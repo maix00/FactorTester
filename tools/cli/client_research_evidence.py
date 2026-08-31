@@ -3,11 +3,51 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 from .client_base import ClientMixinBase
 
 
 class ResearchEvidenceClientMixin(ClientMixinBase):
+    def upload_research_evidence_file(
+        self,
+        *,
+        content: bytes,
+        filename: str,
+        content_type: str,
+        sha256: str,
+    ) -> dict[str, Any]:
+        object_id = f"evidence-file:v1:{sha256}"
+        issued = self._expect_success(self.session.post(
+            "/api/transfers/objects/access",
+            {
+                "object_kind": "evidence_file", "object_id": object_id,
+                "filename": filename, "content_type": content_type,
+                "size_bytes": len(content), "sha256": sha256,
+            },
+        ))
+        access = issued.get("access") or {}
+        request = Request(
+            str(access.get("url") or ""), data=content, method="PUT",
+            headers={
+                "Authorization": f"Bearer {access.get('bearer') or ''}",
+                "Content-Length": str(len(content)),
+                "Content-Type": content_type,
+                "X-FactorTester-Client": "cli",
+            },
+        )
+        try:
+            with urlopen(request, timeout=120) as response:
+                response.read()
+        except HTTPError as exc:
+            raise RuntimeError(
+                f"Evidence file upload failed ({exc.code})"
+            ) from exc
+        except OSError as exc:
+            raise RuntimeError("Evidence file source Manager is offline") from exc
+        return dict(issued.get("object") or {})
+
     def put_research_evidence_source(
         self, source: dict[str, Any],
     ) -> dict[str, Any]:
@@ -60,6 +100,29 @@ class ResearchEvidenceClientMixin(ClientMixinBase):
             "/api/research-evidence/search", query=query,
         ))
         return dict(data.get("result") or {})
+
+    def list_research_evidence_catalog(
+        self, query: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.get(
+            "/api/research-evidence/catalog", query=query,
+        ))
+        return dict(data.get("catalog") or {})
+
+    def get_research_evidence_applicability_schema(self) -> dict[str, Any]:
+        data = self._expect_success(self.session.get(
+            "/api/research-evidence/applicability/schema"
+        ))
+        return dict(data.get("schema") or {})
+
+    def update_research_evidence_applicability(
+        self, evidence_ref: str, applicability: dict[str, Any],
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.patch(
+            f"/api/research-evidence/{evidence_ref}/applicability",
+            {"applicability": applicability},
+        ))
+        return dict(data.get("evidence") or {})
 
     def prepare_research_evidence_lifecycle(
         self, evidence_ref: str, payload: dict[str, Any],

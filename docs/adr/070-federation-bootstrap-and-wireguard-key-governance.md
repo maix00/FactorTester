@@ -1,121 +1,41 @@
-# ADR 070: Bootstrap federation without singular-peer semantics
+# ADR 070：不以单一对等节点语义引导联邦
 
-## Status
+## 状态
 
-Accepted for Issue #185 on 2026-08-13.
+已接受，针对 Issue #185，2026-08-13。
 
-## Context
+## 背景
 
-The first two deployments used `peer_host`, `FACTORTESTER_PEER_ADDRESS`, and
-`register_url` for values that actually belonged to the local node or to one
-initial contact. Those names imply a permanent two-server relationship and do
-not describe a future federation with several public and private servers.
+最初两个部署用 `peer_host`、`FACTORTESTER_PEER_ADDRESS` 和 `register_url` 表示本地节点或一个初始联系人。这些名称暗示永久的双服务器关系，不能表达未来多个公共/私有服务器的联邦。WireGuard 只认证公钥并路由 `AllowedIPs`，不会发现节点或分发密钥；让管理员把每个新对等节点手工复制到每台服务器容易出错，让应用 Manager 自己发明对等节点又会混淆部署信任域和应用信任域。
 
-WireGuard authenticates configured public keys and routes configured
-`AllowedIPs`; it deliberately does not discover nodes or distribute keys.
-Requiring an administrator to copy every new peer into every server would make
-membership error-prone, while allowing an application Manager to invent peers
-would collapse the deployment and application trust domains.
+## 决策
 
-## Decision
+### 稳定节点词汇
 
-### Stable node vocabulary
+`Federated Node` 只由稳定 `server_id` 标识。节点自行公布客户端端点、overlay 端点、执行端口、数据源能力、负载、revision 和租约。公共/私有、main/feat、IP 和执行端口是属性，不是身份。
 
-A `Federated Node` is keyed only by stable `server_id`. Each node advertises
-its own client endpoints, overlay endpoints, execution ports, data-source
-capabilities, load, revision, and lease. Public/private, main/feat, IP address,
-and execution port are attributes rather than identities.
+`overlay_bind_address` 或部署的 `*_LOCAL_ADDRESS` 表示本节点 WireGuard 接口地址；`Peer` 只指某个远程 WireGuard/联邦目录记录，且总属于集合。旧 `--peer-host` 和 schema-v1 `register_url` 在迁移期间只读兼容；新配置使用 `--overlay-bind-address` 和 `bootstrap_url`。
 
-An `overlay_bind_address` or deployment `*_LOCAL_ADDRESS` is the address owned
-by the current node's WireGuard interface. `Peer` is reserved for one remote
-WireGuard or federation-directory record and is always part of a collection.
-The old `--peer-host` option and schema-v1 `register_url` remain read-only
-compatibility aliases during migration; new configuration is written using
-`--overlay-bind-address` and `bootstrap_url`.
+### 一个引导、多个发现节点
 
-### One bootstrap, many discovered nodes
+非公共节点在私有 17998 配置一个当前 `bootstrap_url`。它是种子和可用性网关，不是主服务器。认证注册响应返回按 `server_id` 编排、无凭据、会过期的节点目录，因此一次注册可以发现第三个及之后的服务器；目录项只带签名身份/端点元数据，不带其他节点 proxy bearer。
 
-A non-public node configures one current `bootstrap_url` on private port
-17998. The bootstrap is a seed and availability gateway, not a primary server.
-Its authenticated registration response contains an expiring, credential-free
-node directory keyed by `server_id`, so one registration can discover the
-third and later servers. A directory entry carries signed identity/endpoint
-metadata but never another node's proxy bearer. The legacy singular `peer`
-response remains temporarily for the directly responding node and older
-callers.
+发现不是认证。只有当选择端口、能力、任务目标、生成物所有者或提交所有者实际需要某个节点时，请求 Manager 才校验签名目录项并向其 17998 做一次直接注册，之后才把它放进认证路由表。一个后台调度器只续租配置的 bootstrap 和已经激活的直接关系，不为每个发现节点预先创建 listener/thread。
 
-Discovery is not authentication. A node does not immediately register with
-every directory entry. When selection of a port, capability, task destination,
-artifact owner, or submission owner first requires a discovered node, the
-requesting Manager verifies the signed directory entry and performs one direct
-registration against that node's 17998 endpoint. Only then does the node enter
-the authenticated route registry. One background scheduler renews the
-configured bootstrap and the direct relationships that have actually been
-activated; it does not create one listener/thread or eager heartbeat per
-discovered node.
+只有响应中的 `bootstrap_server_id` 接收测得的 RTT；来自其他节点的延迟因测量来源不同而丢弃。目录租约过期后清除陈旧记录。
 
-Only the response's `bootstrap_server_id` receives the measured request RTT.
-Latency copied from another node is discarded because it was measured from a
-different origin. Stale directory records expire through their leases.
+### WireGuard 配置与路由
 
-### WireGuard provisioning and routing
+WireGuard 成员由 Manager 外部的部署模块管理：加入部署本地生成 root-only 私钥，只导出公钥；集群协调者分配唯一隧道地址并批准公开记录；签名版本化 inventory 保存 `server_id`、隧道类型、公开密钥、地址、可达端点、允许路由、generation 和启停状态，不包含私钥、注册 bearer、数据库密码或 Manager 会话；特权 sidecar 校验并应用 peer 记录，不受信任的 Manager 不能读取私钥或改变隧道成员。
 
-WireGuard membership is managed by a deployment Module outside the Manager
-application:
+可达公共节点建立直连；NAT/私有节点保留一个主动出站公共网关及可选备用网关。公共节点只转发 overlay IP 包，不保存或镜像生成物/提交物；应用仍直接访问目标节点 17998/17997。
 
-1. The joining deployment generates its private key locally with owner-only
-   permissions and exports only its public key.
-2. A cluster administrator or deployment coordinator allocates a unique
-   tunnel address and approves the public record.
-3. A signed, versioned inventory records `server_id`, tunnel kind
-   (`factortester` or `database`), public key, address, reachable endpoint,
-   allowed routes, generation, and enabled/revoked state. It never contains a
-   private key, registration bearer, database password, or Manager session.
-4. A privileged sidecar/deployment adapter validates the inventory and renders
-   or applies WireGuard peer records. The unprivileged Manager cannot read the
-   private key or mutate tunnel membership.
+首次入网 bundle 只含选定 bootstrap 的公钥、UDP 端点、分配地址、inventory 校验公钥和受限联邦注册凭据。Issue #185 暂用集群级 bearer，替换成每节点/一次性凭据属于后续安全迁移；运维不为每个未来节点填写一个设置字段。
 
-Public nodes with reachable UDP endpoints form direct public-to-public peers.
-A private/NAT node keeps one active outbound public gateway and may retain
-approved standby gateway metadata. The active public node routes overlay IP
-packets between authorized peers. Application traffic still addresses the
-destination node's 17998/17997 endpoint; the gateway performs only network
-forwarding and never persists or mirrors artifact/submission bytes.
+### 权威与轮换
 
-The first-enrollment bundle contains only the selected bootstrap's public key,
-UDP endpoint, the joining node's allocated address, the cluster inventory
-verification key, and the restricted federation registration credential.
-Issue #185 currently uses one cluster-scoped bearer for direct application
-registration; it is stored owner-only and never appears in discovery output.
-Replacing it with per-node or one-time enrollment credentials is a later
-security migration and is not claimed by this ADR. Operators do not fill one
-form field per future peer.
+私钥由使用该密钥的部署所有；公钥分发由集群部署协调者负责，不由 PostgreSQL、Manager、Git 或容器镜像负责。轮换时本地生成新密钥、发布更高 inventory generation、分阶段应用两端、验证握手和健康端点，再删除旧记录和本地旧密钥/配置；撤销先禁用 inventory，再传播后清理。FactorTester 与数据库身份独立轮换。
 
-### Authority and rotation
+## 后果
 
-Private-key ownership remains with the deployment that uses the key. Public-key
-distribution belongs to the cluster deployment coordinator, not PostgreSQL,
-the FactorTester Manager, Git, or a container image. PostgreSQL may receive an
-audit projection but is not required to bring up either tunnel.
-
-Rotation generates a new local key, publishes a higher inventory generation,
-applies both sides in a staged operation, verifies a handshake and the private
-health endpoints, then removes the old public record and securely removes the
-old local key/config. Revocation disables the inventory record first and is
-propagated before local cleanup. FactorTester and database identities rotate
-independently.
-
-## Consequences
-
-- Adding a server does not add a new user-managed settings field.
-- A node can discover more than the one server used to bootstrap, while only
-  nodes selected for actual work become authenticated routes.
-- Public-key metadata can scale to any number of nodes without centralizing
-  private keys.
-- Bootstrap loss affects new directory refreshes. Activated direct relations
-  continue renewing independently; never-activated directory records expire
-  without creating credentials. Existing WireGuard state remains independent,
-  and an approved standby can later become the active gateway.
-- Routed private-node traffic may add one public-gateway network hop, but it
-  avoids application-layer file relays, duplicate storage, SSH tunnels, and
-  inbound NAT requirements.
+增加服务器不再增加用户设置字段；节点可以发现多台服务器，但只有实际被选中工作的节点成为认证路由；公共密钥元数据可扩展到任意节点数而不集中私钥。bootstrap 丢失只影响新目录刷新，已激活关系独立续租；私有节点流量可能多一跳公共网关，但避免应用层文件中继、重复存储、SSH 隧道和 NAT 入站要求。

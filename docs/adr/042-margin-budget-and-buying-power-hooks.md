@@ -1,152 +1,118 @@
-# ADR-042: Margin budget and buying-power hooks
+# ADR-042：保证金预算与购买力钩子
 
-- **Date**: 2026-07-23
-- **Status**: Accepted
-- **Related**: ADR-031, ADR-032, ADR-033, ADR-035, ADR-041
+- **日期**：2026-07-23
+- **状态**：已接受
+- **相关**：ADR-031、ADR-032、ADR-033、ADR-035、ADR-041
 
-## Context
+## 背景
 
-Group allocation currently produces relative target weights and
-`OrderConstructModule` interprets a gross weight of one as one times equity.
-That cash-account convention underuses futures capital. The signal cash check
-then compounds the problem by treating every positive futures order as if its
-full notional were cash expenditure.
+分组分配先产生相对目标权重，`OrderConstructModule` 再把总权重 1 解释为权益的 1 倍。
+这种现金账户约定没有充分利用期货保证金；信号阶段的现金检查又把每个正向期货订单都当成完整名义本金
+支出，进一步放大了问题。
 
-The framework needs three distinct decisions:
+框架需要区分三个决定：
 
-1. how selected products share relative notional exposure;
-2. how far the complete cash-pool portfolio is scaled toward a margin budget;
-3. whether the executable order batch fits the hard buying-power limit.
+1. 选中的产品如何共享相对名义敞口；
+2. 完整资金池组合向保证金预算缩放多少；
+3. 可执行订单批次是否满足硬性购买力上限。
 
-LEAN similarly separates portfolio targets, risk adjustment, execution, and
-buying-power checks. It also orders position-reducing trades ahead of orders
-that increase margin impact. Backtrader supplies cash and commission/margin
-information to a sizer but leaves sizing separate from its futures accounting
-model. These are boundary references, not imported defaults.
+LEAN 也把组合目标、风险调整、执行和购买力检查分开，并优先处理减少持仓的交易。Backtrader 会把
+现金、佣金和保证金信息提供给 sizer，但把规模计算与期货会计模型分开。这里的框架只是边界参考，不
+直接照搬这些框架的默认值。
 
-## Decision
+## 决策
 
-### Enabled margin has one default semantic
+### 启用保证金时的默认语义
 
-When effective `margin_mode` is `auto`, `exact`, `custom`, or `fixed`:
+当有效 `margin_mode` 为 `auto`、`exact`、`custom` 或 `fixed` 时：
 
-- allocation defaults to `equal_notional` (shown to users as 等名义敞口);
-- `target_margin_utilization` defaults to `0.30`;
-- `max_margin_utilization` defaults to `0.40`;
-- the target margin budget is always converted into and reported as total
-  gross notional leverage.
+- allocation 默认为 `equal_notional`（界面显示为“等名义敞口”）；
+- `target_margin_utilization` 默认为 `0.30`；
+- `max_margin_utilization` 默认为 `0.40`；
+- 目标保证金预算始终换算并报告为资金池总毛名义杠杆。
 
-There is no implicit `legacy_gross_1x` fallback in margin mode. When margin is
-explicitly disabled, target weights keep their cash-account meaning and no
-margin-budget scaling is applied. Users may configure the target and maximum,
-subject to `0 < target <= max < 1`.
+保证金模式不再隐式回退到 `legacy_gross_1x`。显式禁用保证金时，目标权重仍使用现金账户语义，也不
+执行保证金预算缩放。用户可以配置目标和上限，但必须满足 `0 < target <= max < 1`。
 
-### Target scaling is a cash-pool policy
+### 目标缩放属于资金池策略
 
-Allocation produces relative signed notional weights. `MarginBudgetModule`
-runs after strategy intents and signal-time equity, but before order sizing. It
-groups every participating strategy and ledger by cash-pool identity and makes
-one decision for the whole pool.
+allocation 产生带符号的相对名义权重。`MarginBudgetModule` 在策略意图和信号时点权益之后、订单数量
+计算之前运行。它按资金池身份汇总所有参与的策略和账本，并对整个资金池作一次决定。
 
-For each target product it resolves the historical long/short margin rule at
-the causal signal timestamp. A product that is not margin-accounted uses
-`m_i = 1.0`, even when it shares a portfolio with margin-accounted products;
-its full notional therefore participates in the weighted capital requirement.
-With raw target notional `N_i` and margin ratio `m_i`:
+对于每个目标产品，模块在因果信号时间戳解析历史多空保证金规则。没有保证金会计的产品使用
+`m_i = 1.0`；即使它与按保证金计量的产品共享组合，也以其完整名义本金参加加权资金要求。令原始目标
+名义本金为 `N_i`、保证金比例为 `m_i`：
 
 ```text
-raw projected margin = sum(abs(N_i) * m_i)
-pool scale = target utilization * pool equity / raw projected margin
-scaled target notional = raw target notional * pool scale
-gross leverage = sum(abs(scaled target notional)) / pool equity
+原始预计保证金 = sum(abs(N_i) * m_i)
+资金池缩放比例 = 目标利用率 * 资金池权益 / 原始预计保证金
+缩放后的目标名义本金 = 原始目标名义本金 * 资金池缩放比例
+毛杠杆 = sum(abs(缩放后的目标名义本金)) / 资金池权益
 ```
 
-The same pool scale preserves equal-notional, equal-margin, inverse-volatility,
-or factor-sizing relationships. A shared pool never grants each strategy a
-separate 80% budget. Conflicting target/max settings within one pool fail
-before order creation.
+同一资金池缩放比例保持等名义、等保证金、逆波动率或因子规模关系。共享资金池不会为每个策略分别
+发放 80% 预算。同一资金池内冲突的目标/上限配置在创建订单前失败。
 
-The policy returns a typed, serializable decision. The owning module validates
-and applies it to `TargetWeightIntent`; the policy does not mutate intents,
-orders, positions, or cash.
+策略返回类型化、可序列化的决策。所属模块负责校验并把它应用到 `TargetWeightIntent`；策略本身不
+修改意图、订单、持仓或现金。
 
-### Buying power is authoritative at execution
+### 购买力检查以执行阶段为权威
 
-The signal-stage check is a causal estimate. For margin-accounted products it
-uses incremental margin requirement, expected fees, expected realized loss,
-and configured reserve. It never uses full futures notional as cash cost.
+信号阶段检查只是因果估计。对按保证金计量的产品，它使用增量保证金需求、预计费用、预计已实现损失和
+配置的现金储备，不把完整期货名义本金当作现金成本。
 
-The execution-stage check uses resolved execution prices, slippage, fees,
-current positions, and current historical margin rules. It simulates the
-complete cash-pool order batch and enforces both available cash and
-`max_margin_utilization`.
+执行阶段检查使用已解析的成交价、滑点、费用、当前持仓和当前历史保证金规则，模拟完整的资金池订单批次，
+同时执行可用现金和 `max_margin_utilization` 上限。
 
-Orders that reduce absolute position exposure are applied before increasing
-orders. A hard cap may proportionally reduce only the margin-increasing part of
-the batch. Closing or otherwise margin-releasing orders are never blocked by
-the cap. Quantity rounding is applied after scaling and the resulting error is
-reported.
+减少绝对持仓敞口的订单先于增加敞口的订单应用。硬上限只能按比例压缩增加保证金的批次；平仓或其他释放
+保证金的订单不被上限阻断。数量舍入在缩放之后执行，并报告由此产生的误差。
 
-### Drift remains a margin-risk event
+### 漂移仍属于保证金风险事件
 
-Price moves, losses, DMTM, or a historical margin-rule increase can move an
-existing portfolio above the hard limit. Normal signal events rebalance toward
-the target; they do not mechanically trade every bar. Existing margin-check
-and liquidation events remain responsible for post-fill drift and use the
-same cash-pool utilization calculation.
+价格变化、损失、DMTM 或历史保证金规则上调，都可能使已有组合超过硬上限。普通信号事件向目标重新平衡，
+不会机械地每根 bar 交易。已有的保证金检查和清算事件继续负责处理成交后的漂移，并使用同一资金池利用率
+计算。
 
-### Hook ownership
+### 钩子所有权
 
-`StrategyBookPolicies` registers overrides, while lifecycle modules own their
-application:
+`StrategyBookPolicies` 注册覆盖策略，生命周期模块负责应用：
 
-- `margin_budget` receives an immutable cash-pool target request and returns a
-  target scale plus diagnostics;
-- `buying_power` receives an immutable cash-pool order-batch request and
-  returns allowed quantities plus diagnostics;
-- margin funding/liquidation remains owned by `MarginModule`.
+- `margin_budget` 接收不可变的资金池目标请求，返回目标缩放和诊断；
+- `buying_power` 接收不可变的资金池订单批次请求，返回允许的数量和诊断；
+- 保证金融资/清算仍由 `MarginModule` 负责。
 
-Both hooks use structured decisions with policy identity, reason code,
-effective timestamp, pool identity, and diagnostics. Compact step output is
-the default; CLI detail output may expose the complete request and decision.
+两个钩子都使用结构化决策，包含策略身份、原因码、生效时间、资金池身份和诊断信息。默认 step 输出保持
+紧凑；CLI 的 detail 输出才展开完整请求和决策。
 
-## Step and result contract
+## 步骤与结果契约
 
-Every margin-budget decision reports at least:
+每次保证金预算决策至少报告：
 
-- cash-pool equity;
-- target margin and projected margin;
-- weighted margin ratio;
-- target scale;
-- gross notional leverage;
-- projected utilization before and after quantity rounding;
-- rounding error and hard-limit headroom.
+- 资金池权益；
+- 目标保证金和预计保证金；
+- 加权保证金比例；
+- 目标缩放比例；
+- 毛名义杠杆；
+- 数量舍入前后的预计利用率；
+- 舍入误差和硬上限余量。
 
-These are numerical results, not log-only prose, so Web, CLI, persisted run
-artifacts, and step mode consume the same fields.
+这些是数值结果而不只是日志文字，因此 Web、CLI、持久化运行生成物和 step 模式使用同一组字段。
 
-## Acceptance invariants
+## 验收不变量
 
-- Equal-notional allocation remains equal after margin-budget scaling.
-- Equal-margin allocation produces equal projected margin contributions.
-- Mixed cash and margin products give cash products a `1.0` margin ratio in
-  the portfolio-weighted calculation.
-- Initial projected utilization is within configured tolerance of 80%, unless
-  whole-lot rounding or unavailable buying power is explicitly reported.
-- Two strategies sharing a cash pool consume one combined target and maximum.
-- Signal estimation and execution simulation both use incremental futures
-  margin rather than full notional.
-- Actual execution does not actively increase utilization beyond 85%.
-- Margin-releasing quantities are never reduced by the hard cap.
-- Historical margin changes and DMTM losses feed the existing margin-risk
-  event path.
-- Step output exposes gross leverage and the other fields above without
-  dumping per-product internals by default.
+- 等名义分配在保证金预算缩放后仍保持等名义关系。
+- 等保证金分配产生相等的预计保证金贡献。
+- 混合现金产品和保证金产品时，现金产品在组合加权计算中的保证金比例为 `1.0`。
+- 当测试显式设置目标为 `0.80`、上限为 `0.85` 时，初始预计利用率在配置容差内接近 80%；这不是当前
+  默认值的声明。
+- 共享资金池的两个策略共同消耗同一个目标和上限。
+- 信号估计和执行模拟都使用增量期货保证金，而不是完整名义本金。
+- 实际执行不会主动把利用率提高到 `0.85` 以上。
+- 释放保证金的数量不会被硬上限缩减。
+- 历史保证金变化和 DMTM 损失进入既有保证金风险事件路径。
+- Step 输出在不默认倾倒逐产品内部细节的前提下，提供毛杠杆及上述字段。
 
-## Consequences
+## 后果
 
-Historical margin-mode backtests intentionally change because their old
-one-times-notional fallback was not the desired product semantic. Cash-mode
-backtests remain unscaled. A configured 80% margin target is a capital budget,
-not a risk guarantee; volatility-aware allocation and independent risk limits
-remain separate policies.
+历史保证金模式回测会有意改变，因为旧的完整名义本金回退不是目标产品语义。现金模式回测不做缩放。
+显式配置的 80% 保证金目标是资金预算，不是风险保证；波动率分配和独立风险限制仍是不同策略。

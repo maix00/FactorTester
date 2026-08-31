@@ -1,36 +1,22 @@
-# ADR 109: Multi-select draft commit and test-run empty state
+# ADR 109：多选草稿提交与运行面板空状态
 
-## Status
+## 状态
 
-Accepted
+已接受。
 
-## Context
+## 背景
 
-The shared multi-select control is used by product, factor, category, output,
-and test configuration surfaces. Several callers rerender their parent after a
-selection changes. Calling the change callback for every checkbox click caused
-the newly created `<details>` element to close after the first selection, so a
-user could not make a multi-selection in one interaction.
+共享多选控件用于产品、因子、分类、输出和测试配置页面。若干调用方在选择变化时重绘父节点；每次复选框点击都调用 change callback 会使新建的 `<details>` 在第一次选择后关闭，用户无法在一次交互中完成多选。
 
-The test-run batch surface also appeared before a product group existed and
-showed disabled actions plus an empty-state message. That duplicated the
-product selector's guidance and made an unconfigured test look broken.
+测试运行批次区域在没有产品组时也曾出现，显示禁用动作和空状态。这重复了产品选择器的指导，让未配置测试看起来像坏了。
 
-## Decision
+## 决策
 
-- Multi-select controls maintain a draft selection while the menu is open.
-- They render one save/apply action. The caller callback runs only after that
-  action succeeds, and the menu then closes. Closing without saving restores
-  the last committed selection.
-- Single-select controls continue to commit immediately and close after one
-  choice.
-- The test-run batch surface is not rendered until at least one product group
-  is selected. The product selector remains the single place that asks the
-  user to choose a product group.
+- 多选控件在菜单打开期间维护 draft selection。
+- 只渲染一个保存/应用动作；该动作成功后才调用调用方 callback，然后关闭菜单。未保存直接关闭时恢复最近一次已提交选择。
+- 单选控件仍立即提交，选择一项后关闭。
+- 至少选择一个产品组前不渲染测试运行批次区域；产品选择器是唯一引导用户选择产品组的位置。
 
-## Consequences
+## 后果
 
-All shared multi-select callers get the same predictable interaction and can
-still provide a custom apply label or persistence callback. The workbench has
-no misleading run panel before it has a runnable product scope; after a
-selection, RunSpec, run, progress, and result controls are unchanged.
+所有共享多选调用方拥有相同且可预测的交互，并可提供自定义应用文案或持久化 callback。工作台在没有可运行产品范围时不显示误导性的运行面板；选择后 RunSpec、运行、进度和结果控制不变。

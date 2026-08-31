@@ -2,10 +2,12 @@ import Combine
 import Foundation
 
 enum ResearchModuleSection: String, CaseIterable, Identifiable {
-    case local
-    case shared
+    case researches
+    case evidence
+    case reports
     case graph
     case profiles
+    case agentModels = "agent-models"
 
     var id: String { rawValue }
 
@@ -17,7 +19,10 @@ enum ResearchModuleSection: String, CaseIterable, Identifiable {
               })?.value else {
             return nil
         }
-        return Self(rawValue: rawValue)
+        switch rawValue {
+        case "local", "shared": return .reports
+        default: return Self(rawValue: rawValue)
+        }
     }
 }
 
@@ -31,7 +36,7 @@ final class ClientTabSession: ObservableObject {
     /// session metadata rather than a published view trigger: receiving the
     /// Web section callback must not reload the already-rendered WebView.
     /// A later mount still reads the value and restores the selected section.
-    var researchSection = ResearchModuleSection.shared
+    var researchSection = ResearchModuleSection.researches
     @Published var researchLifecycle = ResearchLifecycleFilter.active
     @Published var selectedBranchID = ""
     /// Detail values survive tab view unmounting without retaining any native

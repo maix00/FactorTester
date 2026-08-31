@@ -33,7 +33,8 @@ extension TestJobsService {
     func artifactTransferData(
         jobID: String,
         port: Int,
-        artifact: TestJobArtifact
+        artifact: TestJobArtifact,
+        evidenceRef: String? = nil
     ) async throws -> Data {
         let encodedJob = jobID.addingPercentEncoding(
             withAllowedCharacters: .urlPathAllowed
@@ -41,8 +42,16 @@ extension TestJobsService {
         let encodedName = artifact.name.addingPercentEncoding(
             withAllowedCharacters: .urlPathAllowed
         ) ?? artifact.name
+        var accessPath = "/api/jobs/\(encodedJob)/artifacts/\(encodedName)/access"
+        if let evidenceRef, !evidenceRef.isEmpty {
+            var components = URLComponents()
+            components.queryItems = [
+                URLQueryItem(name: "evidence_ref", value: evidenceRef),
+            ]
+            accessPath += components.percentEncodedQuery.map { "?\($0)" } ?? ""
+        }
         let issued = try await requestData(
-            path: "/api/jobs/\(encodedJob)/artifacts/\(encodedName)/access",
+            path: accessPath,
             method: "POST",
             port: port
         )

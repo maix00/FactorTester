@@ -1,18 +1,22 @@
-# ADR-011: Page state debug registration follows runtime ownership
+# ADR-011：页面状态调试注册遵循运行时所有权
 
-## Context
+## 状态
 
-Page debug data was assembled in the lifecycle route and the single-factor page route. This duplicated fields, coupled the generic endpoint to single-factor internals, and caused debug probing to construct factors instead of observing existing page caches.
+已接受。
 
-## Decision
+## 背景
 
-- `server/services/page_state_debug.py` is the only debug-section registry and payload builder.
-- A service that owns page-scoped state registers its own section. Page identity is registered by `page_runtime`; single-factor `FactorFamily` and `Factor` caches are registered by `factor_registry`.
-- Global sections apply to every page. Page-specific sections are selected by `page_kind`.
-- Registering the same `section_id` again replaces the previous registration. Every request builds a fresh, complete snapshot of currently active registrations.
-- Every section includes the requested `page_uuid`. Providers only inspect existing state and must not create runtime objects.
-- The HTTP route only validates the query and serializes the registry result; page route modules do not register debug content.
+过去，页面调试数据分别在生命周期路由和单因子页面路由中拼装。这会重复字段、把通用端点耦合到单因子实现，还可能让调试探测错误地创建因子，而不是观察已经存在的页面缓存。
 
-## Consequences
+## 决策
 
-Future test pages register their debug data in the service that owns their page-scoped state. Adding a module no longer requires changing the shared debug route, and debug requests cannot alter factor lifecycle state.
+- `server/services/page_state_debug.py` 是唯一的调试分区注册表和负载构建器。
+- 拥有页面作用域状态的服务自行注册分区：`page_runtime` 注册页面身份，`factor_registry` 注册单因子 `FactorFamily` 与 `Factor` 缓存。
+- 全局分区适用于所有页面；页面专属分区由 `page_kind` 选择。
+- 再次注册相同的 `section_id` 会替换旧注册。每次请求都从当前活跃注册构建新的完整快照。
+- 每个分区都带有请求的 `page_uuid`。提供者只能读取现有状态，不得创建运行时对象。
+- HTTP 路由只校验查询参数并序列化注册表结果；页面路由模块不得注册调试内容。
+
+## 后果
+
+以后新增测试页面时，应在拥有其页面作用域状态的服务中注册调试数据。新增模块不再需要修改共享调试路由，调试请求也不会改变因子生命周期状态。

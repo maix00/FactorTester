@@ -1,46 +1,33 @@
-# ADR 124: WebMCP uses the visible browser action surface
+# ADR-124：WebMCP 使用可见的浏览器操作面
 
-## Status
+## 状态
 
-Accepted
+已接受；WebMCP 仍是实验性浏览器能力，当前不支持时不影响普通 Web 或嵌入式
+WebKit 客户端。
 
-## Context
+## 背景
 
-FactorTester agents can use the research CLI, while people can also use the
-Manager Web application. The Web application contains additional account,
-device and subordinate-management operations that intentionally do not belong
-to the research CLI. Duplicating every backend route as a browser tool would
-create another authorization and workflow surface, and would let an agent
-change server state without sharing the form state visible to the user.
+FactorTester Agent 可以使用研究 CLI，人也可以使用 Manager Web。Web 还包含
+账户、设备和下级用户管理，这些不属于研究 CLI。把每条后端路由都复制成浏览
+器工具会产生第二套授权和工作流，并允许 Agent 绕过用户正在看到的表单状态。
 
-## Decision
+## 决策
 
-1. The Web shell registers a small, stable set of imperative WebMCP tools for
-   capability discovery, route navigation, visible-control inspection, form
-   filling and explicit action activation.
-2. Capability discovery maps every public `factortester` CLI command family to
-   one or more Web surfaces and separately identifies Web-only management
-   surfaces.
-3. Form and action identifiers are ephemeral and issued only for visible
-   controls in the active page and its open modal dialogs. An agent must inspect
-   again after rendering or submitting a surface.
-4. WebMCP changes controls and dispatches their ordinary input/change/click
-   events. It does not call business APIs directly. Existing page validation,
-   session credentials, role checks and backend authorization remain the
-   authority.
-5. Reading is bounded and marked as potentially untrusted. Password values are
-   never returned. Action activation requires an explicit `confirmed: true`,
-   and cross-origin links cannot be activated.
-6. Browsers without `document.modelContext` keep the normal application with
-   no polyfill or additional dependency.
+1. Web shell 注册一组稳定而小的 WebMCP 工具，用于能力发现、路由导航、可见
+   控件检查、表单填写和显式动作触发；
+2. 能力发现把公开 `factortester` CLI 命令族映射到 Web 表面，并单独标记只
+   属于 Web 的管理表面；
+3. 表单和动作 ID 是短期凭据，只为当前页面和已打开的 modal 可见控件发放；
+   渲染或提交后必须重新检查；
+4. WebMCP 修改控件并分发普通 input/change/click 事件，不直接调用业务 API；
+   页面校验、会话凭据、角色检查和后端授权仍是权威；
+5. 读取有界且标记为潜在不可信，密码不返回；动作必须带显式
+   `confirmed: true`，跨源链接不能触发；
+6. 没有 `document.modelContext` 的浏览器使用普通应用，不安装 polyfill 或额外
+   依赖。
 
-## Consequences
+## 后果
 
-- Agents and users operate one shared, inspectable Web state, including dynamic
-  IC/backtest forms and Web-only subordinate management.
-- New pages are automatically operable when they use semantic controls; adding
-  a top-level capability mapping makes them easier for agents to discover.
-- The adapter cannot bypass a disabled or hidden control. Complex custom
-  widgets remain a sequence of visible actions, matching ordinary UI use.
-- WebMCP remains an experimental browser capability, while the site continues
-  to work unchanged in unsupported browsers and embedded WebKit clients.
+Agent 与用户操作同一份可检查的 Web 状态，包括动态 IC/回测表单和 Web 专有的
+下级管理。复杂控件仍需按可见动作序列操作，不能绕过禁用/隐藏状态。新增页面
+使用语义控件即可接入；补充顶层能力映射会改善 Agent 发现能力。

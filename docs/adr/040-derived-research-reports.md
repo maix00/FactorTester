@@ -1,36 +1,22 @@
-# ADR-040: Derived Research Reports
+# ADR-040：派生研究报告
 
-## Status
+## 状态
 
-Accepted.
+已接受。
 
-## Context
+## 背景
 
-Factor research produces immutable contracts, claims, obligations, trial plans,
-evidence envelopes, job records, graph traces, and local Agent notes. These
-objects must remain independently addressable for replay and audit. A human
-reader also needs a coherent research narrative, but neither one ever-growing
-Markdown file nor a new report database should become another source of truth.
+因子研究会产生不可变合约、结论、义务、试验计划、证据封装、Job 记录、图轨迹和本地 Agent 笔记。这些对象必须独立寻址，以支持重放和审计。读者还需要连贯的研究叙事，但不能让一个不断增长的 Markdown 文件或新的报告数据库成为另一套权威来源。
 
-Future reports may include charts and may also be rendered as PDF. Charts are
-components within a report; Markdown and PDF are render targets for the same
-bounded report model.
+报告将来可能包含图表，也可能渲染为 PDF。图表是报告中的组件；Markdown 和 PDF 都是同一个有界报告模型的渲染目标。
 
-## Decision
+## 决策
 
-Research reports are deterministic, local, cold-path projections over explicit
-object references. Report generation does not call an LLM, execute a Skill,
-advance the Active Graph, or write server research tables. It assembles only
-facts, accepted Agent-authored notes, and content-addressed assets already
-present in its input snapshot.
+研究报告是对显式对象引用的确定性、本地、冷路径投影。生成报告不得调用 LLM、执行 Skill、推进 Active Graph 或写入服务器研究表；只能组装输入快照中已有的事实、已接受的 Agent 笔记和内容寻址资产。
 
-The canonical research objects and Graph trace remain authoritative. Generated
-reports are disposable and rebuildable. A report records the graph,
-methodology, Decision Contract, factor-family version, TrialPlan, and evidence
-hashes from which it was built; it never replaces those objects.
+规范研究对象和 Graph 轨迹仍是权威。生成报告是可丢弃、可重建的；报告记录生成它的 graph、方法、Decision Contract、因子族版本、TrialPlan 和证据哈希，但不取代这些对象。
 
-One monolithic file is rejected. Reports belong to the Profile research root,
-not to its factor-authoring worktree. The derived local layout is:
+拒绝单体文件。报告属于 Profile 研究根目录，而不是因子作者工作树：
 
 ```text
 research/<work-package-id>/
@@ -40,16 +26,13 @@ research/<work-package-id>/
   assets/
 ```
 
-- `INDEX.json` is a bounded deterministic UI projection and commit point, not
-  a canonical record or database object.
-- The Work Package `REPORT.md` is a derived aggregate.
-- A branch report presents one bounded research lineage.
-- Immutable evidence and result artifacts remain in their existing stores and
-  are linked by reference rather than copied inline.
-- Agent notes remain separate inputs so a renderer cannot silently rewrite
-  provisional reasoning as server fact.
+- `INDEX.json` 是有界、确定性的 UI 投影和提交点，不是规范记录或数据库对象；
+- Work Package 的 `REPORT.md` 是派生汇总；
+- 分支报告呈现一条有界研究谱系；
+- 不可变证据和结果生成物留在原有存储中，只通过引用关联，不内嵌复制；
+- Agent 笔记作为独立输入保留，渲染器不能把临时推理静默改写成服务器事实。
 
-The renderer boundary accepts a bounded snapshot, not a live database handle:
+渲染器接收有界快照，不接收活动数据库句柄：
 
 ```text
 ReportSnapshot
@@ -58,101 +41,40 @@ ReportSnapshot
   -> MarkdownTarget | PdfTarget
 ```
 
-`ReportDocument` contains ordered sections and references. `ReportAsset`
-contains a content hash, media type, caption, provenance references, and
-optional accessibility text. A chart is one `ReportAsset`; it is embedded in a
-section and is not a separate report type. A later chart producer may create
-assets from reviewed result data, but the report renderer only verifies and
-places them.
+`ReportDocument` 包含有序章节和引用；`ReportAsset` 包含内容哈希、媒体类型、标题、来源引用和可选的无障碍文本。图表是一个 `ReportAsset`，嵌在章节中，不是另一种报告。将来的图表生成器可以从已审阅结果创建资产，但报告渲染器只负责校验和放置。
 
-Only Markdown rendering is required by the first implementation. The public
-interfaces reserve additional render targets and assets without importing a
-PDF or chart dependency now. PDF generation and chart production require their
-own later acceptance tests and ADR update.
+第一版只要求 Markdown 渲染。公共接口预留其他渲染目标和资产类型，但此时不引入 PDF 或图表依赖；PDF 和图表生成必须另有验收测试和 ADR 更新。
 
-Sync and rendering are separate:
+同步与渲染分离：
 
-1. An explicit local sync obtains only changed compact objects and artifact
-   references.
-2. The renderer reads that bounded local snapshot and performs zero database
-   and network reads.
-3. A per-Work-Package file lock serializes index load, merge, staging, and
-   publication without adding a database transaction or event object.
-4. Unchanged bytes reuse all report files. Changed branch, aggregate, and index
-   files are staged first and published in that order, with `INDEX.json` last.
-5. A failed publication restores the previous complete three-file generation.
+1. 显式本地同步只获取变化的紧凑对象和生成物引用；
+2. 渲染器读取有界本地快照，零数据库、零网络读取；
+3. 每个 Work Package 的文件锁串行化索引读取、合并、staging 和发布，不增加数据库事务或事件对象；
+4. 未变化的字节复用原报告文件；变化的分支、汇总和索引文件先 staging 后发布，`INDEX.json` 最后发布；
+5. 发布失败时恢复上一份完整的三文件生成。
 
-Workspace regeneration must preserve `research/`. Local reports may contain
-explicit, bounded code and math blocks. Arbitrary `factor_source`, `formula`,
-and `expression_tree` fields remain rejected so content is never silently
-dropped by the legacy snapshot projection. Credentials, raw stdout/stderr, and
-unbounded result payloads remain outside the report content contract. Only content-free manifests, stable
-references, and hashes may cross the Active Graph/server boundary; the report
-body and source code stay in the Profile-local research root. Access policy
-and artifact availability are checked before a reference is rendered.
+工作区重新生成必须保留 `research/`。本地报告可以包含明确、有界的代码块和数学块；任意 `factor_source`、`formula` 和 `expression_tree` 字段仍拒绝，避免旧快照投影静默丢内容。凭据、原始 stdout/stderr 和无界结果负载不属于报告内容合约。跨 Active Graph/服务器边界的只能是无内容 manifest、稳定引用和哈希；正文与源码留在 Profile 本地研究根目录。渲染引用前检查访问策略和生成物是否可用。
 
-## Consequences
+## 后果
 
-- Human-readable research history does not create a parallel persistence
-  model.
-- Report generation has zero model-token cost and a measurable zero-database
-  rendering path.
-- Large evidence, curves, and charts remain content-addressed assets instead
-  of inflating Markdown or Agent context.
-- A branch report can be regenerated after a renderer upgrade without changing
-  any research conclusion or graph state.
-- PDF and chart support can be added without changing the research-object
-  protocol, provided they implement the same bounded document and asset
-  interfaces.
+- 可读的研究历史不会生成并行持久化模型。
+- 报告生成不消耗模型令牌，渲染路径可测且不访问数据库。
+- 大证据、曲线和图表保持为内容寻址资产，不膨胀 Markdown 或 Agent 上下文。
+- 升级渲染器后可以重建分支报告，不改变研究结论或图状态。
+- 只要实现同一个有界文档和资产接口，就可以加入 PDF 和图表，而不改变研究对象协议。
 
-### Quantitative visualization and navigation boundary
+### 定量可视化与导航边界
 
-The backend may emit only deterministic, compact series/table artifacts.
-Charts and PDF pages are cold-path derived assets over those reviewed
-artifacts; they are not additional research results and never trigger a new
-database read during report rendering.
+后端只能发出确定性、紧凑的序列/表格生成物。图表和 PDF 页面是基于已审阅生成物的冷路径派生资产，不是额外研究结果，报告渲染期间不能触发新的数据库读取。
 
-The minimum v1 report presentation is:
+第一版报告至少提供：紧凑结果表；当策略语义有意义时提供净值和回撤序列；对横截面测试提供有序的分组收益和分组差值序列。热力图和 PDF 渲染暂缓。图表资产是 Markdown/PDF 章节内的组件，来源链接到准确的后端紧凑生成物。
 
-- the compact result table;
-- conditional net-equity and drawdown series when the tested strategy
-  semantics make those series meaningful;
-- ordered group-return and group-spread series for cross-sectional tests.
+真实换手和成本拖累、观测数量与覆盖率、Sharpe 及年化约定、单调性结论的不确定性、多重检验调整引用，都必须由后端显式提供；客户端或报告渲染器不得自行推断。
 
-Heatmaps and PDF rendering remain deferred. Chart assets remain components
-inside Markdown/PDF report sections rather than standalone report records.
-Their provenance links to the exact compact backend artifact.
+打开 holdout 生成物是可审计事件。报告索引保留稳定 holdout 引用和访问回执；普通样本内导航不能静默加载或显示 holdout 内容。
 
-Realized turnover and cost drag, observation count and coverage, the exact
-Sharpe and annualization convention, uncertainty for monotonicity claims, and
-multiplicity-adjustment references are explicit backend capability gaps. The
-client or report renderer must not infer them.
+`ProfileResearchProjection` 预留有界的 `list`、`detail`、`timeline` seam；`ReportDocument` v2 和 `INDEX.json` 预留章节与 TrialPlan、义务、证据引用之间的双向稳定锚点。UI 消费这些投影和锚点，而不是读取数据库 schema 或扫描完整 Markdown。未来服务器实现必须保持一次查询得到 Profile 索引、最多两次详情查询、keyset timeline 每页最多 50 行、每次点击最多一次缓存对象读取，以及 SSE 传递零数据库写入。本 ADR 只预留接口，不授权新增数据库对象或服务器端点。
 
-Opening a holdout artifact is an auditable event. The report index retains its
-stable holdout reference and access receipt; routine in-sample navigation must
-not silently load or display holdout content.
+## 验收
 
-`ProfileResearchProjection` reserves bounded `list`, `detail`, and `timeline`
-seams. `ReportDocument` v2 and `INDEX.json` reserve bidirectional stable
-anchors between report sections and TrialPlan, obligation, and evidence
-references. The UI consumes those projections and anchors rather than reading
-database schema or scanning complete Markdown. A future server implementation
-must preserve a one-query profile index, at most two detail queries, keyset
-timeline pages of at most 50 rows, one cached object lookup per click, and zero
-database writes for SSE delivery. This ADR reserves the interface only; it
-does not authorize new database objects or server endpoints.
-
-## Acceptance
-
-The first implementation must prove:
-
-- deterministic byte-stable Markdown for the same snapshot;
-- incremental rebuild writes only changed report files;
-- no database, network, LLM, or Skill call occurs during rendering;
-- missing or unauthorized references are rendered as explicit bounded gaps;
-- workspace regeneration preserves existing reports and notes;
-- report files contain provenance hashes but no prohibited source or heavy
-  payload;
-- the Markdown target supports embedded, content-addressed report assets;
-- stub conformance tests allow later PDF and chart components without making
-  either a runtime dependency.
+第一版实现必须证明：同一快照产生字节稳定的 Markdown；增量重建只写变化文件；渲染期间没有数据库、网络、LLM 或 Skill 调用；缺失或无权限引用显示为明确且有界的缺口；工作区重新生成保留既有报告和笔记；报告含来源哈希但不含禁止的源码或重负载；Markdown 目标支持内嵌的内容寻址报告资产；桩一致性测试允许未来加入 PDF 和图表组件，但不把它们变成运行时依赖。

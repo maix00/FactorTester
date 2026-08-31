@@ -615,6 +615,7 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
         projection["source"] = "local"
         projection["local_ref"] = local_ref
         projection["profile_id"] = snapshot.get("_local_profile_id") or ""
+        projection["branches"] = self._local_report_branches(principal, local_ref)
         return projection
 
     def local_research_index(self, principal: str, local_ref: str) -> dict[str, Any]:
@@ -630,7 +631,31 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
         value = build_upload_index(snapshot)
         value.update(source="local", local_ref=local_ref,
                      profile_id=profile_id)
+        value["branches"] = self._local_report_branches(principal, local_ref)
         return value
+
+    def _local_report_branches(
+        self, principal: str, local_ref: str,
+    ) -> list[dict[str, Any]]:
+        """Project every local branch of one logical Report for its reader."""
+        package_id, separator, _branch_id = str(local_ref or "").rpartition(":")
+        if not separator or not package_id:
+            return []
+        branches: list[dict[str, Any]] = []
+        for item in self.local_research(principal):
+            if str(item.get("record_id") or "") != package_id:
+                continue
+            branch_local_ref = str(item.get("local_ref") or "")
+            if not branch_local_ref:
+                continue
+            branches.append({
+                "branch_ref": str(item.get("branch_id") or ""),
+                "title": str(item.get("branch_id") or item.get("title") or ""),
+                "publication_id": f"local:{branch_local_ref}",
+                "href": f"/research/local:{branch_local_ref}",
+                "selected": branch_local_ref == local_ref,
+            })
+        return branches
 
     def local_research_chapter(
         self, principal: str, local_ref: str, chapter_id: str,

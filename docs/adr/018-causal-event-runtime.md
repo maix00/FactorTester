@@ -2,7 +2,7 @@
 
 - **日期**：2026-06-20
 - **状态**：已采纳
-- **取代**：ADR-009 中的固定阶段 DES 与 `EventDrivenFactor`
+- **取代**：ADR-127 中的固定阶段 DES 与 `EventDrivenFactor`
 
 ## 背景
 

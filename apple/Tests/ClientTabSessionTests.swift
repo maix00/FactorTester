@@ -2,8 +2,8 @@ import XCTest
 @testable import FTClient
 
 final class ClientTabSessionTests: XCTestCase {
-    func testResearchOpensOnSharedSection() {
-        XCTAssertEqual(ClientTabSession().researchSection, .shared)
+    func testResearchOpensOnResearchCatalogSection() {
+        XCTAssertEqual(ClientTabSession().researchSection, .researches)
     }
 
     func testStoreRetainsOnlyLightweightStateForAnOpenTab() {

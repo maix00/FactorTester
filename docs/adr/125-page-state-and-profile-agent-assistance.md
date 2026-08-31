@@ -1,59 +1,43 @@
-# ADR 125: Page state and Profile Agent assistance share registered semantics
+# ADR-125：页面状态与 Profile Agent 助手共享注册语义
 
-## Status
+## 状态
 
-Accepted
+已接受。
 
-## Context
+## 背景
 
-Left-navigation tabs can keep live DOM briefly, but memory eviction and reload
-must rebuild a page. DOM control snapshots alone cannot restore selected nested
-tabs, custom widgets, owned overlays, or the JavaScript model behind a form.
-Server-hosted Profile Agents also need to understand and update the page that a
-person is viewing, while the Agent process cannot access the browser's WebMCP
-runtime directly.
+左侧导航 tab 可以短暂保留 DOM，但内存回收和刷新必须能重建页面。仅保存 DOM
+控件快照无法恢复嵌套 tab、自定义部件、所属 overlay 或表单背后的 JavaScript
+模型。服务器 Profile Agent 也需要理解和更新用户正在看的页面，但不能直接
+访问浏览器 WebMCP 运行时。
 
-## Decision
+## 决策
 
-1. Each left-navigation tab owns a versioned `FTPageState` registry. Shared
-   components register serializable state under stable section identifiers.
-2. A tab checkpoint captures registered state into the existing browser-local
-   tab workspace. Performance eviction disposes live registrations and DOM but
-   retains their serializable state; route reconstruction registers the same
-   sections and restores them before the page is presented.
-3. A reusable right-side Agent drawer binds a page to one Profile. Research
-   reports use their bound Profile; every other assisted surface uses the
-   current account's `self` Profile.
-4. Drawer visibility and Agent runtime lifetime are separate. Hiding a drawer
-   does not stop the Agent. A browser-local profile ownership registry starts
-   once and stops only after the last tab that opened that Profile is evicted.
-5. An assisted page registers one versioned Agent Assistance Document Adapter:
-   schema, export, validation and atomic import. Registration automatically
-   mounts only the lightweight right-edge trigger and drawer shell; pages never
-   assemble that UI. Profile resolution, Adapter preparation, Agent runtime
-   startup and chat modules are deferred until the person opens the drawer.
-6. While a drawer is open, the browser publishes the schema, complete document
-   and optimistic-lock revision to a short-lived Manager memory channel. The
-   FactorTester CLI inspects, validates or atomically applies one complete JSON
-   document. The browser acknowledges success only after the page Adapter has
-   validated, imported, saved and rendered it.
-7. Test assistance edits a ResearchConfiguration-shaped document whose
-   `configuration` member is exactly the structure later frozen as
-   `RunSpec.configuration`. RunSpec adds immutable identity and execution
-   metadata; there is no second handwritten field mapping.
-8. Page documents and applications are ephemeral, profile-scoped, authenticated,
-   versioned, size-bounded, and independent of business ports. They are not a
-   research record and are never written to the control database.
-9. ADR-124 WebMCP and this CLI channel retain separate transports but share the
-   same principle: registered documents, ordinary validation, and no
-   backend or DOM bypass.
+1. 每个左侧 tab 拥有版本化的 `FTPageState` 注册表；共享组件以稳定 section
+   标识注册可序列化状态；
+2. tab checkpoint 写入现有浏览器本地 tab workspace。性能回收销毁 live 注册和
+   DOM，但保留序列化状态；路由重建时重新注册并在呈现前恢复；
+3. 可复用右侧 Agent drawer 绑定一个 Profile。研究报告使用绑定的 Profile，
+   其他助手页面使用当前账户的 `self` Profile；
+4. drawer 显示与 Agent 运行时生命周期分离。隐藏 drawer 不停止 Agent；只有打开
+   该 Profile 的最后一个 tab 被回收后才停止；
+5. 助手页面注册一个版本化 Assistance Document Adapter，负责 schema、导出、
+   校验和原子导入。注册会自动挂载轻量右侧触发器和 drawer 壳，页面不重复装配
+   这套 UI；Profile 解析、运行时启动、聊天模块延迟到真正打开时；
+6. drawer 打开时，浏览器把 schema、完整文档和乐观锁 revision 发布到短期
+   Manager 内存通道。FactorTester CLI 对一份完整 JSON 文档执行 inspect、
+   validate 或原子 apply；页面 Adapter 完成校验、导入、保存和渲染后才确认成功；
+7. 测试助手使用与 `RunSpec.configuration` 相同形状的
+   `ResearchConfiguration` 文档；RunSpec 只增加不可变身份和执行元数据，不再
+   手写第二份字段映射；
+8. 页面文档和应用是按 Profile 隔离的短期认证对象，有版本、大小上限，独立于
+   业务端口，不是研究记录，也不写控制库；
+9. WebMCP 与 CLI 助手通道保留不同传输，但共享“注册文档、普通校验、不绕过后端
+   或 DOM”的原则。
 
-## Consequences
+## 后果
 
-- Reload and memory reclamation no longer require retaining whole page DOM.
-- Pages must register non-native widgets explicitly; ordinary controls retain
-  the existing generic snapshot fallback.
-- Agent assistance cannot write a document that the active page schema and
-  Adapter do not accept, and stale revisions cannot overwrite newer edits.
-- Multiple assisted tabs can safely share one Profile Agent without a hidden
-  drawer terminating another tab's conversation.
+刷新和内存回收不再需要保留整个页面 DOM；页面必须为非原生部件显式注册状态。
+助手不能写入当前 schema/Adapter 不接受的文档，过期 revision 不能覆盖较新的
+用户修改；多个助手 tab 可以共享一个 Profile Agent，不会因某个 drawer 隐藏而
+终止另一个 tab 的会话。

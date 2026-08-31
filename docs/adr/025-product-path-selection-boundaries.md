@@ -1,60 +1,42 @@
-# ADR 025: Product Path Selection Boundaries
+# ADR-025：产品路径选择边界
 
-## Status
+## 状态
 
-Accepted
+已接受。
 
-## Context
+## 背景
 
-The single-factor page used to treat a frontend submission as a page-scoped
-`FactorTester`.  That blurred three different concepts:
+单因子页面曾把前端提交对象当成页面级 `FactorTester`，混淆了三种不同
+概念：SQLite 中的用户产品组模板、一次测试选择的产品/路径全集，以及
+IC/分组测试运行时的 `FactorTester`。
 
-- a user product-group template stored in SQLite,
-- a product/path universe selected for one test configuration,
-- the `FactorTester` runtime object used by IC or group-test execution.
+## 决策
 
-This caused page-level state to leak into IC/group tests, made sorting ambiguous,
-and forced global overlays such as product category and return-frequency settings
-to exist outside the concrete test that actually needs them.
+引入 `ProductPathSelection` 表示一次明确的产品/路径选择。它只拥有：
 
-## Decision
+- `selection_id`；
+- `selected_paths`；
+- `product_group`；
+- `manual_selection` 或 `user_product_group_template` 等来源元数据；
+- 延迟解析的产品集合。
 
-Introduce `ProductPathSelection` as the backend object for a selected
-product/path universe.  It owns only path and product-universe semantics:
+用户产品组 SQLite 存储中的一行可以通过
+`product_group_to_path_selection` 构造一个选择对象。
 
-- `selection_id`
-- `selected_paths`
-- `product_group`
-- source metadata such as `manual_selection` or `user_product_group_template`
-- lazily resolved products
+`ProductPathSelection` 不创建、更新或删除 `FactorTester`。IC 和分组运行器
+在运行时根据各自设置创建测试器，并附加本次选择的产品全集元数据；页面级
+查询只作为旧前端输入的迁移桥。规范测试 payload 应把
+`product_selection` 或 `product_selections` 放在具体测试内。
 
-One row in the user product-group SQLite store can build exactly one
-`ProductPathSelection` through `product_group_to_path_selection`.
+排序由用户产品组模板存储负责，页面级产品路径选择不实现排序。
 
-`ProductPathSelection` must not create, update, or delete `FactorTester`
-instances.  IC test and group test runners create their own `FactorTester`
-objects at run time from the product selection carried by that test's settings.
-The page-level product selection lookup is only a compatibility bridge until the
-frontend sends `product_selection` or `product_selections` inside the concrete
-test payload.
+## 后果
 
-Ordering is owned by the user product-group template store.  Page-level
-product-path selections do not implement reorder semantics.
-
-## Consequences
-
-The frontend should remove page-level product category and return-frequency
-overlays.  These choices should be opened from the IC/group test setting modules
-that need them.
-
-IC test and group test must keep independent backend setting applications.  They
-can share registry infrastructure and base-field builders, but each test module
-owns its own tabs, defaults, disabled values, chips, and lazy-loaded setting UI.
-
-Existing result and snapshot APIs may continue to expose `submission_id` where
-the meaning is the strategy owner id inside a specific test run.  New product
-universe APIs should use `product_path_selection_id` or `selection_id`.
-
-`FactorTester` remains a runtime compute context.  Business runners such as IC
-and group test own tester creation for their run, attach the selected product
-universe metadata, and register the tester only for result lookup after the run.
+- 产品分类和收益频率不再作为全局页面覆盖层，而由真正需要它们的测试
+  设置模块打开。
+- IC 和分组测试保持独立的设置应用；可以共享注册表、基础字段构建器和
+  公共 UI，但各模块拥有自己的 tab、默认值、禁用值、chip 和懒加载界面。
+- 旧结果/快照 API 可以暂时返回 `submission_id`，但新的产品全集 API 使用
+  `product_path_selection_id` 或 `selection_id`。
+- `FactorTester` 仍是运行时计算上下文；业务运行器负责创建它，并只在
+  结果查询需要时登记测试器。

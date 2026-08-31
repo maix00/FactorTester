@@ -11,6 +11,9 @@ from tools.cli.release.research_reporting.authoring.tree_fork import (
     inherit_continuation_report_tree,
     inherit_report_tree_across_packages,
 )
+from tools.cli.release.research_reporting.work_package_identity import (
+    work_package_report_id,
+)
 from tools.cli.release.research_obligations import (
     inherit_obligation_ledger,
 )
@@ -50,7 +53,9 @@ def prepare_continuation_report_parent(
             package_root=target_package_root,
             source_branch_id=source_branch_id,
             target_branch_id=target_branch_id,
-            target_report_id=f"report-{work_package_id}-{target_branch_id}",
+            target_report_id=work_package_report_id(
+                target_package_root, work_package_id,
+            ),
         )
     else:
         inherited = inherit_report_tree_across_packages(
@@ -61,7 +66,7 @@ def prepare_continuation_report_parent(
             target_package_root=target_package_root,
             source_branch_id=source_branch_id,
             target_branch_id=target_branch_id,
-            target_report_id=f"report-{work_package_id}-{target_branch_id}",
+            target_report_id=f"report-{work_package_id}",
         )
     scope = resolve_local_graph_report(
         client_root=client_root, profile_id=profile_id,

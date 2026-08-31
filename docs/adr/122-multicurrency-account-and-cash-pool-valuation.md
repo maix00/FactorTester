@@ -1,54 +1,45 @@
-# ADR 122: Multi-currency accounts and cash-pool valuation
+# ADR-122：多币种账户与资金池估值
 
-Status: Accepted
+## 状态
 
-## Context
+已接受。
 
-A cash pool used to store one `DataMoney` object and every ledger in that pool
-read and replaced that object. This made an account currency indistinguishable
-from the pool's base currency and made a mixed-currency pool impossible.
+## 背景
 
-Broker account models distinguish currency-specific cash balances from the
-base-currency account summary. A shared buying-power boundary must retain both
-facts and value each account at the causal timestamp.
+资金池过去只保存一个 `DataMoney`，池内所有账本都读取并替换它，导致账户
+币种和资金池 base currency 无法区分，也无法表达混合币种资金池。经纪商模型
+通常把币种现金余额和 base-currency 汇总分开；FactorTester 的购买力边界也
+必须保留两个事实，并在因果时间点估值。
 
-## Decision
+## 决策
 
-- `LedgerConfig.account_currency` is the registered currency of one account.
-  `CashPoolConfig.base_currency` remains the pool's common valuation currency.
-- `CashPoolStore` owns one immutable `DataMoney` balance per ledger. Different
-  ledgers never share a balance object, even when they share a pool.
-- Initial pool capital is recorded once. It is assigned to a base-currency
-  account when one exists; otherwise it remains an unallocated base-currency
-  pool reserve.
-- Pool cash, equity, margin and utilization convert every account component to
-  the pool base currency using the FX observation at the event timestamp.
-- FX observations are cached by pool, currency pair, timestamp and provider so
-  all consumers in one causal event use the same rate without repeated reads.
-- A missing or non-positive cross-currency rate is an error. It is never
-  replaced with one or with a current non-causal rate.
-- Passive valuation does not charge a hypothetical conversion fee. Buying
-  power and execution projections value positive foreign cash net of the
-  registered conversion fee and foreign cash requirements inclusive of that
-  fee. An actual future FX transfer must book its fee as a settlement event.
-- Fill, settlement and audit projections retain account ID, pool ID, account
-  currency and pool base currency as separate fields.
+- `LedgerConfig.account_currency` 是单个账户的注册币种；
+  `CashPoolConfig.base_currency` 是资金池的共同估值币种；
+- `CashPoolStore` 为每个账本拥有独立不可变 `DataMoney` 余额，即使共享资金池也
+  不共享余额对象；
+- 初始资金只记录一次：存在 base-currency 账户时分配给它，否则保留为资金池
+  未分配的 base-currency 储备；
+- 资金池现金、权益、保证金和利用率在事件时刻使用 FX 观察统一转换到池的
+  base currency；
+- FX 按资金池、币种对、时间戳和提供方缓存，同一因果事件的所有消费者使用
+  同一汇率；
+- 缺失或非正汇率直接报错，不能改成 1 或当前的非因果汇率；
+- 被动估值不收假设的换汇费；购买力和执行投影对外币现金按注册换汇费净值，
+  实际未来换汇必须作为结算事件记账；
+- 成交、结算和审计投影分别保留账户 ID、资金池 ID、账户币种和资金池 base
+  currency。
 
-`LedgerState.base_currency` remains the internal name of the account-currency
-slot for now; new configuration and result contracts use `account_currency`.
-It must never be populated from a pool base currency when an explicit account
-currency exists.
+`LedgerState.base_currency` 暂时仍是账户币种槽位的内部名称；新的配置和结果
+契约使用 `account_currency`。有明确账户币种时，不能用资金池 base currency
+覆盖它。
 
-## Consequences
+## 后果
 
-Same-currency private pools retain their prior arithmetic. Shared pools no
-longer duplicate initial capital and no longer depend on whichever account is
-visited first. Mixed-currency runs require a historical FX provider for every
-observed pair and timestamp. Cash constraints, margin budgets, equity curves
-and margin-risk checks share the same pool valuation boundary.
+同币种私有资金池保持原有算术；共享资金池不再重复计算初始资金，也不依赖先
+访问哪个账户。混合币种运行要求每个观察到的币种对和时间戳都有历史 FX 提供
+方；现金约束、保证金预算、净值和保证金风险检查共用同一资金池估值边界。
 
-## References
+## 参考
 
 - https://www.interactivebrokers.com/docs/web-api/v1/endpoints/portfolio/portfolio-summary
 - https://interactivebrokers.github.io/tws-api/account_summary.html
-

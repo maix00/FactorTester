@@ -1,76 +1,36 @@
-# ADR 114: Public Manager Codex sandbox inside Docker
+# ADR 114：公共 Manager Docker 内的 Codex bubblewrap 沙箱
 
-## Status
+## 状态
 
-Accepted for the public Manager Agent runtime.
+已接受，适用于公共 Manager Agent 运行时。
 
-## Context
+## 背景
 
-The public Manager starts one Codex `app-server` per claimed research
-Profile. Codex's Linux `workspace-write` policy uses bubblewrap with user and
-PID namespaces. The public container previously installed bubblewrap as an
-ordinary executable and also enabled Docker's `no-new-privileges` option. On
-the Alibaba Cloud host this caused every Agent command to stop at:
+公共 Manager 为每个 claimed 研究 Profile 启动一个 Codex `app-server`。Codex 的 Linux `workspace-write` 使用 bubblewrap 的 user/PID namespace。公共容器曾把 bubblewrap 当普通可执行文件安装，同时启用 Docker `no-new-privileges`，导致 Alibaba Cloud 主机上的每条 Agent 命令都停在 `bwrap: No permissions to create new namespace`。
 
-```text
-bwrap: No permissions to create new namespace
-```
+Manager 与 PostgreSQL 是分开的服务。Manager 挂载应用状态和控制面秘密，因此不能为整个容器开启无限制执行；否则 prompt 或工作区负载会成为更大的主机风险。
 
-The Manager and PostgreSQL containers are separate services. The Manager
-mounts application state and control-plane secrets, so enabling unrestricted
-execution for the whole container would make a model prompt or workspace
-payload a broader host-facing risk.
+## 决策
 
-## Decision
+公共 FactorTester 服务采用官方 Codex secure-container 模式：
 
-The public FactorTester service uses the official Codex secure-container
-pattern:
+1. 镜像构建时安装发行版 bubblewrap，并把 `/usr/bin/bwrap` 设为 setuid；
+2. 只给 FactorTester 服务该模式所需 capability：`SYS_ADMIN`、`SYS_CHROOT`、`SETUID`、`SETGID`、`SYS_PTRACE`、`NET_ADMIN`、`NET_RAW`；
+3. 对该服务禁用 Docker 默认 seccomp 和 AppArmor profile，使 bubblewrap 能创建内层沙箱；
+4. 不设置 `privileged: true`，不把这些 capability 给 PostgreSQL，PostgreSQL 继续使用 `no-new-privileges`；
+5. 保持 Codex 自身 `workspace-write`、进程内 seccomp 和 `no-new-privs` 约束不变。外层放宽只为创建内层沙箱，不代表 Agent 获得全盘权限。
 
-1. Install the distribution bubblewrap package and set `/usr/bin/bwrap` to
-   setuid mode during image construction.
-2. Give only the FactorTester service the explicit capabilities required by
-   that pattern (`SYS_ADMIN`, `SYS_CHROOT`, `SETUID`, `SETGID`, `SYS_PTRACE`,
-   `NET_ADMIN`, and `NET_RAW`).
-3. disable Docker's outer default seccomp and AppArmor profiles for that
-   service so bubblewrap can create its inner sandbox.
-4. Do not set `privileged: true`, do not grant these capabilities to
-   PostgreSQL, and keep PostgreSQL under `no-new-privileges`.
-5. Keep Codex's own `workspace-write` policy and in-process seccomp/
-   `no-new-privs` enforcement unchanged. The outer relaxation exists only to
-   construct the inner sandbox; it is not a request for Agent full-disk
-   access.
+不增加 FactorTester 传输端口；公共 7998、7997 和 WireGuard UDP 端口仍是唯一发布的应用端口。
 
-No FactorTester transport port is added. The existing public `7998`, `7997`,
-and WireGuard UDP port remain the only published application ports.
+## 选择理由
 
-## Why this choice
+官方 Codex secure Docker profile 记录了这一边界。使用部署公共镜像和该 profile 的临时容器已在目标主机通过 `codex sandbox -- /bin/true`。目标内核拒绝 bubblewrap 新建 `/proc` mount，但当前 Codex sandbox helper 会预检并在没有该 mount 时重试；不启用无限制回退。把 `sandbox_mode` 设成 `danger-full-access` 或设置 `privileged: true` 会移除相关边界，不接受。
 
-The official Codex secure Docker profile documents this exact boundary. A
-temporary container using the deployed public image and this profile passed
-`codex sandbox -- /bin/true` on the target host. The target kernel rejects the
-fresh `/proc` mount used by bubblewrap, but the current Codex sandbox helper
-preflights that mount and retries without it; no unrestricted fallback is
-enabled.
+## 后果
 
-Setting `sandbox_mode = "danger-full-access"` or `privileged: true` in the
-Manager would make the Agent work by removing the relevant security boundary,
-so neither is an accepted fix.
+公共镜像必须保留 `/usr/bin/bwrap` 的 setuid 位。Docker/AppArmor 改动只对 Manager 容器显式生效，PostgreSQL 单独加固。若主机拒绝所需 capability 或 setuid，Agent 沙箱 smoke test 应失败，而不是静默无隔离运行。回滚镜像/Compose revision 会恢复之前的加固容器，但在沙箱先决条件恢复前 Agent shell 仍不可用。
 
-## Consequences
+## 参考
 
-- The public image must preserve the setuid bit on `/usr/bin/bwrap`.
-- Docker/AppArmor policy changes are explicit and limited to the Manager
-  container; the PostgreSQL container remains hardened separately.
-- A host that rejects the required Docker capabilities or setuid execution
-  will fail the Agent sandbox smoke test rather than silently running without
-  isolation.
-- Rolling back the public image and Compose revision restores the previous
-  hardened container, but Agent shell commands will again be unavailable on
-  this host until the sandbox prerequisites are restored.
-
-## References
-
-- OpenAI Codex secure container profile:
-  <https://github.com/openai/codex/blob/main/.devcontainer/README.md>
-- OpenAI Codex Linux sandbox behavior:
-  <https://github.com/openai/codex/blob/main/codex-rs/linux-sandbox/README.md>
+- OpenAI Codex secure container profile：<https://github.com/openai/codex/blob/main/.devcontainer/README.md>
+- OpenAI Codex Linux sandbox 行为：<https://github.com/openai/codex/blob/main/codex-rs/linux-sandbox/README.md>

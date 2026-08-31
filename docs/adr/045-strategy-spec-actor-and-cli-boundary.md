@@ -42,6 +42,10 @@ profiles/<profile-id>/
 └── strategy-worktree/           # Profile Strategy source
 ```
 
+上图是当前工作区物化布局和职责示意，不是旧公共 API 的保留声明。因子库和产品库的公开入口分别以
+`factortester factor-library`、`factortester product-library` 及 ADR-141 记录的 canonical API 为准；
+`factor-worktree`、`custom_factors/` 等内部目录名仍属于后续一次性目录迁移范围。
+
 `strategy-library` 使用 `.strategy_workspace/manifest.json`，Profile 的
 `strategy_workspace_binding` 使用 `local-strategy-git`，与因子绑定、同步和
 回滚凭据完全分离。个人 canonical 库不会因创建 Profile 自动合并；Profile

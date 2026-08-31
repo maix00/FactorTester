@@ -1,150 +1,83 @@
-# ADR-044: Native strategy hooks and market-event kinds
+# ADR-044：Native 策略钩子与市场事件类型
 
-- **Date**: 2026-07-27
-- **Status**: Proposed for issue #172
-- **Related**: ADR-018, ADR-020, ADR-026, ADR-027, ADR-034, ADR-043
+- **日期**：2026-07-27
+- **状态**：针对 issue #172 提议；已实现部分以当前运行时代码和测试为准
+- **相关**：ADR-018、ADR-020、ADR-026、ADR-027、ADR-034、ADR-043
 
-## Context
+## 背景
 
-The native runtime already has a causal `EventQueue`, but its public Strategy
-object is currently only an identity. The only user-shaped callback is the
-incremental factor executor's private `on_bar` seam. This makes a small custom
-event strategy need to know about `Flow`, `FieldRef`, `EventDraft`, and the
-order-construction graph.
+Native 运行时已有因果 `EventQueue`，但公开 Strategy 对象最初只有身份信息，
+自定义事件策略不得不理解 `Flow`、`FieldRef` 和订单构造图。运行时也曾把
+聚合回放事件命名为 `BAR`，这不能与 L1 报价、成交或 L2/L3 委托簿更新混用。
 
-The runtime also currently names the aggregate replay event `BAR`. That name
-must not be reused for L1 quotes, trades, or L2/L3 order-book updates. A bar is
-an aggregate observation with an explicit visibility policy; a quote or book
-delta is an atomic market-data observation whose sequence affects matching and
-queue position.
+## 决策
 
-## Decisions
+### 公开钩子只是适配器，不是第二个执行引擎
 
-### 1. Public hooks are a small adapter, not a second execution engine
+作者 API 可以提供可选的 `on_start`、`on_stop`、`on_event`、`on_bar`、
+`on_quote`、`on_trade`、`on_book_delta`、`on_book_snapshot`、
+`on_order_event` 和状态专用订单回调。适配器优先调用最具体的覆盖方法，再
+回退到通用市场/事件方法。
 
-The public author API has optional no-op methods:
+回调只能返回有类型的目标或订单意图，不能直接修改 `Ledger`、市场数据、
+订单或事件队列；返回值必须经过既有的
+`SIGNAL → sizing → risk → execution → ledger` 流程。取消/替换在其不可变
+动作记录接入同一命令适配器前仍是内部能力。
 
-```text
-on_start(ctx)
-on_stop(ctx)
-on_event(ctx, event)  # generic fallback
-on_bar(ctx, bar)
-on_quote(ctx, quote)
-on_trade(ctx, trade)
-on_book_delta(ctx, delta)
-on_book_snapshot(ctx, snapshot)
-on_order_event(ctx, order)
-on_order_<status>(ctx, order)  # e.g. on_order_canceled
-```
+### BAR 不代表 L2/L3
 
-`on_market_feed(ctx, event)` is the generic fallback for market-feed types
-without a dedicated method, and `on_event(ctx, event)` is the final fallback
-across feed, BAR, and order events. The adapter calls the most specific
-overridden method first. A strategy does not need to implement every hook.
+`EventKind.MARKET_FEED` 是原始行情的调度优先级，载荷使用
+`MarketFeedEventKind` 区分：
 
-Order callbacks are observational. A callback returns a typed target or order
-delta intent; it never mutates `Ledger`, `MarketDataStore`, `Order`, or the
-event queue directly. The adapter converts returned intents into the existing
-`SIGNAL → sizing → risk → execution → ledger` pipeline.
-
-Cancel/replace commands remain an internal lifecycle capability until their
-immutable action records are exposed through the same typed command adapter.
-This prevents a first public API from bypassing the issue-144 order lineage.
-
-### 2. BAR is not the L2/L3 event kind
-
-`EventKind.MARKET_FEED` is a coarse scheduler priority for raw feed events.
-Its payload carries a typed `MarketFeedEventKind`:
-
-| payload kind | data level | author hook |
+| 载荷类型 | 数据层级 | 作者钩子 |
 |---|---|---|
-| `QUOTE` | L1 BBO | `on_quote` |
-| `TRADE` | trade tick | `on_trade` |
-| `BOOK_DELTA` | L2 MBP or L3 MBO delta | `on_book_delta` |
-| `BOOK_SNAPSHOT` | L2/L3 snapshot | `on_book_snapshot` |
+| `QUOTE` | L1 买卖盘 | `on_quote` |
+| `TRADE` | 逐笔成交 | `on_trade` |
+| `BOOK_DELTA` | L2 MBP 或 L3 MBO 增量 | `on_book_delta` |
+| `BOOK_SNAPSHOT` | L2/L3 快照 | `on_book_snapshot` |
 
-`EventKind.BAR` remains the aggregate-bar event. Raw market events are ordered
-before BAR and ORDER at the same timestamp; equal timestamp events retain the
-feed sequence. L2/L3 do not require separate scheduler kinds unless a future
-matching model needs a different priority. The payload kind is the extensible
-boundary, while `EventKind` remains the scheduling boundary.
+`EventKind.BAR` 仍表示带有明确可见性策略的聚合 K 线。相同时间戳下，原始
+行情先于 BAR 和 ORDER，等时间事件保留数据源序号。
 
-### 2.1 SIGNAL is not a timer
+### SIGNAL 不是定时器
 
-`EventKind.SIGNAL` is a domain decision point, not a clock notification. The
-factor signal module creates it from an aligned factor table or from live
-factor state that was updated by a BAR. Its timestamp therefore means
-“the strategy may evaluate this signal now”, not “a wall-clock timer fired”.
-Signals can be sparse, session-aligned, or derived from a data source; they
-must not be emitted when the relevant market input is unavailable.
+`EventKind.SIGNAL` 是策略决策点，不是时钟通知。因子信号模块从对齐表或
+BAR 更新后的实时状态生成它；无相关市场输入时不生成信号。定时器使用
+`TimerEvent`/`EventKind.TIMER`，由调度器负责注册、取消、重复策略和确定性
+排序，不能用 SIGNAL 或伪造 BAR 实现。
 
-Native now exposes this boundary as `TimerEvent` and `EventKind.TIMER`.
-`StrategyContext.set_timer()` returns a typed recurring schedule, while
-`set_time_alert()` returns a one-shot schedule and `cancel_timer()` returns a
-cancel request. The scheduler owns registration, cancellation, repeat policy,
-and deterministic same-timestamp ordering. A timer callback must not be
-implemented by reusing SIGNAL or by creating a synthetic BAR. Recurring
-timers are bounded by the strategy run window or an explicit end timestamp so
-backtests cannot create an unbounded queue.
+`BarStrategy` 只消费聚合 BAR。如果只有 L2/L3 而需要 K 线，必须由独立的
+`MarketDataAggregator` 消费原始事件，按明确的收盘/可见时间发布派生 BAR；
+不能把簿变化直接传给 `on_bar`，也不能在策略中偷偷读取未来簿变化。
 
-`BarStrategy` consumes aggregate BAR events only. When a user has only L2/L3
-data but wants a bar strategy, a separate `MarketDataAggregator` actor must
-consume the raw book/trade events and publish a derived BAR event with an
-explicit close/visibility timestamp. It is not correct to pass a book delta to
-`on_bar` or to silently aggregate future book updates inside the strategy.
+### 数据精度与钩子形状分开声明
 
-### 3. Data fidelity is declared separately from hook shape
+策略声明所需市场事件和执行能力。预检报告必须区分请求数据层级、可用
+`L1`/`L2_MBP`/`L3_MBO`、成交模型、部分成交支持和剩余订单携带能力。要求
+订单状态或成交后持仓轴而选定执行模型无法发出时，必须校验失败，不能静默
+退化为 BAR 策略。
 
-The strategy declares required market events and execution capabilities. L1/BAR
-can use an explicit capacity/fill model, but must not silently claim queue-level
-fidelity. L2/L3 provide more precise book state and matching inputs without
-changing the strategy source API.
-
-The preflight report must distinguish:
-
-- requested data (`bar`, `quote`, `trade`, `book_delta`)
-- available data level (`L1`, `L2_MBP`, `L3_MBO`)
-- fill model (`next_bar_full_fill`, `bar_volume_limited`, `book_matching`)
-- whether partial fills and residual carry are supported
-
-Preflight capability checks also distinguish ordinary order events from the
-`ORDER_STATUS` axis and the post-fill `POSITION` axis. A strategy that requires
-either axis must fail validation when the selected execution model cannot emit
-it; it must not silently fall back to a BAR-only strategy.
-
-## Event ordering
+## 事件顺序
 
 ```text
 FIELD_CHANGE
-→ MARKET_FEED (quote/trade/book delta)
+→ MARKET_FEED（quote/trade/book delta）
 → BAR
-→ ORDER (existing orders consume the observation)
-→ POSITION (a successful fill updates a position)
-→ TIMER (clock-driven strategy callback)
-→ SIGNAL (factor/strategy decision)
+→ ORDER
+→ POSITION
+→ TIMER
+→ SIGNAL
 → LEDGER
 ```
 
-The exact existing signal/order ordering remains unchanged for legacy runs;
-new raw market events only occupy the previously unused priority slot before
-BAR. A hook-generated intent is queued as a causal SIGNAL at the same or later
-timestamp and therefore goes through the existing order pipeline.
+旧运行的 signal/order 精确顺序保持不变；新的原始行情只占用 BAR 之前的
+优先级。钩子产生的意图以同一或更晚时间的因果 SIGNAL 入队，继续经过既有
+订单流水线。
 
-## Consequences
+## 后果
 
-- Simple strategies need only subclass `BarStrategy` or `EventStrategy` and
-  return target/order intents.
-- Order-aware strategies can override a status-specific callback for the
-  native order vocabulary (`blocked`, `submitted`, `accepted`,
-  `partially_filled`, `pending_cancel`, `pending_update`, `filled`,
-  `cancelled`, `rejected`, `expired`); each falls back to `on_order_event`.
-- L2/L3 events are first-class and cannot be confused with aggregate bars.
-- The ledger and issue-144 order lifecycle remain the sole owners of fills,
-  fees, margin, DMTM, cancellation, replacement, and residual orders.
-- Position events are emitted only after a fill is posted to the ledger. They
-  carry immutable snapshots and never grant a strategy a mutable ledger handle.
-- Account/ledger events remain internal native infrastructure. Timer events are
-  public only through `StrategyContext` controls and `on_timer`; they do not
-  expose the queue or ledger.
-- Adding a new market-data format only adds a payload type and a hook adapter;
-  it does not multiply scheduler phases or rewrite Strategy authors' code.
+- 简单策略只需继承 `BarStrategy` 或 `EventStrategy` 并返回意图。
+- 订单状态回调只能观察生命周期；成交、费用、保证金、DMTM、取消、替换和
+  剩余订单仍由账本及订单生命周期模块负责。
+- 持仓事件只在成交写入账本后发出，并携带不可变快照，不暴露可变账本句柄。
+- 新增市场数据格式只增加载荷类型和适配器，不增加调度阶段或重写作者代码。

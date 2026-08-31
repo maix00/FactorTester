@@ -1,50 +1,25 @@
-# ADR 102: Bounded password login from public visitor mode
+# ADR 102：公共访客模式中的有界密码登录
 
-## Status
+## 状态
 
-Accepted
+已接受。
 
-## Context
+## 背景
 
-The public Manager exposes a deliberately limited visitor session so an
-anonymous visitor can inspect the public task and catalog views.  The public
-deployment also requires device-authenticated sessions for ordinary browser
-access.  A visitor must not be able to turn that session into an arbitrary
-account session, but a small number of explicitly approved accounts need a
-password-login path for controlled testing.  This explicit allowlist may
-include a super-admin when that access is intentionally granted.
+公共 Manager 提供有意受限的访客会话，让匿名访客查看公共任务和目录；普通浏览器访问公共部署仍要求设备认证。访客不能把会话变成任意账户会话，但少量明确批准的账户需要受控密码登录做测试，其中可以有被有意授予该能力的超级管理员。
 
-## Decision
+## 决策
 
-Add `FACTORTESTER_PUBLIC_VISITOR_LOGIN_ALLOWLIST`, defaulting to an empty
-value.  A request may use password login while a valid visitor cookie is
-active only when all of the following hold:
+增加 `FACTORTESTER_PUBLIC_VISITOR_LOGIN_ALLOWLIST`，默认空值。只有同时满足以下条件时，有效访客 cookie 才能使用密码登录：
 
-1. the request is on the public Manager's visitor origin and uses the normal
-   secure transport check;
-2. the submitted identifier resolves exactly, case-sensitively, to one
-   allowlisted account (canonical username, `organization@alias`, or alias);
-3. the account is active.  Its normal role and capabilities are preserved;
-   the allowlist is the explicit authorization boundary.
+1. 请求来自公共 Manager 的访客来源并通过正常安全传输校验；
+2. 提交的身份以区分大小写的精确方式解析为白名单账户（规范用户名、`organization@alias` 或 alias）；
+3. 账户处于活动状态，保留其正常角色和能力；白名单是明确授权边界。
 
-The resulting session is recorded as `visitor-password`, bound to the
-Manager origin, and accepted by the existing public origin gate.  The
-visitor cookie is expired in the same response.  Registration policy and
-device enrollment do not change; an explicitly allowlisted administrator
-retains the normal Manager/admin permissions of that account.
+结果会话记录为 `visitor-password`，绑定 Manager 来源，并在同一响应中使访客 cookie 失效。注册策略和设备注册不变，获批管理员仍拥有该账户本来的 Manager/admin 权限。
 
-The current deployment allowlist is stored in the central control database.
-Account hierarchy is separate data: `GTHT@testA@545963541963` remains an
-ordinary user and is recorded as the parent of
-`GTHT@MaxJJW@392452984564`.
+当前部署白名单存储在中央控制库。账户层级是独立数据：`GTHT@testA@545963541963` 仍是普通用户，并记录为 `GTHT@MaxJJW@392452984564` 的父级。
 
-## Consequences
+## 后果
 
-- A deployment must opt in each account; a missing setting preserves the
-  existing visitor-login rejection.
-- Alias matching remains case-sensitive and ambiguous aliases fail closed.
-- PostgreSQL remains the account authority when available; an existing
-  Manager SQLite account row is used during the established database outage
-  fallback.  No device or visitor-account cache table is introduced.
-- The relationship helper is dry-run by default and requires an explicit
-  backup before applying account data changes.
+部署必须逐个加入账户；缺少设置继续拒绝访客登录。alias 匹配区分大小写，歧义 alias fail-closed。PostgreSQL 可用时仍是账户权威，已建立的数据库故障回退期间使用 Manager SQLite 账户行，不增加设备或访客账户缓存表。关系辅助工具默认 dry-run，应用账户变更前必须显式备份。

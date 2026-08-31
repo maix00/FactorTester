@@ -5,6 +5,7 @@ import pytest
 from server.manager.services.agent_workspace import ensure_server_profile_workspace
 from server.manager.services.server_research import ServerResearchService
 from server.manager.storage.profile_runtime_store import ProfileRuntimeStore
+from tools.cli.release.research_reporting.authoring.tree_fork import fork_report_tree
 from tools.cli.release.research_reporting.public_research.library import (
     PublicResearchLibrary,
 )
@@ -52,6 +53,28 @@ def test_server_agent_report_is_listed_and_read_from_canonical_workspace(tmp_pat
     assert index["title"] == "服务器 Agent 报告"
     assert index["access"]["build_source"] == "server_agent"
     assert index["access"]["sharing_state"] == "not_shared"
+
+
+def test_server_report_reader_lists_sibling_branches_in_one_work_package(tmp_path):
+    service, profile_id = _service(tmp_path)
+    row = service.list_owner(PRINCIPAL)[0]
+    package_root = service._location(PRINCIPAL, row["server_ref"])["package_root"]
+    fork_report_tree(
+        package_root=package_root,
+        source_branch_id="main",
+        target_branch_id="alternative",
+        target_report_id=row["report_id"],
+    )
+
+    index = service.index(PRINCIPAL, row["server_ref"])
+
+    assert [item["branch_ref"] for item in index["branches"]] == [
+        "alternative", "main",
+    ]
+    assert sum(bool(item["selected"]) for item in index["branches"]) == 1
+    assert index["branches"][1]["publication_id"] == (
+        f"server:{profile_id}:report-one:main"
+    )
 
 
 def test_server_agent_report_can_be_explicitly_shared_with_provenance(tmp_path):

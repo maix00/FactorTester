@@ -24,7 +24,7 @@ batch 内传递字段值。同时，旧实现中大量模块仍直接写入原 `
 将原 `AccountState` 重命名为 `BacktestRunState`，并明确 `BacktestRunState` 与
 `FlowContext` 的职责边界。
 
-### BacktestRunState
+### 回测运行状态（BacktestRunState）
 
 `BacktestRunState` 是整个 native backtest run 的长生命周期容器。它可以持有：
 
@@ -66,7 +66,7 @@ batch 内传递字段值。同时，旧实现中大量模块仍直接写入原 `
 - 当某个文件正在做语义迁移时，可以顺手把局部变量改成 `state` / `run_state`，
   但必须保持小步提交，并以行为测试覆盖。
 
-### FlowContext
+### 流程上下文（FlowContext）
 
 `FlowContext` 是一次 flow 调度链的短生命周期字段总线：
 

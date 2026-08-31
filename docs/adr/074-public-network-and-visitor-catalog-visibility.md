@@ -1,63 +1,24 @@
-# ADR 074: Public network summary and visitor catalog visibility
+# ADR 074：公共网络摘要与访客目录可见性
 
-## Status
+## 状态
 
-Accepted
+已接受。
 
-## Context
+## 背景
 
-The Manager home page is used from both an internal network and a public
-Manager.  A client must not infer or hard-code the public address from its own
-URL.  At the same time, a visitor needs a useful read-only view of public
-factor metadata and of the data sources known to the federation.
+Manager 首页既在内网使用，也在公共 Manager 使用。客户端不能从当前 URL 推断或硬编码公共地址；访客仍需要可用的只读公共因子元数据和联邦已知数据源视图。旧联邦注册主要用 `role` 标识节点，多公共 Manager 或更多 feature 节点后不够表达。公共/私有网络范围必须显式，但旧注册仍要可读。
 
-The existing federation registry identified nodes mainly by `role`.  That is
-not sufficient once more than one public Manager or more feature nodes are
-added.  The public/private network scope must be explicit, while old registry
-entries remain readable.
+公共容器 `.settings` 已将 `data_dir` 绑定到 `/data`、`source_data_dirs.LocalCNFutures` 绑定到 `/data/sources/LocalCNFutures`。因此源路径由配置决定；缺少产品源投影不能靠复制数据盘或镜像 SQLite 修复。
 
-The public container's `.settings` already binds `data_dir` to `/data` and
-`source_data_dirs.LocalCNFutures` to `/data/sources/LocalCNFutures`.  The
-source path is therefore configuration-driven; a missing product-source
-projection is not fixed by copying the data disk or mirroring SQLite.
+## 决策
 
-## Decision
+1. 联邦注册带 `public_server`，内部节点带 `internal_addresses`。旧记录兼容默认 main 为公共、feat 为非公共；内部地址只能是私有 IP。
+2. 首页 API 分开返回 `internal_server_addresses` 与 `public_server_addresses`。后者在适用时包含当前公共 Manager，由服务器提供，最多三个在线公共节点；旧字段为 Swift 目标切换保留。
+3. Web 首页每行展示一个 IP。空列表显示“无在线内网服务器”或“无在线公网服务器”；客户端不追加端口，也不从浏览器 URL 推导地址。
+4. 访客目录返回所有数据源描述及提供方 overlay，并分别标注可见与可获取。仅内网提供方可以作为元数据显示，但不能被访客选择用于产品、树、合约或行情路由；用户产品组和因子集合仍是私有的。
+5. 访客因子目录只使用已注册的公共因子源码，并投影不含源码和工作区路径的元数据；访客任务与生成物限制不变。
+6. 设备认证仍使用已注册公钥。注册和最近 IP 是审计字段，不要求一致。浏览器凭据仍按 WebCrypto/IndexedDB 来源隔离；直接 IP 注册的密钥不会自动出现在 ngrok 来源。入口没有本地凭据时，合规页跳转规范公共 IP，使已有密钥能认证，不跨来源复制私钥。
 
-1. Federation registrations carry `public_server` and, for internal nodes,
-   `internal_addresses`.  Old entries default `main` to public and `feat` to
-   non-public for compatibility.  Internal addresses are private IPs only.
-2. The home API returns separate `internal_server_addresses` and
-   `public_server_addresses`.  The latter includes the current public Manager
-   when applicable, is server-provided, and is capped at three online public
-   nodes.  Legacy fields remain for Swift target switching.
-3. The Web home page renders one IP address per line.  Empty lists render
-   `无在线内网服务器` or `无在线公网服务器`; the client does not add ports or
-   derive an address from the browser URL.
-4. Visitor catalog responses expose all source descriptors and their provider
-   overlay.  Each source is annotated separately as visible and fetchable.
-   Internal-only providers remain visible as metadata but cannot be selected
-   by visitor product, tree, contract, or market-data routes.  User product
-   groups and factor sets remain private.
-5. Visitor factor catalog uses the registered public factor source only and
-   projects metadata without source code or workspace paths.  A visitor's
-   task and artifact restrictions remain unchanged.
-6. Device authentication still uses the registered public key.  Enrollment
-   and last-seen IPs are audit fields and need not match.  Browser credentials
-   remain origin-scoped by WebCrypto/IndexedDB: a key enrolled under the
-   direct IP is not automatically readable under the ngrok origin.  When a
-   configured ingress has no local credential, its compliance page redirects
-   to the canonical public IP so the already-enrolled key can authenticate
-   without copying the private key across origins.
+## 后果
 
-## Consequences
-
-- Adding a second public Manager does not require a client release or a
-  hard-coded IP list.
-- An internal source can be advertised without accidentally turning visitor
-  metadata access into data-byte access.
-- Public source data is fetchable only from a local public provider in this
-  release.  A future cross-public-node data proxy can add an explicit remote
-  fetch capability without weakening the visitor policy.
-- The data disk remains the source of truth for LocalCNFutures.  Deployment
-  should verify the mounted path and the source projection endpoint after a
-  release.
+增加第二个公共 Manager 不需要客户端发布或硬编码 IP。内网源可以公开描述而不自动赋予访客数据字节权限。当前版本只从本地公共提供方获取公共源数据；将来的跨公共节点代理必须显式增加远程 fetch capability。数据盘仍是 LocalCNFutures 真正来源，部署后应校验挂载路径和源投影端点。

@@ -27,7 +27,7 @@ def test_forked_report_changes_independently(tmp_path: Path) -> None:
         package_root=package,
         source_branch_id="source",
         target_branch_id="target",
-        target_report_id="report-target",
+        target_report_id="report-source",
     )
 
     add_component(
@@ -45,3 +45,4 @@ def test_forked_report_changes_independently(tmp_path: Path) -> None:
     assert [item["component_id"] for item in target["components"]] == [
         "chapter-a", "fork-note",
     ]
+    assert target["head"]["report_id"] == source["head"]["report_id"]

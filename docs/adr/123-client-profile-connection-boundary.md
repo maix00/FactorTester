@@ -1,43 +1,44 @@
-# ADR 123: Keep local Profiles portable and bind servers to the client
+# ADR-123：本地 Profile 保持可移植，服务器由客户端绑定
 
-## Status
+## 状态
 
-Accepted
+目标决策已接受，但截至本次审计为**部分实施，存在代码偏离**。
 
-## Context
+当前 Swift 实现仍在 `LocalProfileModel.swift` 读取 `server.base_url`，并由
+`ProfileLiveProcessController`、研究目录和部分 Profile 页面使用
+`profile.serverURL`。这些是待迁移实现，不应在 ADR 中写成“已经完全移除”。
 
-A local Profile describes a user's identity, workspaces, agents, and local
-research state.  It is not a deployment or network configuration.  Earlier
-Profile versions stored `server.base_url`, which caused a moved or retired
-server port to break report-reference validation, Graph commands, and local
-research creation even when the client had already been pointed at another
-server.
+## 背景
 
-Server-hosted Profiles are different: their runtime binding is represented by
-the server-side runtime record (`runtime_kind=server` and an executor/server
-identity).  That identity is stable metadata; a service port is not.
+本地 Profile 描述用户身份、工作区、Agent 和本地研究状态，不应成为部署或
+网络配置。早期 Profile 保存 `server.base_url`，会使服务器或端口迁移破坏
+报告引用、研究图命令和本地研究创建，即使客户端已经切换到另一台服务器。
 
-## Decision
+服务器上的 Profile 则可以拥有服务器侧运行时记录；其稳定身份是服务器
+`server_id`，不是服务端口。
 
-- Client-owned local Profiles use schema version 10 and never contain a
-  `server` endpoint field.
-- The installed FactorTester client binds to one server through its global
-  client configuration, an explicit command connection override, or a
-  Manager-issued server-Agent capability.  Report authorities and Graph
-  commands use that connection rather than reading a Profile endpoint.
-- Manager synchronization derives the Manager address from the client
-  connection or accepts an explicit Manager URL.  It never derives an
-  address from Profile JSON.
-- Legacy local Profiles are migrated once on load: their old endpoint is
-  discarded and the normalized Profile is persisted.  Legacy endpoint data is
-  not used as a fallback.
-- Server-side runtime/projection code may retain a stable server identity for
-  a server-hosted Profile, but must not require a port in that identity.
+## 决策
 
-## Consequences
+- 客户端 Profile 的目标 schema 为 10，不包含服务器 endpoint 字段；
+- 已安装 FactorTester 客户端通过全局客户端配置、显式命令连接覆盖或 Manager
+  发出的服务器 Agent capability 绑定服务器；报告 authority 和研究图命令
+  使用这个连接，不读取 Profile endpoint；
+- Manager 同步从客户端连接或显式 Manager URL 得到地址，不从 Profile JSON
+  推导；
+- 旧 Profile 加载时一次性丢弃旧 endpoint 并持久化规范化 Profile，不把它作为
+  回退；
+- 服务器 Profile 可以保留稳定的运行时服务器身份，但不能要求端口写入身份。
 
-Changing the client's configured server does not move, duplicate, or rewrite
-Profile workspaces and research reports.  A client must be configured before a
-network operation that has no explicit endpoint; a clear configuration error
-is preferable to silently reconnecting to a stale Profile port.
+## 当前迁移边界
 
+Python CLI/Manager 路径已经以客户端/Manager 连接为主；Swift 的
+`LocalProfileModel.serverURL` 及其调用方仍需一次性迁移为客户端连接注入。
+在迁移完成前，不能删除该字段，否则会破坏现有研究目录和运行时控制器。
+迁移验收必须覆盖切换客户端服务器后，Profile 工作区、研究报告和研究图
+引用不被移动、复制或重写。
+
+## 后果
+
+客户端切换服务器的目标行为是不移动、不复制、不改写 Profile 工作区和报告。
+没有显式 endpoint 的网络操作必须在客户端未配置时清楚失败，而不能悄悄连回
+过期端口。本文记录的是目标边界，不为当前 Swift 偏离提供永久兼容承诺。

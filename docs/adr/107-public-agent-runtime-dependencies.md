@@ -1,37 +1,22 @@
-# ADR-107: Public Agent runtime dependencies
+# ADR-107：公共 Agent 运行时依赖
 
-## Status
+## 状态
 
-Accepted
+已接受。
 
-## Context
+## 背景
 
-The public Manager hosts server-side Profiles. A Profile's app-server must be
-able to start the Codex `app-server` protocol and invoke the user-facing
-FactorTester research CLI. The Manager/operator CLI belongs to server
-administration and must not be part of the Agent command surface.
+公共 Manager 承载服务器侧 Profile。Profile 的 app-server 必须启动 Codex `app-server` 协议并调用面向用户的 FactorTester 研究 CLI；Manager/operator CLI 属于服务器管理，不得进入 Agent 命令表面。
 
-The public image is built and activated from an exact Git revision. Runtime
-dependencies therefore need to be installed and checked during the image
-build, without storing provider tokens or the private Mihomo subscription in
-the repository.
+公共镜像按精确 Git revision 构建和激活，因此运行时依赖要在镜像构建期间安装并检查，不能把 provider token 或私有 Mihomo 订阅放进仓库。
 
-## Decision
+## 决策
 
-- Install a pinned `@openai/codex` npm release in the public image and verify
-  `codex --version` during the build.
-- Install the `tools/cli` Python distribution into the image so the
-  `factortester` launcher resolves through the installed bootstrap rather than
-  a checkout on the Agent's working directory.
-- Remove the `factortester-manager` launcher after installation. Its Python
-  modules remain part of the Manager application source, but the ordinary
-  Agent PATH does not expose its command.
-- Keep the Codex npm registry and version as Compose build arguments. Keep
-  provider credentials and Mihomo subscription configuration runtime-only.
+- 在公共镜像安装固定版本的 `@openai/codex` npm 包，并在构建时校验 `codex --version`。
+- 把 `tools/cli` Python 分发安装到镜像，使 `factortester` launcher 从已安装 bootstrap 解析，而不是从 Agent 工作目录 checkout 解析。
+- 安装后移除 `factortester-manager` launcher；其 Python 模块仍属于 Manager 应用源码，但普通 Agent PATH 不暴露该命令。
+- Codex npm registry 和版本作为 Compose build args；provider 凭据与 Mihomo 订阅配置只在运行时注入。
 
-## Consequences
+## 后果
 
-The public image is larger because it contains Node.js and the Codex Linux
-runtime, but Profile app-server startup is deterministic and does not depend
-on a host installation. Updating Codex is an explicit image revision and is
-covered by the normal build, publish, restart, and verification transaction.
+公共镜像因为包含 Node.js 和 Codex Linux runtime 会更大，但 Profile app-server 启动确定且不依赖主机安装。升级 Codex 是显式镜像 revision，必须经过正常构建、发布、重启和验证事务。

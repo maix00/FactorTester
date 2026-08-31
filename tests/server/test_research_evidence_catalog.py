@@ -1,23 +1,26 @@
 from __future__ import annotations
 
-import settings as Settings
 import pytest
 
+import settings as Settings
 from server.services.research_evidence_catalog import (
     attach_tag,
     create_evidence,
+    create_source_fragment,
     create_tag,
+    evidence_contains_job_source,
+    finalize_lifecycle_transition,
+    get_evidence_lifecycle,
     list_facets,
     list_source_fragments,
     list_tags,
+    prepare_lifecycle_transition,
     propose_tag,
     put_source_capture,
     put_source_fragment,
     search_evidence,
-    finalize_lifecycle_transition,
-    get_evidence_lifecycle,
-    prepare_lifecycle_transition,
 )
+from server.services.research_evidence_catalog.validation import digest
 from tests.server.data_contract_fixtures import initialize
 from tools.factors.formula_identity import freeze_factor_identity
 
@@ -94,6 +97,57 @@ def test_one_source_supports_multiple_fragments_and_evidence(
     assert [item["fragment_ref"] for item in list_source_fragments(
         owner="alice", source_ref=source["source_ref"],
     )] == [first["fragment_ref"], second["fragment_ref"]]
+
+
+def test_job_fragment_is_derived_from_captured_snapshot(
+    monkeypatch, tmp_path,
+) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", str(tmp_path / "catalog.db"))
+    source = put_source_capture(
+        owner="alice",
+        source_kind="job",
+        identity={"job_id": "job-1", "server_id": "public"},
+        content_hash="a" * 64,
+        audit={
+            "job_id": "job-1",
+            "status": "succeeded",
+            "result_summary": {"return": 0.12},
+            "artifacts": [{
+                "name": "equity_curve",
+                "content_hash": "c" * 64,
+                "content_type": "application/json",
+            }],
+        },
+    )
+
+    fragment = create_source_fragment(
+        owner="alice",
+        source_ref=source["source_ref"],
+        selector={"json_pointer": "/result_summary"},
+        title_zh="任务结果摘要",
+        summary_zh="由权威任务快照提取的结果摘要",
+        fragment_hash="f" * 64,
+        preview={"return": 999},
+    )
+
+    assert fragment["preview"] == {"return": 0.12}
+    assert fragment["fragment_hash"] == digest({"return": 0.12})
+
+    status = create_source_fragment(
+        owner="alice",
+        source_ref=source["source_ref"],
+        selector={"field": "status"},
+        title_zh="任务终态",
+        summary_zh="由权威任务快照提取的任务终态",
+    )
+    assert status["preview"] == {"status": "succeeded"}
+    evidence = _evidence(fragment["fragment_ref"])
+    assert evidence_contains_job_source(
+        owner="alice", evidence_ref=evidence["evidence_ref"], job_id="job-1",
+    ) is True
+    assert evidence_contains_job_source(
+        owner="alice", evidence_ref=evidence["evidence_ref"], job_id="job-2",
+    ) is False
 
 
 def test_new_evidence_requires_an_owned_fragment(monkeypatch, tmp_path) -> None:

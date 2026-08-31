@@ -1,5 +1,7 @@
 (() => {
   const fallbackSections = [
+    ["researches", "研究"],
+    ["evidence", "证据"],
     ["reports", "研究报告"],
     ["graph", "研究图"],
     ["profiles", "研究身份"],
@@ -11,11 +13,12 @@
     if (!isCurrent()) return;
     const sections = sectionsFor(context);
     const params = new URLSearchParams(location.search);
-    const requested = params.get("section") || "reports";
+    const requested = params.get("section") || "researches";
+    const researchID = params.get("research_id") || "";
     const profileID = params.get("profile") || "";
     const allowedSections = new Set(sections.map(item => item[0]));
     const selected = allowedSections.has(requested)
-      ? requested : (sections[0]?.[0] || "shared");
+      ? requested : (sections[0]?.[0] || "researches");
     const embedded = new URLSearchParams(location.search).get("presentation") === "embedded";
     context.activeNav("research");
     context.setHeading(context.t("研究"), context.t(labelFor(selected, sections)));
@@ -48,13 +51,32 @@
       } else if (selected === "agent-models") {
         await window.FTStaticLoader?.loadGroups?.(["profile-agent-models"]);
         await FTAgentModels.list({...context, content: body});
+      } else if (selected === "researches") {
+        await window.FTStaticLoader?.loadGroups?.(["research-catalog"]);
+        if (researchID) {
+          // The query form is kept only as an old-link bridge.  A concrete
+          // Research is always promoted to its own left-sidebar tab; it is
+          // never rendered as a nested page inside the Research root tab.
+          context.navigate(`/researches/${encodeURIComponent(researchID)}`, {
+            parentFolder: "research",
+            parentResearchID: researchID,
+          });
+          return;
+        }
+        await window.FTResearchCatalog.render({...context, content: body}, body);
       } else if (selected === "reports") {
+        await window.FTStaticLoader?.loadGroups?.(["research-reports"]);
+        if (!isCurrent()) return;
         await FTResearchReports.render(context, body, embedded);
+      } else if (selected === "evidence") {
+        await window.FTStaticLoader?.loadGroups?.(["research-evidence"]);
+        if (!isCurrent()) return;
+        await FTResearchEvidence.render(context, body);
       } else if (selected === "graph") {
         await window.FTStaticLoader?.loadGroups?.(["research-graph"]);
         await FTResearchGraphList.render(context, body);
       } else {
-        await FTResearchReports.render(context, body, embedded);
+        await window.FTResearchCatalog.render({...context, content: body}, body);
       }
       if (!isCurrent()) return;
     } catch (error) {
@@ -66,17 +88,18 @@
   function sectionsFor(context) {
     const research = (context.modules || []).find(item => item.id === "research");
     const children = Array.isArray(research?.children) ? research.children : [];
-    if (!children.length) return fallbackSections;
-    return children.map(item => {
+    const registered = children.map(item => {
       const path = String(item.path || "");
       const section = new URL(path, "http://factortester.invalid")
         .searchParams.get("section") || String(item.id || "").split(".").pop();
       return [section, item.title_key || item.title || section];
     });
+    const sections = registered.length ? registered : fallbackSections.slice(1);
+    return [["researches", "研究"], ...sections.filter(item => item[0] !== "researches")];
   }
 
   function labelFor(section, sections) {
-    return sections.find(item => item[0] === section)?.[1] || "研究报告";
+    return sections.find(item => item[0] === section)?.[1] || "研究";
   }
 
   function tabBar(context, selected, embedded) {
@@ -110,12 +133,23 @@
     return nav;
   }
 
+  function resolvePublicationSource(item, localByReportID, embedded) {
+    const reportID = String(item?.report_id || "").trim();
+    if (!embedded || item?.is_owned !== true || !reportID) return item;
+    const local = localByReportID?.get(reportID);
+    if (!local?.local_ref) return item;
+    return {
+      ...item,
+      href: `/research/${encodeURIComponent(`local:${local.local_ref}`)}`,
+      local_source: true,
+    };
+  }
+
   // Keep the source resolver on the public research seam for integrations
   // that only load the page coordinator; ownership remains in shared.js.
   window.FTResearch = {
     list,
     sectionTabs: tabBar,
-    resolvePublicationSource: (...args) =>
-      window.FTResearchShared.resolvePublicationSource(...args),
+    resolvePublicationSource,
   };
 })();

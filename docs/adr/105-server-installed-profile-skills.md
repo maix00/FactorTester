@@ -1,86 +1,25 @@
-# ADR 105: Server-installed Skills for server Profiles
+# ADR 105：服务器 Profile 使用服务器安装的 Skill
 
-## Status
+## 状态
 
-Accepted for the first server-side Agent Skill selection slice.
+已接受，作为首个服务器侧 Agent Skill 选择切片。
 
-## Context
+## 背景
 
-A server Agent may need FactorTester research instructions, but a user must not
-upload arbitrary instructions or grant a server Agent Manager-maintenance
-capabilities. The server also has to keep client-run Profiles separate: client
-Skills are shipped and managed by the client application, not exposed by a
-Manager's server catalog.
+服务器 Agent 可能需要 FactorTester 研究说明，但用户不能上传任意指令，也不能让服务器 Agent 获得 Manager 运维能力。客户端运行 Profile 必须保持独立：客户端 Skill 由客户端应用发布和管理，不能从 Manager 的服务器目录暴露。
 
-## Decisions
+## 决策
 
-1. The deployed server owns an explicit Skill manifest at
-   `server/manager/skills/catalog.json`. A Skill is available to a Profile only
-   when it is listed, enabled, has a valid `SKILL.md`, and declares the matching
-   runtime kind.
-2. Only entries with `audience: profile` are shown to users. Manager-only
-   maintenance Skills remain server-installed but are never returned by the
-   Profile catalog route.
-3. A user can only check or uncheck the server-provided Skill ids for a server
-   Profile. The selection is stored in the Manager's existing local SQLite
-   database. The Profile receives only owner-controlled symlinks under its
-   canonical `.codex/skills` directory; Skill source files are not copied into
-   a Profile or temporary Agent workspace and are not uploaded to PostgreSQL.
-4. Browser responses contain Skill metadata and selection state, but never
-   local filesystem paths. The server-side Agent supervisor obtains the
-   selected installed bindings through `AgentProfileService.selected_skill_bindings`
-   when it starts the claimed Profile Agent. It must construct the app-server
-   Skill view from that allowlist and must not expose the repository-wide Skill
-   directory.
-5. The Profile app-server launch environment is isolated with its `.codex`
-   directory as `CODEX_HOME`, `HOME`, and the XDG config/data/state roots.
-   Before accepting turns, the supervisor must call `skills/list`, disable
-   every discovered Skill outside the selected projection, re-enable selected
-   Skills that were previously disabled, and refresh the list using
-   `skills/config/write`. `turn/start` Skill inputs are constructed only from
-   selected Skill ids.
-6. The Manager now owns the server Profile app-server supervisor and exposes a
-   narrow authenticated JSON-RPC/SSE bridge. It starts a process only after a
-   Profile has an active claim and a valid local provider, keeps one process per
-   Profile, and stops all child processes during Manager shutdown. Provider
-   tokens are passed only through the child environment; they are not written
-   to the Profile config file or returned by HTTP routes.
-7. The browser may submit prompts and selected Skill ids, but cannot submit
-   arbitrary Skill paths or arbitrary app-server methods. The supervisor
-   forces the Profile workspace as `cwd`, validates `turn/start` Skill inputs,
-   and redacts local paths and credential-shaped fields from responses/events.
-   The browser bridge accepts text input only; image/file/mention inputs and
-   per-request approval, sandbox, provider, capability-root, and permission
-   overrides are rejected. Each generated Profile config fixes execution to
-   `approval_policy = "never"`, `sandbox_mode = "workspace-write"`, and the
-   Profile workspace with outbound network access. Codex's documented
-   `shell_environment_policy.ignore_default_excludes = false` is also set so
-   the provider token is removed from shell-tool environments even though the
-   app-server itself receives it through its private child environment.
-8. The first provider adapter is the OpenAI Responses-compatible wire
-   contract. The existing Provider form remains the only API-key entry point;
-   the API key is encrypted in Manager-local SQLite and is never returned by
-   the list or connection-test routes. A connection test performs an
-   authenticated, read-only `GET /models` request and verifies that the
-   configured default model is present. The provider protocol field remains an
-   extension seam for later adapters, but unsupported protocol values are
-   rejected rather than treated as OpenAI.
-9. A claimed server Profile Agent is started only after a local executable
-   preflight for both Codex and the FactorTester CLI, followed by the provider
-   health check. The FactorTester CLI path is supplied by `FACTORTESTER_CLI`
-   or the installed `factortester` command and is added to the child process
-   environment; a failed preflight prevents Codex from being spawned.
+1. 部署的服务器在 `server/manager/skills/catalog.json` 拥有显式 Skill manifest。Skill 只有在列出、启用、含有效 `SKILL.md` 且声明匹配 runtime kind 时才对 Profile 可用。
+2. 只有 `audience: profile` 的条目返回给用户；Manager-only 运维 Skill 可以安装在服务器，但不能由 Profile 目录路由返回。
+3. 用户只能勾选服务器提供的 Skill ID，选择保存在 Manager 现有本地 SQLite。Profile 只在规范 `.codex/skills` 下获得由所有者控制的 symlink；Skill 源码不复制到 Profile 或临时 Agent 工作区，也不上传 PostgreSQL。
+4. 浏览器响应只含 Skill 元数据和选择状态，不含本地路径。服务器 Agent supervisor 启动 claimed Profile Agent 时通过 `AgentProfileService.selected_skill_bindings` 获取绑定，只按白名单构造 app-server Skill 视图，不能暴露仓库级 Skill 目录。
+5. Profile app-server 环境以其 `.codex` 作为 `CODEX_HOME`、`HOME` 和 XDG 配置/数据/状态根。接受 turn 前调用 `skills/list`，禁用所选投影之外的 Skill，重新启用之前禁用的已选 Skill，并用 `skills/config/write` 刷新列表；`turn/start` 的 Skill 输入只来自选定 ID。
+6. Manager 拥有服务器 Profile app-server supervisor，提供窄的认证 JSON-RPC/SSE bridge。只有 Profile 有 active claim 和有效本地 provider 后才启动，每个 Profile 一个进程，Manager 关闭时停止子进程。Provider token 只通过子进程环境传递，不写 Profile 配置或 HTTP 响应。
+7. 浏览器只能提交 prompt 和已选 Skill ID，不能提交任意路径或 app-server 方法。supervisor 强制 Profile 工作区为 cwd，校验 turn/start Skill 输入，并从响应/事件中净化本地路径和凭据形态字段。当前 bridge 只接受文本输入；图片/文件/mention、逐请求 approval、sandbox、provider、capability-root 和权限覆盖均拒绝。生成的 Profile 配置固定 `approval_policy = "never"`、`sandbox_mode = "workspace-write"`、Profile 工作区和出站网络，并设置 `shell_environment_policy.ignore_default_excludes = false`，使 provider token 不进入 shell tool 环境。
+8. 首个 provider adapter 使用 OpenAI Responses 兼容 wire contract。已有 Provider 表单是唯一 API key 入口，key 在 Manager 本地 SQLite 加密保存，list/connection-test 不返回。连接测试发送认证的只读 `GET /models`，确认默认模型存在；不支持的 protocol 值拒绝，不当作 OpenAI。
+9. claimed 服务器 Profile Agent 只有在本地 Codex 与 FactorTester CLI 可执行预检通过、Provider 健康检查通过后才启动。CLI 路径来自 `FACTORTESTER_CLI` 或已安装的 `factortester` 命令，并加入子进程环境；预检失败不启动 Codex。
 
-## Consequences
+## 后果
 
-- Adding a research Skill is a server deployment/configuration change, not a
-  user-facing upload operation.
-- A server outage or SQLite failure prevents changing the selection, while an
-  already running Agent can continue under the supervisor's existing process
-  policy.
-- Client Profiles keep their own app-managed Skill set and show no server Skill
-  selection controls.
-- An API-key or model outage is reported when the user tests the Provider and
-  again before a new Agent process starts; no secret is included in either
-  response. Future providers can add an adapter without changing Profile claim
-  or workspace isolation semantics.
+增加研究 Skill 是服务器部署/配置变更，不是用户上传。服务器或 SQLite 故障阻止修改选择，但已运行 Agent 仍按 supervisor 的既有进程策略继续。客户端 Profile 保持自己的 Skill 集合，不显示服务器 Skill 选择控件。API key 或模型故障在 Provider 测试时及新 Agent 启动前分别报告，响应不包含秘密；未来 provider 可增加 adapter，而不改变 Profile claim 或工作区隔离。

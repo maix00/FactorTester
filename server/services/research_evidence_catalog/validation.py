@@ -7,7 +7,6 @@ import json
 import re
 from typing import Any
 
-
 SOURCE_KINDS = frozenset({"job", "terminal", "file", "web"})
 EVIDENCE_KINDS = frozenset({
     "hypothesis_semantics",

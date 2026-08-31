@@ -1,41 +1,26 @@
-# ADR 016: Provider-Scoped Derived Market Artifacts
+# ADR 016：按数据提供方隔离派生行情生成物
 
-## Status
+## 状态
 
-Accepted
+已接受。
 
-## Context
+## 背景
 
-LocalCNFutures generated main-roll and term-structure files directly under the
-global data directory. This prevents another local source from safely using the
-same artifact names and offers no shared cross-platform lifecycle.
+LocalCNFutures 过去把主力合约和期限结构文件直接写入全局数据目录。其他本地数据源无法安全使用同名生成物，也没有跨平台的共享生命周期。旧期限结构文件还把 Wind 主、次连续映射（`A.DCE`、`A_S.DCE`）与期限曲线混在一起，并把映射区间错误当成到期窗口，因此不是规范的挂牌合约曲线。
 
-The historical term-structure file also mixed Wind primary and secondary
-continuous mappings (`A.DCE` and `A_S.DCE`) with a maturity curve. Mapping
-intervals were treated as maturity windows, so it was not a canonical listed
-contract curve.
+## 决策
 
-## Decision
+- 生成物身份由 `(provider, artifact_name, variant)` 确定。
+- 提供方拥有可配置的源数据根目录和按提供方命名空间隔离的生成物根目录。
+- 构建器先写 staging 文件；协调器在可移植的独占锁下使用 `os.replace` 发布，并在 SQLite 中保存生命周期和覆盖范围。
+- Flask 启动时在后台线程执行 ensure，不等待构建完成。
+- `roller_info` 表示主力/次主力连续选择和复权方式。
+- `term_structure:listed_contracts` 来自观测到的合约 DAY1 行；连续映射只能补充 `IS_MAIN`、`IS_SECONDARY` 标记。
+- 产品分类和数据序列变体是两个独立关注点。
+- 规范源文件只位于各提供方配置的源根目录；规范派生文件只位于该提供方的生成物根目录。读取端不得探测历史全局路径或旧文件名。
 
-- Artifacts are identified by `(provider, artifact_name, variant)`.
-- Providers own configurable source-data and provider-namespaced artifact roots.
-- Builders write staging files; the coordinator publishes with `os.replace`
-  under a portable exclusive lock and persists state/coverage in SQLite.
-- Flask startup performs ensure in a daemon thread and never waits for a build.
-- `roller_info` represents primary/secondary continuous selection and adjustment.
-- `term_structure:listed_contracts` comes from observed contract DAY1 rows;
-  continuous mappings only annotate `IS_MAIN` and `IS_SECONDARY`.
-- Product classification and data-series variants remain separate concerns.
-- Canonical source files live under each provider's configured source root.
-  Canonical generated files live only under that provider's artifact root;
-  readers do not probe historical global paths or legacy filenames.
+## 后果
 
-## Consequences
+以后新增期货、期权、利率或其他曲线型数据源时，可以注册新的构建器而不修改协调器。大表继续使用 Parquet，SQLite 只保存生命周期和覆盖范围元数据。
 
-Future futures, options, rates, or other curve-bearing sources can register
-builders without changing the coordinator. Large fact tables remain Parquet;
-SQLite contains lifecycle and coverage metadata only.
-
-The LocalCNFutures migration is complete. Migration utilities and read-time
-fallbacks are deliberately absent, so a misplaced artifact fails visibly
-instead of silently selecting stale data.
+LocalCNFutures 迁移已经完成。迁移工具和读取时回退路径有意不保留，错位的生成物应显式失败，而不是静默选择过期数据。

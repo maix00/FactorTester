@@ -29,7 +29,7 @@ FactorTester 是一个量化因子研究与回测平台，面向期货及多资�
 范围，也不能成为 Research Graph 推进门禁。一次冻结配置属于 `run_id`，具体
 回测、IC、因子评估或类型分析属于独立 `job_id`。关闭页面不会取消任务，取消只能显式
 发生。worker 只接收可序列化 RunSpec 和 planning 后冻结的 ExecutionPlan，不读取页面
-FactorTester 或 `page_factors`。Web 与 CLI 统一通过 `/api/workspaces`、`/api/runs`、
+FactorTester 或 `page_factors`。Web 与 CLI 统一通过 `/api/test-authoring/workspaces`、`/api/runs`、
 `/api/jobs` 管理生命周期。SQLite 只保存低频权威事实；实时 progress/SSE 和行情缓存
 属于单机 job daemon 内存，完整曲线/明细属于显式保留的文件 artifact。完整决策见
 ADR-037、ADR-038、ADR-039。
@@ -56,7 +56,7 @@ IC 的一个核心测试单元由产品范围、冻结因子、前瞻收益期�
 分组组合与持有期半衰期属于消费核心结果的附加分析，权威表示是后端注册的
 类型化无环图，界面树只负责展示。图像、表格和保留策略属于输出请求，不是分析
 节点。RunSpec 在界面统一显示为“运行配置”，冻结上述执行语义而不冻结界面
-排序、聚合和折叠状态。完整决策见 ADR-050、ADR-066。
+排序、聚合和折叠状态。完整决策见 ADR-132、ADR-133。
 
 ### 因子 (Factor)
 
@@ -198,8 +198,8 @@ start_server.py          ← 入口：Flask + Waitress + 热插拔重载
 │  ├─ admin.py           ← 用户与机构管理
 │  ├─ modules/
 │  │  ├─ single_factor_test/  ← IC、分组回测与研究任务执行 API
-│  │  ├─ custom_factors/      ← CRUD、目录、参数配置 API（编辑器由 Manager 提供）
-│  │  ├─ products/cn_futures/ ← 品种树 + 价格数据 API
+│  │  ├─ custom_factors/      ← 因子领域内部实现（公开入口见 /api/factor-library）
+│  │  ├─ products/cn_futures/ ← 期货领域内部实现（公开入口见 /api/product-library）
 │  │  ├─ shared/              ← 共享工具
 │  │  └─ templates/           ← 运行配置模板 API
 │  └─ services/          ← 业务逻辑（无 Flask 依赖）
@@ -273,9 +273,12 @@ IC / 分组测试结果的保留边界见 ADR-008：保留最新图表与分组�
 
 ### 命名约定
 
-- `UniqueObject.name`：`{user_prefix}:{alias}:{uuid}` — 全局唯一
-- `UniqueObject.alias`：纯类名（如 `MmRet`）— 用于查找
-- `user_prefix`：公共因子用 `$COMMON`，自定义因子用 `用户名@序号`
+- 冻结对象使用带版本的 `factor:v2`、`factor-family:v2` 或 `factor-set:v2` 引用；alias 只是展示和解析输入，
+  不是持久身份。
+- 尚未冻结的运行时因子/因子族使用 `runtime-factor:*` 或 `runtime-factor-family:*` 名称，具体 owner 由显式
+  `owner_ref` 或运行时上下文决定。
+- 内部运行时上下文仍接受 `$COMMON` 作为公共 owner 的历史别名，但新的冻结引用和公共对象登记统一使用
+  `public`；不能从对象名称反推 owner。
 
 ---
 

@@ -1,62 +1,46 @@
-# ADR 059: Manager server module boundaries
+# ADR 059：Manager 服务器模块边界
 
-## Status
+## 状态
 
-Accepted; migration completed.
+已接受；迁移完成。
 
-## Context
+## 背景
 
-The former `scripts/worktree_flask_manager.py` combined the deployment entry
-point, HTTP routing, authentication, federation, job selection, process
-supervision, and HTML generation. Compatibility aliases temporarily preserved
-that import namespace while the implementation moved into `server/manager/`.
-Keeping those aliases after every internal caller had migrated would leave two
-public names for each Manager module and allow deployments to drift back to the
-retired entry point.
+旧的 `scripts/worktree_flask_manager.py` 同时承担部署入口、HTTP 路由、认证、联邦、任务选择、进程监督和 HTML 生成。实现迁入 `server/manager/` 期间，兼容别名暂时保留旧导入命名空间；当所有内部调用方都迁移后继续保留这些别名，会让每个 Manager 模块有两个公开名称，也可能让部署重新依赖已退役入口。
 
-## Decision
+## 决策
 
-New Manager server code belongs under `server/manager/`. The target layout is:
+新的 Manager 服务器代码统一位于 `server/manager/`：
 
 ```text
 server/manager/
-  app.py                 # process bootstrap and lifecycle
+  app.py                 # 进程启动与生命周期
   http/
-    *_routes.py          # focused HTTP route families
-    pages.py             # dependency-free HTML boundaries
-    security.py          # transport, session, and access policy
+    *_routes.py          # 聚焦的 HTTP 路由族
+    pages.py             # 无数据库依赖的 HTML 边界
+    security.py          # 传输、会话和访问策略
   domain/
-    devices.py           # device enrollment, challenge, and verification
-    jobs.py              # task lookup and server/port selection
-    federation.py        # peer registration and forwarding
+    devices.py           # 设备注册、挑战和校验
+    jobs.py              # 任务查询与服务器/端口选择
+    federation.py        # 对等节点注册与转发
   storage/
-    control_db.py        # PostgreSQL control-plane repository
-    sqlite.py            # local execution/index projections
+    control_db.py        # PostgreSQL 控制面仓库
+    sqlite.py            # 本地执行/索引投影
   data_plane/
-    app.py               # 7997 client + 17997 peer transfer process
-  state/                 # routing, jobs, worktrees, sessions, processes
-  web/                   # Manager Web shell and static modules
+    app.py               # 7997 客户端与 17997 对等传输进程
+  state/                 # 路由、任务、worktree、会话、进程状态
+  web/                   # Manager Web 壳与静态模块
 ```
 
-`server.manager.app` is the only Manager process entry point. ADR-068 replaced
-the old artifact service with `server.manager.data_plane.app`, the sole
-7997/17997 transfer-process entry point; its listeners expose disjoint client
-and WireGuard peer routes.
-All Manager imports use `server.manager.*`; the retired `scripts/worktree_*`
-aliases and `/manager-legacy` page are removed. `runtime.py` is only the
-composition root for `ManagerState` and `Handler`; route Implementation lives
-in the focused modules under `server/manager/http/`.
+`server.manager.app` 是唯一的 Manager 进程入口。ADR-068 已用 `server.manager.data_plane.app` 替代旧生成物服务，该模块是唯一的 7997/17997 传输进程入口；两个监听端口暴露相互隔离的客户端和 WireGuard 对等路由。
 
-The term *worktree* remains part of the domain: a Manager discovers and starts
-feature worktrees and exposes them through `/api/worktrees`. Removing the old
-script namespace does not remove that capability or the peer-routing protocol.
+所有 Manager 导入使用 `server.manager.*`；已退役的 `scripts/worktree_*` 别名和 `/manager-legacy` 页面删除。`runtime.py` 只作为 `ManagerState` 与 `Handler` 的组合根；路由实现放在 `server/manager/http/` 下的聚焦模块中。
 
-## Consequences
+*worktree* 仍是领域概念：Manager 发现并启动 feature worktree，并通过 `/api/worktrees` 暴露它。删除旧脚本命名空间不等于删除该能力或对等路由协议。
 
-- Deployments and the local LaunchAgent use `python -m server.manager.app`.
-- Device authentication pages can be tested without constructing Manager
-  state or opening a database connection.
-- Tests import the canonical Module directly, so a legacy namespace cannot
-  conceal a missing or circular dependency.
-- The HTTP dispatch Seam has one Interface and one implementation namespace;
-  worktree execution and federated routing retain their existing behavior.
+## 后果
+
+- 部署和本机 LaunchAgent 使用 `python -m server.manager.app`。
+- 设备认证页面可以在不构造 Manager 状态、不打开数据库连接的情况下测试。
+- 测试直接导入规范模块，旧命名空间无法掩盖缺失或循环依赖。
+- HTTP dispatch seam 只有一个接口和一个实现命名空间；worktree 执行与联邦路由保持原有行为。

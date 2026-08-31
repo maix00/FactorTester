@@ -2,18 +2,27 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
-from typing import Any, Mapping
-
+from typing import Any
 
 _RESEARCH_TABS = (
+    {
+        "id": "research.evidence",
+        "title": "证据",
+        "title_key": "证据",
+        "description_key": "浏览本人登记的本地与服务器研究证据",
+        "path": "/research?section=evidence",
+        "requiresAuth": True,
+        "roles": [],
+    },
     {
         "id": "research.reports",
         "title": "研究报告",
         "title_key": "研究报告",
-        "description_key": "浏览本人的、下级用户与共享研究报告",
+        "description_key": "浏览本人、下级用户和公开共享的研究报告",
         "path": "/research?section=reports",
-        "requiresAuth": False,
+        "requiresAuth": True,
         "roles": [],
     },
     {
@@ -134,8 +143,8 @@ _NAVIGATION_MODULES: tuple[dict[str, Any], ...] = (
         "description_key": "查看各 Profile 的实时步骤、义务与报告",
         "icon": "chart",
         "sfSymbol": "chart.xyaxis.line",
-        "path": "/research?section=reports",
-        "requiresAuth": False,
+        "path": "/research?section=researches",
+        "requiresAuth": True,
         "roles": [],
         "children": list(_RESEARCH_TABS),
         "sidebarVisible": True,

@@ -7,7 +7,10 @@ class Element {
     this.tag = tag; this.children = []; this.dataset = {}; this.hidden = false;
     this.attributes = {}; this.listeners = {}; this.textContent = ""; this.className = "";
     this.classes = new Set();
-    this.classList = {add: value => this.classes.add(value)};
+    this.classList = {
+      add: value => this.classes.add(value),
+      remove: value => this.classes.delete(value),
+    };
   }
   append(...values) { this.children.push(...values); }
   replaceChildren(...values) { this.children = values; }
@@ -96,6 +99,9 @@ assert(fixedHeight >= 0 && drawerHeight > fixedHeight,
   drawer.hide();
   assert.equal(drawer.toggle.hidden, false, "the trigger returns after the drawer closes");
   assert(events.some(item => item[0] === "chat" && item[1] === true));
+  const title = drawer.shell.children[0].children[0];
+  assert.equal(title.children[1].textContent, "self",
+    "the active Profile is visible beside the assistant title");
   const bridgeStarts = events.filter(item => item[0] === "bridge").length;
   await drawer.open();
   assert.equal(events.filter(item => item[0] === "bridge").length, bridgeStarts,
@@ -129,5 +135,35 @@ assert(fixedHeight >= 0 && drawerHeight > fixedHeight,
   assert.equal(rebuilt.shell.hidden, false,
     "a performance-evicted assisted page reopens the drawer after rebuilding");
   assert.equal(rebuilt.toggle.hidden, true);
+  const navigated = [];
+  const switcher = FTPageAgentDrawer.attach({
+    ...context,
+    navigate: path => navigated.push(path),
+    checkpointTabSession: () => {},
+  }, {
+    resolveProfile: async () => ({profile_id: "alpha", alias: "Alpha"}),
+    resolveProfiles: async () => [
+      {profile_id: "alpha", alias: "Alpha"},
+      {profile_id: "beta", alias: "Beta"},
+    ],
+    onProfileChange: profile => events.push(["selected", profile.profile_id]),
+    assistance: {connect: async () => {}, disconnect: () => {}},
+  });
+  await switcher.open();
+  const switcherTitle = switcher.shell.children[0].children[0];
+  const switcherProfile = switcherTitle.children[1];
+  const switcherMenuButton = switcherTitle.children[2];
+  const switcherMenu = switcherTitle.children[3];
+  assert.equal(switcherProfile.textContent, "Alpha");
+  switcherProfile.listeners.click();
+  assert.match(navigated[0], /profile=alpha$/,
+    "clicking the active Profile opens its detail page");
+  switcherMenuButton.listeners.click();
+  assert.equal(switcherMenu.hidden, false);
+  switcherMenu.children[1].listeners.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert(events.some(item => item[0] === "selected" && item[1] === "beta"));
+  assert.equal(switcherProfile.textContent, "Beta",
+    "selecting a bound Profile remounts the conversation under that Profile");
   console.log("PASS: page Agent drawer reuses its page-owned assistance receiver");
 })().catch(error => { console.error(error); process.exitCode = 1; });

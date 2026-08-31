@@ -12,7 +12,7 @@
 
 1. SQLite 中经过协议校验的 canonical Graph JSON 仍是运行时唯一权威。YAML 是从指定的 `graph_id/version` 即时生成的只读发布表示，不建立第二份可编辑版本源。
 2. YAML 导出先移除 SQLite 行级的 `created_by`、`created_at` 元数据，再重新执行同一 Graph 校验；下载文件不接受客户端提交的 Graph 内容。canonical 文件名只包含 graph id 与版本号；canonical Graph 自身仍保留协议要求的 `content_hash`，但不把 hash 重复塞进文件名。
-3. `GET /api/research-graphs/<graph_id>/versions/<version>/yaml` 是只读下载端点，返回 `application/yaml`、ETag、不可变缓存策略和版本/hash 响应头。公共 Graph 网关只放行该端点以及既有的版本列表和 Active 读取端点。
+3. `GET /api/catalog/research-graphs/<graph_id>/versions/<version>/yaml` 是只读下载端点，返回 `application/yaml`、ETag、不可变缓存策略和版本/hash 响应头。公共 Graph 网关只放行该端点以及既有的版本列表和 Active 读取端点。
 4. 研究图选项卡使用随项目发布的 Cytoscape.js（MIT）在 Canvas 上绘制可缩放、拖动、选择和重新布局的网络图。节点/边语义在右侧详情面板显示；这不是节点列表，也不把研究图强制排成流程图。Web 与嵌入 Swift 的页面共用该渲染模块。
 5. Cytoscape 资源不从 CDN 加载；版本、许可证、文件大小和 SHA-256 保存在 `static/vendor/cytoscape/` 的许可及校验清单中，并由静态资源 manifest 声明。
 6. 研究图的语言版本是 canonical Graph 之外的 display overlay。`research_graph_presentations` 每个 `graph_id + version + locale` 只保存当前文本，不建立翻译 revision/hash 历史；翻译文本不能写回 Graph JSON，也不能改变 Graph `content_hash`。节点、边和能力文本允许是部分覆盖，未覆盖处回退到 canonical Graph。

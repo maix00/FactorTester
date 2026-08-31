@@ -720,6 +720,7 @@ class RequestSecurityMixin:
             path == "/docs"
             or path.startswith("/docs/")
             or path == "/api/docs/index"
+            or path == "/api/docs/test-fields"
             or path.startswith("/api/docs/pages/")
         ):
             return True

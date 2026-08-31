@@ -3,13 +3,13 @@
 - **日期**：2026-07-03
 - **状态**：已接受
 - **决策者**：FactorTester 团队
-- **取代**：[028-native-broker-policy-boundary.md](028-native-broker-policy-boundary.md)、[028-native-broker-policy-implementation-plan.md](028-native-broker-policy-implementation-plan.md)
+- **取代**：[028-native-broker-policy-boundary.md](028-native-broker-policy-boundary.md)、[ADR-128：Native Broker Policy 迁移实施计划](128-native-broker-policy-implementation-plan.md)
 
 ---
 
 ## 背景
 
-ADR-028 打算把订单行为（撤单、成交价、现金约束、终态确认……）统一收拢到一个 `BrokerModule`
+ADR-128 的实施计划曾打算把订单行为（撤单、成交价、现金约束、终态确认……）统一收拢到一个 `BrokerModule`
 暴露的 ~9 个 policy selector 后面，各执行模块改为调用 `broker_for(state, strategy).policy()`。
 这是 Lean（`IBrokerageModel`）的路数——用一个 Broker 对象同时管"账户结构"和"费用/撮合模型"。
 
@@ -30,7 +30,7 @@ ADR-028 打算把订单行为（撤单、成交价、现金约束、终态确认
 
 废弃"Broker 是模型工厂"的方向。把原 `BrokerModule`/`NativeBroker` 拆成概念上不重叠的两半：
 
-### StrategyBook（`tools/testers/backtest/modules/strategy_book.py`）
+### 策略簿（StrategyBook，`tools/testers/backtest/modules/strategy_book.py`）
 
 策略入口：注册哪些策略、每个策略可以操作哪些 `ledger_id`（账本路由）、每个策略用哪种 target
 生成方式（`GroupMembershipModule` 分组 / `LongShortCompositionModule` 多空）及其参数。

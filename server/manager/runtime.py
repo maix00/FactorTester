@@ -49,6 +49,7 @@ from server.manager.http.client_research_routes import ClientResearchRoutesMixin
 from server.manager.http.server_research_routes import ServerResearchRoutesMixin
 from server.manager.http.profile_research_routes import ProfileResearchRoutesMixin
 from server.manager.http.research_object_routes import ResearchObjectRoutesMixin
+from server.manager.http.research_catalog_routes import ResearchCatalogRoutesMixin
 from server.manager.http.agent_routes import AgentRoutesMixin
 from server.manager.http.agent_app_routes import AgentAppServerRoutesMixin
 from server.manager.http.page_assistance_routes import PageAssistanceRoutesMixin
@@ -92,6 +93,7 @@ from server.manager.domain.federation import (
 )
 from server.manager.services.test_authoring import TestAuthoringService
 from server.manager.services.research_graph_catalog import ResearchGraphCatalog
+from server.manager.services.research_catalog import ResearchCatalog
 from server.manager.services.mihomo_supervisor import MihomoSupervisor
 from server.manager.services.technical_docs import TechnicalDocsLibrary
 from server.manager.services.public_factor_replication import (
@@ -352,6 +354,11 @@ class ManagerState(
             self.sessions_db_path,
             server_id=self.server_id,
         )
+        # Research ownership, Profile membership, Research Workspaces,
+        # report links, and Evidence links share the Manager metadata store.
+        # Report and Evidence bytes remain in their existing stores; this
+        # catalog is the single relationship and access-policy seam.
+        self.research_catalog = ResearchCatalog(self.sessions_db_path)
         # Account, organisation, hierarchy, profile, quota, and device
         # identity records share one PostgreSQL control plane when deployed.
         # The constructor is lazy: an unavailable database is reported by the
@@ -553,6 +560,7 @@ class Handler(
     AgentRoutesMixin,
     ServerResearchRoutesMixin,
     ProfileResearchRoutesMixin,
+    ResearchCatalogRoutesMixin,
     ResearchObjectRoutesMixin,
     ClientResearchRoutesMixin,
     PublicResearchRoutesMixin,

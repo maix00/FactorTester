@@ -1,89 +1,33 @@
-# ADR 072: Public ngrok ingress and explicit proxy trust
+# ADR 072：公共 ngrok 入口与显式代理信任
 
-## Status
+## 状态
 
-Accepted.
+已接受。
 
-## Context
+## 背景
 
-The stable `eloquence-drizzly-fencing.ngrok-free.dev` browser origin originally
-terminated at a development Mac and forwarded to that machine's Manager 7998.
-The public FactorTester Manager now owns the long-lived service and must remain
-reachable when the Mac is offline.  The public host still may not open inbound
-TCP 80 or 443, and ADR 069 still limits it to two business containers.
+稳定的 `eloquence-drizzly-fencing.ngrok-free.dev` 浏览器来源最初终止在开发 Mac，再转发到该机器的 Manager 7998。现在公共 FactorTester Manager 自己拥有长期服务，Mac 离线时也必须可达。公共主机仍不能开放入站 TCP 80/443，ADR-069 仍限制为两个业务容器。
 
-An ngrok Agent on the public host can establish an outbound TLS connection to
-ngrok and forward the stable HTTPS origin to the already-published Manager
-7998.  However, forwarding to a Docker-published host port changes the direct
-peer observed inside the application container.  The Manager sees the fixed
-transport-network gateway `172.30.186.1`, not host loopback.  If it ignores the
-canonical forwarded client address, it treats that gateway as a private-LAN
-client, exposes LAN-only network information, and stores the gateway as device
-audit metadata.  If it trusts forwarding headers from every private peer, a
-direct caller or another container could instead spoof an internal or approved
-address.
+公共主机上的 ngrok Agent 可以通过出站 TLS 连接 ngrok，把稳定 HTTPS 来源转到已经发布的 Manager 7998。但转发到 Docker 发布的主机端口会改变容器内看到的直接对等端：Manager 看到固定传输网关 `172.30.186.1`，而非 host loopback。若不识别规范的转发客户端地址，就会把网关当作内网客户端并暴露内网信息；若信任所有私有对等节点的转发头，直接调用方或其他容器又可以伪造已批准地址。
 
-## Decision
+## 决策
 
-1. The ngrok Agent is a host-level ingress daemon, not a third FactorTester
-   business container.  It runs as the unprivileged `ngrok` system user under
-   systemd, starts on boot, and forwards
-   `https://eloquence-drizzly-fencing.ngrok-free.dev` to
-   `https://localhost:7998`.
-2. The browser-to-ngrok leg uses ngrok's publicly trusted certificate.  The
-   agent-to-Manager leg remains HTTPS and verifies the persisted Manager
-   certificate through an explicit CA file.  Upstream verification must not be
-   disabled.  The ngrok authtoken remains in an owner/group-restricted host
-   configuration and is never stored in Git or a container image.
-3. The ngrok Traffic Policy removes caller-provided `X-Forwarded-For` and
-   `X-Forwarded-Proto`, then writes exactly one canonical client address from
-   `conn.client_ip` and the literal secure scheme.  A multi-value forwarding
-   chain is not part of this deployment contract.
-4. Manager trusts forwarding headers only when the direct peer is loopback or
-   belongs to `FACTORTESTER_TRUSTED_PROXY_CIDRS`.  The public Compose project
-   configures exactly `172.30.186.1/32`, the fixed gateway of its `/29`
-   transport network.  The setting is parsed once at startup; empty entries,
-   malformed networks, and host-bit-bearing CIDRs stop startup instead of
-   falling back to broad private-network trust.
-5. Even for a trusted peer, Manager accepts only one syntactically valid IP
-   and one protocol value.  Missing, malformed, duplicate, or comma-separated
-   values fall back to the direct peer and cannot create a secure-proxy or
-   public-client identity.
-6. Device identity remains the registered public key bound to one account.
-   Enrollment and last-seen IPs are audit metadata only; they are neither an
-   authentication factor nor required to equal one another.
-7. Direct public access to `https://<public-ip>:7998` remains available.  The
-   ngrok origin is an additional browser origin and therefore has its own
-   origin-local WebCrypto storage.  A user on the public allowlist signs in
-   through visitor mode at either origin; that origin then enrolls its current
-   browser automatically.  No internal Manager handoff or one-time grant is
-   used, and a key stored under one origin is never copied to the other.
+1. ngrok Agent 是主机级入口 daemon，不是第三个 FactorTester 业务容器。它由 systemd 以无特权 `ngrok` 用户启动，转发 `https://eloquence-drizzly-fencing.ngrok-free.dev` 到 `https://localhost:7998`。
+2. 浏览器到 ngrok 使用 ngrok 公共信任证书；Agent 到 Manager 仍走 HTTPS，并通过显式 CA 文件校验持久化 Manager 证书。不得关闭上游校验。ngrok authtoken 只放在主机受 owner/group 限制的配置中，不进 Git 或容器镜像。
+3. ngrok Traffic Policy 删除调用方提供的 `X-Forwarded-For` 和 `X-Forwarded-Proto`，然后从 `conn.client_ip` 和固定安全 scheme 写入恰好一个规范客户端地址；多值转发链不属于本部署合约。
+4. Manager 只有在直接对等端为 loopback 或属于 `FACTORTESTER_TRUSTED_PROXY_CIDRS` 时才信任转发头。公共 Compose 项目只配置传输网段 `/29` 的固定网关 `172.30.186.1/32`。设置启动时解析；空项、错误网络和带 host bits 的 CIDR 直接阻止启动，不回退到宽泛私有网信任。
+5. 即便对等端可信，Manager 也只接受一个语法正确的 IP 和一个协议值。缺失、错误、重复或逗号分隔值回退到直接对等端，不能创建 secure-proxy 或 public-client 身份。
+6. 设备身份仍是绑定一个账户的已注册公钥。注册和最近 IP 只是审计元数据，既不是认证因素，也不要求相等。
+7. `https://<public-ip>:7998` 直连继续可用。ngrok 来源是额外的浏览器来源，有自己的 WebCrypto 存储；白名单用户在任一来源用访客模式登录，该来源自动注册当前浏览器。不使用内部 Manager handoff 或一次性 grant，一个来源的密钥永远不复制到另一个来源。
 
-## Operations and failure behavior
+## 运维与故障行为
 
-- No new inbound security-group rule is required.  The Agent uses outbound
-  TLS to ngrok; clients reach ngrok's edge on 443, while the public host keeps
-  ports 80 and 443 closed.
-- A Manager/container restart may briefly return an upstream error through the
-  domain; the Agent remains running and reconnects automatically when 7998 is
-  healthy.  A host restart restores the endpoint through systemd.
-- If ngrok is unavailable, direct IP access on 7998 and server-to-server
-  WireGuard communication remain independent and usable.
-- A Manager certificate rotation requires the Agent's trusted CA copy to be
-  refreshed and the service restarted.  Ordinary image releases retain the
-  existing certificate and need no ngrok rebuild.
-- The local Mac no longer runs the Agent for this domain.  Restarting a second
-  non-pooled Agent with the same URL is a deliberate rollback operation, not a
-  normal active/active topology.
+- 不新增入站安全组规则。Agent 通过出站 TLS 连接 ngrok；客户端访问 ngrok 的 443，公共主机继续关闭 80/443。
+- Manager/容器重启期间域名可能短暂返回上游错误；Agent 保持运行，7998 健康后自动重连。主机重启由 systemd 恢复入口。
+- ngrok 不可用时，7998 公共 IP 直连和服务器间 WireGuard 仍独立可用。
+- Manager 证书轮换需刷新 Agent 信任的 CA 副本并重启服务；普通镜像发布保留已有证书，无需重建 ngrok。
+- 本地 Mac 不再为该域名运行 Agent。用相同 URL 重启第二个非 pooled Agent 只作为明确回滚操作，不能作为正常 active/active 拓扑。
 
-## Consequences
+## 后果
 
-- The stable domain is served by the public Manager rather than depending on
-  the development Mac.
-- Public device auditing records the original IPv4 or IPv6 client address,
-  while anonymous LAN-only APIs remain protected.
-- Proxy trust is an explicit deployment capability, not an inference from all
-  RFC 1918 addresses or Docker membership.
-- The public host still has exactly the two business containers required by
-  ADR 066 and ADR 069; ngrok lifecycle is independent of FactorTester image
-  construction and PostgreSQL recovery.
+稳定域名由公共 Manager 提供，不依赖开发 Mac；公共设备审计记录真实 IPv4/IPv6 客户端地址，匿名内网 API 仍受保护。代理信任是显式部署能力，不从 RFC 1918 地址或 Docker 成员身份推断。公共主机仍只有 ADR-066/069 所需的两个业务容器，ngrok 生命周期独立于 FactorTester 镜像构建和 PostgreSQL 恢复。

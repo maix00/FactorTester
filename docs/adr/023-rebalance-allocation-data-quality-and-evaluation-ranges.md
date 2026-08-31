@@ -1,183 +1,99 @@
-# ADR-023: Rebalance, allocation, market-rule quality, and evaluation ranges
+# ADR-023：再平衡、配置、市场规则质量与评估区间
 
-- **Date**: 2026-06-21
-- **Status**: Accepted
-- **Related**: ADR-018, ADR-019, ADR-020, ADR-021, ADR-022
+- **日期**：2026-06-21
+- **状态**：已接受（部分语义由后续运行配置与 API/CLI ADR 继续约束）
+- **相关**：ADR-018、ADR-019、ADR-020、ADR-021、ADR-022、ADR-141
 
-## Context
+## 背景
 
-The group-test UI currently uses `each_period`, `buy_and_hold`, and `recycle`
-without defining which clock emits a period. It also mixes portfolio allocation,
-margin affordability, market-rule lookup, and result presentation. External
-frameworks expose similar extension points, but their defaults are not
-semantically interchangeable.
+分组测试页面曾使用 `each_period`、`buy_and_hold`、`recycle`，但没有说明
+“周期”由哪一个时钟发出；同时把组合配置、保证金可负担性、市场规则查询和
+结果展示混在一起。Backtrader、Qlib、Zipline 等框架虽然都有类似扩展点，
+但它们的默认语义不能互换。
 
-Installed framework source confirms these boundaries:
+外部框架的共同边界是：策略产生目标，执行层再根据当前持仓把目标转换为
+订单；佣金、滑点、保证金、流动性和账本是独立的执行模型。FactorTester
+必须保持这个边界，不能把框架默认值悄悄带入运行。
 
-- Backtrader strategies run on `next`; `order_target_percent` is an explicit
-  rebalance request. Commission/margin (`CommInfoBase`) and volume fillers are
-  broker extensions.
-- Qlib `WeightStrategyBase` produces target weights on a trade-calendar step;
-  `OrderGenerator` converts them using the exchange price, costs, tradability,
-  and trade unit.
-- Zipline exposes scheduled callbacks and `order_target_percent`; commission,
-  slippage, futures multipliers, and the ledger are separate components.
-- Alphalens equal-weight factor portfolios normalize selected assets to a fixed
-  gross exposure. Margin is not an allocation signal.
+## 决策
 
-## Decision
+### 再平衡是显式触发器
 
-### Rebalance policies are explicit triggers
+规范领域语言不再使用 `each_period`。支持的策略是：
 
-`each_period` is removed from the canonical domain language. Supported policies
-are:
+- `buy_and_hold`：第一次出现有效目标后提交一次，不主动再平衡；
+- `on_factor_signal`：因子频率产生新的可交易信号时再平衡，这是分组测试
+  的默认策略；
+- `scheduled`：由日、周、月或未来的自定义日历计划触发，与因子更新独立；
+- `membership_change`：只有选中成员发生变化时再平衡。
 
-- `buy_and_hold`: submit the first valid target once; no voluntary rebalance.
-- `on_factor_signal`: rebalance whenever the configured factor frequency emits
-  a new tradable signal. This is the default group-test policy.
-- `scheduled`: rebalance when a named calendar schedule fires (daily, weekly,
-  monthly, or a future custom schedule), independently of factor updates.
-- `membership_change`: rebalance only when selected membership changes.
+展期、到期、保证金追缴、风险拒绝和强平属于执行/风险事件。它们可以在
+任何策略下改变持仓，但不会把买入并持有改写成定时再平衡。
 
-Roll, expiry, margin call, risk rejection, and forced liquidation are execution
-or risk events. They may change positions under every policy and do not turn a
-buy-and-hold strategy into a scheduled strategy.
+旧数据中的 `each_period` 只允许在一次性读取迁移时转换为
+`on_factor_signal`；新的运行配置和模板不得再写出它。
 
-Legacy `each_period` snapshots are migrated once to `on_factor_signal` when read.
-The canonical runtime and newly persisted templates never emit `each_period`.
+### 配置与保证金分离
 
-### Allocation is separate from margin
+配置策略先产生目标权重，保证金约束随后执行。可用配置策略包括
+`inverse_volatility`、`equal_risk_contribution`、`equal_notional`，以及只
+用于明确对比的 `equal_margin`。每种策略必须说明回看窗口、最少观测数、
+年化方式和缺失数据处理；`equal_risk_contribution` 不是
+`inverse_volatility` 的别名。
 
-Allocation policies produce target weights before contract sizing:
+除 `equal_margin` 这个明确的对比配置外，改变保证金比例不得改变相对目标
+权重；约束只能拒绝再平衡或按比例缩放全部目标。
 
-- `inverse_volatility` is the default equal-risk policy. For selected assets,
-  raw weight is `1 / max(volatility, floor)`, normalized to configured gross
-  exposure. Volatility uses trailing returns only, with explicit lookback,
-  minimum observations, annualization, and missing-data behavior.
-- `equal_risk_contribution` uses a covariance matrix and solves for equal total
-  risk contributions. It is a separate advanced policy, not an alias for
-  inverse volatility.
-- `equal_notional` gives every selected asset equal absolute notional weight.
-- `equal_margin` gives every selected asset equal initial-margin budget and is
-  retained only as an explicitly labelled comparison policy.
+### 市场规则使用带来源的版本化提供方
 
-Margin constraints run after allocation. Except for the `equal_margin`
-comparison allocator, changing margin ratios cannot change relative target
-weights; a constraint may reject the rebalance or scale all weights uniformly.
+手续费、保证金比例、流动性/容量、乘数、最小变动价位和手数均由独立的
+提供方读取，并返回来源：
 
-### Market rules are versioned providers with explicit fallback
+- `effective_at`：在模拟时刻真实生效的规则；
+- `as_of_latest`：缺少历史值时使用的最新值；
+- `configured_default`：用户或应用明确配置的默认值。
 
-Commission schedules, margin ratios, liquidity/capacity data, multipliers,
-tick sizes, and lot/trade units are obtained through independent provider
-interfaces. A provider returns both a value and provenance:
+运行级策略决定缺失历史值时是严格失败、使用最新值并标记每个受影响记录，
+还是使用明确默认值并标记结果。`latest_available` 只能作为数据引导期间的
+有界近似，必须在结果中显示质量警告，不能冒充历史事实。
 
-- `effective_at`: a rule known to be effective at the simulated timestamp.
-- `as_of_latest`: the latest available rule substituted for missing history.
-- `configured_default`: an explicit user or application default.
+### 评估区间是运行元数据
 
-Fallback is controlled by a run-level policy:
+一次运行持有一个有序时间区间以及可选的切分时刻。后端连续、因果地执行
+整个区间，不在切分点重置状态；每个时间序列点和指标携带样本内/样本外
+标记。前端可以默认只看样本内并显式切换样本外，但指标不能根据图表是否
+可见来推断。
 
-- `strict_historical`: missing `effective_at` data is an error.
-- `latest_available`: use `as_of_latest` and mark every affected fill/snapshot.
-- `configured_default`: use the registered default and mark it.
+### 所有执行后端遵守同一规范
 
-`latest_available` is allowed during the current data bootstrap, but results
-must display an approximation warning and data-quality counts. It must never be
-presented as historical truth. Adding historical tables later changes provider
-resolution, not strategy, broker, or ledger contracts.
+Native、Backtrader、Qlib 和 Zipline 消费相同的因子信号、再平衡事件、目标
+权重、市场规则快照和结果结构。适配器可以使用各自的扩展点，但不能静默
+应用框架默认值。对比测试至少校验信号/目标权重、支持范围内的成交语义、
+因手数/最小价位造成的有界差异，以及数据来源和评估区间元数据。
 
-### In-sample and out-of-sample are result metadata
+订单生成遵守“目标减当前持仓”的共同契约；同一时刻同一产品的买卖意图先
+净额化，再计算手续费和滑点。卖出扣费后的可用现金可用于同批买入；费用、
+滑点、保证金、手数或流动性不足时，成交量可以低于目标，但 `target_trace`
+仍记录原始策略意图。
 
-A run owns one ordered evaluation range and an optional split timestamp:
+### 分组和多空是并列策略
 
-- in-sample: `start <= t <= split`;
-- out-of-sample: `split < t <= end`.
+分位数组合和多空组合分别编译为有独立策略/组合身份的策略通道，共享市场
+和因子执行器，但属于同一次运行。多空不是两条已完成净值曲线的事后相减。
+多空按共同因子研究惯例使用固定总敞口和等额多空敞口；两条腿先各自配置，
+空头权重取负，再经过执行、保证金、费用、滑点和容量约束。
 
-The backend computes one continuous causal run so state crosses the split
-without reset. Every timeseries point and metric carries an evaluation segment.
-The frontend defaults to showing in-sample only, offers an explicit toggle for
-out-of-sample, and shades the out-of-sample plot band. Metrics are reported per
-segment and for the full run; they are never inferred from chart visibility.
+相同运行中两条腿必须不同且存在；重叠产品先从两边净掉并记诊断；任一腿
+为空时不发出新目标并记诊断。不同执行后端对同一成员信号、再平衡策略和
+配置必须给出相同目标轨迹。
 
-### Framework consistency uses canonical contracts
+## 后果
 
-Native, Backtrader, Qlib, and Zipline consume the same factor signals,
-rebalance events, target weights, market-rule snapshots, and result schema.
-Framework adapters may use native extension points, but must not silently apply
-framework defaults. Comparisons assert:
-
-- exact signal and target-weight equality;
-- exact event/fill semantics where the adapter supports them;
-- bounded differences explicitly caused by lot/tick rounding;
-- identical provenance and evaluation-segment metadata.
-
-Precomputed and incremental factor execution publish the same `FactorSignal`.
-Supported operators require a numerical equivalence test before incremental
-execution is advertised. The native event runtime executes all strategies in
-one run; product-overlap batches are an input optimization and do not create
-separate native backtests.
-
-Only vectorizable inputs may be prepared before replay: factor signal events,
-membership matrices, prices, market-rule matrices, and signal-update masks.
-Target weights are strategy intent produced inside each framework's event/bar
-lifecycle. They are recorded as `target_trace` for comparison, not supplied as a
-precomputed execution input.
-
-Order generation follows the common target-order contract used by Backtrader,
-Zipline/Quantopian-style APIs, Qlib, and LEAN: a strategy first emits target
-weights/positions for the current event, then the framework execution layer
-turns the net difference from current holdings into orders/fills. Same-event
-buy and sell intent for the same instrument is netted before fees and slippage.
-Sell-side proceeds after fees increase available cash before buy-side sizing;
-if fees, slippage, margin, lot size, or liquidity make the full target
-unaffordable, the resulting fill/position is reduced while the target trace
-remains the original strategy intent.
-
-### Group and Long-Short are peer strategies
-
-Quantile group and Long-Short definitions compile to independent strategy lanes
-with their own strategy/portfolio identities. They share market and factor
-actors and participate in the same run and progress stream. Long-Short is not a
-post-processing subtraction of two completed group equity curves.
-
-`group` itself is only one backtest strategy family. A group test may expand one
-factor signal into many concrete group strategies. Long-Short is a
-strategy-composition strategy: it references existing strategy identities as
-long-leg and short-leg sources, then produces a new independently accounted
-strategy lane. In the current group-test implementation, those referenced
-source strategies are group-strategy lanes and their membership lanes are the
-canonical signal input. The general contract remains strategy-to-strategy so a
-future non-group strategy can expose target streams to the same Long-Short
-composer without changing frontend semantics.
-
-Long-Short target semantics follow the common factor-research convention used by
-Alphalens: a dollar-neutral portfolio has equal absolute long and short
-exposure and fixed gross exposure. In this project each Long-Short strategy
-therefore allocates 50% gross exposure to its long leg and 50% gross exposure to
-its short leg before execution-layer contract sizing, margin, fees, slippage,
-and capacity are applied.
-
-Framework adapters may calculate target weights in their own lifecycle
-callbacks, but their behavior must be identical:
-
-- long and short source strategy ids must be distinct and present in the same
-  run;
-- if realized membership overlaps after product remapping or derived-group
-  masking, overlapping instruments are netted out of both legs for that
-  timestamp and the overlap is recorded as a diagnostic;
-- if either leg is empty at a rebalance timestamp, no new Long-Short target is
-  emitted for that timestamp and the event is recorded as a diagnostic;
-- if both legs are non-empty, each leg is allocated independently with the same
-  allocation policy, then the short-leg weights are negated;
-- native, Backtrader, Qlib, and Zipline runs must publish the same target trace
-  for the same membership signal, rebalance policy, and allocation settings.
-
-## Consequences
-
-- Existing `each_period` data needs a read-time migration to
-  `on_factor_signal`; no compatibility branch remains in runtime code.
-- Equal-risk requires a causal volatility estimator and warm-up diagnostics.
-- Latest-rule substitution enables current tests but visibly lowers result
-  quality until historical market-rule data is loaded.
-- Backend settings, templates, progress, and result renderers must be generated
-  from the same registered contracts to prevent UI/runtime drift.
+- 旧 `each_period` 需要一次性迁移；运行时不保留隐式兼容分支。
+- 等风险配置需要因果波动率估计和预热诊断。
+- 使用最新市场规则可以帮助数据引导，但会降低结果质量，直到历史规则
+  补齐。
+- 后端设置、模板、进度和结果渲染必须来自同一注册契约，避免界面与运行时
+  漂移。
+- 目标权重只表达策略意图；订单、账本、手续费、保证金、流动性和撮合仍由
+  执行模块负责。

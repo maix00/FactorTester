@@ -1,43 +1,21 @@
-# ADR 077: ngrok redirects to the canonical IP device gate
+# ADR 077：ngrok 跳转规范 IP 设备入口
 
-## Status
+## 状态
 
-Accepted
+已接受。
 
-## Context
+## 背景
 
-The public browser device credential is intentionally enrolled once on the
-canonical public IP origin. The configured ngrok address is a separate browser
-origin, so its IndexedDB and WebCrypto private-key storage cannot be shared
-with the IP origin. Creating a second public device credential for ngrok would
-make one browser appear to be two devices and would complicate the quota and
-revocation model.
+公共浏览器设备凭据有意只在规范公共 IP 来源注册一次。配置的 ngrok 地址是另一个浏览器来源，其 IndexedDB 和 WebCrypto 私钥存储无法与 IP 来源共享。为 ngrok 创建第二个公共设备凭据会使同一浏览器看起来像两个设备，并复杂化配额和撤销模型。
 
-## Decision
+## 决策
 
-1. A navigation from an explicitly configured visitor ingress receives a
-   short-lived, single-use, target-bound grant and is redirected to the
-   canonical public Manager IP compliance page.
-2. The grant authorizes that target compliance page to display the existing
-   visitor-mode entry. It does not create a visitor session or authenticate a
-   user. The visitor session is still created only when the user explicitly
-   selects the visitor entry.
-3. The canonical IP compliance page runs the normal device-key bootstrap. A
-   browser with the IP-origin key automatically verifies and enters the
-   application; a browser without it remains on the Chinese compliance page
-   and can choose the bounded visitor mode.
-4. Direct IP navigation without a valid ingress grant never displays the
-   visitor entry. Invalid, expired, reused, or wrong-target grants fail closed.
-5. The private key and normal Manager session are never put in the redirect
-   URL. The redirect contains only the opaque, expiring grant and a safe local
-   next path.
+1. 从显式配置的访客入口导航时，返回短期、一次性、绑定目标的 grant，并跳转到规范公共 Manager IP 合规页。
+2. grant 只授权目标合规页显示已有访客入口，不创建访客会话或认证用户；访客会话仍只在用户显式选择访客入口后创建。
+3. 规范 IP 合规页执行正常设备密钥引导；有 IP 来源密钥的浏览器自动校验进入应用，没有的浏览器留在中文合规页并可选择受限访客模式。
+4. 没有有效入口 grant 的直接 IP 导航不显示访客入口；无效、过期、重复使用或目标错误的 grant 直接失败。
+5. 私钥和正常 Manager 会话绝不放入重定向 URL；重定向只包含不透明的过期 grant 和安全本地 next path。
 
-## Consequences
+## 后果
 
-- The browser has one logical public device credential and one public-device
-  quota entry.
-- ngrok remains a convenience ingress rather than an authenticated origin.
-- The public IP endpoint must have a browser-trusted HTTPS certificate for
-  automatic device authentication to complete.
-- Visitor grants are process-local and are invalidated by a Manager restart;
-  device registration, accounts, and task records are unaffected.
+浏览器只有一个公共设备凭据和一条配额记录；ngrok 是便利入口而非认证来源。公共 IP 必须有浏览器信任的 HTTPS 证书，设备自动认证才能完成。访客 grant 是进程内状态，Manager 重启会使其失效，但不影响设备、账户和任务记录。

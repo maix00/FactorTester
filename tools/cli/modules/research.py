@@ -7,6 +7,7 @@ import json
 import click
 
 from tools.cli.commands.client_research import client_research
+from tools.cli.commands.research_catalog import register_research_catalog_commands
 from tools.cli.commands.research_evidence import research_evidence
 from tools.cli.commands.research_report import report
 from tools.cli.core.context import client_from_config
@@ -17,7 +18,7 @@ from tools.cli.table import render_table
 @click.command("list")
 @click.option(
     "--scope",
-    type=click.Choice(("mine", "subordinates", "shared")),
+    type=click.Choice(("all", "mine", "subordinates", "shared")),
     default="mine",
     show_default=True,
 )
@@ -153,3 +154,4 @@ def register_research_domain(
     research.add_command(research_evidence, name="evidence")
     research.add_command(research_profiles)
     research.add_command(client_research, name="workspaces")
+    register_research_catalog_commands(research)

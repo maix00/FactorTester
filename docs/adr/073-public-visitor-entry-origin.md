@@ -1,56 +1,23 @@
-# ADR 073: Public visitor entry is ingress-scoped and redirects to the IP endpoint
+# ADR 073：公共访客入口受入口来源约束并跳转到 IP 端点
 
-## Status
+## 状态
 
-Accepted
+已接受。
 
-## Context
+## 背景
 
-The public Manager is reachable both through the stable browser ingress
-`https://eloquence-drizzly-fencing.ngrok-free.dev` and through its direct HTTPS
-IP endpoint.  These are different browser origins.  The compliance page must
-not accidentally advertise visitor mode on every public address, especially
-the direct IP entry.
+公共 Manager 同时通过稳定浏览器入口 `https://eloquence-drizzly-fencing.ngrok-free.dev` 和直接 HTTPS IP 端点可达；两者是不同浏览器来源。合规页不能在每个公共地址意外宣传访客模式，尤其不能在直接 IP 入口显示。
 
-Visitor mode is the bounded anonymous projection that the local Manager
-already exposes when `FACTORTESTER_REQUIRE_LOGIN_FOR_UI=0`: it can inspect the
-server's newest twenty public test records, but it cannot submit authenticated
-runs, inspect private account data, or download generated artifacts.
+访客模式是本地 Manager 已提供的有界匿名投影（`FACTORTESTER_REQUIRE_LOGIN_FOR_UI=0`）：可查看服务器最新 20 条公共测试记录，但不能提交认证运行、查看私有账户数据或下载生成物。
 
-## Decision
+## 决策
 
-1. A deployment explicitly lists browser ingress origins in
-   `FACTORTESTER_PUBLIC_VISITOR_ORIGINS`.  The configured
-   `FACTORTESTER_MANAGER_PUBLIC_ENDPOINT` is the visitor target, not an
-   allowed display origin.  Therefore direct IP compliance pages never show
-   the visitor entry unless an operator explicitly puts that IP in the
-   ingress list.
-2. The configured ingress compliance page links to the Manager's `/visitor`
-   route.  The Manager creates a short-lived, single-use in-memory grant and
-   redirects the browser to the configured HTTPS Manager endpoint, carrying
-   only that grant and a safe local next path.
-3. The IP endpoint consumes the grant and issues an origin-bound, short-lived
-   visitor session cookie.  A manually supplied `?visitor=1`, an expired
-   grant, a grant for another target, or a cookie on another origin does not
-   enable visitor mode.
-4. Visitor mode is represented by one `VisitorMode` capability object.  It
-   uses the existing `__public_jobs__` projection when forwarding anonymous
-   reads to a service, is capped at twenty server jobs, cannot submit work,
-   and cannot obtain artifact-transfer authorization.  Existing route-level
-   authentication checks remain in force for account, profile, settings,
-   manager, and cross-server operations.
-5. A login attempt from visitor mode returns a typed error and the web client
-   returns to the compliance page with the visitor entry suppressed.
+1. 部署在 `FACTORTESTER_PUBLIC_VISITOR_ORIGINS` 中显式列出浏览器入口来源。`FACTORTESTER_MANAGER_PUBLIC_ENDPOINT` 是访客跳转目标，不是允许显示入口的来源，因此直接 IP 合规页除非被运维显式加入列表，否则不显示访客入口。
+2. 配置的入口合规页链接到 Manager `/visitor` 路由。Manager 创建短期、一次性的内存 grant，并把浏览器重定向到配置的 HTTPS Manager 端点，只携带 grant 和安全的本地 next path。
+3. IP 端点消费 grant，签发绑定来源的短期访客 session cookie。手工 `?visitor=1`、过期/错误目标 grant 或其他来源 cookie 不能启用访客模式。
+4. 访客模式由一个 `VisitorMode` capability 对象表示。向服务转发匿名读取时使用已有 `__public_jobs__` 投影，最多 20 个服务器 Job，不能提交工作，也不能获得生成物传输授权；账户、Profile、设置、Manager 和跨服务器操作仍走原有路由认证。
+5. 访客模式的登录尝试返回类型化错误，Web 客户端回到合规页并隐藏访客入口。
 
-## Consequences
+## 后果
 
-- The ngrok origin is only an ingress/choice page; the active visitor session
-  lives on the public IP origin requested by the deployment.
-- Direct IP access remains compliance-only until device authentication or a
-  grant obtained through an explicitly configured ingress.
-- Visitor grants and sessions are process-local anonymous state.  A Manager
-  restart invalidates them and does not affect users, devices, PostgreSQL, or
-  job records.
-- The public task projection can expose recent task metadata and storage
-  counters without exposing generated file bytes.
-
+ngrok 只负责入口/选择页，活动访客会话位于部署指定的公共 IP 来源。直接 IP 在设备认证或从显式入口获得 grant 前仍只显示合规页。访客 grant 和会话是进程内匿名状态；Manager 重启使它们失效，不影响用户、设备、PostgreSQL 或 Job。公共任务投影可以展示最近任务元数据和存储计数，但不暴露生成物字节。

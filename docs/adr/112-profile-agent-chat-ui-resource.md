@@ -1,76 +1,34 @@
-# ADR 112: Profile Agent chat uses an industry UI resource
+# ADR 112：Profile Agent 会话使用成熟的行业 UI 资源
 
-## Status
+## 状态
 
-Accepted
+已接受。
 
-## Context
+## 背景
 
-The Profile detail page needs a real conversation surface: streaming assistant
-messages, thread state, Markdown, error handling, and mobile-friendly composer
-behavior. The Manager already owns the authenticated Profile Agent app-server
-bridge and its SSE event stream. Rebuilding those interaction patterns as a
-local set of bubbles and a textarea would duplicate a mature UI problem.
+Profile 详情页需要真正的会话界面：流式助手消息、会话状态、Markdown、错误处理和移动端输入框行为。Manager 已拥有认证的 Profile Agent app-server bridge 及 SSE 事件流；若用自定义气泡和 textarea 重建这些交互，会重复一个成熟 UI 问题。
 
-The repository is a dependency-free vanilla-JavaScript shell rather than a
-React application. The existing server-side Agent boundary also chooses the
-provider and keeps credentials out of the browser. The chat UI must therefore
-remain provider-neutral even though the selected reusable web resource is
-published by OpenAI.
+仓库是无依赖的 vanilla JavaScript 壳，不是 React 应用；服务器 Agent 边界还负责选择 provider 并把凭据留在浏览器之外。因此聊天 UI 必须与 provider 无关。
 
-## Decision
+## 决策
 
-Use the official ChatKit Web Component as the Profile Agent chat surface:
+使用官方 ChatKit Web Component 作为 Profile Agent 聊天表面：
 
 - [ChatKit JS](https://openai.github.io/chatkit-js/)
-- [ChatKit JS quickstart](https://openai.github.io/chatkit-js/quickstart/)
-- [ChatKit Python protocol types](https://github.com/openai/chatkit-python/blob/main/chatkit/types.py)
+- [ChatKit JS 快速开始](https://openai.github.io/chatkit-js/quickstart/)
+- [ChatKit Python 协议类型](https://github.com/openai/chatkit-python/blob/main/chatkit/types.py)
 
-Load the component lazily only when the Profile Agent session tab is opened.
-`profile/chatkit-adapter.js` translates ChatKit's thread and streaming event
-protocol to the existing authenticated Manager RPC/SSE bridge. It does not
-select a model provider, receive a provider token, or expose a server-local
-path. Provider selection remains a server/Profile concern, so future
-non-OpenAI providers can use the same UI protocol adapter.
+只有打开 Profile Agent 会话 tab 时才懒加载组件。`profile/chatkit-adapter.js` 把 ChatKit 的 thread/streaming 事件协议转换为现有认证 Manager RPC/SSE bridge；它不选择模型、不接收 provider token、不暴露服务器路径。Provider 选择仍是服务器/Profile 关注点，因此未来非 OpenAI provider 可以复用相同 UI 协议。
 
-The following alternatives were reviewed against the current shell and the
-future multi-provider requirement:
+评估过这些替代方案：
 
-- [assistant-ui](https://www.assistant-ui.com/docs/) has the broadest reusable
-  React surface and explicitly supports custom runtimes, REST/custom protocols,
-  AG-UI, A2A, LangGraph, Google ADK and other backends. Its
-  [custom runtime](https://www.assistant-ui.com/docs/runtimes/custom/overview)
-  is the strongest future migration candidate, but it requires a React build.
-- [Vercel AI Elements](https://elements.ai-sdk.dev/) provides composable
-  conversation, prompt, tool, source and workflow components. It is source
-  code installed into a React/shadcn application and is closely integrated with
-  the Vercel AI SDK, so it is not a drop-in dependency for this vanilla shell.
-- [CopilotKit](https://docs.copilotkit.ai/) provides ready-made React chat
-  components and a headless UI, while its runtime accepts any
-  [AG-UI-compatible backend](https://docs.ag-ui.com/). It is a good option if
-  FactorTester later adopts AG-UI for tool calls and generative UI, but it also
-  introduces a React runtime and a larger agent-UI integration surface.
-- [Flowise Embed](https://docs.flowiseai.com/using-flowise/embed) is the closest
-  script-level embed and supports a maintained web widget, but it couples the
-  UI to a Flowise chatflow/backend rather than to FactorTester's authenticated
-  Profile Agent protocol.
+- [assistant-ui](https://www.assistant-ui.com/docs/) 的 React 可复用界面最完整，支持自定义 runtime、REST/custom protocol、AG-UI、A2A、LangGraph 等，是未来迁移候选，但需要 React 构建；
+- [Vercel AI Elements](https://elements.ai-sdk.dev/) 提供可组合会话、prompt、工具、来源和工作流组件，但依赖 React/shadcn 与 Vercel AI SDK，不适合当前 vanilla 壳直接引入；
+- [CopilotKit](https://docs.copilotkit.ai/) 提供 React 聊天组件和 headless UI，支持 AG-UI 后端，适合将来采用 AG-UI，但会引入更大的 React/Agent UI 集成面；
+- [Flowise Embed](https://docs.flowiseai.com/using-flowise/embed) 最接近脚本嵌入，但把 UI 耦合到 Flowise chatflow/backend，不适合 FactorTester 认证 Profile Agent 协议。
 
-The current Manager remains a dependency-free vanilla shell. Therefore the
-selected ChatKit Web Component is only the presentation layer; the local
-`chatkit-adapter.js` and `chatkit-protocol.js` are provider-neutral. The
-Profile Agent server may route to OpenAI, Anthropic, Google, local models, or a
-future model gateway without exposing provider credentials or changing this
-page. If the shell later migrates to React, assistant-ui is the preferred
-replacement candidate, with AG-UI as the backend protocol boundary.
+当前 ChatKit 只作展示层；本地 `chatkit-adapter.js` 和 `chatkit-protocol.js` 保持 provider 无关。若壳未来迁到 React，首选替代是 assistant-ui，后端协议边界优先采用 AG-UI。
 
-## Consequences
+## 后果
 
-- The Profile page gains a maintained conversation UI instead of a custom
-  transcript/composer implementation.
-- The Manager must allow the official ChatKit script and iframe origin in the
-  authenticated shell CSP.
-- ChatKit itself is an external lazy-loaded dependency; a future offline or
-  supply-chain requirement should vendor a pinned release and retain the same
-  adapter boundary.
-- Attachments and provider-specific widgets stay disabled until the Manager
-  exposes corresponding authenticated protocol operations.
+Profile 页面获得维护中的会话 UI，而不是自制 transcript/composer。Manager 必须在认证壳 CSP 中允许官方 ChatKit script 和 iframe 来源。ChatKit 是外部懒加载依赖；将来若有离线或供应链要求，应固定并 vendor 版本，同时保留 adapter 边界。附件和 provider 专属控件在 Manager 提供对应认证协议操作前保持禁用。

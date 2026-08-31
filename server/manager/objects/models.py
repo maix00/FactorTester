@@ -13,6 +13,7 @@ class TransferObjectKind(StrEnum):
     RESEARCH_ASSET = "research_asset"
     RESEARCH_ATTACHMENT = "research_attachment"
     RESEARCH_LOCAL_RESOURCE = "research_local_resource"
+    EVIDENCE_FILE = "evidence_file"
     FACTOR_SOURCE = "factor_source"
     PROFILE_WORKSPACE = "profile_workspace"
     CLIENT_RELEASE = "client_release"

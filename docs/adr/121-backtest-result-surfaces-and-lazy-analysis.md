@@ -1,119 +1,72 @@
-# ADR 121: Backtest result surfaces and lazy analysis
+# ADR-121：回测结果表面与懒加载分析
 
-Status: Accepted
+## 状态
 
-## Context
+已接受。
 
-Backtest outputs used to map one generated artifact to one top-level tab.  That
-made the tab row unstable, duplicated strategy-return views, and encouraged the
-browser to fetch data unrelated to the question the user was asking.
+## 背景
 
-The design is informed by established portfolio-analysis surfaces:
+回测输出过去把一个生成物映射到一个顶层 tab，造成 tab 行不稳定、策略收益
+视图重复，并使浏览器提前下载与当前问题无关的数据。QuantConnect、Pyfolio、
+FIX ExecutionReport 和 GIPS 的共同要求是：统计、时序、成交、费用、风险和
+假设应分层展示，并且费用基础、风险定义和模拟状态不能从图表中猜测。
 
-- QuantConnect groups result statistics, time-series charts and trades, lets
-  users select visible charts, and links chart ranges.
-- Pyfolio separates returns/risk tear sheets from transaction and round-trip
-  analysis.
-- FIX ExecutionReport models the order lifecycle as ordered state changes.
-- GIPS requires fee basis, risk definitions, assumptions and simulated status
-  to be visible rather than inferred from a chart.
+## 决策
 
-## Decision
+回测 Job 暴露五个稳定表面：
 
-### Stable result surfaces
+1. **概览**：运行警告、来源和有界摘要；
+2. **策略统计**：可比较的策略指标，点击策略标题进入策略局部分析；
+3. **时变指标**：净值/当前回撤、收益、滚动风险、现金、保证金利用率、敞口
+   和基于成交的换手率，策略和曲线筛选都在本表面内部；
+4. **执行与账户**：事件流、订单、成交/结算、持仓、现金、保证金和费用的
+   内嵌导航；
+5. **收益与风险**：成本比率、回撤区间和期间收益。
 
-Backtest Jobs expose five stable surfaces:
+每个顶层表面自己保存策略多选状态。执行/账户表面在权威生成物存在时还
+提供账户、资金池和币种筛选，并从策略、账户、资金池三个角度展示观察到的
+关系。账户余额有自己的币种，资金池以 base currency 作为共同估值单位，
+二者不能互相推断。
 
-1. **Overview** — runtime warnings, provenance and the bounded summary.
-2. **Strategy statistics** — comparable strategy metrics; a strategy heading
-   opens strategy-local analysis.
-3. **Time-varying metrics** — equity/current drawdown, returns, rolling risk,
-   cash, margin utilization, exposure and fill-based turnover. Strategy and
-   curve selection live inside this surface.
-4. **Execution and account** — an inner navigation for event flow, orders,
-   fills/settlements, positions, cash, margin and fees.
-5. **Return and risk analysis** — cost ratios, drawdown episodes and period
-   returns.
+生成物注册表声明 `result_surface`、`result_view`、`supplemental_bundle` 和
+语义 `result_order`；UI 消费这些声明，旧 Job 元数据只使用有界回退投影。
+生成物名称是存储身份，不是导航标签。
 
-Every top-level surface owns its strategy multi-selection state inside the
-surface. Switching surfaces therefore restores that surface's previous
-selection instead of applying an implicit global filter. Execution/account
-inner pages additionally expose account, cash-pool and currency filters when
-those identities are present in the authoritative artifact. They also show
-the observed relationships from three independently pageable perspectives:
-strategy, account, and cash pool. Account currency and cash-pool base currency
-are separate dimensions: an account records the currency of its balance while
-a pool's base currency is the common valuation unit. A missing identity or
-currency remains explicitly unregistered and is never inferred from a strategy
-label or from the other currency field.
+策略 overlay 只保留需要单个策略身份或其分组成员的分析：分布、稳定性、
+容量、可交易性、日历、持有期、贡献、稳健性和排序。重复的策略收益 tab 删除，
+因为外部时变表面已经支持策略筛选。
 
-The output registry declares `result_surface`, `result_view`,
-`supplemental_bundle`, and semantic `result_order`. The UI consumes these
-declarations and keeps a fallback projection only for old persisted Job
-metadata. Artifact names remain storage identities, not navigation labels.
+概览和策略统计至少提供总收益/年化收益、波动率、Sharpe、Calmar、当前与
+历史最大回撤、胜率、换手率和重要运行警告。图表和表格保留策略身份、时间戳
+及其时区、币种、费用基础、数据源和回退警告；缺失值保留为空，不改成零。
 
-The strategy overlay keeps analyses that require one strategy identity or its
-group membership: distribution, stability, capacity, tradability, calendar,
-holding period, contribution, robustness and ranking. The duplicate strategy
-return-series tab is removed because the external time-varying surface already
-supports strategy filtering.
+## 懒加载与懒计算
 
-### Metrics and disclosure
+- 立即渲染结果壳、tab 和控制项，只请求当前内嵌页面或选中的曲线；
+- 新选曲线可以并发加载，并在当前 Job tab 生命周期内缓存不可变规范载荷；
+- 表格只创建可见页的 DOM；事件流只加载订单/成交，账户投影在对应页面或图表
+  被选中时加载；
+- 维度选项从已加载的活动生成物派生，不为填充筛选器发起跨服务器全目录扫描；
+- 过期请求可以填充不可变缓存，但不能切换 tab 或重新打开已关闭的控件。
 
-The overview and strategy statistics should provide at least total and annual
-return, volatility, Sharpe, Calmar, current and historical maximum drawdown,
-win rate, turnover and material runtime warnings. Charts and tables retain the
-strategy identity, timestamp/timezone, currency, fee basis, data-source and
-fallback warnings needed to interpret those values. A missing value stays
-missing; it is not converted to zero.
+若规范 JSON 超出有界大小，下一版生成物必须提供不可变的时间/行分区和带
+`start/end/count` 的能力授权读取；客户端不能通过轮询业务端口模拟范围查询。
 
-### Lazy loading
+主运行在 `post_replay` 通过一个 `ReportDataset` 共同计算选定输出，缓存投影
+避免重复扫描。可选输出由一个补充 Job 请求批量生成，注册 bundle 共享
+`time_series`、`execution_account` 和 `return_risk` 的重复工作。补充身份由
+父 Job、来源哈希、规范请求和当前输出状态决定；相同并发请求复用同一个子任务。
 
-- Render the result shell, tabs and controls immediately.
-- Fetch only the active inner page or selected curves.
-- Fetch several newly selected curves concurrently and cache their immutable
-  canonical payloads for the life of the mounted Job tab.
-- Build DOM nodes only for the visible table page.
-- Entering Execution and account initially loads one table. Event flow loads
-  only orders and fills; account projections load when their inner page or
-  chart is selected.
-- Dimension choices are derived from the already loaded active artifact. The
-  browser does not start a cross-server catalogue scan merely to populate an
-  account or cash-pool filter.
-- Ignore a completed fetch as navigation state. It may populate the immutable
-  payload cache, but it must not switch a tab or reopen a closed control.
+策略分析 tab 共享一个 strategy-analysis bundle，排序仍是独立的配置/产品范围
+计算。打开结果不应静默重算；生成物删除后的重建必须是显式补充操作。
 
-For artifacts that outgrow bounded canonical JSON, the next artifact schema
-must add an indexed, immutable row/time partition and a capability-bound
-`start/end/count` read. The browser must not emulate range queries by polling
-business ports. Artifact bytes remain owned by the Job's storage server.
+## 后果
 
-### Lazy computation and supplemental Jobs
+导航规模稳定，跨服务器只读取当前可见数据，补充计算可审计且去重。不可变
+JSON 仍有整文件传输成本；大结果必须升级为带索引的生成物格式，而不是继续
+增加客户端分页或全量下载。
 
-- The primary run computes requested outputs in `post_replay` using one
-  `ReportDataset`; cached projections prevent repeated scans.
-- Optional post-run outputs are one supplemental Job request containing all
-  selected outputs. Registry bundles identify shared work:
-  `time_series`, `execution_account`, and `return_risk`.
-- The supplemental identity is based on parent Job, source hashes, normalized
-  request semantics and current output state. Concurrent equal requests reuse
-  one queued/running Job; completed artifacts are stored on the parent while
-  the child remains in supplemental history.
-- Strategy-local tabs share one strategy-analysis bundle. Ranking remains a
-  separate configuration/product-scope calculation.
-- Deleting a generated artifact is an explicit user decision. Merely opening a
-  result surface must not silently regenerate it; regeneration is an explicit
-  supplemental action.
-
-## Consequences
-
-The navigation remains small even as outputs grow, cross-server reads occur
-only for visible data, and supplemental work is auditable and deduplicated.
-The immutable JSON format still has a whole-file transfer cost; very large
-outputs require the indexed artifact schema described above rather than more
-client-side pagination.
-
-## References
+## 参考
 
 - https://www.quantconnect.com/docs/v2/cloud-platform/backtesting/results
 - https://www.quantconnect.com/docs/v2/cloud-platform/api-reference/backtest-management/read-backtest/charts

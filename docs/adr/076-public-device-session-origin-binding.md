@@ -1,17 +1,11 @@
-# ADR 076: Public device sessions are bound to the canonical IP origin
+# ADR 076：公共设备会话绑定规范 IP 来源
 
-## Status
+## 状态
 
-Superseded by ADR 077.
+已由 ADR-077 取代。
 
-## Decision
+## 历史决策
 
-Sessions created by browser device verification store the authentication method
-`device` and the exact canonical public-IP HTTPS origin. A public Manager
-accepts that session only on the same origin.
+浏览器设备校验创建的会话保存认证方式 `device` 和精确的规范公共 IP HTTPS 来源，公共 Manager 只在同一来源接受该会话。显式公共白名单访客登录后创建的访客密码会话也绑定规范公共 IP 来源；没有来源元数据的密码会话和旧会话不能绕过公共设备门禁。
 
-Visitor-password sessions created after the explicit public allowlist visitor
-login are also bound to the canonical public-IP origin. Password sessions and
-legacy sessions without origin metadata never bypass the public device gate.
-
-There is no cross-origin `device-handoff` endpoint or authentication path.
+协议不提供跨来源 `device-handoff` 端点或认证路径。

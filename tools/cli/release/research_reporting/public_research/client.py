@@ -27,6 +27,10 @@ from tools.cli.release.research_reporting.public_research.object_uploads import 
 from tools.cli.release.research_reporting.public_research.projection import (
     build_upload_projection,
 )
+from tools.cli.release.research_reporting.work_package_identity import (
+    load_work_package_migration_head,
+    migrate_work_package_report_identity,
+)
 
 from .outbox import PublicResearchOutbox
 
@@ -141,6 +145,58 @@ class PublicResearchClient:
                         "pending_sync": pending is not None,
                     })
         return sorted(values, key=lambda item: (item["title"], item["work_package_id"], item["branch_id"]))
+
+    def local_report_migration_records(
+        self, *, apply_identities: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Return a byte-free migration inventory from this FTClient only."""
+        records: list[dict[str, Any]] = []
+        for profile in LocalProfileStore(self.client_root).list():
+            profile_id = str(profile["profile_id"])
+            workspace = Path(str(profile["workspace_root"])).expanduser()
+            for record in profile.get("research_records") or []:
+                work_package_id = _work_package_id(record.get("graph_instance_ref"))
+                if not work_package_id:
+                    continue
+                package_root = workspace / "research" / work_package_id
+                branches_root = package_root / "branches"
+                if not branches_root.is_dir():
+                    continue
+                branch_roots = [
+                    branch_root for branch_root in sorted(branches_root.iterdir())
+                    if (branch_root / "authoring" / "HEAD.json").is_file()
+                ]
+                if not branch_roots:
+                    continue
+                migrate_work_package_report_identity(
+                    package_root, apply=apply_identities,
+                )
+                for branch_root in branch_roots:
+                    try:
+                        head = load_work_package_migration_head(
+                            package_root, branch_root.name,
+                        )
+                    except (OSError, ValueError):
+                        continue
+                    records.append({
+                        "source_kind": "client",
+                        "source_ref": (
+                            f"{profile_id}:{work_package_id}:{branch_root.name}"
+                        ),
+                        "profile_ref": profile_id,
+                        "record_id": work_package_id,
+                        "work_package_id": work_package_id,
+                        "branch_id": branch_root.name,
+                        "report_id": str(head["report_id"]),
+                        "title": str(head["title"]),
+                        "generation": int(head["generation"]),
+                        "visibility": "private",
+                        "build_source": "client",
+                        "build_source_ref": profile_id,
+                    })
+        return sorted(records, key=lambda item: (
+            item["profile_ref"], item["work_package_id"], item["branch_id"],
+        ))
 
     def publish(
         self,

@@ -1,53 +1,24 @@
-# ADR 081: Manager sessions use the existing local SQLite database
+# ADR 081：Manager 会话使用现有本地 SQLite 生命周期
 
-## Status
+## 状态
 
-Accepted
+已接受。
 
-## Context
+## 背景
 
-PostgreSQL is the shared authority for accounts, organizations, devices, and
-quotas, but an already-running Manager must be able to validate its existing
-sessions while PostgreSQL is unavailable. The repository already gives each
-Manager a local SQLite database configured by `.settings`; that database
-contains the local account projection and other Manager-visible data.
+PostgreSQL 共享账户、组织、设备和配额权威，但 Manager 必须在 PostgreSQL 不可用时校验已经签发的会话。每个 Manager 已有由 `.settings` 配置的本地 SQLite，包含本地账户投影和其他 Manager 可见数据。
 
-The previous session implementation persisted token hashes and session
-metadata in `sessions.json`. That format had no `created_at` or `last_seen_at`
-lifecycle fields, rewrote the whole file for each change, and made cleanup and
-concurrent access harder to reason about. Existing JSON sessions are not to be
-silently imported into the new store.
+旧会话把 token 哈希和元数据写在 `sessions.json`，缺少 `created_at`/`last_seen_at`，每次变更都重写整个文件，清理和并发访问难以推理。新存储不应静默导入旧 JSON。
 
-## Decision
+## 决策
 
-1. Add a dedicated `manager_sessions` table to the existing local SQLite file
-   resolved from `Settings.CACHE_DB_PATH`. Do not create a second session-only
-   SQLite file in the Manager state directory.
-2. Store only the SHA-256 token hash, principal, role, authentication method,
-   issuing origin, display alias, `created_at`, `last_seen_at`, and
-   `expires_at`. The raw bearer token is never persisted.
-3. Use a 30-day absolute session lifetime, refresh within the existing
-   seven-day refresh window, touch `last_seen_at` at most once per minute, and
-   remove expired or 45-day-idle sessions during startup and periodic access.
-4. The Manager session store is local and independent of PostgreSQL. PostgreSQL
-   recovery may restore central authority, but it is not required to validate
-   an already-issued local session.
-5. The application does not read or migrate `sessions.json`. After the SQLite
-   release has been deployed and verified, the exact legacy file is deleted
-   from each deployment state directory. A restricted backup may be retained
-   separately for rollback audit purposes.
-6. Device-key automatic login remains a separate challenge/signature flow.
-   Successful device verification issues a Manager session, but a failure in
-   the device flow must not be diagnosed as a session-store failure.
+1. 在 `Settings.CACHE_DB_PATH` 解析出的现有 SQLite 中增加 `manager_sessions` 表；不在 Manager 状态目录另建会话 SQLite。
+2. 只保存 token 的 SHA-256 哈希、主体、角色、认证方式、签发来源、显示 alias、`created_at`、`last_seen_at` 和 `expires_at`，不保存原始 bearer token。
+3. 绝对会话寿命 30 天；在既有 7 天刷新窗口内刷新；每分钟最多更新一次 `last_seen_at`；启动和周期访问清理过期或闲置 45 天会话。
+4. 会话库是本地的，与 PostgreSQL 独立；中央库恢复可以恢复权威，但不是校验已签发本地会话的必要条件。
+5. 应用不读取或迁移 `sessions.json`。SQLite 版本部署并验证后，从每个部署状态目录删除精确的旧文件；回滚审计可另行保留受限备份。
+6. 设备密钥自动登录仍是独立的挑战/签名流程；成功设备校验再签发 Manager 会话，设备流程失败不能被诊断为会话库故障。
 
-## Consequences
+## 后果
 
-- Local account fallback and session validation use the same per-Manager SQLite
-  persistence boundary while PostgreSQL is offline.
-- The existing SQLite file receives one authentication table and three indexes;
-  no session JSON file or raw token material remains in active use.
-- Removing legacy JSON sessions invalidates their old cookies. Users must sign
-  in again or complete device-key authentication after the cutover.
-- A damaged or unavailable local SQLite file prevents local session fallback;
-  the Manager should fail closed rather than consult PostgreSQL for a raw
-  session token.
+本地账户回退和会话校验共享同一 Manager SQLite 边界；现有 SQLite 增加一个认证表和三个索引，不再使用会话 JSON 或原始 token。删除旧 JSON 会使旧 cookie 失效，用户需重新登录或完成设备认证。SQLite 损坏/不可用时本地回退应 fail-closed，不能把原始会话 token 交给 PostgreSQL 处理。

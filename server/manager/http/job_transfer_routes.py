@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import secrets
-from urllib.parse import unquote
+from urllib.parse import parse_qs, unquote
 
 from server.manager.domain.federation import TargetNotFound, TargetUnavailable
 from server.manager.http.job_public_projection import (
@@ -16,6 +16,7 @@ from server.manager.services.job_artifact_catalog import JobArtifactCatalog
 from server.manager.services.job_artifact_query import JobArtifactQueryService
 from server.manager.transfers.peer_gateway import PeerControlError
 from server.manager.transfers.planner import NodeUnavailable
+from server.services.research_evidence_catalog import evidence_contains_job_source
 
 _ACCESS_PATH = re.compile(
     r"^/api/jobs/([A-Za-z0-9._-]{1,128})/artifacts/"
@@ -146,16 +147,16 @@ class JobTransferRoutesMixin:
             ).strip()
             access = self._rewrite_client_data_access(
                 self.state.prepare_submission_upload(
-                principal=principal,
-                storage_server_id=storage_server_id,
-                job_id=job_id,
-                name=name,
-                expected_size=int(payload.get("size_bytes")),
-                expected_sha256=str(payload.get("sha256") or ""),
-                content_type=str(
-                    payload.get("content_type") or "application/octet-stream"
-                ),
-                idempotency_key=idempotency,
+                    principal=principal,
+                    storage_server_id=storage_server_id,
+                    job_id=job_id,
+                    name=name,
+                    expected_size=int(payload.get("size_bytes")),
+                    expected_sha256=str(payload.get("sha256") or ""),
+                    content_type=str(
+                        payload.get("content_type") or "application/octet-stream"
+                    ),
+                    idempotency_key=idempotency,
                 )
             )
         except NodeUnavailable as exc:
@@ -243,6 +244,49 @@ class JobTransferRoutesMixin:
             principal = visitor.principal
         else:
             principal = "__public_jobs__"
+        evidence_ref = str(
+            parse_qs(str(getattr(parsed, "query", "") or ""))
+            .get("evidence_ref", [""])[0]
+        ).strip()
+        if evidence_ref:
+            if session is None:
+                json_response(
+                    self, {"success": False, "error": "login required"}, 401,
+                )
+                return True
+            catalog = getattr(self.state, "research_catalog", None)
+            if catalog is None:
+                json_response(
+                    self,
+                    {"success": False, "error": "Research catalog is unavailable"},
+                    503,
+                )
+                return True
+            evidence_access = catalog.resolve_evidence_access(
+                evidence_ref=evidence_ref, viewer=principal,
+            )
+            if not evidence_access["can_download"]:
+                json_response(
+                    self,
+                    {"success": False, "error": "Evidence download is not authorized"},
+                    403,
+                )
+                return True
+            try:
+                evidence_owner = catalog.evidence_owner_ref(evidence_ref)
+            except KeyError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 404)
+                return True
+            if not evidence_contains_job_source(
+                owner=evidence_owner, evidence_ref=evidence_ref, job_id=job_id,
+            ):
+                json_response(
+                    self,
+                    {"success": False, "error": "Evidence does not cite this Job"},
+                    409,
+                )
+                return True
+            principal = evidence_owner
         idempotency = str(
             self.headers.get("Idempotency-Key") or secrets.token_hex(16)
         ).strip()

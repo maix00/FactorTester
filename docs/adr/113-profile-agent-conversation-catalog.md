@@ -1,9 +1,9 @@
 # ADR 113：Profile Agent 会话目录与内置历史视图
 
-- Status: Accepted
-- Date: 2026-08-19
+- **状态**：已接受
+- **日期**：2026-08-19
 
-## Context
+## 背景
 
 同一个服务器 Agent 可能先后或同时服务多个研究身份。供应商的
 `provider_thread_id` 只表示 Agent 运行时的线程，不应直接作为浏览器历史列表的
@@ -13,7 +13,7 @@ Profile 归属。
 FactorTester 使用 ChatKit 的内置历史视图来完成会话列表、切换、新建、重命名和
 删除；Manager 负责提供经过 Profile 权限过滤的线程协议。
 
-## Decision
+## 决策
 
 1. Manager 本地 SQLite 使用一张 `manager_agent_conversations` 表保存会话目录。
    会话归属由 `principal + profile_id` 确定；同一个 Agent 绑定多个 Profile 时，
@@ -47,7 +47,7 @@ FactorTester 使用 ChatKit 的内置历史视图来完成会话列表、切换�
     可短时复用的只读 app-server；它不检查模型网络、不启动 CC Switch、不签发
     FactorTester Agent 会话，也不改变 Agent 生命周期。
 
-## Consequences
+## 后果
 
 - 会话目录在中央 PostgreSQL 不可用时仍能支持本 Manager 的列表与权限判断。
 - 供应商线程不会因 Agent 重启而自动丢失，但供应商自身删除线程时，恢复会返回明确

@@ -1,12 +1,15 @@
-# ADR-028 实施计划：Native Broker Policy 迁移
+# ADR-128：Native Broker Policy 迁移实施计划
 
-> **状态：已被 [ADR-032](032-strategy-book-and-counterparty-boundary.md) 取代。** 只有"阶段 1：
+> **编号迁移说明：** 本文原文件名为 `028-native-broker-policy-implementation-plan.md`。因 ADR-028 已用于
+> Native Broker Policy 与 TargetStrategy 的边界，本文迁移为 ADR-128；计划内容不因重编号改变。
+>
+> **状态：已被 [ADR-032](032-strategy-book-and-counterparty-boundary.md) 取代。** 只有“阶段 1：
 > BrokerModule 骨架"（改名为 StrategyBookModule/StrategyBookSimple）落地了；阶段 2 起把各模块
 > 改成调用 broker policy 的方向已放弃，不再执行。
 
 - **对应决策**：[028-native-broker-policy-boundary.md](028-native-broker-policy-boundary.md)
 - **日期**：2026-07-01
-- **状态**：草案，未开始执行
+- **最终状态**：已取代；阶段 1 的骨架曾落地，阶段 2 以后未执行
 
 ---
 
@@ -96,20 +99,20 @@ liquidity_mode=volume_participation` 干净地实现了，没必要在 `matching
 "何时调用 policy"（flow 编排、字段读取、写回 ctx/ledger），不再自己判断
 "怎么算"。
 
-### 3. `GroupMembershipModule.schedule_order_execution` → `cancel_policy`/`order_validity`
+### 3. `GroupMembershipModule.schedule_order_execution` → `cancel_policy`/`order_validity`（撤单与订单有效性）
 
 - 现有逻辑（`group_membership.py:350` `_schedule_order_execution`）里"同
   `(strategy, instrument)` 的 stale pending order 标记 CANCELLED"这部分，改为调用
   `broker.cancel_policy(stale_order, new_order, ctx.timestamp)` 返回布尔值。
 - 回归：`pytest tests/backtest/native/test_group_membership.py tests/backtest/native/test_step3_wiring.py -q`。
 
-### 4. `OrderExecutionModule` → `matching_policy`
+### 4. `OrderExecutionModule` → `matching_policy`（撮合策略）
 
 - `_resolve_execution_price` 改为调用 `broker.matching_policy(order, price_table)`
   返回成交价，而不是硬编码 `_execution_price_at`。
 - 回归：`pytest tests/backtest/native/test_order_execution.py -q`。
 
-### 5. `PositionSizingModule` → `min_lot_policy`
+### 5. `PositionSizingModule` → `min_lot_policy`（最小手数策略）
 
 - `_round_to_lot_sizes`/`_round_one` 的取整算法迁到 broker 的
   `min_lot_policy(quantity, lot_size)` callable，模块只保留字段读取和写回
@@ -117,7 +120,7 @@ liquidity_mode=volume_participation` 干净地实现了，没必要在 `matching
 - **必须同时验证 `nearest_lot` 非默认选项**，不能只测 `floor_to_lot`。
 - 回归：`pytest tests/backtest/native/test_position_sizing.py -q`。
 
-### 6. `LiquidityModule` → `fill_cap_policy`
+### 6. `LiquidityModule` → `fill_cap_policy`（成交上限策略）
 
 - `_cap_to_liquidity` 迁到 broker 的 `fill_cap_policy(quantity, participation_rate,
   volume)`。
@@ -125,13 +128,13 @@ liquidity_mode=volume_participation` 干净地实现了，没必要在 `matching
   容易只测默认值就漏掉这条）。
 - 回归：`pytest tests/backtest/native/test_fee_slippage_liquidity_cashconstraint.py -q`。
 
-### 7. `LedgerCashConstraintModule` → `cash_policy`
+### 7. `LedgerCashConstraintModule` → `cash_policy`（现金策略）
 
 - `_constrain_to_ledger_cash` 里"按比例缩买单"的部分迁到 broker 的
   `cash_policy(orders, available_cash)`。
 - 回归：`pytest tests/backtest/native/test_fee_slippage_liquidity_cashconstraint.py -q`。
 
-### 8. `OrderLifecycleModule` → `accept_policy`/`order_state_model`
+### 8. `OrderLifecycleModule` → `accept_policy`/`order_state_model`（接收策略与订单状态模型）
 
 - `_finalize_order` 改为调用 `broker.accept_policy(order)` 决定 FILLED/REJECTED，
   `reject_reason` 管子已存在，直接复用。

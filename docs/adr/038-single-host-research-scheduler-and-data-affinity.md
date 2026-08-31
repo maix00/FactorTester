@@ -1,71 +1,33 @@
-# ADR-038: Single-Host Research Scheduler and Data Affinity
+# ADR-038：单主机研究调度器与数据亲和性
 
-## Status
+## 状态
 
-Accepted.
+已接受。
 
-## Context
+## 背景
 
-Per-request child processes cannot share process-local market-data caches and
-allow every Flask worker to create a competing scheduler. Backtest planning also
-depends on an ordered chain: run window, frozen product selection, term-structure
-expansion, source/frequency/field resolution, coverage, then data loading.
+按请求创建子进程无法共享进程内行情缓存，还会让每个 Flask worker 各自创建竞争的调度器。回测规划也有严格顺序：运行窗口、冻结产品选择、期限结构展开、数据源/频率/字段解析、覆盖范围检查，然后才加载数据。
 
-## Decision
+## 决策
 
-The supported deployment is one host with SQLite WAL and a Unix domain socket.
-A dedicated job daemon is the sole scheduler for a deployment. Flask owns only
-authentication and HTTP/SSE projection. The local 7998 worktree manager
-supervises an API/daemon/worker service bundle and injects deployment, source
-revision, artifact root, and socket identity. Multiple hosts must not consume
-the same SQLite queue.
+支持的部署形态是单主机、SQLite WAL 和 Unix domain socket。一个部署只允许一个专用 job daemon 调度任务；Flask 只负责认证以及 HTTP/SSE 投影。本机 7998 worktree manager 监督 API/daemon/worker 服务组，并注入部署标识、源码版本、生成物根目录和 socket 身份。多个主机不得消费同一个 SQLite 队列。
 
-Submission performs cheap validation only. A long-lived planner pool generates
-an immutable DataRequirementPlan/ExecutionPlan by reusing the production Flow
-semantics. Execution workers consume that plan and do not re-read mutable page
-state or silently resolve a different plan. Relevant data-version changes while
-queued trigger replanning; material changes require user confirmation.
+提交阶段只做廉价校验。长生命周期 planner pool 复用生产 Flow 语义，异步生成不可变 `DataRequirementPlan`/`ExecutionPlan`；执行 worker 只消费该计划，不重读可变页面状态，也不静默生成另一份计划。排队期间相关数据版本发生变化时重新规划；实质变化必须请求用户确认。
 
-Execution uses long-lived workers with bounded process-local, read-only caches.
-Cache keys include authorization scope, source and schema versions, product,
-frequency, fields, partition/window identity, adjustment policy, and relevant
-term-structure/trading-rule versions. Concurrent loads use single-flight within
-a worker. Workers report cache inventory to the daemon in memory only.
+执行使用长生命周期 worker 和有界、进程内、只读缓存。缓存键包含授权范围、数据源和 schema 版本、产品、频率、字段、分区/窗口、复权策略及相关期限结构/交易规则版本。并发加载在单个 worker 内使用 single-flight。worker 只在内存中向 daemon 报告缓存目录。
 
-The scheduler is work-conserving and fair across users. Permission-derived
-priority classes and reserved capacity are evaluated before bounded data
-affinity. Priority never preempts running work. Without competing users, one
-user may burst into otherwise idle workers. Each user may pin one queued job;
-the pin wins over data affinity within that user's queue and is consumed when
-the job starts. Unpinned jobs may be reordered only within bounded look-ahead
-and maximum-wait constraints.
+调度器在用户之间保持工作守恒和公平。先计算由权限决定的优先级和预留容量，再在有界范围内使用数据亲和性；优先级不会抢占运行中的任务。没有竞争用户时，一个用户可以使用空闲 worker。每个用户最多固定一个排队任务；该固定选择在用户自己的队列中优先于数据亲和性，并在任务启动时消耗。未固定任务只能在有限前瞻和最大等待约束内重排。
 
-Working data is pinned while a job runs; reusable cache is LRU/idle-evictable.
-Jobs larger than a normal worker cache budget use an exclusive large-job worker
-and do not leave a reusable cache. Requests above the server hard memory limit
-fail planning. Public immutable market data may be shared across users; private
-data includes its authorization domain in the key.
+任务运行期间固定工作数据；可复用缓存按 LRU/闲置淘汰。超出普通 worker 缓存预算的大任务使用专用大任务 worker，不留下可复用缓存。超过服务器硬内存限制的请求在规划阶段失败。公共不可变行情可以跨用户共享；私有数据必须把授权域放入缓存键。
 
-Each user may have one non-terminal step-mode job. It retains the same worker
-and job identity while paused. Paused work blocks ordinary daemon drain; force
-restart marks it failed. Cooperative cancellation is attempted first; an
-unresponsive worker is killed and replaced, losing only that worker's cache.
+每个用户最多一个非终态 step-mode 任务。暂停时保持同一 worker 和 job 身份；暂停会阻塞普通 daemon 排空，强制重启则标记失败。先协作取消；无响应 worker 被杀死并替换，只损失该 worker 的缓存。
 
-The 7998 manager supports normal, debug, and explicit debug-wait bundle modes.
-API-only restart leaves daemon and running jobs intact. Protocol incompatibility
-requires a drain/restart of the bundle. Native planner/execution children attach
-through VS Code subprocess debugging; external conda engines require opt-in
-debugpy support in their own environments.
+7998 manager 支持普通、调试和显式等待调试的服务组模式。只重启 API 不影响 daemon 和运行任务；协议不兼容必须排空并重启服务组。原生 planner/execution 子进程通过 VS Code subprocess 调试；外部 conda 引擎只有在其环境中显式启用 debugpy 才能调试。
 
-## Consequences
+## 后果
 
-- No public worker port is introduced.
-- The daemon's bounded event broker supplies SSE progress without database
-  writes; SQLite cancellation is the durable fallback and the Unix socket is the
-  immediate notification path.
-- A shared Arrow/mmap cache service is deferred until profiling proves that
-  cross-worker duplicate loading remains material.
-- Identical jobs are not coalesced. Only immutable input data is reused.
-- A future multi-host deployment requires PostgreSQL-style queue locking, a
-  broker, shared artifact storage, and a separately designed distributed cache.
-
+- 不新增公共 worker 端口。
+- daemon 的有界事件 broker 提供 SSE 进度，不写数据库；SQLite 取消标记是持久兜底，Unix socket 用于即时通知。
+- 只有在性能剖析证明跨 worker 的重复加载仍然重要时，才考虑共享 Arrow/mmap 缓存服务。
+- 不合并相同任务，只复用不可变输入数据。
+- 将来若扩展多主机，必须另行设计 PostgreSQL 风格队列锁、broker、共享生成物存储和分布式缓存。

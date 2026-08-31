@@ -632,6 +632,12 @@ struct ResearchAuditObjectPayload: Decodable {
 
 struct ResearchEvidenceDetailEnvelope: Decodable {
     let evidence: ResearchEvidenceDetailPayload
+    let access: ResearchCatalogAccess?
+}
+
+struct ResearchEvidenceResolvedDetail {
+    let evidence: ResearchEvidenceDetailPayload
+    let access: ResearchCatalogAccess?
 }
 
 struct ResearchEvidenceDetailPayload: Decodable {

@@ -11,20 +11,71 @@ from tools.factors.formula_identity import require_frozen_factor
 
 _REF = re.compile(r"^evidence:[a-z_]+:sha256:[0-9a-f]{64}$")
 
+APPLICABILITY_FIELDS = (
+    {
+        "name": "factor_refs", "section": "objects", "label_zh": "因子候选",
+        "type": "string_array", "registration": "factor_execution",
+    },
+    {
+        "name": "factor_set_refs", "section": "objects", "label_zh": "因子集合",
+        "type": "string_array", "registration": "factor_execution",
+    },
+    {
+        "name": "factor_source_refs", "section": "objects", "label_zh": "因子来源",
+        "type": "string_array", "registration": "factor_execution",
+    },
+    {
+        "name": "product_scope_ref", "section": "objects", "label_zh": "产品范围",
+        "type": "reference", "registration": "product_or_group_selection",
+        "reuses": ["product_library_product", "product_path_selection"],
+        "selection": "single",
+    },
+    {
+        "name": "product_group_refs", "section": "environment", "label_zh": "产品组",
+        "type": "string_array", "registration": "product_path_selection",
+    },
+    {
+        "name": "time_window", "section": "environment", "label_zh": "时间范围",
+        "type": "time_window", "registration": "time_range",
+    },
+    {"name": "product_refs", "type": "string_array", "exposed": False},
+    {"name": "sample_refs", "type": "string_array", "exposed": False},
+    {"name": "factor_subjects", "type": "object_array", "exposed": False},
+    {"name": "data_source_refs", "type": "string_array", "exposed": False},
+    {"name": "environment_refs", "type": "string_array", "exposed": False},
+    {"name": "source_refs", "type": "string_array", "exposed": False},
+    {"name": "contract_hash", "type": "sha256", "exposed": False},
+    {"name": "methodology_hash", "type": "sha256", "exposed": False},
+    {"name": "trial_plan_hash", "type": "sha256", "exposed": False},
+    {"name": "run_spec_hash", "type": "sha256", "exposed": False},
+    {"name": "limitations", "type": "string_array", "exposed": False},
+)
+
+
+def applicability_schema() -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "sections": [
+            {"id": "objects", "label_zh": "适用对象"},
+            {"id": "environment", "label_zh": "适用环境"},
+        ],
+        "fields": [dict(field) for field in APPLICABILITY_FIELDS],
+    }
+
 
 def validate_applicability(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("applicability must be an object")
-    allowed = {
-        "product_refs", "source_refs", "factor_refs", "sample_refs",
-        "factor_subjects",
-        "contract_hash", "methodology_hash", "trial_plan_hash",
-        "run_spec_hash", "time_window", "limitations",
-    }
+    allowed = {field["name"] for field in APPLICABILITY_FIELDS}
     unknown = sorted(set(value) - allowed)
     if unknown:
         raise ValueError("unsupported applicability fields: " + ", ".join(unknown))
-    for field in ("product_refs", "source_refs", "factor_refs", "sample_refs", "limitations"):
+    for field in (
+        "product_refs", "source_refs", "factor_refs", "factor_set_refs",
+        "factor_source_refs", "sample_refs",
+        "product_group_refs", "data_source_refs", "environment_refs",
+        "limitations",
+    ):
         items = value.get(field, [])
         if not isinstance(items, list) or not all(isinstance(item, str) and item.strip() for item in items):
             raise ValueError(f"applicability.{field} must be a string array")
@@ -55,20 +106,29 @@ def validate_applicability(value: Any) -> dict[str, Any]:
         )
     if frozen_subjects:
         value = {**value, "factor_subjects": frozen_subjects}
+    if "product_scope_ref" in value:
+        text(value["product_scope_ref"], "applicability.product_scope_ref")
     for field in ("contract_hash", "methodology_hash", "trial_plan_hash", "run_spec_hash"):
         if field in value and not sha(value[field]):
             raise ValueError(f"applicability.{field} must be sha256")
     if not any(value.get(field) for field in (
-        "product_refs", "source_refs", "factor_refs", "sample_refs",
+        "product_refs", "source_refs", "factor_refs", "factor_set_refs",
+        "factor_source_refs", "sample_refs", "product_scope_ref",
+        "product_group_refs", "data_source_refs", "environment_refs",
         "contract_hash", "methodology_hash", "trial_plan_hash", "run_spec_hash",
     )):
         raise ValueError("applicability must declare a non-empty scope")
     if "time_window" in value:
         window = value["time_window"]
-        if not isinstance(window, dict) or set(window) != {"start", "end"}:
+        if (
+            not isinstance(window, dict)
+            or not set(window).issubset({"start", "end"})
+            or not set(window)
+        ):
             raise ValueError("applicability.time_window is invalid")
-        text(window["start"], "applicability.time_window.start")
-        text(window["end"], "applicability.time_window.end")
+        for boundary in ("start", "end"):
+            if boundary in window:
+                text(window[boundary], f"applicability.time_window.{boundary}")
     return json.loads(canonical(value))
 
 

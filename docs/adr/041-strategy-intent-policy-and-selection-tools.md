@@ -1,343 +1,115 @@
-# ADR-041: Strategy intent policies and reusable selection tools
+# ADR-041：策略意图策略与可复用选择工具
 
-- **Date**: 2026-07-23
-- **Status**: Accepted
-- **Related**: ADR-023, ADR-024, ADR-029, ADR-032, ADR-035
+- **日期**：2026-07-23
+- **状态**：已接受；运行时边界与公开入口分别由 ADR-018、ADR-032、ADR-141
+  约束
+- **相关**：ADR-023、ADR-024、ADR-029、ADR-032、ADR-035、ADR-141
 
-## Context
+## 背景
 
-`StrategyIntentPolicy` is currently split across three owners:
+`StrategyIntentPolicy` 曾分散在全局 `strategy_kind -> policy` 注册表、执行期
+的分组/阈值/多空流程，以及只能替换批量路径的
+`strategy_intent_precompute` 回调中。这会让实时和预计算实现漂移，也会把
+分组测试误认为回测引擎的前置条件。
 
-- a global `strategy_kind -> policy` registry used by precomputation;
-- separate executable group, threshold, and long-short flows used during replay;
-- a `StrategyBookPolicies.strategy_intent_precompute` callable that can replace
-  only the batch path.
+Backtrader、Qlib、LEAN 和 Zipline 都把选择、目标配置、再平衡和订单执行
+分开：策略产生目标，订单层根据当前持仓交易差额。FactorTester 采用同一
+语义。
 
-This split permits the live and precomputed implementations to drift. It also
-makes group testing look like a prerequisite of the backtest engine rather than
-one built-in strategy-intent policy.
+## 决策
 
-The established external contracts point to the same separation:
+### StrategyBook 拥有策略解析
 
-- `bt` composes scheduling, selection, weighting, and rebalancing algorithms.
-- Qlib strategies produce target positions; its order generator converts targets
-  into orders.
-- LEAN separates universe/insight production, portfolio targets, and execution.
-- Zipline separates Pipeline factors/screens from target orders.
+`StrategyBookPolicies` 是唯一的策略容器，分别保存每个策略的意图策略、
+组合级协调策略，以及路由、现金可用性和数量计算等运行时覆盖。只有具有
+稳定决策契约和组合语义的插槽才成为可复用工具；需要读取可变账本或订单
+状态的能力仍由运行时边界负责。
 
-The common industry meaning is that selection and entry/exit state do not by
-themselves specify transaction quantity. A strategy produces a desired target;
-the order layer trades the difference from current holdings.
+`StrategyIntentPolicy` 是由 StrategyBook 解析的每策略策略。全局策略类型
+注册表在迁移期只保存内置默认值，预计算专用覆盖不拥有策略语义。
 
-## Decision
+### 一个意图接口、两个执行适配器
 
-### StrategyBook owns policy resolution
+策略意图从上下文产生 `TradeIntent`，相同语义同时供：
 
-`StrategyBookPolicies` remains the one policy container. It distinguishes:
+- 回放/逐步检查的事件适配器；
+- 只对声明可编译策略开放的向量化适配器。
 
-- per-strategy intent policies;
-- book-level coordination policies such as decision merge and hierarchy;
-- ledger/order overrides such as routing, cash availability, and sizing.
+不支持的自定义 Python 逻辑回退到事件适配器，不能静默换成另一套算法。
 
-The container is not itself one flat toolkit. A slot becomes a reusable tool
-only when it has a stable decision contract and useful composition semantics:
+### 可复用策略工具
 
-- intent selection, decision merge, hierarchy constraints, target allocation,
-  and standard capacity/risk constraints are named toolkit components;
-- order routing, cash availability, and pending-order conflict remain runtime
-  boundary hooks because they inspect mutable ledger or order state;
-- target sizing belongs to allocation, while target-to-order conversion and
-  executable capacity remain in the order layer.
+工具分为三类：
 
-`StrategyIntentPolicy` becomes a first-class per-strategy policy resolved by
-the StrategyBook. The global strategy-kind registry remains only as the catalog
-of built-in defaults during migration. A precompute-only override is not the
-owner of strategy semantics.
+- 横截面选择：`screen`、`rank`、`split`、`top`、`bottom`；
+- 再平衡：全目标、买入并持有、成员变化、有界替换，以及未来的换手预算；
+- 配置：等名义、逆波动、等保证金和登记的未来配置器。
 
-### One intent interface, two execution adapters
+内置分组策略的标准计划是筛选、排序、分组、选择、再平衡和配置；向量化
+实现只是同一计划的优化。
 
-A strategy-intent policy produces `TradeIntent` from a strategy context. The
-same policy semantics are used by:
+### 因子角色属于策略
 
-- an event adapter for replay and step inspection;
-- a vectorized adapter for policies that declare a compilable selection plan.
+策略可以绑定 `ranking`、`screen`、`entry`、`exit` 和 `sizing` 角色。分组
+策略至少需要 `ranking`；阈值状态策略使用 `entry`/`exit`，二者可以在未
+显式绑定时有意绑定主因子。
 
-Unsupported custom Python logic falls back to the event adapter. It must never
-silently use a different vectorized algorithm.
+角色因子由 `FactorSignalModule` 计算，意图策略只消费按时间排列的值。
+缺少 entry 值不能开仓，缺少 exit 值不能静默改用排序因子。预计算只能编译
+同一因果转换，不能替换有状态的进入/退出转换。
 
-### Reusable policy tools
+### 分组成员与数量
 
-Policies may compose three tool families:
+进入选中桶产生非零目标，离开产生零目标，仍在桶内也可能改变目标权重。
+产品掩码是分桶后的交集，不得被重新解释为动态排序全集。订单构造仍是
+目标数量减当前数量。
 
-- cross-sectional selection: `screen`, `rank`, `split`, `top`, `bottom`;
-- rebalance: full target, buy-and-hold, membership change, bounded replacement,
-  and later a turnover budget;
-- allocation: equal notional, inverse volatility, equal margin, and registered
-  future allocators.
+### 用户界面与 CLI
 
-The tools own canonical semantics and diagnostics. Built-in group policy is a
-cross-sectional policy whose standard plan is screen, rank, split, select,
-rebalance, and allocate. Its vectorized implementation is an optimization of
-the same plan.
+选定策略拥有自己的配置界面；Web 和 CLI 从后端 manifest 获取策略目录、
+因子角色和策略字段，不同时暴露全部字段。CLI-Anything 只包装真实
+`factortester` HTTP CLI，不能在本地重写策略解析。
 
-### Factor roles belong to a policy
+### 边界策略的统一决策包络
 
-A strategy may bind factors to named roles declared by its selected policy.
-Initial roles are `ranking`, `screen`, `entry`, `exit`, and `sizing`.
+路由、购买力和待处理订单分别使用 `RouteDecision`、`BuyingPowerDecision`
+和 `PendingOrderDecision`，但都遵守同一行为：策略只返回值，不直接修改
+账本、订单队列、待处理索引或资金池；拥有者模块负责校验并原子应用。
 
-- Group policy requires `ranking` and may use `screen` or `sizing`.
-- Threshold-state policy uses `entry` and `exit`, which may reference the same
-  factor for backward compatibility.
+序列化决策至少包括 `policy_id`、版本、动作、稳定原因码、有效时间、输入
+摘要、领域载荷、诊断和实现来源。默认策略和自定义策略走相同校验路径；
+逐步输出摘要，显式 CLI 详情命令才输出完整请求、决策与来源。
 
-Entry and exit factors produce selection or position state. Allocation or a
-`sizing` factor produces target weight. Neither creates an order quantity.
-
-### Factor-role execution and causal state
-
-Role factor evaluation belongs to `FactorSignalModule`, not to an intent
-policy. Precomputed mode may evaluate role factors into causal tables during
-`PRE_REPLAY`; incremental mode updates the same role values from BAR events.
-The intent policy consumes those values in timestamp order.
-
-Entry/exit hysteresis remains a state transition even when its inputs are
-precomputed. A precompute adapter may compile the ordered transitions into a
-target-intent table, but must not replace them with independent vectorized
-comparisons. At each SIGNAL event the event adapter either computes the same
-transition from published role values or applies the compiled intent.
-
-Missing role values are explicit: a missing entry value cannot open a new
-position, and a missing exit value cannot silently fall back to the ranking or
-primary factor to preserve one. Backward compatibility applies only when a
-role is unbound, in which case the policy deliberately binds it to the primary
-factor.
-
-### Group membership and quantity
-
-For group policy, membership change is the entry/exit meaning:
-
-- entering a selected bucket creates a non-zero target;
-- leaving it creates a zero target;
-- remaining selected may still change target weight.
-
-`OrderConstructModule` continues to calculate target quantity minus current
-quantity. Product masks remain a post-bucket intersection and never cause
-reranking.
-
-### User surfaces
-
-The selected intent policy owns its configuration Interface. Web and CLI obtain
-the policy catalog, factor roles, and policy-specific fields from the backend
-manifest. They do not expose every policy field simultaneously.
-
-The CLI-Anything harness wraps the real `factortester` HTTP CLI. It provides
-human-readable and JSON inspection plus workspace mutation commands; it does
-not reimplement policy resolution locally.
-
-### Boundary-policy audit
-
-`StrategyBookPolicies` is a suitable registration and resolution container for
-book-level policies. It is not the execution owner of every registered policy.
-The module that owns a lifecycle transition must call the policy, validate its
-decision, apply it, and publish the corresponding audit output.
-
-The current callable contracts are too weak for that rule:
-
-- `order_routing(state, order) -> ledger` is sufficient only for a pure,
-  deterministic, single-ledger mapping. The result is currently resolved each
-  time `state.ledger_for(order)` is called instead of being frozen. In
-  addition, target-minus-current reads positions through the strategy/product
-  ledger mapping before the order-routing hook runs. A custom route can
-  therefore calculate a delta from one ledger and later book it to another.
-- `cash_availability(state, ledger, cash, reason) -> float` can express a
-  static reserve, but not a buying-power decision over a candidate order
-  batch. It has no explicit timestamp, cash-pool identity, candidate orders,
-  pending reservations, same-batch proceeds, or per-order result. Signal-order
-  funding, execution-order funding, and margin funding are distinct decisions
-  currently multiplexed through an untyped `reason` string.
-- `pending_order_conflict(state, strategy, order, timestamp) -> None` has no
-  decision result. After the hook returns, scheduling unconditionally marks
-  the new order scheduled, overwrites the `(strategy, instrument)` pending
-  index, and emits its event. The hook cannot coherently express reject-new,
-  keep-existing, merge, coexist, or defer. It is also called before the new
-  order receives its planned execution and price timestamps.
-
-There are two ownership problems in addition to those contract problems:
-
-- accounting-ledger assignment and execution-venue routing are different
-  semantics. The former must be known before target-minus-current; the latter,
-  if introduced later, belongs to execution and must not change accounting
-  ownership;
-- generic order scheduling and pending-order resolution currently live in the
-  group-membership module even though threshold, long-short, and custom intent
-  policies need exactly the same order lifecycle.
-
-Finally, these policy objects are not declared Flow inputs and their decisions
-are not structured Flow outputs. Step mode can show the resulting quantity or
-order, but cannot establish which policy ran, what action it selected, or why.
-
-### Uniform decision behavior
-
-Boundary policies use one decision envelope, not one universal business
-payload. `RouteDecision`, `BuyingPowerDecision`, and `PendingOrderDecision`
-retain domain-specific fields, while every decision follows the same behavioral
-contract:
-
-- the policy returns a value and does not directly mutate ledger, order queue,
-  pending index, or cash-pool state;
-- the owning module validates and applies the returned value atomically;
-- the decision is deterministic for the same frozen request and policy
-  configuration;
-- the value is serializable and contains `policy_id`, `policy_version`, a
-  domain action, a stable `reason_code`, a concise reason, effective timestamp,
-  input digest, domain payload, diagnostics, and implementation provenance;
-- the default policy returns the same envelope as a custom policy; there is no
-  invisible special-case path;
-- step output shows a compact decision summary, while an explicit CLI command
-  can print the complete request, decision, and provenance;
-- invalid or incomplete decisions fail before state mutation and identify the
-  policy and rejected field.
-
-The shared envelope is an Interface and audit protocol. It must not become a
-dictionary of optional fields. Domain decisions remain typed dataclasses or
-Protocols with their own validation:
-
-```text
-PolicyDecision envelope
-├── RouteDecision: position_ledger_id
-├── BuyingPowerDecision: cash_pool_id, available amount, order limits
-└── PendingOrderDecision: replace/cancel_new/merge/coexist/defer + result set
-```
-
-### Boundary-policy target design
-
-Accounting ledger ownership is resolved before target conversion:
-
-1. `PositionLedgerPolicy` receives strategy, product, signal timestamp, target
-   intent identity, and declared ledger candidates.
-2. `PositionLedgerModule` validates one declared ledger and freezes the
-   decision in the target/order lineage.
-3. Target-minus-current reads positions from that frozen ledger.
-4. Cash, fee, margin, fill, and settlement consume the same ledger identity;
-   none re-runs the policy.
-
-If venue or broker routing is needed later, a separate execution policy may
-split an already-accounted order into execution children. Those children must
-retain the parent accounting ledger.
-
-Cash handling is separated by decision meaning:
-
-- `CashReservePolicy` is a pure ledger/cash-pool reserve rule and replaces the
-  current simple `cash_availability` use case;
-- `BuyingPowerPolicy` receives one cash pool, all participating ledgers, current
-  positions and reservations, and the complete candidate order batch, then
-  returns allowed per-order quantities or notionals;
-- `MarginFundingPolicy` handles a margin-requirement change and returns paid
-  amount, deficit, and required follow-up action.
-
-Signal-time cash checks remain an early causal estimate. Execution-time checks
-use resolved execution price, slippage, and fee and are authoritative. Both
-group by cash-pool identity rather than ledger object identity.
-
-Pending-order resolution moves to a generic `OrderSchedulingModule`:
-
-1. construct an immutable order draft and resolve its execution/price times;
-2. collect all relevant existing pending orders;
-3. call `PendingOrderPolicy` with the draft, planned timestamps, existing
-   orders, and lifecycle context;
-4. validate the returned result set;
-5. atomically update statuses, pending indexes, event queue, and audit trail.
-
-The first supported actions are `replace`, `cancel_new`, `merge`, `coexist`,
-and `defer`. `coexist` requires a multi-order pending index; it cannot be
-implemented by overwriting the current single `(strategy, instrument)` entry.
-
-### Migration sequence
-
-1. Introduce the decision envelope and domain decision types without changing
-   default behavior.
-2. Add compact step serializers and stable JSON output for the three decision
-   families.
-3. Resolve and freeze accounting-ledger ownership before target conversion;
-   keep the old routing callable behind a compatibility adapter that is invoked
-   exactly once.
-4. Move generic scheduling out of group membership and adapt the legacy
-   pending hook to `replace` semantics. Reject legacy custom hooks whose side
-   effects cannot be represented safely instead of silently guessing intent.
-5. Split cash reserve, buying power, and margin funding. Change batching from
-   ledger identity to cash-pool identity before enabling shared-pool custom
-   policies.
-6. Remove compatibility adapters only after persisted RunSpecs identify the
-   new policy contract version.
-
-The migration must not change fees, margin rules, liquidity limits, DMTM,
-product-mask semantics, or intent-policy target traces.
-
-## Consequences
-
-- Group, threshold, and long-short become peer built-in intent policies.
-- Live and precomputed target traces must be equivalent for every built-in
-  policy and every compilable selection plan.
-- Existing flat settings and `strategy_intent_mode` remain readable through a
-  migration adapter, but new RunSpecs freeze policy identity, factor bindings,
-  policy parameters, and implementation provenance.
-- Policy tools improve leverage while keeping market data, ledger, margin,
-  fees, capacity, and execution in their current owners.
-- A custom policy may sacrifice vectorized speed, but never semantic fidelity.
-
-## Acceptance invariants
-
-- Binding entry and exit to the primary factor reproduces the legacy threshold
-  selection and target trace at every event.
-- Distinct entry/exit factors produce identical selection, target weights, and
-  transition reasons in event and precomputed adapters.
-- Changing factor values after a timestamp cannot change any earlier intent.
-- Flow contracts expose `factor_role_bindings`, `factor_role_values`, and
-  `trade_intent` without undeclared reads; step output summarizes the role
-  values and transition reason.
-- Missing entry values do not enter and missing exit values exit explicitly.
-- Group `screen` values form a timestamp-local eligibility universe before
-  ranking; missing or non-finite values exclude a product. A static
-  `product_mask_names` remains a post-bucket intersection and is not silently
-  reinterpreted as that dynamic universe.
-- Group `sizing` values affect only target weights inside the selected set;
-  missing, non-finite, and non-positive values receive zero weight. Event and
-  precomputed targets and reason codes are identical, and future role values
-  cannot alter an earlier target.
-- Order construction remains target minus current position; fee, margin,
-  liquidity, and DMTM behavior is unchanged.
-
-### Boundary-policy acceptance
-
-- A route-policy spy is called exactly once per target/order lineage. The
-  target delta, signal cash check, execution cash check, fee, fill, settlement,
-  and position snapshot all report the same frozen accounting ledger.
-- Routing to an undeclared ledger fails before cash, fee, queue, or ledger
-  mutation. Route decisions expose policy identity, reason, and provenance in
-  both step and JSON output.
-- Two distinct ledgers sharing one cash pool and submitting simultaneous buys
-  are constrained as one batch. Their combined spend and reservations never
-  exceed the policy decision, irrespective of strategy iteration order.
-- Signal and execution buying-power decisions are separately recorded; the
-  execution decision uses actual execution price, slippage, fee, and pending
-  reservations. Margin funding uses its own typed request and decision.
-- Pending-order tests cover no conflict, replace, cancel-new, merge, coexist,
-  and defer. After each action, the pending index and event queue contain the
-  same live order set and no cancelled or untracked order can execute.
-- Pending policy input includes the new planned execution and price timestamps
-  plus all relevant existing orders. The behavior is identical for group,
-  threshold, long-short, and custom intent policies.
-- Default and custom policies pass the same validation and application path.
-  A policy cannot mutate cash, ledgers, queues, or order status while deciding.
-- Replaying a frozen request with the same policy version produces an identical
-  serialized decision. Changing strategy iteration or dictionary insertion
-  order does not change the result.
-- Step mode prints one compact row per material decision with policy, action,
-  reason, and key amounts/identities. A dedicated CLI detail command prints the
-  full request, result, diagnostics, and provenance without truncation.
-- Existing single-ledger, shared-ledger, fee/slippage/liquidity, margin, DMTM,
-  event-vs-precomputed intent, and equity-curve regression suites remain green.
-
-## References
+账本归属必须在目标转换前解析并冻结，目标、现金、费用、成交、结算和持仓
+都消费同一账本身份。执行场所路由不能反过来改变会计归属。现金储备、购买力
+和保证金资金分别建模；跨账本共享资金池时按资金池而非账本对象聚合。
+
+待处理订单解析迁移到通用 Order Scheduling 模块，先构造不可变订单草稿和
+计划时间，再调用策略并原子更新状态、索引、队列和审计。首批动作是
+`replace`、`cancel_new`、`merge`、`coexist` 和 `defer`。
+
+## 迁移顺序
+
+1. 先加入决策包络和领域类型，不改变默认行为；
+2. 增加紧凑逐步序列化和稳定 JSON；
+3. 在目标转换前冻结会计账本，并让旧路由回调最多调用一次；
+4. 将通用调度从成员模块移出，无法安全表示副作用的旧 hook 拒绝而不是猜测；
+5. 按资金池拆分现金储备、购买力和保证金资金；
+6. 只有持久化 RunSpec 带有新策略契约版本后才删除适配器。
+
+迁移不得改变费用、保证金、流动性、DMTM、产品掩码或目标轨迹。
+
+## 后果与验收
+
+分组、阈值和多空是并列的内置意图策略；实时和预计算的目标轨迹以及原因
+码必须一致。相同冻结请求和策略版本必须得到相同序列化决策，不受策略迭代
+顺序或字典插入顺序影响。
+
+验收还必须覆盖：缺失 entry/exit 值、动态 screen、sizing、单账本与共享资金池、
+费用/滑点/流动性/保证金、待处理订单五类动作，以及默认/自定义策略相同的
+校验和应用路径。逐步输出每个实质决策一行；完整细节通过显式 CLI JSON 查看。
+
+## 参考
 
 - https://pmorissette.github.io/bt/index.html
 - https://github.com/microsoft/qlib/blob/main/docs/component/strategy.rst

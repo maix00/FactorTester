@@ -1,55 +1,44 @@
-# ADR-037: Research Run and Job Persistence Boundary
+# ADR-037：研究运行与任务的持久化边界
 
-## Status
+## 状态
 
-Accepted. Supersedes the lifecycle and persistence decisions in ADR-036.
+已接受，取代 ADR-036 中关于生命周期和持久化的决策。
 
-## Context
+## 背景
 
-An asynchronous research job must remain queryable when its submitting HTTP
-request, browser page, CLI process, or Flask worker disappears. Persisting every
-SSE activity and progress update made SQLite a high-frequency event transport,
-slowed real backtests materially, and still did not make computation resumable.
+异步研究任务必须在提交它的 HTTP 请求、浏览器页面、CLI 进程或 Flask worker 消失后仍可查询。
+把每个 SSE 活动和进度更新都持久化，会把 SQLite 变成高频事件传输层，明显拖慢真实回测，也不能因此
+让计算具备可恢复能力。
 
-The system also needs to distinguish the configuration requested by a user from
-the concrete products, sources, fields, frequencies, and data versions resolved
-for execution.
+系统还必须区分用户请求的配置与执行时解析出的具体产品、数据源、字段、频率和数据版本。
 
-## Decision
+## 决策
 
-Research ownership is `user -> ResearchWorkspace -> ResearchRun -> JobAttempt`.
-A run freezes the requested RunSpec. Each analysis attempt has a `job_id` and a
-compact, immutable ExecutionPlan produced asynchronously before execution.
-Retries create a new attempt; rerunning a complete submission creates a new
-run. A historical configuration never overwrites a workspace that has since
-changed: restoring it creates a new workspace.
+研究所有权链为 `user -> ResearchWorkspace -> ResearchRun -> JobAttempt`。Run 冻结用户请求的
+RunSpec。每次分析尝试拥有一个 `job_id`，并在执行前异步生成紧凑、不可变的 ExecutionPlan。重试创建
+新尝试；重新运行已完成的提交创建新 Run。历史配置不能覆盖后来已经改变的工作区；恢复历史配置时创建
+新工作区。
 
-Jobs are durable and page-independent. Refresh, page close, SSE disconnect, CLI
-exit, and API-only restart do not alter job state. Cancellation is explicit.
-`page_uuid` and `view_uuid` remain transient UI/runtime identities and are not
-job owners or cancellation keys.
+任务是可持久化且与页面无关的。刷新、关闭页面、SSE 断开、CLI 退出和仅 API 重启都不改变任务状态。
+取消必须显式请求。`page_uuid` 与 `view_uuid` 仍是临时 UI/运行时身份，不是任务所有者或取消键。
 
-SQLite WAL stores only low-frequency canonical facts:
+SQLite WAL 只存储低频规范事实：
 
-- run/job identity, owner, workspace, kind, retry chain, and timestamps;
-- frozen RunSpec/hash and compact ExecutionPlan/hash/notices;
-- status, cancellation request/reason, execution/deployment metadata;
-- permission-derived scheduling entitlement and the user's one queue pin;
-- compact result summary or error/traceback;
-- artifact identity, integrity, size, state, and user quota.
+- Run/Job 身份、所有者、工作区、类型、重试链和时间戳；
+- 冻结的 RunSpec/hash，以及紧凑的 ExecutionPlan/hash/notice；
+- 状态、取消请求/原因、执行/部署元数据；
+- 根据权限得出的调度资格和用户的一个队列置顶项；
+- 紧凑结果摘要或错误/traceback；
+- 生成物身份、完整性、大小、状态和用户配额。
 
-SQLite does not store progress, activity, SSE history, activity manifests,
-worker heartbeats, process-slot renewals, cache inventory, DataFrames, complete
-curves/details, or step engine state. Real-time progress and a bounded event
-ring belong to the job daemon. On reconnect the daemon sends its current
-in-memory snapshot; an unavailable cursor produces an explicit reset. Database
-state remains authoritative for lifecycle and terminal summaries.
+SQLite 不存储进度、活动记录、SSE 历史、活动 manifest、Worker 心跳、进程槽位续租、缓存清单、
+DataFrame、完整曲线/详情或 step 引擎状态。实时进度和有界事件环属于任务 daemon。重连时 daemon 发送
+当前内存快照；cursor 不可用时显式发送 reset。数据库状态仍是生命周期和终态摘要的权威。
 
-Job metadata and compact summaries do not expire silently. Users may explicitly
-delete terminal history. Temporary transport/staging files are TTL-managed;
-retained result policy is defined by ADR-039.
+任务元数据和紧凑摘要不会静默过期。用户可以显式删除终态历史。临时传输/暂存文件由 TTL 管理；保留结果
+的策略由 ADR-039 定义。
 
-The state model is:
+状态模型为：
 
 ```text
 submitted -> planning -> awaiting_confirmation -> queued -> running
@@ -59,19 +48,14 @@ submitted -> planning -> awaiting_confirmation -> queued -> running
                                       `---------------------->|-> cancelled
 ```
 
-Normal auto resolution is informational. Semantic fallbacks are warnings.
-Product exclusion, window clipping, or replacement of an explicit source or
-frequency requires confirmation. Unsatisfied requirements fail planning.
+普通 auto 解析只提供信息。语义回退必须是 warning。排除产品、裁剪时间范围，或替换显式数据源/频率都
+必须要求确认；无法满足的要求使 planning 失败。
 
-## Consequences
+## 后果
 
-- Web and CLI use the same workspace/run/job APIs.
-- A personal task view can reconstruct status without browser-local state.
-- Removing database event replay is intentional; progress continuity depends on
-  the live daemon, while lifecycle continuity depends on SQLite.
-- `test_job_events`, persisted latest progress/manifest, view-owned job leases,
-  renewable SQLite process slots, and lifecycle-policy compatibility branches
-  are retired.
-- Step mode remains memory-resident in one worker. API restart is harmless, but
-  daemon restart is not resumable and must fail explicitly.
-
+- Web 和 CLI 使用同一套工作区/Run/Job API。
+- 个人任务视图不依赖浏览器本地状态即可重建生命周期状态。
+- 移除数据库事件回放是有意决策；进度连续性依赖活动 daemon，生命周期连续性依赖 SQLite。
+- `test_job_events`、持久化的最新进度/manifest、视图拥有的任务租约、可续租 SQLite 进程槽位和
+  生命周期策略兼容分支均已退出当前设计。
+- Step 模式仍驻留在单个 Worker 内存中。API 重启不影响它，但 daemon 重启后不可恢复，必须显式失败。

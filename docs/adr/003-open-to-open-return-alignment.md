@@ -1,4 +1,4 @@
-# 003 - OPEN-TO-OPEN 收益率时间对齐验证
+# ADR-003：OPEN-TO-OPEN 收益率时间对齐验证
 
 ## 状态
 

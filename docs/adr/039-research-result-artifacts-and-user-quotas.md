@@ -1,55 +1,27 @@
-# ADR-039: Research Result Artifacts and User Quotas
+# ADR-039：研究结果生成物与用户配额
 
-## Status
+## 状态
 
-Accepted.
+已接受。
 
-## Context
+## 背景
 
-Complete backtest, IC, and evaluation results can contain large curves and
-details. Storing those JSON payloads in SQLite bloats the canonical metadata
-store, while retaining every complete result by default consumes unbounded
-disk. Asynchronous execution still needs a short-lived cross-process delivery
-path even when the user did not request permanent retention.
+完整回测、IC 和评估结果可能包含很大的曲线和明细。把 JSON 直接存进 SQLite 会膨胀规范元数据存储；默认永久保留全部结果又会造成磁盘无界增长。异步执行仍需要短期跨进程传递路径，即使用户没有请求永久保留。
 
-## Decision
+## 决策
 
-Every terminal job retains a compact result summary in SQLite. Complete curves,
-trades, daily details, and diagnostics are retained only when the user explicitly
-requests full-result storage. Large payloads live in a server-managed artifact
-root with staging, temporary, and retained areas. Workers write staging files,
-verify content hashes, and atomically promote them. Web requests never provide
-arbitrary server paths; CLI may download a result to a client-side path.
+每个终态任务在 SQLite 保留紧凑结果摘要。完整曲线、交易、日明细和诊断只有在用户明确请求完整结果存储时才保留。大负载放在服务器管理的生成物根目录，分为 staging、临时和保留区域。worker 写 staging 文件、校验内容哈希，再原子提升为正式生成物。Web 请求不得提交任意服务器路径；CLI 可以把结果下载到客户端指定路径。
 
-Temporary delivery artifacts have a short TTL. Retained artifacts remain until
-the user deletes them or an explicit, visible administrative policy applies.
-Deleting a retained artifact preserves the job, RunSpec, ExecutionPlan, summary,
-and a `deleted_by_user` artifact record.
+临时传递生成物有较短 TTL。保留生成物一直存在，直到用户删除或显式、可见的管理策略生效。删除保留生成物仍保留 Job、RunSpec、ExecutionPlan、摘要以及 `deleted_by_user` 生成物记录。
 
-Each user has a soft retained-byte quota. A job accepted while the user is under
-quota may finish and retain its complete result even if that result exceeds the
-quota. Once actual retained usage exceeds quota:
+每个用户有软性的保留字节配额。任务在用户未超额时被接受，即使最终结果超过配额也允许完成并保留。实际用量超额后：运行中任务继续；排队和规划中的任务以 `storage_quota_exceeded` 取消；暂停任务继续暂停但不能恢复；新提交在用量降回配额前拒绝。
 
-- running jobs continue;
-- queued and planning jobs are cancelled with `storage_quota_exceeded`;
-- paused jobs remain paused but cannot continue;
-- new submissions are rejected until usage returns below quota.
+系统不得静默删除旧结果，也不得把已经接受的任务降级成摘要模式。服务器级硬盘空间阈值仍用于保护主机。配额用量可以由生成物元数据计算，不需要高频字节计数器。
 
-No older result is silently deleted and accepted work is not downgraded to
-summary-only. A server-wide hard free-space threshold still protects the host.
-Artifact metadata is sufficient to calculate usage; no high-frequency byte
-counter is required.
+个人 Web 界面和 CLI 提供用量、配额、最大保留生成物、单任务删除和批量删除，并为配额错误给出简洁修复建议。清理任务只回收遗留 staging/临时文件以及数据库/文件 tombstone，不删除仍被引用的保留文件。
 
-The personal Web interface and CLI expose usage, quota, largest retained
-artifacts, per-job and bulk deletion, and concise remediation for quota errors.
-Cleanup reconciles abandoned staging/temporary files and database/file
-tombstones without deleting retained files that remain referenced.
+## 后果
 
-## Consequences
-
-- SQLite stores artifact metadata and compact summaries, never large result
-  payloads.
-- Full-result retention is an explicit per-job choice, with a run-level default
-  that individual analyses may override.
-- Historical jobs without retained artifacts remain useful for audit, workspace
-  cloning, summary inspection, and explicit rerun.
+- SQLite 只存生成物元数据和紧凑摘要，不存大结果负载。
+- 完整结果保留是逐任务显式选择，运行级默认值可被单个分析覆盖。
+- 没有保留生成物的历史任务仍可用于审计、工作区克隆、摘要查看和显式重跑。
