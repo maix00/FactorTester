@@ -186,10 +186,18 @@
           [...table.body.rows].forEach((row, index) => {
             const item = items[index];
             row.dataset.href = "true";
-            row.addEventListener("click", () => context.navigate(
-              `/researches/${encodeURIComponent(item.research_id)}`,
-              {title: item.research_title || context.t("研究")},
-            ));
+            row.addEventListener("click", () => {
+              const query = item.research_id
+                ? `?research_id=${encodeURIComponent(item.research_id)}` : "";
+              context.navigate(
+                `/research/${encodeURIComponent(item.report_id)}${query}`,
+                {
+                  title: item.report_title || context.t("研究报告"),
+                  parentFolder: "research",
+                  parentResearchID: item.research_id || "",
+                },
+              );
+            });
           });
           content.append(table.shell);
         }
