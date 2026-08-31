@@ -3487,6 +3487,11 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert "window.FTResearchCatalog" in researches
     assert "FTUI.pagedTable" in researches
     assert "/api/research" in researches
+    assert 'title: "我的研究"' in researches
+    assert 'title: "下级用户的研究"' in researches
+    assert 'title: "共享研究"' in researches
+    assert 'nav.className = "research-section-tabs research-root-scopes"' in researches
+    assert "research-section-tab research-root-scope" in researches
     assert "card.append(note, downloadChoices(context, value))" in local_page
     assert 'section.className = "job-section client-download"' not in local_page
     assert 'note.className = "secondary research-graph-list-note"' in graph_list

@@ -133,7 +133,9 @@ struct ResearchDocumentReportView: View {
                             kind: "test",
                             status: "unknown",
                             workspaceID: "",
-                            port: port ?? serverURL.port ?? 8141,
+                            port: port ?? serverURL.port
+                                ?? ManagerConfig.bakedPublicBootstrapEndpoint.port
+                                ?? 7998,
                             profile: profileName,
                             updatedAt: nil,
                             artifactCount: 0
