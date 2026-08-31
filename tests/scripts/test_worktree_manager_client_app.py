@@ -2535,10 +2535,13 @@ def test_manager_navigation_is_role_filtered_and_nests_profiles_under_research(
         item["id"] for item in user_modules["research"]["children"]
     } == {
         "research.graph", "research.profiles",
-        "research.agent-models",
+        "research.agent-models", "research.reports",
     }
     assert "research.researches" not in user_modules["research"]["children"]
-    assert "research.reports" not in user_modules["research"]["children"]
+    assert any(
+        item["id"] == "research.reports"
+        for item in user_modules["research"]["children"]
+    )
     assert "admin_users" not in user_modules
     assert not {"manager", "sqlite_web"} & set(org_modules)
     assert {"manager", "sqlite_web"} <= set(admin_modules)

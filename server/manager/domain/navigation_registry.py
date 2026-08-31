@@ -8,6 +8,15 @@ from typing import Any
 
 _RESEARCH_TABS = (
     {
+        "id": "research.reports",
+        "title": "研究报告",
+        "title_key": "研究报告",
+        "description_key": "浏览本人、下级用户和公开共享的研究报告",
+        "path": "/research?section=reports",
+        "requiresAuth": True,
+        "roles": [],
+    },
+    {
         "id": "research.graph",
         "title": "研究图",
         "title_key": "研究图",

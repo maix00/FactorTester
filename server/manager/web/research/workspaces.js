@@ -1,6 +1,7 @@
 (() => {
   const fallbackSections = [
     ["researches", "研究"],
+    ["reports", "研究报告"],
     ["graph", "研究图"],
     ["profiles", "研究身份"],
     ["agent-models", "智能体模型"],
@@ -15,10 +16,8 @@
     const researchID = params.get("research_id") || "";
     const profileID = params.get("profile") || "";
     const allowedSections = new Set(sections.map(item => item[0]));
-    const selected = requested === "reports"
-      ? "researches"
-      : (allowedSections.has(requested)
-        ? requested : (sections[0]?.[0] || "researches"));
+    const selected = allowedSections.has(requested)
+      ? requested : (sections[0]?.[0] || "researches");
     const embedded = new URLSearchParams(location.search).get("presentation") === "embedded";
     context.activeNav("research");
     context.setHeading(context.t("研究"), context.t(labelFor(selected, sections)));
@@ -64,6 +63,10 @@
           return;
         }
         await window.FTResearchCatalog.render({...context, content: body}, body);
+      } else if (selected === "reports") {
+        await window.FTStaticLoader?.loadGroups?.(["research-reports"]);
+        if (!isCurrent()) return;
+        await FTResearchReports.render(context, body, embedded);
       } else if (selected === "graph") {
         await window.FTStaticLoader?.loadGroups?.(["research-graph"]);
         await FTResearchGraphList.render(context, body);
@@ -87,7 +90,7 @@
       return [section, item.title_key || item.title || section];
     });
     const sections = registered.length ? registered : fallbackSections.slice(1);
-    return [["researches", "研究"], ...sections.filter(item => item[0] !== "researches" && item[0] !== "reports")];
+    return [["researches", "研究"], ...sections.filter(item => item[0] !== "researches")];
   }
 
   function labelFor(section, sections) {
