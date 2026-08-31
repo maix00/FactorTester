@@ -185,9 +185,11 @@
           fragment.source?.source_kind || "—",
           JSON.stringify(fragment.selector || {}),
           fragment.summary_zh || "—",
+          sourceAction(context, state, evidenceRef, fragment),
         ]);
         content.append(rows.length ? FTUI.pagedTable([
-          context.t("摘选"), context.t("来源类型"), context.t("选择器"), context.t("说明"),
+          context.t("摘选"), context.t("来源类型"), context.t("选择器"),
+          context.t("说明"), context.t("操作"),
         ], rows, {pageSize: 20}).shell : FTUI.empty(
           context.t("暂无摘选"), context.t("该 Evidence 尚未登记 fragment"),
         ));
@@ -245,6 +247,33 @@
     } catch (error) {
       mount.replaceChildren(FTUI.empty(context.t("无法读取证据"), error.message));
     }
+  }
+
+  function sourceAction(context, state, evidenceRef, fragment) {
+    const source = fragment?.source || {};
+    if (source.source_kind !== "file") return "—";
+    if (!state.access?.can_download) return context.t("仅可预览");
+    const identity = source.identity || {};
+    if (!identity.object_id || !identity.storage_server_id) {
+      return context.t("文件尚未上传");
+    }
+    const button = context.button(context.t("下载"), async () => {
+      try {
+        const value = await FTResearchObjectTransfer.evidenceBlob(
+          context, evidenceRef, fragment.source_ref,
+        );
+        const link = document.createElement("a");
+        const url = URL.createObjectURL(value.blob);
+        link.href = url;
+        link.download = value.object?.filename || identity.filename || "evidence-file";
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } catch (error) {
+        context.toast?.(error.message, "error");
+      }
+    });
+    button.className = "secondary";
+    return button;
   }
 
   function scopeSummary(value) {

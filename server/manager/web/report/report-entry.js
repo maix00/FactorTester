@@ -13,7 +13,17 @@
       context.tabID || `report:${publicationID}`,
     );
     session.durable ||= {};
-    const reading = session.durable.reportReading ||= {disclosures: {}};
+    session.durable.reportReadingByBranch ||= {};
+    if (!session.durable.reportReadingByBranch[publicationID]) {
+      const isFirstBranch = Object.keys(
+        session.durable.reportReadingByBranch,
+      ).length === 0;
+      session.durable.reportReadingByBranch[publicationID] = isFirstBranch
+        ? (session.durable.reportReading || {disclosures: {}})
+        : {disclosures: {}};
+    }
+    const reading = session.durable.reportReadingByBranch[publicationID];
+    session.durable.reportReading = reading;
     reading.disclosures ||= {};
     context.pageState?.register?.("research-report", {
       capture: () => ({
@@ -56,9 +66,24 @@
       branchPicker.className = "branch-picker";
       branches.forEach(branch => {
         const option = document.createElement("option");
-        option.value = branch.href || branch.branch_ref || "";
+        option.value = branch.publication_id || "";
         option.textContent = branch.title || branch.branch_ref || t("研究路径");
+        option.selected = Boolean(branch.selected)
+          || option.value === publicationID;
         branchPicker.append(option);
+      });
+      branchPicker.setAttribute("aria-label", t("研究路径"));
+      branchPicker.addEventListener("change", () => {
+        const targetPublicationID = branchPicker.value;
+        if (!targetPublicationID || targetPublicationID === publicationID) return;
+        const target = branches.find(branch => (
+          branch.publication_id === targetPublicationID
+        ));
+        if (target?.href) {
+          context.updateActiveTab({path: target.href});
+          history.replaceState(history.state, "", target.href);
+        }
+        render(targetPublicationID, context);
       });
       toolbar.append(branchPicker);
     }

@@ -2,16 +2,16 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import sqlite3
 import json
+import sqlite3
 import threading
 from contextlib import contextmanager
 from types import SimpleNamespace
 from urllib.request import Request, urlopen
 
 import pytest
-import settings as Settings
 
+import settings as Settings
 from server.manager import runtime as manager
 from server.manager.data_plane.context import DataPlaneRuntime
 from server.manager.data_plane.server import ClientDataPlaneHTTPServer
@@ -21,19 +21,26 @@ from server.manager.objects import (
     research_object_id,
     split_research_object_id,
 )
+from server.manager.objects.adapters.evidence_file import EvidenceFileStore
 from server.manager.objects.adapters.factor_source import (
     FactorSourceDestinationAdapter,
     FactorSourceOriginAdapter,
     FactorSourceStore,
 )
+from server.manager.objects.adapters.profile_workspace import (
+    ProfileWorkspaceOriginAdapter,
+)
 from server.manager.objects.adapters.public_research import PublicResearchOriginAdapter
 from server.manager.objects.adapters.public_research_destination import (
     PublicResearchDestinationAdapter,
 )
-from server.manager.objects.adapters.profile_workspace import (
-    ProfileWorkspaceOriginAdapter,
-)
 from server.manager.objects.origin import ObjectOriginRegistry
+from server.manager.services.agent_workspace import ensure_server_profile_workspace
+from server.services.federated_factor_sources import (
+    hydrate_source_free_entries,
+    source_free_context,
+    source_transfer_manifest,
+)
 from tools.cli.release.research_reporting.public_research.library import (
     PublicResearchLibrary,
 )
@@ -43,12 +50,6 @@ from tools.cli.release.research_reporting.public_research.object_store import (
 from tools.cli.release.research_reporting.public_research.object_uploads import (
     detach_object_bytes,
 )
-from server.services.federated_factor_sources import (
-    hydrate_source_free_entries,
-    source_free_context,
-    source_transfer_manifest,
-)
-from server.manager.services.agent_workspace import ensure_server_profile_workspace
 
 
 @pytest.fixture(autouse=True)
@@ -88,6 +89,32 @@ def test_object_reference_normalizes_hash_and_metadata() -> None:
 
     assert value.kind is TransferObjectKind.RESEARCH_ATTACHMENT
     assert value.expected_sha256 == "a" * 64
+
+
+def test_evidence_file_store_promotes_and_resolves_hash_bound_bytes(tmp_path) -> None:
+    raw = b"local evidence\n"
+    digest = hashlib.sha256(raw).hexdigest()
+    object_id = f"evidence-file:v1:{digest}"
+    staged = tmp_path / "staged"
+    staged.write_bytes(raw)
+    store = EvidenceFileStore(tmp_path / "evidence")
+
+    stored = store.store(
+        object_id, staged, size=len(raw), sha256=digest,
+    )
+
+    assert stored.read_bytes() == raw
+    assert store.resolve(object_id, size=len(raw), sha256=digest) == stored
+
+
+def test_evidence_file_store_reports_not_uploaded_separately(tmp_path) -> None:
+    digest = hashlib.sha256(b"missing").hexdigest()
+    store = EvidenceFileStore(tmp_path / "evidence")
+
+    with pytest.raises(FileNotFoundError, match="has not been uploaded"):
+        store.resolve(
+            f"evidence-file:v1:{digest}", size=7, sha256=digest,
+        )
 
 
 def test_public_research_object_store_resolves_attachment_without_base64(
@@ -550,7 +577,7 @@ def test_transient_factor_source_transfer_manifest_adds_canonical_identity() -> 
         "source_access_policy": "transient_run_source",
         "factor_id": "TransientDemo",
         "path": "manager_factor_sources/"
-        + hashlib.sha256("alice:TransientDemo".encode()).hexdigest()
+        + hashlib.sha256(b"alice:TransientDemo").hexdigest()
         + ".py",
         "source_sha256": digest,
         "source_bytes": len(source.encode()),

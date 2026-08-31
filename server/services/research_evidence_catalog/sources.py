@@ -294,6 +294,27 @@ def evidence_contains_job_source(
     )
 
 
+def evidence_source(
+    *, owner: str, evidence_ref: str, source_ref: str,
+) -> dict[str, Any] | None:
+    """Return one source only when it is cited by the requested Evidence."""
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        ensure_schema(conn)
+        row = conn.execute(
+            """SELECT s.*
+                 FROM research_fragment_evidence_objects e,
+                      json_each(e.fragment_refs_json) refs
+                 JOIN research_evidence_fragments f
+                   ON f.fragment_ref=refs.value AND f.owner=e.owner
+                 JOIN research_evidence_sources s
+                   ON s.source_ref=f.source_ref AND s.owner=f.owner
+                WHERE e.owner=? AND e.evidence_ref=? AND s.source_ref=?
+                LIMIT 1""",
+            (owner, evidence_ref, source_ref),
+        ).fetchone()
+    return _source_row(row) if row is not None else None
+
+
 def create_evidence(
     *,
     owner: str,

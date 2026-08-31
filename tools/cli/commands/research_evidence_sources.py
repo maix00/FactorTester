@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
+import mimetypes
 import subprocess
 import time
+from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
@@ -23,6 +24,7 @@ from .research_evidence_common import (
     profile_options,
     read_object,
 )
+
 _MAX_SOURCE_BYTES = 8 * 1024 * 1024
 
 
@@ -182,11 +184,24 @@ def capture_file(
         )
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
-    value = client_from_config().put_research_evidence_source({
+    client = client_from_config()
+    content_type = mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
+    uploaded = client.upload_research_evidence_file(
+        content=content,
+        filename=resolved.name,
+        content_type=content_type,
+        sha256=content_hash,
+    )
+    value = client.put_research_evidence_source({
         "source_kind": "file",
         "identity": {
             "relative_path": relative.as_posix(),
             "content_hash": content_hash,
+            "object_id": uploaded.get("object_id") or f"evidence-file:v1:{content_hash}",
+            "storage_server_id": uploaded.get("storage_server_id") or "",
+            "size_bytes": len(content),
+            "filename": resolved.name,
+            "content_type": content_type,
         },
         "content_hash": content_hash,
         "audit": {"size": len(content), "provenance": provenance},

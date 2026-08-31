@@ -62,5 +62,40 @@
     return result;
   }
 
-  window.FTResearchObjectTransfer = Object.freeze({response, blob});
+  async function evidenceBlob(context, evidenceRef, sourceRef) {
+    const issued = await context.api("/api/transfers/objects/download-access", {
+      method: "POST",
+      body: JSON.stringify({
+        object_kind: "evidence_file",
+        evidence_ref: evidenceRef,
+        source_ref: sourceRef,
+      }),
+    });
+    const access = issued?.access || {};
+    if (!access.url || !access.bearer) {
+      throw new Error(text(context, "证据文件传输授权无效"));
+    }
+    let result;
+    try {
+      result = await fetch(access.url, {
+        credentials: "omit",
+        redirect: "error",
+        headers: new Headers({Authorization: `Bearer ${access.bearer}`}),
+      });
+    } catch (error) {
+      throw new Error(errorMessage(error?.message, text(context, "证据来源离线")));
+    }
+    if (!result.ok) {
+      const value = await result.json().catch(() => ({}));
+      throw new Error(errorMessage(value?.error, text(context, "证据文件下载失败")));
+    }
+    const value = await result.blob();
+    const expected = Number(access.expected_size ?? issued?.object?.size_bytes ?? 0);
+    if (expected > 0 && value.size !== expected) {
+      throw new Error(text(context, "证据文件大小校验失败"));
+    }
+    return {blob: value, object: issued.object || {}};
+  }
+
+  window.FTResearchObjectTransfer = Object.freeze({response, blob, evidenceBlob});
 })();

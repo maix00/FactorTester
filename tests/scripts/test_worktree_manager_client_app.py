@@ -4122,3 +4122,14 @@ def test_report_snapshot_reference_reuses_reference_presentation_seam() -> None:
     assert "headerFor" in reference
     assert "FTReferencePage?.headerFor" in report_entry
     assert "reference-tone-${presentation.tone}" in report_entry
+
+
+def test_report_reader_switches_branches_inside_the_active_report_tab() -> None:
+    report_entry = (
+        ROOT / "server" / "manager" / "web" / "report" / "report-entry.js"
+    ).read_text(encoding="utf-8")
+
+    assert 'branch.publication_id || ""' in report_entry
+    assert 'reportReadingByBranch[publicationID]' in report_entry
+    assert 'context.updateActiveTab({path: target.href})' in report_entry
+    assert 'render(targetPublicationID, context)' in report_entry

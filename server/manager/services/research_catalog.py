@@ -34,6 +34,19 @@ class ResearchCatalog:
     def ensure_schema(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with connect_sqlite(self.db_path) as conn:
+            legacy = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='research_catalog_evidence_links'"
+            ).fetchone()
+            current = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='research_catalog_report_evidence_links'"
+            ).fetchone()
+            if legacy is not None and current is None:
+                raise RuntimeError(
+                    "research catalog requires the explicit Report-Evidence "
+                    "schema migration"
+                )
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS research_catalog_researches (
@@ -92,9 +105,8 @@ class ResearchCatalog:
                     FOREIGN KEY(research_id)
                       REFERENCES research_catalog_researches(research_id)
                 );
-                CREATE TABLE IF NOT EXISTS research_catalog_evidence_links (
+                CREATE TABLE IF NOT EXISTS research_catalog_report_evidence_links (
                     link_ref TEXT PRIMARY KEY,
-                    research_id TEXT NOT NULL,
                     evidence_ref TEXT NOT NULL,
                     evidence_owner_ref TEXT NOT NULL,
                     report_id TEXT NOT NULL,
@@ -106,8 +118,8 @@ class ResearchCatalog:
                     status TEXT NOT NULL,
                     created_at REAL NOT NULL,
                     revoked_at REAL NOT NULL,
-                    FOREIGN KEY(research_id)
-                      REFERENCES research_catalog_researches(research_id)
+                    FOREIGN KEY(report_id)
+                      REFERENCES research_catalog_reports(report_id)
                 );
                 CREATE TABLE IF NOT EXISTS research_catalog_migrations (
                     migration_ref TEXT PRIMARY KEY,
@@ -130,7 +142,7 @@ class ResearchCatalog:
                 CREATE INDEX IF NOT EXISTS idx_research_catalog_report_research
                     ON research_catalog_reports(research_id, updated_at);
                 CREATE INDEX IF NOT EXISTS idx_research_catalog_evidence
-                    ON research_catalog_evidence_links(evidence_ref, status);
+                    ON research_catalog_report_evidence_links(evidence_ref, status);
                 CREATE UNIQUE INDEX IF NOT EXISTS
                     idx_research_catalog_migration_identity
                     ON research_catalog_researches(owner_ref, migration_source)
@@ -427,12 +439,36 @@ class ResearchCatalog:
         self._viewable_research(research_id, viewer=viewer)
         with connect_sqlite(self.db_path, readonly=True) as conn:
             rows = conn.execute(
-                """SELECT * FROM research_catalog_evidence_links
-                   WHERE research_id=? AND status='active'
-                   ORDER BY created_at DESC, link_ref""",
+                """SELECT link.*, report.research_id
+                     FROM research_catalog_report_evidence_links link
+                     JOIN research_catalog_reports report
+                       ON report.report_id=link.report_id
+                    WHERE report.research_id=? AND link.status='active'
+                    ORDER BY link.created_at DESC, link.link_ref""",
                 (research_id,),
             ).fetchall()
         return [self._evidence_link_value(item) for item in rows]
+
+    def research_manifest(
+        self, research_id: str, *, viewer: str | None,
+    ) -> dict[str, Any]:
+        """Return the bounded relationship manifest; never include object bytes."""
+        research = self._viewable_research(research_id, viewer=viewer)
+        reports = self.list_reports(research_id, viewer=viewer)
+        links = self.list_evidence_links(research_id, viewer=viewer)
+        return {
+            "schema_version": 1,
+            "research": research,
+            "reports": reports,
+            "evidence_links": [{
+                **link,
+                "access": self.resolve_evidence_access(
+                    evidence_ref=link["evidence_ref"], viewer=viewer,
+                ),
+            } for link in links],
+            "workspaces": self.list_workspaces(research_id, viewer=viewer),
+            "generated_at": time.time(),
+        }
 
     def update_research(
         self,
@@ -683,7 +719,6 @@ class ResearchCatalog:
             raise ValueError("report is not active")
         owner = _principal(evidence_owner_ref or actor)
         values = {
-            "research_id": research_id,
             "evidence_ref": evidence,
             "evidence_owner_ref": owner,
             "report_id": report,
@@ -700,28 +735,32 @@ class ResearchCatalog:
         with connect_sqlite(self.db_path) as conn:
             existing_owner = conn.execute(
                 """SELECT DISTINCT evidence_owner_ref
-                   FROM research_catalog_evidence_links
+                   FROM research_catalog_report_evidence_links
                    WHERE evidence_ref=? AND status='active'""",
                 (evidence,),
             ).fetchall()
             if any(str(item["evidence_owner_ref"]) != owner for item in existing_owner):
                 raise ValueError("evidence owner does not match existing links")
             conn.execute(
-                """INSERT INTO research_catalog_evidence_links
-                   (link_ref, research_id, evidence_ref, evidence_owner_ref,
+                """INSERT INTO research_catalog_report_evidence_links
+                   (link_ref, evidence_ref, evidence_owner_ref,
                     report_id, graph_ref, branch_ref, job_id, profile_ref,
                     purpose, status, created_at, revoked_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, 0)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, 0)
                    ON CONFLICT(link_ref) DO UPDATE SET status='active', revoked_at=0""",
                 (
-                    link_ref, values["research_id"], values["evidence_ref"],
-                    values["evidence_owner_ref"], values["report_id"],
+                    link_ref, values["evidence_ref"], values["evidence_owner_ref"],
+                    values["report_id"],
                     values["graph_ref"], values["branch_ref"], values["job_id"],
                     values["profile_ref"], values["purpose"], now,
                 ),
             )
             value = conn.execute(
-                "SELECT * FROM research_catalog_evidence_links WHERE link_ref=?",
+                """SELECT link.*, report.research_id
+                     FROM research_catalog_report_evidence_links link
+                     JOIN research_catalog_reports report
+                       ON report.report_id=link.report_id
+                    WHERE link.link_ref=?""",
                 (link_ref,),
             ).fetchone()
         return self._evidence_link_value(value)
@@ -740,8 +779,12 @@ class ResearchCatalog:
         target = _text(evidence_ref, "evidence_ref", maximum=512)
         with connect_sqlite(self.db_path, readonly=True) as conn:
             links = conn.execute(
-                """SELECT * FROM research_catalog_evidence_links
-                   WHERE evidence_ref=? AND status='active'""",
+                """SELECT link.*, report.research_id
+                     FROM research_catalog_report_evidence_links link
+                     JOIN research_catalog_reports report
+                       ON report.report_id=link.report_id
+                    WHERE link.evidence_ref=? AND link.status='active'
+                      AND report.status='active'""",
                 (target,),
             ).fetchall()
         if not links:
@@ -780,7 +823,7 @@ class ResearchCatalog:
         with connect_sqlite(self.db_path, readonly=True) as conn:
             row = conn.execute(
                 """SELECT evidence_owner_ref
-                   FROM research_catalog_evidence_links
+                   FROM research_catalog_report_evidence_links
                    WHERE evidence_ref=? AND status='active'
                    ORDER BY created_at DESC, link_ref LIMIT 1""",
                 (target,),
@@ -803,6 +846,9 @@ class ResearchCatalog:
         making request-time reads mutate the catalog.
         """
         principal = _principal(actor)
+        canonical_report_ids, legacy_report_ids = _canonical_migration_report_ids(
+            records, principal,
+        )
         counts = {"seen": 0, "migrated": 0, "already_migrated": 0, "failed": 0}
         results: list[dict[str, Any]] = []
         for item in records:
@@ -814,7 +860,13 @@ class ResearchCatalog:
             source_kind = str(item.get("source_kind") or item.get("source") or "report")
             source_ref = str(item.get("source_ref") or item.get("report_id") or "").strip()
             owner = str(item.get("owner_ref") or principal).strip()
-            report_id = str(item.get("report_id") or source_ref).strip()
+            report_id = canonical_report_ids.get(
+                _migration_work_package_key(item, principal),
+                legacy_report_ids.get(
+                    str(item.get("report_id") or "").strip(),
+                    str(item.get("report_id") or source_ref).strip(),
+                ),
+            )
             if not source_ref or not report_id or owner != principal:
                 counts["failed"] += 1
                 results.append({
@@ -858,7 +910,11 @@ class ResearchCatalog:
         source_ref: str,
         report_id: str,
     ) -> dict[str, Any]:
-        migration_key = f"{source_kind}:{source_ref}:{actor}"
+        # Branches and replicated/public projections are provenance of one
+        # Report, not separate Research roots.  The durable Research identity
+        # therefore follows owner + report_id; each source still receives its
+        # own idempotent migration receipt below.
+        migration_key = f"report:{actor}:{report_id}"
         research_id = "research:migrated:" + hashlib.sha256(
             migration_key.encode("utf-8")
         ).hexdigest()[:32]
@@ -907,7 +963,7 @@ class ResearchCatalog:
                      completed_at=0""",
                 (
                     "research-migration:v1:" + hashlib.sha256(
-                        migration_key.encode("utf-8")
+                        f"{source_kind}\x1f{source_ref}\x1f{actor}".encode()
                     ).hexdigest(),
                     source_kind, source_ref, actor, research_id, now,
                 ),
@@ -924,13 +980,24 @@ class ResearchCatalog:
                 profile_ref=profile_ref,
                 role="owner",
             )
-            workspace = self.create_workspace(
-                research_id,
-                actor=actor,
-                principal_ref=str(item.get("profile_owner_ref") or actor),
-                profile_ref=profile_ref,
-                title=f"{title} / {profile_ref}",
+            existing_workspaces = self.list_workspaces(
+                research_id, viewer=actor,
             )
+            workspace = next(
+                (
+                    value for value in existing_workspaces
+                    if str(value.get("profile_ref") or "") == profile_ref
+                ),
+                None,
+            )
+            if workspace is None:
+                workspace = self.create_workspace(
+                    research_id,
+                    actor=actor,
+                    principal_ref=str(item.get("profile_owner_ref") or actor),
+                    profile_ref=profile_ref,
+                    title=f"{title} / {profile_ref}",
+                )
             workspace_id = str(workspace["workspace_id"])
         self.register_report(
             research_id,
@@ -1248,6 +1315,52 @@ def _stronger_access(*values: dict[str, Any] | None) -> dict[str, Any]:
             int(bool(value.get("can_manage"))),
         ),
     )
+
+
+def _migration_work_package_key(
+    item: dict[str, Any], owner: str,
+) -> tuple[str, str, str] | None:
+    """Identify legacy Branches that belong to the same Work Package."""
+    package_id = str(
+        item.get("work_package_id") or item.get("record_id") or ""
+    ).strip()
+    if not package_id:
+        return None
+    profile_ref = str(
+        item.get("profile_ref") or item.get("profile_id") or ""
+    ).strip()
+    return owner, profile_ref, package_id
+
+
+def _canonical_migration_report_ids(
+    records: list[dict[str, Any]], owner: str,
+) -> tuple[dict[tuple[str, str, str] | None, str], dict[str, str]]:
+    """Collapse old per-Branch report IDs without splitting the Work Package."""
+    grouped: dict[tuple[str, str, str], set[str]] = {}
+    for item in records:
+        if not isinstance(item, dict):
+            continue
+        key = _migration_work_package_key(item, owner)
+        report_id = str(item.get("report_id") or "").strip()
+        if key is not None and report_id:
+            grouped.setdefault(key, set()).add(report_id)
+    result: dict[tuple[str, str, str] | None, str] = {}
+    aliases: dict[str, set[str]] = {}
+    for key, report_ids in grouped.items():
+        if len(report_ids) == 1:
+            result[key] = next(iter(report_ids))
+            continue
+        stable_key = "\x1f".join(key)
+        result[key] = "report-migrated-" + hashlib.sha256(
+            stable_key.encode()
+        ).hexdigest()[:24]
+        for legacy_report_id in report_ids:
+            aliases.setdefault(legacy_report_id, set()).add(result[key])
+    return result, {
+        legacy_report_id: next(iter(canonical_ids))
+        for legacy_report_id, canonical_ids in aliases.items()
+        if len(canonical_ids) == 1
+    }
 
 
 def _principal(value: Any) -> str:

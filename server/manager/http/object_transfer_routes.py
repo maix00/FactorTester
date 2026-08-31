@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 
+from scripts.data_dir import CACHE_DB_PATH
 from server.manager.http.responses import json_response
+from server.manager.objects.adapters.evidence_file import EvidenceFileStore
 from server.manager.objects.adapters.factor_source import FactorSourceStore
 from server.manager.objects.models import TransferObjectKind
 from server.manager.objects.references import research_object_id
@@ -12,14 +14,13 @@ from server.manager.services.federated_public_data import VISITOR_PRINCIPAL
 from server.manager.services.profile_workspace_browser import (
     ProfileWorkspaceError,
 )
+from server.manager.transfers.peer_gateway import PeerControlError
+from server.manager.transfers.planner import NodeUnavailable
+from server.services.research_evidence_catalog import evidence_source
 from tools.cli.release.research_reporting.public_research.object_store import (
     PublicResearchObjectStore,
 )
-from server.manager.transfers.peer_gateway import PeerControlError
-from server.manager.transfers.planner import NodeUnavailable
 from tools.data.account_manage import can_view_user_scope
-from scripts.data_dir import CACHE_DB_PATH
-
 
 _ACCESS_PATH = "/api/transfers/objects/access"
 _DOWNLOAD_ACCESS_PATH = "/api/transfers/objects/download-access"
@@ -28,9 +29,13 @@ _RESEARCH_KINDS = frozenset({
     TransferObjectKind.RESEARCH_ATTACHMENT.value,
     TransferObjectKind.RESEARCH_LOCAL_RESOURCE.value,
 })
+_UPLOADABLE_KINDS = _RESEARCH_KINDS | frozenset({
+    TransferObjectKind.EVIDENCE_FILE.value,
+})
 _DOWNLOADABLE_KINDS = _RESEARCH_KINDS | frozenset({
     TransferObjectKind.PROFILE_WORKSPACE.value,
     TransferObjectKind.FACTOR_SOURCE.value,
+    TransferObjectKind.EVIDENCE_FILE.value,
 })
 
 
@@ -58,7 +63,48 @@ class ObjectTransferRoutesMixin:
             object_kind = str(payload.get("object_kind") or "").strip()
             if object_kind not in _DOWNLOADABLE_KINDS:
                 raise ValueError("object kind is not downloadable")
-            if object_kind == TransferObjectKind.PROFILE_WORKSPACE.value:
+            if object_kind == TransferObjectKind.EVIDENCE_FILE.value:
+                if session is None:
+                    raise PermissionError("login required")
+                evidence_ref = str(payload.get("evidence_ref") or "").strip()
+                source_ref = str(payload.get("source_ref") or "").strip()
+                catalog = getattr(self.state, "research_catalog", None)
+                if catalog is None:
+                    raise RuntimeError("Research catalog is unavailable")
+                access_decision = catalog.resolve_evidence_access(
+                    evidence_ref=evidence_ref, viewer=principal,
+                )
+                try:
+                    evidence_owner = catalog.evidence_owner_ref(evidence_ref)
+                except KeyError:
+                    evidence_owner = principal
+                source = evidence_source(
+                    owner=evidence_owner,
+                    evidence_ref=evidence_ref,
+                    source_ref=source_ref,
+                )
+                if source is not None and evidence_owner == principal:
+                    access_decision = {
+                        "can_view": True, "can_preview": True,
+                        "can_download": True, "can_manage": True,
+                        "access_basis": "owner",
+                    }
+                if not access_decision.get("can_download"):
+                    raise PermissionError("Evidence file download is not authorized")
+                if source is None or source.get("source_kind") != "file":
+                    raise KeyError("Evidence does not cite this file source")
+                identity = source.get("identity") or {}
+                object_id = str(identity.get("object_id") or "").strip()
+                expected_size = int(identity.get("size_bytes") or 0)
+                expected_sha256 = str(source.get("content_hash") or "").lower()
+                storage_server_id = str(identity.get("storage_server_id") or "").strip()
+                if not object_id or not storage_server_id:
+                    raise FileNotFoundError("Evidence file has not been uploaded")
+                metadata = {
+                    "filename": identity.get("filename") or "evidence-file",
+                    "content_type": identity.get("content_type") or "application/octet-stream",
+                }
+            elif object_kind == TransferObjectKind.PROFILE_WORKSPACE.value:
                 if session is None:
                     raise PermissionError("login required")
                 profile_id = str(payload.get("profile_id") or "").strip()
@@ -157,6 +203,13 @@ class ObjectTransferRoutesMixin:
         except PermissionError as exc:
             json_response(self, {"success": False, "error": str(exc)}, 403)
             return True
+        except FileNotFoundError as exc:
+            json_response(self, {
+                "success": False,
+                "code": "evidence_source_unavailable",
+                "error": str(exc),
+            }, 409)
+            return True
         except (ProfileWorkspaceError, TypeError, ValueError, KeyError) as exc:
             json_response(self, {"success": False, "error": str(exc)}, 404)
             return True
@@ -188,8 +241,54 @@ class ObjectTransferRoutesMixin:
         try:
             payload = self._json_body(256 * 1024)
             object_kind = str(payload.get("object_kind") or "").strip()
-            if object_kind not in _RESEARCH_KINDS:
+            if object_kind not in _UPLOADABLE_KINDS:
                 raise ValueError("object kind is not uploadable")
+            if object_kind == TransferObjectKind.EVIDENCE_FILE.value:
+                if session is None:
+                    raise PermissionError("login required")
+                owner = str(session.get("username") or "").strip()
+                expected_size = int(payload.get("size_bytes"))
+                expected_sha256 = str(payload.get("sha256") or "").strip().lower()
+                object_id = str(
+                    payload.get("object_id")
+                    or f"evidence-file:v1:{expected_sha256}"
+                ).strip()
+                EvidenceFileStore.digest_from_id(object_id)
+                if not object_id.endswith(expected_sha256):
+                    raise ValueError("Evidence file object id does not match its hash")
+                storage_server_id = str(
+                    payload.get("storage_server_id") or self.state.server_id
+                ).strip()
+                if storage_server_id != self.state.server_id:
+                    raise ValueError("Evidence file upload must target this Manager")
+                filename = _filename(payload.get("filename"))
+                idempotency = str(
+                    self.headers.get("Idempotency-Key")
+                    or f"evidence-file-upload:{owner}:{expected_sha256}"
+                ).strip()
+                access = self._rewrite_client_data_access(
+                    self.state.prepare_object_upload(
+                        principal=owner,
+                        storage_server_id=storage_server_id,
+                        object_kind=object_kind,
+                        object_id=object_id,
+                        filename=filename,
+                        expected_size=expected_size,
+                        expected_sha256=expected_sha256,
+                        idempotency_key=idempotency,
+                        content_type=str(payload.get("content_type") or "application/octet-stream"),
+                    )
+                )
+                json_response(self, {
+                    "success": True,
+                    "object": {
+                        "object_kind": object_kind, "object_id": object_id,
+                        "size_bytes": expected_size, "sha256": expected_sha256,
+                        "storage_server_id": storage_server_id,
+                    },
+                    "access": access,
+                }, 201)
+                return True
             publication_id = str(payload.get("publication_id") or "").strip()
             object_id = str(payload.get("object_id") or "").strip()
             if not publication_id or not object_id:

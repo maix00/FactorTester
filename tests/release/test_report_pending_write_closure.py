@@ -78,7 +78,7 @@ def test_pending_source_cannot_be_forked(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="submission_sequence 1"):
         fork_report_tree(
             package_root=package, source_branch_id="main",
-            target_branch_id="fork", target_report_id="report-fork",
+            target_branch_id="fork", target_report_id="report-wp",
         )
     assert not (
         package / "branches" / "fork" / "authoring" / "HEAD.json"

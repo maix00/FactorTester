@@ -13,6 +13,7 @@ struct ResearchDocumentReferenceOverlay: View {
     @Environment(\.dismiss) private var dismiss
     @State private var payload: ResearchAuditObjectPayload?
     @State private var evidenceDetail: ResearchEvidenceDetailPayload?
+    @State private var evidenceAccess: ResearchCatalogAccess?
     @State private var registryObjectJSON: String?
     @State private var isLoading = false
     @State private var error: String?
@@ -39,6 +40,7 @@ struct ResearchDocumentReferenceOverlay: View {
                     if let evidenceDetail {
                         ResearchDocumentEvidenceFragmentList(
                             detail: evidenceDetail,
+                            canDownload: evidenceAccess?.canDownload ?? false,
                             reportRef: reportRef,
                             openJob: openJobSource
                         )
@@ -126,15 +128,20 @@ struct ResearchDocumentReferenceOverlay: View {
             if let objectHref {
                 payload = try await service.auditObject(href: objectHref)
                 if reference.kind == "evidence" {
-                    evidenceDetail = try? await service.evidence(
+                    if let resolved = try? await service.evidenceDetail(
                         reference: reference.targetRef
-                    )
+                    ) {
+                        evidenceDetail = resolved.evidence
+                        evidenceAccess = resolved.access
+                    }
                 }
             } else {
                 if reference.kind == "evidence" {
-                    evidenceDetail = try await service.evidence(
+                    let resolved = try await service.evidenceDetail(
                         reference: reference.targetRef
                     )
+                    evidenceDetail = resolved.evidence
+                    evidenceAccess = resolved.access
                 } else {
                     registryObjectJSON = try await service.frozenObjectJSON(
                         reference: reference

@@ -129,6 +129,46 @@ def test_report_migration_is_explicit_and_idempotent(tmp_path):
     assert detail["evidence_links"][0]["evidence_ref"].startswith("evidence:job:")
 
 
+def test_report_branches_and_replicas_migrate_into_one_research(tmp_path):
+    catalog = ResearchCatalog(tmp_path / "research.sqlite")
+    records = [{
+        "source_kind": "client", "source_ref": "maxa:package:branch-a",
+        "owner_ref": "alice", "report_id": "legacy-branch-report-a",
+        "record_id": "package", "title": "动量研究",
+        "profile_ref": "maxa", "build_source": "client",
+    }, {
+        "source_kind": "server_agent", "source_ref": "maxa:package:branch-b",
+        "owner_ref": "alice", "report_id": "legacy-branch-report-b",
+        "work_package_id": "package", "title": "动量研究",
+        "profile_ref": "maxa", "build_source": "server_agent",
+    }, {
+        "source_kind": "publication", "source_ref": "publication-1",
+        "owner_ref": "alice", "report_id": "legacy-branch-report-b",
+        "title": "动量研究", "profile_ref": "maxa",
+        "build_source": "server_agent",
+    }]
+
+    result = catalog.migrate_reports(records, actor="alice")
+
+    assert result["counts"]["migrated"] == 3
+    assert len({item["research_id"] for item in result["items"]}) == 1
+    assert len({item["report_id"] for item in result["items"]}) == 1
+    researches = catalog.list_researches(viewer="alice")
+    assert len(researches) == 1
+    assert researches[0]["title"] == "动量研究"
+    assert len(catalog.list_reports(researches[0]["research_id"], viewer="alice")) == 1
+
+
+def test_legacy_evidence_link_schema_requires_explicit_migration(tmp_path):
+    database = tmp_path / "research.sqlite"
+    import sqlite3
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE research_catalog_evidence_links(link_ref TEXT)")
+
+    with pytest.raises(RuntimeError, match="explicit Report-Evidence"):
+        ResearchCatalog(database)
+
+
 def test_canonical_report_scope_inherits_research_membership_and_keeps_research_metadata(
     tmp_path,
 ):

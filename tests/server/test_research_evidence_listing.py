@@ -108,27 +108,26 @@ def test_research_evidence_is_derived_only_from_report_bindings(
     _evidence(0)
     evidence_ref = list_evidence_page(owner="alice")["items"][0]["evidence_ref"]
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        conn.execute("""CREATE TABLE research_catalog_evidence_links (
-            link_ref TEXT PRIMARY KEY, research_id TEXT, evidence_ref TEXT,
+        conn.execute("""CREATE TABLE research_catalog_reports (
+            report_id TEXT PRIMARY KEY, research_id TEXT, title TEXT
+        )""")
+        conn.execute("""CREATE TABLE research_catalog_report_evidence_links (
+            link_ref TEXT PRIMARY KEY, evidence_ref TEXT,
             evidence_owner_ref TEXT, report_id TEXT, graph_ref TEXT,
             branch_ref TEXT, job_id TEXT, profile_ref TEXT, purpose TEXT,
             status TEXT, created_at REAL, revoked_at REAL
         )""")
-        base = (
-            "research-1", evidence_ref, "alice", "", "", "", "", "", "",
-            "active", 1.0, 0.0,
+        conn.executemany(
+            "INSERT INTO research_catalog_reports VALUES (?, ?, ?)",
+            [("report-a", "research-1", "A"), ("report-b", "research-1", "B")],
         )
         conn.execute(
-            "INSERT INTO research_catalog_evidence_links VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("direct", *base),
+            "INSERT INTO research_catalog_report_evidence_links VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("report-1", evidence_ref, "alice", "report-a", "", "", "", "", "claim", "active", 2.0, 0.0),
         )
         conn.execute(
-            "INSERT INTO research_catalog_evidence_links VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("report-1", "research-1", evidence_ref, "alice", "report-a", "", "", "", "", "claim", "active", 2.0, 0.0),
-        )
-        conn.execute(
-            "INSERT INTO research_catalog_evidence_links VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("report-2", "research-1", evidence_ref, "alice", "report-b", "", "", "", "", "claim", "active", 3.0, 0.0),
+            "INSERT INTO research_catalog_report_evidence_links VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("report-2", evidence_ref, "alice", "report-b", "", "", "", "", "claim", "active", 3.0, 0.0),
         )
 
     result = list_research_evidence_page(owner="alice", research_id="research-1")
@@ -145,17 +144,21 @@ def test_research_evidence_projection_reads_member_owned_evidence(
     _evidence(0)
     evidence_ref = list_evidence_page(owner="alice")["items"][0]["evidence_ref"]
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        conn.execute("""CREATE TABLE research_catalog_evidence_links (
-            link_ref TEXT PRIMARY KEY, research_id TEXT, evidence_ref TEXT,
+        conn.execute("""CREATE TABLE research_catalog_reports (
+            report_id TEXT PRIMARY KEY, research_id TEXT, title TEXT
+        )""")
+        conn.execute("INSERT INTO research_catalog_reports VALUES ('report-a', 'research-1', 'A')")
+        conn.execute("""CREATE TABLE research_catalog_report_evidence_links (
+            link_ref TEXT PRIMARY KEY, evidence_ref TEXT,
             evidence_owner_ref TEXT, report_id TEXT, graph_ref TEXT,
             branch_ref TEXT, job_id TEXT, profile_ref TEXT, purpose TEXT,
             status TEXT, created_at REAL, revoked_at REAL
         )""")
         conn.execute(
-            "INSERT INTO research_catalog_evidence_links VALUES "
-            "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO research_catalog_report_evidence_links VALUES "
+            "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                "report-link", "research-1", evidence_ref, "alice", "report-a",
+                "report-link", evidence_ref, "alice", "report-a",
                 "", "", "", "", "claim", "active", 1.0, 0.0,
             ),
         )
@@ -174,17 +177,21 @@ def test_research_evidence_projection_uses_canonical_access_resolver(
     _evidence(0)
     evidence_ref = list_evidence_page(owner="alice")["items"][0]["evidence_ref"]
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        conn.execute("""CREATE TABLE research_catalog_evidence_links (
-            link_ref TEXT PRIMARY KEY, research_id TEXT, evidence_ref TEXT,
+        conn.execute("""CREATE TABLE research_catalog_reports (
+            report_id TEXT PRIMARY KEY, research_id TEXT, title TEXT
+        )""")
+        conn.execute("INSERT INTO research_catalog_reports VALUES ('report-a', 'research-1', 'A')")
+        conn.execute("""CREATE TABLE research_catalog_report_evidence_links (
+            link_ref TEXT PRIMARY KEY, evidence_ref TEXT,
             evidence_owner_ref TEXT, report_id TEXT, graph_ref TEXT,
             branch_ref TEXT, job_id TEXT, profile_ref TEXT, purpose TEXT,
             status TEXT, created_at REAL, revoked_at REAL
         )""")
         conn.execute(
-            "INSERT INTO research_catalog_evidence_links VALUES "
-            "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO research_catalog_report_evidence_links VALUES "
+            "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                "report-link", "research-1", evidence_ref, "alice", "report-a",
+                "report-link", evidence_ref, "alice", "report-a",
                 "", "", "", "", "claim", "active", 1.0, 0.0,
             ),
         )

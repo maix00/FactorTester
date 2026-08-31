@@ -293,5 +293,21 @@ def register_research_catalog_commands(research: click.Group) -> None:
             raise click.ClickException("迁移文件必须是报告数组或 {records: []}")
         click.echo(_json(client_from_config().migrate_research_reports(records)))
 
+    @research.command("migrate-existing-reports")
+    @click.option("--apply", is_flag=True, help="执行计划；省略时只显示发现结果。")
+    @friendly_errors
+    def migrate_existing_reports(apply: bool) -> None:
+        """发现客户端、服务器 Agent 与公共发布中的旧报告并显式迁移。"""
+        click.echo(_json(
+            client_from_config().discover_research_report_migration(apply=apply)
+        ))
+
+    @research.command("manifest")
+    @click.argument("research_id")
+    @friendly_errors
+    def manifest(research_id: str) -> None:
+        """读取共享 Research 的精简关系清单（不下载正文或生成物）。"""
+        click.echo(_json(client_from_config().research_manifest(research_id)))
+
 
 __all__ = ["register_research_catalog_commands"]

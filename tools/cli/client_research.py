@@ -95,6 +95,11 @@ class ResearchClientMixin(ClientMixinBase):
             "/api/research/migrations/reports", {"records": records},
         ))
 
+    def discover_research_report_migration(self, *, apply: bool = False) -> dict[str, Any]:
+        return self._expect_success(self.session.post(
+            "/api/research/migrations/reports/discover", {"apply": bool(apply)},
+        ))
+
     def list_research_reports(
         self, *, scope: str = "all", include_archived: bool = False,
     ) -> dict[str, Any]:
@@ -108,6 +113,12 @@ class ResearchClientMixin(ClientMixinBase):
         return self._expect_success(self.session.get(
             "/api/research/reports", query=query,
         ))
+
+    def research_manifest(self, research_id: str) -> dict[str, Any]:
+        data = self._expect_success(self.session.get(
+            self._research_url(research_id, "/manifest"),
+        ))
+        return dict(data.get("manifest") or {})
 
     def research_report_catalog(self, *, scope: str) -> dict[str, Any]:
         """Backward-compatible method name using the canonical API."""

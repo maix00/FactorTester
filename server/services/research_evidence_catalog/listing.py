@@ -112,24 +112,24 @@ def list_evidence_relationship_page(
         ).fetchone()
         if exists is None:
             raise KeyError("research Evidence not found")
-        if not _table_exists(conn, "research_catalog_evidence_links"):
+        if not _table_exists(conn, "research_catalog_report_evidence_links"):
             return _empty_page(selected_page, selected_size)
         total = int(conn.execute(
             """SELECT COUNT(*) AS count
-                 FROM research_catalog_evidence_links
+                 FROM research_catalog_report_evidence_links
                 WHERE evidence_ref=? AND evidence_owner_ref=?
                   AND report_id<>'' AND status='active'""",
             (target, owner),
         ).fetchone()["count"])
         rows = conn.execute(
-            """SELECT link.*,
+            """SELECT link.*, report.research_id,
                       research.title AS research_title,
                       report.title AS report_title
-                 FROM research_catalog_evidence_links link
-                 LEFT JOIN research_catalog_researches research
-                   ON research.research_id=link.research_id
-                 LEFT JOIN research_catalog_reports report
+                 FROM research_catalog_report_evidence_links link
+                 JOIN research_catalog_reports report
                    ON report.report_id=link.report_id
+                 LEFT JOIN research_catalog_researches research
+                   ON research.research_id=report.research_id
                 WHERE link.evidence_ref=? AND link.evidence_owner_ref=?
                   AND link.report_id<>'' AND link.status='active'
                 ORDER BY link.created_at DESC, link.link_ref
@@ -178,10 +178,11 @@ def list_research_evidence_page(
     target = str(research_id or "").strip()
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         ensure_schema(conn)
-        if not _table_exists(conn, "research_catalog_evidence_links"):
+        if not _table_exists(conn, "research_catalog_report_evidence_links"):
             return _empty_page(selected_page, selected_size)
-        grouped = """FROM research_catalog_evidence_links link
-            WHERE link.research_id=? AND link.report_id<>''
+        grouped = """FROM research_catalog_report_evidence_links link
+            JOIN research_catalog_reports report ON report.report_id=link.report_id
+            WHERE report.research_id=?
               AND link.status='active'
             GROUP BY link.evidence_owner_ref, link.evidence_ref"""
         total = int(conn.execute(
