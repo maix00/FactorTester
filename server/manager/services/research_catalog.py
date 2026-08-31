@@ -222,20 +222,43 @@ class ResearchCatalog:
         subordinate_set = {
             str(item or "").strip() for item in subordinate_refs if str(item or "").strip()
         }
+        viewer_ref = str(viewer or "").strip()
         self.ensure_schema()
         with connect_sqlite(self.db_path, readonly=True) as conn:
             rows = conn.execute(
-                "SELECT * FROM research_catalog_researches ORDER BY updated_at DESC, research_id"
+                """SELECT research.*,
+                          membership.role AS viewer_member_role,
+                          membership.status AS viewer_member_status
+                     FROM research_catalog_researches AS research
+                     LEFT JOIN research_catalog_memberships AS membership
+                       ON membership.research_id=research.research_id
+                      AND membership.principal_ref=?
+                      AND membership.status='active'
+                    ORDER BY research.updated_at DESC, research.research_id""",
+                (viewer_ref,),
             ).fetchall()
         result = []
         for row in rows:
             if not include_archived and row["status"] == "archived":
                 continue
-            access = self._research_access(row, viewer)
+            membership = None
+            if row["viewer_member_status"]:
+                membership = {
+                    "role": row["viewer_member_role"],
+                    "status": row["viewer_member_status"],
+                }
+            access = self._research_access_values(
+                research_id=str(row["research_id"]),
+                owner=str(row["owner_ref"]),
+                status=str(row["status"]),
+                visibility=str(row["visibility"]),
+                authorized_users_json=row["authorized_users_json"],
+                viewer=viewer_ref,
+                membership=membership,
+            )
             if not access["can_view"]:
                 continue
             owner = str(row["owner_ref"])
-            viewer_ref = str(viewer or "").strip()
             if selected_scope == "mine" and owner != viewer_ref:
                 continue
             if selected_scope == "subordinates" and owner not in subordinate_set:
@@ -307,6 +330,96 @@ class ResearchCatalog:
                 (research_id,),
             ).fetchall()
         return [self._report_value(item, viewer=viewer) for item in rows]
+
+    def list_reports_for_scope(
+        self,
+        *,
+        viewer: str | None,
+        scope: str = "all",
+        subordinate_refs: list[str] | tuple[str, ...] | set[str] = (),
+        include_archived: bool = False,
+    ) -> list[dict[str, Any]]:
+        """List visible Reports through the canonical Research projection.
+
+        This is a metadata-only reader for the root Research > Reports view.
+        It deliberately joins the Research row in one query and preloads the
+        viewer's memberships, so changing report scopes does not turn into an
+        N+1 request/query chain.  Report bytes and chapter/object retrieval
+        remain owned by their existing object adapters.
+        """
+        selected_scope = _choice(scope, RESEARCH_SCOPES, "research scope")
+        viewer_ref = str(viewer or "").strip()
+        subordinate_set = {
+            str(item or "").strip()
+            for item in subordinate_refs
+            if str(item or "").strip()
+        }
+        self.ensure_schema()
+        with connect_sqlite(self.db_path, readonly=True) as conn:
+            rows = conn.execute(
+                """SELECT report.*,
+                          research.title AS research_title,
+                          research.description AS research_description,
+                          research.owner_ref AS research_owner_ref,
+                          research.status AS research_status,
+                          research.visibility AS research_visibility,
+                          research.authorized_users_json AS research_authorized_users_json
+                   FROM research_catalog_reports AS report
+                   JOIN research_catalog_researches AS research
+                     ON research.research_id=report.research_id
+                  WHERE report.status='active'
+                  ORDER BY report.updated_at DESC, report.report_id""",
+            ).fetchall()
+            memberships = {
+                str(item["research_id"]): item
+                for item in conn.execute(
+                    """SELECT research_id, role, status
+                       FROM research_catalog_memberships
+                      WHERE principal_ref=? AND status='active'""",
+                    (viewer_ref,),
+                ).fetchall()
+            } if viewer_ref else {}
+
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            research_owner = str(row["research_owner_ref"])
+            if not include_archived and str(row["research_status"]) == "archived":
+                continue
+            if selected_scope == "mine" and research_owner != viewer_ref:
+                continue
+            if selected_scope == "subordinates" and research_owner not in subordinate_set:
+                continue
+            if selected_scope == "shared" and research_owner == viewer_ref:
+                continue
+
+            research_access = self._research_access_values(
+                research_id=str(row["research_id"]),
+                owner=research_owner,
+                status=str(row["research_status"]),
+                visibility=str(row["research_visibility"]),
+                authorized_users_json=row["research_authorized_users_json"],
+                viewer=viewer_ref,
+                membership=memberships.get(str(row["research_id"])),
+            )
+            report_access = self._report_access(
+                row, viewer_ref, research_access=research_access,
+            )
+            if not research_access["can_view"] and not report_access["can_view"]:
+                continue
+            value = self._report_value(
+                row,
+                viewer=viewer_ref,
+                access=_stronger_access(research_access, report_access),
+            )
+            value["research"] = {
+                "research_id": str(row["research_id"]),
+                "title": str(row["research_title"]),
+                "owner_ref": research_owner,
+                "status": str(row["research_status"]),
+                "visibility": str(row["research_visibility"]),
+            }
+            result.append(value)
+        return result
 
     def list_evidence_links(
         self, research_id: str, *, viewer: str | None,
@@ -476,8 +589,35 @@ class ResearchCatalog:
         )
         clean_visibility = _visibility(visibility)
         users = _authorized_users(authorized_users, str(row["owner_ref"]))
+        clean_profile = _optional_profile(profile_ref)
+        clean_workspace = str(workspace_id or "").strip()
         now = time.time()
         with connect_sqlite(self.db_path) as conn:
+            if clean_workspace:
+                workspace = conn.execute(
+                    """SELECT workspace_id, research_id, profile_ref, status
+                         FROM research_catalog_workspaces
+                        WHERE workspace_id=?""",
+                    (clean_workspace,),
+                ).fetchone()
+                if workspace is None:
+                    raise ValueError("research workspace not found")
+                if str(workspace["research_id"]) != research_id:
+                    raise ValueError("research workspace does not belong to research")
+                if str(workspace["status"]) != "active":
+                    raise ValueError("research workspace is not active")
+                workspace_profile = _optional_profile(workspace["profile_ref"])
+                if clean_profile and clean_profile != workspace_profile:
+                    raise ValueError("report profile does not match research workspace")
+                clean_profile = workspace_profile
+            if clean_profile:
+                membership = conn.execute(
+                    """SELECT status FROM research_catalog_memberships
+                        WHERE research_id=? AND profile_ref=?""",
+                    (research_id, clean_profile),
+                ).fetchone()
+                if membership is None or str(membership["status"]) != "active":
+                    raise ValueError("report profile must be an active research member")
             existing = conn.execute(
                 "SELECT * FROM research_catalog_reports WHERE report_id=?",
                 (report,),
@@ -502,7 +642,7 @@ class ResearchCatalog:
                      updated_at=excluded.updated_at""",
                 (
                     report, research_id, str(row["owner_ref"]), clean_title,
-                    _optional_profile(profile_ref), str(workspace_id or ""),
+                    clean_profile, clean_workspace,
                     source, str(build_source_ref or "").strip(),
                     clean_visibility, _json(users), str(source_ref or ""),
                     now, now,
@@ -535,11 +675,12 @@ class ResearchCatalog:
         if not self._research_access(row, actor)["can_manage"]:
             raise PermissionError("research Evidence management is not authorized")
         evidence = _text(evidence_ref, "evidence_ref", maximum=512)
-        report = str(report_id or "").strip()
-        if report:
-            report_row = self._report_row(report)
-            if str(report_row["research_id"]) != research_id:
-                raise ValueError("report does not belong to research")
+        report = _text(report_id, "report_id", maximum=256)
+        report_row = self._report_row(report)
+        if str(report_row["research_id"]) != research_id:
+            raise ValueError("report does not belong to research")
+        if str(report_row["status"]) != "active":
+            raise ValueError("report is not active")
         owner = _principal(evidence_owner_ref or actor)
         values = {
             "research_id": research_id,
@@ -780,7 +921,10 @@ class ResearchCatalog:
                     source_kind, source_ref, actor, research_id, now,
                 ),
             )
-        workspace_id = str(item.get("workspace_id") or "")
+        # An old source may carry a workspace identifier from a different
+        # store. Only a workspace created in this Research catalog is a valid
+        # relationship; dangling legacy identifiers must not be persisted.
+        workspace_id = ""
         if profile_ref:
             self.add_membership(
                 research_id,
@@ -882,36 +1026,74 @@ class ResearchCatalog:
 
     def _research_access(self, row, viewer: str | None) -> dict[str, Any]:
         viewer_ref = str(viewer or "").strip()
-        owner = str(row["owner_ref"])
-        if viewer_ref and viewer_ref == owner:
-            return _access(True, True, True, True, "owner", str(row["research_id"]))
-        if str(row["status"]) == "archived":
-            return _access(False, False, False, False, "none", str(row["research_id"]))
-        if str(row["visibility"]) == "public":
-            return _access(True, True, True, False, "research", str(row["research_id"]))
-        authorized = _loads_list(row["authorized_users_json"])
-        if viewer_ref and viewer_ref in authorized:
-            return _access(True, True, True, False, "research", str(row["research_id"]))
+        membership = None
         if viewer_ref:
             with connect_sqlite(self.db_path, readonly=True) as conn:
-                member = conn.execute(
+                membership = conn.execute(
                     """SELECT role, status FROM research_catalog_memberships
                        WHERE research_id=? AND principal_ref=?
                          AND status='active'""",
                     (str(row["research_id"]), viewer_ref),
                 ).fetchone()
-            if member is not None:
-                return _access(
-                    True, True, True,
-                    str(member["role"]) in {"owner", "editor"},
-                    "research", str(row["research_id"]),
-                )
-        return _access(False, False, False, False, "none", str(row["research_id"]))
+        return self._research_access_values(
+            research_id=str(row["research_id"]),
+            owner=str(row["owner_ref"]),
+            status=str(row["status"]),
+            visibility=str(row["visibility"]),
+            authorized_users_json=row["authorized_users_json"],
+            viewer=viewer_ref,
+            membership=membership,
+        )
 
-    def _report_access(self, row, viewer: str | None) -> dict[str, Any]:
+    @staticmethod
+    def _research_access_values(
+        *,
+        research_id: str,
+        owner: str,
+        status: str,
+        visibility: str,
+        authorized_users_json: Any,
+        viewer: str,
+        membership=None,
+    ) -> dict[str, Any]:
+        if viewer and viewer == owner:
+            return _access(True, True, True, True, "owner", research_id)
+        if status == "archived":
+            return _access(False, False, False, False, "none", research_id)
+        if visibility == "public":
+            return _access(True, True, True, False, "research", research_id)
+        if viewer and viewer in _loads_list(authorized_users_json):
+            return _access(True, True, True, False, "research", research_id)
+        if membership is not None and str(membership["status"]) == "active":
+            return _access(
+                True, True, True,
+                str(membership["role"]) in {"owner", "editor"},
+                "research", research_id,
+            )
+        return _access(False, False, False, False, "none", research_id)
+
+    def _report_access(
+        self, row, viewer: str | None, *, research_access=None,
+    ) -> dict[str, Any]:
         viewer_ref = str(viewer or "").strip()
         if viewer_ref and viewer_ref == str(row["owner_ref"]):
             return _access(True, True, True, True, "owner", str(row["report_id"]))
+        if research_access is None:
+            try:
+                research = self._research_row(str(row["research_id"]))
+            except KeyError:
+                research = None
+            if research is not None:
+                research_access = self._research_access(research, viewer_ref)
+        if research_access and research_access["can_view"]:
+            return _access(
+                True,
+                True,
+                research_access["can_download"],
+                research_access["can_manage"],
+                research_access["access_basis"],
+                str(row["report_id"]),
+            )
         if str(row["visibility"]) == "public":
             return _access(True, True, False, False, "report", str(row["report_id"]))
         if viewer_ref and viewer_ref in _loads_list(row["authorized_users_json"]):
@@ -966,7 +1148,13 @@ class ResearchCatalog:
             "updated_at": float(row["updated_at"]),
         }
 
-    def _report_value(self, row, *, viewer: str | None) -> dict[str, Any]:
+    def _report_value(
+        self,
+        row,
+        *,
+        viewer: str | None,
+        access: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         value = {
             "report_id": str(row["report_id"]),
             "research_id": str(row["research_id"]),
@@ -982,7 +1170,7 @@ class ResearchCatalog:
             "created_at": float(row["created_at"]),
             "updated_at": float(row["updated_at"]),
         }
-        value["access"] = self._report_access(row, viewer)
+        value["access"] = access or self._report_access(row, viewer)
         return value
 
     @staticmethod
@@ -1047,6 +1235,28 @@ def _access(
         "access_basis": str(access_basis),
         "object_ref": str(object_ref),
     }
+
+
+def _stronger_access(*values: dict[str, Any] | None) -> dict[str, Any]:
+    """Return the strongest already-resolved access decision.
+
+    Research and Report permissions are evaluated independently.  A caller
+    listing a report must receive the effective decision rather than whichever
+    branch happened to run first; in particular, Research membership can grant
+    download while a public Report alone grants preview only.
+    """
+    weights = {"none": 0, "report": 1, "research": 2, "owner": 3}
+    candidates = [value for value in values if isinstance(value, dict)]
+    if not candidates:
+        return _access(False, False, False, False, "none", "")
+    return max(
+        candidates,
+        key=lambda value: (
+            weights.get(str(value.get("access_basis") or "none"), 0),
+            int(bool(value.get("can_download"))),
+            int(bool(value.get("can_manage"))),
+        ),
+    )
 
 
 def _principal(value: Any) -> str:

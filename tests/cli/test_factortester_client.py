@@ -454,15 +454,14 @@ def fake_server() -> Iterator[str]:
             sources=[{"source_id": "LocalCNFutures", "frequency": "MIN1"}],
         )
 
-    @app.get("/api/research-publications/settings")
-    def research_publications():
+    @app.get("/api/research/reports")
+    def research_reports():
         assert session.get("username") == "alice"
-        return jsonify(success=True, reports=[{"title": "我的研究"}])
-
-    @app.get("/api/public-research")
-    def public_research():
-        assert request.args.get("scope") == "subordinates"
-        return jsonify(success=True, reports=[{"title": "下级研究"}])
+        value = {
+            "mine": {"title": "我的研究"},
+            "subordinates": {"title": "下级研究"},
+        }.get(request.args.get("scope"), {"title": "全部研究"})
+        return jsonify(success=True, reports=[value], scope=request.args.get("scope"))
 
     @app.get("/api/client/profile-directory")
     def profile_directory():

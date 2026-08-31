@@ -53,12 +53,7 @@ class ResearchCatalogRoutesMixin:
         try:
             if parsed.path == "/api/research":
                 scope = str(query.get("scope", ["all"])[0] or "all")
-                subordinate_users = self._subordinate_users(viewer)
-                subordinate_refs = [
-                    str(item.get("username") or item.get("owner_ref") or "").strip()
-                    for item in subordinate_users
-                    if isinstance(item, dict)
-                ]
+                subordinate_refs = self._research_catalog_subordinate_refs(viewer)
                 value = service.list_researches(
                     viewer=viewer,
                     include_archived=query.get("include_archived") == ["1"],
@@ -66,6 +61,20 @@ class ResearchCatalogRoutesMixin:
                     subordinate_refs=subordinate_refs,
                 )
                 payload = {"researches": value, "items": value, "scope": scope}
+            elif parsed.path == "/api/research/reports":
+                scope = str(query.get("scope", ["all"])[0] or "all")
+                value = service.list_reports_for_scope(
+                    viewer=viewer,
+                    include_archived=query.get("include_archived") == ["1"],
+                    scope=scope,
+                    subordinate_refs=self._research_catalog_subordinate_refs(viewer),
+                )
+                payload = {
+                    "reports": value,
+                    "items": value,
+                    "count": len(value),
+                    "scope": scope,
+                }
             else:
                 research_id, child = self._research_catalog_target(parsed.path)
                 if child is None:
@@ -218,6 +227,14 @@ class ResearchCatalogRoutesMixin:
     @staticmethod
     def _is_research_catalog_path(path: str) -> bool:
         return path == "/api/research" or path.startswith("/api/research/")
+
+    def _research_catalog_subordinate_refs(self, viewer: str) -> list[str]:
+        subordinate_users = self._subordinate_users(viewer)
+        return [
+            str(item.get("username") or item.get("owner_ref") or "").strip()
+            for item in subordinate_users
+            if isinstance(item, dict)
+        ]
 
     @staticmethod
     def _research_catalog_target(path: str) -> tuple[str, str | None]:

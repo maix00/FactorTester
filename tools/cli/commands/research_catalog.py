@@ -27,13 +27,21 @@ def register_research_catalog_commands(research: click.Group) -> None:
     """Register Research root operations on the existing ``research`` group."""
 
     @research.command("list")
+    @click.option(
+        "--scope",
+        type=click.Choice(("all", "mine", "subordinates", "shared")),
+        default="all",
+        show_default=True,
+        help="研究可见范围。",
+    )
     @click.option("--include-archived", is_flag=True, help="同时列出已归档研究。")
     @click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
     @friendly_errors
-    def list_researches(include_archived: bool, as_json: bool) -> None:
+    def list_researches(scope: str, include_archived: bool, as_json: bool) -> None:
         """列出当前用户可见的 Research 根对象。"""
         value = client_from_config().list_researches(
             include_archived=include_archived,
+            scope=scope,
         )
         if as_json:
             click.echo(_json(value))
@@ -236,7 +244,7 @@ def register_research_catalog_commands(research: click.Group) -> None:
     @click.argument("research_id")
     @click.option("--evidence-ref", required=True)
     @click.option("--evidence-owner", "evidence_owner_ref", default="")
-    @click.option("--report-id", default="")
+    @click.option("--report-id", required=True)
     @click.option("--graph-ref", default="")
     @click.option("--branch-ref", default="")
     @click.option("--job-id", default="")

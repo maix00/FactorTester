@@ -3,7 +3,10 @@ from __future__ import annotations
 from types import SimpleNamespace
 from urllib.parse import quote
 
+import pytest
+
 from server.manager.http import research_object_routes
+from server.manager.http import research_catalog_routes
 from server.manager.services.research_catalog import ResearchCatalog
 
 
@@ -127,6 +130,144 @@ def test_report_migration_is_explicit_and_idempotent(tmp_path):
     assert detail["title"] == "旧报告"
     assert detail["reports"][0]["report_id"] == "server-report-1"
     assert detail["evidence_links"][0]["evidence_ref"].startswith("evidence:job:")
+
+
+def test_canonical_report_scope_inherits_research_membership_and_keeps_research_metadata(
+    tmp_path,
+):
+    catalog = ResearchCatalog(tmp_path / "research.sqlite")
+    research = catalog.create_research(
+        owner_ref="alice", title="协作研究", visibility="private",
+    )
+    catalog.add_membership(
+        research["research_id"],
+        actor="alice",
+        principal_ref="bob",
+        profile_ref="bob-profile",
+        role="viewer",
+    )
+    catalog.register_report(
+        research["research_id"],
+        actor="alice",
+        report_id="report-private",
+        title="协作报告",
+        visibility="private",
+    )
+
+    reports = catalog.list_reports_for_scope(
+        viewer="bob", scope="shared",
+    )
+    assert len(reports) == 1
+    assert reports[0]["title"] == "协作报告"
+    assert reports[0]["research"] == {
+        "research_id": research["research_id"],
+        "title": "协作研究",
+        "owner_ref": "alice",
+        "status": "active",
+        "visibility": "private",
+    }
+    assert reports[0]["access"]["access_basis"] == "research"
+    assert reports[0]["access"]["can_download"] is True
+    assert catalog.list_reports_for_scope(
+        viewer="bob", scope="mine",
+    ) == []
+
+
+def test_report_only_visibility_does_not_inherit_research_download_access(tmp_path):
+    catalog = ResearchCatalog(tmp_path / "research.sqlite")
+    research = catalog.create_research(
+        owner_ref="alice", title="内部研究", visibility="private",
+    )
+    report = catalog.register_report(
+        research["research_id"],
+        actor="alice",
+        report_id="report-public",
+        title="公开报告",
+        visibility="public",
+    )
+    reports = catalog.list_reports_for_scope(viewer="eve", scope="shared")
+    assert reports[0]["report_id"] == report["report_id"]
+    assert reports[0]["access"]["access_basis"] == "report"
+    assert reports[0]["access"]["can_preview"] is True
+    assert reports[0]["access"]["can_download"] is False
+
+
+def test_report_relationship_requires_catalog_workspace_and_active_profile(tmp_path):
+    catalog = ResearchCatalog(tmp_path / "research.sqlite")
+    first = catalog.create_research(
+        owner_ref="alice", title="第一个研究", profile_ref="self",
+    )
+    second = catalog.create_research(owner_ref="alice", title="第二个研究")
+    workspace = first["workspaces"][0]
+
+    with pytest.raises(ValueError, match="does not belong"):
+        catalog.register_report(
+            second["research_id"], actor="alice", report_id="wrong-research",
+            workspace_id=workspace["workspace_id"],
+        )
+    with pytest.raises(ValueError, match="active research member"):
+        catalog.register_report(
+            second["research_id"], actor="alice", report_id="missing-member",
+            profile_ref="other-profile",
+        )
+
+
+def test_evidence_link_requires_active_report_in_same_research(tmp_path):
+    catalog = ResearchCatalog(tmp_path / "research.sqlite")
+    first = catalog.create_research(owner_ref="alice", title="第一个研究")
+    second = catalog.create_research(owner_ref="alice", title="第二个研究")
+    report = catalog.register_report(
+        first["research_id"], actor="alice", report_id="report-1",
+    )
+
+    with pytest.raises(ValueError, match="report_id is required"):
+        catalog.link_evidence(
+            first["research_id"], actor="alice",
+            evidence_ref="evidence:job:sha256:" + "d" * 64,
+        )
+    with pytest.raises(ValueError, match="does not belong"):
+        catalog.link_evidence(
+            second["research_id"], actor="alice",
+            evidence_ref="evidence:job:sha256:" + "e" * 64,
+            report_id=report["report_id"],
+        )
+
+
+def test_canonical_report_route_returns_bounded_catalog_projection(monkeypatch, tmp_path):
+    catalog = ResearchCatalog(tmp_path / "research.sqlite")
+    research = catalog.create_research(owner_ref="alice", title="研究")
+    catalog.register_report(
+        research["research_id"],
+        actor="alice",
+        report_id="report-1",
+        title="报告 1",
+        visibility="public",
+    )
+    responses = []
+
+    class Handler(research_catalog_routes.ResearchCatalogRoutesMixin):
+        state = SimpleNamespace(research_catalog=catalog)
+
+        def _session(self):
+            return {"username": "eve"}
+
+        def _subordinate_users(self, _viewer):
+            return []
+
+    monkeypatch.setattr(
+        research_catalog_routes,
+        "json_response",
+        lambda _handler, value, status=200: responses.append((value, status)),
+    )
+    handled = Handler()._get_research_catalog_routes(SimpleNamespace(
+        path="/api/research/reports", query="scope=shared",
+    ))
+
+    assert handled is True
+    assert responses[0][1] == 200
+    assert responses[0][0]["scope"] == "shared"
+    assert responses[0][0]["count"] == 1
+    assert responses[0][0]["reports"][0]["research"]["title"] == "研究"
 
 
 def test_evidence_detail_route_uses_research_access_for_report_preview(

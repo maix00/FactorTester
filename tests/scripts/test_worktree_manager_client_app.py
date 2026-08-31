@@ -2316,7 +2316,7 @@ def test_web_opened_tab_icons_are_separate_from_labels_and_jobs_have_status_time
         for relative in ("styles/app.css", "styles/report.css")
     )
 
-    assert "row.append(button, close)" in tabs
+    assert "row.append(...(handle ? [handle] : []), tabButton(tab, nested), tabCloseButton(tab))" in tabs
     assert "button.append(close)" not in tabs
     assert 'button.title = document.body.classList.contains("sidebar-collapsed") ? "" : tab.title;' in tabs
     assert "statusCell(job, context)" in jobs
@@ -2535,7 +2535,7 @@ def test_manager_navigation_is_role_filtered_and_nests_profiles_under_research(
         item["id"] for item in user_modules["research"]["children"]
     } == {
         "research.graph", "research.profiles",
-        "research.agent-models", "research.reports",
+        "research.agent-models", "research.reports", "research.evidence",
     }
     assert "research.researches" not in user_modules["research"]["children"]
     assert any(

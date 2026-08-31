@@ -612,6 +612,8 @@
     "research/graph.js",
     "research/graph-list.js",
     "research/local.js",
+    "research/evidence-applicability.js",
+    "research/evidence.js",
     "research/reports.js",
     "research/shared.js",
     "research/researches.js",

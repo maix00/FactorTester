@@ -59,54 +59,15 @@
     return root;
   }
 
-  async function fetchRows(context, scope, embedded) {
-    if (scope === "mine") {
-      const [serverResult, localResult] = await Promise.allSettled([
-        context.api("/api/research-publications/settings"),
-        embedded && context.session
-          ? context.api("/api/client/research")
-          : Promise.reject(new Error("client research is available in the local client")),
-      ]);
-      const rows = [];
-      const publishedByReport = new Map(
-        (serverResult.status === "fulfilled" ? serverResult.value.reports || [] : [])
-          .filter(item => item?.report_id)
-          .map(item => [String(item.report_id), item]),
-      );
-      if (serverResult.status === "fulfilled") {
-        (serverResult.value.reports || []).forEach(item => rows.push({
-          ...item,
-          source: "server_catalog",
-          build_source: item.build_source || "client",
-          href: item.href || `/research/${encodeURIComponent(item.publication_id || "")}`,
-        }));
-      }
-      if (localResult.status === "fulfilled") {
-        (localResult.value.research || []).forEach(item => rows.push({
-          ...item,
-          source: "client_local",
-          build_source: item.build_source || "client",
-          sharing_state: sharingState(
-            item,
-            publishedByReport.get(String(item.report_id || "")),
-          ),
-          is_shared: sharingState(
-            item,
-            publishedByReport.get(String(item.report_id || "")),
-          ) === "shared",
-          title: item.title || item.local_ref,
-          owner_ref: item.profile_name || item.profile_id,
-          href: `/research/${encodeURIComponent(`local:${item.local_ref}`)}`,
-        }));
-      }
-      return rows;
-    }
-    const result = await context.api(`/api/public-research?scope=${encodeURIComponent(scope)}`);
-    return (result.reports || []).map(item => ({
+  async function fetchRows(context, scope) {
+    const result = await context.api(
+      `/api/research/reports?scope=${encodeURIComponent(scope)}`,
+    );
+    return (result.reports || result.items || []).map(item => ({
       ...item,
-      source: "server_catalog",
+      source: "research_catalog",
       build_source: item.build_source || "client",
-      href: item.href || `/research/${encodeURIComponent(item.publication_id || "")}`,
+      href: reportRoute(item),
     }));
   }
 
@@ -125,14 +86,24 @@
     return owner || profile || context.t("未知");
   }
 
+  function researchDisplay(context, item) {
+    const research = item?.research || {};
+    const title = String(research.title || item?.research_title || "").trim();
+    const id = String(research.research_id || item?.research_id || "").trim();
+    if (title && id) return `${title}（${id}）`;
+    return title || id || context.t("未关联研究");
+  }
+
   function table(context, rows, state, scope, root) {
     const view = FTUI.pagedTable(
       [
-        context.t("报告"), context.t("用户（Profile）"), context.t("构建来源"),
+        context.t("报告"), context.t("所属研究"), context.t("用户（Profile）"),
+        context.t("构建来源"),
         context.t("共享状态"), context.t("访问范围"), context.t("更新时间"),
       ],
       rows.map(item => [
         item.title || item.name || item.filename || context.t("未命名研究报告"),
+        researchDisplay(context, item),
         ownerDisplay(context, item),
         buildSource(context, item),
         sharing(context, item),
@@ -153,7 +124,9 @@
     const pageRows = rows.slice(view.start, view.start + view.pageSize);
     [...view.body.rows].forEach((row, index) => {
       row.dataset.href = "true";
-      row.addEventListener("click", () => context.navigate(pageRows[index].href));
+      row.addEventListener("click", () => context.navigate(pageRows[index].href, {
+        researchTitle: pageRows[index].research?.title || pageRows[index].research_title || "",
+      }));
     });
     view.shell.classList.add("research-report-table");
     return view.shell;
@@ -197,7 +170,7 @@
         if (!current(context)) return;
       }
       const [rows, release] = await Promise.all([
-        fetchRows(context, scope, embedded),
+        fetchRows(context, scope),
         scope === "mine" ? loadClientRelease(context) : Promise.resolve(null),
       ]);
       if (!current(context)) return;
@@ -256,11 +229,14 @@
     const explicit = String(item?.href || "").trim();
     let route = explicit;
     const reference = String(item?.source_ref || item?.report_id || "").trim();
+    const linkedResearchID = String(
+      researchID || item?.research_id || item?.research?.research_id || "",
+    ).trim();
     if (!route) route = reference
       ? `/research/${encodeURIComponent(reference)}` : "";
-    if (!route || !researchID) return route;
+    if (!route || !linkedResearchID) return route;
     const url = new URL(route, location.origin);
-    url.searchParams.set("research_id", researchID);
+    url.searchParams.set("research_id", linkedResearchID);
     return `${url.pathname}${url.search}${url.hash}`;
   }
 

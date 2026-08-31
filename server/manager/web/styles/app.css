@@ -79,9 +79,41 @@ body.sidebar-collapsed .opened-tab > .tab-main > .symbol { margin: 0; justify-se
 .nav-grandchild { font-size: 12px; }
 .opened-tab-nested { min-height: 28px; padding-top: 5px; padding-bottom: 5px; }
 .opened-tab.dragging, .nav-folder.drop-target, .opened-tab.drop-target { opacity: .58; outline: 1px dashed var(--accent); outline-offset: -1px; }
-.opened-tab.drop-before, .nav-folder-row.drop-before { border-top: 2px solid var(--accent); }
-.opened-tab.drop-after, .nav-folder-row.drop-after { border-bottom: 2px solid var(--accent); }
-.opened-tab.drop-before, .opened-tab.drop-after { position: relative; }
+.opened-tab.drop-before, .opened-tab.drop-after,
+.nav-folder-row.drop-before, .nav-folder-row.drop-after { position: relative; }
+.opened-tab.drop-before::before, .opened-tab.drop-after::after,
+.nav-folder-row.drop-before::before, .nav-folder-row.drop-after::after {
+  content: ""; position: absolute; z-index: 2; left: 4px; right: 4px; height: 2px;
+  border-radius: 2px; background: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--panel) 70%, transparent);
+  pointer-events: none;
+}
+.opened-tab.drop-before::before, .nav-folder-row.drop-before::before { top: 0; }
+.opened-tab.drop-after::after, .nav-folder-row.drop-after::after { bottom: 0; }
+.tab-drag-handle {
+  display: inline-grid; place-items: center; flex: 0 0 18px; width: 18px; height: 22px;
+  border: 0; border-radius: 5px; padding: 0; color: var(--muted); background: transparent;
+  font-size: 11px; letter-spacing: -2px; line-height: 1; cursor: grab; opacity: .52;
+}
+.opened-tab.draggable-tab:hover > .tab-drag-handle,
+.opened-tab.draggable-tab:focus-within > .tab-drag-handle,
+.opened-tab.draggable-tab.dragging > .tab-drag-handle { opacity: .9; }
+.tab-drag-handle:hover { color: var(--text); background: color-mix(in srgb, var(--accent) 11%, transparent); }
+.tab-drag-handle:active, .opened-tab.dragging > .tab-drag-handle { cursor: grabbing; }
+.tab-drag-handle:focus-visible { opacity: 1; outline: 2px solid var(--accent); outline-offset: 1px; }
+.tab-drag-preview {
+  position: fixed; z-index: 1000; top: 0; left: 0; transform: translate(-200%, -200%); max-width: 280px;
+  padding: 7px 10px; border: 1px solid var(--accent); border-radius: 7px;
+  color: var(--text); background: var(--panel); box-shadow: 0 8px 24px #0003;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+}
+.opened-tab.tab-moved, .nav-folder-row.tab-moved { animation: ft-tab-moved 700ms ease-out; }
+@keyframes ft-tab-moved {
+  0% { background: color-mix(in srgb, var(--accent) 24%, transparent); }
+  100% { background: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .opened-tab.tab-moved, .nav-folder-row.tab-moved { animation: none; }
+}
 body.sidebar-collapsed .nav-folder-toggle { display: none; }
 body.sidebar-collapsed .nav-folder-static-children { display: none; }
 body.sidebar-collapsed .nav-folder-row > .nav-button { width: 100%; }
@@ -95,6 +127,15 @@ body.sidebar-collapsed .nav-folder-dynamic > .research-detail-tab-row { padding:
 body.sidebar-collapsed .nav-folder-dynamic .nav-research-tab-children { display: grid; margin-left: 8px; padding-left: 4px; }
 body.sidebar-collapsed .nav-folder-dynamic .nav-research-tab-children .opened-tab { padding-left: 4px; padding-right: 4px; }
 body.sidebar-collapsed .nav-folder-dynamic .nav-research-tab-children .opened-tab > .tab-main > .symbol { width: 15px; height: 15px; flex-basis: 15px; }
+body.sidebar-collapsed .opened-tab.draggable-tab {
+  display: flex; align-items: center; justify-content: flex-end; gap: 1px;
+}
+body.sidebar-collapsed .opened-tab.draggable-tab > .tab-drag-handle {
+  display: inline-grid; flex: 0 0 14px; width: 14px; height: 26px; opacity: .72; font-size: 9px;
+}
+body.sidebar-collapsed .opened-tab.draggable-tab > .tab-main {
+  width: 24px; flex: 0 0 24px; min-height: 30px;
+}
 .opened-caption { margin-top: 14px; }
 .opened-tabs { display: grid; gap: 1px; min-width: 0; min-height: 0; flex: 0 1 auto; max-height: calc(100vh - 180px); overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
 .opened-tab { width: 100%; min-width: 0; border: 0; background: transparent; color: inherit; border-radius: 7px; padding: 6px 8px; display: flex; gap: 8px; align-items: center; text-align: left; min-height: 30px; overflow: hidden; }

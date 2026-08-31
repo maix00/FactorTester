@@ -20,7 +20,7 @@ class FakeElement {
     this.classes = new Set();
     this.classList = {
       add: value => this.classes.add(value),
-      remove: value => this.classes.delete(value),
+      remove: (...values) => values.forEach(value => this.classes.delete(value)),
       contains: value => this.classes.has(value),
       toggle: (value, force) => {
         const next = force === undefined ? !this.classes.has(value) : Boolean(force);
@@ -474,6 +474,81 @@ let researchChildHost = researchWrapper.children.find(item => (
 assert(researchChildHost);
 const childTwoRow = researchChildHost.children.find(item => item.dataset.tabID === researchChildTwoID);
 assert(childTwoRow);
+const researchHeader = researchWrapper.children.find(item => (
+  item.className.includes("nav-folder-row")
+));
+assert(researchHeader);
+assert(!researchHeader.children.some(item => item.className === "tab-drag-handle"),
+  "Research folders must not expose a drag handle and cannot be nested");
+assert.strictEqual(researchHeader.draggable, undefined);
+researchHeader.dispatchEvent({
+  type: "dragover",
+  dataTransfer: {getData: () => orphanID},
+  preventDefault() {}, stopPropagation() {}, before: true,
+});
+assert(researchHeader.classes.has("drop-target"),
+  "a Research header advertises mounting instead of a before/after reorder");
+assert(!researchHeader.classes.has("drop-before"));
+researchHeader.dispatchEvent({type: "dragleave"});
+assert(!researchHeader.classes.has("drop-target"));
+
+// Ordinary tabs expose a dedicated drag handle instead of making the whole
+// row draggable. The handle also provides a keyboard alternative for users
+// who cannot use native drag-and-drop.
+let draggedID = "";
+const childTwoHandle = childTwoRow.children.find(item => (
+  item.className === "tab-drag-handle"
+));
+assert(childTwoHandle);
+assert.strictEqual(childTwoHandle.draggable, true);
+childTwoHandle.dispatchEvent({
+  type: "dragstart",
+  dataTransfer: {
+    setData: (_type, value) => { draggedID = value; },
+    effectAllowed: "",
+  },
+});
+assert.strictEqual(draggedID, researchChildTwoID);
+assert(childTwoRow.classes.has("dragging"));
+childTwoHandle.dispatchEvent({type: "dragend"});
+assert(!childTwoRow.classes.has("dragging"));
+
+const reportOneHandle = researchChildHost.children
+  .find(item => item.dataset.tabID === researchChildID)
+  .children.find(item => item.className === "tab-drag-handle");
+reportOneHandle.dispatchEvent({
+  type: "keydown", key: "ArrowDown", preventDefault() {}, stopPropagation() {},
+});
+assert.deepStrictEqual(
+  hierarchyState.tabs.filter(item => item.parentTabID === researchDetailID).map(item => item.id),
+  [researchChildTwoID, researchChildID],
+);
+const movedReportRow = researchDynamic.children.find(item => (
+  item.dataset.navFolder === `research-tab:${researchDetailID}`
+)).children.find(item => item.className.includes("nav-research-tab-children"))
+  .children.find(item => item.dataset.tabID === researchChildID);
+movedReportRow.children.find(item => item.className === "tab-drag-handle").dispatchEvent({
+  type: "keydown", key: "ArrowUp", preventDefault() {}, stopPropagation() {},
+});
+assert.deepStrictEqual(
+  hierarchyState.tabs.filter(item => item.parentTabID === researchDetailID).map(item => item.id),
+  [researchChildID, researchChildTwoID],
+);
+
+// Hovering a row gives a before/after insertion marker without changing
+// ordering until the drop is committed.
+const markerRow = researchDynamic.children.find(item => (
+  item.dataset.navFolder === `research-tab:${researchDetailID}`
+)).children.find(item => item.className.includes("nav-research-tab-children"))
+  .children.find(item => item.dataset.tabID === researchChildTwoID);
+markerRow.dispatchEvent({
+  type: "dragover",
+  dataTransfer: {getData: () => researchChildID},
+  preventDefault() {}, stopPropagation() {}, before: true,
+});
+assert(markerRow.classes.has("drop-before"));
+markerRow.dispatchEvent({type: "dragleave"});
+assert(!markerRow.classes.has("drop-before"));
 const dropEvent = parentTabID => ({
   type: "drop",
   dataTransfer: {getData: () => orphanID},
@@ -520,4 +595,21 @@ remountWrapper.dispatchEvent(dropEvent(researchDetailID));
 assert.strictEqual(orphan.parentTabID, researchDetailID);
 researchFolder.dispatchEvent(dropEvent(""));
 assert.strictEqual(orphan.parentTabID, undefined);
+// A report opened from the Research detail list carries its Research identity
+// in the URL, so a fresh navigation recreates the correct parent folder and
+// does not leave the report in the global opened-tab rail.
+hierarchyTabs.navigate(
+  "/research/report-inferred?research_id=research-inferred",
+  {researchTitle: "推断研究"},
+);
+const inferredReport = hierarchyState.tabs.find(item => (
+  item.path.startsWith("/research/report-inferred")
+));
+const inferredParent = hierarchyState.tabs.find(item => (
+  item.id === inferredReport?.parentTabID
+));
+assert(inferredReport);
+assert.strictEqual(inferredReport.parentFolder, "research");
+assert(inferredParent);
+assert.strictEqual(inferredParent.path, "/researches/research-inferred");
 console.log("ok");

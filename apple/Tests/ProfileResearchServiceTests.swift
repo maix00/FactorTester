@@ -24,6 +24,83 @@ final class StubURLProtocol: URLProtocol {
 }
 
 final class ProfileResearchServiceTests: SimplifiedChineseLocalizedTestCase {
+    func testCanonicalResearchCatalogDecodesSharedAccessAndRelationships() async throws {
+        let transport = FakeProjectionTransport(responses: [
+            response(
+                """
+                {"success":true,"research":{
+                  "research_id":"research:v1:r1","owner_ref":"alice",
+                  "title":"动量研究","description":"","status":"active",
+                  "visibility":"authorized","authorized_users":[],
+                  "access":{"can_view":true,"can_preview":true,
+                    "can_download":true,"can_manage":false,
+                    "access_basis":"research"},
+                  "members":[{"research_id":"research:v1:r1",
+                    "principal_ref":"bob","profile_ref":"maxb",
+                    "role":"viewer","status":"active"}],
+                  "workspaces":[{"workspace_id":"workspace:v1:w1",
+                    "research_id":"research:v1:r1","principal_ref":"bob",
+                    "profile_ref":"maxb","title":"maxb workspace",
+                    "status":"active"}],
+                  "reports":[{"report_id":"report-1",
+                    "research_id":"research:v1:r1","owner_ref":"alice",
+                    "title":"结论","profile_ref":"maxb",
+                    "workspace_id":"workspace:v1:w1",
+                    "build_source":"server_agent","visibility":"public",
+                    "access":{"can_view":true,"can_preview":true,
+                      "can_download":false,"can_manage":false,
+                      "access_basis":"report"}}],
+                  "evidence_links":[]}}
+                """,
+                etag: "\"research-detail\""
+            ),
+        ])
+        let service = ProfileResearchService(
+            baseURL: URL(string: "http://example.test")!,
+            transport: transport
+        )
+
+        let detail = try await service.research(researchID: "research:v1:r1")
+
+        XCTAssertEqual(detail.members.first?.profileRef, "maxb")
+        XCTAssertEqual(detail.workspaces.first?.researchID, detail.researchID)
+        XCTAssertEqual(detail.reports.first?.access.accessBasis, "report")
+        XCTAssertTrue(detail.access.canDownload)
+        XCTAssertEqual(
+            transport.requests.first?.url?.path,
+            "/api/research/research:v1:r1"
+        )
+    }
+
+    func testCanonicalResearchCreationUsesSameEndpointAsServerWeb() async throws {
+        let transport = FakeProjectionTransport(responses: [
+            response(
+                """
+                {"success":true,"research":{
+                  "research_id":"research:v1:new","owner_ref":"alice",
+                  "title":"新研究","description":"说明","status":"active",
+                  "visibility":"private","authorized_users":[],
+                  "access":{"can_view":true,"can_preview":true,
+                    "can_download":true,"can_manage":true,
+                    "access_basis":"owner"}}}
+                """,
+                etag: "\"research-create\""
+            ),
+        ])
+        let service = ProfileResearchService(
+            baseURL: URL(string: "http://example.test")!,
+            transport: transport
+        )
+
+        let research = try await service.createResearch(
+            title: "新研究", description: "说明"
+        )
+
+        XCTAssertEqual(research.researchID, "research:v1:new")
+        XCTAssertEqual(transport.requests.first?.httpMethod, "POST")
+        XCTAssertEqual(transport.requests.first?.url?.path, "/api/research")
+    }
+
     func testEntryRequirementAcceptsCanonicalCompactProjection() throws {
         let data = Data(
             """

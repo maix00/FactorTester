@@ -118,6 +118,33 @@
       nodes.forEach(node => node.classList.remove("drop-target", "drop-before", "drop-after"));
     }
 
+    function focusTabDragHandle(tabID) {
+      const handle = [...(document.querySelectorAll?.(
+        "[data-ft-tab-drag-handle]",
+      ) || [])].find(item => item.dataset.ftTabDragHandle === tabID);
+      handle?.focus?.();
+    }
+
+    function flashMovedTab(tabID) {
+      const row = [...(document.querySelectorAll?.(
+        ".opened-tab, .nav-folder-row",
+      ) || [])].find(item => item.dataset.tabID === tabID
+        || item.dataset.dragTabID === tabID);
+      if (!row) return;
+      row.classList.remove("tab-moved");
+      // Force a new animation when the same tab is moved twice in quick
+      // succession.  The read is intentionally local to the moved row.
+      void row.offsetWidth;
+      row.classList.add("tab-moved");
+      setTimeout(() => row.classList.remove("tab-moved"), 700);
+    }
+
+    function renderMovedTab(tabID) {
+      renderOpenedTabs();
+      flashMovedTab(tabID);
+      focusTabDragHandle(tabID);
+    }
+
     function dropBefore(event, target) {
       if (typeof event.before === "boolean") return event.before;
       const rect = target.getBoundingClientRect?.();
@@ -159,19 +186,66 @@
       return close;
     }
 
-    function tabDragSource(row, tab) {
+    function moveTabByOffset(tabID, offset) {
+      const tab = state.tabs.find(item => item.id === tabID);
+      if (!isDraggableTab(tab)) return false;
+      const parentID = researchParentTabID(tab);
+      const siblings = state.tabs.filter(item => (
+        isDraggableTab(item) && researchParentTabID(item) === parentID
+      ));
+      const index = siblings.indexOf(tab);
+      const target = siblings[index + Number(offset || 0)];
+      if (!target || target === tab) return false;
+      return moveTabRelative(tabID, target.id, Number(offset) < 0);
+    }
+
+    function tabDragHandle(tab) {
+      const handle = document.createElement("button");
+      handle.type = "button";
+      handle.className = "tab-drag-handle";
+      handle.textContent = "⋮⋮";
+      handle.title = t("拖动以移动");
+      handle.setAttribute("aria-label", t("拖动以移动"));
+      handle.setAttribute("aria-keyshortcuts", "ArrowUp ArrowDown");
+      handle.dataset.ftTabDragHandle = tab.id;
+      handle.addEventListener("keydown", event => {
+        const offset = event.key === "ArrowUp" ? -1
+          : event.key === "ArrowDown" ? 1 : 0;
+        if (!offset) return;
+        event.preventDefault();
+        event.stopPropagation();
+        moveTabByOffset(tab.id, offset);
+      });
+      return handle;
+    }
+
+    function tabDragSource(row, tab, handle) {
       if (!isDraggableTab(tab)) return;
-      row.draggable = true;
+      row.classList.add("draggable-tab");
       row.dataset.dragTabID = tab.id;
-      row.addEventListener("dragstart", event => {
+      const source = handle || row;
+      source.draggable = true;
+      source.addEventListener("dragstart", event => {
         draggingTabID = tab.id;
-        event.dataTransfer?.setData("text/plain", tab.id);
+        event.dataTransfer?.setData?.("text/plain", tab.id);
         if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
         row.classList.add("dragging");
+        if (event.dataTransfer?.setDragImage && document.body?.append) {
+          const preview = document.createElement("div");
+          preview.className = "tab-drag-preview";
+          preview.textContent = tab.title;
+          document.body.append(preview);
+          // Keep the preview alive for the native drag operation. Removing it
+          // on the next task is racy in WebKit and makes the drag image blank.
+          source.__ftDragPreview = preview;
+          event.dataTransfer.setDragImage(preview, 12, 12);
+        }
       });
-      row.addEventListener("dragend", () => {
+      source.addEventListener("dragend", () => {
         draggingTabID = "";
         row.classList.remove("dragging");
+        source.__ftDragPreview?.remove?.();
+        source.__ftDragPreview = null;
         clearDropMarkers();
       });
     }
@@ -180,9 +254,11 @@
       const row = document.createElement("div");
       row.className = `opened-tab${nested ? " opened-tab-nested" : ""}${tab.id === state.activeTabID ? " active" : ""}`;
       row.dataset.tabID = tab.id;
-      row.append(tabButton(tab, nested), tabCloseButton(tab));
-      tabDragSource(row, tab);
-      acceptTabRowDrop(row, tab);
+      const handle = isDraggableTab(tab) ? tabDragHandle(tab) : null;
+      row.append(...(handle ? [handle] : []), tabButton(tab, nested), tabCloseButton(tab));
+      tabDragSource(row, tab, handle);
+      if (isResearchDetailTab(tab)) acceptTabDrop(row, tab.id);
+      else acceptTabRowDrop(row, tab);
       return row;
     }
 
@@ -227,7 +303,7 @@
       const last = siblings.at(-1);
       if (last) insertTabRelative(tab, last, false);
       checkpointWorkspace();
-      renderOpenedTabs();
+      renderMovedTab(tabID);
       return true;
     }
 
@@ -240,7 +316,7 @@
       const last = siblings.at(-1);
       if (last) insertTabRelative(tab, last, false);
       checkpointWorkspace();
-      renderOpenedTabs();
+      renderMovedTab(tabID);
       return true;
     }
 
@@ -252,7 +328,7 @@
       if (!assignTabParent(tab, researchParentTabID(target))) return false;
       if (!insertTabRelative(tab, target, before)) return false;
       checkpointWorkspace();
-      renderOpenedTabs();
+      renderMovedTab(tabID);
       return true;
     }
 
@@ -273,18 +349,26 @@
         event.preventDefault();
         event.stopPropagation();
         clearDropMarkers();
-        target.classList.add(dropBefore(event, target) ? "drop-before" : "drop-after");
+        if (isResearchDetailTab(targetTab)) {
+          // A Research detail tab is a folder. Dropping on its header mounts
+          // the source below it; before/after would falsely suggest that the
+          // Research itself can be reordered or nested.
+          target.classList.add("drop-target");
+        } else {
+          target.classList.add(dropBefore(event, target) ? "drop-before" : "drop-after");
+        }
         if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
       });
       target.addEventListener("dragleave", () => {
-        target.classList.remove("drop-before", "drop-after");
+        target.classList.remove("drop-target", "drop-before", "drop-after");
       });
       target.addEventListener("drop", event => {
         event.preventDefault();
         event.stopPropagation();
         const sourceID = dragTabID(event);
         const source = state.tabs.find(item => item.id === sourceID);
-        const before = dropBefore(event, target);
+        const before = isResearchDetailTab(targetTab)
+          ? false : dropBefore(event, target);
         clearDropMarkers();
         if (!isDraggableTab(source) || source.id === targetTab.id) return;
         moveTabRelative(sourceID, targetTab.id, before);
@@ -370,7 +454,7 @@
         button.classList.add("nav-folder-tab");
         const close = tabCloseButton(tab);
         header.append(disclosure, button, close);
-        acceptTabRowDrop(header, tab);
+        acceptTabDrop(header, tab.id);
         const childHost = document.createElement("div");
         childHost.className = "nav-folder-children nav-research-tab-children";
         childHost.hidden = !expanded;
@@ -640,6 +724,17 @@
       return `research-report:${encodeURIComponent(target)}`;
     }
 
+    function researchIDFromReportPath(path) {
+      const pathname = String(path || "").split(/[?#]/, 1)[0];
+      if (!/^\/research\//.test(pathname)) return "";
+      try {
+        const origin = location.origin || "http://factortester.invalid";
+        return String(new URL(path, origin).searchParams.get("research_id") || "").trim();
+      } catch (_) {
+        return "";
+      }
+    }
+
     function researchDetailTabID(path) {
       const pathname = String(path || "").split(/[?#]/, 1)[0];
       const match = /^\/researches\/(.+)$/.exec(pathname);
@@ -670,6 +765,25 @@
       const options = navigationOptions && typeof navigationOptions === "object"
         ? {...navigationOptions} : {};
       const detailTabID = detailTabIDForPath(path);
+      const reportResearchID = detailTabID && researchReportTabID(path)
+        ? researchIDFromReportPath(path) : "";
+      if (reportResearchID && !options.parentTabID) {
+        const parentPath = `/researches/${encodeURIComponent(reportResearchID)}`;
+        const parentID = researchDetailTabID(parentPath);
+        const parent = state.tabs.find(tab => tab.id === parentID);
+        if (!parent) {
+          openTab(parentPath, {
+            id: parentID,
+            title: options.researchTitle || t("研究"),
+            closable: true,
+            parentFolder: "research",
+            parentResearchID: reportResearchID,
+          });
+        }
+        options.parentFolder = "research";
+        options.parentTabID = parentID;
+        options.parentResearchID = reportResearchID;
+      }
       // An overlay owns the source tab.  Any internal navigation initiated
       // from it gets a dedicated tab, including normally pinned feature routes.
       // Stable detail tabs remain deduplicated even when opened from an

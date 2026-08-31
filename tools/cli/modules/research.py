@@ -18,7 +18,7 @@ from tools.cli.table import render_table
 @click.command("list")
 @click.option(
     "--scope",
-    type=click.Choice(("mine", "subordinates", "shared")),
+    type=click.Choice(("all", "mine", "subordinates", "shared")),
     default="mine",
     show_default=True,
 )

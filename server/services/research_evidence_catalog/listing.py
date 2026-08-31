@@ -160,7 +160,13 @@ def list_evidence_relationship_page(
 def list_research_evidence_page(
     *, owner: str, research_id: str, page: int = 1, page_size: int = 20,
 ) -> dict[str, Any]:
-    """Derive Research Evidence exclusively from active Report bindings."""
+    """Derive Research Evidence exclusively from active Report bindings.
+
+    ``owner`` is the requesting principal, not the Evidence owner.  Research
+    access is authorized by the Manager ResearchCatalog route before this
+    metadata projection is called, so the projection must be able to join
+    Evidence objects owned by participating Profiles as well.
+    """
     selected_page = max(1, int(page))
     selected_size = min(max(1, int(page_size)), 100)
     target = str(research_id or "").strip()

@@ -262,6 +262,117 @@ struct ProfileResearchService {
         return value.evidence
     }
 
+    // MARK: - Canonical Research catalog (ADR-142)
+
+    func researches(
+        scope: String = "all",
+        includeArchived: Bool = false
+    ) async throws -> [ResearchCatalogItem] {
+        let envelope = try await value(
+            path: path("/api/research", query: [
+                URLQueryItem(name: "scope", value: scope),
+                URLQueryItem(
+                    name: "include_archived",
+                    value: includeArchived ? "1" : "0"
+                ),
+            ]),
+            as: ResearchCatalogListEnvelope.self
+        )
+        return envelope.researches
+    }
+
+    func research(researchID: String) async throws -> ResearchCatalogDetail {
+        let envelope = try await value(
+            path: "/api/research/\(encodedPathComponent(researchID))",
+            as: ResearchCatalogDetailEnvelope.self
+        )
+        return envelope.research
+    }
+
+    func createResearch(
+        title: String,
+        description: String = "",
+        visibility: String = "private",
+        authorizedUsers: [String] = [],
+        profileRef: String = ""
+    ) async throws -> ResearchCatalogItem {
+        let envelope = try await writeValue(
+            path: "/api/research",
+            method: "POST",
+            body: [
+                "title": title,
+                "description": description,
+                "visibility": visibility,
+                "authorized_users": authorizedUsers,
+                "profile_ref": profileRef,
+            ],
+            as: ResearchCatalogCreateEnvelope.self
+        )
+        return envelope.research
+    }
+
+    func addResearchMember(
+        researchID: String,
+        principalRef: String,
+        profileRef: String,
+        role: String = "contributor"
+    ) async throws -> ResearchCatalogMembership {
+        let envelope = try await writeValue(
+            path: "/api/research/\(encodedPathComponent(researchID))/members",
+            method: "POST",
+            body: [
+                "principal_ref": principalRef,
+                "profile_ref": profileRef,
+                "role": role,
+                "status": "active",
+            ],
+            as: ResearchCatalogMemberEnvelope.self
+        )
+        return envelope.member
+    }
+
+    func createResearchWorkspace(
+        researchID: String,
+        principalRef: String,
+        profileRef: String,
+        title: String = ""
+    ) async throws -> ResearchCatalogWorkspace {
+        let envelope = try await writeValue(
+            path: "/api/research/\(encodedPathComponent(researchID))/workspaces",
+            method: "POST",
+            body: [
+                "principal_ref": principalRef,
+                "profile_ref": profileRef,
+                "title": title,
+            ],
+            as: ResearchCatalogWorkspaceEnvelope.self
+        )
+        return envelope.workspace
+    }
+
+    func linkResearchReport(
+        researchID: String,
+        reportID: String,
+        title: String,
+        profileRef: String = "",
+        workspaceID: String = "",
+        buildSource: String = "client"
+    ) async throws -> ResearchCatalogReport {
+        let envelope = try await writeValue(
+            path: "/api/research/\(encodedPathComponent(researchID))/reports",
+            method: "POST",
+            body: [
+                "report_id": reportID,
+                "title": title,
+                "profile_ref": profileRef,
+                "workspace_id": workspaceID,
+                "build_source": buildSource,
+            ],
+            as: ResearchCatalogReportEnvelope.self
+        )
+        return envelope.report
+    }
+
     func researchGraphVersions(
         graphID: String
     ) async throws -> [ResearchGraphVersion] {
@@ -292,6 +403,37 @@ struct ProfileResearchService {
         case .value(let value, _):
             return value
         }
+    }
+
+    private func writeValue<T: Decodable>(
+        path: String,
+        method: String,
+        body: [String: Any],
+        as type: T.Type
+    ) async throws -> T {
+        let data = try JSONSerialization.data(withJSONObject: body)
+        let response = try await transport.data(for: request(
+            path: path, etag: nil, method: method, body: data
+        ))
+        guard (200..<300).contains(response.statusCode) else {
+            if let payload = try? decoder.decode(
+                ResearchProjectionErrorPayload.self,
+                from: response.data
+            ), !payload.error.isEmpty {
+                throw APIError.transport(payload.error)
+            }
+            throw APIError.transport(
+                "Research catalog HTTP \(response.statusCode)"
+            )
+        }
+        return try decoder.decode(type, from: response.data)
+    }
+
+    private func encodedPathComponent(_ value: String) -> String {
+        let allowed = CharacterSet.urlPathAllowed.subtracting(
+            CharacterSet(charactersIn: "/?#")
+        )
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 
     private func conditional<T: Decodable>(
