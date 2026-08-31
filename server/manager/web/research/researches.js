@@ -9,7 +9,6 @@
     {id: "reports", title: "研究报告"},
     {id: "profiles", title: "研究身份"},
     {id: "workspaces", title: "研究工作区"},
-    {id: "evidence", title: "证据"},
   ];
   const pageSize = 20;
 
@@ -323,16 +322,6 @@
         ));
         return;
       }
-      pane.replaceChildren(simpleTable(
-        context,
-        [context.t("证据"), context.t("报告"), context.t("Job"), context.t("用途")],
-        (response.evidence_links || []).map(item => [
-          item.evidence_ref, item.report_id || "—", item.job_id || "—", item.purpose || "—",
-        ]),
-        state,
-        "evidence",
-        () => childTable(context, root, researchID, value, kind),
-      ));
     } catch (error) {
       if (current(context)) pane.replaceChildren(
         FTUI.empty(context.t("无法读取"), error.message || String(error)),
@@ -349,7 +338,7 @@
       return;
     }
     const kind = {
-      reports: "reports", profiles: "members", workspaces: "workspaces", evidence: "evidence",
+      reports: "reports", profiles: "members", workspaces: "workspaces",
     }[state.activeTab];
     if (kind) await childTable(context, root, researchID, value, kind);
   }
