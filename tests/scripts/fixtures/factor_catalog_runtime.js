@@ -34,11 +34,19 @@ async function main() {
         "/api/product-library/product-groups": {groups: [{group_ref: "group:one"}]},
         "/api/factor-library/families": {
           families: [{family_ref: "family:one"}],
-          family_scopes: {}, principal: "alice", visitor: false,
+          family_scopes: {
+            public: {families: [{family_ref: "family:public"}]},
+            mine: {families: [{family_ref: "family:mine"}]},
+          },
+          principal: "alice", visitor: false,
         },
         "/api/factor-library/factors": {
           factors: [{factor_ref: "factor:one"}],
-          family_scopes: {}, principal: "alice", visitor: false,
+          family_scopes: {
+            public: {factors: [{factor_ref: "factor:public"}], families: []},
+            mine: {factors: [{factor_ref: "factor:mine"}], families: []},
+          },
+          principal: "alice", visitor: false,
         },
       }[path]);
     },
@@ -62,6 +70,15 @@ async function main() {
     "/api/factor-library/families", "/api/factor-library/factors",
   ]);
   assert.strictEqual(data.factors[0].factor_ref, "factor:one");
+  assert.strictEqual(
+    data.familyScopes.public.families[0].family_ref, "family:public",
+  );
+  assert.strictEqual(
+    data.familyScopes.mine.families[0].family_ref, "family:mine",
+  );
+  assert.strictEqual(
+    data.familyScopes.public.factors[0].factor_ref, "factor:public",
+  );
 
   const savedFactor = {
     schema_version: 2,
