@@ -389,7 +389,7 @@ window.webkit = {messageHandlers: {researchNavigation: {
   postMessage() { nativeNavigations += 1; },
 }}};
 const embeddedState = {
-  tabs: [{id: "jobs", path: "/jobs?section=types", title: "测试", closable: false}],
+  tabs: [{id: "jobs", path: "/jobs?section=types", title: "测试台", closable: false}],
   activeTabID: "jobs", tabSessions: new Map(), modules: [], pendingScrollCapture: null,
 };
 const embeddedTabs = window.FTTabs.create({
@@ -415,7 +415,7 @@ const nestedResearchID = "research-detail:research-two";
 const hierarchyState = {
   tabs: [], activeTabID: researchChildID, tabSessions: new Map(), modules: [
     {id: "home", path: "/", title: "主页", pinned: true},
-    {id: "research", path: "/research?section=researches", title: "研究", pinned: true},
+    {id: "research", path: "/research?section=researches", title: "研究台", pinned: true},
   ], pendingScrollCapture: null,
 };
 const hierarchyTabs = window.FTTabs.create({

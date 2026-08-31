@@ -245,7 +245,7 @@
     const isCurrent = () => context.isRouteCurrent?.() !== false;
     if (!isCurrent()) return;
     FTJobProgress.stopProgress();
-    context.activeNav("jobs"); context.setHeading(context.t("测试"));
+    context.activeNav("jobs"); context.setHeading(context.t("测试台"));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取跨端口任务…")));
     const state = scopeState(context);
     const urlScope = new URLSearchParams(location.search).get("scope");
