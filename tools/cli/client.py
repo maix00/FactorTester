@@ -8,6 +8,7 @@ from .client_admin import AdminClientMixin
 from .client_agent_flow import AgentFlowClientMixin
 from .client_agent_profile import AgentProfileClientMixin
 from .client_factor_library import FactorLibraryClientMixin
+from .client_jobs import JobsClientMixin
 from .client_navigation import NavigationClientMixin
 from .client_order_audit import OrderAuditClientMixin
 from .client_product_library import ProductLibraryClientMixin
@@ -16,6 +17,7 @@ from .client_research import ResearchClientMixin
 from .client_research_evidence import ResearchEvidenceClientMixin
 from .client_research_graph import ResearchGraphClientMixin
 from .client_research_step import ResearchStepClientMixin
+from .client_runs import RunsClientMixin
 from .client_test_authoring import TestAuthoringClientMixin
 from .http import HttpSession
 
@@ -29,6 +31,8 @@ class FactorTesterClient(
     AgentProfileClientMixin,
     OrderAuditClientMixin,
     ResearchClientMixin,
+    RunsClientMixin,
+    JobsClientMixin,
     TestAuthoringClientMixin,
     NavigationClientMixin,
     ProductLibraryClientMixin,
