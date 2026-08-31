@@ -21,6 +21,12 @@
     ).trim();
   }
 
+  function familyClassNameMatches(expected, inspection) {
+    const stored = String(expected || "").trim();
+    const declared = String(inspection?.factor_name || "").trim();
+    return Boolean(stored && declared && stored === declared);
+  }
+
   function familyItems(data) {
     const seen = new Set();
     return (data?.families || []).flatMap(item => {
@@ -702,17 +708,16 @@
     const name = textField(
       context, "因子家族类名",
       persistedFamilyClassName(familyMode ? loaded : state.family || loaded), {
-      readOnly: mode === "edit" || familyMode, required: true,
+      readOnly: mode === "edit", required: true,
       },
     );
     const chineseName = textField(context, "中文名称", loaded.chinese_name || "");
     const description = textField(context, "说明", loaded.description || "");
     const category = textField(context, "分类", loaded.category || "自编");
-    state.onInspected = inspection => {
-      if (inspection?.factor_name) name.value = inspection.factor_name;
-    };
     state.onFamilyChanged = family => {
-      name.value = persistedFamilyClassName(family);
+      if (mode === "create" && !familyMode) {
+        name.value = persistedFamilyClassName(family);
+      }
     };
     const topMount = document.createElement("div");
     topMount.className = "factor-detail-top";
@@ -851,6 +856,15 @@
         jobs: jobs.mount,
       },
     });
+    let selectedTab = tabs.current();
+    tabs.root.addEventListener("object-detail-tab-change", event => {
+      const nextTab = event.detail?.key || tabs.current();
+      const previousTab = selectedTab;
+      selectedTab = nextTab;
+      if (previousTab === "source" && nextTab !== "source") {
+        void validateSourceDraft();
+      }
+    });
     if (mode === "create") {
       const stateKey = `factor-create:${state.familyMode ? "family" : "factor"}`;
       context.pageState?.register?.(stateKey, {
@@ -890,6 +904,12 @@
         if (!await validateSourceDraft()) {
           tabs.select("source", true);
           throw new Error(state.validationError || context.t("因子源码无法通过检查"));
+        }
+        if ((state.familyMode || state.sourceMode !== "family")
+            && !familyClassNameMatches(name.value, state.inspection)) {
+          throw new Error(context.t(
+            "详情中的因子家族类名必须与源码声明的类名一致",
+          ));
         }
         const saved = state.sourceMode === "family"
           ? await saveLibraryFactor(context, state)
@@ -995,5 +1015,6 @@
 
   window.FTFactorEditor = Object.freeze({
     render, reconcileParameterValues, bindFieldValue, persistedFamilyClassName,
+    familyClassNameMatches,
   });
 })();

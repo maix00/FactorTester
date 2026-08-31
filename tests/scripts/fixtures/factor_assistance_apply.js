@@ -77,4 +77,10 @@ assert.equal(window.FTFactorEditor.persistedFamilyClassName({
 assert.equal(window.FTFactorEditor.persistedFamilyClassName({
   factor_family_alias: "LegacyFamily", factor_alias: "LegacyFamily|N:25d",
 }), "LegacyFamily");
+assert.equal(window.FTFactorEditor.familyClassNameMatches(
+  "MmAroonDown", {factor_name: "MmAroonDown"},
+), true);
+assert.equal(window.FTFactorEditor.familyClassNameMatches(
+  "MmAroonDown", {factor_name: "MmAroonUp"},
+), false);
 console.log("ok");

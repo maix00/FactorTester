@@ -2334,7 +2334,8 @@ def test_factor_create_editors_use_shared_actions_and_personal_factor_scope() ->
     assert 'context.toolbar.append(submit)' in editor
     assert 'source: {save_mode: "auto"}' in editor
     assert 'await validateSourceDraft()' in editor
-    assert 'object-detail-tab-change' not in editor
+    assert 'object-detail-tab-change' in editor
+    assert "familyClassNameMatches(name.value, state.inspection)" in editor
     assert 'form.append(topMount, tabs.root, status)' in editor
     assert "FTUI.actionButton(" in object_form
     assert 'if (definition.mode === "edit") context.toolbar.append(cancelEdit)' in object_form
@@ -2386,8 +2387,9 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert "factor-param-factor-" in parameter_editor
     assert "FTTestObjectEditorOverlay.open" in editor
     assert "state.onInspected?.(state.inspection)" in editor
-    assert "name.value = inspection.factor_name" in editor
-    assert 'readOnly: mode === "edit" || familyMode' in editor
+    assert "name.value = inspection.factor_name" not in editor
+    assert "familyClassNameMatches(name.value, state.inspection)" in editor
+    assert 'readOnly: mode === "edit"' in editor
 
 
 def test_factor_library_lists_original_class_name_and_description_columns() -> None:
