@@ -10,8 +10,13 @@ from ..core.evidence import persist_command_evidence
 from ..core.plan import build_factor_research_plan, validation_checklist
 from ..core.session import load_session, record_event, record_gap, save_session
 from ..core.slices import default_factor_validation_plan
-from ..utils.factortester_backend import looks_like_platform_gap, resolve_factortester, run_factortester
+from ..utils.factortester_backend import (
+    looks_like_platform_gap,
+    resolve_factortester,
+    run_factortester,
+)
 from .common import echo_json
+
 
 @click.command("doctor")
 @click.option("--json", "as_json", is_flag=True, help="输出 JSON。")

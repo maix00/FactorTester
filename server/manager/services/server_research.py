@@ -107,6 +107,19 @@ class ServerResearchService:
             key=lambda item: (-float(item["updated_at"]), item["server_ref"]),
         )
 
+    def owner_report(self, principal: str, report_id: str) -> dict[str, Any] | None:
+        """Resolve one private server-Profile report by its stable report id."""
+        selected = str(report_id or "").strip()
+        if not selected:
+            return None
+        return next(
+            (
+                item for item in self.list_owner(principal)
+                if str(item.get("report_id") or "") == selected
+            ),
+            None,
+        )
+
     def projection(self, principal: str, server_ref: str) -> dict[str, Any]:
         location = self._location(principal, server_ref)
         value = build_upload_projection(
@@ -229,13 +242,14 @@ class ServerResearchService:
             build_source="server_agent",
             build_source_ref=source_ref,
         )
+        shared = visibility in {"authorized", "public"}
         return {
             **settings,
             "server_ref": server_ref,
             "build_source": "server_agent",
             "build_source_ref": source_ref,
-            "sharing_state": "shared",
-            "is_shared": True,
+            "sharing_state": "shared" if shared else "not_shared",
+            "is_shared": shared,
         }
 
     def _snapshot(self, location: dict[str, Any]) -> dict[str, Any]:

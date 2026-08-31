@@ -6,8 +6,9 @@ The historical ``/single_factor_test`` HTML application was retired after the
 IC and backtest workbenches became first-class client modules.  The execution
 APIs remain here because both clients consume the same service contract.
 """
-from flask import Blueprint, request
 from urllib.parse import urlsplit
+
+from flask import Blueprint, request
 
 sft_bp = Blueprint('sft', __name__)
 
@@ -27,21 +28,21 @@ def allow_same_host_job_reads(response):
         response.headers["Vary"] = "Origin"
     return response
 
-from . import (  # noqa: E402, F401
+from . import (  # noqa: F401
     agent_flow_routes,
     backtest_job_reads,
     backtest_jobs,
     backtest_settings,
     category_routes,
     configuration_snapshot_routes,
+    direct_trial_routes,
     group,
     ic,
     job_port_routes,
     research_graph_routes,
-    research_graph_user_routes,
-    research_step_routes,
-    research_result_report_routes,
     research_jobs,
+    research_result_report_routes,
+    research_step_routes,
     run_input_routes,
     setting_instance_routes,
     supplemental_routes,

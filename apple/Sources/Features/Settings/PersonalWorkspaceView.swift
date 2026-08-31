@@ -94,19 +94,6 @@ struct PersonalWorkspaceView: View {
             }
             Divider()
             SettingsRow(
-                title: "Git 版本",
-                description: "分别显示本地工作副本与服务器 canonical 版本"
-            ) {
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text(verbatim: L10n.format("本地 · %@", controller.localFactorLibrary?.gitHead ?? "—"))
-                        .font(.caption.monospaced())
-                    Text(verbatim: L10n.format("服务器 · %@", controller.serverFactorLibrary?.gitHead ?? "—"))
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Divider()
-            SettingsRow(
                 title: "同步",
                 description: "按方向传输因子源码；同步到本地更新同名文件但不删除其他文件"
             ) {
@@ -131,20 +118,6 @@ struct PersonalWorkspaceView: View {
                     }
                         .buttonStyle(.bordered)
                         .disabled(factorLibraryRoot == nil || controller.isWorking)
-                }
-            }
-            if let local = controller.localFactorLibrary {
-                Divider()
-                SettingsRow(title: "本地因子数量", description: "当前本地工作副本的文件统计") {
-                    Text(verbatim: L10n.format("自定义 %lld · 公共 %lld", local.customCount, local.publicCount))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            if let server = controller.serverFactorLibrary {
-                Divider()
-                SettingsRow(title: "服务器因子数量", description: "当前登录用户可同步的服务器快照") {
-                    Text(verbatim: L10n.format("自定义 %lld · 公共 %lld", server.customCount, server.publicCount))
-                        .foregroundStyle(.secondary)
                 }
             }
         }

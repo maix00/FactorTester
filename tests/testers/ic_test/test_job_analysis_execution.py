@@ -13,7 +13,7 @@ from tools.testers.ic_test.configuration import (
 from tools.testers.ic_test.execution import execute_ic_job_analyses, plan_ic_jobs
 
 
-FACTOR = "factor:v1:profile-maxa:path:roc:commit:blob"
+FACTOR = "factor:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 
 def _configuration(*, with_analysis: bool):

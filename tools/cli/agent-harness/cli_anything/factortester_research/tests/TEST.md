@@ -7,7 +7,7 @@ artifact contracts produced by the workflow.
 
 ## Product metadata and report reference acceptance
 
-- `factortester products info` wraps long keys, values, sources, and notes
+- `factortester product-library info` wraps long keys, values, sources, and notes
   without replacing their content with an ellipsis.
 - The canonical, packaged, and locally registered Research Agent Skill applies
   typed domain-reference rules to every Markdown-bearing report location.

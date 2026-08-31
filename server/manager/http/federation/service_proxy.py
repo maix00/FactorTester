@@ -33,10 +33,7 @@ class FederationServiceProxyRoutesMixin:
                 path,
             )
             or path == "/api/research-agent-executions"
-            or (
-                path.startswith("/api/research-graphs/")
-                and not path.startswith("/api/research-graphs/user-library")
-            )
+            or path.startswith("/api/research-graph-instances/")
             or path.startswith("/api/trial-plans/")
             or path == "/api/internal/factor-library/public-source-applied"
         )

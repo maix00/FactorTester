@@ -214,7 +214,7 @@ def test_ic_quantile_portfolio_rows_keep_portfolio_units_separate() -> None:
 
     result = {
         "factors": [{
-            "factor_alias": "ROC", "factor_ref": "factor:v1:roc",
+            "factor_alias": "ROC", "factor_ref": "factor:v2:C_hxmG_kcqe_YUpCZtfvY7cvSxHKmqFz1vC8-DpM0hY",
             "ic_method": "rank", "primary_forward_return_horizon": "DAY1",
             "primary_entry_delay_bars": 0,
             "ic_statistics": {
@@ -262,7 +262,7 @@ def test_ic_quantile_portfolio_rows_include_non_primary_horizon_variants() -> No
     rows = quantile_portfolio_statistics_rows({
         "factors": [{
             "factor_alias": "ROC",
-            "factor_ref": "factor:v1:roc",
+            "factor_ref": "factor:v2:C_hxmG_kcqe_YUpCZtfvY7cvSxHKmqFz1vC8-DpM0hY",
             "ic_method": "rank",
             "primary_forward_return_horizon": "DAY1",
             "primary_entry_delay_bars": 0,
@@ -513,7 +513,7 @@ def test_metrics_svg_formats_epoch_timestamps() -> None:
 
 
 def test_requested_ic_outputs_include_series_and_statistics() -> None:
-    factor_ref = "factor:v1:profile-maxa:path:identity:" + "a" * 40 + ":" + "b" * 40
+    factor_ref = "factor:v2:" + "a" * 43
     result = {
         "success": True,
         "forward_horizon_sampling": {

@@ -125,16 +125,6 @@ def test_profile_cli_has_no_legacy_layout_commands(tmp_path, monkeypatch):
         assert command_help.exit_code == 0, command_help.output
         assert "--workspace-root" not in command_help.output
 
-    outside = tmp_path / "outside-factor-library"
-    outside.mkdir()
-    rejected = runner.invoke(cli, [
-        "factor-library", "workspace", "canonical-register",
-        "--path", str(outside), "--owner-ref", OWNER,
-        "--release-profile", str(release),
-    ])
-    assert rejected.exit_code != 0
-    assert "must use the unified user layout" in rejected.output
-
     shown = runner.invoke(cli, [
         "client", "profile", "user-layout", "show",
         "--principal", OWNER,

@@ -63,6 +63,7 @@ def test_local_profile_agent_unknown_get_does_not_fall_back_to_service_gateway(
     paths = (
         "/custom-factors/api/list",
         "/custom-factors/api/factor-library-overview",
+        "/api/factor-library/research-runs",
         "/api/future-cli-capability?detail=1",
     )
     with running_manager(state) as base_url:
@@ -97,10 +98,8 @@ def test_profile_agent_uses_canonical_factor_library_gateway(
     monkeypatch.setattr(state, "route_request", route_request)
     with running_manager(state) as base_url:
         for path in (
-            "/api/factor-library/catalog",
-            "/api/factor-library/operators",
-            "/api/factor-library/research-runs?limit=1",
-            "/api/factor-library/workspace/snapshot",
+            "/api/factor-library/overview",
+            "/api/factor-library/families/operators",
             "/api/admin/server-instances",
         ):
             with urlopen(Request(
@@ -110,12 +109,72 @@ def test_profile_agent_uses_canonical_factor_library_gateway(
 
     assert {values["principal"] for _route, values in forwarded} == {"user@1"}
     assert [values["path"] for _route, values in forwarded] == [
-        "/custom-factors/api/list",
-        "/custom-factors/api/visual-operators",
-        "/custom-factors/api/factor-library-research-runs?limit=1",
-        "/custom-factors/api/workspace/snapshot",
+        "/api/internal/factor-library/overview",
+        "/api/internal/factor-library/operators",
         "/admin/api/server-instances",
     ]
+
+
+@pytest.mark.parametrize("agent", [False, True])
+def test_research_graph_gateway_is_identical_for_client_and_profile_agent(
+    tmp_path, monkeypatch, agent,
+) -> None:
+    state = authenticated_state(tmp_path)
+    route = ServiceRoute(
+        server_id=state.server_id,
+        role="main",
+        branch="main",
+        revision="test",
+        port=8000,
+    )
+    monkeypatch.setattr(state, "route_for", lambda **_values: route)
+    forwarded = []
+
+    def route_request(selected, **values):
+        forwarded.append((selected, values))
+        return GatewayResponse(
+            status=200,
+            body=json.dumps({"success": True}).encode(),
+            content_type="application/json",
+        )
+
+    monkeypatch.setattr(state, "route_request", route_request)
+    headers = agent_headers(state) if agent else {
+        "Authorization": "Bearer user-token",
+    }
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/research-graph-instances/instance-1/"
+            "branches/branch-1/node/advance",
+            data=b'{}',
+            headers={**headers, "Content-Type": "application/json"},
+            method="POST",
+        )) as response:
+            assert json.loads(response.read())["success"] is True
+
+    assert [values["path"] for _route, values in forwarded] == [
+        "/api/research-graph-instances/instance-1/branches/branch-1/"
+        "node/advance",
+    ]
+    assert {values["principal"] for _route, values in forwarded} == {"user@1"}
+
+
+def test_research_graph_catalog_does_not_fall_through_to_service_gateway(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(
+        state,
+        "route_request",
+        lambda *_args, **_values: pytest.fail("unsafe path must not be proxied"),
+    )
+    with running_manager(state) as base_url:
+        with pytest.raises(HTTPError) as failed:
+            urlopen(Request(
+                f"{base_url}/api/research-graphs/factor-research/active",
+                headers=agent_headers(state),
+            ))
+    assert failed.value.code == 404
 
 
 def test_local_profile_agent_unknown_write_does_not_fall_back_to_service_gateway(
@@ -153,7 +212,7 @@ def test_local_profile_agent_cannot_target_a_remote_service(
     with running_manager(state) as base_url:
         with pytest.raises(HTTPError) as failed:
             urlopen(Request(
-                f"{base_url}/api/factor-library/catalog"
+                f"{base_url}/api/factor-library/families/operators"
                 "?server_id=remote-main",
                 headers=agent_headers(state),
             ))

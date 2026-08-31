@@ -57,7 +57,7 @@ def _fake_codex(path: Path, *, history: bool = False) -> str:
                         "text": (
                             "98 个期货品种，2846 个合约路径\n\n"
                             "```bash\n"
-                            "factortester products list\n"
+                            "factortester product-library list\n"
                             "```"
                         ),
                         "created_at": 3,
@@ -795,7 +795,7 @@ def test_profile_conversation_survives_agent_stop_and_rebind(tmp_path, monkeypat
     )["items"]
     assert [item["type"] for item in items] == ["assistant_message", "user_message"]
     assert items[0]["content"][0]["text"] == (
-        "98 个期货品种，2846 个合约路径\n\n```bash\nfactortester products list\n```"
+        "98 个期货品种，2846 个合约路径\n\n```bash\nfactortester product-library list\n```"
     )
     saved = service.conversation(PRINCIPAL, PROFILE_ID, conversation["conversation_id"])
     assert saved["provider_thread_id"] == "provider-thread-1"
@@ -1005,7 +1005,7 @@ class _SSESupervisor:
                             "item": {
                                 "id": "command-1",
                                 "type": "commandExecution",
-                                "command": "factortester products list",
+                                "command": "factortester product-library list",
                                 "aggregatedOutput": "98 products",
                                 "cwd": "/research/maxc",
                                 "status": "completed",
@@ -1075,7 +1075,7 @@ def test_profile_agent_sse_uses_incremental_http11_chunks():
     assert chunk_body.startswith(sse_payload)
     assert b'"chatkit_item": {"id": "command-1"' in raw
     assert b'"type": "workflow"' in raw
-    assert b'"summary": {"title": "factortester products list"}' in raw
+    assert b'"summary": {"title": "factortester product-library list"}' in raw
     assert b'"cwd": "/research/maxc"' in raw
     assert supervisor.calls[0][0] == 0
 

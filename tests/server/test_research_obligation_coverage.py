@@ -24,14 +24,8 @@ _WIRE_FIELDS = {
     "edge_required", "satisfaction",
 }
 
-_FACTOR_REF = (
-    "factor:v1:profile-test:cGF0aA:dGVzdC1mYWN0b3I:"
-    + "a" * 40 + ":" + "b" * 40
-)
-_OTHER_FACTOR_REF = (
-    "factor:v1:profile-test:cGF0aA:b3RoZXItZmFjdG9y:"
-    + "c" * 40 + ":" + "d" * 40
-)
+_FACTOR_REF = "factor:v2:" + "a" * 43
+_OTHER_FACTOR_REF = "factor:v2:" + "b" * 43
 
 
 def _graph():

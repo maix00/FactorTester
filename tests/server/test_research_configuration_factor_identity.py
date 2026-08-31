@@ -21,7 +21,7 @@ def _factor() -> dict:
 
 def _payload(factors: list[dict]) -> dict:
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "shared": {"factors": factors},
         "analyses": {},
         "ui": {},

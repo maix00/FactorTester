@@ -18,7 +18,7 @@
 2. FTClient 管理的本机来源安装在
    `~/Documents/FactorTester/sources/<source-id>`。每个来源提供严格校验的
    `source.json`；静态目录读取不导入 connector，也不执行网络探测。
-3. 普通 Web 页面只请求 `/api/catalog/*`，因此只能看到服务器目录。Swift 内嵌
+3. 普通 Web 页面只请求 `/api/product-library/*`，因此只能看到服务器目录。Swift 内嵌
    页面可以额外请求 `/api/client/product*`；这些请求由 `WKWebView` 消息处理器
    截获，并交给打包的本地 CLI。Manager 不实现这些路由。
 4. 本地桥只允许固定的只读目录路径和受限请求体。来源凭证保存在设备 Keychain，

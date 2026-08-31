@@ -84,7 +84,7 @@ const dispatch = window.FTAppRouteDispatch.create({
   await dispatch.render({kind: "products"}, 10);
   assert.deepEqual(
     calls.slice(-3),
-    ["nav:products", "heading:产品", "products:10"],
+    ["nav:products", "heading:产品库", "products:10"],
     "public visitors must be able to browse the product catalog",
   );
   await dispatch.render({kind: "ic-test"}, 11);

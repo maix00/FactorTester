@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from flask import Flask
 import pytest
 import yaml
+from flask import Flask
 
 import settings as Settings
 from server.modules.single_factor_test import sft_bp
@@ -113,60 +113,19 @@ def test_user_graph_upload_recomputes_one_stale_semantic_hash(tmp_path, monkeypa
     assert "locale:" not in loaded["yaml"]
 
 
-def test_user_graph_routes_are_explicit_and_manager_local(client):
-    response = client.post(
-        "/api/research-graphs/user-library",
-        json={
-            "filename": "uploaded.yaml",
-            "yaml": yaml.safe_dump(_graph()),
-        },
-    )
-    assert response.status_code == 201
-    file_id = response.json["file"]["graph_file_id"]
-    assert response.json["file"]["sync_scope"] == "manager-local"
-    assert "locale" not in response.json["file"]
-
-    default = client.get("/api/research-graphs/user-library/default")
-    assert default.status_code == 200
-    assert default.json["default"] is None
-
-    selected = client.post(
-        "/api/research-graphs/user-library/default",
-        json={"kind": "user", "graph_file_id": file_id},
-    )
-    assert selected.status_code == 200
-    assert selected.json["default"]["kind"] == "user"
-
-    download = client.get(
-        f"/api/research-graphs/user-library/{file_id}?download=1"
-    )
-    assert download.status_code == 200
-    assert "locale" not in download.data.decode("utf-8")
-
-    view = client.get(
-        f"/api/research-graphs/user-library/{file_id}?view=1"
-    )
-    assert view.status_code == 200
-    assert view.json["file"]["graph"]["graph_id"] == "personal-research"
-    assert "yaml" not in view.json["file"]
-
-    deleted = client.delete(f"/api/research-graphs/user-library/{file_id}")
-    assert deleted.status_code == 200
-    assert client.get(
-        f"/api/research-graphs/user-library/{file_id}"
-    ).status_code == 404
-
-
-def test_federation_does_not_forward_private_user_library():
+def test_federation_only_forwards_graph_runtime_instances():
     from server.manager.http.federation.service_proxy import (
         FederationServiceProxyRoutesMixin,
     )
 
-    assert FederationServiceProxyRoutesMixin._federation_path_allowed(
-        "/api/research-graphs/factor-research/versions"
-    )
     assert not FederationServiceProxyRoutesMixin._federation_path_allowed(
         "/api/research-graphs/user-library"
+    )
+    assert not FederationServiceProxyRoutesMixin._federation_path_allowed(
+        "/api/research-graphs/factor-research/versions"
+    )
+    assert FederationServiceProxyRoutesMixin._federation_path_allowed(
+        "/api/research-graph-instances/instance-1/branches/branch-1"
     )
 
 

@@ -340,7 +340,7 @@
         draft => draft?.schemaVersion === 2 ? String(draft.workspaceID || "") : "",
       ).filter(Boolean));
       return Promise.all([...workspaceIDs].map(workspaceID => api(
-        `/api/workspaces/${encodeURIComponent(workspaceID)}`,
+        `/api/test-authoring/workspaces/${encodeURIComponent(workspaceID)}`,
         {method: "DELETE"},
       )));
     },

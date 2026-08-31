@@ -180,10 +180,7 @@ def test_declared_links_preserve_the_agent_authored_kind_target_and_label() -> N
 def test_declared_link_round_trip_preserves_brackets_in_factor_label() -> None:
     value = typed_markdown_link(
         kind="factor",
-        target_ref=(
-            "factor:v1:profile-maxa:cGF0aA:aWRlbnRpdHk:"
-            f"{'1' * 40}:{'2' * 40}"
-        ),
+        target_ref="factor:v2:" + "a" * 43,
         label="SgCPS|P:[CA]|N:20d",
     )
 
@@ -195,11 +192,7 @@ def test_declared_link_round_trip_preserves_brackets_in_factor_label() -> None:
 def test_versioned_factor_and_resolved_domain_links_are_valid() -> None:
     factor = typed_markdown_link(
         kind="factor",
-        target_ref=(
-            "factor-family:v1:profile-maxa:"
-            "Y3VzdG9tX2ZhY3RvcnMvU2dDUFMucHk:U2dDUFM:"
-            f"{'1' * 40}:{'2' * 40}"
-        ),
+        target_ref="factor-family:v2:" + "c" * 43,
         label="SgCPS",
     )
     product = typed_markdown_link(
@@ -244,10 +237,7 @@ def test_versioned_factor_and_resolved_domain_links_are_valid() -> None:
 
 
 def test_typed_factor_set_uses_the_factor_link_kind() -> None:
-    target = (
-        "factor-set:v1:profile-maxa:c2V0cw:bW9tZW50dW0:"
-        + ("a" * 40) + ":" + ("b" * 40)
-    )
+    target = "factor-set:v2:" + "b" * 43
 
     link = typed_markdown_link(
         kind="factor", target_ref=target, label="动量因子集合",

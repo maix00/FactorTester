@@ -13,7 +13,7 @@ from typing import Iterable
 import click
 
 from tools.cli.modules.custom_factors import factor_library
-from tools.cli.modules.products import products
+from tools.cli.modules.products import product_library
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,9 +27,9 @@ class ControllerRegistry:
     def __init__(self) -> None:
         self._adapters = (
             ControllerAdapter(
-                public_key="products",
+                public_key="product-library",
                 backend_key="products",
-                commands=(products,),
+                commands=(product_library,),
             ),
             ControllerAdapter(
                 public_key="factor-library",

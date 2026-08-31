@@ -72,6 +72,51 @@ def test_server_research_routes_read_owner_report(tmp_path: Path):
             settings = json.loads(response.read())
         assert settings["reports"][0]["build_source"] == "server_agent"
         assert settings["reports"][0]["sharing_state"] == "not_shared"
+
+        request = Request(
+            f"{base}/api/research-publications/publish",
+            data=json.dumps({
+                "server_ref": server_ref,
+                "visibility": "private",
+            }).encode(),
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urlopen(request) as response:
+            published = json.loads(response.read())
+        assert published["success"] is True
+        assert published["build_source"] == "server_agent"
+        assert published["visibility"] == "private"
+
+        request = Request(
+            f"{base}/api/research-publications/settings",
+            data=json.dumps({
+                "report_id": settings["reports"][0]["report_id"],
+                "visibility": "authorized",
+                "authorized_users": ["GTHT@Reader@2"],
+            }).encode(),
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urlopen(request) as response:
+            shared = json.loads(response.read())
+        assert shared["success"] is True
+        assert shared["settings"]["build_source"] == "server_agent"
+        assert shared["settings"]["visibility"] == "authorized"
+
+        request = Request(
+            f"{base}/api/research-publications/settings",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        with urlopen(request) as response:
+            settings = json.loads(response.read())
+        assert settings["reports"][0]["sharing_state"] == "shared"
     finally:
         server.shutdown()
         server.server_close()

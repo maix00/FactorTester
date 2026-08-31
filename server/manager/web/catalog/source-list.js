@@ -85,7 +85,7 @@
 
   async function loadDescriptors(context, helpers) {
     const {localCatalogAvailable, request} = helpers;
-    const origins = [{id: "server", endpoint: "/api/catalog/sources"}];
+    const origins = [{id: "server", endpoint: "/api/product-library/data-sources"}];
     // A browser cannot access the client filesystem. Local providers are
     // requested only by the embedded Swift presentation.
     if (localCatalogAvailable()) {

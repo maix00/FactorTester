@@ -37,7 +37,7 @@
     const resolved = await Promise.all(missing.map(async ref => {
       try {
         const value = await context.api(
-          `/api/catalog/product-groups/${encodeURIComponent(ref)}`,
+          `/api/product-library/product-groups/${encodeURIComponent(ref)}`,
         );
         return value?.group || null;
       } catch (_error) {

@@ -46,20 +46,13 @@
     state.factorSetCatalog.busy = true;
     state.factorSetCatalog.error = "";
     try {
-      const serverRequest = context.api(
+      const server = await context.api(
         `${serialization.catalog_endpoint}?query=${encodeURIComponent(query)}`,
-      );
-      const localRequest = nativeHandler()
-        ? nativeRequest(serialization.native_catalog_action, {query})
-        : Promise.resolve({items: []});
-      const [server, local] = await Promise.all([serverRequest, localRequest]);
-      const merged = FTFactorModel.mergeFactorSets(
-        server.items || [], local.items || [],
       );
       const byRef = new Map((state.factorSetCatalog.items || []).map(item => [
         item.target_ref, item,
       ]));
-      for (const item of merged) byRef.set(item.target_ref, item);
+      for (const item of server.items || []) byRef.set(item.target_ref, item);
       state.factorSetCatalog.items = [...byRef.values()].filter(item => item.target_ref);
     } catch (error) {
       state.factorSetCatalog.error = error.message || String(error);
@@ -252,34 +245,12 @@
       state.factorSetCatalog.runInputs.set(item.target_ref, bundle);
       return bundle.descriptor;
     }
-    if (item.visibility !== "server") {
-      bundle = await nativeRequest(serialization.native_run_input_action, {
-        target_ref: item.target_ref,
-      });
-      for (const source of bundle.transient_factor_sources || []) {
-        FTTestInputState.putFactor(state, {
-          ...source,
-          source_origin: "factor_set",
-          factor_set_refs: [item.target_ref],
-        }, {factor_name: source.factor_id});
-      }
-    } else {
-      const payload = await context.api(
-        `${serialization.descriptor_endpoint}?target_ref=${encodeURIComponent(item.target_ref)}`,
-      );
-      bundle = {descriptor: payload.descriptor || payload};
-    }
+    const payload = await context.api(
+      `${serialization.descriptor_endpoint}?target_ref=${encodeURIComponent(item.target_ref)}`,
+    );
+    bundle = {descriptor: payload.descriptor || payload};
     state.factorSetCatalog.runInputs.set(item.target_ref, bundle);
     return bundle.descriptor;
-  }
-
-  function nativeHandler() {
-    return window.webkit?.messageHandlers?.factorTesterLocalFactorSets;
-  }
-  async function nativeRequest(action, payload = {}) {
-    const handler = nativeHandler();
-    if (!handler?.postMessage) throw new Error("FTClient local factor catalog is unavailable");
-    return await handler.postMessage({action, ...payload});
   }
 
   window.FTTestFactorSets = Object.freeze({

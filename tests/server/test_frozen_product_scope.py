@@ -77,6 +77,44 @@ def test_freeze_product_scope_moves_reusable_objects_to_shared() -> None:
     assert "product_path_candidates" not in payload["ui"]["backtest"]
 
 
+def test_freeze_product_scope_accepts_assisted_group_reference_shape(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "server.modules.products.product_group_store."
+        "load_authoritative_product_groups",
+        lambda _owner: [{
+            "id": "product-group:day", "name": "Day", "paths": ["Product/A"],
+        }],
+    )
+    configuration = {
+        "payload": {
+            "shared": {"product_selections": {
+                "product-group:day": {"paths": ["Product/A"]},
+            }},
+            "analyses": {"backtest": {"groups": [{
+                "id": "group-a",
+                "product_path_selection": {"group_ref": "product-group:day"},
+            }]}},
+            "ui": {},
+        },
+    }
+
+    frozen = freeze_product_scope(
+        configuration, owner="alice", analyses=["backtest"],
+    )
+
+    group = frozen["payload"]["analyses"]["backtest"]["groups"][0]
+    assert group["product_path_selection_id"] == "product-group:day"
+    assert group["product_path_selection"][
+        "product_path_selection_id"
+    ] == "product-group:day"
+    assert group["product_path_selection"]["group_ref"] == "product-group:day"
+    assert frozen["payload"]["shared"]["product_selections"][
+        "product-group:day"
+    ]["paths"] == ["Product/A"]
+
+
 def test_embedded_product_scope_does_not_reopen_mutable_catalog(monkeypatch) -> None:
     configuration = {
         "payload": {

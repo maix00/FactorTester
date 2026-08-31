@@ -13,14 +13,14 @@ def test_grouped_ic_run_spec_compiles_typed_groups_with_provenance():
         "configuration_groups": [{
             "config_group_id": "cg-alpha",
             "product_scope_ref": "product-scope:core8",
-            "factor_ref": "factor:v1:profile:p:factor:commit:blob",
+            "factor_ref": "factor:v2:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
             "horizon": {"mode": "physical_frequency", "frequency": "MIN5"},
             "entry_delay_bars": 1,
             "methods": ["rank"],
             "return_price_basis": "next_open_to_open_adjusted",
         }],
     }
-    compiled = compile_ic_grouped_configuration(frozen, factor_frequencies={"factor:v1:profile:p:factor:commit:blob": "MIN5"})
+    compiled = compile_ic_grouped_configuration(frozen, factor_frequencies={"factor:v2:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": "MIN5"})
     assert compiled["groups"][0]["config_group_id"] == "cg-alpha"
     assert compiled["groups"][0]["product_scope_ref"] == "product-scope:core8"
     assert compiled["groups"][0]["core_ref"].startswith("ic-core-request:v1:")
@@ -33,20 +33,28 @@ def test_compiled_group_hash_is_order_independent():
 
     base = {
         "configuration_groups": [
-            {"config_group_id": "b", "product_scope_ref": "p:b", "factor_ref": "factor:v1:b", "horizon": "MIN5", "entry_delay_bars": 0, "methods": ["rank"], "return_price_basis": "next"},
-            {"config_group_id": "a", "product_scope_ref": "p:a", "factor_ref": "factor:v1:a", "horizon": "MIN5", "entry_delay_bars": 0, "methods": ["rank"], "return_price_basis": "next"},
+            {"config_group_id": "b", "product_scope_ref": "p:b", "factor_ref": "factor:v2:n6065XCpFt8yYTj9iGHCdrs7ZSKvjHRedB33HumEd5w", "horizon": "MIN5", "entry_delay_bars": 0, "methods": ["rank"], "return_price_basis": "next"},
+            {"config_group_id": "a", "product_scope_ref": "p:a", "factor_ref": "factor:v2:Wroo2lwG5LBiImordFdeS5OTS_IAfxFmLCZUzPgJZe4", "horizon": "MIN5", "entry_delay_bars": 0, "methods": ["rank"], "return_price_basis": "next"},
         ]
     }
-    other = {"configuration_groups": list(reversed(base["configuration_groups"]))}
     with pytest.raises(ValueError, match="exactly one"):
-        compile_ic_grouped_configuration(base, factor_frequencies={"factor:v1:a": "MIN5", "factor:v1:b": "MIN5"})
+        compile_ic_grouped_configuration(base, factor_frequencies={"factor:v2:Wroo2lwG5LBiImordFdeS5OTS_IAfxFmLCZUzPgJZe4": "MIN5", "factor:v2:n6065XCpFt8yYTj9iGHCdrs7ZSKvjHRedB33HumEd5w": "MIN5"})
 
 
 def test_run_ic_invokes_worker_once_with_frozen_grouped_execution_view(monkeypatch):
     from server.modules.single_factor_test import ic, process_runners
+    from tools.factors.formula_identity import freeze_factor_identity
     from tools.testers.ic_test.configuration.grouped import compile_ic_grouped_configuration
 
-    factor_ref = "factor:v1:profile:p:factor:commit:blob"
+    factor = freeze_factor_identity(
+        owner_ref="public",
+        family_alias="MmRet",
+        factor_alias="MmRet|P:CA|N:10d|$F:5m",
+        family_formula_fingerprint="a" * 64,
+        self_formula_fingerprint="b" * 64,
+        params={},
+    )
+    factor_ref = factor["ref"]
     grouped = {
         "configuration_groups": [{
             "config_group_id": "cg-alpha",
@@ -63,7 +71,7 @@ def test_run_ic_invokes_worker_once_with_frozen_grouped_execution_view(monkeypat
     )
     payload = {
         "_owner": "alice", "run_id": "run-one",
-        "factors": [{"factor_ref": factor_ref, "alias": "MmRet|P:CA|N:10d|$F:5m"}],
+        "factors": [factor],
         "run_spec": {
             "typed_ic": typed,
             "configuration": {"shared": {"product_selections": {
@@ -103,7 +111,7 @@ def test_grouped_ic_planner_uses_only_the_group_owned_frozen_scope(monkeypatch):
     from server.modules.single_factor_test.planning import build_execution_plan
     from tools.testers.ic_test.configuration.grouped import compile_ic_grouped_configuration
 
-    factor_ref = "factor:v1:profile:p:factor:commit:blob"
+    factor_ref = "factor:v2:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
     typed = compile_ic_grouped_configuration({"configuration_groups": [{
         "config_group_id": "cg-alpha",
         "product_scope_ref": "product-scope:core8",

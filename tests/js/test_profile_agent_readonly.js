@@ -43,7 +43,7 @@ const items = [
     type: "assistant_message",
     thread_id: conversation.conversation_id,
     content: [{type: "output_text", text: (
-      "这是历史回答\n\n```bash\nfactortester products list\n```"
+      "这是历史回答\n\n```bash\nfactortester product-library list\n```"
     ), annotations: []}],
     created_at: "2026-08-20T00:00:02+00:00",
   },
@@ -108,7 +108,7 @@ const adapter = window.FTProfileChatKit.create(
   );
   assert.equal(
     thread.items.data[2].content[0].text,
-    "这是历史回答\n\n```bash\nfactortester products list\n```",
+    "这是历史回答\n\n```bash\nfactortester product-library list\n```",
   );
   assert.deepEqual(thread.items.data[2].content[0].annotations, []);
   assert.equal(thread.items.data[2].annotations, undefined);

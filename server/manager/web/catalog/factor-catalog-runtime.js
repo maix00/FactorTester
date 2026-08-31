@@ -81,9 +81,11 @@
     const data = ensureCache();
     if (data.libraryLoaded) return data;
     if (!libraryPromise) {
-      const request = refresh
-        ? context.api("/api/catalog/factors?refresh=1")
-        : context.api("/api/catalog/factors");
+      const suffix = refresh ? "?refresh=1" : "";
+      const request = Promise.all([
+        context.api(`/api/factor-library/families${suffix}`),
+        context.api(`/api/factor-library/factors${suffix}`),
+      ]).then(([families, factors]) => ({...families, ...factors}));
       libraryPromise = request
         .then(applyLibrary)
         .catch(error => {
@@ -98,14 +100,8 @@
     const data = ensureCache();
     if (data.setsLoaded) return data;
     if (!setsPromise) {
-      setsPromise = Promise.allSettled([
-        context.api("/api/catalog/factor-sets"),
-        nativeRequest("catalog").catch(() => ({items: []})),
-      ]).then(([setsResult, localSetsResult]) => {
-        const sets = setsResult.status === "fulfilled" ? setsResult.value : {};
-        const localSets = localSetsResult.status === "fulfilled"
-          ? localSetsResult.value : {items: []};
-        data.sets = FTFactorModel.mergeFactorSets(sets.items, localSets.items);
+      setsPromise = context.api("/api/factor-library/factor-sets").then(sets => {
+        data.sets = Array.isArray(sets?.items) ? sets.items : [];
         data.setScopes = sets.item_scopes || {};
         data.setsLoaded = true;
         return data;
@@ -121,7 +117,7 @@
     const data = ensureCache();
     if (data.groupsLoaded) return data;
     if (!groupsPromise) {
-      groupsPromise = context.api("/api/catalog/product-groups")
+      groupsPromise = context.api("/api/product-library/product-groups")
         .then(value => {
           data.groups = Array.isArray(value?.groups) ? value.groups : [];
           data.groupsLoaded = true;
@@ -152,17 +148,7 @@
     return context.isRouteCurrent?.() !== false;
   }
 
-  async function nativeRequest(action, payload = {}) {
-    const handler = window.webkit?.messageHandlers?.factorTesterLocalFactorSets;
-    if (!handler?.postMessage) {
-      if (action === "catalog") return {items: []};
-      throw new Error("local factor catalog is unavailable");
-    }
-    const value = await handler.postMessage({action, ...payload});
-    return value && typeof value === "object" ? value : {};
-  }
-
   window.FTFactorCatalog = Object.freeze({
-    load, isCurrent, nativeRequest, upsertFactor,
+    load, isCurrent, upsertFactor,
   });
 })();

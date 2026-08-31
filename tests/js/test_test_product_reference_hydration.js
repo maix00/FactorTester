@@ -18,7 +18,7 @@ vm.runInThisContext(
     },
   }, {groupRefs: [ref]}, []);
   assert.deepEqual(requests, [
-    `/api/catalog/product-groups/${encodeURIComponent(ref)}`,
+    `/api/product-library/product-groups/${encodeURIComponent(ref)}`,
   ]);
   assert.equal(groups[0].group_ref, ref);
   assert.equal(groups[0].name, "已保存产品组");
@@ -42,7 +42,7 @@ vm.runInThisContext(
   assert.equal(FTTestProducts.needsReferenceHydration(state), true);
   const changed = await FTTestProducts.hydrateStateReferences({
     api: async path => {
-      assert.equal(path, `/api/catalog/product-groups/${encodeURIComponent(ref)}`);
+      assert.equal(path, `/api/product-library/product-groups/${encodeURIComponent(ref)}`);
       return {group: {group_ref: ref, name: "中国期货日盘", paths: ["DCE.m"]}};
     },
   }, state);

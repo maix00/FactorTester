@@ -30,26 +30,26 @@ class TestAuthoringError(RuntimeError):
 class TestAuthoringService:
     """Serve authoring state directly from the shared local data store."""
 
-    _WORKSPACE_RE = re.compile(r"/api/workspaces/([^/]{1,128})")
+    _WORKSPACE_RE = re.compile(r"/api/test-authoring/workspaces/([^/]{1,128})")
     _CONFIG_RE = re.compile(
-        r"/api/workspaces/([^/]{1,128})/configuration"
+        r"/api/test-authoring/workspaces/([^/]{1,128})/configuration"
     )
     _SNAPSHOT_RE = re.compile(
-        r"/api/workspaces/([^/]{1,128})/configuration-snapshots"
+        r"/api/test-authoring/workspaces/([^/]{1,128})/configuration-snapshots"
     )
     _SAVE_TEMPLATE_RE = re.compile(
-        r"/api/workspaces/([^/]{1,128})/configuration/templates"
+        r"/api/test-authoring/workspaces/([^/]{1,128})/configuration/templates"
     )
     _LOAD_TEMPLATE_RE = re.compile(
-        r"/api/workspaces/([^/]{1,128})/configuration/load-template"
+        r"/api/test-authoring/workspaces/([^/]{1,128})/configuration/load-template"
     )
-    _TEMPLATE_RE = re.compile(r"/api/configuration-templates/([^/]{1,128})")
-    _SETTINGS_RE = re.compile(r"/api/backtest/settings/([^/]{1,128})")
+    _TEMPLATE_RE = re.compile(r"/api/test-authoring/configuration-templates/([^/]{1,128})")
+    _SETTINGS_RE = re.compile(r"/api/test-authoring/modules/([^/]{1,128})")
     _SETTINGS_SUMMARY_RE = re.compile(
-        r"/api/backtest/settings/([^/]{1,128})/summary"
+        r"/api/test-authoring/modules/([^/]{1,128})/summary"
     )
     _SETTINGS_TAB_RE = re.compile(
-        r"/api/backtest/settings/([^/]{1,128})/tabs/([^/]{1,128})"
+        r"/api/test-authoring/modules/([^/]{1,128})/tabs/([^/]{1,128})"
     )
 
     @classmethod
@@ -57,12 +57,12 @@ class TestAuthoringService:
         if method == "GET":
             return bool(
                 path in {
-                    "/api/workspaces",
-                    "/api/workspace-summaries",
-                    "/api/configuration-templates",
-                    "/api/data_source_categories",
+                    "/api/test-authoring/workspaces",
+                    "/api/test-authoring/workspace-summaries",
+                    "/api/test-authoring/configuration-templates",
+                    "/api/product-library/data-source-categories",
                     "/api/jobs/artifact-capabilities",
-                    "/api/testers/modules",
+                    "/api/test-authoring/modules",
                 }
                 or cls._SETTINGS_RE.fullmatch(path)
                 or cls._SETTINGS_SUMMARY_RE.fullmatch(path)
@@ -73,7 +73,7 @@ class TestAuthoringService:
             )
         if method == "POST":
             return bool(
-                path == "/api/workspaces"
+                path == "/api/test-authoring/workspaces"
                 or cls._SAVE_TEMPLATE_RE.fullmatch(path)
                 or cls._LOAD_TEMPLATE_RE.fullmatch(path)
                 or cls._SNAPSHOT_RE.fullmatch(path)
@@ -127,7 +127,7 @@ class TestAuthoringService:
         owner: str,
         query: dict[str, list[str]] | None = None,
     ) -> TestAuthoringResponse:
-        if path == "/api/testers/modules":
+        if path == "/api/test-authoring/modules":
             from server.modules.single_factor_test.backtest_settings import (
                 _navigation_children,
             )
@@ -156,7 +156,7 @@ class TestAuthoringService:
             return TestAuthoringResponse(self._settings_manifest(
                 unquote(match.group(1)),
             ))
-        if path == "/api/data_source_categories":
+        if path == "/api/product-library/data-source-categories":
             from server.modules.single_factor_test.category_routes import (
                 list_data_source_categories,
             )
@@ -171,19 +171,19 @@ class TestAuthoringService:
                 "schema_version": 1,
                 "outputs": output_capabilities(),
             })
-        if path == "/api/workspaces":
+        if path == "/api/test-authoring/workspaces":
             from server.services import research_workspaces
             return TestAuthoringResponse({
                 "success": True,
                 "workspaces": research_workspaces.list_workspaces(owner=owner),
             })
-        if path == "/api/workspace-summaries":
+        if path == "/api/test-authoring/workspace-summaries":
             from server.services import research_workspaces
             return TestAuthoringResponse({
                 "success": True,
                 "workspaces": research_workspaces.list_workspace_summaries(owner=owner),
             })
-        if path == "/api/configuration-templates":
+        if path == "/api/test-authoring/configuration-templates":
             from server.services import research_configurations
             return TestAuthoringResponse({
                 "success": True,
@@ -233,11 +233,11 @@ class TestAuthoringService:
                 raise TestAuthoringError("workspace not found", 404)
             return TestAuthoringResponse({"success": True, **value})
 
-        if method == "POST" and path == "/api/workspaces":
+        if method == "POST" and path == "/api/test-authoring/workspaces":
             factors = self._object_list(payload, "factors")
             workspace = research_workspaces.create_workspace(
                 owner=owner,
-                title=str(payload.get("title") or "Factor research").strip(),
+                title=str(payload.get("title") or "Factor test").strip(),
                 factors=factors,
             )
             return TestAuthoringResponse({

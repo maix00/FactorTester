@@ -56,14 +56,14 @@ def fake_server() -> Iterator[str]:
         session.clear()
         return jsonify(success=True)
 
-    @app.post("/api/workspaces")
+    @app.post("/api/test-authoring/workspaces")
     def create_workspace():
         assert session.get("username") == "alice"
         return jsonify(success=True, workspace={
             "workspace_id": "workspace-1", "configuration": {"revision": 1},
         }), 201
 
-    @app.get("/api/workspaces")
+    @app.get("/api/test-authoring/workspaces")
     def list_workspaces():
         assert session.get("username") == "alice"
         return jsonify(success=True, workspaces=[{"workspace_id": "workspace-1", "revision": 1}])
@@ -264,7 +264,7 @@ def fake_server() -> Iterator[str]:
             checkpoint_ref="trace:trace-1",
         )
 
-    @app.get("/api/testers/modules")
+    @app.get("/api/test-authoring/modules")
     def modules():
         parent = request.args.get("parent")
         if parent == "single_factor_page":
@@ -275,7 +275,7 @@ def fake_server() -> Iterator[str]:
     def home_modules():
         return jsonify(success=True, modules=[{"id": "single_factor_test", "title": "单因子测试"}])
 
-    @app.get("/api/backtest/settings/<application>")
+    @app.get("/api/test-authoring/modules/<application>")
     def settings(application: str):
         return jsonify(
             success=True,
@@ -284,7 +284,7 @@ def fake_server() -> Iterator[str]:
             defaults={"engine_mode": {"value": "auto", "label": "执行模式", "editor": "select", "tab_key": "engine"}},
         )
 
-    @app.get("/api/backtest/settings/<application>/tabs/<tab_key>")
+    @app.get("/api/test-authoring/modules/<application>/tabs/<tab_key>")
     def tab(application: str, tab_key: str):
         return jsonify(
             success=True,
@@ -293,7 +293,7 @@ def fake_server() -> Iterator[str]:
             settings=[{"key": "engine_mode", "label": "执行模式", "editor": "select", "default": "auto", "tab": tab_key}],
         )
 
-    @app.get("/api/catalog/product-groups")
+    @app.get("/api/product-library/product-groups")
     def product_groups():
         assert request.args.get("view") == "summary"
         return jsonify(success=True, groups=[{"id": "pg-1", "name": "中国期货日盘"}])
@@ -336,24 +336,32 @@ def fake_server() -> Iterator[str]:
             entries=[],
         )
 
-    @app.get("/api/factor-library-overview")
+    @app.get("/api/factor-library/overview")
     def factor_library():
         return jsonify(success=True, factors=[{"alias": "SgCCS|N:2m"}])
 
-    @app.get("/api/catalog/factors")
-    def factor_catalog():
+    @app.get("/api/factor-library/families")
+    def factor_families():
         return jsonify(
             success=True,
             schema_version=2,
             family_scopes={
                 "mine": {
                     "families": [{"factor_family_alias": "SgCCS"}],
-                    "factors": [{"factor_alias": "SgCCS|N:2m"}],
                 },
             },
         )
 
-    @app.get("/api/catalog/factor-sets")
+    @app.get("/api/factor-library/factors")
+    def factors():
+        return jsonify(
+            success=True,
+            family_scopes={
+                "mine": {"factors": [{"factor_alias": "SgCCS|N:2m"}]},
+            },
+        )
+
+    @app.get("/api/factor-library/factor-sets")
     def factor_sets():
         assert request.args.get("query") == "momentum"
         return jsonify(
@@ -364,7 +372,7 @@ def fake_server() -> Iterator[str]:
             },
         )
 
-    @app.get("/api/catalog/factor-library-sources")
+    @app.get("/api/factor-library/owners")
     def factor_library_sources():
         return jsonify(success=True, sources=[{
             "owner_ref": "alice/team",
@@ -373,7 +381,7 @@ def fake_server() -> Iterator[str]:
         }])
 
     @app.get(
-        "/api/catalog/factor-library-sources/<path:owner_ref>/projection"
+        "/api/factor-library/owners/<path:owner_ref>/projection"
     )
     def factor_library_source_projection(owner_ref):
         assert owner_ref == "alice/team"
@@ -381,13 +389,6 @@ def fake_server() -> Iterator[str]:
             success=True,
             projection={"owner_ref": owner_ref, "factors": []},
             projection_hash="a" * 64,
-        )
-
-    @app.get("/api/catalog/factor-sources/manifest")
-    def factor_source_manifest():
-        assert request.args.get("include_subordinates") == "0"
-        return jsonify(
-            success=True, server_id="public-main", principal="alice", items=[],
         )
 
     @app.post("/api/catalog/research-graphs/versions")
@@ -426,27 +427,27 @@ def fake_server() -> Iterator[str]:
             "graph_id": graph_id, "version": version,
         }), 201
 
-    @app.post("/api/catalog/factor-sets")
+    @app.post("/api/factor-library/factor-sets")
     def register_factor_set():
         descriptor = request.get_json()["descriptor"]
         return jsonify(success=True, factor_set={
             "target_ref": descriptor["target_ref"],
         })
 
-    @app.delete("/api/catalog/factor-sets")
+    @app.delete("/api/factor-library/factor-sets")
     def unregister_factor_set():
         return jsonify(
             success=request.args.get("target_ref") == "factor-set:momentum",
         )
 
-    @app.get("/api/catalog/products")
+    @app.get("/api/product-library/products")
     def product_catalog():
         return jsonify(
             success=True,
             products=[{"name": "RB.SHF", "description": "螺纹钢"}],
         )
 
-    @app.get("/api/catalog/sources")
+    @app.get("/api/product-library/data-sources")
     def product_sources():
         return jsonify(
             success=True,
@@ -518,9 +519,6 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
         "target_ref": "factor-set:momentum",
     })["factor_set"]["target_ref"] == "factor-set:momentum"
     assert client.unregister_factor_set("factor-set:momentum")["success"] is True
-    assert client.factor_source_sync_manifest(
-        include_subordinates=False,
-    )["server_id"] == "public-main"
     graph = {"graph_id": "factor-research", "version": 1}
     assert client.publish_research_graph(graph)["graph_id"] == "factor-research"
     assert client.list_research_graph_versions("factor-research")[0][
@@ -681,7 +679,7 @@ def test_client_fetches_settings_and_candidates(fake_server: str, tmp_path) -> N
 def test_client_detects_old_module_endpoint_when_parent_is_ignored(tmp_path) -> None:
     app = Flask(__name__)
 
-    @app.get("/api/testers/modules")
+    @app.get("/api/test-authoring/modules")
     def modules():
         return jsonify(success=True, modules=[{"key": "single_factor_family_test"}])
 

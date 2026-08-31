@@ -12,7 +12,7 @@ vm.runInThisContext(
 const match = window.FTNavigation.matchRoute;
 const pinned = window.FTNavigation.isPinnedPath;
 const modules = [
-  {id: "products", title: "产品", path: "/products"},
+  {id: "products", title: "产品库", path: "/products"},
 ];
 assert.deepStrictEqual(match("/", ""), {kind: "home"});
 assert.deepStrictEqual(match("/research", "?section=graph"), {kind: "research"});

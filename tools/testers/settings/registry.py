@@ -301,7 +301,7 @@ class ApplicationSettings:
                 for flow in sorted(self.flows, key=lambda item: (item.surface, item.order, item.key))
             ],
             "accepted_global_default_keys": list(self.accepted_global_default_keys),
-            "tab_url_template": f"/api/backtest/settings/{self.application}/tabs/{{tab_key}}",
+            "tab_url_template": f"/api/test-authoring/modules/{self.application}/tabs/{{tab_key}}",
         }
         collisions = set(manifest) & set(self.manifest_extensions)
         if collisions:
@@ -358,7 +358,7 @@ class ApplicationSettings:
         manifest["defaults"] = compact_defaults
         manifest["manifest_mode"] = "summary"
         manifest["full_manifest_url"] = (
-            f"/api/backtest/settings/{self.application}"
+            f"/api/test-authoring/modules/{self.application}"
         )
         return manifest
 

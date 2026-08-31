@@ -223,7 +223,7 @@ class PublicResearchClient:
             if manifest["kind"] == "revoke":
                 try:
                     value = self._request(
-                        "POST", "/api/public-research/revoke",
+                        "POST", "/api/research-publications/revoke",
                         payload={"publication_id": manifest["publication_id"]},
                     )
                 except ManagerRequestError as exc:
@@ -249,7 +249,7 @@ class PublicResearchClient:
             ).strip()
             if not publication_id:
                 value = self._request(
-                    "POST", "/api/public-research/publish",
+                    "POST", "/api/research-publications/publish",
                     payload={
                         "owner_ref": manifest["owner_ref"],
                         "profile_ref": manifest.get("profile_ref") or "",

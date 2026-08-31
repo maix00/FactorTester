@@ -5,6 +5,19 @@ from types import SimpleNamespace
 from server.manager.http import catalog_routes
 
 
+def test_legacy_catalog_product_routes_are_not_handled() -> None:
+    class Handler(catalog_routes.CatalogRoutesMixin):
+        pass
+
+    handler = Handler()
+    assert handler._serve_product_catalog(SimpleNamespace(
+        path="/api/catalog/product-groups",
+    )) is False
+    assert handler._serve_product_catalog_write(SimpleNamespace(
+        path="/api/catalog/product-groups",
+    )) is False
+
+
 def test_manager_product_group_put_uses_module_unquote_without_crashing(monkeypatch) -> None:
     responses: list[tuple[dict, int]] = []
     updates: list[tuple] = []
@@ -43,7 +56,7 @@ def test_manager_product_group_put_uses_module_unquote_without_crashing(monkeypa
     )
 
     handled = Handler()._serve_product_catalog_write(SimpleNamespace(
-        path="/api/catalog/product-groups/product-group%3Apg_day",
+        path="/api/product-library/product-groups/product-group%3Apg_day",
     ))
 
     assert handled is True

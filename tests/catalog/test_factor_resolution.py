@@ -1,14 +1,9 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 import subprocess
 
-from click.testing import CliRunner
-
 from tools.cli.catalog import factor_resolution
-from tools.cli.commands import client_catalog as catalog_commands
-from tools.cli.commands.client_catalog import catalog_factor
 from tools.factors.formula_identity import (
     require_frozen_factor,
     require_frozen_factor_family,
@@ -158,72 +153,3 @@ def test_selected_owner_revision_lists_families_and_instantiates_candidate(
     assert factor["alias"] == "MmRateOfChg|P:CA|N:20d|$F:1d"
     assert factor["workspace_provenance"]["revision"] == first
     assert require_frozen_factor(factor)["ref"].startswith("factor:v2:")
-
-
-def test_catalog_resolve_uses_authenticated_user_when_owner_is_omitted(
-    tmp_path, monkeypatch,
-) -> None:
-    captured = {}
-
-    class Client:
-        def current_principal(self):
-            return {"username": "18717974771"}
-
-    def resolve(**kwargs):
-        captured.update(kwargs)
-        return {
-            "schema_version": 2,
-            "ref": "factor:v2:" + "a" * 43,
-            "alias": "MmRateOfChg|N:20d|$F:1d",
-            "owner_ref": "user:18717974771",
-            "identity": {},
-        }
-
-    monkeypatch.setattr(catalog_commands, "client_from_config", lambda: Client())
-    monkeypatch.setattr(catalog_commands, "resolve_local_factor_reference", resolve)
-    profile = tmp_path / "release.json"
-    profile.write_text(
-        json.dumps({
-            "schema_version": 1,
-            "release": {"install_root": str(tmp_path / "client")},
-        }),
-        encoding="utf-8",
-    )
-
-    result = CliRunner().invoke(
-        catalog_factor,
-        [
-            "resolve",
-            "--alias", "MmRateOfChg|N:20d|$F:1d",
-            "--release-profile", str(profile),
-            "--json",
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert captured["owner_ref"] == "user:18717974771"
-    assert captured["revision"] == "HEAD"
-
-
-def test_default_owner_uses_unique_local_profile_when_cli_session_is_empty(
-    tmp_path, monkeypatch,
-) -> None:
-    class Client:
-        def current_principal(self):
-            return {"username": None}
-
-    class Profiles:
-        def __init__(self, _root):
-            pass
-
-        def list(self):
-            return [{
-                "session_binding": {"principal_ref": "18717974771"},
-            }]
-
-    monkeypatch.setattr(catalog_commands, "client_from_config", lambda: Client())
-    monkeypatch.setattr(catalog_commands, "LocalProfileStore", Profiles)
-
-    assert catalog_commands._current_user_owner_ref(tmp_path) == (
-        "user:18717974771"
-    )

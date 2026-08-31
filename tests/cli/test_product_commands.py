@@ -5,8 +5,7 @@ import json
 from click.testing import CliRunner
 
 from tools.cli.app import cli
-from tools.cli.modules.products import controller
-from tools.cli.modules.products import liquidity
+from tools.cli.modules.products import controller, groups, liquidity
 
 
 class _AvailabilityClient:
@@ -186,7 +185,7 @@ class _ProductCategoryClient:
 def test_products_info_wraps_long_cells_without_truncation(monkeypatch) -> None:
     monkeypatch.setattr(controller, "client_from_config", lambda: _ProductInfoClient())
 
-    result = CliRunner().invoke(cli, ["products", "info", "SI.GFE"])
+    result = CliRunner().invoke(cli, ["product-library", "info", "SI.GFE"])
 
     assert result.exit_code == 0, result.output
     flattened = "".join(result.output.split())
@@ -205,7 +204,7 @@ def test_products_liquidity_emits_batch_json_for_explicit_as_of(
     monkeypatch.setattr(liquidity, "client_from_config", lambda: fake)
 
     result = CliRunner().invoke(cli, [
-        "products",
+        "product-library",
         "liquidity",
         "--product",
         "A.DCE",
@@ -239,7 +238,7 @@ def test_products_availability_emits_readable_json_for_explicit_scope(
     monkeypatch.setattr(controller, "client_from_config", lambda: fake)
 
     result = CliRunner().invoke(cli, [
-        "products",
+        "product-library",
         "availability",
         "--product",
         "A.DCE",
@@ -269,7 +268,7 @@ def test_products_availability_compact_json_is_explicit(monkeypatch) -> None:
     monkeypatch.setattr(controller, "client_from_config", lambda: fake)
 
     result = CliRunner().invoke(cli, [
-        "products",
+        "product-library",
         "availability",
         "--product",
         "A.DCE",
@@ -284,7 +283,7 @@ def test_products_availability_compact_json_is_explicit(monkeypatch) -> None:
 
 
 def test_products_availability_does_not_import_server_runtime() -> None:
-    result = CliRunner().invoke(cli, ["products", "availability", "--help"])
+    result = CliRunner().invoke(cli, ["product-library", "availability", "--help"])
 
     assert result.exit_code == 0, result.output
     assert "--local-runtime" not in result.output
@@ -292,10 +291,10 @@ def test_products_availability_does_not_import_server_runtime() -> None:
 
 def test_product_group_subject_commands_use_one_canonical_cli(monkeypatch) -> None:
     fake = _ProductGroupSubjectClient()
-    monkeypatch.setattr(controller, "client_from_config", lambda: fake)
+    monkeypatch.setattr(groups, "client_from_config", lambda: fake)
 
     result = CliRunner().invoke(cli, [
-        "products", "groups", "subjects", "add",
+        "product-library", "groups", "subjects", "add",
         "product-group:pg-metals",
         "--factor-ref", "factor:sha256:factor-a",
         "--factor-set-ref", "factor-set:profile-alice:momentum",
@@ -316,10 +315,10 @@ def test_product_group_creation_freezes_profile_and_research_refs(
     monkeypatch,
 ) -> None:
     fake = _ProductGroupCreationClient()
-    monkeypatch.setattr(controller, "client_from_config", lambda: fake)
+    monkeypatch.setattr(groups, "client_from_config", lambda: fake)
 
     result = CliRunner().invoke(cli, [
-        "products", "groups", "add",
+        "product-library", "groups", "add",
         "--name", "硅产业",
         "--path", "Products/Futures/CNFutures/_products/SI.GFE",
         "--profile-id", "maxa",
@@ -343,7 +342,7 @@ def test_product_category_cli_manages_regular_and_composite_categories(monkeypat
     )
 
     added = CliRunner().invoke(cli, [
-        "products", "categories", "add",
+        "product-library", "categories", "add",
         "--name", "我的分类",
         "--item", "日盘=Product/Futures/CNFutures",
         "--item", "日盘=Product/Futures/CNFuturesContract",
@@ -362,7 +361,7 @@ def test_product_category_cli_manages_regular_and_composite_categories(monkeypat
     })
 
     composite = CliRunner().invoke(cli, [
-        "products", "categories", "add-composite",
+        "product-library", "categories", "add-composite",
         "--category-id", "day_night",
         "--category-id", "sector",
     ])
@@ -371,12 +370,12 @@ def test_product_category_cli_manages_regular_and_composite_categories(monkeypat
         "category_ids": ["day_night", "sector"],
     })
 
-    listing = CliRunner().invoke(cli, ["products", "categories", "list"])
+    listing = CliRunner().invoke(cli, ["product-library", "categories", "list"])
     assert listing.exit_code == 0, listing.output
     assert "日夜盘" in listing.output
 
     deleted = CliRunner().invoke(cli, [
-        "products", "categories", "delete", "category-new", "--yes",
+        "product-library", "categories", "delete", "category-new", "--yes",
     ])
     assert deleted.exit_code == 0, deleted.output
     assert fake.calls[3] == ("delete", "category-new")
@@ -399,7 +398,7 @@ def test_products_availability_renders_orthogonal_stream_dimensions(
     monkeypatch.setattr(controller, "client_from_config", lambda: fake)
 
     result = CliRunner().invoke(cli, [
-        "products",
+        "product-library",
         "availability",
         "--product",
         "JNI.OSE",

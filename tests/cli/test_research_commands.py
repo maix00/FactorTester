@@ -1362,6 +1362,34 @@ def test_snapshot_cli_creates_lists_and_selects_explicit_snapshot(
     assert fake.snapshot_selection == ("snapshot-1", 1)
 
 
+def test_run_submit_rejects_partial_snapshot_identity(
+    tmp_path, monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(
+        "tools.cli.commands.research.client_from_config", lambda: fake,
+    )
+    runner = CliRunner()
+    assert runner.invoke(
+        cli, ["workspace", "create", "--factor-family", "MmRet"],
+    ).exit_code == 0
+
+    missing_revision = runner.invoke(cli, [
+        "run", "submit", "--analysis", "ic",
+        "--configuration-snapshot-id", "snapshot-1",
+    ])
+    missing_id = runner.invoke(cli, [
+        "run", "submit", "--analysis", "ic",
+        "--configuration-snapshot-revision", "1",
+    ])
+
+    assert missing_revision.exit_code == 1
+    assert "requires its frozen revision" in missing_revision.output
+    assert missing_id.exit_code == 1
+    assert "requires a snapshot id" in missing_id.output
+
+
 def test_run_submit_json_preserves_server_report_projection(
     tmp_path,
     monkeypatch,

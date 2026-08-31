@@ -31,20 +31,16 @@ def test_research_agent_skill_uses_frozen_factor_references() -> None:
     canonical = CANONICAL.read_text(encoding="utf-8")
 
     assert PACKAGED.read_text(encoding="utf-8") == canonical
-    assert "factor-library workspace reference" in canonical
+    assert "factor-library factors --json" in canonical
     assert "client catalog factor" not in canonical
-    assert "--source-file '<custom_factors-or-public_factors>/<family>.py'" in canonical
-    assert "--revision <commit>" in canonical
-    assert "--identity '<complete-factor-alias>'" in canonical
-    assert "Use the returned `target_ref`" in canonical
+    assert "temporary_objects" in canonical
+    assert "submitted atomically" in canonical
     assert "Do not fall back to an older commit" in canonical
     assert "factortester://factor/factor-family%3A" in canonical
     assert "factortester://factor_family/" not in canonical
-    assert "factor-library workspace factor-set create" in canonical
-    assert "factor-library workspace factor-set reference" in canonical
-    assert "factor-set sync" in canonical
-    assert "factor-set registered" in canonical
-    assert "factor-set unsync" in canonical
+    assert "Profile-local factor-set manifest" in canonical
+    assert "Only the `self`" in canonical
+    assert "workspace user download|upload" in canonical
     assert "refresh `download` from the database factor library" in canonical
     assert "merge `download` into `upload`" in canonical
     assert "merge the committed `agent/<profile>` branch into `upload`" in canonical

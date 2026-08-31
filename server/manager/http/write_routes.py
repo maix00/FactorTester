@@ -62,8 +62,6 @@ class WriteRoutesMixin:
             return
         if self._post_agent_routes(parsed):
             return
-        if self._post_server_research_routes(parsed):
-            return
         if self._post_client_research_routes(parsed):
             return
         if self._post_research_object_routes(parsed):
@@ -128,7 +126,7 @@ class WriteRoutesMixin:
             return
         if self._proxy_job_request(parsed, method="POST"):
             return
-        if self.path == "/api/public-research/sync":
+        if self.path == "/api/research-publications/sync":
             if not self._is_local_ftclient():
                 json_response(self, {"success": False, "error": "local FTClient required"}, 403)
                 return
@@ -145,12 +143,49 @@ class WriteRoutesMixin:
                 return
             json_response(self, {"success": True, **value})
             return
-        if self.path == "/api/public-research/publish":
+        if self.path == "/api/research-publications/publish":
+            payload = self._json_body(32 * 1024 * 1024)
+            server_ref = str(payload.get("server_ref") or "").strip()
+            if server_ref:
+                session = self._session()
+                if session is None:
+                    json_response(
+                        self,
+                        {"success": False, "error": "login required"},
+                        401,
+                    )
+                    return
+                try:
+                    value = self.state.server_research.publish(
+                        str(session.get("username") or ""),
+                        server_ref,
+                        public_research=self.state.public_research,
+                        visibility=str(payload.get("visibility") or "public"),
+                        authorized_users=list(
+                            payload.get("authorized_users") or []
+                        ),
+                        public_title=str(payload.get("public_title") or ""),
+                    )
+                    self._sync_research_metadata(
+                        str(value["publication_id"]),
+                    )
+                    self._invalidate_federated_public_research()
+                except PermissionError as exc:
+                    json_response(
+                        self, {"success": False, "error": str(exc)}, 403,
+                    )
+                    return
+                except (OSError, TypeError, ValueError, KeyError) as exc:
+                    json_response(
+                        self, {"success": False, "error": str(exc)}, 400,
+                    )
+                    return
+                json_response(self, {"success": True, **value}, 201)
+                return
             if not self._is_local_ftclient():
                 json_response(self, {"success": False, "error": "local FTClient required"}, 403)
                 return
             try:
-                payload = self._json_body(32 * 1024 * 1024)
                 projection = payload.get("projection")
                 report_id = str(payload.get("report_id") or "")
                 owner_ref = str(payload.get("owner_ref") or "")
@@ -212,7 +247,7 @@ class WriteRoutesMixin:
                 "storage_server_id": settings.get("storage_server_id") or self.state.server_id,
             })
             return
-        if self.path == "/api/public-research/revoke":
+        if self.path == "/api/research-publications/revoke":
             if not self._is_local_ftclient():
                 json_response(self, {"success": False, "error": "local FTClient required"}, 403)
                 return
@@ -236,15 +271,36 @@ class WriteRoutesMixin:
                 return
             try:
                 payload = self._json_body(256 * 1024)
-                value = self.state.public_research.configure(
-                    owner_ref=str(session["username"]),
-                    report_id=str(payload.get("report_id") or ""),
-                    projection=None,
-                    visibility=str(payload.get("visibility") or "private"),
-                    auto_sync=bool(payload.get("auto_sync", True)),
-                    relay_local_files=bool(payload.get("relay_local_files", False)),
-                    authorized_users=list(payload.get("authorized_users") or []),
+                owner = str(session["username"])
+                report_id = str(payload.get("report_id") or "")
+                visibility = str(payload.get("visibility") or "private")
+                server_report = self.state.server_research.owner_report(
+                    owner, report_id,
                 )
+                if server_report is not None:
+                    value = self.state.server_research.publish(
+                        owner,
+                        str(server_report["server_ref"]),
+                        public_research=self.state.public_research,
+                        visibility=visibility,
+                        authorized_users=list(
+                            payload.get("authorized_users") or []
+                        ),
+                    )
+                else:
+                    value = self.state.public_research.configure(
+                        owner_ref=owner,
+                        report_id=report_id,
+                        projection=None,
+                        visibility=visibility,
+                        auto_sync=bool(payload.get("auto_sync", True)),
+                        relay_local_files=bool(
+                            payload.get("relay_local_files", False)
+                        ),
+                        authorized_users=list(
+                            payload.get("authorized_users") or []
+                        ),
+                    )
                 self._sync_research_metadata(str(value["publication_id"]))
                 self._invalidate_federated_public_research()
             except PermissionError as exc:

@@ -6,6 +6,11 @@ import re
 import sys
 from urllib.parse import parse_qs, unquote
 
+from server.manager.http.product_library_routes import (
+    PRODUCT_LIBRARY_PREFIX,
+    product_library_page,
+    product_library_source_ids,
+)
 from server.manager.http.responses import json_response
 from server.manager.services.public_catalog import (
     VisitorCatalogAccessError,
@@ -19,57 +24,26 @@ from server.manager.services.test_authoring import TestAuthoringError
 from server.modules.products.product_category_views import normalize_category_selection
 
 
-def catalog_source_ids(query: dict[str, list[str]]) -> tuple[str, ...]:
-    """Resolve repeated or comma-separated source filters."""
-    from server.services.product_catalog_projection import (
-        catalog_source_ids as default_source_ids,
-    )
-    from server.services.product_catalog_projection import (
-        normalize_source_ids,
-    )
-
-    requested = [
-        item.strip()
-        for value in query.get("data_source", [])
-        for item in str(value).split(",")
-        if item.strip()
-    ]
-    return normalize_source_ids(requested) if requested else default_source_ids()
-
-
-def _catalog_page(
-    rows: list[dict],
-    query: dict[str, list[str]],
+def _factor_resource_projection(
+    payload: dict[str, object], resource: str,
 ) -> dict[str, object]:
-    """Filter and bound a product search response for lazy clients."""
-    search = str(query.get("query", [""])[0] or "").strip().casefold()
-    if search:
-        rows = [
-            row for row in rows
-            if search in " ".join(
-                str(row.get(key) or "")
-                for key in (
-                    "name", "code", "desc", "description", "exchange",
-                    "product_path", "source_ids",
-                )
-            ).casefold()
-        ]
-    try:
-        page = max(1, int(query.get("page", ["1"])[0] or 1))
-        limit = min(100, max(1, int(query.get("limit", ["25"])[0] or 25)))
-    except (TypeError, ValueError) as exc:
-        raise ValueError("产品列表分页参数无效") from exc
-    total = len(rows)
-    total_pages = max(1, (total + limit - 1) // limit)
-    offset = (page - 1) * limit
-    return {
-        "products": rows[offset:offset + limit],
-        "page": page,
-        "limit": limit,
-        "total": total,
-        "total_pages": total_pages,
-        "has_more": page < total_pages,
-    }
+    """Expose one canonical factor-library resource without a mixed catalog."""
+    keep = "families" if resource == "families" else "factors"
+    drop = "factors" if keep == "families" else "families"
+    result = dict(payload)
+    result.pop(drop, None)
+    scopes = result.get("family_scopes")
+    if isinstance(scopes, dict):
+        result["family_scopes"] = {
+            key: {
+                **value,
+                keep: list(value.get(keep) or []),
+                **({drop: []} if drop in value else {}),
+            }
+            for key, value in scopes.items()
+            if isinstance(value, dict)
+        }
+    return result
 
 
 class CatalogRoutesMixin:
@@ -159,7 +133,7 @@ class CatalogRoutesMixin:
 
     def _serve_product_catalog(self, parsed) -> bool:
         """Serve the Manager-owned catalog without selecting a service port."""
-        if not parsed.path.startswith("/api/catalog/"):
+        if not parsed.path.startswith(PRODUCT_LIBRARY_PREFIX):
             return False
         session = self._session()
         visitor = self._visitor_mode()
@@ -180,7 +154,7 @@ class CatalogRoutesMixin:
         )
         category_id = category_ids[0] if len(category_ids) == 1 else ",".join(category_ids)
         try:
-            if parsed.path == "/api/catalog/sources":
+            if parsed.path == "/api/product-library/data-sources":
                 sources = self.state.federated_source_descriptors(
                     refresh=str(query.get("refresh", [""])[0]).lower()
                     in {"1", "true", "yes"},
@@ -195,14 +169,14 @@ class CatalogRoutesMixin:
                     "visitor": visitor is not None,
                     "sources": sources,
                 }
-            elif parsed.path == "/api/catalog/categories":
+            elif parsed.path == "/api/product-library/categories":
                 value = {
                     "success": True,
                     "origin": "server",
                     "default_category_id": None,
                     "categories": self.state.client_state.product_categories(principal),
                 }
-            elif parsed.path == "/api/catalog/products":
+            elif parsed.path == "/api/product-library/products":
                 if visitor is not None:
                     descriptors = visitor_source_descriptors(
                         self.state.federated_source_descriptors(),
@@ -213,7 +187,7 @@ class CatalogRoutesMixin:
                         self.state.client_state.product_names(), source_ids,
                     )
                 else:
-                    source_ids = catalog_source_ids(query)
+                    source_ids = product_library_source_ids(query)
                     products = self.state.client_state.product_names(source_ids)
                 value = {
                     "success": True,
@@ -223,8 +197,8 @@ class CatalogRoutesMixin:
                     "products": products,
                 }
                 if any(key in query for key in ("query", "page", "limit")):
-                    value.update(_catalog_page(products, query))
-            elif parsed.path == "/api/catalog/product-fields":
+                    value.update(product_library_page(products, query))
+            elif parsed.path == "/api/product-library/product-fields":
                 product = self.state.client_state.product_fields(
                     query.get("name", [""])[0]
                 )
@@ -247,7 +221,7 @@ class CatalogRoutesMixin:
                     "name": product.get("name"),
                     "fields": product.get("fields", {}),
                 }
-            elif parsed.path == "/api/catalog/tree":
+            elif parsed.path == "/api/product-library/tree":
                 if visitor is not None:
                     descriptors = visitor_source_descriptors(
                         self.state.federated_source_descriptors(),
@@ -255,7 +229,7 @@ class CatalogRoutesMixin:
                     )
                     source_ids = select_visitor_source_ids(query, descriptors)
                 else:
-                    source_ids = catalog_source_ids(query)
+                    source_ids = product_library_source_ids(query)
                 value = {
                     "success": True,
                     "origin": "server",
@@ -273,7 +247,7 @@ class CatalogRoutesMixin:
                         )
                     ),
                 }
-            elif parsed.path == "/api/catalog/contract-tree":
+            elif parsed.path == "/api/product-library/contract-tree":
                 if visitor is not None:
                     descriptors = visitor_source_descriptors(
                         self.state.federated_source_descriptors(),
@@ -281,7 +255,7 @@ class CatalogRoutesMixin:
                     )
                     source_ids = select_visitor_source_ids(query, descriptors)
                 else:
-                    source_ids = catalog_source_ids(query)
+                    source_ids = product_library_source_ids(query)
                 paged = any(
                     key in query for key in ("query", "page", "limit")
                 )
@@ -315,7 +289,7 @@ class CatalogRoutesMixin:
                     "source_ids": list(source_ids),
                     **nodes,
                 }
-            elif parsed.path == "/api/catalog/contracts":
+            elif parsed.path == "/api/product-library/contracts":
                 if visitor is not None:
                     descriptors = visitor_source_descriptors(
                         self.state.federated_source_descriptors(),
@@ -332,7 +306,7 @@ class CatalogRoutesMixin:
                     start_date=query.get("start_date", [None])[0],
                     end_date=query.get("end_date", [None])[0],
                 )
-            elif parsed.path == "/api/catalog/product-groups":
+            elif parsed.path == "/api/product-library/product-groups":
                 summary = str(query.get("view", [""])[0] or "") == "summary"
                 value = {
                     "success": True,
@@ -349,7 +323,7 @@ class CatalogRoutesMixin:
                 }
             else:
                 subjects = re.fullmatch(
-                    r"/api/catalog/product-groups/([^/]+)/subjects", parsed.path,
+                    r"/api/product-library/product-groups/([^/]+)/subjects", parsed.path,
                 )
                 if subjects is not None:
                     bindings = self.state.client_state.product_group_subjects(
@@ -368,7 +342,7 @@ class CatalogRoutesMixin:
                     json_response(self, value)
                     return True
                 match = re.fullmatch(
-                    r"/api/catalog/product-groups/([^/]+)", parsed.path,
+                    r"/api/product-library/product-groups/([^/]+)", parsed.path,
                 )
                 if match is None:
                     return False
@@ -396,7 +370,7 @@ class CatalogRoutesMixin:
 
     def _serve_factor_catalog(self, parsed) -> bool:
         """Serve read-only factor metadata without selecting a service port."""
-        if not parsed.path.startswith("/api/catalog/factor"):
+        if not parsed.path.startswith("/api/factor-library/"):
             return False
         session = self._session()
         visitor = self._visitor_mode()
@@ -415,7 +389,7 @@ class CatalogRoutesMixin:
         refresh = str(query.get("refresh", [""])[0] or "") == "1"
         try:
             source_match = re.fullmatch(
-                r"/api/catalog/factor-sources/(custom|public)/([^/]+)"
+                r"/api/factor-library/family-sources/(custom|public)/([^/]+)"
                 r"/versions(?:/([^/]+))?",
                 parsed.path,
             )
@@ -474,7 +448,7 @@ class CatalogRoutesMixin:
                     value = read_source_catalog()
                 json_response(self, value)
                 return True
-            if parsed.path == "/api/catalog/factor-sources/manifest":
+            if parsed.path == "/api/factor-library/family-sources/manifest":
                 if visitor is not None:
                     raise VisitorCatalogAccessError(
                         "访客模式不能同步因子家族源码"
@@ -492,7 +466,7 @@ class CatalogRoutesMixin:
                 ))
                 return True
             provenance_match = re.fullmatch(
-                r"/api/catalog/factor-library-sources"
+                r"/api/factor-library/owners"
                 r"(?:/([^/]+)/projection)?",
                 parsed.path,
             )
@@ -522,7 +496,10 @@ class CatalogRoutesMixin:
                 )
                 json_response(self, value)
                 return True
-            if parsed.path == "/api/catalog/factors":
+            if parsed.path in {
+                "/api/factor-library/families",
+                "/api/factor-library/factors",
+            }:
                 if visitor is not None:
                     from server.manager.services.factor_library_scopes import (
                         compose_factor_library_scopes,
@@ -530,14 +507,19 @@ class CatalogRoutesMixin:
                     from server.manager.services.public_catalog import (
                         public_factor_library,
                     )
-                    json_response(self, {
+                    payload = {
                         "success": True,
                         "visitor": True,
                         **compose_factor_library_scopes(
                             {"public": public_factor_library()},
                             principal=principal,
                         ),
-                    })
+                    }
+                    json_response(
+                        self, _factor_resource_projection(
+                            payload, parsed.path.rsplit("/", 1)[-1],
+                        ),
+                    )
                     return True
                 if factor_service is self.state.client_state:
                     from server.manager.services.factor_library_scopes import (
@@ -564,18 +546,28 @@ class CatalogRoutesMixin:
                     value = compose_factor_library_scopes(
                         scopes, principal=principal,
                     )
-                    json_response(self, {"success": True, **value})
+                    json_response(
+                        self, _factor_resource_projection(
+                            {"success": True, **value},
+                            parsed.path.rsplit("/", 1)[-1],
+                        ),
+                    )
                     return True
-                json_response(self, {
+                payload = {
                     "success": True,
                     **(
                         factor_service.factor_library(
                             principal, refresh=True,
                         ) if refresh else factor_service.factor_library(principal)
                     ),
-                })
+                }
+                json_response(
+                    self, _factor_resource_projection(
+                        payload, parsed.path.rsplit("/", 1)[-1],
+                    ),
+                )
                 return True
-            if parsed.path == "/api/catalog/factor-sets":
+            if parsed.path == "/api/factor-library/factor-sets":
                 if visitor is not None:
                     raise VisitorCatalogAccessError(
                         "访客模式不能读取用户因子集合"
@@ -596,7 +588,7 @@ class CatalogRoutesMixin:
                     "item_scopes": scopes,
                 })
                 return True
-            if parsed.path == "/api/catalog/factor-sets/detail":
+            if parsed.path == "/api/factor-library/factor-sets/detail":
                 if visitor is not None:
                     raise VisitorCatalogAccessError(
                         "访客模式不能读取用户因子集合"
@@ -628,7 +620,7 @@ class CatalogRoutesMixin:
                         "success": True, "factor_set": value,
                     })
                 return True
-            if parsed.path == "/api/catalog/factor-sets/descriptor":
+            if parsed.path == "/api/factor-library/factor-sets/descriptor":
                 if visitor is not None:
                     raise VisitorCatalogAccessError(
                         "访客模式不能读取用户因子集合"
@@ -678,7 +670,7 @@ class CatalogRoutesMixin:
 
     def _serve_factor_catalog_write(self, parsed, *, method: str) -> bool:
         """Write principal-owned Factor Sets without selecting a service port."""
-        if parsed.path != "/api/catalog/factor-sets":
+        if parsed.path != "/api/factor-library/factor-sets":
             return False
         session = self._session()
         if session is None or self._visitor_mode() is not None:
@@ -739,22 +731,22 @@ class CatalogRoutesMixin:
     def _serve_product_catalog_write(self, parsed) -> bool:
         """Serve Manager-owned catalog writes without a service port."""
         category_delete = re.fullmatch(
-            r"/api/catalog/categories/([^/]+)", parsed.path,
+            r"/api/product-library/categories/([^/]+)", parsed.path,
         )
         category_refresh = re.fullmatch(
-            r"/api/catalog/categories/([^/]+)/refresh", parsed.path,
+            r"/api/product-library/categories/([^/]+)/refresh", parsed.path,
         )
         group_mutation = re.fullmatch(
-            r"/api/catalog/product-groups/([^/]+)", parsed.path,
+            r"/api/product-library/product-groups/([^/]+)", parsed.path,
         )
         group_subjects = re.fullmatch(
-            r"/api/catalog/product-groups/([^/]+)/subjects", parsed.path,
+            r"/api/product-library/product-groups/([^/]+)/subjects", parsed.path,
         )
         if parsed.path not in {
-            "/api/catalog/prices",
-            "/api/catalog/product-groups",
-            "/api/catalog/categories",
-            "/api/catalog/categories/composite",
+            "/api/market-data/prices",
+            "/api/product-library/product-groups",
+            "/api/product-library/categories",
+            "/api/product-library/categories/composite",
         } and category_delete is None and category_refresh is None \
                 and group_mutation is None and group_subjects is None:
             return False
@@ -763,7 +755,7 @@ class CatalogRoutesMixin:
         if session is None and visitor is None:
             json_response(self, {"success": False, "error": "login required"}, 401)
             return True
-        price_request = parsed.path == "/api/catalog/prices"
+        price_request = parsed.path == "/api/market-data/prices"
         if visitor is not None and not price_request:
             json_response(self, {
                 "success": False,
@@ -785,7 +777,7 @@ class CatalogRoutesMixin:
             ) else self._json_body(256 * 1024)
             if price_request and visitor is not None:
                 self._ensure_visitor_price_access(payload)
-            if parsed.path == "/api/catalog/categories":
+            if parsed.path == "/api/product-library/categories":
                 from server.modules.products.product_category_store import (
                     create_product_category,
                 )
@@ -797,7 +789,7 @@ class CatalogRoutesMixin:
                     category_id=payload.get("id"),
                 )
                 value = {"success": True, "origin": "server", "category": category}
-            elif parsed.path == "/api/catalog/categories/composite":
+            elif parsed.path == "/api/product-library/categories/composite":
                 from server.modules.products.product_category_store import (
                     create_product_category_composition,
                 )
@@ -871,7 +863,7 @@ class CatalogRoutesMixin:
                     "success": False, "error": "产品分类更新方法不支持",
                 }, 405)
                 return True
-            elif parsed.path == "/api/catalog/product-groups":
+            elif parsed.path == "/api/product-library/product-groups":
                 name = str(payload.get("name") or "").strip()
                 paths = payload.get("paths")
                 category_ids = payload.get("category_ids") or []
@@ -1041,7 +1033,7 @@ class CatalogRoutesMixin:
     def _serve_manager_application(self, parsed, *, method: str) -> bool:
         """Dispatch Manager-owned application state under one import boundary."""
         if method == "GET" and parsed.path.startswith(
-            "/api/catalog/factor-sources/"
+            "/api/factor-library/family-sources/"
         ):
             # A missing source is fetched over the object data plane.  Keep
             # that bounded network wait outside the global first-import lock

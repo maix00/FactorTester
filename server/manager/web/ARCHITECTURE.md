@@ -134,16 +134,16 @@ seam. This distinction is important: a tab or container being visible is not
 permission to download every implementation behind all other tabs. The
 manifest group, not a DOM `display:none`/collapse state, is the code loading
 boundary. Within a tester, `workbench-settings` is only the tab/chip shell;
-its first response uses `/api/backtest/settings/<application>/summary`, which
+its first response uses `/api/test-authoring/modules/<application>/summary`, which
 contains identity, defaults, and tab descriptors but not control options or
-help overlays. `/api/backtest/settings/<application>/tabs/<tab_key>` is
+help overlays. `/api/test-authoring/modules/<application>/tabs/<tab_key>` is
 requested only when a field-bearing tab is opened and supplies that tab's
 complete schema. `workbench-settings-fields` is fetched only when the active
 tab first needs editable rows. Hiding an unmounted tab therefore does not
 download its field-control implementation or its tab schema merely because
 its metadata exists. The first authoring request uses
-`/api/workspace-summaries`, which returns workspace identity only; the
-selected workspace then loads one `/api/workspaces/<id>/configuration`
+`/api/test-authoring/workspace-summaries`, which returns workspace identity only; the
+selected workspace then loads one `/api/test-authoring/workspaces/<id>/configuration`
 payload. Do not put full configurations back into the list response.
 ```
 

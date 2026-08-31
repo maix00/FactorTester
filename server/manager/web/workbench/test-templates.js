@@ -78,7 +78,7 @@
   async function detail(context, configurationID) {
     context.activeNav("");
     context.content.replaceChildren(FTUI.loading(context.t("正在读取模板…")));
-    const value = await context.api("/api/configuration-templates");
+    const value = await context.api("/api/test-authoring/configuration-templates");
     const template = (value.templates || []).find(item => item.configuration_id === configurationID);
     if (!template) throw new Error(context.t("模板不存在"));
     context.setHeading(template.name || context.t("模板详情"), context.t("测试模板"));

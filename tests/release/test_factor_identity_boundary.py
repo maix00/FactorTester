@@ -21,8 +21,10 @@ def test_factor_identity_batch_uses_one_external_process(monkeypatch) -> None:
                 "results": [{
                     "index": index,
                     "identity": request["identity"],
-                    "canonical_identity": request["identity"],
-                    "valid": True,
+                        "canonical_identity": request["identity"],
+                        "family_formula_fingerprint": "a" * 64,
+                        "self_formula_fingerprint": "b" * 64,
+                        "valid": True,
                 } for index, request in enumerate(requests)],
             }),
         )

@@ -9,7 +9,6 @@ import click
 from ..utils.factortester_backend import run_factortester
 from .common import echo_json
 
-
 _PASSTHROUGH = {
     "context_settings": {
         "ignore_unknown_options": True,

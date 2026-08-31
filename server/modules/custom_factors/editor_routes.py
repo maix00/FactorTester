@@ -1,16 +1,14 @@
 """Routes supporting custom-factor source validation and visual editor metadata."""
 
 import hashlib
-import json
 import os
 
 from flask import jsonify, request
 
-from server.modules.custom_factors import cf_bp, factor_library_internal_bp
+from server.modules.custom_factors import factor_library_internal_bp
 from server.modules.custom_factors.expression_inspection import fixed_column_refs
 from server.modules.custom_factors.visual_graph import factor_expr_to_visual_graph
 from server.modules.shared.factor_param_utils import (
-    factor_param_value_display,
     factor_param_value_storage,
     frozen_factor_dependencies,
     normalize_factor_param_row,
@@ -21,10 +19,7 @@ from server.services.factor_registry import (
     invalidate_factor_family_cache,
 )
 from server.services.factor_workspace import (
-    build_factor_workspace,
-    get_factor_workspace_git_state,
     push_factor_workspace,
-    run_factor_workspace_git_action,
     sync_factor_workspace,
 )
 from server.services.http_auth import login_required
@@ -35,13 +30,13 @@ from tools.data.account_manage import (
     get_account,
     is_super_admin_account,
 )
+from tools.data.factor_workspace.repository import FactorWorkspaceRepository
 from tools.data.factor_workspace.storage import (
     assert_canonical_factor_workspace_root,
     factor_source_root,
     load_factor_source,
     load_public_factor_source,
 )
-from tools.data.sqlite.factor_source_store import list_factor_sources
 from tools.factors.formula_identity import freeze_factor_identity
 
 
@@ -104,7 +99,7 @@ def api_public_source_applied():
     return jsonify({'success': True, 'applied': applied})
 
 
-@cf_bp.route('/api/validate', methods=['POST'])
+@factor_library_internal_bp.route('/validate', methods=['POST'])
 @login_required
 def api_validate_expr():
     data = request.get_json(silent=True) or {}
@@ -326,7 +321,7 @@ def api_validate_expr():
         })
 
 
-@cf_bp.route('/api/visual-operators')
+@factor_library_internal_bp.route('/operators')
 @login_required
 def api_visual_operators():
     from tools.factors.FactorExpr import get_visual_operator_groups
@@ -336,7 +331,7 @@ def api_visual_operators():
     })
 
 
-@cf_bp.route('/api/source-root', methods=['GET', 'POST'])
+@factor_library_internal_bp.route('/workspace/user/root', methods=['GET', 'POST'])
 @login_required
 def api_source_root():
     username = current_user()
@@ -367,17 +362,7 @@ def api_source_root():
     })
 
 
-@cf_bp.route('/api/workspace/build', methods=['POST'])
-@login_required
-def api_build_workspace():
-    username = current_user()
-    if username is None:
-        return jsonify({'success': False, 'error': '未登录'}), 401
-    result = build_factor_workspace(username)
-    return jsonify({'success': True, **result})
-
-
-@cf_bp.route('/api/workspace/sync', methods=['POST'])
+@factor_library_internal_bp.route('/workspace/user/download', methods=['POST'])
 @login_required
 def api_sync_workspace():
     username = current_user()
@@ -389,7 +374,7 @@ def api_sync_workspace():
     return jsonify({'success': True, **result})
 
 
-@cf_bp.route('/api/workspace/push', methods=['POST'])
+@factor_library_internal_bp.route('/workspace/user/upload', methods=['POST'])
 @login_required
 def api_push_workspace():
     username = current_user()
@@ -405,120 +390,22 @@ def api_push_workspace():
     return jsonify({'success': True, **result})
 
 
-@cf_bp.route('/api/workspace/git-settings', methods=['GET', 'POST'])
+@factor_library_internal_bp.route('/workspace/user/merge-download', methods=['POST'])
 @login_required
-def api_workspace_git_settings():
-    username = current_user()
-    if request.method == 'GET':
-        return jsonify({'success': True, **get_factor_workspace_git_state(username)})
-
-    data = request.get_json(silent=True) or {}
-    from tools.data.sqlite.factor_source_workspace_settings import (
-        save_factor_source_workspace_settings,
-    )
-    git_enabled = bool(data.get('git_enabled'))
-    git_repo_root = (data.get('git_repo_root') or '').strip()
-    if git_repo_root:
-        try:
-            git_repo_root = assert_canonical_factor_workspace_root(git_repo_root)
-        except PermissionError as exc:
-            return jsonify({'success': False, 'error': str(exc)}), 400
-    save_factor_source_workspace_settings(
-        username,
-        git_enabled=git_enabled,
-        git_repo_root=git_repo_root,
-    )
-    return jsonify({'success': True, **get_factor_workspace_git_state(username)})
-
-
-@cf_bp.route('/api/workspace/git', methods=['POST'])
-@login_required
-def api_workspace_git_action():
+def api_workspace_merge_download():
     username = current_user()
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
-    data = request.get_json(silent=True) or {}
     try:
-        result = run_factor_workspace_git_action(
-            username,
-            str(data.get('action') or ''),
-            message=str(data.get('message') or ''),
-            branch=str(data.get('branch') or ''),
-            create=bool(data.get('create')),
-            cached=bool(data.get('cached')),
-            stat=bool(data.get('stat')),
-        )
+        result = FactorWorkspaceRepository(username).merge_download_snapshot()
     except Exception as exc:
         return jsonify({'success': False, 'error': str(exc)}), 400
     return jsonify({'success': True, **result})
 
 
-def _canonical_workspace_snapshot(username: str) -> dict:
-    files = []
-    for row in list_factor_sources('custom'):
-        if row.get('owner_username') != username:
-            continue
-        factor_id = str(row.get('factor_id') or '').strip()
-        source_code = str(row.get('source_code') or '')
-        if factor_id and source_code:
-            files.append({
-                'path': f'custom_factors/{factor_id}.py',
-                'kind': 'custom',
-                'source_sha256': hashlib.sha256(source_code.encode('utf-8')).hexdigest(),
-                'source_bytes': len(source_code.encode('utf-8')),
-            })
-    for row in list_factor_sources('public'):
-        factor_id = str(row.get('factor_id') or '').strip()
-        source_code = str(row.get('source_code') or '')
-        if factor_id and source_code:
-            files.append({
-                'path': f'public_factors/{factor_id}.py',
-                'kind': 'public',
-                'source_sha256': hashlib.sha256(source_code.encode('utf-8')).hexdigest(),
-                'source_bytes': len(source_code.encode('utf-8')),
-            })
-    files.sort(key=lambda item: item['path'])
-    digest_payload = json.dumps(files, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()
-    git_state = get_factor_workspace_git_state(username)
-    return {
-        'schema_version': 1,
-        'principal': username,
-        'workspace_root': git_state.get('workspace_root', ''),
-        'git_head': git_state.get('git_head', ''),
-        'git_current_branch': git_state.get('git_current_branch', ''),
-        'digest': hashlib.sha256(digest_payload).hexdigest(),
-        'custom_factor_count': sum(item['kind'] == 'custom' for item in files),
-        'public_factor_count': sum(item['kind'] == 'public' for item in files),
-        'files': files,
-    }
 
 
-@cf_bp.route('/api/workspace/snapshot', methods=['GET', 'POST'])
-@login_required
-def api_workspace_snapshot():
-    username = current_user()
-    if not username:
-        return jsonify({'success': False, 'error': '未登录'}), 401
-    if request.method == 'GET':
-        return jsonify({'success': True, 'snapshot': _canonical_workspace_snapshot(username)})
-
-    return jsonify({
-        'success': False,
-        'error': (
-            'workspace snapshot 只读；源码同步必须通过 upload/download 分支流程，'
-            '禁止直接导入 snapshot'
-        ),
-        'code': 'workspace_snapshot_write_disabled',
-        'next_commands': [
-            'factortester factor-library workspace push',
-            'factortester factor-library workspace sync',
-        ],
-    }), 410
-
-
-
-
-@cf_bp.route('/api/params/preset', methods=['GET'])
+@factor_library_internal_bp.route('/families/parameter-presets', methods=['GET'])
 @login_required
 def api_params_preset():
     presets = [

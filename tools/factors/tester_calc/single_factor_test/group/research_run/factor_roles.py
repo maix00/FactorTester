@@ -39,6 +39,8 @@ def _factor_source_alias(alias: str, data: dict) -> str:
         return alias
     family_alias = str(frozen["identity"]["family_alias"]).strip()
     owner_ref = str(frozen["owner_ref"]).strip()
+    if owner_ref == "public":
+        return alias
     if not family_alias or not owner_ref or ":" in family_alias:
         return alias
     family_ref = f"{owner_ref}:{family_alias}"

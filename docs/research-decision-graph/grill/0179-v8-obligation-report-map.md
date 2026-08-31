@@ -1068,7 +1068,7 @@ profile hashes。规则 profile 更新时只重开受影响的小类/Claims；�
 规划开始先明确产品范围；CLI 至少提供：
 
 ```text
-factortester products scope inspect --workspace <ref> --json
+factortester product-library scope inspect --workspace <ref> --json
 factortester markets profiles resolve --product <id> --venue <id> --as-of <time> --json
 factortester markets profiles describe --ref <profile-ref> --json
 factortester markets rules diff --from <profile-ref> --to <profile-ref> --json
