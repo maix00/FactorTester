@@ -319,13 +319,13 @@ def create_evidence(
                     "Evidence sources"
                 ) from exc
         immutable = {
+            "schema_version": 2,
             "owner": required_text(owner, "owner", maximum=256),
             "evidence_kind": kind,
             "fragment_refs": refs,
             "title_zh": title,
             "description_zh": description,
             "claim_summary": claim,
-            "applicability": scope,
             "identity_refs": identity,
             "limitations": normalized_limitations,
             "conflicts": normalized_conflicts,
@@ -351,6 +351,32 @@ def create_evidence(
             ),
         )
     return get_composed_evidence(owner=owner, evidence_ref=evidence_ref)
+
+
+def update_evidence_applicability(
+    *, owner: str, evidence_ref: str, applicability: Any,
+) -> dict[str, Any]:
+    """Update interpretive scope without changing immutable Evidence identity."""
+    target = required_text(evidence_ref, "evidence_ref", maximum=512)
+    scope = validate_applicability(applicability)
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        ensure_schema(conn)
+        row = conn.execute(
+            "SELECT identity_refs_json FROM research_fragment_evidence_objects "
+            "WHERE evidence_ref=? AND owner=?",
+            (target, owner),
+        ).fetchone()
+        if row is None:
+            raise KeyError("fragment-bound research evidence not found")
+        check_identity_scope(
+            {"identity_refs": json.loads(row["identity_refs_json"])}, scope,
+        )
+        conn.execute(
+            "UPDATE research_fragment_evidence_objects SET applicability_json=? "
+            "WHERE evidence_ref=? AND owner=?",
+            (canonical(scope), target, owner),
+        )
+    return {"evidence_ref": target, "applicability": scope}
 
 
 def get_composed_evidence(

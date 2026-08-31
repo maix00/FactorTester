@@ -27,6 +27,7 @@ from server.services.research_evidence_catalog import (
     list_facets,
     list_evidence_page,
     list_evidence_relationship_page,
+    list_research_evidence_page,
     list_source_fragments,
     list_tags,
     prepare_lifecycle_transition,
@@ -35,12 +36,14 @@ from server.services.research_evidence_catalog import (
     retire_tag,
     search_evidence,
     update_tag,
+    update_evidence_applicability,
 )
 from server.services.research_evidence_registry import (
     admit_evidence,
     admit_evidence_for_graph,
     get_evidence,
 )
+from server.services.research_evidence_scope import applicability_schema
 
 
 class ResearchObjectRoutesMixin:
@@ -142,6 +145,28 @@ class ResearchObjectRoutesMixin:
                         page_size=int(query.get("page_size", ["20"])[0] or 20),
                         text=str(query.get("text", [""])[0]),
                         include_excluded=query.get("include_excluded") == ["1"],
+                    )
+                }
+            elif parsed.path == "/api/research-evidence/applicability/schema":
+                payload = {"schema": applicability_schema()}
+            elif re.fullmatch(
+                r"/api/research-evidence/catalog/research/([^/]+)", parsed.path,
+            ):
+                target = re.fullmatch(
+                    r"/api/research-evidence/catalog/research/([^/]+)",
+                    parsed.path,
+                )
+                research_id = unquote(target.group(1))
+                catalog = getattr(self.state, "research_catalog", None)
+                if catalog is None:
+                    raise RuntimeError("Research catalog is unavailable")
+                catalog.get_research_summary(research_id, viewer=owner)
+                payload = {
+                    "catalog": list_research_evidence_page(
+                        owner=owner,
+                        research_id=research_id,
+                        page=int(query.get("page", ["1"])[0] or 1),
+                        page_size=int(query.get("page_size", ["20"])[0] or 20),
                     )
                 }
             elif re.fullmatch(
@@ -434,24 +459,35 @@ class ResearchObjectRoutesMixin:
         raise KeyError("research Evidence route not found")
 
     def _patch_research_object_routes(self, parsed) -> bool:
+        applicability = re.fullmatch(
+            r"/api/research-evidence/(.+)/applicability", parsed.path,
+        )
         match = re.fullmatch(r"/api/research-evidence/tags/(.+)", parsed.path)
-        if not match:
+        if not match and not applicability:
             return False
         owner = self._research_owner()
         if owner is None:
             return True
         try:
             data = self._research_object_body(256 * 1024)
-            value = update_tag(
-                owner=owner,
-                tag_ref=unquote(match.group(1)),
-                title_zh=data.get("title_zh"),
-                description_zh=data.get("description_zh"),
-            )
+            if applicability:
+                value = update_evidence_applicability(
+                    owner=owner,
+                    evidence_ref=unquote(applicability.group(1)),
+                    applicability=data.get("applicability") or {},
+                )
+            else:
+                value = update_tag(
+                    owner=owner,
+                    tag_ref=unquote(match.group(1)),
+                    title_zh=data.get("title_zh"),
+                    description_zh=data.get("description_zh"),
+                )
         except (KeyError, TypeError, ValueError) as exc:
             self._research_object_error(exc)
             return True
-        json_response(self, {"success": True, "tag": value})
+        key = "evidence" if applicability else "tag"
+        json_response(self, {"success": True, key: value})
         return True
 
     def _delete_research_object_routes(self, parsed) -> bool:

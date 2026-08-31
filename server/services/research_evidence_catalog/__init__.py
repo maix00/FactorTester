@@ -5,6 +5,7 @@ from .listing import (
     get_evidence_summary,
     list_evidence_page,
     list_evidence_relationship_page,
+    list_research_evidence_page,
 )
 from .lifecycle import (
     finalize_lifecycle_transition,
@@ -22,6 +23,7 @@ from .sources import (
     list_source_fragments,
     put_source_capture,
     put_source_fragment,
+    update_evidence_applicability,
 )
 from .tags import (
     attach_tag,
@@ -49,6 +51,7 @@ __all__ = [
     "list_facets",
     "list_evidence_page",
     "list_evidence_relationship_page",
+    "list_research_evidence_page",
     "list_source_fragments",
     "list_tags",
     "propose_tag",
@@ -59,4 +62,5 @@ __all__ = [
     "require_active_evidence",
     "search_evidence",
     "update_tag",
+    "update_evidence_applicability",
 ]

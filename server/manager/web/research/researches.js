@@ -7,6 +7,7 @@
   const detailTabs = [
     {id: "details", title: "详情"},
     {id: "reports", title: "研究报告"},
+    {id: "evidence", title: "证据"},
     {id: "profiles", title: "研究身份"},
     {id: "workspaces", title: "研究工作区"},
   ];
@@ -293,6 +294,47 @@
         );
         return;
       }
+      if (kind === "evidence") {
+        const page = state.pages.evidence || 1;
+        const response = await context.api(
+          `/api/research-evidence/catalog/research/${encodeURIComponent(researchID)}`
+          + `?page=${page}&page_size=${pageSize}`,
+        );
+        if (!current(context)) return;
+        const catalog = response.catalog || {};
+        const items = catalog.items || [];
+        if (!items.length) {
+          pane.replaceChildren(FTUI.empty(
+            context.t("暂无证据"), context.t("该研究的报告尚未引用 Evidence"),
+          ));
+          return;
+        }
+        const table = FTUI.pagedTable([
+          context.t("证据"), context.t("类型"), context.t("摘要"),
+          context.t("引用报告"), context.t("引用时间"),
+        ], items.map(item => [
+          item.title_zh || item.evidence_ref, item.evidence_kind || "—",
+          item.claim_summary || "—", item.report_count,
+          FTUI.formatDate(item.linked_at),
+        ]), {
+          remote: true, page: catalog.page, pageSize: catalog.page_size,
+          total: catalog.total,
+          onPageChange: next => {
+            state.pages.evidence = next;
+            void childTable(context, root, researchID, value, kind);
+          },
+        });
+        [...table.body.rows].forEach((row, index) => {
+          const item = items[index];
+          row.dataset.href = "true";
+          row.addEventListener("click", () => context.navigate(
+            `/evidence/${encodeURIComponent(item.evidence_ref)}`,
+            {title: item.title_zh || context.t("证据"), parentFolder: "research"},
+          ));
+        });
+        pane.replaceChildren(table.shell);
+        return;
+      }
       const response = await context.api(endpoint);
       if (!current(context)) return;
       if (kind === "members") {
@@ -338,7 +380,8 @@
       return;
     }
     const kind = {
-      reports: "reports", profiles: "members", workspaces: "workspaces",
+      reports: "reports", evidence: "evidence",
+      profiles: "members", workspaces: "workspaces",
     }[state.activeTab];
     if (kind) await childTable(context, root, researchID, value, kind);
   }

@@ -69,6 +69,21 @@ class ResearchEvidenceClientMixin(ClientMixinBase):
         ))
         return dict(data.get("catalog") or {})
 
+    def get_research_evidence_applicability_schema(self) -> dict[str, Any]:
+        data = self._expect_success(self.session.get(
+            "/api/research-evidence/applicability/schema"
+        ))
+        return dict(data.get("schema") or {})
+
+    def update_research_evidence_applicability(
+        self, evidence_ref: str, applicability: dict[str, Any],
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.patch(
+            f"/api/research-evidence/{evidence_ref}/applicability",
+            {"applicability": applicability},
+        ))
+        return dict(data.get("evidence") or {})
+
     def prepare_research_evidence_lifecycle(
         self, evidence_ref: str, payload: dict[str, Any],
     ) -> dict[str, Any]:

@@ -278,7 +278,10 @@
     ],
     "research-shell": ["research/workspaces.js"],
     "research-catalog": ["research/researches.js"],
-    "research-evidence": ["research/evidence.js"],
+    "research-evidence": [
+      "research/evidence-applicability.js",
+      "research/evidence.js"
+    ],
     "research-reports": ["research/reports.js"],
     "research-local": ["research/local.js"],
     "research-shared": ["research/shared.js"],

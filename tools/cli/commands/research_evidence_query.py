@@ -30,6 +30,7 @@ def register_query_commands(group: click.Group) -> None:
     group.add_command(list_catalog)
     group.add_command(search)
     group.add_command(facet)
+    group.add_command(applicability)
     group.add_command(admit)
     group.add_command(admit_graph)
     group.add_command(exclude)
@@ -180,6 +181,48 @@ def list_catalog(
         "text": text or None,
         "include_excluded": "1" if include_excluded else None,
     }), as_json)
+
+
+@click.group("applicability")
+def applicability() -> None:
+    """Inspect or update the mutable interpretation scope of Evidence."""
+
+
+@applicability.command("schema")
+@click.option("--json", "as_json", is_flag=True)
+def applicability_schema(as_json: bool) -> None:
+    emit(client_from_config().get_research_evidence_applicability_schema(), as_json)
+
+
+@applicability.command("show")
+@click.argument("evidence_ref")
+@click.option("--json", "as_json", is_flag=True)
+def applicability_show(evidence_ref: str, as_json: bool) -> None:
+    evidence = client_from_config().get_research_evidence(evidence_ref)
+    emit({
+        "evidence_ref": evidence.get("evidence_ref"),
+        "applicability": evidence.get("applicability") or {},
+    }, as_json)
+
+
+@applicability.command("update")
+@click.argument("evidence_ref")
+@click.option(
+    "--file", "applicability_file", required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option("--json", "as_json", is_flag=True)
+def applicability_update(
+    evidence_ref: str, applicability_file: Path, as_json: bool,
+) -> None:
+    value = read_object(applicability_file, "Evidence applicability")
+    evidence = client_from_config().update_research_evidence_applicability(
+        evidence_ref, value,
+    )
+    emit({
+        "evidence_ref": evidence.get("evidence_ref"),
+        "applicability": evidence.get("applicability") or {},
+    }, as_json)
 
 
 @click.group("facet")

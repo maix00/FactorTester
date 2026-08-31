@@ -157,6 +157,61 @@ def list_evidence_relationship_page(
     }
 
 
+def list_research_evidence_page(
+    *, owner: str, research_id: str, page: int = 1, page_size: int = 20,
+) -> dict[str, Any]:
+    """Derive Research Evidence exclusively from active Report bindings."""
+    selected_page = max(1, int(page))
+    selected_size = min(max(1, int(page_size)), 100)
+    target = str(research_id or "").strip()
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        ensure_schema(conn)
+        if not _table_exists(conn, "research_catalog_evidence_links"):
+            return _empty_page(selected_page, selected_size)
+        grouped = """FROM research_catalog_evidence_links link
+            WHERE link.research_id=? AND link.report_id<>''
+              AND link.status='active'
+            GROUP BY link.evidence_owner_ref, link.evidence_ref"""
+        total = int(conn.execute(
+            f"SELECT COUNT(*) AS count FROM (SELECT 1 {grouped})", (target,),
+        ).fetchone()["count"])
+        rows = conn.execute(
+            f"""SELECT link.evidence_owner_ref, link.evidence_ref,
+                       MAX(link.created_at) AS linked_at,
+                       COUNT(DISTINCT link.report_id) AS report_count,
+                       group_concat(DISTINCT link.report_id) AS report_ids
+                  {grouped}
+                 ORDER BY linked_at DESC, link.evidence_ref
+                 LIMIT ? OFFSET ?""",
+            (target, selected_size, (selected_page - 1) * selected_size),
+        ).fetchall()
+        items = []
+        for row in rows:
+            evidence = conn.execute(
+                "SELECT title_zh, evidence_kind, claim_summary "
+                "FROM research_fragment_evidence_objects "
+                "WHERE owner=? AND evidence_ref=?",
+                (row["evidence_owner_ref"], row["evidence_ref"]),
+            ).fetchone()
+            items.append({
+                "evidence_ref": str(row["evidence_ref"]),
+                "evidence_owner_ref": str(row["evidence_owner_ref"]),
+                "title_zh": str(evidence["title_zh"] if evidence else ""),
+                "evidence_kind": str(evidence["evidence_kind"] if evidence else ""),
+                "claim_summary": str(evidence["claim_summary"] if evidence else ""),
+                "report_count": int(row["report_count"]),
+                "report_ids": [
+                    value for value in str(row["report_ids"] or "").split(",") if value
+                ],
+                "linked_at": float(row["linked_at"]),
+            })
+    return {
+        "items": items, "page": selected_page, "page_size": selected_size,
+        "total": total, "has_previous": selected_page > 1,
+        "has_next": selected_page * selected_size < total,
+    }
+
+
 def _source_projection(conn, owner: str, refs: list[str]) -> dict[str, dict]:
     if not refs:
         return {}
@@ -228,9 +283,17 @@ def _list_item(row, *, sources: dict[str, dict], tags: dict[str, list[str]]) -> 
         "source_kinds": sorted(source["kinds"]),
         "source_locations": sorted(source["locations"]),
         "job_refs": sorted(source["job_refs"]),
+        "applicability": applicability,
         "applicable_objects": {
             "factor_refs": list(applicability.get("factor_refs") or []),
+            "factor_set_refs": list(applicability.get("factor_set_refs") or []),
+            "factor_source_refs": list(
+                applicability.get("factor_source_refs") or []
+            ),
             "product_refs": list(applicability.get("product_refs") or []),
+            "product_scope_ref": str(
+                applicability.get("product_scope_ref") or ""
+            ),
             "sample_refs": list(applicability.get("sample_refs") or []),
         },
         "applicable_environment": {
@@ -278,5 +341,5 @@ def _empty_page(page: int, page_size: int) -> dict[str, Any]:
 
 __all__ = [
     "get_evidence_summary", "list_evidence_page",
-    "list_evidence_relationship_page",
+    "list_evidence_relationship_page", "list_research_evidence_page",
 ]

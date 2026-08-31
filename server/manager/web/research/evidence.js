@@ -91,7 +91,8 @@
   async function detail(context, mount, evidenceRef) {
     const key = `evidence:${evidenceRef}`;
     const state = context.tabSession[key] || {
-      activeTab: "overview", full: null, relationshipPage: 1,
+      activeTab: "overview", full: null, relationshipPage: 1, editing: false,
+      applicabilityTab: "objects", applicabilitySchema: null,
     };
     context.tabSession[key] = state;
     mount.replaceChildren(FTUI.loading(context.t("正在读取证据…")));
@@ -120,6 +121,15 @@
       }
       root.append(nav, content);
       if (state.activeTab === "overview") {
+        const actions = document.createElement("div");
+        actions.className = "research-evidence-actions";
+        const edit = context.button(
+          context.t(state.editing ? "取消编辑" : "编辑适用范围"),
+          () => { state.editing = !state.editing; void detail(context, mount, evidenceRef); },
+        );
+        edit.className = "secondary";
+        actions.append(edit);
+        content.append(actions);
         content.append(FTUI.table([
           context.t("字段"), context.t("值"),
         ], [
@@ -134,6 +144,32 @@
           [context.t("状态"), evidence.lifecycle_status],
           [context.t("登记时间"), FTUI.formatDate(evidence.created_at)],
         ]).shell);
+        if (state.editing) {
+          state.applicabilitySchema ||= (await context.api(
+            "/api/research-evidence/applicability/schema",
+          )).schema;
+          const editor = FTEvidenceApplicabilityEditor.create(
+            context, state, state.applicabilitySchema, evidence.applicability || {},
+          );
+          const save = context.button(context.t("保存适用范围"), async () => {
+            let applicability;
+            try { applicability = editor.read(); }
+            catch (error) { context.toast?.(error.message, "error"); return; }
+            await context.api(
+              `/api/research-evidence/${encodeURIComponent(evidenceRef)}/applicability`,
+              {method: "PATCH", body: JSON.stringify({applicability})},
+            );
+            state.editing = false;
+            state.full = null;
+            await detail(context, mount, evidenceRef);
+          });
+          const note = document.createElement("p");
+          note.className = "secondary";
+          note.textContent = context.t(
+            "适用范围是可修改的人工解释，不改变证据标识；摘选与来源保持不可变。",
+          );
+          content.append(note, editor.root, save);
+        }
       } else if (state.activeTab === "fragments") {
         if (!state.full) {
           const full = await context.api(
@@ -210,11 +246,15 @@
 
   function scopeSummary(value) {
     const parts = [];
-    const labels = {factor_refs: "因子", product_refs: "产品", sample_refs: "样本"};
+    const labels = {
+      factor_refs: "因子", factor_set_refs: "因子集合",
+      factor_source_refs: "因子来源", product_refs: "产品", sample_refs: "样本",
+    };
     Object.entries(labels).forEach(([field, label]) => {
       const items = value?.[field] || [];
       if (items.length) parts.push(`${label} ${items.length}`);
     });
+    if (value?.product_scope_ref) parts.push("产品范围 1");
     return parts.join(" · ") || "—";
   }
 
@@ -238,8 +278,11 @@
   function scopeDetail(value) {
     return [
       ...(value?.factor_refs || []),
+      ...(value?.factor_set_refs || []),
+      ...(value?.factor_source_refs || []),
       ...(value?.product_refs || []),
       ...(value?.sample_refs || []),
+      ...(value?.product_scope_ref ? [value.product_scope_ref] : []),
     ].join("、") || "—";
   }
 
