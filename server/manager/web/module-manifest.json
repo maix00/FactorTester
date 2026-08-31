@@ -619,6 +619,7 @@
     "research/local.js",
     "research/evidence-applicability.js",
     "research/evidence.js",
+    "research/visibility.js",
     "research/reports.js",
     "research/shared.js",
     "research/researches.js",
