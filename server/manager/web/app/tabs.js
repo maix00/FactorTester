@@ -397,7 +397,6 @@
         const children = childrenByParent.get(tab.id) || [];
         if (!children.length) {
           const row = tabRow(tab);
-          row.classList.add("research-detail-tab-row");
           acceptTabDrop(row, tab.id);
           host.append(row);
           return;
@@ -760,7 +759,7 @@
         });
       }
       if (pathname === "/jobs") {
-        return openTab(path, {id: "jobs", title: t("测试"), closable: false});
+        return openTab(path, {id: "jobs", title: t("测试台"), closable: false});
       }
       if (pathname === "/settings" || pathname.startsWith("/settings/")) {
         return openTab(path, {id: "settings", title: t("设置"), closable: false});

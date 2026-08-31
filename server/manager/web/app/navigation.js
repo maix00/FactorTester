@@ -8,7 +8,7 @@
     const id = pathname.split("/").filter(Boolean)[0] || "home";
     if (id === "researches") {
       return modules.find(item => item.id === "research")
-        || {id: "research", title: "研究", icon: "chart"};
+        || {id: "research", title: "研究台", icon: "chart"};
     }
     return modules.find(item =>
       item.id === id || modulePath(item).split("/").filter(Boolean)[0] === id
@@ -102,7 +102,7 @@
   const fallbackModuleDefinitions = [
     {id: "home", title: "主页", title_key: "主页", path: "/", requiresAuth: false, sidebarVisible: true, homeVisible: false, pinned: true},
     {
-      id: "research", title: "研究", title_key: "研究",
+      id: "research", title: "研究台", title_key: "研究台",
       description_key: "查看各 Profile 的实时步骤、义务与报告",
       icon: "chart", sfSymbol: "chart.xyaxis.line",
       path: "/research?section=researches", requiresAuth: true,
@@ -117,7 +117,7 @@
     {id: "ic-test", title: "IC 测试", title_key: "IC 测试", description_key: "配置并运行因子 IC 测试", sfSymbol: "chart.xyaxis.line", path: "/ic-test", requiresAuth: false, sidebarVisible: false, homeVisible: false, pinned: false, tab_behavior: "new"},
     {id: "backtest", title: "回测", title_key: "回测", description_key: "配置并运行分组回测", sfSymbol: "chart.line.uptrend.xyaxis", path: "/backtest", requiresAuth: false, sidebarVisible: false, homeVisible: false, pinned: false, tab_behavior: "new"},
     {
-      id: "jobs", title: "测试", title_key: "测试",
+      id: "jobs", title: "测试台", title_key: "测试台",
       description_key: "选择测试类型或查看测试任务", sfSymbol: "checklist",
       path: "/jobs?section=types", requiresAuth: false,
       sidebarVisible: true, homeVisible: true, pinned: true,

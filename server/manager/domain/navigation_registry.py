@@ -137,8 +137,8 @@ _NAVIGATION_MODULES: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "research",
-        "title": "研究",
-        "title_key": "研究",
+        "title": "研究台",
+        "title_key": "研究台",
         "desc": "研究报告、研究图与研究身份",
         "description_key": "查看各 Profile 的实时步骤、义务与报告",
         "icon": "chart",
@@ -185,8 +185,8 @@ _NAVIGATION_MODULES: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "jobs",
-        "title": "测试",
-        "title_key": "测试",
+        "title": "测试台",
+        "title_key": "测试台",
         "desc": "选择测试类型或查看测试任务",
         "description_key": "选择测试类型或查看测试任务",
         "icon": "任务",
