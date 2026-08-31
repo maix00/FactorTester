@@ -52,10 +52,10 @@ def test_maxa_six_run_specs_get_readable_chips_and_complete_parameters():
         "sample_hash": "f" * 64,
     }
     cases = [
-        ("ic", "day", "none", "截面 IC", "日盘"),
-        ("ic", "night", "none", "截面 IC", "夜盘"),
-        ("backtest", "day", "none", "回测", "无手续费"),
-        ("backtest", "night", "none", "回测", "无手续费"),
+        ("ic", "day", "zero", "截面 IC", "日盘"),
+        ("ic", "night", "zero", "截面 IC", "夜盘"),
+        ("backtest", "day", "zero", "回测", "无手续费"),
+        ("backtest", "night", "zero", "回测", "无手续费"),
         ("backtest", "day", "historical", "回测", "历史手续费"),
         ("backtest", "night", "historical", "回测", "历史手续费"),
     ]
@@ -83,7 +83,7 @@ def test_maxa_six_run_specs_get_readable_chips_and_complete_parameters():
 
 def test_submitted_run_spec_is_described_as_server_frozen_provenance():
     projection = run_spec_presentation(
-        _spec(analysis="ic", session="day", fee_mode="none"),
+        _spec(analysis="ic", session="day", fee_mode="zero"),
         run_spec_hash="a" * 64,
         run_id="run-1",
     )
@@ -99,7 +99,7 @@ def test_batch_key_rejects_same_dates_when_execution_semantics_differ():
         "sample_hash": "f" * 64,
     }
     day_gross = _spec(
-        analysis="backtest", session="day", fee_mode="none",
+        analysis="backtest", session="day", fee_mode="zero",
     )
     assert strict_process_batch_candidate_key(
         day_gross, sample_identity=sample,
@@ -112,7 +112,7 @@ def test_batch_key_rejects_same_dates_when_execution_semantics_differ():
         _spec(
             analysis="backtest",
             session="night",
-            fee_mode="none",
+            fee_mode="zero",
         ),
         sample_identity=sample,
     )
@@ -129,7 +129,7 @@ def test_batch_key_rejects_same_dates_when_execution_semantics_differ():
     assert strict_process_batch_candidate_key(
         day_gross, sample_identity=sample,
     ) != strict_process_batch_candidate_key(
-        _spec(analysis="ic", session="day", fee_mode="none"),
+        _spec(analysis="ic", session="day", fee_mode="zero"),
         sample_identity=sample,
     )
 

@@ -104,21 +104,11 @@ def resolve_group_settings(
                 value = _coerce_value(definition, value)
                 _validate_value(definition, value)
             except ValueError:
-                if definition.key == "time_precision":
+                if user_provided:
                     raise
-                requested_value = value
                 value = rules.engine_defaults.get(engine, _default(definition))
                 value = _coerce_value(definition, value)
                 _validate_value(definition, value)
-                if user_provided:
-                    setting_fallbacks.append({
-                        "setting_key": definition.key,
-                        "module": definition.module,
-                        "engine": engine,
-                        "requested_value": requested_value,
-                        "applied_value": value,
-                        "reason": "invalid_setting_value",
-                    })
             value, fallback = _resolve_engine_value(
                 definition,
                 value,
