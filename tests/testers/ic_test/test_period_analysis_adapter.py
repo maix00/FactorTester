@@ -16,7 +16,7 @@ from tools.testers.ic_test.analysis_graph.runtime import (
 def test_period_analysis_groups_series_by_registered_calendar_rule() -> None:
     core = ICCoreTest(
         product_scope_ref="product-scope:metals",
-        factor_ref="factor:v1:profile-maxa:path:roc:commit:blob",
+        factor_ref="factor:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         horizon="MIN5",
         entry_delay_bars=0,
         method="rank",

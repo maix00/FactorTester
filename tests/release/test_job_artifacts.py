@@ -380,7 +380,7 @@ def test_collect_job_report_mounts_one_ic_statistics_table(
         "artifact_kind": "ic_statistics_summary",
         "columns": ["factor", "experiment", "mean_ic", "source"],
         "rows": [{
-            "factor": "[MmRateOfChg](factortester://factor/factor%3Av1%3Aprofile-maxa%3Apath%3Aidentity%3Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%3Abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)",
+            "factor": "[MmRateOfChg](factortester://factor/factor%3Av2%3Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)",
             "experiment": "[Job job-ic](factortester://job/job%3Ajob-ic)",
             "mean_ic": 0.12,
             "source": "[原始](factortester://artifact/job-artifact%3Ajob-ic%3Aic_statistics_data)",

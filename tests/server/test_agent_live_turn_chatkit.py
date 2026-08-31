@@ -41,14 +41,8 @@ def test_active_turn_is_visible_before_provider_thread_finishes():
     assert [item["id"] for item in page["items"]] == [
         "answer-live", "reasoning-1", "user-1",
     ]
-    assert page["items"][0]["workflow"]["tasks"][0]["title"] == (
-        "当前检查到以下内容"
-    )
-    assert page["items"][0]["workflow"]["tasks"][0]["content"] is None
-    assert page["items"][0]["workflow"]["expanded"] is True
-    assert page["items"][0]["workflow"]["tasks"][0]["status_indicator"] == (
-        "loading"
-    )
+    assert page["items"][0]["content"][0]["text"] == "当前检查到以下内容"
+    assert "workflow" not in page["items"][0]
 
 
 def test_active_turn_ignores_events_from_another_thread():

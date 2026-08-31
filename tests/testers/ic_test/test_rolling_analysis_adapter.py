@@ -16,7 +16,7 @@ from tools.testers.ic_test.analysis_graph.runtime import (
 def test_rolling_analysis_summarizes_each_signal_count_window() -> None:
     core = ICCoreTest(
         product_scope_ref="product-scope:metals",
-        factor_ref="factor:v1:profile-maxa:path:roc:commit:blob",
+        factor_ref="factor:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         horizon="MIN5",
         entry_delay_bars=0,
         method="rank",

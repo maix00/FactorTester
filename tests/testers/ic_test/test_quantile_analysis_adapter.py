@@ -16,7 +16,7 @@ from tools.testers.ic_test.analysis_graph.runtime import (
 def test_quantile_analysis_consumes_core_panels_without_ic_series() -> None:
     core = ICCoreTest(
         product_scope_ref="product-scope:metals",
-        factor_ref="factor:v1:profile-maxa:path:roc:commit:blob",
+        factor_ref="factor:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         horizon="MIN5",
         entry_delay_bars=0,
         method="rank",

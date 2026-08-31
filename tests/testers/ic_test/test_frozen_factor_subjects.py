@@ -53,7 +53,7 @@ def test_factor_set_members_must_be_selected_for_execution() -> None:
 def test_frozen_configuration_rejects_unknown_standalone_subject() -> None:
     payload = frozen_configuration().to_dict()
     payload["factor_subject_refs"] = [
-        "factor:v1:profile-maxa:path:unknown:commit:blob",
+        "factor:v2:fffffffffffffffffffffffffffffffffffffffffff",
     ]
     with pytest.raises(ValueError, match="standalone factor subject"):
         CompiledICRunConfiguration.from_dict(payload)

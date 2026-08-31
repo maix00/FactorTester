@@ -9,7 +9,7 @@ from tools.testers.ic_test.core import ICCoreTest
 def _core(horizon: str) -> ICCoreTest:
     return ICCoreTest(
         product_scope_ref="metals",
-        factor_ref="factor:v1:roc",
+        factor_ref="factor:v2:C_hxmG_kcqe_YUpCZtfvY7cvSxHKmqFz1vC8-DpM0hY",
         horizon=horizon,
         entry_delay_bars=0,
         method="rank",

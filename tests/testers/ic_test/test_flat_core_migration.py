@@ -71,7 +71,7 @@ def test_flat_migration_is_order_independent_and_emits_no_flat_fields() -> None:
 
 def test_flat_migration_rejects_unfrozen_and_unimplemented_inputs() -> None:
     assert frozen_configuration(min_cross_section_count=5).analysis_graph.core_tests
-    with pytest.raises(ValueError, match="frozen factor_ref"):
+    with pytest.raises(ValueError, match="factor:v2 formula reference"):
         migrate_flat_ic_settings(
             flat_settings(factor_selections=[{"factor_alias": "ROC"}]),
             factor_frequencies={ROC: "1m"},

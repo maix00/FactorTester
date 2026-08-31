@@ -194,8 +194,8 @@
     "styles/outputs/backtest-results.css",
     "styles/workbench.css",
     "styles/workbench-settings.css",
-    "styles/task-inputs.css",
-    "styles/docs.css"
+    "styles/docs.css",
+    "styles/task-inputs.css"
   ],
   "groups": {
     "code-viewer": [],

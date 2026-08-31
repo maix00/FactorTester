@@ -37,7 +37,10 @@ def test_ic_execution_payload_preserves_each_factor_family() -> None:
                 ],
                 "factors": factors,
             },
-            "analyses": {"ic": {"product_path_selection_id": "strict-day"}},
+            "analyses": {"ic": {
+                "product_path_selection_id": "strict-day",
+                "execution": {"settings": {}},
+            }},
         },
     }
 

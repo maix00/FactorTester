@@ -10,8 +10,8 @@ from tools.testers.ic_test.configuration import (
 )
 
 
-ROC = "factor:v1:profile-maxa:path:roc:commit:blob"
-SGCCS = "factor:v1:profile-maxa:path:sgccs:commit:blob"
+ROC = "factor:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+SGCCS = "factor:v2:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 
 def _authoring() -> ICRunAuthoringConfiguration:
@@ -118,7 +118,7 @@ def test_schema2_grouped_payload_maps_each_group_to_one_typed_core() -> None:
         "schema_version": 2,
         "configuration_groups": [{
             "config_group_id": "g-day",
-            "factor_ref": "factor:v1:owner:path:roc:commit:blob",
+            "factor_ref": "factor:v2:ddddddddddddddddddddddddddddddddddddddddddd",
             "product_scope_ref": "product-group:day",
             "entry_delay_bars": 2,
             "horizon": {"sampling": "scale_aware"},
@@ -134,8 +134,8 @@ def test_schema2_grouped_payload_maps_each_group_to_one_typed_core() -> None:
 
 def test_schema2_grouped_payload_rejects_more_than_one_slice1_group() -> None:
     payload = {"schema_version": 2, "configuration_groups": [
-        {"config_group_id": "first", "factor_ref": "factor:v1:a", "product_scope_ref": "s", "entry_delay_bars": 0, "horizon": {"sampling": "scale_aware"}, "methods": ["rank"], "return_price_basis": "x"},
-        {"config_group_id": "second", "factor_ref": "factor:v1:b", "product_scope_ref": "s", "entry_delay_bars": 1, "horizon": {"sampling": "scale_aware"}, "methods": ["rank"], "return_price_basis": "x"},
+        {"config_group_id": "first", "factor_ref": "factor:v2:Wroo2lwG5LBiImordFdeS5OTS_IAfxFmLCZUzPgJZe4", "product_scope_ref": "s", "entry_delay_bars": 0, "horizon": {"sampling": "scale_aware"}, "methods": ["rank"], "return_price_basis": "x"},
+        {"config_group_id": "second", "factor_ref": "factor:v2:n6065XCpFt8yYTj9iGHCdrs7ZSKvjHRedB33HumEd5w", "product_scope_ref": "s", "entry_delay_bars": 1, "horizon": {"sampling": "scale_aware"}, "methods": ["rank"], "return_price_basis": "x"},
     ]}
     with pytest.raises(ValueError, match="exactly one"):
         ICRunAuthoringConfiguration.from_dict(payload)

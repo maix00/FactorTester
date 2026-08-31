@@ -10,7 +10,7 @@ from tools.cli.app import cli
 
 
 def test_client_research_exposes_no_legacy_report_migration_command() -> None:
-    result = CliRunner().invoke(cli, ["client", "research", "--help"])
+    result = CliRunner().invoke(cli, ["research", "--help"])
 
     assert result.exit_code == 0, result.output
     assert "migrate-work-packages" not in result.output
