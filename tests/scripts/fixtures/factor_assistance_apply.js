@@ -21,9 +21,10 @@ const state = {
 const control = value => ({value});
 let dirtyKey = "";
 let redraws = 0;
+const nameControl = control("");
 window.FTFactorAssistance.register({}, {
   state,
-  name: control(""), chineseName: control(""),
+  name: nameControl, chineseName: control(""),
   description: control(""), category: control(""),
   tabs: {current: () => "source"},
   redraw: () => { redraws += 1; },
@@ -35,10 +36,14 @@ window.FTFactorAssistance.register({}, {
 
 adapter.importDocument({
   name: "ProbeMin", chinese_name: "探针", description: "", category: "自编",
-  source: {mode: "source", code: "class ProbeMin: pass\n"},
+  source: {mode: "source", code: "class PendingSourceName: pass\n"},
   parameter_values: {N: "25d"},
 });
-assert.equal(state.sourceCode, "class ProbeMin: pass\n");
+assert.equal(state.sourceCode, "class PendingSourceName: pass\n");
+assert.equal(
+  nameControl.value, "ProbeMin",
+  "assistance must restore the draft field without deriving it from source",
+);
 assert.equal(dirtyKey, "source");
 assert.equal(redraws, 1);
 
@@ -63,8 +68,19 @@ assert.equal(
 );
 visibleInput.value = "自编";
 assert.equal(fieldRow.value, "自编");
-assert.equal(
-  window.FTFactorEditor.sourceClassName("class MmAroonDown(FactorFamily):\n    pass\n"),
-  "MmAroonDown",
-);
+assert.equal(window.FTFactorEditor.persistedFamilyClassName({
+  name: "StoredClass", factor_family_name: "ProjectionClass",
+}), "StoredClass");
+assert.equal(window.FTFactorEditor.persistedFamilyClassName({
+  factor_family_name: "ProjectionClass", factor_alias: "ProjectionClass|N:25d",
+}), "ProjectionClass");
+assert.equal(window.FTFactorEditor.persistedFamilyClassName({
+  factor_family_alias: "LegacyFamily", factor_alias: "LegacyFamily|N:25d",
+}), "LegacyFamily");
+assert.equal(window.FTFactorEditor.familyClassNameMatches(
+  "MmAroonDown", {factor_name: "MmAroonDown"},
+), true);
+assert.equal(window.FTFactorEditor.familyClassNameMatches(
+  "MmAroonDown", {factor_name: "MmAroonUp"},
+), false);
 console.log("ok");
