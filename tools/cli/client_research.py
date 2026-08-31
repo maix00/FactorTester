@@ -80,6 +80,15 @@ class ResearchClientMixin(ClientMixinBase):
         ))
         return dict(data.get("report") or {})
 
+    def update_research_report(
+        self, research_id: str, report_id: str, payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        target = quote(str(report_id or "").strip(), safe="")
+        data = self._expect_success(self.session.patch(
+            self._research_url(research_id, f"/reports/{target}"), payload,
+        ))
+        return dict(data.get("report") or {})
+
     def link_research_evidence(
         self, research_id: str, payload: dict[str, Any],
     ) -> dict[str, Any]:

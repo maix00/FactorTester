@@ -69,7 +69,7 @@ def register_research_catalog_commands(research: click.Group) -> None:
     @click.option("--description", default="", help="研究说明。")
     @click.option(
         "--visibility",
-        type=click.Choice(("private", "authorized", "public")),
+        type=click.Choice(("private", "superiors", "authorized", "public")),
         default="private",
         show_default=True,
     )
@@ -105,7 +105,7 @@ def register_research_catalog_commands(research: click.Group) -> None:
     @click.option("--description")
     @click.option(
         "--visibility",
-        type=click.Choice(("private", "authorized", "public")),
+        type=click.Choice(("private", "superiors", "authorized", "public")),
     )
     @click.option("--status", type=click.Choice(("active", "archived")))
     @click.option("--authorized-user", multiple=True, help="替换授权用户列表。")
@@ -209,7 +209,7 @@ def register_research_catalog_commands(research: click.Group) -> None:
     @click.option("--build-source-ref", default="")
     @click.option(
         "--visibility",
-        type=click.Choice(("private", "authorized", "public")),
+        type=click.Choice(("private", "superiors", "authorized", "public")),
         default="private",
         show_default=True,
     )
@@ -242,6 +242,41 @@ def register_research_catalog_commands(research: click.Group) -> None:
                 "authorized_users": list(authorized_user),
                 "source_ref": source_ref,
             },
+        )))
+
+    @research.command("report-update")
+    @click.argument("research_id")
+    @click.argument("report_id")
+    @click.option(
+        "--visibility",
+        type=click.Choice(("private", "superiors", "authorized", "public")),
+    )
+    @click.option("--authorized-user", multiple=True, help="替换授权用户列表。")
+    @click.option("--clear-authorized-users", is_flag=True)
+    @friendly_errors
+    def update_report(
+        research_id: str,
+        report_id: str,
+        visibility: str | None,
+        authorized_user: tuple[str, ...],
+        clear_authorized_users: bool,
+    ) -> None:
+        """更新 Report 独立可见性。"""
+        if clear_authorized_users and authorized_user:
+            raise click.ClickException(
+                "--clear-authorized-users 不能与 --authorized-user 同时使用"
+            )
+        payload: dict[str, Any] = {}
+        if visibility is not None:
+            payload["visibility"] = visibility
+        if clear_authorized_users:
+            payload["authorized_users"] = []
+        elif authorized_user:
+            payload["authorized_users"] = list(authorized_user)
+        if not payload:
+            raise click.ClickException("至少提供一个要更新的字段")
+        click.echo(_json(client_from_config().update_research_report(
+            research_id, report_id, payload,
         )))
 
     @research.command("evidence-link")

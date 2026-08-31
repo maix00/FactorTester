@@ -60,7 +60,8 @@
     const basis = item?.access?.access_basis || item?.visibility || "private";
     return context.t({
       owner: "所有者", member: "成员", research: "研究共享",
-      public: "公开", authorized: "授权用户", private: "仅自己", none: "无",
+      public: "全体用户共享", superiors: "分享给上级",
+      authorized: "指定用户可见", private: "仅自己", none: "无",
     }[basis] || basis);
   }
 
@@ -99,7 +100,9 @@
       rows.map(item => [
         item.title || item.research_id,
         item.owner_ref || context.t("未知"),
-        accessLabel(context, item),
+        FTResearchVisibility.control(context, item, {
+          kind: "research", onSaved: () => renderRootContent(context, root),
+        }),
         FTUI.formatDate(item.updated_at || item.created_at),
       ]),
       {
@@ -131,6 +134,7 @@
   }
 
   async function renderRootContent(context, root) {
+    await FTResearchVisibility.redeemFromLocation(context);
     const state = rootState(context);
     const content = root.querySelector(".research-root-content");
     if (!content) return;
