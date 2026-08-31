@@ -69,7 +69,17 @@
     const boundProfileID = String(
       value.profile_ref || value.profile_id || value.generation?.profile_id || "",
     ).trim();
-    if (boundProfileID && context.session) {
+    const researchID = String(
+      value.research_id
+      || new URLSearchParams(location.search).get("research_id")
+      || "",
+    ).trim();
+    if ((boundProfileID || researchID) && context.session) {
+      let profileListPromise = null;
+      const resolveProfiles = researchID ? () => {
+        profileListPromise ||= FTPageAgentProfiles.forResearch(context, researchID);
+        return profileListPromise;
+      } : null;
       FTPageAssistance.register(context, {
         navigation: () => ({
           schema_version: 1, root_id: "page", nodes: {
@@ -95,7 +105,14 @@
           throw new Error(context.t("研究报告正文通过研究工作流修改"));
         },
       }, {
-        boundProfileID,
+        ...(boundProfileID ? {boundProfileID} : {}),
+        ...(!boundProfileID && resolveProfiles ? {
+          resolveProfile: async () => (
+            (await resolveProfiles())[0] || FTPageAgentProfiles.self(context)
+          ),
+        } : {}),
+        researchID,
+        ...(resolveProfiles ? {resolveProfiles} : {}),
         pageKind: "research-report",
         profileKey: value.profile_key || "",
         view: () => ({selected_chapter_id: reading.selectedChapterID || ""}),

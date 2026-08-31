@@ -248,13 +248,16 @@
     return state;
   }
 
-  function reportRoute(item) {
+  function reportRoute(item, researchID = "") {
     const explicit = String(item?.href || "").trim();
-    if (explicit) return explicit;
+    let route = explicit;
     const reference = String(item?.source_ref || item?.report_id || "").trim();
-    return reference
-      ? `/research/${encodeURIComponent(reference)}`
-      : "";
+    if (!route) route = reference
+      ? `/research/${encodeURIComponent(reference)}` : "";
+    if (!route || !researchID) return route;
+    const url = new URL(route, location.origin);
+    url.searchParams.set("research_id", researchID);
+    return `${url.pathname}${url.search}${url.hash}`;
   }
 
   function researchReportTable(context, rows, state, mount, researchID) {
@@ -268,7 +271,7 @@
           context.t("独立打开"),
           event => {
             event.stopPropagation();
-            const href = reportRoute(item);
+            const href = reportRoute(item, researchID);
             if (!href) return;
             context.navigate(href, {
               parentFolder: "research",
@@ -303,7 +306,7 @@
     [...view.body.rows].forEach((row, index) => {
       row.dataset.href = "true";
       row.addEventListener("click", () => {
-        const href = reportRoute(pageRows[index]);
+        const href = reportRoute(pageRows[index], researchID);
         if (!href) return;
         context.navigate(href, {
           parentFolder: "research",

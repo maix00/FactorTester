@@ -54,5 +54,27 @@
     return profile;
   }
 
-  window.FTPageAgentProfiles = Object.freeze({bound, self});
+  function identifier(value) {
+    return String(value || "").trim().replace(/^profile:/, "");
+  }
+
+  async function forResearch(context, researchID) {
+    const id = String(researchID || "").trim();
+    if (!id) return [];
+    const [available, membership] = await Promise.all([
+      profiles(context),
+      context.api(`/api/research/${encodeURIComponent(id)}/members`),
+    ]);
+    const boundIDs = new Set((membership.members || [])
+      .filter(item => String(item.status || "active") === "active")
+      .map(item => identifier(item.profile_ref))
+      .filter(Boolean));
+    // /api/client/profiles already represents the current execution boundary:
+    // a Web server returns its server Profiles and a client returns its local
+    // Profiles.  Intersecting here prevents a Research membership on another
+    // host from appearing as a selectable but unusable assistant.
+    return available.filter(item => boundIDs.has(identifier(item.profile_id)));
+  }
+
+  window.FTPageAgentProfiles = Object.freeze({bound, forResearch, profiles, self});
 })();

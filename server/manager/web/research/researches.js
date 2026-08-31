@@ -233,6 +233,50 @@
     return section;
   }
 
+  function registerResearchAssistance(context, research) {
+    if (!context.session) return null;
+    let profileListPromise = null;
+    const resolveProfiles = () => {
+      profileListPromise ||= FTPageAgentProfiles.forResearch(
+        context, research.research_id,
+      );
+      return profileListPromise;
+    };
+    return FTPageAssistance.register(context, {
+      navigation: () => ({
+        schema_version: 1,
+        root_id: "page",
+        nodes: {
+          page: {
+            id: "page", kind: "research", label: research.title || "研究",
+            summary: research.description || "", children: [],
+          },
+        },
+      }),
+      schema: () => ({type: "object", readOnly: true}),
+      exportDocument: () => ({
+        schema_version: 1,
+        document_kind: "research_context",
+        research_id: research.research_id,
+      }),
+      validate: () => {},
+      importDocument: () => {
+        throw new Error(context.t("研究内容通过研究工作流修改"));
+      },
+    }, {
+      pageKind: "research",
+      researchID: research.research_id,
+      resolveProfiles,
+      resolveProfile: async () => (
+        (await resolveProfiles())[0] || FTPageAgentProfiles.self(context)
+      ),
+      view: () => ({
+        research_id: research.research_id,
+        section: detailState(context).activeTab,
+      }),
+    });
+  }
+
   async function childTable(context, root, researchID, value, kind) {
     const state = detailState(context);
     const pane = root.querySelector(".research-detail-pane");
@@ -345,6 +389,7 @@
       pane.className = "research-detail-pane";
       root.append(pane);
       mount.replaceChildren(root);
+      registerResearchAssistance(context, value);
       await renderDetailPane(context, root, id, value);
     } catch (error) {
       if (current(context)) mount.replaceChildren(
