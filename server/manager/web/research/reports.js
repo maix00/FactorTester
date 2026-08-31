@@ -281,16 +281,18 @@
       title.textContent = selected.title || selected.report_id || context.t("未命名研究报告");
       line.append(title);
     }
+    const metadata = document.createElement("div");
+    metadata.className = "research-report-info-metadata";
     [
       buildSource(context, selected),
       visibility(context, selected.visibility),
       FTUI.formatDate(selected.updated_at || selected.created_at),
     ].filter(Boolean).forEach(value => {
       const item = document.createElement("span");
-      item.className = "secondary";
       item.textContent = value;
-      line.append(item);
+      metadata.append(item);
     });
+    line.append(metadata);
     return line;
   }
 
