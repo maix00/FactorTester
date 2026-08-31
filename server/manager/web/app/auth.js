@@ -50,7 +50,10 @@
 
     async function openReportSettings() {
       const settings = (await api("/api/research-publications/settings")).reports
-        .find(item => item.publication_id === state.report.publication_id);
+        .find(item => (
+          item.publication_id === state.report.publication_id
+          || item.report_id === state.report.report_id
+        ));
       if (!settings) return;
       document.querySelector("#setting-auto-sync").checked = settings.auto_sync;
       document.querySelector("#setting-visibility").value = settings.visibility;

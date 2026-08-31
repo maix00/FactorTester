@@ -236,15 +236,36 @@ class WriteRoutesMixin:
                 return
             try:
                 payload = self._json_body(256 * 1024)
-                value = self.state.public_research.configure(
-                    owner_ref=str(session["username"]),
-                    report_id=str(payload.get("report_id") or ""),
-                    projection=None,
-                    visibility=str(payload.get("visibility") or "private"),
-                    auto_sync=bool(payload.get("auto_sync", True)),
-                    relay_local_files=bool(payload.get("relay_local_files", False)),
-                    authorized_users=list(payload.get("authorized_users") or []),
+                owner = str(session["username"])
+                report_id = str(payload.get("report_id") or "")
+                visibility = str(payload.get("visibility") or "private")
+                server_report = self.state.server_research.owner_report(
+                    owner, report_id,
                 )
+                if server_report is not None:
+                    value = self.state.server_research.publish(
+                        owner,
+                        str(server_report["server_ref"]),
+                        public_research=self.state.public_research,
+                        visibility=visibility,
+                        authorized_users=list(
+                            payload.get("authorized_users") or []
+                        ),
+                    )
+                else:
+                    value = self.state.public_research.configure(
+                        owner_ref=owner,
+                        report_id=report_id,
+                        projection=None,
+                        visibility=visibility,
+                        auto_sync=bool(payload.get("auto_sync", True)),
+                        relay_local_files=bool(
+                            payload.get("relay_local_files", False)
+                        ),
+                        authorized_users=list(
+                            payload.get("authorized_users") or []
+                        ),
+                    )
                 self._sync_research_metadata(str(value["publication_id"]))
                 self._invalidate_federated_public_research()
             except PermissionError as exc:
