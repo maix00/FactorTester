@@ -1,8 +1,8 @@
 (() => {
   const scopes = [
-    {id: "mine", title: "本人研究"},
-    {id: "subordinates", title: "下级用户研究"},
-    {id: "shared", title: "公开（给我的）研究"},
+    {id: "mine", title: "我的研究"},
+    {id: "subordinates", title: "下级用户的研究"},
+    {id: "shared", title: "共享研究"},
   ];
   const detailTabs = [
     {id: "details", title: "详情"},
@@ -66,12 +66,12 @@
 
   function scopeTabs(context, state, root) {
     const nav = document.createElement("nav");
-    nav.className = "research-root-scopes";
+    nav.className = "research-section-tabs research-root-scopes";
     nav.setAttribute("aria-label", context.t("研究范围"));
     scopes.forEach(definition => {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = `research-root-scope${state.scope === definition.id ? " active" : ""}`;
+      button.className = `research-section-tab research-root-scope${state.scope === definition.id ? " active" : ""}`;
       button.textContent = context.t(definition.title);
       button.setAttribute("aria-current", state.scope === definition.id ? "page" : "false");
       button.disabled = !context.session && definition.id !== "shared";
