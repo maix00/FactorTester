@@ -7,13 +7,21 @@
 
   function normalizedTab(tab) {
     if (!tab || !String(tab.id || "") || !String(tab.path || "")) return null;
-    return {
+    const value = {
       id: String(tab.id),
       path: String(tab.path),
       title: String(tab.title || ""),
       icon: String(tab.icon || ""),
       closable: Boolean(tab.closable),
     };
+    // Parent metadata is part of the durable tab identity.  Keep it optional
+    // so old workspaces remain readable while allowing the sidebar hierarchy
+    // to survive reloads and tab eviction.
+    ["parentFolder", "parentTabID", "parentResearchID"].forEach(key => {
+      const item = String(tab[key] || "").trim();
+      if (item) value[key] = item;
+    });
+    return value;
   }
 
   function create(options = {}) {

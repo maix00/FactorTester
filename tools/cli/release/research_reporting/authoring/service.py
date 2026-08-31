@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ..git import commit_work_package
+from ..work_package_identity import work_package_report_id
 from .tree_descriptor import report_tree_descriptor, section_refs_from_snapshot
 from .tree_model import (
     add_asset as _add_asset,
@@ -25,7 +26,7 @@ def ensure_branch_authoring(*, package_root: Path, work_package_id: str, branch_
     """Initialize one report tree and create the current node chapter once."""
     initialized = initialize_tree(
         package_root=package_root, branch_id=branch_id,
-        report_id=_report_id(work_package_id, branch_id), title=title,
+        report_id=work_package_report_id(package_root, work_package_id), title=title,
     )
     chapter_sync = _unchanged()
     section_refs: list[dict[str, str]] = []
@@ -133,10 +134,6 @@ def _result(package_root: Path, work_package_id: str, branch_id: str, snapshot: 
         ),
         "chapter_sync": chapter_sync, "git": git,
     }
-
-
-def _report_id(work_package_id: str, branch_id: str) -> str:
-    return f"report-{work_package_id}-{branch_id}"
 
 
 def _unchanged() -> dict[str, Any]:

@@ -18,6 +18,9 @@ from tools.cli.release.research_reporting.authoring.export import (
 from tools.cli.release.research_reporting.authoring.tree_fork import (
     fork_report_tree,
 )
+from tools.cli.release.research_reporting.work_package_identity import (
+    work_package_report_id,
+)
 from tools.cli.release.research_reporting.git import commit_work_package
 from tools.cli.release.research_reporting.package_layout import (
     safe_package_component,
@@ -100,7 +103,7 @@ def inherit_local_report(
         package_root=package_root,
         source_branch_id=source_branch_id,
         target_branch_id=target_branch_id,
-        target_report_id=f"report-{package_root.name}-{target_branch_id}",
+        target_report_id=work_package_report_id(package_root, package_root.name),
     )
     export_branch_report(
         package_root=package_root,

@@ -28,6 +28,9 @@ assert.deepStrictEqual(match("/docs/system-overview", ""), {
 assert.deepStrictEqual(match("/research/local%3Aid", ""), {
   kind: "report", id: "local%3Aid",
 });
+assert.deepStrictEqual(match("/researches/research%2Fone", ""), {
+  kind: "research-detail", id: "research/one",
+});
 assert.deepStrictEqual(match("/jobs/8141/job%2Fid", ""), {
   kind: "job", port: 8141, id: "job/id",
 });

@@ -50,7 +50,7 @@ def test_continuation_inherits_active_detour_once(tmp_path) -> None:
 
     first = inherit_continuation_report_tree(
         package_root=package, source_branch_id="source",
-        target_branch_id="target", target_report_id="report-target",
+        target_branch_id="target", target_report_id="report-source",
     )
     add_component(
         package_root=package, branch_id="target",
@@ -60,7 +60,7 @@ def test_continuation_inherits_active_detour_once(tmp_path) -> None:
     )
     repeated = inherit_continuation_report_tree(
         package_root=package, source_branch_id="source",
-        target_branch_id="target", target_report_id="report-target",
+        target_branch_id="target", target_report_id="report-source",
     )
 
     snapshot = load_snapshot(package_root=package, branch_id="target")

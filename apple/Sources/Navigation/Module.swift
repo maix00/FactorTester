@@ -92,12 +92,13 @@ struct Module: Codable, Identifiable, Hashable {
             id: "research", title: "研究",
             desc: "研究报告、研究图与研究身份",
             sfSymbol: "chart.xyaxis.line",
-            path: "/research?section=shared", requiresAuth: false,
+            path: "/research?section=researches", requiresAuth: false,
             children: [
-                Module(id: "research.local", title: "本地研究", path: "/research?section=local"),
-                Module(id: "research.shared", title: "共享研究", path: "/research?section=shared", requiresAuth: false),
+                Module(id: "research.reports", title: "研究报告", path: "/research?section=reports", requiresAuth: false),
+                Module(id: "research.evidence", title: "证据", path: "/research?section=evidence"),
                 Module(id: "research.graph", title: "研究图", path: "/research?section=graph"),
                 Module(id: "research.profiles", title: "研究身份", path: "/research?section=profiles"),
+                Module(id: "research.agent-models", title: "智能体模型", path: "/research?section=agent-models"),
             ]
         ),
         Module(

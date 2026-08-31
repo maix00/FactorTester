@@ -61,6 +61,28 @@ vm.runInThisContext(
   }), /HTTP 403/);
   assert.equal(permissionCalls, 1, "non-transient errors are not retried");
 
+  const researchContext = {
+    ...context,
+    tabSession: {},
+    api: async path => path === "/api/client/profiles"
+      ? {profiles: [
+        {profile_id: "self-profile", profile_kind: "self"},
+        {profile_id: "research-profile", profile_kind: "research"},
+        {profile_id: "other-host", profile_kind: "research"},
+      ]}
+      : {members: [
+        {profile_ref: "profile:research-profile", status: "active"},
+        {profile_ref: "other-host", status: "revoked"},
+        {profile_ref: "not-on-this-host", status: "active"},
+      ]},
+  };
+  assert.deepEqual(
+    (await window.FTPageAgentProfiles.forResearch(researchContext, "research:one"))
+      .map(item => item.profile_id),
+    ["research-profile"],
+    "Research assistants are the active bindings available on this host",
+  );
+
   console.log("PASS: non-report assistance uses self and reports keep bound profiles");
 })().catch(error => {
   console.error(error);

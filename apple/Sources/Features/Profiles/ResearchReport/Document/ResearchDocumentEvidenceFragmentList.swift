@@ -5,6 +5,7 @@ import AppKit
 
 struct ResearchDocumentEvidenceFragmentList: View {
     let detail: ResearchEvidenceDetailPayload
+    let canDownload: Bool
     let reportRef: String
     let openJob: (String, Int?, String) -> Void
 
@@ -83,7 +84,14 @@ struct ResearchDocumentEvidenceFragmentList: View {
                 .buttonStyle(.link)
             }
         case "file":
-            if let relative = identity["relative_path"]?.scalarText,
+            if canDownload,
+               identity["object_id"]?.scalarText != nil,
+               identity["storage_server_id"]?.scalarText != nil {
+                Button(L10n.text("下载文件")) {
+                    Task { await downloadFile(fragment) }
+                }
+                .buttonStyle(.link)
+            } else if let relative = identity["relative_path"]?.scalarText,
                let url = localFileURL(relative) {
                 Button(L10n.text("打开文件")) {
                     #if os(macOS)
@@ -108,6 +116,24 @@ struct ResearchDocumentEvidenceFragmentList: View {
         default:
             EmptyView()
         }
+    }
+
+    @MainActor
+    private func downloadFile(_ fragment: ResearchEvidenceFragment) async {
+        #if os(macOS)
+        do {
+            let value = try await ManagerObjectTransferService.shared.downloadEvidenceFile(
+                evidenceRef: detail.evidenceRef,
+                sourceRef: fragment.sourceRef
+            )
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = value.filename
+            guard panel.runModal() == .OK, let destination = panel.url else { return }
+            try value.data.write(to: destination, options: .atomic)
+        } catch {
+            NSSound.beep()
+        }
+        #endif
     }
 
     private func localFileURL(_ relative: String) -> URL? {

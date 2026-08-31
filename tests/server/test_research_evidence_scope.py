@@ -1,4 +1,7 @@
-from server.services.research_evidence_scope import validate_applicability
+from server.services.research_evidence_scope import (
+    applicability_schema,
+    validate_applicability,
+)
 from tools.factors.factor_set_identity import freeze_factor_set_identity
 from tools.factors.formula_identity import freeze_factor_identity
 
@@ -31,3 +34,25 @@ def test_evidence_scope_carries_complete_factor_subject_for_display() -> None:
         "factor_refs": [FACTOR["ref"]],
         "factor_subjects": [FACTOR],
     }
+
+
+def test_evidence_scope_accepts_one_sided_time_window() -> None:
+    assert validate_applicability({
+        "product_scope_ref": "product-group:day",
+        "time_window": {"start": "2025-01-01"},
+    }) == {
+        "product_scope_ref": "product-group:day",
+        "time_window": {"start": "2025-01-01"},
+    }
+
+
+def test_applicability_schema_reuses_registered_test_controls() -> None:
+    fields = {item["name"]: item for item in applicability_schema()["fields"]}
+    assert fields["factor_refs"]["registration"] == "factor_execution"
+    assert fields["product_scope_ref"]["registration"] == (
+        "product_or_group_selection"
+    )
+    assert fields["product_scope_ref"]["reuses"] == [
+        "product_library_product", "product_path_selection",
+    ]
+    assert fields["contract_hash"]["exposed"] is False

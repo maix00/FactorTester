@@ -284,7 +284,7 @@
   // discover that the handler will return "登录后继续".
   const protectedRouteKinds = new Set([
     "factor-sets", "factor-set",
-    "profile", "profiles", "manager", "mihomo",
+    "profile", "profiles", "research-detail", "manager", "mihomo",
   ]);
 
   async function renderRoute() {
@@ -403,6 +403,13 @@
       }),
       report,
       research,
+      researchDetail: (pageContext, id) => FTResearchCatalog.detail(
+        pageContext, pageContext.content, id,
+      ),
+      evidenceDetail: async (pageContext, id) => {
+        await window.FTStaticLoader?.loadGroups?.(["research-evidence"]);
+        return FTResearchEvidence.detail(pageContext, pageContext.content, id);
+      },
       docs: (pageContext, slug) => FTDocs.render(pageContext, slug),
       researchGraph: (pageContext, id) => FTResearchGraphList.detail(pageContext, pageContext.content, id),
       remoteModule: route => remoteModule(location.pathname, moduleForPath(location.pathname)),
@@ -480,8 +487,9 @@
       if (active?.path) history.replaceState({}, "", active.path);
     } else if (initial !== "/" && initial !== "") {
       // Module routes, including /research?section=..., belong to the
-      // existing feature-entry tab.  Only detail routes (for example
-      // /research/<report>) get an independently closable tab.
+      // existing feature-entry tab.  Concrete Research and report routes get
+      // independently closable tabs; Research detail tabs are direct children
+      // of the Research folder and never children of another Research tab.
       const pinnedModule = isPinnedPath(initial) ? moduleForPath(initial) : null;
       const pinned = pinnedModule && state.tabs.find(tab =>
         !tab.closable && tab.id === pinnedModule.id
@@ -492,13 +500,29 @@
       } else if (!isPinnedPath(initial)) {
         const id = detailTabIDForPath(initial)
           || `${initial}:${crypto.randomUUID ? crypto.randomUUID() : Date.now()}`;
+        const researchMatch = /^\/researches\/(.+?)(?:[?#]|$)/.exec(initial);
+        let parentResearchID = "";
+        if (researchMatch) {
+          try { parentResearchID = decodeURIComponent(researchMatch[1]); }
+          catch (_) { parentResearchID = researchMatch[1]; }
+        }
         const restored = state.tabs.find(tab => (
           tab.id === id || (tab.closable && tab.path === initial)
         ));
         if (restored) {
+          if (parentResearchID) {
+            restored.parentFolder = "research";
+            delete restored.parentTabID;
+            restored.parentResearchID = parentResearchID;
+          }
           state.activeTabID = restored.id;
         } else {
-          state.tabs.push({id, path: initial, title: titleForPath(initial), icon: tabIcon(initial), closable: true});
+          state.tabs.push({
+            id, path: initial, title: titleForPath(initial), icon: tabIcon(initial),
+            closable: true,
+            ...(parentResearchID
+              ? {parentFolder: "research", parentResearchID} : {}),
+          });
           state.activeTabID = id;
         }
       }

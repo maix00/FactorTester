@@ -11,6 +11,7 @@ from server.services.research_evidence_catalog import (
     attach_tag,
     capture_job_source,
     create_evidence,
+    create_source_fragment,
     create_tag,
     detach_tag,
     list_facets,
@@ -18,7 +19,6 @@ from server.services.research_evidence_catalog import (
     list_tags,
     propose_tag,
     put_source_capture,
-    put_source_fragment,
     retire_tag,
     search_evidence,
     update_tag,
@@ -73,7 +73,7 @@ def create_job_evidence_source():
 def create_research_evidence_fragment(source_ref: str):
     data = request.get_json(silent=True) or {}
     try:
-        value = put_source_fragment(
+        value = create_source_fragment(
             owner=require_user(),
             source_ref=source_ref,
             selector=data.get("selector"),

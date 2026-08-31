@@ -14,6 +14,7 @@ from server.services.research_evidence_scope import (
 )
 from tools.data.sqlite.db import connect_sqlite
 
+from .fragments import extract_job_fragment
 from .provenance import validate_file_provenance
 from .schema import ensure_schema
 from .validation import (
@@ -214,6 +215,39 @@ def put_source_fragment(
     return _fragment_row(row)
 
 
+def create_source_fragment(
+    *,
+    owner: str,
+    source_ref: str,
+    selector: Any,
+    title_zh: str,
+    summary_zh: str,
+    fragment_hash: str | None = None,
+    preview: Any | None = None,
+    created_at: float | None = None,
+) -> dict[str, Any]:
+    """Create a fragment, deriving Job content from its captured authority."""
+    source = get_source_capture(owner=owner, source_ref=source_ref)
+    normalized_selector = validate_selector(source["source_kind"], selector)
+    if source["source_kind"] == "job":
+        normalized_preview, normalized_hash = extract_job_fragment(
+            source, normalized_selector,
+        )
+    else:
+        normalized_preview = preview or {}
+        normalized_hash = sha256(fragment_hash, "fragment_hash")
+    return put_source_fragment(
+        owner=owner,
+        source_ref=source_ref,
+        selector=normalized_selector,
+        fragment_hash=normalized_hash,
+        title_zh=title_zh,
+        summary_zh=summary_zh,
+        preview=normalized_preview,
+        created_at=created_at,
+    )
+
+
 def list_source_fragments(
     *, owner: str, source_ref: str,
 ) -> list[dict[str, Any]]:
@@ -226,6 +260,59 @@ def list_source_fragments(
             (owner, source_ref),
         ).fetchall()
     return [_fragment_row(row) for row in rows]
+
+
+def evidence_contains_job_source(
+    *, owner: str, evidence_ref: str, job_id: str,
+) -> bool:
+    """Return whether an Evidence object contains a fragment from one Job."""
+    target_job = required_text(job_id, "job_id", maximum=128)
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        ensure_schema(conn)
+        row = conn.execute(
+            "SELECT fragment_refs_json FROM research_fragment_evidence_objects "
+            "WHERE owner=? AND evidence_ref=?",
+            (owner, evidence_ref),
+        ).fetchone()
+        if row is None:
+            return False
+        refs = json.loads(row["fragment_refs_json"])
+        if not refs:
+            return False
+        sources = conn.execute(
+            f"""SELECT s.identity_json
+                  FROM research_evidence_fragments f
+                  JOIN research_evidence_sources s
+                    ON s.source_ref=f.source_ref AND s.owner=f.owner
+                 WHERE f.owner=? AND s.source_kind='job'
+                   AND f.fragment_ref IN ({','.join('?' for _ in refs)})""",
+            (owner, *refs),
+        ).fetchall()
+    return any(
+        str(json.loads(item["identity_json"]).get("job_id") or "") == target_job
+        for item in sources
+    )
+
+
+def evidence_source(
+    *, owner: str, evidence_ref: str, source_ref: str,
+) -> dict[str, Any] | None:
+    """Return one source only when it is cited by the requested Evidence."""
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        ensure_schema(conn)
+        row = conn.execute(
+            """SELECT s.*
+                 FROM research_fragment_evidence_objects e,
+                      json_each(e.fragment_refs_json) refs
+                 JOIN research_evidence_fragments f
+                   ON f.fragment_ref=refs.value AND f.owner=e.owner
+                 JOIN research_evidence_sources s
+                   ON s.source_ref=f.source_ref AND s.owner=f.owner
+                WHERE e.owner=? AND e.evidence_ref=? AND s.source_ref=?
+                LIMIT 1""",
+            (owner, evidence_ref, source_ref),
+        ).fetchone()
+    return _source_row(row) if row is not None else None
 
 
 def create_evidence(
@@ -285,13 +372,13 @@ def create_evidence(
                     "Evidence sources"
                 ) from exc
         immutable = {
+            "schema_version": 2,
             "owner": required_text(owner, "owner", maximum=256),
             "evidence_kind": kind,
             "fragment_refs": refs,
             "title_zh": title,
             "description_zh": description,
             "claim_summary": claim,
-            "applicability": scope,
             "identity_refs": identity,
             "limitations": normalized_limitations,
             "conflicts": normalized_conflicts,
@@ -317,6 +404,32 @@ def create_evidence(
             ),
         )
     return get_composed_evidence(owner=owner, evidence_ref=evidence_ref)
+
+
+def update_evidence_applicability(
+    *, owner: str, evidence_ref: str, applicability: Any,
+) -> dict[str, Any]:
+    """Update interpretive scope without changing immutable Evidence identity."""
+    target = required_text(evidence_ref, "evidence_ref", maximum=512)
+    scope = validate_applicability(applicability)
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        ensure_schema(conn)
+        row = conn.execute(
+            "SELECT identity_refs_json FROM research_fragment_evidence_objects "
+            "WHERE evidence_ref=? AND owner=?",
+            (target, owner),
+        ).fetchone()
+        if row is None:
+            raise KeyError("fragment-bound research evidence not found")
+        check_identity_scope(
+            {"identity_refs": json.loads(row["identity_refs_json"])}, scope,
+        )
+        conn.execute(
+            "UPDATE research_fragment_evidence_objects SET applicability_json=? "
+            "WHERE evidence_ref=? AND owner=?",
+            (canonical(scope), target, owner),
+        )
+    return {"evidence_ref": target, "applicability": scope}
 
 
 def get_composed_evidence(

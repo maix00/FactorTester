@@ -95,6 +95,69 @@ def test_published_technical_docs_are_public_without_a_session(tmp_path) -> None
     assert page["title"] == "系统总览"
 
 
+def test_generated_test_field_catalog_is_public_and_paged(tmp_path) -> None:
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+    state.require_login_for_ui = True
+    state.public_server = True
+    state.technical_docs.test_field_catalog = lambda client="web": [
+        {
+            "application": "ic_test", "role": "setting", "key": "start_date",
+            "field_path": "setting.start_date", "module": "time",
+            "label": "开始日期", "tab_label": "时间", "value_type": "date",
+            "default": "2024-01-01",
+        },
+        {
+            "application": "backtest", "role": "run", "key": "task_name",
+            "field_path": "run.task_name", "module": "",
+            "label": "任务名称", "tab_label": "提交", "value_type": "string",
+            "default": "",
+        },
+    ]
+
+    with _running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/docs/test-fields?role=setting&page_size=1",
+            headers=_headers(),
+        )) as response:
+            payload = json.loads(response.read())
+
+    assert payload["success"] is True
+    assert payload["source"] == "registered-test-settings"
+    assert payload["page"] == 1
+    assert payload["page_size"] == 1
+    assert payload["client"] == "web"
+    assert payload["total"] == 1
+    assert payload["fields"][0]["key"] == "start_date"
+
+
+def test_generated_test_field_catalog_selects_a_client_projection(tmp_path) -> None:
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+    state.require_login_for_ui = True
+    state.public_server = True
+    calls = []
+
+    def catalog(*, client="web"):
+        calls.append(client)
+        return [{
+            "application": "ic_test", "role": "run", "key": "swift_only",
+            "field_path": "run.swift_only", "module": "",
+            "label": "Swift 专用", "tab_label": "提交", "value_type": "string",
+            "default": "",
+        }]
+
+    state.technical_docs.test_field_catalog = catalog
+    with _running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/docs/test-fields?client=swift",
+            headers=_headers(),
+        )) as response:
+            payload = json.loads(response.read())
+
+    assert calls == ["swift"]
+    assert payload["client"] == "swift"
+    assert payload["fields"][0]["field_path"] == "run.swift_only"
+
+
 def test_immutable_research_graph_catalog_is_public_without_a_session(
     tmp_path, monkeypatch,
 ) -> None:

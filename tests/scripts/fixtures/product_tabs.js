@@ -3,13 +3,20 @@ const fs = require("fs");
 const vm = require("vm");
 
 function element() {
-  return {
+  const value = {
     children: [], className: "", hidden: false, dataset: {},
     append(...children) { this.children.push(...children); },
     replaceChildren(...children) { this.children = children; },
     addEventListener() {}, setAttribute() {},
     querySelector() { return element(); },
   };
+  const classes = new Set();
+  value.classList = {
+    add: name => classes.add(name),
+    remove: name => classes.delete(name),
+    contains: name => classes.has(name),
+  };
+  return value;
 }
 
 const opened = element();

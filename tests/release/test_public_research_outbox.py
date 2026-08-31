@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.release.report_tree_fixtures import profile
+from tools.cli.release.research_reporting.authoring.tree_model import initialize_tree
 from tools.cli.release.research_reporting.public_research.client import (
     ManagerRequestError,
     PublicResearchClient,
@@ -135,3 +137,28 @@ def test_public_report_sync_marks_operation_complete_after_reconnect(
     assert uploaded == ["attachment:sha256:abc"]
     assert client.outbox.pending() == []
     assert client.outbox.load(operation_id)["manifest"]["state"] == "completed"
+
+
+def test_local_report_migration_inventory_collapses_one_work_package(
+    tmp_path: Path,
+) -> None:
+    profile(tmp_path)
+    package = tmp_path / "profile-root" / "research" / "sgccs-review"
+    for branch, report_id in (
+        ("branch-sgccs", "legacy-main"),
+        ("alternative", "legacy-alternative"),
+    ):
+        initialize_tree(
+            package_root=package, branch_id=branch, report_id=report_id,
+            title="SgCCS review",
+        )
+    client = PublicResearchClient(tmp_path, manager_url="http://manager.invalid")
+
+    planned = client.local_report_migration_records(apply_identities=False)
+    assert {item["report_id"] for item in planned} == {
+        "legacy-main", "legacy-alternative",
+    }
+
+    applied = client.local_report_migration_records(apply_identities=True)
+    assert {item["report_id"] for item in applied} == {"report-sgccs-review"}
+    assert {item["work_package_id"] for item in applied} == {"sgccs-review"}

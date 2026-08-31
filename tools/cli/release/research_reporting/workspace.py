@@ -9,6 +9,7 @@ from .package_layout import PACKAGE_DIRECTORIES, ensure_branch_report_tree
 from .authoring.tree_descriptor import report_tree_descriptor
 from .authoring.tree_model import initialize_tree
 from .authoring.service import commit_branch_authoring
+from .work_package_identity import ensure_work_package_identity
 
 
 def initialize_work_package(
@@ -30,9 +31,12 @@ def initialize_work_package(
         (package_root / relative).mkdir(parents=True, exist_ok=True)
     branch_root = ensure_branch_report_tree(package_root, branch_id)
 
+    identity = ensure_work_package_identity(
+        package_root, work_package_id=work_package_id,
+    )
     initialized = initialize_tree(
         package_root=package_root, branch_id=branch_id,
-        report_id=f"report-{work_package_id}-{branch_id}", title=title,
+        report_id=str(identity["report_id"]), title=title,
     )
     descriptor = report_tree_descriptor(
         package_root=package_root, work_package_id=work_package_id,

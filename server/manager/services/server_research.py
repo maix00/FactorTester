@@ -265,6 +265,20 @@ class ServerResearchService:
         value["server_ref"] = location["server_ref"]
         value["profile_id"] = location["profile_id"]
         value["source_server_id"] = self.server_id
+        value["branches"] = [
+            {
+                "branch_ref": str(item.get("branch_id") or ""),
+                "title": str(item.get("branch_id") or item.get("title") or ""),
+                "publication_id": f"server:{item['server_ref']}",
+                "href": f"/research/server:{item['server_ref']}",
+                "selected": item["server_ref"] == location["server_ref"],
+            }
+            for item in self.list_owner(location["owner"])
+            if (
+                str(item.get("profile_id") or "") == location["profile_id"]
+                and str(item.get("work_package_id") or "") == location["package_id"]
+            )
+        ]
         value["access"] = {
             "visibility": "private",
             "build_source": "server_agent",
@@ -294,6 +308,7 @@ class ServerResearchService:
             raise ValueError("server research report was not found")
         claim = self.runtime_store.active_claim(owner, profile_id)
         return {
+            "owner": owner,
             "server_ref": _server_ref(profile_id, package_id, branch_id),
             "profile_id": profile_id,
             "package_id": package_id,

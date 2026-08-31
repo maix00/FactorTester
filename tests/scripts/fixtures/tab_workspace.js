@@ -23,7 +23,9 @@ const alice = window.FTTabWorkspace.create({
 alice.save({
   tabs: [
     {id: "home", path: "/", title: "主页", icon: "house", closable: false},
-    {id: "factor:1", path: "/factors/factor/1", title: "Factor A", icon: "fx", closable: true},
+    {id: "factor:1", path: "/factors/factor/1", title: "Factor A", icon: "fx", closable: true,
+      parentFolder: "research", parentTabID: "research-detail:research-1",
+      parentResearchID: "research-1"},
   ],
   activeTabID: "factor:1",
 });
@@ -31,7 +33,9 @@ alice.save({
 assert.deepStrictEqual(alice.restore(), {
   tabs: [
     {id: "home", path: "/", title: "主页", icon: "house", closable: false},
-    {id: "factor:1", path: "/factors/factor/1", title: "Factor A", icon: "fx", closable: true},
+    {id: "factor:1", path: "/factors/factor/1", title: "Factor A", icon: "fx", closable: true,
+      parentFolder: "research", parentTabID: "research-detail:research-1",
+      parentResearchID: "research-1"},
   ],
   activeTabID: "factor:1",
 });

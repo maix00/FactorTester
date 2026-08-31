@@ -21,11 +21,14 @@
     let connection = null;
     let connectionGeneration = 0;
     let profilePromise = null;
+    let selectedProfile = null;
     const resolveProfile = () => {
       if (!profilePromise) {
-        profilePromise = Promise.resolve(options.boundProfileID
-          ? window.FTPageAgentProfiles.bound(context, options.boundProfileID)
-          : window.FTPageAgentProfiles.self(context));
+        profilePromise = Promise.resolve(selectedProfile || (options.resolveProfile
+          ? options.resolveProfile()
+          : (options.boundProfileID
+            ? window.FTPageAgentProfiles.bound(context, options.boundProfileID)
+            : window.FTPageAgentProfiles.self(context))));
       }
       return profilePromise;
     };
@@ -115,6 +118,11 @@
         bridge?.dispose();
         bridge = null;
       },
+      selectProfile: profile => {
+        controller.disconnect();
+        selectedProfile = profile;
+        profilePromise = Promise.resolve(profile);
+      },
     });
     context.pageState?.register?.("page-assistance-connection", {
       restore: () => { void controller.connect().catch(() => {}); },
@@ -123,7 +131,12 @@
     if (context.isRouteCurrent?.() !== false) {
       void controller.connect().catch(() => {});
       window.FTPageAgentDrawer.attach(
-        context, {...options, resolveProfile, assistance: controller},
+        context, {
+          ...options,
+          resolveProfile,
+          onProfileChange: controller.selectProfile,
+          assistance: controller,
+        },
       );
     }
     return controller;

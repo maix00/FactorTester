@@ -13,7 +13,17 @@
       context.tabID || `report:${publicationID}`,
     );
     session.durable ||= {};
-    const reading = session.durable.reportReading ||= {disclosures: {}};
+    session.durable.reportReadingByBranch ||= {};
+    if (!session.durable.reportReadingByBranch[publicationID]) {
+      const isFirstBranch = Object.keys(
+        session.durable.reportReadingByBranch,
+      ).length === 0;
+      session.durable.reportReadingByBranch[publicationID] = isFirstBranch
+        ? (session.durable.reportReading || {disclosures: {}})
+        : {disclosures: {}};
+    }
+    const reading = session.durable.reportReadingByBranch[publicationID];
+    session.durable.reportReading = reading;
     reading.disclosures ||= {};
     context.pageState?.register?.("research-report", {
       capture: () => ({
@@ -56,9 +66,24 @@
       branchPicker.className = "branch-picker";
       branches.forEach(branch => {
         const option = document.createElement("option");
-        option.value = branch.href || branch.branch_ref || "";
+        option.value = branch.publication_id || "";
         option.textContent = branch.title || branch.branch_ref || t("研究路径");
+        option.selected = Boolean(branch.selected)
+          || option.value === publicationID;
         branchPicker.append(option);
+      });
+      branchPicker.setAttribute("aria-label", t("研究路径"));
+      branchPicker.addEventListener("change", () => {
+        const targetPublicationID = branchPicker.value;
+        if (!targetPublicationID || targetPublicationID === publicationID) return;
+        const target = branches.find(branch => (
+          branch.publication_id === targetPublicationID
+        ));
+        if (target?.href) {
+          context.updateActiveTab({path: target.href});
+          history.replaceState(history.state, "", target.href);
+        }
+        render(targetPublicationID, context);
       });
       toolbar.append(branchPicker);
     }
@@ -69,7 +94,17 @@
     const boundProfileID = String(
       value.profile_ref || value.profile_id || value.generation?.profile_id || "",
     ).trim();
-    if (boundProfileID && context.session) {
+    const researchID = String(
+      value.research_id
+      || new URLSearchParams(location.search).get("research_id")
+      || "",
+    ).trim();
+    if ((boundProfileID || researchID) && context.session) {
+      let profileListPromise = null;
+      const resolveProfiles = researchID ? () => {
+        profileListPromise ||= FTPageAgentProfiles.forResearch(context, researchID);
+        return profileListPromise;
+      } : null;
       FTPageAssistance.register(context, {
         navigation: () => ({
           schema_version: 1, root_id: "page", nodes: {
@@ -95,7 +130,14 @@
           throw new Error(context.t("研究报告正文通过研究工作流修改"));
         },
       }, {
-        boundProfileID,
+        ...(boundProfileID ? {boundProfileID} : {}),
+        ...(!boundProfileID && resolveProfiles ? {
+          resolveProfile: async () => (
+            (await resolveProfiles())[0] || FTPageAgentProfiles.self(context)
+          ),
+        } : {}),
+        researchID,
+        ...(resolveProfiles ? {resolveProfiles} : {}),
         pageKind: "research-report",
         profileKey: value.profile_key || "",
         view: () => ({selected_chapter_id: reading.selectedChapterID || ""}),

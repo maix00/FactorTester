@@ -19,18 +19,23 @@ from server.services.research_evidence_catalog import (
     attach_tag,
     capture_job_source,
     create_evidence,
+    create_source_fragment,
     create_tag,
     detach_tag,
     finalize_lifecycle_transition,
+    get_evidence_summary,
+    list_evidence_page,
+    list_evidence_relationship_page,
     list_facets,
+    list_research_evidence_page,
     list_source_fragments,
     list_tags,
     prepare_lifecycle_transition,
     propose_tag,
     put_source_capture,
-    put_source_fragment,
     retire_tag,
     search_evidence,
+    update_evidence_applicability,
     update_tag,
 )
 from server.services.research_evidence_registry import (
@@ -38,6 +43,7 @@ from server.services.research_evidence_registry import (
     admit_evidence_for_graph,
     get_evidence,
 )
+from server.services.research_evidence_scope import applicability_schema
 
 
 class ResearchObjectRoutesMixin:
@@ -51,7 +57,10 @@ class ResearchObjectRoutesMixin:
         return str(session["username"])
 
     def _research_object_error(self, exc: Exception, *, missing: bool = False) -> None:
-        status = 404 if missing or isinstance(exc, KeyError) else 409
+        if isinstance(exc, PermissionError):
+            status = 403
+        else:
+            status = 404 if missing or isinstance(exc, KeyError) else 409
         json_response(self, {"success": False, "error": str(exc)}, status)
 
     def _research_object_body(self, maximum: int) -> dict:
@@ -95,7 +104,7 @@ class ResearchObjectRoutesMixin:
                     raise KeyError("run not found")
                 jobs = JobRepository().list(owner=owner, run_id=run_id, limit=200)
                 payload = {"run": value, "jobs": [job.summary() for job in jobs]}
-        except (KeyError, TypeError, ValueError) as exc:
+        except (KeyError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
             self._research_object_error(exc, missing=isinstance(exc, KeyError))
             return True
         json_response(self, {"success": True, **payload})
@@ -128,6 +137,82 @@ class ResearchObjectRoutesMixin:
                         include_retired=query.get("include_retired") == ["1"],
                     )
                 }
+            elif parsed.path == "/api/research-evidence/catalog":
+                payload = {
+                    "catalog": list_evidence_page(
+                        owner=owner,
+                        page=int(query.get("page", ["1"])[0] or 1),
+                        page_size=int(query.get("page_size", ["20"])[0] or 20),
+                        text=str(query.get("text", [""])[0]),
+                        include_excluded=query.get("include_excluded") == ["1"],
+                    )
+                }
+            elif parsed.path == "/api/research-evidence/applicability/schema":
+                payload = {"schema": applicability_schema()}
+            elif re.fullmatch(
+                r"/api/research-evidence/catalog/research/([^/]+)", parsed.path,
+            ):
+                target = re.fullmatch(
+                    r"/api/research-evidence/catalog/research/([^/]+)",
+                    parsed.path,
+                )
+                research_id = unquote(target.group(1))
+                catalog = getattr(self.state, "research_catalog", None)
+                if catalog is None:
+                    raise RuntimeError("Research catalog is unavailable")
+                catalog.get_research_summary(research_id, viewer=owner)
+                payload = {
+                    "catalog": list_research_evidence_page(
+                        owner=owner,
+                        research_id=research_id,
+                        page=int(query.get("page", ["1"])[0] or 1),
+                        page_size=int(query.get("page_size", ["20"])[0] or 20),
+                        access_resolver=lambda evidence_ref: (
+                            catalog.resolve_evidence_access(
+                                evidence_ref=evidence_ref,
+                                viewer=owner,
+                            )
+                        ),
+                    )
+                }
+            elif re.fullmatch(
+                r"/api/research-evidence/catalog/(.+)/summary", parsed.path,
+            ):
+                target = re.fullmatch(
+                    r"/api/research-evidence/catalog/(.+)/summary", parsed.path,
+                )
+                evidence_ref = unquote(target.group(1))
+                evidence_owner, access = self._evidence_read_context(
+                    evidence_ref=evidence_ref,
+                    viewer=owner,
+                )
+                payload = {
+                    "evidence": get_evidence_summary(
+                        owner=evidence_owner, evidence_ref=evidence_ref,
+                    ),
+                    "access": access,
+                }
+            elif re.fullmatch(
+                r"/api/research-evidence/catalog/(.+)/relationships", parsed.path,
+            ):
+                target = re.fullmatch(
+                    r"/api/research-evidence/catalog/(.+)/relationships",
+                    parsed.path,
+                )
+                evidence_ref = unquote(target.group(1))
+                evidence_owner, access = self._evidence_read_context(
+                    evidence_ref=evidence_ref,
+                    viewer=owner,
+                )
+                payload = {
+                    "relationships": list_evidence_relationship_page(
+                        owner=evidence_owner,
+                        evidence_ref=evidence_ref,
+                        page=int(query.get("page", ["1"])[0] or 1),
+                        page_size=int(query.get("page_size", ["20"])[0] or 20),
+                    ),
+                    "access": access,
+                }
             elif parsed.path == "/api/research-evidence/search":
                 start = str(query.get("time_start", [""])[0])
                 end = str(query.get("time_end", [""])[0])
@@ -151,19 +236,54 @@ class ResearchObjectRoutesMixin:
                     )
                 }
             elif detail:
-                payload = {
-                    "evidence": get_evidence(
-                        owner=owner,
-                        evidence_ref=unquote(detail.group(1)),
-                    )
-                }
+                evidence_ref = unquote(detail.group(1))
+                evidence_owner, access = self._evidence_read_context(
+                    evidence_ref=evidence_ref,
+                    viewer=owner,
+                )
+                payload = {"evidence": get_evidence(
+                    owner=evidence_owner,
+                    evidence_ref=evidence_ref,
+                )}
+                payload["access"] = access
             else:
                 raise KeyError("research Evidence route not found")
-        except (KeyError, TypeError, ValueError) as exc:
+        except (KeyError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
             self._research_object_error(exc, missing=isinstance(exc, KeyError))
             return True
         json_response(self, {"success": True, **payload})
         return True
+
+    def _evidence_read_context(
+        self, *, evidence_ref: str, viewer: str,
+    ) -> tuple[str, dict]:
+        catalog = getattr(self.state, "research_catalog", None)
+        if catalog is None:
+            return viewer, {
+                "can_view": True,
+                "can_preview": True,
+                "can_download": True,
+                "can_manage": True,
+                "access_basis": "owner",
+            }
+        access = catalog.resolve_evidence_access(
+            evidence_ref=evidence_ref,
+            viewer=viewer,
+        )
+        try:
+            evidence_owner = catalog.evidence_owner_ref(evidence_ref)
+        except KeyError:
+            # Unlinked Evidence remains a private object of its registry owner.
+            return viewer, {
+                "can_view": True,
+                "can_preview": True,
+                "can_download": True,
+                "can_manage": True,
+                "access_basis": "owner",
+            }
+        if not access["can_view"]:
+            raise PermissionError("Evidence access is not authorized")
+        return evidence_owner, access
 
     def _post_research_object_routes(self, parsed) -> bool:
         if parsed.path == "/api/trial-plans/direct":
@@ -204,7 +324,7 @@ class ResearchObjectRoutesMixin:
                 raise KeyError("run not found")
             configuration = run["run_spec"].get("configuration")
             if not isinstance(configuration, dict):
-                raise ValueError("run has no restorable configuration")
+                raise TypeError("run has no restorable configuration")
             if (
                 int(configuration.get("schema_version") or 0)
                 != research_configurations.SCHEMA_VERSION
@@ -279,7 +399,7 @@ class ResearchObjectRoutesMixin:
                 )
             }, 201
         if fragment:
-            value = put_source_fragment(
+            value = create_source_fragment(
                 owner=owner,
                 source_ref=unquote(fragment.group(1)),
                 selector=data.get("selector"),
@@ -374,24 +494,35 @@ class ResearchObjectRoutesMixin:
         raise KeyError("research Evidence route not found")
 
     def _patch_research_object_routes(self, parsed) -> bool:
+        applicability = re.fullmatch(
+            r"/api/research-evidence/(.+)/applicability", parsed.path,
+        )
         match = re.fullmatch(r"/api/research-evidence/tags/(.+)", parsed.path)
-        if not match:
+        if not match and not applicability:
             return False
         owner = self._research_owner()
         if owner is None:
             return True
         try:
             data = self._research_object_body(256 * 1024)
-            value = update_tag(
-                owner=owner,
-                tag_ref=unquote(match.group(1)),
-                title_zh=data.get("title_zh"),
-                description_zh=data.get("description_zh"),
-            )
+            if applicability:
+                value = update_evidence_applicability(
+                    owner=owner,
+                    evidence_ref=unquote(applicability.group(1)),
+                    applicability=data.get("applicability") or {},
+                )
+            else:
+                value = update_tag(
+                    owner=owner,
+                    tag_ref=unquote(match.group(1)),
+                    title_zh=data.get("title_zh"),
+                    description_zh=data.get("description_zh"),
+                )
         except (KeyError, TypeError, ValueError) as exc:
             self._research_object_error(exc)
             return True
-        json_response(self, {"success": True, "tag": value})
+        key = "evidence" if applicability else "tag"
+        json_response(self, {"success": True, key: value})
         return True
 
     def _delete_research_object_routes(self, parsed) -> bool:

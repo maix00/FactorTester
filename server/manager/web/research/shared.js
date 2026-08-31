@@ -1,16 +1,4 @@
 (() => {
-  function resolvePublicationSource(item, localByReportID, embedded) {
-    const reportID = String(item?.report_id || "").trim();
-    if (!embedded || item?.is_owned !== true || !reportID) return item;
-    const local = localByReportID?.get(reportID);
-    if (!local?.local_ref) return item;
-    return {
-      ...item,
-      href: `/research/${encodeURIComponent(`local:${local.local_ref}`)}`,
-      local_source: true,
-    };
-  }
-
   async function render(context, mount, embedded) {
     const [publicResult, localResult] = await Promise.allSettled([
       context.api("/api/public-research"),
@@ -29,7 +17,7 @@
         : [],
     );
     const visiblePublications = publications.map(item =>
-      resolvePublicationSource(item, localByReportID, embedded),
+      FTResearch.resolvePublicationSource(item, localByReportID, embedded),
     );
     mount.append(visiblePublications.length
       ? publicationSection(context, visiblePublications)
@@ -95,5 +83,8 @@
     );
   }
 
-  window.FTResearchShared = Object.freeze({render, resolvePublicationSource});
+  window.FTResearchShared = Object.freeze({
+    render,
+    resolvePublicationSource: (...args) => FTResearch.resolvePublicationSource(...args),
+  });
 })();

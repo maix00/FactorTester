@@ -6,30 +6,13 @@ from __future__ import annotations
 import argparse
 import signal
 import threading
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 from server.manager.config import CLIENT_DATA_PORT, PEER_DATA_PORT
 from server.manager.data_plane.artifacts import ArtifactOriginResolver
-from server.manager.data_plane.local_runs import LocalRunArtifactOriginAdapter
 from server.manager.data_plane.context import DataPlaneRuntime
-from server.manager.objects.adapters.factor_source import (
-    FactorSourceDestinationAdapter,
-    FactorSourceOriginAdapter,
-)
-from server.manager.objects.adapters.profile_workspace import (
-    ProfileWorkspaceOriginAdapter,
-)
-from server.manager.objects.adapters.client_release import (
-    ClientReleaseDestinationAdapter,
-)
-from server.manager.objects.adapters.public_research import PublicResearchOriginAdapter
-from server.manager.objects.adapters.public_research_destination import (
-    PublicResearchDestinationAdapter,
-)
-from server.manager.objects.origin import ObjectOriginRegistry
-from server.manager.objects.destination import ObjectDestinationRegistry
-from server.manager.objects.models import TransferObjectKind
+from server.manager.data_plane.local_runs import LocalRunArtifactOriginAdapter
 from server.manager.data_plane.server import (
     ClientDataPlaneHTTPServer,
     PeerDataPlaneHTTPServer,
@@ -40,6 +23,27 @@ from server.manager.http.security import (
     server_tls_context,
 )
 from server.manager.network_endpoints import peer_bind_address
+from server.manager.objects.adapters.client_release import (
+    ClientReleaseDestinationAdapter,
+)
+from server.manager.objects.adapters.evidence_file import (
+    EvidenceFileDestinationAdapter,
+    EvidenceFileOriginAdapter,
+)
+from server.manager.objects.adapters.factor_source import (
+    FactorSourceDestinationAdapter,
+    FactorSourceOriginAdapter,
+)
+from server.manager.objects.adapters.profile_workspace import (
+    ProfileWorkspaceOriginAdapter,
+)
+from server.manager.objects.adapters.public_research import PublicResearchOriginAdapter
+from server.manager.objects.adapters.public_research_destination import (
+    PublicResearchDestinationAdapter,
+)
+from server.manager.objects.destination import ObjectDestinationRegistry
+from server.manager.objects.models import TransferObjectKind
+from server.manager.objects.origin import ObjectOriginRegistry
 from server.manager.transfers.node_keys import NodeKey
 from server.manager.transfers.peer_gateway import TransferPeerGateway
 from tools.cli.release.research_reporting.public_research.library import (
@@ -106,6 +110,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         adapters[TransferObjectKind.RESEARCH_LOCAL_RESOURCE.value] = PublicResearchOriginAdapter(
             research_store,
         )
+        evidence_root = Path(args.research_root) / "evidence-files"
+        adapters[TransferObjectKind.EVIDENCE_FILE.value] = EvidenceFileOriginAdapter(
+            evidence_root,
+        )
     if args.factor_source_database:
         adapters[TransferObjectKind.FACTOR_SOURCE.value] = FactorSourceOriginAdapter(
             database=args.factor_source_database,
@@ -137,6 +145,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             TransferObjectKind.RESEARCH_LOCAL_RESOURCE.value,
         ):
             destination_adapters[kind] = research_destination
+        destination_adapters[TransferObjectKind.EVIDENCE_FILE.value] = (
+            EvidenceFileDestinationAdapter(Path(args.research_root) / "evidence-files")
+        )
     if args.factor_source_database:
         destination_adapters[TransferObjectKind.FACTOR_SOURCE.value] = (
             FactorSourceDestinationAdapter(database=args.factor_source_database)

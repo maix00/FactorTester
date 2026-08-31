@@ -154,6 +154,78 @@ final class ManagerObjectTransferService {
         return response.data
     }
 
+    @discardableResult
+    func uploadEvidenceFile(
+        content: Data,
+        filename: String,
+        contentType: String = "application/octet-stream"
+    ) async throws -> ManagerObjectTransferReceipt {
+        let digest = Self.sha256(content)
+        let objectID = "evidence-file:v1:\(digest)"
+        let issued = try await issue(
+            path: "/api/transfers/objects/access",
+            body: [
+                "object_kind": "evidence_file", "object_id": objectID,
+                "filename": filename, "content_type": contentType,
+                "size_bytes": content.count, "sha256": digest,
+            ],
+            idempotencyKey: "evidence-file-upload:\(digest)"
+        )
+        guard let access = issued.access,
+              let url = URL(string: access.url), !access.bearer.isEmpty else {
+            throw APIError.server(L10n.text("服务器返回的证据文件上传授权无效。"))
+        }
+        let response = try await send(dataRequest(
+            url: url, method: "PUT", body: content,
+            headers: [
+                "Authorization": "Bearer \(access.bearer)",
+                "Content-Length": String(content.count),
+                "Content-Type": contentType,
+                "X-FactorTester-Client": "swift",
+            ]
+        ), allowedHosts: hosts(for: url))
+        try validateSuccess(response, fallback: L10n.text("证据文件上传失败"))
+        return receipt(
+            from: issued, objectID: objectID, digest: digest, size: content.count
+        )
+    }
+
+    func downloadEvidenceFile(
+        evidenceRef: String,
+        sourceRef: String
+    ) async throws -> (data: Data, filename: String) {
+        let issued = try await issue(
+            path: "/api/transfers/objects/download-access",
+            body: [
+                "object_kind": "evidence_file",
+                "evidence_ref": evidenceRef,
+                "source_ref": sourceRef,
+            ],
+            idempotencyKey: nil
+        )
+        guard let access = issued.access,
+              let url = URL(string: access.url), !access.bearer.isEmpty else {
+            throw APIError.server(L10n.text("服务器返回的证据文件下载授权无效。"))
+        }
+        let response = try await send(dataRequest(
+            url: url, method: "GET", body: nil,
+            headers: [
+                "Authorization": "Bearer \(access.bearer)",
+                "X-FactorTester-Client": "swift",
+            ]
+        ), allowedHosts: hosts(for: url))
+        try validateSuccess(response, fallback: L10n.text("证据文件下载失败"))
+        if let size = access.expectedSize ?? issued.object?.sizeBytes,
+           response.data.count != size {
+            throw APIError.server(L10n.text("证据文件大小校验失败。"))
+        }
+        if let digest = issued.object?.sha256,
+           Self.sha256(response.data) != digest.lowercased() {
+            throw APIError.server(L10n.text("证据文件完整性校验失败。"))
+        }
+        return (response.data, issued.object?.filename ?? "evidence-file")
+    }
+
     private func issue(
         path: String,
         body: [String: Any],
@@ -290,11 +362,12 @@ private struct TransferObjectMetadata: Decodable {
     let objectID: String?
     let sizeBytes: Int?
     let sha256: String?
+    let filename: String?
 
     enum CodingKeys: String, CodingKey {
         case objectID = "object_id"
         case sizeBytes = "size_bytes"
-        case sha256
+        case sha256, filename
     }
 }
 
