@@ -383,13 +383,6 @@ def fake_server() -> Iterator[str]:
             projection_hash="a" * 64,
         )
 
-    @app.get("/api/catalog/factor-sources/manifest")
-    def factor_source_manifest():
-        assert request.args.get("include_subordinates") == "0"
-        return jsonify(
-            success=True, server_id="public-main", principal="alice", items=[],
-        )
-
     @app.post("/api/catalog/research-graphs/versions")
     def publish_research_graph():
         graph = request.get_json()["graph"]
@@ -518,9 +511,6 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
         "target_ref": "factor-set:momentum",
     })["factor_set"]["target_ref"] == "factor-set:momentum"
     assert client.unregister_factor_set("factor-set:momentum")["success"] is True
-    assert client.factor_source_sync_manifest(
-        include_subordinates=False,
-    )["server_id"] == "public-main"
     graph = {"graph_id": "factor-research", "version": 1}
     assert client.publish_research_graph(graph)["graph_id"] == "factor-research"
     assert client.list_research_graph_versions("factor-research")[0][
