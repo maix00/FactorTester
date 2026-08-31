@@ -104,6 +104,105 @@ def test_archived_research_is_hidden_from_non_owner_and_hides_authorized_users(
     ] == "archived"
 
 
+def test_research_and_report_can_share_with_dynamic_superior_chain(tmp_path):
+    accounts = [
+        {"username": "chief", "parent_username": "", "active": True},
+        {"username": "boss", "parent_username": "chief", "active": True},
+        {"username": "alice", "parent_username": "boss", "active": True},
+        {"username": "eve", "parent_username": "", "active": True},
+    ]
+    catalog = ResearchCatalog(
+        tmp_path / "research.sqlite", account_provider=lambda: accounts,
+    )
+    research = catalog.create_research(
+        owner_ref="alice", title="上级共享研究", visibility="superiors",
+    )
+    assert catalog.get_research_summary(
+        research["research_id"], viewer="boss",
+    )["access"]["can_download"] is True
+    assert catalog.get_research_summary(
+        research["research_id"], viewer="chief",
+    )["access"]["can_view"] is True
+    with pytest.raises(PermissionError):
+        catalog.get_research_summary(research["research_id"], viewer="eve")
+
+    private_research = catalog.create_research(
+        owner_ref="alice", title="私有研究", visibility="private",
+    )
+    report = catalog.register_report(
+        private_research["research_id"], actor="alice",
+        report_id="report-superiors", visibility="superiors",
+    )
+    shared = catalog.list_reports_for_scope(viewer="boss", scope="shared")
+    assert shared[0]["report_id"] == report["report_id"]
+    assert shared[0]["access"]["can_preview"] is True
+    assert shared[0]["access"]["can_download"] is False
+
+
+def test_owner_can_update_report_visibility_independently(tmp_path):
+    catalog = ResearchCatalog(tmp_path / "research.sqlite")
+    research = catalog.create_research(owner_ref="alice", title="研究")
+    report = catalog.register_report(
+        research["research_id"], actor="alice", report_id="report-one",
+    )
+    updated = catalog.update_report(
+        research["research_id"], report["report_id"], actor="alice",
+        visibility="authorized", authorized_users=["bob"],
+    )
+    assert updated["visibility"] == "authorized"
+    assert updated["authorized_users"] == ["bob"]
+    assert catalog.get_research_summary(
+        research["research_id"], viewer="alice",
+    )["visibility"] == "private"
+
+
+def test_share_links_grant_target_without_exposing_plain_token(tmp_path):
+    catalog = ResearchCatalog(tmp_path / "research.sqlite")
+    research = catalog.create_research(owner_ref="alice", title="研究")
+    report = catalog.register_report(
+        research["research_id"], actor="alice", report_id="report-one",
+    )
+    link = catalog.create_share_link(
+        target_kind="report", research_id=research["research_id"],
+        report_id=report["report_id"], actor="alice", mode="one_time",
+    )
+    grant = catalog.redeem_share_link(link["token"], actor="bob")
+    assert grant["report_id"] == report["report_id"]
+    assert catalog.list_reports_for_scope(viewer="bob", scope="shared")[0][
+        "access"
+    ]["can_download"] is False
+    with pytest.raises(PermissionError, match="already been redeemed"):
+        catalog.redeem_share_link(link["token"], actor="carol")
+    assert link["token"] not in (tmp_path / "research.sqlite").read_bytes().decode(
+        "utf-8", errors="ignore",
+    )
+
+
+def test_permanent_share_link_can_be_redeemed_by_multiple_users(tmp_path):
+    catalog = ResearchCatalog(tmp_path / "research.sqlite")
+    research = catalog.create_research(owner_ref="alice", title="研究")
+    link = catalog.create_share_link(
+        target_kind="research", research_id=research["research_id"],
+        actor="alice", mode="permanent",
+    )
+    catalog.redeem_share_link(link["token"], actor="bob")
+    catalog.redeem_share_link(link["token"], actor="carol")
+    assert catalog.get_research_summary(
+        research["research_id"], viewer="bob",
+    )["access"]["can_download"] is True
+    assert catalog.get_research_summary(
+        research["research_id"], viewer="carol",
+    )["access"]["can_download"] is True
+    listed = catalog.list_share_links(research["research_id"], actor="alice")
+    assert listed[0]["link_id"] == link["link_id"]
+    revoked = catalog.revoke_share_link(
+        research["research_id"], link["link_id"], actor="alice",
+    )
+    assert revoked["revoked_at"] > 0
+    with pytest.raises(KeyError, match="share link not found"):
+        catalog.redeem_share_link(link["token"], actor="dave")
+
+
 def test_report_migration_is_explicit_and_idempotent(tmp_path):
     catalog = ResearchCatalog(tmp_path / "research.sqlite")
     record = {
@@ -127,6 +226,22 @@ def test_report_migration_is_explicit_and_idempotent(tmp_path):
     assert detail["title"] == "旧报告"
     assert detail["reports"][0]["report_id"] == "server-report-1"
     assert detail["evidence_links"][0]["evidence_ref"].startswith("evidence:job:")
+
+
+def test_publication_migration_restores_legacy_private_projection_to_superiors(tmp_path):
+    catalog = ResearchCatalog(tmp_path / "research.sqlite")
+    result = catalog.migrate_reports([{
+        "source_kind": "publication", "source_ref": "publication-one",
+        "owner_ref": "alice", "report_id": "report-one", "title": "共享报告",
+        "visibility": "private",
+    }], actor="alice")
+    research_id = result["items"][0]["research_id"]
+    assert catalog.get_research_summary(
+        research_id, viewer="alice",
+    )["visibility"] == "superiors"
+    assert catalog.list_reports(research_id, viewer="alice")[0][
+        "visibility"
+    ] == "superiors"
 
 
 def test_report_branches_and_replicas_migrate_into_one_research(tmp_path):
@@ -156,6 +271,7 @@ def test_report_branches_and_replicas_migrate_into_one_research(tmp_path):
     researches = catalog.list_researches(viewer="alice")
     assert len(researches) == 1
     assert researches[0]["title"] == "动量研究"
+    assert researches[0]["visibility"] == "superiors"
     assert len(catalog.list_reports(researches[0]["research_id"], viewer="alice")) == 1
 
 

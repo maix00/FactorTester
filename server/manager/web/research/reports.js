@@ -107,7 +107,9 @@
         ownerDisplay(context, item),
         buildSource(context, item),
         sharing(context, item),
-        visibility(context, item.visibility),
+        FTResearchVisibility.control(context, item, {
+          kind: "report", onSaved: () => renderScope(context, root, false),
+        }),
         FTUI.formatDate(item.updated_at || item.created_at),
       ]),
       {
@@ -133,7 +135,10 @@
   }
 
   function visibility(context, value) {
-    const labels = {private: "仅自己", authorized: "授权用户", public: "公开"};
+    const labels = {
+      private: "仅自己", superiors: "分享给上级",
+      authorized: "指定用户可见", public: "全体用户共享",
+    };
     return context.t(labels[value] || value || "未知");
   }
 

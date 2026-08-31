@@ -61,6 +61,20 @@ class ResearchCatalogRoutesMixin:
                     subordinate_refs=subordinate_refs,
                 )
                 payload = {"researches": value, "items": value, "scope": scope}
+            elif parsed.path == "/api/research/principals":
+                needle = str(query.get("q", [""])[0]).strip().casefold()
+                values = []
+                store = getattr(self.state, "control_store", None)
+                for item in ([] if store is None else store.load_accounts()):
+                    username = str(item.get("username") or "").strip()
+                    if (
+                        not username or username == viewer
+                        or item.get("active", True) is False
+                        or (needle and needle not in username.casefold())
+                    ):
+                        continue
+                    values.append({"principal_ref": username, "label": username})
+                payload = {"principals": sorted(values, key=lambda item: item["label"])[:100]}
             elif parsed.path == "/api/research/reports":
                 scope = str(query.get("scope", ["all"])[0] or "all")
                 value = service.list_reports_for_scope(
@@ -113,6 +127,12 @@ class ResearchCatalogRoutesMixin:
                     )
                     manifest["source_server_id"] = str(self.state.server_id)
                     payload = {"manifest": manifest}
+                elif child == "share-links":
+                    payload = {
+                        "share_links": service.list_share_links(
+                            research_id, actor=viewer,
+                        ),
+                    }
                 else:
                     raise KeyError("research route not found")
         except (KeyError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
@@ -147,6 +167,12 @@ class ResearchCatalogRoutesMixin:
                     list(data.get("records") or []), actor=actor,
                 )
                 json_response(self, {"success": True, **value}, 200)
+                return True
+            if parsed.path == "/api/research/share-links/redeem":
+                value = service.redeem_share_link(
+                    str(data.get("token") or ""), actor=actor,
+                )
+                json_response(self, {"success": True, "grant": value})
                 return True
             if parsed.path == "/api/research/migrations/reports/discover":
                 records = self._discover_research_report_records(actor)
@@ -197,6 +223,17 @@ class ResearchCatalogRoutesMixin:
                 )
                 json_response(self, {"success": True, "report": value}, 201)
                 return True
+            if child == "share-links":
+                value = service.create_share_link(
+                    target_kind=str(data.get("target_kind") or "research"),
+                    research_id=research_id,
+                    report_id=str(data.get("report_id") or ""),
+                    actor=actor,
+                    mode=str(data.get("mode") or "permanent"),
+                    expires_at=float(data.get("expires_at") or 0),
+                )
+                json_response(self, {"success": True, "share_link": value}, 201)
+                return True
             if child == "evidence":
                 value = service.link_evidence(
                     research_id,
@@ -218,6 +255,48 @@ class ResearchCatalogRoutesMixin:
             return True
 
     def _patch_research_catalog_routes(self, parsed) -> bool:
+        share_match = re.fullmatch(
+            r"/api/research/([^/]+)/share-links/([^/]+)", parsed.path,
+        )
+        if share_match:
+            session = self._research_catalog_session()
+            if session is None:
+                return True
+            try:
+                data = self._research_catalog_body()
+                if data.get("revoked") is not True:
+                    raise ValueError("share link patch requires revoked=true")
+                value = self._research_catalog_service().revoke_share_link(
+                    unquote(share_match.group(1)),
+                    unquote(share_match.group(2)),
+                    actor=str(session["username"]),
+                )
+            except (KeyError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
+                self._research_catalog_error(exc)
+                return True
+            json_response(self, {"success": True, "share_link": value})
+            return True
+        report_match = re.fullmatch(
+            r"/api/research/([^/]+)/reports/([^/]+)", parsed.path,
+        )
+        if report_match:
+            session = self._research_catalog_session()
+            if session is None:
+                return True
+            try:
+                data = self._research_catalog_body()
+                value = self._research_catalog_service().update_report(
+                    unquote(report_match.group(1)),
+                    unquote(report_match.group(2)),
+                    actor=str(session["username"]),
+                    visibility=data.get("visibility"),
+                    authorized_users=data.get("authorized_users"),
+                )
+            except (KeyError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
+                self._research_catalog_error(exc)
+                return True
+            json_response(self, {"success": True, "report": value})
+            return True
         match = re.fullmatch(r"/api/research/([^/]+)", parsed.path)
         if not match:
             return False
@@ -293,7 +372,7 @@ class ResearchCatalogRoutesMixin:
     @staticmethod
     def _research_catalog_target(path: str) -> tuple[str, str | None]:
         match = re.fullmatch(
-            r"/api/research/([^/]+)(?:/(members|workspaces|reports|evidence|manifest))?",
+            r"/api/research/([^/]+)(?:/(members|workspaces|reports|evidence|manifest|share-links))?",
             path,
         )
         if not match:
