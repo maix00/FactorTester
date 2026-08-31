@@ -3,6 +3,18 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from tools.factors.tester_calc.single_factor_test.group.research_run import settings
+from tools.factors.formula_identity import freeze_factor_identity
+
+
+def _factor(alias: str, *, owner: str) -> dict:
+    return freeze_factor_identity(
+        owner_ref=owner,
+        family_alias=alias.split("|", 1)[0],
+        factor_alias=alias,
+        family_formula_fingerprint="a" * 64,
+        self_formula_fingerprint="b" * 64,
+        params={},
+    )
 
 
 def test_delegated_factor_alias_uses_frozen_source_owner(monkeypatch) -> None:
@@ -20,11 +32,14 @@ def test_delegated_factor_alias_uses_frozen_source_owner(monkeypatch) -> None:
 
     monkeypatch.setattr("server.services.factor_registry.factor_from_alias", resolve)
 
+    frozen = _factor(
+        "CA|$F:1m", owner="GTHT@MaxJJW@392452984564",
+    )
     settings.resolve_group_strategy_settings(
         {
             "id": "group-1",
             "product_path_selection_id": "selection-1",
-            "factor_candidate_refs": ["factor:v1:ca"],
+            "factor_candidate_refs": [frozen["ref"]],
             "splitCount": 5,
             "groupIndex": 1,
         },
@@ -32,13 +47,7 @@ def test_delegated_factor_alias_uses_frozen_source_owner(monkeypatch) -> None:
         fallback_group_settings={},
         page_uuid="",
         data={
-            "factors": [{
-                "alias": "CA|$F:1m",
-                "factor_ref": "factor:v1:ca",
-                "factor_family_alias": "CA",
-                "factor_family_ref": "CA",
-                "factor_owner_ref": "GTHT@MaxJJW@392452984564",
-            }],
+            "factors": [frozen],
         },
         page_factors_dict={},
         selection_cache={},
@@ -61,22 +70,19 @@ def test_unowned_factor_alias_keeps_short_public_resolution(monkeypatch) -> None
         lambda alias, **kwargs: captured.append(alias) or object(),
     )
 
+    frozen = _factor("MmRet|P:CA|N:10d|$F:1d", owner="public")
     settings.resolve_group_strategy_settings(
         {
             "id": "group-1",
             "product_path_selection_id": "selection-1",
-            "factor_candidate_refs": ["factor:v1:mmret"],
+            "factor_candidate_refs": [frozen["ref"]],
             "splitCount": 5,
             "groupIndex": 1,
         },
         resolved_backtest_settings={"group-1": {}},
         fallback_group_settings={},
         page_uuid="",
-        data={"factors": [{
-                "alias": "MmRet|P:CA|N:10d|$F:1d",
-                "factor_ref": "factor:v1:mmret",
-            "factor_family_alias": "MmRet",
-        }]},
+        data={"factors": [frozen]},
         page_factors_dict={},
         selection_cache={},
         username="GTHT@testA@545963541963",
