@@ -506,7 +506,11 @@ final class ClientTabSelectionTests: XCTestCase {
         )
         XCTAssertEqual(
             ResearchModuleSection.fromResearchPath("/research?section=local"),
-            .local
+            .reports
+        )
+        XCTAssertEqual(
+            ResearchModuleSection.fromResearchPath("/research?section=evidence"),
+            .evidence
         )
         XCTAssertNil(
             ResearchModuleSection.fromResearchPath("/research/local:report-1")

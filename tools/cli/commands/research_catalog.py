@@ -10,6 +10,10 @@ import click
 
 from tools.cli.core.context import client_from_config
 from tools.cli.core.errors import friendly_errors
+from tools.cli.release.locations import default_client_root
+from tools.cli.release.research_reporting.public_research.client import (
+    PublicResearchClient,
+)
 
 
 def _json(value: Any) -> str:
@@ -298,9 +302,25 @@ def register_research_catalog_commands(research: click.Group) -> None:
     @friendly_errors
     def migrate_existing_reports(apply: bool) -> None:
         """发现客户端、服务器 Agent 与公共发布中的旧报告并显式迁移。"""
-        click.echo(_json(
-            client_from_config().discover_research_report_migration(apply=apply)
-        ))
+        client = client_from_config()
+        local_records = PublicResearchClient(
+            default_client_root(),
+        ).local_report_migration_records(apply_identities=apply)
+        remote = client.discover_research_report_migration(apply=apply)
+        if not apply:
+            click.echo(_json({
+                "status": "planned",
+                "local_count": len(local_records),
+                "remote_count": int(remote.get("count") or 0),
+                "records": local_records + list(remote.get("records") or []),
+            }))
+            return
+        local = client.migrate_research_reports(local_records)
+        click.echo(_json({
+            "status": "completed",
+            "local": local,
+            "remote": remote,
+        }))
 
     @research.command("manifest")
     @click.argument("research_id")
