@@ -18,7 +18,6 @@ from .resolver import resolve_group_settings
 
 
 _NORMALIZABLE_REASONS = frozenset({
-    "invalid_setting_value",
     "local_only_group_value_ignored",
     "non_editable_value_ignored",
 })

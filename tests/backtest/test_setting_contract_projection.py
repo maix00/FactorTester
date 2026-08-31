@@ -190,6 +190,15 @@ def test_editable_values_win_only_when_the_registered_condition_allows_them() ->
     }
 
 
+def test_custom_engine_rejects_unknown_fee_mode() -> None:
+    with pytest.raises(ValueError, match="invalid value for fee_mode"):
+        _resolve({
+            "engine": "native",
+            "engine_mode": "custom",
+            "fee_mode": "none",
+        })
+
+
 def test_resolved_settings_have_no_missing_or_unregistered_keys() -> None:
     application = backtest_setting_registry.get("group_test")
     resolved = resolve_group_settings(
