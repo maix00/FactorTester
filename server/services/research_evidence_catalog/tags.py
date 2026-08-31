@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from difflib import SequenceMatcher
 import json
 import time
-from typing import Any
 import uuid
+from difflib import SequenceMatcher
+from typing import Any
 
 import settings as Settings
 from tools.data.sqlite.db import connect_sqlite
@@ -18,7 +18,6 @@ from .schema import (
     ensure_schema,
 )
 from .validation import profile_reference, required_text
-
 
 _PROPOSAL_TTL_SECONDS = 15 * 60
 

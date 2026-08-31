@@ -13,7 +13,7 @@ def extract_job_fragment(
     """Resolve a small Job fragment from the immutable captured snapshot."""
     snapshot = source.get("audit")
     if not isinstance(snapshot, dict):
-        raise ValueError("captured Job source has no authoritative snapshot")
+        raise TypeError("captured Job source has no authoritative snapshot")
     if "field" in selector:
         field = str(selector["field"] or "").strip()
         if field not in snapshot:

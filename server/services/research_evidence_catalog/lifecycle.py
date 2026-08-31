@@ -13,7 +13,6 @@ from tools.data.sqlite.db import connect_sqlite
 from .schema import bump_catalog_revision, ensure_schema
 from .validation import canonical, required_text
 
-
 _ACTIONS = {
     "exclude": ("active", "excluded"),
     "restore": ("excluded", "active"),
