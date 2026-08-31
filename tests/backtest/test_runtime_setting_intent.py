@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from tools.testers.settings.runtime_intent import (
     normalize_backtest_runtime_setting_intent,
 )
@@ -74,6 +76,17 @@ def test_custom_runtime_values_are_not_normalized() -> None:
 
     assert normalized == payload
     assert changes == []
+
+
+def test_unknown_explicit_runtime_value_is_rejected_instead_of_normalized() -> None:
+    payload = _payload({
+        "engine": "native",
+        "engine_mode": "custom",
+        "fee_mode": "none",
+    })
+
+    with pytest.raises(ValueError, match="invalid value for fee_mode"):
+        normalize_backtest_runtime_setting_intent(payload)
 
 
 def test_ignored_local_only_group_override_is_removed() -> None:

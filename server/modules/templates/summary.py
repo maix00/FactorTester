@@ -105,7 +105,6 @@ def build_snapshot_summary(snapshot: dict) -> dict[str, Any]:
                 'custom': '自定义品种/合约',
                 'fixed': '固定费率',
                 'zero': '无费用',
-                'none': '无费用',
                 'market': '自动费率',
             }
             trigger_labels = {
@@ -147,7 +146,7 @@ def build_snapshot_summary(snapshot: dict) -> dict[str, Any]:
         if group_count:
             group_parts.append(f"分组数={group_count}")
         fee_mode = group_settings.get('fee_mode', '')
-        if fee_mode and fee_mode not in ('none', 'zero'):
+        if fee_mode and fee_mode != 'zero':
             fee_labels = {
                 'auto': '自动费率',
                 'close_yesterday': '平昨费率',

@@ -2496,6 +2496,8 @@ def test_client_module_catalog_keeps_test_routes_out_of_entry_surfaces(tmp_path)
     assert modules["jobs"]["sfSymbol"] == "checklist"
     assert modules["jobs"]["title_key"] == "测试"
     assert modules["jobs"]["path"] == "/jobs?section=types"
+    assert modules["products"]["title"] == "产品库"
+    assert modules["products"]["title_key"] == "产品库"
     test_tabs = modules["jobs"]["children"]
     assert [item["id"] for item in test_tabs] == ["jobs.types", "jobs.list"]
     assert [item["id"] for item in test_tabs[0]["children"]] == [

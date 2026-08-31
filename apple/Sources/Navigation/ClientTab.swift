@@ -229,8 +229,8 @@ struct ClientTab: Identifiable {
 
     static let products = ClientTab.web(
         id: "products",
-        title: "产品",
-        titleKey: "产品",
+        title: "产品库",
+        titleKey: "产品库",
         systemImage: "shippingbox",
         path: "/products?source=local"
     )

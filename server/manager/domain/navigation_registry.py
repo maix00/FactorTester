@@ -207,8 +207,8 @@ _NAVIGATION_MODULES: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "products",
-        "title": "产品",
-        "title_key": "产品",
+        "title": "产品库",
+        "title_key": "产品库",
         "desc": "查询产品、合约与市场资料",
         "description_key": "查询产品、合约与市场资料",
         "icon": "box",

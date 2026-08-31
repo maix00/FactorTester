@@ -1396,25 +1396,19 @@ def test_numeric_setting_strings_are_normalized() -> None:
     assert "_setting_fallbacks" not in resolved["group-1"]
 
 
-def test_invalid_numeric_setting_falls_back_with_diagnostics() -> None:
+def test_invalid_explicit_numeric_setting_is_rejected() -> None:
     application = backtest_setting_registry.get("group_test")
 
-    resolved = resolve_group_settings(
-        application,
-        local_values={},
-        group_values={"group-1": {"initial_capital_major": ""}},
-        group_ids=("group-1",),
-    )
-
-    assert resolved["group-1"]["initial_capital_major"] == 100_000_000.0
-    assert resolved["group-1"]["_setting_fallbacks"] == [{
-        "setting_key": "initial_capital_major",
-        "module": "cash_pool",
-        "engine": "native",
-        "requested_value": "",
-        "applied_value": 100_000_000.0,
-        "reason": "invalid_setting_value",
-    }]
+    with pytest.raises(
+        ValueError,
+        match="setting initial_capital_major requires a number",
+    ):
+        resolve_group_settings(
+            application,
+            local_values={},
+            group_values={"group-1": {"initial_capital_major": ""}},
+            group_ids=("group-1",),
+        )
 
 
 # money_unit_policy's per-engine override behavior (qlib keeps default,

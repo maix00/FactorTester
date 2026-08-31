@@ -347,11 +347,14 @@ def _prepare_local_research_run_request(data: dict, *, owner: str) -> dict:
         ) from exc
     runtime_setting_changes: list[dict] = []
     if "backtest" in analyses:
-        normalized_payload, runtime_setting_changes = (
-            normalize_backtest_runtime_setting_intent(
-                frozen_configuration.get("payload") or {},
+        try:
+            normalized_payload, runtime_setting_changes = (
+                normalize_backtest_runtime_setting_intent(
+                    frozen_configuration.get("payload") or {},
+                )
             )
-        )
+        except ValueError as exc:
+            raise _RunRequestError(str(exc)) from exc
         frozen_configuration = {
             **frozen_configuration,
             "payload": normalized_payload,

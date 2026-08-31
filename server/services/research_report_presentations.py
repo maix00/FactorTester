@@ -221,7 +221,7 @@ def _fee_alias(run_spec: dict[str, Any]) -> str:
         for item in groups if isinstance(item, dict)
     )
     modes = [item for item in modes if item]
-    if modes and set(modes) == {"none"}:
+    if modes and set(modes) == {"zero"}:
         return "无手续费"
     if any(item in {"auto", "historical", "exchange"} for item in modes):
         return "历史/交易所手续费"

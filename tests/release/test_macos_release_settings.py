@@ -422,7 +422,7 @@ def test_macos_web_shell_exposes_profiles_account_and_bounded_research() -> None
         encoding="utf-8"
     )
 
-    for label in ("研究", "因子库", "产品", "设置"):
+    for label in ("研究", "因子库", "产品库", "设置"):
         assert label in tab_model
     assert "个人中心" not in tab_model
     assert "ClientWebShellView()" in root
