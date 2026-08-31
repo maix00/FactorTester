@@ -66,12 +66,12 @@
 
   function scopeTabs(context, state, root) {
     const nav = document.createElement("nav");
-    nav.className = "research-section-tabs research-root-scopes";
+    nav.className = "segmented-tabs research-root-scopes";
     nav.setAttribute("aria-label", context.t("研究范围"));
     scopes.forEach(definition => {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = `research-section-tab research-root-scope${state.scope === definition.id ? " active" : ""}`;
+      button.className = `segmented-tab research-root-scope${state.scope === definition.id ? " active" : ""}`;
       button.textContent = context.t(definition.title);
       button.setAttribute("aria-current", state.scope === definition.id ? "page" : "false");
       button.disabled = !context.session && definition.id !== "shared";

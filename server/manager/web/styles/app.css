@@ -168,11 +168,11 @@ main { min-width: 0; }
 .shared-paged-table { display: grid; gap: 0; width: 100%; min-width: 0; }
 .shared-paged-table > .table-shell { border-radius: 12px 12px 0 0; }
 .jobs-page { min-height: calc(100vh - 144px); display: flex; flex-direction: column; gap: 12px; }
-.job-scope-tabs { display: flex; gap: 3px; width: fit-content; max-width: 100%; padding: 3px; border-radius: 9px; background: #e9e9ed; overflow-x: auto; }
+.segmented-tabs, .job-scope-tabs { display: flex; gap: 3px; width: fit-content; max-width: 100%; padding: 3px; border-radius: 9px; background: #e9e9ed; overflow-x: auto; }
 .toolbar .job-scope-tabs { flex: 0 1 auto; min-width: 0; }
-.job-scope-tab { border: 0; border-radius: 7px; padding: 7px 12px; color: inherit; background: transparent; white-space: nowrap; }
-.job-scope-tab.selected { color: white; background: var(--accent); }
-.job-scope-tab:not(.selected):hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.segmented-tab, .job-scope-tab { border: 0; border-radius: 7px; padding: 7px 12px; color: inherit; background: transparent; white-space: nowrap; }
+.segmented-tab.active, .segmented-tab.selected, .job-scope-tab.selected { color: white; background: var(--accent); }
+.segmented-tab:not(.active):not(.selected):hover, .job-scope-tab:not(.selected):hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .job-scope-tab:disabled { cursor: default; }
 .job-user-picker { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .job-user-picker label { display: flex; align-items: center; gap: 10px; color: var(--muted); }
