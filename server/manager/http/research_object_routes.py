@@ -24,9 +24,9 @@ from server.services.research_evidence_catalog import (
     detach_tag,
     finalize_lifecycle_transition,
     get_evidence_summary,
-    list_facets,
     list_evidence_page,
     list_evidence_relationship_page,
+    list_facets,
     list_research_evidence_page,
     list_source_fragments,
     list_tags,
@@ -35,8 +35,8 @@ from server.services.research_evidence_catalog import (
     put_source_capture,
     retire_tag,
     search_evidence,
-    update_tag,
     update_evidence_applicability,
+    update_tag,
 )
 from server.services.research_evidence_registry import (
     admit_evidence,
@@ -167,6 +167,12 @@ class ResearchObjectRoutesMixin:
                         research_id=research_id,
                         page=int(query.get("page", ["1"])[0] or 1),
                         page_size=int(query.get("page_size", ["20"])[0] or 20),
+                        access_resolver=lambda evidence_ref: (
+                            catalog.resolve_evidence_access(
+                                evidence_ref=evidence_ref,
+                                viewer=owner,
+                            )
+                        ),
                     )
                 }
             elif re.fullmatch(
@@ -175,10 +181,16 @@ class ResearchObjectRoutesMixin:
                 target = re.fullmatch(
                     r"/api/research-evidence/catalog/(.+)/summary", parsed.path,
                 )
+                evidence_ref = unquote(target.group(1))
+                evidence_owner, access = self._evidence_read_context(
+                    evidence_ref=evidence_ref,
+                    viewer=owner,
+                )
                 payload = {
                     "evidence": get_evidence_summary(
-                        owner=owner, evidence_ref=unquote(target.group(1)),
-                    )
+                        owner=evidence_owner, evidence_ref=evidence_ref,
+                    ),
+                    "access": access,
                 }
             elif re.fullmatch(
                 r"/api/research-evidence/catalog/(.+)/relationships", parsed.path,
@@ -187,13 +199,19 @@ class ResearchObjectRoutesMixin:
                     r"/api/research-evidence/catalog/(.+)/relationships",
                     parsed.path,
                 )
+                evidence_ref = unquote(target.group(1))
+                evidence_owner, access = self._evidence_read_context(
+                    evidence_ref=evidence_ref,
+                    viewer=owner,
+                )
                 payload = {
                     "relationships": list_evidence_relationship_page(
-                        owner=owner,
-                        evidence_ref=unquote(target.group(1)),
+                        owner=evidence_owner,
+                        evidence_ref=evidence_ref,
                         page=int(query.get("page", ["1"])[0] or 1),
                         page_size=int(query.get("page_size", ["20"])[0] or 20),
-                    )
+                    ),
+                    "access": access,
                 }
             elif parsed.path == "/api/research-evidence/search":
                 start = str(query.get("time_start", [""])[0])
@@ -219,29 +237,15 @@ class ResearchObjectRoutesMixin:
                 }
             elif detail:
                 evidence_ref = unquote(detail.group(1))
-                research_id = str(query.get("research_id", [""])[0] or "")
-                report_id = str(query.get("report_id", [""])[0] or "")
-                access = None
-                evidence_owner = owner
-                if research_id or report_id:
-                    catalog = getattr(self.state, "research_catalog", None)
-                    if catalog is None:
-                        raise RuntimeError("Research catalog is unavailable")
-                    access = catalog.resolve_evidence_access(
-                        evidence_ref=evidence_ref,
-                        viewer=owner,
-                        research_id=research_id,
-                        report_id=report_id,
-                    )
-                    if not access["can_view"]:
-                        raise PermissionError("research Evidence access is not authorized")
-                    evidence_owner = catalog.evidence_owner_ref(evidence_ref)
+                evidence_owner, access = self._evidence_read_context(
+                    evidence_ref=evidence_ref,
+                    viewer=owner,
+                )
                 payload = {"evidence": get_evidence(
                     owner=evidence_owner,
                     evidence_ref=evidence_ref,
                 )}
-                if access is not None:
-                    payload["access"] = access
+                payload["access"] = access
             else:
                 raise KeyError("research Evidence route not found")
         except (KeyError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
@@ -249,6 +253,37 @@ class ResearchObjectRoutesMixin:
             return True
         json_response(self, {"success": True, **payload})
         return True
+
+    def _evidence_read_context(
+        self, *, evidence_ref: str, viewer: str,
+    ) -> tuple[str, dict]:
+        catalog = getattr(self.state, "research_catalog", None)
+        if catalog is None:
+            return viewer, {
+                "can_view": True,
+                "can_preview": True,
+                "can_download": True,
+                "can_manage": True,
+                "access_basis": "owner",
+            }
+        access = catalog.resolve_evidence_access(
+            evidence_ref=evidence_ref,
+            viewer=viewer,
+        )
+        try:
+            evidence_owner = catalog.evidence_owner_ref(evidence_ref)
+        except KeyError:
+            # Unlinked Evidence remains a private object of its registry owner.
+            return viewer, {
+                "can_view": True,
+                "can_preview": True,
+                "can_download": True,
+                "can_manage": True,
+                "access_basis": "owner",
+            }
+        if not access["can_view"]:
+            raise PermissionError("Evidence access is not authorized")
+        return evidence_owner, access
 
     def _post_research_object_routes(self, parsed) -> bool:
         if parsed.path == "/api/trial-plans/direct":

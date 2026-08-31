@@ -329,7 +329,11 @@
           row.dataset.href = "true";
           row.addEventListener("click", () => context.navigate(
             `/evidence/${encodeURIComponent(item.evidence_ref)}`,
-            {title: item.title_zh || context.t("证据"), parentFolder: "research"},
+            {
+              title: item.title_zh || context.t("证据"),
+              parentFolder: "research",
+              parentResearchID: researchID,
+            },
           ));
         });
         pane.replaceChildren(table.shell);

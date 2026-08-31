@@ -5,8 +5,7 @@ from urllib.parse import quote
 
 import pytest
 
-from server.manager.http import research_object_routes
-from server.manager.http import research_catalog_routes
+from server.manager.http import research_catalog_routes, research_object_routes
 from server.manager.services.research_catalog import ResearchCatalog
 
 
@@ -37,7 +36,7 @@ def test_research_catalog_keeps_research_and_profile_workspaces_distinct(tmp_pat
     )["workspace_id"] == workspace["workspace_id"]
 
 
-def test_research_and_report_visibility_drive_evidence_access(tmp_path):
+def test_report_binding_and_its_research_drive_evidence_access(tmp_path):
     catalog = ResearchCatalog(tmp_path / "research.sqlite")
     research = catalog.create_research(owner_ref="alice", title="研究")
     catalog.add_membership(
@@ -71,14 +70,12 @@ def test_research_and_report_visibility_drive_evidence_access(tmp_path):
 
     member_access = catalog.resolve_evidence_access(
         evidence_ref=link["evidence_ref"], viewer="bob",
-        research_id=research["research_id"],
     )
     assert member_access["can_view"] is True
     assert member_access["can_download"] is True
 
     report_access = catalog.resolve_evidence_access(
         evidence_ref=link["evidence_ref"], viewer="eve",
-        report_id=report["report_id"],
     )
     assert report_access["can_view"] is True
     assert report_access["can_preview"] is True
@@ -312,11 +309,59 @@ def test_evidence_detail_route_uses_research_access_for_report_preview(
 
     handled = Handler()._get_evidence_route(SimpleNamespace(
         path="/api/research-evidence/" + quote(evidence_ref, safe=""),
-        query="report_id=" + quote(report["report_id"], safe=""),
+        query="",
     ))
 
     assert handled is True
     assert responses[0][1] == 200
     assert responses[0][0]["evidence"]["owner"] == "alice"
     assert responses[0][0]["access"]["can_preview"] is True
+    assert responses[0][0]["access"]["can_download"] is False
+
+
+def test_evidence_summary_route_uses_same_report_access(
+    monkeypatch, tmp_path,
+):
+    catalog = ResearchCatalog(tmp_path / "research.sqlite")
+    research = catalog.create_research(owner_ref="alice", title="研究")
+    report = catalog.register_report(
+        research["research_id"], actor="alice",
+        report_id="report-public", visibility="public",
+    )
+    evidence_ref = "evidence:job:sha256:" + "d" * 64
+    catalog.link_evidence(
+        research["research_id"], actor="alice",
+        evidence_ref=evidence_ref, evidence_owner_ref="alice",
+        report_id=report["report_id"],
+    )
+    responses = []
+
+    class Handler(research_object_routes.ResearchObjectRoutesMixin):
+        state = SimpleNamespace(research_catalog=catalog)
+
+        def _session(self):
+            return {"username": "eve"}
+
+    monkeypatch.setattr(
+        research_object_routes, "get_evidence_summary",
+        lambda *, owner, evidence_ref: {
+            "owner": owner, "evidence_ref": evidence_ref,
+        },
+    )
+    monkeypatch.setattr(
+        research_object_routes, "json_response",
+        lambda _handler, value, status=200: responses.append((value, status)),
+    )
+
+    handled = Handler()._get_evidence_route(SimpleNamespace(
+        path=(
+            "/api/research-evidence/catalog/"
+            + quote(evidence_ref, safe="") + "/summary"
+        ),
+        query="",
+    ))
+
+    assert handled is True
+    assert responses[0][0]["evidence"]["owner"] == "alice"
+    assert responses[0][0]["access"]["access_basis"] == "report"
     assert responses[0][0]["access"]["can_download"] is False

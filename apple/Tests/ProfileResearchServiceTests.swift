@@ -24,6 +24,42 @@ final class StubURLProtocol: URLProtocol {
 }
 
 final class ProfileResearchServiceTests: SimplifiedChineseLocalizedTestCase {
+    func testEvidenceDetailDecodesAccessWithoutResearchContext() async throws {
+        let transport = FakeProjectionTransport(responses: [
+            response(
+                """
+                {"success":true,"evidence":{
+                  "evidence_ref":"evidence:v1:e1","evidence_kind":"job",
+                  "created_at":1,
+                  "envelope":{"schema_version":2,"envelope_id":"job:1",
+                    "envelope_hash":"abc","evidence_kind":"job",
+                    "title":"证据","claim_summary":"结论","facts":{},
+                    "source_refs":["job:1"],"metric_refs":[],
+                    "artifact_refs":[],"hypotheses_tested":0,
+                    "stop_condition":"","limitations":[],"conflicts":[]},
+                  "applicability":{},"fragments":[],"tags":[],
+                  "lifecycle":{"status":"active"}},
+                 "access":{"can_view":true,"can_preview":true,
+                   "can_download":false,"can_manage":false,
+                   "access_basis":"report"}}
+                """,
+                etag: "\"evidence-detail\""
+            ),
+        ])
+        let service = ProfileResearchService(
+            baseURL: URL(string: "http://example.test")!,
+            transport: transport
+        )
+
+        let detail = try await service.evidenceDetail(
+            reference: "evidence:v1:e1"
+        )
+
+        XCTAssertEqual(detail.access?.accessBasis, "report")
+        XCTAssertFalse(detail.access?.canDownload ?? true)
+        XCTAssertNil(transport.requests.first?.url?.query)
+    }
+
     func testCanonicalResearchCatalogDecodesSharedAccessAndRelationships() async throws {
         let transport = FakeProjectionTransport(responses: [
             response(

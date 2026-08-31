@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import settings as Settings
-from tools.data.sqlite.db import connect_sqlite
 from server.services.research_evidence_catalog import (
     create_evidence,
     list_evidence_page,
@@ -10,6 +9,7 @@ from server.services.research_evidence_catalog import (
     put_source_fragment,
     update_evidence_applicability,
 )
+from tools.data.sqlite.db import connect_sqlite
 
 
 def _evidence(index: int) -> None:
@@ -165,3 +165,38 @@ def test_research_evidence_projection_reads_member_owned_evidence(
     assert result["total"] == 1
     assert result["items"][0]["evidence_owner_ref"] == "alice"
     assert result["items"][0]["title_zh"] == "证据0"
+
+
+def test_research_evidence_projection_uses_canonical_access_resolver(
+    monkeypatch, tmp_path,
+) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", str(tmp_path / "catalog.db"))
+    _evidence(0)
+    evidence_ref = list_evidence_page(owner="alice")["items"][0]["evidence_ref"]
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        conn.execute("""CREATE TABLE research_catalog_evidence_links (
+            link_ref TEXT PRIMARY KEY, research_id TEXT, evidence_ref TEXT,
+            evidence_owner_ref TEXT, report_id TEXT, graph_ref TEXT,
+            branch_ref TEXT, job_id TEXT, profile_ref TEXT, purpose TEXT,
+            status TEXT, created_at REAL, revoked_at REAL
+        )""")
+        conn.execute(
+            "INSERT INTO research_catalog_evidence_links VALUES "
+            "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "report-link", "research-1", evidence_ref, "alice", "report-a",
+                "", "", "", "", "claim", "active", 1.0, 0.0,
+            ),
+        )
+    access = {
+        "can_view": True, "can_preview": True, "can_download": False,
+        "can_manage": False, "access_basis": "report",
+    }
+
+    result = list_research_evidence_page(
+        owner="bob",
+        research_id="research-1",
+        access_resolver=lambda _ref: access,
+    )
+
+    assert result["items"][0]["access"] == access

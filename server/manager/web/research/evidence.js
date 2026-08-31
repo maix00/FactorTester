@@ -102,6 +102,7 @@
       );
       if (context.isRouteCurrent?.() === false) return;
       const evidence = value.evidence || {};
+      state.access = value.access || evidence.access || {};
       context.setHeading(evidence.title_zh || context.t("证据"), context.t("证据详情"));
       const root = document.createElement("section");
       root.className = "research-evidence-detail";
@@ -123,12 +124,14 @@
       if (state.activeTab === "overview") {
         const actions = document.createElement("div");
         actions.className = "research-evidence-actions";
-        const edit = context.button(
-          context.t(state.editing ? "取消编辑" : "编辑适用范围"),
-          () => { state.editing = !state.editing; void detail(context, mount, evidenceRef); },
-        );
-        edit.className = "secondary";
-        actions.append(edit);
+        if (state.access.can_manage !== false) {
+          const edit = context.button(
+            context.t(state.editing ? "取消编辑" : "编辑适用范围"),
+            () => { state.editing = !state.editing; void detail(context, mount, evidenceRef); },
+          );
+          edit.className = "secondary";
+          actions.append(edit);
+        }
         content.append(actions);
         content.append(FTUI.table([
           context.t("字段"), context.t("值"),

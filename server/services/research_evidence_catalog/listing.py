@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import Any
 
 import settings as Settings
@@ -158,7 +159,12 @@ def list_evidence_relationship_page(
 
 
 def list_research_evidence_page(
-    *, owner: str, research_id: str, page: int = 1, page_size: int = 20,
+    *,
+    owner: str,
+    research_id: str,
+    page: int = 1,
+    page_size: int = 20,
+    access_resolver: Callable[[str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Derive Research Evidence exclusively from active Report bindings.
 
@@ -199,8 +205,16 @@ def list_research_evidence_page(
                 "WHERE owner=? AND evidence_ref=?",
                 (row["evidence_owner_ref"], row["evidence_ref"]),
             ).fetchone()
+            evidence_ref = str(row["evidence_ref"])
+            access = (
+                access_resolver(evidence_ref)
+                if access_resolver is not None
+                else _owner_access()
+            )
+            if not access.get("can_view", False):
+                continue
             items.append({
-                "evidence_ref": str(row["evidence_ref"]),
+                "evidence_ref": evidence_ref,
                 "evidence_owner_ref": str(row["evidence_owner_ref"]),
                 "title_zh": str(evidence["title_zh"] if evidence else ""),
                 "evidence_kind": str(evidence["evidence_kind"] if evidence else ""),
@@ -210,6 +224,7 @@ def list_research_evidence_page(
                     value for value in str(row["report_ids"] or "").split(",") if value
                 ],
                 "linked_at": float(row["linked_at"]),
+                "access": access,
             })
     return {
         "items": items, "page": selected_page, "page_size": selected_size,
@@ -318,13 +333,17 @@ def _list_item(row, *, sources: dict[str, dict], tags: dict[str, list[str]]) -> 
         "tag_refs": tags.get(evidence_ref, []),
         "lifecycle_status": str(row["lifecycle_status"]),
         "created_at": float(row["created_at"]),
-        "access": {
-            "can_view": True,
-            "can_preview": True,
-            "can_download": True,
-            "can_manage": True,
-            "access_basis": "owner",
-        },
+        "access": _owner_access(),
+    }
+
+
+def _owner_access() -> dict[str, Any]:
+    return {
+        "can_view": True,
+        "can_preview": True,
+        "can_download": True,
+        "can_manage": True,
+        "access_basis": "owner",
     }
 
 

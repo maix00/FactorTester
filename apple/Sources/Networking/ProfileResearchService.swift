@@ -246,6 +246,12 @@ struct ProfileResearchService {
     func evidence(
         reference: String
     ) async throws -> ResearchEvidenceDetailPayload {
+        try await evidenceDetail(reference: reference).evidence
+    }
+
+    func evidenceDetail(
+        reference: String
+    ) async throws -> ResearchEvidenceResolvedDetail {
         let allowed = CharacterSet.urlPathAllowed.subtracting(
             CharacterSet(charactersIn: "/?#")
         )
@@ -259,7 +265,10 @@ struct ProfileResearchService {
             path: "/api/research-evidence/\(encoded)",
             as: ResearchEvidenceDetailEnvelope.self
         )
-        return value.evidence
+        return ResearchEvidenceResolvedDetail(
+            evidence: value.evidence,
+            access: value.access
+        )
     }
 
     // MARK: - Canonical Research catalog (ADR-142)

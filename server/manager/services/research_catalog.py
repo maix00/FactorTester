@@ -731,10 +731,12 @@ class ResearchCatalog:
         *,
         evidence_ref: str,
         viewer: str | None,
-        research_id: str = "",
-        report_id: str = "",
     ) -> dict[str, Any]:
-        """Resolve view/preview/download rights for one Evidence reference."""
+        """Resolve rights from Evidence ownership and its Report bindings.
+
+        Evidence remains independent from Research.  A containing Research can
+        broaden access only transitively through a Report that cites it.
+        """
         target = _text(evidence_ref, "evidence_ref", maximum=512)
         with connect_sqlite(self.db_path, readonly=True) as conn:
             links = conn.execute(
@@ -748,18 +750,7 @@ class ResearchCatalog:
         if any(str(item["evidence_owner_ref"]) == viewer_ref for item in links):
             return _access(True, True, True, True, "owner", target)
 
-        candidates = links
-        if research_id:
-            candidates = [
-                item for item in links
-                if str(item["research_id"]) == str(research_id)
-            ]
-        if report_id:
-            candidates = [
-                item for item in candidates
-                if str(item["report_id"]) == str(report_id)
-            ]
-        for link in candidates:
+        for link in links:
             try:
                 research = self._research_row(str(link["research_id"]))
             except KeyError:
@@ -770,7 +761,7 @@ class ResearchCatalog:
                     True, True, True, False, "research", target,
                 )
 
-        for link in candidates:
+        for link in links:
             if not str(link["report_id"]):
                 continue
             try:
