@@ -23,7 +23,10 @@ from server.services.research_evidence_catalog import (
     create_tag,
     detach_tag,
     finalize_lifecycle_transition,
+    get_evidence_summary,
     list_facets,
+    list_evidence_page,
+    list_evidence_relationship_page,
     list_source_fragments,
     list_tags,
     prepare_lifecycle_transition,
@@ -129,6 +132,42 @@ class ResearchObjectRoutesMixin:
                     "tags": list_tags(
                         owner=owner,
                         include_retired=query.get("include_retired") == ["1"],
+                    )
+                }
+            elif parsed.path == "/api/research-evidence/catalog":
+                payload = {
+                    "catalog": list_evidence_page(
+                        owner=owner,
+                        page=int(query.get("page", ["1"])[0] or 1),
+                        page_size=int(query.get("page_size", ["20"])[0] or 20),
+                        text=str(query.get("text", [""])[0]),
+                        include_excluded=query.get("include_excluded") == ["1"],
+                    )
+                }
+            elif re.fullmatch(
+                r"/api/research-evidence/catalog/(.+)/summary", parsed.path,
+            ):
+                target = re.fullmatch(
+                    r"/api/research-evidence/catalog/(.+)/summary", parsed.path,
+                )
+                payload = {
+                    "evidence": get_evidence_summary(
+                        owner=owner, evidence_ref=unquote(target.group(1)),
+                    )
+                }
+            elif re.fullmatch(
+                r"/api/research-evidence/catalog/(.+)/relationships", parsed.path,
+            ):
+                target = re.fullmatch(
+                    r"/api/research-evidence/catalog/(.+)/relationships",
+                    parsed.path,
+                )
+                payload = {
+                    "relationships": list_evidence_relationship_page(
+                        owner=owner,
+                        evidence_ref=unquote(target.group(1)),
+                        page=int(query.get("page", ["1"])[0] or 1),
+                        page_size=int(query.get("page_size", ["20"])[0] or 20),
                     )
                 }
             elif parsed.path == "/api/research-evidence/search":

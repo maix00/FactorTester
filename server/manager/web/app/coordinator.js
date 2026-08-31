@@ -406,6 +406,10 @@
       researchDetail: (pageContext, id) => FTResearchCatalog.detail(
         pageContext, pageContext.content, id,
       ),
+      evidenceDetail: async (pageContext, id) => {
+        await window.FTStaticLoader?.loadGroups?.(["research-evidence"]);
+        return FTResearchEvidence.detail(pageContext, pageContext.content, id);
+      },
       docs: (pageContext, slug) => FTDocs.render(pageContext, slug),
       researchGraph: (pageContext, id) => FTResearchGraphList.detail(pageContext, pageContext.content, id),
       remoteModule: route => remoteModule(location.pathname, moduleForPath(location.pathname)),

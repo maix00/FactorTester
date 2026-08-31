@@ -17,14 +17,19 @@ def validate_applicability(value: Any) -> dict[str, Any]:
         raise ValueError("applicability must be an object")
     allowed = {
         "product_refs", "source_refs", "factor_refs", "sample_refs",
-        "factor_subjects",
+        "factor_subjects", "product_group_refs", "data_source_refs",
+        "environment_refs",
         "contract_hash", "methodology_hash", "trial_plan_hash",
         "run_spec_hash", "time_window", "limitations",
     }
     unknown = sorted(set(value) - allowed)
     if unknown:
         raise ValueError("unsupported applicability fields: " + ", ".join(unknown))
-    for field in ("product_refs", "source_refs", "factor_refs", "sample_refs", "limitations"):
+    for field in (
+        "product_refs", "source_refs", "factor_refs", "sample_refs",
+        "product_group_refs", "data_source_refs", "environment_refs",
+        "limitations",
+    ):
         items = value.get(field, [])
         if not isinstance(items, list) or not all(isinstance(item, str) and item.strip() for item in items):
             raise ValueError(f"applicability.{field} must be a string array")
@@ -60,6 +65,7 @@ def validate_applicability(value: Any) -> dict[str, Any]:
             raise ValueError(f"applicability.{field} must be sha256")
     if not any(value.get(field) for field in (
         "product_refs", "source_refs", "factor_refs", "sample_refs",
+        "product_group_refs", "data_source_refs", "environment_refs",
         "contract_hash", "methodology_hash", "trial_plan_hash", "run_spec_hash",
     )):
         raise ValueError("applicability must declare a non-empty scope")

@@ -61,6 +61,14 @@ class ResearchEvidenceClientMixin(ClientMixinBase):
         ))
         return dict(data.get("result") or {})
 
+    def list_research_evidence_catalog(
+        self, query: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.get(
+            "/api/research-evidence/catalog", query=query,
+        ))
+        return dict(data.get("catalog") or {})
+
     def prepare_research_evidence_lifecycle(
         self, evidence_ref: str, payload: dict[str, Any],
     ) -> dict[str, Any]:

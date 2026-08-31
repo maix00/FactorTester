@@ -23,6 +23,10 @@
           context(routeToken), {nav: "research", title: "研究"},
           pages.researchDetail, route.id,
         );
+        case "evidence-detail": return guarded(
+          context(routeToken), {nav: "research", title: "证据"},
+          pages.evidenceDetail, route.id,
+        );
         case "docs": return guarded(
           context(routeToken), {nav: "", title: "技术文档", allowVisitor: true},
           pages.docs, route.slug,

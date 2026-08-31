@@ -1,6 +1,7 @@
 (() => {
   const fallbackSections = [
     ["researches", "研究"],
+    ["evidence", "证据"],
     ["reports", "研究报告"],
     ["graph", "研究图"],
     ["profiles", "研究身份"],
@@ -67,6 +68,10 @@
         await window.FTStaticLoader?.loadGroups?.(["research-reports"]);
         if (!isCurrent()) return;
         await FTResearchReports.render(context, body, embedded);
+      } else if (selected === "evidence") {
+        await window.FTStaticLoader?.loadGroups?.(["research-evidence"]);
+        if (!isCurrent()) return;
+        await FTResearchEvidence.render(context, body);
       } else if (selected === "graph") {
         await window.FTStaticLoader?.loadGroups?.(["research-graph"]);
         await FTResearchGraphList.render(context, body);

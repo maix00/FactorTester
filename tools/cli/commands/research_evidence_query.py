@@ -27,6 +27,7 @@ def register_query_commands(group: click.Group) -> None:
     group.add_command(guide)
     group.add_command(create)
     group.add_command(get)
+    group.add_command(list_catalog)
     group.add_command(search)
     group.add_command(facet)
     group.add_command(admit)
@@ -155,6 +156,30 @@ def search(
         "include_excluded": "1" if include_excluded else None,
     }
     emit(client_from_config().search_research_evidence(query), as_json)
+
+
+@click.command("list")
+@click.option("--page", type=click.IntRange(min=1), default=1, show_default=True)
+@click.option(
+    "--page-size", type=click.IntRange(1, 100), default=20, show_default=True,
+)
+@click.option("--text", default="")
+@click.option("--include-excluded", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def list_catalog(
+    page: int,
+    page_size: int,
+    text: str,
+    include_excluded: bool,
+    as_json: bool,
+) -> None:
+    """List the metadata-only Evidence catalog one server page at a time."""
+    emit(client_from_config().list_research_evidence_catalog({
+        "page": page,
+        "page_size": page_size,
+        "text": text or None,
+        "include_excluded": "1" if include_excluded else None,
+    }), as_json)
 
 
 @click.group("facet")
