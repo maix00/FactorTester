@@ -192,6 +192,10 @@
     const content = root.querySelector(".research-report-scope-content");
     content.replaceChildren(FTUI.loading(context.t("正在读取研究报告…")));
     try {
+      if (scope === "mine") {
+        await window.FTStaticLoader?.loadGroups?.(["research-local"]);
+        if (!current(context)) return;
+      }
       const [rows, release] = await Promise.all([
         fetchRows(context, scope, embedded),
         scope === "mine" ? loadClientRelease(context) : Promise.resolve(null),

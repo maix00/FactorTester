@@ -287,6 +287,8 @@
       // and independent-open action.  Do not fetch the same report list here
       // first; that doubled the payload and made the tab appear slow.
       if (kind === "reports") {
+        await window.FTStaticLoader?.loadGroups?.(["research-reports"]);
+        if (!current(context)) return;
         await FTResearchReports.renderForResearch(
           context, pane, researchID, {title: value.title},
         );

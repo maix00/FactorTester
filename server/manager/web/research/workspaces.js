@@ -52,7 +52,7 @@
         await window.FTStaticLoader?.loadGroups?.(["profile-agent-models"]);
         await FTAgentModels.list({...context, content: body});
       } else if (selected === "researches") {
-        await window.FTStaticLoader?.loadGroups?.(["research-core"]);
+        await window.FTStaticLoader?.loadGroups?.(["research-catalog"]);
         if (researchID) {
           // The query form is kept only as an old-link bridge.  A concrete
           // Research is always promoted to its own left-sidebar tab; it is
@@ -125,12 +125,23 @@
     return nav;
   }
 
+  function resolvePublicationSource(item, localByReportID, embedded) {
+    const reportID = String(item?.report_id || "").trim();
+    if (!embedded || item?.is_owned !== true || !reportID) return item;
+    const local = localByReportID?.get(reportID);
+    if (!local?.local_ref) return item;
+    return {
+      ...item,
+      href: `/research/${encodeURIComponent(`local:${local.local_ref}`)}`,
+      local_source: true,
+    };
+  }
+
   // Keep the source resolver on the public research seam for integrations
   // that only load the page coordinator; ownership remains in shared.js.
   window.FTResearch = {
     list,
     sectionTabs: tabBar,
-    resolvePublicationSource: (...args) =>
-      window.FTResearchShared.resolvePublicationSource(...args),
+    resolvePublicationSource,
   };
 })();
