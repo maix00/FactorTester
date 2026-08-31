@@ -15,6 +15,7 @@ from server.services.research_evidence_scope import (
 from tools.data.sqlite.db import connect_sqlite
 
 from .provenance import validate_file_provenance
+from .fragments import extract_job_fragment
 from .schema import ensure_schema
 from .validation import (
     canonical,
@@ -212,6 +213,39 @@ def put_source_fragment(
     if row is None:
         raise KeyError("source fragment belongs to another owner")
     return _fragment_row(row)
+
+
+def create_source_fragment(
+    *,
+    owner: str,
+    source_ref: str,
+    selector: Any,
+    title_zh: str,
+    summary_zh: str,
+    fragment_hash: str | None = None,
+    preview: Any | None = None,
+    created_at: float | None = None,
+) -> dict[str, Any]:
+    """Create a fragment, deriving Job content from its captured authority."""
+    source = get_source_capture(owner=owner, source_ref=source_ref)
+    normalized_selector = validate_selector(source["source_kind"], selector)
+    if source["source_kind"] == "job":
+        normalized_preview, normalized_hash = extract_job_fragment(
+            source, normalized_selector,
+        )
+    else:
+        normalized_preview = preview or {}
+        normalized_hash = sha256(fragment_hash, "fragment_hash")
+    return put_source_fragment(
+        owner=owner,
+        source_ref=source_ref,
+        selector=normalized_selector,
+        fragment_hash=normalized_hash,
+        title_zh=title_zh,
+        summary_zh=summary_zh,
+        preview=normalized_preview,
+        created_at=created_at,
+    )
 
 
 def list_source_fragments(

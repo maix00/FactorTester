@@ -20,9 +20,8 @@ from server.services.research_graph.research_cycle.job_evidence import (
 from server.services.research_evidence_catalog import (
     capture_job_source,
     create_evidence,
-    put_source_fragment,
+    create_source_fragment,
 )
-from server.services.research_evidence_catalog.validation import digest
 from server.services.research_graph.versions import load_graph_from_conn
 from tools.data.sqlite.db import connect_sqlite
 from tools.factors.formula_identity import (
@@ -76,15 +75,12 @@ def persist_terminal_job_evidence(
     source = capture_job_source(owner=owner, job_id=job.job_id)
     fragments = []
     for item in source.pop("available_fragments", []):
-        preview = item.get("preview") or {}
-        fragments.append(put_source_fragment(
+        fragments.append(create_source_fragment(
             owner=owner,
             source_ref=source["source_ref"],
             selector=item["selector"],
-            fragment_hash=digest(preview),
             title_zh=str(item["title_zh"]),
             summary_zh=_job_fragment_summary(item),
-            preview=preview,
         ))
     if not fragments:
         return None

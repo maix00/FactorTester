@@ -19,6 +19,7 @@ from server.services.research_evidence_catalog import (
     attach_tag,
     capture_job_source,
     create_evidence,
+    create_source_fragment,
     create_tag,
     detach_tag,
     finalize_lifecycle_transition,
@@ -28,7 +29,6 @@ from server.services.research_evidence_catalog import (
     prepare_lifecycle_transition,
     propose_tag,
     put_source_capture,
-    put_source_fragment,
     retire_tag,
     search_evidence,
     update_tag,
@@ -300,7 +300,7 @@ class ResearchObjectRoutesMixin:
                 )
             }, 201
         if fragment:
-            value = put_source_fragment(
+            value = create_source_fragment(
                 owner=owner,
                 source_ref=unquote(fragment.group(1)),
                 selector=data.get("selector"),

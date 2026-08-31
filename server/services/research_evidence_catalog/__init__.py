@@ -9,6 +9,7 @@ from .lifecycle import (
 )
 from .sources import (
     capture_job_source,
+    create_source_fragment,
     create_evidence,
     find_job_evidence,
     get_composed_evidence,
@@ -30,6 +31,7 @@ from .tags import (
 __all__ = [
     "attach_tag",
     "capture_job_source",
+    "create_source_fragment",
     "create_evidence",
     "find_job_evidence",
     "finalize_lifecycle_transition",
