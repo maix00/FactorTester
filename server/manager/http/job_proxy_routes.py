@@ -43,14 +43,12 @@ class JobProxyRoutesMixin:
         namespaces = (
             (
                 "/api/factor-library/",
-                "/custom-factors/api/",
+                "/api/internal/factor-library/",
                 {
-                    "catalog": "list",
-                    "operators": "visual-operators",
-                    "overview": "factor-library-overview",
-                    "research-runs": "factor-library-research-runs",
-                    "research-metrics": "factor-library-research-metrics",
-                    "research-stability": "factor-library-research-stability",
+                    "families/operators": "operators",
+                    "families/validate": "validate",
+                    "families/custom": "families/custom",
+                    "families/public": "families/public",
                 },
             ),
             ("/api/admin/", "/admin/api/", {}),
@@ -83,7 +81,21 @@ class JobProxyRoutesMixin:
             )
             return True
         suffix = parsed.path.removeprefix(prefix)
-        workspace_push = method == "POST" and suffix == "workspace/push"
+        if prefix == "/api/factor-library/" and not any(
+            re.fullmatch(pattern, suffix)
+            for pattern in (
+                r"overview",
+                r"families/(?:operators|validate|custom|public)",
+                r"families/(?:custom|public)/[^/]+",
+                r"configurations/[^/]+(?:/[^/]+|/factors)?",
+                r"configuration-scopes(?:/[^/]+)?",
+                r"workspace/user/(?:root|download|upload|merge-download)",
+            )
+        ):
+            return False
+        workspace_push = (
+            method == "POST" and suffix == "workspace/user/upload"
+        )
         if workspace_push and str(session.get("role") or "") != "super_admin":
             json_response(self, {
                 "success": False,
@@ -91,11 +103,6 @@ class JobProxyRoutesMixin:
             }, 403)
             return True
         internal_suffix = aliases.get(suffix, suffix)
-        if internal_suffix.startswith("configs/"):
-            internal_suffix = (
-                "factor-library-configs/"
-                + internal_suffix.removeprefix("configs/")
-            )
         internal_path = internal_prefix + internal_suffix
         forwarded_query = urlencode([
             (key, value)
@@ -192,10 +199,7 @@ class JobProxyRoutesMixin:
             if visitor_submission and visitor is not None
             else str(session["username"])
         )
-        workspace_push = (
-            method == "POST"
-            and parsed.path == "/custom-factors/api/workspace/push"
-        )
+        workspace_push = False
         if workspace_push and str(session.get("role") or "") != "super_admin":
             json_response(self, {
                 "success": False,

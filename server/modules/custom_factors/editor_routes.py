@@ -5,7 +5,7 @@ import os
 
 from flask import jsonify, request
 
-from server.modules.custom_factors import cf_bp, factor_library_internal_bp
+from server.modules.custom_factors import factor_library_internal_bp
 from server.modules.custom_factors.expression_inspection import fixed_column_refs
 from server.modules.custom_factors.visual_graph import factor_expr_to_visual_graph
 from server.modules.shared.factor_param_utils import (
@@ -99,7 +99,7 @@ def api_public_source_applied():
     return jsonify({'success': True, 'applied': applied})
 
 
-@cf_bp.route('/api/validate', methods=['POST'])
+@factor_library_internal_bp.route('/validate', methods=['POST'])
 @login_required
 def api_validate_expr():
     data = request.get_json(silent=True) or {}
@@ -321,7 +321,7 @@ def api_validate_expr():
         })
 
 
-@cf_bp.route('/api/visual-operators')
+@factor_library_internal_bp.route('/operators')
 @login_required
 def api_visual_operators():
     from tools.factors.FactorExpr import get_visual_operator_groups
@@ -331,7 +331,7 @@ def api_visual_operators():
     })
 
 
-@cf_bp.route('/api/source-root', methods=['GET', 'POST'])
+@factor_library_internal_bp.route('/workspace/user/root', methods=['GET', 'POST'])
 @login_required
 def api_source_root():
     username = current_user()
@@ -362,7 +362,7 @@ def api_source_root():
     })
 
 
-@cf_bp.route('/api/workspace/sync', methods=['POST'])
+@factor_library_internal_bp.route('/workspace/user/download', methods=['POST'])
 @login_required
 def api_sync_workspace():
     username = current_user()
@@ -374,7 +374,7 @@ def api_sync_workspace():
     return jsonify({'success': True, **result})
 
 
-@cf_bp.route('/api/workspace/push', methods=['POST'])
+@factor_library_internal_bp.route('/workspace/user/upload', methods=['POST'])
 @login_required
 def api_push_workspace():
     username = current_user()
@@ -390,7 +390,7 @@ def api_push_workspace():
     return jsonify({'success': True, **result})
 
 
-@cf_bp.route('/api/workspace/merge-download', methods=['POST'])
+@factor_library_internal_bp.route('/workspace/user/merge-download', methods=['POST'])
 @login_required
 def api_workspace_merge_download():
     username = current_user()
@@ -405,7 +405,7 @@ def api_workspace_merge_download():
 
 
 
-@cf_bp.route('/api/params/preset', methods=['GET'])
+@factor_library_internal_bp.route('/families/parameter-presets', methods=['GET'])
 @login_required
 def api_params_preset():
     presets = [

@@ -5,8 +5,8 @@ from pathlib import Path
 from flask import Flask
 
 from server.modules.custom_factors import (
-    cf_bp,
     crud_routes,
+    factor_library_internal_bp,
     factor_library_service,
 )
 
@@ -20,7 +20,7 @@ def _app() -> Flask:
         static_folder=str(ROOT / "static"),
     )
     app.secret_key = "factor-library-mutations-test"
-    app.register_blueprint(cf_bp)
+    app.register_blueprint(factor_library_internal_bp)
     return app
 
 
@@ -38,7 +38,7 @@ def test_public_family_mutations_are_superadmin_only(monkeypatch) -> None:
 
     monkeypatch.setattr(crud_routes, "_current_user_is_super_admin", deny)
     denied = client.post(
-        "/custom-factors/api/create-public",
+        "/api/internal/factor-library/families/public",
         json={"source_code": "class PublicAlpha(FactorFamily):\n    pass"},
     )
     assert denied.status_code == 403
@@ -72,7 +72,7 @@ def test_public_family_mutations_are_superadmin_only(monkeypatch) -> None:
         lambda *_args, **_kwargs: {},
     )
     created = client.post(
-        "/custom-factors/api/create-public",
+        "/api/internal/factor-library/families/public",
         json={
             "source_code": "class PublicAlpha(FactorFamily):\n    pass",
             "chinese_name": "公共动量",
@@ -93,7 +93,9 @@ def test_public_family_mutations_are_superadmin_only(monkeypatch) -> None:
         "delete_factor_source_row",
         lambda kind, owner, factor_id: deleted.append((kind, owner, factor_id)),
     )
-    removed = client.post("/custom-factors/api/delete-public/PublicAlpha")
+    removed = client.delete(
+        "/api/internal/factor-library/families/public/PublicAlpha"
+    )
     assert removed.status_code == 200
     assert deleted == [("public", "", "PublicAlpha")]
     assert invalidated == ["PublicAlpha", "PublicAlpha"]
@@ -125,7 +127,7 @@ def test_public_family_save_succeeds_without_server_git_workspace(monkeypatch) -
     )
 
     response = client.post(
-        "/custom-factors/api/create-public",
+        "/api/internal/factor-library/families/public",
         json={"source_code": "class PublicAlpha(FactorFamily):\n    pass"},
     )
 

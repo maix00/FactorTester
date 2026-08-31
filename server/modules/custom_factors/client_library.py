@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
-from hashlib import sha256
 import json
 import re
+from collections import defaultdict
+from hashlib import sha256
 from typing import Any
 
 from tools.cli.release.research_reporting.references.factor_formula import (
@@ -13,7 +13,6 @@ from tools.cli.release.research_reporting.references.factor_formula import (
     verify_factor_reference,
 )
 from tools.factors.formula_identity import freeze_factor_identity
-
 
 _LOCAL_PATH = re.compile(
     r"(^~[/\\])|(^[/\\])|(^[A-Za-z]:[/\\])|(file://)"

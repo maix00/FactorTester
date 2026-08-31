@@ -81,9 +81,11 @@
     const data = ensureCache();
     if (data.libraryLoaded) return data;
     if (!libraryPromise) {
-      const request = refresh
-        ? context.api("/api/catalog/factors?refresh=1")
-        : context.api("/api/catalog/factors");
+      const suffix = refresh ? "?refresh=1" : "";
+      const request = Promise.all([
+        context.api(`/api/factor-library/families${suffix}`),
+        context.api(`/api/factor-library/factors${suffix}`),
+      ]).then(([families, factors]) => ({...families, ...factors}));
       libraryPromise = request
         .then(applyLibrary)
         .catch(error => {
@@ -98,7 +100,7 @@
     const data = ensureCache();
     if (data.setsLoaded) return data;
     if (!setsPromise) {
-      setsPromise = context.api("/api/catalog/factor-sets").then(sets => {
+      setsPromise = context.api("/api/factor-library/factor-sets").then(sets => {
         data.sets = Array.isArray(sets?.items) ? sets.items : [];
         data.setScopes = sets.item_scopes || {};
         data.setsLoaded = true;

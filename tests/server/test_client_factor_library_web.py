@@ -13,7 +13,6 @@ from server.manager.services.federated_factor_projection import (
 )
 from server.modules.custom_factors import (
     catalog_routes,
-    cf_bp,
     editor_routes,
     factor_library_internal_bp,
     factor_library_routes,
@@ -82,7 +81,6 @@ def _app() -> Flask:
         template_folder=None,
     )
     app.secret_key = "client-library-test"
-    app.register_blueprint(cf_bp)
     app.register_blueprint(factor_library_internal_bp)
     return app
 
@@ -190,23 +188,9 @@ def test_public_source_applied_requires_superadmin_and_verifies_source(
 
 
 def test_embedded_library_api_is_sanitized_and_redacts_local_paths(
-    monkeypatch,
 ) -> None:
-    calls: list[dict] = []
-
-    def overview(
-        username,
-        include_subordinates,
-        product_group=None,
-        factor_family_alias=None,
-    ):
-        calls.append({
-            "username": username,
-            "include_subordinates": include_subordinates,
-            "product_group": product_group,
-            "factor_family_alias": factor_family_alias,
-        })
-        return {
+    payload = build_client_library_projection(
+        {
             "factors": [{
                 "id": "private-db-id",
                 "factor_alias": "SgCCS|N:2m",
@@ -240,30 +224,9 @@ def test_embedded_library_api_is_sanitized_and_redacts_local_paths(
             "errors": [{
                 "error": "/Users/alice/private_factor.py failed",
             }],
-        }
-
-    monkeypatch.setattr(
-        factor_library_routes,
-        "build_factor_library_overview",
-        overview,
+        },
+        principal="alice",
     )
-    client = _app().test_client()
-    _login(client)
-
-    response = client.get(
-        "/custom-factors/api/client/factor-library"
-        "?include_subordinates=1&product_group=CNFutures"
-        "&factor_family_alias=SgCCS"
-    )
-
-    assert response.status_code == 200
-    payload = response.get_json()
-    assert calls == [{
-        "username": "alice",
-        "include_subordinates": True,
-        "product_group": "CNFutures",
-        "factor_family_alias": "SgCCS",
-    }]
     assert payload["mode"] == "embedded_read_only_library"
     assert payload["schema_version"] == 2
     assert payload["families"][0]["factor_family_alias"] == "SgCCS"
@@ -451,7 +414,7 @@ def test_source_version_route_exposes_stable_factor_family_identity(monkeypatch)
     _login(client, "alice")
 
     response = client.get(
-        "/custom-factors/api/source-versions/custom/Momentum",
+        "/api/internal/factor-library/family-sources/custom/Momentum/versions",
     )
 
     assert response.status_code == 200
@@ -487,7 +450,7 @@ def test_source_version_route_returns_persisted_snapshot_without_current_source(
     _login(client)
 
     response = client.get(
-        f"/custom-factors/api/source-versions/public/Momentum/{fingerprint}",
+        f"/api/internal/factor-library/family-sources/public/Momentum/versions/{fingerprint}",
     )
 
     assert response.status_code == 200
@@ -516,7 +479,7 @@ def test_source_version_current_returns_live_family_source(monkeypatch) -> None:
     _login(client)
 
     response = client.get(
-        "/custom-factors/api/source-versions/public/Momentum/current",
+        "/api/internal/factor-library/family-sources/public/Momentum/versions/current",
     )
 
     assert response.status_code == 200
@@ -601,7 +564,7 @@ def test_validate_transient_factor_returns_instantiated_alias_and_formula() -> N
     ))
 
     response = client.post(
-        "/custom-factors/api/validate",
+        "/api/internal/factor-library/validate",
         json={"source_code": source, "params": {"P": "CA", "N": "5d"}},
     )
 
@@ -630,7 +593,7 @@ def test_validate_transient_factor_uses_defaults_when_params_are_omitted() -> No
     ))
 
     response = client.post(
-        "/custom-factors/api/validate",
+        "/api/internal/factor-library/validate",
         json={"source_code": source},
     )
 
@@ -666,7 +629,7 @@ def test_validate_factor_alias_accepts_unregistered_canonical_member(monkeypatch
     _login(client)
 
     response = client.post(
-        "/custom-factors/api/validate",
+        "/api/internal/factor-library/validate",
         json={
             "resolve_factor_alias": True,
             "factor_alias": "Momentum|N:20d",

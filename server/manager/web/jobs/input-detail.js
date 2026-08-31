@@ -112,7 +112,7 @@
       const configurations = factorConfigurations(taskDetail, factorID);
       const values = await Promise.all(
         (configurations.length ? configurations : [{}]).map(item => context.api(
-          withPort("/api/factor-library/validate", portQuery),
+          withPort("/api/factor-library/families/validate", portQuery),
           {method: "POST", body: JSON.stringify({
             source_code: source, params: item.params || {},
           })},

@@ -72,6 +72,28 @@ def _catalog_page(
     }
 
 
+def _factor_resource_projection(
+    payload: dict[str, object], resource: str,
+) -> dict[str, object]:
+    """Expose one canonical factor-library resource without a mixed catalog."""
+    keep = "families" if resource == "families" else "factors"
+    drop = "factors" if keep == "families" else "families"
+    result = dict(payload)
+    result.pop(drop, None)
+    scopes = result.get("family_scopes")
+    if isinstance(scopes, dict):
+        result["family_scopes"] = {
+            key: {
+                **value,
+                keep: list(value.get(keep) or []),
+                **({drop: []} if drop in value else {}),
+            }
+            for key, value in scopes.items()
+            if isinstance(value, dict)
+        }
+    return result
+
+
 class CatalogRoutesMixin:
     """Serve Manager-owned catalogs without consulting execution ports."""
 
@@ -396,7 +418,7 @@ class CatalogRoutesMixin:
 
     def _serve_factor_catalog(self, parsed) -> bool:
         """Serve read-only factor metadata without selecting a service port."""
-        if not parsed.path.startswith("/api/catalog/factor"):
+        if not parsed.path.startswith("/api/factor-library/"):
             return False
         session = self._session()
         visitor = self._visitor_mode()
@@ -415,7 +437,7 @@ class CatalogRoutesMixin:
         refresh = str(query.get("refresh", [""])[0] or "") == "1"
         try:
             source_match = re.fullmatch(
-                r"/api/catalog/factor-sources/(custom|public)/([^/]+)"
+                r"/api/factor-library/family-sources/(custom|public)/([^/]+)"
                 r"/versions(?:/([^/]+))?",
                 parsed.path,
             )
@@ -474,7 +496,7 @@ class CatalogRoutesMixin:
                     value = read_source_catalog()
                 json_response(self, value)
                 return True
-            if parsed.path == "/api/catalog/factor-sources/manifest":
+            if parsed.path == "/api/factor-library/family-sources/manifest":
                 if visitor is not None:
                     raise VisitorCatalogAccessError(
                         "访客模式不能同步因子家族源码"
@@ -492,7 +514,7 @@ class CatalogRoutesMixin:
                 ))
                 return True
             provenance_match = re.fullmatch(
-                r"/api/catalog/factor-library-sources"
+                r"/api/factor-library/owners"
                 r"(?:/([^/]+)/projection)?",
                 parsed.path,
             )
@@ -522,7 +544,10 @@ class CatalogRoutesMixin:
                 )
                 json_response(self, value)
                 return True
-            if parsed.path == "/api/catalog/factors":
+            if parsed.path in {
+                "/api/factor-library/families",
+                "/api/factor-library/factors",
+            }:
                 if visitor is not None:
                     from server.manager.services.factor_library_scopes import (
                         compose_factor_library_scopes,
@@ -530,14 +555,19 @@ class CatalogRoutesMixin:
                     from server.manager.services.public_catalog import (
                         public_factor_library,
                     )
-                    json_response(self, {
+                    payload = {
                         "success": True,
                         "visitor": True,
                         **compose_factor_library_scopes(
                             {"public": public_factor_library()},
                             principal=principal,
                         ),
-                    })
+                    }
+                    json_response(
+                        self, _factor_resource_projection(
+                            payload, parsed.path.rsplit("/", 1)[-1],
+                        ),
+                    )
                     return True
                 if factor_service is self.state.client_state:
                     from server.manager.services.factor_library_scopes import (
@@ -564,18 +594,28 @@ class CatalogRoutesMixin:
                     value = compose_factor_library_scopes(
                         scopes, principal=principal,
                     )
-                    json_response(self, {"success": True, **value})
+                    json_response(
+                        self, _factor_resource_projection(
+                            {"success": True, **value},
+                            parsed.path.rsplit("/", 1)[-1],
+                        ),
+                    )
                     return True
-                json_response(self, {
+                payload = {
                     "success": True,
                     **(
                         factor_service.factor_library(
                             principal, refresh=True,
                         ) if refresh else factor_service.factor_library(principal)
                     ),
-                })
+                }
+                json_response(
+                    self, _factor_resource_projection(
+                        payload, parsed.path.rsplit("/", 1)[-1],
+                    ),
+                )
                 return True
-            if parsed.path == "/api/catalog/factor-sets":
+            if parsed.path == "/api/factor-library/factor-sets":
                 if visitor is not None:
                     raise VisitorCatalogAccessError(
                         "访客模式不能读取用户因子集合"
@@ -596,7 +636,7 @@ class CatalogRoutesMixin:
                     "item_scopes": scopes,
                 })
                 return True
-            if parsed.path == "/api/catalog/factor-sets/detail":
+            if parsed.path == "/api/factor-library/factor-sets/detail":
                 if visitor is not None:
                     raise VisitorCatalogAccessError(
                         "访客模式不能读取用户因子集合"
@@ -628,7 +668,7 @@ class CatalogRoutesMixin:
                         "success": True, "factor_set": value,
                     })
                 return True
-            if parsed.path == "/api/catalog/factor-sets/descriptor":
+            if parsed.path == "/api/factor-library/factor-sets/descriptor":
                 if visitor is not None:
                     raise VisitorCatalogAccessError(
                         "访客模式不能读取用户因子集合"
@@ -678,7 +718,7 @@ class CatalogRoutesMixin:
 
     def _serve_factor_catalog_write(self, parsed, *, method: str) -> bool:
         """Write principal-owned Factor Sets without selecting a service port."""
-        if parsed.path != "/api/catalog/factor-sets":
+        if parsed.path != "/api/factor-library/factor-sets":
             return False
         session = self._session()
         if session is None or self._visitor_mode() is not None:
@@ -1041,7 +1081,7 @@ class CatalogRoutesMixin:
     def _serve_manager_application(self, parsed, *, method: str) -> bool:
         """Dispatch Manager-owned application state under one import boundary."""
         if method == "GET" and parsed.path.startswith(
-            "/api/catalog/factor-sources/"
+            "/api/factor-library/family-sources/"
         ):
             # A missing source is fetched over the object data plane.  Keep
             # that bounded network wait outside the global first-import lock

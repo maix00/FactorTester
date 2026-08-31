@@ -131,10 +131,10 @@
         if (!window.confirm(context.t("确认删除该因子家族？"))) return;
         const alias = baseFamily.factor_family_alias || baseFamily.factor_family_name;
         const endpoint = publicFamily
-          ? `/api/factor-library/delete-public/${encodeURIComponent(alias)}`
-          : `/api/factor-library/delete/${encodeURIComponent(alias)}`;
+          ? `/api/factor-library/families/public/${encodeURIComponent(alias)}`
+          : `/api/factor-library/families/custom/${encodeURIComponent(alias)}`;
         try {
-          await context.api(endpoint, {method: "POST"});
+          await context.api(endpoint, {method: "DELETE"});
           context.showNotice?.(context.t("已删除"));
           if (FTTabReturn.returnToSource(context)) return;
           context.closeTab?.(context.tabID);
@@ -503,7 +503,7 @@
     if (selected?.owner_username) {
       query.set("owner_username", selected.owner_username);
     }
-    return context.api(`/api/catalog/factor-sets/detail?${query}`);
+    return context.api(`/api/factor-library/factor-sets/detail?${query}`);
   }
 
   function linkRows(view, items, path, context, onNavigate = null) {

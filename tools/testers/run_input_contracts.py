@@ -15,7 +15,7 @@ FACTOR_SOURCE_INPUT = {
     "accept": ".py,text/x-python",
     "extensions": (".py",),
     "multiple": False,
-    "inspect_endpoint": "/custom-factors/api/validate",
+    "inspect_endpoint": "/api/factor-library/families/validate",
     "path_prefix": "custom_factors",
 }
 

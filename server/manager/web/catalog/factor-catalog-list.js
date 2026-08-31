@@ -163,7 +163,7 @@
       if (!targetRef || !window.confirm(context.t("确认删除该因子集合？"))) return;
       try {
         await context.api(
-          `/api/catalog/factor-sets?target_ref=${encodeURIComponent(targetRef)}`,
+          `/api/factor-library/factor-sets?target_ref=${encodeURIComponent(targetRef)}`,
           {method: "DELETE"},
         );
         context.showNotice?.(context.t("已删除"));
@@ -185,14 +185,14 @@
     )) return;
     const endpoint = page === "families"
       ? scope === "public"
-        ? `/api/factor-library/delete-public/${encodeURIComponent(familyAlias)}`
-        : `/api/factor-library/delete/${encodeURIComponent(familyAlias)}`
-      : `/api/factor-library/configs/${encodeURIComponent(familyAlias)}`
+        ? `/api/factor-library/families/public/${encodeURIComponent(familyAlias)}`
+        : `/api/factor-library/families/custom/${encodeURIComponent(familyAlias)}`
+      : `/api/factor-library/configurations/${encodeURIComponent(familyAlias)}`
         + `?factor_alias=${encodeURIComponent(item.factor_alias || "")}`
         + `&scope_key=${encodeURIComponent(item.scope_key || item.product_group || "default")}`;
     try {
       await context.api(endpoint, {
-        method: page === "families" ? "POST" : "DELETE",
+        method: "DELETE",
         ...(page === "families" ? {} : {body: JSON.stringify({})}),
       });
       context.showNotice?.(context.t("已删除"));

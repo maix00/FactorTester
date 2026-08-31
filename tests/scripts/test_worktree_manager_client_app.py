@@ -336,19 +336,19 @@ def test_profile_research_reads_manager_projection_without_business_port(
     ("path", "method_name"),
     (
         (
-            "/api/catalog/factor-sources/public/MmClose2High/versions/current",
+                "/api/factor-library/family-sources/public/MmClose2High/versions/current",
             "version",
         ),
         (
             (
-                "/api/catalog/factor-sources/custom/SubordinateFactor"
+                    "/api/factor-library/family-sources/custom/SubordinateFactor"
                 "/versions/current?owner_username=GTHT%40child%401"
             ),
             "version",
         ),
         (
             (
-                "/api/catalog/factor-sources/custom/Momentum/versions"
+                    "/api/factor-library/family-sources/custom/Momentum/versions"
                 "?owner_username=GTHT%40child%401"
             ),
             "versions",
@@ -397,12 +397,12 @@ def test_factor_family_source_detail_uses_manager_catalog_without_gateway(
     ("path", "expected_ref"),
     (
         (
-            "/api/catalog/factor-sources/public/MmClose2High/versions/current",
+            "/api/factor-library/family-sources/public/MmClose2High/versions/current",
             "public:MmClose2High",
         ),
         (
             (
-                "/api/catalog/factor-sources/custom/SubordinateFactor"
+                "/api/factor-library/family-sources/custom/SubordinateFactor"
                 "/versions/current?owner_username=child%401"
             ),
             "child@1:SubordinateFactor",
@@ -454,7 +454,7 @@ def test_factor_source_detail_does_not_hydrate_an_unreadable_owner(
     monkeypatch.setattr(FactorSourceHydrator, "hydrate", reject_hydration)
     with running_manager(state) as base_url, pytest.raises(HTTPError) as raised:
         urlopen(Request(
-            f"{base_url}/api/catalog/factor-sources/custom/Secret"
+            f"{base_url}/api/factor-library/family-sources/custom/Secret"
             "/versions/current?owner_username=unreadable%401",
             headers={"Authorization": "Bearer user-token"},
         ))
@@ -736,7 +736,8 @@ def test_test_workbench_first_load_is_concurrent_and_service_port_free(
     )
     paths = (
         "/api/backtest/settings/ic_test",
-        "/api/catalog/factors",
+        "/api/factor-library/families",
+        "/api/factor-library/factors",
         "/api/catalog/product-groups",
         "/api/workspaces",
         "/api/configuration-templates",
@@ -1945,7 +1946,7 @@ global.fetch = async (_path, options) => {{
   return {{status: 200, ok: true, json: async () => ({{success: true}})}};
 }};
 (async () => {{
-  const value = await FTAppRuntime.create().api("/api/catalog/factors");
+  const value = await FTAppRuntime.create().api("/api/factor-library/factors");
   console.log(JSON.stringify({{value, attempts}}));
 }})().catch(error => {{ console.error(error); process.exit(1); }});
 """
@@ -2850,9 +2851,9 @@ def test_web_factor_library_reads_product_group_owned_subject_relations(
     assert "group.factor_set_refs" in model
     assert "value.product_group_refs" not in model
     assert "item.value.target_ref, item.value.set_ref" in model
-    assert 'context.api("/api/catalog/factors")' in runtime
-    assert 'context.api("/api/catalog/factor-sets")' in runtime
-    assert "/api/catalog/factor-sets/detail" in details
+    assert 'context.api(`/api/factor-library/families${suffix}`)' in runtime
+    assert 'context.api("/api/factor-library/factor-sets")' in runtime
+    assert "/api/factor-library/factor-sets/detail" in details
     assert "servicePath" not in coordinator
     assert "/api/entities/factor-sets" not in coordinator
     assert "/api/catalog/product-groups" in runtime
@@ -2886,7 +2887,7 @@ def test_test_workbench_reads_factor_candidates_from_manager_catalog(
                 scripts[name] = response.read().decode("utf-8")
 
     script = scripts["tests"]
-    assert 'context.api("/api/catalog/factors")' in script
+    assert 'context.api("/api/factor-library/factors")' in script
     assert (
         'context.api("/api/catalog/product-groups?view=summary"' in script
     )
@@ -3131,27 +3132,32 @@ def test_manager_factor_catalog_does_not_select_a_service_port(
     headers = {"Authorization": "Bearer user-token"}
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/catalog/factors", headers=headers,
+            f"{base_url}/api/factor-library/families", headers=headers,
         )) as response:
-            library = json.loads(response.read())
+            families = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/catalog/factor-sets?query=momentum",
+            f"{base_url}/api/factor-library/factors", headers=headers,
+        )) as response:
+            factors = json.loads(response.read())
+        with urlopen(Request(
+            f"{base_url}/api/factor-library/factor-sets?query=momentum",
             headers=headers,
         )) as response:
             sets = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/catalog/factor-sets/detail?target_ref=factor-set%3Aone",
+            f"{base_url}/api/factor-library/factor-sets/detail?target_ref=factor-set%3Aone",
             headers=headers,
         )) as response:
             detail = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/catalog/factor-sets/descriptor?target_ref=factor-set%3Aone",
+            f"{base_url}/api/factor-library/factor-sets/descriptor?target_ref=factor-set%3Aone",
             headers=headers,
         )) as response:
             descriptor = json.loads(response.read())
 
-    assert library["principal"] == "user@1"
-    assert library["factors"][0]["factor_ref"] == "factor:one"
+    assert families["principal"] == "user@1"
+    assert families["families"][0]["family_ref"] == "factor-family:one"
+    assert factors["factors"][0]["factor_ref"] == "factor:one"
     assert sets["items"][0]["query"] == "momentum"
     assert detail["factor_set"]["target_ref"] == "factor-set:one"
     assert descriptor["descriptor"]["target_ref"] == "factor-set:one"
@@ -3180,7 +3186,7 @@ def test_manager_factor_source_manifest_does_not_select_a_service_port(
     )
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/catalog/factor-sources/manifest"
+            f"{base_url}/api/factor-library/family-sources/manifest"
             "?include_subordinates=0",
             headers={"Authorization": "Bearer user-token"},
         )) as response:
@@ -3219,12 +3225,12 @@ def test_manager_factor_library_provenance_does_not_select_a_service_port(
     headers = {"Authorization": "Bearer user-token"}
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/catalog/factor-library-sources",
+            f"{base_url}/api/factor-library/owners",
             headers=headers,
         )) as response:
             owners = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/catalog/factor-library-sources/"
+            f"{base_url}/api/factor-library/owners/"
             "user%401/projection?product_group=CNFutures",
             headers=headers,
         )) as response:
@@ -3296,14 +3302,14 @@ def test_manager_factor_set_writes_do_not_select_a_service_port(
             },
         }).encode()
         with urlopen(Request(
-            f"{base_url}/api/catalog/factor-sets",
+            f"{base_url}/api/factor-library/factor-sets",
             data=body,
             headers=headers,
             method="POST",
         )) as response:
             created = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/catalog/factor-sets?target_ref=factor-set%3Anew",
+            f"{base_url}/api/factor-library/factor-sets?target_ref=factor-set%3Anew",
             headers=headers,
             method="DELETE",
         )) as response:
@@ -3340,14 +3346,14 @@ def test_manager_factor_set_detail_allows_only_a_direct_child(
     headers = {"Authorization": "Bearer user-token"}
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/catalog/factor-sets/detail"
+            f"{base_url}/api/factor-library/factor-sets/detail"
             "?target_ref=factor-set%3Achild&owner_username=child%401",
             headers=headers,
         )) as response:
             child = json.loads(response.read())
         with pytest.raises(HTTPError) as forbidden:
             urlopen(Request(
-                f"{base_url}/api/catalog/factor-sets/detail"
+                f"{base_url}/api/factor-library/factor-sets/detail"
                 "?target_ref=factor-set%3Ahidden&owner_username=peer%401",
                 headers=headers,
             ))

@@ -7,13 +7,13 @@ from typing import cast
 
 from flask import jsonify, request
 
-from server.modules.custom_factors import cf_bp
+from server.modules.custom_factors import factor_library_internal_bp
 from server.services.factor_source_manifest import FactorSourceManifest
 from server.services.http_auth import login_required
 from server.services.session_runtime import current_user
 
 
-@cf_bp.route("/api/source-sync/manifest", methods=["GET"])
+@factor_library_internal_bp.route("/family-sources/manifest", methods=["GET"])
 @login_required
 def api_source_sync_manifest():
     value = FactorSourceManifest().build(

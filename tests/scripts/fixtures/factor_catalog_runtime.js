@@ -30,11 +30,14 @@ async function main() {
       const request = pending.get(path);
       if (request) return request.promise;
       return Promise.resolve({
-        "/api/catalog/factor-sets": {items: [{target_ref: "set:one"}]},
+        "/api/factor-library/factor-sets": {items: [{target_ref: "set:one"}]},
         "/api/catalog/product-groups": {groups: [{group_ref: "group:one"}]},
-        "/api/catalog/factors": {
-          factors: [{factor_ref: "factor:one"}],
+        "/api/factor-library/families": {
           families: [{family_ref: "family:one"}],
+          family_scopes: {}, principal: "alice", visitor: false,
+        },
+        "/api/factor-library/factors": {
+          factors: [{factor_ref: "factor:one"}],
           family_scopes: {}, principal: "alice", visitor: false,
         },
       }[path]);
@@ -43,20 +46,20 @@ async function main() {
   };
 
   let data = await window.FTFactorCatalog.load(context, {sets: true});
-  assert.deepStrictEqual(calls, ["/api/catalog/factor-sets"]);
+  assert.deepStrictEqual(calls, ["/api/factor-library/factor-sets"]);
   assert.strictEqual(data.sets[0].target_ref, "set:one");
   assert.strictEqual(data.libraryLoaded, false);
 
   data = await window.FTFactorCatalog.load(context, {groups: true});
   assert.deepStrictEqual(calls, [
-    "/api/catalog/factor-sets", "/api/catalog/product-groups",
+    "/api/factor-library/factor-sets", "/api/catalog/product-groups",
   ]);
   assert.strictEqual(data.groups[0].group_ref, "group:one");
 
   data = await window.FTFactorCatalog.load(context, {library: true});
   assert.deepStrictEqual(calls, [
-    "/api/catalog/factor-sets", "/api/catalog/product-groups",
-    "/api/catalog/factors",
+    "/api/factor-library/factor-sets", "/api/catalog/product-groups",
+    "/api/factor-library/families", "/api/factor-library/factors",
   ]);
   assert.strictEqual(data.factors[0].factor_ref, "factor:one");
 
@@ -81,14 +84,19 @@ async function main() {
   // guards the shared-cache mutation contract used during route transitions.
   await window.FTFactorCatalog.load(context, {refresh: true});
   calls.length = 0;
+  const families = deferred();
   const factors = deferred();
   const sets = deferred();
-  pending.set("/api/catalog/factors", factors);
-  pending.set("/api/catalog/factor-sets", sets);
+  pending.set("/api/factor-library/families", families);
+  pending.set("/api/factor-library/factors", factors);
+  pending.set("/api/factor-library/factor-sets", sets);
   const libraryLoad = window.FTFactorCatalog.load(context, {library: true});
   const setLoad = window.FTFactorCatalog.load(context, {sets: true});
+  families.resolve({
+    families: [], family_scopes: {}, principal: "alice", visitor: false,
+  });
   factors.resolve({
-    factors: [{factor_ref: "factor:two"}], families: [],
+    factors: [{factor_ref: "factor:two"}],
     family_scopes: {}, principal: "alice", visitor: false,
   });
   sets.resolve({items: [{target_ref: "set:two"}]});
@@ -97,7 +105,8 @@ async function main() {
   assert.strictEqual(setData.sets[0].target_ref, "set:two");
   assert.strictEqual(setData.libraryLoaded, true);
   assert.deepStrictEqual(calls.sort(), [
-    "/api/catalog/factor-sets", "/api/catalog/factors",
+    "/api/factor-library/factor-sets", "/api/factor-library/families",
+    "/api/factor-library/factors",
   ].sort());
 
   console.log("ok");

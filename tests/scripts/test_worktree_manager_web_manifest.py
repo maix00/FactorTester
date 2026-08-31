@@ -979,7 +979,7 @@ def test_factor_detail_modes_share_page_shell_and_family_only_has_version_picker
     assert "sourceVersionHistory" in family_view
     assert "FTFactorDetailShared.versionPicker" in editor
     assert 'context.t("读取版本历史")' not in editor
-    assert "/api/catalog/factor-sources/" in shared
+    assert "/api/factor-library/family-sources/" in shared
     assert "/custom-factors/api/source-versions/" not in shared
     assert "/custom-factors/api/public-factor/" not in details
     assert "/custom-factors/api/get/" not in details
@@ -1053,7 +1053,7 @@ def test_factor_catalog_lists_expose_shared_edit_actions() -> None:
     assert "square.and.pencil" in source
     assert "onEdit: item => editItem" in catalog
     assert "?mode=edit" in catalog
-    assert "/api/catalog/factor-sets?target_ref=" in catalog
+    assert "/api/factor-library/factor-sets?target_ref=" in catalog
     assert "/custom-factors/api/client/factor-sets" not in catalog
 
 
@@ -1266,7 +1266,8 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
     assert "/api/backtest/settings/${application}/summary" in first_load
     assert "/api/backtest/settings/${application}`" not in first_load
     for endpoint in (
-        "/api/catalog/factors", "/api/catalog/product-groups",
+        "/api/factor-library/families", "/api/factor-library/factors",
+        "/api/catalog/product-groups",
         "/api/data_source_categories", "/api/configuration-templates",
         "/api/jobs/artifact-capabilities", "/api/client/profiles",
     ):
@@ -2340,7 +2341,7 @@ def test_factor_create_editors_use_shared_actions_and_personal_factor_scope() ->
     assert 'form.append(tabs.root, status)' in object_form
     assert "familyScopes?.mine" in set_editor
     assert "mine?.factors" in set_editor
-    assert 'context.api("/api/catalog/factor-sets"' in set_editor
+    assert 'context.api("/api/factor-library/factor-sets"' in set_editor
     assert "/custom-factors/api/client/factor-sets" not in set_editor
     assert "FTFactorSetAssistance" in set_editor
 
@@ -2488,7 +2489,7 @@ def test_factor_catalog_list_defers_auxiliary_catalogs_and_heavy_modules() -> No
     assert 'groups: true, library: page !== "sets"' in catalog_list
     assert "onOpen: () =>" in catalog_list
     assert "/api/catalog/product-groups" in runtime
-    assert 'context.api("/api/catalog/factor-sets")' in runtime
+    assert 'context.api("/api/factor-library/factor-sets")' in runtime
     sets_start = runtime.index("async function loadSets(context)")
     groups_start = runtime.index("async function loadGroups(context)")
     assert "loadLibrary(context)" not in runtime[sets_start:groups_start]

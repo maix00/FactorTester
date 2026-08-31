@@ -336,24 +336,32 @@ def fake_server() -> Iterator[str]:
             entries=[],
         )
 
-    @app.get("/api/factor-library-overview")
+    @app.get("/api/factor-library/overview")
     def factor_library():
         return jsonify(success=True, factors=[{"alias": "SgCCS|N:2m"}])
 
-    @app.get("/api/catalog/factors")
-    def factor_catalog():
+    @app.get("/api/factor-library/families")
+    def factor_families():
         return jsonify(
             success=True,
             schema_version=2,
             family_scopes={
                 "mine": {
                     "families": [{"factor_family_alias": "SgCCS"}],
-                    "factors": [{"factor_alias": "SgCCS|N:2m"}],
                 },
             },
         )
 
-    @app.get("/api/catalog/factor-sets")
+    @app.get("/api/factor-library/factors")
+    def factors():
+        return jsonify(
+            success=True,
+            family_scopes={
+                "mine": {"factors": [{"factor_alias": "SgCCS|N:2m"}]},
+            },
+        )
+
+    @app.get("/api/factor-library/factor-sets")
     def factor_sets():
         assert request.args.get("query") == "momentum"
         return jsonify(
@@ -364,7 +372,7 @@ def fake_server() -> Iterator[str]:
             },
         )
 
-    @app.get("/api/catalog/factor-library-sources")
+    @app.get("/api/factor-library/owners")
     def factor_library_sources():
         return jsonify(success=True, sources=[{
             "owner_ref": "alice/team",
@@ -373,7 +381,7 @@ def fake_server() -> Iterator[str]:
         }])
 
     @app.get(
-        "/api/catalog/factor-library-sources/<path:owner_ref>/projection"
+        "/api/factor-library/owners/<path:owner_ref>/projection"
     )
     def factor_library_source_projection(owner_ref):
         assert owner_ref == "alice/team"
@@ -419,14 +427,14 @@ def fake_server() -> Iterator[str]:
             "graph_id": graph_id, "version": version,
         }), 201
 
-    @app.post("/api/catalog/factor-sets")
+    @app.post("/api/factor-library/factor-sets")
     def register_factor_set():
         descriptor = request.get_json()["descriptor"]
         return jsonify(success=True, factor_set={
             "target_ref": descriptor["target_ref"],
         })
 
-    @app.delete("/api/catalog/factor-sets")
+    @app.delete("/api/factor-library/factor-sets")
     def unregister_factor_set():
         return jsonify(
             success=request.args.get("target_ref") == "factor-set:momentum",

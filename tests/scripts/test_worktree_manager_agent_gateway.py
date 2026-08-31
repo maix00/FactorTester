@@ -63,6 +63,7 @@ def test_local_profile_agent_unknown_get_does_not_fall_back_to_service_gateway(
     paths = (
         "/custom-factors/api/list",
         "/custom-factors/api/factor-library-overview",
+        "/api/factor-library/research-runs",
         "/api/future-cli-capability?detail=1",
     )
     with running_manager(state) as base_url:
@@ -97,9 +98,8 @@ def test_profile_agent_uses_canonical_factor_library_gateway(
     monkeypatch.setattr(state, "route_request", route_request)
     with running_manager(state) as base_url:
         for path in (
-            "/api/factor-library/catalog",
-            "/api/factor-library/operators",
-            "/api/factor-library/research-runs?limit=1",
+            "/api/factor-library/overview",
+            "/api/factor-library/families/operators",
             "/api/admin/server-instances",
         ):
             with urlopen(Request(
@@ -109,9 +109,8 @@ def test_profile_agent_uses_canonical_factor_library_gateway(
 
     assert {values["principal"] for _route, values in forwarded} == {"user@1"}
     assert [values["path"] for _route, values in forwarded] == [
-        "/custom-factors/api/list",
-        "/custom-factors/api/visual-operators",
-        "/custom-factors/api/factor-library-research-runs?limit=1",
+        "/api/internal/factor-library/overview",
+        "/api/internal/factor-library/operators",
         "/admin/api/server-instances",
     ]
 
@@ -151,7 +150,7 @@ def test_local_profile_agent_cannot_target_a_remote_service(
     with running_manager(state) as base_url:
         with pytest.raises(HTTPError) as failed:
             urlopen(Request(
-                f"{base_url}/api/factor-library/catalog"
+                f"{base_url}/api/factor-library/families/operators"
                 "?server_id=remote-main",
                 headers=agent_headers(state),
             ))

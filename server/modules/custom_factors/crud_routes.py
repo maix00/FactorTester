@@ -6,7 +6,7 @@ from typing import cast
 
 from flask import jsonify, request
 
-from server.modules.custom_factors import cf_bp
+from server.modules.custom_factors import factor_library_internal_bp
 from server.modules.custom_factors.catalog import (
     _load_factor_family_from_source,
     list_custom_factors,
@@ -36,6 +36,8 @@ from tools.data.factor_workspace.storage import (
 )
 from tools.data.sqlite.factor_source_store import (
     delete_factor_source as delete_factor_source_row,
+)
+from tools.data.sqlite.factor_source_store import (
     get_factor_source_metadata,
 )
 from tools.data.sqlite.factor_source_versions import record_factor_formula_version
@@ -87,7 +89,7 @@ def _record_saved_formula_version(
     )
 
 
-@cf_bp.route('/api/create', methods=['POST'])
+@factor_library_internal_bp.route('/families/custom', methods=['POST'])
 @login_required
 def api_create_factor():
     username = _username()
@@ -146,7 +148,7 @@ def api_create_factor():
     })
 
 
-@cf_bp.route('/api/create-public', methods=['POST'])
+@factor_library_internal_bp.route('/families/public', methods=['POST'])
 @login_required
 def api_create_public_factor():
     """Create one public FactorFamily source for a super administrator."""
@@ -199,7 +201,7 @@ def api_create_public_factor():
     })
 
 
-@cf_bp.route('/api/update/<factor_id>', methods=['POST'])
+@factor_library_internal_bp.route('/families/custom/<factor_id>', methods=['PUT'])
 @login_required
 def api_update_factor(factor_id):
     username = _username()
@@ -287,7 +289,7 @@ def api_update_factor(factor_id):
     })
 
 
-@cf_bp.route('/api/update-public/<factor_id>', methods=['POST'])
+@factor_library_internal_bp.route('/families/public/<factor_id>', methods=['PUT'])
 @login_required
 def api_update_public_factor(factor_id):
     if not _current_user_is_super_admin():
@@ -348,7 +350,7 @@ def api_update_public_factor(factor_id):
     })
 
 
-@cf_bp.route('/api/delete/<factor_id>', methods=['POST'])
+@factor_library_internal_bp.route('/families/custom/<factor_id>', methods=['DELETE'])
 @login_required
 def api_delete_factor(factor_id):
     username = _username()
@@ -368,7 +370,7 @@ def api_delete_factor(factor_id):
     return jsonify({'success': True, 'message': f'因子 "{old_name}" 已删除'})
 
 
-@cf_bp.route('/api/delete-public/<factor_id>', methods=['POST'])
+@factor_library_internal_bp.route('/families/public/<factor_id>', methods=['DELETE'])
 @login_required
 def api_delete_public_factor(factor_id):
     if not _current_user_is_super_admin():
@@ -384,7 +386,7 @@ def api_delete_public_factor(factor_id):
     })
 
 
-@cf_bp.route('/api/get/<factor_id>', methods=['GET'])
+@factor_library_internal_bp.route('/families/custom/<factor_id>', methods=['GET'])
 @login_required
 def api_get_factor(factor_id):
     username = _username()

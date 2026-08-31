@@ -5,7 +5,7 @@ from typing import cast
 
 from flask import jsonify, request
 
-from server.modules.custom_factors import cf_bp
+from server.modules.custom_factors import factor_library_internal_bp
 from server.modules.custom_factors.catalog import (
     get_public_factor_detail,
     list_custom_factors,
@@ -20,7 +20,7 @@ from tools.data.account_manage import get_account, load_accounts
 _SOURCE_CATALOG = FactorSourceCatalog()
 
 
-@cf_bp.route('/api/list', methods=['GET'])
+@factor_library_internal_bp.route('/families', methods=['GET'])
 @login_required
 def api_list_factors():
     username = cast(str, current_user())
@@ -53,7 +53,7 @@ def api_list_factors():
     })
 
 
-@cf_bp.route('/api/public-factor/<factor_name>', methods=['GET'])
+@factor_library_internal_bp.route('/families/public/<factor_name>', methods=['GET'])
 @login_required
 def api_public_factor_detail(factor_name):
     detail = get_public_factor_detail(factor_name)
@@ -62,7 +62,7 @@ def api_public_factor_detail(factor_name):
     return jsonify({'success': True, 'factor': detail})
 
 
-@cf_bp.route('/api/source-versions/<source_kind>/<factor_id>', methods=['GET'])
+@factor_library_internal_bp.route('/family-sources/<source_kind>/<factor_id>/versions', methods=['GET'])
 @login_required
 def api_source_versions(source_kind, factor_id):
     username = cast(str, current_user())
@@ -78,8 +78,8 @@ def api_source_versions(source_kind, factor_id):
         return jsonify({'success': False, 'error': str(exc)}), 404
 
 
-@cf_bp.route(
-    '/api/source-versions/<source_kind>/<factor_id>/<fingerprint>',
+@factor_library_internal_bp.route(
+    '/family-sources/<source_kind>/<factor_id>/versions/<fingerprint>',
     methods=['GET'],
 )
 @login_required
