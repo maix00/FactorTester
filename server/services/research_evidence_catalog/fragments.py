@@ -18,9 +18,13 @@ def extract_job_fragment(
         field = str(selector["field"] or "").strip()
         if field not in snapshot:
             raise ValueError(f"Job fragment field is unavailable: {field}")
-        value = snapshot[field]
+        selected = snapshot[field]
+        value = selected if isinstance(selected, dict) else {field: selected}
     elif "json_pointer" in selector:
-        value = _json_pointer(snapshot, str(selector["json_pointer"] or ""))
+        selected = _json_pointer(
+            snapshot, str(selector["json_pointer"] or ""),
+        )
+        value = selected if isinstance(selected, dict) else {"value": selected}
     elif "artifact_ref" in selector:
         artifact_ref = str(selector["artifact_ref"] or "").strip()
         value = next(

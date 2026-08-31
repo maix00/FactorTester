@@ -132,6 +132,15 @@ def test_job_fragment_is_derived_from_captured_snapshot(
     assert fragment["preview"] == {"return": 0.12}
     assert fragment["fragment_hash"] == digest({"return": 0.12})
 
+    status = create_source_fragment(
+        owner="alice",
+        source_ref=source["source_ref"],
+        selector={"field": "status"},
+        title_zh="任务终态",
+        summary_zh="由权威任务快照提取的任务终态",
+    )
+    assert status["preview"] == {"status": "succeeded"}
+
 
 def test_new_evidence_requires_an_owned_fragment(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", str(tmp_path / "catalog.db"))
