@@ -1,6 +1,6 @@
 """Server factor-library CLI module."""
 
-from .controller import parse_key_value
+from . import controller as _controller  # noqa: F401  Registers non-catalog commands.
 from .factor_library import factor_library
 
-__all__ = ["factor_library", "parse_key_value"]
+__all__ = ["factor_library"]

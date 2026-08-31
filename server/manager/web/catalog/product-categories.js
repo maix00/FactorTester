@@ -40,7 +40,7 @@
               context, value.categories || [],
             );
             if (!selected) return;
-            const created = await context.api("/api/catalog/categories/composite", {
+            const created = await context.api("/api/product-library/categories/composite", {
               method: "POST",
               body: JSON.stringify({category_ids: selected}),
             });

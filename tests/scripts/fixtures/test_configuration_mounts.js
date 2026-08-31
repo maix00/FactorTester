@@ -49,11 +49,17 @@ global.FTTestConfigurationCompiler = {
   executionSettings: (_manifest, values) => structuredClone(values),
   sanitizeExecutionPayload: (_manifest, payload) => structuredClone(payload),
   factorSubjects: factors => (factors || []).map(item => ({
+    schema_version: item.schema_version,
+    ref: item.ref,
     alias: item.alias,
-    factor_ref: item.ref,
+    owner_ref: item.owner_ref,
+    identity: structuredClone(item.identity),
   })),
 };
 global.FTTestRunFields = {selection: () => [{name: "ic_statistics_data"}]};
+global.FTTestState = {
+  registeredRunValues: () => ({}),
+};
 vm.runInThisContext(fs.readFileSync(
   "server/manager/web/catalog/factor-model.js", "utf8",
 ), {filename: "factor-model.js"});
@@ -65,7 +71,9 @@ vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {filename: process
 
 const requests = [];
 const state = {
-  kind: "ic", manifest: {defaults: {}}, values: {
+  kind: "ic", manifest: {
+    defaults: {}, research_configuration_schema_version: 3,
+  }, values: {
     factor_candidates: [{
       ...factor, temporary: true, source_origin: "test_inline",
     }, secondFactor],
@@ -93,7 +101,9 @@ const state = {
     target_ref: "factor-set:v1:temporary", temporary: true,
     manifest: {identity: {members: []}},
   }]},
-  workspace: {workspace_id: "workspace-1", configuration: {revision: 1, payload: {}}},
+  workspace: {workspace_id: "workspace-1", configuration: {
+    configuration_id: "configuration-1", revision: 1, payload: {},
+  }},
 };
 
 const equivalentVisibleFactor = structuredClone(factor);
@@ -126,7 +136,11 @@ assert.deepEqual(
 );
 const context = {t: value => value, api: async (path, options) => {
   requests.push({path, body: JSON.parse(options.body)});
-  return {configuration: {revision: 2, payload: JSON.parse(options.body).payload}};
+  return {configuration: {
+    configuration_id: `configuration-${requests.length}`,
+    revision: 2,
+    payload: JSON.parse(options.body).payload,
+  }};
 }};
 
 (async () => {
@@ -143,7 +157,7 @@ const context = {t: value => value, api: async (path, options) => {
   );
   const icAnalysis = requests[0].body.payload.analyses.ic;
   assert.deepEqual(Object.keys(icAnalysis).sort(), [
-    "configuration_groups", "local_settings", "product_selections", "schema_version",
+    "configuration_groups", "execution", "product_selections", "schema_version",
   ], "IC authoring must persist the grouped typed shape");
   assert.deepEqual(icAnalysis.configuration_groups, [configurationGroup]);
   assert.deepEqual(icAnalysis.product_selections, {
@@ -182,7 +196,9 @@ const context = {t: value => value, api: async (path, options) => {
     },
     workspace: {
       workspace_id: "workspace-2",
-      configuration: {revision: 1, payload: {}},
+      configuration: {
+        configuration_id: "configuration-2", revision: 1, payload: {},
+      },
     },
     groupRef: "",
     groupRefs: [],

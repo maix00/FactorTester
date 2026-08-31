@@ -4,6 +4,18 @@ import threading
 
 from server.manager.services.account_domain_projection import factor_rows_from_sync
 from server.manager.services.client_state import ClientStateService
+from tools.factors.formula_identity import freeze_factor_identity
+
+
+def _factor(alias: str, family: str, owner: str) -> dict:
+    return freeze_factor_identity(
+        owner_ref=owner,
+        family_alias=family,
+        factor_alias=alias,
+        family_formula_fingerprint="a" * 64,
+        self_formula_fingerprint="b" * 64,
+        params={"$F": "1m"} if "$F:1m" in alias else {},
+    )
 
 
 class LocalOnlySync:
@@ -79,11 +91,9 @@ def test_factor_projection_uses_local_owner_alias_and_hides_migrated_username():
             "name": "GTHT@MaxJJW@392452984564",
             "scope_user_id": "GTHT@MaxJJW@392452984564",
             "params_list": [{"$F": "1m"}],
-            "resolved_factors": [{
-                "factor_alias": "SgCCS|$F:1m",
-                "factor_family_alias": "SgCCS",
-                "params": [{"alias": "$F", "value": "1m"}],
-            }],
+            "resolved_factors": [_factor(
+                "SgCCS|$F:1m", "SgCCS", "GTHT@MaxJJW@392452984564",
+            )],
         },
     }])
 
@@ -132,11 +142,9 @@ def test_factor_library_prefers_resolved_sqlite_mirror_without_legacy_rebuild(
         "entity_id": "default:CA",
         "payload": {
             "factor_family_alias": "CA",
-            "resolved_factors": [{
-                "factor_alias": "CA|$F:1m",
-                "factor_family_alias": "CA",
-                "params": [{"alias": "$F", "value": "1m"}],
-            }],
+            "resolved_factors": [_factor(
+                "CA|$F:1m", "CA", "GTHT@MaxJJW@392452984564",
+            )],
         },
     }])
     monkeypatch.setattr(
@@ -175,10 +183,9 @@ def test_factor_library_subordinates_are_direct_children_from_sync_mirror(
         "entity_id": "default:ParentFactor",
         "payload": {
             "factor_family_alias": "ParentFactor",
-            "resolved_factors": [{
-                "factor_alias": "ParentFactor",
-                "factor_family_alias": "ParentFactor",
-            }],
+            "resolved_factors": [_factor(
+                "ParentFactor", "ParentFactor", parent,
+            )],
         },
     }, {
         "principal": child,
@@ -186,10 +193,7 @@ def test_factor_library_subordinates_are_direct_children_from_sync_mirror(
         "entity_id": "default:CA",
         "payload": {
             "factor_family_alias": "CA",
-            "resolved_factors": [{
-                "factor_alias": "CA|$F:1m",
-                "factor_family_alias": "CA",
-            }],
+            "resolved_factors": [_factor("CA|$F:1m", "CA", child)],
         },
     }, {
         "principal": peer,
@@ -197,10 +201,7 @@ def test_factor_library_subordinates_are_direct_children_from_sync_mirror(
         "entity_id": "default:PeerFactor",
         "payload": {
             "factor_family_alias": "PeerFactor",
-            "resolved_factors": [{
-                "factor_alias": "PeerFactor",
-                "factor_family_alias": "PeerFactor",
-            }],
+            "resolved_factors": [_factor("PeerFactor", "PeerFactor", peer)],
         },
     }])
     monkeypatch.setattr(

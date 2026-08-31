@@ -79,7 +79,9 @@ def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tm
     monkeypatch.setattr(FactorWorkspaceRepository, "commit", lambda self, message: None)
     monkeypatch.setattr(FactorWorkspaceRepository, "state", lambda self: git_state)
 
-    result = factor_workspace.build_factor_workspace("default$alice@1")
+    result = factor_workspace.sync_database_to_workspace(
+        "default$alice@1", branch_mode="auto", clear_existing=True
+    )
 
     assert result["custom_factor_count"] == 1
     assert result["public_factor_count"] == 1
@@ -157,7 +159,9 @@ def test_factor_workspace_build_refuses_root_owned_by_another_profile(monkeypatc
     )
 
     with pytest.raises(PermissionError, match="default\\$owner@1"):
-        factor_workspace.build_factor_workspace("default$other@1")
+        factor_workspace.sync_database_to_workspace(
+            "default$other@1", branch_mode="auto", clear_existing=True
+        )
 
     assert protected_source.read_text(encoding="utf-8") == "owner source\n"
 
@@ -219,7 +223,7 @@ def test_factor_workspace_push_refuses_root_owned_by_another_profile(
     assert protected_source.read_text(encoding="utf-8") == "owner source\n"
 
 
-def test_factor_workspace_build_refuses_nonempty_unmanaged_root(monkeypatch, tmp_path):
+def test_factor_workspace_download_refuses_nonempty_unmanaged_root(monkeypatch, tmp_path):
     workspace_root = tmp_path / "unmanaged-root"
     workspace_root.mkdir()
     protected_file = workspace_root / "research-notes.md"
@@ -232,7 +236,9 @@ def test_factor_workspace_build_refuses_nonempty_unmanaged_root(monkeypatch, tmp
     )
 
     with pytest.raises(PermissionError, match="没有有效的 Factor Workspace 所有权标记"):
-        factor_workspace.build_factor_workspace("default$alice@1")
+        factor_workspace.sync_database_to_workspace(
+            "default$alice@1", branch_mode="auto", clear_existing=True
+        )
 
     assert protected_file.read_text(encoding="utf-8") == "keep me\n"
 

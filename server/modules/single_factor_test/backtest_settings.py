@@ -10,10 +10,10 @@ from typing import Any
 
 from flask import jsonify, request
 
-from tools.testers.settings import backtest_setting_registry
 from tools.testers.backtest.modules.registry import BacktestModuleRegistry
 from tools.testers.home import HomeModuleRegistry
 from tools.testers.registry import Module, ModuleRegistry
+from tools.testers.settings import backtest_setting_registry
 
 from . import sft_bp
 
@@ -52,7 +52,7 @@ def _serialize_module(module: Module) -> dict[str, Any]:
     }
 
 
-@sft_bp.get("/api/testers/modules")
+@sft_bp.get("/api/test-authoring/modules")
 def get_testers_modules():
     home = HomeModuleRegistry()
     parent = (request.args.get("parent") or "").strip()
@@ -157,7 +157,7 @@ def _module_application(module: Module) -> str:
     return application or module.key
 
 
-@sft_bp.get("/api/backtest/settings/<application>")
+@sft_bp.get("/api/test-authoring/modules/<application>")
 def get_backtest_setting_application(application: str):
     try:
         client = (request.args.get("client") or "web").strip().lower()
@@ -176,7 +176,7 @@ def get_backtest_setting_application(application: str):
     return jsonify({"success": True, **settings_manifest})
 
 
-@sft_bp.get("/api/backtest/settings/<application>/summary")
+@sft_bp.get("/api/test-authoring/modules/<application>/summary")
 def get_backtest_setting_application_summary(application: str):
     try:
         client = (request.args.get("client") or "web").strip().lower()
@@ -194,7 +194,7 @@ def get_backtest_setting_application_summary(application: str):
     return jsonify({"success": True, **settings_manifest})
 
 
-@sft_bp.get("/api/backtest/settings/<application>/tabs/<tab_key>")
+@sft_bp.get("/api/test-authoring/modules/<application>/tabs/<tab_key>")
 def get_backtest_setting_tab(application: str, tab_key: str):
     try:
         manifest = backtest_setting_registry.get(application).tab_manifest(tab_key)

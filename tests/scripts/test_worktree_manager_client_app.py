@@ -336,19 +336,19 @@ def test_profile_research_reads_manager_projection_without_business_port(
     ("path", "method_name"),
     (
         (
-            "/api/catalog/factor-sources/public/MmClose2High/versions/current",
+                "/api/factor-library/family-sources/public/MmClose2High/versions/current",
             "version",
         ),
         (
             (
-                "/api/catalog/factor-sources/custom/SubordinateFactor"
+                    "/api/factor-library/family-sources/custom/SubordinateFactor"
                 "/versions/current?owner_username=GTHT%40child%401"
             ),
             "version",
         ),
         (
             (
-                "/api/catalog/factor-sources/custom/Momentum/versions"
+                    "/api/factor-library/family-sources/custom/Momentum/versions"
                 "?owner_username=GTHT%40child%401"
             ),
             "versions",
@@ -397,12 +397,12 @@ def test_factor_family_source_detail_uses_manager_catalog_without_gateway(
     ("path", "expected_ref"),
     (
         (
-            "/api/catalog/factor-sources/public/MmClose2High/versions/current",
+            "/api/factor-library/family-sources/public/MmClose2High/versions/current",
             "public:MmClose2High",
         ),
         (
             (
-                "/api/catalog/factor-sources/custom/SubordinateFactor"
+                "/api/factor-library/family-sources/custom/SubordinateFactor"
                 "/versions/current?owner_username=child%401"
             ),
             "child@1:SubordinateFactor",
@@ -454,7 +454,7 @@ def test_factor_source_detail_does_not_hydrate_an_unreadable_owner(
     monkeypatch.setattr(FactorSourceHydrator, "hydrate", reject_hydration)
     with running_manager(state) as base_url, pytest.raises(HTTPError) as raised:
         urlopen(Request(
-            f"{base_url}/api/catalog/factor-sources/custom/Secret"
+            f"{base_url}/api/factor-library/family-sources/custom/Secret"
             "/versions/current?owner_username=unreadable%401",
             headers={"Authorization": "Bearer user-token"},
         ))
@@ -550,7 +550,7 @@ def test_test_configuration_writes_are_manager_owned_without_service_port(
     class Authoring:
         @staticmethod
         def handles(path, method):
-            return path == "/api/workspaces/workspace-one/configuration" and method == "PUT"
+            return path == "/api/test-authoring/workspaces/workspace-one/configuration" and method == "PUT"
 
         @staticmethod
         def write(method, path, *, owner, payload):
@@ -575,7 +575,7 @@ def test_test_configuration_writes_are_manager_owned_without_service_port(
     body = b'{"expected_revision":1,"payload":{}}'
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/workspaces/workspace-one/configuration?port=8141",
+            f"{base_url}/api/test-authoring/workspaces/workspace-one/configuration?port=8141",
             data=body,
             method="PUT",
             headers={
@@ -588,7 +588,7 @@ def test_test_configuration_writes_are_manager_owned_without_service_port(
     assert value["configuration"]["revision"] == 2
     assert calls == [{
         "method": "PUT",
-        "path": "/api/workspaces/workspace-one/configuration",
+        "path": "/api/test-authoring/workspaces/workspace-one/configuration",
         "owner": "user@1",
         "payload": {"expected_revision": 1, "payload": {}},
     }]
@@ -629,7 +629,7 @@ def test_configuration_snapshot_is_manager_owned_without_service_port(
     }).encode()
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/workspaces/workspace-one/configuration-snapshots",
+            f"{base_url}/api/test-authoring/workspaces/workspace-one/configuration-snapshots",
             data=body,
             method="POST",
             headers={
@@ -665,9 +665,12 @@ def test_workspace_draft_delete_is_manager_owned_without_service_port(
         "delete_draft_workspace",
         lambda **values: calls.append(values) or {"deleted": True},
     )
-    assert service.handles("/api/workspaces/workspace-one", "DELETE") is True
+    assert service.handles("/api/test-authoring/workspaces/workspace-one", "DELETE") is True
+    assert service.handles("/api/workspaces/workspace-one", "DELETE") is False
+    assert service.handles("/api/backtest/settings/ic_test", "GET") is False
+    assert service.handles("/api/testers/modules", "GET") is False
     response = service.write(
-        "DELETE", "/api/workspaces/workspace-one",
+        "DELETE", "/api/test-authoring/workspaces/workspace-one",
         owner="user@1", payload={},
     )
 
@@ -692,7 +695,7 @@ def test_test_settings_are_available_without_execution_service(
     headers = {"Authorization": "Bearer user-token"}
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/backtest/settings/ic_test?port=8141",
+            f"{base_url}/api/test-authoring/modules/ic_test?port=8141",
             headers=headers,
         )) as response:
             settings = json.loads(response.read())
@@ -702,7 +705,7 @@ def test_test_settings_are_available_without_execution_service(
         )) as response:
             outputs = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/data_source_categories?port=8141",
+            f"{base_url}/api/product-library/data-source-categories?port=8141",
             headers=headers,
         )) as response:
             categories = json.loads(response.read())
@@ -735,14 +738,15 @@ def test_test_workbench_first_load_is_concurrent_and_service_port_free(
         lambda: pytest.fail("authoring must not inspect service ports"),
     )
     paths = (
-        "/api/backtest/settings/ic_test",
-        "/api/catalog/factors",
-        "/api/catalog/product-groups",
-        "/api/workspaces",
-        "/api/configuration-templates",
+        "/api/test-authoring/modules/ic_test",
+        "/api/factor-library/families",
+        "/api/factor-library/factors",
+        "/api/product-library/product-groups",
+        "/api/test-authoring/workspaces",
+        "/api/test-authoring/configuration-templates",
         "/api/jobs/artifact-capabilities",
-        "/api/data_source_categories",
-        "/api/testers/modules?parent=ic_test",
+        "/api/product-library/data-source-categories",
+        "/api/test-authoring/modules?parent=ic_test",
     )
 
     with running_manager(state) as base_url:
@@ -1945,7 +1949,7 @@ global.fetch = async (_path, options) => {{
   return {{status: 200, ok: true, json: async () => ({{success: true}})}};
 }};
 (async () => {{
-  const value = await FTAppRuntime.create().api("/api/catalog/factors");
+  const value = await FTAppRuntime.create().api("/api/factor-library/factors");
   console.log(JSON.stringify({{value, attempts}}));
 }})().catch(error => {{ console.error(error); process.exit(1); }});
 """
@@ -1973,7 +1977,7 @@ global.fetch = async (_path, _options) => {{
 }};
 (async () => {{
   try {{
-    await FTAppRuntime.create().api("/api/catalog/categories", {{method: "POST"}});
+    await FTAppRuntime.create().api("/api/product-library/categories", {{method: "POST"}});
   }} catch (_) {{}}
   console.log(JSON.stringify({{attempts}}));
 }})().catch(error => {{ console.error(error); process.exit(1); }});
@@ -2136,10 +2140,10 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
             else:
                 assert f'/research-static/{relative}' not in shell
 
-    assert "/api/backtest/settings/" in scripts["tests.js"]
-    assert "servicePath(`/api/backtest/settings/" not in scripts["tests.js"]
-    assert "/api/workspaces" in scripts["tests.js"]
-    assert 'servicePath("/api/workspaces")' not in scripts["tests.js"]
+    assert "/api/test-authoring/modules/" in scripts["tests.js"]
+    assert "servicePath(`/api/test-authoring/modules/" not in scripts["tests.js"]
+    assert "/api/test-authoring/workspaces" in scripts["tests.js"]
+    assert 'servicePath("/api/test-authoring/workspaces")' not in scripts["tests.js"]
     assert "/api/runs/preview" in scripts["run-batch-actions.js"]
     assert "ensureFactorsForExecution" in scripts["run-batch-actions.js"]
     assert "ensureProductsForExecution" in scripts["run-batch-actions.js"]
@@ -2166,7 +2170,7 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert "FTTestObjectPicker.create" in scripts["test-products.js"]
     assert "FTTestObjectPicker" in scripts["test-object-picker.js"]
     assert "FTTestObjectEditorOverlay" in scripts["test-object-editor-overlay.js"]
-    assert "/api/data_source_categories" in scripts["test-categories.js"]
+    assert "/api/product-library/data-source-categories" in scripts["test-categories.js"]
     assert "window.FTTestConfiguration" in scripts["test-configuration.js"]
     assert "window.FTTestConfigurationCompiler" in scripts[
         "test-configuration-compiler.js"
@@ -2201,9 +2205,7 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert "FTFactors.factorDetail" in scripts[
         "test-object-editor-overlay.js"
     ]
-    assert "FTFactorDetailShared.parameterEditor" in scripts[
-        "factor-editor.js"
-    ]
+    assert "function parameterEditor" in scripts["factor-editor.js"]
     assert "setting_template" not in scripts["tests.js"]
     assert 'test_templates: Object.freeze' in scripts["test-content-adapters.js"]
     assert "FTTestTemplates.panel" in scripts["test-content-adapters.js"]
@@ -2852,15 +2854,13 @@ def test_web_factor_library_reads_product_group_owned_subject_relations(
     assert "group.factor_set_refs" in model
     assert "value.product_group_refs" not in model
     assert "item.value.target_ref, item.value.set_ref" in model
-    assert 'context.api("/api/catalog/factors")' in runtime
-    assert 'context.api("/api/catalog/factor-sets")' in runtime
-    assert "/api/catalog/factor-sets/detail" in details
+    assert 'context.api(`/api/factor-library/families${suffix}`)' in runtime
+    assert 'context.api("/api/factor-library/factor-sets")' in runtime
+    assert "/api/factor-library/factor-sets/detail" in details
     assert "servicePath" not in coordinator
     assert "/api/entities/factor-sets" not in coordinator
-    assert "/api/catalog/product-groups" in runtime
-    assert "factorTesterLocalFactorSets" in runtime
-    assert "mergeFactorSets" in runtime
-    assert 'visibility: "local"' in model
+    assert "/api/product-library/product-groups" in runtime
+    assert "factorTesterLocalFactorSets" not in runtime
     assert 'context.t("因子家族")' in listing
     assert 'context.t("因子")' in listing
     assert 'context.t("因子集合")' in listing
@@ -2890,9 +2890,9 @@ def test_test_workbench_reads_factor_candidates_from_manager_catalog(
                 scripts[name] = response.read().decode("utf-8")
 
     script = scripts["tests"]
-    assert 'context.api("/api/catalog/factors")' in script
+    assert 'context.api("/api/factor-library/factors")' in script
     assert (
-        'context.api("/api/catalog/product-groups?view=summary"' in script
+        'context.api("/api/product-library/product-groups?view=summary"' in script
     )
     assert '/custom-factors/api/client/factor-library' not in script
     assert 'servicePath("/api/product-groups")' not in script
@@ -3135,27 +3135,32 @@ def test_manager_factor_catalog_does_not_select_a_service_port(
     headers = {"Authorization": "Bearer user-token"}
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/catalog/factors", headers=headers,
+            f"{base_url}/api/factor-library/families", headers=headers,
         )) as response:
-            library = json.loads(response.read())
+            families = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/catalog/factor-sets?query=momentum",
+            f"{base_url}/api/factor-library/factors", headers=headers,
+        )) as response:
+            factors = json.loads(response.read())
+        with urlopen(Request(
+            f"{base_url}/api/factor-library/factor-sets?query=momentum",
             headers=headers,
         )) as response:
             sets = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/catalog/factor-sets/detail?target_ref=factor-set%3Aone",
+            f"{base_url}/api/factor-library/factor-sets/detail?target_ref=factor-set%3Aone",
             headers=headers,
         )) as response:
             detail = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/catalog/factor-sets/descriptor?target_ref=factor-set%3Aone",
+            f"{base_url}/api/factor-library/factor-sets/descriptor?target_ref=factor-set%3Aone",
             headers=headers,
         )) as response:
             descriptor = json.loads(response.read())
 
-    assert library["principal"] == "user@1"
-    assert library["factors"][0]["factor_ref"] == "factor:one"
+    assert families["principal"] == "user@1"
+    assert families["families"][0]["family_ref"] == "factor-family:one"
+    assert factors["factors"][0]["factor_ref"] == "factor:one"
     assert sets["items"][0]["query"] == "momentum"
     assert detail["factor_set"]["target_ref"] == "factor-set:one"
     assert descriptor["descriptor"]["target_ref"] == "factor-set:one"
@@ -3184,7 +3189,7 @@ def test_manager_factor_source_manifest_does_not_select_a_service_port(
     )
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/catalog/factor-sources/manifest"
+            f"{base_url}/api/factor-library/family-sources/manifest"
             "?include_subordinates=0",
             headers={"Authorization": "Bearer user-token"},
         )) as response:
@@ -3223,12 +3228,12 @@ def test_manager_factor_library_provenance_does_not_select_a_service_port(
     headers = {"Authorization": "Bearer user-token"}
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/catalog/factor-library-sources",
+            f"{base_url}/api/factor-library/owners",
             headers=headers,
         )) as response:
             owners = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/catalog/factor-library-sources/"
+            f"{base_url}/api/factor-library/owners/"
             "user%401/projection?product_group=CNFutures",
             headers=headers,
         )) as response:
@@ -3300,14 +3305,14 @@ def test_manager_factor_set_writes_do_not_select_a_service_port(
             },
         }).encode()
         with urlopen(Request(
-            f"{base_url}/api/catalog/factor-sets",
+            f"{base_url}/api/factor-library/factor-sets",
             data=body,
             headers=headers,
             method="POST",
         )) as response:
             created = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/catalog/factor-sets?target_ref=factor-set%3Anew",
+            f"{base_url}/api/factor-library/factor-sets?target_ref=factor-set%3Anew",
             headers=headers,
             method="DELETE",
         )) as response:
@@ -3344,14 +3349,14 @@ def test_manager_factor_set_detail_allows_only_a_direct_child(
     headers = {"Authorization": "Bearer user-token"}
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/catalog/factor-sets/detail"
+            f"{base_url}/api/factor-library/factor-sets/detail"
             "?target_ref=factor-set%3Achild&owner_username=child%401",
             headers=headers,
         )) as response:
             child = json.loads(response.read())
         with pytest.raises(HTTPError) as forbidden:
             urlopen(Request(
-                f"{base_url}/api/catalog/factor-sets/detail"
+                f"{base_url}/api/factor-library/factor-sets/detail"
                 "?target_ref=factor-set%3Ahidden&owner_username=peer%401",
                 headers=headers,
             ))
@@ -3465,6 +3470,9 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert "window.FTAgentModelEditor" in agent_model_editor
     assert 'model.addEventListener("focus"' in agent_model_editor
     assert "clientDownload?.(context, release)" in reports
+    assert 'section.className = "research-client-download-action"' in local_page
+    assert "card.append(note, downloadChoices(context, value))" in local_page
+    assert 'section.className = "job-section client-download"' not in local_page
     assert 'note.className = "secondary research-graph-list-note"' in graph_list
     assert "source_server_ids" in profile_directory
     assert "直属下级研究身份的 Agent 会话默认对直属上级只读可见" in profile_directory_detail
@@ -3532,7 +3540,7 @@ def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:
     assert '["categories", "产品分类"]' in script
     assert '["groups", "产品组"]' in script
     assert "includeProducts" in script
-    assert "/api/catalog/categories" in script
+    assert "/api/product-library/categories" in script
     assert 'if (!query)' in script
     assert 'sourceList' in script
     assert 'FTProductSources.list' in script
@@ -3540,7 +3548,7 @@ def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:
     assert 'frequencyCell' in source_script
     assert 'product_paths' in source_script
     assert 'product-source-page' in source_script
-    assert '/api/catalog/sources' in source_script
+    assert '/api/product-library/data-sources' in source_script
     assert 'if (localCatalogAvailable())' in source_script
     assert '/api/client/product_sources' in source_script
     assert 'Web 端只能访问服务器提供的数据源' in source_script
@@ -3551,9 +3559,9 @@ def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:
     assert "FTProductTree.categorySelectionValues" in script
     assert 'query.append("category", value)' in script
     assert 'product-source-tabs' not in script
-    assert '/api/catalog/categories' in script
-    assert 'servicePath("/api/product_tree")' not in script
-    assert '`/api/catalog/tree?${query}`' in script
+    assert '/api/product-library/categories' in script
+    assert 'servicePath("/api/internal/product-library/tree")' not in script
+    assert '`/api/product-library/tree?${query}`' in script
     assert 'FTProductCategoryModel.availableSourceIDs' in script
     assert 'selectedSources.forEach' in script
     assert 'FTProductTree.render' in script
@@ -3575,7 +3583,8 @@ def test_product_catalog_lazy_page_forwards_search_and_paging(
 ) -> None:
     state = authenticated_state(tmp_path)
     monkeypatch.setattr(
-        catalog_routes, "catalog_source_ids", lambda _query: ("Synthetic",),
+        catalog_routes, "product_library_source_ids",
+        lambda _query: ("Synthetic",),
     )
     monkeypatch.setattr(
         state.client_state, "product_names", lambda *_: [
@@ -3597,12 +3606,12 @@ def test_product_catalog_lazy_page_forwards_search_and_paging(
     headers = {"Authorization": "Bearer user-token"}
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/catalog/products?query=beta&page=1&limit=1",
+            f"{base_url}/api/product-library/products?query=beta&page=1&limit=1",
             headers=headers,
         )) as response:
             products = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/catalog/contract-tree?path=Product%2F_products"
+            f"{base_url}/api/product-library/contract-tree?path=Product%2F_products"
             "&query=beta&page=2&limit=10",
             headers=headers,
         )) as response:
@@ -3670,34 +3679,34 @@ def test_manager_product_catalog_does_not_select_a_service_port(
     monkeypatch.setattr(state, "service_ports", reject_service_port)
     headers = {"Authorization": "Bearer user-token"}
     with running_manager(state) as base_url:
-        with urlopen(Request(f"{base_url}/api/catalog/sources", headers=headers)) as response:
+        with urlopen(Request(f"{base_url}/api/product-library/data-sources", headers=headers)) as response:
             sources = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/catalog/tree?category=cnfutures_sector", headers=headers,
+            f"{base_url}/api/product-library/tree?category=cnfutures_sector", headers=headers,
         )) as response:
             tree = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/catalog/tree", headers=headers,
+            f"{base_url}/api/product-library/tree", headers=headers,
         )) as response:
             uncategorized_tree = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/catalog/contracts?product=JNI.OSE",
+            f"{base_url}/api/product-library/contracts?product=JNI.OSE",
             headers=headers,
         )) as response:
             contracts = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/catalog/prices",
+            f"{base_url}/api/market-data/prices",
             data=json.dumps({"product_name": "JNI.OSE"}).encode(),
             headers={**headers, "Content-Type": "application/json"},
             method="POST",
         )) as response:
             prices = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/catalog/product-groups", headers=headers,
+            f"{base_url}/api/product-library/product-groups", headers=headers,
         )) as response:
             groups = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/catalog/product-groups",
+            f"{base_url}/api/product-library/product-groups",
             data=json.dumps({
                 "name": "新建组", "paths": ["China Futures/Day"],
                 "category_ids": ["cnfutures_sector"],
@@ -3759,7 +3768,7 @@ def test_product_group_summary_does_not_expand_catalog_memberships(
 
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/catalog/product-groups?view=summary",
+            f"{base_url}/api/product-library/product-groups?view=summary",
             headers={"Authorization": "Bearer user-token"},
         )) as response:
             value = json.loads(response.read())
@@ -3786,7 +3795,7 @@ def test_manager_product_catalog_passes_parallel_category_selection(
     headers = {"Authorization": "Bearer user-token"}
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/catalog/tree?category=cnfutures_day_night"
+            f"{base_url}/api/product-library/tree?category=cnfutures_day_night"
             "&category=cnfutures_sector",
             headers=headers,
         )) as response:
@@ -3795,7 +3804,7 @@ def test_manager_product_catalog_passes_parallel_category_selection(
     assert value["category_ids"] == ["cnfutures_day_night", "cnfutures_sector"]
     assert value["tree"] == [{"title": "日夜盘"}, {"title": "行业"}]
     assert calls[0][0] == ["cnfutures_day_night", "cnfutures_sector"]
-    assert r"/api/get_price_data" not in _SERVICE_WRITE_PATTERNS["POST"]
+    assert r"/api/internal/market-data/prices" not in _SERVICE_WRITE_PATTERNS["POST"]
 
 
 def test_manager_product_catalog_can_request_selectable_tree_nodes(
@@ -3812,7 +3821,7 @@ def test_manager_product_catalog_can_request_selectable_tree_nodes(
     headers = {"Authorization": "Bearer user-token"}
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/catalog/tree?checkbox=1", headers=headers,
+            f"{base_url}/api/product-library/tree?checkbox=1", headers=headers,
         )) as response:
             value = json.loads(response.read())
 
@@ -3929,11 +3938,11 @@ def test_product_detail_renderer_is_loaded_as_a_separate_catalog_module(tmp_path
     assert "window.FTProductDetails" in details
     assert "detailHelpers" in products
     assert "async function productDetail(context, target)" in products
-    assert 'context.servicePath("/api/get_price_data")' not in details
+    assert 'context.servicePath("/api/internal/market-data/prices")' not in details
     assert "FTProductPricePanel.render" in details
     assert "product-price-panel-mount" in details
-    assert '"/api/catalog/prices"' not in details
-    assert '"/api/catalog/contracts"' in details
+    assert '"/api/market-data/prices"' not in details
+    assert '"/api/product-library/contracts"' in details
 
 
 @pytest.mark.parametrize(

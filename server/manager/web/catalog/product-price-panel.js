@@ -5,7 +5,7 @@
 
   function endpoint(source) {
     return source === "local"
-      ? "/api/client/product_prices" : "/api/catalog/prices";
+      ? "/api/client/product_prices" : "/api/market-data/prices";
   }
 
   function sourceEntries(value) {

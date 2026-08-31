@@ -6,13 +6,11 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
 
 from server.manager.services.agent_workspace import ensure_server_profile_workspace
 from server.manager.services.profile_factor_worktree import (
     ensure_server_profile_factor_worktree,
 )
-from tools.cli.app import cli
 from tools.cli.release import factor_worktree
 from tools.cli.release.factor_worktree import (
     CanonicalFactorRepoStore,
@@ -330,48 +328,3 @@ def test_unchecked_profile_branch_behind_canonical_base_is_recovered(
         current,
         _git(target, "rev-parse", "HEAD"),
     ) == ""
-
-
-def test_cli_create_is_idempotent_and_keeps_sync_manual(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    user_root = (
-        tmp_path / "Documents/FactorTester/users" / OWNER
-    )
-    canonical_parent = user_root / "personal-workspace"
-    canonical_parent.mkdir(parents=True)
-    repo, _ = _canonical(canonical_parent, "factor-library")
-    client_root = tmp_path / "support"
-    _profile(LocalProfileStore(client_root), user_root, "maxa")
-    monkey_profile = tmp_path / "release-profile.json"
-    monkey_profile.write_text(json.dumps({
-        "release": {"install_root": str(client_root)}
-    }))
-    runner = CliRunner()
-    registered = runner.invoke(cli, [
-        "factor-library", "workspace", "canonical-register",
-        "--path", str(repo),
-        "--owner-ref", OWNER,
-        "--release-profile", str(monkey_profile),
-    ])
-    assert registered.exit_code == 0, registered.output
-    created = runner.invoke(cli, [
-        "factor-library", "workspace", "create-profile-worktree", "maxa",
-        "--release-profile", str(monkey_profile),
-    ])
-    assert created.exit_code == 0, created.output
-    value = json.loads(created.output)
-    assert value["status"] == "created"
-    assert value["verification"]["valid"] is True
-    assert value["binding"]["sync_policy"]["auto_push"] is False
-    assert value["binding"]["sync_policy"]["auto_merge"] is False
-    assert Path(value["binding"]["worktree_path"]).is_dir()
-
-    repeated = runner.invoke(cli, [
-        "factor-library", "workspace", "create-profile-worktree", "maxa",
-        "--release-profile", str(monkey_profile),
-    ])
-    assert repeated.exit_code == 0, repeated.output
-    assert json.loads(repeated.output)["status"] == "existing"

@@ -8,15 +8,15 @@ from tools.cli.app import cli
 from tools.cli.modules import agents as agent_commands
 from tools.cli.modules import research as research_commands
 from tools.cli.modules.products import catalog as product_catalog_commands
-from tools.cli.modules.products import controller as product_controller_commands
 from tools.cli.modules.products import data_sources as product_source_commands
+from tools.cli.modules.products import groups as product_group_commands
 
 
 def test_root_exposes_business_domains_without_split_legacy_groups() -> None:
     result = CliRunner().invoke(cli, ["--help"])
 
     assert result.exit_code == 0, result.output
-    assert "products" in result.output
+    assert "product-library" in result.output
     assert "research" in result.output
     assert "agents" in result.output
     assert "profile-agent" not in result.output
@@ -29,6 +29,7 @@ def test_root_exposes_business_domains_without_split_legacy_groups() -> None:
 def test_removed_cli_compatibility_aliases_are_not_callable() -> None:
     runner = CliRunner()
     removed = (
+        ["products", "list"],
         ["strategy-intent", "describe"],
         ["research-graph", "active", "graph"],
         ["factor-library", "list"],
@@ -38,7 +39,7 @@ def test_removed_cli_compatibility_aliases_are_not_callable() -> None:
         ["factor-library", "workspace", "sync-to-local"],
         ["client", "check-update"],
         ["client", "update-app"],
-        ["products", "modules"],
+        ["product-library", "modules"],
     )
 
     for args in removed:
@@ -52,8 +53,8 @@ def test_canonical_nested_cli_surfaces_are_registered() -> None:
     for args in (
         ["strategy", "intent", "--help"],
         ["research", "graphs", "--help"],
-        ["factor-library", "workspace", "sync", "--help"],
-        ["factor-library", "workspace", "push", "--help"],
+        ["factor-library", "workspace", "user", "download", "--help"],
+        ["factor-library", "workspace", "user", "upload", "--help"],
         ["client", "app-update", "--help"],
     ):
         result = runner.invoke(cli, args)
@@ -68,7 +69,7 @@ def test_products_list_reads_the_real_server_catalog(monkeypatch) -> None:
     monkeypatch.setattr(
         product_catalog_commands, "client_from_config", lambda: Client(),
     )
-    result = CliRunner().invoke(cli, ["products", "list", "--json"])
+    result = CliRunner().invoke(cli, ["product-library", "list", "--json"])
 
     assert result.exit_code == 0, result.output
     value = json.loads(result.output)
@@ -84,7 +85,7 @@ def test_products_sources_share_the_server_catalog(monkeypatch) -> None:
     monkeypatch.setattr(
         product_source_commands, "client_from_config", lambda: Client(),
     )
-    result = CliRunner().invoke(cli, ["products", "sources", "list", "--json"])
+    result = CliRunner().invoke(cli, ["product-library", "sources", "list", "--json"])
 
     assert result.exit_code == 0, result.output
     value = json.loads(result.output)
@@ -101,9 +102,9 @@ def test_products_groups_share_the_web_manager_catalog(monkeypatch) -> None:
             }]}
 
     monkeypatch.setattr(
-        product_controller_commands, "client_from_config", lambda: Client(),
+        product_group_commands, "client_from_config", lambda: Client(),
     )
-    result = CliRunner().invoke(cli, ["products", "groups", "list", "--json"])
+    result = CliRunner().invoke(cli, ["product-library", "groups", "list", "--json"])
 
     assert result.exit_code == 0, result.output
     value = json.loads(result.output)
@@ -170,7 +171,7 @@ def test_agents_models_use_the_manager_provider_catalog(monkeypatch) -> None:
 
 def test_nested_domain_help_matches_web_modules() -> None:
     runner = CliRunner()
-    products = runner.invoke(cli, ["products", "--help"])
+    products = runner.invoke(cli, ["product-library", "--help"])
     research = runner.invoke(cli, ["research", "--help"])
     agents = runner.invoke(cli, ["agents", "--help"])
 

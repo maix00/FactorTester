@@ -8,7 +8,7 @@
 
 服务器上的研究身份由 Manager 启动 Agent。Agent 的隔离 `HOME` 不应读取
 用户浏览器 Cookie 或宿主机的 `~/.factortester`，但每次执行
-`factortester products`、任务查询或研究命令都不应要求人工再次配置和登录。
+`factortester product-library`、任务查询或研究命令都不应要求人工再次配置和登录。
 同时，服务器内已有 Manager 时，目录查询不应绕到公网端点产生额外流量。
 
 ## 决策

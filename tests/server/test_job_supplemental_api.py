@@ -93,19 +93,19 @@ def test_supplemental_routes_create_single_flight_and_page(tmp_path, monkeypatch
 
     request = {
         "kind": "backtest_strategy_analysis",
-        "params": {"analysis_tab": "returns", "strategy_id": "strategy-1"},
+        "params": {"analysis_tab": "overview", "strategy_id": "strategy-1"},
     }
     created = client.post("/api/jobs/parent-1/supplementals", json=request)
     duplicate = client.post("/api/jobs/parent-1/supplementals", json={
         "kind": "backtest_strategy_analysis",
-        "params": {"analysis_tab": "overview", "strategy_id": "strategy-1"},
+        "params": {"analysis_tab": "rolling", "strategy_id": "strategy-1"},
     })
     listed = client.get(
         "/api/jobs/parent-1/supplementals",
         query_string={"search": "backtest_strategy", "limit": 10},
     )
 
-    assert created.status_code == 201
+    assert created.status_code == 201, created.get_json()
     assert duplicate.status_code == 202
     assert created.get_json()["job"]["status"] == "queued"
     assert duplicate.get_json()["job"]["job_id"] == created.get_json()["job"]["job_id"]
@@ -150,7 +150,7 @@ def test_strategy_supplemental_executes_and_persists_under_parent(
         session["username"] = "alice"
     created = client.post("/api/jobs/parent-1/supplementals", json={
         "kind": "backtest_strategy_analysis",
-        "params": {"analysis_tab": "returns", "strategy_id": "strategy-1"},
+        "params": {"analysis_tab": "overview", "strategy_id": "strategy-1"},
     }).get_json()
     child_id = created["job"]["job_id"]
 
@@ -177,17 +177,20 @@ def test_strategy_supplemental_executes_and_persists_under_parent(
     payload = orjson.loads(
         (tmp_path / "artifacts" / artifact["relative_path"]).read_bytes()
     )
-    assert payload["return_series"][-1]["return"] == pytest.approx(0.01)
+    assert payload["summary"]["Total Return"] == pytest.approx(0.01)
     bundle_names = {
         item["name"] for item in repository.list_artifacts(
             job_id="parent-1", owner="alice",
         )
         if item["name"].startswith("strategy-analysis--strategy-strategy-1--")
     }
-    assert len(bundle_names) == 16
+    from tools.factors.tester_calc.single_factor_test.group.strategy_analysis import (
+        STRATEGY_ANALYSIS_TABS,
+    )
+    assert len(bundle_names) == len(STRATEGY_ANALYSIS_TABS)
     assert {
         "strategy-analysis--strategy-strategy-1--overview",
-        "strategy-analysis--strategy-strategy-1--returns",
+        "strategy-analysis--strategy-strategy-1--distribution",
         "strategy-analysis--strategy-strategy-1--robustness",
     } <= bundle_names
 

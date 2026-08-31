@@ -260,7 +260,9 @@ def build_execution_plan(kind: str, data: dict[str, Any]) -> dict[str, Any]:
     )
 
     run_spec = data.get("run_spec")
-    if isinstance(run_spec, dict):
+    if kind in {
+        "backtest", "ic", "factor_evaluation", "factor_type_analysis",
+    } and isinstance(run_spec, dict):
         assert_run_spec_factor_revisions_current(
             run_spec,
             owner=str(data.get("_owner") or ""),

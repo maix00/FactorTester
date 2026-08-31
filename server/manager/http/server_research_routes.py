@@ -138,37 +138,6 @@ class ServerResearchRoutesMixin:
         json_response(self, {"success": False, "error": "server research route not found"}, 404)
         return True
 
-    def _post_server_research_routes(self, parsed) -> bool:
-        if parsed.path != "/api/server-research/publish":
-            return False
-        session = self._server_research_session()
-        if session is None:
-            return True
-        try:
-            payload = self._json_body(32 * 1024 * 1024)
-            if not isinstance(payload, dict):
-                raise TypeError("request body must be an object")
-            value = self.state.server_research.publish(
-                str(session.get("username") or ""),
-                str(payload.get("server_ref") or ""),
-                public_research=self.state.public_research,
-                visibility=str(payload.get("visibility") or "public"),
-                authorized_users=list(payload.get("authorized_users") or []),
-                public_title=str(payload.get("public_title") or ""),
-            )
-            sync_metadata = getattr(self, "_sync_research_metadata", None)
-            if callable(sync_metadata) and value.get("publication_id"):
-                sync_metadata(str(value["publication_id"]))
-            invalidate = getattr(self, "_invalidate_federated_public_research", None)
-            if callable(invalidate):
-                invalidate()
-            json_response(self, {"success": True, **value}, 201)
-        except PermissionError as exc:
-            json_response(self, {"success": False, "error": str(exc)}, 403)
-        except (OSError, TypeError, ValueError, KeyError, sqlite3.Error) as exc:
-            json_response(self, {"success": False, "error": str(exc)}, 400)
-        return True
-
     def _send_server_research_bytes(
         self,
         raw: bytes,

@@ -38,21 +38,25 @@ const state = {
   settingsCode: {status: "ready", error: "", promise: null},
   settingsInitialized: false,
 };
-window.FTTests.ensureSettingsCode({}, state, () => { refreshes += 1; });
-
-assert.equal(state.settingsInitialized, true,
-  "a ready loader record must still initialize a new test session");
-assert.deepEqual(state.settingsMountedTabs, ["engine"]);
-assert.deepEqual(state.values, {engine: "native"});
-assert.equal(refreshes, 1,
-  "recovering a ready-but-uninitialized session should repaint once");
-
 const preloadedState = {
   manifest: {},
   settingsCode: {status: "idle", error: "", promise: null},
   settingsInitialized: false,
 };
-window.FTTests.ensureSettingsCode({}, preloadedState, () => { refreshes += 1; })
+const readyInitialization = window.FTTests.ensureSettingsCode(
+  {}, state, () => { refreshes += 1; },
+);
+
+assert.equal(state.settingsInitialized, true,
+  "a ready loader record must still initialize a new test session");
+assert.deepEqual(state.settingsMountedTabs, ["engine"]);
+assert.deepEqual(state.values, {engine: "native"});
+readyInitialization.then(() => new Promise(resolve => queueMicrotask(resolve))).then(() => {
+  assert.equal(refreshes, 1,
+    "recovering a ready-but-uninitialized session should repaint once");
+
+  return window.FTTests.ensureSettingsCode({}, preloadedState, () => { refreshes += 1; });
+}).then(() => new Promise(resolve => queueMicrotask(resolve)))
   .then(() => {
     assert.equal(preloadedState.settingsInitialized, true,
       "a preloaded settings module must still repaint a new test session");

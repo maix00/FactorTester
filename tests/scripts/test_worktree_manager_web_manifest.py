@@ -14,12 +14,13 @@ ROOT = Path(__file__).resolve().parents[2]
 WEB_ROOT = ROOT / "server" / "manager" / "web"
 
 
-def test_settings_runtime_loads_configuration_compiler_first() -> None:
+def test_configuration_compiler_loads_only_for_preview_and_submission() -> None:
     manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8"))
 
     dependencies = manifest["group_dependencies"]
-    assert "workbench-compiler" in dependencies["workbench-backtest"]
-    assert "workbench-compiler" in dependencies["workbench-ic-controls"]
+    assert "workbench-compiler" not in dependencies["workbench-backtest"]
+    assert "workbench-compiler" not in dependencies["workbench-ic-controls"]
+    assert "workbench-compiler" in dependencies["workbench-run-submit"]
 
 
 def test_manifest_matches_html_script_order_and_files() -> None:
@@ -50,7 +51,7 @@ def test_manifest_matches_html_script_order_and_files() -> None:
         "styles/outputs/artifacts.css",
         "styles/outputs/backtest-results.css",
         "styles/workbench.css", "styles/workbench-settings.css",
-        "styles/task-inputs.css", "styles/docs.css",
+        "styles/docs.css", "styles/task-inputs.css",
     ]
     assert "FT_STATIC_STYLES" in template
     assert "FT_STATIC_SCRIPTS" in template
@@ -478,23 +479,6 @@ def test_run_inputs_are_kept_out_of_templates_and_attached_to_each_job() -> None
     assert result.stdout.strip() == "ok"
 
 
-def test_factor_set_selection_freezes_descriptor_and_local_sources() -> None:
-    import subprocess
-
-    fixture = ROOT / "tests" / "scripts" / "fixtures" / "factor_set_selection.js"
-    modules = [
-        WEB_ROOT / "catalog" / "factor-model.js",
-        WEB_ROOT / "workbench" / "factor-selection.js",
-        WEB_ROOT / "workbench" / "factor-set-selection.js",
-    ]
-    result = subprocess.run(
-        ["node", str(fixture), *(str(item) for item in modules)], cwd=ROOT,
-        capture_output=True, text=True, check=False,
-    )
-    assert result.returncode == 0, result.stderr or result.stdout
-    assert result.stdout.strip() == "ok"
-
-
 def test_strategy_dependencies_compile_from_uploaded_text_files() -> None:
     import subprocess
 
@@ -567,7 +551,7 @@ def test_backend_registered_run_fields_compile_into_run_requests() -> None:
     assert result.stdout.strip() == "ok"
 
     settings = (WEB_ROOT / "settings" / "settings.js").read_text(encoding="utf-8")
-    assert '/api/backtest/settings/group_test' in settings
+    assert '/api/test-authoring/modules/group_test' in settings
     assert 'item?.key === "service_port"' in settings
 
 
@@ -929,7 +913,7 @@ def test_factor_editor_family_picker_uses_the_shared_source_control() -> None:
     assert "function sharedPicker" in source
     assert "function familyPicker" in source
     assert "FTTestFieldRow.create" in source
-    assert "FTFactorDetailShared.parameterEditor" in source
+    assert "function parameterEditor" in source
     assert "factor-editor-source-metadata" in source
     source_controls = source.split("function sourceControls", 1)[1].split(
         "function sourceMetadata", 1,
@@ -995,7 +979,7 @@ def test_factor_detail_modes_share_page_shell_and_family_only_has_version_picker
     assert "sourceVersionHistory" in family_view
     assert "FTFactorDetailShared.versionPicker" in editor
     assert 'context.t("读取版本历史")' not in editor
-    assert "/api/catalog/factor-sources/" in shared
+    assert "/api/factor-library/family-sources/" in shared
     assert "/custom-factors/api/source-versions/" not in shared
     assert "/custom-factors/api/public-factor/" not in details
     assert "/custom-factors/api/get/" not in details
@@ -1069,7 +1053,7 @@ def test_factor_catalog_lists_expose_shared_edit_actions() -> None:
     assert "square.and.pencil" in source
     assert "onEdit: item => editItem" in catalog
     assert "?mode=edit" in catalog
-    assert "/api/catalog/factor-sets?target_ref=" in catalog
+    assert "/api/factor-library/factor-sets?target_ref=" in catalog
     assert "/custom-factors/api/client/factor-sets" not in catalog
 
 
@@ -1279,19 +1263,20 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
     first_load = source.split(
         "const [manifest, workspaces, savedWorkspaceConfiguration]", 1
     )[1].split("]);", 1)[0]
-    assert "/api/backtest/settings/${application}/summary" in first_load
-    assert "/api/backtest/settings/${application}`" not in first_load
+    assert "/api/test-authoring/modules/${application}/summary" in first_load
+    assert "/api/test-authoring/modules/${application}`" not in first_load
     for endpoint in (
-        "/api/catalog/factors", "/api/catalog/product-groups",
-        "/api/data_source_categories", "/api/configuration-templates",
+        "/api/factor-library/families", "/api/factor-library/factors",
+        "/api/product-library/product-groups",
+        "/api/product-library/data-source-categories", "/api/test-authoring/configuration-templates",
         "/api/jobs/artifact-capabilities", "/api/client/profiles",
     ):
         assert endpoint not in first_load
-    assert "/api/workspace-summaries" in first_load
+    assert "/api/test-authoring/workspace-summaries" in first_load
     assert "workbench-settings" not in first_load
     assert "FTTestInputState.initialize" not in first_load
     assert "FTTestState.initializeInputState(state)" in source
-    assert "/api/workspaces/${workspaceID}/configuration" in source
+    assert "/api/test-authoring/workspaces/${workspaceID}/configuration" in source
     assert "FTTestFactors.prepare(state)" in template_actions
     assert "function ensureLazyKey" in source
     assert "ensureProductsForExecution" in source
@@ -1418,7 +1403,7 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
         "workbench-run", "workbench-compiler", "workbench-ic-controls",
     ]
     assert manifest["group_dependencies"]["workbench-ic-controls"] == [
-        "workbench-core", "workbench-compiler",
+        "workbench-core",
     ]
     assert manifest["groups"]["workbench-compiler"] == [
         "workbench/test-configuration-compiler.js",
@@ -2356,7 +2341,7 @@ def test_factor_create_editors_use_shared_actions_and_personal_factor_scope() ->
     assert 'form.append(tabs.root, status)' in object_form
     assert "familyScopes?.mine" in set_editor
     assert "mine?.factors" in set_editor
-    assert 'context.api("/api/catalog/factor-sets"' in set_editor
+    assert 'context.api("/api/factor-library/factor-sets"' in set_editor
     assert "/custom-factors/api/client/factor-sets" not in set_editor
     assert "FTFactorSetAssistance" in set_editor
 
@@ -2503,8 +2488,8 @@ def test_factor_catalog_list_defers_auxiliary_catalogs_and_heavy_modules() -> No
     assert 'sets: page === "sets"' in catalog_list
     assert 'groups: true, library: page !== "sets"' in catalog_list
     assert "onOpen: () =>" in catalog_list
-    assert "/api/catalog/product-groups" in runtime
-    assert 'context.api("/api/catalog/factor-sets")' in runtime
+    assert "/api/product-library/product-groups" in runtime
+    assert 'context.api("/api/factor-library/factor-sets")' in runtime
     sets_start = runtime.index("async function loadSets(context)")
     groups_start = runtime.index("async function loadGroups(context)")
     assert "loadLibrary(context)" not in runtime[sets_start:groups_start]
@@ -2527,5 +2512,5 @@ def test_product_group_detail_never_uses_retired_business_route() -> None:
     ).read_text(encoding="utf-8")
 
     assert '"/api/client/product-groups"' in detail
-    assert '"/api/catalog/product-groups"' in detail
+    assert '"/api/product-library/product-groups"' in detail
     assert '"/api/product-groups"' not in detail

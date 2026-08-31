@@ -334,7 +334,7 @@ def test_cycle_object_read_lazy_loads_exact_immutable_run_configuration(
         configuration_id="configuration-1",
         configuration_revision=7,
         run_spec={
-            "run_spec_version": 3,
+            "run_spec_version": 4,
             "products": ["RB.SHF"],
             "start_date": "2024-01-01",
             "end_date": "2025-12-31",

@@ -32,7 +32,7 @@
       const group = selectedExecutionGroup(context, state);
       await window.FTTestConfiguration.save(context, state, group);
       const value = await context.api(
-        `/api/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration/templates`,
+        `/api/test-authoring/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration/templates`,
         {method: "POST", body: JSON.stringify({name: name.trim()})},
       );
       state.templates.unshift(value.template);
@@ -49,7 +49,7 @@
         await window.FTTestConfiguration.ensureWorkspace(context, state);
       }
       const value = await context.api(
-        `/api/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration/load-template`,
+        `/api/test-authoring/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration/load-template`,
         {
           method: "POST",
           body: JSON.stringify({
@@ -95,7 +95,7 @@
         const group = selectedExecutionGroup(context, state);
         await window.FTTestConfiguration.save(context, state, group);
         const value = await context.api(
-          `/api/configuration-templates/${encodeURIComponent(template.configuration_id)}`,
+          `/api/test-authoring/configuration-templates/${encodeURIComponent(template.configuration_id)}`,
           {
             method: "PUT",
             body: JSON.stringify({workspace_id: state.workspace.workspace_id}),
@@ -115,7 +115,7 @@
       if (!confirm(`${context.t("确定删除模板")}「${template.name}」？`)) return;
       try {
         await context.api(
-          `/api/configuration-templates/${encodeURIComponent(template.configuration_id)}`,
+          `/api/test-authoring/configuration-templates/${encodeURIComponent(template.configuration_id)}`,
           {method: "DELETE"},
         );
         state.templates = state.templates.filter(item => (

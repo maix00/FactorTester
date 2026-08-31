@@ -8,10 +8,10 @@ from typing import Any
 
 import click
 
+from ..core.successor_graph import build_successor_graph
 from ..core.trial_plan_fixture import (
     validate_trial_plan_fixture,
 )
-from ..core.successor_graph import build_successor_graph
 from .common import echo_json
 
 

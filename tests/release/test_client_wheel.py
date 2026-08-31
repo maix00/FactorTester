@@ -200,7 +200,7 @@ def test_built_client_runs_from_outside_repository(tmp_path: Path) -> None:
     assert release_target_import.stdout.strip() == "build_target_beta_package"
 
     products_help = subprocess.run(
-        [sys.executable, "-m", "tools.cli.app", "products", "--help"],
+        [sys.executable, "-m", "tools.cli.app", "product-library", "--help"],
         cwd=tmp_path,
         env=env,
         check=True,

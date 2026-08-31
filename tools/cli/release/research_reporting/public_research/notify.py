@@ -21,7 +21,7 @@ def sync_manager(paths: dict[str, Path]) -> None:
             "projection": projection,
         }, ensure_ascii=False).encode("utf-8")
         request = Request(
-            "http://127.0.0.1:7998/api/public-research/sync",
+            "http://127.0.0.1:7998/api/research-publications/sync",
             data=payload,
             headers={
                 "Content-Type": "application/json",

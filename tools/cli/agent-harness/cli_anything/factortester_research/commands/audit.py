@@ -18,6 +18,7 @@ from ..core.session import (
 )
 from .common import echo_json
 
+
 @click.group("skill-usage")
 def skill_usage() -> None:
     """记录仅保存在本地研究过程中的实际 Skill 使用审计。"""
@@ -130,10 +131,10 @@ def decision_poor_result(ctx: click.Context, reason: str, evidence: str, as_json
         return
     click.echo("状态: factor_improvement_required")
     click.echo("下一步:")
-    click.echo("  factortester factor-library workspace git diff")
+    click.echo("  git diff")
     click.echo("  编辑 workspace 中的因子源码/参数")
-    click.echo("  factortester factor-library workspace push")
-    click.echo("  重新运行 workspace inspect、IC、类型分析和回测")
+    click.echo("  git commit；由用户工作区执行 factor-library workspace user upload")
+    click.echo("  重新运行 IC、类型分析和回测")
 
 
 @click.group("gap")

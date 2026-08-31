@@ -74,10 +74,7 @@ from tools.cli.commands import research_graph_obligation_advance as advance
 from tools.cli.commands import research_graph_obligations as obligation_commands
 
 
-_FACTOR_REF = (
-    "factor:v1:profile-test:cGF0aA:aWRlbnRpdHk:"
-    + "a" * 40 + ":" + "b" * 40
-)
+_FACTOR_REF = "factor:v2:" + "a" * 43
 
 
 def _ledger():
@@ -229,9 +226,7 @@ def test_edge_scope_revalidation_accepts_explicit_matching_factor_scope():
 
 
 def test_factor_set_scope_is_not_inferred_from_member_factor():
-    set_ref = "factor-set:v1:profile-maxa:c2V0cw:bW9tZW50dW0:" + (
-        "a" * 40
-    ) + ":" + ("b" * 40)
+    set_ref = "factor-set:v2:" + "b" * 43
     obligation = {
         "obligation_id": "portfolio",
         "status": "bounded",

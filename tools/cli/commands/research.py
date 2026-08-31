@@ -21,16 +21,12 @@ from tools.cli.core.run_input_dependencies import (
 from tools.cli.core.run_input_dependencies import (
     option as run_input_option,
 )
+from tools.cli.core.run_submission import build_run_request
 from tools.cli.core.strategy_spec import load_spec
 from tools.cli.release.artifact_paths import artifact_destination
 from tools.cli.release.job_cache import job_cache_directory
-from tools.cli.release.local_profile import LocalProfileStore
 from tools.cli.release.profile import load_profile_root
-from tools.cli.release.profile_factor_set_queries import profile_factor_context
 from tools.cli.release.research_reporting.job_artifacts import collect_job_report
-from tools.cli.release.research_reporting.references.factor_set_workspace import (
-    validate_factor_set_reference,
-)
 from tools.cli.state import load_state, save_state
 from tools.cli.step import field_occurrences, render_step_event
 
@@ -42,7 +38,9 @@ def _json(value: Any) -> str:
 def _require_workspace():
     state = load_state()
     if not state.workspace_id:
-        raise click.ClickException("尚未选择 research workspace；请先运行 factortester workspace create/use")
+        raise click.ClickException(
+            "尚未选择测试配置工作区；请先运行 factortester workspace create/use"
+        )
     return state
 
 
@@ -82,33 +80,19 @@ def _load_profile_factor_sources(root: Path | None) -> list[dict[str, str]]:
 
 def _load_factor_set_descriptors(
     target_refs: tuple[str, ...],
-    *,
-    release_profile: Path | None,
 ) -> list[dict[str, Any]]:
     if not target_refs:
         return []
-    client_root = load_profile_root(release_profile)
-    store = LocalProfileStore(client_root)
-    values = []
+    client = client_from_config()
+    values: list[dict[str, Any]] = []
     for target_ref in target_refs:
-        matches = []
-        for profile in store.list():
-            try:
-                _repository, roots = profile_factor_context(profile)
-                matches.append(validate_factor_set_reference(
-                    kind="factor", target_ref=target_ref, roots=roots,
-                ))
-            except (OSError, ValueError):
-                continue
-        if len(matches) != 1:
+        payload = client.factor_set_descriptor(target_ref)
+        descriptor = payload.get("descriptor")
+        if not isinstance(descriptor, dict):
             raise click.ClickException(
-                "--factor-set-ref 必须精确匹配一个已登记工作区中的 v2 因子集合"
+                "--factor-set-ref 必须匹配当前用户可见的数据库因子集合"
             )
-        value = matches[0]
-        values.append({
-            "target_ref": target_ref,
-            "manifest": value["descriptor"],
-        })
+        values.append(descriptor)
     return values
 
 
@@ -148,7 +132,7 @@ def _load_strategy_specs(paths: tuple[Path, ...]) -> list[dict[str, Any]]:
 
 @click.group("workspace")
 def workspace() -> None:
-    """Manage durable research contexts and their active configuration."""
+    """管理测试配置工作区及其当前 ResearchConfiguration。"""
 
 
 @click.group("external-factor")
@@ -202,7 +186,7 @@ def external_factor_validate(manifest_path: Path, attach: bool) -> None:
     "--factor", "factors", multiple=True,
     help="具体 factor，格式 FAMILY_ALIAS=FACTOR_ALIAS，可重复。",
 )
-@click.option("--title", default="Factor research", show_default=True)
+@click.option("--title", default="Factor test", show_default=True)
 @friendly_errors
 def workspace_create(
     factor_families: tuple[str, ...], factors: tuple[str, ...], title: str,
@@ -532,6 +516,8 @@ def workspace_snapshot_list() -> None:
 @click.option("--port", "run_ports", multiple=True, type=click.IntRange(1, 65535), help="提交到指定 FactorTester 端口。")
 def run(run_ports: tuple[int, ...]) -> None:
     """Submit and inspect immutable research runs."""
+    if len(run_ports) > 1:
+        raise click.UsageError("一次 Run 只能指定一个执行端口")
 
 
 @run.command("preview")
@@ -578,7 +564,7 @@ def run(run_ports: tuple[int, ...]) -> None:
 )
 @click.option(
     "--factor-set-ref", "factor_set_refs", multiple=True,
-    help="将本地 CLI 已验证的冻结因子集合绑定到本次 RunSpec，可重复",
+    help="将数据库因子库中可见的冻结因子集合绑定到本次 RunSpec，可重复",
 )
 @click.option(
     "--release-profile",
@@ -620,54 +606,27 @@ def run_preview(
 ) -> None:
     """Preview the exact frozen RunSpec identity without creating state."""
     state = _require_workspace()
-    snapshot_options = (
-        {
-            "configuration_snapshot_id": configuration_snapshot_id,
-            "configuration_snapshot_revision": (
-                configuration_snapshot_revision
-            ),
-        }
-        if configuration_snapshot_id
-        else {}
+    preview_kwargs = build_run_request(
+        analyses=analyses,
+        retain_full=retain_full,
+        step_mode=step_mode,
+        configuration_snapshot_id=configuration_snapshot_id,
+        configuration_snapshot_revision=configuration_snapshot_revision,
+        flow_profile=flow_profile,
+        flow_profile_min_ms=flow_profile_min_ms,
+        margin_execution_profile=margin_execution_profile,
+        profile_factor_worktree=profile_factor_worktree,
+        factor_set_refs=factor_set_refs,
+        strategy_spec_paths=strategy_spec_paths,
+        profile_strategy_worktree=profile_strategy_worktree,
+        run_input_specs=run_input_specs,
+        output_requests=output_requests,
+        load_factor_sources=_load_profile_factor_sources,
+        load_factor_sets=_load_factor_set_descriptors,
+        load_strategy_specs=_load_strategy_specs,
+        load_strategy_bundle=_load_strategy_bundle,
+        load_run_inputs=load_run_input_dependencies,
     )
-    preview_kwargs = {
-        "analyses": list(analyses),
-        "retention_mode": "full" if retain_full else "summary",
-        "step_mode": step_mode,
-        **snapshot_options,
-    }
-    if flow_profile:
-        preview_kwargs["performance_profile"] = {
-            "kind": "cumulative_flow",
-            "min_total_ms": flow_profile_min_ms,
-        }
-    if margin_execution_profile:
-        preview_kwargs["margin_execution_profile"] = {
-            "kind": "cumulative",
-        }
-    if profile_factor_worktree is not None:
-        preview_kwargs["transient_factor_sources"] = _load_profile_factor_sources(
-            profile_factor_worktree
-        )
-    descriptors = _load_factor_set_descriptors(
-        factor_set_refs, release_profile=release_profile,
-    )
-    if descriptors:
-        preview_kwargs["factor_subject_descriptors"] = descriptors
-    specs = _load_strategy_specs(strategy_spec_paths)
-    if specs:
-        preview_kwargs["strategy_specs"] = specs
-    if profile_strategy_worktree is not None:
-        preview_kwargs["transient_strategy_sources"] = _load_strategy_bundle(
-            profile_strategy_worktree
-        )
-    dependencies = load_run_input_dependencies(
-        run_input_specs, analyses=analyses,
-    )
-    if dependencies:
-        preview_kwargs["run_input_dependencies"] = dependencies
-    if output_requests:
-        preview_kwargs["output_requests"] = list(output_requests)
     result = client_from_config().preview_run(
         state.workspace_id,
         None if configuration_snapshot_id else state.configuration_revision,
@@ -715,7 +674,7 @@ def run_preview(
 )
 @click.option(
     "--factor-set-ref", "factor_set_refs", multiple=True,
-    help="将本地 CLI 已验证的冻结因子集合绑定到本次 RunSpec，可重复",
+    help="将数据库因子库中可见的冻结因子集合绑定到本次 RunSpec，可重复",
 )
 @click.option(
     "--strategy-spec",
@@ -864,56 +823,31 @@ def run_submit(
                 )
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
-    snapshot_options = (
-        {
-            "configuration_snapshot_id": configuration_snapshot_id,
-            "configuration_snapshot_revision": (
-                configuration_snapshot_revision
-            ),
-        }
-        if configuration_snapshot_id
-        else {}
+    submit_kwargs = build_run_request(
+        analyses=analyses,
+        retain_full=retain_full,
+        step_mode=step_mode,
+        configuration_snapshot_id=configuration_snapshot_id,
+        configuration_snapshot_revision=configuration_snapshot_revision,
+        flow_profile=flow_profile,
+        flow_profile_min_ms=flow_profile_min_ms,
+        margin_execution_profile=margin_execution_profile,
+        profile_factor_worktree=profile_factor_worktree,
+        factor_set_refs=factor_set_refs,
+        strategy_spec_paths=strategy_spec_paths,
+        profile_strategy_worktree=profile_strategy_worktree,
+        run_input_specs=run_input_specs,
+        output_requests=output_requests,
+        load_factor_sources=_load_profile_factor_sources,
+        load_factor_sets=_load_factor_set_descriptors,
+        load_strategy_specs=_load_strategy_specs,
+        load_strategy_bundle=_load_strategy_bundle,
+        load_run_inputs=load_run_input_dependencies,
     )
-    submit_kwargs = {
-        "analyses": list(analyses),
-        "retention_mode": "full" if retain_full else "summary",
-        "step_mode": step_mode,
+    submit_kwargs.update({
         "trial_binding": trial_binding,
         "report_binding": report_binding,
-        **snapshot_options,
-    }
-    if flow_profile:
-        submit_kwargs["performance_profile"] = {
-            "kind": "cumulative_flow",
-            "min_total_ms": flow_profile_min_ms,
-        }
-    if margin_execution_profile:
-        submit_kwargs["margin_execution_profile"] = {
-            "kind": "cumulative",
-        }
-    if profile_factor_worktree is not None:
-        submit_kwargs["transient_factor_sources"] = _load_profile_factor_sources(
-            profile_factor_worktree
-        )
-    descriptors = _load_factor_set_descriptors(
-        factor_set_refs, release_profile=release_profile,
-    )
-    if descriptors:
-        submit_kwargs["factor_subject_descriptors"] = descriptors
-    specs = _load_strategy_specs(strategy_spec_paths)
-    if specs:
-        submit_kwargs["strategy_specs"] = specs
-    if profile_strategy_worktree is not None:
-        submit_kwargs["transient_strategy_sources"] = _load_strategy_bundle(
-            profile_strategy_worktree
-        )
-    dependencies = load_run_input_dependencies(
-        run_input_specs, analyses=analyses,
-    )
-    if dependencies:
-        submit_kwargs["run_input_dependencies"] = dependencies
-    if output_requests:
-        submit_kwargs["output_requests"] = list(output_requests)
+    })
     client = client_from_config()
     result = client.submit_run(
         state.workspace_id,

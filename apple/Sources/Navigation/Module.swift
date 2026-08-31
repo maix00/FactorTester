@@ -141,7 +141,7 @@ struct Module: Codable, Identifiable, Hashable {
             ]
         ),
         Module(id: "factors", title: "因子库", path: "/factors", requiresAuth: false),
-        Module(id: "products", title: "产品", path: "/products", requiresAuth: false),
+        Module(id: "products", title: "产品库", path: "/products", requiresAuth: false),
         Module(
             id: "manager", title: "服务器管理", sfSymbol: "server.rack",
             path: "/manager",

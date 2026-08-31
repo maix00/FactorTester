@@ -215,6 +215,37 @@
     return state.testRunBatch;
   }
 
+  function taskEntries(state, options = {}) {
+    const byID = new Map(synchronize(state).map(item => [item.groupID, item]));
+    return taskGroups(state).map(group => ({
+      group,
+      item: byID.get(groupIdentity(group)),
+    })).filter(entry => (
+      entry.item && (!options.submittedOnly || entry.item.jobID)
+    ));
+  }
+
+  function resultEntries(state) {
+    return taskEntries(state, {submittedOnly: true}).map(entry => ({
+      jobID: entry.item.jobID,
+      label: entry.item.groupLabel,
+      item: entry.item,
+    }));
+  }
+
+  function activeResultEntry(state, entries) {
+    const values = Array.isArray(entries) ? entries : resultEntries(state);
+    if (!values.length) return null;
+    let active = values.find(entry => (
+      entry.jobID === state.activeResultJobID
+    ));
+    if (!active) {
+      active = values[0];
+      state.activeResultJobID = active.jobID;
+    }
+    return active;
+  }
+
   function itemFor(state, group) {
     const groupID = groupIdentity(group);
     return synchronize(state).find(item => item.groupID === groupID);
@@ -416,10 +447,12 @@
   }
 
   window.FTTestRunBatchModel = Object.freeze({
-    BACKTEST_TASK_ID, PHASE_LABELS, backtestStrategyGroups, groupIdentity, groupLabel,
+    BACKTEST_TASK_ID, PHASE_LABELS, activeResultEntry, backtestStrategyGroups,
+    groupIdentity, groupLabel,
     clone, errorDetail, inputFingerprint, itemFor, invalidatePreview, jobPath, previewMatches,
     previewRecord, recordPreview, runSpecHash,
-    recordSubmission, recordLocalSubmission, routeQuery, runSpecPath, runSpecTarget,
-    synchronize, taskGroups, update,
+    recordSubmission, recordLocalSubmission, resultEntries, routeQuery,
+    runSpecPath, runSpecTarget,
+    synchronize, taskEntries, taskGroups, update,
   });
 })();

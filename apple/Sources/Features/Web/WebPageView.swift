@@ -39,9 +39,6 @@ final class WebPageSession {
         )
         #if os(macOS)
         webView?.configuration.userContentController.removeScriptMessageHandler(
-            forName: FactorLibraryLocalBridgeContract.messageName
-        )
-        webView?.configuration.userContentController.removeScriptMessageHandler(
             forName: ClientLocalCatalogBridgeContract.messageName
         )
         webView?.configuration.userContentController.removeScriptMessageHandler(
@@ -365,20 +362,12 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             )
             #if os(macOS)
             existing.configuration.userContentController.removeScriptMessageHandler(
-                forName: FactorLibraryLocalBridgeContract.messageName
-            )
-            existing.configuration.userContentController.removeScriptMessageHandler(
                 forName: ClientLocalCatalogBridgeContract.messageName
             )
             existing.configuration.userContentController.removeScriptMessageHandler(
                 forName: LocalRunBridgeContract.messageName
             )
             if allowsLocalCatalog {
-                existing.configuration.userContentController.addScriptMessageHandler(
-                    FactorLibraryLocalBridge(),
-                    contentWorld: .page,
-                    name: FactorLibraryLocalBridgeContract.messageName
-                )
                 existing.configuration.userContentController.addScriptMessageHandler(
                     ClientLocalCatalogBridge(),
                     contentWorld: .page,
@@ -411,11 +400,6 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         let configuration = WKWebViewConfiguration()
         #if os(macOS)
         if allowsLocalCatalog {
-            configuration.userContentController.addScriptMessageHandler(
-                FactorLibraryLocalBridge(),
-                contentWorld: .page,
-                name: FactorLibraryLocalBridgeContract.messageName
-            )
             configuration.userContentController.addScriptMessageHandler(
                 ClientLocalCatalogBridge(),
                 contentWorld: .page,
@@ -508,9 +492,6 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             forName: ClientWebAuthenticationMessage.handlerName
         )
         #if os(macOS)
-        webView.configuration.userContentController.removeScriptMessageHandler(
-            forName: FactorLibraryLocalBridgeContract.messageName
-        )
         webView.configuration.userContentController.removeScriptMessageHandler(
             forName: ClientLocalCatalogBridgeContract.messageName
         )

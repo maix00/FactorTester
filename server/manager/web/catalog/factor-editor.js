@@ -249,7 +249,7 @@
           if (!family) {
             return {valid: false, error: context.t("找不到该 alias 对应的可见因子家族")};
           }
-          return context.api("/api/factor-library/validate", {
+          return context.api("/api/factor-library/families/validate", {
             resolve_factor_alias: true,
             factor_alias: alias,
             factor_family_alias: familyAliasValue,
@@ -312,7 +312,7 @@
     state.validationMessage = context.t("正在校验源码并解析参数…");
     redraw();
     try {
-      const parsed = await context.api("/api/factor-library/validate", {
+      const parsed = await context.api("/api/factor-library/families/validate", {
         method: "POST",
         body: JSON.stringify({source_code: state.sourceCode, params: {}}),
       });
@@ -323,7 +323,7 @@
         parsed.params || [], state.parameterValues,
       );
       const value = !state.familyMode && Object.keys(parameterValues).length
-        ? await context.api("/api/factor-library/validate", {
+        ? await context.api("/api/factor-library/families/validate", {
           method: "POST",
           body: JSON.stringify({
             source_code: state.sourceCode,
@@ -487,7 +487,7 @@
       const isPublic = state.family?.factor_kind === "public"
         || state.family?.source === "public"
         || owner === "public" || owner === "__public_jobs__";
-      const value = await context.api("/api/factor-library/validate", {
+      const value = await context.api("/api/factor-library/families/validate", {
         method: "POST",
         body: JSON.stringify({
           resolve_factor: true,
@@ -512,7 +512,7 @@
       };
     }
     const value = await context.api(
-      `/api/factor-library/configs/${encodeURIComponent(alias)}`,
+      `/api/factor-library/configurations/${encodeURIComponent(alias)}`,
       {
         method: "PUT",
         body: JSON.stringify({
@@ -548,7 +548,7 @@
     if (context.testObjectTemporary) {
       const alias = state.inspection?.factor_name || state.factorID
         || readInput(fields.name);
-      const value = await context.api("/api/factor-library/validate", {
+      const value = await context.api("/api/factor-library/families/validate", {
         method: "POST",
         body: JSON.stringify({
           source_code: state.sourceCode,
@@ -574,23 +574,24 @@
     const endpoint = state.familyMode
       ? state.publicMode
         ? state.mode === "create"
-          ? "/api/factor-library/create-public"
-          : `/api/factor-library/update-public/${encodeURIComponent(state.factorID)}`
+          ? "/api/factor-library/families/public"
+          : `/api/factor-library/families/public/${encodeURIComponent(state.factorID)}`
         : state.mode === "create"
-          ? "/api/factor-library/create"
-          : `/api/factor-library/update/${encodeURIComponent(state.factorID)}`
+          ? "/api/factor-library/families/custom"
+          : `/api/factor-library/families/custom/${encodeURIComponent(state.factorID)}`
       : state.mode === "create"
-        ? "/api/factor-library/create"
-        : `/api/factor-library/update/${encodeURIComponent(state.factorID)}`;
+        ? "/api/factor-library/families/custom"
+        : `/api/factor-library/families/custom/${encodeURIComponent(state.factorID)}`;
     const value = await context.api(endpoint, {
-      method: "POST", body: JSON.stringify(payload),
+      method: state.mode === "create" ? "POST" : "PUT",
+      body: JSON.stringify(payload),
     });
     const saved = value.factor || value;
     const alias = saved.name || saved.id || state.factorID;
     let registered = null;
     if (!state.familyMode && Object.keys(state.parameterValues || {}).length) {
       const libraryValue = await context.api(
-        `/api/factor-library/configs/${encodeURIComponent(alias)}`,
+        `/api/factor-library/configurations/${encodeURIComponent(alias)}`,
         {
           method: "PUT",
           body: JSON.stringify({

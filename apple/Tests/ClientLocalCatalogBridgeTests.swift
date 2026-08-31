@@ -63,7 +63,7 @@ final class ClientLocalCatalogBridgeTests: XCTestCase {
 
     func testBridgeRejectsServerAndExternalRoutes() {
         for path in [
-            "/api/catalog/sources",
+            "/api/product-library/data-sources",
             "https://example.test/api/client/product_sources",
         ] {
             XCTAssertThrowsError(

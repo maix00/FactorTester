@@ -27,11 +27,7 @@
   function runSpecPath(...args) { return model().runSpecPath(...args); }
 
   function selectedTasks(state) {
-    const groups = model().taskGroups(state);
-    const items = model().synchronize(state);
-    const byID = new Map(items.map(item => [item.groupID, item]));
-    return groups.map(group => ({group, item: byID.get(model().groupIdentity(group))}))
-      .filter(entry => entry.item);
+    return model().taskEntries(state);
   }
 
   function headerActions(context, state, refresh) {
@@ -244,16 +240,16 @@
   }
 
   function submittedItems(state) {
-    return model().synchronize(state).filter(item => item.jobID);
+    return model().taskEntries(state, {submittedOnly: true})
+      .map(entry => entry.item);
   }
 
   function renderSubmitted(context, state, refresh) {
-    const items = submittedItems(state);
-    if (!items.length) return null;
-    if (!items.some(item => item.groupID === state.activeRunGroupID)) {
-      state.activeRunGroupID = items[0].groupID;
-    }
-    const active = items.find(item => item.groupID === state.activeRunGroupID) || items[0];
+    const entries = model().resultEntries(state);
+    const selected = model().activeResultEntry(state, entries);
+    if (!selected) return null;
+    const items = entries.map(entry => entry.item);
+    const active = selected.item;
     const root = document.createElement("section");
     root.className = "test-run-observer";
     const heading = document.createElement("div");
@@ -295,14 +291,14 @@
       items.forEach(item => {
         const button = document.createElement("button");
         button.type = "button";
-        button.classList.toggle("active", item.groupID === active.groupID);
+        button.classList.toggle("active", item.jobID === active.jobID);
         const name = document.createElement("span");
         name.textContent = item.groupLabel;
         const status = document.createElement("small");
         status.textContent = context.t(model().PHASE_LABELS[item.phase] || item.phase);
         button.append(name, status);
         button.addEventListener("click", () => {
-          state.activeRunGroupID = item.groupID;
+          state.activeResultJobID = item.jobID;
           refresh?.();
         });
         tabs.append(button);

@@ -87,7 +87,7 @@ const context = {
 (async () => {
   const workspace = await window.FTTestConfiguration.ensureWorkspace(context, state);
   assert.equal(workspace.workspace_id, 'workspace-1');
-  assert.deepEqual(urls.map(value => value.url), ['/api/workspaces']);
+  assert.deepEqual(urls.map(value => value.url), ['/api/test-authoring/workspaces']);
   console.log('PASS: IC preview uses registered groups and repairs partial workspace state');
 })().catch(error => {
   console.error(error);

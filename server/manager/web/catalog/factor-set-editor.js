@@ -121,7 +121,7 @@
           items.find(item => item.value === ref)?.record
         )).filter(Boolean);
         if (!members.length) throw new Error(context.t("请至少选择一个因子"));
-        const payload = await context.api("/api/catalog/factor-sets", {
+        const payload = await context.api("/api/factor-library/factor-sets", {
           method: "POST",
           body: JSON.stringify({
             persist: context.testObjectTemporary !== true,

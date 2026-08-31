@@ -15,16 +15,13 @@ from tools.cli.commands.research_graph_factor_subjects import (
     ("value", "kind"),
     [
         (
-            "factor:v1:profile-maxa:cGF0aA:aWQ:"
-            + "a" * 40 + ":" + "b" * 40,
+            "factor:v2:" + "a" * 43,
             "factor",
         ),
         (
-            "factor-set:v1:profile-maxa:cGF0aA:aWQ:"
-            + "a" * 40 + ":" + "b" * 40,
+            "factor-set:v2:" + "b" * 43,
             "factor_set",
         ),
-        ("factor-expr:F|N:20d@sha256:" + "c" * 64, "factor_expr_execution"),
     ],
 )
 def test_factor_subject_accepts_only_frozen_identities(value, kind):
@@ -32,10 +29,7 @@ def test_factor_subject_accepts_only_frozen_identities(value, kind):
 
 
 def test_factor_family_is_a_navigation_reference_not_a_subject() -> None:
-    value = (
-        "factor-family:v1:profile-maxa:cGF0aA:aWQ:"
-        + "a" * 40 + ":" + "b" * 40
-    )
+    value = "factor-family:v2:" + "c" * 43
 
     assert factor_reference_kind(value) == "factor_family"
     with pytest.raises(ValueError, match="navigation-only"):
@@ -72,14 +66,8 @@ def test_owner_reference_or_typed_ref_is_not_a_family_selector(value) -> None:
         split_owner_qualified_factor_family(value)
 
 def test_current_report_requirement_selects_its_typed_factor_binding() -> None:
-    selected = (
-        "factor:v1:profile-maxa:cGF0aA:c2VsZWN0ZWQ:"
-        + "a" * 40 + ":" + "b" * 40
-    )
-    unrelated = (
-        "factor:v1:profile-maxa:cGF0aA:dW5yZWxhdGVk:"
-        + "c" * 40 + ":" + "d" * 40
-    )
+    selected = "factor:v2:" + "d" * 43
+    unrelated = "factor:v2:" + "e" * 43
     snapshot = {
         "components": [
             {"component_id": "chapter", "parent_id": "root"},

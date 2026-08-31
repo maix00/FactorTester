@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import json
 
-from flask import Flask
 import pytest
-import yaml
+from flask import Flask
 
 import settings as Settings
 from server.modules.single_factor_test import sft_bp
 from server.services import research_graphs
-from server.services.research_graph.protocol import graph_content_hash
 from server.services.research_graph.presentations import create_schema
+from server.services.research_graph.protocol import graph_content_hash
 from tools.data.sqlite.db import connect_sqlite
 
 
@@ -157,47 +156,6 @@ def test_locale_projection_does_not_change_graph_hash(tmp_path, monkeypatch):
         graph_id="factor-research",
         locale="zh-Hans",
     )[0]["presentation_status"] == "missing"
-
-
-def test_locale_yaml_is_a_bundle_and_missing_locale_is_explicit(client):
-    graph = research_graphs.register_graph(_graph(), actor="curator-agent")
-    research_graphs.register_presentation(
-        graph,
-        _presentation(graph, locale="en"),
-        actor="curator-agent",
-    )
-
-    versions = client.get(
-        "/api/research-graphs/factor-research/versions?locale=en"
-    )
-    assert versions.status_code == 200
-    assert versions.json["locale"] == "en"
-    assert versions.json["versions"][0]["presentation_status"] == "available"
-    assert versions.json["versions"][0]["presentation"]["title"] == (
-        "Research graph"
-    )
-
-    response = client.get(
-        "/api/research-graphs/factor-research/versions/1/yaml?locale=en"
-    )
-
-    assert response.status_code == 200
-    assert response.headers["Content-Language"] == "en"
-    assert response.headers["X-FactorTester-Graph-Locale"] == "en"
-    assert "X-FactorTester-Graph-Translation-Hash" not in response.headers
-    assert '-en.yaml"' in response.headers["Content-Disposition"]
-    payload = yaml.safe_load(response.data.decode())
-    assert payload["format"] == "factor-tester.research-graph-presentation.v1"
-    assert payload["graph"]["content_hash"] == graph["content_hash"]
-    assert payload["presentation"]["locale"] == "en"
-    assert "created_by" not in payload["presentation"]
-    assert json.dumps(payload, ensure_ascii=False, sort_keys=True)
-
-    missing = client.get(
-        "/api/research-graphs/factor-research/versions/1/yaml?locale=zh-Hans"
-    )
-    assert missing.status_code == 409
-    assert missing.json["locale"] == "zh-Hans"
 
 
 def test_presentation_validation_allows_partial_overlay_and_rejects_unknown_fields(

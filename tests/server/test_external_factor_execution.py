@@ -3,10 +3,19 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from server.modules.single_factor_test.group import _resolve_group_strategy_settings
+from tools.factors.formula_identity import freeze_factor_identity
 
 
 def test_group_run_resolves_frozen_external_factor_before_registry(monkeypatch) -> None:
     factor = SimpleNamespace(alias="external_momentum")
+    frozen = freeze_factor_identity(
+        owner_ref="alice",
+        family_alias="external_momentum",
+        factor_alias="external_momentum",
+        family_formula_fingerprint="a" * 64,
+        self_formula_fingerprint="b" * 64,
+        params={},
+    )
     selection = SimpleNamespace(selection_id="selection-1", products=())
     monkeypatch.setattr(
         "server.modules.shared.factor_tester_runtime.selection_for_product_path_selection",
@@ -29,17 +38,14 @@ def test_group_run_resolves_frozen_external_factor_before_registry(monkeypatch) 
             "name": "external",
             "splitCount": 5,
             "groupIndex": 1,
-            "factor_candidate_refs": ["external_momentum"],
+            "factor_candidate_refs": [frozen["ref"]],
             "product_path_selection_id": "selection-1",
         },
         resolved_backtest_settings={"group-1": {}},
         fallback_group_settings={},
         page_uuid="",
             data={
-                "factors": [{
-                    "factor_ref": "external_momentum",
-                    "alias": "external_momentum",
-                }],
+                "factors": [frozen],
                 "external_factor_artifacts": [{"artifact_id": "external_momentum:abc"}],
             },
         page_factors_dict={},

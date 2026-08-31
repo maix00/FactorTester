@@ -876,7 +876,7 @@ def _execution_payload(configuration: dict, kind: str) -> dict:
     return execution
 
 
-@sft_bp.post("/api/workspaces")
+@sft_bp.post("/api/test-authoring/workspaces")
 def create_research_workspace():
     data = request.get_json(silent=True) or {}
     factors = data.get("factors") or []
@@ -884,7 +884,7 @@ def create_research_workspace():
         return jsonify({"success": False, "error": "factors must be an array of objects"}), 400
     workspace = research_workspaces.create_workspace(
         owner=require_user(),
-        title=str(data.get("title") or "Factor research").strip(),
+        title=str(data.get("title") or "Factor test").strip(),
         factors=factors,
     )
     return jsonify({"success": True, "workspace": workspace}), 201
@@ -900,7 +900,7 @@ def get_job_artifact_capabilities():
     })
 
 
-@sft_bp.get("/api/workspaces")
+@sft_bp.get("/api/test-authoring/workspaces")
 def list_research_workspaces():
     return jsonify({
         "success": True,
@@ -908,7 +908,7 @@ def list_research_workspaces():
     })
 
 
-@sft_bp.get("/api/workspaces/<workspace_id>")
+@sft_bp.get("/api/test-authoring/workspaces/<workspace_id>")
 def get_research_workspace(workspace_id: str):
     workspace = research_workspaces.load_workspace(
         workspace_id=workspace_id, owner=require_user(),
@@ -918,7 +918,7 @@ def get_research_workspace(workspace_id: str):
     return jsonify({"success": True, "workspace": workspace})
 
 
-@sft_bp.delete("/api/workspaces/<workspace_id>")
+@sft_bp.delete("/api/test-authoring/workspaces/<workspace_id>")
 def delete_research_workspace(workspace_id: str):
     value = research_workspaces.delete_draft_workspace(
         workspace_id=workspace_id, owner=require_user(),
@@ -928,7 +928,7 @@ def delete_research_workspace(workspace_id: str):
     return jsonify({"success": True, **value})
 
 
-@sft_bp.get("/api/workspaces/<workspace_id>/configuration")
+@sft_bp.get("/api/test-authoring/workspaces/<workspace_id>/configuration")
 def get_workspace_configuration(workspace_id: str):
     value = research_configurations.load_workspace_configuration(
         workspace_id=workspace_id, owner=require_user(),
@@ -952,7 +952,7 @@ def validate_external_factor_artifact():
     return jsonify({"success": True, "artifact": artifact})
 
 
-@sft_bp.put("/api/workspaces/<workspace_id>/configuration")
+@sft_bp.put("/api/test-authoring/workspaces/<workspace_id>/configuration")
 def update_workspace_configuration(workspace_id: str):
     data = request.get_json(silent=True) or {}
     try:
@@ -979,7 +979,7 @@ def update_workspace_configuration(workspace_id: str):
     return jsonify({"success": True, "configuration": value})
 
 
-@sft_bp.get("/api/configuration-templates")
+@sft_bp.get("/api/test-authoring/configuration-templates")
 def list_configuration_templates():
     return jsonify({
         "success": True,
@@ -987,7 +987,7 @@ def list_configuration_templates():
     })
 
 
-@sft_bp.post("/api/workspaces/<workspace_id>/configuration/templates")
+@sft_bp.post("/api/test-authoring/workspaces/<workspace_id>/configuration/templates")
 def save_configuration_template(workspace_id: str):
     data = request.get_json(silent=True) or {}
     name = str(data.get("name") or "").strip()
@@ -1002,7 +1002,7 @@ def save_configuration_template(workspace_id: str):
     return jsonify({"success": True, "template": template}), 201
 
 
-@sft_bp.post("/api/workspaces/<workspace_id>/configuration/load-template")
+@sft_bp.post("/api/test-authoring/workspaces/<workspace_id>/configuration/load-template")
 def load_configuration_template(workspace_id: str):
     data = request.get_json(silent=True) or {}
     configuration_id = str(data.get("configuration_id") or "").strip()
@@ -1026,7 +1026,7 @@ def load_configuration_template(workspace_id: str):
     return jsonify({"success": True, "configuration": value})
 
 
-@sft_bp.put("/api/configuration-templates/<configuration_id>")
+@sft_bp.put("/api/test-authoring/configuration-templates/<configuration_id>")
 def overwrite_configuration_template(configuration_id: str):
     workspace_id = str((request.get_json(silent=True) or {}).get("workspace_id") or "").strip()
     if not workspace_id:
@@ -1042,7 +1042,7 @@ def overwrite_configuration_template(configuration_id: str):
     return jsonify({"success": True, "template": value})
 
 
-@sft_bp.delete("/api/configuration-templates/<configuration_id>")
+@sft_bp.delete("/api/test-authoring/configuration-templates/<configuration_id>")
 def delete_configuration_template(configuration_id: str):
     if not research_configurations.delete_template(
         configuration_id=configuration_id, owner=require_user(),

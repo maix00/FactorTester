@@ -18,7 +18,7 @@ def test_provider_thread_projects_structured_chatkit_items_without_raw_reasoning
                     "先读取状态，再核对日志。",
                 ], "content": ["PRIVATE_CHAIN_OF_THOUGHT"]},
                 {"id": "c1", "type": "commandExecution",
-                 "command": "factortester products list",
+                 "command": "factortester product-library list",
                  "aggregatedOutput": "98 products", "exitCode": 0,
                  "status": "completed"},
                 {"id": "f1", "type": "fileChange", "status": "completed",
@@ -33,7 +33,7 @@ def test_provider_thread_projects_structured_chatkit_items_without_raw_reasoning
                  "text": "正在整理结果。"},
                 {"id": "a1", "type": "agentMessage",
                  "phase": "final_answer",
-                 "text": "完成。\n\n```bash\nfactortester products list\n```"},
+                 "text": "完成。\n\n```bash\nfactortester product-library list\n```"},
             ],
         }],
     }
@@ -53,7 +53,7 @@ def test_provider_thread_projects_structured_chatkit_items_without_raw_reasoning
         "```text\n98 products\n```\n\nExit code: 0"
     )
     assert items[2]["workflow"]["summary"] == {
-        "title": "factortester products list",
+        "title": "factortester product-library list",
     }
     assert items[4]["arguments"] == {"limit": 20}
     assert items[-2]["content"][0]["text"] == "正在整理结果。"

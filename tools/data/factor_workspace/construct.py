@@ -10,7 +10,10 @@ from pathlib import Path
 from typing import Any
 
 from tools.data.factor_workspace import storage as factor_workspace_storage
-from tools.decorators.factor_workspace import extract_factor_workspace_exports, has_factor_workspace_decorator
+from tools.decorators.factor_workspace import (
+    extract_factor_workspace_exports,
+    has_factor_workspace_decorator,
+)
 
 from .sdk import AUTHOR_SDK_MODULES
 
@@ -563,8 +566,8 @@ def _sync_policy_workspace(root: str) -> bool:
         "1. Define or edit factors in `custom_factors/` and parameter candidates through "
         "the CLI factor-library commands.\n"
         "2. Draft policy ideas in `policies/`.\n"
-        "3. Use `factortester factor-library workspace git status|diff|commit` to keep "
-        "the experiment reproducible.\n"
+        "3. Use ordinary `git status`, `git diff`, and `git commit` in the Profile "
+        "worktree to keep the experiment reproducible.\n"
         "4. Run CLI backtests against selected product groups and compare results.\n",
     )
     example_changed = _write_text_if_changed(
@@ -616,30 +619,3 @@ def _sync_vscode_settings(root: str) -> bool:
     if not os.path.exists(settings_path) or changed:
         return _write_json(settings_path, payload)
     return False
-
-
-def build_factor_workspace(username: str) -> dict[str, Any]:
-    from .sync import sync_database_to_workspace
-    from .repository import FactorWorkspaceRepository
-
-    result = sync_database_to_workspace(username, branch_mode="auto", clear_existing=True)
-    git_info = result.get("git") or {}
-    if git_info.get("git_enabled"):
-        repository = FactorWorkspaceRepository(username)
-        commit_sha = repository.commit_generated("chore: rebuild factor workspace")
-        if commit_sha:
-            created_branches = repository.materialize_branches()
-            result["git_commit_sha"] = commit_sha
-            if created_branches:
-                result["git_created_branches"] = created_branches
-        result["git"] = repository.state()
-        result["git_selected_branch"] = result["git"].get("git_current_branch", "")
-        manifest_path = os.path.join(repository.root, ".factor_workspace", "manifest.json")
-        manifest = {}
-        if os.path.exists(manifest_path):
-            with open(manifest_path, "r", encoding="utf-8") as file:
-                manifest = json.load(file)
-        manifest["git"] = result["git"]
-        manifest["git_selected_branch"] = result["git_selected_branch"]
-        _write_json(manifest_path, manifest)
-    return result

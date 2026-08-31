@@ -941,9 +941,9 @@ def test_setting_routes_reject_unknown_tabs_instead_of_falling_back() -> None:
     app.register_blueprint(sft_bp)
     client = app.test_client()
 
-    index = client.get("/api/backtest/settings/group_test")
-    tab = client.get("/api/backtest/settings/group_test/tabs/engine")
-    missing = client.get("/api/backtest/settings/group_test/tabs/legacy")
+    index = client.get("/api/test-authoring/modules/group_test")
+    tab = client.get("/api/test-authoring/modules/group_test/tabs/engine")
+    missing = client.get("/api/test-authoring/modules/group_test/tabs/legacy")
 
     assert index.status_code == 200
     assert "settings" not in index.get_json()
@@ -961,7 +961,7 @@ def test_setting_manifest_does_not_read_page_runtime_time() -> None:
     app.register_blueprint(sft_bp)
 
     payload = app.test_client().get(
-        "/api/backtest/settings/group_test?page_uuid=page-1"
+        "/api/test-authoring/modules/group_test?page_uuid=page-1"
     ).get_json()
 
     assert payload["defaults"]["start_date"]["value"] == ""
@@ -1307,7 +1307,7 @@ def test_group_run_resolves_window_from_payload_execution_settings() -> None:
 def test_setting_index_is_a_real_lazy_loading_boundary() -> None:
     app = Flask(__name__)
     app.register_blueprint(sft_bp)
-    payload = app.test_client().get("/api/backtest/settings/group_test").get_json()
+    payload = app.test_client().get("/api/test-authoring/modules/group_test").get_json()
 
     assert payload["tab_url_template"].endswith("/tabs/{tab_key}")
     assert all(
@@ -1447,7 +1447,7 @@ def test_setting_summary_preserves_defaults_but_defers_tab_control_metadata() ->
     full = application.manifest()
 
     assert summary["manifest_mode"] == "summary"
-    assert summary["full_manifest_url"] == "/api/backtest/settings/group_test"
+    assert summary["full_manifest_url"] == "/api/test-authoring/modules/group_test"
     assert set(summary["defaults"]) == set(full["defaults"])
     for key, field in summary["defaults"].items():
         assert field["value"] == full["defaults"][key]["value"]

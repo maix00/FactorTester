@@ -125,7 +125,7 @@
     ) return state.workspace;
     if (workspaceID) {
       const value = await context.api(
-        `/api/workspaces/${encodeURIComponent(workspaceID)}/configuration`,
+        `/api/test-authoring/workspaces/${encodeURIComponent(workspaceID)}/configuration`,
       );
       const restored = value?.configuration || value;
       if (
@@ -150,7 +150,7 @@
       title: `${kindTitle} · ${alias}`,
       factors: FTTestConfigurationCompiler.factorSubjects(factors),
     };
-    const value = await context.api("/api/workspaces", {
+    const value = await context.api("/api/test-authoring/workspaces", {
       method: "POST", body: JSON.stringify(body),
     });
     state.workspace = value.workspace;
@@ -190,7 +190,7 @@
     const payload = configurationPayload(state, group);
     state.analysis = structuredClone(payload.analyses[state.kind]);
     const value = await context.api(
-      `/api/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration`,
+      `/api/test-authoring/workspaces/${encodeURIComponent(state.workspace.workspace_id)}/configuration`,
       {
         method: "PUT",
         body: JSON.stringify({expected_revision: configuration.revision, payload}),
@@ -327,7 +327,16 @@
       const stored = item.product_path_selection;
       const storedPaths = stored?.selected_paths || stored?.paths || [];
       const catalog = catalogGroups.get(id);
-      if (!catalog || storedPaths.length) return item;
+      if (!id) return item;
+      if (!catalog || storedPaths.length) return {
+        ...item,
+        product_path_selection_id: id,
+        product_path_selection: {
+          ...(stored || {}),
+          product_path_selection_id: id,
+          product_group_template_id: stored?.product_group_template_id || id,
+        },
+      };
       return {
         ...item,
         product_path_selection_id: id,

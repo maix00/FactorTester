@@ -9,7 +9,7 @@
     if (state.categoryCandidatesLoaded) return;
     if (pendingLoads.has(state)) return pendingLoads.get(state);
     const request = (async () => { try {
-      const value = await context.api("/api/data_source_categories");
+      const value = await context.api("/api/product-library/data-source-categories");
       const fetched = (value.categories || []).map(item => ({
         ...item,
         enabled: item.enabled !== false,

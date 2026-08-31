@@ -212,14 +212,14 @@
   function sourceVersionsEndpoint(options = {}) {
     const kind = encodeURIComponent(options.sourceKind || "public");
     const family = encodeURIComponent(options.familyID || "");
-    return `/api/catalog/factor-sources/${kind}/${family}/versions${versionQuery(options)}`;
+    return `/api/factor-library/family-sources/${kind}/${family}/versions${versionQuery(options)}`;
   }
 
   function versionEndpoint(options = {}, version = "current") {
     const kind = encodeURIComponent(options.sourceKind || "public");
     const family = encodeURIComponent(options.familyID || "");
     const selected = encodeURIComponent(version || "current");
-    return `/api/catalog/factor-sources/${kind}/${family}/versions/${selected}${versionQuery(options)}`;
+    return `/api/factor-library/family-sources/${kind}/${family}/versions/${selected}${versionQuery(options)}`;
   }
 
   function versionItems(context, payload) {

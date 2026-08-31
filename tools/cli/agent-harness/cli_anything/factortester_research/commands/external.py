@@ -15,6 +15,7 @@ from ..core.external_factor import (
 from ..core.session import load_session, record_event, save_session
 from .common import echo_json
 
+
 @click.group("external-factor")
 def external_factor() -> None:
     """Plan and validate external Vibe factor artifacts without bypassing GTHT."""

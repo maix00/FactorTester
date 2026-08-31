@@ -254,7 +254,7 @@ assert.deepStrictEqual(
     content: new Element(),
     toolbar: new Element(),
     api: async path => {
-      assert.match(path, /factor-sources\/custom\/MmRateOfChg\/versions\/current/);
+      assert.match(path, /family-sources\/custom\/MmRateOfChg\/versions\/current/);
       return {
         success: true,
         source_code: "class MmRateOfChg(FactorFamily):\n    pass\n",
@@ -282,7 +282,7 @@ assert.deepStrictEqual(
   assert.match(currentSource.children[1].children[0].textContent, /MmRateOfChg/);
 
   const familyContext = {...context, api: async path => {
-    assert.match(path, /factor-sources\/custom\/MmRateOfChg\/versions/);
+    assert.match(path, /family-sources\/custom\/MmRateOfChg\/versions/);
     if (path.includes(`/${"b".repeat(64)}`)) {
       return {
         success: true,

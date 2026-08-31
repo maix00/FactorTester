@@ -11,8 +11,8 @@ from tools.testers.ic_test.configuration import (
 from tools.testers.ic_test.execution import plan_ic_jobs, validate_ic_job_plan
 
 
-ROC = "factor:v1:profile-maxa:path:roc:commit:blob"
-SGCCS = "factor:v1:profile-maxa:path:sgccs:commit:blob"
+ROC = "factor:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+SGCCS = "factor:v2:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 
 def _configuration():

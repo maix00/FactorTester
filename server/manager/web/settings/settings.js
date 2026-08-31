@@ -93,7 +93,7 @@
     body.append(pageHeader(context.t("服务器"), context.t("配置 Manager 与当前 FactorTester 服务端口"), "server.rack"));
     const [ports, manifest] = await Promise.all([
       context.api("/api/jobs/ports"),
-      context.api("/api/backtest/settings/group_test"),
+      context.api("/api/test-authoring/modules/group_test"),
     ]);
     if (!current(context)) return;
     // Settings only needs backend-declared field metadata.  Do not load the

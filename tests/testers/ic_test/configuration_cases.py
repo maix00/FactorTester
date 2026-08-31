@@ -12,9 +12,9 @@ from tools.testers.ic_test.configuration import (
 )
 
 
-ROC = "factor:v1:profile-maxa:path:roc:commit:blob"
-SGCCS = "factor:v1:profile-maxa:path:sgccs:commit:blob"
-MOMENTUM_SET = "factor-set:v1:profile-maxa:path:momentum:commit:blob"
+ROC = "factor:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+SGCCS = "factor:v2:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+MOMENTUM_SET = "factor-set:v2:ccccccccccccccccccccccccccccccccccccccccccc"
 
 
 def flat_settings(**overrides: object) -> dict[str, object]:

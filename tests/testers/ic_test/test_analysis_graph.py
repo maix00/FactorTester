@@ -28,16 +28,16 @@ def _core(
 
 
 def test_core_test_identity_is_deterministic_and_uses_execution_axes() -> None:
-    left = _core("factor:v1:roc", "MIN5")
-    right = _core("factor:v1:roc", "MIN5")
-    other = _core("factor:v1:roc", "MIN10")
+    left = _core("factor:v2:C_hxmG_kcqe_YUpCZtfvY7cvSxHKmqFz1vC8-DpM0hY", "MIN5")
+    right = _core("factor:v2:C_hxmG_kcqe_YUpCZtfvY7cvSxHKmqFz1vC8-DpM0hY", "MIN5")
+    other = _core("factor:v2:C_hxmG_kcqe_YUpCZtfvY7cvSxHKmqFz1vC8-DpM0hY", "MIN10")
 
     assert left.core_test_ref == right.core_test_ref
     assert left.core_test_ref != other.core_test_ref
     assert left.to_dict() == {
         "core_test_ref": left.core_test_ref,
         "product_scope_ref": "metals",
-        "factor_ref": "factor:v1:roc",
+        "factor_ref": "factor:v2:C_hxmG_kcqe_YUpCZtfvY7cvSxHKmqFz1vC8-DpM0hY",
         "horizon": "MIN5",
         "entry_delay_bars": 0,
         "method": "rank",
@@ -46,8 +46,8 @@ def test_core_test_identity_is_deterministic_and_uses_execution_axes() -> None:
 
 
 def test_analysis_graph_accepts_single_core_analyses_and_cross_horizon_reduce() -> None:
-    min5 = _core("factor:v1:roc", "MIN5")
-    min10 = _core("factor:v1:roc", "MIN10")
+    min5 = _core("factor:v2:C_hxmG_kcqe_YUpCZtfvY7cvSxHKmqFz1vC8-DpM0hY", "MIN5")
+    min10 = _core("factor:v2:C_hxmG_kcqe_YUpCZtfvY7cvSxHKmqFz1vC8-DpM0hY", "MIN10")
     graph = ICAnalysisGraph(
         core_tests=(min5, min10),
         analyses=(
@@ -72,7 +72,7 @@ def test_analysis_graph_accepts_single_core_analyses_and_cross_horizon_reduce() 
 
 
 def test_analysis_graph_rejects_analysis_target_for_core_only_type() -> None:
-    core = _core("factor:v1:roc", "MIN5")
+    core = _core("factor:v2:C_hxmG_kcqe_YUpCZtfvY7cvSxHKmqFz1vC8-DpM0hY", "MIN5")
     graph = ICAnalysisGraph(
         core_tests=(core,),
         analyses=(
@@ -96,8 +96,8 @@ def test_analysis_graph_rejects_analysis_target_for_core_only_type() -> None:
 
 
 def test_analysis_graph_rejects_incompatible_cross_horizon_group() -> None:
-    metals = _core("factor:v1:roc", "MIN5", scope="metals")
-    energy = _core("factor:v1:roc", "MIN10", scope="energy")
+    metals = _core("factor:v2:C_hxmG_kcqe_YUpCZtfvY7cvSxHKmqFz1vC8-DpM0hY", "MIN5", scope="metals")
+    energy = _core("factor:v2:C_hxmG_kcqe_YUpCZtfvY7cvSxHKmqFz1vC8-DpM0hY", "MIN10", scope="energy")
     graph = ICAnalysisGraph(
         core_tests=(metals, energy),
         analyses=(

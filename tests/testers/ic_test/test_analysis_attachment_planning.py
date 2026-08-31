@@ -13,7 +13,7 @@ from tools.testers.ic_test.core import ICCoreTest
 def _core(horizon: str, *, scope: str = "metals") -> ICCoreTest:
     return ICCoreTest(
         product_scope_ref=scope,
-        factor_ref="factor:v1:profile-maxa:path:roc:commit:blob",
+        factor_ref="factor:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         horizon=horizon,
         entry_delay_bars=0,
         method="rank",

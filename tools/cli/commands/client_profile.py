@@ -31,11 +31,7 @@ from tools.cli.release.profile_sync import (
     sync_profile as _sync_profile,
 )
 from tools.cli.release.storage import read_json
-from tools.cli.release.user_layout import (
-    default_user_factor_library,
-    default_user_profile_root,
-    user_layout_status,
-)
+from tools.cli.release.user_layout import default_user_profile_root, user_layout_status
 
 
 def _json(value) -> str:
@@ -120,9 +116,8 @@ def create_profile(
     release_profile: Path | None,
 ) -> None:
     """Create one provider-neutral local Profile and optional Agent."""
-    receipt = ProfileLifecycle(
-        load_profile_root(release_profile)
-    ).create(
+    profile_root = load_profile_root(release_profile)
+    receipt = ProfileLifecycle(profile_root).create(
         profile_id=profile_id,
         display_name=display_name,
         server_url=server_url,
@@ -131,8 +126,20 @@ def create_profile(
         principal_ref=principal_ref,
     )
     profile = LocalProfileStore(
-        load_profile_root(release_profile)
+        profile_root
     ).load(profile_id)
+    try:
+        CanonicalFactorRepoStore(profile_root).load()
+    except ValueError:
+        factor_worktree = {
+            "status": "pending_user_workspace",
+            "created": False,
+            "profile_id": profile_id,
+        }
+    else:
+        factor_worktree = ensure_factor_worktree_binding(
+            profile_root, profile_id,
+        )
     control_profile_sync = _sync_profile(
         profile,
         manager_url=(
@@ -145,6 +152,7 @@ def create_profile(
         "server_visibility_verified": bool(control_profile_sync.get("synced")),
         "server_visibility_pending": not bool(control_profile_sync.get("synced")),
         "control_profile_sync": control_profile_sync,
+        "factor_worktree": factor_worktree,
     }))
 
 
@@ -600,67 +608,6 @@ def upsert_profile_history(
     click.echo(_json(LocalProfileStore(
         load_profile_root(release_profile)
     ).upsert_research_record(profile_id, value)))
-
-
-@click.command("canonical-register", hidden=True)
-@click.option(
-    "--path",
-    required=True,
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-)
-@click.option("--owner-ref", required=True)
-@_root_option
-@friendly_errors
-def register_canonical_factor_repo(
-    path: Path,
-    owner_ref: str,
-    release_profile: Path | None,
-) -> None:
-    expected = default_user_factor_library(owner_ref).resolve()
-    if path.expanduser().resolve() != expected:
-        raise ValueError(
-            "canonical factor library must use the unified user layout"
-        )
-    root = load_profile_root(release_profile)
-    click.echo(_json(
-        CanonicalFactorRepoStore(root).register(path, owner_ref=owner_ref)
-    ))
-
-
-@click.command("canonical-show", hidden=True)
-@_root_option
-@friendly_errors
-def show_canonical_factor_repo(
-    release_profile: Path | None,
-) -> None:
-    root = load_profile_root(release_profile)
-    click.echo(_json(CanonicalFactorRepoStore(root).load()))
-
-
-@click.command("create-profile-worktree")
-@click.argument("profile_id")
-@click.option("--branch", default="")
-@click.option(
-    "--worktree-path",
-    type=click.Path(file_okay=False, path_type=Path),
-)
-@click.option("--source-sync/--no-source-sync", default=False)
-@_root_option
-@friendly_errors
-def create_profile_factor_worktree(
-    profile_id: str,
-    branch: str,
-    worktree_path: Path | None,
-    source_sync: bool,
-    release_profile: Path | None,
-) -> None:
-    click.echo(_json(ensure_factor_worktree_binding(
-        load_profile_root(release_profile),
-        profile_id,
-        branch=branch,
-        worktree_path=worktree_path,
-        source_sync_enabled=source_sync,
-    )))
 
 
 @client_profile.group("agent")

@@ -17,7 +17,7 @@ def test_half_life_combines_same_axes_horizon_statistics() -> None:
     cores = tuple(
         ICCoreTest(
             product_scope_ref="product-scope:metals",
-            factor_ref="factor:v1:profile-maxa:path:roc:commit:blob",
+            factor_ref="factor:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             horizon=horizon,
             entry_delay_bars=0,
             method="rank",

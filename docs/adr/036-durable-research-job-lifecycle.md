@@ -61,7 +61,7 @@ expiry is represented explicitly rather than deletion.
 
 ## Consequences
 
-- Web and CLI share `/api/workspaces`, `/api/runs`, and `/api/jobs`.
+- Web and CLI share `/api/test-authoring/workspaces`, `/api/runs`, and `/api/jobs`.
 - Web and CLI share the same configuration/template schema and load/save API.
 - Workspace revision numbers are counters, not stored historical snapshots.
 - There is no direct job submission endpoint and no analysis-specific job API.

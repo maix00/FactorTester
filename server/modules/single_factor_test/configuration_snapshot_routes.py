@@ -9,7 +9,7 @@ from server.services import research_configuration_snapshots
 from server.services.session_runtime import require_user
 
 
-@sft_bp.post("/api/workspaces/<workspace_id>/configuration-snapshots")
+@sft_bp.post("/api/test-authoring/workspaces/<workspace_id>/configuration-snapshots")
 def create_workspace_configuration_snapshot(workspace_id: str):
     data = request.get_json(silent=True) or {}
     try:
@@ -39,7 +39,7 @@ def create_workspace_configuration_snapshot(workspace_id: str):
     return jsonify({"success": True, "snapshot": value}), 201
 
 
-@sft_bp.get("/api/workspaces/<workspace_id>/configuration-snapshots")
+@sft_bp.get("/api/test-authoring/workspaces/<workspace_id>/configuration-snapshots")
 def list_workspace_configuration_snapshots(workspace_id: str):
     return jsonify({
         "success": True,

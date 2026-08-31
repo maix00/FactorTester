@@ -16,29 +16,13 @@ import click
 
 from tools.cli.commands.client_adapter import client_adapter
 from tools.cli.commands.client_catalog import (
-    catalog_factor,
-    catalog_factor_set,
-    catalog_family,
     catalog_local_run,
     catalog_migration,
-    catalog_owner,
-    catalog_revision,
     catalog_source,
     catalog_status,
     init_catalog,
 )
-from tools.cli.commands.client_profile import (
-    client_profile,
-    create_profile_factor_worktree,
-    register_canonical_factor_repo,
-    show_canonical_factor_repo,
-)
-from tools.cli.commands.client_profile_factor_reference import (
-    register_factor_reference_commands,
-)
-from tools.cli.commands.client_profile_factor_set import (
-    register_factor_set_commands,
-)
+from tools.cli.commands.client_profile import client_profile
 from tools.cli.commands.client_profile_revision import (
     register_profile_revision_commands,
 )
@@ -50,7 +34,6 @@ from tools.cli.manager.config import (
     ManagerConfig,
     ManagerCredentialStore,
 )
-from tools.cli.modules.custom_factors.controller import workspace as factor_workspace
 from tools.cli.release.app_update_control import dispatch_app_update, read_status
 from tools.cli.release.bundle_runtime import activate_bundled_runtime
 from tools.cli.release.client_release_bundle import inspect_client_release_bundle
@@ -129,16 +112,6 @@ client.add_command(catalog_local_run, name="local-run")
 client.add_command(catalog_migration, name="migration")
 register_strategy_profile_commands(client_profile)
 register_profile_revision_commands(client_profile)
-register_factor_reference_commands(factor_workspace)
-register_factor_set_commands(factor_workspace)
-factor_workspace.add_command(create_profile_factor_worktree)
-factor_workspace.add_command(register_canonical_factor_repo)
-factor_workspace.add_command(show_canonical_factor_repo)
-factor_workspace.add_command(catalog_owner, name="owners")
-factor_workspace.add_command(catalog_revision, name="revisions")
-factor_workspace.add_command(catalog_family, name="families")
-factor_workspace.add_command(catalog_factor, name="factors")
-factor_workspace.add_command(catalog_factor_set, name="factor-sets")
 
 
 @client.group("storage", hidden=True)

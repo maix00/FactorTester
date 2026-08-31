@@ -43,7 +43,7 @@
     const local = normalizeRows(state.productFilterCandidates || rowsFromState(state));
     if (local.length) return includeSelected(local, selected);
     try {
-      const value = await context.api("/api/catalog/products");
+      const value = await context.api("/api/product-library/products");
       const remote = apiRows(value);
       if (remote.length) state.productFilterCandidates = remote;
       return includeSelected(remote, selected);

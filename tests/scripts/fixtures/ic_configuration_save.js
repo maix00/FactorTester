@@ -141,7 +141,7 @@ assert.throws(
   const context = {
     t: value => value,
     async api(path, options) {
-      assert.equal(path, "/api/workspaces/workspace-ic/configuration");
+      assert.equal(path, "/api/test-authoring/workspaces/workspace-ic/configuration");
       savedPayload = JSON.parse(options.body).payload;
       return {configuration: {revision: 8, payload: savedPayload}};
     },

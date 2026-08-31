@@ -13,10 +13,10 @@ from typing import Any, Optional
 
 from flask import jsonify, request
 
-from tools.testers.settings import backtest_setting_registry
 import server.services.page_runtime as page_runtime
 from server.services.http_auth import login_required
 from server.services.session_runtime import current_user
+from tools.testers.settings import backtest_setting_registry
 
 from . import sft_bp
 
@@ -71,7 +71,9 @@ def _serialize_instance(obj: Any) -> dict[str, Any]:
     return info
 
 
-@sft_bp.get("/api/backtest/settings/<application>/<key>/instance_info")
+@sft_bp.get(
+    "/api/test-authoring/modules/<application>/fields/<key>/instance-info"
+)
 @login_required
 def get_setting_instance_info(application: str, key: str):
     page_uuid = (request.args.get("page_uuid") or "").strip()

@@ -540,6 +540,10 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
   .agent-model-result-count { align-self: flex-end; }
 }
 .client-download-dialog .dialog-card { gap: 12px; }
+.research-client-download-action { display: flex; justify-content: flex-end; }
+.research-client-download-action button { display: inline-flex; align-items: center; gap: 7px; }
+.research-client-download-action .ft-icon,
+.research-client-download-action .ft-icon-svg { width: 17px; height: 17px; flex-basis: 17px; }
 .profile-detail-tabs { display: flex; gap: 3px; width: fit-content; max-width: 100%; padding: 3px; border-radius: 9px; background: #e9e9ed; overflow-x: auto; }
 .profile-detail-tab { border: 0; border-radius: 7px; padding: 7px 13px; color: inherit; background: transparent; white-space: nowrap; }
 .profile-detail-tab.active { color: white; background: var(--accent); }
