@@ -42,12 +42,12 @@
     body.className = "strategy-list-batch-body";
     body.id = `strategy-list-batch-${batch.key}`;
     body.hidden = !expanded;
-    const disclosure = button(options.context, expanded ? "⌄" : "›", event => {
+    const disclosure = button(options.context, expanded ? "▾" : "▸", event => {
       event?.preventDefault?.();
       event?.stopPropagation?.();
       const next = body.hidden;
       body.hidden = !next;
-      disclosure.textContent = next ? "⌄" : "›";
+      disclosure.textContent = next ? "▾" : "▸";
       disclosure.title = tx(options, next ? "收起添加批次" : "展开添加批次");
       disclosure.setAttribute("aria-expanded", String(next));
       options.onToggleBatch?.(batch.key, next);
@@ -68,8 +68,9 @@
       note.textContent = batch.description;
       copy.append(note);
     }
-    header.append(disclosure, select, copy);
+    header.append(select, copy);
     if (batch.actions) header.append(actions(batch.actions, options));
+    header.append(disclosure);
     shell.append(header);
     for (const item of batch.items || []) body.append(renderItem(item, options));
     shell.append(body);
@@ -85,7 +86,7 @@
     branch.className = "strategy-list-branch";
     const hasChildren = Boolean(item.hasChildren || (item.children || []).length);
     if (hasChildren) {
-      const disclosure = button(options.context, item.expanded === false ? "›" : "⌄", () => (
+      const disclosure = button(options.context, item.expanded === false ? "▸" : "▾", () => (
         options.onToggleItem?.(item.key, item.expanded === false)
       ));
       disclosure.className = "strategy-list-disclosure strategy-list-item-disclosure";

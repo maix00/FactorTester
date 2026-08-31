@@ -85,9 +85,10 @@
     }
 
     function researchFolderHost() {
-      return document.querySelector(
-        '[data-nav-folder="research"] .nav-folder-dynamic',
-      );
+      // Open Research instances are user tabs, not children of the pinned
+      // Research feature entry.  Render their folders in the common opened
+      // tab rail so the feature navigation keeps its ordinary static shape.
+      return document.querySelector("#opened-tabs");
     }
 
     function applyTabMetadata(tab, options) {
@@ -118,11 +119,12 @@
       nodes.forEach(node => node.classList.remove("drop-target", "drop-before", "drop-after"));
     }
 
-    function focusTabDragHandle(tabID) {
-      const handle = [...(document.querySelectorAll?.(
-        "[data-ft-tab-drag-handle]",
-      ) || [])].find(item => item.dataset.ftTabDragHandle === tabID);
-      handle?.focus?.();
+    function focusMovedTab(tabID) {
+      const row = [...(document.querySelectorAll?.(
+        ".opened-tab, .nav-folder-row",
+      ) || [])].find(item => item.dataset.tabID === tabID
+        || item.dataset.dragTabID === tabID);
+      row?.querySelector?.(".tab-main")?.focus?.();
     }
 
     function flashMovedTab(tabID) {
@@ -142,7 +144,7 @@
     function renderMovedTab(tabID) {
       renderOpenedTabs();
       flashMovedTab(tabID);
-      focusTabDragHandle(tabID);
+      focusMovedTab(tabID);
     }
 
     function dropBefore(event, target) {
@@ -186,44 +188,11 @@
       return close;
     }
 
-    function moveTabByOffset(tabID, offset) {
-      const tab = state.tabs.find(item => item.id === tabID);
-      if (!isDraggableTab(tab)) return false;
-      const parentID = researchParentTabID(tab);
-      const siblings = state.tabs.filter(item => (
-        isDraggableTab(item) && researchParentTabID(item) === parentID
-      ));
-      const index = siblings.indexOf(tab);
-      const target = siblings[index + Number(offset || 0)];
-      if (!target || target === tab) return false;
-      return moveTabRelative(tabID, target.id, Number(offset) < 0);
-    }
-
-    function tabDragHandle(tab) {
-      const handle = document.createElement("button");
-      handle.type = "button";
-      handle.className = "tab-drag-handle";
-      handle.textContent = "⋮⋮";
-      handle.title = t("拖动以移动");
-      handle.setAttribute("aria-label", t("拖动以移动"));
-      handle.setAttribute("aria-keyshortcuts", "ArrowUp ArrowDown");
-      handle.dataset.ftTabDragHandle = tab.id;
-      handle.addEventListener("keydown", event => {
-        const offset = event.key === "ArrowUp" ? -1
-          : event.key === "ArrowDown" ? 1 : 0;
-        if (!offset) return;
-        event.preventDefault();
-        event.stopPropagation();
-        moveTabByOffset(tab.id, offset);
-      });
-      return handle;
-    }
-
-    function tabDragSource(row, tab, handle) {
+    function tabDragSource(row, tab) {
       if (!isDraggableTab(tab)) return;
       row.classList.add("draggable-tab");
       row.dataset.dragTabID = tab.id;
-      const source = handle || row;
+      const source = row;
       source.draggable = true;
       source.addEventListener("dragstart", event => {
         draggingTabID = tab.id;
@@ -254,9 +223,8 @@
       const row = document.createElement("div");
       row.className = `opened-tab${nested ? " opened-tab-nested" : ""}${tab.id === state.activeTabID ? " active" : ""}`;
       row.dataset.tabID = tab.id;
-      const handle = isDraggableTab(tab) ? tabDragHandle(tab) : null;
-      row.append(...(handle ? [handle] : []), tabButton(tab, nested), tabCloseButton(tab));
-      tabDragSource(row, tab, handle);
+      row.append(tabButton(tab, nested), tabCloseButton(tab));
+      tabDragSource(row, tab);
       if (isResearchDetailTab(tab)) acceptTabDrop(row, tab.id);
       else acceptTabRowDrop(row, tab);
       return row;
@@ -400,12 +368,10 @@
     function renderResearchSidebarTabs() {
       const host = researchFolderHost();
       if (!host) return false;
-      const folder = host.closest?.('[data-nav-folder="research"]') || host.parentElement;
-      host.replaceChildren();
-      // The whole Research folder is the unmount target.  The drop handler
+      // The opened-tab rail is the unmount target.  The drop handler
       // stops propagation so a child Research folder can still receive a
       // drop without being immediately detached by this parent listener.
-      acceptTabDrop(folder || host, "");
+      acceptTabDrop(host, "");
       const detailTabs = state.tabs.filter(tab => tab.closable && isResearchDetailTab(tab));
       const detailIDs = new Set(detailTabs.map(tab => tab.id));
       const childrenByParent = new Map();
@@ -447,13 +413,13 @@
         const disclosure = document.createElement("button");
         disclosure.type = "button";
         disclosure.className = "nav-folder-toggle";
-        disclosure.textContent = expanded ? "⌄" : "›";
+        disclosure.textContent = expanded ? "▾" : "▸";
         disclosure.setAttribute("aria-expanded", expanded ? "true" : "false");
         disclosure.title = t(expanded ? "收起" : "展开");
         const button = tabButton(tab);
         button.classList.add("nav-folder-tab");
         const close = tabCloseButton(tab);
-        header.append(disclosure, button, close);
+        header.append(button, disclosure, close);
         acceptTabDrop(header, tab.id);
         const childHost = document.createElement("div");
         childHost.className = "nav-folder-children nav-research-tab-children";
@@ -463,7 +429,7 @@
           event.stopPropagation();
           const next = childHost.hidden;
           childHost.hidden = !next;
-          disclosure.textContent = next ? "⌄" : "›";
+          disclosure.textContent = next ? "▾" : "▸";
           disclosure.setAttribute("aria-expanded", next ? "true" : "false");
           disclosure.title = t(next ? "收起" : "展开");
           localStorage.setItem(
@@ -489,7 +455,7 @@
       const opened = state.tabs.filter(tab => (
         tab.closable && (!hasResearchHost || !isResearchSidebarTab(tab))
       ));
-      caption.hidden = opened.length === 0;
+      caption.hidden = !state.tabs.some(tab => tab.closable);
       for (const tab of opened) {
         host.append(tabRow(tab));
       }

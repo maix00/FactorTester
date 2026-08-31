@@ -106,11 +106,10 @@ const dialogs = [];
 const pageAgentNodes = [];
 const storage = new Map();
 const durableStorage = new Map();
-const researchFolder = new FakeElement();
-researchFolder.dataset.navFolder = "research";
-const researchDynamic = new FakeElement();
-researchDynamic.dataset.navFolderDynamic = "research";
-researchFolder.append(researchDynamic);
+// Open Research folders belong to the common opened-tab rail.  The pinned
+// Research feature entry has no dynamic child hierarchy.
+const researchFolder = opened;
+const researchDynamic = opened;
 
 global.document = {
   body: {classList: {contains: () => false}},
@@ -119,8 +118,6 @@ global.document = {
   querySelector: selector => ({
     "#opened-tabs": opened,
     "#opened-caption": caption,
-    '[data-nav-folder="research"] .nav-folder-dynamic': researchDynamic,
-    '[data-nav-folder="research"]': researchFolder,
   }[selector] || null),
   querySelectorAll: selector => {
     if (selector === "dialog") return dialogs;
@@ -492,16 +489,12 @@ assert(!researchHeader.classes.has("drop-before"));
 researchHeader.dispatchEvent({type: "dragleave"});
 assert(!researchHeader.classes.has("drop-target"));
 
-// Ordinary tabs expose a dedicated drag handle instead of making the whole
-// row draggable. The handle also provides a keyboard alternative for users
-// who cannot use native drag-and-drop.
+// Ordinary opened tabs drag from the row itself and retain only their normal
+// page icon; no dedicated visual drag handle is rendered.
 let draggedID = "";
-const childTwoHandle = childTwoRow.children.find(item => (
-  item.className === "tab-drag-handle"
-));
-assert(childTwoHandle);
-assert.strictEqual(childTwoHandle.draggable, true);
-childTwoHandle.dispatchEvent({
+assert(!childTwoRow.children.some(item => item.className === "tab-drag-handle"));
+assert.strictEqual(childTwoRow.draggable, true);
+childTwoRow.dispatchEvent({
   type: "dragstart",
   dataTransfer: {
     setData: (_type, value) => { draggedID = value; },
@@ -510,30 +503,8 @@ childTwoHandle.dispatchEvent({
 });
 assert.strictEqual(draggedID, researchChildTwoID);
 assert(childTwoRow.classes.has("dragging"));
-childTwoHandle.dispatchEvent({type: "dragend"});
+childTwoRow.dispatchEvent({type: "dragend"});
 assert(!childTwoRow.classes.has("dragging"));
-
-const reportOneHandle = researchChildHost.children
-  .find(item => item.dataset.tabID === researchChildID)
-  .children.find(item => item.className === "tab-drag-handle");
-reportOneHandle.dispatchEvent({
-  type: "keydown", key: "ArrowDown", preventDefault() {}, stopPropagation() {},
-});
-assert.deepStrictEqual(
-  hierarchyState.tabs.filter(item => item.parentTabID === researchDetailID).map(item => item.id),
-  [researchChildTwoID, researchChildID],
-);
-const movedReportRow = researchDynamic.children.find(item => (
-  item.dataset.navFolder === `research-tab:${researchDetailID}`
-)).children.find(item => item.className.includes("nav-research-tab-children"))
-  .children.find(item => item.dataset.tabID === researchChildID);
-movedReportRow.children.find(item => item.className === "tab-drag-handle").dispatchEvent({
-  type: "keydown", key: "ArrowUp", preventDefault() {}, stopPropagation() {},
-});
-assert.deepStrictEqual(
-  hierarchyState.tabs.filter(item => item.parentTabID === researchDetailID).map(item => item.id),
-  [researchChildID, researchChildTwoID],
-);
 
 // Hovering a row gives a before/after insertion marker without changing
 // ordering until the drop is committed.
