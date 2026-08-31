@@ -69,6 +69,7 @@ body.sidebar-collapsed .opened-tab > .tab-main > .symbol { margin: 0; justify-se
 .nav-research-detail-folder .nav-folder-toggle { width: 20px; flex-basis: 20px; }
 .nav-research-detail-folder > .nav-folder-row > .tab-close { margin-left: 0; }
 .nav-research-tab-children { margin-left: 20px; padding-left: 7px; }
+.nav-research-tab-children[hidden] { display: none; }
 .nav-research-tab-children .opened-tab { min-height: 28px; padding: 5px 8px 5px 7px; }
 .nav-research-tab-children .opened-tab .tab-label { font-size: 12px; }
 .nav-grandchild { font-size: 12px; }
