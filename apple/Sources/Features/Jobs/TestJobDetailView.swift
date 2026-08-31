@@ -322,11 +322,11 @@ struct TestJobDetailView: View {
     private func serverURL(for job: TestJob) -> URL {
         var components = URLComponents(
             url: ServerConfig.shared.baseURL
-                ?? URL(string: "http://127.0.0.1:8141")!,
+                ?? ManagerConfig.bakedPublicBootstrapEndpoint,
             resolvingAgainstBaseURL: false
         )!
         if job.port > 0 { components.port = job.port }
-        return components.url ?? URL(string: "http://127.0.0.1:8141")!
+        return components.url ?? ManagerConfig.bakedPublicBootstrapEndpoint
     }
 
     private func artifacts(_ detail: TestJobDetail) -> some View {
