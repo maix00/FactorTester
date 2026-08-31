@@ -115,6 +115,74 @@ def test_profile_agent_uses_canonical_factor_library_gateway(
     ]
 
 
+@pytest.mark.parametrize("agent", [False, True])
+def test_research_graph_gateway_is_identical_for_client_and_profile_agent(
+    tmp_path, monkeypatch, agent,
+) -> None:
+    state = authenticated_state(tmp_path)
+    route = ServiceRoute(
+        server_id=state.server_id,
+        role="main",
+        branch="main",
+        revision="test",
+        port=8000,
+    )
+    monkeypatch.setattr(state, "route_for", lambda **_values: route)
+    forwarded = []
+
+    def route_request(selected, **values):
+        forwarded.append((selected, values))
+        return GatewayResponse(
+            status=200,
+            body=json.dumps({"success": True}).encode(),
+            content_type="application/json",
+        )
+
+    monkeypatch.setattr(state, "route_request", route_request)
+    headers = agent_headers(state) if agent else {
+        "Authorization": "Bearer user-token",
+    }
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/research-graphs/factor-research/active",
+            headers=headers,
+        )) as response:
+            assert json.loads(response.read())["success"] is True
+        with urlopen(Request(
+            f"{base_url}/api/research-graph-instances/instance-1/"
+            "branches/branch-1/node/advance",
+            data=b'{}',
+            headers={**headers, "Content-Type": "application/json"},
+            method="POST",
+        )) as response:
+            assert json.loads(response.read())["success"] is True
+
+    assert [values["path"] for _route, values in forwarded] == [
+        "/api/research-graphs/factor-research/active",
+        "/api/research-graph-instances/instance-1/branches/branch-1/"
+        "node/advance",
+    ]
+    assert {values["principal"] for _route, values in forwarded} == {"user@1"}
+
+
+def test_research_graph_gateway_rejects_path_traversal(
+    tmp_path, monkeypatch,
+) -> None:
+    state = authenticated_state(tmp_path)
+    monkeypatch.setattr(
+        state,
+        "route_request",
+        lambda *_args, **_values: pytest.fail("unsafe path must not be proxied"),
+    )
+    with running_manager(state) as base_url:
+        with pytest.raises(HTTPError) as failed:
+            urlopen(Request(
+                f"{base_url}/api/research-graphs/%2e%2e/admin",
+                headers=agent_headers(state),
+            ))
+    assert failed.value.code == 404
+
+
 def test_local_profile_agent_unknown_write_does_not_fall_back_to_service_gateway(
     tmp_path, monkeypatch,
 ) -> None:

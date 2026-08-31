@@ -3470,6 +3470,9 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert "window.FTAgentModelEditor" in agent_model_editor
     assert 'model.addEventListener("focus"' in agent_model_editor
     assert "clientDownload?.(context, release)" in reports
+    assert 'section.className = "research-client-download-action"' in local_page
+    assert "card.append(note, downloadChoices(context, value))" in local_page
+    assert 'section.className = "job-section client-download"' not in local_page
     assert 'note.className = "secondary research-graph-list-note"' in graph_list
     assert "source_server_ids" in profile_directory
     assert "直属下级研究身份的 Agent 会话默认对直属上级只读可见" in profile_directory_detail
