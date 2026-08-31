@@ -3485,6 +3485,8 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert 'model.addEventListener("focus"' in agent_model_editor
     assert "clientDownload?.(context, release)" in reports
     assert 'line.className = "research-report-info-line"' in reports
+    assert 'metadata.className = "research-report-info-metadata"' in reports
+    assert 'item.className = "secondary"' not in reports
     assert 'body.className = "research-report-embedded-body"' in reports
     assert 'loadGroups?.(["report"])' in reports
     assert "FTReportSource.create" in reports
