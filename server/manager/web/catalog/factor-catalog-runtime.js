@@ -117,7 +117,7 @@
     const data = ensureCache();
     if (data.groupsLoaded) return data;
     if (!groupsPromise) {
-      groupsPromise = context.api("/api/catalog/product-groups")
+      groupsPromise = context.api("/api/product-library/product-groups")
         .then(value => {
           data.groups = Array.isArray(value?.groups) ? value.groups : [];
           data.groupsLoaded = true;

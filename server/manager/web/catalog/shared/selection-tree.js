@@ -12,7 +12,7 @@
 
   function endpoint(source) {
     return source === "local"
-      ? "/api/client/contract_tree" : "/api/catalog/contract-tree";
+      ? "/api/client/contract_tree" : "/api/product-library/contract-tree";
   }
 
   function treePath(source, sourceIDs, categoryIDs, path, params = {}) {

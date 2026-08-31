@@ -97,34 +97,34 @@
           context(routeToken), {nav: "factors", title: "因子库", allowVisitor: true}, pages.factors, route,
         );
         case "product-group": return guarded(
-          context(routeToken), {nav: "products", title: "产品", allowVisitor: true}, pages.productGroup, route.id,
+          context(routeToken), {nav: "products", title: "产品库", allowVisitor: true}, pages.productGroup, route.id,
         );
         case "product": return guarded(
-          context(routeToken), {nav: "products", title: "产品", allowVisitor: true}, pages.product, route.id,
+          context(routeToken), {nav: "products", title: "产品库", allowVisitor: true}, pages.product, route.id,
         );
         case "product-reference": return guarded(
-          context(routeToken), {nav: "products", title: "产品", allowVisitor: true},
+          context(routeToken), {nav: "products", title: "产品库", allowVisitor: true},
           pages.productReference, route.referenceKind, route.id,
         );
         case "product-sources": return guarded(
-          context(routeToken), {nav: "products", title: "产品", allowVisitor: true}, pages.productSources, route,
+          context(routeToken), {nav: "products", title: "产品库", allowVisitor: true}, pages.productSources, route,
         );
         case "product-source-family": return guarded(
           context(routeToken), {nav: "products", title: "数据源族", allowVisitor: true},
           pages.productSourceFamily, route.id,
         );
         case "product-groups": return guarded(
-          context(routeToken), {nav: "products", title: "产品", allowVisitor: true}, pages.productGroups, route,
+          context(routeToken), {nav: "products", title: "产品库", allowVisitor: true}, pages.productGroups, route,
         );
         case "product-categories": return guarded(
-          context(routeToken), {nav: "products", title: "产品", allowVisitor: true}, pages.productCategories, route,
+          context(routeToken), {nav: "products", title: "产品库", allowVisitor: true}, pages.productCategories, route,
         );
         case "product-category": return guarded(
           context(routeToken), {nav: "products", title: "产品分类", allowVisitor: true},
           pages.productCategory, route,
         );
         case "products": return guarded(
-          context(routeToken), {nav: "products", title: "产品", allowVisitor: true}, pages.products,
+          context(routeToken), {nav: "products", title: "产品库", allowVisitor: true}, pages.products,
         );
         case "profile": return guarded(
           context(routeToken), {nav: "research", title: "研究身份"}, pages.profile, route.id,

@@ -291,17 +291,17 @@ def test_visitor_catalog_shows_internal_sources_but_rejects_their_data(
 
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/catalog/sources", headers=headers,
+            f"{base_url}/api/product-library/data-sources", headers=headers,
         )) as response:
             sources = json.loads(response.read())["sources"]
         with urlopen(Request(
-            f"{base_url}/api/catalog/products?data_source=PublicSource",
+            f"{base_url}/api/product-library/products?data_source=PublicSource",
             headers=headers,
         )) as response:
             products = json.loads(response.read())["products"]
         with pytest.raises(HTTPError) as denied:
             urlopen(Request(
-                f"{base_url}/api/catalog/products?data_source=InternalSource",
+                f"{base_url}/api/product-library/products?data_source=InternalSource",
                 headers=headers,
             ))
 
@@ -372,7 +372,7 @@ def test_visitor_can_read_public_price_series_but_not_internal_product_prices(
         body = json.dumps({"product_name": product_name}).encode()
         request_headers = {**headers, "Content-Length": str(len(body))}
         return urlopen(Request(
-            f"{base_url}/api/catalog/prices",
+            f"{base_url}/api/market-data/prices",
             data=body, headers=request_headers, method="POST",
         ))
 

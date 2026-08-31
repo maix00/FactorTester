@@ -23,4 +23,4 @@ def module_lines(modules: list[dict[str, Any]]) -> list[str]:
 def print_home_welcome() -> None:
     click.echo("FactorTester CLI")
     click.echo("测试任务: factortester workspace --help / run --help / job --help")
-    click.echo("数据管理: factortester products --help / factor-library --help")
+    click.echo("数据管理: factortester product-library --help / factor-library --help")

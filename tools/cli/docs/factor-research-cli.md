@@ -144,7 +144,7 @@ requests only that scope; availability must never widen it through an implicit
 provider fallback.
 
 ```bash
-factortester products availability \
+factortester product-library availability \
   --product A.DCE \
   --source Local \
   --frequency MIN1 \
@@ -178,7 +178,7 @@ of factor or backtest results. The cutoff is mandatory so the screen cannot
 silently inspect a later holdout:
 
 ```bash
-factortester products liquidity \
+factortester product-library liquidity \
   --product A.DCE \
   --product RB.SHF \
   --source LocalCNFuturesDAY1 \

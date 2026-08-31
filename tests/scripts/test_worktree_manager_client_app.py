@@ -702,7 +702,7 @@ def test_test_settings_are_available_without_execution_service(
         )) as response:
             outputs = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/data_source_categories?port=8141",
+            f"{base_url}/api/product-library/data-source-categories?port=8141",
             headers=headers,
         )) as response:
             categories = json.loads(response.read())
@@ -738,11 +738,11 @@ def test_test_workbench_first_load_is_concurrent_and_service_port_free(
         "/api/backtest/settings/ic_test",
         "/api/factor-library/families",
         "/api/factor-library/factors",
-        "/api/catalog/product-groups",
+        "/api/product-library/product-groups",
         "/api/workspaces",
         "/api/configuration-templates",
         "/api/jobs/artifact-capabilities",
-        "/api/data_source_categories",
+        "/api/product-library/data-source-categories",
         "/api/testers/modules?parent=ic_test",
     )
 
@@ -1974,7 +1974,7 @@ global.fetch = async (_path, _options) => {{
 }};
 (async () => {{
   try {{
-    await FTAppRuntime.create().api("/api/catalog/categories", {{method: "POST"}});
+    await FTAppRuntime.create().api("/api/product-library/categories", {{method: "POST"}});
   }} catch (_) {{}}
   console.log(JSON.stringify({{attempts}}));
 }})().catch(error => {{ console.error(error); process.exit(1); }});
@@ -2167,7 +2167,7 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert "FTTestObjectPicker.create" in scripts["test-products.js"]
     assert "FTTestObjectPicker" in scripts["test-object-picker.js"]
     assert "FTTestObjectEditorOverlay" in scripts["test-object-editor-overlay.js"]
-    assert "/api/data_source_categories" in scripts["test-categories.js"]
+    assert "/api/product-library/data-source-categories" in scripts["test-categories.js"]
     assert "window.FTTestConfiguration" in scripts["test-configuration.js"]
     assert "window.FTTestConfigurationCompiler" in scripts[
         "test-configuration-compiler.js"
@@ -2856,7 +2856,7 @@ def test_web_factor_library_reads_product_group_owned_subject_relations(
     assert "/api/factor-library/factor-sets/detail" in details
     assert "servicePath" not in coordinator
     assert "/api/entities/factor-sets" not in coordinator
-    assert "/api/catalog/product-groups" in runtime
+    assert "/api/product-library/product-groups" in runtime
     assert "factorTesterLocalFactorSets" not in runtime
     assert 'context.t("因子家族")' in listing
     assert 'context.t("因子")' in listing
@@ -2889,7 +2889,7 @@ def test_test_workbench_reads_factor_candidates_from_manager_catalog(
     script = scripts["tests"]
     assert 'context.api("/api/factor-library/factors")' in script
     assert (
-        'context.api("/api/catalog/product-groups?view=summary"' in script
+        'context.api("/api/product-library/product-groups?view=summary"' in script
     )
     assert '/custom-factors/api/client/factor-library' not in script
     assert 'servicePath("/api/product-groups")' not in script
@@ -3534,7 +3534,7 @@ def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:
     assert '["categories", "产品分类"]' in script
     assert '["groups", "产品组"]' in script
     assert "includeProducts" in script
-    assert "/api/catalog/categories" in script
+    assert "/api/product-library/categories" in script
     assert 'if (!query)' in script
     assert 'sourceList' in script
     assert 'FTProductSources.list' in script
@@ -3542,7 +3542,7 @@ def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:
     assert 'frequencyCell' in source_script
     assert 'product_paths' in source_script
     assert 'product-source-page' in source_script
-    assert '/api/catalog/sources' in source_script
+    assert '/api/product-library/data-sources' in source_script
     assert 'if (localCatalogAvailable())' in source_script
     assert '/api/client/product_sources' in source_script
     assert 'Web 端只能访问服务器提供的数据源' in source_script
@@ -3553,9 +3553,9 @@ def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:
     assert "FTProductTree.categorySelectionValues" in script
     assert 'query.append("category", value)' in script
     assert 'product-source-tabs' not in script
-    assert '/api/catalog/categories' in script
-    assert 'servicePath("/api/product_tree")' not in script
-    assert '`/api/catalog/tree?${query}`' in script
+    assert '/api/product-library/categories' in script
+    assert 'servicePath("/api/internal/product-library/tree")' not in script
+    assert '`/api/product-library/tree?${query}`' in script
     assert 'FTProductCategoryModel.availableSourceIDs' in script
     assert 'selectedSources.forEach' in script
     assert 'FTProductTree.render' in script
@@ -3577,7 +3577,8 @@ def test_product_catalog_lazy_page_forwards_search_and_paging(
 ) -> None:
     state = authenticated_state(tmp_path)
     monkeypatch.setattr(
-        catalog_routes, "catalog_source_ids", lambda _query: ("Synthetic",),
+        catalog_routes, "product_library_source_ids",
+        lambda _query: ("Synthetic",),
     )
     monkeypatch.setattr(
         state.client_state, "product_names", lambda *_: [
@@ -3599,12 +3600,12 @@ def test_product_catalog_lazy_page_forwards_search_and_paging(
     headers = {"Authorization": "Bearer user-token"}
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/catalog/products?query=beta&page=1&limit=1",
+            f"{base_url}/api/product-library/products?query=beta&page=1&limit=1",
             headers=headers,
         )) as response:
             products = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/catalog/contract-tree?path=Product%2F_products"
+            f"{base_url}/api/product-library/contract-tree?path=Product%2F_products"
             "&query=beta&page=2&limit=10",
             headers=headers,
         )) as response:
@@ -3672,34 +3673,34 @@ def test_manager_product_catalog_does_not_select_a_service_port(
     monkeypatch.setattr(state, "service_ports", reject_service_port)
     headers = {"Authorization": "Bearer user-token"}
     with running_manager(state) as base_url:
-        with urlopen(Request(f"{base_url}/api/catalog/sources", headers=headers)) as response:
+        with urlopen(Request(f"{base_url}/api/product-library/data-sources", headers=headers)) as response:
             sources = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/catalog/tree?category=cnfutures_sector", headers=headers,
+            f"{base_url}/api/product-library/tree?category=cnfutures_sector", headers=headers,
         )) as response:
             tree = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/catalog/tree", headers=headers,
+            f"{base_url}/api/product-library/tree", headers=headers,
         )) as response:
             uncategorized_tree = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/catalog/contracts?product=JNI.OSE",
+            f"{base_url}/api/product-library/contracts?product=JNI.OSE",
             headers=headers,
         )) as response:
             contracts = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/catalog/prices",
+            f"{base_url}/api/market-data/prices",
             data=json.dumps({"product_name": "JNI.OSE"}).encode(),
             headers={**headers, "Content-Type": "application/json"},
             method="POST",
         )) as response:
             prices = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/catalog/product-groups", headers=headers,
+            f"{base_url}/api/product-library/product-groups", headers=headers,
         )) as response:
             groups = json.loads(response.read())
         with urlopen(Request(
-            f"{base_url}/api/catalog/product-groups",
+            f"{base_url}/api/product-library/product-groups",
             data=json.dumps({
                 "name": "新建组", "paths": ["China Futures/Day"],
                 "category_ids": ["cnfutures_sector"],
@@ -3761,7 +3762,7 @@ def test_product_group_summary_does_not_expand_catalog_memberships(
 
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/catalog/product-groups?view=summary",
+            f"{base_url}/api/product-library/product-groups?view=summary",
             headers={"Authorization": "Bearer user-token"},
         )) as response:
             value = json.loads(response.read())
@@ -3788,7 +3789,7 @@ def test_manager_product_catalog_passes_parallel_category_selection(
     headers = {"Authorization": "Bearer user-token"}
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/catalog/tree?category=cnfutures_day_night"
+            f"{base_url}/api/product-library/tree?category=cnfutures_day_night"
             "&category=cnfutures_sector",
             headers=headers,
         )) as response:
@@ -3797,7 +3798,7 @@ def test_manager_product_catalog_passes_parallel_category_selection(
     assert value["category_ids"] == ["cnfutures_day_night", "cnfutures_sector"]
     assert value["tree"] == [{"title": "日夜盘"}, {"title": "行业"}]
     assert calls[0][0] == ["cnfutures_day_night", "cnfutures_sector"]
-    assert r"/api/get_price_data" not in _SERVICE_WRITE_PATTERNS["POST"]
+    assert r"/api/internal/market-data/prices" not in _SERVICE_WRITE_PATTERNS["POST"]
 
 
 def test_manager_product_catalog_can_request_selectable_tree_nodes(
@@ -3814,7 +3815,7 @@ def test_manager_product_catalog_can_request_selectable_tree_nodes(
     headers = {"Authorization": "Bearer user-token"}
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/catalog/tree?checkbox=1", headers=headers,
+            f"{base_url}/api/product-library/tree?checkbox=1", headers=headers,
         )) as response:
             value = json.loads(response.read())
 
@@ -3931,11 +3932,11 @@ def test_product_detail_renderer_is_loaded_as_a_separate_catalog_module(tmp_path
     assert "window.FTProductDetails" in details
     assert "detailHelpers" in products
     assert "async function productDetail(context, target)" in products
-    assert 'context.servicePath("/api/get_price_data")' not in details
+    assert 'context.servicePath("/api/internal/market-data/prices")' not in details
     assert "FTProductPricePanel.render" in details
     assert "product-price-panel-mount" in details
-    assert '"/api/catalog/prices"' not in details
-    assert '"/api/catalog/contracts"' in details
+    assert '"/api/market-data/prices"' not in details
+    assert '"/api/product-library/contracts"' in details
 
 
 @pytest.mark.parametrize(

@@ -68,7 +68,7 @@
     context.content.replaceChildren(FTUI.loading(context.t("正在读取产品资料…")));
     const fieldsPayload = await context.api(source === "local"
       ? `/api/client/product_fields?name=${encodeURIComponent(product.name)}`
-      : `/api/catalog/product-fields?name=${encodeURIComponent(product.name)}`);
+      : `/api/product-library/product-fields?name=${encodeURIComponent(product.name)}`);
     if (!current(context)) return;
     const root = document.createElement("div"); root.className = "detail-stack product-detail-page";
     root.append(helpers.sourceSummary(context, source));
@@ -86,7 +86,7 @@
     context.content.replaceChildren(root);
     const end = new Date(); const start = new Date(end); start.setFullYear(start.getFullYear() - 1);
     const contractsEndpoint = source === "local"
-      ? "/api/client/product_contracts" : "/api/catalog/contracts";
+      ? "/api/client/product_contracts" : "/api/product-library/contracts";
     let pricePanelPromise;
     if (selectedContractUID && selectedContractHasData === "0") {
       priceMount.replaceChildren(FTUI.empty(
@@ -167,7 +167,7 @@
     const contractUID = String(target || "").trim();
     const title = selectedContractName || contractUID;
     const fieldsEndpoint = source === "local"
-      ? "/api/client/product_fields" : "/api/catalog/product-fields";
+      ? "/api/client/product_fields" : "/api/product-library/product-fields";
     let fieldsPayload;
     try {
       fieldsPayload = await context.api(

@@ -146,7 +146,7 @@ vm.runInThisContext(
 const state = {
   tabs: [
     {id: "home", path: "/", title: "主页", closable: false},
-    {id: "products", path: "/products", title: "产品", closable: false},
+    {id: "products", path: "/products", title: "产品库", closable: false},
   ],
   activeTabID: "home", tabSessions: new Map(), modules: [],
   pendingScrollCapture: null,
@@ -278,7 +278,7 @@ const restoredState = {
   tabs: [], activeTabID: "home", tabSessions: new Map(),
   modules: [
     {id: "home", path: "/", title: "主页", pinned: true},
-    {id: "products", path: "/products", title: "产品", pinned: true},
+    {id: "products", path: "/products", title: "产品库", pinned: true},
   ],
 };
 const restoredTabs = window.FTTabs.create({

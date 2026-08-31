@@ -148,12 +148,12 @@
           // Manager-owned account-domain directory.  Member paths belong to
           // the detail request and must never make the list page fall back to
           // the retired business-port product-group API.
-          : request(context, "/api/catalog/product-groups?view=summary"))
+          : request(context, "/api/product-library/product-groups?view=summary"))
         : Promise.resolve({});
       const productsRequest = includeProducts
         ? (origin === "local"
           ? request(context, "/api/client/product_names")
-          : request(context, "/api/catalog/products"))
+          : request(context, "/api/product-library/products"))
         : Promise.resolve({});
       const [productsResult, groupsResult] = await Promise.allSettled([
         productsRequest, groupsRequest,
@@ -175,7 +175,7 @@
   async function loadCategories(context, source) {
     const endpoint = source === "local"
       ? "/api/client/product_categories"
-      : "/api/catalog/categories";
+      : "/api/product-library/categories";
     return cachedRequest(categoryCache, source, async () => {
       const value = await request(context, endpoint);
       return Array.isArray(value.categories) ? value : {
@@ -186,7 +186,7 @@
 
   async function loadSources(context, source) {
     const endpoint = source === "local"
-      ? "/api/client/product_sources" : "/api/catalog/sources";
+      ? "/api/client/product_sources" : "/api/product-library/data-sources";
     return cachedRequest(sourceCache, source, async () => {
       const value = await request(context, endpoint);
       return Array.isArray(value.sources) ? value.sources : [];
@@ -204,7 +204,7 @@
       (dataSourceIDs || []).forEach(value => query.append("data_source", value));
       const endpoint = source === "local"
         ? `/api/client/product_tree?${query}`
-        : `/api/catalog/tree?${query}`;
+        : `/api/product-library/tree?${query}`;
       const value = await request(context, endpoint);
       return value.tree || value;
     });
@@ -215,7 +215,7 @@
     const sourceIDs = FTProductCategoryModel.availableSourceIDs(sourceDefinitions);
     const tree = await loadTree(context, source, [], sourceIDs);
     const endpoint = source === "local"
-      ? "/api/client/contract_tree" : "/api/catalog/contract-tree";
+      ? "/api/client/contract_tree" : "/api/product-library/contract-tree";
     return {
       tree,
       source,
@@ -362,7 +362,7 @@
         if (params.limit) query.set("limit", String(params.limit));
         return source === "local"
           ? `/api/client/contract_tree?${query}`
-          : `/api/catalog/contract-tree?${query}`;
+          : `/api/product-library/contract-tree?${query}`;
       };
       const renderTree = async () => {
         // No selected Category means the stable classifier-only product tree.
@@ -469,7 +469,7 @@
       textContent: context.t("搜索结果"),
     }));
     const endpoint = source === "local"
-      ? "/api/client/product_names" : "/api/catalog/products";
+      ? "/api/client/product_names" : "/api/product-library/products";
     const params = new URLSearchParams({query, page: "1", limit: "50"});
     try {
       const payload = await request(context, `${endpoint}?${params}`);

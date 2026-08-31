@@ -4,15 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from .client_admin import AdminClientMixin
 from .client_agent_flow import AgentFlowClientMixin
 from .client_agent_profile import AgentProfileClientMixin
-from .client_admin import AdminClientMixin
 from .client_factor_library import FactorLibraryClientMixin
-from .client_protocol import ProtocolClientMixin
 from .client_order_audit import OrderAuditClientMixin
+from .client_product_library import ProductLibraryClientMixin
+from .client_protocol import ProtocolClientMixin
 from .client_research import ResearchClientMixin
-from .client_research_graph import ResearchGraphClientMixin
 from .client_research_evidence import ResearchEvidenceClientMixin
+from .client_research_graph import ResearchGraphClientMixin
 from .client_research_step import ResearchStepClientMixin
 from .http import HttpSession
 
@@ -26,6 +27,7 @@ class FactorTesterClient(
     AgentProfileClientMixin,
     OrderAuditClientMixin,
     ResearchClientMixin,
+    ProductLibraryClientMixin,
     FactorLibraryClientMixin,
     ResearchStepClientMixin,
 ):

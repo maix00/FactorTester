@@ -12,6 +12,11 @@ import traceback
 
 from flask import jsonify, request
 
+from server.modules.products.product_category_views import (
+    normalize_category_selection,
+    render_product_tree,
+    tree_for_path,
+)
 from server.modules.shared.price_services import (
     available_product_categories,
     cached_contracts,
@@ -19,11 +24,6 @@ from server.modules.shared.price_services import (
     contract_has_data,
     find_product,
     product_public_fields,
-)
-from server.modules.products.product_category_views import (
-    normalize_category_selection,
-    render_product_tree,
-    tree_for_path,
 )
 from server.services.product_catalog_projection import product_source_descriptors
 from server.services.product_market_data import (
@@ -44,7 +44,7 @@ def _unexpected_error(error: Exception):
     }), 500
 
 
-@shared_bp.route("/api/list_product_names")
+@shared_bp.route("/api/internal/product-library/products")
 def list_product_names():
     """Return all registered product names and reflected public fields."""
     try:
@@ -73,7 +73,7 @@ def list_product_names():
         return _unexpected_error(error)
 
 
-@shared_bp.route("/api/product_tree")
+@shared_bp.route("/api/internal/product-library/tree")
 def get_product_tree():
     """Return the product category tree in Fancytree format."""
     try:
@@ -88,7 +88,7 @@ def get_product_tree():
         return _unexpected_error(error)
 
 
-@shared_bp.route("/api/product_categories")
+@shared_bp.route("/api/internal/product-library/categories")
 def get_product_categories():
     """Return explicit base category dimensions and registered sources."""
     return jsonify({
@@ -99,7 +99,7 @@ def get_product_categories():
     })
 
 
-@shared_bp.route("/api/product_fields")
+@shared_bp.route("/api/product-library/product-fields")
 def get_product_fields():
     name = str(request.args.get("name") or "")
     if not name:
@@ -119,7 +119,7 @@ def get_product_fields():
         return _unexpected_error(error)
 
 
-@shared_bp.route("/api/contract_tree")
+@shared_bp.route("/api/internal/product-library/contract-tree")
 def get_contract_tree():
     """Return contract-level lazy nodes for the selected tree path."""
     try:
@@ -167,7 +167,7 @@ def get_contract_tree():
         return _unexpected_error(error)
 
 
-@shared_bp.route("/api/get_contracts")
+@shared_bp.route("/api/internal/product-library/contracts")
 def get_contracts():
     try:
         value = contract_listing(
@@ -182,7 +182,7 @@ def get_contracts():
         return _unexpected_error(error)
 
 
-@shared_bp.route("/api/get_price_data", methods=["POST"])
+@shared_bp.route("/api/internal/market-data/prices", methods=["POST"])
 def get_price_data():
     payload = request.get_json(silent=True) or {}
     try:

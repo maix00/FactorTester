@@ -299,7 +299,7 @@
       }
       if (["/products", "/products/sources", "/products/categories", "/products/groups"]
         .includes(pathname)) {
-        return openTab(path, {id: "products", title: t("产品"), closable: false});
+        return openTab(path, {id: "products", title: t("产品库"), closable: false});
       }
       if (["/factors", "/factors/families", "/factors/sets"].includes(pathname)) {
         return openTab(path, {id: "factors", title: t("因子库"), closable: false});

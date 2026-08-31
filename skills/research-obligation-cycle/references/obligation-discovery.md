@@ -74,7 +74,7 @@ and execution fields before any diagnostic job starts. The deterministic CLI
 first reads the shared catalog without inspecting source files:
 
 ```text
-factortester products capabilities --json
+factortester product-library capabilities --json
 ```
 
 If the exact scope has no frozen snapshot, capture the query as a Terminal
@@ -83,7 +83,7 @@ primary Evidence:
 
 ```text
 factortester research evidence source capture-terminal --profile-id <profile> -- \
-  factortester products availability \
+  factortester product-library availability \
     --product <product> --source <source> --frequency <frequency> \
     --field <logical-field> --field-catalog --historical-fields --json
 ```

@@ -83,8 +83,8 @@
       return;
     }
     const endpoint = category
-      ? `/api/catalog/categories/${encodeURIComponent(category.id)}`
-      : "/api/catalog/categories";
+      ? `/api/product-library/categories/${encodeURIComponent(category.id)}`
+      : "/api/product-library/categories";
     const value = await context.api(endpoint, {
       method: category ? "PUT" : "POST",
       body: JSON.stringify(payload),
@@ -148,7 +148,7 @@
     return FTUI.actionButton(context.t("删除"), async () => {
       if (!window.confirm(context.t("确认删除该产品分类？"))) return;
       try {
-        await context.api(`/api/catalog/categories/${encodeURIComponent(category.id)}`, {
+        await context.api(`/api/product-library/categories/${encodeURIComponent(category.id)}`, {
           method: "DELETE",
         });
         context.closeTab?.(context.tabID);
@@ -165,7 +165,7 @@
     return FTUI.actionButton(context.t("从父分类更新内容"), async () => {
       try {
         await context.api(
-          `/api/catalog/categories/${encodeURIComponent(category.id)}/refresh`,
+          `/api/product-library/categories/${encodeURIComponent(category.id)}/refresh`,
           {method: "POST"},
         );
         const query = mode === "edit" ? "?mode=edit" : "";

@@ -43,7 +43,7 @@ const state = {
   tabs: [
     {id: "home", path: "/", title: "主页", closable: false},
     {id: "jobs", path: "/jobs?section=types", title: "测试", closable: false},
-    {id: "products", path: "/products", title: "产品", closable: false},
+    {id: "products", path: "/products", title: "产品库", closable: false},
     {id: "settings", path: "/settings", title: "设置", closable: false},
   ],
   activeTabID: "home", tabSessions: new Map(), modules: [],
@@ -146,7 +146,7 @@ assert.strictEqual(
 const closeState = {
   tabs: [
     {id: "home", path: "/", title: "主页", closable: false},
-    {id: "products", path: "/products", title: "产品", closable: false},
+    {id: "products", path: "/products", title: "产品库", closable: false},
     {id: "settings", path: "/settings", title: "设置", closable: false},
   ],
   activeTabID: "home", tabSessions: new Map(), modules: [],

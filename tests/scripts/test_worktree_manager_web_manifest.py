@@ -1267,8 +1267,8 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
     assert "/api/backtest/settings/${application}`" not in first_load
     for endpoint in (
         "/api/factor-library/families", "/api/factor-library/factors",
-        "/api/catalog/product-groups",
-        "/api/data_source_categories", "/api/configuration-templates",
+        "/api/product-library/product-groups",
+        "/api/product-library/data-source-categories", "/api/configuration-templates",
         "/api/jobs/artifact-capabilities", "/api/client/profiles",
     ):
         assert endpoint not in first_load
@@ -2488,7 +2488,7 @@ def test_factor_catalog_list_defers_auxiliary_catalogs_and_heavy_modules() -> No
     assert 'sets: page === "sets"' in catalog_list
     assert 'groups: true, library: page !== "sets"' in catalog_list
     assert "onOpen: () =>" in catalog_list
-    assert "/api/catalog/product-groups" in runtime
+    assert "/api/product-library/product-groups" in runtime
     assert 'context.api("/api/factor-library/factor-sets")' in runtime
     sets_start = runtime.index("async function loadSets(context)")
     groups_start = runtime.index("async function loadGroups(context)")
@@ -2512,5 +2512,5 @@ def test_product_group_detail_never_uses_retired_business_route() -> None:
     ).read_text(encoding="utf-8")
 
     assert '"/api/client/product-groups"' in detail
-    assert '"/api/catalog/product-groups"' in detail
+    assert '"/api/product-library/product-groups"' in detail
     assert '"/api/product-groups"' not in detail

@@ -11,6 +11,7 @@ from typing import Any
 from flask import jsonify
 
 from server.services.http_auth import login_required
+
 from . import sft_bp
 
 # 这些数据源 Category 应用到的产品路径（中国期货品种 + 合约）。
@@ -60,7 +61,9 @@ def list_data_source_categories() -> list[dict[str, Any]]:
     return out
 
 
-@sft_bp.route("/api/data_source_categories", methods=["GET"])
+@sft_bp.route(
+    "/api/internal/product-library/data-source-categories", methods=["GET"],
+)
 @login_required
 def api_data_source_categories():
     return jsonify({"success": True, "categories": list_data_source_categories()})

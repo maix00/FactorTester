@@ -60,7 +60,7 @@ class TestAuthoringService:
                     "/api/workspaces",
                     "/api/workspace-summaries",
                     "/api/configuration-templates",
-                    "/api/data_source_categories",
+                    "/api/product-library/data-source-categories",
                     "/api/jobs/artifact-capabilities",
                     "/api/testers/modules",
                 }
@@ -156,7 +156,7 @@ class TestAuthoringService:
             return TestAuthoringResponse(self._settings_manifest(
                 unquote(match.group(1)),
             ))
-        if path == "/api/data_source_categories":
+        if path == "/api/product-library/data-source-categories":
             from server.modules.single_factor_test.category_routes import (
                 list_data_source_categories,
             )

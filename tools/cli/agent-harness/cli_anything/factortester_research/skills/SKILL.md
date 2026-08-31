@@ -263,12 +263,12 @@ admitting any of that Evidence into Graph remains a separate explicit action.
   `product_group_refs`. Read and change that relation only through the native
   product-group CLI:
   ```bash
-  factortester products groups subjects list \
+  factortester product-library groups subjects list \
     product-group:<id> --json
-  factortester products groups subjects add \
+  factortester product-library groups subjects add \
     product-group:<id> --factor-ref '<stable-factor-ref>' \
     --factor-set-ref '<stable-factor-set-ref>' --json
-  factortester products groups subjects remove \
+  factortester product-library groups subjects remove \
     product-group:<id> --factor-ref '<stable-factor-ref>' \
     --factor-set-ref '<stable-factor-set-ref>' --json
   ```

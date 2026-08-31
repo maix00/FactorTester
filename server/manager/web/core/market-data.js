@@ -27,14 +27,14 @@
 
   function prices(context, request, preferred = "") {
     return firstAvailable(context, source => context.api(
-      source === "local" ? "/api/client/product_prices" : "/api/catalog/prices",
+      source === "local" ? "/api/client/product_prices" : "/api/market-data/prices",
       {method: "POST", body: JSON.stringify(request)},
     ), preferred);
   }
 
   function contracts(context, product, preferred = "") {
     return firstAvailable(context, source => context.api(
-      `${source === "local" ? "/api/client/product_contracts" : "/api/catalog/contracts"}`
+      `${source === "local" ? "/api/client/product_contracts" : "/api/product-library/contracts"}`
         + `?product=${encodeURIComponent(product)}`,
     ), preferred);
   }

@@ -7,8 +7,6 @@ import pytest
 from click.testing import CliRunner
 
 from tools.cli.commands.client_catalog import (
-    catalog_factor_set,
-    catalog_group,
     catalog_migration,
 )
 from tools.data.catalog import LocalCatalogStore
@@ -191,53 +189,3 @@ def test_catalog_cli_preflight_is_read_only_and_reports_category_paths(tmp_path)
     assert value["safe_to_migrate"] is False
     assert value["groups"][0]["migration_status"] == "category_paths_need_snapshot"
     assert not (tmp_path / "client/catalog/catalog.sqlite").exists()
-
-
-def test_catalog_cli_lists_owner_scoped_bindings_and_set_members(tmp_path) -> None:
-    store = LocalCatalogStore(tmp_path / "client")
-    factor_record = _factor_record()
-    store.upsert_factor(factor_record)
-    store.upsert_group({
-        "group_ref": "group:cn",
-        "owner_ref": "profile:maxa",
-        "name": "中国期货",
-    })
-    store.replace_group_subjects(
-        "group:cn",
-        [{"subject_kind": "factor", "subject_ref": factor_record["ref"]}],
-    )
-    factor_set_record = _factor_set_record(factor_record)
-    store.upsert_factor_set(factor_set_record)
-
-    profile = tmp_path / "profile.json"
-    profile.write_text(
-        '{"schema_version":1,"release":{"install_root":"%s"}}'
-        % (tmp_path / "client"),
-        encoding="utf-8",
-    )
-    runner = CliRunner()
-    groups = runner.invoke(
-        catalog_group,
-        ["list", "--owner-ref", "profile:maxa",
-         "--release-profile", str(profile), "--json"],
-    )
-    subjects = runner.invoke(
-        catalog_group,
-        ["subjects", "group:cn", "--release-profile", str(profile),
-         "--json"],
-    )
-    sets = runner.invoke(
-        catalog_factor_set,
-        ["list", "--owner-ref", "profile:maxa",
-         "--release-profile", str(profile), "--json"],
-    )
-
-    assert groups.exit_code == 0, groups.output
-    assert subjects.exit_code == 0, subjects.output
-    assert sets.exit_code == 0, sets.output
-    assert json.loads(groups.output)[0]["group_ref"] == "group:cn"
-    assert json.loads(subjects.output)[0]["subject_ref"] == factor_record["ref"]
-    listed_set = json.loads(sets.output)[0]
-    assert [member["ref"] for member in listed_set["identity"]["members"]] == [
-        factor_record["ref"],
-    ]

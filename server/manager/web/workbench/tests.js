@@ -417,7 +417,7 @@
       // not expand every group's product membership just to open an editor;
       // referenced groups are resolved individually when their full payload
       // is actually required.
-      const value = await context.api("/api/catalog/product-groups?view=summary");
+      const value = await context.api("/api/product-library/product-groups?view=summary");
       const listed = Array.isArray(value.groups) ? value.groups : [];
       const catalog = await FTTestProducts.hydrateReferencedGroups(
         context, state, listed,

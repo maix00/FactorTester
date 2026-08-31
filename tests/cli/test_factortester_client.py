@@ -293,7 +293,7 @@ def fake_server() -> Iterator[str]:
             settings=[{"key": "engine_mode", "label": "执行模式", "editor": "select", "default": "auto", "tab": tab_key}],
         )
 
-    @app.get("/api/catalog/product-groups")
+    @app.get("/api/product-library/product-groups")
     def product_groups():
         assert request.args.get("view") == "summary"
         return jsonify(success=True, groups=[{"id": "pg-1", "name": "中国期货日盘"}])
@@ -440,14 +440,14 @@ def fake_server() -> Iterator[str]:
             success=request.args.get("target_ref") == "factor-set:momentum",
         )
 
-    @app.get("/api/catalog/products")
+    @app.get("/api/product-library/products")
     def product_catalog():
         return jsonify(
             success=True,
             products=[{"name": "RB.SHF", "description": "螺纹钢"}],
         )
 
-    @app.get("/api/catalog/sources")
+    @app.get("/api/product-library/data-sources")
     def product_sources():
         return jsonify(
             success=True,

@@ -31,7 +31,7 @@ async function main() {
       if (request) return request.promise;
       return Promise.resolve({
         "/api/factor-library/factor-sets": {items: [{target_ref: "set:one"}]},
-        "/api/catalog/product-groups": {groups: [{group_ref: "group:one"}]},
+        "/api/product-library/product-groups": {groups: [{group_ref: "group:one"}]},
         "/api/factor-library/families": {
           families: [{family_ref: "family:one"}],
           family_scopes: {}, principal: "alice", visitor: false,
@@ -52,13 +52,13 @@ async function main() {
 
   data = await window.FTFactorCatalog.load(context, {groups: true});
   assert.deepStrictEqual(calls, [
-    "/api/factor-library/factor-sets", "/api/catalog/product-groups",
+    "/api/factor-library/factor-sets", "/api/product-library/product-groups",
   ]);
   assert.strictEqual(data.groups[0].group_ref, "group:one");
 
   data = await window.FTFactorCatalog.load(context, {library: true});
   assert.deepStrictEqual(calls, [
-    "/api/factor-library/factor-sets", "/api/catalog/product-groups",
+    "/api/factor-library/factor-sets", "/api/product-library/product-groups",
     "/api/factor-library/families", "/api/factor-library/factors",
   ]);
   assert.strictEqual(data.factors[0].factor_ref, "factor:one");

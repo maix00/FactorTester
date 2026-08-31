@@ -279,7 +279,7 @@ def _walk_tree(nodes):
     "path",
     [
         "https://example.test/api/client/product_sources",
-        "/api/catalog/sources",
+        "/api/product-library/data-sources",
         "/api/client/not-a-catalog-route",
     ],
 )
