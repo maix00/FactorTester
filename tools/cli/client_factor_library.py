@@ -426,45 +426,6 @@ class FactorLibraryClientMixin(ClientMixinBase):
             payload,
         ))
 
-    def list_factor_research_runs(self, **params: Any) -> dict[str, Any]:
-        query = {
-            key: value for key, value in params.items()
-            if value not in (None, "", [], ())
-        }
-        return self._expect_success(self.session.get(
-            "/api/factor-library/research-runs",
-            query=query or None,
-        ))
-
-    def save_factor_research_run(
-        self,
-        payload: dict[str, Any],
-    ) -> dict[str, Any]:
-        return self._expect_success(self.session.post(
-            "/api/factor-library/research-runs",
-            payload,
-        ))
-
-    def factor_research_metrics(self, **params: Any) -> dict[str, Any]:
-        query = {
-            key: value for key, value in params.items()
-            if value not in (None, "", [], {})
-        }
-        return self._expect_success(self.session.get(
-            "/api/factor-library/research-metrics",
-            query=query or None,
-        ))
-
-    def factor_research_stability(self, **params: Any) -> dict[str, Any]:
-        query = {
-            key: value for key, value in params.items()
-            if value not in (None, "", [], {})
-        }
-        return self._expect_success(self.session.get(
-            "/api/factor-library/research-stability",
-            query=query or None,
-        ))
-
     def group_snapshot(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._expect_success(
             self.session.post("/get_group_snapshot", payload)
