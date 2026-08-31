@@ -3451,8 +3451,6 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
             profile_directory_detail = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/jobs/jobs.js") as response:
             jobs = response.read().decode("utf-8")
-        with urlopen(f"{base_url}/research-static/styles/app.css") as response:
-            app_css = response.read().decode("utf-8")
 
     assert '["researches", "研究"]' in workspaces
     assert '["graph", "研究图"]' in workspaces
@@ -3492,10 +3490,13 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert 'title: "我的研究"' in researches
     assert 'title: "下级用户的研究"' in researches
     assert 'title: "共享研究"' in researches
-    assert 'nav.className = "segmented-tabs research-root-scopes"' in researches
-    assert "segmented-tab research-root-scope" in researches
-    assert ".segmented-tabs, .job-scope-tabs" in app_css
-    assert ".segmented-tab, .job-scope-tab" in app_css
+    assert 'nav.className = "research-section-tabs research-root-scopes"' in researches
+    assert "research-section-tab research-root-scope" in researches
+    assert 'nav.className = "research-section-tabs research-detail-tabs"' in researches
+    assert "research-section-tab research-detail-tab" in researches
+    assert 'context.setHeading(value.title || id, context.t("研究"))' in researches
+    assert 'header.className = "research-detail-header"' not in researches
+    assert 'context.t("返回研究")' not in researches
     assert "card.append(note, downloadChoices(context, value))" in local_page
     assert 'section.className = "job-section client-download"' not in local_page
     assert 'note.className = "secondary research-graph-list-note"' in graph_list

@@ -66,12 +66,12 @@
 
   function scopeTabs(context, state, root) {
     const nav = document.createElement("nav");
-    nav.className = "segmented-tabs research-root-scopes";
+    nav.className = "research-section-tabs research-root-scopes";
     nav.setAttribute("aria-label", context.t("研究范围"));
     scopes.forEach(definition => {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = `segmented-tab research-root-scope${state.scope === definition.id ? " active" : ""}`;
+      button.className = `research-section-tab research-root-scope${state.scope === definition.id ? " active" : ""}`;
       button.textContent = context.t(definition.title);
       button.setAttribute("aria-current", state.scope === definition.id ? "page" : "false");
       button.disabled = !context.session && definition.id !== "shared";
@@ -170,12 +170,12 @@
 
   function detailTabsView(context, state, root, researchID) {
     const nav = document.createElement("nav");
-    nav.className = "research-detail-tabs";
+    nav.className = "research-section-tabs research-detail-tabs";
     nav.setAttribute("aria-label", context.t("研究详情"));
     detailTabs.forEach(definition => {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = `research-detail-tab${state.activeTab === definition.id ? " active" : ""}`;
+      button.className = `research-section-tab research-detail-tab${state.activeTab === definition.id ? " active" : ""}`;
       button.textContent = context.t(definition.title);
       button.setAttribute("aria-current", state.activeTab === definition.id ? "page" : "false");
       button.addEventListener("click", () => {
@@ -407,22 +407,11 @@
         parentFolder: "research",
         parentResearchID: id,
       });
+      context.setHeading(value.title || id, context.t("研究"));
       const root = document.createElement("div");
-      root.className = "research-detail-page";
+      root.className = "research-root-detail research-detail-page";
       root.__researchValue = value;
-      const header = document.createElement("header");
-      header.className = "research-detail-header";
-      const back = context.button(context.t("返回研究"), () => {
-        context.navigate("/research?section=researches");
-      }, context.t("返回研究列表"));
-      back.className = "secondary";
-      const title = document.createElement("h2");
-      title.textContent = value.title || id;
-      const meta = document.createElement("p");
-      meta.className = "secondary";
-      meta.textContent = `${context.t("所有者")}: ${value.owner_ref || "—"} · ${context.t("可见性")}: ${accessLabel(context, value)}`;
-      header.append(back, title, meta);
-      root.append(header, detailTabsView(context, state, root, id));
+      root.append(detailTabsView(context, state, root, id));
       const pane = document.createElement("div");
       pane.className = "research-detail-pane";
       root.append(pane);
