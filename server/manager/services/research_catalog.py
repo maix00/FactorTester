@@ -13,11 +13,12 @@ import json
 import secrets
 import time
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 from tools.data.sqlite.db import connect_sqlite
 
-VISIBILITIES = frozenset({"private", "authorized", "public"})
+VISIBILITIES = frozenset({"private", "superiors", "authorized", "public"})
 RESEARCH_STATUSES = frozenset({"active", "archived"})
 MEMBER_ROLES = frozenset({"owner", "editor", "contributor", "viewer"})
 MEMBER_STATUSES = frozenset({"active", "invited", "revoked"})
@@ -27,9 +28,21 @@ RESEARCH_SCOPES = frozenset({"all", "mine", "subordinates", "shared"})
 class ResearchCatalog:
     """Persist Research relationships in the Manager-owned SQLite database."""
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(
+        self,
+        db_path: str | Path,
+        *,
+        account_provider: Callable[[], list[dict[str, Any]]] | None = None,
+    ) -> None:
         self.db_path = Path(db_path).expanduser().resolve()
+        self._account_provider = account_provider
         self.ensure_schema()
+
+    def set_account_provider(
+        self, provider: Callable[[], list[dict[str, Any]]] | None,
+    ) -> None:
+        """Attach the shared account hierarchy after runtime initialization."""
+        self._account_provider = provider
 
     def ensure_schema(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -133,6 +146,20 @@ class ResearchCatalog:
                     completed_at REAL NOT NULL,
                     UNIQUE(source_kind, source_ref, owner_ref)
                 );
+                CREATE TABLE IF NOT EXISTS research_catalog_share_links (
+                    link_id TEXT PRIMARY KEY,
+                    target_kind TEXT NOT NULL,
+                    research_id TEXT NOT NULL,
+                    report_id TEXT NOT NULL,
+                    owner_ref TEXT NOT NULL,
+                    token_hash TEXT NOT NULL UNIQUE,
+                    mode TEXT NOT NULL,
+                    expires_at REAL NOT NULL,
+                    redeemed_by TEXT NOT NULL,
+                    redeemed_at REAL NOT NULL,
+                    revoked_at REAL NOT NULL,
+                    created_at REAL NOT NULL
+                );
                 CREATE INDEX IF NOT EXISTS idx_research_catalog_owner
                     ON research_catalog_researches(owner_ref, updated_at);
                 CREATE INDEX IF NOT EXISTS idx_research_catalog_members_principal
@@ -147,8 +174,41 @@ class ResearchCatalog:
                     idx_research_catalog_migration_identity
                     ON research_catalog_researches(owner_ref, migration_source)
                     WHERE migration_source <> '';
+                CREATE INDEX IF NOT EXISTS idx_research_share_links_owner
+                    ON research_catalog_share_links(owner_ref, created_at);
                 """
             )
+            # Old publication projections were shared before ADR-142. Restore
+            # them exactly once, so a later owner choice of "private" remains
+            # authoritative across restarts.
+            restoration_ref = "schema:restore-publication-superiors:v1"
+            restored = conn.execute(
+                "SELECT 1 FROM research_catalog_migrations WHERE migration_ref=?",
+                (restoration_ref,),
+            ).fetchone()
+            if restored is None:
+                now = time.time()
+                conn.execute(
+                    """UPDATE research_catalog_reports SET visibility='superiors'
+                       WHERE visibility='private' AND research_id IN (
+                         SELECT research_id FROM research_catalog_migrations
+                         WHERE source_kind='publication' AND status='completed'
+                       )"""
+                )
+                conn.execute(
+                    """UPDATE research_catalog_researches SET visibility='superiors'
+                       WHERE visibility='private' AND research_id IN (
+                         SELECT research_id FROM research_catalog_migrations
+                         WHERE source_kind='publication' AND status='completed'
+                       )"""
+                )
+                conn.execute(
+                    """INSERT INTO research_catalog_migrations
+                       (migration_ref, source_kind, source_ref, owner_ref,
+                        research_id, status, error, created_at, completed_at)
+                       VALUES (?, 'schema', ?, '', '', 'completed', '', ?, ?)""",
+                    (restoration_ref, restoration_ref, now, now),
+                )
 
     # ------------------------------------------------------------------
     # Research, membership, workspace, and report records
@@ -690,6 +750,200 @@ class ResearchCatalog:
             ).fetchone()
         return self._report_value(value, viewer=actor)
 
+    def update_report(
+        self,
+        research_id: str,
+        report_id: str,
+        *,
+        actor: str,
+        visibility: str | None = None,
+        authorized_users: list[str] | tuple[str, ...] | None = None,
+    ) -> dict[str, Any]:
+        research = self._research_row(research_id)
+        if not self._research_access(research, actor)["can_manage"]:
+            raise PermissionError("research report management is not authorized")
+        row = self._report_row(report_id)
+        if str(row["research_id"]) != research_id:
+            raise ValueError("report does not belong to research")
+        values: dict[str, Any] = {}
+        if visibility is not None:
+            values["visibility"] = _visibility(visibility)
+        if authorized_users is not None:
+            values["authorized_users_json"] = _json(
+                _authorized_users(authorized_users, str(row["owner_ref"])),
+            )
+        if not values:
+            return self._report_value(row, viewer=actor)
+        values["updated_at"] = time.time()
+        assignments = ", ".join(f"{key}=?" for key in values)
+        with connect_sqlite(self.db_path) as conn:
+            conn.execute(
+                f"UPDATE research_catalog_reports SET {assignments} WHERE report_id=?",
+                (*values.values(), report_id),
+            )
+            updated = conn.execute(
+                "SELECT * FROM research_catalog_reports WHERE report_id=?",
+                (report_id,),
+            ).fetchone()
+        return self._report_value(updated, viewer=actor)
+
+    def create_share_link(
+        self,
+        *,
+        target_kind: str,
+        research_id: str,
+        report_id: str = "",
+        actor: str,
+        mode: str = "permanent",
+        expires_at: float = 0,
+    ) -> dict[str, Any]:
+        if target_kind not in {"research", "report"}:
+            raise ValueError("target_kind must be research or report")
+        if mode not in {"one_time", "permanent"}:
+            raise ValueError("mode must be one_time or permanent")
+        research = self._research_row(research_id)
+        if not self._research_access(research, actor)["can_manage"]:
+            raise PermissionError("research sharing is not authorized")
+        if target_kind == "report":
+            report = self._report_row(report_id)
+            if str(report["research_id"]) != research_id:
+                raise ValueError("report does not belong to research")
+        else:
+            report_id = ""
+        token = secrets.token_urlsafe(32)
+        link_id = "share-" + secrets.token_hex(12)
+        now = time.time()
+        with connect_sqlite(self.db_path) as conn:
+            conn.execute(
+                """INSERT INTO research_catalog_share_links
+                   (link_id, target_kind, research_id, report_id, owner_ref,
+                    token_hash, mode, expires_at, redeemed_by, redeemed_at,
+                    revoked_at, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', 0, 0, ?)""",
+                (
+                    link_id, target_kind, research_id, report_id, actor,
+                    hashlib.sha256(token.encode("utf-8")).hexdigest(), mode,
+                    max(0.0, float(expires_at or 0)), now,
+                ),
+            )
+        return {
+            "link_id": link_id,
+            "target_kind": target_kind,
+            "research_id": research_id,
+            "report_id": report_id,
+            "mode": mode,
+            "expires_at": max(0.0, float(expires_at or 0)),
+            "token": token,
+            "created_at": now,
+        }
+
+    def list_share_links(self, research_id: str, *, actor: str) -> list[dict[str, Any]]:
+        research = self._research_row(research_id)
+        if not self._research_access(research, actor)["can_manage"]:
+            raise PermissionError("research sharing is not authorized")
+        with connect_sqlite(self.db_path, readonly=True) as conn:
+            rows = conn.execute(
+                """SELECT * FROM research_catalog_share_links
+                   WHERE research_id=? ORDER BY created_at DESC""",
+                (research_id,),
+            ).fetchall()
+        return [self._share_link_value(row) for row in rows]
+
+    def revoke_share_link(
+        self, research_id: str, link_id: str, *, actor: str,
+    ) -> dict[str, Any]:
+        research = self._research_row(research_id)
+        if not self._research_access(research, actor)["can_manage"]:
+            raise PermissionError("research sharing is not authorized")
+        with connect_sqlite(self.db_path) as conn:
+            row = conn.execute(
+                """SELECT * FROM research_catalog_share_links
+                   WHERE research_id=? AND link_id=?""",
+                (research_id, link_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError("share link not found")
+            conn.execute(
+                "UPDATE research_catalog_share_links SET revoked_at=? WHERE link_id=?",
+                (time.time(), link_id),
+            )
+            updated = conn.execute(
+                "SELECT * FROM research_catalog_share_links WHERE link_id=?",
+                (link_id,),
+            ).fetchone()
+        return self._share_link_value(updated)
+
+    def redeem_share_link(self, token: str, *, actor: str) -> dict[str, Any]:
+        clean_token = _text(token, "token", maximum=512)
+        digest = hashlib.sha256(clean_token.encode("utf-8")).hexdigest()
+        now = time.time()
+        with connect_sqlite(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT * FROM research_catalog_share_links WHERE token_hash=?",
+                (digest,),
+            ).fetchone()
+            if row is None or float(row["revoked_at"]) > 0:
+                raise KeyError("share link not found")
+            if float(row["expires_at"]) > 0 and float(row["expires_at"]) <= now:
+                raise PermissionError("share link has expired")
+            if str(row["mode"]) == "one_time" and str(row["redeemed_by"]):
+                if str(row["redeemed_by"]) != actor:
+                    raise PermissionError("share link has already been redeemed")
+            target_kind = str(row["target_kind"])
+            if target_kind == "research":
+                target = conn.execute(
+                    "SELECT * FROM research_catalog_researches WHERE research_id=?",
+                    (str(row["research_id"]),),
+                ).fetchone()
+                table, key, key_value = (
+                    "research_catalog_researches", "research_id", str(row["research_id"]),
+                )
+            else:
+                target = conn.execute(
+                    "SELECT * FROM research_catalog_reports WHERE report_id=?",
+                    (str(row["report_id"]),),
+                ).fetchone()
+                table, key, key_value = (
+                    "research_catalog_reports", "report_id", str(row["report_id"]),
+                )
+            if target is None:
+                raise KeyError("shared object not found")
+            users = _authorized_users(
+                [*_loads_list(target["authorized_users_json"]), actor],
+                str(target["owner_ref"]),
+            )
+            conn.execute(
+                f"UPDATE {table} SET authorized_users_json=?, updated_at=? WHERE {key}=?",
+                (_json(users), now, key_value),
+            )
+            if str(row["mode"]) == "one_time" and not str(row["redeemed_by"]):
+                conn.execute(
+                    """UPDATE research_catalog_share_links
+                       SET redeemed_by=?, redeemed_at=? WHERE link_id=?""",
+                    (actor, now, str(row["link_id"])),
+                )
+        return {
+            "target_kind": target_kind,
+            "research_id": str(row["research_id"]),
+            "report_id": str(row["report_id"]),
+            "mode": str(row["mode"]),
+        }
+
+    @staticmethod
+    def _share_link_value(row) -> dict[str, Any]:
+        return {
+            "link_id": str(row["link_id"]),
+            "target_kind": str(row["target_kind"]),
+            "research_id": str(row["research_id"]),
+            "report_id": str(row["report_id"]),
+            "mode": str(row["mode"]),
+            "expires_at": float(row["expires_at"]),
+            "redeemed_by": str(row["redeemed_by"]),
+            "redeemed_at": float(row["redeemed_at"]),
+            "revoked_at": float(row["revoked_at"]),
+            "created_at": float(row["created_at"]),
+        }
+
     # ------------------------------------------------------------------
     # Evidence links and access
 
@@ -920,11 +1174,26 @@ class ResearchCatalog:
         ).hexdigest()[:32]
         title = str(item.get("title") or report_id).strip() or report_id
         profile_ref = str(item.get("profile_ref") or item.get("profile_id") or "").strip()
-        visibility = str(item.get("visibility") or "private")
+        visibility = str(
+            item.get("visibility")
+            or ("superiors" if source_kind == "publication" else "private")
+        )
         if visibility not in VISIBILITIES:
             visibility = "private"
+        if source_kind == "publication" and visibility == "private":
+            visibility = "superiors"
         now = time.time()
         with connect_sqlite(self.db_path) as conn:
+            existing_research = conn.execute(
+                "SELECT visibility FROM research_catalog_researches WHERE research_id=?",
+                (research_id,),
+            ).fetchone()
+            if (
+                not item.get("visibility") and source_kind != "publication"
+                and existing_research is not None
+                and str(existing_research["visibility"]) != "private"
+            ):
+                visibility = str(existing_research["visibility"])
             existing_migration = conn.execute(
                 """SELECT * FROM research_catalog_migrations
                    WHERE source_kind=? AND source_ref=? AND owner_ref=?""",
@@ -1103,8 +1372,8 @@ class ResearchCatalog:
             membership=membership,
         )
 
-    @staticmethod
     def _research_access_values(
+        self,
         *,
         research_id: str,
         owner: str,
@@ -1119,6 +1388,8 @@ class ResearchCatalog:
         if status == "archived":
             return _access(False, False, False, False, "none", research_id)
         if visibility == "public":
+            return _access(True, True, True, False, "research", research_id)
+        if visibility == "superiors" and self._is_superior(viewer, owner):
             return _access(True, True, True, False, "research", research_id)
         if viewer and viewer in _loads_list(authorized_users_json):
             return _access(True, True, True, False, "research", research_id)
@@ -1154,9 +1425,39 @@ class ResearchCatalog:
             )
         if str(row["visibility"]) == "public":
             return _access(True, True, False, False, "report", str(row["report_id"]))
+        if str(row["visibility"]) == "superiors" and self._is_superior(
+            viewer_ref, str(row["owner_ref"]),
+        ):
+            return _access(True, True, False, False, "report", str(row["report_id"]))
         if viewer_ref and viewer_ref in _loads_list(row["authorized_users_json"]):
             return _access(True, True, False, False, "report", str(row["report_id"]))
         return _access(False, False, False, False, "none", str(row["report_id"]))
+
+    def _is_superior(self, viewer: str, owner: str) -> bool:
+        """Resolve the owner's active parent chain from the account authority."""
+        if not viewer or not owner or not callable(self._account_provider):
+            return False
+        try:
+            accounts = list(self._account_provider() or [])
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return False
+        by_username = {
+            str(item.get("username") or "").strip(): item
+            for item in accounts if isinstance(item, dict)
+        }
+        current = owner
+        visited: set[str] = set()
+        while current and current not in visited:
+            visited.add(current)
+            account = by_username.get(current)
+            if account is None or account.get("active", True) is False:
+                return False
+            parent = str(account.get("parent_username") or "").strip()
+            if parent == viewer:
+                superior = by_username.get(parent)
+                return superior is not None and superior.get("active", True) is not False
+            current = parent
+        return False
 
     def _research_value(
         self, row, *, viewer: str | None, access: dict[str, Any] | None = None,
@@ -1223,12 +1524,15 @@ class ResearchCatalog:
             "build_source": str(row["build_source"]),
             "build_source_ref": str(row["build_source_ref"]),
             "visibility": str(row["visibility"]),
+            "authorized_users": [],
             "status": str(row["status"]),
             "source_ref": str(row["source_ref"]),
             "created_at": float(row["created_at"]),
             "updated_at": float(row["updated_at"]),
         }
         value["access"] = access or self._report_access(row, viewer)
+        if value["access"]["can_manage"]:
+            value["authorized_users"] = _loads_list(row["authorized_users_json"])
         return value
 
     @staticmethod

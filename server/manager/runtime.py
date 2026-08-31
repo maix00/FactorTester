@@ -370,6 +370,11 @@ class ManagerState(
             self.control_database_settings.effective_environ()
         )
         self.control_store = control_store_from_env(control_database_environ)
+        self.research_catalog.set_account_provider(
+            lambda: [] if self.control_store is None else [
+                dict(item) for item in self.control_store.load_accounts()
+            ],
+        )
         self.device_registry = DeviceRegistry(
             self.state_root / "device-registry.json",
             server_id=self.server_id,

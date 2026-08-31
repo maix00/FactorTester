@@ -65,7 +65,10 @@
   }
 
   function visibilityTitle(context, value) {
-    const title = {private: "仅自己", authorized: "授权用户", public: "公开"}[value];
+    const title = {
+      private: "仅自己", superiors: "分享给上级",
+      authorized: "指定用户可见", public: "全体用户共享",
+    }[value];
     return title ? context.t(title) : value || "";
   }
 

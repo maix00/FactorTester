@@ -57,9 +57,10 @@
     "research-reference": ["core", "code-viewer"],
     "report": ["code-viewer", "object-transfer"],
     "research-shell": ["core"],
-    "research-catalog": ["core"],
+    "research-visibility": ["core"],
+    "research-catalog": ["core", "research-visibility"],
     "research-evidence": ["core", "object-transfer"],
-    "research-reports": ["core"],
+    "research-reports": ["core", "research-visibility"],
     "research-local": ["core"],
     "research-shared": ["research-shell"],
     "research-graph": ["core", "catalog-core"],
@@ -280,6 +281,7 @@
       "report/report-entry.js"
     ],
     "research-shell": ["research/workspaces.js"],
+    "research-visibility": ["research/visibility.js"],
     "research-catalog": ["research/researches.js"],
     "research-evidence": [
       "research/evidence-applicability.js",
