@@ -232,5 +232,125 @@
     await renderScope(context, root, embedded);
   }
 
-  window.FTResearchReports = Object.freeze({render, buildSource, sharing});
+  function researchReportState(context, researchID) {
+    const root = context.tabSession.researchReportLists
+      || (context.tabSession.researchReportLists = {});
+    const key = String(researchID || "");
+    const state = root[key] || {page: 1};
+    root[key] = state;
+    context.pageState?.register?.(`research-reports:${key}`, {
+      capture: () => ({page: state.page}),
+      restore: value => {
+        if (Number(value?.page) > 0) state.page = Number(value.page);
+      },
+      describe: () => ({page: "research-reports", research_id: key, fields: []}),
+    });
+    return state;
+  }
+
+  function reportRoute(item) {
+    const explicit = String(item?.href || "").trim();
+    if (explicit) return explicit;
+    const reference = String(item?.source_ref || item?.report_id || "").trim();
+    return reference
+      ? `/research/${encodeURIComponent(reference)}`
+      : "";
+  }
+
+  function researchReportTable(context, rows, state, mount, researchID) {
+    const view = FTUI.pagedTable(
+      [
+        context.t("研究报告"), context.t("构建来源"),
+        context.t("访问范围"), context.t("更新时间"), context.t("操作"),
+      ],
+      rows.map(item => {
+        const action = context.button(
+          context.t("独立打开"),
+          event => {
+            event.stopPropagation();
+            const href = reportRoute(item);
+            if (!href) return;
+            context.navigate(href, {
+              parentFolder: "research",
+              parentTabID: context.tabID,
+              parentResearchID: researchID,
+              title: item.title || item.report_id || context.t("研究报告"),
+            });
+          },
+          context.t("在左栏的当前研究下打开此研究报告"),
+        );
+        action.className = "secondary research-report-open";
+        return [
+          item.title || item.report_id || context.t("未命名研究报告"),
+          buildSource(context, item),
+          visibility(context, item.visibility),
+          FTUI.formatDate(item.updated_at || item.created_at),
+          action,
+        ];
+      }),
+      {
+        page: state.page,
+        pageSize,
+        pageLabel: (page, total) => `${page} / ${total}`,
+        totalLabel: total => context.t("共 %lld 个").replace("%lld", String(total)),
+        onPageChange: page => {
+          state.page = page;
+          void renderForResearch(context, mount, researchID);
+        },
+      },
+    );
+    const pageRows = rows.slice(view.start, view.start + view.pageSize);
+    [...view.body.rows].forEach((row, index) => {
+      row.dataset.href = "true";
+      row.addEventListener("click", () => {
+        const href = reportRoute(pageRows[index]);
+        if (!href) return;
+        context.navigate(href, {
+          parentFolder: "research",
+          parentTabID: context.tabID,
+          parentResearchID: researchID,
+          title: pageRows[index].title || pageRows[index].report_id,
+        });
+      });
+    });
+    view.shell.classList.add("research-report-table", "research-report-table-embedded");
+    return view.shell;
+  }
+
+  async function renderForResearch(context, mount, researchID, researchMeta = {}) {
+    const id = String(researchID || "").trim();
+    if (!id) {
+      mount.replaceChildren(FTUI.empty(context.t("无法读取"), context.t("缺少 Research 标识")));
+      return;
+    }
+    const state = researchReportState(context, id);
+    mount.replaceChildren(FTUI.loading(context.t("正在读取研究报告…")));
+    try {
+      const value = await context.api(
+        `/api/research/${encodeURIComponent(id)}/reports`,
+      );
+      if (!current(context)) return;
+      const rows = Array.isArray(value.reports) ? value.reports : [];
+      const root = document.createElement("div");
+      root.className = "research-reports-for-research";
+      const note = document.createElement("p");
+      note.className = "secondary";
+      note.textContent = researchMeta.title
+        ? `${context.t("属于研究")}: ${researchMeta.title}`
+        : context.t("这些研究报告属于当前 Research");
+      root.append(note);
+      root.append(rows.length
+        ? researchReportTable(context, rows, state, mount, id)
+        : FTUI.empty(context.t("暂无研究报告"), context.t("可在当前 Research 中登记研究报告")));
+      mount.replaceChildren(root);
+    } catch (error) {
+      if (current(context)) mount.replaceChildren(
+        FTUI.empty(context.t("无法读取"), error.message || String(error)),
+      );
+    }
+  }
+
+  window.FTResearchReports = Object.freeze({
+    render, renderForResearch, buildSource, sharing,
+  });
 })();

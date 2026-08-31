@@ -51,6 +51,50 @@ body.sidebar-collapsed .opened-tab > .tab-main > .symbol { margin: 0; justify-se
 .sidebar-caption { color: var(--muted); font-size: 11px; font-weight: 600; padding: 0 8px 4px; }
 #module-nav, #opened-tabs { width: 100%; }
 #module-nav { display: grid; gap: 1px; }
+.nav-folder { min-width: 0; display: grid; gap: 1px; }
+.nav-folder-row { min-width: 0; display: flex; align-items: center; gap: 2px; }
+.nav-folder-row > .nav-button { min-width: 0; flex: 1; }
+.nav-folder-row > .tab-main { min-width: 0; max-width: 100%; flex: 1; display: flex; gap: 8px; align-items: center; border: 0; border-radius: 7px; padding: 6px 8px; background: transparent; color: inherit; text-align: left; overflow: hidden; }
+.nav-folder-row > .tab-main:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.nav-folder-row > .tab-main.active { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.nav-folder-row > .tab-main .tab-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-folder-toggle { width: 22px; height: 30px; flex: 0 0 22px; border: 0; border-radius: 6px; padding: 0; color: var(--muted); background: transparent; font-size: 17px; line-height: 1; }
+.nav-folder-toggle:hover { color: var(--text); background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.nav-folder-children { min-width: 0; display: grid; gap: 1px; margin-left: 10px; padding: 2px 0 2px 8px; border-left: 1px solid var(--line); }
+.nav-folder-children > .nav-button, .nav-folder-children > .nav-folder > .nav-folder-row > .nav-button { min-height: 28px; padding-top: 5px; padding-bottom: 5px; font-size: 12px; }
+.nav-folder-static-children { overflow: hidden; }
+.nav-folder-dynamic { min-width: 0; display: grid; gap: 1px; margin-top: 3px; padding-top: 3px; border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+.nav-folder-dynamic .opened-tab { padding-left: 7px; }
+.nav-folder-dynamic .nav-research-detail-folder { min-width: 0; }
+.nav-folder-dynamic .nav-research-detail-folder > .nav-folder-row,
+.nav-folder-dynamic > .research-detail-tab-row { border-radius: 8px; background: color-mix(in srgb, var(--soft) 58%, transparent); box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 12%, transparent); }
+.nav-folder-dynamic .nav-research-detail-folder > .nav-folder-row { padding: 2px 4px 2px 0; }
+.nav-folder-dynamic .nav-research-detail-folder > .nav-folder-row > .nav-folder-tab,
+.nav-folder-dynamic > .research-detail-tab-row > .tab-main { min-height: 30px; padding-top: 6px; padding-bottom: 6px; font-size: 13px; font-weight: 600; }
+.nav-folder-dynamic .nav-research-detail-folder .nav-folder-toggle { width: 20px; flex-basis: 20px; }
+.nav-folder-dynamic .nav-research-detail-folder > .nav-folder-row > .tab-close { margin-left: 0; }
+.nav-folder-dynamic .nav-research-tab-children { margin-left: 20px; padding-left: 7px; }
+.nav-folder-dynamic .nav-research-tab-children .opened-tab { min-height: 28px; padding-top: 5px; padding-bottom: 5px; }
+.nav-folder-dynamic .nav-research-tab-children .opened-tab .tab-label { font-size: 12px; }
+.nav-grandchild { font-size: 12px; }
+.opened-tab-nested { min-height: 28px; padding-top: 5px; padding-bottom: 5px; }
+.opened-tab.dragging, .nav-folder.drop-target, .opened-tab.drop-target { opacity: .58; outline: 1px dashed var(--accent); outline-offset: -1px; }
+.opened-tab.drop-before, .nav-folder-row.drop-before { border-top: 2px solid var(--accent); }
+.opened-tab.drop-after, .nav-folder-row.drop-after { border-bottom: 2px solid var(--accent); }
+.opened-tab.drop-before, .opened-tab.drop-after { position: relative; }
+body.sidebar-collapsed .nav-folder-toggle { display: none; }
+body.sidebar-collapsed .nav-folder-static-children { display: none; }
+body.sidebar-collapsed .nav-folder-row > .nav-button { width: 100%; }
+body.sidebar-collapsed .nav-folder-row > .tab-main { display: grid; grid-template-columns: 1fr; place-items: center; width: 100%; min-height: 30px; gap: 0; padding: 5px; }
+body.sidebar-collapsed .nav-folder-row > .tab-main > .symbol { width: 17px; height: 17px; flex-basis: 17px; justify-self: center; }
+body.sidebar-collapsed .nav-folder-row > .tab-close { display: none; }
+body.sidebar-collapsed .nav-folder-dynamic { margin-top: 3px; padding-top: 3px; border-top: 1px solid var(--line); }
+body.sidebar-collapsed .nav-folder-dynamic .nav-folder-toggle { display: none; }
+body.sidebar-collapsed .nav-folder-dynamic .nav-research-detail-folder > .nav-folder-row,
+body.sidebar-collapsed .nav-folder-dynamic > .research-detail-tab-row { padding: 2px; box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 12%, transparent); }
+body.sidebar-collapsed .nav-folder-dynamic .nav-research-tab-children { display: grid; margin-left: 8px; padding-left: 4px; }
+body.sidebar-collapsed .nav-folder-dynamic .nav-research-tab-children .opened-tab { padding-left: 4px; padding-right: 4px; }
+body.sidebar-collapsed .nav-folder-dynamic .nav-research-tab-children .opened-tab > .tab-main > .symbol { width: 15px; height: 15px; flex-basis: 15px; }
 .opened-caption { margin-top: 14px; }
 .opened-tabs { display: grid; gap: 1px; min-width: 0; min-height: 0; flex: 0 1 auto; max-height: calc(100vh - 180px); overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
 .opened-tab { width: 100%; min-width: 0; border: 0; background: transparent; color: inherit; border-radius: 7px; padding: 6px 8px; display: flex; gap: 8px; align-items: center; text-align: left; min-height: 30px; overflow: hidden; }
@@ -501,6 +545,10 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .research-report-tab:not(.active):hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .research-report-tab:disabled { cursor: default; opacity: .5; }
 .research-reports-page, .research-graph-list-page { display: grid; gap: 14px; min-width: 0; }
+.research-root-page, .research-root-detail { display: grid; gap: 14px; min-width: 0; }
+.research-root-table table { min-width: 720px; }
+.research-root-detail section { display: grid; gap: 8px; min-width: 0; }
+.research-root-detail h2, .research-root-detail h3, .research-root-detail p { margin: 0; }
 .research-report-scope-content { display: grid; gap: 14px; min-width: 0; }
 .research-report-table table, .research-graph-table table { min-width: 860px; }
 .research-report-table .shared-table-pagination, .research-graph-table .shared-table-pagination,

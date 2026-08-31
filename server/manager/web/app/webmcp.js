@@ -45,9 +45,9 @@
       description: "Browse and manage product classification trees.",
     },
     {
-      id: "research", path: "/research?section=reports", title: "Research reports", access: "public",
+      id: "research", path: "/research?section=researches", title: "Research", access: "authenticated",
       cli: ["research"],
-      description: "Inspect research reports, evidence and agent workflow outputs.",
+      description: "Manage Research roots, Profile memberships, workspaces and report links.",
     },
     {
       id: "research_graph", path: "/research?section=graph", title: "Research graph", access: "authenticated",

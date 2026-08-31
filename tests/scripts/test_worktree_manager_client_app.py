@@ -2534,9 +2534,11 @@ def test_manager_navigation_is_role_filtered_and_nests_profiles_under_research(
     assert {
         item["id"] for item in user_modules["research"]["children"]
     } == {
-        "research.reports", "research.graph", "research.profiles",
+        "research.graph", "research.profiles",
         "research.agent-models",
     }
+    assert "research.researches" not in user_modules["research"]["children"]
+    assert "research.reports" not in user_modules["research"]["children"]
     assert "admin_users" not in user_modules
     assert not {"manager", "sqlite_web"} & set(org_modules)
     assert {"manager", "sqlite_web"} <= set(admin_modules)
@@ -3424,6 +3426,8 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
             graph_list = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research/reports.js") as response:
             reports = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/research/researches.js") as response:
+            researches = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/profile/agent-models.js") as response:
             agent_models = response.read().decode("utf-8")
         with urlopen(
@@ -3441,11 +3445,11 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
         with urlopen(f"{base_url}/research-static/jobs/jobs.js") as response:
             jobs = response.read().decode("utf-8")
 
-    assert '["reports", "研究报告"]' in workspaces
+    assert '["researches", "研究"]' in workspaces
     assert '["graph", "研究图"]' in workspaces
     assert '["agent-models", "智能体模型"]' in workspaces
     assert 'FTAgentModels.list' in workspaces
-    assert "FTResearchReports.render(context, body, embedded)" in workspaces
+    assert "FTResearchCatalog.render({...context, content: body}, body)" in workspaces
     assert "FTResearchGraphList.render(context, body)" in workspaces
     assert "window.FTResearchLocal" in local_page
     assert "clientDownload(context" in local_page
@@ -3473,6 +3477,9 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert 'model.addEventListener("focus"' in agent_model_editor
     assert "clientDownload?.(context, release)" in reports
     assert 'section.className = "research-client-download-action"' in local_page
+    assert "window.FTResearchCatalog" in researches
+    assert "FTUI.pagedTable" in researches
+    assert "/api/research" in researches
     assert "card.append(note, downloadChoices(context, value))" in local_page
     assert 'section.className = "job-section client-download"' not in local_page
     assert 'note.className = "secondary research-graph-list-note"' in graph_list

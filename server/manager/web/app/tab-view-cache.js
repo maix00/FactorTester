@@ -7,6 +7,20 @@
     const onTabEvicted = options.onTabEvicted;
     const liveViewLimit = Math.max(1, Number(options.liveViewLimit) || 3);
     const coldViewMemory = new Map();
+    let lastActivityAt = 0;
+
+    // Date.now() has millisecond precision, so several synchronous tab
+    // switches can otherwise receive the same LRU timestamp.  Keep the
+    // wall-clock value as the baseline but make the ordering strictly
+    // monotonic within this cache instance.
+    function nextActivityAt(seed = 0) {
+      lastActivityAt = Math.max(
+        Number(seed) || 0,
+        Date.now(),
+        lastActivityAt + 1,
+      );
+      return lastActivityAt;
+    }
 
     function moveChildren(element) {
       if (!element || typeof document.createDocumentFragment !== "function") return null;
@@ -282,7 +296,7 @@
     function enforceLiveViewLimit(excludeTabID) {
       const live = state.tabs.map(tab => ({
         tabID: tab.id, session: tabSession(tab.id),
-      })).filter(item => item.session.view?.content);
+      })).filter(item => item.session.view?.content?.childNodes?.length);
       while (live.length > liveViewLimit) {
         live.sort((left, right) => (
           (left.session.view.lastUsedAt || 0) - (right.session.view.lastUsedAt || 0)
@@ -312,7 +326,7 @@
       const key = writeColdView(tabID, snapshot);
       session.view = {
         coldKey: key, pendingRestore: false, ready: true,
-        lastUsedAt: view.lastUsedAt || Date.now(),
+        lastUsedAt: view.lastUsedAt || nextActivityAt(),
       };
       Promise.resolve(onTabEvicted?.(tabID)).catch(() => {});
     }
@@ -337,12 +351,12 @@
         } : null;
         view.navRoute = document.querySelector?.(".nav-button.active")?.dataset?.route || "";
         view.ready = session.viewReady !== false;
-        view.lastUsedAt = Date.now();
+        view.lastUsedAt = nextActivityAt();
         session.view = view;
         return;
       }
       if (view.rerenderOnRestore) {
-        view.lastUsedAt = Date.now();
+        view.lastUsedAt = nextActivityAt();
         session.view = view;
         return;
       }
@@ -360,14 +374,14 @@
         view.navRoute = document.querySelector?.(".nav-button.active")?.dataset?.route || "";
         view.rerenderOnRestore = true;
         view.ready = false;
-        view.lastUsedAt = Date.now();
+        view.lastUsedAt = nextActivityAt();
         session.view = view;
         return;
       }
       // Pointerdown captures report scroll before click navigates.  A second
       // save sees an empty shell, so retain the already detached fragment.
       if (view.content?.childNodes?.length && !content.firstChild) {
-        view.lastUsedAt = Date.now();
+        view.lastUsedAt = nextActivityAt();
         session.view = view;
         return;
       }
@@ -380,7 +394,7 @@
       } : null;
       view.navRoute = document.querySelector?.(".nav-button.active")?.dataset?.route || "";
       view.ready = session.viewReady !== false;
-      view.lastUsedAt = Date.now();
+      view.lastUsedAt = nextActivityAt();
       session.view = view;
       enforceLiveViewLimit(state.activeTabID);
     }
@@ -424,7 +438,7 @@
         return "cold";
       }
       if (!view?.ready || !view.content) return false;
-      view.lastUsedAt = Date.now();
+      view.lastUsedAt = nextActivityAt();
       restoreChildren(content, view.content);
       restoreChildren(toolbar, view.toolbar);
       if (title) title.textContent = view.title || "";
@@ -473,7 +487,7 @@
       deleteColdView(state.activeTabID);
       delete view.coldKey;
       view.pendingRestore = false;
-      view.lastUsedAt = Date.now();
+      view.lastUsedAt = nextActivityAt();
       restoreOverlays(state.activeTabID, session);
       restorePageAgent(state.activeTabID);
       window.requestAnimationFrame?.(() => window.scrollTo({
@@ -506,7 +520,7 @@
       const key = writeColdView(tabID, saved);
       session.view = {
         coldKey: key, pendingRestore: false, ready: true,
-        lastUsedAt: Number(saved.updatedAt || Date.now()),
+        lastUsedAt: nextActivityAt(Number(saved.updatedAt || 0)),
       };
       return true;
     }

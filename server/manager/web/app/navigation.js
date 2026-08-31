@@ -6,6 +6,10 @@
   function moduleForPath(path, modules) {
     const pathname = String(path || "").split(/[?#]/, 1)[0];
     const id = pathname.split("/").filter(Boolean)[0] || "home";
+    if (id === "researches") {
+      return modules.find(item => item.id === "research")
+        || {id: "research", title: "研究", icon: "chart"};
+    }
     return modules.find(item =>
       item.id === id || modulePath(item).split("/").filter(Boolean)[0] === id
     ) || {id, title: id, icon: ""};
@@ -40,7 +44,7 @@
     const module = moduleForPath(path, modules);
     if (parts.length <= 1) return t(module.title_key || module.title);
     const labels = {
-      research: "研究报告", "research-graphs": "研究图", jobs: "测试", factors: "因子详情",
+      research: "研究报告", researches: "研究", "research-graphs": "研究图", jobs: "测试", factors: "因子详情",
       products: "产品详情", profiles: "研究身份", "test-templates": "测试模板",
     };
     if (parts[0] === "products" && parts[1] === "categories") {
@@ -101,10 +105,9 @@
       id: "research", title: "研究", title_key: "研究",
       description_key: "查看各 Profile 的实时步骤、义务与报告",
       icon: "chart", sfSymbol: "chart.xyaxis.line",
-      path: "/research?section=reports", requiresAuth: false,
+      path: "/research?section=researches", requiresAuth: true,
       sidebarVisible: true, homeVisible: true, pinned: true,
       children: [
-        {id: "research.reports", title: "研究报告", title_key: "研究报告", path: "/research?section=reports", requiresAuth: false},
         {id: "research.graph", title: "研究图", title_key: "研究图", path: "/research?section=graph", requiresAuth: true},
         {id: "research.profiles", title: "研究身份", title_key: "研究身份", path: "/research?section=profiles", requiresAuth: true},
         {id: "research.agent-models", title: "智能体模型", title_key: "智能体模型", path: "/research?section=agent-models", requiresAuth: true},
@@ -184,6 +187,9 @@
     }
     if (parts[0] === "research" && parts[1]) {
       return {kind: "report", id: parts.slice(1).join("/")};
+    }
+    if (parts[0] === "researches" && parts[1]) {
+      return {kind: "research-detail", id: decodeURIComponent(parts.slice(1).join("/"))};
     }
     if (parts[0] === "research-graphs" && parts[1]) {
       return {kind: "research-graph", id: decodeURIComponent(parts.slice(1).join("/"))};

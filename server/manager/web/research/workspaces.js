@@ -1,6 +1,6 @@
 (() => {
   const fallbackSections = [
-    ["reports", "研究报告"],
+    ["researches", "研究"],
     ["graph", "研究图"],
     ["profiles", "研究身份"],
     ["agent-models", "智能体模型"],
@@ -11,11 +11,14 @@
     if (!isCurrent()) return;
     const sections = sectionsFor(context);
     const params = new URLSearchParams(location.search);
-    const requested = params.get("section") || "reports";
+    const requested = params.get("section") || "researches";
+    const researchID = params.get("research_id") || "";
     const profileID = params.get("profile") || "";
     const allowedSections = new Set(sections.map(item => item[0]));
-    const selected = allowedSections.has(requested)
-      ? requested : (sections[0]?.[0] || "shared");
+    const selected = requested === "reports"
+      ? "researches"
+      : (allowedSections.has(requested)
+        ? requested : (sections[0]?.[0] || "researches"));
     const embedded = new URLSearchParams(location.search).get("presentation") === "embedded";
     context.activeNav("research");
     context.setHeading(context.t("研究"), context.t(labelFor(selected, sections)));
@@ -48,13 +51,24 @@
       } else if (selected === "agent-models") {
         await window.FTStaticLoader?.loadGroups?.(["profile-agent-models"]);
         await FTAgentModels.list({...context, content: body});
-      } else if (selected === "reports") {
-        await FTResearchReports.render(context, body, embedded);
+      } else if (selected === "researches") {
+        await window.FTStaticLoader?.loadGroups?.(["research-core"]);
+        if (researchID) {
+          // The query form is kept only as an old-link bridge.  A concrete
+          // Research is always promoted to its own left-sidebar tab; it is
+          // never rendered as a nested page inside the Research root tab.
+          context.navigate(`/researches/${encodeURIComponent(researchID)}`, {
+            parentFolder: "research",
+            parentResearchID: researchID,
+          });
+          return;
+        }
+        await window.FTResearchCatalog.render({...context, content: body}, body);
       } else if (selected === "graph") {
         await window.FTStaticLoader?.loadGroups?.(["research-graph"]);
         await FTResearchGraphList.render(context, body);
       } else {
-        await FTResearchReports.render(context, body, embedded);
+        await window.FTResearchCatalog.render({...context, content: body}, body);
       }
       if (!isCurrent()) return;
     } catch (error) {
@@ -66,17 +80,18 @@
   function sectionsFor(context) {
     const research = (context.modules || []).find(item => item.id === "research");
     const children = Array.isArray(research?.children) ? research.children : [];
-    if (!children.length) return fallbackSections;
-    return children.map(item => {
+    const registered = children.map(item => {
       const path = String(item.path || "");
       const section = new URL(path, "http://factortester.invalid")
         .searchParams.get("section") || String(item.id || "").split(".").pop();
       return [section, item.title_key || item.title || section];
     });
+    const sections = registered.length ? registered : fallbackSections.slice(1);
+    return [["researches", "研究"], ...sections.filter(item => item[0] !== "researches" && item[0] !== "reports")];
   }
 
   function labelFor(section, sections) {
-    return sections.find(item => item[0] === section)?.[1] || "研究报告";
+    return sections.find(item => item[0] === section)?.[1] || "研究";
   }
 
   function tabBar(context, selected, embedded) {

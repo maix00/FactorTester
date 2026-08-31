@@ -51,7 +51,10 @@ class ResearchObjectRoutesMixin:
         return str(session["username"])
 
     def _research_object_error(self, exc: Exception, *, missing: bool = False) -> None:
-        status = 404 if missing or isinstance(exc, KeyError) else 409
+        if isinstance(exc, PermissionError):
+            status = 403
+        else:
+            status = 404 if missing or isinstance(exc, KeyError) else 409
         json_response(self, {"success": False, "error": str(exc)}, status)
 
     def _research_object_body(self, maximum: int) -> dict:
@@ -95,7 +98,7 @@ class ResearchObjectRoutesMixin:
                     raise KeyError("run not found")
                 jobs = JobRepository().list(owner=owner, run_id=run_id, limit=200)
                 payload = {"run": value, "jobs": [job.summary() for job in jobs]}
-        except (KeyError, TypeError, ValueError) as exc:
+        except (KeyError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
             self._research_object_error(exc, missing=isinstance(exc, KeyError))
             return True
         json_response(self, {"success": True, **payload})
@@ -151,15 +154,33 @@ class ResearchObjectRoutesMixin:
                     )
                 }
             elif detail:
-                payload = {
-                    "evidence": get_evidence(
-                        owner=owner,
-                        evidence_ref=unquote(detail.group(1)),
+                evidence_ref = unquote(detail.group(1))
+                research_id = str(query.get("research_id", [""])[0] or "")
+                report_id = str(query.get("report_id", [""])[0] or "")
+                access = None
+                evidence_owner = owner
+                if research_id or report_id:
+                    catalog = getattr(self.state, "research_catalog", None)
+                    if catalog is None:
+                        raise RuntimeError("Research catalog is unavailable")
+                    access = catalog.resolve_evidence_access(
+                        evidence_ref=evidence_ref,
+                        viewer=owner,
+                        research_id=research_id,
+                        report_id=report_id,
                     )
-                }
+                    if not access["can_view"]:
+                        raise PermissionError("research Evidence access is not authorized")
+                    evidence_owner = catalog.evidence_owner_ref(evidence_ref)
+                payload = {"evidence": get_evidence(
+                    owner=evidence_owner,
+                    evidence_ref=evidence_ref,
+                )}
+                if access is not None:
+                    payload["access"] = access
             else:
                 raise KeyError("research Evidence route not found")
-        except (KeyError, TypeError, ValueError) as exc:
+        except (KeyError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
             self._research_object_error(exc, missing=isinstance(exc, KeyError))
             return True
         json_response(self, {"success": True, **payload})
@@ -204,7 +225,7 @@ class ResearchObjectRoutesMixin:
                 raise KeyError("run not found")
             configuration = run["run_spec"].get("configuration")
             if not isinstance(configuration, dict):
-                raise ValueError("run has no restorable configuration")
+                raise TypeError("run has no restorable configuration")
             if (
                 int(configuration.get("schema_version") or 0)
                 != research_configurations.SCHEMA_VERSION

@@ -16,15 +16,23 @@ class FakeElement {
     this.value = "";
     this.parentNode = null;
     this.controls = [];
+    this.listeners = new Map();
     this.classes = new Set();
     this.classList = {
       add: value => this.classes.add(value),
+      remove: value => this.classes.delete(value),
       contains: value => this.classes.has(value),
+      toggle: (value, force) => {
+        const next = force === undefined ? !this.classes.has(value) : Boolean(force);
+        if (next) this.classes.add(value); else this.classes.delete(value);
+        return next;
+      },
     };
   }
 
   get firstChild() { return this.children[0] || null; }
   get childNodes() { return this.children; }
+  get parentElement() { return this.parentNode; }
   append(...values) {
     values.forEach(value => {
       if (value?.parentNode) {
@@ -68,7 +76,15 @@ class FakeElement {
     }
     return [];
   }
-  addEventListener() {}
+  addEventListener(type, handler) {
+    const handlers = this.listeners.get(type) || [];
+    handlers.push(handler);
+    this.listeners.set(type, handlers);
+  }
+  dispatchEvent(event) {
+    this.listeners.get(event.type)?.forEach(handler => handler(event));
+    return true;
+  }
   setAttribute() {}
   removeAttribute(name) { if (name === "open") this.open = false; }
   showModal() { this.open = true; }
@@ -90,6 +106,11 @@ const dialogs = [];
 const pageAgentNodes = [];
 const storage = new Map();
 const durableStorage = new Map();
+const researchFolder = new FakeElement();
+researchFolder.dataset.navFolder = "research";
+const researchDynamic = new FakeElement();
+researchDynamic.dataset.navFolderDynamic = "research";
+researchFolder.append(researchDynamic);
 
 global.document = {
   body: {classList: {contains: () => false}},
@@ -98,6 +119,8 @@ global.document = {
   querySelector: selector => ({
     "#opened-tabs": opened,
     "#opened-caption": caption,
+    '[data-nav-folder="research"] .nav-folder-dynamic': researchDynamic,
+    '[data-nav-folder="research"]': researchFolder,
   }[selector] || null),
   querySelectorAll: selector => {
     if (selector === "dialog") return dialogs;
@@ -152,7 +175,8 @@ const state = {
   pendingScrollCapture: null,
 };
 let renderCount = 0;
-const tabs = window.FTTabs.create({
+let tabs;
+tabs = window.FTTabs.create({
   state, embeddedPresentation: false, t: value => value,
   renderRoute() {
     renderCount += 1;
@@ -215,6 +239,7 @@ tabs.saveActiveTabSession();
 tabs.saveActiveTabSession();
 tabs.navigate("/products/product/AGENT-RETURN.DCE");
 tabs.navigate("/");
+tabs.markActiveViewReady();
 assert.strictEqual(agentShell.hidden, true);
 assert.strictEqual(agentToggle.hidden, false,
   "returning to an assisted tab restores its floating Agent trigger");
@@ -226,6 +251,7 @@ tabs.saveActiveTabSession();
 tabs.saveActiveTabSession();
 tabs.navigate("/products/product/AGENT-OPEN-RETURN.DCE");
 tabs.navigate("/");
+tabs.markActiveViewReady();
 assert.strictEqual(agentShell.hidden, false,
   "a later switch captures the current drawer state after the previous restore");
 assert.strictEqual(agentToggle.hidden, true);
@@ -259,6 +285,10 @@ assert.strictEqual(renderCount, renderCountBeforeLegacyReportRestore + 1);
 // when the tab is selected again.
 const first = state.activeTabID;
 tabs.navigate("/products/product/B.DCE");
+// Make the eviction assertion independent of the wall-clock order of the
+// preceding report-tab checks; this tab is the deliberately oldest inactive
+// view for the scenario below.
+state.tabSessions.get(first).view.lastUsedAt = 1;
 tabs.navigate("/products/product/C.DCE");
 tabs.navigate("/products/product/D.DCE");
 const coldSession = state.tabSessions.get(first);
@@ -317,6 +347,7 @@ tabs.navigate("/products/product/KEYED-B.DCE");
 state.tabSessions.get(keyedTabID).view.lastUsedAt = 1;
 tabs.navigate("/products/product/KEYED-C.DCE");
 tabs.navigate("/products/product/KEYED-D.DCE");
+tabs.navigate("/products/product/KEYED-E.DCE");
 const keyedSession = state.tabSessions.get(keyedTabID);
 assert(keyedSession.view?.coldKey);
 const inserted = new FakeElement("input");
@@ -375,4 +406,118 @@ embeddedTabs.navigate("/backtest");
 assert.strictEqual(nativeNavigations, 0);
 assert.strictEqual(embeddedState.tabs.filter(tab => tab.path === "/backtest").length, 2);
 assert.ok(embeddedState.tabs.filter(tab => tab.path === "/backtest").every(tab => tab.closable));
+
+// Research is a real sidebar folder.  A Research detail tab is always a
+// direct child of that folder, while ordinary closable tabs can be mounted
+// below it.  Stale Research-parent metadata must not create Research nesting.
+const researchDetailID = "research-detail:research-one";
+const researchChildID = "research-report:report-one";
+const researchChildTwoID = "product-detail:product:child-two.DCE";
+const orphanID = "product-detail:product:orphan.DCE";
+const nestedResearchID = "research-detail:research-two";
+const hierarchyState = {
+  tabs: [], activeTabID: researchChildID, tabSessions: new Map(), modules: [
+    {id: "home", path: "/", title: "主页", pinned: true},
+    {id: "research", path: "/research?section=researches", title: "研究", pinned: true},
+  ], pendingScrollCapture: null,
+};
+const hierarchyTabs = window.FTTabs.create({
+  state: hierarchyState, embeddedPresentation: false, t: value => value,
+  renderRoute() {}, content, title, eyebrow, toolbar, notice,
+  modulePath: value => value.path,
+  isPinnedPath: path => ["/", "/research"].includes(String(path).split("?", 1)[0]),
+  titleForPath: () => "详情", tabIcon: () => "chart",
+});
+// The production shell has one FTTabs instance. Reset the synthetic drop
+// target before creating a second instance in this fixture so its handler
+// closes over hierarchyState rather than the earlier scenario's state.
+researchFolder.__ftTabDropBound = false;
+researchFolder.listeners.delete("drop");
+hierarchyTabs.initializeTabs({
+  activeTabID: researchChildID,
+  tabs: [
+    {id: researchDetailID, path: "/researches/research-one", title: "研究一", closable: true},
+    {id: researchChildID, path: "/research/report-one", title: "报告一", closable: true,
+      parentFolder: "research", parentTabID: researchDetailID,
+      parentResearchID: "research-one"},
+    {id: researchChildTwoID, path: "/products/product/child-two.DCE", title: "子页二", closable: true,
+      parentFolder: "research", parentTabID: researchDetailID,
+      parentResearchID: "research-one"},
+    {id: orphanID, path: "/products/product/orphan.DCE", title: "孤立页", closable: true,
+      parentFolder: "research", parentTabID: "missing-research",
+      parentResearchID: "missing-research"},
+    {id: nestedResearchID, path: "/researches/research-two", title: "研究二", closable: true,
+      parentFolder: "research", parentTabID: researchDetailID,
+      parentResearchID: "research-one"},
+  ],
+});
+const researchOne = hierarchyState.tabs.find(item => item.id === researchDetailID);
+const researchTwo = hierarchyState.tabs.find(item => item.id === nestedResearchID);
+const reportOne = hierarchyState.tabs.find(item => item.id === researchChildID);
+const orphan = hierarchyState.tabs.find(item => item.id === orphanID);
+assert.strictEqual(researchOne.parentFolder, "research");
+assert.strictEqual(researchOne.parentTabID, undefined);
+assert.strictEqual(researchTwo.parentTabID, undefined,
+  "a Research tab cannot be nested under another Research tab");
+assert.strictEqual(reportOne.parentTabID, researchDetailID);
+assert.strictEqual(orphan.parentTabID, undefined,
+  "a stale parent is repaired to a direct Research child");
+const researchWrapper = researchDynamic.children.find(item => (
+  item.dataset.navFolder === `research-tab:${researchDetailID}`
+));
+assert(researchWrapper);
+const orphanRow = researchDynamic.children.find(item => item.dataset.tabID === orphanID);
+assert(orphanRow);
+let researchChildHost = researchWrapper.children.find(item => (
+  item.className.includes("nav-research-tab-children")
+));
+assert(researchChildHost);
+const childTwoRow = researchChildHost.children.find(item => item.dataset.tabID === researchChildTwoID);
+assert(childTwoRow);
+const dropEvent = parentTabID => ({
+  type: "drop",
+  dataTransfer: {getData: () => orphanID},
+  preventDefault() {}, stopPropagation() {}, parentTabID,
+});
+// Dropping on a sibling row reorders within the same folder. The row's
+// vertical half determines before/after; the fixture uses `before` directly
+// so it does not depend on a browser layout engine.
+childTwoRow.dispatchEvent({
+  type: "drop",
+  dataTransfer: {getData: () => researchChildID},
+  preventDefault() {}, stopPropagation() {}, before: true,
+});
+assert.deepStrictEqual(
+  hierarchyState.tabs.filter(item => item.parentTabID === researchDetailID).map(item => item.id),
+  [researchChildID, researchChildTwoID],
+);
+// A tab from outside the folder can be dropped onto a child row: it is
+// mounted into that child's Research folder and placed at the requested side.
+researchChildHost = researchDynamic.children.find(item => (
+  item.dataset.navFolder === `research-tab:${researchDetailID}`
+)).children.find(item => item.className.includes("nav-research-tab-children"));
+const childTwoRowAfterSort = researchChildHost.children.find(item => item.dataset.tabID === researchChildTwoID);
+childTwoRowAfterSort.dispatchEvent({
+  type: "drop",
+  dataTransfer: {getData: () => orphanID},
+  preventDefault() {}, stopPropagation() {}, before: true,
+});
+assert.strictEqual(orphan.parentTabID, researchDetailID);
+assert.deepStrictEqual(
+  hierarchyState.tabs.filter(item => item.parentTabID === researchDetailID).map(item => item.id),
+  [researchChildID, orphanID, researchChildTwoID],
+);
+// Dropping on the Research folder itself unmounts the child. Dropping on the
+// folder body mounts it again, which covers both directions of the move.
+researchFolder.dispatchEvent(dropEvent(""));
+assert.strictEqual(orphan.parentTabID, undefined);
+assert.strictEqual(orphan.parentFolder, undefined,
+  "dropping on the Research folder unmounts the tab");
+const remountWrapper = researchDynamic.children.find(item => (
+  item.dataset.navFolder === `research-tab:${researchDetailID}`
+));
+remountWrapper.dispatchEvent(dropEvent(researchDetailID));
+assert.strictEqual(orphan.parentTabID, researchDetailID);
+researchFolder.dispatchEvent(dropEvent(""));
+assert.strictEqual(orphan.parentTabID, undefined);
 console.log("ok");

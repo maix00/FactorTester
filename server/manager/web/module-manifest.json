@@ -150,6 +150,7 @@
     "public-reference": ["research-reference"],
     "reference": ["research-reference"],
     "research": ["research-core"],
+    "research-detail": ["research-core"],
     "research-graph": ["research-graph"],
     "jobs": ["jobs"],
     "job": ["job-detail-core"],
@@ -274,6 +275,7 @@
       "research/local.js",
       "research/reports.js",
       "research/shared.js",
+      "research/researches.js",
       "research/workspaces.js"
     ],
     "research-graph": [
@@ -605,6 +607,7 @@
     "research/local.js",
     "research/reports.js",
     "research/shared.js",
+    "research/researches.js",
     "research/workspaces.js",
     "jobs/artifacts.js",
     "jobs/artifact-query.js",
