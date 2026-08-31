@@ -266,7 +266,7 @@ struct ProfileResearchService {
         graphID: String
     ) async throws -> [ResearchGraphVersion] {
         let response = try await value(
-            path: "/api/research-graphs/\(graphID)/versions",
+            path: "/api/catalog/research-graphs/\(graphID)/versions",
             as: ResearchGraphVersionsEnvelope.self
         )
         return response.versions
@@ -276,7 +276,7 @@ struct ProfileResearchService {
         graphID: String
     ) async throws -> ResearchGraphVersion {
         let response = try await value(
-            path: "/api/research-graphs/\(graphID)/active",
+            path: "/api/catalog/research-graphs/\(graphID)/active",
             as: ResearchGraphEnvelope.self
         )
         return response.graph

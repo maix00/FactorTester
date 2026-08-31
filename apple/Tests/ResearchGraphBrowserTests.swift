@@ -58,8 +58,8 @@ final class ResearchGraphBrowserTests: XCTestCase {
         XCTAssertEqual(
             transport.requests.map { $0.url?.path },
             [
-                "/api/research-graphs/factor-research/versions",
-                "/api/research-graphs/factor-research/active",
+                "/api/catalog/research-graphs/factor-research/versions",
+                "/api/catalog/research-graphs/factor-research/active",
             ]
         )
     }

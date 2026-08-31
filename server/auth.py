@@ -12,15 +12,10 @@ PUBLIC_ENDPOINTS: 不要求登录的 API 端点集合。业务端口不提供网
 """
 import re
 import secrets
-from flask import Blueprint, request, jsonify, session
-from tools.data.account_manage import (
-    accounts_lock, load_accounts, save_accounts,
-    verify_password, hash_password,
-    normalize_account, serialize_account_public,
-    DEFAULT_ORGANIZATION_ID, DEFAULT_ORGANIZATION_NAME,
-    ROLE_SUPER_ADMIN, ROLE_USER, ROLE_DEVELOPER,
-    list_organizations_with_default, next_account_username, root_level_id_for_org,
-)
+
+from flask import Blueprint, jsonify, request, session
+
+from server.services.page_runtime import cleanup_user_pages
 from server.services.session_runtime import (
     check_session_idle,
     cleanup_session_resource,
@@ -28,7 +23,23 @@ from server.services.session_runtime import (
     current_user_obj,
     touch_session_activity,
 )
-from server.services.page_runtime import cleanup_user_pages
+from tools.data.account_manage import (
+    DEFAULT_ORGANIZATION_ID,
+    DEFAULT_ORGANIZATION_NAME,
+    ROLE_DEVELOPER,
+    ROLE_SUPER_ADMIN,
+    ROLE_USER,
+    accounts_lock,
+    hash_password,
+    list_organizations_with_default,
+    load_accounts,
+    next_account_username,
+    normalize_account,
+    root_level_id_for_org,
+    save_accounts,
+    serialize_account_public,
+    verify_password,
+)
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -55,18 +66,6 @@ def _is_public_job_gateway_read() -> bool:
     ))
 
 
-def _is_public_graph_gateway_read() -> bool:
-    """Allow only Manager-delegated immutable research graph reads."""
-    return bool(
-        session.get('manager_gateway_public_graph')
-        and request.method == 'GET'
-        and re.fullmatch(
-            r'/api/research-graphs/[^/]+/(?:versions|active)',
-            request.path,
-        )
-    )
-
-
 @auth_bp.before_app_request
 def _check_login():
     PUBLIC_ENDPOINTS = {
@@ -87,8 +86,6 @@ def _check_login():
     # through the loopback Manager gateway.  Mutations, progress streams,
     # storage and all artifact bytes still require Manager authorization.
     if _is_public_job_gateway_read():
-        return None
-    if _is_public_graph_gateway_read():
         return None
 
     # 已登录用户：检查自动登出

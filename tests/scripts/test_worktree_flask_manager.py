@@ -1124,7 +1124,7 @@ def test_public_research_publish_and_revoke_routes_are_loopback_only(tmp_path):
     }
     with _running_manager(state) as base_url:
         request = Request(
-            f"{base_url}/api/public-research/publish",
+            f"{base_url}/api/research-publications/publish",
             data=json.dumps({
                 "owner_ref": "owner",
                 "report_id": projection["report_id"],
@@ -1151,7 +1151,7 @@ def test_public_research_publish_and_revoke_routes_are_loopback_only(tmp_path):
         ).encode("utf-8")).hexdigest()
         assert mirrored["projection_hash"] == expected_hash
         revoke = Request(
-            f"{base_url}/api/public-research/revoke",
+            f"{base_url}/api/research-publications/revoke",
             data=json.dumps({"publication_id": published["publication_id"]}).encode(),
             headers={"Content-Type": "application/json"},
             method="POST",

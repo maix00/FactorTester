@@ -144,11 +144,6 @@ def test_research_graph_gateway_is_identical_for_client_and_profile_agent(
     }
     with running_manager(state) as base_url:
         with urlopen(Request(
-            f"{base_url}/api/research-graphs/factor-research/active",
-            headers=headers,
-        )) as response:
-            assert json.loads(response.read())["success"] is True
-        with urlopen(Request(
             f"{base_url}/api/research-graph-instances/instance-1/"
             "branches/branch-1/node/advance",
             data=b'{}',
@@ -158,14 +153,13 @@ def test_research_graph_gateway_is_identical_for_client_and_profile_agent(
             assert json.loads(response.read())["success"] is True
 
     assert [values["path"] for _route, values in forwarded] == [
-        "/api/research-graphs/factor-research/active",
         "/api/research-graph-instances/instance-1/branches/branch-1/"
         "node/advance",
     ]
     assert {values["principal"] for _route, values in forwarded} == {"user@1"}
 
 
-def test_research_graph_gateway_rejects_path_traversal(
+def test_research_graph_catalog_does_not_fall_through_to_service_gateway(
     tmp_path, monkeypatch,
 ) -> None:
     state = authenticated_state(tmp_path)
@@ -177,7 +171,7 @@ def test_research_graph_gateway_rejects_path_traversal(
     with running_manager(state) as base_url:
         with pytest.raises(HTTPError) as failed:
             urlopen(Request(
-                f"{base_url}/api/research-graphs/%2e%2e/admin",
+                f"{base_url}/api/research-graphs/factor-research/active",
                 headers=agent_headers(state),
             ))
     assert failed.value.code == 404

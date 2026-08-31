@@ -51,7 +51,6 @@ class JobProxyRoutesMixin:
                     "families/public": "families/public",
                 },
             ),
-            ("/api/research-graphs/", "/api/research-graphs/", {}),
             (
                 "/api/research-graph-instances/",
                 "/api/research-graph-instances/",
@@ -99,10 +98,7 @@ class JobProxyRoutesMixin:
             )
         ):
             return False
-        if prefix in {
-            "/api/research-graphs/",
-            "/api/research-graph-instances/",
-        } and not self._safe_local_service_suffix(suffix):
+        if prefix == "/api/research-graph-instances/" and not self._safe_local_service_suffix(suffix):
             return False
         workspace_push = (
             method == "POST" and suffix == "workspace/user/upload"

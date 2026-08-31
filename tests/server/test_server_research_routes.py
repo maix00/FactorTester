@@ -74,6 +74,24 @@ def test_server_research_routes_read_owner_report(tmp_path: Path):
         assert settings["reports"][0]["sharing_state"] == "not_shared"
 
         request = Request(
+            f"{base}/api/research-publications/publish",
+            data=json.dumps({
+                "server_ref": server_ref,
+                "visibility": "private",
+            }).encode(),
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urlopen(request) as response:
+            published = json.loads(response.read())
+        assert published["success"] is True
+        assert published["build_source"] == "server_agent"
+        assert published["visibility"] == "private"
+
+        request = Request(
             f"{base}/api/research-publications/settings",
             data=json.dumps({
                 "report_id": settings["reports"][0]["report_id"],

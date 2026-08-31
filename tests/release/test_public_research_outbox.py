@@ -115,7 +115,7 @@ def test_public_report_sync_marks_operation_complete_after_reconnect(
     uploaded = []
 
     def request(method, path, **_kwargs):
-        if path == "/api/public-research/publish":
+        if path == "/api/research-publications/publish":
             return {
                 "success": True,
                 "publication_id": "publication-1",
