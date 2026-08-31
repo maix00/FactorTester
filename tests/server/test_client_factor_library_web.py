@@ -15,7 +15,6 @@ from server.modules.custom_factors import (
     catalog_routes,
     editor_routes,
     factor_library_internal_bp,
-    factor_library_routes,
     factor_library_service,
 )
 from server.modules.custom_factors.client_library import build_client_library_projection

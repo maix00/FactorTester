@@ -1885,7 +1885,7 @@ def test_device_session_is_bound_to_its_issuing_origin(tmp_path) -> None:
 def test_direct_https_manager_accepts_public_ui_login_and_marks_cookie_secure(
     tmp_path, monkeypatch,
 ) -> None:
-    state = manager.ManagerState(tmp_path, "python")
+    manager.ManagerState(tmp_path, "python")
     handler = object.__new__(manager.Handler)
     handler.server = type("TLSServer", (), {"tls_enabled": True})()
     handler.client_address = ("8.8.8.8", 443)
