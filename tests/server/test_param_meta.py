@@ -16,6 +16,7 @@ from tools.parameters import (
     TypeParam,
     WindowParam,
 )
+from tools.factors.Parameters import FactorFreqParam, ReverseParam
 
 
 def _frozen(alias: str, *, params: dict | None = None) -> dict:
@@ -57,6 +58,22 @@ def test_every_parameter_type_exports_class_owned_input_help(parameter):
 
     assert value["input_help"] == parameter.input_help
     assert value["input_help"].strip()
+
+
+@pytest.mark.parametrize(
+    ("parameter", "expected_type", "help_fragment"),
+    [
+        (FactorFreqParam, "FactorFrequencyParam", "信号频率"),
+        (ReverseParam, "ReverseSignalParam", "反转"),
+    ],
+)
+def test_system_parameters_expose_semantic_types_and_help(
+    parameter, expected_type, help_fragment,
+):
+    value = serialize_param_meta(parameter)
+
+    assert value["type"] == expected_type
+    assert help_fragment in value["input_help"]
 
 
 def test_factor_param_numeric_constant_keeps_plain_default_value():

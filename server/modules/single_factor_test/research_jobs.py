@@ -388,7 +388,6 @@ def _prepare_local_research_run_request(data: dict, *, owner: str) -> dict:
                 continue
             frequency = str(
                 item.get("frequency")
-                or item.get("default_return_freq")
                 or item.get("freq")
                 or ""
             ).strip()

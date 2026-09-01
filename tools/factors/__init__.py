@@ -37,7 +37,6 @@ if FACTOR_WORKSPACE:
     from tools.factors.Parameters import (
         FactorFreqParam,
         FactorNextPeriodReturns,
-        ReturnFreqParam,
         ReverseParam,
     )
     from tools.factors.PrecomputedFactorArtifact import PrecomputedFactorArtifact

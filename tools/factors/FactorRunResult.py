@@ -2,7 +2,7 @@
 FactorRunResult — 单个 Factor 在一次计算中的完整结果。
 
 替代 FactorTester 中按 Factor 拆散的 8 个 dict：
-  factor_source_tables, factor_tables, factor_returns, factor_return_freqs,
+  factor_source_tables, factor_tables, factor_returns,
   factor_ic_series, factor_ic_stats, factor_reports（最后一个从未被使用，已废弃）。
 
 所有 per-factor 状态聚合到一个 slots 类，按测试类别分区，通过 FactorTester.results: Dict[Factor, FactorRunResult] 访问。
@@ -21,7 +21,6 @@ from typing import TYPE_CHECKING, Any, Optional
 import pandas as pd
 
 if TYPE_CHECKING:
-    from tools.data.types import DataFreq
     from tools.factors.Factors import Factor
     from tools.factors.expr.timeline import PanelTimeline
     from tools.factors.temporal_support import TemporalSupport
@@ -40,7 +39,7 @@ class FactorRunResult:
       ic_series, ic_stats
 
       ── Group 测试 ──
-      returns, _return_freq
+      returns
     """
 
     __slots__ = (
@@ -62,7 +61,6 @@ class FactorRunResult:
         "temporal_support",
         "hac_diagnostics",
         "_returns",
-        "_return_freq",
         "ic_series",
         "ic_stats",
     )
@@ -79,7 +77,6 @@ class FactorRunResult:
         self.temporal_support: Optional[TemporalSupport | dict[str, Any]] = None
         self.hac_diagnostics: Optional[dict[str, Any]] = None
         self._returns: pd.DataFrame = pd.DataFrame()
-        self._return_freq: Optional[DataFreq] = None
         self.ic_series: pd.Series = pd.Series(dtype=float)
         self.ic_stats: pd.Series = pd.Series(dtype=float)
 
@@ -155,15 +152,6 @@ class FactorRunResult:
                 raise TypeError(f"returns must be pd.DataFrame, got {type(value).__name__}")
         self._returns = value
 
-    # ── return_freq ──
-    @property
-    def return_freq(self) -> Optional[DataFreq]:
-        return self._return_freq
-
-    @return_freq.setter
-    def return_freq(self, value: Optional[DataFreq]) -> None:
-        self._return_freq = value
-
     # ── helpers ──
     def clear_caches(self) -> None:
         """重置可变字段（保留 _factor 不变）。"""
@@ -177,6 +165,5 @@ class FactorRunResult:
         self.temporal_support = None
         self.hac_diagnostics = None
         self.returns = pd.DataFrame()
-        self._return_freq = None
         self.ic_series = pd.Series(dtype=float)
         self.ic_stats = pd.Series(dtype=float)

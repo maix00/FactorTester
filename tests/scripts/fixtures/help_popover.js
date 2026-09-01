@@ -112,6 +112,8 @@ const bubble = byClass("ft-help-bubble");
 assert.ok(bubble);
 assert.equal(bubble.getAttribute("role"), "tooltip");
 assert.equal(bubble.textContent, "这是纯文字帮助");
+assert.ok(Number.parseFloat(bubble.style.top) < 40, "bubble should prefer the trigger's upper side");
+assert.equal(bubble.style.left, "24px", "bubble should be horizontally centered on the trigger");
 assert.equal(bubbleButton.getAttribute("aria-expanded"), "true");
 click(bubbleButton);
 assert.equal(byClass("ft-help-bubble"), undefined);
