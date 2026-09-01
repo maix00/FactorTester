@@ -450,7 +450,7 @@
     if (request.method !== "turn/steer") {
       throw new Error("Profile Agent active turn is not ready for steering");
     }
-    await rpc(state, request.method, request.params);
+    const response = await rpc(state, request.method, request.params);
     const user = P.userItem(state, text);
     state.items.push(user);
     writeEvent(controller, {type: "thread.item.added", item: user});
@@ -459,6 +459,7 @@
       title: state.threadTitle || text.slice(0, 80),
       preview: text,
     }).catch(() => {});
+    return response;
   }
 
   function openEventStream(state, controller, signal) {
@@ -614,13 +615,22 @@
   ) {
     const text = P.extractInputText(params);
     if (!text) throw new Error("A non-empty text message is required");
+    let response = null;
+    let transitionedSteer = false;
     if (state.active) {
-      await steerActiveTurn(
+      response = await steerActiveTurn(
         controller, state, profileState, text, updateConversation,
       );
-      return;
+      transitionedSteer = response?.managerTransition === "turn/start";
+      if (!transitionedSteer) return;
+      // The previous turn ended between the browser status read and steer.
+      // The Manager atomically promoted the message to a new turn. Retire the
+      // old event consumer so this request can own the new turn's event stream.
+      state.eventStream?.close();
     }
     state.active = true;
+    const generation = Number(state.streamGeneration || 0) + 1;
+    state.streamGeneration = generation;
     const hadThread = Boolean(state.threadID || state.conversation?.provider_thread_id);
     state.assistant = null;
     state.finalResponseComplete = false;
@@ -630,22 +640,27 @@
       .filter(isAssistantMessage)
       .map(item => String(item.id || "")));
     try {
-      await ensureThread(state);
-      if (!hadThread) writeEvent(controller, {
-        type: "thread.created", thread: P.threadObject(state),
-      });
-      const user = P.userItem(state, text);
-      state.items.push(user);
-      writeEvent(controller, {type: "thread.item.added", item: user});
-      writeEvent(controller, {type: "thread.item.done", item: user});
+      if (!transitionedSteer) {
+        await ensureThread(state);
+        if (!hadThread) writeEvent(controller, {
+          type: "thread.created", thread: P.threadObject(state),
+        });
+        const user = P.userItem(state, text);
+        state.items.push(user);
+        writeEvent(controller, {type: "thread.item.added", item: user});
+        writeEvent(controller, {type: "thread.item.done", item: user});
+      }
       writeEvent(controller, {
         type: "stream_options", stream_options: {allow_cancel: true},
       });
-      const runtimeStatus = await alignEventCursor(state);
-      const request = turnRequest(state, runtimeStatus, text);
-      const response = await rpc(state, request.method, request.params);
+      let request = {method: "turn/start", turnID: ""};
+      if (!transitionedSteer) {
+        const runtimeStatus = await alignEventCursor(state);
+        request = turnRequest(state, runtimeStatus, text);
+        response = await rpc(state, request.method, request.params);
+      }
       state.turnID = request.turnID || P.turnIDFrom(response) || state.turnID;
-      if (request.method === "turn/start") {
+      if (request.method === "turn/start" || transitionedSteer) {
         // The request may have replaced a stopped app-server process.  Event
         // sequences are process-local, so use the Manager-owned cursor for
         // this exact turn instead of carrying a cursor from the old process.
@@ -660,6 +675,7 @@
       // avoids racing the lifecycle process startup without losing early
       // deltas from a fast response.
       let eventStream = openEventStream(state, controller, signal);
+      state.eventStream = eventStream;
       await eventStream.ready.catch(() => {});
       eventStream.activate();
       let result = "retry";
@@ -669,6 +685,7 @@
         retries += 1;
         if (result === "retry" && !signal.aborted) {
           eventStream = openEventStream(state, controller, signal);
+          state.eventStream = eventStream;
           await eventStream.ready.catch(() => {});
         }
       }
@@ -700,9 +717,12 @@
         preview: text,
       }).catch(() => {});
     } finally {
-      closeSource(state);
-      state.active = false;
-      state.assistant = null;
+      if (state.streamGeneration === generation) {
+        state.eventStream = null;
+        closeSource(state);
+        state.active = false;
+        state.assistant = null;
+      }
     }
   }
 
