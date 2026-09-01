@@ -135,7 +135,7 @@
         model().familyName(item),
         model().description(item),
         (item.categories || []).join("、"),
-        origin(item, context),
+        origin(item, context, scope),
         model().owner(item),
         item.factor_count || 0,
         ...(canModify || showAddFactor ? [actionCell(
@@ -236,9 +236,14 @@
       ));
       return;
     }
+    const showOwner = scope === "subordinates";
     const headers = kind === "factor-set"
       ? [context.t("因子集合"), context.t("成员数"), context.t("所有者"), context.t("可见范围"), context.t("产品组")]
-      : [context.t("因子"), context.t("原类名"), context.t("说明"), context.t("来源"), context.t("所有者"), context.t("产品组")];
+      : [
+        context.t("因子"), context.t("原类名"), context.t("说明"),
+        context.t("来源"), ...(showOwner ? [context.t("所有者")] : []),
+        context.t("产品组"),
+      ];
     if (canModify) {
       headers.push(context.t("操作"));
     }
@@ -259,8 +264,8 @@
       item.value.factor_alias,
       model().familyName(item.value),
       model().description(item.value),
-      origin(item.value, context),
-      model().owner(item.value),
+      origin(item.value, context, scope),
+      ...(showOwner ? [model().owner(item.value)] : []),
       model().groupLabels(item, names, bySubject, context.t("未绑定产品组")).join("、"),
       ...(canModify
         ? [actionCell(context, onDelete, onEdit, null, item.value)] : []),
@@ -310,8 +315,11 @@
     };
   }
 
-  function origin(value, context) {
-    return context.t(value.factor_kind === "public" ? "公共" : "用户");
+  function origin(value, context, scope = "mine") {
+    if (value.factor_kind === "public" || value.source === "public") {
+      return context.t("公共");
+    }
+    return context.t(scope === "subordinates" ? "下级" : "我");
   }
 
   function visibility(value, context) {

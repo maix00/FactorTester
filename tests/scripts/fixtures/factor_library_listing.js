@@ -107,6 +107,14 @@ const data = {
         factor_kind: "custom",
         owner_username: "alice",
         owner_alias: "MaxA",
+      }, {
+        factor_ref: "factor:public-family",
+        factor_alias: "PublicFamily|N:10d",
+        factor_family_name: "PublicFamily",
+        chinese_name: "公共家族参数因子",
+        factor_kind: "public",
+        owner_username: "alice",
+        owner_alias: "MaxA",
       }],
     },
     subordinates: {
@@ -253,8 +261,30 @@ window.FTFactorList.render(context, data, mount, {
   page: "factors", scope: "mine", query: "", groupRef: "*",
 });
 assert.deepStrictEqual(mount.value.headers, [
-  "因子", "原类名", "说明", "来源", "所有者", "产品组",
+  "因子", "原类名", "说明", "来源", "产品组",
 ]);
 assert.strictEqual(mount.value.rows[0][1], "MmRateOfChg");
 assert.strictEqual(mount.value.rows[0][2], "20 日动量变动率");
+assert.strictEqual(mount.value.rows[0][3], "我");
+assert.strictEqual(mount.value.rows[1][3], "公共");
+
+const subordinateFactor = {
+  factor_ref: "factor:child", factor_alias: "ChildFamily|N:5d",
+  factor_family_name: "ChildFamily", chinese_name: "下级因子",
+  factor_kind: "custom", owner_username: "child", owner_alias: "Child",
+};
+window.FTFactorList.render(context, {
+  ...data,
+  family_scopes: {
+    ...data.family_scopes,
+    subordinates: {...data.family_scopes.subordinates, factors: [subordinateFactor]},
+  },
+}, mount, {
+  page: "factors", scope: "subordinates", query: "", groupRefs: ["*"],
+});
+assert.deepStrictEqual(mount.value.headers, [
+  "因子", "原类名", "说明", "来源", "所有者", "产品组",
+]);
+assert.strictEqual(mount.value.rows[0][3], "下级");
+assert.strictEqual(mount.value.rows[0][4], "Child");
 console.log("ok");
