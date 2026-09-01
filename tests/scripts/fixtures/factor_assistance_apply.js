@@ -77,6 +77,11 @@ assert.equal(window.FTFactorEditor.persistedFamilyClassName({
 assert.equal(window.FTFactorEditor.persistedFamilyClassName({
   factor_family_alias: "LegacyFamily", factor_alias: "LegacyFamily|N:25d",
 }), "LegacyFamily");
+assert.equal(window.FTFactorEditor.persistedFamilyClassName({
+  name: "SgChgDur|P:[CA]|Th:[0.001]|K:30m|$F:30m",
+  factor_alias: "SgChgDur|P:[CA]|Th:[0.001]|K:30m|$F:30m",
+  factor_family_name: "SgChgDur",
+}), "SgChgDur", "factor records must not use their full alias as the family class name");
 assert.equal(window.FTFactorEditor.familyClassNameMatches(
   "MmAroonDown", {factor_name: "MmAroonDown"},
 ), true);
