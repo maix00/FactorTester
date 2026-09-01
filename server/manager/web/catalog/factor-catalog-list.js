@@ -241,7 +241,9 @@
       cancel.type = "button";
       const confirm = FTUI.actionButton(
         context.t(factorCount > 0 ? "删除家族及因子" : "删除"),
-        () => dialog.close("confirm"), {variant: "danger"},
+        () => dialog.close("confirm"), {
+          variant: factorCount > 0 ? "danger" : "warning",
+        },
       );
       confirm.type = "button";
       actions.append(cancel, confirm);

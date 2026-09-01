@@ -130,7 +130,8 @@
 
   function actionButton(label, action, options = {}) {
     const button = document.createElement("button");
-    const variant = options.variant === "primary" ? "primary" : "secondary";
+    const variant = ["primary", "warning", "danger"].includes(options.variant)
+      ? options.variant : "secondary";
     button.type = "button";
     button.className = `action-button ${variant}`;
     button.textContent = text(label);

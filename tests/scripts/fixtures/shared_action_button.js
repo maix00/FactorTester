@@ -44,6 +44,11 @@ assert.strictEqual(button.className, "action-button primary");
 button.listeners.click();
 assert.strictEqual(clicked, true);
 
+const warning = window.FTUI.actionButton("删除", () => {}, {variant: "warning"});
+const danger = window.FTUI.actionButton("级联删除", () => {}, {variant: "danger"});
+assert.strictEqual(warning.className, "action-button warning");
+assert.strictEqual(danger.className, "action-button danger");
+
 const editor = window.FTUI.codeEditor("value = 1", {
   language: "python", required: true, placeholder: "Python source",
 });
