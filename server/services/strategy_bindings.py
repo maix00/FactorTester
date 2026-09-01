@@ -23,7 +23,7 @@ def compile_configuration_strategies(
     configuration objects into that execution representation.
     """
     document = configuration.get("payload") if isinstance(configuration.get("payload"), dict) else configuration
-    state = view(document)
+    state = view(document, include_source=True)
     temporary = {
         str(item.get("temp_ref") or ""): item
         for item in state["strategies"] if isinstance(item, dict)
@@ -59,7 +59,7 @@ def compile_configuration_strategies(
             library_ref = str(source.get("strategy_ref") or "").strip()
             revision_ref = str(source.get("revision_ref") or "").strip()
             revision = library.get_revision(
-                library_ref, revision_ref, principal=owner,
+                library_ref, revision_ref, principal=owner, include_source=True,
             )["revision"]
             source_code = str(revision.get("source_code") or "")
             entrypoint = str(revision.get("entrypoint") or "Strategy")

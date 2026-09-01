@@ -8,7 +8,9 @@ from typing import Any
 from server.services import configuration_strategies, research_configurations
 
 
-def read(*, workspace_id: str, owner: str) -> dict[str, Any]:
+def read(
+    *, workspace_id: str, owner: str, include_source: bool = False,
+) -> dict[str, Any]:
     configuration = research_configurations.load_workspace_configuration(
         workspace_id=workspace_id, owner=owner,
     )
@@ -18,7 +20,9 @@ def read(*, workspace_id: str, owner: str) -> dict[str, Any]:
         "success": True,
         "configuration_id": configuration["configuration_id"],
         "revision": configuration["revision"],
-        **configuration_strategies.view(configuration["payload"]),
+        **configuration_strategies.view(
+            configuration["payload"], include_source=include_source,
+        ),
     }
 
 
@@ -29,6 +33,7 @@ def write(
     method: str,
     binding_id: str = "",
     request: dict[str, Any],
+    strategy_library=None,
 ) -> dict[str, Any]:
     configuration = research_configurations.load_workspace_configuration(
         workspace_id=workspace_id, owner=owner,
@@ -58,6 +63,8 @@ def write(
                 revision_ref=str(request.get("revision_ref") or ""),
                 target_strategy_id=str(request.get("target_strategy_id") or ""),
                 source_sha256=str(request.get("source_sha256") or ""),
+                library=strategy_library,
+                owner=owner,
             )
         else:
             raise ValueError("strategy kind must be inline or library")
@@ -84,6 +91,8 @@ def write(
     return {
         "success": True,
         "configuration": updated,
-        **configuration_strategies.view(updated["payload"]),
-        "change": result,
+        **configuration_strategies.view(
+            updated["payload"], include_source=False,
+        ),
+        "change": configuration_strategies.project_change(result),
     }

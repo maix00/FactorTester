@@ -30,6 +30,8 @@ class TestAuthoringError(RuntimeError):
 class TestAuthoringService:
     """Serve authoring state directly from the shared local data store."""
 
+    strategy_library = None
+
     _WORKSPACE_RE = re.compile(r"/api/test-authoring/workspaces/([^/]{1,128})")
     _CONFIG_RE = re.compile(
         r"/api/test-authoring/workspaces/([^/]{1,128})/configuration"
@@ -203,6 +205,7 @@ class TestAuthoringService:
 
             return TestAuthoringResponse(read(
                 workspace_id=unquote(match.group(1)), owner=owner,
+                include_source=self._include_source(query),
             ))
         if match := self._CONFIG_RE.fullmatch(path):
             from server.services import research_configurations
@@ -235,6 +238,12 @@ class TestAuthoringService:
             return TestAuthoringResponse({"success": True, "workspace": value})
         raise TestAuthoringError("test authoring route not found", 404)
 
+    @staticmethod
+    def _include_source(query: dict[str, list[str]] | None) -> bool:
+        values = query or {}
+        value = str(values.get("include_source", ["0"])[0] or "0")
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+
     def write(
         self, method: str, path: str, *, owner: str, payload: dict[str, Any],
     ) -> TestAuthoringResponse:
@@ -243,13 +252,22 @@ class TestAuthoringService:
         if match := self._STRATEGIES_RE.fullmatch(path):
             from server.manager.services.test_authoring_strategies import write
 
-            return TestAuthoringResponse(write(
-                workspace_id=unquote(match.group(1)),
-                owner=owner,
-                method=method,
-                binding_id=unquote(match.group(2) or ""),
-                request=payload,
-            ), 201 if method == "POST" else 200)
+            try:
+                value = write(
+                    workspace_id=unquote(match.group(1)),
+                    owner=owner,
+                    method=method,
+                    binding_id=unquote(match.group(2) or ""),
+                    request=payload,
+                    strategy_library=self.strategy_library,
+                )
+            except PermissionError as exc:
+                raise TestAuthoringError(str(exc), 403) from exc
+            except KeyError as exc:
+                raise TestAuthoringError(str(exc), 404) from exc
+            return TestAuthoringResponse(
+                value, 201 if method == "POST" else 200,
+            )
 
         if method == "DELETE" and (match := self._WORKSPACE_RE.fullmatch(path)):
             value = research_workspaces.delete_draft_workspace(
@@ -298,6 +316,20 @@ class TestAuthoringService:
         if match := self._CONFIG_RE.fullmatch(path):
             if method == "PUT":
                 revision = self._required_int(payload, "expected_revision")
+                try:
+                    from server.services import configuration_strategies
+
+                    candidate = payload.get("payload")
+                    if isinstance(candidate, dict):
+                        configuration_strategies.validate(
+                            candidate,
+                            library=self.strategy_library,
+                            owner=owner,
+                        )
+                except PermissionError as exc:
+                    raise TestAuthoringError(str(exc), 403) from exc
+                except KeyError as exc:
+                    raise TestAuthoringError(str(exc), 404) from exc
                 try:
                     value = research_configurations.update_workspace_configuration(
                         workspace_id=unquote(match.group(1)), owner=owner,

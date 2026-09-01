@@ -80,13 +80,20 @@ class StrategyLibraryStore:
 
     @staticmethod
     def _revision(row: Any, *, include_source: bool = True) -> dict[str, Any]:
+        hooks = json.loads(str(row["hooks_json"] or "[]"))
+        if not include_source:
+            hooks = [
+                {key: value for key, value in hook.items() if key != "source"}
+                if isinstance(hook, dict) else hook
+                for hook in hooks
+            ]
         value: dict[str, Any] = {
             "revision_ref": str(row["revision_ref"]),
             "strategy_ref": str(row["strategy_ref"]),
             "revision_number": int(row["revision_number"]),
             "source_sha256": str(row["source_sha256"]),
             "entrypoint": str(row["entrypoint"]),
-            "hooks": json.loads(str(row["hooks_json"] or "[]")),
+            "hooks": hooks,
             "requirements": json.loads(str(row["requirements_json"] or "{}")),
             "created_by": str(row["created_by"]),
             "created_at": float(row["created_at"]),
@@ -198,7 +205,13 @@ class StrategyLibraryStore:
                 "revision_number": int(row["revision_number"]),
                 "source_sha256": str(row["source_sha256"]),
                 "entrypoint": str(row["entrypoint"]),
-                "hooks": json.loads(str(row["hooks_json"] or "[]")),
+                "hooks": [
+                    {
+                        key: value for key, value in hook.items()
+                        if key != "source"
+                    } if isinstance(hook, dict) else hook
+                    for hook in json.loads(str(row["hooks_json"] or "[]"))
+                ],
                 "requirements": json.loads(str(row["requirements_json"] or "{}")),
                 "created_by": str(row["created_by"]),
                 "created_at": float(row["revision_created_at"]),

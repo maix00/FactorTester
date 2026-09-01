@@ -502,6 +502,7 @@ class ManagerState(
             conversation_items_reader=self.agent_app_server.conversation_items,
         )
         self.test_authoring = TestAuthoringService()
+        self.test_authoring.strategy_library = self.strategy_library
         # The Manager exposes several application projections from one Python
         # process.  Their first call imports overlapping FactorTester packages;
         # concurrent first-page requests can otherwise observe partially

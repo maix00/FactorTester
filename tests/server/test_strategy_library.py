@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from server.manager.services import test_authoring
 from server.services import configuration_strategies
 from server.services.strategy_bindings import compile_configuration_strategies
 from server.services.strategy_library import StrategyLibraryService
@@ -99,7 +100,7 @@ def test_library_scopes_and_immutable_revisions(tmp_path: Path) -> None:
     assert updated["current_revision"]["revision_ref"] != old_revision
     assert len(updated["revisions"]) == 2
     assert service.get_revision(
-        strategy["strategy_ref"], old_revision, principal="bob",
+        strategy["strategy_ref"], old_revision, principal="bob", include_source=True,
     )["revision"]["source_code"] == SOURCE
 
 
@@ -112,6 +113,13 @@ def test_strategy_reads_can_omit_source_and_updates_are_atomic(tmp_path: Path) -
         strategy["strategy_ref"], principal="alice", include_source=False,
     )["strategy"]
     assert "source_code" not in summary["current_revision"]
+    assert all("source" not in hook for hook in summary["current_revision"]["hooks"])
+    assert all(
+        "source" not in hook
+        for hook in summary["revisions"][0]["hooks"]
+    )
+    listed = service.list(principal="alice", scope="mine")["items"][0]
+    assert all("source" not in hook for hook in listed["current_revision"]["hooks"])
 
     with pytest.raises(KeyError):
         service.store.update_entry_with_revision(
@@ -160,6 +168,10 @@ def test_configuration_inline_sources_are_deduplicated(tmp_path: Path) -> None:
     configuration_strategies.validate(payload)
     assert first["strategy"]["temp_ref"] == second["strategy"]["temp_ref"]
     assert len(configuration_strategies.view(payload)["strategies"]) == 1
+    metadata = configuration_strategies.view(payload, include_source=False)
+    assert "source_code" not in metadata["strategies"][0]
+    assert all("source" not in hook for hook in metadata["strategies"][0]["hooks"])
+    assert configuration_strategies.view(payload, include_source=True)["strategies"][0]["source_code"] == SOURCE
     compiled = compile_configuration_strategies(payload, owner="alice")
     assert len(compiled["transient_strategy_sources"]) == 1
     assert len(compiled["strategy_specs"]) == 2
@@ -187,6 +199,88 @@ def test_library_binding_freezes_the_selected_revision(tmp_path: Path) -> None:
     assert normalized["strategy_kind"] == "library"
     assert normalized["revision_ref"] == old_revision
     assert normalized["source"].startswith("profile:strategies/frozen/")
+
+
+def test_configuration_library_binding_validates_access_and_hash(tmp_path: Path) -> None:
+    service = library(tmp_path)
+    strategy = create_strategy(service)
+    revision = strategy["current_revision"]
+
+    payload = {"shared": {}, "analyses": {"backtest": {}}}
+    binding = configuration_strategies.add_library(
+        payload,
+        strategy_ref=strategy["strategy_ref"],
+        revision_ref=str(revision["revision_ref"]),
+        target_strategy_id="group-1",
+        source_sha256=str(revision["source_sha256"]),
+        library=service,
+        owner="alice",
+    )
+    assert binding["binding"]["source"]["source_sha256"] == revision["source_sha256"]
+
+    rejected = {"shared": {}, "analyses": {"backtest": {}}}
+    with pytest.raises(ValueError, match="source hash mismatch"):
+        configuration_strategies.add_library(
+            rejected,
+            strategy_ref=strategy["strategy_ref"],
+            revision_ref=str(revision["revision_ref"]),
+            target_strategy_id="group-1",
+            source_sha256="0" * 64,
+            library=service,
+            owner="alice",
+        )
+    assert configuration_strategies.view(rejected)["bindings"] == []
+
+    with pytest.raises(PermissionError):
+        configuration_strategies.add_library(
+            {"shared": {}, "analyses": {"backtest": {}}},
+            strategy_ref=strategy["strategy_ref"],
+            revision_ref=str(revision["revision_ref"]),
+            target_strategy_id="group-1",
+            library=service,
+            owner="bob",
+        )
+
+    with pytest.raises(KeyError, match="strategy revision not found"):
+        configuration_strategies.add_library(
+            {"shared": {}, "analyses": {"backtest": {}}},
+            strategy_ref=strategy["strategy_ref"],
+            revision_ref="revision:missing",
+            target_strategy_id="group-1",
+            library=service,
+            owner="alice",
+        )
+
+
+def test_test_authoring_put_rejects_inaccessible_library_revision(tmp_path: Path) -> None:
+    service = library(tmp_path)
+    strategy = create_strategy(service, owner="alice")
+    revision = strategy["current_revision"]["revision_ref"]
+    authoring = test_authoring.TestAuthoringService()
+    authoring.strategy_library = service
+
+    with pytest.raises(test_authoring.TestAuthoringError) as error:
+        authoring.write(
+            "PUT",
+            "/api/test-authoring/workspaces/workspace-one/configuration",
+            owner="bob",
+            payload={
+                "expected_revision": 1,
+                "payload": {
+                    "shared": {},
+                    "analyses": {"backtest": {"strategy_bindings": [{
+                        "binding_id": "binding-1",
+                        "target_strategy_id": "group-1",
+                        "source": {
+                            "kind": "library",
+                            "strategy_ref": strategy["strategy_ref"],
+                            "revision_ref": revision,
+                        },
+                    }]}},
+                },
+            },
+        )
+    assert error.value.status == 403
 
 
 def _normalize(compiled: dict) -> list[dict]:

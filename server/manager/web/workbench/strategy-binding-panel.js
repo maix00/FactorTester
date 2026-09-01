@@ -62,15 +62,23 @@
       onChange: next => {
         const value = next[0] || "";
         if (!value) {
-          if (current) FTTestInputState.removeStrategyBinding(state, current.binding_id);
+          if (current) FTTestInputState.removeStrategyBinding(
+            state, current.binding_id,
+          );
         } else {
           const parsed = parseValue(value);
+          const selectedItem = values.find(item => item.value === value);
           FTTestInputState.putStrategyBinding(state, {
             binding_id: current?.binding_id || newID("binding"),
             target_strategy_id: group.id,
             source: parsed.kind === "inline"
               ? {kind: "inline", temp_ref: parsed.temp_ref}
-              : {kind: "library", strategy_ref: parsed.strategy_ref, revision_ref: parsed.revision_ref},
+              : {
+                kind: "library", strategy_ref: parsed.strategy_ref,
+                revision_ref: parsed.revision_ref,
+                ...(selectedItem?.source_sha256
+                  ? {source_sha256: selectedItem.source_sha256} : {}),
+              },
           });
         }
         refresh?.();
@@ -87,6 +95,7 @@
       value: `library::${item.strategy_ref}::${item.current_revision_ref}`,
       label: item.name || item.strategy_ref,
       description: `${item.owner_ref || ""} · r${item.current_revision?.revision_number || "—"}`,
+      source_sha256: item.current_revision?.source_sha256 || "",
     }));
     for (const item of state.temporaryStrategies || []) {
       result.push({
@@ -103,6 +112,7 @@
           value,
           label: source.strategy_ref || "已冻结策略",
           description: `已冻结版本 · ${source.revision_ref || "—"}`,
+          source_sha256: source.source_sha256 || "",
         });
       }
     } else if (source.kind === "inline" && source.temp_ref

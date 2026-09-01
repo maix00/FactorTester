@@ -103,7 +103,7 @@ class StrategyLibraryRoutesMixin:
 
     @staticmethod
     def _include_source(query: dict[str, list[str]]) -> bool:
-        value = str(query.get("include_source", ["1"])[0] or "1").strip().lower()
+        value = str(query.get("include_source", ["0"])[0] or "0").strip().lower()
         return value not in {"0", "false", "no", "off"}
 
     @staticmethod

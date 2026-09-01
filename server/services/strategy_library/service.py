@@ -55,7 +55,9 @@ class StrategyLibraryService:
         revision: dict[str, Any] | None = None,
         explicitly_shared: bool | None = None,
     ) -> dict[str, Any]:
-        revision = revision or self.store.get_revision(str(entry["current_revision_ref"]))
+        revision = revision or self.store.get_revision(
+            str(entry["current_revision_ref"]), include_source=False,
+        )
         if revision is None:
             raise RuntimeError("strategy current revision is missing")
         item = dict(entry)
@@ -107,7 +109,7 @@ class StrategyLibraryService:
 
     def get(
         self, strategy_ref: str, *, principal: str,
-        include_source: bool = True,
+        include_source: bool = False,
     ) -> dict[str, Any]:
         entry = self.store.get_entry(strategy_ref)
         if entry is None:
@@ -129,7 +131,7 @@ class StrategyLibraryService:
 
     def get_revision(
         self, strategy_ref: str, revision_ref: str, *, principal: str,
-        include_source: bool = True,
+        include_source: bool = False,
     ) -> dict[str, Any]:
         entry = self.store.get_entry(strategy_ref)
         if entry is None:
@@ -142,6 +144,26 @@ class StrategyLibraryService:
         if revision is None or revision["strategy_ref"] != strategy_ref:
             raise KeyError("strategy revision not found")
         return {"success": True, "revision": revision}
+
+    def validate_revision(
+        self,
+        strategy_ref: str,
+        revision_ref: str,
+        *,
+        principal: str,
+        source_sha256: str = "",
+    ) -> dict[str, Any]:
+        """Validate an executable revision without transferring its source."""
+        revision = self.get_revision(
+            strategy_ref,
+            revision_ref,
+            principal=principal,
+            include_source=False,
+        )["revision"]
+        requested_hash = str(source_sha256 or "").strip()
+        if requested_hash and requested_hash != revision["source_sha256"]:
+            raise ValueError("library strategy revision source hash mismatch")
+        return revision
 
     def create(self, payload: dict[str, Any], *, principal: str) -> dict[str, Any]:
         name = normalize_text(payload.get("name"), field="strategy name", limit=160)
@@ -165,7 +187,9 @@ class StrategyLibraryService:
             requirements=requirements,
             created_by=principal,
         )
-        return self.get(refs["strategy_ref"], principal=principal)
+        return self.get(
+            refs["strategy_ref"], principal=principal, include_source=False,
+        )
 
     def update(
         self, strategy_ref: str, payload: dict[str, Any], *, principal: str,
@@ -218,11 +242,7 @@ class StrategyLibraryService:
             expected_revision_ref=str(current["revision_ref"]),
             revision=revision,
         )
-        return self.get(
-            strategy_ref,
-            principal=principal,
-            include_source=source_definition_changed,
-        )
+        return self.get(strategy_ref, principal=principal, include_source=False)
 
     def delete(self, strategy_ref: str, *, principal: str) -> dict[str, Any]:
         entry = self.store.get_entry(strategy_ref)

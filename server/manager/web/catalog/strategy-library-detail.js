@@ -45,7 +45,7 @@
       stateKey: `strategy-detail-tabs:${strategy.strategy_ref}`,
       tabs: detailTabs,
       panels: {
-        overview: details(context, strategy, revision),
+        overview: details(context, strategy, revision, source.loadRevision),
         source: source.panel,
         revisions: revisions(context, strategy.revisions || []),
       },
@@ -62,6 +62,18 @@
       context.t("源码按需加载，避免策略详情首屏传输大段文本"),
     ));
     let state = "idle";
+    let revisionPromise = null;
+    async function loadRevision() {
+      if (!revisionPromise) {
+        revisionPromise = FTStrategyLibraryRuntime.getRevision(
+          context, strategyRef, revisionRef, {includeSource: true},
+        ).then(response => response.revision || {}).catch(error => {
+          revisionPromise = null;
+          throw error;
+        });
+      }
+      return revisionPromise;
+    }
     async function load() {
       if (state === "loading" || state === "loaded") return;
       if (!revisionRef) {
@@ -72,11 +84,8 @@
       state = "loading";
       panel.replaceChildren(FTUI.loading(context.t("正在读取源码…")));
       try {
-        const response = await FTStrategyLibraryRuntime.getRevision(
-          context, strategyRef, revisionRef, {includeSource: true},
-        );
+        const source = await loadRevision();
         if (context.isRouteCurrent?.() === false) return;
-        const source = response.revision || {};
         panel.replaceChildren(FTUI.code(source.source_code || "", {
           language: "python", className: "strategy-source-viewer",
         }));
@@ -89,10 +98,10 @@
         state = "error";
       }
     }
-    return {panel, load};
+    return {panel, load, loadRevision};
   }
 
-  function details(context, strategy, revision) {
+  function details(context, strategy, revision, loadRevision) {
     return FTUI.table([context.t("字段"), context.t("值")], [
       [context.t("策略引用"), strategy.strategy_ref],
       [context.t("所有者"), strategy.owner_ref],
@@ -100,17 +109,43 @@
       [context.t("入口类"), revision.entrypoint || "—"],
       [context.t("可见性"), visibility(context, strategy.visibility)],
       [context.t("源码哈希"), revision.source_sha256 || "—"],
-      [context.t("Hooks"), hookTable(context, revision.hooks || [])],
+      [context.t("Hooks"), hookTable(context, revision.hooks || [], loadRevision)],
       [context.t("更新时间"), FTUI.formatDate(strategy.updated_at)],
     ]).shell;
   }
 
-  function hookTable(context, values) {
+  function hookTable(context, values, loadRevision) {
     const rows = (Array.isArray(values) ? values : []).map(item => {
-      const body = FTUI.code(item.source || "", {language: "python"});
+      const body = document.createElement("div");
+      body.className = "strategy-hook-source";
+      if (item.source) body.append(FTUI.code(item.source, {language: "python"}));
+      else body.append(FTUI.empty(
+        context.t("展开后读取 Hook 源码"),
+        context.t("源码按需加载，不影响详情页首屏"),
+      ));
       const details = document.createElement("details");
       const summary = document.createElement("summary");
       summary.textContent = `${item.name || "Hook"} · ${item.lineno || "—"}-${item.end_lineno || "—"}`;
+      let loaded = Boolean(item.source);
+      details.addEventListener("toggle", async () => {
+        if (!details.open || loaded || !loadRevision) return;
+        loaded = true;
+        body.replaceChildren(FTUI.loading(context.t("正在读取 Hook 源码…")));
+        try {
+          const revision = await loadRevision();
+          const hook = (revision.hooks || []).find(value => (
+            value.name === item.name
+            && Number(value.lineno) === Number(item.lineno)
+          ));
+          if (!hook?.source) throw new Error(context.t("Hook 源码不可用"));
+          body.replaceChildren(FTUI.code(hook.source, {language: "python"}));
+        } catch (error) {
+          loaded = false;
+          body.replaceChildren(FTUI.empty(
+            context.t("Hook 源码读取失败"), error.message || "",
+          ));
+        }
+      });
       details.append(summary, body);
       return [item.name || "—", `${item.lineno || "—"}-${item.end_lineno || "—"}`, details];
     });

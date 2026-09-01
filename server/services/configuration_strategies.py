@@ -7,6 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from server.services.strategy_source_inspection import inspect_source, normalize_entrypoint
+from server.services.strategy_library import StrategyLibraryService
 
 
 def _normalize_target(value: Any) -> str:
@@ -36,8 +37,15 @@ def _sections(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     return temporary, backtest
 
 
-def validate(payload: dict[str, Any]) -> None:
+def validate(
+    payload: dict[str, Any],
+    *,
+    library: StrategyLibraryService | None = None,
+    owner: str = "",
+) -> None:
     """Validate only the optional strategy extension of a configuration."""
+    if not isinstance(payload, dict):
+        raise ValueError("configuration must be an object")
     temporary, backtest = _sections(deepcopy(payload))
     strategies = temporary.get("strategies") or []
     by_ref: dict[str, dict[str, Any]] = {}
@@ -77,16 +85,58 @@ def validate(payload: dict[str, Any]) -> None:
                 raise ValueError(f"strategy binding references unknown temporary strategy: {source.get('temp_ref')}")
         elif not str(source.get("strategy_ref") or "").strip() or not str(source.get("revision_ref") or "").strip():
             raise ValueError("library strategy binding requires strategy_ref and revision_ref")
+        elif library is not None:
+            library.validate_revision(
+                str(source.get("strategy_ref") or "").strip(),
+                str(source.get("revision_ref") or "").strip(),
+                principal=str(owner or "").strip(),
+                source_sha256=str(source.get("source_sha256") or "").strip(),
+            )
         seen_bindings.add(binding_id)
         seen_targets.add(target)
 
 
-def view(payload: dict[str, Any]) -> dict[str, Any]:
+def view(
+    payload: dict[str, Any], *, include_source: bool = False,
+) -> dict[str, Any]:
     temporary, backtest = _sections(deepcopy(payload))
     return {
-        "strategies": temporary.get("strategies") or [],
+        "strategies": [
+            _project_strategy(item, include_source=include_source)
+            for item in temporary.get("strategies") or []
+        ],
         "bindings": backtest.get("strategy_bindings") or [],
     }
+
+
+def _project_strategy(
+    value: dict[str, Any], *, include_source: bool,
+) -> dict[str, Any]:
+    """Return a strategy projection without source text when not requested."""
+    result = deepcopy(value)
+    if include_source:
+        return result
+    result.pop("source_code", None)
+    result["hooks"] = [
+        {
+            key: item_value for key, item_value in hook.items()
+            if key != "source"
+        } if isinstance(hook, dict) else hook
+        for hook in result.get("hooks") or []
+    ]
+    return result
+
+
+def project_change(
+    value: dict[str, Any], *, include_source: bool = False,
+) -> dict[str, Any]:
+    """Project a mutation result for a response-sized API payload."""
+    result = deepcopy(value)
+    for key in ("strategy", "removed_strategy"):
+        item = result.get(key)
+        if isinstance(item, dict):
+            result[key] = _project_strategy(item, include_source=include_source)
+    return result
 
 
 def _new_ref(prefix: str) -> str:
@@ -146,6 +196,8 @@ def add_library(
     revision_ref: str,
     target_strategy_id: str,
     source_sha256: str = "",
+    library: StrategyLibraryService | None = None,
+    owner: str = "",
 ) -> dict[str, Any]:
     _temporary, backtest = _sections(payload)
     strategy_ref = str(strategy_ref or "").strip()
@@ -153,6 +205,16 @@ def add_library(
     target = _normalize_target(target_strategy_id)
     if not strategy_ref or not revision_ref or not target:
         raise ValueError("library strategy_ref, revision_ref, and target_strategy_id are required")
+    if library is not None:
+        revision = library.validate_revision(
+            strategy_ref,
+            revision_ref,
+            principal=str(owner or "").strip(),
+            source_sha256=source_sha256,
+        )
+        source_sha256 = str(source_sha256 or "").strip() or str(
+            revision["source_sha256"]
+        )
     if any(str(item.get("target_strategy_id") or "") == target
            for item in backtest["strategy_bindings"]):
         raise ValueError(f"strategy target already has a binding: {target}")

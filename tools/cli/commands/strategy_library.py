@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +9,7 @@ import click
 
 from tools.cli.core.context import client_from_config
 from tools.cli.core.errors import friendly_errors
+from tools.cli.commands.strategy_output import emit_library
 
 
 @click.group("strategy-library")
@@ -28,15 +28,7 @@ def list_library(scope: str, page: int, limit: int, query: str, as_json: bool) -
     value = client_from_config().list_strategy_library(
         scope=scope, page=page, limit=limit, query=query,
     )
-    if as_json:
-        click.echo(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
-        return
-    for item in value.get("items") or []:
-        revision = item.get("current_revision") or {}
-        click.echo(
-            f"{item.get('strategy_ref')}\t{item.get('name')}\t"
-            f"r{revision.get('revision_number', '-')}\t{item.get('visibility')}"
-        )
+    emit_library(value, as_json)
 
 
 @strategy_library.command("show")
@@ -44,17 +36,8 @@ def list_library(scope: str, page: int, limit: int, query: str, as_json: bool) -
 @click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
 @friendly_errors
 def show_library(strategy_ref: str, as_json: bool) -> None:
-    value = client_from_config().get_strategy(strategy_ref)
-    if as_json:
-        click.echo(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
-        return
-    strategy = value.get("strategy") or {}
-    click.echo(f"{strategy.get('name')}\t{strategy.get('strategy_ref')}")
-    click.echo(f"owner={strategy.get('owner_ref')} visibility={strategy.get('visibility')}")
-    revision = strategy.get("current_revision") or {}
-    click.echo(f"revision={revision.get('revision_ref')} entrypoint={revision.get('entrypoint')}")
-    for hook in revision.get("hooks") or []:
-        click.echo(f"hook={hook.get('name')} lines={hook.get('lineno')}-{hook.get('end_lineno')}")
+    value = client_from_config().get_strategy(strategy_ref, include_source=False)
+    emit_library(value, as_json)
 
 
 @strategy_library.command("create")
@@ -73,7 +56,7 @@ def create_library(
         name=name, source_file=source_file, entrypoint=entrypoint,
         description=description, visibility=visibility,
     )
-    _emit(value, as_json)
+    emit_library(value, as_json)
 
 
 @strategy_library.command("update")
@@ -100,20 +83,18 @@ def update_library(
         values["source_code"] = source_file.read_text(encoding="utf-8")
     if not values:
         raise click.ClickException("update 至少需要一个修改选项")
-    _emit(client_from_config().update_strategy(strategy_ref, values), as_json)
+    emit_library(client_from_config().update_strategy(strategy_ref, values), as_json)
 
 
 @strategy_library.command("delete")
 @click.argument("strategy_ref")
 @click.option("--yes", is_flag=True, help="确认归档该策略。")
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
 @friendly_errors
-def delete_library(strategy_ref: str, yes: bool) -> None:
+def delete_library(strategy_ref: str, yes: bool, as_json: bool) -> None:
     if not yes:
         raise click.ClickException("删除是归档操作；请显式指定 --yes")
-    click.echo(json.dumps(
-        client_from_config().delete_strategy(strategy_ref),
-        ensure_ascii=False, indent=2,
-    ))
+    emit_library(client_from_config().delete_strategy(strategy_ref), as_json)
 
 
 @strategy_library.group("revisions")
@@ -126,16 +107,21 @@ def revisions() -> None:
 @click.option("--json", "as_json", is_flag=True)
 @friendly_errors
 def list_revisions(strategy_ref: str, as_json: bool) -> None:
-    _emit(client_from_config().list_strategy_revisions(strategy_ref), as_json)
+    emit_library(client_from_config().list_strategy_revisions(strategy_ref), as_json)
 
 
 @revisions.command("show")
 @click.argument("strategy_ref")
 @click.argument("revision_ref")
+@click.option("--with-source", is_flag=True, help="按需输出源码。")
 @click.option("--json", "as_json", is_flag=True)
 @friendly_errors
-def show_revision(strategy_ref: str, revision_ref: str, as_json: bool) -> None:
-    _emit(client_from_config().get_strategy_revision(strategy_ref, revision_ref), as_json)
+def show_revision(
+    strategy_ref: str, revision_ref: str, with_source: bool, as_json: bool,
+) -> None:
+    emit_library(client_from_config().get_strategy_revision(
+        strategy_ref, revision_ref, include_source=with_source,
+    ), as_json)
 
 
 @strategy_library.group("share")
@@ -148,33 +134,28 @@ def share() -> None:
 @click.option("--json", "as_json", is_flag=True)
 @friendly_errors
 def list_shares(strategy_ref: str, as_json: bool) -> None:
-    _emit(client_from_config().list_strategy_shares(strategy_ref), as_json)
+    emit_library(client_from_config().list_strategy_shares(strategy_ref), as_json)
 
 
 @share.command("grant")
 @click.argument("strategy_ref")
 @click.argument("principal_ref")
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
 @friendly_errors
-def grant_share(strategy_ref: str, principal_ref: str) -> None:
-    _emit(client_from_config().grant_strategy_share(strategy_ref, principal_ref), True)
+def grant_share(strategy_ref: str, principal_ref: str, as_json: bool) -> None:
+    emit_library(
+        client_from_config().grant_strategy_share(strategy_ref, principal_ref),
+        as_json,
+    )
 
 
 @share.command("revoke")
 @click.argument("strategy_ref")
 @click.argument("principal_ref")
+@click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
 @friendly_errors
-def revoke_share(strategy_ref: str, principal_ref: str) -> None:
-    _emit(client_from_config().revoke_strategy_share(strategy_ref, principal_ref), True)
-
-
-def _emit(value: Any, as_json: bool) -> None:
-    if as_json:
-        click.echo(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
-        return
-    if isinstance(value, dict):
-        for key, item in value.items():
-            if isinstance(item, (dict, list)):
-                continue
-            click.echo(f"{key}={item}")
-    else:
-        click.echo(str(value))
+def revoke_share(strategy_ref: str, principal_ref: str, as_json: bool) -> None:
+    emit_library(
+        client_from_config().revoke_strategy_share(strategy_ref, principal_ref),
+        as_json,
+    )

@@ -105,9 +105,12 @@ class TestAuthoringClientMixin(ClientMixinBase):
         ))
         return dict(data.get("configuration") or {})
 
-    def list_configuration_strategies(self, workspace_id: str) -> dict[str, Any]:
+    def list_configuration_strategies(
+        self, workspace_id: str, *, include_source: bool = False,
+    ) -> dict[str, Any]:
         return self._expect_success(self.session.get(
-            f"/api/test-authoring/workspaces/{workspace_id}/configuration/strategies"
+            f"/api/test-authoring/workspaces/{workspace_id}/configuration/strategies",
+            query={"include_source": "1"} if include_source else {},
         ))
 
     def add_inline_strategy(
