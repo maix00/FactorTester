@@ -871,6 +871,8 @@
     "冻结引用" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Frozen reference"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"冻结引用"}}}},
     "未绑定产品组" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Unbound product group"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"未绑定产品组"}}}},
     "产品库" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Product Library"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"产品库"}}}},
+    "策略库" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Strategy Library"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"策略库"}}}},
+    "管理可复用策略、源码版本与共享范围" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Manage reusable strategies, source revisions, and sharing scope"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"管理可复用策略、源码版本与共享范围"}}}},
     "市场资料" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Market data"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"市场资料"}}}},
     "正在读取产品目录…" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Loading product catalog…"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正在读取产品目录…"}}}},
     "搜索产品、代码或产品组" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Search products, symbols, or product groups"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"搜索产品、代码或产品组"}}}},

@@ -1,8 +1,11 @@
-# ADR-045: StrategySpec、Strategy Actor 与 CLI 边界
+# ADR-045：StrategySpec、Strategy Actor 与 CLI 边界
 
 - **状态**：逐步迁移
 - **日期**：2026-07-27
-- **相关**：ADR-032、ADR-035、ADR-041、ADR-044
+- **相关**：ADR-032、ADR-035、ADR-041、ADR-044、ADR-143
+
+策略库、不可变源码版本和配置内临时策略的当前边界由 ADR-143 补充；本文继续约束
+Strategy Actor 的运行时语义，不再单独规定策略源码的持久化方式。
 
 ## 背景
 

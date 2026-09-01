@@ -7,6 +7,8 @@ import hashlib
 import re
 from typing import Any
 
+from tools.testers.backtest.engines.native.strategy import STRATEGY_CALLBACKS
+
 
 MAX_SOURCE_BYTES = 1024 * 1024
 VISIBILITIES = frozenset({"private", "shared", "public"})
@@ -63,6 +65,8 @@ def inspect_source(source_code: object, entrypoint: object = "Strategy") -> dict
         else:
             continue
         if not hook_name or hook_name.startswith("_"):
+            continue
+        if hook_name not in STRATEGY_CALLBACKS:
             continue
         start = int(getattr(function, "lineno", 0) or 0)
         end = int(getattr(function, "end_lineno", start) or start)

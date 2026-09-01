@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 from typing import Any
 
 from server.modules.shared.factor_param_utils import (
@@ -105,9 +106,29 @@ def inspect_strategy_source(value: Any) -> dict[str, Any]:
         raw_spec.setdefault("entrypoint", entrypoint)
     normalized = normalize_strategy_plan([raw_spec], uploaded_paths=[path])[0]
     normalized["actor_callbacks"] = callbacks
+    source_text = str(entries[0]["source_code"])
+    source_hash = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
+    hooks = []
+    selected_class = classes.get(entrypoint)
+    for node in (selected_class.body if selected_class is not None else []):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.name not in STRATEGY_CALLBACKS:
+            continue
+        start = int(getattr(node, "lineno", 0) or 0)
+        end = int(getattr(node, "end_lineno", start) or start)
+        hooks.append({
+            "name": node.name,
+            "lineno": start,
+            "end_lineno": end,
+            "source": "\n".join(source_text.splitlines()[start - 1:end]) if start else "",
+        })
     return {
         "entrypoint": entrypoint,
         "callbacks": callbacks,
+        "hooks": hooks,
+        "source_sha256": source_hash,
+        "source_bytes": len(source_text.encode("utf-8")),
         "requirements": dict(normalized.get("requirements") or {}),
         "strategy_spec": normalized,
     }

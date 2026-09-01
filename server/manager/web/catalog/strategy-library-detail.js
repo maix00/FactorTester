@@ -39,9 +39,9 @@
       panels: {
         overview: details(context, strategy, revision),
         source: FTUI.code(revision.source_code || "", {language: "python", className: "strategy-source-viewer"}),
-        hooks: hooks(context, revision.hooks || []),
         revisions: revisions(context, strategy.revisions || []),
       },
+      overrides: {hooks: {hidden: true}},
     });
     root.append(tabs.root);
     context.content.replaceChildren(root);
@@ -55,11 +55,12 @@
       [context.t("入口类"), revision.entrypoint || "—"],
       [context.t("可见性"), visibility(context, strategy.visibility)],
       [context.t("源码哈希"), revision.source_sha256 || "—"],
+      [context.t("Hooks"), hookTable(context, revision.hooks || [])],
       [context.t("更新时间"), FTUI.formatDate(strategy.updated_at)],
     ]).shell;
   }
 
-  function hooks(context, values) {
+  function hookTable(context, values) {
     const rows = (Array.isArray(values) ? values : []).map(item => {
       const body = FTUI.code(item.source || "", {language: "python"});
       const details = document.createElement("details");
@@ -70,7 +71,7 @@
     });
     return rows.length ? FTUI.table(
       [context.t("Hook"), context.t("行号"), context.t("源码")], rows,
-    ).shell : FTUI.empty(context.t("暂无 Hook"), context.t("当前策略没有可展示的公共 Hook"));
+    ).shell : context.t("暂无 Hook");
   }
 
   function revisions(context, values) {

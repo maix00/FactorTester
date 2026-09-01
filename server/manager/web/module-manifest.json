@@ -175,7 +175,7 @@
     "job-configuration": ["job-detail-core"],
     "job-input": ["job-detail-input"],
     "ic-test": ["workbench-test-ui", "workbench-ic-groups"],
-    "backtest": ["workbench-test-ui", "workbench-backtest"],
+    "backtest": ["workbench-test-ui"],
     "factor-evaluation": ["workbench-test-ui"],
     "factor-series": ["workbench-core"],
     "test-template": ["workbench-templates"],

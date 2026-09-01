@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 from flask import Flask
 
 from server.modules.single_factor_test import sft_bp
@@ -51,6 +53,10 @@ def test_strategy_inspection_returns_callbacks_and_normalized_spec() -> None:
     assert payload["valid"] is True
     assert payload["entrypoint"] == "IntradayHook"
     assert payload["callbacks"] == ["on_bar", "on_order_filled"]
+    assert payload["hooks"][0]["name"] == "on_bar"
+    assert payload["hooks"][1]["name"] == "on_order_filled"
+    assert payload["source_sha256"] == hashlib.sha256(source.encode()).hexdigest()
+    assert payload["source_bytes"] == len(source.encode())
     assert payload["requirements"] == {}
     assert payload["strategy_spec"]["source"] == "profile:strategies/intraday_hook.py"
     assert payload["strategy_spec"]["parameters"] == {"threshold": 0.2}

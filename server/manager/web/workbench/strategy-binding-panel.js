@@ -32,7 +32,7 @@
     };
     const redraw = () => {
       rows.replaceChildren(...groups.map(group => bindingRow(
-        context, state, group, candidates, refresh, redraw,
+        context, state, group, candidates, loaded, refresh, redraw,
       )));
     };
     redraw();
@@ -40,7 +40,7 @@
     return root;
   }
 
-  function bindingRow(context, state, group, candidates, refresh, redraw) {
+  function bindingRow(context, state, group, candidates, loaded, refresh, redraw) {
     const root = document.createElement("div");
     root.className = "strategy-binding-row";
     const title = document.createElement("strong");
@@ -49,7 +49,7 @@
     const current = (state.strategyBindings || []).find(item => (
       item.target_strategy_id === group.id
     ));
-    const values = strategyItems(state, candidates);
+    const values = strategyItems(state, candidates, current);
     const selected = current ? bindingValue(state, current, values) : "";
     const picker = FTTestObjectPicker.create(context, {
       title: context.t("策略"), name: `strategy-binding-${group.id}`,
@@ -79,7 +79,7 @@
     return root;
   }
 
-  function strategyItems(state, candidates) {
+  function strategyItems(state, candidates, current) {
     const result = candidates.map(item => ({
       value: `library::${item.strategy_ref}::${item.current_revision_ref}`,
       label: item.name || item.strategy_ref,
@@ -90,6 +90,24 @@
         value: `inline::${item.temp_ref}`,
         label: item.name || item.temp_ref,
         description: `临时策略 · ${item.entrypoint || "Strategy"}`,
+      });
+    }
+    const source = current?.source || {};
+    if (source.kind === "library") {
+      const value = `library::${source.strategy_ref}::${source.revision_ref}`;
+      if (!result.some(item => item.value === value)) {
+        result.push({
+          value,
+          label: source.strategy_ref || "已冻结策略",
+          description: `已冻结版本 · ${source.revision_ref || "—"}`,
+        });
+      }
+    } else if (source.kind === "inline" && source.temp_ref
+        && !result.some(item => item.value === `inline::${source.temp_ref}`)) {
+      result.push({
+        value: `inline::${source.temp_ref}`,
+        label: "临时策略（源码缺失）",
+        description: "当前配置引用的临时策略未能恢复",
       });
     }
     return result;
@@ -139,6 +157,8 @@
           name: name.value.trim(),
           entrypoint: inspected.entrypoint || entrypoint.value.trim(),
           source_code: source.value(),
+          source_sha256: inspected.source_sha256 || "",
+          hooks: inspected.hooks || [],
           requirements: inspected.requirements || {},
         }, {
           binding_id: newID("binding"),
@@ -194,6 +214,8 @@
             name: draft.name.trim(),
             entrypoint: inspected.entrypoint || draft.entrypoint,
             source_code: draft.source_code,
+            source_sha256: inspected.source_sha256 || "",
+            hooks: inspected.hooks || [],
             requirements: inspected.requirements || {},
           }, {
             binding_id: newID("binding"),

@@ -632,9 +632,10 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     assert manifest["route_groups"]["ic-test"] == [
         "workbench-test-ui", "workbench-ic-groups",
     ]
-    assert manifest["route_groups"]["backtest"] == [
-        "workbench-test-ui", "workbench-backtest",
-    ]
+    assert manifest["route_groups"]["backtest"] == ["workbench-test-ui"]
+    assert "workbench-backtest" not in manifest["route_groups"]["backtest"]
+    assert '"workbench-backtest"' in tests_module
+    assert "ensureBacktestCode" in tests_module
     assert manifest["route_groups"]["factor-evaluation"] == ["workbench-test-ui"]
     assert manifest["route_groups"]["factor-series"] == ["workbench-core"]
     assert manifest["route_groups"]["product-categories"] == [

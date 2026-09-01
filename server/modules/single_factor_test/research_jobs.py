@@ -506,7 +506,10 @@ def _prepare_local_research_run_request(
                 + ", ".join(sorted(missing_refs))
             )
     if strategy_plan:
-        run_spec["strategy_specs"] = deepcopy(strategy_plan)
+        # ``strategy_plan`` is the canonical frozen RunSpec field.  Older
+        # workers can still read their explicit job-payload compatibility
+        # projection below, but the durable RunSpec must not store the same
+        # plan twice under two names.
         run_spec["strategy_plan"] = deepcopy(strategy_plan)
     if strategy_bindings:
         run_spec["strategy_bindings"] = deepcopy(strategy_bindings)
