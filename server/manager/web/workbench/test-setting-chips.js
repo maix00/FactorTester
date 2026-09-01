@@ -410,7 +410,7 @@
   function openDetail(context, state, descriptor) {
     const action = descriptor?.detailOverlay;
     const target = action?.target;
-    if (!action || !target || !window.FTTestObjectEditorOverlay?.open) return false;
+    if (!action || !target) return false;
     const value = target.value && typeof target.value === "object" ? target.value : null;
     const temporary = Boolean(value?.temporary
       || value?.source_kind === "transient"
@@ -418,7 +418,10 @@
     const snapshot = action.kind === "factor"
       && value?.schema_version === 2
       && String(value?.ref || "") === String(target.ref);
-    void FTTestObjectEditorOverlay.open(context, {
+    const openEditor = window.FTTestLazyCode?.openObjectEditor
+      || window.FTTestObjectEditorOverlay?.open;
+    if (!openEditor) return false;
+    void openEditor(context, {
       kind: action.kind,
       mode: action.mode || "view",
       ref: target.ref,

@@ -61,7 +61,7 @@
   }
 
   function openEditor(context, mode, ref, onSaved, testState = null, initialValue = null) {
-    return FTTestObjectEditorOverlay.open(context, {
+    return FTTestLazyCode.openObjectEditor(context, {
       kind: "category", mode, ref, onSaved, testState,
       temporary: mode === "create" || initialValue?.temporary === true,
       initialValue,
