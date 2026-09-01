@@ -101,6 +101,8 @@
     "trash": '<path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 10v7M14 10v7"/>',
     "safari": '<circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2.3 5.2-4.7 2.3 2.3-5.2 4.7-2.3Z"/>',
     "link": '<path d="M9.5 14.5 8 16a3.5 3.5 0 0 1-5-5l2-2a3.5 3.5 0 0 1 5 0M14.5 9.5 16 8a3.5 3.5 0 0 1 5 5l-2 2a3.5 3.5 0 0 1-5 0M8 12h8"/>',
+    "xmark": '<path d="M6 6l12 12M18 6 6 18"/>',
+    "chevron.left": '<path d="m15 5-7 7 7 7"/>',
   };
 
   const normalize = value => String(value || "").replace(/-/g, "_");
