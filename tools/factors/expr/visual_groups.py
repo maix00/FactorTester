@@ -56,13 +56,26 @@ VISUAL_OPERATOR_GROUPS = [
             {'key': 'shift', 'label': '平移', 'symbol': 'shift', 'desc': 'X.shift(N)', 'arity': 2, 'slots': ['序列 X', '步长 N']},
             {'key': 'delta', 'label': '差分', 'symbol': 'delta', 'desc': 'X.delta(N)', 'arity': 2, 'slots': ['序列 X', '步长 N']},
             {
+                'key': 'window_bars',
+                'label': '窗口 Bar 数',
+                'symbol': 'Bars',
+                'desc': (
+                    'window_bars(K) 将时间窗口 K 换算为当前因子频率下的 bar 数值表达式，'
+                    '供算术与 truncate 使用；搜索范围直接写 scope_bars(K)，不要嵌套调用'
+                ),
+                'arity': 1,
+                'slots': ['窗口 K'],
+            },
+            {
                 'key': 'bar_since',
                 'label': '事件距离',
                 'symbol': 'BarSince',
                 'desc': (
-                    'bar_since(condition, scope=bars(N), select="nearest", '
-                    'default=nan, include_current=True)；scope 也可使用 '
-                    'session(gap="3h") 或 trading_day()'
+                    'bar_since(condition, scope=scope_bars(K), select="nearest", '
+                    'include_current=True)；K 可为整数 bar 数或 WindowParam；'
+                    '未命中默认返回当前 scope 已积累的距离；scope 也可使用 '
+                    'scope_session(gap="3h") 或 scope_trading_day()；需要缺失值时显式传 '
+                    'default=nan'
                 ),
                 'arity': 2,
                 'slots': ['条件', '回看范围'],
@@ -72,10 +85,12 @@ VISUAL_OPERATOR_GROUPS = [
                 'label': '历史匹配距离',
                 'symbol': 'BarDistance',
                 'desc': (
-                    'X.bar_distance(condition, scope=bars(N), '
-                    'select="nearest", default=nan)；condition 用 CURRENT 与 '
-                    'CANDIDATE 表示当前值和候选历史值；scope 也可使用 '
-                    'session(gap="3h") 或 trading_day()'
+                    'X.bar_distance(condition, scope=scope_bars(K), '
+                    'select="nearest")；K 可为整数 bar 数或 WindowParam；'
+                    'condition 用 CURRENT 与 CANDIDATE 表示当前值和候选历史值；'
+                    '未命中默认返回当前 scope 已积累的距离；scope 也可使用 '
+                    'scope_session(gap="3h") 或 scope_trading_day()；需要缺失值时显式传 '
+                    'default=nan'
                 ),
                 'arity': 3,
                 'slots': ['序列 X', '匹配条件', '回看范围'],

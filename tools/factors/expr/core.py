@@ -412,6 +412,13 @@ class FactorExpr:
             lines.append(f"{latex_sym}_t &:= {node._to_latex(subst=sk_to_sym)},")
             sk_to_sym[node._structural_key()] = latex_sym
 
+        # When the root itself is the final intermediate, its definition is
+        # already the complete formula.  Emitting ``X := intermediate`` adds
+        # no information and makes the UI appear to calculate it twice.
+        if self._is_intermediate and self._structural_key() in sk_to_sym:
+            lines[-1] = lines[-1].removesuffix(",") + "."
+            return "\\begin{aligned}\n" + " \\\\\n".join(lines) + "\n\\end{aligned}"
+
         # 2) 最后一行 X_t，用符号映射递归生成
         raw = ''.join(ch if (ch.isalnum() or ch == '_') else '_' for ch in str(final_name)).strip('_')
         final_base = raw or 'X'
@@ -768,17 +775,17 @@ class FactorExpr:
         *,
         scope: Any,
         select: str = "nearest",
-        default: Any = np.nan,
+        default: Any = None,
     ) -> 'FactorExpr':
-        """Distance to a matching historical value; nearest is the default."""
-        from .bar_search import bar_distance
+        """Distance to a matching historical value; unmatched defaults to scope age."""
+        from .bar_search import SCOPE_LENGTH, bar_distance
 
         return bar_distance(
             self,
             condition,
             scope=scope,
             select=select,
-            default=default,
+            default=SCOPE_LENGTH if default is None else default,
         )
 
     @factor_workspace

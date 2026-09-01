@@ -22,9 +22,9 @@ if FACTOR_WORKSPACE:
         LookbackScope,
         SessionScope,
         TradingDayScope,
-        bars,
-        session,
-        trading_day,
+        scope_bars,
+        scope_session,
+        scope_trading_day,
     )
     from .match_refs import CANDIDATE, CURRENT, MatchValueRef
     from .operands import OperandExpr
@@ -86,11 +86,12 @@ if FACTOR_WORKSPACE:
 __factor_workspace__ = (
     "CURRENT",
     "CANDIDATE",
-    "bars",
-    "session",
-    "trading_day",
+    "scope_bars",
+    "scope_session",
+    "scope_trading_day",
     "bar_since",
     "bar_distance",
+    "window_bars",
     "OPEN",
     "HIGH",
     "LOW",
