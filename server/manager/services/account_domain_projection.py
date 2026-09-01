@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from tools.factors.formula_identity import require_frozen_factor
+from tools.factors.formula_identity import (
+    freeze_factor_identity,
+    require_frozen_factor,
+)
 
 
 def factor_rows_from_sync(
@@ -76,7 +79,9 @@ def factor_rows_from_account_entities(
             factors = []
         for item in factors[:512]:
             try:
-                frozen = require_frozen_factor(item)
+                frozen = require_frozen_factor(
+                    _restore_legacy_factor_identity(item)
+                )
             except (TypeError, ValueError):
                 continue
             identity = frozen["identity"]
@@ -121,6 +126,42 @@ def factor_rows_from_account_entities(
                 ],
             })
     return result
+
+
+def _restore_legacy_factor_identity(item: object) -> object:
+    """Restore the ref omitted by early v2 account-domain projections.
+
+    The immutable ref is derived only from identity fields already persisted
+    with the row.  Incomplete or inconsistent rows still fail the normal
+    frozen-factor validation and remain omitted.
+    """
+    if not isinstance(item, dict) or item.get("ref") or item.get("factor_ref"):
+        return item
+    params = item.get("params") or item.get("factor_params") or []
+    if isinstance(params, list):
+        params = {
+            str(value.get("alias") or ""): value.get("value")
+            for value in params
+            if isinstance(value, dict) and str(value.get("alias") or "")
+        }
+    if not isinstance(params, dict):
+        return item
+    try:
+        frozen = freeze_factor_identity(
+            owner_ref=str(item.get("factor_owner_ref") or "").strip(),
+            family_alias=str(item.get("factor_family_alias") or "").strip(),
+            factor_alias=str(item.get("factor_alias") or "").strip(),
+            family_formula_fingerprint=str(
+                item.get("family_formula_fingerprint") or ""
+            ).strip(),
+            self_formula_fingerprint=str(
+                item.get("self_formula_fingerprint") or ""
+            ).strip(),
+            params=params,
+        )
+    except (TypeError, ValueError):
+        return item
+    return {**item, **frozen, "factor_ref": frozen["ref"]}
 
 
 def _owner_alias(
