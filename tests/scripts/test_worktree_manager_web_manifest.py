@@ -1208,6 +1208,18 @@ def test_dialog_cards_have_shared_viewport_scroll_fallback() -> None:
     assert "overflow: hidden" not in run_spec_rule
 
 
+def test_open_modal_dialog_freezes_document_and_contains_dropdown_scroll() -> None:
+    styles = (WEB_ROOT / "styles" / "app.css").read_text(encoding="utf-8")
+    assert "html:has(dialog[open])" in styles
+    assert "body:has(dialog[open])" in styles
+    assert "overflow: hidden" in styles.split(
+        "html:has(dialog[open])", 1
+    )[1].split("}", 1)[0]
+    options_rule = styles.split(".ft-multi-select-options {", 1)[1].split("}", 1)[0]
+    assert "overscroll-behavior: contain" in options_rule
+    assert "dialog[open]" in styles
+
+
 def test_all_pages_share_responsive_inline_padding_without_width_caps() -> None:
     styles = (WEB_ROOT / "styles" / "app.css").read_text(encoding="utf-8")
     root_rule = styles.split(":root {", 1)[1].split("}", 1)[0]
