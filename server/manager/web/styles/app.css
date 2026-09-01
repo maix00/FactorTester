@@ -67,7 +67,7 @@ body.sidebar-collapsed .opened-tab > .tab-main > .symbol { margin: 0; justify-se
 .nav-research-detail-folder > .nav-folder-row { min-height: 30px; }
 .nav-research-detail-folder > .nav-folder-row > .nav-folder-tab { min-height: 30px; padding: 6px 8px; }
 .nav-research-detail-folder .nav-folder-toggle { width: 20px; flex-basis: 20px; }
-.nav-research-detail-folder > .nav-folder-row > .tab-close { margin-left: 0; }
+.nav-research-detail-folder > .nav-folder-row > .tab-close { width: 20px; height: 30px; flex-basis: 20px; margin: 0 8px 0 0; }
 .nav-research-tab-children { margin-left: 20px; padding-left: 7px; }
 .nav-research-tab-children[hidden] { display: none; }
 .nav-research-tab-children .opened-tab { min-height: 28px; padding: 5px 8px 5px 7px; }
@@ -120,8 +120,9 @@ body.sidebar-collapsed .nav-research-tab-children .opened-tab > .tab-main > .sym
 .opened-tab .tab-label { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 body.sidebar-collapsed .opened-tab .tab-label { display: none !important; }
 .opened-tab > .tab-main { min-width: 0; max-width: 100%; flex: 1; display: flex; gap: 8px; align-items: center; border: 0; padding: 0; background: transparent; color: inherit; text-align: left; overflow: hidden; }
-.opened-tab > .tab-close { margin-left: auto; flex: 0 0 auto; border: 0; padding: 0 2px; background: transparent; color: var(--muted); line-height: 1; }
-.opened-tab .tab-close:hover { color: var(--text); }
+.tab-close { flex: 0 0 auto; border: 0; border-radius: 0; padding: 0 2px; background: transparent; color: var(--muted); line-height: 1; }
+.opened-tab > .tab-close { margin-left: auto; }
+.tab-close:hover { color: var(--text); background: transparent; }
 .nav-button, .account-button { width: 100%; border: 0; background: transparent; color: inherit; border-radius: 7px; padding: 6px 8px; display: flex; gap: 8px; align-items: center; text-align: left; min-height: 30px; }
 .nav-button:hover, .account-button:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); }
 .nav-button.active { color: white; background: var(--accent); }
