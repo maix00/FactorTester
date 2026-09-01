@@ -66,6 +66,8 @@
   }
 
   function scopeTabs(context, state, root) {
+    const row = document.createElement("div");
+    row.className = "research-root-scope-row";
     const nav = document.createElement("nav");
     nav.className = "research-section-tabs research-root-scopes";
     nav.setAttribute("aria-label", context.t("研究范围"));
@@ -73,6 +75,7 @@
       const button = document.createElement("button");
       button.type = "button";
       button.className = `research-section-tab research-root-scope${state.scope === definition.id ? " active" : ""}`;
+      button.dataset.researchScope = definition.id;
       button.textContent = context.t(definition.title);
       button.setAttribute("aria-current", state.scope === definition.id ? "page" : "false");
       button.disabled = !context.session && definition.id !== "shared";
@@ -80,6 +83,12 @@
         if (button.disabled || state.scope === definition.id) return;
         state.scope = definition.id;
         state.pages[definition.id] = 1;
+        nav.querySelectorAll(".research-root-scope").forEach(item => {
+          const active = item.dataset.researchScope === state.scope;
+          item.classList.toggle("active", active);
+          item.setAttribute("aria-current", active ? "page" : "false");
+        });
+        addButton.hidden = state.scope !== "mine";
         const url = new URL(location.href);
         url.searchParams.set("section", "researches");
         url.searchParams.set("research_scope", definition.id);
@@ -90,7 +99,16 @@
       });
       nav.append(button);
     });
-    return nav;
+    const addButton = FTUI.iconButton(
+      context, "plus", "新建研究",
+      () => void createResearchDialog(context, root).catch(error => (
+        context.showNotice?.(error.message || String(error), true)
+      )),
+    );
+    addButton.classList.add("research-root-add");
+    addButton.hidden = state.scope !== "mine" || !context.session;
+    row.append(nav, addButton);
+    return row;
   }
 
   function dialogButton(context, title, action, style = "secondary") {
@@ -251,25 +269,12 @@
       );
       if (!current(context)) return;
       const rows = Array.isArray(value.researches) ? value.researches : [];
-      const children = [];
-      if (state.scope === "mine" && context.session) {
-        const actions = document.createElement("div");
-        actions.className = "research-root-actions";
-        actions.append(FTUI.iconButton(
-          context, "plus", "新建研究",
-          () => void createResearchDialog(context, root).catch(error => (
-            context.showNotice?.(error.message || String(error), true)
-          )),
-        ));
-        children.push(actions);
-      }
-      children.push(rows.length
+      content.replaceChildren(rows.length
         ? listTable(context, rows, state, root)
         : FTUI.empty(
           context.t("暂无研究"),
           context.t("当前范围内还没有 Research 根对象"),
         ));
-      content.replaceChildren(...children);
     } catch (error) {
       if (current(context)) content.replaceChildren(
         FTUI.empty(context.t("无法读取"), error.message || String(error)),
