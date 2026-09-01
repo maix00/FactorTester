@@ -108,80 +108,6 @@
     let disposed = false;
     let observedProcessing = false;
     let initialRuntimeStatus = options.runtimeStatus || null;
-    const activeComposer = document.createElement("form");
-    activeComposer.className = "profile-agent-active-composer";
-    activeComposer.hidden = true;
-    const activeInput = document.createElement("textarea");
-    activeInput.rows = 1;
-    activeInput.placeholder = context.t("输入补充要求…");
-    activeInput.setAttribute("aria-label", context.t("输入补充要求"));
-    const activeAction = typeof FTUI.iconButton === "function"
-      ? FTUI.iconButton(context, "stop.fill", "停止生成", () => {})
-      : document.createElement("button");
-    activeAction.type = "submit";
-    activeComposer.append(activeInput, activeAction);
-    let manualStreamPending = false;
-    function updateActiveAction() {
-      const hasText = Boolean(String(activeInput.value || "").trim());
-      const icon = window.FTIcons?.node?.(
-        hasText ? "arrow.up" : "stop.fill",
-      );
-      activeAction.replaceChildren(...(icon ? [icon] : []));
-      activeAction.setAttribute(
-        "aria-label", context.t(hasText ? "发送补充要求" : "停止生成"),
-      );
-      activeAction.title = context.t(hasText ? "发送补充要求" : "停止生成");
-    }
-    async function consumeAdapterStream(response) {
-      if (!response?.body) return;
-      const reader = response.body.getReader();
-      while (!(await reader.read()).done) {}
-    }
-    async function submitActiveComposer(event) {
-      event.preventDefault();
-      if (!selectedConversationID || activeAction.disabled) return;
-      const text = String(activeInput.value || "").trim();
-      activeAction.disabled = true;
-      try {
-        if (!text) {
-          await adapter.fetch(adapter.endpoint, {
-            method: "POST",
-            body: JSON.stringify({
-              type: "threads.stop",
-              params: {thread_id: selectedConversationID},
-            }),
-          });
-          activeComposer.hidden = true;
-          return;
-        }
-        manualStreamPending = true;
-        activeInput.value = "";
-        updateActiveAction();
-        const response = await adapter.fetch(adapter.endpoint, {
-          method: "POST",
-          body: JSON.stringify({
-            type: "threads.add_user_message",
-            params: {
-              thread_id: selectedConversationID,
-              input: [{type: "input_text", text}],
-            },
-          }),
-        });
-        await consumeAdapterStream(response);
-        await target.fetchUpdates?.();
-      } catch (error) {
-        status.textContent = `${context.t("Agent 对话发生错误")}: ${
-          error?.message || context.t("请重试")}`;
-      } finally {
-        manualStreamPending = false;
-        activeAction.disabled = false;
-        activeComposer.hidden = true;
-      }
-    }
-    activeInput.addEventListener("input", updateActiveAction);
-    activeComposer.addEventListener("submit", event => {
-      void submitActiveComposer(event);
-    });
     async function refreshProcessingTurn() {
       if (disposed || !selectedConversationID
           || typeof target.fetchUpdates !== "function") return;
@@ -193,14 +119,12 @@
         const processing = String(
           runtimeStatus.processing_conversation_id || "",
         ).trim() === selectedConversationID;
-        activeComposer.hidden = !processing;
-        if (processing) updateActiveAction();
         if (!processing && !observedProcessing) return;
-        // ChatKit's supported remount path is an authoritative item refresh.
-        // It reconstructs every persisted workflow/process item produced
-        // while this iframe was absent, then keeps polling until the final
-        // assistant item is durable.
-        await target.fetchUpdates();
+        // Refresh once when an active conversation is remounted and once when
+        // it finishes. Replacing ChatKit's authoritative item list every
+        // second resets its internal scroll anchor and makes the transcript
+        // appear to jump while the user is reading it.
+        if (!observedProcessing || !processing) await target.fetchUpdates();
         observedProcessing = processing;
         if (processing && !disposed) {
           updateTimer = setTimeout(refreshProcessingTurn, 1000);
@@ -260,31 +184,11 @@
       status.textContent = `${context.t("Agent 对话发生错误")}: ${
         error?.message || context.t("请检查 Agent 状态")}`;
     });
-    target.addEventListener("chatkit.response.start", () => {
-      activeComposer.hidden = false;
-      updateActiveAction();
-    });
-    target.addEventListener("chatkit.response.end", () => {
-      if (!manualStreamPending) activeComposer.hidden = true;
-    });
-    target.addEventListener("chatkit.composer.layout.change", event => {
-      const layout = event.detail || {};
-      const values = [layout.x, layout.y, layout.width, layout.height]
-        .map(Number);
-      if (!values.every(Number.isFinite)) return;
-      const [x, y, width, height] = values;
-      activeComposer.style.left = `${x}px`;
-      activeComposer.style.top = `${y}px`;
-      activeComposer.style.width = `${width}px`;
-      activeComposer.style.minHeight = `${height}px`;
-      activeComposer.style.right = "auto";
-      activeComposer.style.bottom = "auto";
-    });
     target.addEventListener("chatkit.thread.change", event => {
       const identifier = String(event.detail?.threadId || "").trim();
       if (identifier) selectedConversationID = identifier;
     });
-    chatStage.append(target, activeComposer);
+    chatStage.append(target);
     host.replaceChildren(chatStage);
     if (options.readOnly) {
       const composerNote = document.createElement("div");

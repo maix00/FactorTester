@@ -149,6 +149,44 @@ def delete_factor_param_config(username: str, ff_alias: str, scope_key: str = DE
     return bool(cursor.rowcount)
 
 
+def delete_factor_family_configs(
+    ff_alias: str, *, username: str | None = None,
+) -> list[dict[str, Any]]:
+    """Atomically delete every registered factor row for one family.
+
+    A custom family is restricted to its owner.  A public family passes no
+    username because registrations may belong to any account.
+    """
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        ensure_factor_param_config_schema(conn)
+        where = "ff_alias = ?"
+        params: tuple[Any, ...] = (ff_alias,)
+        if username is not None:
+            where += " AND username = ?"
+            params = (ff_alias, username)
+        rows = conn.execute(
+            f"SELECT username, scope_key, payload_json "
+            f"FROM account_factor_param_configs WHERE {where}",
+            params,
+        ).fetchall()
+        conn.execute(
+            f"DELETE FROM account_factor_param_configs WHERE {where}", params,
+        )
+    deleted = []
+    for row in rows:
+        try:
+            payload = json.loads(row["payload_json"])
+        except Exception:
+            payload = {}
+        params_list = payload.get("params_list") if isinstance(payload, dict) else []
+        deleted.append({
+            "username": str(row["username"]),
+            "scope_key": str(row["scope_key"]),
+            "factor_count": len(params_list) if isinstance(params_list, list) else 0,
+        })
+    return deleted
+
+
 def list_factor_param_config_aliases(username: str, scope_key: str = DEFAULT_SCOPE_KEY) -> list[str]:
     scope_key = normalize_product_group(scope_key)
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:

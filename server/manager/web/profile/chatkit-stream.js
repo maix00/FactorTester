@@ -442,22 +442,28 @@
     return !state.turnID || eventTurnID === state.turnID;
   }
 
-  async function steerActiveTurn(
+  // This is recovery for a stale browser-side active flag, not a second
+  // composer feature. ChatKit does not expose a supported live-steer control.
+  // If the Manager says the old turn ended, its atomic steer endpoint promotes
+  // the already-submitted message to a fresh turn so it is never lost.
+  async function recoverStaleActiveTurn(
     controller, state, profileState, text, updateConversation,
   ) {
     const status = await runtimeStatus(state);
     const request = turnRequest(state, status, text);
     if (request.method !== "turn/steer") {
-      throw new Error("Profile Agent active turn is not ready for steering");
+      throw new Error("Profile Agent is already responding");
     }
     const response = await rpc(state, request.method, request.params);
+    if (response?.managerTransition !== "turn/start") {
+      throw new Error("Profile Agent is already responding");
+    }
     const user = P.userItem(state, text);
     state.items.push(user);
     writeEvent(controller, {type: "thread.item.added", item: user});
     writeEvent(controller, {type: "thread.item.done", item: user});
     await updateConversation(profileState, state, {
-      title: state.threadTitle || text.slice(0, 80),
-      preview: text,
+      title: state.threadTitle || text.slice(0, 80), preview: text,
     }).catch(() => {});
     return response;
   }
@@ -618,14 +624,10 @@
     let response = null;
     let transitionedSteer = false;
     if (state.active) {
-      response = await steerActiveTurn(
+      response = await recoverStaleActiveTurn(
         controller, state, profileState, text, updateConversation,
       );
-      transitionedSteer = response?.managerTransition === "turn/start";
-      if (!transitionedSteer) return;
-      // The previous turn ended between the browser status read and steer.
-      // The Manager atomically promoted the message to a new turn. Retire the
-      // old event consumer so this request can own the new turn's event stream.
+      transitionedSteer = true;
       state.eventStream?.close();
     }
     state.active = true;

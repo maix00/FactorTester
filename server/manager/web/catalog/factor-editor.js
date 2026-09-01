@@ -95,8 +95,24 @@
       multi: false,
       items: familyItems(data),
       selected: state.family ? [familyRef(state.family)] : [],
-      onChange: values => {
+      onChange: async values => {
         state.family = familyItems(data).find(item => item.value === values[0])?.family || null;
+        if (state.family && !(state.family.params || []).length) {
+          try {
+            const loaded = await window.FTFactorDetailShared.loadSourceVersion(
+              context, state.family, "current", {
+                familyID: familyAlias(state.family),
+                sourceKind: state.family.factor_kind === "public" ? "public" : undefined,
+                ownerUsername: state.family.owner_username
+                  || context.session?.username || "",
+              },
+            );
+            state.family = {...state.family, ...loaded};
+          } catch (error) {
+            state.sourceVersionError = error?.message
+              || context.t("因子家族参数读取失败");
+          }
+        }
         state.latestFamily = state.family;
         state.parameterValues = defaults(state.family?.params || []);
         state.sourceVersionFingerprint = "";
@@ -653,11 +669,26 @@
     }
     const temporaryFamilyEdit = mode === "edit" && context.testObjectTemporary
       && loaded.source_kind !== "transient" && !loaded.source_code;
-    const selectedFamily = !familyMode && mode === "create" && options.familyRef
+    let selectedFamily = !familyMode && mode === "create" && options.familyRef
       ? data.families.find(item => familyRef(item) === options.familyRef
         || item.factor_family_alias === options.familyRef
         || item.factor_family_name === options.familyRef) || null
       : null;
+    if (selectedFamily && !(selectedFamily.params || []).length) {
+      try {
+        const familySource = await window.FTFactorDetailShared.loadSourceVersion(
+          context, selectedFamily, "current", {
+            familyID: familyAlias(selectedFamily),
+            sourceKind: selectedFamily.factor_kind === "public" ? "public" : undefined,
+            ownerUsername: selectedFamily.owner_username || context.session.username || "",
+          },
+        );
+        selectedFamily = {...selectedFamily, ...familySource};
+      } catch (_) {
+        // The source panel will surface an availability error. Keep the
+        // catalog row selectable instead of making the whole editor fail.
+      }
+    }
     const loadedFamily = temporaryFamilyEdit
       ? data.families.find(item => familyRef(item) === (
         loaded.family_ref
