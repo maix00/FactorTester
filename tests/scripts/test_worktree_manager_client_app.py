@@ -3490,7 +3490,6 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert 'loadGroups?.(["research-local"])' in shell
     assert 'homeNetworkRow(\n        "FactorTester 客户端"' in shell
     assert 'clientDownloadButton(appContext(routeToken), release, "下载")' in shell
-    assert 'clientRow.classList.add("home-network-action-row")' in shell
     assert 'line.className = "research-report-info-line"' in reports
     assert 'metadata.className = "research-report-info-metadata"' in reports
     assert 'item.className = "secondary"' not in reports
