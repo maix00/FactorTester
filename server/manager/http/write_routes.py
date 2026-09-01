@@ -301,11 +301,20 @@ class WriteRoutesMixin:
                 payload = self._json_body(256 * 1024)
                 owner = str(session["username"])
                 report_id = str(payload.get("report_id") or "")
+                publication_id = str(payload.get("publication_id") or "").strip()
                 visibility = str(payload.get("visibility") or "private")
+                publication = None
+                if publication_id:
+                    publication = self.state.public_research.owner_settings(
+                        publication_id, owner,
+                    )
+                    if report_id and report_id != publication["report_id"]:
+                        raise PermissionError("report settings target does not match")
+                    report_id = str(publication["report_id"])
                 server_report = self.state.server_research.owner_report(
                     owner, report_id,
                 )
-                if server_report is not None:
+                if server_report is not None and publication is None:
                     value = self.state.server_research.publish(
                         owner,
                         str(server_report["server_ref"]),
@@ -319,6 +328,9 @@ class WriteRoutesMixin:
                     value = self.state.public_research.configure(
                         owner_ref=owner,
                         report_id=report_id,
+                        publication_key=str(
+                            (publication or {}).get("publication_key") or report_id
+                        ),
                         projection=None,
                         visibility=visibility,
                         auto_sync=bool(payload.get("auto_sync", True)),

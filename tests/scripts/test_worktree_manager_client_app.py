@@ -2245,6 +2245,8 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
             report_source = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/rich-text.js") as response:
             rich_text = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/research/report-settings.js") as response:
+            report_settings = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/app/tabs.js") as response:
             tabs = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/app/tab-view-cache.js") as response:
@@ -2358,6 +2360,8 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
             icons = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/rich-text.js") as response:
             rich_text = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/research/report-settings.js") as response:
+            report_settings = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/rich-text-blocks.js") as response:
             rich_text_blocks = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/table-view.js") as response:
@@ -2390,6 +2394,9 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'FTIcons.reference' in rich_text
     assert 'legacyFactorSnapshot' in rich_text
     assert 'reference-legacy' in rich_text
+    assert 'window.FTResearchReportSettings' in report_settings
+    assert 'publication_id: settings.publication_id' in report_settings
+    assert '自动上传' in report_settings
     assert 'factortester-local://' in rich_text
     assert '(?:file)' in rich_text
     assert 'return "file"' in rich_text
@@ -3584,7 +3591,9 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert "runtime_bound_here: false" in page_agent_profiles
     assert "未绑定当前服务器/客户端" in page_agent_drawer
     assert "if (profile?.runtime_bound_here === false)" in page_agent_drawer
-    assert 'text: conversationTitle(context, profile)' in agent_chat
+    assert 'const title = await conversationTitle(context, profile)' in agent_chat
+    assert 'text: title' in agent_chat
+    assert 'match?.label || match?.display_name' in agent_chat
     assert 'context.t("研究身份 Agent")' not in agent_chat
     assert "assistantAllowed" in report_entry
     assert 'access_basis === "research"' in report_entry

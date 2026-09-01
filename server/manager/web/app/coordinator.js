@@ -238,7 +238,7 @@
       state, api, t, content, toolbar, button,
       ...currentTabContext(),
       tabID: state.activeTabID, tabSession, activeNav, setHeading, updateActiveTab,
-      openReportSettings, saveActiveTabSession, openTab, navigate, showNotice,
+      saveActiveTabSession, openTab, navigate, showNotice,
       captureScrollPosition,
       checkpointTabSession: tabs?.scheduleActiveSessionCheckpoint,
       isRouteCurrent: () => routeToken === activeRouteToken,
@@ -398,7 +398,6 @@
   });
   const openLogin = auth.openLogin;
   const logout = auth.logout;
-  const openReportSettings = auth.openReportSettings;
 
   routeDispatch = FTAppRouteDispatch.create({
     content,

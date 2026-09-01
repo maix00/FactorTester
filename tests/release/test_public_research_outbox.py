@@ -155,6 +155,33 @@ def test_public_report_sync_marks_operation_complete_after_reconnect(
     assert client.outbox.load(operation_id)["manifest"]["state"] == "completed"
 
 
+def test_client_configures_one_uploaded_branch(monkeypatch, tmp_path: Path) -> None:
+    client = PublicResearchClient(tmp_path, manager_url="http://manager.invalid")
+    requests = []
+
+    def request(method, path, **kwargs):
+        requests.append((method, path, kwargs["payload"]))
+        return {"success": True, "settings": {
+            "publication_id": "publication-branch-b",
+            "report_id": "report-1", "branch_ref": "branch-b",
+            "visibility": "authorized", "auto_sync": False,
+        }}
+
+    monkeypatch.setattr(client, "_request", request)
+    result = client.configure(
+        "publication-branch-b", visibility="authorized", auto_sync=False,
+        authorized_users=("GTHT@Reader@2",),
+    )
+
+    assert result["branch_ref"] == "branch-b"
+    assert requests == [("POST", "/api/research-publications/settings", {
+        "publication_id": "publication-branch-b",
+        "visibility": "authorized", "auto_sync": False,
+        "relay_local_files": False,
+        "authorized_users": ["GTHT@Reader@2"],
+    })]
+
+
 def test_local_report_migration_inventory_collapses_one_work_package(
     tmp_path: Path,
 ) -> None:

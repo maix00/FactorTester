@@ -275,6 +275,16 @@
         () => void createReportDialog(context, researchID, rerender),
       ));
     }
+    const settingsTarget = selected?.selected_branch?.publication_id
+      ? {...selected, ...selected.selected_branch,
+        publication_id: selected.selected_branch.publication_id}
+      : selected;
+    if (settingsTarget?.access?.can_manage === true || selected?.can_manage === true) {
+      actions.append(FTUI.iconButton(
+        context, "gearshape", "研究报告设置",
+        () => FTResearchReportSettings.open(context, settingsTarget, rerender),
+      ));
+    }
     if (selected?.access?.can_manage === true && selected?.can_delete === true) {
       actions.append(FTUI.iconButton(
         context, "trash", "删除研究报告", async () => {
@@ -401,7 +411,7 @@
       metadata.append(item);
     });
     const actions = reportActions(
-      context, researchID, selected, rerender, canManage,
+      context, researchID, selectedSource(selected, state), rerender, canManage,
     );
     actions.prepend(FTUI.iconButton(
       context, "safari", "在独立页面打开",

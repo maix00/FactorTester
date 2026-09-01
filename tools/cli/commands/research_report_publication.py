@@ -114,3 +114,43 @@ def unpublish_report(
     """Revoke a shared report now or queue the revocation while offline."""
     library = PublicResearchClient(load_profile_root(release_profile))
     output(library.unpublish(publication_id), as_json)
+
+
+@publication.command("settings")
+@click.argument("publication_id")
+@click.option(
+    "--release-profile",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--visibility", type=click.Choice(["private", "authorized", "public"]),
+    required=True,
+)
+@click.option("--auto-upload/--no-auto-upload", default=True, show_default=True)
+@click.option("--relay-local-files/--no-relay-local-files", default=False)
+@click.option("--authorized-user", "authorized_users", multiple=True)
+@click.option("--confirm-public", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def configure_publication(
+    publication_id: str,
+    release_profile: Path | None,
+    visibility: str,
+    auto_upload: bool,
+    relay_local_files: bool,
+    authorized_users: tuple[str, ...],
+    confirm_public: bool,
+    as_json: bool,
+) -> None:
+    """Configure visibility and automatic upload for one uploaded Branch."""
+    if visibility == "public" and not confirm_public:
+        raise click.ClickException(
+            "public confirmation is required; pass --confirm-public"
+        )
+    library = PublicResearchClient(load_profile_root(release_profile))
+    output(library.configure(
+        publication_id,
+        visibility=visibility,
+        auto_sync=auto_upload,
+        relay_local_files=relay_local_files,
+        authorized_users=authorized_users,
+    ), as_json)

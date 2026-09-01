@@ -118,7 +118,11 @@
     ));
     if (value.access?.can_manage) {
       infoActions.append(FTUI.iconButton(
-        context, "gearshape", "研究报告设置", context.openReportSettings,
+        context, "gearshape", "研究报告设置",
+        () => FTResearchReportSettings.open(
+          context, {...value, publication_id: publicationID},
+          () => render(publicationID, context),
+        ),
       ));
     }
     infoLine.append(infoActions);

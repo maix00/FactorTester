@@ -38,31 +38,6 @@
       await FTSettings.show(context.appContext(), "account");
     }
 
-    function addAuthorizedUser(value = "") {
-      const row = document.createElement("div"); row.className = "authorized-user";
-      row.innerHTML = '<input><button type="button"></button>';
-      row.querySelector("input").placeholder = t("完整用户名");
-      row.querySelector("button").textContent = t("移除");
-      row.querySelector("input").value = value;
-      row.querySelector("button").onclick = () => row.remove();
-      document.querySelector("#authorized-user-list").append(row);
-    }
-
-    async function openReportSettings() {
-      const settings = (await api("/api/research-publications/settings")).reports
-        .find(item => (
-          item.publication_id === state.report.publication_id
-          || item.report_id === state.report.report_id
-        ));
-      if (!settings) return;
-      document.querySelector("#setting-auto-sync").checked = settings.auto_sync;
-      document.querySelector("#setting-visibility").value = settings.visibility;
-      document.querySelector("#setting-relay").checked = settings.relay_local_files;
-      const list = document.querySelector("#authorized-user-list"); list.replaceChildren();
-      (settings.authorized_users || []).forEach(addAuthorizedUser);
-      document.querySelector("#report-settings-dialog").showModal();
-    }
-
     document.querySelector("#login-form").addEventListener("submit", async event => {
       event.preventDefault();
       try {
@@ -132,32 +107,9 @@
         field.hidden = false; field.textContent = error.message;
       }
     });
-    document.querySelector("#report-settings-form").addEventListener("submit", async event => {
-      event.preventDefault();
-      try {
-        const users = [...document.querySelectorAll("#authorized-user-list input")]
-          .map(item => item.value.trim()).filter(Boolean);
-        await api("/api/research-publications/settings", {
-          method: "POST",
-          body: JSON.stringify({
-            report_id: state.report.report_id,
-            auto_sync: document.querySelector("#setting-auto-sync").checked,
-            visibility: document.querySelector("#setting-visibility").value,
-            relay_local_files: document.querySelector("#setting-relay").checked,
-            authorized_users: users,
-          }),
-        });
-        document.querySelector("#report-settings-dialog").close();
-        await context.renderReport(state.report.publication_id);
-      } catch (error) {
-        const field = document.querySelector("#settings-error");
-        field.hidden = false; field.textContent = error.message;
-      }
-    });
-    document.querySelector("#add-authorized-user").onclick = () => addAuthorizedUser();
     document.querySelector("#account-button").onclick = () => context.navigate("/settings/account");
 
-    return {openLogin, logout, openReportSettings};
+    return {openLogin, logout};
   }
 
   window.FTAuth = {bind};

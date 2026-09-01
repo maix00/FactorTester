@@ -67,26 +67,6 @@
     </form>
   </dialog>
 
-  <dialog id="report-settings-dialog">
-    <form method="dialog" class="dialog-card wide" id="report-settings-form">
-      <button class="dialog-close" value="cancel" aria-label="关闭" data-i18n-aria="关闭">×</button>
-      <h2 data-i18n="研究报告设置">研究报告设置</h2>
-      <p data-i18n="远端页面读取 FTClient 已上传的结构化镜像；本地文件不会随报告公开">远端页面读取 FTClient 已上传的结构化镜像；本地文件不会随报告公开</p>
-      <div class="settings-list">
-        <label class="setting-row"><span><b data-i18n="自动同步">自动同步</b><small data-i18n="本地报告 generation 更新后上传到 7998">本地报告 generation 更新后上传到 7998</small></span><input id="setting-auto-sync" type="checkbox"></label>
-        <label class="setting-row"><span><b data-i18n="访问范围">访问范围</b><small data-i18n="私有、指定用户或任何访问者">私有、指定用户或任何访问者</small></span><select id="setting-visibility"><option value="private" data-i18n="仅自己">仅自己</option><option value="authorized" data-i18n="授权用户">授权用户</option><option value="public" data-i18n="公开">公开</option></select></label>
-        <label class="setting-row"><span><b data-i18n="本地文件中继">本地文件中继</b><small data-i18n="仅在所有者 FTClient 在线且访问者获授权时可用">仅在所有者 FTClient 在线且访问者获授权时可用</small></span><input id="setting-relay" type="checkbox"></label>
-        <label class="setting-row"><span><b data-i18n="未完全覆盖时允许推进">未完全覆盖时允许推进</b><small data-i18n="仍显示缺口，但不以覆盖完整性阻止节点推进">仍显示缺口，但不以覆盖完整性阻止节点推进</small></span><input id="setting-gate" type="checkbox"></label>
-      </div>
-      <section class="authorized-users">
-        <div class="section-heading"><div><h3 data-i18n="授权用户">授权用户</h3><p data-i18n="只填写完整用户名；公开模式不依赖此表">只填写完整用户名；公开模式不依赖此表</p></div><button id="add-authorized-user" type="button" data-i18n="添加">添加</button></div>
-        <div id="authorized-user-list"></div>
-      </section>
-      <button class="primary" type="submit" data-i18n="保存设置">保存设置</button>
-      <div id="settings-error" class="form-error" hidden></div>
-    </form>
-  </dialog>
-
   <!-- FT_STATIC_SCRIPTS -->
 </body>
 </html>

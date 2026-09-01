@@ -121,3 +121,72 @@ def test_server_research_routes_read_owner_report(tmp_path: Path):
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def test_report_settings_target_one_publication_branch(tmp_path: Path):
+    state = manager.ManagerState(
+        tmp_path, "python", data_root=tmp_path / "data",
+        session_db_path=tmp_path / "manager.sqlite",
+    )
+    token = "branch-settings-token"
+    state._sessions[state._token_hash(token)] = (
+        PRINCIPAL, "user", float("inf"),
+    )
+    publications = []
+    for branch in ("branch-a", "branch-b"):
+        projection = {
+            "schema_version": 2, "report_id": "report-branches",
+            "title": branch, "language": "zh-Hans", "generation": 1,
+            "components": [], "bindings": [], "assets": [],
+            "local_resources": [], "related_objects": [], "attachments": [],
+            "projection_hash": f"hash-{branch}",
+        }
+        synced = state.public_research.sync({
+            "report_id": "report-branches",
+            "publication_key": f"report-branches:branch:{branch}",
+            "branch_ref": branch,
+            "owner_ref": PRINCIPAL,
+            "profile_ref": "maxa",
+            "projection": projection,
+        })
+        state.public_research.configure(
+            owner_ref=PRINCIPAL, report_id="report-branches",
+            publication_key=f"report-branches:branch:{branch}",
+            projection=None, visibility="private", auto_sync=True,
+            relay_local_files=False, authorized_users=[],
+        )
+        publications.append(synced["publication_id"])
+    manager.Handler.state = state
+    server = manager.ThreadingHTTPServer(("127.0.0.1", 0), manager.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+        request = Request(
+            f"{base}/api/research-publications/settings",
+            data=json.dumps({
+                "publication_id": publications[1],
+                "report_id": "report-branches",
+                "visibility": "authorized",
+                "auto_sync": False,
+                "authorized_users": ["GTHT@Reader@2"],
+            }).encode(),
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urlopen(request) as response:
+            saved = json.loads(response.read())["settings"]
+        assert saved["publication_id"] == publications[1]
+        assert saved["branch_ref"] == "branch-b"
+        assert saved["visibility"] == "authorized"
+        assert saved["auto_sync"] is False
+        first = state.public_research.owner_settings(publications[0], PRINCIPAL)
+        assert first["visibility"] == "private"
+        assert first["auto_sync"] is True
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
