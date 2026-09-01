@@ -927,6 +927,8 @@ def test_factor_editor_family_picker_uses_the_shared_source_control() -> None:
     assert 'params: state.parameterValues || {}' in source
     assert "FTUI.actionButton" in source
     assert "FTUI.codeEditor" in source
+    assert 'loadSourceVersion(\n              context, state.family, "current"' in source
+    assert 'loadSourceVersion(\n          context, selectedFamily, "current"' in source
     assert "factor-editor-upload-action" not in source
     assert "const title = document.createElement(\"h2\")" not in source
     assert "test-factor-family-row" not in source
@@ -934,6 +936,21 @@ def test_factor_editor_family_picker_uses_the_shared_source_control() -> None:
     styles = (WEB_ROOT / "styles" / "app.css").read_text(encoding="utf-8")
     assert ".editable-code-editor textarea" in styles
     assert "background: transparent !important" in styles
+
+
+def test_factor_family_delete_warns_and_backend_cascades_registered_factors() -> None:
+    listing = (WEB_ROOT / "catalog" / "factor-catalog-list.js").read_text(
+        encoding="utf-8",
+    )
+    routes = (
+        ROOT / "server" / "modules" / "custom_factors" / "crud_routes.py"
+    ).read_text(encoding="utf-8")
+
+    assert "function confirmFamilyDeletion" in listing
+    assert "factor-family-delete-warning" in listing
+    assert "删除家族及因子" in listing
+    assert "delete_factor_family_configs" in routes
+    assert "cascade_deleted" in routes
 
 
 def test_frozen_factor_chip_detail_uses_its_snapshot_without_port_resolution() -> None:

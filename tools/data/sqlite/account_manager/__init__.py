@@ -33,6 +33,7 @@ from .factor_set import (
 from .factor_param_config import (
     DEFAULT_SCOPE_KEY,
     delete_factor_param_config,
+    delete_factor_family_configs,
     delete_scope,
     ensure_factor_param_config_schema,
     ensure_scope_exists,

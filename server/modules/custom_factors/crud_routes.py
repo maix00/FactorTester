@@ -23,6 +23,7 @@ from server.services.research_configurations import rename_factor_family_alias
 from server.services.session_runtime import current_user
 from tools.data.account_manage import (
     can_view_user_scope,
+    delete_factor_family_configs,
     get_account,
     is_super_admin_account,
 )
@@ -361,13 +362,18 @@ def api_delete_factor(factor_id):
         return jsonify({'success': False, 'error': '因子不存在'}), 404
 
     old_name = factor_class_name(existing_source)
+    cascade = delete_factor_family_configs(old_name or factor_id, username=username)
     delete_factor_source(username, factor_id)
 
     invalidate_custom_factor_cache(username, factor_id)
     if old_name:
         invalidate_factor_family_cache(old_name)
 
-    return jsonify({'success': True, 'message': f'因子 "{old_name}" 已删除'})
+    return jsonify({
+        'success': True,
+        'message': f'因子家族 "{old_name}" 已删除',
+        'cascade_deleted': cascade,
+    })
 
 
 @factor_library_internal_bp.route('/families/public/<factor_id>', methods=['DELETE'])
@@ -378,11 +384,13 @@ def api_delete_public_factor(factor_id):
     existing_source = load_public_factor_source(factor_id)
     if existing_source is None:
         return jsonify({'success': False, 'error': '公共因子家族不存在'}), 404
+    cascade = delete_factor_family_configs(factor_id)
     delete_factor_source_row('public', '', factor_id)
     invalidate_factor_family_cache(factor_id)
     return jsonify({
         'success': True,
         'message': f'公共因子家族 "{factor_id}" 已删除',
+        'cascade_deleted': cascade,
     })
 
 

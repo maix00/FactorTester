@@ -112,15 +112,18 @@ vm.runInThisContext(
     1,
     "a remounted active conversation fetches process items produced while absent",
   );
-  const activeComposer = findAll(root, item => item.tagName === "form")[0];
-  const activeInput = findAll(activeComposer, item => item.tagName === "textarea")[0];
-  const activeAction = findAll(activeComposer, item => item.tagName === "button")[0];
-  initialChats[0].dispatch("chatkit.response.start");
-  assert.equal(activeComposer.hidden, false);
-  assert.equal(activeAction.attributes["aria-label"], "停止生成");
-  activeInput.value = "补充约束";
-  activeInput.dispatch("input");
-  assert.equal(activeAction.attributes["aria-label"], "发送补充要求");
+  initialChats[0].dispatch("chatkit.ready");
+  await flush();
+  assert.equal(
+    initialChats[0].updateCount,
+    1,
+    "status polling does not repeatedly replace the ChatKit timeline and scroll anchor",
+  );
+  assert.equal(
+    findAll(root, item => item.className === "profile-agent-active-composer").length,
+    0,
+    "active turns rely on ChatKit's native stop control without a second composer",
+  );
   const lifecycleHost = findAll(
     root, item => item.dataset?.ftKeepConnectedOnTabSave === "true",
   )[0];
