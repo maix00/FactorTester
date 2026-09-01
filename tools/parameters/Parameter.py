@@ -273,7 +273,9 @@ class TypeParam(Parameter):
 @factor_workspace
 class FactorParam(TypeParam):
     """
-    因子表达式参数：接受 FactorExpr 或其子类实例（允许 None 作为默认值）。
+    因子表达式参数：接受 FactorExpr、因子引用或数值常量（允许 None 作为默认值）。
+
+    数值常量会规范化为 ConstExpr，使其能作为 FactorExpr 直接嵌入表达式树。
 
     等价于 TypeParam(..., typ=(FactorExpr, type(None)))，但自动导入 FactorExpr。
     示例：FactorParam('FE') — 接受任意 FactorExpr 或 None。
@@ -283,44 +285,28 @@ class FactorParam(TypeParam):
                  *args, **kwargs):
         if hasattr(self, '_initialized'):
             return
-        from tools.data.types import DataColumn
-        from tools.factors.FactorExpr import FactorExpr, ParamRef, ColumnRef
+        from tools.factors.FactorExpr import FactorExpr, ConstExpr, ParamRef
+        from tools.factors.factor_param_resolution import coerce_factor_param_expr
         from tools.parameters.DataColumnParam import DataColumnParam
 
-        def is_datacolumn_like(value: Any) -> bool:
+        def contains(value: Any) -> bool:
             try:
-                DataColumn(value)
-                return True
+                normalized = coerce_factor_param_expr(value)
             except Exception:
                 return False
-
-        def contains(value: Any) -> bool:
-            return (
-                isinstance(value, (FactorExpr, DataColumnParam, str, dict, type(None)))
-                or is_datacolumn_like(value)
-            )
+            return normalized is None or isinstance(normalized, (FactorExpr, str, dict))
 
         def rectify(value: Any) -> Any:
-            if isinstance(value, DataColumnParam):
-                return ParamRef(value)
-            if is_datacolumn_like(value):
-                return ColumnRef(DataColumn(value))
-            return value
+            return coerce_factor_param_expr(value)
 
         def alias_value(value: Any) -> str:
             if value is None:
                 return ''
-            def _strip_freq(v: str) -> str:
-                """从别名中移除 |$F:xxx 部分（FactorParam 的子因子无 SignalAlign，$F 无意义）。"""
-                import re
-                return re.sub(r'\|?\$F:[^|]+', '', v)
+            if isinstance(value, ConstExpr):
+                return str(value.value)
             if isinstance(value, dict):
                 raw = value.get('factor_alias') or value.get('alias') or str(value)
-                return _strip_freq(raw)
-            if is_datacolumn_like(value):
-                return DataColumn(value).value
-            if isinstance(value, ColumnRef):
-                return value.column.value
+                return raw
             if isinstance(value, FactorExpr):
                 try:
                     return value._get_alias()
@@ -329,7 +315,7 @@ class FactorParam(TypeParam):
             if isinstance(value, ParamRef):
                 return getattr(value.param, 'alias', str(value))
             raw = getattr(value, 'alias', str(value))
-            return _strip_freq(raw)
+            return raw
 
         space = ValueSpace(
             contains=contains,

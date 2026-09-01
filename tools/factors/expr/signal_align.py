@@ -349,6 +349,22 @@ class SignalAlign(CompositeExpr):
                 'end_session_skip', self.end_session_skip,
                 'end_session_gap', str(self.end_session_gap))
 
+    def resolve(self, *args, **kwargs) -> FactorExpr:
+        resolved: FactorExpr = SignalAlign(
+            self.operands[0].resolve(*args, **kwargs),
+            self.signal_freq,
+            basepoint=self.basepoint,
+            daily_basepoint=self.daily_basepoint,
+            end_session_skip=self.end_session_skip,
+            end_session_gap=self.end_session_gap,
+        )
+        if self._is_intermediate:
+            resolved = resolved.as_intermediate(
+                self._intermediate_name,
+                factor=kwargs.get('caller', None),
+            )
+        return resolved
+
     def _apply_op(self, values: List[Any]) -> pd.DataFrame:
         data = values[0]
         self._raw_data = data  # 保存未对齐的原始数据
