@@ -48,6 +48,16 @@
     });
   }
 
+  async function openObjectEditor(context, options) {
+    if (!window.FTTestObjectEditorOverlay?.open) {
+      await loadGroup("object-editor-overlay");
+    }
+    if (!window.FTTestObjectEditorOverlay?.open) {
+      throw new Error(context?.t?.("对象编辑器不可用") || "对象编辑器不可用");
+    }
+    return window.FTTestObjectEditorOverlay.open(context, options);
+  }
+
   function codeGroupForTab(tab) {
     return {
       factor_selection: "workbench-factors",
@@ -104,5 +114,6 @@
     codeGroupForTab, deferredPanel, ensureGroupCode, ensureRunBatchActionsCode,
     ensureRunBatchCode,
     fallbackGroupReferences, groupID, hasSelectedProductPaths, loadGroup,
+    openObjectEditor,
   });
 })();

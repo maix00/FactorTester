@@ -113,7 +113,7 @@
       "profile-skills", "profile-workspace", "profile-agent-session",
       "profile-agent-models"
     ],
-    "workbench-core": ["object-editor-overlay"],
+    "workbench-core": [],
     "workbench-settings": ["workbench-core", "catalog-selection-core"],
     "workbench-settings-fields": ["workbench-settings-controls"],
     "workbench-ic-controls": ["workbench-core"],

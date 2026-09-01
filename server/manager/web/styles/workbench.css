@@ -145,18 +145,22 @@
 .test-run-options { padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
 .test-product-selection-summary { color: var(--text) !important; font-weight: 650; }
 .test-object-editor-dialog { width: min(1080px, calc(100vw - 32px)); max-width: none; }
-.test-object-editor-dialog > .test-object-editor-overlay { width: 100%; max-width: none; box-sizing: border-box; }
-.test-object-editor-overlay { width: auto; max-height: calc(100vh - 32px); gap: 6px; overflow: auto; padding: 14px 16px 18px; }
-.test-object-editor-overlay > .section-heading { display: grid; grid-template-columns: auto minmax(120px, auto) minmax(0, 1fr) auto; align-items: center; justify-content: initial; gap: 8px; min-height: 30px; margin: 0; padding: 0; }
+.test-object-editor-dialog > .test-object-editor-overlay { width: 100%; height: calc(100dvh - 32px); max-width: none; max-height: calc(100dvh - 32px); box-sizing: border-box; }
+.test-object-editor-overlay { display: grid; grid-template-rows: auto minmax(0, 1fr); width: auto; gap: 6px; overflow: hidden; padding: 14px 16px 18px; }
+.test-object-editor-overlay > .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 30px; margin: 0; padding: 0; }
 .test-object-editor-overlay > .section-heading h2 { overflow: hidden; font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }
-.test-object-editor-overlay .test-object-editor-back, .test-object-editor-overlay .test-object-editor-close { width: 28px; height: 28px; min-width: 28px; padding: 0; border: 0; background: transparent; }
-.test-object-editor-tabs { display: flex; min-width: 0; gap: 3px; overflow-x: auto; padding: 0; }
-.test-object-editor-tabs[hidden] { display: none; }
-.test-object-editor-tab { display: inline-flex; align-items: center; flex: 0 0 auto; border: 0; border-radius: 6px; color: var(--muted); background: transparent; font-size: 11px; }
-.test-object-editor-tab-label { border: 0; padding: 4px 4px 4px 7px; color: inherit; background: transparent; font: inherit; }
-.test-object-editor-tab-cancel { width: 20px; height: 20px; min-width: 20px; border: 0; padding: 0; color: inherit; background: transparent; }
-.test-object-editor-tab.active { color: var(--accent); background: var(--accent-soft); }
-.test-object-editor-overlay-mount, .test-object-editor-overlay-mount > .detail-stack { width: 100%; max-width: none; min-width: 0; margin-inline: 0; box-sizing: border-box; }
+.test-object-editor-overlay .test-object-editor-close { width: 28px; height: 28px; min-width: 28px; padding: 0; border: 0; background: transparent; }
+.test-object-editor-body { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; min-height: 0; overflow: hidden; }
+.test-object-editor-body.has-tree { grid-template-columns: minmax(150px, 210px) minmax(0, 1fr); gap: 12px; }
+.test-object-editor-tree { min-width: 0; min-height: 0; padding: 2px 8px 2px 0; border-right: 1px solid var(--line); overflow: auto; }
+.test-object-editor-tree[hidden] { display: none; }
+.test-object-editor-tree-item { display: grid; grid-template-columns: 18px minmax(0, 1fr) 20px; align-items: center; min-height: 30px; margin-left: calc(var(--tree-depth) * 14px); border-radius: 7px; color: var(--muted); }
+.test-object-editor-tree-item.active { color: var(--accent); background: var(--accent-soft); }
+.test-object-editor-tree-toggle, .test-object-editor-tree-cancel { width: 18px; height: 24px; min-width: 18px; padding: 0; border: 0; color: inherit; background: transparent; }
+.test-object-editor-tree-toggle[hidden] { display: block; visibility: hidden; }
+.test-object-editor-tree-label { min-width: 0; padding: 5px 4px; border: 0; overflow: hidden; color: inherit; background: transparent; font: inherit; font-size: 12px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.test-object-editor-overlay-mount { width: 100%; max-width: none; min-width: 0; min-height: 0; margin-inline: 0; overflow: auto; box-sizing: border-box; }
+.test-object-editor-overlay-mount > .detail-stack { width: 100%; max-width: none; min-width: 0; margin-inline: 0; box-sizing: border-box; }
 .test-object-editor-frame, .test-object-editor-frame > .detail-stack { width: 100%; max-width: none; min-width: 0; margin-inline: 0; box-sizing: border-box; }
 .test-object-editor-overlay .factor-editor-form { width: 100%; max-width: none; margin-inline: 0; }
 .test-object-editor-overlay .factor-editor-form .test-setting-row { grid-template-columns: minmax(180px, .52fr) minmax(0, 1.48fr); }
@@ -173,6 +177,10 @@
   color: transparent;
   background: transparent;
   -webkit-text-fill-color: transparent;
+}
+@media (max-width: 720px) {
+  .test-object-editor-body.has-tree { grid-template-columns: minmax(110px, 32vw) minmax(0, 1fr); gap: 8px; }
+  .test-object-editor-tree-item { margin-left: calc(var(--tree-depth) * 9px); }
 }
 .factor-editor-source-metadata { display: grid; min-width: 0; padding: 4px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .factor-editor-readonly-value { min-width: 0; overflow-wrap: anywhere; color: var(--muted); }

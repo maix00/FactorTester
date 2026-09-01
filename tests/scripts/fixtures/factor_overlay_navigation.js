@@ -12,6 +12,7 @@ class Element {
     this.open = false;
     this.textContent = "";
     this.classes = new Set();
+    this.style = {setProperty: (name, value) => { this[name] = value; }};
     this.classList = {
       toggle: (name, enabled) => enabled
         ? this.classes.add(name) : this.classes.delete(name),
@@ -106,15 +107,15 @@ const context = {
   const dialog = body.children[0];
   const card = dialog.children[0];
   const heading = card.children[0];
-  const back = heading.children[0];
-  const tabs = heading.children[2];
-  const close = heading.children[3];
-  const mount = card.children[1];
+  const close = heading.children[1];
+  const overlayBody = card.children[1];
+  const tree = overlayBody.children[0];
+  const mount = overlayBody.children[1];
   assert.equal(calls.sets.length, 1);
   assert.equal(calls.sets[0].viewOnly, true);
   assert.equal(calls.loads.length, 1);
   assert.deepEqual(calls.loads[0], ["factor-catalog-detail"]);
-  assert.equal(back.hidden, true);
+  assert.equal(tree.hidden, true);
 
   mount.children[0].children[0].listeners.click();
   await Promise.resolve();
@@ -123,27 +124,34 @@ const context = {
     ref: factorRef, mode: "view", viewOnly: true, alias: "Momentum|N:20d",
   }]);
   assert.deepEqual(calls.loads[1], ["factor-catalog-detail-rendering"]);
-  assert.equal(back.hidden, false);
-  assert.equal(tabs.hidden, false);
-  assert.equal(tabs.children.length, 2);
+  assert.equal(tree.hidden, false);
+  assert.equal(tree.children.length, 2);
 
-  back.listeners.click();
+  tree.children[0].children[1].listeners.click();
   await Promise.resolve();
   await Promise.resolve();
   assert.equal(calls.sets.length, 1);
-  assert.equal(back.hidden, true);
-  assert.equal(tabs.children.length, 2, "back navigation must preserve the child frame");
-  tabs.children[1].children[0].listeners.click();
+  assert.equal(tree.children.length, 2, "parent navigation must preserve the child frame");
+  mount.children[0].children[0].listeners.click();
   await Promise.resolve();
   await Promise.resolve();
-  assert.equal(back.hidden, false, "preserved child frame must remain navigable");
-  tabs.children[1].children[1].listeners.click({
+  assert.equal(tree.children.length, 3, "parallel children must share one tree branch");
+  tree.children[0].children[1].listeners.click();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(tree.children.length, 3, "returning to the parent must preserve all siblings");
+  tree.children[1].children[1].listeners.click();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(tree.children[1].classes.has("active"), true,
+    "preserved child frame must remain navigable");
+  tree.children[1].children[2].listeners.click({
     preventDefault() {}, stopPropagation() {},
   });
   await Promise.resolve();
   await Promise.resolve();
-  assert.equal(tabs.children.length, 1, "tab cancel must remove only the child frame");
-  assert.equal(back.hidden, true);
+  assert.equal(tree.children.length, 2, "tree cancel must remove only the selected sibling");
+  assert.equal(tree.children[0].classes.has("active"), true);
 
   close.listeners.click();
   await pending;

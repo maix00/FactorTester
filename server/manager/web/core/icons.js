@@ -104,6 +104,8 @@
     "link": '<path d="M9.5 14.5 8 16a3.5 3.5 0 0 1-5-5l2-2a3.5 3.5 0 0 1 5 0M14.5 9.5 16 8a3.5 3.5 0 0 1 5 5l-2 2a3.5 3.5 0 0 1-5 0M8 12h8"/>',
     "xmark": '<path d="M6 6l12 12M18 6 6 18"/>',
     "chevron.left": '<path d="m15 5-7 7 7 7"/>',
+    "triangle.right": '<path d="m9 6 7 6-7 6Z"/>',
+    "triangle.down": '<path d="m6 9 6 7 6-7Z"/>',
   };
 
   const normalize = value => String(value || "").replace(/-/g, "_");

@@ -2197,7 +2197,7 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert "restoreFrozenSelections(state)" in scripts["test-factors.js"]
     assert "window.FTTestFactorCandidates" in factor_candidates
     assert "selectedProjections" in scripts["test-products.js"]
-    assert "FTTestObjectEditorOverlay.open" in scripts["test-products.js"]
+    assert "FTTestLazyCode.openObjectEditor" in scripts["test-products.js"]
     assert "FTTestObjectPicker.create" in scripts["test-products.js"]
     assert "FTTestObjectPicker" in scripts["test-object-picker.js"]
     assert "FTTestObjectEditorOverlay" in scripts["test-object-editor-overlay.js"]

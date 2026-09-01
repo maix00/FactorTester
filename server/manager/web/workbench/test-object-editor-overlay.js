@@ -84,19 +84,16 @@
     closeButton.className = "dialog-close icon-action-button test-object-editor-close";
     closeButton.replaceChildren?.(window.FTIcons?.node?.("xmark") || "×");
     closeButton.title = context.t("关闭");
-    const backButton = document.createElement("button");
-    backButton.type = "button";
-    backButton.className = "icon-action-button test-object-editor-back";
-    backButton.replaceChildren?.(window.FTIcons?.node?.("chevron.left") || "‹");
-    backButton.title = context.t("返回上一层");
-    backButton.setAttribute?.("aria-label", context.t("返回上一层"));
-    backButton.hidden = true;
-    const tabBar = document.createElement("div");
-    tabBar.className = "test-object-editor-tabs";
-    heading.append(backButton, copy, tabBar, closeButton);
+    heading.append(copy, closeButton);
+    const body = document.createElement("div");
+    body.className = "test-object-editor-body";
+    const tree = document.createElement("nav");
+    tree.className = "test-object-editor-tree";
+    tree.setAttribute?.("aria-label", context.t("已打开页面"));
     const mount = document.createElement("div");
     mount.className = "test-object-editor-overlay-mount";
-    card.append(heading, mount);
+    body.append(tree, mount);
+    card.append(heading, body);
     dialog.append(card);
     const state = {
       closed: false,
@@ -132,27 +129,54 @@
     let renderToken = 0;
     let activeFrame = frames[0];
     const loadedGroups = new Set();
+    const expandedFrames = new Set([frames[0].id]);
 
     const normalizedValue = (frame, value) => frame.temporary === true && value
       ? {...value, temporary: true, source_origin: value.source_origin || "test_inline"}
       : value;
 
-    const renderTabs = () => {
-      tabBar.replaceChildren(...frames.map((frame, index) => {
-        const item = document.createElement("span");
-        item.className = "test-object-editor-tab";
+    const childrenOf = parent => frames.filter(frame => frame.parent === parent);
+    const isDescendantOf = (candidate, ancestor) => {
+      for (let current = candidate?.parent; current; current = current.parent) {
+        if (current === ancestor) return true;
+      }
+      return false;
+    };
+
+    const renderTree = () => {
+      const renderNode = (frame, depth) => {
+        const item = document.createElement("div");
+        item.className = "test-object-editor-tree-item";
+        item.style?.setProperty?.("--tree-depth", String(depth));
         item.classList.toggle("active", frame === activeFrame);
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "test-object-editor-tab-label";
-        const definition = definitions[frame.kind];
-        button.textContent = frame.label || `${context.t(definition.title)} ${index + 1}`;
-        button.addEventListener("click", () => { void renderFrame(frame); });
-        item.append(button);
+        const children = childrenOf(frame);
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "icon-action-button test-object-editor-tree-toggle";
+        toggle.hidden = children.length === 0;
+        toggle.replaceChildren?.(window.FTIcons?.node?.(
+          expandedFrames.has(frame.id) ? "triangle.down" : "triangle.right",
+        ) || (expandedFrames.has(frame.id) ? "▾" : "▸"));
+        toggle.title = context.t(expandedFrames.has(frame.id) ? "收起" : "展开");
+        toggle.addEventListener("click", event => {
+          event.preventDefault?.();
+          event.stopPropagation?.();
+          if (expandedFrames.has(frame.id)) expandedFrames.delete(frame.id);
+          else expandedFrames.add(frame.id);
+          renderTree();
+        });
+        const label = document.createElement("button");
+        label.type = "button";
+        label.className = "test-object-editor-tree-label";
+        const frameDefinition = definitions[frame.kind];
+        label.textContent = frame.label || context.t(frameDefinition.title);
+        label.title = label.textContent;
+        label.addEventListener("click", () => { void renderFrame(frame); });
+        item.append(toggle, label);
         if (frame !== frames[0]) {
           const cancel = document.createElement("button");
           cancel.type = "button";
-          cancel.className = "icon-action-button test-object-editor-tab-cancel";
+          cancel.className = "icon-action-button test-object-editor-tree-cancel";
           cancel.replaceChildren?.(window.FTIcons?.node?.("xmark") || "×");
           cancel.title = context.t("取消这一层");
           cancel.setAttribute?.("aria-label", context.t("取消这一层"));
@@ -163,9 +187,15 @@
           });
           item.append(cancel);
         }
-        return item;
-      }));
-      tabBar.hidden = frames.length < 2;
+        const nodes = [item];
+        if (expandedFrames.has(frame.id)) {
+          for (const child of children) nodes.push(...renderNode(child, depth + 1));
+        }
+        return nodes;
+      };
+      tree.replaceChildren(...renderNode(frames[0], 0));
+      tree.hidden = frames.length < 2;
+      body.classList.toggle("has-tree", frames.length > 1);
     };
 
     const closeFrame = frame => {
@@ -174,14 +204,19 @@
         return;
       }
       const index = frames.indexOf(frame);
-      const wasActive = frame === activeFrame;
-      if (index >= 0) frames.splice(index, 1);
-      frame.resolve?.(null);
-      if (wasActive) {
+      const removed = frames.filter(candidate => (
+        candidate === frame || isDescendantOf(candidate, frame)
+      ));
+      const removesActive = removed.includes(activeFrame);
+      for (const candidate of removed) candidate.resolve?.(null);
+      for (let cursor = frames.length - 1; cursor >= 0; cursor -= 1) {
+        if (removed.includes(frames[cursor])) frames.splice(cursor, 1);
+      }
+      if (removesActive) {
         void renderFrame(frame.parent && frames.includes(frame.parent)
           ? frame.parent : frames[Math.max(0, index - 1)] || frames[0]);
       } else {
-        renderTabs();
+        renderTree();
       }
     };
 
@@ -206,8 +241,7 @@
       title.textContent = prefix + context.t(frameDefinition.title);
       frame.label = name || `${prefix}${context.t(frameDefinition.title)}`;
       if (name && frame.kind === "factor") title.title = name;
-      backButton.hidden = frame === frames[0];
-      renderTabs();
+      renderTree();
     };
 
     const renderFrame = async frame => {
@@ -220,7 +254,6 @@
       frame.mount.className = "test-object-editor-frame";
       mount.replaceChildren(frame.mount);
       if (frame.rendered) return;
-      frame.rendered = true;
       const frameOptions = {
         ...options,
         ...frame,
@@ -254,6 +287,7 @@
           loadedGroups.add(frameDefinition.load);
         }
         if (state.closed || token !== renderToken) return;
+        frame.rendered = true;
         await frameDefinition.render(proxy, frame.ref, frame.mode, frameOptions);
       } catch (error) {
         if (!state.closed && token === renderToken) {
@@ -273,6 +307,7 @@
         kind: "factor", ref: targetRef, mode: "view",
         initialValue, temporary: Boolean(initialValue),
       });
+      expandedFrames.add(activeFrame.id);
       void renderFrame(frames.at(-1));
     };
 
@@ -294,14 +329,11 @@
         resolve,
       };
       frames.push(child);
+      expandedFrames.add(activeFrame.id);
       void renderFrame(child);
       return promise;
     };
 
-    backButton.addEventListener("click", () => {
-      if (activeFrame === frames[0]) return;
-      void renderFrame(activeFrame.parent || frames[0]);
-    });
     await renderFrame(frames[0]);
     return promise;
   }

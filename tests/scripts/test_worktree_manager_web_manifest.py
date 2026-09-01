@@ -1321,9 +1321,10 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
     assert manifest["group_dependencies"]["workbench-input-state"] == [
         "workbench-core",
     ]
-    assert manifest["group_dependencies"]["workbench-core"] == [
-        "object-editor-overlay",
-    ]
+    assert manifest["group_dependencies"]["workbench-core"] == []
+    assert "openObjectEditor" in (
+        WEB_ROOT / "workbench" / "test-lazy-code.js"
+    ).read_text(encoding="utf-8")
     assert "workbench/templates/actions.js" in manifest["groups"]["workbench-core"]
     assert "workbench/templates/actions.js" not in manifest["groups"]["workbench-templates"]
     assert "output-choice" not in manifest["group_dependencies"]["workbench-core"]
@@ -2501,7 +2502,8 @@ def test_test_object_overlay_loads_the_detail_group_before_first_factor_chip() -
     assert '"xmark":' in icons
     assert '"chevron.left":' in icons
     assert 'FTIcons?.node?.("xmark")' in overlay
-    assert 'FTIcons?.node?.("chevron.left")' in overlay
+    assert '"triangle.down" : "triangle.right"' in overlay
+    assert '"triangle.right":' in icons
 
 
 def test_factor_catalog_list_defers_auxiliary_catalogs_and_heavy_modules() -> None:
