@@ -608,17 +608,23 @@
         temporary: true,
       };
     }
+    const sourceFamilyID = state.familyMode
+      ? state.factorID
+      : state.loaded?.factor_family_alias
+        || state.loaded?.family_alias
+        || state.inspection?.factor_name
+        || state.factorID;
     const endpoint = state.familyMode
       ? state.publicMode
         ? state.mode === "create"
           ? "/api/factor-library/families/public"
-          : `/api/factor-library/families/public/${encodeURIComponent(state.factorID)}`
+          : `/api/factor-library/families/public/${encodeURIComponent(sourceFamilyID)}`
         : state.mode === "create"
           ? "/api/factor-library/families/custom"
-          : `/api/factor-library/families/custom/${encodeURIComponent(state.factorID)}`
+          : `/api/factor-library/families/custom/${encodeURIComponent(sourceFamilyID)}`
       : state.mode === "create"
         ? "/api/factor-library/families/custom"
-        : `/api/factor-library/families/custom/${encodeURIComponent(state.factorID)}`;
+        : `/api/factor-library/families/custom/${encodeURIComponent(sourceFamilyID)}`;
     const value = await context.api(endpoint, {
       method: state.mode === "create" ? "POST" : "PUT",
       body: JSON.stringify(payload),
@@ -1088,5 +1094,6 @@
   window.FTFactorEditor = Object.freeze({
     render, reconcileParameterValues, bindFieldValue, persistedFamilyClassName,
     familyClassNameMatches, refreshPersistedObject, replacePersistedObjectTab,
+    saveSourceFactor,
   });
 })();
