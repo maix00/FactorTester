@@ -107,8 +107,9 @@ const context = {
   const card = dialog.children[0];
   const heading = card.children[0];
   const back = heading.children[0];
-  const tabs = card.children[1];
-  const mount = card.children[2];
+  const tabs = heading.children[2];
+  const close = heading.children[3];
+  const mount = card.children[1];
   assert.equal(calls.sets.length, 1);
   assert.equal(calls.sets[0].viewOnly, true);
   assert.equal(calls.loads.length, 1);
@@ -131,8 +132,13 @@ const context = {
   await Promise.resolve();
   assert.equal(calls.sets.length, 1);
   assert.equal(back.hidden, true);
+  assert.equal(tabs.children.length, 2, "back navigation must preserve the child frame");
+  tabs.children[1].listeners.click();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(back.hidden, false, "preserved child frame must remain navigable");
 
-  heading.children[2].listeners.click();
+  close.listeners.click();
   await pending;
   assert.equal(dialog.removed, true);
   console.log("ok");
