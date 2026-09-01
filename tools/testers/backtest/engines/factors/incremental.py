@@ -12,6 +12,8 @@ import pandas as pd
 
 from tools.data.types import DataFreq
 from tools.factors.expr import (
+    BarDistanceOp,
+    BarSinceOp,
     CategoryBoolRef,
     ColumnRef,
     CompositeExpr,
@@ -19,22 +21,27 @@ from tools.factors.expr import (
     CrossSectionalOp,
     FactorExpr,
     RollingOp,
-    SignalAlign,
     ShiftOp,
+    SignalAlign,
     TermStructureOp,
     WhereOp,
 )
-from tools.factors.expr.term_structure_math import evaluate_term_curve, normalize_term_curve
-from tools.factors.expr.pointwise import POINTWISE_OPS, apply_pointwise
 from tools.factors.expr.conditional import apply_where
+from tools.factors.expr.pointwise import POINTWISE_OPS, apply_pointwise
+from tools.factors.expr.term_structure_math import (
+    evaluate_term_curve,
+    normalize_term_curve,
+)
 from tools.factors.lookback import LookbackContract, infer_lookback_contract
-from .group_cross_sectional import GroupCrossSectionalNode
-from .cross_sectional_residual import ResidualizeNode
-from .cross_sectional_kernels import ordinal_rank, rank_percent, zscore
-from .rolling_statistics import ROLLING_STATISTICS, RollingStatisticsNode
 from tools.products.AdjustableTermStructure import (
     TERM_RANK_COL,
 )
+
+from .bar_search import BarDistanceNode, BarSinceNode, compile_match_predicate
+from .cross_sectional_kernels import ordinal_rank, rank_percent, zscore
+from .cross_sectional_residual import ResidualizeNode
+from .group_cross_sectional import GroupCrossSectionalNode
+from .rolling_statistics import ROLLING_STATISTICS, RollingStatisticsNode
 
 if TYPE_CHECKING:
     # MarketSlice lived in the now-deleted engines/native/runtime.py
@@ -545,6 +552,7 @@ class NormalizedBarFields(dict[str, float]):
 @dataclass(frozen=True, slots=True)
 class _StreamingMarketSlice:
     timestamp: pd.Timestamp
+    trading_day: pd.Timestamp | None
     prices: Mapping[Any, _StreamingBarPrice]
     term_curves: Mapping[Any, pd.DataFrame]
 
@@ -564,6 +572,7 @@ class IncrementalFactorExecutor:
         timestamp: pd.Timestamp,
         fields_by_product: Mapping[Any, Any],
         term_curves_by_product: Mapping[Any, Any] | None = None,
+        trading_day: pd.Timestamp | None = None,
     ) -> None:
         term_curves_by_product = term_curves_by_product or {}
         observed_products = set(fields_by_product) | set(term_curves_by_product)
@@ -572,6 +581,7 @@ class IncrementalFactorExecutor:
             raise ValueError(f"market slice is missing streaming products: {missing!r}")
         market = _StreamingMarketSlice(
             pd.Timestamp(timestamp),
+            pd.Timestamp(trading_day).normalize() if trading_day is not None else None,
             {
                 product: _StreamingBarPrice(_normalize_bar_fields(fields_by_product.get(product, {})))
                 for product in self._plan.products
@@ -643,6 +653,24 @@ def compile_streaming_factor(
                 width=len(products),
                 reset_on_session_gap=bool(expr.end_session_skip),
                 session_gap=pd.Timedelta(expr.end_session_gap),
+            )
+        elif isinstance(expr, BarSinceOp):
+            node = BarSinceNode(
+                compile_node(expr.condition),
+                scope=expr.scope,
+                select=expr.select,
+                default=_streaming_scalar(expr.operands[1], "bar_since default"),
+                width=len(products),
+                include_current=expr.include_current,
+            )
+        elif isinstance(expr, BarDistanceOp):
+            node = BarDistanceNode(
+                compile_node(expr.value),
+                compile_match_predicate(expr.condition, compile_node),
+                scope=expr.scope,
+                select=expr.select,
+                default=_streaming_scalar(expr.operands[2], "bar_distance default"),
+                width=len(products),
             )
         elif isinstance(expr, CompositeExpr):
             if expr.op not in _COMPOSITE_OPS:
@@ -791,6 +819,12 @@ def _normalize_bar_fields(fields: Any) -> dict[str, float]:
         "LOW": value,
         "CLOSE": value,
     }
+
+
+def _streaming_scalar(expr: FactorExpr, label: str) -> float:
+    if not isinstance(expr, ConstExpr) or not np.isscalar(expr.value):
+        raise UnsupportedStreamingFactor(f"streaming {label} must resolve to a scalar constant")
+    return float(expr.value)
 
 
 def _normalize_term_curve(curve: Any) -> pd.DataFrame:

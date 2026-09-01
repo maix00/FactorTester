@@ -6,10 +6,28 @@
 FACTOR_WORKSPACE = True
 
 if FACTOR_WORKSPACE:
+    # ═════════════════════════════════════════════════════════════════════════
+    # 预定义常用列引用（在所有子模块加载后定义，避免循环导入）
+    # ═════════════════════════════════════════════════════════════════════════
+    from tools.data.types import DataColumn
+
+    from .bar_search import BarDistanceOp, BarSinceOp, bar_distance, bar_since
+    from .composite import CompositeExpr, _reduce_biop, expr_max, expr_min
+    from .conditional import WhereOp, where
     from .core import EvaluateContext, FactorExpr
-    from .timeline import PanelTimeline, build_panel_timeline, compact_observed, scatter_observed
+    from .cross_sectional import CrossSectionalOp
+    from .leaf import CategoryBoolRef, ColumnRef, ConstExpr, ParamRef, _to_expr
+    from .lookback_scope import (
+        BarCountScope,
+        LookbackScope,
+        SessionScope,
+        TradingDayScope,
+        bars,
+        session,
+        trading_day,
+    )
+    from .match_refs import CANDIDATE, CURRENT, MatchValueRef
     from .operands import OperandExpr
-    from .leaf import CategoryBoolRef, ColumnRef, ParamRef, ConstExpr, _to_expr
     from .rolling import (
         RollingExpr,
         RollingOp,
@@ -20,9 +38,7 @@ if FACTOR_WORKSPACE:
         window_bars,
     )
     from .shift import ShiftOp, _is_zero_shift_period, _strip_latex_time_subscript
-    from .cross_sectional import CrossSectionalOp
-    from .composite import CompositeExpr, _reduce_biop, expr_max, expr_min
-    from .conditional import WhereOp, where
+    from .signal_align import SignalAlign, signal_align
     from .term_structure import (
         TermStructureOp,
         term_carry_annualized,
@@ -35,21 +51,20 @@ if FACTOR_WORKSPACE:
         term_slope_segment,
         term_spread,
     )
-    from .signal_align import SignalAlign, signal_align
+    from .timeline import (
+        PanelTimeline,
+        build_panel_timeline,
+        compact_observed,
+        scatter_observed,
+    )
     from .visual_groups import (
-        VISUAL_OPERATOR_GROUPS,
         VISUAL_COMPOSITE_KEY,
         VISUAL_OPERATOR_CATEGORY,
-        get_visual_operator_groups,
+        VISUAL_OPERATOR_GROUPS,
         get_visual_composite_key,
         get_visual_operator_category,
+        get_visual_operator_groups,
     )
-
-    # ═════════════════════════════════════════════════════════════════════════
-    # 预定义常用列引用（在所有子模块加载后定义，避免循环导入）
-    # ═════════════════════════════════════════════════════════════════════════
-
-    from tools.data.types import DataColumn
 
     OPEN = ColumnRef(DataColumn.OPEN_ADJUSTED)
     HIGH = ColumnRef(DataColumn.HIGH_ADJUSTED)
@@ -69,6 +84,13 @@ if FACTOR_WORKSPACE:
     SMALL_VAL = ConstExpr(1e-10)
 
 __factor_workspace__ = (
+    "CURRENT",
+    "CANDIDATE",
+    "bars",
+    "session",
+    "trading_day",
+    "bar_since",
+    "bar_distance",
     "OPEN",
     "HIGH",
     "LOW",

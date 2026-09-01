@@ -4,16 +4,20 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from tools.data.types import DataColumn
-from tools.data.types import DataFreq
+from tools.data.types import DataColumn, DataFreq
 from tools.factors.expr import (
+    CANDIDATE,
     CLOSE,
+    CURRENT,
     ColumnRef,
     ConstExpr,
     CrossSectionalOp,
     EvaluateContext,
     RollingOp,
     SignalAlign,
+    bar_since,
+    bars,
+    session,
     term_carry_annualized,
     term_contango,
     term_curvature,
@@ -23,19 +27,22 @@ from tools.factors.expr import (
     term_slope,
     term_slope_segment,
     term_spread,
+    trading_day,
 )
 from tools.factors.expr.timeline import build_panel_timeline
-from tools.products.categories.Category import Category
 from tools.products.AdjustableTermStructure import (
-    AdjustableProductMixin,
     TERM_CONTRACT_COL,
     TERM_CONTRACT_UID_COL,
     TERM_DAYS_TO_MATURITY_COL,
     TERM_PRODUCT_COL,
     TERM_RANK_COL,
     TERM_TRADING_DAY_COL,
+    AdjustableProductMixin,
 )
-from tools.testers.backtest.engines.factors.incremental import UnsupportedStreamingFactor
+from tools.products.categories.Category import Category
+from tools.testers.backtest.engines.factors.incremental import (
+    UnsupportedStreamingFactor,
+)
 
 
 def test_factor_expr_compile_incremental_returns_run_scoped_executor():
@@ -299,6 +306,95 @@ def test_incremental_shared_stateful_child_advances_once_across_signal_layers():
         [np.nan, np.nan, 3.0, 5.0, 5.0, 10.0, 10.0, 12.0],
         equal_nan=True,
     )
+
+
+def test_incremental_bar_since_matches_batch_fixed_scope():
+    products, rows = _panel()
+    close = ColumnRef(DataColumn.CLOSE)
+    expr = bar_since(close > 16.0, scope=bars(3), default=3)
+
+    batch = _batch_eval(expr, products, rows)
+    live = _live_eval(expr, products, rows)
+
+    pd.testing.assert_frame_equal(live, batch, check_exact=False)
+
+
+def test_incremental_bar_distance_matches_batch_dynamic_predicate():
+    products, rows = _panel()
+    close = ColumnRef(DataColumn.CLOSE)
+    expr = close.bar_distance(
+        (CURRENT - CANDIDATE).abs() >= 2.0,
+        scope=bars(3),
+        default=3,
+    )
+
+    batch = _batch_eval(expr, products, rows)
+    live = _live_eval(expr, products, rows)
+
+    pd.testing.assert_frame_equal(live, batch, check_exact=False)
+
+
+def test_incremental_bar_distance_farthest_matches_batch():
+    products, rows = _panel()
+    close = ColumnRef(DataColumn.CLOSE)
+    expr = close.bar_distance(
+        CANDIDATE != CURRENT,
+        scope=bars(4),
+        select="farthest",
+        default=4,
+    )
+
+    batch = _batch_eval(expr, products, rows)
+    live = _live_eval(expr, products, rows)
+
+    pd.testing.assert_frame_equal(live, batch, check_exact=False)
+
+
+def test_incremental_bar_search_scopes_reset_at_session_and_trading_day():
+    condition = ColumnRef(DataColumn.CLOSE) > 1.5
+    session_executor = bar_since(
+        condition, scope=session(), default=9,
+    ).compile_incremental(
+        factor_alias="session_bar_since", products=("P1",), source_freq=DataFreq.MIN1,
+    )
+    day_executor = bar_since(
+        condition, scope=trading_day(), default=9,
+    ).compile_incremental(
+        factor_alias="day_bar_since", products=("P1",), source_freq=DataFreq.MIN1,
+    )
+    rows = [
+        ("2026-01-01 09:01", "2026-01-01", 2.0),
+        ("2026-01-01 09:02", "2026-01-01", 1.0),
+        ("2026-01-01 21:01", "2026-01-02", 1.0),
+    ]
+    session_values = []
+    day_values = []
+    for timestamp, trading_day_value, close in rows:
+        fields = {"P1": {"CLOSE": close}}
+        session_executor.on_bar(timestamp, fields, trading_day=trading_day_value)
+        day_executor.on_bar(timestamp, fields, trading_day=trading_day_value)
+        session_values.append(session_executor.on_signal(timestamp)["P1"])
+        day_values.append(day_executor.on_signal(timestamp)["P1"])
+
+    np.testing.assert_allclose(session_values, [0, 1, 9])
+    np.testing.assert_allclose(day_values, [0, 1, 9])
+
+
+def test_incremental_bar_distance_reports_fixed_scope_lookback_contract():
+    close = ColumnRef(DataColumn.CLOSE)
+    executor = close.bar_distance(
+        CANDIDATE < CURRENT,
+        scope=bars(4),
+        default=4,
+    ).compile_incremental(
+        factor_alias="bar_distance_lookback",
+        products=("P1",),
+        source_freq=DataFreq.MIN1,
+    )
+
+    contract = executor._plan.lookback_contract
+    assert contract.warmup == 4
+    assert contract.max_window == 4
 
 
 class _MemoryTermStore:

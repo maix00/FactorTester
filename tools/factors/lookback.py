@@ -104,6 +104,15 @@ def infer_lookback_contract(
         elif cls_name == "ShiftOp":
             child_contract = visit(getattr(expr, "operand", None))
             result = serial(resolve_window(getattr(expr, "periods", None)), child_contract)
+        elif cls_name in {"BarSinceOp", "BarDistanceOp"}:
+            operands = _operands(expr)
+            child_contract = parallel(operands[:-1])
+            scope = getattr(expr, "scope", None)
+            window_expr = getattr(scope, "count", None)
+            result = serial(
+                resolve_window(window_expr) if window_expr is not None else None,
+                child_contract,
+            )
         else:
             result = parallel(_operands(expr))
             result = LookbackContract(
@@ -129,4 +138,3 @@ def _operands(expression: Any) -> tuple[Any, ...]:
         return tuple(operands)
     except TypeError:
         return ()
-

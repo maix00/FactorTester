@@ -602,6 +602,55 @@ def test_validate_transient_factor_uses_defaults_when_params_are_omitted() -> No
     assert payload["normalized_params"]["N"] == "25d"
 
 
+def test_validate_transient_duration_factor_supports_bar_distance_source() -> None:
+    client = _app().test_client()
+    _login(client)
+    source = "\n".join((
+        "from tools.factors import CANDIDATE, CURRENT, FactorFamily, bars",
+        "from tools.factors.FactorExpr import CLOSE, VOLUME",
+        "from tools.parameters import FactorParam",
+        "class DurationSignal(FactorFamily):",
+        "    source_freq = '1m'",
+        "    @staticmethod",
+        "    def factor_expr():",
+        "        Th = FactorParam('Th', default_value=0.001)",
+        "        K = FactorParam('K', default_value=30)",
+        "        match = (CURRENT - CANDIDATE).abs() / (CURRENT.abs() + 1e-10) >= Th",
+        "        pdur = CLOSE.bar_distance(match, scope=bars(K), default=K)",
+        "        vdur = VOLUME.bar_distance(match, scope=bars(K), default=K)",
+        "        return (pdur + vdur) / 2.0",
+        "",
+    ))
+
+    response = client.post(
+        "/api/internal/factor-library/validate",
+        json={"source_code": source},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["valid"] is True, payload
+    assert payload["normalized_params"]["Th"] == "0.001"
+    assert payload["normalized_params"]["K"] == "30"
+    assert "BarDistance" in payload["math_expr"]
+
+
+def test_factor_operator_catalog_exposes_bar_search_operators() -> None:
+    client = _app().test_client()
+    _login(client)
+
+    response = client.get("/api/internal/factor-library/operators")
+
+    assert response.status_code == 200
+    groups = response.get_json()["groups"]
+    keys = {
+        operator["key"]
+        for group in groups
+        for operator in [*(group.get("operators") or []), *(group.get("more_operators") or [])]
+    }
+    assert {"bar_since", "bar_distance"} <= keys
+
+
 def test_validate_factor_alias_accepts_unregistered_canonical_member(monkeypatch) -> None:
     class Family:
         @staticmethod

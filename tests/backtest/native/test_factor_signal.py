@@ -21,6 +21,7 @@ from tools.testers.backtest.modules.factor_signal import (
     _schedule_signal_live_timestamps, _schedule_signal_precomputed_timestamps,
     _evaluate_factor_for_strategies, _factor_calculation_key,
     _clip_scheduled_table_to_strategy_window, _clip_signal_table_to_strategy_window,
+    _live_bar_trading_day,
     _schedule_table_for_strategy, _factor_fields_by_product,
     normalize_signal_timestamp,
 )
@@ -38,6 +39,29 @@ class _FakeMinuteFreq:
 class _FakeDayFreq:
     def is_day_multiple(self) -> bool:
         return True
+
+
+def test_live_bar_trading_day_uses_bar_event_day_level_for_night_session():
+    strategy = Strategy(alias="night-session")
+    draft = EventDraft(
+        EventKind.BAR,
+        pd.Timestamp("2026-01-01 21:01"),
+        strategy,
+        index_key=(pd.Timestamp("2026-01-02"), pd.Timestamp("2026-01-01 21:01")),
+        index_names=("DAY1", "MIN1"),
+    )
+
+    class _Context:
+        def draft_for(self, candidate):
+            assert candidate is strategy
+            return draft
+
+        def get(self, *_args):
+            raise AssertionError("event DAY1 should win over resolver fallback")
+
+    assert _live_bar_trading_day(
+        _Context(), [strategy], pd.Timestamp("2026-01-01 21:01"),
+    ) == pd.Timestamp("2026-01-02")
 
 
 def test_normalize_signal_timestamp_minute_level_floors_seconds():
