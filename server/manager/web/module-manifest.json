@@ -46,7 +46,8 @@
     "code-viewer": ["core"],
     "charts": ["core"],
     "catalog-selection-core": ["core"],
-    "object-editor-overlay": ["core"],
+    "workbench-object-picker": ["core", "catalog-selection-core"],
+    "object-editor-overlay": ["core", "workbench-object-picker"],
     "catalog-core": ["product-catalog-core", "factor-catalog-core"],
     "output-choice": ["core"],
     "object-transfer": ["core"],
@@ -129,8 +130,13 @@
     "workbench-run-submit": [
       "workbench-run", "workbench-compiler", "workbench-ic-controls"
     ],
-    "workbench-factors": ["workbench-core", "catalog-core", "workbench-source-inputs"],
-    "workbench-products": ["workbench-core", "catalog-core"],
+    "workbench-factors": [
+      "workbench-core", "catalog-core", "workbench-source-inputs",
+      "workbench-object-picker"
+    ],
+    "workbench-products": [
+      "workbench-core", "catalog-core", "workbench-object-picker"
+    ],
     "workbench-test-ui": [
       "workbench-settings", "workbench-settings-fields",
       "workbench-run"
@@ -249,8 +255,10 @@
     "catalog-detail-tabs": [
       "catalog/shared/object-detail-tabs.js"
     ],
+    "workbench-object-picker": [
+      "workbench/test-object-picker.js"
+    ],
     "object-editor-overlay": [
-      "workbench/test-object-picker.js",
       "workbench/test-object-editor-overlay.js"
     ],
     "product-catalog-core": [
