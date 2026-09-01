@@ -581,6 +581,25 @@ class ResearchCatalog:
             ).fetchone()
         return self._research_value(updated, viewer=actor)
 
+    def remove_research(self, research_id: str, *, actor: str) -> dict[str, Any]:
+        """Archive a Research only in the catalog that created it."""
+        row = self._research_row(research_id)
+        if not self._research_access(row, actor)["can_manage"]:
+            raise PermissionError("research management is not authorized")
+        if str(row["migration_source"]):
+            raise PermissionError("research can only be deleted on its source server")
+        with connect_sqlite(self.db_path) as conn:
+            conn.execute(
+                """UPDATE research_catalog_researches
+                   SET status='archived', updated_at=? WHERE research_id=?""",
+                (time.time(), research_id),
+            )
+            updated = conn.execute(
+                "SELECT * FROM research_catalog_researches WHERE research_id=?",
+                (research_id,),
+            ).fetchone()
+        return self._research_value(updated, viewer=actor)
+
     def add_membership(
         self,
         research_id: str,

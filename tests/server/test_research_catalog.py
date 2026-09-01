@@ -185,6 +185,12 @@ def test_owner_can_remove_report_and_profile_from_research(tmp_path):
     assert catalog.list_members(research["research_id"], viewer="alice") == []
     assert catalog.list_workspaces(research["research_id"], viewer="alice") == []
 
+    removed_research = catalog.remove_research(
+        research["research_id"], actor="alice",
+    )
+    assert removed_research["status"] == "archived"
+    assert catalog.list_researches(viewer="alice") == []
+
 
 def test_share_links_grant_target_without_exposing_plain_token(tmp_path):
     catalog = ResearchCatalog(tmp_path / "research.sqlite")

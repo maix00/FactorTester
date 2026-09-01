@@ -331,20 +331,26 @@ class ResearchCatalogRoutesMixin:
         return True
 
     def _delete_research_catalog_routes(self, parsed) -> bool:
+        research_match = re.fullmatch(r"/api/research/([^/]+)", parsed.path)
         report_match = re.fullmatch(
             r"/api/research/([^/]+)/reports/([^/]+)", parsed.path,
         )
         member_match = re.fullmatch(
             r"/api/research/([^/]+)/members/([^/]+)", parsed.path,
         )
-        if not report_match and not member_match:
+        if not research_match and not report_match and not member_match:
             return False
         session = self._research_catalog_session()
         if session is None:
             return True
         actor = str(session["username"])
         try:
-            if report_match:
+            if research_match:
+                value = self._research_catalog_service().remove_research(
+                    unquote(research_match.group(1)), actor=actor,
+                )
+                payload = {"research": value}
+            elif report_match:
                 value = self._research_catalog_service().remove_report(
                     unquote(report_match.group(1)),
                     unquote(report_match.group(2)),

@@ -187,6 +187,13 @@ def register_research_catalog_commands(research: click.Group) -> None:
             research_id, profile_ref,
         )))
 
+    @research.command("remove")
+    @click.argument("research_id")
+    @friendly_errors
+    def remove_research(research_id: str) -> None:
+        """删除当前端点创建的 Research；远端投影不可移除。"""
+        click.echo(_json(client_from_config().remove_research(research_id)))
+
     @research.command("workspace-create")
     @click.argument("research_id")
     @click.option("--principal", "principal_ref", default="")

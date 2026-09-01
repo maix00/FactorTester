@@ -181,15 +181,36 @@
   function listTable(context, rows, state, root) {
     const scope = state.scope;
     const view = FTUI.pagedTable(
-      [context.t("研究"), context.t("所有者"), context.t("可见性"), context.t("更新时间")],
-      rows.map(item => [
+      [context.t("研究"), context.t("所有者"), context.t("可见性"), context.t("更新时间"), context.t("操作")],
+      rows.map(item => {
+        const actions = document.createElement("span");
+        actions.className = "research-row-actions";
+        if (item.can_delete === true) actions.append(FTUI.iconButton(
+          context, "trash", "删除研究", async event => {
+            event?.stopPropagation?.();
+            if (!window.confirm(context.t("确定删除这个研究吗？"))) return;
+            try {
+              await context.api(
+                `/api/research/${encodeURIComponent(item.research_id)}`,
+                {method: "DELETE"},
+              );
+              await renderRootContent(context, root);
+            } catch (error) {
+              context.showNotice?.(error.message || String(error), true);
+            }
+          },
+        ));
+        actions.addEventListener("click", event => event.stopPropagation());
+        return [
         item.title || item.research_id,
         item.owner_ref || context.t("未知"),
         FTResearchVisibility.control(context, item, {
           kind: "research", onSaved: () => renderRootContent(context, root),
         }),
         FTUI.formatDate(item.updated_at || item.created_at),
-      ]),
+        actions,
+      ];
+      }),
       {
         page: state.pages[scope] || 1,
         pageSize,

@@ -56,6 +56,12 @@ class ResearchClientMixin(ClientMixinBase):
             self._research_url(research_id), payload,
         ))
 
+    def remove_research(self, research_id: str) -> dict[str, Any]:
+        data = self._expect_success(self.session.delete(
+            self._research_url(research_id),
+        ))
+        return dict(data.get("research") or {})
+
     def add_research_member(
         self, research_id: str, payload: dict[str, Any],
     ) -> dict[str, Any]:

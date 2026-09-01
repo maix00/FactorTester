@@ -12,6 +12,7 @@ class FakeResearchClient:
         self.created = None
         self.removed_report = None
         self.removed_profile = None
+        self.removed_research = None
 
     def create_research_report(self, research_id, payload):
         self.created = (research_id, payload)
@@ -24,6 +25,10 @@ class FakeResearchClient:
     def remove_research_member(self, research_id, profile_ref):
         self.removed_profile = (research_id, profile_ref)
         return {"profile_ref": profile_ref, "status": "revoked"}
+
+    def remove_research(self, research_id):
+        self.removed_research = research_id
+        return {"research_id": research_id, "status": "archived"}
 
 
 def test_research_cli_exposes_report_spaces_without_link_command(monkeypatch):
@@ -44,6 +49,9 @@ def test_research_cli_exposes_report_spaces_without_link_command(monkeypatch):
     member = runner.invoke(cli, [
         "research", "member-remove", "research:v1:one", "--profile", "self",
     ])
+    research_removed = runner.invoke(cli, [
+        "research", "remove", "research:v1:one",
+    ])
 
     assert help_result.exit_code == 0
     assert "report-create" in help_result.output
@@ -59,3 +67,5 @@ def test_research_cli_exposes_report_spaces_without_link_command(monkeypatch):
     assert fake.removed_report == ("research:v1:one", "report:v1:new")
     assert member.exit_code == 0, member.output
     assert fake.removed_profile == ("research:v1:one", "self")
+    assert research_removed.exit_code == 0, research_removed.output
+    assert fake.removed_research == "research:v1:one"
