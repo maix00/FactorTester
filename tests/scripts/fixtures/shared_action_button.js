@@ -10,7 +10,9 @@ global.document = {
       children: [],
       listeners: {},
       attributes: {},
+      dataset: {},
       append(...items) { this.children.push(...items); },
+      replaceChildren(...items) { this.children = items; },
       addEventListener(name, handler) { this.listeners[name] = handler; },
       setAttribute(name, value) { this.attributes[name] = value; },
       removeAttribute(name) { delete this.attributes[name]; },
@@ -19,7 +21,11 @@ global.document = {
   },
 };
 let highlighted = 0;
-global.window = {hljs: {highlightElement() { highlighted += 1; }}};
+global.window = {
+  hljs: {highlightElement() { highlighted += 1; }},
+  setTimeout(handler) { handler(); },
+  FTIcons: {node(symbol) { return {symbol}; }},
+};
 vm.runInThisContext(
   fs.readFileSync("server/manager/web/core/shared-ui.js", "utf8"),
   {filename: "shared-ui.js"},
@@ -50,4 +56,28 @@ editor.textarea.value = "value = 2";
 editor.textarea.listeners.input();
 assert.strictEqual(editor.value(), "value = 2");
 assert.strictEqual(highlighted, 2);
-console.log("ok");
+
+(async () => {
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  let reloads = 0;
+  const refresh = window.FTUI.refreshButton({
+    t: value => value,
+    button(label, handler, help) {
+      return window.FTUI.actionButton(label, handler, {help});
+    },
+  }, async () => { reloads += 1; await pending; });
+  const completion = refresh.listeners.click();
+  assert.strictEqual(refresh.disabled, true);
+  assert.strictEqual(refresh.dataset.refreshState, "refreshing");
+  assert.strictEqual(refresh.attributes["aria-busy"], "true");
+  release();
+  await completion;
+  assert.strictEqual(reloads, 1);
+  assert.strictEqual(refresh.disabled, false);
+  assert.strictEqual(refresh.attributes["aria-busy"], undefined);
+  console.log("ok");
+})().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});

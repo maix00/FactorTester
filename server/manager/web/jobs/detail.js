@@ -189,7 +189,9 @@
     const jobTitle = taskTitle(job, context);
     context.updateActiveTab?.({title: jobTitle});
     context.setHeading(jobTitle, context.t("测试任务详情"));
-    context.toolbar.append(context.button("↻", () => detailPage(), context.t("刷新详情")));
+    context.toolbar.append(FTUI.refreshButton(
+      context, () => detailPage(), {label: "刷新详情"},
+    ));
     const runSpec = runSpecReference(taskDetail, job, context, resolvedServerID);
     if (context.session && FTJobActions.workbenchKind(job) && FTJobActions.runID(job)) {
       const openConfiguration = context.button(context.t("在配置页面打开"), async () => {

@@ -40,6 +40,22 @@ vm.runInThisContext(
     ),
     /因子保存后未在因子库中登记/,
   );
+
+  const transitions = [];
+  window.FTFactorEditor.replacePersistedObjectTab({
+    tabID: "factor-detail:factor:old",
+    navigate(path) { transitions.push(["navigate", path]); },
+    closeTab(tabID) { transitions.push(["close", tabID]); },
+  }, {familyMode: false}, {
+    factor_ref: "factor:v2:new",
+    factor_alias: "Probe|N:10d",
+  });
+  assert.equal(transitions[0][0], "navigate");
+  assert.match(
+    transitions[0][1],
+    /^\/factors\/factor\/factor%3Av2%3Anew\?updated=\d+$/,
+  );
+  assert.deepEqual(transitions[1], ["close", "factor-detail:factor:old"]);
   console.log("ok");
 })().catch(error => {
   console.error(error);

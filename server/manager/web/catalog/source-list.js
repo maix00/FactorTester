@@ -70,15 +70,9 @@
         mount.replaceChildren(FTUI.empty(
           context.t("数据源族读取失败"), error.message || context.t("请稍后重试"),
         ));
-      } finally {
-        if (refresh && isCurrentView(token)) refresh.disabled = false;
       }
     };
-    refresh = context.button("↻", () => {
-      if (refresh.disabled) return;
-      refresh.disabled = true;
-      void loadIntoMount();
-    }, context.t("刷新"));
+    refresh = FTUI.refreshButton(context, loadIntoMount);
     context.toolbar.append(refresh);
     void loadIntoMount();
   }

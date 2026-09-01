@@ -63,7 +63,7 @@
     body.className = "manager-tab-content";
     wrapper.append(body);
     context.toolbar.append(
-      context.button("↻", () => show(context), context.t("刷新")),
+      FTUI.refreshButton(context, () => show(context)),
     );
     context.content.replaceChildren(wrapper);
 

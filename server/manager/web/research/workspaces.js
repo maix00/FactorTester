@@ -28,7 +28,7 @@
     // surrounding tab and WebView session, but must not duplicate this
     // control with a second native picker.
     context.toolbar.append(tabBar(context, selected, embedded));
-    context.toolbar.append(context.button("↻", () => list(context), context.t("刷新")));
+    context.toolbar.append(FTUI.refreshButton(context, () => list(context)));
     const body = document.createElement("div");
     body.className = "research-workspace-page";
     body.append(FTUI.loading(context.t("正在读取研究…")));

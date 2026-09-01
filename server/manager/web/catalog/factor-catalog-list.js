@@ -64,7 +64,7 @@
     context.content.replaceChildren(root);
 
     context.toolbar.append(
-      context.button("↻", async () => {
+      FTUI.refreshButton(context, async () => {
         await catalog().load(context, {
           refresh: true,
           library: page !== "sets",
@@ -72,8 +72,8 @@
           groups: true,
         });
         if (!catalog().isCurrent(context)) return;
-        list(context, page, familyScope);
-      }, context.t("刷新")),
+        await list(context, page, familyScope);
+      }),
     );
     const canModify = Boolean(context.session) && (
       page === "factors" && familyScope === "mine"
