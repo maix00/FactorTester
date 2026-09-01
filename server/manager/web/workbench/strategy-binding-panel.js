@@ -142,137 +142,49 @@
   }
 
   async function openInline(context, state, target, refresh, redraw) {
-    if (!window.FTStrategyLibraryEditor?.create) {
-      await window.FTStaticLoader?.loadGroups?.(["strategy-library-editor-core"]);
-    }
-    if (window.FTStrategyLibraryEditor?.create) {
-      return openInlineEditor(context, state, target, refresh, redraw);
-    }
-    const dialog = document.createElement("dialog");
-    dialog.className = "strategy-inline-dialog";
-    const card = document.createElement("form");
-    card.className = "dialog-card wide";
-    card.addEventListener("submit", async event => {
-      event.preventDefault();
-      submit.disabled = true;
-      try {
+    // Temporary strategies use the same nested object editor as every other
+    // test-time object.  The binding panel owns only inspection and state
+    // persistence; it must not create a second dialog implementation.
+    return FTTestObjectEditorOverlay.open(context, {
+      kind: "strategy",
+      mode: "create",
+      ref: "new",
+      temporary: true,
+      storageMode: "configuration-inline",
+      submitLabel: "添加到当前配置",
+      onSubmit: async draft => {
         const inspected = await context.api("/api/run-inputs/strategy/inspect", {
           method: "POST",
           body: JSON.stringify({
             path: `configuration/strategies/${Date.now()}.py`,
-            source_code: source.value(), entrypoint: entrypoint.value.trim(),
+            source_code: draft.source_code,
+            entrypoint: draft.entrypoint,
           }),
         });
-        if (!inspected.valid) throw new Error(inspected.error || context.t("策略源码无法通过校验"));
+        if (!inspected.valid) {
+          throw new Error(inspected.error || context.t("策略源码无法通过校验"));
+        }
         const tempRef = newID("temporary-strategy");
-        FTTestInputState.putInlineStrategy(state, {
+        return {
           temp_ref: tempRef,
-          name: name.value.trim(),
-          entrypoint: inspected.entrypoint || entrypoint.value.trim(),
-          source_code: source.value(),
+          name: draft.name.trim(),
+          entrypoint: inspected.entrypoint || draft.entrypoint,
+          source_code: draft.source_code,
           source_sha256: inspected.source_sha256 || "",
           hooks: inspected.hooks || [],
           requirements: inspected.requirements || {},
-        }, {
+        };
+      },
+      onSaved: strategy => {
+        FTTestInputState.putInlineStrategy(state, strategy, {
           binding_id: newID("binding"),
           target_strategy_id: target,
-          source: {kind: "inline", temp_ref: tempRef},
+          source: {kind: "inline", temp_ref: strategy.temp_ref},
         });
-        dialog.close();
-        refresh?.(); redraw?.();
-      } catch (error) {
-        errorNode.textContent = error.message || context.t("策略源码无法通过校验");
-        submit.disabled = false;
-      }
-    });
-    const title = document.createElement("h2"); title.textContent = context.t("新建临时策略");
-    const name = textField(context, "策略名称", true);
-    const entrypoint = textField(context, "入口类", true); entrypoint.value = "Strategy";
-    const sourceEditor = FTUI.codeEditor("", {language: "python", required: true, ariaLabel: context.t("Python 策略源码")});
-    const source = sourceEditor;
-    const errorNode = document.createElement("small"); errorNode.className = "form-error";
-    const actions = document.createElement("div"); actions.className = "dialog-actions";
-    const cancel = FTUI.actionButton(context.t("取消"), () => dialog.close(), {variant: "secondary"});
-    const submit = FTUI.actionButton(context.t("添加到当前配置"), null, {variant: "primary"});
-    submit.type = "submit";
-    actions.append(cancel, submit);
-    card.append(title, row(context, "策略名称", name), row(context, "入口类", entrypoint), row(context, "Python 源码", source.element), errorNode, actions);
-    dialog.append(card); document.body.append(dialog); dialog.addEventListener("close", () => dialog.remove()); dialog.showModal();
-  }
-
-  function openInlineEditor(context, state, target, refresh, redraw) {
-    const dialog = document.createElement("dialog");
-    dialog.className = "strategy-inline-dialog";
-    const editor = FTStrategyLibraryEditor.create(context, {}, {
-      mode: "create",
-      storageMode: "configuration-inline",
-      onSubmit: async (draft, status) => {
-        const submit = dialog.querySelector('[type="submit"]');
-        if (submit) submit.disabled = true;
-        try {
-          const inspected = await context.api("/api/run-inputs/strategy/inspect", {
-            method: "POST",
-            body: JSON.stringify({
-              path: `configuration/strategies/${Date.now()}.py`,
-              source_code: draft.source_code,
-              entrypoint: draft.entrypoint,
-            }),
-          });
-          if (!inspected.valid) {
-            throw new Error(inspected.error || context.t("策略源码无法通过校验"));
-          }
-          const tempRef = newID("temporary-strategy");
-          FTTestInputState.putInlineStrategy(state, {
-            temp_ref: tempRef,
-            name: draft.name.trim(),
-            entrypoint: inspected.entrypoint || draft.entrypoint,
-            source_code: draft.source_code,
-            source_sha256: inspected.source_sha256 || "",
-            hooks: inspected.hooks || [],
-            requirements: inspected.requirements || {},
-          }, {
-            binding_id: newID("binding"),
-            target_strategy_id: target,
-            source: {kind: "inline", temp_ref: tempRef},
-          });
-          dialog.close();
-          refresh?.();
-          redraw?.();
-        } catch (error) {
-          status.textContent = error.message || context.t("策略源码无法通过校验");
-          if (submit) submit.disabled = false;
-        }
+        refresh?.();
+        redraw?.();
       },
     });
-    const title = document.createElement("h2");
-    title.textContent = context.t("新建临时策略");
-    const actions = document.createElement("div");
-    actions.className = "dialog-actions";
-    const cancel = FTUI.actionButton(
-      context.t("取消"), () => dialog.close(), {variant: "secondary"},
-    );
-    const submit = FTUI.actionButton(
-      context.t("添加到当前配置"), null, {variant: "primary"},
-    );
-    submit.type = "submit";
-    actions.append(cancel, submit);
-    editor.form.prepend(title);
-    editor.form.append(actions);
-    dialog.append(editor.form);
-    document.body.append(dialog);
-    dialog.addEventListener("close", () => dialog.remove(), {once: true});
-    dialog.showModal();
-  }
-
-  function textField(context, label, required) {
-    const input = document.createElement("input");
-    input.type = "text"; input.required = required; input.placeholder = context.t(label); input.setAttribute("aria-label", context.t(label));
-    return input;
-  }
-
-  function row(context, label, control) {
-    const root = document.createElement("label"); root.className = "strategy-binding-field";
-    const title = document.createElement("span"); title.textContent = context.t(label); root.append(title, control); return root;
   }
 
   function newID(prefix) {

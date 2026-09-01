@@ -1818,6 +1818,32 @@ def test_shared_multi_select_enforces_exclusive_and_single_selection() -> None:
         "groups"]["catalog-selection-remote"]
 
 
+def test_inline_strategy_creation_uses_shared_nested_object_overlay() -> None:
+    panel = (WEB_ROOT / "workbench" / "strategy-binding-panel.js").read_text(
+        encoding="utf-8",
+    )
+    overlay = (WEB_ROOT / "workbench" / "test-object-editor-overlay.js").read_text(
+        encoding="utf-8",
+    )
+    styles = (WEB_ROOT / "styles" / "strategy-library.css").read_text(
+        encoding="utf-8",
+    )
+
+    assert 'kind: "strategy"' in panel
+    assert "FTTestObjectEditorOverlay.open" in panel
+    assert "FTStrategyLibraryEditor.create" not in panel
+    assert 'temporary: true' in panel
+    assert "strategy-inline-dialog" not in panel
+    assert 'strategy: {' in overlay
+    assert 'load: "strategy-library-editor-core"' in overlay
+    assert 'submitLabel || "保存"' in overlay
+    assert "strategy-inline-dialog" not in styles
+    manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text())
+    assert "strategy-library-editor-core" not in manifest["group_dependencies"][
+        "workbench-strategy-bindings"
+    ]
+
+
 def test_registered_locked_fields_share_one_visual_and_picker_contract() -> None:
     fields = (WEB_ROOT / "workbench" / "test-setting-fields.js").read_text(
         encoding="utf-8"
