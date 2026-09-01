@@ -122,6 +122,17 @@ for raw in sys.stdin:
         }
     elif method == "thread/delete":
         result = {"deleted": True}
+    elif method == "turn/steer" and any(
+        item.get("text") == "stale turn"
+        for item in request.get("params", {}).get("input", [])
+    ):
+        if "id" in request:
+            sys.stdout.write(json.dumps({
+                "id": request["id"],
+                "error": {"code": -32602, "message": "no active turn"},
+            }) + "\\n")
+            sys.stdout.flush()
+        continue
     else:
         result = {"accepted": method, "params": request.get("params", {})}
         if method == "turn/start":
@@ -560,6 +571,22 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
         conversation_id=conversation["conversation_id"],
     )
     assert steered["result"]["accepted"] == "turn/steer"
+    promoted = supervisor.request(
+        PRINCIPAL,
+        PROFILE_ID,
+        "turn/steer",
+        {
+            "threadId": "provider-thread-1",
+            "turnId": "turn-active",
+            "input": [{"type": "text", "text": "stale turn"}],
+        },
+        conversation_id=conversation["conversation_id"],
+    )
+    assert promoted["result"]["accepted"] == "turn/start"
+    assert promoted["result"]["managerTransition"] == "turn/start"
+    assert promoted["result"]["params"]["input"] == [
+        {"type": "text", "text": "stale turn"},
+    ]
     with pytest.raises(AgentAppServerError, match="use turn/steer"):
         supervisor.request(
             PRINCIPAL,
@@ -588,7 +615,10 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
         SimpleNamespace(observe=lambda _payload: None),
         {
             "method": "item/completed",
-            "params": {"item": {"id": "final", "type": "agentMessage"}},
+            "params": {
+                "turnId": "turn-active",
+                "item": {"id": "final", "type": "agentMessage"},
+            },
         },
     )
 
@@ -1141,12 +1171,12 @@ def test_profile_agent_binds_provider_turn_id_from_runtime_event():
     )
 
 
-def test_profile_agent_turn_completed_waits_for_final_item():
+def test_profile_agent_turn_completed_clears_processing_turn():
     supervisor = AgentAppServerSupervisor.__new__(AgentAppServerSupervisor)
     supervisor._lock = threading.RLock()
     key = (PRINCIPAL, PROFILE_ID)
     supervisor._processing_turns = {
-        key: {"conversation_id": "conversation-live"},
+        key: {"conversation_id": "conversation-live", "turn_id": "turn-live"},
     }
     observer = SimpleNamespace(observe=lambda _payload: None)
 
@@ -1159,7 +1189,28 @@ def test_profile_agent_turn_completed_waits_for_final_item():
         },
     )
 
-    assert supervisor._processing_turns[key]["conversation_id"] == ("conversation-live")
+    assert key not in supervisor._processing_turns
+
+
+def test_profile_agent_late_old_turn_completion_preserves_new_turn():
+    supervisor = AgentAppServerSupervisor.__new__(AgentAppServerSupervisor)
+    supervisor._lock = threading.RLock()
+    key = (PRINCIPAL, PROFILE_ID)
+    supervisor._processing_turns = {
+        key: {"conversation_id": "conversation-live", "turn_id": "turn-new"},
+    }
+    observer = SimpleNamespace(observe=lambda _payload: None)
+
+    supervisor._observe_runtime_event(
+        key,
+        observer,
+        {
+            "method": "turn/completed",
+            "params": {"turn": {"id": "turn-old", "status": "completed"}},
+        },
+    )
+
+    assert supervisor._processing_turns[key]["turn_id"] == "turn-new"
 
 
 def test_profile_agent_http_routes_start_and_proxy_authenticated_session(

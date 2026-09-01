@@ -9,13 +9,14 @@ class Element {
     this.children = [];
     this.listeners = {};
     this.dataset = {};
+    this.attributes = {};
     this.hidden = false;
     this.disabled = false;
     this.textContent = "";
   }
   append(...children) { this.children.push(...children); }
   replaceChildren(...children) { this.children = [...children]; }
-  setAttribute() {}
+  setAttribute(name, value) { this.attributes[name] = String(value); }
   addEventListener(name, listener) { this.listeners[name] = listener; }
   dispatch(name, detail = {}) { this.listeners[name]?.({target: this, detail}); }
   click() { this.onclick?.({target: this}); }
@@ -111,6 +112,15 @@ vm.runInThisContext(
     1,
     "a remounted active conversation fetches process items produced while absent",
   );
+  const activeComposer = findAll(root, item => item.tagName === "form")[0];
+  const activeInput = findAll(activeComposer, item => item.tagName === "textarea")[0];
+  const activeAction = findAll(activeComposer, item => item.tagName === "button")[0];
+  initialChats[0].dispatch("chatkit.response.start");
+  assert.equal(activeComposer.hidden, false);
+  assert.equal(activeAction.attributes["aria-label"], "停止生成");
+  activeInput.value = "补充约束";
+  activeInput.dispatch("input");
+  assert.equal(activeAction.attributes["aria-label"], "发送补充要求");
   const lifecycleHost = findAll(
     root, item => item.dataset?.ftKeepConnectedOnTabSave === "true",
   )[0];
