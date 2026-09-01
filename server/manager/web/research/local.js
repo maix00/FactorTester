@@ -1,13 +1,8 @@
 (() => {
   async function render(context, mount, embedded) {
-    const releaseResult = await Promise.allSettled([
-      context.api(context.servicePath("/api/client/releases/beta.json")),
-    ]).then(results => results[0]);
+    const release = await loadClientRelease(context);
     if (context.isRouteCurrent?.() === false) return;
-    mount.append(clientDownload(
-      context,
-      releaseResult.status === "fulfilled" ? releaseResult.value : null,
-    ));
+    mount.append(clientDownload(context, release));
     // A standalone browser cannot read the user's local filesystem.  The
     // embedded Swift client owns that projection and requests it explicitly.
     if (!embedded || !context.session) return;
@@ -77,14 +72,26 @@
   function clientDownload(context, value) {
     const section = document.createElement("section");
     section.className = "research-client-download-action";
+    section.append(clientDownloadButton(context, value));
+    return section;
+  }
+
+  function clientDownloadButton(context, value) {
     const open = context.button(
       context.t("客户端下载"),
       () => showDownloadOverlay(context, value),
       context.t("打开客户端下载"),
     );
     open.prepend(FTIcons.node("arrow.down.circle"));
-    section.append(open);
-    return section;
+    return open;
+  }
+
+  async function loadClientRelease(context) {
+    try {
+      return await context.api(context.servicePath("/api/client/releases/beta.json"));
+    } catch (_) {
+      return null;
+    }
   }
 
   function downloadChoices(context, value) {
@@ -164,5 +171,7 @@
     dialog.showModal();
   }
 
-  window.FTResearchLocal = Object.freeze({render, clientDownload});
+  window.FTResearchLocal = Object.freeze({
+    render, clientDownload, clientDownloadButton, loadClientRelease,
+  });
 })();

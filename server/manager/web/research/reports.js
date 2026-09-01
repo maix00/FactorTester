@@ -71,14 +71,6 @@
     }));
   }
 
-  async function loadClientRelease(context) {
-    try {
-      return await context.api(context.servicePath("/api/client/releases/beta.json"));
-    } catch (_) {
-      return null;
-    }
-  }
-
   function ownerDisplay(context, item) {
     const owner = String(item.owner_ref || item.owner_username || "").trim();
     const profile = String(item.profile_ref || item.profile_id || "").trim();
@@ -174,27 +166,14 @@
     const content = root.querySelector(".research-report-scope-content");
     content.replaceChildren(FTUI.loading(context.t("正在读取研究报告…")));
     try {
-      if (scope === "mine") {
-        await window.FTStaticLoader?.loadGroups?.(["research-local"]);
-        if (!current(context)) return;
-      }
-      const [rows, release] = await Promise.all([
-        fetchRows(context, scope),
-        scope === "mine" ? loadClientRelease(context) : Promise.resolve(null),
-      ]);
+      const rows = await fetchRows(context, scope);
       if (!current(context)) return;
-      const children = [];
-      if (scope === "mine") {
-        const download = FTResearchLocal.clientDownload?.(context, release);
-        if (download) children.push(download);
-      }
-      children.push(rows.length
+      content.replaceChildren(rows.length
         ? table(context, rows, state, scope, root)
         : FTUI.empty(
           context.t(scope === "shared" ? "暂无共享研究报告" : "暂无研究报告"),
           context.t("研究报告会按来源显示在这里"),
         ));
-      content.replaceChildren(...children);
     } catch (error) {
       if (current(context)) content.replaceChildren(
         FTUI.empty(context.t("无法读取"), error.message || String(error)),

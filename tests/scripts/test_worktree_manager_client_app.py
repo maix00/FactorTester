@@ -3473,8 +3473,8 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert "我的研究报告" in reports
     assert "下级用户的研究报告" in reports
     assert "共享研究报告" in reports
-    assert "clientDownload" in reports
-    assert "loadClientRelease" in reports
+    assert "clientDownload" not in reports
+    assert "loadClientRelease" not in reports
     assert 'search.type = "search"' in agent_models
     assert 'search.addEventListener("input"' in agent_models
     assert "requestAnimationFrame" in agent_models
@@ -3483,7 +3483,11 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert "/duplicate`" in agent_models
     assert "window.FTAgentModelEditor" in agent_model_editor
     assert 'model.addEventListener("focus"' in agent_model_editor
-    assert "clientDownload?.(context, release)" in reports
+    assert "clientDownload?.(context, release)" not in reports
+    assert "clientDownloadButton" in local_page
+    assert "loadClientRelease" in local_page
+    assert 'loadGroups?.(["research-local"])' in shell
+    assert 'homeNetworkRow(\n        "FactorTester 客户端"' in shell
     assert 'line.className = "research-report-info-line"' in reports
     assert 'metadata.className = "research-report-info-metadata"' in reports
     assert 'item.className = "secondary"' not in reports
