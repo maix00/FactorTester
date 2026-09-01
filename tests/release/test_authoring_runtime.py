@@ -35,7 +35,7 @@ def _stale_workspace(root: Path) -> Path:
         "from __future__ import annotations\n"
         "from typing import Any\n"
         "from enum import Enum\n\n"
-        "ReturnFreqParam: Parameter = ...\n"
+        "RemovedLegacyParam: Parameter = ...\n"
     )
     (root / "pyrightconfig.json").write_text(json.dumps({
         "include": ["custom_factors", "tools"],

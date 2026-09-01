@@ -58,14 +58,17 @@
     const viewportHeight = Number(window.innerHeight) || 768;
     const width = Math.min(360, Math.max(220, viewportWidth - 16));
     popup.style.maxWidth = `${width}px`;
-    const measured = popup.getBoundingClientRect?.() || {height: 0};
+    const measured = popup.getBoundingClientRect?.() || {width, height: 0};
     const gap = 8;
+    const measuredWidth = Math.min(width, Number(measured.width) || width);
     const left = Math.max(8, Math.min(
-      rect.left, viewportWidth - width - 8,
+      rect.left + rect.width / 2 - measuredWidth / 2,
+      viewportWidth - measuredWidth - 8,
     ));
+    const above = rect.top - measured.height - gap;
     const below = rect.bottom + gap;
-    const top = below + measured.height <= viewportHeight - 8
-      ? below : Math.max(8, rect.top - measured.height - gap);
+    const top = above >= 8
+      ? above : Math.min(below, viewportHeight - measured.height - 8);
     popup.style.left = `${left}px`;
     popup.style.top = `${top}px`;
   }
