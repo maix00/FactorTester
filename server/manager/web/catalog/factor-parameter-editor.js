@@ -5,35 +5,46 @@
     const values = {...initial};
     const root = document.createElement("section");
     root.className = "factor-detail-parameter-editor";
+    const header = document.createElement("div");
+    header.className = "factor-detail-parameter-header";
+    ["Key", "参数类型", "默认值", "Value"].forEach(label => {
+      const cell = document.createElement("b");
+      cell.textContent = context.t(label);
+      header.append(cell);
+    });
+    root.append(header);
     for (const parameter of parameters) {
       const alias = String(parameter?.alias || parameter?.name || "").trim();
       if (!alias) continue;
-      const row = document.createElement("label");
-      row.className = "test-object-field";
-      const title = document.createElement("b");
-      title.textContent = alias;
+      const row = document.createElement("div");
+      row.className = "factor-detail-parameter-row";
+      const key = document.createElement("b");
+      key.className = "factor-detail-parameter-key";
+      key.textContent = alias;
+      const type = parameterType(context, parameter);
+      const defaultValue = document.createElement("code");
+      defaultValue.className = "factor-detail-parameter-default";
+      defaultValue.textContent = displayValue(parameter.default_value);
+      const value = document.createElement("div");
+      value.className = "factor-detail-parameter-value";
       const initialValue = values[alias] ?? parameter.default_value ?? "";
       values[alias] = initialValue;
       if (parameter.type === "FactorParam") {
-        renderReference(context, row, title, parameter, initialValue, values, options);
+        renderReference(context, value, parameter, initialValue, values, options);
       } else {
         const input = document.createElement("input");
         input.type = "text";
         input.value = initialValue;
         input.addEventListener("input", () => { values[alias] = input.value; });
-        row.append(title, input);
+        value.append(input);
       }
-      if (parameter.desc || parameter.value_space_desc) {
-        const help = document.createElement("small");
-        help.textContent = parameter.desc || parameter.value_space_desc;
-        row.append(help);
-      }
+      row.append(key, type, defaultValue, value);
       root.append(row);
     }
     return {root, values};
   }
 
-  function renderReference(context, row, title, parameter, initialValue, values, options) {
+  function renderReference(context, row, parameter, initialValue, values, options) {
     const alias = String(parameter.alias || parameter.name).trim();
     const columns = [...(parameter.options || [])];
     const factors = [...(options.factorItems || [])];
@@ -67,7 +78,7 @@
     const initialText = display(initialValue);
     input.value = columns.some(item => item.value === initialValue)
       || numericConstant(initialText) !== null ? initialText : "";
-    input.placeholder = context.t("手工输入数值、ColumnRef 或因子 alias");
+    input.placeholder = context.t("填写");
     input.addEventListener("input", () => {
       const raw = input.value.trim().toUpperCase();
       const matched = columns.find(item => String(item.value || "").toUpperCase() === raw);
@@ -94,10 +105,34 @@
         input.reportValidity();
       }
     });
-    control.append(group(context.t("数值 / DataColumn / ColumnRef / 因子 alias"),
-      columnPicker.element || columnPicker, input),
-    group(context.t("因子库因子"), factorPicker.element || factorPicker));
-    row.append(title, control);
+    control.append(group(context.t("填写"), input),
+      group(context.t("Column"), columnPicker.element || columnPicker),
+      group(context.t("因子库"), factorPicker.element || factorPicker));
+    row.append(control);
+  }
+
+  function parameterType(context, parameter) {
+    const root = document.createElement("span");
+    root.className = "factor-detail-parameter-type";
+    const name = document.createElement("span");
+    name.textContent = String(parameter.type || parameter.param_type || "Parameter");
+    root.append(name);
+    const description = String(parameter.desc || parameter.value_space_desc || "").trim();
+    const fallback = parameter.type === "FactorParam"
+      ? context.t("可填写能解析为 FactorExpr 的值，也可从 Column 或因子库选择。") : "";
+    const help = description || fallback;
+    if (help) root.append((window.FTUI?.helpIcon || window.FTHelp?.create)(help, {
+      ariaLabel: context.t("查看参数类型说明"),
+    }));
+    return root;
+  }
+
+  function displayValue(value) {
+    if (value === undefined || value === null || value === "") return "—";
+    if (typeof value === "object") {
+      return String(value.alias || value.factor_alias || value.value || JSON.stringify(value));
+    }
+    return String(value);
   }
 
   function numericConstant(value) {
