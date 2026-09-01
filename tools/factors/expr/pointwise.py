@@ -11,6 +11,8 @@ from typing import Any, Sequence
 import numpy as np
 import pandas as pd
 
+from tools.data.types import DataFreq, finest_index
+
 
 POINTWISE_OPS = frozenset({
     "add", "sub", "mul", "div",
@@ -19,6 +21,70 @@ POINTWISE_OPS = frozenset({
     "gt", "lt", "ge", "le", "eq", "ne",
     "and", "or", "not",
 })
+
+
+def _has_signal_index(value: Any) -> bool:
+    return isinstance(value, pd.DataFrame) and any(
+        str(name).startswith("_SIGNAL@") for name in value.index.names
+    )
+
+
+def _signal_frequency(index: pd.Index) -> DataFreq | None:
+    for name in reversed(index.names):
+        text = str(name)
+        if text.startswith("_SIGNAL@"):
+            return DataFreq(text.split("@", 1)[1])
+    return None
+
+
+def _event_times(index: pd.Index) -> np.ndarray:
+    values = finest_index(index) if isinstance(index, pd.MultiIndex) else index
+    return pd.DatetimeIndex(values).asi8
+
+
+def carry_formed_signal(signal: pd.DataFrame, target: pd.DataFrame) -> pd.DataFrame:
+    """Carry each formed signal to later target rows without looking ahead."""
+    source_times = _event_times(signal.index)
+    target_times = _event_times(target.index)
+    if source_times.size == 0:
+        return pd.DataFrame(np.nan, index=target.index, columns=target.columns)
+    if source_times.size > 1 and np.any(source_times[1:] < source_times[:-1]):
+        order = np.argsort(source_times, kind="stable")
+        source_times = source_times[order]
+        signal = signal.iloc[order]
+
+    positions = np.searchsorted(source_times, target_times, side="right") - 1
+    formed = positions >= 0
+    safe_positions = np.maximum(positions, 0)
+    carried = signal.reindex(columns=target.columns).iloc[safe_positions].copy()
+    carried.index = target.index
+    if not formed.all():
+        carried.iloc[~formed, :] = np.nan
+    return carried
+
+
+def _align_nested_signal_frames(left: Any, right: Any) -> tuple[Any, Any]:
+    if not isinstance(left, pd.DataFrame) or not isinstance(right, pd.DataFrame):
+        return left, right
+    left_signal = _has_signal_index(left)
+    right_signal = _has_signal_index(right)
+    if left_signal and not right_signal:
+        return carry_formed_signal(left, right), right
+    if right_signal and not left_signal:
+        return left, carry_formed_signal(right, left)
+    if left_signal and right_signal and not left.index.equals(right.index):
+        # Carry the coarser signal onto the finer signal timeline.  Frequency,
+        # unlike row count, remains correct when either side has data gaps.
+        left_freq = _signal_frequency(left.index)
+        right_freq = _signal_frequency(right.index)
+        if (
+            left_freq is not None
+            and right_freq is not None
+            and left_freq.value >= right_freq.value
+        ):
+            return carry_formed_signal(left, right), right
+        return left, carry_formed_signal(right, left)
+    return left, right
 
 
 def broadcast_series_to_frame(frame: pd.DataFrame, series: pd.Series) -> np.ndarray:
@@ -38,6 +104,7 @@ def align_series(left: pd.Series, right: pd.Series) -> tuple[pd.Series, pd.Serie
 
 def apply_binary(left: Any, right: Any, op: str) -> Any:
     """Apply a binary operation with FactorExpr's time-axis broadcasting."""
+    left, right = _align_nested_signal_frames(left, right)
     if isinstance(left, pd.DataFrame) and isinstance(right, pd.Series):
         if op in {"and", "or"}:
             right_frame = pd.DataFrame(

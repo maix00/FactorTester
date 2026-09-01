@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from tests._repo import repo_root
-from tools.parameters import TypeParam
+from tools.parameters import FactorParam, TypeParam
 
 
 def _load_factor_param_utils_module():
@@ -19,8 +19,8 @@ def _load_factor_param_utils_module():
 
 
 class _FactorFamilyStub:
-    def __init__(self):
-        self.params = [
+    def __init__(self, params=None):
+        self.params = params or [
             TypeParam("TransportAlpha", default_value=0.2, typ=(int, float)),
             TypeParam("TransportLag", default_value=0, typ=int),
         ]
@@ -56,3 +56,17 @@ def test_invalid_numeric_type_param_text_remains_rejected():
 
     with pytest.raises(ValueError, match="TransportAlpha"):
         param_utils.normalize_factor_param_row(family, {"TransportAlpha": "not-a-number"})
+
+
+def test_numeric_factor_param_is_coerced_and_wrapped_from_text_control():
+    param_utils = _load_factor_param_utils_module()
+    family = _FactorFamilyStub([
+        FactorParam("TransportThreshold", default_value=0.001),
+    ])
+
+    row = param_utils.normalize_factor_param_row(
+        family,
+        {"TransportThreshold": "0.025"},
+    )
+
+    assert row["TransportThreshold"].value == pytest.approx(0.025)

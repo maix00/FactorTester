@@ -8,9 +8,9 @@ values up at SIGNAL events.
 
 from __future__ import annotations
 
+import inspect
 from collections import defaultdict
 from dataclasses import dataclass, field
-import inspect
 from math import ceil
 from numbers import Integral
 from typing import Any, ClassVar, cast
@@ -20,11 +20,17 @@ import pandas as pd
 from tools.data.types import DataIndex, DataTime
 from tools.data.types.time_freq import DataFreq
 from tools.factors.expr.signal_align import signal_align
+from tools.testers.backtest.engines.factors.incremental import NormalizedBarFields
 from tools.testers.backtest.engines.native.events import EventDraft, EventKind
-from tools.testers.backtest.engines.native.fields import ExecutableModule, FieldDefinition, FieldRef
+from tools.testers.backtest.engines.native.fields import (
+    ExecutableModule,
+    FieldDefinition,
+    FieldRef,
+)
 from tools.testers.backtest.engines.native.flow import Flow, Phase
-from tools.testers.backtest.modules.factor import FactorModule, factor_runtime_key
 from tools.testers.backtest.modules.causal_bar import CausalBar, visible_causal_bars
+from tools.testers.backtest.modules.factor import FactorModule, factor_runtime_key
+from tools.testers.backtest.modules.live_price_buffer import LivePriceTableBuffer
 from tools.testers.backtest.modules.market_data import (
     MarketDataModule,
     current_prices_table_for,
@@ -33,17 +39,25 @@ from tools.testers.backtest.modules.market_data import (
 from tools.testers.backtest.modules.product_selection import ProductSelectionModule
 from tools.testers.backtest.modules.run_window import (
     RunWindowModule,
-    _expr_operands as _run_window_expr_operands,
-    _expr_window_to_timedelta as _run_window_expr_window_to_timedelta,
-    _infer_expr_warmup_window as _run_window_infer_expr_warmup_window,
-    _max_timedelta as _run_window_max_timedelta,
     auto_warmup_window,
     parse_warmup_window,
     run_window_envelope_for_strategies,
     run_window_key_for_config,
     strategy_run_window_datetimes,
-    warmup_window_for_strategy,
     warmup_window_for_strategies,
+    warmup_window_for_strategy,
+)
+from tools.testers.backtest.modules.run_window import (
+    _expr_operands as _run_window_expr_operands,
+)
+from tools.testers.backtest.modules.run_window import (
+    _expr_window_to_timedelta as _run_window_expr_window_to_timedelta,
+)
+from tools.testers.backtest.modules.run_window import (
+    _infer_expr_warmup_window as _run_window_infer_expr_warmup_window,
+)
+from tools.testers.backtest.modules.run_window import (
+    _max_timedelta as _run_window_max_timedelta,
 )
 from tools.testers.backtest.modules.time_index_lookup import (
     IndexEventTime,
@@ -51,8 +65,6 @@ from tools.testers.backtest.modules.time_index_lookup import (
     row_at_index_key,
     signal_event_times,
 )
-from tools.testers.backtest.engines.factors.incremental import NormalizedBarFields
-from tools.testers.backtest.modules.live_price_buffer import LivePriceTableBuffer
 
 
 @dataclass
@@ -366,7 +378,9 @@ def _schedule_signal_live_timestamps(state, ctx) -> None:
     Strategies sharing identical signal_align parameters are grouped so
     signal_align() runs once per unique parameter combination, not once per
     strategy."""
-    from tools.testers.backtest.modules.factor_role_signal import reject_incremental_factor_roles
+    from tools.testers.backtest.modules.factor_role_signal import (
+        reject_incremental_factor_roles,
+    )
 
     reject_incremental_factor_roles(state)
     data = current_prices_table_for(state)
@@ -448,7 +462,9 @@ def _schedule_signal_precomputed_timestamps(state, ctx) -> None:
             )
             _append_signal_drafts(drafts, signal_event_times(tables[schedule_key]), scheduled_strategies)
     ctx.set(FactorSignalModule.signal_value, drafts)
-    from tools.testers.backtest.modules.factor_role_signal import schedule_precomputed_factor_roles
+    from tools.testers.backtest.modules.factor_role_signal import (
+        schedule_precomputed_factor_roles,
+    )
 
     schedule_precomputed_factor_roles(state, ctx)
 
@@ -1039,7 +1055,9 @@ def _evaluate_signal_precomputed(state, ctx) -> None:
             )
             values_by_table_event[cache_key] = values
         ctx.set_for(FactorSignalModule.signal_value, strategy, values)
-    from tools.testers.backtest.modules.factor_role_signal import publish_precomputed_factor_roles
+    from tools.testers.backtest.modules.factor_role_signal import (
+        publish_precomputed_factor_roles,
+    )
 
     publish_precomputed_factor_roles(state, ctx, _precomputed_signal_values_for_event)
 
@@ -1204,6 +1222,7 @@ def _observe_signal_live_bar(state, ctx) -> None:
                 fields_by_product,
                 term_curves_by_product,
                 accepts_term_curves=accepts_term_curves,
+                trading_day=_live_bar_trading_day(ctx, by_factor[factor_key], bar_end),
             )
             current_value = getattr(executor, "on_signal", None)
             if callable(current_value):
@@ -1423,14 +1442,44 @@ def _call_live_executor_on_bar(
     term_curves_by_product: dict[Any, Any],
     *,
     accepts_term_curves: bool | None = None,
+    trading_day: pd.Timestamp | None = None,
 ) -> None:
     on_bar = executor.on_bar
     if accepts_term_curves is None:
         accepts_term_curves = _executor_accepts_term_curves(executor)
+    accepts_trading_day = "trading_day" in inspect.signature(on_bar).parameters
+    kwargs = {"trading_day": trading_day} if accepts_trading_day else {}
     if accepts_term_curves:
-        on_bar(timestamp, fields_by_product, term_curves_by_product)
+        on_bar(timestamp, fields_by_product, term_curves_by_product, **kwargs)
     else:
-        on_bar(timestamp, fields_by_product)
+        on_bar(timestamp, fields_by_product, **kwargs)
+
+
+def _live_bar_trading_day(ctx: Any, strategies: Any, timestamp: pd.Timestamp) -> pd.Timestamp | None:
+    for strategy in strategies or ():
+        try:
+            draft = ctx.draft_for(strategy)
+        except LookupError:
+            continue
+        names = tuple(str(name).lower() for name in (draft.index_names or ()))
+        key = draft.index_key
+        values = key if isinstance(key, tuple) else (key,)
+        for position, name in enumerate(names):
+            if (
+                (name == "trading_day" or name.startswith("day"))
+                and position < len(values)
+                and values[position] is not None
+            ):
+                return pd.Timestamp(values[position]).normalize()
+    resolver = ctx.get(MarketDataModule.trading_day_resolver, None)
+    resolve = getattr(resolver, "resolve_trading_day", None)
+    if callable(resolve):
+        try:
+            value = resolve(timestamp)
+            return pd.Timestamp(value).normalize() if value is not None else None
+        except (KeyError, TypeError, ValueError):
+            return None
+    return None
 
 
 def _executor_accepts_term_curves(executor: Any) -> bool:

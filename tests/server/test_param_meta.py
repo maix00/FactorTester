@@ -30,6 +30,12 @@ def test_factor_param_declares_visible_factor_reference_editor():
     assert any(option["value"] == "C" for option in value["options"])
 
 
+def test_factor_param_numeric_constant_keeps_plain_default_value():
+    value = serialize_param_meta(FactorParam("NumericP", default_value=0.001))
+
+    assert value["default_value"] == "0.001"
+
+
 def test_scalar_parameter_keeps_scalar_editor_contract():
     value = serialize_param_meta(WindowParam("N", default_value="20d"))
 
@@ -42,6 +48,12 @@ def test_factor_param_storage_uses_only_the_nested_v2_ref():
     nested = _frozen("Nested|N:20d")
 
     assert factor_param_value_storage(parameter, nested) == nested["ref"]
+
+
+def test_factor_param_storage_preserves_numeric_constant_type():
+    parameter = FactorParam("NumericStorageP", default_value=0.001)
+
+    assert factor_param_value_storage(parameter, parameter.default_value) == 0.001
 
 
 def test_factor_param_dependencies_are_flattened_and_deduplicated():

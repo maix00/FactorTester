@@ -762,6 +762,26 @@ class FactorExpr:
         return _lazy()['RollingOp']('rolling_argmin', _lazy()['_to_expr'](window), self)
 
     @factor_workspace
+    def bar_distance(
+        self,
+        condition: Any,
+        *,
+        scope: Any,
+        select: str = "nearest",
+        default: Any = np.nan,
+    ) -> 'FactorExpr':
+        """Distance to a matching historical value; nearest is the default."""
+        from .bar_search import bar_distance
+
+        return bar_distance(
+            self,
+            condition,
+            scope=scope,
+            select=select,
+            default=default,
+        )
+
+    @factor_workspace
     def shift(self, periods: Union[int, str, pd.Timedelta, 'Parameter', 'FactorExpr'] = 1) -> 'ShiftOp':
         """前 N 期值：x.shift(1) 即昨天值。"""
         return _lazy()['ShiftOp']('shift', periods, self)

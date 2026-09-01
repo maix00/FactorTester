@@ -28,6 +28,54 @@ def resolve_factor_param_value(value: Any) -> Any:
     return resolver(value)
 
 
+def coerce_factor_param_expr(value: Any) -> Any:
+    """Normalize a FactorParam value to a FactorExpr when possible.
+
+    Serialized string/dict references remain deferred during declaration and
+    are resolved through the active adapter at runtime.  Existing FactorExpr
+    semantics, including SignalAlign, are preserved for nested factors.
+    """
+    from tools.data.types import DataColumn
+    from tools.factors.FactorExpr import (
+        ColumnRef,
+        ConstExpr,
+        FactorExpr,
+        ParamRef,
+    )
+    from tools.parameters.DataColumnParam import DataColumnParam
+
+    if value is None:
+        return None
+    if isinstance(value, (str, dict)):
+        try:
+            return ColumnRef(DataColumn(value))
+        except Exception:
+            return value
+    if isinstance(value, DataColumnParam):
+        return ParamRef(value)
+
+    # Import lazily to avoid the Factor -> FactorExpr module cycle.
+    from tools.factors import Factor
+    if isinstance(value, Factor):
+        return value._expr
+    if isinstance(value, FactorExpr):
+        return value
+
+    try:
+        return ColumnRef(DataColumn(value))
+    except Exception:
+        return ConstExpr(value)
+
+
+def resolve_factor_param_expr(value: Any) -> tuple[Any, Any | None]:
+    """Resolve a transport reference and return its expression plus source Factor."""
+    if isinstance(value, (str, dict)):
+        value = resolve_factor_param_value(value)
+    from tools.factors import Factor
+    source_factor = value if isinstance(value, Factor) else None
+    return coerce_factor_param_expr(value), source_factor
+
+
 @contextmanager
 def factor_param_resolver_scope(resolver: Callable[[Any], Any]):
     """Bind a task-local resolver without mutating another request or worker."""

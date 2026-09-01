@@ -423,7 +423,14 @@ class FactorFamily(UniqueNameObject, FactorExpr):
         except (TypeError, ValueError, json.JSONDecodeError):
             decoded = raw_value
         if decoded != raw_value:
-            candidates.append(decoded)
+            from tools.factors.FactorExpr import ConstExpr
+            if (
+                isinstance(param, FactorParam)
+                and isinstance(getattr(param, 'default_value', None), ConstExpr)
+            ):
+                candidates.insert(0, decoded)
+            else:
+                candidates.append(decoded)
         candidates.extend(getattr(param, "_fin_values", ()))
 
         for candidate in candidates:

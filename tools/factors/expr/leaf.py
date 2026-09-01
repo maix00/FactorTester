@@ -263,8 +263,7 @@ class ParamRef(FactorExpr):
     def resolve(self, param_values: dict | None = None, *args, **kwargs) -> FactorExpr:
         """从宿主对象的注册表中取出当前参数值。若提供 param_values 则优先从中查找。"""
         from tools.parameters import DataColumnParam, FactorParam
-        from tools.factors import Factor
-        factor: Optional['Factor'] = None
+        factor = None
 
         if param_values is not None and self.param.alias in param_values:
             value = param_values[self.param.alias]
@@ -273,21 +272,12 @@ class ParamRef(FactorExpr):
         if isinstance(self.param, DataColumnParam):
             resolved: FactorExpr = ColumnRef(DataColumn(value))
         elif isinstance(self.param, FactorParam):
-            value = self.param._value_space.rectify(value)
+            from tools.factors.factor_param_resolution import resolve_factor_param_expr
+            value, factor = resolve_factor_param_expr(value)
             if value is None:
                 resolved = ConstExpr(None)
             else:
-                if isinstance(value, (str, dict)):
-                    try:
-                        from tools.factors.factor_param_resolution import resolve_factor_param_value
-                        value = resolve_factor_param_value(value)
-                    except Exception as exc:
-                        raise TypeError(f"参数 {self.param.alias} 无法解析为因子: {value}") from exc
-                if isinstance(value, Factor):
-                    resolved = value._func_expr
-                    factor = value
-                else:
-                    resolved = value
+                resolved = value
                 if not isinstance(resolved, FactorExpr):
                     raise TypeError(f"参数 {self.param.alias} 需要 FactorExpr，收到 {type(value).__name__}")
                 resolved = resolved.resolve(param_values=param_values, *args, **kwargs)

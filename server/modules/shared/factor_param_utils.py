@@ -6,8 +6,6 @@ session, while the factor library stores one user-scoped config per family.
 
 from __future__ import annotations
 
-import re
-
 from tools.cli.release.research_reporting.references.factor_formula import (
     build_factor_reference,
 )
@@ -16,20 +14,29 @@ from tools.factors.formula_identity import require_frozen_factor
 from tools.parameters import FactorParam, TypeParam
 
 
-def _clean_factor_alias(value: str) -> str:
-    """Remove |$F:xxx suffix from a nested factor alias string.
-
-    FactorParam values may carry $F fragments from upstream serialisation
-    (e.g. 'PrOHLCMean|C:CA|H:HA|L:LA|O:OA|$F:1m').  Stripping them ensures
-    dict equality and dedup work correctly across /add_factor_by_params.
-    """
-    return re.sub(r'\|?\$F:[^|]+', '', value)
-
-
 def _coerce_transport_value(param, value):
     """Convert text controls for numeric TypeParam values before validation."""
     if not isinstance(param, TypeParam) or not isinstance(value, str):
         return value
+
+    if isinstance(param, FactorParam):
+        from tools.factors.FactorExpr import ConstExpr
+        default = getattr(param, 'default_value', None)
+        if isinstance(default, ConstExpr):
+            try:
+                if isinstance(default.value, bool):
+                    normalized = value.strip().lower()
+                    if normalized in {'true', '1'}:
+                        return True
+                    if normalized in {'false', '0'}:
+                        return False
+                    return value
+                if isinstance(default.value, int):
+                    return int(value.strip())
+                if isinstance(default.value, float):
+                    return float(value.strip())
+            except ValueError:
+                return value
 
     typ = getattr(param, '_typ', None)
     if typ is None:
@@ -65,9 +72,6 @@ def normalize_factor_param_rows(factor_family, params_list: list) -> list:
                 v = p._value_space.rectify(normalized[p.alias])
             else:
                 v = p.default_value
-            # Clean $F suffix from FactorParam string values (see _clean_factor_alias)
-            if isinstance(v, str) and '|$F:' in v:
-                v = _clean_factor_alias(v)
             row[p.alias] = v
         normalized_rows.append(row)
     return normalized_rows
@@ -90,6 +94,10 @@ def factor_param_value_storage(param, value):
     """Store FactorParam dependencies by opaque v2 ref, never nested inline."""
     if isinstance(param, FactorParam) and isinstance(value, dict):
         return require_frozen_factor(value)['ref']
+    if isinstance(param, FactorParam):
+        from tools.factors.FactorExpr import ConstExpr
+        if isinstance(value, ConstExpr):
+            return value.value
     return factor_param_value_display(param, value)
 
 

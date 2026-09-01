@@ -4,7 +4,7 @@ import pytest
 
 from tools.data.types import DataColumn
 from tools.factors import FactorFamily
-from tools.factors.FactorExpr import ColumnRef
+from tools.factors.FactorExpr import ColumnRef, ConstExpr
 from tools.parameters import DataColumnParam, FactorParam, WindowParam
 
 
@@ -29,6 +29,13 @@ class _ColumnAliasFamily(FactorFamily):
         return column + 1
 
 
+class _ConstantFactorParamFamily(FactorFamily):
+    @staticmethod
+    def factor_expr():
+        threshold = FactorParam("Threshold", default_value=0.001)
+        return ColumnRef(DataColumn.CLOSE) > threshold
+
+
 def test_factor_family_parses_alias_and_creates_one_off_factor() -> None:
     family = _AliasFamily()
     alias = f"{family.alias}|AliasWindow:2m|$F:1m|$Rev"
@@ -47,6 +54,17 @@ def test_factor_family_parser_preserves_nested_factor_alias_pipes() -> None:
     alias = f"{family.alias}|NestedFactor:[Child|N:2m|$Rev]|$F:1d"
 
     assert family.parse_alias(alias)["NestedFactor"] == "Child|N:2m|$Rev"
+
+
+def test_factor_family_numeric_factor_param_alias_round_trips() -> None:
+    family = _ConstantFactorParamFamily()
+    alias = family.get_alias(Threshold=0.025)
+
+    parsed = family.parse_alias(alias)
+
+    assert alias.endswith("|Threshold:[0.025]")
+    assert isinstance(parsed["Threshold"], ConstExpr)
+    assert parsed["Threshold"].value == 0.025
 
 
 def test_factor_family_parser_accepts_frozen_legacy_column_brackets() -> None:

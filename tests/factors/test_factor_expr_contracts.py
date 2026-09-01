@@ -13,6 +13,7 @@ from tools.factors.FactorExpr import (
     FactorExpr,
     ParamRef,
     RollingOp,
+    SignalAlign,
     ShiftOp,
     CrossSectionalOp,
     WhereOp,
@@ -194,6 +195,38 @@ def test_factor_param_raw_expression_nests_through_tanh_and_where():
     assert resolved._structural_key() == expected._structural_key()
     assert not resolved.param_deps
     assert resolved.supports_incremental()
+
+
+def test_factor_param_wraps_numeric_constants_as_factor_expressions():
+    threshold = FactorParam("NumericFactorConstant", default_value=0.001)
+
+    assert isinstance(threshold.default_value, ConstExpr)
+    assert threshold.default_value.value == 0.001
+
+    resolved = ParamRef(threshold).resolve()
+    assert isinstance(resolved, ConstExpr)
+    assert resolved.value == 0.001
+
+    replacement = threshold._value_space.rectify(2)
+    assert isinstance(replacement, ConstExpr)
+    assert replacement.value == 2
+
+
+def test_factor_param_preserves_explicit_signal_alignment():
+    aligned = SignalAlign(ColumnRef(DataColumn.CLOSE), "5m")
+    nested = FactorParam("AlignedNestedExpression", default_value=aligned)
+
+    assert nested.default_value is aligned
+    assert ParamRef(nested).resolve()._structural_key() == aligned._structural_key()
+
+
+def test_factor_param_alias_preserves_nested_signal_frequency():
+    nested = FactorParam(
+        "NestedFrequencyAlias",
+        default_value="Child|N:2m|$F:5m|$Rev",
+    )
+
+    assert nested.get_value_alias(nested.default_value) == "Child|N:2m|$F:5m|$Rev"
 
 
 def test_authoring_catalog_describes_tanh_without_owning_its_kernel():

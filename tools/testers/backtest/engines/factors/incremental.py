@@ -12,6 +12,8 @@ import pandas as pd
 
 from tools.data.types import DataFreq
 from tools.factors.expr import (
+    BarDistanceOp,
+    BarSinceOp,
     CategoryBoolRef,
     ColumnRef,
     CompositeExpr,
@@ -20,20 +22,26 @@ from tools.factors.expr import (
     FactorExpr,
     RollingOp,
     ShiftOp,
+    SignalAlign,
     TermStructureOp,
     WhereOp,
 )
-from tools.factors.expr.term_structure_math import evaluate_term_curve, normalize_term_curve
-from tools.factors.expr.pointwise import POINTWISE_OPS, apply_pointwise
 from tools.factors.expr.conditional import apply_where
+from tools.factors.expr.pointwise import POINTWISE_OPS, apply_pointwise
+from tools.factors.expr.term_structure_math import (
+    evaluate_term_curve,
+    normalize_term_curve,
+)
 from tools.factors.lookback import LookbackContract, infer_lookback_contract
-from .group_cross_sectional import GroupCrossSectionalNode
-from .cross_sectional_residual import ResidualizeNode
-from .cross_sectional_kernels import ordinal_rank, rank_percent, zscore
-from .rolling_statistics import ROLLING_STATISTICS, RollingStatisticsNode
 from tools.products.AdjustableTermStructure import (
     TERM_RANK_COL,
 )
+
+from .bar_search import BarDistanceNode, BarSinceNode, compile_match_predicate
+from .cross_sectional_kernels import ordinal_rank, rank_percent, zscore
+from .cross_sectional_residual import ResidualizeNode
+from .group_cross_sectional import GroupCrossSectionalNode
+from .rolling_statistics import ROLLING_STATISTICS, RollingStatisticsNode
 
 if TYPE_CHECKING:
     # MarketSlice lived in the now-deleted engines/native/runtime.py
@@ -58,7 +66,10 @@ class ConstantNode:
     width: int
 
     def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
-        return np.full(self.width, self.value, dtype=float)
+        key = id(self)
+        if key not in cache:
+            cache[key] = np.full(self.width, self.value, dtype=float)
+        return cache[key]
 
 
 @dataclass(slots=True)
@@ -67,11 +78,15 @@ class ColumnNode:
     products: tuple[Any, ...]
 
     def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
+        key = id(self)
+        if key in cache:
+            return cache[key]
         try:
-            return np.asarray([
+            cache[key] = np.asarray([
                 market.prices[product].fields[self.column_name]
                 for product in self.products
             ], dtype=float)
+            return cache[key]
         except KeyError as exc:
             raise KeyError(f"market slice is missing factor column {self.column_name!r}") from exc
 
@@ -83,10 +98,13 @@ class CategoryBoolNode:
     products: tuple[Any, ...]
 
     def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
-        return np.asarray([
-            self.category.is_in_category(self.category_name, product)
-            for product in self.products
-        ], dtype=bool)
+        key = id(self)
+        if key not in cache:
+            cache[key] = np.asarray([
+                self.category.is_in_category(self.category_name, product)
+                for product in self.products
+            ], dtype=bool)
+        return cache[key]
 
 
 @dataclass(slots=True)
@@ -102,6 +120,46 @@ class CompositeNode:
         with np.errstate(all="ignore"):
             result = _apply_composite(self.op, values)
         cache[key] = np.asarray(result, dtype=float)
+        return cache[key]
+
+
+class SignalHoldNode:
+    """Publish a child value on its signal cadence and hold it between bars."""
+
+    def __init__(
+        self,
+        child: StreamingNode,
+        *,
+        every_bars: int,
+        width: int,
+        reset_on_session_gap: bool,
+        session_gap: pd.Timedelta,
+    ) -> None:
+        self.child = child
+        self.every_bars = every_bars
+        self._count = 0
+        self._held = np.full(width, np.nan, dtype=float)
+        self._last_timestamp: pd.Timestamp | None = None
+        self._reset_on_session_gap = reset_on_session_gap
+        self._session_gap = session_gap
+
+    def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
+        key = id(self)
+        if key in cache:
+            return cache[key]
+        timestamp = pd.Timestamp(market.timestamp)
+        if (
+            self._reset_on_session_gap
+            and self._last_timestamp is not None
+            and timestamp - self._last_timestamp >= self._session_gap
+        ):
+            self._count = 0
+        value = np.asarray(self.child.update(market, cache), dtype=float)
+        self._count += 1
+        if self._count % self.every_bars == 0:
+            self._held = value.copy()
+        self._last_timestamp = timestamp
+        cache[key] = self._held.copy()
         return cache[key]
 
 
@@ -342,11 +400,17 @@ class ShiftNode:
         self._width = width
 
     def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
+        key = id(self)
+        if key in cache:
+            return cache[key]
         value = self.child.update(market, cache).copy()
         self._history.append(value)
         if len(self._history) <= self.periods:
-            return np.full(self._width, np.nan, dtype=float)
-        return self._history[0].copy()
+            result = np.full(self._width, np.nan, dtype=float)
+        else:
+            result = self._history[0].copy()
+        cache[key] = result
+        return result
 
 
 @dataclass(slots=True)
@@ -409,10 +473,13 @@ class TermStructureNode:
     column_name: str
 
     def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
-        return np.asarray([
-            self._value_for_curve(product, market.term_curves.get(product))
-            for product in self.products
-        ], dtype=float)
+        key = id(self)
+        if key not in cache:
+            cache[key] = np.asarray([
+                self._value_for_curve(product, market.term_curves.get(product))
+                for product in self.products
+            ], dtype=float)
+        return cache[key]
 
     def _value_for_curve(self, product: Any, curve: pd.DataFrame | None) -> float:
         if curve is None:
@@ -441,10 +508,14 @@ class WhereNode:
     false_value: StreamingNode
 
     def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
+        key = id(self)
+        if key in cache:
+            return cache[key]
         cond = self.cond.update(market, cache)
         true_value = self.true_value.update(market, cache)
         false_value = self.false_value.update(market, cache)
-        return np.asarray(apply_where(cond, true_value, false_value), dtype=float)
+        cache[key] = np.asarray(apply_where(cond, true_value, false_value), dtype=float)
+        return cache[key]
 
 
 class StreamingFactorPlan:
@@ -480,6 +551,8 @@ class NormalizedBarFields(dict[str, float]):
 
 @dataclass(frozen=True, slots=True)
 class _StreamingMarketSlice:
+    timestamp: pd.Timestamp
+    trading_day: pd.Timestamp | None
     prices: Mapping[Any, _StreamingBarPrice]
     term_curves: Mapping[Any, pd.DataFrame]
 
@@ -499,6 +572,7 @@ class IncrementalFactorExecutor:
         timestamp: pd.Timestamp,
         fields_by_product: Mapping[Any, Any],
         term_curves_by_product: Mapping[Any, Any] | None = None,
+        trading_day: pd.Timestamp | None = None,
     ) -> None:
         term_curves_by_product = term_curves_by_product or {}
         observed_products = set(fields_by_product) | set(term_curves_by_product)
@@ -506,6 +580,8 @@ class IncrementalFactorExecutor:
         if missing:
             raise ValueError(f"market slice is missing streaming products: {missing!r}")
         market = _StreamingMarketSlice(
+            pd.Timestamp(timestamp),
+            pd.Timestamp(trading_day).normalize() if trading_day is not None else None,
             {
                 product: _StreamingBarPrice(_normalize_bar_fields(fields_by_product.get(product, {})))
                 for product in self._plan.products
@@ -547,6 +623,55 @@ def compile_streaming_factor(
             node = ColumnNode(expr.column.name, products)
         elif isinstance(expr, CategoryBoolRef):
             node = CategoryBoolNode(expr.category, expr.category_name, products)
+        elif isinstance(expr, SignalAlign):
+            if source_freq is None:
+                raise UnsupportedStreamingFactor(
+                    "streaming SignalAlign requires an explicit source frequency"
+                )
+            source = DataFreq(source_freq)
+            target = DataFreq(expr.signal_freq)
+            if source.value <= pd.Timedelta(0) or target.value <= pd.Timedelta(0):
+                raise UnsupportedStreamingFactor(
+                    "streaming SignalAlign frequencies must be positive"
+                )
+            if target.is_day_multiple():
+                raise UnsupportedStreamingFactor(
+                    "streaming daily SignalAlign requires a session-calendar close event"
+                )
+            ratio = target.value.total_seconds() / source.value.total_seconds()
+            if ratio < 1 or not float(ratio).is_integer():
+                raise UnsupportedStreamingFactor(
+                    "streaming SignalAlign must be an integer multiple of source frequency"
+                )
+            if not isinstance(expr.basepoint, str) or expr.basepoint.lower() not in {"first", "last"}:
+                raise UnsupportedStreamingFactor(
+                    "streaming SignalAlign requires first/last basepoint"
+                )
+            node = SignalHoldNode(
+                compile_node(expr.operands[0]),
+                every_bars=int(ratio),
+                width=len(products),
+                reset_on_session_gap=bool(expr.end_session_skip),
+                session_gap=pd.Timedelta(expr.end_session_gap),
+            )
+        elif isinstance(expr, BarSinceOp):
+            node = BarSinceNode(
+                compile_node(expr.condition),
+                scope=expr.scope,
+                select=expr.select,
+                default=_streaming_scalar(expr.operands[1], "bar_since default"),
+                width=len(products),
+                include_current=expr.include_current,
+            )
+        elif isinstance(expr, BarDistanceOp):
+            node = BarDistanceNode(
+                compile_node(expr.value),
+                compile_match_predicate(expr.condition, compile_node),
+                scope=expr.scope,
+                select=expr.select,
+                default=_streaming_scalar(expr.operands[2], "bar_distance default"),
+                width=len(products),
+            )
         elif isinstance(expr, CompositeExpr):
             if expr.op not in _COMPOSITE_OPS:
                 raise UnsupportedStreamingFactor(f"unsupported composite op: {expr.op}")
@@ -694,6 +819,12 @@ def _normalize_bar_fields(fields: Any) -> dict[str, float]:
         "LOW": value,
         "CLOSE": value,
     }
+
+
+def _streaming_scalar(expr: FactorExpr, label: str) -> float:
+    if not isinstance(expr, ConstExpr) or not np.isscalar(expr.value):
+        raise UnsupportedStreamingFactor(f"streaming {label} must resolve to a scalar constant")
+    return float(expr.value)
 
 
 def _normalize_term_curve(curve: Any) -> pd.DataFrame:
