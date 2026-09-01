@@ -152,7 +152,9 @@
 .test-object-editor-overlay .test-object-editor-back, .test-object-editor-overlay .test-object-editor-close { width: 28px; height: 28px; min-width: 28px; padding: 0; border: 0; background: transparent; }
 .test-object-editor-tabs { display: flex; min-width: 0; gap: 3px; overflow-x: auto; padding: 0; }
 .test-object-editor-tabs[hidden] { display: none; }
-.test-object-editor-tab { flex: 0 0 auto; border: 0; border-radius: 6px; padding: 4px 7px; color: var(--muted); background: transparent; font-size: 11px; }
+.test-object-editor-tab { display: inline-flex; align-items: center; flex: 0 0 auto; border: 0; border-radius: 6px; color: var(--muted); background: transparent; font-size: 11px; }
+.test-object-editor-tab-label { border: 0; padding: 4px 4px 4px 7px; color: inherit; background: transparent; font: inherit; }
+.test-object-editor-tab-cancel { width: 20px; height: 20px; min-width: 20px; border: 0; padding: 0; color: inherit; background: transparent; }
 .test-object-editor-tab.active { color: var(--accent); background: var(--accent-soft); }
 .test-object-editor-overlay-mount, .test-object-editor-overlay-mount > .detail-stack { width: 100%; max-width: none; min-width: 0; margin-inline: 0; box-sizing: border-box; }
 .test-object-editor-frame, .test-object-editor-frame > .detail-stack { width: 100%; max-width: none; min-width: 0; margin-inline: 0; box-sizing: border-box; }
