@@ -4,16 +4,38 @@ from __future__ import annotations
 
 from typing import Any, Literal, cast
 
-import numpy as np
 import pandas as pd
 
 from .bar_search_eval import evaluate_bar_distance, evaluate_bar_since, scalar_default
 from .core import EvaluateContext, FactorExpr
 from .leaf import _to_expr
-from .lookback_scope import LookbackScope
+from .lookback_scope import BarCountScope, LookbackScope
 from .operands import OperandExpr
 
 Selection = Literal["nearest", "farthest"]
+
+
+class ScopeLengthDefault(FactorExpr):
+    """Marker meaning an unmatched search returns its current scope age."""
+
+    def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
+        raise RuntimeError("scope-length default is evaluated by its bar-search operator")
+
+    def _structural_key(self) -> tuple[str]:
+        return ("ScopeLengthDefault",)
+
+    @property
+    def op_name(self) -> str:
+        return "scope_length"
+
+    def _to_latex(self, subst: dict | None = None) -> str:
+        return r"\operatorname{ScopeLength}"
+
+    def _get_alias(self) -> str:
+        return "SCOPE_LENGTH"
+
+
+SCOPE_LENGTH = ScopeLengthDefault()
 
 
 def _validate_select(select: str) -> Selection:
@@ -29,7 +51,7 @@ class BarSinceOp(OperandExpr):
         *,
         scope: LookbackScope,
         select: str = "nearest",
-        default: Any = np.nan,
+        default: Any = SCOPE_LENGTH,
         include_current: bool = True,
     ) -> None:
         super().__init__("bar_since", condition, _to_expr(default))
@@ -40,6 +62,11 @@ class BarSinceOp(OperandExpr):
     @property
     def condition(self) -> FactorExpr:
         return self.operands[0]
+
+    @property
+    def _operands(self) -> tuple[FactorExpr, ...]:
+        scope_refs = (self.scope.count,) if isinstance(self.scope, BarCountScope) else ()
+        return (*self.operands, *scope_refs)
 
     def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
         condition = self.condition.evaluate(ctx=ctx)
@@ -71,7 +98,10 @@ class BarSinceOp(OperandExpr):
 
     def _to_latex(self, subst: dict | None = None) -> str:
         condition = self.condition._to_latex(subst)
-        return f"\\operatorname{{BarSince}}^{{{self.select}}}_{{{self.scope.kind}}}({condition})"
+        return (
+            f"\\operatorname{{BarSince}}^{{\\mathrm{{{self.select}}}}}"
+            f"_{{{self.scope.to_latex(subst)}}}\\left({condition}\\right)"
+        )
 
     def _get_alias(self) -> str:
         return f"BAR_SINCE_{self.select.upper()}_{self.condition._get_alias()}"
@@ -82,11 +112,14 @@ def bar_since(
     *,
     scope: LookbackScope,
     select: str = "nearest",
-    default: Any = np.nan,
+    default: Any = SCOPE_LENGTH,
     include_current: bool = True,
 ) -> BarSinceOp:
     if not isinstance(scope, LookbackScope):
-        raise TypeError("bar_since scope must be created by bars/session/trading_day")
+        raise TypeError(
+            "bar_since scope must be created by "
+            "scope_bars/scope_session/scope_trading_day"
+        )
     return BarSinceOp(
         _to_expr(condition),
         scope=scope,
@@ -104,7 +137,7 @@ class BarDistanceOp(OperandExpr):
         *,
         scope: LookbackScope,
         select: str = "nearest",
-        default: Any = np.nan,
+        default: Any = SCOPE_LENGTH,
     ) -> None:
         super().__init__("bar_distance", value, condition, _to_expr(default))
         self.scope = scope
@@ -117,6 +150,11 @@ class BarDistanceOp(OperandExpr):
     @property
     def condition(self) -> FactorExpr:
         return self.operands[1]
+
+    @property
+    def _operands(self) -> tuple[FactorExpr, ...]:
+        scope_refs = (self.scope.count,) if isinstance(self.scope, BarCountScope) else ()
+        return (*self.operands, *scope_refs)
 
     def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
         values = self.value.evaluate(ctx=ctx)
@@ -150,8 +188,9 @@ class BarDistanceOp(OperandExpr):
         value = self.value._to_latex(subst)
         condition = self.condition._to_latex(subst)
         return (
-            f"\\operatorname{{BarDistance}}^{{{self.select}}}_{{{self.scope.kind}}}"
-            f"({value};{condition})"
+            f"\\operatorname{{BarDistance}}^{{\\mathrm{{{self.select}}}}}"
+            f"_{{{self.scope.to_latex(subst)}}}"
+            f"\\left({value};{condition}\\right)"
         )
 
     def _get_alias(self) -> str:
@@ -164,10 +203,13 @@ def bar_distance(
     *,
     scope: LookbackScope,
     select: str = "nearest",
-    default: Any = np.nan,
+    default: Any = SCOPE_LENGTH,
 ) -> BarDistanceOp:
     if not isinstance(scope, LookbackScope):
-        raise TypeError("bar_distance scope must be created by bars/session/trading_day")
+        raise TypeError(
+            "bar_distance scope must be created by "
+            "scope_bars/scope_session/scope_trading_day"
+        )
     return BarDistanceOp(
         _to_expr(value),
         _to_expr(condition),

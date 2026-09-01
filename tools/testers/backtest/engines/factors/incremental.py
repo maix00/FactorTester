@@ -27,6 +27,7 @@ from tools.factors.expr import (
     WhereOp,
 )
 from tools.factors.expr.conditional import apply_where
+from tools.factors.expr.lookback_scope import BarCountScope
 from tools.factors.expr.pointwise import POINTWISE_OPS, apply_pointwise
 from tools.factors.expr.term_structure_math import (
     evaluate_term_curve,
@@ -655,21 +656,27 @@ def compile_streaming_factor(
                 session_gap=pd.Timedelta(expr.end_session_gap),
             )
         elif isinstance(expr, BarSinceOp):
+            scope = expr.scope
+            if isinstance(scope, BarCountScope):
+                scope = scope.resolve_for_streaming(source_freq, products)
             node = BarSinceNode(
                 compile_node(expr.condition),
-                scope=expr.scope,
+                scope=scope,
                 select=expr.select,
-                default=_streaming_scalar(expr.operands[1], "bar_since default"),
+                default=_streaming_bar_search_default(expr.operands[1], "bar_since default"),
                 width=len(products),
                 include_current=expr.include_current,
             )
         elif isinstance(expr, BarDistanceOp):
+            scope = expr.scope
+            if isinstance(scope, BarCountScope):
+                scope = scope.resolve_for_streaming(source_freq, products)
             node = BarDistanceNode(
                 compile_node(expr.value),
                 compile_match_predicate(expr.condition, compile_node),
-                scope=expr.scope,
+                scope=scope,
                 select=expr.select,
-                default=_streaming_scalar(expr.operands[2], "bar_distance default"),
+                default=_streaming_bar_search_default(expr.operands[2], "bar_distance default"),
                 width=len(products),
             )
         elif isinstance(expr, CompositeExpr):
@@ -825,6 +832,12 @@ def _streaming_scalar(expr: FactorExpr, label: str) -> float:
     if not isinstance(expr, ConstExpr) or not np.isscalar(expr.value):
         raise UnsupportedStreamingFactor(f"streaming {label} must resolve to a scalar constant")
     return float(expr.value)
+
+
+def _streaming_bar_search_default(expr: FactorExpr, label: str) -> float | None:
+    if type(expr).__name__ == "ScopeLengthDefault":
+        return None
+    return _streaming_scalar(expr, label)
 
 
 def _normalize_term_curve(curve: Any) -> pd.DataFrame:

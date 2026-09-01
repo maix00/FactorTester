@@ -69,7 +69,7 @@ class _ScopedState:
 
 
 class BarSinceNode(_ScopedState):
-    def __init__(self, child: Any, *, scope: LookbackScope, select: str, default: float, width: int, include_current: bool) -> None:
+    def __init__(self, child: Any, *, scope: LookbackScope, select: str, default: float | None, width: int, include_current: bool) -> None:
         super().__init__(scope)
         self.child = child
         self.select = select
@@ -89,15 +89,18 @@ class BarSinceNode(_ScopedState):
                 matches.clear()
         self._ordinal += 1
         condition = np.asarray(self.child.update(market, cache), dtype=float)
-        output = np.full(self.width, self.default, dtype=float)
+        fallback = (
+            min(self.scope.resolved_count(), self._ordinal)
+            if self.default is None and isinstance(self.scope, BarCountScope)
+            else self._ordinal if self.default is None else self.default
+        )
+        output = np.full(self.width, fallback, dtype=float)
         for column, matches in enumerate(self._matches):
             is_match = np.isfinite(condition[column]) and bool(condition[column])
             if self.include_current and is_match:
                 matches.append(self._ordinal)
             if isinstance(self.scope, BarCountScope):
-                minimum = self._ordinal - self.scope.resolved_count() + (
-                    1 if self.include_current else 0
-                )
+                minimum = self._ordinal - self.scope.resolved_count()
                 while matches and matches[0] < minimum:
                     matches.popleft()
             if matches:
@@ -117,7 +120,7 @@ class BarDistanceNode(_ScopedState):
         *,
         scope: LookbackScope,
         select: str,
-        default: float,
+        default: float | None,
         width: int,
     ) -> None:
         super().__init__(scope)
@@ -126,6 +129,7 @@ class BarDistanceNode(_ScopedState):
         self.select = select
         self.default = default
         self.width = width
+        self._scope_age = -1
         maxlen = scope.resolved_count() if isinstance(scope, BarCountScope) else None
         self._history: deque[np.ndarray] = deque(maxlen=maxlen)
 
@@ -135,8 +139,15 @@ class BarDistanceNode(_ScopedState):
             return cache[key]
         if self.should_reset(market):
             self._history.clear()
+            self._scope_age = -1
+        self._scope_age += 1
         current = np.asarray(self.child.update(market, cache), dtype=float)
-        output = np.full(self.width, self.default, dtype=float)
+        fallback = (
+            min(self.scope.resolved_count(), self._scope_age)
+            if self.default is None and isinstance(self.scope, BarCountScope)
+            else self._scope_age if self.default is None else self.default
+        )
+        output = np.full(self.width, fallback, dtype=float)
         matched = np.zeros(self.width, dtype=bool)
         candidates = reversed(self._history) if self.select == "nearest" else iter(self._history)
         history_length = len(self._history)
