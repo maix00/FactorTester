@@ -25,10 +25,7 @@
     search.type = "search";
     search.className = "input input-bordered";
     search.placeholder = context.t("搜索补充任务");
-    const refresh = document.createElement("button");
-    refresh.type = "button";
-    refresh.className = "secondary-button";
-    refresh.textContent = context.t("刷新");
+    const refresh = FTUI.refreshButton(context, () => load(page));
     toolbar.append(search, refresh);
     const host = document.createElement("div");
     root.append(toolbar, host);
@@ -101,7 +98,6 @@
       clearTimeout(timer);
       timer = setTimeout(() => load(1), 250);
     });
-    refresh.addEventListener("click", () => load(page));
     return {root, load};
   }
 

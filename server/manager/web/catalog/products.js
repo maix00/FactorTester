@@ -279,14 +279,14 @@
     search.className = "toolbar-search";
     search.placeholder = page === "groups"
       ? context.t("搜索产品组") : context.t("搜索产品或代码");
-    const refresh = context.button("↻", () => {
+    const refresh = FTUI.refreshButton(context, () => {
       [...cache.keys()].filter(key => key.startsWith(`${source}:`))
         .forEach(key => cache.delete(key));
       categoryCache.delete(source);
       sourceCache.delete(source);
       [...treeCache.keys()].filter(key => key.startsWith(`${source}:`)).forEach(key => treeCache.delete(key));
-      list(context, page);
-    }, context.t("刷新"));
+      return list(context, page);
+    });
     context.toolbar.append(search, refresh);
     context.content.replaceChildren(FTUI.loading(context.t("正在读取产品目录…")));
     let value;

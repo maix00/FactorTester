@@ -670,6 +670,21 @@
     return {...result, ...persisted};
   }
 
+  function replacePersistedObjectTab(context, state, result) {
+    const ref = state.familyMode
+      ? result.family_ref || result.id || result.name || state.factorID
+      : result.factor_ref || result.factor_alias || result.name;
+    const path = state.familyMode
+      ? `/factors/family/${encodeURIComponent(ref)}?updated=${Date.now()}`
+      : `/factors/factor/${encodeURIComponent(ref)}?updated=${Date.now()}`;
+    const previousTabID = context.tabID;
+    // Activate the new immutable identity first. The old editor is then an
+    // inactive tab, so removing it cannot render a fallback route that races
+    // the new detail request and restores the obsolete Factor reference.
+    context.navigate(path);
+    if (previousTabID) context.closeTab?.(previousTabID);
+  }
+
   async function render(context, data, targetRef, mode, options = {}) {
     if (!context.session) throw new Error(context.t("登录后才能编辑因子"));
     const familyMode = options.familyMode === true;
@@ -999,11 +1014,7 @@
           : result.factor_ref || result.factor_alias || result.name;
         const kind = state.familyMode ? "family" : "factor";
         if (FTTabReturn.returnToSource(context, {kind, ref})) return;
-        context.closeTab?.(context.tabID);
-        const path = state.familyMode
-          ? `/factors/family/${encodeURIComponent(ref)}?updated=${Date.now()}`
-          : `/factors/factor/${encodeURIComponent(ref)}?updated=${Date.now()}`;
-        context.navigate(path);
+        replacePersistedObjectTab(context, state, result);
       } catch (error) {
         status.textContent = error.message || context.t("因子保存失败");
         submit.disabled = false;
@@ -1076,6 +1087,6 @@
 
   window.FTFactorEditor = Object.freeze({
     render, reconcileParameterValues, bindFieldValue, persistedFamilyClassName,
-    familyClassNameMatches, refreshPersistedObject,
+    familyClassNameMatches, refreshPersistedObject, replacePersistedObjectTab,
   });
 })();

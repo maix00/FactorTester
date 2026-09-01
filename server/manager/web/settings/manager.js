@@ -129,7 +129,9 @@
       tabs.append(tab);
     });
     wrapper.append(tabs, body);
-    context.toolbar.append(context.button("↻", () => show(context, selected), context.t("刷新")));
+    context.toolbar.append(FTUI.refreshButton(
+      context, () => show(context, selected),
+    ));
     context.content.replaceChildren(wrapper);
     if (selected === "allowlist" || selected === "devices") {
       await window.FTStaticLoader?.loadGroups?.(["manager-access"]);

@@ -88,15 +88,9 @@
         mount.replaceChildren(FTUI.empty(
           context.t("产品分类读取失败"), error.message || "",
         ));
-      } finally {
-        if (refresh && isCurrentView(token)) refresh.disabled = false;
       }
     };
-    refresh = context.button("↻", () => {
-      if (refresh.disabled) return;
-      refresh.disabled = true;
-      void loadIntoMount();
-    }, context.t("刷新"));
+    refresh = FTUI.refreshButton(context, loadIntoMount);
     toolbar.append(refresh);
     void loadIntoMount();
   }

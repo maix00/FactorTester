@@ -97,6 +97,12 @@ async function main() {
   ]);
   assert.deepStrictEqual(calls, []);
 
+  await window.FTFactorCatalog.load(context, {refresh: true, library: true});
+  assert.deepStrictEqual(calls.sort(), [
+    "/api/factor-library/families?refresh=1",
+    "/api/factor-library/factors?refresh=1",
+  ].sort(), "manual refresh must bypass the populated catalog cache");
+
   // A library and set request issued together must retain both results.  This
   // guards the shared-cache mutation contract used during route transitions.
   await window.FTFactorCatalog.load(context, {refresh: true});

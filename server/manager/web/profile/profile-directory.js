@@ -99,9 +99,10 @@
       load();
     });
     root.append(server);
-    root.append(context.button(
-      "↻", () => { state.page = 1; load(); }, context.t("刷新"),
-    ));
+    root.append(FTUI.refreshButton(context, () => {
+      state.page = 1;
+      return load();
+    }));
     return root;
   }
 
@@ -216,9 +217,7 @@
     context.toolbar.replaceChildren();
     const sectionTabs = window.FTResearch?.sectionTabs?.(context, "profiles", false);
     if (sectionTabs) context.toolbar.append(sectionTabs);
-    context.toolbar.append(context.button(
-      "↻", () => list(context), context.t("刷新"),
-    ));
+    context.toolbar.append(FTUI.refreshButton(context, () => list(context)));
     const root = document.createElement("div");
     root.className = "detail-stack profile-directory";
     SCOPES.forEach(([scope]) => root.append(section(context, scope)));
