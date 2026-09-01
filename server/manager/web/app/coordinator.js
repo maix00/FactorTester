@@ -140,7 +140,11 @@
     const key = document.createElement("span"); key.textContent = t(label);
     const content = document.createElement("strong");
     const values = Array.isArray(value) ? value : [value];
-    values.filter(item => String(item || "").trim()).forEach(item => {
+    values.filter(item => item instanceof Node || String(item || "").trim()).forEach(item => {
+      if (item instanceof Node) {
+        content.append(item);
+        return;
+      }
       const line = document.createElement("div");
       line.textContent = String(item);
       content.append(line);
@@ -186,6 +190,14 @@
             : [t("无在线公网服务器")],
         ),
       );
+      await window.FTStaticLoader?.loadGroups?.(["research-local"]);
+      if (routeToken !== activeRouteToken) return;
+      const release = await FTResearchLocal.loadClientRelease(appContext(routeToken));
+      if (routeToken !== activeRouteToken) return;
+      root.append(homeNetworkRow(
+        "FactorTester 客户端",
+        FTResearchLocal.clientDownloadButton(appContext(routeToken), release, "下载"),
+      ));
     } catch (error) {
       if (routeToken !== activeRouteToken) return;
       root.replaceChildren(homeNetworkRow("服务器网络信息", error.message));
@@ -226,7 +238,7 @@
       state, api, t, content, toolbar, button,
       ...currentTabContext(),
       tabID: state.activeTabID, tabSession, activeNav, setHeading, updateActiveTab,
-      openReportSettings, saveActiveTabSession, openTab, navigate, showNotice,
+      saveActiveTabSession, openTab, navigate, showNotice,
       captureScrollPosition,
       checkpointTabSession: tabs?.scheduleActiveSessionCheckpoint,
       isRouteCurrent: () => routeToken === activeRouteToken,
@@ -387,7 +399,6 @@
   });
   const openLogin = auth.openLogin;
   const logout = auth.logout;
-  const openReportSettings = auth.openReportSettings;
 
   routeDispatch = FTAppRouteDispatch.create({
     content,

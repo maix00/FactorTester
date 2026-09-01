@@ -244,6 +244,21 @@ class PublicResearchRoutesMixin:
                         item for item in server_research.list_owner(owner)
                         if str(item.get("report_id") or "") not in published_report_ids
                     )
+                catalog_reports = {
+                    str(item.get("report_id") or ""): item
+                    for item in self.state.research_catalog.list_reports_for_scope(
+                        viewer=owner, scope="mine",
+                    )
+                }
+                for report in reports:
+                    policy = catalog_reports.get(str(report.get("report_id") or ""))
+                    if policy is None:
+                        continue
+                    report.update(
+                        research_id=str(policy.get("research_id") or ""),
+                        visibility=str(policy.get("visibility") or "private"),
+                        authorized_users=list(policy.get("authorized_users") or []),
+                    )
             except (OSError, RuntimeError, ValueError, sqlite3.Error) as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 503)
                 return True

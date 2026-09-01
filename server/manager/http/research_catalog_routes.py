@@ -63,6 +63,11 @@ class ResearchCatalogRoutesMixin:
                 payload = {"researches": value, "items": value, "scope": scope}
             elif parsed.path == "/api/research/principals":
                 needle = str(query.get("q", [""])[0]).strip().casefold()
+                relation = str(query.get("relation", [""])[0]).strip()
+                superior_refs = set(
+                    self._research_catalog_superior_refs(viewer)
+                    if relation == "superiors" else []
+                )
                 values = []
                 store = getattr(self.state, "control_store", None)
                 for item in ([] if store is None else store.load_accounts()):
@@ -70,6 +75,7 @@ class ResearchCatalogRoutesMixin:
                     if (
                         not username or username == viewer
                         or item.get("active", True) is False
+                        or (relation == "superiors" and username not in superior_refs)
                         or (needle and needle not in username.casefold())
                     ):
                         continue
@@ -83,6 +89,7 @@ class ResearchCatalogRoutesMixin:
                     scope=scope,
                     subordinate_refs=self._research_catalog_subordinate_refs(viewer),
                 )
+                value = self._research_catalog_publication_branches(value, viewer)
                 payload = {
                     "reports": value,
                     "items": value,
@@ -110,9 +117,12 @@ class ResearchCatalogRoutesMixin:
                         ),
                     }
                 elif child == "reports":
+                    reports = service.list_reports(
+                        research_id, viewer=viewer,
+                    )
                     payload = {
-                        "reports": service.list_reports(
-                            research_id, viewer=viewer,
+                        "reports": self._research_catalog_publication_branches(
+                            reports, viewer,
                         ),
                     }
                 elif child == "evidence":
@@ -140,6 +150,47 @@ class ResearchCatalogRoutesMixin:
             return True
         json_response(self, {"success": True, **payload})
         return True
+
+    def _research_catalog_publication_branches(
+        self, reports: list[dict], viewer: str,
+    ) -> list[dict]:
+        """Attach readable server projections without loading report bytes."""
+        try:
+            publications = self._research_service().list_visible(viewer)
+        except (AttributeError, ConnectionError, OSError, RuntimeError, ValueError):
+            publications = []
+        by_report: dict[str, list[dict]] = {}
+        for item in publications:
+            if not isinstance(item, dict):
+                continue
+            report_id = str(item.get("report_id") or "").strip()
+            publication_id = str(item.get("publication_id") or "").strip()
+            if report_id and publication_id:
+                by_report.setdefault(report_id, []).append(item)
+        result = []
+        for original in reports:
+            value = dict(original)
+            local = [dict(item) for item in value.get("branches") or []]
+            projected = []
+            for item in by_report.get(str(value.get("report_id") or ""), []):
+                projected.append({
+                    "branch_ref": str(item.get("branch_ref") or ""),
+                    "title": str(item.get("branch_ref") or item.get("title") or ""),
+                    "profile_ref": str(item.get("profile_ref") or ""),
+                    "source_kind": "publication",
+                    "source_ref": str(item.get("publication_id") or ""),
+                    "publication_id": str(item.get("publication_id") or ""),
+                    "selected": not projected,
+                })
+            if projected:
+                for item in local:
+                    item["selected"] = False
+            seen = {item["publication_id"] for item in projected}
+            value["branches"] = projected + [
+                item for item in local if item.get("publication_id") not in seen
+            ]
+            result.append(value)
+        return result
 
     def _post_research_catalog_routes(self, parsed) -> bool:
         if not self._is_research_catalog_path(parsed.path):
@@ -208,19 +259,29 @@ class ResearchCatalogRoutesMixin:
                 json_response(self, {"success": True, "workspace": value}, 201)
                 return True
             if child == "reports":
-                value = service.register_report(
-                    research_id,
-                    actor=actor,
-                    report_id=data.get("report_id"),
-                    title=str(data.get("title") or ""),
-                    profile_ref=str(data.get("profile_ref") or ""),
-                    workspace_id=str(data.get("workspace_id") or ""),
-                    build_source=str(data.get("build_source") or "client"),
-                    build_source_ref=str(data.get("build_source_ref") or ""),
-                    visibility=str(data.get("visibility") or "private"),
-                    authorized_users=data.get("authorized_users"),
-                    source_ref=str(data.get("source_ref") or ""),
-                )
+                if data.get("report_id"):
+                    value = service.register_report(
+                        research_id,
+                        actor=actor,
+                        report_id=data.get("report_id"),
+                        title=str(data.get("title") or ""),
+                        profile_ref=str(data.get("profile_ref") or ""),
+                        workspace_id=str(data.get("workspace_id") or ""),
+                        build_source=str(data.get("build_source") or "client"),
+                        build_source_ref=str(data.get("build_source_ref") or ""),
+                        visibility=str(data.get("visibility") or "private"),
+                        authorized_users=data.get("authorized_users"),
+                        source_ref=str(data.get("source_ref") or ""),
+                    )
+                else:
+                    value = service.create_report_space(
+                        research_id,
+                        actor=actor,
+                        title=str(data.get("title") or ""),
+                        profile_ref=str(data.get("profile_ref") or ""),
+                        visibility=str(data.get("visibility") or "private"),
+                        authorized_users=data.get("authorized_users"),
+                    )
                 json_response(self, {"success": True, "report": value}, 201)
                 return True
             if child == "share-links":
@@ -292,6 +353,12 @@ class ResearchCatalogRoutesMixin:
                     visibility=data.get("visibility"),
                     authorized_users=data.get("authorized_users"),
                 )
+                self._sync_research_report_publications(
+                    owner=str(session["username"]),
+                    report_id=str(value["report_id"]),
+                    visibility=str(value["visibility"]),
+                    authorized_users=list(value.get("authorized_users") or []),
+                )
             except (KeyError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
                 self._research_catalog_error(exc)
                 return True
@@ -320,6 +387,46 @@ class ResearchCatalogRoutesMixin:
         json_response(self, {"success": True, "research": value})
         return True
 
+    def _delete_research_catalog_routes(self, parsed) -> bool:
+        research_match = re.fullmatch(r"/api/research/([^/]+)", parsed.path)
+        report_match = re.fullmatch(
+            r"/api/research/([^/]+)/reports/([^/]+)", parsed.path,
+        )
+        member_match = re.fullmatch(
+            r"/api/research/([^/]+)/members/([^/]+)", parsed.path,
+        )
+        if not research_match and not report_match and not member_match:
+            return False
+        session = self._research_catalog_session()
+        if session is None:
+            return True
+        actor = str(session["username"])
+        try:
+            if research_match:
+                value = self._research_catalog_service().remove_research(
+                    unquote(research_match.group(1)), actor=actor,
+                )
+                payload = {"research": value}
+            elif report_match:
+                value = self._research_catalog_service().remove_report(
+                    unquote(report_match.group(1)),
+                    unquote(report_match.group(2)),
+                    actor=actor,
+                )
+                payload = {"report": value}
+            else:
+                value = self._research_catalog_service().remove_membership(
+                    unquote(member_match.group(1)),
+                    profile_ref=unquote(member_match.group(2)),
+                    actor=actor,
+                )
+                payload = {"member": value}
+        except (KeyError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
+            self._research_catalog_error(exc)
+            return True
+        json_response(self, {"success": True, **payload})
+        return True
+
     @staticmethod
     def _is_research_catalog_path(path: str) -> bool:
         return path == "/api/research" or path.startswith("/api/research/")
@@ -331,6 +438,55 @@ class ResearchCatalogRoutesMixin:
             for item in subordinate_users
             if isinstance(item, dict)
         ]
+
+    def _research_catalog_superior_refs(self, viewer: str) -> list[str]:
+        store = getattr(self.state, "control_store", None)
+        accounts = [] if store is None else list(store.load_accounts())
+        by_username = {
+            str(item.get("username") or "").strip(): item
+            for item in accounts if isinstance(item, dict)
+        }
+        result: list[str] = []
+        current = str(viewer or "").strip()
+        visited: set[str] = set()
+        while current and current not in visited:
+            visited.add(current)
+            account = by_username.get(current)
+            if account is None or account.get("active", True) is False:
+                break
+            parent = str(account.get("parent_username") or "").strip()
+            superior = by_username.get(parent)
+            if not parent or superior is None or superior.get("active", True) is False:
+                break
+            result.append(parent)
+            current = parent
+        return result
+
+    def _sync_research_report_publications(
+        self,
+        *,
+        owner: str,
+        report_id: str,
+        visibility: str,
+        authorized_users: list[str],
+    ) -> None:
+        """Apply the canonical Report policy to each uploaded Branch."""
+        users = list(authorized_users)
+        if visibility == "superiors":
+            users = self._research_catalog_superior_refs(owner)
+        for publication in self.state.public_research.list_owner(owner):
+            if str(publication.get("report_id") or "") != report_id:
+                continue
+            self.state.public_research.configure(
+                owner_ref=owner,
+                report_id=report_id,
+                publication_key=str(publication.get("publication_key") or report_id),
+                projection=None,
+                visibility=visibility,
+                auto_sync=bool(publication.get("auto_sync", True)),
+                relay_local_files=bool(publication.get("relay_local_files", False)),
+                authorized_users=users,
+            )
 
     def _discover_research_report_records(self, actor: str) -> list[dict]:
         """Project all three existing report stores into one explicit plan."""

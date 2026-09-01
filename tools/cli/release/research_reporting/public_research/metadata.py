@@ -31,7 +31,7 @@ def normalize_build_source(value: Any, *, default: str = "client") -> str:
 
 def sharing_state(visibility: Any) -> str:
     """Reduce the access policy to the explicit shared/non-shared label."""
-    return "shared" if str(visibility or "").strip() in {"authorized", "public"} else "not_shared"
+    return "shared" if str(visibility or "").strip() in {"superiors", "authorized", "public"} else "not_shared"
 
 
 def provenance_fields(

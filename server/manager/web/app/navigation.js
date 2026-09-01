@@ -57,6 +57,27 @@
   }
 
   function tabIcon(path, modules) {
+    const pathname = String(path || "").split(/[?#]/, 1)[0];
+    if (/^\/research\//.test(pathname)) return "doc.text";
+    if (/^\/researches\//.test(pathname)) return "lightbulb";
+    if (/^\/evidence\//.test(pathname)) return "doc.text.magnifyingglass";
+    if (/^\/research-graphs\//.test(pathname)) {
+      return "point.3.connected.trianglepath.dotted";
+    }
+    if (/^\/jobs\//.test(pathname)) return "doc.text.magnifyingglass";
+    if (/^\/test-templates\//.test(pathname)) return "list.bullet.clipboard";
+    if (/^\/factor-series(?:\/|$)/.test(pathname)) return "chart.xyaxis.line";
+    if (/^\/factors\/set\//.test(pathname)) return "square.stack.3d.up";
+    if (/^\/factors\/(?:family|factor)\//.test(pathname)) return "function";
+    if (/^\/products\/group\//.test(pathname)) {
+      return "shippingbox.and.arrow.backward";
+    }
+    if (/^\/products\/(?:contract|continuous-contract)\//.test(pathname)) {
+      return pathname.includes("/continuous-contract/")
+        ? "chart.line.uptrend.xyaxis" : "doc.text";
+    }
+    if (/^\/products\/product\//.test(pathname)) return "shippingbox";
+    if (/^\/profiles\//.test(pathname)) return "person.crop.rectangle.stack";
     return FTIcons.module(moduleForPath(path, modules));
   }
 

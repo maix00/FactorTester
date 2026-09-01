@@ -242,7 +242,7 @@ class ServerResearchService:
             build_source="server_agent",
             build_source_ref=source_ref,
         )
-        shared = visibility in {"authorized", "public"}
+        shared = visibility in {"superiors", "authorized", "public"}
         return {
             **settings,
             "server_ref": server_ref,
