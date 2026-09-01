@@ -2228,6 +2228,28 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert 'method: "DELETE"' in scripts["actions.js"]
 
 
+def test_web_shell_serves_every_frontend_deep_link_on_refresh(tmp_path) -> None:
+    state = authenticated_state(tmp_path)
+    paths = (
+        "/research/report%3Alocal",
+        "/researches/research%3Amigrated%3Aone",
+        "/evidence/evidence%3Aone",
+        "/research-graphs/graph%3Aone",
+        "/jobs/job%3Aone",
+        "/factor-series?factor_ref=factor%3Aone",
+        "/reference?kind=factor&target=factor%3Aone",
+        "/factors/family/new?mode=create",
+        "/products/group/product-group%3Aone",
+        "/profiles/self",
+        "/test-templates/template%3Aone",
+    )
+    with running_manager(state) as base_url:
+        for path in paths:
+            with urlopen(f"{base_url}{path}") as response:
+                assert response.status == 200, path
+                assert b'class="app-shell"' in response.read(), path
+
+
 def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:

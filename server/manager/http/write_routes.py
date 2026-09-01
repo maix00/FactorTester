@@ -344,6 +344,32 @@ class WriteRoutesMixin:
                             authorized_users
                         ),
                     )
+                research_id = str(payload.get("research_id") or "").strip()
+                if not research_id:
+                    matches = {
+                        str(item.get("research_id") or "")
+                        for item in self.state.research_catalog.list_reports_for_scope(
+                            viewer=owner, scope="mine",
+                        )
+                        if str(item.get("report_id") or "") == report_id
+                    }
+                    matches.discard("")
+                    if len(matches) == 1:
+                        research_id = matches.pop()
+                if research_id:
+                    self.state.research_catalog.update_report(
+                        research_id,
+                        report_id,
+                        actor=owner,
+                        visibility=visibility,
+                        authorized_users=authorized_users,
+                    )
+                    self._sync_research_report_publications(
+                        owner=owner,
+                        report_id=report_id,
+                        visibility=visibility,
+                        authorized_users=authorized_users,
+                    )
                 self._sync_research_metadata(str(value["publication_id"]))
                 self._invalidate_federated_public_research()
             except PermissionError as exc:
