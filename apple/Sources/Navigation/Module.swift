@@ -102,6 +102,10 @@ struct Module: Codable, Identifiable, Hashable {
             ]
         ),
         Module(
+            id: "factor-series", title: "查看因子序列", path: "/factor-series",
+            sidebarVisible: false, homeVisible: false, tabBehavior: "new"
+        ),
+        Module(
             id: "ic-test", title: "IC 测试", path: "/ic-test",
             sidebarVisible: false, homeVisible: false, tabBehavior: "new"
         ),
@@ -118,6 +122,12 @@ struct Module: Codable, Identifiable, Hashable {
                     desc: "选择要运行的测试类型",
                     path: "/jobs?section=types", requiresAuth: false,
                     children: [
+                        Module(
+                            id: "factor-series", title: "查看因子序列",
+                            desc: "计算并查看因子值、价格与合约区间",
+                            sfSymbol: "waveform.path.ecg", path: "/factor-series",
+                            tabBehavior: "new"
+                        ),
                         Module(
                             id: "ic-test", title: "IC 测试",
                             desc: "配置并运行因子 IC 测试",

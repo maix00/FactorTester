@@ -12,6 +12,7 @@
     "research.profiles": "person.2.crop.square.stack",
     "research.agent-models": "server.rack",
     "ic-test": "chart.xyaxis.line",
+    "factor-series": "waveform.path.ecg",
     backtest: "chart.line.uptrend.xyaxis",
     jobs: "checklist",
     factors: "function",

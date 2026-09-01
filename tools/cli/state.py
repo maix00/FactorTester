@@ -22,8 +22,6 @@ class CliState:
     def location_label(self) -> str:
         if self.current_parent is None:
             return "首页"
-        if self.current_parent == "single_factor_family_test":
-            return "因子研究"
         return public_module_key(self.current_parent)
 
     def enter(self, parent: str) -> None:

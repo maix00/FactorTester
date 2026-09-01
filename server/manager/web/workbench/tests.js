@@ -5,7 +5,7 @@
     ic: {application: "ic_test", nav: "ic-test", title: "IC 测试"},
     backtest: {application: "group_test", nav: "backtest", title: "回测"},
     factor_evaluation: {
-      application: "factor_evaluation", nav: "factors", title: "因子序列",
+      application: "factor_evaluation", nav: "jobs", title: "查看因子序列",
     },
   };
   async function show(context, kind, options = {}) {

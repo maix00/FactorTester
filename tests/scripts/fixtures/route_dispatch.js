@@ -57,7 +57,7 @@ const dispatch = window.FTAppRouteDispatch.create({
     kind: "factor-series", factorRef: "factor:v1:roc", groupRef: "product-group:night",
   }, 4);
   assert.deepEqual(calls.slice(-3), [
-    "nav:factors", "heading:因子序列", "factor-series:4:factor:v1:roc:product-group:night",
+    "nav:jobs", "heading:查看因子序列", "factor-series:4:factor:v1:roc:product-group:night",
   ]);
 
   loggedIn = false;

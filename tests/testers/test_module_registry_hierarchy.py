@@ -1,93 +1,38 @@
-"""Locks in the config-driven Module/ModuleRegistry hierarchy:
+"""Locks in the flat, parallel test-type Module registry."""
 
-HomeModuleRegistry -> single_factor_family_test (page Module)
-                   -> backtest (generic Backtest Module)
-  single_factor_family_test -> sub_registry: SingleFactorFamilyTestModuleRegistry
-       -> 5 leaf Modules (single_factor_page, factor_evaluation,
-          factor_type_analysis, ic_test, group_test)
-       -> group_test.sub_registry: BacktestModuleRegistry
-
-No Module subclasses are hand-written — they're all constructed from the
-declarative JSON configs under static/config/testers/. This test catches
-config/resolver drift (typo'd key, missing settings factory, broken
-sub_registry wiring) without needing to read every config by hand.
-"""
 from __future__ import annotations
 
 
-def test_home_registers_single_factor_family_test_page():
+def test_home_registers_parallel_test_types_in_order():
     from tools.testers.home import HomeModuleRegistry
 
     home = HomeModuleRegistry()
-    assert home.module_keys == ("single_factor_family_test", "backtest")
-
-    page = home.get("single_factor_family_test")
-    assert page.label == "单因子家族测试"
-    assert page.order == 10
-    # build_app override resolves to single_factor_page_settings, not a
-    # (nonexistent) single_factor_family_test_settings.
-    assert type(page.app).__name__ == "ApplicationSettings"
-    backtest = home.get("backtest")
-    assert backtest.label == "回测"
-    assert backtest.app.application == "group_test"
-
-
-def test_single_factor_family_test_registers_five_modules_in_order():
-    from tools.testers.single_factor_family_test.registry import (
-        SingleFactorFamilyTestModuleRegistry,
+    assert home.module_keys == (
+        "factor_evaluation", "ic_test", "backtest", "factor_type_analysis",
     )
-
-    sub = SingleFactorFamilyTestModuleRegistry()
-    assert sub.module_keys == (
-        "single_factor_page",
-        "factor_evaluation",
-        "factor_type_analysis",
-        "ic_test",
-        "group_test",
-    )
-    ordered = sub.sorted_modules()
-    assert [m.order for m in ordered] == [10, 20, 30, 40, 50]
-    # Every leaf module's app builds without error (each resolves to its own
-    # "<key>_settings" factory via naming convention).
-    for module in ordered:
+    assert [module.label for module in home.sorted_modules()] == [
+        "查看因子序列", "IC 测试", "回测", "因子类型分析",
+    ]
+    for module in home.sorted_modules():
         assert type(module.app).__name__ == "ApplicationSettings"
 
 
-def test_group_test_module_nests_backtest_module_registry():
+def test_backtest_alone_nests_the_execution_module_registry():
     from tools.testers.backtest.modules.registry import BacktestModuleRegistry
-    from tools.testers.single_factor_family_test.registry import (
-        SingleFactorFamilyTestModuleRegistry,
-    )
+    from tools.testers.home import HomeModuleRegistry
 
-    sub = SingleFactorFamilyTestModuleRegistry()
-    group_test = sub.get("group_test")
-    nested = group_test.sub_registry
+    home = HomeModuleRegistry()
+    nested = home.get("backtest").sub_registry
     assert isinstance(nested, BacktestModuleRegistry)
-    assert nested.module_keys  # at least one executable module registered
+    assert nested.module_keys
+    assert home.get("factor_evaluation").sub_registry is None
 
 
-def test_full_hierarchy_resolves_three_levels_deep():
+def test_find_resolves_parallel_types():
     from tools.testers.home import HomeModuleRegistry
 
     home = HomeModuleRegistry()
-    page = home.get("single_factor_family_test")
-    group_test = page.sub_registry.get("group_test")
-    backtest_registry = group_test.sub_registry
-    assert backtest_registry.module_keys
-
-
-def test_find_recurses_into_sub_registries():
-    from tools.testers.home import HomeModuleRegistry
-
-    home = HomeModuleRegistry()
-    # top-level
-    assert home.find("single_factor_family_test") is home.get("single_factor_family_test")
-    assert home.find("backtest") is home.get("backtest")
-    # one level down, inside single_factor_family_test's sub_registry
-    ic_module = home.find("ic_test")
-    assert ic_module is not None
-    assert ic_module.label == "IC 测试"
-    # group_test itself is also found at the same depth
-    assert home.find("group_test") is not None
-    # unknown key
+    assert home.find("factor_evaluation") is home.get("factor_evaluation")
+    assert home.find("ic_test") is home.get("ic_test")
+    assert home.find("group_test") is None
     assert home.find("does_not_exist") is None

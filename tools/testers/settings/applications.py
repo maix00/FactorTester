@@ -387,113 +387,6 @@ def register_market_data_base(app: ApplicationSettings, *, include_price_type: b
         ))
 
 
-def single_factor_page_settings() -> ApplicationSettings:
-    app = ApplicationSettings("single_factor_page")
-    app.register_accepted_global_default_keys(*FACTOR_CANDIDATE_KEYS, *FACTOR_SELECTION_KEYS, *PRODUCT_PATH_CANDIDATE_KEYS, *PRODUCT_PATH_SELECTION_KEYS, *MARKET_DATA_SELECTION_KEYS, *RUN_WINDOW_KEYS)
-    for module in (
-        SettingModule("setting_template", "因子家族设置模板", "page", 10),
-        SettingModule("factor_execution", "因子设置", "factor", 20),
-        SettingModule("product_selection", "产品路径", "product", 30),
-        SettingModule("market_data_source", "数据源", "market_data", 40),
-        SettingModule("market_data_frequency", "数据频率", "market_data", 50),
-        SettingModule("run_window", "时间范围", "time", 60),
-    ):
-        app.register_module(module)
-    for tab in (
-        SettingTab(
-            "setting_template",
-            "模板",
-            (TabMountPoint.LOCAL_SETTINGS,),
-            "custom",
-            10,
-            (TabMountPoint.LOCAL_SETTINGS,),
-        ),
-        SettingTab(
-            "factors",
-            "因子",
-            (TabMountPoint.LOCAL_SETTINGS,),
-            "custom",
-            20,
-            # 默认隐藏：加载模板后若含因子设置再懒挂载（见 main_page_settings_panel）。
-            content_adapter="factor_selection",
-        ),
-        SettingTab(
-            "product_path_selection",
-            "产品路径",
-            (TabMountPoint.LOCAL_SETTINGS,),
-            "settings-grid",
-            30,
-            content_adapter="product_path_selection",
-        ),
-        SettingTab(
-            "data_source",
-            "数据源",
-            (TabMountPoint.LOCAL_SETTINGS,),
-            "settings-grid",
-            40,
-        ),
-        SettingTab(
-            "frequency",
-            "数据频率",
-            (TabMountPoint.LOCAL_SETTINGS,),
-            "settings-grid",
-            50,
-        ),
-        SettingTab(
-            "time",
-            "时间范围",
-            (TabMountPoint.LOCAL_SETTINGS,),
-            "custom",
-            60,
-            summary_template="{start_date} → {end_date} · {time_precision}",
-            summary_keys=("start_date", "end_date", "time_precision"),
-        ),
-    ):
-        app.register_tab(tab)
-    app.register_setting(SettingDefinition(
-        "setting_template",
-        "因子家族设置模板",
-        "setting_template",
-        "custom",
-        None,
-        ScopePolicy.LOCAL_ONLY,
-        module="setting_template",
-        chip_template="模板: {value}",
-        execution_policy="authoring_only",
-        serialization={"kind": "setting_template"},
-    ))
-    # Field schemas come from executable modules. This page only composes
-    # their page-specific tabs and local-only scope.
-    from tools.testers.backtest.modules.factor import FactorModule
-    from tools.testers.backtest.modules.product_selection import ProductSelectionModule
-    from tools.testers.backtest.modules.registry import register_module_field_settings
-
-    register_module_field_settings(
-        app,
-        (FactorModule, ProductSelectionModule),
-        setting_module_keys={FactorModule: "factor_execution"},
-        tab_keys={FactorModule: "factors"},
-        scope_policy_overrides={
-            "factor_candidates": ScopePolicy.LOCAL_ONLY.value,
-            "factor": ScopePolicy.LOCAL_ONLY.value,
-            "product_path_candidates": ScopePolicy.LOCAL_ONLY.value,
-            "product_path_selection": ScopePolicy.LOCAL_ONLY.value,
-        },
-        add_missing_modules=False,
-    )
-    register_market_data_base(app, include_price_type=False)
-    register_run_window_base(app)
-    # 单因子页只有"因子家族测试设置"这一个扁平面板（无列表项）。
-    app.register_surface(SettingsSurface(
-        "local", "因子家族测试设置", TabMountPoint.LOCAL_SETTINGS, kind="panel", order=10,
-    ))
-    app.set_default_mounted_tabs(
-        TabMountPoint.LOCAL_SETTINGS,
-        ("setting_template", "time"),
-    )
-    return app
-
-
 def group_test_settings() -> ApplicationSettings:
     app = ApplicationSettings("group_test")
 
@@ -609,7 +502,6 @@ def factor_type_analysis_settings() -> ApplicationSettings:
 
 
 backtest_setting_registry = BacktestSettingRegistry()
-backtest_setting_registry.register(single_factor_page_settings())
 backtest_setting_registry.register(group_test_settings())
 backtest_setting_registry.register(ic_test_settings())
 backtest_setting_registry.register(factor_evaluation_settings())

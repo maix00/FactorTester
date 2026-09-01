@@ -169,10 +169,6 @@ def get_backtest_setting_application(application: str):
     # Merge executable module manifest from the registry
     registry = _registry_for(application)
     settings_manifest["executable_modules"] = registry.module_manifest()
-    if application == "single_factor_page":
-        settings_manifest["shared_global_default_keys"] = backtest_setting_registry.shared_global_default_keys(
-            ("factor_evaluation", "ic_test", "group_test")
-        )
     return jsonify({"success": True, **settings_manifest})
 
 
@@ -187,10 +183,6 @@ def get_backtest_setting_application_summary(application: str):
         return jsonify({"success": False, "error": str(exc)}), 404
     registry = _registry_for(application)
     settings_manifest["executable_modules"] = registry.module_manifest()
-    if application == "single_factor_page":
-        settings_manifest["shared_global_default_keys"] = backtest_setting_registry.shared_global_default_keys(
-            ("factor_evaluation", "ic_test", "group_test")
-        )
     return jsonify({"success": True, **settings_manifest})
 
 

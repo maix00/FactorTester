@@ -48,6 +48,7 @@ struct ClientTab: Identifiable {
         switch module.id {
         case "research": return .research
         case "jobs": return .jobs
+        case "factor-series": return .factorSeries()
         case "ic-test": return .icTest()
         case "backtest": return .backtest()
         case "manager": return .manager
@@ -124,6 +125,19 @@ struct ClientTab: Identifiable {
         testPage(
             id: "ic-test", title: "IC 测试",
             systemImage: "chart.xyaxis.line", path: "/ic-test"
+        )
+    }
+
+    static func factorSeries(factorRef: String? = nil) -> ClientTab {
+        var components = URLComponents()
+        components.path = "/factor-series"
+        if let factorRef, !factorRef.isEmpty {
+            components.queryItems = [URLQueryItem(name: "factor_ref", value: factorRef)]
+        }
+        return testPage(
+            id: "factor-series", title: "查看因子序列",
+            systemImage: "waveform.path.ecg",
+            path: components.string ?? "/factor-series"
         )
     }
 
@@ -331,6 +345,13 @@ struct ClientTab: Identifiable {
         }
         if pathname == "/ic-test" {
             return .icTest()
+        }
+        if pathname == "/factor-series" {
+            return .web(
+                id: "factor-series:\(UUID().uuidString)",
+                title: "查看因子序列", titleKey: "查看因子序列",
+                systemImage: "waveform.path.ecg", path: path
+            )
         }
         if pathname == "/backtest" {
             return .backtest()
