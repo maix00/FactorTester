@@ -10,6 +10,8 @@ from urllib.error import HTTPError
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
+from tools.cli.manager.config import ManagerConfig, ManagerCredentialStore
+
 from tools.cli.commands.research_report_scope_identity import (
     resolve_branch_report_scope,
 )
@@ -64,6 +66,10 @@ class PublicResearchClient:
             except (FileNotFoundError, ValueError):
                 configured = "http://127.0.0.1:7998"
         self.manager_url = str(configured).rstrip("/")
+        # Explicit URLs are also used by offline tests and injected local
+        # runtimes. Persisted Manager configuration is validated when loaded.
+        self.manager_config = ManagerConfig(base_url=self.manager_url)
+        self.credentials = ManagerCredentialStore(self.manager_config)
 
     def list_publications(self) -> list[dict[str, Any]]:
         # A read is also a reconnect boundary.  Local browsing must continue
@@ -471,6 +477,9 @@ class PublicResearchClient:
             "Accept": "application/json",
             "X-FactorTester-Client": "cli",
         }
+        token = self.credentials.read()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
         if payload is not None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             headers["Content-Type"] = "application/json"

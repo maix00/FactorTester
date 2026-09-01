@@ -129,8 +129,9 @@ class WriteRoutesMixin:
         if self._proxy_job_request(parsed, method="POST"):
             return
         if self.path == "/api/research-publications/sync":
-            if not self._is_local_ftclient():
-                json_response(self, {"success": False, "error": "local FTClient required"}, 403)
+            client_session = None if self._is_local_ftclient() else self._session()
+            if not self._is_local_ftclient() and client_session is None:
+                json_response(self, {"success": False, "error": "authenticated FTClient required"}, 403)
                 return
             try:
                 value = self.state.public_research.sync(self._json_body(32 * 1024 * 1024))
@@ -184,13 +185,21 @@ class WriteRoutesMixin:
                     return
                 json_response(self, {"success": True, **value}, 201)
                 return
-            if not self._is_local_ftclient():
-                json_response(self, {"success": False, "error": "local FTClient required"}, 403)
+            local_client = self._is_local_ftclient()
+            client_session = None if local_client else self._session()
+            if not local_client and client_session is None:
+                json_response(self, {"success": False, "error": "authenticated FTClient required"}, 403)
                 return
             try:
                 projection = payload.get("projection")
                 report_id = str(payload.get("report_id") or "")
-                owner_ref = str(payload.get("owner_ref") or "")
+                owner_ref = str(
+                    client_session.get("username") if client_session is not None
+                    else payload.get("owner_ref") or ""
+                )
+                supplied_owner = str(payload.get("owner_ref") or "").strip()
+                if client_session is not None and supplied_owner != owner_ref:
+                    raise PermissionError("report owner does not match authenticated user")
                 if isinstance(projection, dict) and str(payload.get("public_title") or "").strip():
                     projection = {
                         **projection,
@@ -253,17 +262,31 @@ class WriteRoutesMixin:
             })
             return
         if self.path == "/api/research-publications/revoke":
-            if not self._is_local_ftclient():
-                json_response(self, {"success": False, "error": "local FTClient required"}, 403)
+            revoke_session = None if self._is_local_ftclient() else self._session()
+            if not self._is_local_ftclient() and revoke_session is None:
+                json_response(self, {"success": False, "error": "authenticated FTClient required"}, 403)
                 return
             try:
                 payload = self._json_body(64 * 1024)
                 publication_id = str(payload.get("publication_id") or "")
+                if revoke_session is not None:
+                    metadata = self.state.public_research.publication_metadata(
+                        publication_id,
+                    )
+                    if str(metadata.get("owner_ref") or "") != str(
+                        revoke_session.get("username") or ""
+                    ):
+                        raise PermissionError(
+                            "publication does not belong to authenticated user"
+                        )
                 self._sync_research_metadata(publication_id, deleted=True)
                 value = self.state.public_research.revoke_publication(
                     publication_id,
                 )
                 self._invalidate_federated_public_research()
+            except PermissionError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 403)
+                return
             except ValueError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 404)
                 return
