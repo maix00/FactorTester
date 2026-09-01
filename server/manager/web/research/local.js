@@ -76,12 +76,13 @@
     return section;
   }
 
-  function clientDownloadButton(context, value) {
+  function clientDownloadButton(context, value, label = "客户端下载") {
     const open = context.button(
-      context.t("客户端下载"),
+      context.t(label),
       () => showDownloadOverlay(context, value),
       context.t("打开客户端下载"),
     );
+    open.classList.add("client-download-button");
     open.prepend(FTIcons.node("arrow.down.circle"));
     return open;
   }

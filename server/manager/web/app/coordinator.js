@@ -194,10 +194,12 @@
       if (routeToken !== activeRouteToken) return;
       const release = await FTResearchLocal.loadClientRelease(appContext(routeToken));
       if (routeToken !== activeRouteToken) return;
-      root.append(homeNetworkRow(
+      const clientRow = homeNetworkRow(
         "FactorTester 客户端",
-        FTResearchLocal.clientDownloadButton(appContext(routeToken), release),
-      ));
+        FTResearchLocal.clientDownloadButton(appContext(routeToken), release, "下载"),
+      );
+      clientRow.classList.add("home-network-action-row");
+      root.append(clientRow);
     } catch (error) {
       if (routeToken !== activeRouteToken) return;
       root.replaceChildren(homeNetworkRow("服务器网络信息", error.message));

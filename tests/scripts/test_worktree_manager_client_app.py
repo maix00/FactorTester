@@ -3485,9 +3485,12 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert 'model.addEventListener("focus"' in agent_model_editor
     assert "clientDownload?.(context, release)" not in reports
     assert "clientDownloadButton" in local_page
+    assert 'clientDownloadButton(context, value, label = "客户端下载")' in local_page
     assert "loadClientRelease" in local_page
     assert 'loadGroups?.(["research-local"])' in shell
     assert 'homeNetworkRow(\n        "FactorTester 客户端"' in shell
+    assert 'clientDownloadButton(appContext(routeToken), release, "下载")' in shell
+    assert 'clientRow.classList.add("home-network-action-row")' in shell
     assert 'line.className = "research-report-info-line"' in reports
     assert 'metadata.className = "research-report-info-metadata"' in reports
     assert 'item.className = "secondary"' not in reports

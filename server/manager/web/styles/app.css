@@ -155,6 +155,10 @@ main { min-width: 0; }
 .home-network-row { min-width: 0; display: grid; gap: 3px; }
 .home-network-row span { color: var(--muted); font-size: 12px; }
 .home-network-row strong { overflow-wrap: anywhere; font-size: 13px; font-weight: 600; }
+.home-network-action-row { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+.home-network-action-row strong { display: flex; justify-content: flex-end; font-size: inherit; font-weight: 400; }
+.client-download-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; width: auto; padding: 5px 9px; line-height: 1.2; white-space: nowrap; }
+.client-download-button .ft-icon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
 .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
 .card { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); padding: 20px; min-height: 130px; text-align: left; color: inherit; }
 .card > .symbol, .card > .symbol .ft-icon { width: 28px; height: 28px; flex-basis: 28px; }
