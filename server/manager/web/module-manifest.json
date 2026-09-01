@@ -133,7 +133,7 @@
     "workbench-products": ["workbench-core", "catalog-core"],
     "workbench-test-ui": [
       "workbench-settings", "workbench-settings-fields",
-      "workbench-settings-chips", "workbench-run"
+      "workbench-run"
     ],
     "workbench-configuration-groups": [
       "workbench-settings", "workbench-settings-controls",

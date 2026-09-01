@@ -1316,8 +1316,7 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
         "workbench-settings",
     ]
     assert manifest["group_dependencies"]["workbench-test-ui"] == [
-        "workbench-settings", "workbench-settings-fields",
-        "workbench-settings-chips", "workbench-run",
+        "workbench-settings", "workbench-settings-fields", "workbench-run",
     ]
     assert manifest["group_dependencies"]["workbench-input-state"] == [
         "workbench-core",
