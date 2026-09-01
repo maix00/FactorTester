@@ -122,6 +122,7 @@ AUTHOR_SDK_MODULES = (
         + "    FactorExpr as FactorExpr, ConstExpr as ConstExpr, ParamRef as ParamRef,\n"
         + "    ColumnRef as ColumnRef, expr_max as expr_max, expr_min as expr_min,\n"
         + "    where as where,\n"
+        + "    window_bars as window_bars,\n"
         + "    term_spread as term_spread, term_ratio as term_ratio, term_slope as term_slope,\n"
         + "    term_carry_annualized as term_carry_annualized,\n"
         + "    SMALL_VAL as SMALL_VAL,\n"
@@ -131,6 +132,13 @@ AUTHOR_SDK_MODULES = (
         + "    FactorFreqParam as FactorFreqParam,\n"
         + "    ReverseParam as ReverseParam,\n"
         + ")\n",
+        footer=(
+            "\nclass LookbackScope: ...\n"
+            "CURRENT: FactorExpr\nCANDIDATE: FactorExpr\n"
+            "def scope_bars(window: Any) -> LookbackScope: ...\n"
+            "def scope_session(*, gap: str = ...) -> LookbackScope: ...\n"
+            "def scope_trading_day() -> LookbackScope: ...\n"
+        ),
     ),
     AuthorSdkModule(
         "tools/factors/FactorFamily.pyi",
@@ -216,6 +224,7 @@ AUTHOR_SDK_MODULES = (
         + "def expr_max(*expressions: Any) -> FactorExpr: ...\n"
         + "def expr_min(*expressions: Any) -> FactorExpr: ...\n"
         + "def where(condition: Any, true_value: Any, false_value: Any = ...) -> FactorExpr: ...\n"
+        + "# Numeric FactorExpr helper; search boundaries use scope_bars(K).\n"
         + "def window_bars(window: Any) -> WindowBarsExpr: ...\n"
         + "def term_spread(*args: Any, **kwargs: Any) -> FactorExpr: ...\n"
         + "def term_ratio(*args: Any, **kwargs: Any) -> FactorExpr: ...\n"

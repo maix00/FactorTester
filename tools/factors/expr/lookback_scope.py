@@ -20,6 +20,9 @@ class LookbackScope:
     def structural_key(self) -> tuple[Any, ...]:
         return (type(self).__name__, self.kind)
 
+    def to_latex(self, subst: dict | None = None) -> str:
+        return f"\\mathrm{{{self.kind}}}"
+
 
 @dataclass(frozen=True)
 class BarCountScope(LookbackScope):
@@ -29,16 +32,47 @@ class BarCountScope(LookbackScope):
     def resolve(self, *args: Any, **kwargs: Any) -> BarCountScope:
         return BarCountScope(self.count.resolve(*args, **kwargs))
 
-    def resolved_count(self) -> int:
+    def resolved_count(
+        self,
+        *,
+        ctx: Any | None = None,
+        source_freq: Any | None = None,
+        products: Any = (),
+    ) -> int:
         if not isinstance(self.count, ConstExpr):
             raise TypeError("bar-search scope must resolve to a constant bar count")
-        value = int(self.count.value)
-        if value <= 0 or value != self.count.value:
-            raise ValueError("bar-search scope requires a positive integer bar count")
-        return value
+        value = self.count.value
+        if isinstance(value, bool):
+            raise ValueError("bar-search scope requires a positive bar count or duration")
+        if isinstance(value, int):
+            count = value
+        else:
+            frequency = source_freq if ctx is None else ctx.freq
+            scope_products = products if ctx is None else ctx.products
+            if frequency is None:
+                raise ValueError("duration bar-search scope requires a source frequency")
+            from .rolling import _resolve_windows
+            common, count, _ = _resolve_windows(value, frequency, scope_products)
+            if not common:
+                raise ValueError(
+                    "bar-search duration must resolve to one common bar count "
+                    "for all selected products"
+                )
+        if count <= 0:
+            raise ValueError("bar-search scope requires a positive bar count or duration")
+        return int(count)
+
+    def resolve_for_streaming(self, source_freq: Any, products: Any) -> BarCountScope:
+        return BarCountScope(ConstExpr(self.resolved_count(
+            source_freq=source_freq,
+            products=products,
+        )))
 
     def structural_key(self) -> tuple[Any, ...]:
         return (type(self).__name__, self.kind, self.count._structural_key())
+
+    def to_latex(self, subst: dict | None = None) -> str:
+        return f"\\mathrm{{bars}}\\left({self.count._to_latex(subst)}\\right)"
 
 
 @dataclass(frozen=True)
@@ -49,20 +83,25 @@ class SessionScope(LookbackScope):
     def structural_key(self) -> tuple[Any, ...]:
         return (type(self).__name__, self.kind, self.gap)
 
+    def to_latex(self, subst: dict | None = None) -> str:
+        return f"\\mathrm{{session}}\\left(\\mathrm{{{self.gap}}}\\right)"
+
 
 @dataclass(frozen=True)
 class TradingDayScope(LookbackScope):
     kind: str = "trading_day"
 
+    def to_latex(self, subst: dict | None = None) -> str:
+        return "\\mathrm{trading\\_day}"
 
-def bars(count: Any) -> BarCountScope:
+
+def scope_bars(count: Any) -> BarCountScope:
     return BarCountScope(_to_expr(count))
 
 
-def session(*, gap: str = "3h") -> SessionScope:
+def scope_session(*, gap: str = "3h") -> SessionScope:
     return SessionScope(gap=gap)
 
 
-def trading_day() -> TradingDayScope:
+def scope_trading_day() -> TradingDayScope:
     return TradingDayScope()
-

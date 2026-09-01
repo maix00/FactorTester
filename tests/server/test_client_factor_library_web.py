@@ -606,19 +606,19 @@ def test_validate_transient_duration_factor_supports_bar_distance_source() -> No
     client = _app().test_client()
     _login(client)
     source = "\n".join((
-        "from tools.factors import CANDIDATE, CURRENT, FactorFamily, bars",
+        "from tools.factors import CANDIDATE, CURRENT, FactorFamily, scope_bars",
         "from tools.factors.FactorExpr import CLOSE, VOLUME",
-        "from tools.parameters import FactorParam",
+        "from tools.parameters import FactorParam, WindowParam",
         "class DurationSignal(FactorFamily):",
         "    source_freq = '1m'",
         "    @staticmethod",
         "    def factor_expr():",
         "        Th = FactorParam('Th', default_value=0.001)",
-        "        K = FactorParam('K', default_value=30)",
+        "        K = WindowParam('K', default_value='30m')",
         "        match = (CURRENT - CANDIDATE).abs() / (CURRENT.abs() + 1e-10) >= Th",
-        "        pdur = CLOSE.bar_distance(match, scope=bars(K), default=K)",
-        "        vdur = VOLUME.bar_distance(match, scope=bars(K), default=K)",
-        "        return (pdur + vdur) / 2.0",
+        "        pdur = CLOSE.bar_distance(match, scope=scope_bars(K))",
+        "        vdur = VOLUME.bar_distance(match, scope=scope_bars(K))",
+        "        return ((pdur + vdur) / 2.0).as_intermediate('差持续期')",
         "",
     ))
 
@@ -631,8 +631,13 @@ def test_validate_transient_duration_factor_supports_bar_distance_source() -> No
     payload = response.get_json()
     assert payload["valid"] is True, payload
     assert payload["normalized_params"]["Th"] == "0.001"
-    assert payload["normalized_params"]["K"] == "30"
+    assert payload["normalized_params"]["K"] == "30m"
     assert "BarDistance" in payload["math_expr"]
+    assert r"\mathrm{nearest}" in payload["math_expr"]
+    assert r"\mathrm{bars}\left(\textcolor{red}{K}\right)" in payload["math_expr"]
+    assert payload["math_expr"].count(":=") == 1
+    assert r"\mathrm{差持续期}_t" in payload["math_expr"]
+    assert "X_t :=" not in payload["math_expr"]
 
 
 def test_factor_operator_catalog_exposes_bar_search_operators() -> None:
@@ -648,13 +653,16 @@ def test_factor_operator_catalog_exposes_bar_search_operators() -> None:
         for group in groups
         for operator in [*(group.get("operators") or []), *(group.get("more_operators") or [])]
     }
-    assert {"bar_since", "bar_distance"} <= operators.keys()
+    assert {"bar_since", "bar_distance", "window_bars"} <= operators.keys()
     assert 'select="nearest"' in operators["bar_since"]["desc"]
     assert "include_current=True" in operators["bar_since"]["desc"]
     assert "CURRENT" in operators["bar_distance"]["desc"]
     assert "CANDIDATE" in operators["bar_distance"]["desc"]
     assert "session" in operators["bar_distance"]["desc"]
     assert "trading_day" in operators["bar_distance"]["desc"]
+    assert "WindowParam" in operators["bar_distance"]["desc"]
+    assert "当前 scope 已积累的距离" in operators["bar_distance"]["desc"]
+    assert "搜索范围直接写 scope_bars(K)" in operators["window_bars"]["desc"]
 
 
 def test_validate_factor_alias_accepts_unregistered_canonical_member(monkeypatch) -> None:
