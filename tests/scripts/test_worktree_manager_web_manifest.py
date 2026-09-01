@@ -52,6 +52,7 @@ def test_manifest_matches_html_script_order_and_files() -> None:
         "styles/outputs/backtest-results.css",
         "styles/workbench.css", "styles/workbench-settings.css",
         "styles/docs.css", "styles/task-inputs.css",
+        "styles/strategy-library.css",
     ]
     assert "FT_STATIC_STYLES" in template
     assert "FT_STATIC_SCRIPTS" in template
