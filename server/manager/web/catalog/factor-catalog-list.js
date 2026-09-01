@@ -180,9 +180,17 @@
     const label = String(
       page === "families" ? modelFamilyLabel(item) : item?.factor_alias || "",
     ).trim();
-    if (!familyAlias || !window.confirm(
-      context.t("确认删除“%@”？").replace("%@", label || familyAlias),
-    )) return;
+    if (!familyAlias) return;
+    const factorCount = page === "families"
+      ? Math.max(0, Number(item?.factor_count || 0)) : 0;
+    const confirmed = page === "families"
+      ? await confirmFamilyDeletion(
+        context, label || familyAlias, factorCount,
+      )
+      : window.confirm(
+        context.t("确认删除“%@”？").replace("%@", label || familyAlias),
+      );
+    if (!confirmed) return;
     const endpoint = page === "families"
       ? scope === "public"
         ? `/api/factor-library/families/public/${encodeURIComponent(familyAlias)}`
@@ -203,6 +211,51 @@
     } catch (error) {
       context.showNotice?.(error.message || context.t("删除失败"), true);
     }
+  }
+
+  function confirmFamilyDeletion(context, label, factorCount) {
+    return new Promise(resolve => {
+      const dialog = document.createElement("dialog");
+      const card = document.createElement("form");
+      card.method = "dialog";
+      card.className = "dialog-card factor-family-delete-card";
+      const title = document.createElement("h2");
+      title.textContent = context.t("删除因子家族");
+      const message = document.createElement("p");
+      message.textContent = context.t("确认删除“%@”？").replace("%@", label);
+      card.append(title, message);
+      if (factorCount > 0) {
+        const warning = document.createElement("p");
+        warning.className = "form-error factor-family-delete-warning";
+        warning.setAttribute("role", "alert");
+        warning.textContent = context.t(
+          `该因子家族仍有 ${factorCount} 个因子。继续删除会级联删除这些因子，且无法恢复。`,
+        );
+        card.append(warning);
+      }
+      const actions = document.createElement("div");
+      actions.className = "dialog-actions";
+      const cancel = FTUI.actionButton(
+        context.t("取消"), () => dialog.close("cancel"), {variant: "secondary"},
+      );
+      cancel.type = "button";
+      const confirm = FTUI.actionButton(
+        context.t(factorCount > 0 ? "删除家族及因子" : "删除"),
+        () => dialog.close("confirm"), {variant: "danger"},
+      );
+      confirm.type = "button";
+      actions.append(cancel, confirm);
+      card.append(actions);
+      dialog.append(card);
+      dialog.addEventListener("close", () => {
+        const accepted = dialog.returnValue === "confirm";
+        dialog.remove();
+        resolve(accepted);
+      }, {once: true});
+      document.body.append(dialog);
+      if (typeof dialog.showModal === "function") dialog.showModal();
+      else dialog.setAttribute("open", "");
+    });
   }
 
   function modelFamilyLabel(item) {

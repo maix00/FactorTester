@@ -52,27 +52,28 @@ const state = {
 const controller = {enqueue: value => chunks.push(Buffer.from(value).toString('utf8'))};
 
 (async () => {
-  await window.FTProfileChatKitStream.streamTurn(
-    controller,
-    state,
-    {profileID: 'profile-main'},
-    {input: '补充约束'},
-    new AbortController().signal,
-    async () => {},
+  await assert.rejects(
+    window.FTProfileChatKitStream.streamTurn(
+      controller,
+      state,
+      {profileID: 'profile-main'},
+      {input: '补充约束'},
+      new AbortController().signal,
+      async () => {},
+    ),
+    /already responding/,
   );
 
-  assert.equal(rpcMethods.length, 1);
+  assert.equal(rpcMethods.length, 1, 'stale-state recovery checks the atomic steer endpoint');
   assert.equal(rpcMethods[0].method, 'turn/steer');
-  assert.equal(rpcMethods[0].params.turnId, 'turn-active');
   assert.equal(state.active, true, 'the authoritative turn remains active');
   assert.equal(state.turnID, 'turn-active');
   assert.equal(state.assistant, existingAssistant, 'the active response is not reset');
   assert.equal(state.source, existingSource, 'the active event stream is retained');
   assert.equal(existingSource.closed, false, 'steering does not close the event stream');
-  assert.equal(state.items.length, 1);
-  assert.equal(state.items[0].type, 'user_message');
-  assert.match(chunks.join(''), /补充约束/);
-  console.log('PASS: a same-conversation message steers the active Profile Agent turn');
+  assert.equal(state.items.length, 0);
+  assert.equal(chunks.length, 0);
+  console.log('PASS: live turns stay on ChatKit controls and reject unpromoted recovery');
 })().catch(error => {
   console.error(error);
   process.exitCode = 1;
