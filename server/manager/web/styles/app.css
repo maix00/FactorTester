@@ -492,6 +492,8 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .action-button { min-height: 34px; border: 1px solid transparent; border-radius: 8px; padding: 8px 12px; color: inherit; }
 .action-button.primary { color: white; border-color: var(--accent); background: var(--accent); }
 .action-button.secondary { border-color: var(--line); background: #e9e9ed; }
+.action-button.warning { color: #8a4b08; border-color: #d97706; background: #fff4df; }
+.action-button.danger { color: #fff; border-color: var(--danger); background: var(--danger); }
 .action-button:hover:not(:disabled) { filter: brightness(.97); }
 .action-button:disabled { cursor: default; opacity: .45; }
 .form-error { color: var(--danger); font-size: 13px; }
@@ -576,6 +578,7 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .factor-family-formula { margin: 0; }
 .factor-family-delete-card { width: min(520px, calc(100vw - 32px)); }
 .factor-family-delete-warning { padding: 12px 14px; border-left: 4px solid var(--danger, #d92d20); background: color-mix(in srgb, var(--danger, #d92d20) 9%, transparent); }
+.dialog-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
 .job-section { display: grid; gap: 10px; min-width: 0; }
 .job-section h2 { font-size: 16px; margin: 0; }
 .research-workspace-page { display: grid; gap: 22px; min-width: 0; }
