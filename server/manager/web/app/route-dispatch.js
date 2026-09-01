@@ -77,7 +77,7 @@
           pages.backtest, route,
         );
         case "factor-series": return guarded(
-          context(routeToken), {nav: "factors", title: "因子序列", allowVisitor: true},
+          context(routeToken), {nav: "jobs", title: "查看因子序列", allowVisitor: true},
           pages.factorSeries, route.factorRef, route.groupRef,
         );
         case "test-template": return guarded(

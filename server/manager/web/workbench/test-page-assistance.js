@@ -45,7 +45,7 @@
           items: structuredClone(itemSchema),
         },
       },
-    } : {
+    } : state.kind === "ic" ? {
       type: "object",
       required: ["configuration_groups"],
       "x-forbidden-properties": FTTestConfigurationCompiler.derivedSettingsKeys(),
@@ -56,6 +56,19 @@
           maxItems: Number(itemContract.max_items) || undefined,
           items: structuredClone(itemSchema),
         },
+      },
+    } : {
+      type: "object",
+      required: ["factor_ref", "product_path_selection"],
+      "x-forbidden-properties": FTTestConfigurationCompiler.derivedSettingsKeys(),
+      properties: {
+        factor_ref: {type: "string", minLength: 1},
+        factor_alias: {type: "string"},
+        factor_family_alias: {type: "string"},
+        product_path_selection_id: {type: "string"},
+        product_path_selection: {type: "object"},
+        paths: {type: "array", items: {type: "string"}},
+        execution: {type: "object"},
       },
     };
     return {
@@ -248,7 +261,8 @@
       };
     }
     const groups = state.kind === "backtest"
-      ? analysis.groups || [] : analysis.configuration_groups || [];
+      ? analysis.groups || []
+      : state.kind === "ic" ? analysis.configuration_groups || [] : [];
     const itemContract = manifest.configuration_item_contract || {};
     const groupContract = itemContract.schema;
     const groupIDs = groups.map((group, index) => {
@@ -283,28 +297,35 @@
       };
       return id;
     });
-    nodes.configurations = {
-      id: "configurations",
-      kind: "collection",
-      label: state.kind === "backtest" ? "策略" : "配置组",
-      summary: `${groupIDs.length}`,
-      collection_path: `configuration.analyses.${state.kind}.${
-        itemContract.collection_key
-      }`,
-      item_kind: itemContract.item_kind,
-      required_fields: structuredClone(groupContract?.required || []),
-      create_template: structuredClone(itemContract.create_template || {}),
-      field_sources: structuredClone(itemContract.field_sources || {}),
-      batch_contract: structuredClone(itemContract.batch_contract || {}),
-      item_schema: structuredClone(groupContract || {}),
-      children: groupIDs,
+    if (state.kind !== "factor_evaluation") {
+      nodes.configurations = {
+        id: "configurations",
+        kind: "collection",
+        label: state.kind === "backtest" ? "策略" : "配置组",
+        summary: `${groupIDs.length}`,
+        collection_path: `configuration.analyses.${state.kind}.${
+          itemContract.collection_key
+        }`,
+        item_kind: itemContract.item_kind,
+        required_fields: structuredClone(groupContract?.required || []),
+        create_template: structuredClone(itemContract.create_template || {}),
+        field_sources: structuredClone(itemContract.field_sources || {}),
+        batch_contract: structuredClone(itemContract.batch_contract || {}),
+        item_schema: structuredClone(groupContract || {}),
+        children: groupIDs,
+      };
+    }
+    const pageLabels = {
+      backtest: "回测配置", ic: "IC 测试配置",
+      factor_evaluation: "查看因子序列配置",
     };
     nodes.page = {
       id: "page",
       kind: "page",
-      label: state.kind === "backtest" ? "回测配置" : "IC 测试配置",
+      label: pageLabels[state.kind] || "测试配置",
       summary: `${mounted.size} mounted tabs`,
-      children: [...tabIDs, "configurations"],
+      children: state.kind === "factor_evaluation"
+        ? tabIDs : [...tabIDs, "configurations"],
     };
     return {schema_version: 1, root_id: "page", nodes};
   }

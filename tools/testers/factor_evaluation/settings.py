@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from tools.testers._shared import (
+    CATEGORY_CANDIDATE_KEYS,
+    CATEGORY_SELECTION_KEYS,
     FACTOR_CANDIDATE_KEYS,
     FACTOR_SET_SELECTION_KEYS,
     FACTOR_SELECTION_KEYS,
@@ -16,6 +18,8 @@ from tools.testers._shared import (
     register_factor_selection_base,
     register_factor_source_selections_base,
     register_market_data_base,
+    register_category_candidate_list_base,
+    register_category_selection_base,
     register_product_path_candidate_list_base,
     register_product_path_selection_base,
     register_run_window_base,
@@ -34,6 +38,8 @@ def register_factor_evaluation_settings(app: ApplicationSettings) -> None:
         *RUN_WINDOW_KEYS,
         *PRODUCT_PATH_CANDIDATE_KEYS,
         *PRODUCT_PATH_SELECTION_KEYS,
+        *CATEGORY_CANDIDATE_KEYS,
+        *CATEGORY_SELECTION_KEYS,
         *FACTOR_CANDIDATE_KEYS,
         *FACTOR_SET_SELECTION_KEYS,
         *FACTOR_SELECTION_KEYS,
@@ -42,6 +48,7 @@ def register_factor_evaluation_settings(app: ApplicationSettings) -> None:
     )
     for module in (
         SettingModule("product_selection", "产品选择", "product", 10),
+        SettingModule("category_grouping", "产品分类", "category", 15),
         SettingModule("run_window", "计算时间范围", "time", 20),
         SettingModule("market_data_source", "数据源", "market_data", 30),
         SettingModule("market_data_frequency", "价格频率", "market_data", 40),
@@ -52,12 +59,20 @@ def register_factor_evaluation_settings(app: ApplicationSettings) -> None:
     for tab in (
         SettingTab(
             "product_path_selection",
-            "产品",
+            "产品组",
             (TabMountPoint.LOCAL_SETTINGS,),
             "settings-grid",
             10,
             (TabMountPoint.LOCAL_SETTINGS,),
             content_adapter="product_path_selection",
+        ),
+        SettingTab(
+            "category",
+            "产品分类",
+            (TabMountPoint.LOCAL_SETTINGS,),
+            "settings-grid",
+            15,
+            content_adapter="category_selection",
         ),
         SettingTab(
             "time",
@@ -85,6 +100,8 @@ def register_factor_evaluation_settings(app: ApplicationSettings) -> None:
     register_run_window_base(app)
     register_product_path_candidate_list_base(app, tab="product_path_selection")
     register_product_path_selection_base(app, tab="product_path_selection")
+    register_category_candidate_list_base(app, tab="category")
+    register_category_selection_base(app, tab="category")
     register_market_data_base(app, include_price_type=True)
     register_factor_candidate_list_base(app)
     register_factor_set_selections_base(app)

@@ -1,6 +1,6 @@
-"""Home — 顶层测试模块注册中心。
+"""Home — 顶层测试类型注册中心。
 
-注册所有顶级页面 Module（单因子家族测试、...）。模块列表是声明式 config
+注册所有平行测试类型 Module。模块列表是声明式 config
 （见 static/config/testers/home.json）——不需要手写 Module 子类，新增顶级
 页面只改那份 JSON。
 """
@@ -26,18 +26,12 @@ def _build_app_resolver(cfg: dict[str, Any]):
     return fn
 
 
-def _single_factor_family_test_module_registry():
-    from tools.testers.single_factor_family_test.registry import SingleFactorFamilyTestModuleRegistry
-    return SingleFactorFamilyTestModuleRegistry()
-
-
 def _backtest_module_registry():
     from tools.testers.backtest.modules.registry import BacktestModuleRegistry
     return BacktestModuleRegistry()
 
 
 _SUB_REGISTRY_FACTORIES = {
-    "single_factor_family_test_module_registry": _single_factor_family_test_module_registry,
     "backtest_module_registry": _backtest_module_registry,
 }
 

@@ -61,6 +61,14 @@ _RESEARCH_TABS = (
 
 _TEST_TYPE_MODULES = (
     {
+        "id": "factor-series", "title": "查看因子序列", "title_key": "查看因子序列",
+        "desc": "计算并查看因子值、价格与合约区间",
+        "description_key": "计算并查看因子值、价格与合约区间",
+        "icon": "FS", "sfSymbol": "waveform.path.ecg", "path": "/factor-series",
+        "requiresAuth": False, "roles": [], "sidebarVisible": False,
+        "homeVisible": False, "pinned": False, "tab_behavior": "new",
+    },
+    {
         "id": "ic-test",
         "title": "IC 测试",
         "title_key": "IC 测试",
@@ -155,6 +163,14 @@ _NAVIGATION_MODULES: tuple[dict[str, Any], ...] = (
         "sidebarVisible": True,
         "homeVisible": True,
         "pinned": True,
+    },
+    {
+        "id": "factor-series", "title": "查看因子序列", "title_key": "查看因子序列",
+        "desc": "计算并查看因子值、价格与合约区间",
+        "description_key": "计算并查看因子值、价格与合约区间",
+        "icon": "FS", "sfSymbol": "waveform.path.ecg", "path": "/factor-series",
+        "requiresAuth": False, "roles": [], "sidebarVisible": False,
+        "homeVisible": False, "pinned": False, "tab_behavior": "new",
     },
     {
         "id": "ic-test",

@@ -363,12 +363,6 @@ class TestAuthoringService:
             else BacktestModuleRegistry()
         )
         manifest["executable_modules"] = registry.module_manifest()
-        if application == "single_factor_page":
-            manifest["shared_global_default_keys"] = (
-                backtest_setting_registry.shared_global_default_keys((
-                    "factor_evaluation", "ic_test", "group_test",
-                ))
-            )
         return {"success": True, **manifest}
 
     @staticmethod

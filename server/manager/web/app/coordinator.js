@@ -51,6 +51,13 @@
   // it avoids stale report/job responses replacing the current tab.
   let activeRouteToken = 0;
 
+  function routePresentation(routeToken) {
+    return FTRoutePresentation.create({
+      isCurrent: () => routeToken === activeRouteToken,
+      activeNav, setHeading, updateActiveTab,
+    });
+  }
+
   function loginRequiredView() {
     const note = FTUI.empty(
       t("登录后继续"),
@@ -65,10 +72,11 @@
   }
 
   const jobsContext = (routeToken = activeRouteToken) => ({
-    api, raw, navigate, openTab, activeNav, setHeading, button, content, toolbar, t,
+    api, raw, navigate, openTab, button, content, toolbar, t,
     openLogin, showNotice, servicePath,
-    loginRequiredView, updateActiveTab, session: state.session, modules: state.modules,
+    loginRequiredView, session: state.session, modules: state.modules,
     isRouteCurrent: () => routeToken === activeRouteToken,
+    ...routePresentation(routeToken),
     ...currentTabContext(),
   });
 
@@ -80,11 +88,12 @@
   }
 
   const appContext = (routeToken = activeRouteToken) => ({
-    api, raw, navigate, activeNav, setHeading, button, content, toolbar,
-    servicePath, showNotice, openLogin, logout, updateActiveTab,
+    api, raw, navigate, button, content, toolbar,
+    servicePath, showNotice, openLogin, logout,
     activateTab: tabs?.activateTab, closeTab: tabs?.closeTab,
     session: state.session, t, ...currentTabContext(),
     isRouteCurrent: () => routeToken === activeRouteToken,
+    ...routePresentation(routeToken),
     languagePreference: state.languagePreference,
     setLanguagePreference,
     checkpointTabSession: tabs?.scheduleActiveSessionCheckpoint,
@@ -237,7 +246,8 @@
     return {
       state, api, t, content, toolbar, button,
       ...currentTabContext(),
-      tabID: state.activeTabID, tabSession, activeNav, setHeading, updateActiveTab,
+      tabID: state.activeTabID, tabSession,
+      ...routePresentation(routeToken),
       saveActiveTabSession, openTab, navigate, showNotice,
       captureScrollPosition,
       checkpointTabSession: tabs?.scheduleActiveSessionCheckpoint,

@@ -2546,11 +2546,16 @@ def test_client_module_catalog_keeps_test_routes_out_of_entry_surfaces(tmp_path)
     assert modules["home"]["title_key"] == "主页"
     assert modules["home"]["sidebarVisible"] is True
     assert modules["home"]["homeVisible"] is False
+    assert modules["factor-series"]["title_key"] == "查看因子序列"
     assert modules["ic-test"]["title_key"] == "IC 测试"
     assert modules["backtest"]["title_key"] == "回测"
     assert modules["ic-test"]["sfSymbol"] == "chart.xyaxis.line"
     assert modules["backtest"]["sfSymbol"] == "chart.line.uptrend.xyaxis"
-    for module_id, path in (("ic-test", "/ic-test"), ("backtest", "/backtest")):
+    for module_id, path in (
+        ("factor-series", "/factor-series"),
+        ("ic-test", "/ic-test"),
+        ("backtest", "/backtest"),
+    ):
         assert modules[module_id]["sidebarVisible"] is False
         assert modules[module_id]["homeVisible"] is False
         assert modules[module_id]["path"] == path
@@ -2562,7 +2567,7 @@ def test_client_module_catalog_keeps_test_routes_out_of_entry_surfaces(tmp_path)
     test_tabs = modules["jobs"]["children"]
     assert [item["id"] for item in test_tabs] == ["jobs.types", "jobs.list"]
     assert [item["id"] for item in test_tabs[0]["children"]] == [
-        "ic-test", "backtest",
+        "factor-series", "ic-test", "backtest",
     ]
     assert "single_factor_test" not in modules
 
@@ -2853,7 +2858,7 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
     assert "job.execution_port" in jobs
     assert "function executionTarget" in job_detail
     assert "context.showNotice?.(" in artifacts
-    assert "api, raw, navigate, openTab, activeNav" in coordinator
+    assert "routePresentation(routeToken)" in coordinator
     assert "priceChart" in viewers
     assert "dataTable" in viewers
     assert "tableModel" in viewers

@@ -1,6 +1,6 @@
 """Shared factor execution setting registrations.
 
-Used by: single_factor_page, group_test, ic_test, factor_evaluation,
+Used by: group_test, ic_test, factor_evaluation,
          factor_type_analysis.
 """
 
