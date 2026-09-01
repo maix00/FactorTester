@@ -13,6 +13,7 @@ from tools.factors.expr import (
     CrossSectionalOp,
     EvaluateContext,
     RollingOp,
+    SignalAlign,
     term_carry_annualized,
     term_contango,
     term_curvature,
@@ -23,6 +24,7 @@ from tools.factors.expr import (
     term_slope_segment,
     term_spread,
 )
+from tools.factors.expr.timeline import build_panel_timeline
 from tools.products.categories.Category import Category
 from tools.products.AdjustableTermStructure import (
     AdjustableProductMixin,
@@ -49,6 +51,59 @@ def test_factor_expr_compile_incremental_returns_run_scoped_executor():
 
     executor.on_bar("2024-01-02", {"P1": {"CLOSE": 12.0}})
     assert executor.on_signal("2024-01-02") == {"P1": 13.0}
+
+
+def test_incremental_nested_signal_align_holds_last_formed_value():
+    expr = SignalAlign(CLOSE, "2m") + CLOSE
+    executor = expr.compile_incremental(
+        factor_alias="nested_signal_hold",
+        products=("P1",),
+        source_freq=DataFreq.MIN1,
+    )
+
+    observed = []
+    for minute, close in enumerate([1.0, 2.0, 3.0, 4.0], start=1):
+        timestamp = pd.Timestamp(f"2024-01-01 09:0{minute}:00")
+        executor.on_bar(timestamp, {"P1": {"CLOSE_ADJUSTED": close}})
+        observed.append(executor.on_signal(timestamp)["P1"])
+
+    np.testing.assert_allclose(
+        observed,
+        [np.nan, 4.0, 5.0, 8.0],
+        equal_nan=True,
+    )
+
+
+def test_incremental_nested_signal_align_resets_cadence_at_session_gap():
+    expr = SignalAlign(
+        CLOSE,
+        "2m",
+        end_session_skip=True,
+        end_session_gap=pd.Timedelta("3h"),
+    )
+    executor = expr.compile_incremental(
+        factor_alias="session_signal_hold",
+        products=("P1",),
+        source_freq=DataFreq.MIN1,
+    )
+
+    observed = []
+    for timestamp, close in zip(
+        pd.to_datetime([
+            "2024-01-01 09:01", "2024-01-01 09:02", "2024-01-01 09:03",
+            "2024-01-01 21:01", "2024-01-01 21:02",
+        ]),
+        [1.0, 2.0, 3.0, 4.0, 5.0],
+        strict=True,
+    ):
+        executor.on_bar(timestamp, {"P1": {"CLOSE_ADJUSTED": close}})
+        observed.append(executor.on_signal(timestamp)["P1"])
+
+    np.testing.assert_allclose(
+        observed,
+        [np.nan, 2.0, 2.0, 2.0, 5.0],
+        equal_nan=True,
+    )
 
 
 def test_incremental_factor_supports_category_boolean_mask_leaf():
@@ -135,6 +190,7 @@ def _batch_eval(expr, products: tuple[str, ...], rows: pd.DataFrame) -> pd.DataF
             freq=DataFreq.MIN1,
             cache={},
             preloaded=preloaded,
+            panel_timeline=build_panel_timeline(products, DataFreq.MIN1, preloaded),
         )
     )
 
@@ -157,6 +213,92 @@ def _live_eval(expr, products: tuple[str, ...], rows: pd.DataFrame) -> pd.DataFr
         executor.on_bar(timestamp, fields)
         observed.append(pd.Series(executor.on_signal(timestamp), name=timestamp))
     return pd.DataFrame(observed, index=rows.index)[list(products)]
+
+
+def test_incremental_nested_signal_align_matches_batch_hold_semantics():
+    products, rows = _panel()
+    close = ColumnRef(DataColumn.CLOSE)
+    expr = SignalAlign(close, "2m") + close
+
+    batch = _batch_eval(expr, products, rows)
+    live = _live_eval(expr, products, rows)
+
+    pd.testing.assert_frame_equal(
+        live,
+        batch.reindex(index=live.index, columns=live.columns),
+        check_exact=False,
+        rtol=1e-12,
+        atol=1e-12,
+    )
+
+
+def test_incremental_multilevel_signal_align_matches_batch_semantics():
+    products = ("P1",)
+    index = pd.date_range("2024-01-01 09:01", periods=12, freq="min")
+    rows = pd.DataFrame(
+        {("P1", DataColumn.CLOSE.name): np.arange(1.0, 13.0)},
+        index=index,
+    )
+    rows.columns = pd.MultiIndex.from_tuples(rows.columns)
+    close = ColumnRef(DataColumn.CLOSE)
+    inner = SignalAlign(close.rolling(2).mean(), "2m")
+    middle = SignalAlign(inner + close, "3m")
+    expr = SignalAlign(middle * 2.0, "4m") + close
+
+    batch = _batch_eval(expr, products, rows)
+    live = _live_eval(expr, products, rows)
+
+    pd.testing.assert_frame_equal(
+        live,
+        batch.reindex(index=live.index, columns=live.columns),
+        check_exact=False,
+        rtol=1e-12,
+        atol=1e-12,
+    )
+
+
+def test_incremental_shared_nested_signal_advances_cadence_once_per_bar():
+    aligned = SignalAlign(CLOSE, "2m")
+    expr = aligned + aligned
+    executor = expr.compile_incremental(
+        factor_alias="shared_nested_signal",
+        products=("P1",),
+        source_freq=DataFreq.MIN1,
+    )
+
+    observed = []
+    for minute, close in enumerate([1.0, 2.0, 3.0, 4.0], start=1):
+        timestamp = pd.Timestamp(f"2024-01-01 09:0{minute}:00")
+        executor.on_bar(timestamp, {"P1": {"CLOSE_ADJUSTED": close}})
+        observed.append(executor.on_signal(timestamp)["P1"])
+
+    np.testing.assert_allclose(
+        observed,
+        [np.nan, 4.0, 4.0, 8.0],
+        equal_nan=True,
+    )
+
+
+def test_incremental_shared_stateful_child_advances_once_across_signal_layers():
+    shifted = ColumnRef(DataColumn.CLOSE).shift(1)
+    expr = SignalAlign(shifted, "2m") + SignalAlign(shifted, "3m")
+    executor = expr.compile_incremental(
+        factor_alias="shared_stateful_child",
+        products=("P1",),
+        source_freq=DataFreq.MIN1,
+    )
+
+    observed = []
+    for minute, close in enumerate(np.arange(1.0, 9.0), start=1):
+        timestamp = pd.Timestamp(f"2024-01-01 09:0{minute}:00")
+        executor.on_bar(timestamp, {"P1": {"CLOSE": close}})
+        observed.append(executor.on_signal(timestamp)["P1"])
+
+    np.testing.assert_allclose(
+        observed,
+        [np.nan, np.nan, 3.0, 5.0, 5.0, 10.0, 10.0, 12.0],
+        equal_nan=True,
+    )
 
 
 class _MemoryTermStore:
