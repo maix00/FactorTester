@@ -910,8 +910,16 @@
     }
 
     function currentTabContext() {
+      const activeTab = state.tabs.find(tab => tab.id === state.activeTabID);
       return {
         tabID: state.activeTabID,
+        // Keep hierarchy metadata in the shared route context so pages can
+        // inherit their parent Research assistant without reimplementing tab
+        // storage lookups.  Expose only the stable relationship fields, not
+        // the mutable tab object itself.
+        parentFolder: String(activeTab?.parentFolder || ""),
+        parentTabID: String(activeTab?.parentTabID || ""),
+        parentResearchID: String(activeTab?.parentResearchID || ""),
         tabSession: viewCache.tabSession(state.activeTabID),
         pageState: viewCache.pageState(state.activeTabID),
         pageAgentLifecycle,

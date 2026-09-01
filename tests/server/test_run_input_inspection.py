@@ -76,3 +76,32 @@ def test_strategy_inspection_rejects_source_without_strategy_subclass() -> None:
 
     assert response.status_code == 400
     assert response.get_json()["code"] == "invalid_strategy_source"
+
+
+def test_strategy_inspection_uses_inherited_callbacks() -> None:
+    client = _app().test_client()
+    _login(client)
+    source = """from tools.testers.backtest.engines.native.strategy import Strategy
+
+class Base(Strategy):
+    def on_bar(self, ctx, bar):
+        return None
+
+class Child(Base):
+    def on_order_filled(self, ctx, order):
+        return None
+"""
+    response = client.post(
+        "/api/run-inputs/strategy/inspect",
+        json={
+            "path": "strategies/inherited.py",
+            "source_code": source,
+            "entrypoint": "Child",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["entrypoint"] == "Child"
+    assert payload["callbacks"] == ["on_bar", "on_order_filled"]
+    assert [hook["name"] for hook in payload["hooks"]] == ["on_order_filled"]

@@ -240,6 +240,8 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .ft-multi-select-search { flex: 1 1 auto; min-width: 0; height: auto; min-height: 0; border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; color: inherit; background: var(--soft); }
 .ft-multi-select-clear { flex: 0 0 auto; width: 30px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: var(--panel); cursor: pointer; }
 .ft-multi-select-clear:hover { color: inherit; background: var(--soft); }
+.ft-multi-select-load-status { color: var(--muted); font-size: 11px; line-height: 1.35; }
+.ft-multi-select-load-status.is-error { color: var(--danger, #c0392b); }
 .ft-multi-select-options { display: grid; gap: 2px; min-height: 0; max-height: min(320px, 42vh); overflow-y: auto; }
 .factor-product-group-filter-menu { max-height: min(680px, calc(100vh - 32px)); }
 .ft-multi-select-option { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 8px; min-width: 0; padding: 6px 7px; border-radius: 6px; cursor: pointer; }

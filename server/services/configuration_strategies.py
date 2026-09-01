@@ -6,7 +6,7 @@ from copy import deepcopy
 from typing import Any
 from uuid import uuid4
 
-from server.services.strategy_library.model import inspect_source, normalize_entrypoint
+from server.services.strategy_source_inspection import inspect_source, normalize_entrypoint
 
 
 def _normalize_target(value: Any) -> str:
@@ -126,7 +126,7 @@ def add_inline(
             "entrypoint": entrypoint,
             "source_code": str(source_code),
             "source_sha256": inspection["source_sha256"],
-            "hooks": inspection["hooks"],
+            "hooks": inspection.get("effective_hooks", inspection["hooks"]),
             "requirements": deepcopy(requirements or {}),
         }
         strategies.append(existing)
@@ -219,7 +219,7 @@ def update_inline(
         "entrypoint": next_entrypoint,
         "source_code": next_source,
         "source_sha256": inspection["source_sha256"],
-        "hooks": inspection["hooks"],
+        "hooks": inspection.get("effective_hooks", inspection["hooks"]),
     })
     if requirements is not None:
         if not isinstance(requirements, dict):

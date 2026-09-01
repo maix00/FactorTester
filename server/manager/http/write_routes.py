@@ -480,6 +480,12 @@ class WriteRoutesMixin:
             return
         if self._patch_research_object_routes(parsed):
             return
+        # Manager-owned application APIs, including Strategy library CRUD,
+        # must be dispatched before the business-port proxies.  PATCH used to
+        # skip this seam even though GET/POST/PUT/DELETE all reached it,
+        # making visibility and edit operations fail with a misleading 404.
+        if self._serve_manager_application(parsed, method="PATCH"):
+            return
         if self._proxy_job_request(parsed, method="PATCH"):
             return
         if self._proxy_service_write(parsed, method="PATCH"):

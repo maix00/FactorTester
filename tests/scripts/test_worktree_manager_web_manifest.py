@@ -1777,8 +1777,9 @@ def test_shared_multi_select_enforces_exclusive_and_single_selection() -> None:
 
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "multi_select_filter.js"
     source = WEB_ROOT / "catalog" / "shared" / "multi-select-filter.js"
+    remote_source = WEB_ROOT / "catalog" / "shared" / "multi-select-filter-remote.js"
     result = subprocess.run(
-        ["node", str(fixture), str(source)], cwd=ROOT,
+        ["node", str(fixture), str(remote_source), str(source)], cwd=ROOT,
         capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr or result.stdout
@@ -1792,6 +1793,12 @@ def test_shared_multi_select_enforces_exclusive_and_single_selection() -> None:
     assert "height: max-content" in styles
     assert ".ft-multi-select-options" in styles
     assert 'menuClass: "factor-product-group-filter-menu"' in factor_filter
+    manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text())
+    assert "catalog-selection-remote" in manifest["group_dependencies"][
+        "workbench-strategy-bindings"
+    ]
+    assert str(remote_source.relative_to(WEB_ROOT)).replace("\\", "/") in manifest[
+        "groups"]["catalog-selection-remote"]
 
 
 def test_registered_locked_fields_share_one_visual_and_picker_contract() -> None:

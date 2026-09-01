@@ -15,32 +15,32 @@
     const rows = document.createElement("div");
     rows.className = "strategy-binding-rows";
     root.append(rows);
-    let candidates = [];
-    let loadStarted = false;
-    let loaded = false;
-    const load = async () => {
-      if (loadStarted) return;
-      loadStarted = true;
-      try {
-        candidates = await FTStrategyLibraryRuntime.available(context);
-      } catch (error) {
-        context.showNotice?.(error.message || context.t("策略库读取失败"), true);
-      } finally {
-        loaded = true;
-      }
-      if (root.isConnected) redraw();
+    const searchCache = new Map();
+    const searchInFlight = new Map();
+    const searchStrategies = query => {
+      const normalized = String(query || "").trim().toLocaleLowerCase();
+      if (searchCache.has(normalized)) return Promise.resolve(searchCache.get(normalized));
+      if (searchInFlight.has(normalized)) return searchInFlight.get(normalized);
+      const request = FTStrategyLibraryRuntime.search(context, normalized)
+        .then(items => {
+          const result = Array.isArray(items) ? items : [];
+          searchCache.set(normalized, result);
+          return result;
+        })
+        .finally(() => searchInFlight.delete(normalized));
+      searchInFlight.set(normalized, request);
+      return request;
     };
     const redraw = () => {
       rows.replaceChildren(...groups.map(group => bindingRow(
-        context, state, group, candidates, loaded, refresh, redraw,
+        context, state, group, searchStrategies, refresh, redraw,
       )));
     };
     redraw();
-    void load();
     return root;
   }
 
-  function bindingRow(context, state, group, candidates, loaded, refresh, redraw) {
+  function bindingRow(context, state, group, searchStrategies, refresh, redraw) {
     const root = document.createElement("div");
     root.className = "strategy-binding-row";
     const title = document.createElement("strong");
@@ -49,13 +49,16 @@
     const current = (state.strategyBindings || []).find(item => (
       item.target_strategy_id === group.id
     ));
-    const values = strategyItems(state, candidates, current);
+    const values = strategyItems(state, [], current);
     const selected = current ? bindingValue(state, current, values) : "";
     const picker = FTTestObjectPicker.create(context, {
       title: context.t("策略"), name: `strategy-binding-${group.id}`,
       items: values, selected: selected ? [selected] : [], multi: false,
-      loading: !loaded,
-      loadingText: context.t("正在读取策略库…"),
+      note: context.t("打开下拉后按名称或引用搜索策略库；临时策略仅属于当前配置"),
+      searchPlaceholder: context.t("搜索策略名称或引用…"),
+      loadItems: async query => strategyItems(
+        state, await searchStrategies(query), current,
+      ),
       onChange: next => {
         const value = next[0] || "";
         if (!value) {

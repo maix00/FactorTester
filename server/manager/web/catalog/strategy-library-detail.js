@@ -6,7 +6,9 @@
     context.content.replaceChildren(FTUI.loading(context.t("正在读取策略…")));
     let value = {};
     if (!creating) {
-      const response = await FTStrategyLibraryRuntime.get(context, strategyRef);
+      const response = await FTStrategyLibraryRuntime.get(context, strategyRef, {
+        includeSource: mode !== "view",
+      });
       value = response.strategy || response;
     }
     if (context.isRouteCurrent?.() === false) return;
@@ -33,18 +35,61 @@
     ));
     const root = document.createElement("section");
     root.className = "strategy-library-detail strategy-library-page";
+    const source = lazySource(context, strategy.strategy_ref, revision.revision_ref);
+    const detailTabs = FTObjectDetailTabs.definitions("strategy", {
+      hooks: {hidden: true},
+    });
+    detailTabs.find(item => item.key === "source").onActivate = source.load;
     const tabs = FTObjectDetailTabs.create(context, {
       objectKind: "strategy", mode: "view",
       stateKey: `strategy-detail-tabs:${strategy.strategy_ref}`,
+      tabs: detailTabs,
       panels: {
         overview: details(context, strategy, revision),
-        source: FTUI.code(revision.source_code || "", {language: "python", className: "strategy-source-viewer"}),
+        source: source.panel,
         revisions: revisions(context, strategy.revisions || []),
       },
-      overrides: {hooks: {hidden: true}},
     });
     root.append(tabs.root);
     context.content.replaceChildren(root);
+  }
+
+  function lazySource(context, strategyRef, revisionRef) {
+    const panel = document.createElement("div");
+    panel.className = "strategy-source-lazy";
+    panel.append(FTUI.empty(
+      context.t("切换到源码页签后读取源码"),
+      context.t("源码按需加载，避免策略详情首屏传输大段文本"),
+    ));
+    let state = "idle";
+    async function load() {
+      if (state === "loading" || state === "loaded") return;
+      if (!revisionRef) {
+        panel.replaceChildren(FTUI.empty(context.t("当前版本暂无源码")));
+        state = "loaded";
+        return;
+      }
+      state = "loading";
+      panel.replaceChildren(FTUI.loading(context.t("正在读取源码…")));
+      try {
+        const response = await FTStrategyLibraryRuntime.getRevision(
+          context, strategyRef, revisionRef, {includeSource: true},
+        );
+        if (context.isRouteCurrent?.() === false) return;
+        const source = response.revision || {};
+        panel.replaceChildren(FTUI.code(source.source_code || "", {
+          language: "python", className: "strategy-source-viewer",
+        }));
+        state = "loaded";
+      } catch (error) {
+        if (context.isRouteCurrent?.() === false) return;
+        panel.replaceChildren(FTUI.empty(
+          context.t("源码读取失败"), error.message || "",
+        ));
+        state = "error";
+      }
+    }
+    return {panel, load};
   }
 
   function details(context, strategy, revision) {
@@ -99,8 +144,24 @@
       ), {variant: "secondary"},
     ));
     context.content.replaceChildren(editor.form);
+    const explicitProfileID = String(route?.researchProfileID || "").trim();
+    const researchID = context.parentFolder === "research"
+      ? String(context.parentResearchID || "").trim() : "";
+    let profileListPromise = null;
+    const resolveProfiles = researchID ? () => {
+      profileListPromise ||= FTPageAgentProfiles.forResearch(context, researchID);
+      return profileListPromise;
+    } : null;
     FTStrategyLibraryAssistance.register(context, editor, {
-      mode, boundProfileID: route?.researchProfileID || "",
+      mode,
+      ...(explicitProfileID && !researchID ? {boundProfileID: explicitProfileID} : {}),
+      ...(researchID ? {
+        researchID,
+        resolveProfiles,
+        resolveProfile: async () => (
+          (await resolveProfiles())[0] || FTPageAgentProfiles.self(context)
+        ),
+      } : {}),
     });
     editor.form.addEventListener("submit", async event => {
       event.preventDefault();

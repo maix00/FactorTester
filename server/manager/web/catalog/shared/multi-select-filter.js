@@ -112,6 +112,8 @@
     let selected = normalizeSelected(options.selected ?? [], items);
     if (!multi && selected.length > 1) selected = [selected[selected.length - 1]];
     let committedSelected = [...selected];
+    const remoteFactory = typeof options.loadItems === "function"
+      && window.FTMultiSelectRemote?.create;
 
     const section = document.createElement("section");
     section.className = ["ft-multi-select-filter", options.className || ""]
@@ -199,11 +201,14 @@
     const optionList = document.createElement("div");
     optionList.className = "ft-multi-select-options";
     optionList.setAttribute("role", "group");
+    const loadStatus = remoteFactory ? Object.assign(document.createElement("div"), {
+      className: "ft-multi-select-load-status", hidden: true,
+    }) : null;
     const note = document.createElement("div");
     note.className = "ft-multi-select-selection-note";
     const actions = document.createElement("div");
     actions.className = "ft-multi-select-actions";
-    menu.append(searchRow, optionList);
+    menu.append(searchRow, ...(loadStatus ? [loadStatus] : []), optionList);
     if (multi) menu.append(note);
     if (multi) menu.append(actions);
     dropdown.append(summary, menu);
@@ -318,6 +323,31 @@
       return selectedFirst(filtered);
     }
 
+    function setItems(nextItems, preserveSelected = false) {
+      const preserved = preserveSelected
+        ? items.filter(item => selected.includes(item.value)
+          || committedSelected.includes(item.value))
+        : [];
+      items.splice(0, items.length, ...normalizeItems([
+        ...preserved,
+        ...(Array.isArray(nextItems) ? nextItems : []),
+      ]).map(item => ({
+        ...item,
+        disabled: item.disabled || (typeof options.disabled === "function"
+          ? Boolean(options.disabled(item)) : controlDisabled),
+      })));
+      selected = normalizeSelected(selected, items);
+      if (!multi && selected.length > 1) selected = [selected[selected.length - 1]];
+      committedSelected = preserveSelected
+        ? normalizeSelected(committedSelected, items) : [...selected];
+      render();
+    }
+
+    const remote = remoteFactory ? remoteFactory({
+      context, options, controlDisabled, search, loadStatus, setItems,
+      refresh: () => render(),
+    }) : null;
+
     function render() {
       const labels = labelsFor();
       const summaryValue = labels.length
@@ -338,6 +368,7 @@
           ? `${translate(context, "已选择", "已选择")}：${labels.join("、")}`
           : translate(context, "尚未选择");
       }
+      remote?.render();
       clear.hidden = !String(search.value || "");
       optionList.replaceChildren(...visibleItems().map(item => {
         const row = document.createElement("label");
@@ -427,10 +458,14 @@
 
     clear.addEventListener("click", () => {
       search.value = "";
-      render();
+      remote?.schedule(0);
+      if (!remote) render();
       search.focus();
     });
-    search.addEventListener("input", render);
+    search.addEventListener("input", () => {
+      remote?.schedule();
+      if (!remote) render();
+    });
     dropdown.addEventListener("toggle", () => {
       const shell = section.closest?.(".backend-settings-shell");
       if (shell?.classList?.toggle) {
@@ -441,6 +476,7 @@
       }
       if (dropdown.open && !controlDisabled) {
         portalMenu();
+        void remote?.load(search.value);
         options.onOpen?.();
       } else {
         if (dropdown.open && controlDisabled) dropdown.open = false;
@@ -507,17 +543,7 @@
         committedSelected = [...selected];
         render();
       },
-      setItems(nextItems) {
-        items.splice(0, items.length, ...normalizeItems(nextItems).map(item => ({
-          ...item,
-          disabled: item.disabled || (typeof options.disabled === "function"
-            ? Boolean(options.disabled(item)) : controlDisabled),
-        })));
-        selected = normalizeSelected(selected, items);
-        if (!multi && selected.length > 1) selected = [selected[selected.length - 1]];
-        committedSelected = [...selected];
-        render();
-      },
+      setItems,
     });
   }
 

@@ -7,7 +7,7 @@ import pytest
 from server.services import configuration_strategies
 from server.services.strategy_bindings import compile_configuration_strategies
 from server.services.strategy_library import StrategyLibraryService
-from server.services.strategy_library.model import inspect_source
+from server.services.strategy_source_inspection import inspect_source
 
 
 SOURCE = """from tools.testers.backtest.engines.native.strategy import Strategy
@@ -53,6 +53,26 @@ def test_library_requires_a_native_strategy_entrypoint(tmp_path: Path) -> None:
     assert strategy["current_revision"]["hooks"][0]["name"] == "on_bar"
 
 
+def test_source_inspection_includes_inherited_callbacks(tmp_path: Path) -> None:
+    source = """from tools.testers.backtest.engines.native.strategy import Strategy
+
+class Base(Strategy):
+    def on_bar(self, ctx, bar):
+        return None
+
+class Child(Base):
+    def on_order_filled(self, ctx, order):
+        return None
+"""
+    inspection = inspect_source(source, "Child")
+    assert inspection["callbacks"] == ["on_bar", "on_order_filled"]
+    assert [hook["name"] for hook in inspection["hooks"]] == ["on_order_filled"]
+    assert [hook["name"] for hook in inspection["effective_hooks"]] == [
+        "on_order_filled", "on_bar",
+    ]
+    assert inspection["effective_hooks"][1]["declared_on"] == "Base"
+
+
 def test_library_scopes_and_immutable_revisions(tmp_path: Path) -> None:
     service = StrategyLibraryService(
         tmp_path / "manager.sqlite",
@@ -78,6 +98,50 @@ def test_library_scopes_and_immutable_revisions(tmp_path: Path) -> None:
     assert service.get_revision(
         strategy["strategy_ref"], old_revision, principal="bob",
     )["revision"]["source_code"] == SOURCE
+
+
+def test_strategy_reads_can_omit_source_and_updates_are_atomic(tmp_path: Path) -> None:
+    service = library(tmp_path)
+    strategy = create_strategy(service)
+    current_ref = strategy["current_revision"]["revision_ref"]
+
+    summary = service.get(
+        strategy["strategy_ref"], principal="alice", include_source=False,
+    )["strategy"]
+    assert "source_code" not in summary["current_revision"]
+
+    with pytest.raises(KeyError):
+        service.store.update_entry_with_revision(
+            strategy["strategy_ref"],
+            name="partially changed",
+            description="should roll back",
+            visibility="public",
+            expected_revision_ref=current_ref,
+            revision={"source_sha256": "missing-fields"},
+        )
+    unchanged = service.get(strategy["strategy_ref"], principal="alice")["strategy"]
+    assert unchanged["name"] == strategy["name"]
+    assert unchanged["visibility"] == strategy["visibility"]
+    assert unchanged["current_revision"]["revision_ref"] == current_ref
+
+
+def test_library_list_pages_visible_rows_at_the_database_boundary(tmp_path: Path) -> None:
+    service = library(tmp_path)
+    mine = create_strategy(service)
+    public = create_strategy(service, owner="bob", visibility="public")
+    create_strategy(service, owner="carol")
+
+    first_page = service.list(principal="alice", scope="all", page=1, limit=1)
+    second_page = service.list(principal="alice", scope="all", page=2, limit=1)
+
+    assert first_page["total"] == 2
+    assert first_page["total_pages"] == 2
+    assert len(first_page["items"]) == 1
+    assert len(second_page["items"]) == 1
+    assert {
+        first_page["items"][0]["strategy_ref"],
+        second_page["items"][0]["strategy_ref"],
+    } == {mine["strategy_ref"], public["strategy_ref"]}
 
 
 def test_configuration_inline_sources_are_deduplicated(tmp_path: Path) -> None:

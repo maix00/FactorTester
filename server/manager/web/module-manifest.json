@@ -143,7 +143,8 @@
       "workbench-configuration-groups", "workbench-ic-controls"
     ],
     "workbench-strategy-bindings": [
-      "workbench-input-state", "object-editor-overlay", "strategy-library-runtime"
+      "workbench-input-state", "object-editor-overlay", "strategy-library-runtime",
+      "catalog-selection-remote"
     ],
     "workbench-backtest": ["workbench-configuration-groups"],
     "workbench-templates": ["workbench-core", "code-viewer"],
@@ -240,6 +241,9 @@
     ],
     "catalog-selection-core": [
       "catalog/shared/multi-select-filter.js"
+    ],
+    "catalog-selection-remote": [
+      "catalog/shared/multi-select-filter-remote.js"
     ],
     "catalog-detail-tabs": [
       "catalog/shared/object-detail-tabs.js"
@@ -620,6 +624,7 @@
     "core/price-chart.js",
     "core/market-data.js",
     "catalog/shared/multi-select-filter.js",
+    "catalog/shared/multi-select-filter-remote.js",
     "jobs/list-format.js",
     "jobs/page-tabs.js",
     "jobs/test-types.js",

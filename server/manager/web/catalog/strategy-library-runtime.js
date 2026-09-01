@@ -19,13 +19,27 @@
     return request(context, `/api/strategy-library/strategies?${params}`);
   }
 
-  async function available(context) {
-    const value = await list(context, {scope: "all", page: 1, limit: 100});
+  async function search(context, query = "") {
+    const value = await list(context, {
+      scope: "all", page: 1, limit: 40, query,
+    });
     return Array.isArray(value?.items) ? value.items : [];
   }
 
-  function get(context, ref) {
-    return request(context, path(ref));
+  function withSource(url, includeSource) {
+    if (includeSource === undefined) return url;
+    return `${url}?include_source=${includeSource ? "1" : "0"}`;
+  }
+
+  function get(context, ref, options = {}) {
+    return request(context, withSource(path(ref), options.includeSource));
+  }
+
+  function getRevision(context, ref, revisionRef, options = {}) {
+    return request(
+      context,
+      withSource(path(ref, `/revisions/${encodeURIComponent(revisionRef)}`), options.includeSource),
+    );
   }
 
   function create(context, payload) {
@@ -61,6 +75,6 @@
   }
 
   window.FTStrategyLibraryRuntime = Object.freeze({
-    available, create, get, grant, list, remove, revoke, shares, update,
+    create, get, getRevision, grant, list, remove, revoke, search, shares, update,
   });
 })();

@@ -5,12 +5,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from .model import (
-    inspect_source,
-    normalize_entrypoint,
-    normalize_text,
-    normalize_visibility,
-)
+from server.services.strategy_source_inspection import inspect_source, normalize_entrypoint
+
+from .model import normalize_text, normalize_visibility
 from .permissions import access_for, subordinate_principals
 from .store import StrategyLibraryStore
 
@@ -31,8 +28,13 @@ class StrategyLibraryService:
         principal: str,
         *,
         subordinate_users: set[str] | None = None,
+        explicitly_shared: bool | None = None,
     ) -> dict[str, bool]:
-        shares = set(self.store.shares(str(entry["strategy_ref"])))
+        shares = (
+            {principal} if explicitly_shared
+            else set() if explicitly_shared is not None
+            else set(self.store.shares(str(entry["strategy_ref"])))
+        )
         return access_for(
             entry,
             principal=principal,
@@ -50,8 +52,10 @@ class StrategyLibraryService:
         principal: str,
         *,
         subordinate_users: set[str] | None = None,
+        revision: dict[str, Any] | None = None,
+        explicitly_shared: bool | None = None,
     ) -> dict[str, Any]:
-        revision = self.store.get_revision(str(entry["current_revision_ref"]))
+        revision = revision or self.store.get_revision(str(entry["current_revision_ref"]))
         if revision is None:
             raise RuntimeError("strategy current revision is missing")
         item = dict(entry)
@@ -61,6 +65,7 @@ class StrategyLibraryService:
         }
         item["access"] = self._access(
             entry, principal, subordinate_users=subordinate_users,
+            explicitly_shared=explicitly_shared,
         )
         return item
 
@@ -79,28 +84,17 @@ class StrategyLibraryService:
         page = max(1, int(page))
         limit = min(100, max(1, int(limit)))
         subordinate_users = subordinate_principals(principal, self.account_provider)
-        rows: list[dict[str, Any]] = []
-        for entry in self.store.list_entries(query=query):
-            owner = str(entry["owner_ref"])
-            visibility = str(entry["visibility"])
-            if scope == "mine" and owner != principal:
-                continue
-            if scope == "subordinates" and owner not in subordinate_users:
-                continue
-            if scope == "shared" and (
-                owner == principal or visibility not in {"shared", "public"}
-            ):
-                continue
-            access = self._access(
-                entry, principal, subordinate_users=subordinate_users,
-            )
-            if not access["can_view"]:
-                continue
-            rows.append(self._summary(
-                entry, principal, subordinate_users=subordinate_users,
-            ))
-        total = len(rows)
-        start = (page - 1) * limit
+        visible, total = self.store.list_visible_entries(
+            principal=principal, scope=scope,
+            subordinate_users=subordinate_users, query=query,
+            page=page, limit=limit,
+        )
+        rows = [self._summary(
+            value["entry"], principal,
+            subordinate_users=subordinate_users,
+            revision=value["revision"],
+            explicitly_shared=value["explicitly_shared"],
+        ) for value in visible]
         return {
             "success": True,
             "scope": scope,
@@ -108,17 +102,22 @@ class StrategyLibraryService:
             "limit": limit,
             "total": total,
             "total_pages": max(1, (total + limit - 1) // limit),
-            "items": rows[start:start + limit],
+            "items": rows,
         }
 
-    def get(self, strategy_ref: str, *, principal: str) -> dict[str, Any]:
+    def get(
+        self, strategy_ref: str, *, principal: str,
+        include_source: bool = True,
+    ) -> dict[str, Any]:
         entry = self.store.get_entry(strategy_ref)
         if entry is None:
             raise KeyError("strategy not found")
         access = self._access(entry, principal)
         if not access["can_view"]:
             raise PermissionError("无权查看该策略")
-        revision = self.store.get_revision(str(entry["current_revision_ref"]))
+        revision = self.store.get_revision(
+            str(entry["current_revision_ref"]), include_source=include_source,
+        )
         if revision is None:
             raise RuntimeError("strategy current revision is missing")
         item = dict(entry)
@@ -130,13 +129,16 @@ class StrategyLibraryService:
 
     def get_revision(
         self, strategy_ref: str, revision_ref: str, *, principal: str,
+        include_source: bool = True,
     ) -> dict[str, Any]:
         entry = self.store.get_entry(strategy_ref)
         if entry is None:
             raise KeyError("strategy not found")
         if not self._access(entry, principal)["can_view"]:
             raise PermissionError("无权查看该策略版本")
-        revision = self.store.get_revision(revision_ref)
+        revision = self.store.get_revision(
+            revision_ref, include_source=include_source,
+        )
         if revision is None or revision["strategy_ref"] != strategy_ref:
             raise KeyError("strategy revision not found")
         return {"success": True, "revision": revision}
@@ -159,7 +161,8 @@ class StrategyLibraryService:
             owner_ref=principal, name=name, description=description,
             visibility=visibility, source_sha256=inspection["source_sha256"],
             source_code=source, entrypoint=entrypoint,
-            hooks=inspection["hooks"], requirements=requirements,
+            hooks=inspection.get("effective_hooks", inspection["hooks"]),
+            requirements=requirements,
             created_by=principal,
         )
         return self.get(refs["strategy_ref"], principal=principal)
@@ -186,21 +189,35 @@ class StrategyLibraryService:
         entrypoint = normalize_entrypoint(payload.get("entrypoint", current["entrypoint"]))
         source_supplied = "source_code" in payload
         source = str(payload.get("source_code") if source_supplied else current["source_code"])
-        inspection = inspect_source(source, entrypoint)
+        source_definition_changed = source_supplied or "entrypoint" in payload
+        inspection = inspect_source(source, entrypoint) if source_definition_changed else {
+            "source_sha256": current["source_sha256"],
+            "hooks": current.get("hooks") or [],
+            "effective_hooks": current.get("hooks") or [],
+        }
         requirements = payload.get("requirements", current.get("requirements") or {})
         if not isinstance(requirements, dict):
             raise ValueError("strategy requirements must be an object")
-        self.store.update_entry(
-            strategy_ref, name=name, description=description, visibility=visibility,
-        )
+        revision = None
         if inspection["source_sha256"] != current["source_sha256"] \
-                or entrypoint != current["entrypoint"] or requirements != current.get("requirements", {}):
-            self.store.add_revision(
-                strategy_ref, source_sha256=inspection["source_sha256"],
-                source_code=source, entrypoint=entrypoint,
-                hooks=inspection["hooks"], requirements=requirements,
-                created_by=principal,
-            )
+                or entrypoint != current["entrypoint"] \
+                or requirements != current.get("requirements", {}):
+            revision = {
+                "source_sha256": inspection["source_sha256"],
+                "source_code": source,
+                "entrypoint": entrypoint,
+                "hooks": inspection.get("effective_hooks", inspection["hooks"]),
+                "requirements": requirements,
+                "created_by": principal,
+            }
+        self.store.update_entry_with_revision(
+            strategy_ref,
+            name=name,
+            description=description,
+            visibility=visibility,
+            expected_revision_ref=str(current["revision_ref"]),
+            revision=revision,
+        )
         return self.get(strategy_ref, principal=principal)
 
     def delete(self, strategy_ref: str, *, principal: str) -> dict[str, Any]:

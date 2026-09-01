@@ -18,18 +18,21 @@
     context.content.replaceChildren(FTUI.loading(context.t("正在读取策略库…")));
     const query = context.tabSession.strategyLibraryList || {page: 1, query: ""};
     context.tabSession.strategyLibraryList = query;
+    query.requestID = Number(query.requestID || 0) + 1;
+    const requestID = query.requestID;
     let value;
     try {
       value = await FTStrategyLibraryRuntime.list(context, {
         scope, page: query.page, query: query.query,
       });
     } catch (error) {
+      if (query.requestID !== requestID) return;
       context.content.replaceChildren(FTUI.empty(
         context.t("无法读取策略库"), error.message || String(error),
       ));
       return;
     }
-    if (context.isRouteCurrent?.() === false) return;
+    if (context.isRouteCurrent?.() === false || query.requestID !== requestID) return;
     const root = document.createElement("section");
     root.className = "library-page strategy-library-page";
     root.append(scopeTabs(context, scope));

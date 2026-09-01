@@ -7,7 +7,7 @@ from typing import Any
 
 from server.services.configuration_strategies import view
 from server.services.strategy_library import StrategyLibraryService
-from server.services.strategy_library.model import inspect_source
+from server.services.strategy_source_inspection import inspect_source
 
 
 def compile_configuration_strategies(

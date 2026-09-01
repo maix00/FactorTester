@@ -45,7 +45,11 @@
     }, {
       pageKind: `strategy-${options.mode || "edit"}`,
       view: () => ({selected_tab: editor.tabs.current()}),
-      boundProfileID: options.boundProfileID,
+      ...(options.boundProfileID ? {boundProfileID: options.boundProfileID} : {}),
+      ...(options.researchID ? {researchID: options.researchID} : {}),
+      ...(options.resolveProfiles ? {resolveProfiles: options.resolveProfiles} : {}),
+      ...(options.resolveProfile ? {resolveProfile: options.resolveProfile} : {}),
+      ...(options.profileKey ? {profileKey: options.profileKey} : {}),
     });
   }
 

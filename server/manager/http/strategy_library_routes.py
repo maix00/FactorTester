@@ -77,20 +77,34 @@ class StrategyLibraryRoutesMixin:
             )
         strategy_ref = tail[0]
         if len(tail) == 1:
-            return service.get(strategy_ref, principal=principal)
+            return service.get(
+                strategy_ref,
+                principal=principal,
+                include_source=StrategyLibraryRoutesMixin._include_source(query),
+            )
         if tail[1] == "revisions":
             if len(tail) == 2:
-                value = service.get(strategy_ref, principal=principal)
+                value = service.get(
+                    strategy_ref, principal=principal, include_source=False,
+                )
                 return {
                     "success": True,
                     "strategy_ref": strategy_ref,
                     "revisions": value["strategy"]["revisions"],
                 }
             if len(tail) == 3:
-                return service.get_revision(strategy_ref, tail[2], principal=principal)
+                return service.get_revision(
+                    strategy_ref, tail[2], principal=principal,
+                    include_source=StrategyLibraryRoutesMixin._include_source(query),
+                )
         if tail[1] == "shares" and len(tail) == 2:
             return service.shares(strategy_ref, principal=principal)
         raise KeyError("strategy library route not found")
+
+    @staticmethod
+    def _include_source(query: dict[str, list[str]]) -> bool:
+        value = str(query.get("include_source", ["1"])[0] or "1").strip().lower()
+        return value not in {"0", "false", "no", "off"}
 
     @staticmethod
     def _strategy_library_write(

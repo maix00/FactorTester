@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import ast
-import hashlib
 from typing import Any
 
 from server.modules.shared.factor_param_utils import (
@@ -11,11 +9,8 @@ from server.modules.shared.factor_param_utils import (
     normalize_factor_param_row,
 )
 from server.services.strategy_plans import normalize_strategy_plan
+from server.services.strategy_source_inspection import inspect_source
 from server.services.transient_strategy_sources import validate_entries
-from tools.testers.backtest.engines.native.strategy import STRATEGY_CALLBACKS
-
-
-_STRATEGY_BASES = {"Strategy", "BarStrategy", "EventStrategy", "OrderAwareStrategy"}
 
 
 def family_template_latex(family: Any) -> str:
@@ -68,26 +63,22 @@ def inspect_strategy_source(value: Any) -> dict[str, Any]:
     path = str(value.get("path") or "").replace("\\", "/").strip()
     source = value.get("source_code")
     entries = validate_entries([{"path": path, "source_code": source}])
-    try:
-        tree = ast.parse(entries[0]["source_code"], filename=path)
-    except SyntaxError as exc:
-        raise ValueError(f"strategy source syntax error: {exc.msg}") from exc
-    classes = {
-        node.name: node for node in tree.body if isinstance(node, ast.ClassDef)
-    }
-    candidates = [name for name in classes if _inherits_strategy(name, classes, set())]
     requested = str(value.get("entrypoint") or "").strip()
-    if requested:
-        if requested not in candidates:
-            raise ValueError("strategy entrypoint is not a Strategy subclass")
-        entrypoint = requested
-    elif len(candidates) == 1:
-        entrypoint = candidates[0]
-    elif not candidates:
-        raise ValueError("strategy source does not define a Strategy subclass")
-    else:
-        raise ValueError("strategy source has multiple entrypoints; choose one")
-    callbacks = sorted(_strategy_methods(entrypoint, classes, set()))
+    try:
+        inspection = inspect_source(
+            entries[0]["source_code"], requested or None,
+        )
+    except ValueError as exc:
+        if str(exc).startswith("strategy source has invalid Python syntax"):
+            detail = str(exc).split(": ", 1)[-1]
+            raise ValueError(f"strategy source syntax error: {detail}") from exc
+        if requested and (
+            "class not found" in str(exc) or "not a native Strategy" in str(exc)
+        ):
+            raise ValueError("strategy entrypoint is not a Strategy subclass") from exc
+        raise
+    entrypoint = inspection["entrypoint"]
+    callbacks = list(inspection["callbacks"])
     raw_spec = value.get("strategy_spec")
     if raw_spec is None:
         raw_spec = {
@@ -106,76 +97,15 @@ def inspect_strategy_source(value: Any) -> dict[str, Any]:
         raw_spec.setdefault("entrypoint", entrypoint)
     normalized = normalize_strategy_plan([raw_spec], uploaded_paths=[path])[0]
     normalized["actor_callbacks"] = callbacks
-    source_text = str(entries[0]["source_code"])
-    source_hash = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
-    hooks = []
-    selected_class = classes.get(entrypoint)
-    for node in (selected_class.body if selected_class is not None else []):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        if node.name not in STRATEGY_CALLBACKS:
-            continue
-        start = int(getattr(node, "lineno", 0) or 0)
-        end = int(getattr(node, "end_lineno", start) or start)
-        hooks.append({
-            "name": node.name,
-            "lineno": start,
-            "end_lineno": end,
-            "source": "\n".join(source_text.splitlines()[start - 1:end]) if start else "",
-        })
     return {
         "entrypoint": entrypoint,
         "callbacks": callbacks,
-        "hooks": hooks,
-        "source_sha256": source_hash,
-        "source_bytes": len(source_text.encode("utf-8")),
+        "hooks": inspection["hooks"],
+        "effective_hooks": inspection.get(
+            "effective_hooks", inspection["hooks"],
+        ),
+        "source_sha256": inspection["source_sha256"],
+        "source_bytes": inspection["source_bytes"],
         "requirements": dict(normalized.get("requirements") or {}),
         "strategy_spec": normalized,
     }
-
-
-def _base_name(value: ast.expr) -> str:
-    if isinstance(value, ast.Name):
-        return value.id
-    if isinstance(value, ast.Attribute):
-        return value.attr
-    return ""
-
-
-def _inherits_strategy(
-    name: str,
-    classes: dict[str, ast.ClassDef],
-    visiting: set[str],
-) -> bool:
-    if name in visiting:
-        return False
-    node = classes.get(name)
-    if node is None:
-        return False
-    visiting = {*visiting, name}
-    for base in node.bases:
-        base_name = _base_name(base)
-        if base_name in _STRATEGY_BASES:
-            return True
-        if _inherits_strategy(base_name, classes, visiting):
-            return True
-    return False
-
-
-def _strategy_methods(
-    name: str,
-    classes: dict[str, ast.ClassDef],
-    visiting: set[str],
-) -> set[str]:
-    if name in visiting or name not in classes:
-        return set()
-    visiting = {*visiting, name}
-    node = classes[name]
-    methods = {
-        item.name for item in node.body
-        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
-        and item.name in STRATEGY_CALLBACKS
-    }
-    for base in node.bases:
-        methods.update(_strategy_methods(_base_name(base), classes, visiting))
-    return methods
