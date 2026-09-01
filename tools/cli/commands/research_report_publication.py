@@ -123,7 +123,7 @@ def unpublish_report(
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
 @click.option(
-    "--visibility", type=click.Choice(["private", "authorized", "public"]),
+    "--visibility", type=click.Choice(["private", "superiors", "authorized", "public"]),
     required=True,
 )
 @click.option("--auto-upload/--no-auto-upload", default=True, show_default=True)

@@ -15,16 +15,17 @@
     return {row, input};
   }
 
-  function authorizedUserRow(context, value = "") {
+  function authorizedUserRow(context, value = "", {readOnly = false} = {}) {
     const row = document.createElement("div");
     row.className = "authorized-user";
     const input = document.createElement("input");
     input.placeholder = context.t("完整用户名");
     input.value = value;
-    const remove = FTUI.iconButton(
+    input.readOnly = readOnly;
+    row.append(input);
+    if (!readOnly) row.append(FTUI.iconButton(
       context, "trash", "移除授权用户", () => row.remove(),
-    );
-    row.append(input, remove);
+    ));
     return row;
   }
 
@@ -86,10 +87,11 @@
     const visibilityRow = document.createElement("label");
     visibilityRow.className = "setting-row";
     const visibilityCopy = document.createElement("span");
-    visibilityCopy.innerHTML = `<b>${context.t("访问范围")}</b><small>${context.t("仅自己、指定用户或全体用户")}</small>`;
+    visibilityCopy.innerHTML = `<b>${context.t("访问范围")}</b><small>${context.t("仅自己、分享给上级、指定用户或全体用户")}</small>`;
     const visibility = document.createElement("select");
     [
-      ["private", "仅自己"], ["authorized", "指定用户可见"],
+      ["private", "仅自己"], ["superiors", "分享给上级"],
+      ["authorized", "指定用户可见"],
       ["public", "全体用户共享"],
     ].forEach(([value, label]) => {
       const option = document.createElement("option");
@@ -114,11 +116,41 @@
     usersHeading.append(usersTitle, add);
     const usersList = document.createElement("div");
     usersList.className = "authorized-user-list";
-    (settings.authorized_users || []).forEach(value => (
-      usersList.append(authorizedUserRow(context, value))
-    ));
+    let editableUsers = [...(settings.authorized_users || [])];
+    let renderedMode = visibility.value;
+    const renderUsers = async () => {
+      const mode = visibility.value;
+      usersTitle.textContent = context.t(mode === "superiors" ? "上级用户" : "授权用户");
+      users.hidden = !["superiors", "authorized"].includes(mode);
+      add.hidden = mode !== "authorized";
+      if (mode === "superiors") {
+        const response = await context.api(
+          "/api/research/principals?relation=superiors",
+        );
+        usersList.replaceChildren(...(response.principals || []).map(item => (
+          authorizedUserRow(
+            context, item.label || item.principal_ref, {readOnly: true},
+          )
+        )));
+        return;
+      }
+      usersList.replaceChildren(...editableUsers.map(value => (
+        authorizedUserRow(context, value)
+      )));
+    };
+    visibility.addEventListener("change", () => {
+      if (renderedMode === "authorized") {
+        editableUsers = [...usersList.querySelectorAll("input:not([readonly])")]
+          .map(input => input.value.trim()).filter(Boolean);
+      }
+      renderedMode = visibility.value;
+      void renderUsers().catch(error => context.showNotice?.(
+        error.message || String(error), true,
+      ));
+    });
     users.append(usersHeading, usersList);
     form.append(users);
+    await renderUsers();
 
     const actions = document.createElement("div");
     actions.className = "dialog-actions";
@@ -127,8 +159,10 @@
     const save = context.button(context.t("保存"), async () => {
       save.disabled = true;
       try {
-        const authorizedUsers = [...usersList.querySelectorAll("input")]
-          .map(input => input.value.trim()).filter(Boolean);
+        const authorizedUsers = visibility.value === "authorized"
+          ? [...usersList.querySelectorAll("input:not([readonly])")]
+            .map(input => input.value.trim()).filter(Boolean)
+          : [];
         await context.api("/api/research-publications/settings", {
           method: "POST",
           body: JSON.stringify({

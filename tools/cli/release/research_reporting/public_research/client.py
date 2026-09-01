@@ -127,7 +127,7 @@ class PublicResearchClient:
                         publication.get("visibility", "private")
                         if publication else "private"
                     )
-                    shared = visibility in {"authorized", "public"}
+                    shared = visibility in {"superiors", "authorized", "public"}
                     values.append({
                         "profile_id": profile_id,
                         "work_package_id": work_package_id,

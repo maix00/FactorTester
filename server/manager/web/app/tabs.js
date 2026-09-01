@@ -491,8 +491,13 @@
     function closeTab(tabID) {
       const index = state.tabs.findIndex(tab => tab.id === tabID);
       if (index < 0) return;
-      if (state.activeTabID === tabID) viewCache.saveActiveTabSession();
-      else viewCache.discardView(tabID);
+      if (state.activeTabID === tabID) {
+        viewCache.saveActiveTabSession();
+        // Saving parks live DOM and overlays.  A closing tab must then dispose
+        // that parked view before its session is removed; otherwise detached
+        // live content can remain authoritative after the fallback route.
+        viewCache.discardView(tabID);
+      } else viewCache.discardView(tabID);
       const closingTab = state.tabs[index];
       const closingSession = state.tabSessions.get(tabID) || null;
       // A research tab is only a sidebar folder; its children are independent
@@ -528,8 +533,9 @@
       history.pushState({}, "", fallback?.path || "/");
       renderOpenedTabs();
       checkpointWorkspace();
-      const restored = viewCache.restoreView(state.activeTabID);
-      if (restored === "live") return;
+      // Closing the active tab is a navigation boundary, not an ordinary
+      // cache switch.  Always run the fallback route once so URL, active tab,
+      // route token and rendered content advance atomically.
       renderRoute();
     }
 

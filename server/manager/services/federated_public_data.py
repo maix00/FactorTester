@@ -193,7 +193,7 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
                         "title", "generation", "updated_at", "visibility",
                         "is_owned", "href", "projection_hash",
                         "build_source", "build_source_ref",
-                        "sharing_state", "is_shared",
+                        "sharing_state", "is_shared", "authorized_users",
                     )
                     if key in payload
                 }
@@ -208,7 +208,16 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
                     or ""
                 ).strip()
                 value["source_server_id"] = source_id
-                if value.get("visibility") == "public" or value.get("is_owned"):
+                authorized = {
+                    str(item or "").strip()
+                    for item in value.get("authorized_users") or []
+                    if str(item or "").strip()
+                }
+                if (
+                    value.get("visibility") == "public"
+                    or value.get("is_owned")
+                    or viewer in authorized
+                ):
                     merged[publication_id] = value
                     if source_id:
                         with self._lock:

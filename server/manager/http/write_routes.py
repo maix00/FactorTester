@@ -303,6 +303,9 @@ class WriteRoutesMixin:
                 report_id = str(payload.get("report_id") or "")
                 publication_id = str(payload.get("publication_id") or "").strip()
                 visibility = str(payload.get("visibility") or "private")
+                authorized_users = list(payload.get("authorized_users") or [])
+                if visibility == "superiors":
+                    authorized_users = self._research_catalog_superior_refs(owner)
                 publication = None
                 if publication_id:
                     publication = self.state.public_research.owner_settings(
@@ -321,7 +324,7 @@ class WriteRoutesMixin:
                         public_research=self.state.public_research,
                         visibility=visibility,
                         authorized_users=list(
-                            payload.get("authorized_users") or []
+                            authorized_users
                         ),
                     )
                 else:
@@ -338,7 +341,7 @@ class WriteRoutesMixin:
                             payload.get("relay_local_files", False)
                         ),
                         authorized_users=list(
-                            payload.get("authorized_users") or []
+                            authorized_users
                         ),
                     )
                 self._sync_research_metadata(str(value["publication_id"]))

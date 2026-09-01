@@ -108,7 +108,7 @@ struct ClientTab: Identifiable {
         id: "research",
         title: "研究",
         titleKey: "研究",
-        systemImage: "chart.xyaxis.line",
+        systemImage: "lightbulb",
         content: .research
     )
 
@@ -298,6 +298,24 @@ struct ClientTab: Identifiable {
 
         if path.hasPrefix("/research/") {
             return .researchReport(path: path)
+        }
+        if pathname.hasPrefix("/researches/") {
+            return .web(
+                id: "research-detail:\(path)", title: "研究", titleKey: "研究",
+                systemImage: "lightbulb", path: path
+            )
+        }
+        if pathname.hasPrefix("/evidence/") {
+            return .web(
+                id: "evidence-detail:\(path)", title: "证据", titleKey: "证据",
+                systemImage: "doc.text.magnifyingglass", path: path
+            )
+        }
+        if pathname.hasPrefix("/research-graphs/") {
+            return .web(
+                id: "research-graph:\(path)", title: "研究图", titleKey: "研究图",
+                systemImage: "point.3.connected.trianglepath.dotted", path: path
+            )
         }
         if pathname.hasPrefix("/jobs/") {
             return .web(

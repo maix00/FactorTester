@@ -16,7 +16,7 @@ from .metadata import normalize_build_source, provenance_fields
 from .projection import chapter_projection, component_projection, projection_index
 from .storage import atomic_json, locked_registry, read_json, read_registry
 
-VISIBILITIES = {"private", "authorized", "public"}
+VISIBILITIES = {"private", "superiors", "authorized", "public"}
 
 
 class PublicResearchLibrary:
@@ -667,7 +667,7 @@ def _can_read(record: dict[str, Any], viewer_ref: str | None) -> bool:
         return True
     return bool(
         viewer_ref
-        and record.get("visibility") == "authorized"
+        and record.get("visibility") in {"superiors", "authorized"}
         and viewer_ref in set(record.get("authorized_users") or [])
     )
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.request import Request, urlopen
 
 from server.manager import runtime as manager
@@ -132,6 +133,12 @@ def test_report_settings_target_one_publication_branch(tmp_path: Path):
     state._sessions[state._token_hash(token)] = (
         PRINCIPAL, "user", float("inf"),
     )
+    accounts = [
+        {"username": "GTHT@Chief@1", "parent_username": "", "active": True},
+        {"username": "GTHT@Boss@2", "parent_username": "GTHT@Chief@1", "active": True},
+        {"username": PRINCIPAL, "parent_username": "GTHT@Boss@2", "active": True},
+    ]
+    state.control_store = SimpleNamespace(load_accounts=lambda: accounts)
     publications = []
     for branch in ("branch-a", "branch-b"):
         projection = {
@@ -186,6 +193,37 @@ def test_report_settings_target_one_publication_branch(tmp_path: Path):
         first = state.public_research.owner_settings(publications[0], PRINCIPAL)
         assert first["visibility"] == "private"
         assert first["auto_sync"] is True
+
+        request = Request(
+            f"{base}/api/research/principals?relation=superiors",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        with urlopen(request) as response:
+            principals = json.loads(response.read())["principals"]
+        assert [item["principal_ref"] for item in principals] == [
+            "GTHT@Boss@2", "GTHT@Chief@1",
+        ]
+
+        request = Request(
+            f"{base}/api/research-publications/settings",
+            data=json.dumps({
+                "publication_id": publications[1],
+                "report_id": "report-branches",
+                "visibility": "superiors",
+                "authorized_users": ["GTHT@Ignored@9"],
+            }).encode(),
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urlopen(request) as response:
+            superior_settings = json.loads(response.read())["settings"]
+        assert superior_settings["visibility"] == "superiors"
+        assert superior_settings["authorized_users"] == [
+            "GTHT@Boss@2", "GTHT@Chief@1",
+        ]
     finally:
         server.shutdown()
         server.server_close()

@@ -5,7 +5,12 @@
   // keeping the same semantic symbol name and visual metrics as SwiftUI.
   const moduleSymbols = {
     home: "square.grid.2x2",
-    research: "chart.xyaxis.line",
+    research: "lightbulb",
+    "research.reports": "doc.text",
+    "research.evidence": "doc.text.magnifyingglass",
+    "research.graph": "point.3.connected.trianglepath.dotted",
+    "research.profiles": "person.2.crop.square.stack",
+    "research.agent-models": "server.rack",
     "ic-test": "chart.xyaxis.line",
     backtest: "chart.line.uptrend.xyaxis",
     jobs: "checklist",
@@ -52,6 +57,7 @@
   const shapes = {
     "square.grid.2x2": '<rect x="4" y="4" width="6" height="6" rx="1.2"/><rect x="14" y="4" width="6" height="6" rx="1.2"/><rect x="4" y="14" width="6" height="6" rx="1.2"/><rect x="14" y="14" width="6" height="6" rx="1.2"/>',
     "chart.xyaxis.line": '<path d="M4 20V4M4 20h17"/><path d="m7 15 3-4 3 2 5-7 3 2"/>',
+    "lightbulb": '<path d="M9 18h6M10 21h4"/><path d="M8.2 14.5A7 7 0 1 1 15.8 14.5C14.7 15.3 14 16.4 14 18h-4c0-1.6-.7-2.7-1.8-3.5Z"/>',
     "chart.line.uptrend.xyaxis": '<path d="M4 20V4M4 20h17"/><path d="m7 16 4-5 3 2 6-8"/><path d="M17 5h3v3"/>',
     "checklist": '<path d="M8 6h12M8 12h12M8 18h12"/><path d="m3.5 5.8 1.2 1.2 2.2-2.4M3.5 11.8l1.2 1.2 2.2-2.4M3.5 17.8l1.2 1.2 2.2-2.4"/>',
     "function": '<text x="3" y="17" fill="currentColor" stroke="none" font-size="16" font-family="ui-sans-serif, sans-serif" font-weight="650">ƒ(x)</text>',

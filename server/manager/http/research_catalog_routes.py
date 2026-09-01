@@ -63,6 +63,11 @@ class ResearchCatalogRoutesMixin:
                 payload = {"researches": value, "items": value, "scope": scope}
             elif parsed.path == "/api/research/principals":
                 needle = str(query.get("q", [""])[0]).strip().casefold()
+                relation = str(query.get("relation", [""])[0]).strip()
+                superior_refs = set(
+                    self._research_catalog_superior_refs(viewer)
+                    if relation == "superiors" else []
+                )
                 values = []
                 store = getattr(self.state, "control_store", None)
                 for item in ([] if store is None else store.load_accounts()):
@@ -70,6 +75,7 @@ class ResearchCatalogRoutesMixin:
                     if (
                         not username or username == viewer
                         or item.get("active", True) is False
+                        or (relation == "superiors" and username not in superior_refs)
                         or (needle and needle not in username.casefold())
                     ):
                         continue
@@ -426,6 +432,29 @@ class ResearchCatalogRoutesMixin:
             for item in subordinate_users
             if isinstance(item, dict)
         ]
+
+    def _research_catalog_superior_refs(self, viewer: str) -> list[str]:
+        store = getattr(self.state, "control_store", None)
+        accounts = [] if store is None else list(store.load_accounts())
+        by_username = {
+            str(item.get("username") or "").strip(): item
+            for item in accounts if isinstance(item, dict)
+        }
+        result: list[str] = []
+        current = str(viewer or "").strip()
+        visited: set[str] = set()
+        while current and current not in visited:
+            visited.add(current)
+            account = by_username.get(current)
+            if account is None or account.get("active", True) is False:
+                break
+            parent = str(account.get("parent_username") or "").strip()
+            superior = by_username.get(parent)
+            if not parent or superior is None or superior.get("active", True) is False:
+                break
+            result.append(parent)
+            current = parent
+        return result
 
     def _discover_research_report_records(self, actor: str) -> list[dict]:
         """Project all three existing report stores into one explicit plan."""

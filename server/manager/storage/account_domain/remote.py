@@ -59,7 +59,7 @@ class AccountDomainControlMixin:
             raise ValueError("account-domain entity identity is required")
         encoded = json.dumps(dict(payload or {}), ensure_ascii=False, sort_keys=True)
         visibility = str(payload.get("visibility") or "private").strip().lower()
-        if visibility not in {"private", "authorized", "public"}:
+        if visibility not in {"private", "superiors", "authorized", "public"}:
             visibility = "private"
         authorized = sorted({
             str(item).strip()
@@ -193,7 +193,8 @@ class AccountDomainControlMixin:
                   AND (
                     principal=%s
                     OR visibility='public'
-                    OR (visibility='authorized' AND authorized_users ? %s)
+                    OR (visibility IN ('authorized', 'superiors')
+                        AND authorized_users ? %s)
                   )
                 ORDER BY revision
                 LIMIT %s

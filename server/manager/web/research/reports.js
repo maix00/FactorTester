@@ -155,7 +155,7 @@
     if (value === "shared" || value === "not_shared") return value;
     if (item?.is_shared === true || publication?.is_shared === true) return "shared";
     const visibility = item?.visibility || publication?.visibility;
-    return ["authorized", "public"].includes(visibility)
+    return ["superiors", "authorized", "public"].includes(visibility)
       ? "shared" : "not_shared";
   }
 

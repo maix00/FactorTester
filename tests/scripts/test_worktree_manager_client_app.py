@@ -2249,16 +2249,26 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
             report_settings = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research/reports.js") as response:
             research_reports = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/research/local.js") as response:
+            research_local = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/app/tabs.js") as response:
             tabs = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/app/tab-view-cache.js") as response:
             tab_view_cache = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/workbench/tests.js") as response:
             tests = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/styles/app.css") as response:
+            styles = response.read().decode("utf-8")
 
     assert 'id="opened-tabs"' in shell
     assert 'id="opened-caption"' in shell
     assert "function closeTab" in tabs
+    close_tab = tabs.split("function closeTab", 1)[1].split("function openModule", 1)[0]
+    assert "viewCache.discardView(tabID)" in close_tab
+    assert "viewCache.restoreView(state.activeTabID)" not in close_tab
+    assert "Always run the fallback route once" in close_tab
+    assert '.nav-research-detail-folder > .nav-folder-row { padding-right: 8px; }' in styles
+    assert '.nav-research-detail-folder > .nav-folder-row > .tab-close { width: auto;' in styles
     assert "function renderOpenedTabs" in tabs
     assert "forceNew: true" in tabs
     assert "activeTabHasOverlay" in tabs
@@ -2366,6 +2376,8 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
             report_settings = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research/reports.js") as response:
             research_reports = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/research/local.js") as response:
+            research_local = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/rich-text-blocks.js") as response:
             rich_text_blocks = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/table-view.js") as response:
@@ -2395,15 +2407,22 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'window.FTIcons' in icons
     assert 'chart.xyaxis.line' in icons
     assert 'person.crop.rectangle.stack' in icons
+    assert '"research.reports": "doc.text"' in icons
+    assert '"research.evidence": "doc.text.magnifyingglass"' in icons
     assert 'FTIcons.reference' in rich_text
     assert 'legacyFactorSnapshot' in rich_text
     assert 'reference-legacy' in rich_text
     assert 'window.FTResearchReportSettings' in report_settings
     assert 'publication_id: settings.publication_id' in report_settings
     assert '自动上传' in report_settings
+    assert '["superiors", "分享给上级"]' in report_settings
+    assert 'relation=superiors' in report_settings
+    assert '{readOnly: true}' in report_settings
     assert 'selectedKind === "publication"' in research_reports
     assert 'source_kind: branch.source_kind' in research_reports
     assert 'research-report-tab-actions' in research_reports
+    assert '["superiors", "authorized", "public"]' in research_reports
+    assert '["superiors", "authorized", "public"]' in research_local
     assert 'factortester-local://' in rich_text
     assert '(?:file)' in rich_text
     assert 'return "file"' in rich_text
