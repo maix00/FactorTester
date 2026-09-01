@@ -7,7 +7,11 @@ from server.manager.domain.federation import registry as registry_module
 from server.manager.services.network_info import local_internal_addresses
 from tests.federation_fixtures import federation_registration as _registration
 
-def test_public_device_targets_are_server_discovered_https_peers(tmp_path) -> None:
+
+def test_public_device_targets_are_server_discovered_https_peers(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("FACTORTESTER_LAN_ADDRESSES", "192.168.50.10")
     state = manager.ManagerState(
         tmp_path,
         "python",

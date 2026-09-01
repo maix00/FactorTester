@@ -221,6 +221,7 @@
     ],
     "docs": [
       "docs/source.js",
+      "docs/field-catalog.js",
       "docs/reader.js"
     ],
     "catalog-selection-core": [
@@ -577,6 +578,7 @@
     "profile/page-agent-profiles.js",
     "profile/page-assistance.js",
     "docs/source.js",
+    "docs/field-catalog.js",
     "docs/reader.js",
     "core/highcharts-range-loader.js",
     "core/price-chart.js",
@@ -619,6 +621,7 @@
     "research/local.js",
     "research/evidence-applicability.js",
     "research/evidence.js",
+    "research/visibility.js",
     "research/reports.js",
     "research/shared.js",
     "research/researches.js",

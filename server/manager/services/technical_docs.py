@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
+import json
+import re
 from copy import deepcopy
 from hashlib import sha256
-import json
 from pathlib import Path
-import re
 from urllib.parse import unquote, urlparse
 
-from markdown_it import MarkdownIt
 import nh3
+from markdown_it import MarkdownIt
 
 _ANCHOR = re.compile(r"\s+\{#([a-z0-9][a-z0-9-]*)\}\s*$")
 _HREF = re.compile(r'href="([^"]+)"')
 _INLINE_CODE = re.compile(r"(?<!`)`([^`\n]+)`(?!`)")
-_KINDS = {"guide", "feature", "implementation", "concept", "troubleshooting", "change"}
+_KINDS = {
+    "guide", "feature", "implementation", "concept", "reference",
+    "troubleshooting", "change",
+}
 _SAFE_EXTERNAL_SCHEMES = {"http", "https"}
 _ALLOWED_TAGS = {
     "a", "blockquote", "br", "code", "del", "em", "h2", "h3", "h4",
@@ -36,6 +39,7 @@ class TechnicalDocsLibrary:
         self.root = root.resolve()
         self.code_root = (code_root or self.root.parent).resolve()
         self._index, self._pages = self._compile()
+        self._test_field_catalog: dict[str, list[dict[str, object]]] = {}
 
     def index(self) -> dict[str, object]:
         return deepcopy(self._index)
@@ -46,10 +50,31 @@ class TechnicalDocsLibrary:
         except KeyError as exc:
             raise KeyError(slug) from exc
 
+    def test_field_catalog(self, *, client: str = "web") -> list[dict[str, object]]:
+        """Return field metadata generated from the tester registration code.
+
+        This is deliberately lazy because importing all test modules can
+        require data-engine dependencies that the documentation shell does
+        not need for its first paint.  Once requested, the catalog is kept for
+        the lifetime of Manager, matching the startup-compiled document
+        corpus and ensuring one response cannot mix registry revisions.
+        """
+        if client not in {"web", "swift", "cli"}:
+            raise ValueError(f"unknown tester manifest client: {client}")
+        if client not in self._test_field_catalog:
+            from tools.testers.settings import backtest_setting_registry
+
+            self._test_field_catalog[client] = backtest_setting_registry.field_catalog(
+                client=client,
+            )
+        return deepcopy(self._test_field_catalog[client])
+
     def _manifest(self) -> dict[str, object]:
         data = json.loads((self.root / "manifest.json").read_text(encoding="utf-8"))
         if data.get("schema_version") != 1:
             raise ValueError("technical docs manifest schema is invalid")
+        if data.get("visibility", "public") != "public":
+            raise ValueError("technical docs manifest must be public")
         sections = data.get("sections")
         if not isinstance(sections, list) or not sections:
             raise ValueError("technical docs sections are required")
@@ -197,6 +222,7 @@ class TechnicalDocsLibrary:
         revision = sha256("".join(texts).encode()).hexdigest()
         index = {
             "success": True, "title": manifest["title"],
+            "visibility": manifest.get("visibility", "public"),
             "default_page": manifest["default_page"],
             "revision": f"sha256:{revision}", "sections": manifest["sections"],
             "search": search,

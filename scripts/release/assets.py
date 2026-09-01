@@ -26,6 +26,13 @@ DEPENDENCIES = (
     "pygments==2.20.0",
     "rich==15.0.0",
 )
+# The source packages use the setuptools backend.  Keep the build backend in
+# the release environment instead of letting every wheel invocation create a
+# fresh isolated environment and resolve it again.
+BUILD_DEPENDENCIES = (
+    "setuptools==80.9.0",
+    "wheel==0.45.1",
+)
 PYINSTALLER_VERSION = "6.21.0"
 PYRIGHT_VERSION = "1.1.411"
 RUNTIME_CACHE_SCHEMA = 8
@@ -72,6 +79,7 @@ def runtime_input_digest(
     digest.update(f"python={sys.version_info[:3]}\n".encode())
     digest.update(f"pyinstaller={PYINSTALLER_VERSION}\n".encode())
     digest.update(f"pyright={PYRIGHT_VERSION}\n".encode())
+    digest.update(("\n".join(BUILD_DEPENDENCIES) + "\n").encode())
     digest.update(("\n".join(DEPENDENCIES) + "\n").encode())
     roots = (
         repo / "tools/cli/pyproject.toml",
@@ -276,6 +284,7 @@ def embed_client_runtime(
             [
                 str(python), "-m", "pip", "install",
                 "--disable-pip-version-check",
+                *BUILD_DEPENDENCIES,
                 f"pyinstaller=={PYINSTALLER_VERSION}",
                 f"pyright[nodejs]=={PYRIGHT_VERSION}",
             ],
@@ -649,6 +658,7 @@ def _build_wheel(
                 "-m",
                 "pip",
                 "wheel",
+                "--no-build-isolation",
                 "--no-cache-dir",
                 "--no-deps",
                 "--wheel-dir",

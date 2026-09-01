@@ -114,12 +114,11 @@ def test_generated_test_field_catalog_is_public_and_paged(tmp_path) -> None:
         },
     ]
 
-    with _running_manager(state) as base_url:
-        with urlopen(Request(
-            f"{base_url}/api/docs/test-fields?role=setting&page_size=1",
-            headers=_headers(),
-        )) as response:
-            payload = json.loads(response.read())
+    with _running_manager(state) as base_url, urlopen(Request(
+        f"{base_url}/api/docs/test-fields?role=setting&page_size=1",
+        headers=_headers(),
+    )) as response:
+        payload = json.loads(response.read())
 
     assert payload["success"] is True
     assert payload["source"] == "registered-test-settings"
@@ -146,16 +145,34 @@ def test_generated_test_field_catalog_selects_a_client_projection(tmp_path) -> N
         }]
 
     state.technical_docs.test_field_catalog = catalog
-    with _running_manager(state) as base_url:
-        with urlopen(Request(
-            f"{base_url}/api/docs/test-fields?client=swift",
-            headers=_headers(),
-        )) as response:
-            payload = json.loads(response.read())
+    with _running_manager(state) as base_url, urlopen(Request(
+        f"{base_url}/api/docs/test-fields?client=swift",
+        headers=_headers(),
+    )) as response:
+        payload = json.loads(response.read())
 
     assert calls == ["swift"]
     assert payload["client"] == "swift"
     assert payload["fields"][0]["field_path"] == "run.swift_only"
+
+
+def test_generated_test_field_catalog_reports_missing_registry_dependency(
+    tmp_path,
+) -> None:
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+    state.public_server = True
+
+    def unavailable(*, client="web"):
+        raise ImportError(f"missing registry dependency for {client}")
+
+    state.technical_docs.test_field_catalog = unavailable
+    with _running_manager(state) as base_url, pytest.raises(HTTPError) as error:
+        urlopen(Request(
+            f"{base_url}/api/docs/test-fields",
+            headers=_headers(),
+        ))
+
+    assert error.value.code == 503
 
 
 def test_immutable_research_graph_catalog_is_public_without_a_session(
@@ -285,7 +302,7 @@ def test_native_client_entry_does_not_make_direct_ip_browser_entry_public(
         "https://eloquence-drizzly-fencing.ngrok-free.dev",
     )
     state = manager.ManagerState(tmp_path, "python", server_id="public-main")
-    monkeypatch.setattr(state, "worktrees", lambda: [])
+    monkeypatch.setattr(state, "worktrees", list)
     opener = build_opener(_NoRedirect())
 
     with _running_manager(state) as base_url:

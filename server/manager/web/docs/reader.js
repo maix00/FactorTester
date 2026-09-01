@@ -84,6 +84,9 @@
     article.innerHTML = page.html;
     bindContentLinks(context, article);
     main.append(article);
+    if (slug === "test-fields" && window.FTDocsFieldCatalog?.render) {
+      window.FTDocsFieldCatalog.render(context, main);
+    }
     if (page.related_pages?.length) {
       const related = el("section", "technical-docs-related");
       related.append(el("h2", "", context.t("相关文档")));
