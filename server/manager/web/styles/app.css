@@ -288,13 +288,14 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-editor-version-picker { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .factor-editor-version-picker > *:first-child { min-width: 0; flex: 1 1 auto; }
 .factor-editor-version-actions { flex: 0 0 auto; }
-.factor-detail-parameter-editor { display: grid; min-width: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); }
+.factor-detail-parameter-editor { display: grid; min-width: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+.factor-detail-parameter-editor input, .factor-detail-parameter-editor select, .factor-detail-parameter-editor button { font-family: inherit; }
 .factor-detail-parameter-header, .factor-detail-parameter-row { display: grid; grid-template-columns: minmax(70px, .45fr) minmax(130px, .7fr) minmax(100px, .7fr) minmax(280px, 2.15fr); align-items: start; gap: 12px; min-width: 0; padding: 10px 12px; }
 .factor-detail-parameter-header { color: var(--muted); background: var(--soft); font-size: 12px; }
 .factor-detail-parameter-row + .factor-detail-parameter-row { border-top: 1px solid var(--line); }
 .factor-detail-parameter-key, .factor-detail-parameter-default { overflow-wrap: anywhere; }
 .factor-detail-parameter-default { width: fit-content; max-width: 100%; }
-.factor-detail-parameter-type { display: inline-flex; align-items: center; gap: 5px; min-height: 24px; }
+.factor-detail-parameter-type { display: inline-flex; align-items: center; gap: 5px; min-height: 24px; font-family: inherit; }
 .factor-detail-parameter-value { min-width: 0; }
 .factor-param-reference-control { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 10px; min-width: 0; }
 .factor-param-reference-control > * { min-width: 0; }

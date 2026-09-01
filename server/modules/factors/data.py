@@ -91,7 +91,7 @@ def factor_list():
         factor_data.append({
             'alias': f.alias,
             'name': f.name,
-            'default_return_freq': factor_freq_str,
+            'frequency': factor_freq_str,
             'freq': factor_freq_str2,
             # 因子家族测试设置的"分类"功能依赖旧 params_list 行上的用户标签，已随该
             # 系统移除；page_factors 中的 Factor 实例没有等价属性，暂留空。
