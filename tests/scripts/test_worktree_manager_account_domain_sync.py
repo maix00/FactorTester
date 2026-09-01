@@ -11,6 +11,7 @@ from server.manager.storage.account_domain.remote import (
 )
 from server.manager.storage.account_domain.factor_sync import materialized_factor_configs
 from tools.cli.release.research_reporting.public_research.library import PublicResearchLibrary
+from tools.factors.formula_identity import freeze_factor_identity
 
 
 class MemoryControlStore:
@@ -58,6 +59,14 @@ class MemoryControlStore:
 
 
 def test_factor_sync_materializes_resolved_aliases(monkeypatch) -> None:
+    frozen = freeze_factor_identity(
+        owner_ref="alice",
+        family_alias="CA",
+        factor_alias="CA|$F:1m",
+        family_formula_fingerprint="a" * 64,
+        self_formula_fingerprint="b" * 64,
+        params={"$F": "1m"},
+    )
     monkeypatch.setattr(
         "tools.data.account_manage.get_account",
         lambda owner: {"username": owner, "alias": "Alice"},
@@ -77,6 +86,8 @@ def test_factor_sync_materializes_resolved_aliases(monkeypatch) -> None:
     monkeypatch.setattr(
         "server.modules.custom_factors.factor_library_service.build_factor_library_overview",
         lambda *_args, **_kwargs: {"factors": [{
+            **frozen,
+            "factor_ref": frozen["ref"],
             "factor_alias": "CA|$F:1m",
             "factor_family_alias": "CA",
             "factor_family_name": "CA",
@@ -89,7 +100,11 @@ def test_factor_sync_materializes_resolved_aliases(monkeypatch) -> None:
     values = materialized_factor_configs("alice")
 
     assert values[0][0] == "default:CA"
-    assert values[0][1]["resolved_factors"][0]["factor_alias"] == "CA|$F:1m"
+    resolved = values[0][1]["resolved_factors"][0]
+    assert resolved["factor_alias"] == "CA|$F:1m"
+    assert resolved["factor_ref"] == frozen["ref"]
+    assert resolved["ref"] == frozen["ref"]
+    assert resolved["identity"] == frozen["identity"]
 
 
 def test_factor_catalog_reconcile_is_idempotent_and_removes_local_stale_rows(

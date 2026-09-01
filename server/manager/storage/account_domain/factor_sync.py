@@ -7,6 +7,8 @@ from typing import Any
 
 
 _FACTOR_KEYS = (
+    "schema_version", "ref", "alias", "owner_ref", "identity",
+    "factor_ref",
     "factor_alias", "factor_family_alias", "factor_family_name",
     "factor_owner_ref", "family_formula_fingerprint",
     "self_formula_fingerprint",
