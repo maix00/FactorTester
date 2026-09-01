@@ -56,6 +56,39 @@ vm.runInThisContext(
     /^\/factors\/factor\/factor%3Av2%3Anew\?updated=\d+$/,
   );
   assert.deepEqual(transitions[1], ["close", "factor-detail:factor:old"]);
+
+  const requests = [];
+  const field = value => ({querySelector() { return {value}; }});
+  const edited = await window.FTFactorEditor.saveSourceFactor({
+    async api(path, options) {
+      requests.push([path, options.method]);
+      if (path.includes("/families/custom/")) {
+        return {factor: {id: "SgChgDur", name: "SgChgDur"}};
+      }
+      return {factors: [{
+        factor_ref: "factor:v2:changed",
+        factor_alias: "SgChgDur|Th:[0.01]",
+      }]};
+    },
+  }, {
+    mode: "edit",
+    familyMode: false,
+    publicMode: false,
+    factorID: "SgChgDur|Th:[0.001]",
+    loaded: {factor_family_alias: "SgChgDur"},
+    inspection: {factor_name: "SgChgDur"},
+    sourceCode: "class SgChgDur(FactorFamily): pass",
+    parameterValues: {Th: 0.01},
+  }, {
+    chineseName: field("差持续期"),
+    description: field("说明"),
+    category: field("自编"),
+  });
+  assert.deepEqual(requests, [
+    ["/api/factor-library/families/custom/SgChgDur", "PUT"],
+    ["/api/factor-library/configurations/SgChgDur", "PUT"],
+  ]);
+  assert.equal(edited.factor_ref, "factor:v2:changed");
   console.log("ok");
 })().catch(error => {
   console.error(error);
