@@ -560,6 +560,8 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .research-section-tab { border: 0; border-radius: 7px; padding: 7px 14px; color: inherit; background: transparent; white-space: nowrap; }
 .research-section-tab.active { color: white; background: var(--accent); }
 .research-section-tab:not(.active):hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.research-detail-tabs { width: 100%; }
+.research-detail-tabs .research-report-tab-actions { margin-left: auto; padding-right: 3px; }
 .research-report-tabs { display: flex; gap: 3px; width: fit-content; max-width: 100%; padding: 3px; border-radius: 9px; background: #e9e9ed; overflow-x: auto; }
 .research-reports-for-research { display: grid; gap: 12px; }
 .research-report-info-line { min-height: 38px; display: flex; align-items: center; gap: 12px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
@@ -1043,12 +1045,16 @@ button.reference-item { cursor: pointer; }
   padding: .2rem; cursor: pointer;
 }
 .page-agent-drawer-profile { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.page-agent-drawer-profile-menu-button { width: 1rem; margin-left: -.25rem; padding: 0; }
 .page-agent-drawer-profile-menu { position: absolute; z-index: 1; top: 3rem; left: 1rem;
   min-width: 12rem; padding: .35rem; border: 1px solid var(--border, #d9dce3);
   border-radius: .65rem; background: var(--surface, #fff); box-shadow: 0 .5rem 1.5rem rgb(0 0 0 / 14%); }
 .page-agent-drawer-profile-menu[hidden] { display: none; }
-.page-agent-drawer-profile-menu button { display: block; width: 100%; text-align: left; }
-.page-agent-drawer-profile-menu button.active { color: var(--accent, #356df3); font-weight: 650; }
+.page-agent-drawer-profile-menu button { display: block; width: 100%; border: 0;
+  border-radius: .4rem; padding: .3rem .45rem; background: transparent;
+  color: inherit; text-align: left; }
+.page-agent-drawer-profile-menu button:hover { background: color-mix(in srgb, var(--accent, #356df3) 7%, transparent); }
+.page-agent-drawer-profile-menu button.active { background: transparent; color: var(--accent, #356df3); font-weight: 650; }
 .page-agent-drawer-body { min-height: 0; overflow: auto; padding: .75rem; }
 .page-agent-drawer-body-conversation-only {
   overflow: hidden;

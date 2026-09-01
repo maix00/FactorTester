@@ -240,10 +240,18 @@
   }
 
   function publicationID(item) {
+    const selectedKind = String(item?.selected_branch?.source_kind || "").trim();
     const reference = String(
       item?.source_ref || item?.publication_id || item?.report_id || "",
     ).trim();
     if (!reference || /^(local|server):/.test(reference)) return reference;
+    // A publication id is already the canonical server projection key.  The
+    // parent report may still say build_source=client after migration; using
+    // that stale value here would incorrectly turn the projection into a
+    // local reference.
+    if (selectedKind === "publication" || item?.source_kind === "publication") {
+      return reference;
+    }
     if (item?.build_source === "client") return `local:${reference}`;
     if (item?.build_source === "server_agent") return `server:${reference}`;
     return reference;
@@ -262,8 +270,24 @@
   function selectedSource(item, state) {
     const branch = selectedBranch(item, state);
     return branch?.publication_id
-      ? {...item, source_ref: branch.publication_id, selected_branch: branch}
+      ? {
+        ...item,
+        source_kind: branch.source_kind,
+        source_ref: branch.publication_id,
+        publication_id: branch.publication_id,
+        selected_branch: branch,
+      }
       : item;
+  }
+
+  function installTabActions(mount, actions) {
+    const detail = mount.closest(".research-root-detail");
+    const tabs = detail?.querySelector(".research-detail-tabs");
+    if (!tabs) return false;
+    tabs.querySelector(".research-report-tab-actions")?.remove();
+    actions.classList.add("research-report-tab-actions");
+    tabs.append(actions);
+    return true;
   }
 
   function reportActions(context, researchID, selected, rerender, canManage) {
@@ -417,7 +441,8 @@
       context, "safari", "在独立页面打开",
       () => context.navigate(reportRoute(selectedSource(selected, state), researchID)),
     ));
-    line.append(metadata, actions);
+    line.append(metadata);
+    line.__reportActions = actions;
     return line;
   }
 
@@ -508,14 +533,18 @@
       const root = document.createElement("div");
       root.className = "research-reports-for-research";
       if (!rows.length) {
-        const toolbar = document.createElement("div");
-        toolbar.className = "research-report-info-line";
-        toolbar.append(reportActions(
+        const actions = reportActions(
           context, id, null,
           () => renderForResearch(context, mount, id, options),
           options.canManage === true,
-        ));
-        root.append(toolbar, FTUI.empty(
+        );
+        if (!installTabActions(mount, actions)) {
+          const toolbar = document.createElement("div");
+          toolbar.className = "research-report-info-line";
+          toolbar.append(actions);
+          root.append(toolbar);
+        }
+        root.append(FTUI.empty(
           context.t("暂无研究报告"), context.t("点击加号新建研究报告"),
         ));
         mount.replaceChildren(root);
@@ -526,12 +555,16 @@
       state.selectedReportID = reportIdentity(selected);
       const body = document.createElement("div");
       body.className = "research-report-embedded-body";
-      root.append(reportInfoLine(
+      const infoLine = reportInfoLine(
         context, id, rows, selected, state,
         () => renderForResearch(context, mount, id, options),
         options.canManage === true,
-      ), body);
+      );
+      root.append(infoLine, body);
       mount.replaceChildren(root);
+      if (!installTabActions(mount, infoLine.__reportActions)) {
+        infoLine.append(infoLine.__reportActions);
+      }
       await renderReportBody(context, body, selectedSource(selected, state), state);
     } catch (error) {
       if (current(context)) mount.replaceChildren(

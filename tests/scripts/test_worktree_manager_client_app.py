@@ -2247,6 +2247,8 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
             rich_text = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research/report-settings.js") as response:
             report_settings = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/research/reports.js") as response:
+            research_reports = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/app/tabs.js") as response:
             tabs = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/app/tab-view-cache.js") as response:
@@ -2362,6 +2364,8 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
             rich_text = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research/report-settings.js") as response:
             report_settings = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/research/reports.js") as response:
+            research_reports = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/rich-text-blocks.js") as response:
             rich_text_blocks = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/table-view.js") as response:
@@ -2397,6 +2401,9 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'window.FTResearchReportSettings' in report_settings
     assert 'publication_id: settings.publication_id' in report_settings
     assert '自动上传' in report_settings
+    assert 'selectedKind === "publication"' in research_reports
+    assert 'source_kind: branch.source_kind' in research_reports
+    assert 'research-report-tab-actions' in research_reports
     assert 'factortester-local://' in rich_text
     assert '(?:file)' in rich_text
     assert 'return "file"' in rich_text

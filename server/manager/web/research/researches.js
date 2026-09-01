@@ -615,6 +615,7 @@
     const state = detailState(context);
     const pane = root.querySelector(".research-detail-pane");
     if (!pane || !value) return;
+    root.querySelector(".research-report-tab-actions")?.remove();
     if (state.activeTab === "details") {
       pane.replaceChildren(detailOverview(context, value));
       return;
