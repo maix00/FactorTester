@@ -11,6 +11,7 @@
     jobs: "checklist",
     factors: "function",
     products: "shippingbox",
+    strategies: "arrow.triangle.branch",
     profiles: "person.2.crop.square.stack",
     settings: "person.crop.circle",
     manager: "server.rack",
@@ -125,6 +126,7 @@
       grid: "square.grid.2x2", chart: "chart.xyaxis.line",
       correlation: "chart.xyaxis.line", backtest: "chart.line.uptrend.xyaxis",
       checklist: "checklist", function: "function", box: "shippingbox",
+      strategy: "arrow.triangle.branch",
       profiles: "person.2.crop.square.stack", server: "server.rack",
       settings: "person.crop.circle",
     }[raw] || "link";

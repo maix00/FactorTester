@@ -45,7 +45,7 @@
     if (parts.length <= 1) return t(module.title_key || module.title);
     const labels = {
       research: "研究报告", researches: "研究", "research-graphs": "研究图", jobs: "测试", factors: "因子详情",
-      evidence: "证据", products: "产品详情", profiles: "研究身份", "test-templates": "测试模板",
+      evidence: "证据", products: "产品详情", profiles: "研究身份", strategies: "策略详情", "test-templates": "测试模板",
     };
     if (parts[0] === "products" && parts[1] === "categories") {
       return t("产品分类");
@@ -142,6 +142,7 @@
     },
     {id: "factors", title: "因子库", title_key: "因子库", description_key: "浏览 canonical 与自定义因子", sfSymbol: "function", path: "/factors", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: true},
     {id: "products", title: "产品库", title_key: "产品库", description_key: "查询产品、合约与市场资料", sfSymbol: "shippingbox", path: "/products", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: true},
+    {id: "strategies", title: "策略库", title_key: "策略库", description_key: "管理可复用策略、源码版本与共享范围", sfSymbol: "arrow.triangle.branch", path: "/strategies?scope=mine", requiresAuth: true, sidebarVisible: true, homeVisible: true, pinned: true},
     {id: "manager", title: "服务器管理", title_key: "服务器管理", description_key: "查看端口状态并控制本机服务", sfSymbol: "server.rack", path: "/manager", requiresAuth: true, roles: ["super_admin"], sidebarVisible: false, homeVisible: true, pinned: false, tab_behavior: "new"},
     {id: "mihomo", title: "Mihomo Dashboard", title_key: "Mihomo Dashboard", description_key: "打开官方 Mihomo Dashboard", sfSymbol: "network", path: "/mihomo", requiresAuth: true, roles: ["super_admin"], sidebarVisible: false, homeVisible: true, pinned: false, tab_behavior: "new"},
     {id: "sqlite_web", title: "数据库", title_key: "数据库", description_key: "浏览统一 SQLite 数据库", sfSymbol: "cylinder.split.1x2", path: "/sqlite-web/", requiresAuth: true, roles: ["super_admin"], sidebarVisible: false, homeVisible: true, pinned: false, tab_behavior: "new"},
@@ -199,6 +200,22 @@
       return {kind: "research-graph", id: decodeURIComponent(parts.slice(1).join("/"))};
     }
     if (parts[0] === "research") return {kind: "research"};
+    if (parts[0] === "strategies" && parts[1]) {
+      const id = decodeURIComponent(parts.slice(1).join("/"));
+      const params = new URLSearchParams(search);
+      return {
+        kind: "strategy",
+        id: id === "new" ? "" : id,
+        mode: params.get("mode") || (id === "new" ? "create" : "view"),
+      };
+    }
+    if (parts[0] === "strategies") {
+      const scope = new URLSearchParams(search).get("scope") || "mine";
+      return {
+        kind: "strategy-library",
+        scope: ["mine", "subordinates", "shared"].includes(scope) ? scope : "mine",
+      };
+    }
     // A task URL may omit the worker port when it is only a storage/detail
     // reference.  Classify these suffix routes before the numbered-port
     // matcher so `/jobs/<id>/configuration` cannot become a Job whose port is

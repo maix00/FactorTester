@@ -22,6 +22,12 @@
       ["identity", "身份与来源", false],
       ["jobs", "测试任务", false],
     ],
+    strategy: [
+      ["overview", "详情", true],
+      ["source", "源码", true],
+      ["hooks", "Hooks", false],
+      ["revisions", "版本", false],
+    ],
   });
 
   function definitions(kind, overrides = {}) {

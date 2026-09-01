@@ -12,6 +12,8 @@
     if (!Array.isArray(state.transientStrategySources)) state.transientStrategySources = [];
     if (!Array.isArray(state.strategySpecs)) state.strategySpecs = [];
     if (!Array.isArray(state.strategyInspections)) state.strategyInspections = [];
+    if (!Array.isArray(state.temporaryStrategies)) state.temporaryStrategies = [];
+    if (!Array.isArray(state.strategyBindings)) state.strategyBindings = [];
     if (!Array.isArray(state.runInputDependencies)) state.runInputDependencies = [];
     state.runInputStatus = state.runInputStatus || {busy: false, error: ""};
     return state;
@@ -99,6 +101,9 @@
     state.transientStrategySources = copy("strategy_sources");
     state.strategySpecs = copy("strategy_specs");
     state.strategyInspections = copy("strategy_inspections");
+    state.temporaryStrategies = copy("strategies");
+    state.strategyBindings = Array.isArray(state.analysis?.strategy_bindings)
+      ? structuredClone(state.analysis.strategy_bindings) : [];
     state.runInputDependencies = copy("run_input_dependencies");
     if (!state.values) return;
     state.values.factor_candidates = mergeByID(
@@ -174,6 +179,8 @@
     state.transientStrategySources = [];
     state.strategySpecs = [];
     state.strategyInspections = [];
+    state.temporaryStrategies = [];
+    state.strategyBindings = [];
     state.runInputDependencies = [];
     state.runInputStatus = {busy: false, error: ""};
     state.outputRequests = [];
@@ -199,7 +206,8 @@
     "settingsTabKey", "settingsMountedTabs", "settingsExplicitMountedTabs", "outputRequests",
     "outputRequestsExplicit", "runValues", "transientFactorSources",
     "transientFactorFamilies", "transientStrategySources", "strategySpecs",
-    "strategyInspections", "runInputDependencies", "selectedBacktestGroupIDs",
+    "strategyInspections", "temporaryStrategies", "strategyBindings",
+    "runInputDependencies", "selectedBacktestGroupIDs",
     "selectedBacktestLongShortIDs", "backtestExpandedBatches",
     "selectedICConfigurationGroupIDs", "icConfigurationGroupSurfaceKey",
     "icConfigurationGroupEditor", "icConfigurationGroupsOpen",

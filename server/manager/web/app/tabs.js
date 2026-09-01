@@ -689,6 +689,15 @@
       return `research-report:${encodeURIComponent(target)}`;
     }
 
+    function strategyDetailTabID(path) {
+      const pathname = String(path || "").split(/[?#]/, 1)[0];
+      const match = /^\/strategies\/(.+)$/.exec(pathname);
+      if (!match) return "";
+      let target = match[1];
+      try { target = decodeURIComponent(target); } catch (_) {}
+      return `strategy-detail:${encodeURIComponent(target === "new" ? "create" : target)}`;
+    }
+
     function researchIDFromReportPath(path) {
       const pathname = String(path || "").split(/[?#]/, 1)[0];
       if (!/^\/research\//.test(pathname)) return "";
@@ -712,6 +721,7 @@
     function detailTabIDForPath(path) {
       return researchDetailTabID(path)
         || researchReportTabID(path)
+        || strategyDetailTabID(path)
         || jobDetailTabID(path)
         || productSourceFamilyDetailTabID(path)
         || productCategoryDetailTabID(path)
@@ -773,6 +783,9 @@
       }
       if (["/factors", "/factors/families", "/factors/sets"].includes(pathname)) {
         return openTab(path, {id: "factors", title: t("因子库"), closable: false});
+      }
+      if (pathname === "/strategies") {
+        return openTab(path, {id: "strategies", title: t("策略库"), closable: false});
       }
       const nativeDetail = Boolean(detailTabID);
       const nativeReference = pathname === "/reference";

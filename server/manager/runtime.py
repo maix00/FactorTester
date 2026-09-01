@@ -36,6 +36,7 @@ from server.manager.http.control_database_routes import ControlDatabaseRoutesMix
 from server.manager.http.request_security import RequestSecurityMixin
 from server.manager.http.federation_routes import FederationRoutesMixin
 from server.manager.http.catalog_routes import CatalogRoutesMixin
+from server.manager.http.strategy_library_routes import StrategyLibraryRoutesMixin
 from server.manager.http.service_selection import ServiceSelectionRoutesMixin
 from server.manager.http.job_proxy_routes import JobProxyRoutesMixin
 from server.manager.http.job_transfer_routes import JobTransferRoutesMixin
@@ -94,6 +95,7 @@ from server.manager.domain.federation import (
 from server.manager.services.test_authoring import TestAuthoringService
 from server.manager.services.research_graph_catalog import ResearchGraphCatalog
 from server.manager.services.research_catalog import ResearchCatalog
+from server.services.strategy_library import StrategyLibraryService
 from server.manager.services.mihomo_supervisor import MihomoSupervisor
 from server.manager.services.technical_docs import TechnicalDocsLibrary
 from server.manager.services.public_factor_replication import (
@@ -375,6 +377,14 @@ class ManagerState(
                 dict(item) for item in self.control_store.load_accounts()
             ],
         )
+        self.strategy_library = StrategyLibraryService(
+            self.sessions_db_path,
+            account_provider=(
+                lambda: [] if self.control_store is None else [
+                    dict(item) for item in self.control_store.load_accounts()
+                ]
+            ),
+        )
         self.device_registry = DeviceRegistry(
             self.state_root / "device-registry.json",
             server_id=self.server_id,
@@ -553,6 +563,7 @@ class Handler(
     ControlDatabaseRoutesMixin,
     FederationRoutesMixin,
     CatalogRoutesMixin,
+    StrategyLibraryRoutesMixin,
     ResearchGraphCatalogRoutesMixin,
     ServiceSelectionRoutesMixin,
     JobProxyRoutesMixin,

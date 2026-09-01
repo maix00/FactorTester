@@ -433,6 +433,7 @@ class ServiceSelectionRoutesMixin:
                     storage_server_id=self.state.server_id,
                     source_collector=source_entries.extend,
                     authorized_factor_owners=authorized_owners,
+                    strategy_library=getattr(self.state, "strategy_library", None),
                 )
             except TypeError as exc:
                 if "unexpected keyword" not in str(exc):

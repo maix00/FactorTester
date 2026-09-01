@@ -16,6 +16,8 @@ assert.deepEqual(inputs.requestBody(state), {
   transient_factor_sources: [],
   transient_strategy_sources: [],
   strategy_specs: [],
+  strategies: [],
+  strategy_bindings: [],
   run_input_dependencies: [],
 });
 

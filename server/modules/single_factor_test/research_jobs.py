@@ -156,7 +156,12 @@ def _normalise_custom_strategy_scope(data: dict) -> dict:
     }
 
 
-def _prepare_local_research_run_request(data: dict, *, owner: str) -> dict:
+def _prepare_local_research_run_request(
+    data: dict,
+    *,
+    owner: str,
+    strategy_library=None,
+) -> dict:
     task_name = _normalise_task_name(
         data.get("task_name") if "task_name" in data else data.get("name")
     )
@@ -309,6 +314,43 @@ def _prepare_local_research_run_request(data: dict, *, owner: str) -> dict:
                 status_code=409,
                 details={"current_revision": configuration["revision"]},
             )
+    # The saved ResearchConfiguration is authoritative.  When it contains
+    # canonical strategy bindings, compile those bindings once into the
+    # legacy worker input bundle.  This keeps library revisions and inline
+    # configuration sources out of the worker-specific request format.
+    configuration_payload = configuration.get("payload")
+    backtest_configuration = (
+        configuration_payload.get("analyses", {}).get("backtest")
+        if isinstance(configuration_payload, dict)
+        and isinstance(configuration_payload.get("analyses"), dict)
+        else None
+    )
+    if isinstance(backtest_configuration, dict) and "strategy_bindings" in backtest_configuration:
+        from server.services.strategy_bindings import compile_configuration_strategies
+
+        try:
+            compiled_strategies = compile_configuration_strategies(
+                configuration_payload,
+                owner=owner,
+                library=strategy_library,
+            )
+            transient_strategy_sources = validate_strategy_entries(
+                compiled_strategies["transient_strategy_sources"]
+            )
+            strategy_specs = compiled_strategies["strategy_specs"]
+            uploaded_strategy_paths = {
+                str(item.get("path") or "") for item in transient_strategy_sources
+            }
+            strategy_plan = normalize_strategy_plan(
+                strategy_specs, uploaded_paths=uploaded_strategy_paths,
+            )
+            strategy_bindings = compiled_strategies["strategy_bindings"]
+        except (KeyError, TypeError, ValueError, PermissionError) as exc:
+            raise _RunRequestError(
+                str(exc), details={"code": "invalid_configuration_strategies"},
+            ) from exc
+    else:
+        strategy_bindings = []
     missing = [
         kind for kind in analyses
         if not isinstance(
@@ -466,6 +508,8 @@ def _prepare_local_research_run_request(data: dict, *, owner: str) -> dict:
     if strategy_plan:
         run_spec["strategy_specs"] = deepcopy(strategy_plan)
         run_spec["strategy_plan"] = deepcopy(strategy_plan)
+    if strategy_bindings:
+        run_spec["strategy_bindings"] = deepcopy(strategy_bindings)
     run_spec["custom_strategy_scope"] = deepcopy(custom_strategy_scope)
     run_spec["strategy_source_policy"] = (
         {
@@ -544,6 +588,7 @@ def _prepare_local_research_run_request(data: dict, *, owner: str) -> dict:
         "transient_strategy_sources": transient_strategy_sources,
         "strategy_specs": strategy_plan,
         "strategy_plan": strategy_plan,
+        "strategy_bindings": strategy_bindings,
         "custom_strategy_scope": custom_strategy_scope,
         "run_input_dependencies": run_input_dependencies,
     }
@@ -556,11 +601,14 @@ def prepare_manager_run_context(
     source_free: bool = False,
     storage_server_id: str = "",
     source_collector=None,
+    strategy_library=None,
 ) -> dict:
     """Freeze origin-owned authoring state before selecting an executor."""
     local_request = deepcopy(data)
     local_request.pop(MANAGER_RUN_CONTEXT_KEY, None)
-    prepared = _prepare_local_research_run_request(local_request, owner=owner)
+    prepared = _prepare_local_research_run_request(
+        local_request, owner=owner, strategy_library=strategy_library,
+    )
     portable_sources = freeze_federated_factor_sources(
         prepared, owner=owner,
     )
@@ -655,6 +703,7 @@ def _capability_plans(prepared: dict, *, owner: str) -> list[dict[str, object]]:
                 "output_requests": output_requests,
                 "strategy_specs": list(prepared.get("strategy_specs") or []),
                 "strategy_plan": list(prepared.get("strategy_plan") or []),
+                "strategy_bindings": list(prepared.get("strategy_bindings") or []),
                 "custom_strategy_scope": deepcopy(
                     prepared.get("custom_strategy_scope") or {}
                 ),
@@ -1189,6 +1238,7 @@ def submit_research_run():
                 )),
                 "strategy_specs": list(prepared.get("strategy_specs") or []),
                 "strategy_plan": list(prepared.get("strategy_plan") or []),
+                "strategy_bindings": list(prepared.get("strategy_bindings") or []),
                 "custom_strategy_scope": deepcopy(
                     prepared.get("custom_strategy_scope") or {}
                 ),
@@ -1313,6 +1363,7 @@ def preview_research_run():
         "output_requests": list(prepared["output_requests"]),
         "strategy_specs": deepcopy(prepared.get("strategy_specs") or []),
         "strategy_plan": deepcopy(prepared.get("strategy_plan") or []),
+        "strategy_bindings": deepcopy(prepared.get("strategy_bindings") or []),
         "custom_strategy_scope": deepcopy(
             prepared.get("custom_strategy_scope") or {}
         ),

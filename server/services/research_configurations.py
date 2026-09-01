@@ -102,6 +102,9 @@ def validate_payload(payload: Any) -> dict[str, Any]:
     for artifact in external_artifacts:
         if not str(artifact.get("manifest_path") or "").strip():
             raise ValueError("each external factor artifact requires manifest_path")
+    from server.services.configuration_strategies import validate as validate_strategies
+
+    validate_strategies(payload)
     return deepcopy(payload)
 
 

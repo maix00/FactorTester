@@ -90,11 +90,18 @@
       "catalog-product-group", "catalog-product-category",
       "catalog-product-detail", "factor-catalog-core"
     ],
-    "factor-catalog-core": ["core", "catalog-selection-core"],
+    "catalog-detail-tabs": ["core"],
+    "factor-catalog-core": ["core", "catalog-selection-core", "catalog-detail-tabs"],
     "factor-catalog-list": ["factor-catalog-core"],
     "factor-catalog-detail": ["factor-catalog-core"],
     "factor-catalog-detail-rendering": ["factor-catalog-detail"],
     "factor-catalog-editor": ["factor-catalog-core", "object-editor-overlay"],
+    "strategy-library-runtime": ["core"],
+    "strategy-library-core": ["strategy-library-runtime", "code-viewer", "catalog-detail-tabs"],
+    "strategy-library-list": ["strategy-library-runtime"],
+    "strategy-library-editor-core": ["strategy-library-core"],
+    "strategy-library-editor": ["strategy-library-editor-core"],
+    "strategy-library-detail": ["strategy-library-editor"],
     "profile-agent-chat": ["core"],
     "profile-directory": ["core"],
     "profile-skills": ["profile-directory"],
@@ -133,6 +140,9 @@
     ],
     "workbench-ic-groups": [
       "workbench-configuration-groups", "workbench-ic-controls"
+    ],
+    "workbench-strategy-bindings": [
+      "workbench-input-state", "object-editor-overlay", "strategy-library-runtime"
     ],
     "workbench-backtest": ["workbench-configuration-groups"],
     "workbench-templates": ["workbench-core", "code-viewer"],
@@ -174,6 +184,8 @@
     "factor": ["factor-catalog-detail-rendering"],
     "factor-set": ["factor-catalog-detail"],
     "factors": ["factor-catalog-list"],
+    "strategy-library": ["strategy-library-list"],
+    "strategy": ["strategy-library-detail"],
     "product-group": ["catalog-product-group"],
     "product": ["catalog-product-detail"],
     "product-reference": ["catalog-product-detail"],
@@ -203,7 +215,8 @@
     "styles/workbench.css",
     "styles/workbench-settings.css",
     "styles/docs.css",
-    "styles/task-inputs.css"
+    "styles/task-inputs.css",
+    "styles/strategy-library.css"
   ],
   "groups": {
     "code-viewer": [],
@@ -227,6 +240,9 @@
     "catalog-selection-core": [
       "catalog/shared/multi-select-filter.js"
     ],
+    "catalog-detail-tabs": [
+      "catalog/shared/object-detail-tabs.js"
+    ],
     "object-editor-overlay": [
       "workbench/test-object-picker.js",
       "workbench/test-object-editor-overlay.js"
@@ -240,7 +256,6 @@
     "factor-catalog-core": [
       "catalog/factor-model.js",
       "catalog/factor-detail-shared.js",
-      "catalog/shared/object-detail-tabs.js",
       "catalog/shared/object-job-table.js",
       "catalog/factor-catalog-runtime.js",
       "catalog/factors.js"
@@ -254,6 +269,22 @@
       "catalog/factor-details.js"
     ],
     "factor-catalog-detail-rendering": [],
+    "strategy-library-runtime": [
+      "catalog/strategy-library-runtime.js"
+    ],
+    "strategy-library-core": [],
+    "strategy-library-editor-core": [
+      "catalog/strategy-library-editor.js"
+    ],
+    "strategy-library-list": [
+      "catalog/strategy-library-list.js"
+    ],
+    "strategy-library-editor": [
+      "catalog/strategy-library-assistance.js"
+    ],
+    "strategy-library-detail": [
+      "catalog/strategy-library-detail.js"
+    ],
     "factor-catalog-editor": [
       "catalog/factor-assistance.js",
       "catalog/factor-parameter-editor.js",
@@ -459,6 +490,9 @@
     ],
     "workbench-source-inputs": [
       "workbench/test-source-upload.js"
+    ],
+    "workbench-strategy-bindings": [
+      "workbench/strategy-binding-panel.js"
     ],
     "workbench-products": [
       "workbench/test-products.js",
@@ -667,6 +701,11 @@
     "catalog/factor-set-editor.js",
     "catalog/factor-details.js",
     "catalog/factors.js",
+    "catalog/strategy-library-runtime.js",
+    "catalog/strategy-library-list.js",
+    "catalog/strategy-library-assistance.js",
+    "catalog/strategy-library-editor.js",
+    "catalog/strategy-library-detail.js",
     "catalog/product-category-model.js",
     "catalog/product-category-overlay.js",
     "catalog/product-category-create.js",
@@ -720,6 +759,7 @@
     "workbench/factor-set-selection.js",
     "workbench/factor-family-picker.js",
     "workbench/test-source-upload.js",
+    "workbench/strategy-binding-panel.js",
     "workbench/strategy-editor-factor-overlay.js",
     "workbench/strategy-editor-custom-source.js",
     "workbench/test-factor-candidates.js",

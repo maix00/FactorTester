@@ -105,6 +105,74 @@ class TestAuthoringClientMixin(ClientMixinBase):
         ))
         return dict(data.get("configuration") or {})
 
+    def list_configuration_strategies(self, workspace_id: str) -> dict[str, Any]:
+        return self._expect_success(self.session.get(
+            f"/api/test-authoring/workspaces/{workspace_id}/configuration/strategies"
+        ))
+
+    def add_inline_strategy(
+        self,
+        workspace_id: str,
+        *,
+        expected_revision: int,
+        name: str,
+        source_code: str,
+        target_strategy_id: str,
+        entrypoint: str = "Strategy",
+        requirements: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self._expect_success(self.session.post(
+            f"/api/test-authoring/workspaces/{workspace_id}/configuration/strategies",
+            {
+                "expected_revision": expected_revision,
+                "kind": "inline",
+                "name": name,
+                "source_code": source_code,
+                "entrypoint": entrypoint,
+                "target_strategy_id": target_strategy_id,
+                "requirements": requirements or {},
+            },
+        ))
+
+    def bind_library_strategy(
+        self,
+        workspace_id: str,
+        *,
+        expected_revision: int,
+        strategy_ref: str,
+        revision_ref: str,
+        target_strategy_id: str,
+        source_sha256: str = "",
+    ) -> dict[str, Any]:
+        return self._expect_success(self.session.post(
+            f"/api/test-authoring/workspaces/{workspace_id}/configuration/strategies",
+            {
+                "expected_revision": expected_revision,
+                "kind": "library",
+                "strategy_ref": strategy_ref,
+                "revision_ref": revision_ref,
+                "source_sha256": source_sha256,
+                "target_strategy_id": target_strategy_id,
+            },
+        ))
+
+    def update_inline_strategy(
+        self, workspace_id: str, binding_id: str, *, expected_revision: int,
+        values: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._expect_success(self.session.patch(
+            f"/api/test-authoring/workspaces/{workspace_id}/configuration/strategies/{binding_id}",
+            {"expected_revision": expected_revision, **values},
+        ))
+
+    def remove_configuration_strategy(
+        self, workspace_id: str, binding_id: str, *, expected_revision: int,
+    ) -> dict[str, Any]:
+        return self._expect_success(self.session.delete(
+            f"/api/test-authoring/workspaces/{workspace_id}/configuration/strategies/{binding_id}",
+            query={"expected_revision": expected_revision},
+        ))
+
     def load_configuration_template(
         self,
         workspace_id: str,

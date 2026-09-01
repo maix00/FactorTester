@@ -232,7 +232,7 @@ class CoreGetRoutesMixin:
             return True
         shell_paths = {
             "/", "/research", "/jobs", "/factors", "/products",
-            "/profiles", "/settings", "/manager", "/research-graphs",
+            "/profiles", "/settings", "/manager", "/research-graphs", "/strategies",
             "/ic-test", "/backtest", "/test-templates", "/sqlite-web",
             "/sqlite-web/", "/mihomo", "/docs",
         }
@@ -245,6 +245,7 @@ class CoreGetRoutesMixin:
             or parsed.path.startswith("/profiles/")
             or parsed.path.startswith("/settings/")
             or parsed.path.startswith("/research-graphs/")
+            or parsed.path.startswith("/strategies/")
             or parsed.path.startswith("/ic-test/")
             or parsed.path.startswith("/backtest/")
             or parsed.path.startswith("/test-templates/")
