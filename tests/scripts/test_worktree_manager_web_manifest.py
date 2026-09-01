@@ -2397,7 +2397,9 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert 'parameter.type === "FactorParam"' in parameter_editor
     assert 'createLabel: context.t("新建因子")' in parameter_editor
     assert "factor-param-reference-control" in parameter_editor
-    assert "手工输入 ColumnRef 或因子 alias" in parameter_editor
+    assert "手工输入数值、ColumnRef 或因子 alias" in parameter_editor
+    assert "function numericConstant" in parameter_editor
+    assert 'setValue(constant, "manual")' in parameter_editor
     assert "请输入有效的 ColumnRef 或因子 alias" in parameter_editor
     assert "onValidateFactorAlias" in parameter_editor
     assert "factor-param-column-" in parameter_editor

@@ -64,8 +64,10 @@
           options.onFactorCreated?.(value, alias);
         }) : null);
     input.type = "text";
-    input.value = columns.some(item => item.value === initialValue) ? initialValue : "";
-    input.placeholder = context.t("手工输入 ColumnRef 或因子 alias");
+    const initialText = display(initialValue);
+    input.value = columns.some(item => item.value === initialValue)
+      || numericConstant(initialText) !== null ? initialText : "";
+    input.placeholder = context.t("手工输入数值、ColumnRef 或因子 alias");
     input.addEventListener("input", () => {
       const raw = input.value.trim().toUpperCase();
       const matched = columns.find(item => String(item.value || "").toUpperCase() === raw);
@@ -76,6 +78,11 @@
     input.addEventListener("change", async () => {
       const raw = input.value.trim();
       if (!raw || columns.some(item => String(item.value || "").toUpperCase() === raw.toUpperCase())) return;
+      const constant = numericConstant(raw);
+      if (constant !== null) {
+        setValue(constant, "manual");
+        return;
+      }
       try {
         const resolved = await options.onValidateFactorAlias?.(raw);
         if (!resolved?.valid || !resolved.factor_alias) throw new Error(
@@ -87,10 +94,19 @@
         input.reportValidity();
       }
     });
-    control.append(group(context.t("DataColumn / ColumnRef / 因子 alias"),
+    control.append(group(context.t("数值 / DataColumn / ColumnRef / 因子 alias"),
       columnPicker.element || columnPicker, input),
     group(context.t("因子库因子"), factorPicker.element || factorPicker));
     row.append(title, control);
+  }
+
+  function numericConstant(value) {
+    const text = String(value || "").trim();
+    if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(text)) {
+      return null;
+    }
+    const parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : null;
   }
 
   function picker(context, name, title, items, selected, onChange, onCreate = null) {
