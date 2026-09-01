@@ -110,9 +110,10 @@
         return [{
           alias,
           value: parameter.value ?? parameter.default_value ?? "",
-          type: parameter.type || parameter.param_type || "",
           input_mode: parameter.input_mode || "",
           options: parameter.options || [],
+          type: parameter.type || parameter.param_type || "Parameter",
+          input_help: parameter.input_help || parameter.help_text || "",
           redacted: parameter.redacted === true,
           description: parameter.desc || parameter.value_space_desc || "",
         }];
@@ -124,6 +125,8 @@
         value: parameter && typeof parameter === "object"
           ? parameter.value ?? parameter.default_value ?? "" : parameter,
         redacted: parameter?.redacted === true,
+        type: parameter?.type || parameter?.param_type || "Parameter",
+        input_help: parameter?.input_help || parameter?.help_text || "",
         description: parameter?.desc || parameter?.value_space_desc || "",
       }));
     }
@@ -134,12 +137,26 @@
     const rows = parameterRows(value);
     if (!rows.length) return null;
     return FTUI.table(
-      [context.t("参数"), context.t("值")],
+      [context.t("参数"), context.t("参数类别"), context.t("值")],
       rows.map(parameter => [
         parameter.alias,
+        parameterType(context, parameter),
         parameter.redacted ? context.t("已隐藏") : parameter.value,
       ]),
     ).shell;
+  }
+
+  function parameterType(context, parameter) {
+    const root = document.createElement("span");
+    root.className = "factor-detail-parameter-type";
+    const name = document.createElement("span");
+    name.textContent = String(parameter.type || parameter.param_type || "Parameter");
+    const help = String(parameter.input_help || parameter.help_text
+      || parameter.description || context.t("填写该参数类型允许的值。"));
+    root.append(name, (window.FTUI?.helpIcon || window.FTHelp?.create)(help, {
+      ariaLabel: context.t("查看参数类型说明"),
+    }));
+    return root;
   }
 
   function fieldRow(context, labelText, control) {

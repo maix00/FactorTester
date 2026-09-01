@@ -7,7 +7,6 @@ from tools.testers.settings import backtest_setting_registry, resolve_group_sett
 
 
 _APPLICATIONS = (
-    "single_factor_page",
     "group_test",
     "ic_test",
     "factor_evaluation",

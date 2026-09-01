@@ -1,6 +1,12 @@
 (() => {
   const fallbackTypes = [
     {
+      id: "factor-series", title: "查看因子序列", title_key: "查看因子序列",
+      description_key: "计算并查看因子值、价格与合约区间", icon: "FS",
+      sfSymbol: "waveform.path.ecg", path: "/factor-series",
+      requiresAuth: false, tab_behavior: "new",
+    },
+    {
       id: "ic-test", title: "IC 测试", title_key: "IC 测试",
       description_key: "配置并运行因子 IC 测试", icon: "IC",
       sfSymbol: "chart.xyaxis.line", path: "/ic-test",
@@ -20,7 +26,7 @@
     const nested = (typesTab?.children || []).filter(item => item?.path);
     if (nested.length) return nested;
     const topLevel = (context.modules || []).filter(item =>
-      ["ic-test", "backtest"].includes(item.id)
+      ["factor-series", "ic-test", "backtest"].includes(item.id)
     );
     return topLevel.length ? topLevel : fallbackTypes;
   }

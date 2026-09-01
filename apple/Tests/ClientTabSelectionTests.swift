@@ -411,7 +411,7 @@ final class ClientTabSelectionTests: XCTestCase {
         ) else {
             return XCTFail("factor series must resolve to a Swift tab")
         }
-        XCTAssertEqual(destination.title, "因子序列")
+        XCTAssertEqual(destination.title, "查看因子序列")
         guard case let .web(destinationPath) = destination.content else {
             return XCTFail("factor series must remain an embedded Web page")
         }

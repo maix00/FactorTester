@@ -14,15 +14,6 @@ def _flows(app: str) -> dict[str, dict]:
     return {f["key"]: f for f in backtest_setting_registry.get(app).manifest()["flows"]}
 
 
-def test_single_factor_page_has_a_single_panel_surface() -> None:
-    surfaces = _surfaces("single_factor_page")
-    assert set(surfaces) == {"local"}
-    assert surfaces["local"]["kind"] == "panel"
-    assert surfaces["local"]["mount"] == "local-settings"
-    # a flat panel has no list flows
-    assert _flows("single_factor_page") == {}
-
-
 def test_group_test_declares_panel_and_multi_select_list() -> None:
     surfaces = _surfaces("group_test")
     assert surfaces["local"]["kind"] == "panel"
@@ -94,7 +85,7 @@ def test_ic_flows_declared() -> None:
 
 
 def test_flows_only_reference_declared_list_surfaces() -> None:
-    for app in ("group_test", "ic_test", "single_factor_page"):
+    for app in ("group_test", "ic_test", "factor_evaluation"):
         manifest = backtest_setting_registry.get(app).manifest()
         list_surface_keys = {s["key"] for s in manifest["surfaces"] if s["kind"] == "list"}
         for flow in manifest["flows"]:

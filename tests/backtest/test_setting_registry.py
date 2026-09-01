@@ -214,7 +214,6 @@ def test_run_fields_are_backend_registered_outside_reusable_templates() -> None:
             "ic_test",
             ["test_template", "time"],
         ),
-        ("single_factor_page", ["setting_template", "time"]),
         (
             "factor_evaluation",
             ["product_path_selection", "time", "factor"],
@@ -240,12 +239,12 @@ def test_every_mountable_tab_audits_every_registered_field() -> None:
         errors = backtest_setting_registry.audit_mounts(client=client)
         assert errors == [], "\n".join(errors)
 
-    single = backtest_setting_registry.get("single_factor_page").manifest()
+    single = backtest_setting_registry.get("factor_evaluation").manifest()
     tabs = {
         tab["key"]: tab
         for tab in single["tab_lists"]["local-settings"]
     }
-    assert tabs["factors"]["content_adapter"] == "factor_selection"
+    assert tabs["factor"]["content_adapter"] == "factor_selection"
     assert tabs["product_path_selection"]["content_adapter"] == (
         "product_path_selection"
     )
@@ -892,8 +891,11 @@ def test_factor_evaluation_reuses_product_path_selection_setting() -> None:
     product_tab = application.tab_manifest("product_path_selection")
 
     assert [tab["key"] for tab in index["tab_lists"]["local-settings"]] == [
-        "product_path_selection", "time", "data_source", "frequency", "price_type", "factor",
+        "product_path_selection", "category", "time", "data_source",
+        "frequency", "price_type", "factor",
     ]
+    category_tab = application.tab_manifest("category")
+    assert category_tab["tab"]["content_adapter"] == "category_selection"
     assert [setting["key"] for setting in product_tab["settings"]] == [
         "product_path_candidates", "product_path_selection",
     ]
@@ -903,37 +905,6 @@ def test_factor_evaluation_reuses_product_path_selection_setting() -> None:
         "paths",
     ]
     assert "product" not in index["defaults"]
-
-
-def test_single_factor_page_shared_defaults_are_registered_by_multiple_modules() -> None:
-    application = backtest_setting_registry.get("single_factor_page")
-    index = application.manifest()
-    index["shared_global_default_keys"] = backtest_setting_registry.shared_global_default_keys(
-        ("factor_evaluation", "ic_test", "group_test")
-    )
-
-    assert index["default_mounted_tabs"] == {
-        "local-settings": ["setting_template", "time"],
-        "group-settings": [],
-    }
-    assert index["shared_global_default_keys"] == [
-        "start_date",
-        "end_date",
-        "start_time",
-        "end_time",
-        "timezone",
-        "time_precision",
-        "product_path_candidates",
-        "product_path_selection",
-        "factor_candidates",
-        "factor_set_selections",
-        "factor",
-        "factor_source_selections",
-        "data_source",
-        "frequency",
-        "category_candidates",
-        "category",
-    ]
 
 
 def test_setting_routes_reject_unknown_tabs_instead_of_falling_back() -> None:

@@ -49,6 +49,7 @@ vm.runInThisContext(
   {filename: "object-job-table.js"},
 );
 global.FTUI = window.FTUI = {
+  helpIcon(text) { const item = new Element("button"); item.helpText = text; return item; },
   code(value, options = {}) {
     const pre = new Element("pre");
     pre.className = ["json-code", "code-viewer", options.className || ""]
@@ -143,7 +144,10 @@ const data = {
     math_expr: "\\frac{P_t-P_{t-N}}{P_{t-N}}",
     description: "端点变化率",
     owner_alias: "MaxA",
-    params: [{alias: "N", value: "20d"}],
+    params: [{
+      alias: "N", value: "20d", type: "WindowParam",
+      input_help: "填写窗口长度，例如 20d。",
+    }],
   }],
   families: [{
     family_ref: "factor-family:sha256:momentum",
@@ -200,7 +204,10 @@ assert.deepStrictEqual(
     item.headers?.[0] === "参数"
   ));
   assert.ok(parameterTable);
+  assert.deepStrictEqual(parameterTable.headers, ["参数", "参数类别", "值"]);
   assert.ok(parameterTable.values.some(row => row[0] === "N"));
+  assert.strictEqual(parameterTable.values[0][1].children[0].textContent, "WindowParam");
+  assert.match(parameterTable.values[0][1].children[1].helpText, /窗口长度/);
   const provenance = walk(content).find(item => (
     item.headers?.[0] === "RunSpec 字段"
   ));
@@ -234,8 +241,14 @@ assert.deepStrictEqual(
         ...data.factors[0],
         factor_ref: historicalFactorRef,
         factor_git_commit: historicalCommit,
-        factor_params: [{alias: "N", value: "20d"}],
-        params: [{alias: "N", value: "20d"}],
+        factor_params: [{
+          alias: "N", value: "20d", type: "WindowParam",
+          input_help: "填写窗口长度，例如 20d。",
+        }],
+        params: [{
+          alias: "N", value: "20d", type: "WindowParam",
+          input_help: "填写窗口长度，例如 20d。",
+        }],
       }],
     },
     historicalFactorRef,
@@ -244,10 +257,9 @@ assert.deepStrictEqual(
     item => item.headers?.[0] === "参数",
   );
   assert.ok(historicalParameterTable);
-  assert.deepStrictEqual(
-    historicalParameterTable.values.find(row => row[0] === "N"),
-    ["N", "20d"],
-  );
+  const historicalParameter = historicalParameterTable.values.find(row => row[0] === "N");
+  assert.strictEqual(historicalParameter[1].children[0].textContent, "WindowParam");
+  assert.strictEqual(historicalParameter[2], "20d");
 
   const currentFamilyContext = {
     ...context,

@@ -228,6 +228,7 @@
       "core/icons.js",
       "core/help-popover.js",
       "core/page-state.js",
+      "app/route-presentation.js",
       "core/shared-ui.js"
     ],
     "charts": [
@@ -367,9 +368,9 @@
       "jobs/job-artifact-viewers.js"
     ],
     "job-detail-factor-series": [
-      "jobs/factor-series-model.js",
-      "jobs/factor-series-chart.js",
-      "jobs/factor-series-view.js"
+      "test-modules/factor-evaluation/results/model.js",
+      "test-modules/factor-evaluation/results/chart.js",
+      "test-modules/factor-evaluation/results/view.js"
     ],
     "job-detail-ic": [
       "jobs/ic-result-model.js",
@@ -612,6 +613,7 @@
     "core/icons.js",
     "core/help-popover.js",
     "core/page-state.js",
+    "app/route-presentation.js",
     "profile/page-agent-lifecycle.js",
     "profile/page-agent-context.js",
     "profile/page-agent-drawer.js",
@@ -630,8 +632,8 @@
     "jobs/test-types.js",
     "jobs/highcharts-timeline.js",
     "jobs/highcharts-viewers.js",
-    "jobs/factor-series-model.js",
-    "jobs/factor-series-chart.js",
+    "test-modules/factor-evaluation/results/model.js",
+    "test-modules/factor-evaluation/results/chart.js",
     "jobs/ic-result-model.js",
     "jobs/ic-portfolio-view.js",
     "jobs/ic-result-charts.js",
@@ -670,7 +672,7 @@
     "research/workspaces.js",
     "jobs/artifacts.js",
     "jobs/artifact-query.js",
-    "jobs/factor-series-view.js",
+    "test-modules/factor-evaluation/results/view.js",
     "jobs/ic-result-view.js",
     "test-modules/backtest/results/analysis/api.js",
     "test-modules/backtest/results/analysis/ui.js",

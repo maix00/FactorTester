@@ -17,9 +17,9 @@ vm.createContext(context);
 [
   "server/manager/web/core/price-chart.js",
   "server/manager/web/jobs/highcharts-timeline.js",
-  "server/manager/web/jobs/factor-series-model.js",
-  "server/manager/web/jobs/factor-series-chart.js",
-  "server/manager/web/jobs/factor-series-view.js",
+  "server/manager/web/test-modules/factor-evaluation/results/model.js",
+  "server/manager/web/test-modules/factor-evaluation/results/chart.js",
+  "server/manager/web/test-modules/factor-evaluation/results/view.js",
 ].forEach(file => vm.runInContext(fs.readFileSync(path.join(root, file), "utf8"), context));
 
 const result = {

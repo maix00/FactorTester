@@ -662,7 +662,7 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     assert "jobs/backtest-group-equity-chart.js" not in manifest["groups"]["job-detail-backtest"]
     assert "test-modules/backtest/results/view.js" in manifest["groups"]["job-detail-backtest"]
     assert "jobs/result-tabs.js" in manifest["groups"]["job-detail-core"]
-    assert "jobs/factor-series-view.js" in manifest["groups"]["job-detail-factor-series"]
+    assert "test-modules/factor-evaluation/results/view.js" in manifest["groups"]["job-detail-factor-series"]
     assert manifest["group_dependencies"]["job-detail-previews"] == [
         "job-detail-core", "report", "charts",
     ]
@@ -673,7 +673,7 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     assert not core_detail.intersection({
         "jobs/highcharts-viewers.js", "jobs/job-artifact-viewers.js",
         "jobs/ic-result-view.js", "test-modules/backtest/results/view.js",
-        "jobs/factor-series-view.js", "core/market-data.js",
+        "test-modules/factor-evaluation/results/view.js", "core/market-data.js",
     })
     artifacts = (WEB_ROOT / "jobs" / "artifacts.js").read_text(encoding="utf-8")
     detail = (WEB_ROOT / "jobs" / "detail.js").read_text(encoding="utf-8")
@@ -1730,6 +1730,22 @@ def test_backtest_analysis_api_uses_job_scoped_manager_routes() -> None:
         capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_factor_evaluation_has_a_direct_agent_assistance_document() -> None:
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "factor_evaluation_assistance.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_independent_page_headers_ignore_stale_route_updates() -> None:
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "route_presentation.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "ok"
 
 
@@ -2022,7 +2038,7 @@ def test_custom_analysis_tabs_are_shared_by_all_job_result_viewers() -> None:
         WEB_ROOT / "test-modules" / "backtest" / "results" / "view.js"
     ).read_text(encoding="utf-8")
     ic = (WEB_ROOT / "jobs" / "ic-result-view.js").read_text(encoding="utf-8")
-    factor = (WEB_ROOT / "jobs" / "factor-series-view.js").read_text(
+    factor = (WEB_ROOT / "test-modules" / "factor-evaluation" / "results" / "view.js").read_text(
         encoding="utf-8"
     )
 

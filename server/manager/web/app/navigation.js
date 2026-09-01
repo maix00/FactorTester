@@ -135,6 +135,7 @@
         {id: "research.agent-models", title: "智能体模型", title_key: "智能体模型", path: "/research?section=agent-models", requiresAuth: true},
       ],
     },
+    {id: "factor-series", title: "查看因子序列", title_key: "查看因子序列", description_key: "计算并查看因子值、价格与合约区间", sfSymbol: "waveform.path.ecg", path: "/factor-series", requiresAuth: false, sidebarVisible: false, homeVisible: false, pinned: false, tab_behavior: "new"},
     {id: "ic-test", title: "IC 测试", title_key: "IC 测试", description_key: "配置并运行因子 IC 测试", sfSymbol: "chart.xyaxis.line", path: "/ic-test", requiresAuth: false, sidebarVisible: false, homeVisible: false, pinned: false, tab_behavior: "new"},
     {id: "backtest", title: "回测", title_key: "回测", description_key: "配置并运行分组回测", sfSymbol: "chart.line.uptrend.xyaxis", path: "/backtest", requiresAuth: false, sidebarVisible: false, homeVisible: false, pinned: false, tab_behavior: "new"},
     {
@@ -149,6 +150,7 @@
           requiresAuth: false, sidebarVisible: false, homeVisible: false,
           pinned: false,
           children: [
+            {id: "factor-series", title: "查看因子序列", title_key: "查看因子序列", description_key: "计算并查看因子值、价格与合约区间", sfSymbol: "waveform.path.ecg", path: "/factor-series", requiresAuth: false, sidebarVisible: false, homeVisible: false, pinned: false, tab_behavior: "new"},
             {id: "ic-test", title: "IC 测试", title_key: "IC 测试", description_key: "配置并运行因子 IC 测试", sfSymbol: "chart.xyaxis.line", path: "/ic-test", requiresAuth: false, sidebarVisible: false, homeVisible: false, pinned: false, tab_behavior: "new"},
             {id: "backtest", title: "回测", title_key: "回测", description_key: "配置并运行分组回测", sfSymbol: "chart.line.uptrend.xyaxis", path: "/backtest", requiresAuth: false, sidebarVisible: false, homeVisible: false, pinned: false, tab_behavior: "new"},
           ],
