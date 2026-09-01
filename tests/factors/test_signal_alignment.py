@@ -89,6 +89,31 @@ def test_outer_finer_signal_align_carries_nested_signal_on_panel_timeline():
     )
 
 
+def test_outer_signal_align_uses_its_own_grid_after_nested_signal_hold():
+    idx = pd.date_range("2026-01-01 09:01", periods=6, freq="min", name="1m")
+    source = pd.DataFrame({"A": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]}, index=idx)
+    timeline = PanelTimeline(
+        index=idx,
+        products=("A",),
+        trading_days=pd.Index(idx.normalize(), name="DAY1"),
+        observed_mask=pd.DataFrame(True, index=idx, columns=["A"]),
+        same_session=True,
+    )
+    expr = SignalAlign(SignalAlign(_FrameExpr(source), "2m"), "3m")
+
+    result = expr.evaluate(
+        ctx=EvaluateContext(
+            products=["A"],
+            freq=DataFreq.MIN1,
+            cache={},
+            panel_timeline=timeline,
+        ),
+    )
+
+    assert list(result.index.get_level_values("_SIGNAL@MIN3")) == [idx[2], idx[5]]
+    assert list(result["A"]) == [2.0, 6.0]
+
+
 def test_two_nested_signal_frequencies_use_the_finer_signal_timeline():
     idx = pd.date_range("2026-01-01 09:01", periods=6, freq="min", name="1m")
     left = pd.DataFrame({"A": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]}, index=idx)

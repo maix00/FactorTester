@@ -383,19 +383,16 @@ class SignalAlign(CompositeExpr):
             if str(name).startswith('_SIGNAL@')
         ]
         if signal_names:
-            source_freq = DataFreq(signal_names[-1].split('@', 1)[1])
-            target_freq = DataFreq(self.signal_freq)
-            if target_freq.value < source_freq.value:
-                if ctx.panel_timeline is None:
-                    raise ValueError(
-                        "finer SignalAlign over a nested signal requires panel_timeline"
-                    )
-                from .pointwise import carry_formed_signal
-                template = pd.DataFrame(
-                    index=ctx.panel_timeline.index,
-                    columns=data.columns,
+            if ctx.panel_timeline is None:
+                raise ValueError(
+                    "outer SignalAlign over a nested signal requires panel_timeline"
                 )
-                data = carry_formed_signal(data, template)
+            from .pointwise import carry_formed_signal
+            template = pd.DataFrame(
+                index=ctx.panel_timeline.index,
+                columns=data.columns,
+            )
+            data = carry_formed_signal(data, template)
         return self._apply_op([data])
 
     # ── 展示 ──
