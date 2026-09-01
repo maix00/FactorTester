@@ -1006,7 +1006,17 @@ class CatalogRoutesMixin:
                     query=parse_qs(parsed.query, keep_blank_values=True),
                 )
             else:
-                payload = {} if method == "DELETE" else self._json_body(1024 * 1024)
+                payload = (
+                    {
+                        key: values[0]
+                        for key, values in parse_qs(
+                            parsed.query, keep_blank_values=True,
+                        ).items()
+                        if values
+                    }
+                    if method == "DELETE"
+                    else self._json_body(1024 * 1024)
+                )
                 response = self.state.test_authoring.write(
                     method, parsed.path, owner=principal,
                     payload=payload,
@@ -1042,6 +1052,8 @@ class CatalogRoutesMixin:
         with self.state.application_request_lock:
             if method == "GET":
                 return bool(
+                    self._serve_strategy_library(parsed, method=method)
+                    or
                     self._get_research_graph_catalog(parsed)
                     or
                     self._serve_report_reference(parsed)
@@ -1052,6 +1064,8 @@ class CatalogRoutesMixin:
                 )
             if method == "POST":
                 return bool(
+                    self._serve_strategy_library(parsed, method=method)
+                    or
                     self._post_research_graph_catalog(parsed)
                     or self._serve_product_catalog_write(parsed)
                     or self._serve_factor_catalog_write(parsed, method=method)
@@ -1059,12 +1073,16 @@ class CatalogRoutesMixin:
                 )
             if method == "DELETE":
                 return bool(
+                    self._serve_strategy_library(parsed, method=method)
+                    or
                     self._delete_research_graph_catalog(parsed)
                     or self._serve_product_catalog_write(parsed)
                     or self._serve_factor_catalog_write(parsed, method=method)
                     or self._serve_test_authoring(parsed, method=method)
                 )
             return bool(
+                self._serve_strategy_library(parsed, method=method)
+                or
                 self._serve_product_catalog_write(parsed)
                 or self._serve_factor_catalog_write(parsed, method=method)
                 or self._serve_test_authoring(parsed, method=method)

@@ -9,6 +9,8 @@
     if (!Array.isArray(state.transientStrategySources)) state.transientStrategySources = [];
     if (!Array.isArray(state.strategySpecs)) state.strategySpecs = [];
     if (!Array.isArray(state.strategyInspections)) state.strategyInspections = [];
+    if (!Array.isArray(state.temporaryStrategies)) state.temporaryStrategies = [];
+    if (!Array.isArray(state.strategyBindings)) state.strategyBindings = [];
     if (!Array.isArray(state.runInputDependencies)) state.runInputDependencies = [];
     if (!state.customStrategyOverrides || typeof state.customStrategyOverrides !== "object") {
       state.customStrategyOverrides = {};
@@ -141,6 +143,94 @@
     return spec;
   }
 
+  function putInlineStrategy(state, strategy, binding) {
+    initialize(state);
+    const normalized = clone(strategy || {});
+    const bindingValue = clone(binding || {});
+    if (!normalized.temp_ref || !bindingValue.binding_id) {
+      throw new Error("临时策略或策略绑定缺少标识");
+    }
+    const duplicate = state.temporaryStrategies.find(item => (
+      item.temp_ref !== normalized.temp_ref && sameInlineStrategy(item, normalized)
+    ));
+    const incomingRef = normalized.temp_ref;
+    const tempRef = duplicate?.temp_ref || incomingRef;
+    normalized.temp_ref = tempRef;
+    if (duplicate) {
+      state.temporaryStrategies = state.temporaryStrategies.filter(
+        item => item.temp_ref !== incomingRef,
+      );
+    } else {
+      replaceBy(state.temporaryStrategies,
+        item => item.temp_ref === normalized.temp_ref, normalized);
+    }
+    bindingValue.source = {
+      ...(bindingValue.source || {}), kind: "inline", temp_ref: tempRef,
+    };
+    const priorIndex = state.strategyBindings.findIndex(item => (
+      item.binding_id === bindingValue.binding_id
+      || item.target_strategy_id === bindingValue.target_strategy_id
+    ));
+    const prior = priorIndex >= 0 ? state.strategyBindings[priorIndex] : null;
+    if (priorIndex >= 0) state.strategyBindings[priorIndex] = bindingValue;
+    else state.strategyBindings.push(bindingValue);
+    if (prior?.source?.kind === "inline"
+        && prior.source.temp_ref !== tempRef) {
+      pruneTemporaryStrategy(state, prior.source.temp_ref);
+    }
+    return normalized;
+  }
+
+  function putStrategyBinding(state, binding) {
+    initialize(state);
+    const value = clone(binding || {});
+    if (!value.binding_id || !value.target_strategy_id || !value.source) {
+      throw new Error("策略绑定字段不完整");
+    }
+    const priorIndex = state.strategyBindings.findIndex(item => (
+      item.target_strategy_id === value.target_strategy_id
+      || item.binding_id === value.binding_id
+    ));
+    const prior = priorIndex >= 0 ? state.strategyBindings[priorIndex] : null;
+    if (priorIndex >= 0) state.strategyBindings[priorIndex] = value;
+    else state.strategyBindings.push(value);
+    if (prior?.source?.kind === "inline"
+        && prior.source.temp_ref !== value.source?.temp_ref) {
+      pruneTemporaryStrategy(state, prior.source.temp_ref);
+    }
+    return value;
+  }
+
+  function removeStrategyBinding(state, bindingID) {
+    initialize(state);
+    const selected = state.strategyBindings.find(item => item.binding_id === bindingID);
+    state.strategyBindings = state.strategyBindings.filter(item => item.binding_id !== bindingID);
+    if (selected?.source?.kind === "inline") {
+      pruneTemporaryStrategy(state, selected.source.temp_ref);
+    }
+    return selected || null;
+  }
+
+  function sameInlineStrategy(left, right) {
+    const leftEntrypoint = String(left?.entrypoint || "Strategy");
+    const rightEntrypoint = String(right?.entrypoint || "Strategy");
+    if (leftEntrypoint !== rightEntrypoint) return false;
+    const leftHash = String(left?.source_sha256 || "");
+    const rightHash = String(right?.source_sha256 || "");
+    if (leftHash && rightHash) return leftHash === rightHash;
+    return String(left?.source_code || "") === String(right?.source_code || "");
+  }
+
+  function pruneTemporaryStrategy(state, tempRef) {
+    const ref = String(tempRef || "");
+    if (!ref || state.strategyBindings.some(item => (
+      item.source?.kind === "inline" && item.source?.temp_ref === ref
+    ))) return;
+    state.temporaryStrategies = state.temporaryStrategies.filter(
+      item => item.temp_ref !== ref,
+    );
+  }
+
   function removeStrategy(state, path) {
     initialize(state);
     state.transientStrategySources = state.transientStrategySources.filter(
@@ -192,6 +282,8 @@
       transient_factor_sources: clone(state.transientFactorSources),
       transient_strategy_sources: clone(state.transientStrategySources),
       strategy_specs: clone(state.strategySpecs),
+      strategies: clone(state.temporaryStrategies),
+      strategy_bindings: clone(state.strategyBindings),
       run_input_dependencies: clone(state.runInputDependencies),
     };
     if (Object.keys(state.customStrategyOverrides).length) {
@@ -229,5 +321,8 @@
     requestBody,
     strategyInspection,
     strategySource,
+    putInlineStrategy,
+    putStrategyBinding,
+    removeStrategyBinding,
   });
 })();

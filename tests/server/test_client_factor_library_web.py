@@ -123,6 +123,35 @@ def test_account_domain_projection_requires_complete_v2_factor_records() -> None
     assert rows[0]["family_formula_fingerprint"] == "a" * 64
 
 
+def test_account_domain_projection_restores_early_v2_record_without_ref() -> None:
+    legacy = {
+        "factor_owner_ref": "principal:alice",
+        "factor_family_alias": "Momentum",
+        "factor_alias": "Momentum|N:20d",
+        "family_formula_fingerprint": "a" * 64,
+        "self_formula_fingerprint": "b" * 64,
+        "factor_params": [{"alias": "N", "value": "20d"}],
+    }
+
+    class Sync:
+        @staticmethod
+        def entities(*_args, **_kwargs):
+            return [{
+                "principal": "alice",
+                "entity_id": "default:Momentum",
+                "payload": {
+                    "factor_family_alias": "Momentum",
+                    "resolved_factors": [legacy],
+                },
+            }]
+
+    rows = factor_rows_from_sync(Sync(), "alice")
+
+    assert len(rows) == 1
+    assert rows[0]["factor_alias"] == "Momentum|N:20d"
+    assert rows[0]["factor_ref"].startswith("factor:v2:")
+
+
 def test_source_family_projections_preserve_formula_fingerprint(monkeypatch) -> None:
     source = {
         "id": "Momentum",

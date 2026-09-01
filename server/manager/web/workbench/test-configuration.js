@@ -108,6 +108,10 @@
       categories: copy((state.values?.category_candidates || []).filter(temporary)),
       factor_sources: copy(state.transientFactorSources),
       factor_families: copy(state.transientFactorFamilies),
+      strategies: copy(state.temporaryStrategies),
+      // Legacy upload arrays remain separate so old imported run inputs can
+      // still be reopened; canonical inline/library bindings are represented
+      // only by the two fields above and in analyses.backtest.
       strategy_sources: copy(state.transientStrategySources),
       strategy_specs: copy(state.strategySpecs),
       strategy_inspections: copy(state.strategyInspections),
@@ -352,6 +356,7 @@
     return FTTestConfigurationCompiler.sanitizeExecutionPayload(state.manifest, {
       ...prior, ...settings, execution: {settings}, groups,
       ls_configs: prior.ls_configs || [], product_selections: productSelections,
+      strategy_bindings: structuredClone(state.strategyBindings || prior.strategy_bindings || []),
     }, state.values, {stripRootRegistered: true});
   }
 

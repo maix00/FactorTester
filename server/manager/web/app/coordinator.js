@@ -297,6 +297,7 @@
   const protectedRouteKinds = new Set([
     "factor-sets", "factor-set",
     "profile", "profiles", "research-detail", "manager", "mihomo",
+    "strategy-library", "strategy",
   ]);
 
   async function renderRoute() {
@@ -414,6 +415,12 @@
       }),
       report,
       research,
+      strategyLibrary: (pageContext, scope) => FTStrategyLibraryList.render(
+        pageContext, scope || "mine",
+      ),
+      strategy: (pageContext, id, mode, route) => FTStrategyLibraryDetail.render(
+        pageContext, id, mode || "view", route || {},
+      ),
       researchDetail: (pageContext, id) => FTResearchCatalog.detail(
         pageContext, pageContext.content, id,
       ),

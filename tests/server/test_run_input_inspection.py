@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 from flask import Flask
 
 from server.modules.single_factor_test import sft_bp
@@ -51,6 +53,10 @@ def test_strategy_inspection_returns_callbacks_and_normalized_spec() -> None:
     assert payload["valid"] is True
     assert payload["entrypoint"] == "IntradayHook"
     assert payload["callbacks"] == ["on_bar", "on_order_filled"]
+    assert payload["hooks"][0]["name"] == "on_bar"
+    assert payload["hooks"][1]["name"] == "on_order_filled"
+    assert payload["source_sha256"] == hashlib.sha256(source.encode()).hexdigest()
+    assert payload["source_bytes"] == len(source.encode())
     assert payload["requirements"] == {}
     assert payload["strategy_spec"]["source"] == "profile:strategies/intraday_hook.py"
     assert payload["strategy_spec"]["parameters"] == {"threshold": 0.2}
@@ -70,3 +76,32 @@ def test_strategy_inspection_rejects_source_without_strategy_subclass() -> None:
 
     assert response.status_code == 400
     assert response.get_json()["code"] == "invalid_strategy_source"
+
+
+def test_strategy_inspection_uses_inherited_callbacks() -> None:
+    client = _app().test_client()
+    _login(client)
+    source = """from tools.testers.backtest.engines.native.strategy import Strategy
+
+class Base(Strategy):
+    def on_bar(self, ctx, bar):
+        return None
+
+class Child(Base):
+    def on_order_filled(self, ctx, order):
+        return None
+"""
+    response = client.post(
+        "/api/run-inputs/strategy/inspect",
+        json={
+            "path": "strategies/inherited.py",
+            "source_code": source,
+            "entrypoint": "Child",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["entrypoint"] == "Child"
+    assert payload["callbacks"] == ["on_bar", "on_order_filled"]
+    assert [hook["name"] for hook in payload["hooks"]] == ["on_order_filled"]

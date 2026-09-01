@@ -1,0 +1,124 @@
+.strategy-library-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.strategy-library-scope-tabs {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+
+.strategy-library-controls {
+  display: flex;
+  gap: .75rem;
+}
+
+.strategy-library-controls input {
+  box-sizing: border-box;
+  max-width: 32rem;
+  width: 100%;
+}
+
+.strategy-library-results,
+.strategy-library-detail,
+.strategy-editor {
+  min-width: 0;
+}
+
+.strategy-library-name-cell {
+  display: grid;
+  gap: .2rem;
+}
+
+.strategy-library-link {
+  background: none;
+  border: 0;
+  color: var(--accent-color, #087cff);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.strategy-library-name-cell small,
+.strategy-binding-note,
+.strategy-editor-status {
+  color: var(--muted-text-color, #6b6b6b);
+}
+
+.strategy-library-row-actions {
+  align-items: center;
+  display: inline-flex;
+  gap: .35rem;
+}
+
+.strategy-library-icon-action,
+.strategy-library-toolbar-action {
+  min-height: 2rem;
+  min-width: 2rem;
+}
+
+.strategy-editor {
+  display: grid;
+  gap: 1rem;
+}
+
+.strategy-editor-overview,
+.strategy-editor-source-panel {
+  display: grid;
+  gap: .75rem;
+}
+
+.strategy-editor-row,
+.strategy-binding-field {
+  align-items: start;
+  display: grid;
+  gap: .5rem;
+  grid-template-columns: minmax(7rem, 12rem) minmax(0, 1fr);
+}
+
+.strategy-editor-row textarea,
+.strategy-editor-row input,
+.strategy-binding-field input {
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+}
+
+.strategy-source-editor {
+  min-height: 24rem;
+  width: 100%;
+}
+
+.strategy-binding-panel {
+  display: grid;
+  gap: .75rem;
+}
+
+.strategy-binding-rows {
+  display: grid;
+  gap: .75rem;
+}
+
+.strategy-binding-row {
+  align-items: center;
+  display: grid;
+  gap: .75rem;
+  grid-template-columns: minmax(10rem, 18rem) minmax(0, 1fr);
+}
+
+.strategy-source-viewer,
+.strategy-library-detail .code-viewer {
+  max-height: 42rem;
+  overflow: auto;
+}
+
+@media (max-width: 48rem) {
+  .strategy-editor-row,
+  .strategy-binding-row,
+  .strategy-binding-field {
+    grid-template-columns: 1fr;
+  }
+}

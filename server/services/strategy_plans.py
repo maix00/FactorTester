@@ -42,16 +42,40 @@ def normalize_strategy_plan(
             spec = StrategySpec.from_mapping(raw)
         except ValueError as exc:
             raise ValueError(str(exc)) from exc
-        if spec.strategy_id and not spec.strategy_id.isidentifier():
-            raise ValueError("strategy_id must be a Python identifier")
+        if spec.strategy_id:
+            _validate_strategy_id(spec.strategy_id)
         if spec.entrypoint and not spec.entrypoint.isidentifier():
             raise ValueError("strategy entrypoint must be a Python identifier")
-        if spec.source_kind == "builtin":
+        if spec.strategy_origin == "library":
+            if not spec.strategy_ref:
+                raise ValueError("library strategy requires strategy_ref")
+            if not spec.revision_ref:
+                raise ValueError("library strategy requires revision_ref")
+            name = spec.source_name.replace("\\", "/")
+            path = PurePosixPath(name)
+            if path.is_absolute() or ".." in path.parts or not name.startswith("strategies/"):
+                raise ValueError("frozen library strategy source must be strategies/<path>.py")
+            if name not in uploaded:
+                raise ValueError(f"frozen library strategy source is not uploaded: {name}")
+            kind = "library"
+            required_fields = list(spec.requirements.get("fields") or [])
+            required_data = list(spec.requirements.get("data") or [])
+            callbacks = []
+        elif spec.source_kind == "builtin":
             template = template_for(spec.source_name)
             kind = template.key
             required_fields = list(template.required_fields)
             required_data = list(template.required_data)
             callbacks = list(template.actor_callbacks)
+        elif spec.source_kind == "library":
+            if not spec.strategy_ref:
+                raise ValueError("library strategy requires strategy_ref")
+            if not spec.revision_ref:
+                raise ValueError("library strategy requires revision_ref")
+            kind = "library"
+            required_fields = list(spec.requirements.get("fields") or [])
+            required_data = list(spec.requirements.get("data") or [])
+            callbacks = []
         else:
             name = spec.source_name.replace("\\", "/")
             path = PurePosixPath(name)
@@ -79,6 +103,18 @@ def normalize_strategy_plan(
         })
         result.append(normalized)
     return result
+
+
+def _validate_strategy_id(value: str) -> None:
+    """Validate a run target identity without treating it as Python code.
+
+    Strategy IDs are domain identifiers supplied by the configuration layer.
+    Existing group IDs intentionally contain characters such as ``-``, ``:``
+    and ``/``; only control characters and unbounded values are unsafe here.
+    The entrypoint remains a Python identifier and is validated separately.
+    """
+    if len(value) > 256 or any(ord(character) < 32 or ord(character) == 127 for character in value):
+        raise ValueError("strategy_id must be a bounded opaque string")
 
 
 def _normalize_requirements(value: Any) -> dict[str, Any]:

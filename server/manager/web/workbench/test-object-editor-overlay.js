@@ -25,6 +25,51 @@
       load: "catalog",
       render: (context, ref, mode) => FTProducts.categoryDetail(context, ref, mode),
     },
+    strategy: {
+      title: "策略",
+      load: "strategy-library-editor-core",
+      render: (context, ref, mode, options) => {
+        if (!window.FTStrategyLibraryEditor?.create) {
+          throw new Error("策略编辑器不可用");
+        }
+        let submitButton = null;
+        const editor = FTStrategyLibraryEditor.create(
+          context,
+          options.initialValue || {},
+          {
+            mode,
+            storageMode: options.storageMode || "configuration-inline",
+            onSubmit: async (draft, status) => {
+              if (submitButton) submitButton.disabled = true;
+              try {
+                const value = options.onSubmit
+                  ? await options.onSubmit(draft, status)
+                  : draft;
+                if (value !== undefined && value !== null && value !== false) {
+                  context.onSaved?.(value);
+                  return;
+                }
+                if (submitButton) submitButton.disabled = false;
+              } catch (error) {
+                status.textContent = error.message || context.t("策略保存失败");
+                if (submitButton) submitButton.disabled = false;
+              }
+            },
+          },
+        );
+        if (mode !== "view") {
+          const actions = document.createElement("div");
+          actions.className = "dialog-actions";
+          submitButton = FTUI.actionButton(
+            context.t(options.submitLabel || "保存"), null, {variant: "primary"},
+          );
+          submitButton.type = "submit";
+          actions.append(submitButton);
+          editor.form.append(actions);
+        }
+        context.content.append(editor.form);
+      },
+    },
   };
 
   function close(dialog, state, value = null) {

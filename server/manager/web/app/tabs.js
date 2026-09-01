@@ -695,6 +695,15 @@
       return `research-report:${encodeURIComponent(target)}`;
     }
 
+    function strategyDetailTabID(path) {
+      const pathname = String(path || "").split(/[?#]/, 1)[0];
+      const match = /^\/strategies\/(.+)$/.exec(pathname);
+      if (!match) return "";
+      let target = match[1];
+      try { target = decodeURIComponent(target); } catch (_) {}
+      return `strategy-detail:${encodeURIComponent(target === "new" ? "create" : target)}`;
+    }
+
     function researchIDFromReportPath(path) {
       const pathname = String(path || "").split(/[?#]/, 1)[0];
       if (!/^\/research\//.test(pathname)) return "";
@@ -718,6 +727,7 @@
     function detailTabIDForPath(path) {
       return researchDetailTabID(path)
         || researchReportTabID(path)
+        || strategyDetailTabID(path)
         || jobDetailTabID(path)
         || productSourceFamilyDetailTabID(path)
         || productCategoryDetailTabID(path)
@@ -779,6 +789,9 @@
       }
       if (["/factors", "/factors/families", "/factors/sets"].includes(pathname)) {
         return openTab(path, {id: "factors", title: t("因子库"), closable: false});
+      }
+      if (pathname === "/strategies") {
+        return openTab(path, {id: "strategies", title: t("策略库"), closable: false});
       }
       const nativeDetail = Boolean(detailTabID);
       const nativeReference = pathname === "/reference";
@@ -897,8 +910,16 @@
     }
 
     function currentTabContext() {
+      const activeTab = state.tabs.find(tab => tab.id === state.activeTabID);
       return {
         tabID: state.activeTabID,
+        // Keep hierarchy metadata in the shared route context so pages can
+        // inherit their parent Research assistant without reimplementing tab
+        // storage lookups.  Expose only the stable relationship fields, not
+        // the mutable tab object itself.
+        parentFolder: String(activeTab?.parentFolder || ""),
+        parentTabID: String(activeTab?.parentTabID || ""),
+        parentResearchID: String(activeTab?.parentResearchID || ""),
         tabSession: viewCache.tabSession(state.activeTabID),
         pageState: viewCache.pageState(state.activeTabID),
         pageAgentLifecycle,

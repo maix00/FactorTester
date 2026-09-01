@@ -58,16 +58,40 @@ class StrategySpec:
     account: Mapping[str, Any] = field(default_factory=dict)
     execution: Mapping[str, Any] = field(default_factory=dict)
     requirements: Mapping[str, Any] = field(default_factory=dict)
+    strategy_ref: str = ""
+    revision_ref: str = ""
+    source_sha256: str = ""
+    strategy_origin: str = ""
+    binding_id: str = ""
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "StrategySpec":
         if not isinstance(value, Mapping):
             raise ValueError("strategy spec must be an object")
-        source = str(value.get("source") or "").strip()
+        source_value = value.get("source")
+        source = ""
+        if isinstance(source_value, Mapping):
+            source_kind = str(source_value.get("kind") or "").strip()
+            source_ref = str(
+                source_value.get("strategy_ref") or source_value.get("ref") or ""
+            ).strip()
+            if source_kind in {"library", "strategy-library"} and source_ref:
+                source = f"library:{source_ref}"
+        else:
+            source = str(source_value or "").strip()
+        strategy_ref = str(value.get("strategy_ref") or "").strip()
+        revision_ref = str(value.get("revision_ref") or "").strip()
+        source_sha256 = str(value.get("source_sha256") or "").strip()
+        strategy_origin = str(value.get("strategy_origin") or "").strip()
+        binding_id = str(value.get("binding_id") or "").strip()
+        if not source and strategy_ref:
+            source = f"library:{strategy_ref}"
+        if source.startswith("strategy-library:"):
+            source = "library:" + source.split(":", 1)[1]
         if not source:
             raise ValueError("strategy spec requires source")
-        if not any(source.startswith(prefix) for prefix in ("builtin:", "profile:", "personal:")):
-            raise ValueError("strategy source must use builtin:<name>, profile:<path>, or personal:<path>")
+        if not any(source.startswith(prefix) for prefix in ("builtin:", "profile:", "personal:", "library:")):
+            raise ValueError("strategy source must use builtin:<name>, profile:<path>, personal:<path>, or library:<ref>")
         workspace = str(value.get("workspace") or "profile").strip()
         if workspace not in {"profile", "personal"} and not workspace.startswith("profile:"):
             raise ValueError("strategy workspace must be profile, personal, or profile:<id>")
@@ -80,11 +104,20 @@ class StrategySpec:
                 raise ValueError(f"strategy spec {name} must be an object")
             sections[name] = dict(section)
         _validate_source_path(source)
+        if source.startswith("library:"):
+            strategy_ref = strategy_ref or source.split(":", 1)[1]
+            if not strategy_ref:
+                raise ValueError("library strategy requires strategy_ref")
         return cls(
             source=source,
             workspace=workspace,
             strategy_id=strategy_id,
             entrypoint=entrypoint,
+            strategy_ref=strategy_ref,
+            revision_ref=revision_ref,
+            source_sha256=source_sha256,
+            strategy_origin=strategy_origin,
+            binding_id=binding_id,
             **sections,
         )
 
@@ -97,7 +130,7 @@ class StrategySpec:
         return self.source.split(":", 1)[1]
 
     def normalized(self) -> dict[str, Any]:
-        return {
+        result = {
             "source": self.source,
             "source_kind": self.source_kind,
             "source_name": self.source_name,
@@ -110,9 +143,27 @@ class StrategySpec:
             "execution": dict(self.execution),
             "requirements": dict(self.requirements),
         }
+        if self.strategy_ref:
+            result["strategy_ref"] = self.strategy_ref
+        if self.revision_ref:
+            result["revision_ref"] = self.revision_ref
+        if self.source_sha256:
+            result["source_sha256"] = self.source_sha256
+        if self.strategy_origin:
+            result["strategy_origin"] = self.strategy_origin
+        if self.binding_id:
+            result["binding_id"] = self.binding_id
+        return result
 
     def dependencies(self) -> dict[str, Any]:
         """Return semantic requirements without exposing internal Flows."""
+        if self.source_kind == "library" or self.strategy_origin == "library":
+            return {
+                "source_kind": "library",
+                "strategy_ref": self.strategy_ref or self.source_name,
+                "revision_ref": self.revision_ref,
+                "source_sha256": self.source_sha256,
+            }
         if self.source_kind != "builtin":
             return {
                 "source_kind": self.source_kind,

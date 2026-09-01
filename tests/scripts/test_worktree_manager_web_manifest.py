@@ -52,6 +52,7 @@ def test_manifest_matches_html_script_order_and_files() -> None:
         "styles/outputs/backtest-results.css",
         "styles/workbench.css", "styles/workbench-settings.css",
         "styles/docs.css", "styles/task-inputs.css",
+        "styles/strategy-library.css",
     ]
     assert "FT_STATIC_STYLES" in template
     assert "FT_STATIC_SCRIPTS" in template
@@ -631,9 +632,10 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     assert manifest["route_groups"]["ic-test"] == [
         "workbench-test-ui", "workbench-ic-groups",
     ]
-    assert manifest["route_groups"]["backtest"] == [
-        "workbench-test-ui", "workbench-backtest",
-    ]
+    assert manifest["route_groups"]["backtest"] == ["workbench-test-ui"]
+    assert "workbench-backtest" not in manifest["route_groups"]["backtest"]
+    assert '"workbench-backtest"' in tests_module
+    assert "ensureBacktestCode" in tests_module
     assert manifest["route_groups"]["factor-evaluation"] == ["workbench-test-ui"]
     assert manifest["route_groups"]["factor-series"] == ["workbench-core"]
     assert manifest["route_groups"]["product-categories"] == [
@@ -1326,8 +1328,7 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
         "workbench-settings",
     ]
     assert manifest["group_dependencies"]["workbench-test-ui"] == [
-        "workbench-settings", "workbench-settings-fields",
-        "workbench-settings-chips", "workbench-run",
+        "workbench-settings", "workbench-settings-fields", "workbench-run",
     ]
     assert manifest["group_dependencies"]["workbench-input-state"] == [
         "workbench-core",
@@ -1805,8 +1806,9 @@ def test_shared_multi_select_enforces_exclusive_and_single_selection() -> None:
 
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "multi_select_filter.js"
     source = WEB_ROOT / "catalog" / "shared" / "multi-select-filter.js"
+    remote_source = WEB_ROOT / "catalog" / "shared" / "multi-select-filter-remote.js"
     result = subprocess.run(
-        ["node", str(fixture), str(source)], cwd=ROOT,
+        ["node", str(fixture), str(remote_source), str(source)], cwd=ROOT,
         capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr or result.stdout
@@ -1820,6 +1822,38 @@ def test_shared_multi_select_enforces_exclusive_and_single_selection() -> None:
     assert "height: max-content" in styles
     assert ".ft-multi-select-options" in styles
     assert 'menuClass: "factor-product-group-filter-menu"' in factor_filter
+    manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text())
+    assert "catalog-selection-remote" in manifest["group_dependencies"][
+        "workbench-strategy-bindings"
+    ]
+    assert str(remote_source.relative_to(WEB_ROOT)).replace("\\", "/") in manifest[
+        "groups"]["catalog-selection-remote"]
+
+
+def test_inline_strategy_creation_uses_shared_nested_object_overlay() -> None:
+    panel = (WEB_ROOT / "workbench" / "strategy-binding-panel.js").read_text(
+        encoding="utf-8",
+    )
+    overlay = (WEB_ROOT / "workbench" / "test-object-editor-overlay.js").read_text(
+        encoding="utf-8",
+    )
+    styles = (WEB_ROOT / "styles" / "strategy-library.css").read_text(
+        encoding="utf-8",
+    )
+
+    assert 'kind: "strategy"' in panel
+    assert "FTTestObjectEditorOverlay.open" in panel
+    assert "FTStrategyLibraryEditor.create" not in panel
+    assert 'temporary: true' in panel
+    assert "strategy-inline-dialog" not in panel
+    assert 'strategy: {' in overlay
+    assert 'load: "strategy-library-editor-core"' in overlay
+    assert 'submitLabel || "保存"' in overlay
+    assert "strategy-inline-dialog" not in styles
+    manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text())
+    assert "strategy-library-editor-core" not in manifest["group_dependencies"][
+        "workbench-strategy-bindings"
+    ]
 
 
 def test_registered_locked_fields_share_one_visual_and_picker_contract() -> None:
