@@ -15,6 +15,18 @@
   }
 
   function persistedFamilyClassName(value) {
+    const factorRecord = Boolean(
+      value?.factor_alias || value?.factor_ref || value?.factor_params,
+    );
+    if (factorRecord) {
+      const storedFamilyName = String(
+        value?.family_class_name || value?.factor_family_name
+        || value?.factor_family_alias || value?.family_alias || value?.family || "",
+      ).trim();
+      if (storedFamilyName) return storedFamilyName;
+      const factorAliasValue = String(value?.factor_alias || value?.alias || "").trim();
+      if (factorAliasValue) return factorAliasValue.split("|", 1)[0];
+    }
     return String(
       value?.name || value?.factor_family_name || value?.family_class_name
       || value?.factor_family_alias || value?.family_alias || value?.family || "",
