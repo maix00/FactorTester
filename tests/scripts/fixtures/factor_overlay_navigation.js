@@ -133,10 +133,17 @@ const context = {
   assert.equal(calls.sets.length, 1);
   assert.equal(back.hidden, true);
   assert.equal(tabs.children.length, 2, "back navigation must preserve the child frame");
-  tabs.children[1].listeners.click();
+  tabs.children[1].children[0].listeners.click();
   await Promise.resolve();
   await Promise.resolve();
   assert.equal(back.hidden, false, "preserved child frame must remain navigable");
+  tabs.children[1].children[1].listeners.click({
+    preventDefault() {}, stopPropagation() {},
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(tabs.children.length, 1, "tab cancel must remove only the child frame");
+  assert.equal(back.hidden, true);
 
   close.listeners.click();
   await pending;

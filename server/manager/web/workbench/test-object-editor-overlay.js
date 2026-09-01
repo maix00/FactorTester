@@ -82,12 +82,12 @@
     const closeButton = document.createElement("button");
     closeButton.type = "button";
     closeButton.className = "dialog-close icon-action-button test-object-editor-close";
-    closeButton.replaceChildren?.(window.FTIcons?.node?.("close") || "×");
+    closeButton.replaceChildren?.(window.FTIcons?.node?.("xmark") || "×");
     closeButton.title = context.t("关闭");
     const backButton = document.createElement("button");
     backButton.type = "button";
     backButton.className = "icon-action-button test-object-editor-back";
-    backButton.replaceChildren?.(window.FTIcons?.node?.("chevron-left") || "‹");
+    backButton.replaceChildren?.(window.FTIcons?.node?.("chevron.left") || "‹");
     backButton.title = context.t("返回上一层");
     backButton.setAttribute?.("aria-label", context.t("返回上一层"));
     backButton.hidden = true;
@@ -139,14 +139,31 @@
 
     const renderTabs = () => {
       tabBar.replaceChildren(...frames.map((frame, index) => {
+        const item = document.createElement("span");
+        item.className = "test-object-editor-tab";
+        item.classList.toggle("active", frame === activeFrame);
         const button = document.createElement("button");
         button.type = "button";
-        button.className = "secondary test-object-editor-tab";
-        button.classList.toggle("active", frame === activeFrame);
+        button.className = "test-object-editor-tab-label";
         const definition = definitions[frame.kind];
         button.textContent = frame.label || `${context.t(definition.title)} ${index + 1}`;
         button.addEventListener("click", () => { void renderFrame(frame); });
-        return button;
+        item.append(button);
+        if (frame !== frames[0]) {
+          const cancel = document.createElement("button");
+          cancel.type = "button";
+          cancel.className = "icon-action-button test-object-editor-tab-cancel";
+          cancel.replaceChildren?.(window.FTIcons?.node?.("xmark") || "×");
+          cancel.title = context.t("取消这一层");
+          cancel.setAttribute?.("aria-label", context.t("取消这一层"));
+          cancel.addEventListener("click", event => {
+            event.preventDefault?.();
+            event.stopPropagation?.();
+            closeFrame(frame);
+          });
+          item.append(cancel);
+        }
+        return item;
       }));
       tabBar.hidden = frames.length < 2;
     };
@@ -157,9 +174,15 @@
         return;
       }
       const index = frames.indexOf(frame);
+      const wasActive = frame === activeFrame;
       if (index >= 0) frames.splice(index, 1);
       frame.resolve?.(null);
-      void renderFrame(frames[Math.max(0, index - 1)] || frames[0]);
+      if (wasActive) {
+        void renderFrame(frame.parent && frames.includes(frame.parent)
+          ? frame.parent : frames[Math.max(0, index - 1)] || frames[0]);
+      } else {
+        renderTabs();
+      }
     };
 
     const saveFrame = (frame, value) => {

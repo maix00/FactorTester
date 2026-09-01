@@ -2488,6 +2488,9 @@ def test_test_object_overlay_loads_the_detail_group_before_first_factor_chip() -
     factors = (
         ROOT / "server" / "manager" / "web" / "catalog" / "factors.js"
     ).read_text(encoding="utf-8")
+    icons = (
+        ROOT / "server" / "manager" / "web" / "core" / "icons.js"
+    ).read_text(encoding="utf-8")
 
     assert 'load: "factor-catalog-detail-rendering"' in overlay
     assert 'load: "factor-catalog-detail"' in overlay
@@ -2496,6 +2499,10 @@ def test_test_object_overlay_loads_the_detail_group_before_first_factor_chip() -
     assert "window.FTFactorDetails.factorDetail(" in factors
     assert "window.FTFactorDetails.familyDetail(" in factors
     assert "window.FTFactorDetails.setDetail(" in factors
+    assert '"xmark":' in icons
+    assert '"chevron.left":' in icons
+    assert 'FTIcons?.node?.("xmark")' in overlay
+    assert 'FTIcons?.node?.("chevron.left")' in overlay
 
 
 def test_factor_catalog_list_defers_auxiliary_catalogs_and_heavy_modules() -> None:
