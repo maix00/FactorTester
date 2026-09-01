@@ -117,11 +117,10 @@
     const name = document.createElement("span");
     name.textContent = String(parameter.type || parameter.param_type || "Parameter");
     root.append(name);
-    const description = String(parameter.desc || parameter.value_space_desc || "").trim();
-    const fallback = parameter.type === "FactorParam"
-      ? context.t("可填写能解析为 FactorExpr 的值，也可从 Column 或因子库选择。") : "";
-    const help = description || fallback;
-    if (help) root.append((window.FTUI?.helpIcon || window.FTHelp?.create)(help, {
+    const help = String(parameter.input_help || parameter.desc
+      || parameter.value_space_desc || context.t("填写该参数类型允许的值。"))
+      .trim();
+    root.append((window.FTUI?.helpIcon || window.FTHelp?.create)(help, {
       ariaLabel: context.t("查看参数类型说明"),
     }));
     return root;

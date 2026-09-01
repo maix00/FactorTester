@@ -7,6 +7,9 @@ from tools.parameters.Parameter import Parameter, ValueSpace
 @factor_workspace
 class WindowParam(Parameter):
     """窗口参数：支持正整数或正 timedelta。"""
+    input_help = (
+        "填写正整数表示 bar 数，或填写正时间长度（如 30m、2h、20d）；零、负数和无法解析的单位无效。"
+    )
 
     @factor_workspace
     def __init__(self, alias: str, default_value: Optional[Any] = 1, *args, **kwargs):

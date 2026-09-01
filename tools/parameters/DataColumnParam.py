@@ -6,6 +6,10 @@ from tools.parameters.Parameter import Parameter, ValueSpace
 
 @factor_workspace
 class DataColumnParam(Parameter):
+    input_help = (
+        "填写 DataColumn/ColumnRef alias（如 C、CA、V、TO、OI），或从 Column 候选中选择一列。"
+    )
+
     @factor_workspace
     def __init__(self, alias: Optional[str] = None, default_value: Optional[Any] = None, *args, **kwargs):
         if hasattr(self, '_initialized'):
