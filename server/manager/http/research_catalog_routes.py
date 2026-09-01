@@ -208,19 +208,29 @@ class ResearchCatalogRoutesMixin:
                 json_response(self, {"success": True, "workspace": value}, 201)
                 return True
             if child == "reports":
-                value = service.register_report(
-                    research_id,
-                    actor=actor,
-                    report_id=data.get("report_id"),
-                    title=str(data.get("title") or ""),
-                    profile_ref=str(data.get("profile_ref") or ""),
-                    workspace_id=str(data.get("workspace_id") or ""),
-                    build_source=str(data.get("build_source") or "client"),
-                    build_source_ref=str(data.get("build_source_ref") or ""),
-                    visibility=str(data.get("visibility") or "private"),
-                    authorized_users=data.get("authorized_users"),
-                    source_ref=str(data.get("source_ref") or ""),
-                )
+                if data.get("report_id"):
+                    value = service.register_report(
+                        research_id,
+                        actor=actor,
+                        report_id=data.get("report_id"),
+                        title=str(data.get("title") or ""),
+                        profile_ref=str(data.get("profile_ref") or ""),
+                        workspace_id=str(data.get("workspace_id") or ""),
+                        build_source=str(data.get("build_source") or "client"),
+                        build_source_ref=str(data.get("build_source_ref") or ""),
+                        visibility=str(data.get("visibility") or "private"),
+                        authorized_users=data.get("authorized_users"),
+                        source_ref=str(data.get("source_ref") or ""),
+                    )
+                else:
+                    value = service.create_report_space(
+                        research_id,
+                        actor=actor,
+                        title=str(data.get("title") or ""),
+                        profile_ref=str(data.get("profile_ref") or ""),
+                        visibility=str(data.get("visibility") or "private"),
+                        authorized_users=data.get("authorized_users"),
+                    )
                 json_response(self, {"success": True, "report": value}, 201)
                 return True
             if child == "share-links":
@@ -318,6 +328,40 @@ class ResearchCatalogRoutesMixin:
             self._research_catalog_error(exc)
             return True
         json_response(self, {"success": True, "research": value})
+        return True
+
+    def _delete_research_catalog_routes(self, parsed) -> bool:
+        report_match = re.fullmatch(
+            r"/api/research/([^/]+)/reports/([^/]+)", parsed.path,
+        )
+        member_match = re.fullmatch(
+            r"/api/research/([^/]+)/members/([^/]+)", parsed.path,
+        )
+        if not report_match and not member_match:
+            return False
+        session = self._research_catalog_session()
+        if session is None:
+            return True
+        actor = str(session["username"])
+        try:
+            if report_match:
+                value = self._research_catalog_service().remove_report(
+                    unquote(report_match.group(1)),
+                    unquote(report_match.group(2)),
+                    actor=actor,
+                )
+                payload = {"report": value}
+            else:
+                value = self._research_catalog_service().remove_membership(
+                    unquote(member_match.group(1)),
+                    profile_ref=unquote(member_match.group(2)),
+                    actor=actor,
+                )
+                payload = {"member": value}
+        except (KeyError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
+            self._research_catalog_error(exc)
+            return True
+        json_response(self, {"success": True, **payload})
         return True
 
     @staticmethod

@@ -565,9 +565,10 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .research-report-info-metadata > span + span::before { content: "·"; margin-right: 7px; color: var(--line); }
 .research-report-embedded-body { min-width: 0; }
 .research-report-table th, .research-report-table td { padding-top: 9px; padding-bottom: 9px; vertical-align: middle; }
-.research-visibility-control { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-.research-visibility-select { width: auto; max-width: 150px; min-height: 30px; border: 1px solid var(--line); border-radius: 7px; padding: 4px 24px 4px 7px; background: var(--panel); color: inherit; }
-.research-share-link-button { width: 30px; height: 30px; min-height: 30px; flex: 0 0 30px; padding: 5px; }
+.research-visibility-control { display: inline-flex; align-items: center; gap: 4px; margin: 0; line-height: 1; white-space: nowrap; }
+.research-visibility-select { width: auto; max-width: 150px; height: 26px; min-height: 0; margin: 0; border: 1px solid var(--line); border-radius: 7px; padding: 1px 22px 1px 7px; background: var(--panel); color: inherit; line-height: 22px; }
+.research-share-link-button { width: 26px; height: 26px; min-height: 0; flex: 0 0 26px; padding: 4px; }
+.research-root-table td:has(.research-visibility-control), .research-report-table td:has(.research-visibility-control) { padding-top: 2px; padding-bottom: 2px; }
 .research-visibility-dialog { max-width: calc(100vw - 24px); }
 .research-visibility-dialog .dialog-card { width: min(420px, calc(100vw - 24px)); max-width: 100%; overflow-x: hidden; }
 .research-visibility-dialog input, .research-visibility-dialog select { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: 8px; padding: 9px; background: var(--panel); color: inherit; }
@@ -583,6 +584,9 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .research-report-tab:disabled { cursor: default; opacity: .5; }
 .research-reports-page, .research-graph-list-page { display: grid; gap: 14px; min-width: 0; }
 .research-root-page, .research-root-detail { display: grid; gap: 14px; min-width: 0; }
+.research-detail-actions, .research-report-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+.research-report-actions { flex: 0 0 auto; }
+.research-report-info-line > .research-report-actions:only-child { margin-left: auto; }
 .research-root-table table { min-width: 720px; }
 .research-root-detail section { display: grid; gap: 8px; min-width: 0; }
 .research-root-detail h2, .research-root-detail h3, .research-root-detail p { margin: 0; }

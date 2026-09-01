@@ -156,6 +156,36 @@ def test_owner_can_update_report_visibility_independently(tmp_path):
     )["visibility"] == "private"
 
 
+def test_owner_can_remove_report_and_profile_from_research(tmp_path):
+    catalog = ResearchCatalog(tmp_path / "research.sqlite")
+    research = catalog.create_research(
+        owner_ref="alice", title="研究", profile_ref="self",
+    )
+    workspace = catalog.list_workspaces(
+        research["research_id"], viewer="alice",
+    )[0]
+    report = catalog.create_report_space(
+        research["research_id"], actor="alice", title="第一份报告",
+        profile_ref="self",
+    )
+    assert report["report_id"].startswith("report:v1:")
+    assert report["workspace_id"] == workspace["workspace_id"]
+    assert report["build_source"] == "workspace"
+
+    removed_report = catalog.remove_report(
+        research["research_id"], report["report_id"], actor="alice",
+    )
+    assert removed_report["status"] == "archived"
+    assert catalog.list_reports(research["research_id"], viewer="alice") == []
+
+    removed_member = catalog.remove_membership(
+        research["research_id"], profile_ref="self", actor="alice",
+    )
+    assert removed_member["status"] == "revoked"
+    assert catalog.list_members(research["research_id"], viewer="alice") == []
+    assert catalog.list_workspaces(research["research_id"], viewer="alice") == []
+
+
 def test_share_links_grant_target_without_exposing_plain_token(tmp_path):
     catalog = ResearchCatalog(tmp_path / "research.sqlite")
     research = catalog.create_research(owner_ref="alice", title="研究")
@@ -226,6 +256,17 @@ def test_report_migration_is_explicit_and_idempotent(tmp_path):
     assert detail["title"] == "旧报告"
     assert detail["reports"][0]["report_id"] == "server-report-1"
     assert detail["evidence_links"][0]["evidence_ref"].startswith("evidence:job:")
+
+    assert detail["can_delete"] is False
+    assert detail["reports"][0]["can_delete"] is False
+    with pytest.raises(PermissionError, match="source server"):
+        catalog.remove_report(
+            research_id, "server-report-1", actor="alice",
+        )
+    with pytest.raises(PermissionError, match="source server"):
+        catalog.update_research(
+            research_id, actor="alice", status="archived",
+        )
 
 
 def test_publication_migration_restores_legacy_private_projection_to_superiors(tmp_path):

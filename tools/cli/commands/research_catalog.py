@@ -177,6 +177,16 @@ def register_research_catalog_commands(research: click.Group) -> None:
             },
         )))
 
+    @research.command("member-remove")
+    @click.argument("research_id")
+    @click.option("--profile", "profile_ref", required=True)
+    @friendly_errors
+    def remove_member(research_id: str, profile_ref: str) -> None:
+        """从 Research 移除一个 Profile，并停用其 Research Workspace。"""
+        click.echo(_json(client_from_config().remove_research_member(
+            research_id, profile_ref,
+        )))
+
     @research.command("workspace-create")
     @click.argument("research_id")
     @click.option("--principal", "principal_ref", default="")
@@ -199,48 +209,33 @@ def register_research_catalog_commands(research: click.Group) -> None:
             },
         )))
 
-    @research.command("report-link")
+    @research.command("report-create")
     @click.argument("research_id")
-    @click.option("--report-id", required=True)
-    @click.option("--title", default="")
-    @click.option("--profile", "profile_ref", default="")
-    @click.option("--workspace-id", default="")
-    @click.option("--build-source", default="client", show_default=True)
-    @click.option("--build-source-ref", default="")
+    @click.option("--title", required=True, help="研究报告标题。")
+    @click.option("--profile", "profile_ref", required=True)
     @click.option(
         "--visibility",
         type=click.Choice(("private", "superiors", "authorized", "public")),
         default="private",
         show_default=True,
     )
-    @click.option("--authorized-user", multiple=True)
-    @click.option("--source-ref", default="")
+    @click.option("--authorized-user", multiple=True, help="授权用户，可重复。")
     @friendly_errors
-    def link_report(
+    def create_report(
         research_id: str,
-        report_id: str,
         title: str,
         profile_ref: str,
-        workspace_id: str,
-        build_source: str,
-        build_source_ref: str,
         visibility: str,
         authorized_user: tuple[str, ...],
-        source_ref: str,
     ) -> None:
-        """把现有 Report 关联到 Research。"""
-        click.echo(_json(client_from_config().register_research_report(
+        """在 Research 中新建一个由 Profile 撰写的报告空间。"""
+        click.echo(_json(client_from_config().create_research_report(
             research_id,
             {
-                "report_id": report_id,
                 "title": title,
                 "profile_ref": profile_ref,
-                "workspace_id": workspace_id,
-                "build_source": build_source,
-                "build_source_ref": build_source_ref,
                 "visibility": visibility,
                 "authorized_users": list(authorized_user),
-                "source_ref": source_ref,
             },
         )))
 
@@ -277,6 +272,16 @@ def register_research_catalog_commands(research: click.Group) -> None:
             raise click.ClickException("至少提供一个要更新的字段")
         click.echo(_json(client_from_config().update_research_report(
             research_id, report_id, payload,
+        )))
+
+    @research.command("report-remove")
+    @click.argument("research_id")
+    @click.argument("report_id")
+    @friendly_errors
+    def remove_report(research_id: str, report_id: str) -> None:
+        """归档 Research 中的一个研究报告空间。"""
+        click.echo(_json(client_from_config().remove_research_report(
+            research_id, report_id,
         )))
 
     @research.command("evidence-link")

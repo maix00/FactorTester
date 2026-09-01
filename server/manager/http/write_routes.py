@@ -461,6 +461,8 @@ class WriteRoutesMixin:
             return
         if self._delete_agent_routes(parsed):
             return
+        if self._delete_research_catalog_routes(parsed):
+            return
         if self._proxy_job_request(parsed, method="DELETE"):
             return
         if self._serve_manager_application(parsed, method="DELETE"):

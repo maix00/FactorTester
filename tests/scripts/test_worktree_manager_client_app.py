@@ -2498,7 +2498,7 @@ def test_client_module_catalog_keeps_test_routes_out_of_entry_surfaces(tmp_path)
         assert modules[module_id]["homeVisible"] is False
         assert modules[module_id]["path"] == path
     assert modules["jobs"]["sfSymbol"] == "checklist"
-    assert modules["jobs"]["title_key"] == "测试"
+    assert modules["jobs"]["title_key"] == "测试台"
     assert modules["jobs"]["path"] == "/jobs?section=types"
     assert modules["products"]["title"] == "产品库"
     assert modules["products"]["title_key"] == "产品库"
@@ -3488,6 +3488,10 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert 'metadata.className = "research-report-info-metadata"' in reports
     assert 'item.className = "secondary"' not in reports
     assert 'body.className = "research-report-embedded-body"' in reports
+    assert 'context, "plus", "新建研究报告"' in reports
+    assert 'context, "trash", "删除研究报告"' in reports
+    assert 'picker.setAttribute("aria-label", context.t("研究报告"))' in reports
+    assert 'item?.build_source === "workspace"' in reports
     assert 'loadGroups?.(["report"])' in reports
     assert "FTReportSource.create" in reports
     assert "FTReportRenderer.render" in reports
@@ -3503,6 +3507,9 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert 'title: "共享研究"' in researches
     assert 'nav.className = "research-section-tabs research-root-scopes"' in researches
     assert "research-section-tab research-root-scope" in researches
+    assert 'context, "plus", "新建研究"' in researches
+    assert 'context, "plus", "添加研究身份"' in researches
+    assert 'context, "trash", "移除研究身份"' in researches
     assert 'nav.className = "research-section-tabs research-detail-tabs"' in researches
     assert "research-section-tab research-detail-tab" in researches
     assert 'context.setHeading(value.title || id, context.t("研究"))' in researches

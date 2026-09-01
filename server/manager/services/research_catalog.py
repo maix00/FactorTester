@@ -373,7 +373,8 @@ class ResearchCatalog:
         with connect_sqlite(self.db_path, readonly=True) as conn:
             rows = conn.execute(
                 """SELECT * FROM research_catalog_memberships
-                   WHERE research_id=? ORDER BY created_at, profile_ref""",
+                   WHERE research_id=? AND status='active'
+                   ORDER BY created_at, profile_ref""",
                 (research_id,),
             ).fetchall()
         return [self._membership_value(item) for item in rows]
@@ -385,7 +386,8 @@ class ResearchCatalog:
         with connect_sqlite(self.db_path, readonly=True) as conn:
             rows = conn.execute(
                 """SELECT * FROM research_catalog_workspaces
-                   WHERE research_id=? ORDER BY updated_at DESC, workspace_id""",
+                   WHERE research_id=? AND status='active'
+                   ORDER BY updated_at DESC, workspace_id""",
                 (research_id,),
             ).fetchall()
         return [self._workspace_value(item) for item in rows]
@@ -559,6 +561,10 @@ class ResearchCatalog:
                 _authorized_users(authorized_users, str(row["owner_ref"])),
             )
         if status is not None:
+            if status == "archived" and str(row["migration_source"]):
+                raise PermissionError(
+                    "research can only be deleted on its source server"
+                )
             values["status"] = _status(status)
         if not values:
             return self._research_value(row, viewer=actor, access=access)
@@ -611,6 +617,41 @@ class ResearchCatalog:
             ).fetchone()
         return self._membership_value(value)
 
+    def remove_membership(
+        self, research_id: str, *, profile_ref: str, actor: str,
+    ) -> dict[str, Any]:
+        row = self._research_row(research_id)
+        if not self._research_access(row, actor)["can_manage"]:
+            raise PermissionError("research membership management is not authorized")
+        profile = _profile(profile_ref)
+        now = time.time()
+        with connect_sqlite(self.db_path) as conn:
+            value = conn.execute(
+                """SELECT * FROM research_catalog_memberships
+                   WHERE research_id=? AND profile_ref=?""",
+                (research_id, profile),
+            ).fetchone()
+            if value is None:
+                raise KeyError("research member not found")
+            conn.execute(
+                """UPDATE research_catalog_memberships
+                   SET status='revoked', updated_at=?
+                   WHERE research_id=? AND profile_ref=?""",
+                (now, research_id, profile),
+            )
+            conn.execute(
+                """UPDATE research_catalog_workspaces
+                   SET status='archived', updated_at=?
+                   WHERE research_id=? AND profile_ref=? AND status='active'""",
+                (now, research_id, profile),
+            )
+            updated = conn.execute(
+                """SELECT * FROM research_catalog_memberships
+                   WHERE research_id=? AND profile_ref=?""",
+                (research_id, profile),
+            ).fetchone()
+        return self._membership_value(updated)
+
     def create_workspace(
         self,
         research_id: str,
@@ -644,6 +685,17 @@ class ResearchCatalog:
                 (research_id, profile),
             ).fetchone()
             if existing is not None:
+                if str(existing["status"]) != "active":
+                    conn.execute(
+                        """UPDATE research_catalog_workspaces
+                           SET status='active', principal_ref=?, title=?, updated_at=?
+                           WHERE workspace_id=?""",
+                        (principal, clean_title, now, str(existing["workspace_id"])),
+                    )
+                    existing = conn.execute(
+                        "SELECT * FROM research_catalog_workspaces WHERE workspace_id=?",
+                        (str(existing["workspace_id"]),),
+                    ).fetchone()
                 return self._workspace_value(existing)
             conn.execute(
                 """INSERT INTO research_catalog_workspaces
@@ -750,6 +802,49 @@ class ResearchCatalog:
             ).fetchone()
         return self._report_value(value, viewer=actor)
 
+    def create_report_space(
+        self,
+        research_id: str,
+        *,
+        actor: str,
+        title: str,
+        profile_ref: str,
+        visibility: str = "private",
+        authorized_users: list[str] | tuple[str, ...] | None = None,
+    ) -> dict[str, Any]:
+        """Create one empty Report space owned by a Research workspace.
+
+        A report space is the durable parent for later branch-authored report
+        content.  It deliberately has no source reference until a Profile
+        publishes the first branch generation.
+        """
+        profile = _profile(profile_ref)
+        workspaces = self.list_workspaces(research_id, viewer=actor)
+        workspace = next(
+            (item for item in workspaces if item["profile_ref"] == profile),
+            None,
+        )
+        if workspace is None:
+            research = self._research_row(research_id)
+            workspace = self.create_workspace(
+                research_id,
+                actor=actor,
+                principal_ref=str(research["owner_ref"]),
+                profile_ref=profile,
+                title=f"{str(research['title'])} / {profile}",
+            )
+        return self.register_report(
+            research_id,
+            actor=actor,
+            report_id="report:v1:" + secrets.token_urlsafe(18),
+            title=title,
+            profile_ref=profile,
+            workspace_id=str(workspace["workspace_id"]),
+            build_source="workspace",
+            visibility=visibility,
+            authorized_users=authorized_users,
+        )
+
     def update_report(
         self,
         research_id: str,
@@ -780,6 +875,31 @@ class ResearchCatalog:
             conn.execute(
                 f"UPDATE research_catalog_reports SET {assignments} WHERE report_id=?",
                 (*values.values(), report_id),
+            )
+            updated = conn.execute(
+                "SELECT * FROM research_catalog_reports WHERE report_id=?",
+                (report_id,),
+            ).fetchone()
+        return self._report_value(updated, viewer=actor)
+
+    def remove_report(
+        self, research_id: str, report_id: str, *, actor: str,
+    ) -> dict[str, Any]:
+        research = self._research_row(research_id)
+        if not self._research_access(research, actor)["can_manage"]:
+            raise PermissionError("research report management is not authorized")
+        row = self._report_row(report_id)
+        if str(row["research_id"]) != research_id:
+            raise ValueError("report does not belong to research")
+        if not self._report_is_local(row):
+            raise PermissionError(
+                "research report can only be deleted on its source server"
+            )
+        with connect_sqlite(self.db_path) as conn:
+            conn.execute(
+                """UPDATE research_catalog_reports
+                   SET status='archived', updated_at=? WHERE report_id=?""",
+                (time.time(), report_id),
             )
             updated = conn.execute(
                 "SELECT * FROM research_catalog_reports WHERE report_id=?",
@@ -1479,6 +1599,10 @@ class ResearchCatalog:
             "updated_at": float(row["updated_at"]),
             "is_owned": str(row["owner_ref"]) == str(viewer or ""),
             "access": resolved_access,
+            "can_delete": (
+                resolved_access["can_manage"]
+                and not str(row["migration_source"])
+            ),
         }
 
     @staticmethod
@@ -1529,11 +1653,25 @@ class ResearchCatalog:
             "source_ref": str(row["source_ref"]),
             "created_at": float(row["created_at"]),
             "updated_at": float(row["updated_at"]),
+            "can_delete": self._report_is_local(row),
         }
         value["access"] = access or self._report_access(row, viewer)
         if value["access"]["can_manage"]:
             value["authorized_users"] = _loads_list(row["authorized_users_json"])
         return value
+
+    @staticmethod
+    def _report_is_local(row) -> bool:
+        """Only empty Report spaces created by this catalog are deletable here.
+
+        Imported client/server/public projections retain their source store;
+        this catalog must never turn a local UI action into remote deletion or
+        hide the projection as a substitute for deletion at the source.
+        """
+        return (
+            str(row["build_source"]) == "workspace"
+            and not str(row["source_ref"])
+        )
 
     @staticmethod
     def _evidence_link_value(row) -> dict[str, Any]:

@@ -267,29 +267,110 @@
     return reference;
   }
 
-  function reportInfoLine(context, rows, selected, state, rerender) {
+  function reportActions(context, researchID, selected, rerender, canManage) {
+    const actions = document.createElement("span");
+    actions.className = "research-report-actions";
+    if (canManage) {
+      actions.append(FTUI.iconButton(
+        context, "plus", "新建研究报告",
+        () => void createReportDialog(context, researchID, rerender),
+      ));
+    }
+    if (selected?.access?.can_manage === true && selected?.can_delete === true) {
+      actions.append(FTUI.iconButton(
+        context, "trash", "删除研究报告", async () => {
+          if (!window.confirm(context.t("确定删除这个研究报告空间吗？"))) return;
+          try {
+            await context.api(
+              `/api/research/${encodeURIComponent(researchID)}`
+                + `/reports/${encodeURIComponent(reportIdentity(selected))}`,
+              {method: "DELETE"},
+            );
+            await rerender();
+          } catch (error) {
+            context.showNotice?.(error.message || String(error), true);
+          }
+        },
+      ));
+    }
+    return actions;
+  }
+
+  async function createReportDialog(context, researchID, rerender) {
+    const profiles = await FTPageAgentProfiles.forResearch(context, researchID);
+    if (!profiles.length) {
+      context.showNotice?.(context.t("请先在“研究身份”中添加一个 Profile"), true);
+      return;
+    }
+    const dialog = document.createElement("dialog");
+    dialog.className = "ft-dialog research-visibility-dialog";
+    const card = document.createElement("div");
+    card.className = "dialog-card";
+    const heading = document.createElement("h2");
+    heading.textContent = context.t("新建研究报告");
+    const title = document.createElement("input");
+    title.placeholder = context.t("研究报告标题");
+    const profile = document.createElement("select");
+    profiles.forEach(item => {
+      const option = document.createElement("option");
+      option.value = String(item.profile_id || "");
+      option.textContent = String(item.display_name || item.profile_id || "");
+      profile.append(option);
+    });
+    const actions = document.createElement("div");
+    actions.className = "dialog-actions";
+    const cancel = context.button(context.t("取消"), () => dialog.close());
+    cancel.classList.add("secondary");
+    const create = context.button(context.t("创建"), async () => {
+      if (!title.value.trim()) {
+        title.focus();
+        return;
+      }
+      create.disabled = true;
+      try {
+        await context.api(`/api/research/${encodeURIComponent(researchID)}/reports`, {
+          method: "POST",
+          body: JSON.stringify({
+            title: title.value.trim(), profile_ref: profile.value,
+            visibility: "private",
+          }),
+        });
+        dialog.close();
+        await rerender();
+      } catch (error) {
+        context.showNotice?.(error.message || String(error), true);
+        create.disabled = false;
+      }
+    });
+    create.classList.add("primary");
+    actions.append(cancel, create);
+    card.append(heading, title, profile, actions);
+    dialog.append(card);
+    dialog.addEventListener("close", () => dialog.remove(), {once: true});
+    document.body.append(dialog);
+    dialog.showModal();
+    title.focus();
+  }
+
+  function reportInfoLine(
+    context, researchID, rows, selected, state, rerender, canManage,
+  ) {
     const line = document.createElement("div");
     line.className = "research-report-info-line";
-    if (rows.length > 1) {
-      const picker = document.createElement("select");
-      picker.setAttribute("aria-label", context.t("研究报告"));
-      rows.forEach(item => {
-        const option = document.createElement("option");
-        option.value = reportIdentity(item);
-        option.textContent = item.title || item.report_id || context.t("未命名研究报告");
-        option.selected = option.value === reportIdentity(selected);
-        picker.append(option);
-      });
-      picker.addEventListener("change", () => {
-        state.selectedReportID = picker.value;
-        void rerender();
-      });
-      line.append(picker);
-    } else {
-      const title = document.createElement("strong");
-      title.textContent = selected.title || selected.report_id || context.t("未命名研究报告");
-      line.append(title);
-    }
+    const picker = document.createElement("select");
+    picker.setAttribute("aria-label", context.t("研究报告"));
+    rows.forEach(item => {
+      const option = document.createElement("option");
+      option.value = reportIdentity(item);
+      option.textContent = item.title || item.report_id || context.t("未命名研究报告");
+      option.selected = option.value === reportIdentity(selected);
+      picker.append(option);
+    });
+    picker.addEventListener("change", () => {
+      state.selectedReportID = picker.value;
+      void rerender();
+    });
+    line.append(picker);
     const metadata = document.createElement("div");
     metadata.className = "research-report-info-metadata";
     [
@@ -301,11 +382,20 @@
       item.textContent = value;
       metadata.append(item);
     });
-    line.append(metadata);
+    line.append(metadata, reportActions(
+      context, researchID, selected, rerender, canManage,
+    ));
     return line;
   }
 
   async function renderReportBody(context, mount, item, state) {
+    if (item?.build_source === "workspace" && !item?.source_ref) {
+      mount.replaceChildren(FTUI.empty(
+        context.t("研究报告尚未撰写"),
+        context.t("绑定的 Profile 可以在这个报告空间中创建分支并撰写正文"),
+      ));
+      return;
+    }
     const id = publicationID(item);
     if (!id) {
       mount.replaceChildren(FTUI.empty(
@@ -368,7 +458,7 @@
     }
   }
 
-  async function renderForResearch(context, mount, researchID) {
+  async function renderForResearch(context, mount, researchID, options = {}) {
     const id = String(researchID || "").trim();
     if (!id) {
       mount.replaceChildren(FTUI.empty(context.t("无法读取"), context.t("缺少 Research 标识")));
@@ -385,8 +475,15 @@
       const root = document.createElement("div");
       root.className = "research-reports-for-research";
       if (!rows.length) {
-        root.append(FTUI.empty(
-          context.t("暂无研究报告"), context.t("可在当前 Research 中登记研究报告"),
+        const toolbar = document.createElement("div");
+        toolbar.className = "research-report-info-line";
+        toolbar.append(reportActions(
+          context, id, null,
+          () => renderForResearch(context, mount, id, options),
+          options.canManage === true,
+        ));
+        root.append(toolbar, FTUI.empty(
+          context.t("暂无研究报告"), context.t("点击加号新建研究报告"),
         ));
         mount.replaceChildren(root);
         return;
@@ -397,8 +494,9 @@
       const body = document.createElement("div");
       body.className = "research-report-embedded-body";
       root.append(reportInfoLine(
-        context, rows, selected, state,
-        () => renderForResearch(context, mount, id),
+        context, id, rows, selected, state,
+        () => renderForResearch(context, mount, id, options),
+        options.canManage === true,
       ), body);
       mount.replaceChildren(root);
       await renderReportBody(context, body, selected, state);
