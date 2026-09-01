@@ -23,6 +23,21 @@
 
   function appendLink(parent, label, target, context) {
     const kind = referenceKind(target, context);
+    const legacyFactorSnapshot = /^factortester:\/\/factor\/(?:factor|factor-family|factor-set)%3Av1%3A/i
+      .test(String(target || ""));
+    if (legacyFactorSnapshot) {
+      const value = document.createElement("span");
+      value.className = "reference-chip reference-factor reference-legacy";
+      value.dataset.referenceKind = kind;
+      value.dataset.referenceTarget = target;
+      const icon = FTIcons.node(FTIcons.reference(kind, target), "reference-icon");
+      const text = document.createElement("span");
+      text.className = "reference-title";
+      text.textContent = context.referenceMeta?.[target]?.label || label;
+      value.append(icon, text);
+      parent.append(value);
+      return;
+    }
     const chip = document.createElement("a");
     chip.className = `reference-chip reference-${kind.replace(/-/g, "_").replace(/[^a-z0-9_]/gi, "")}`;
     chip.dataset.referenceKind = kind;

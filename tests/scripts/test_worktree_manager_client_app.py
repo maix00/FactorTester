@@ -2388,6 +2388,8 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'chart.xyaxis.line' in icons
     assert 'person.crop.rectangle.stack' in icons
     assert 'FTIcons.reference' in rich_text
+    assert 'legacyFactorSnapshot' in rich_text
+    assert 'reference-legacy' in rich_text
     assert 'factortester-local://' in rich_text
     assert '(?:file)' in rich_text
     assert 'return "file"' in rich_text
