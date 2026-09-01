@@ -706,7 +706,7 @@ def _prepare_ic_compute(
     Dict[str, str],         # primary_forward_horizon by display column
 ]:
     """解析参数并构建 IC 分组映射。"""
-    (product_path_selection_id, _, factor_alias_return_freq, paths, ic_decay_lags, rolling_window,
+    (product_path_selection_id, _, factor_items, paths, ic_decay_lags, rolling_window,
      ic_lags, primary_ic_lag, ic_correlation, returns_col,
      forward_horizon_bases, forward_horizon_multipliers) = parse_ic_params(data)
     # Validate the multi-window contract before any factor evaluation.  The
@@ -718,7 +718,7 @@ def _prepare_ic_compute(
     paths_hash = hashlib.md5(str(sorted(paths_hash_source)).encode()).hexdigest()
 
     matched_factors: List[Factor] = []
-    for item in factor_alias_return_freq:
+    for item in factor_items:
         f = factor_family.get_factor_by_alias(item.get('alias', ''))
         if f is not None:
             matched_factors.append(f)

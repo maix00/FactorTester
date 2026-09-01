@@ -210,9 +210,9 @@ def parse_ic_params(data: dict) -> Tuple[
     if not product_path_selection_id:
         errors.append('缺少 product_path_selection_id')
 
-    factor_alias_return_freq = data.get('factors', [])
+    factor_items = data.get('factors', [])
     factor_family_alias = str(data.get('factor_family_alias') or '')
-    if not factor_family_alias and not factor_alias_return_freq:
+    if not factor_family_alias and not factor_items:
         errors.append('缺少 factors')
     paths = data.get('paths', [])
     ic_decay_lags = data.get('ic_decay_lags', None)
@@ -274,7 +274,7 @@ def parse_ic_params(data: dict) -> Tuple[
     if errors:
         raise ValueError('; '.join(errors))
     return (
-        product_path_selection_id, factor_family_alias, factor_alias_return_freq,
+        product_path_selection_id, factor_family_alias, factor_items,
         paths, ic_decay_lags, rolling_window, ic_lags, ic_lags[0],
         ic_correlation, returns_col, forward_horizon_bases, forward_horizon_multipliers,
     )

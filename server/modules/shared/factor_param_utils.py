@@ -6,6 +6,8 @@ session, while the factor library stores one user-scoped config per family.
 
 from __future__ import annotations
 
+import re
+
 from tools.cli.release.research_reporting.references.factor_formula import (
     build_factor_reference,
 )
@@ -35,6 +37,15 @@ def _coerce_transport_value(param, value):
                     return int(value.strip())
                 if isinstance(default.value, float):
                     return float(value.strip())
+            except ValueError:
+                return value
+        # Every FactorParam accepts a numeric ConstExpr, including parameters
+        # whose default is None or a factor/data-column reference. Keep
+        # non-numeric strings deferred so aliases still resolve normally.
+        stripped = value.strip()
+        if re.fullmatch(r'[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?', stripped):
+            try:
+                return float(stripped) if any(mark in stripped.lower() for mark in ('.', 'e')) else int(stripped)
             except ValueError:
                 return value
 

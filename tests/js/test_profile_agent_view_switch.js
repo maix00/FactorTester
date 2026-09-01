@@ -9,13 +9,14 @@ class Element {
     this.children = [];
     this.listeners = {};
     this.dataset = {};
+    this.attributes = {};
     this.hidden = false;
     this.disabled = false;
     this.textContent = "";
   }
   append(...children) { this.children.push(...children); }
   replaceChildren(...children) { this.children = [...children]; }
-  setAttribute() {}
+  setAttribute(name, value) { this.attributes[name] = String(value); }
   addEventListener(name, listener) { this.listeners[name] = listener; }
   dispatch(name, detail = {}) { this.listeners[name]?.({target: this, detail}); }
   click() { this.onclick?.({target: this}); }
@@ -110,6 +111,18 @@ vm.runInThisContext(
     initialChats[0].updateCount,
     1,
     "a remounted active conversation fetches process items produced while absent",
+  );
+  initialChats[0].dispatch("chatkit.ready");
+  await flush();
+  assert.equal(
+    initialChats[0].updateCount,
+    1,
+    "status polling does not repeatedly replace the ChatKit timeline and scroll anchor",
+  );
+  assert.equal(
+    findAll(root, item => item.className === "profile-agent-active-composer").length,
+    0,
+    "active turns rely on ChatKit's native stop control without a second composer",
   );
   const lifecycleHost = findAll(
     root, item => item.dataset?.ftKeepConnectedOnTabSave === "true",

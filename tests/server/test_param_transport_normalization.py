@@ -70,3 +70,21 @@ def test_numeric_factor_param_is_coerced_and_wrapped_from_text_control():
     )
 
     assert row["TransportThreshold"].value == pytest.approx(0.025)
+
+
+@pytest.mark.parametrize(("raw", "expected"), [
+    ("12", 12),
+    ("0.01", 0.01),
+    ("1e-4", 0.0001),
+])
+def test_every_factor_param_accepts_a_manually_typed_numeric_constant(raw, expected):
+    param_utils = _load_factor_param_utils_module()
+    family = _FactorFamilyStub([
+        FactorParam("AnyExpression", default_value=None),
+    ])
+
+    row = param_utils.normalize_factor_param_row(
+        family, {"AnyExpression": raw},
+    )
+
+    assert row["AnyExpression"].value == pytest.approx(expected)

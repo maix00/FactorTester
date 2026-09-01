@@ -7,7 +7,16 @@ from server.modules.shared.factor_param_utils import (
 )
 from server.modules.shared.param_meta import serialize_param_meta
 from tools.factors.formula_identity import freeze_factor_identity
-from tools.parameters import FactorParam, WindowParam
+from tools.parameters import (
+    DataColumnParam,
+    DataTimeParam,
+    FactorParam,
+    FinRangeParam,
+    TimeDeltaParam,
+    TypeParam,
+    WindowParam,
+)
+from tools.factors.Parameters import FactorFreqParam, ReverseParam
 
 
 def _frozen(alias: str, *, params: dict | None = None) -> dict:
@@ -28,6 +37,43 @@ def test_factor_param_declares_visible_factor_reference_editor():
     assert value["input_mode"] == "factor_ref_custom"
     assert value["options"]
     assert any(option["value"] == "C" for option in value["options"])
+    assert "ConstExpr" in value["input_help"]
+    assert "ColumnRef" in value["input_help"]
+    assert "factor:v2" in value["input_help"]
+
+
+@pytest.mark.parametrize(
+    "parameter",
+    [
+        TypeParam("TypedHelp", default_value=1),
+        FinRangeParam("FiniteHelp", value_space=["a", "b"]),
+        TimeDeltaParam("DeltaHelp", default_value="1d"),
+        DataColumnParam("ColumnHelp", default_value="CA"),
+        DataTimeParam("TimeHelp", default_value="2026-09-01"),
+        WindowParam("WindowHelp", default_value="20d"),
+    ],
+)
+def test_every_parameter_type_exports_class_owned_input_help(parameter):
+    value = serialize_param_meta(parameter)
+
+    assert value["input_help"] == parameter.input_help
+    assert value["input_help"].strip()
+
+
+@pytest.mark.parametrize(
+    ("parameter", "expected_type", "help_fragment"),
+    [
+        (FactorFreqParam, "FactorFrequencyParam", "信号频率"),
+        (ReverseParam, "ReverseSignalParam", "反转"),
+    ],
+)
+def test_system_parameters_expose_semantic_types_and_help(
+    parameter, expected_type, help_fragment,
+):
+    value = serialize_param_meta(parameter)
+
+    assert value["type"] == expected_type
+    assert help_fragment in value["input_help"]
 
 
 def test_factor_param_numeric_constant_keeps_plain_default_value():

@@ -132,6 +132,9 @@ class Parameter(UniqueNameObject):
         rectify_value   → 代理到 self._value_space.rectify
         get_value_alias → 代理到 self._value_space.alias
     """
+    input_help = (
+        "填写该参数类型允许的值；输入会在保存或运行前按参数值空间进行解析和校验。"
+    )
     @factor_workspace
     def __new__(cls, alias: Optional[str] = None, *args, **kwargs):
         return super().__new__(cls, alias=alias)
@@ -258,6 +261,9 @@ class TypeParam(Parameter):
     
     typ 可以是单个 type 或 type 的 tuple（表示多类型联合）。
     """
+    input_help = (
+        "填写与该参数默认值或 typ 声明一致的 Python 标量类型；不符合类型约束的值无法保存。"
+    )
     @factor_workspace
     def __init__(self, alias: Optional[str] = None, default_value: Any = None, 
                  typ: Optional[type | tuple[type, ...]] = None, *args, **kwargs):
@@ -280,6 +286,12 @@ class FactorParam(TypeParam):
     等价于 TypeParam(..., typ=(FactorExpr, type(None)))，但自动导入 FactorExpr。
     示例：FactorParam('FE') — 接受任意 FactorExpr 或 None。
     """
+    input_help = (
+        "FactorParam 接受可解析为 FactorExpr 的值。手动填写数值常量（支持整数、小数和科学计数法）"
+        "时会转换为 ConstExpr；可填写 DataColumn/ColumnRef alias（如 CA、V、TO、OI）；也可填写"
+        "可解析的因子 alias。还可以从 Column 下拉框或因子库中选择，或现场新建因子。因子 alias "
+        "在保存时解析为固定源码版本的 factor:v2 引用，嵌套依赖会随运行配置一并冻结。"
+    )
     @factor_workspace
     def __init__(self, alias: Optional[str] = None, default_value: Any = None,
                  *args, **kwargs):
@@ -331,6 +343,9 @@ class FactorParam(TypeParam):
 
 @factor_workspace
 class FinRangeParam(Parameter):
+    input_help = (
+        "只能选择该参数声明的有限值集合中的一项；允许值由参数的 value_space 定义。"
+    )
     @factor_workspace
     def __init__(self, alias: Optional[str] = None, value_space: Optional[List[Any]] = None, 
                  default_value: Any = None, *args, **kwargs):
@@ -358,6 +373,9 @@ class TimeDeltaParam(Parameter):
     时间增量参数：接受可转换为 pd.Timedelta 的值，支持正/负/非负/非正约束。
     示例：TimeDeltaParam('RF', flag='pos', default_value='1d') 只接受正时长。
     """
+    input_help = (
+        "填写时间长度，例如 30s、5m、2h、1d；可用范围还受 flag 的正、负、非负或非正约束。"
+    )
     @factor_workspace
     def __init__(self, alias: Optional[str] = None, flag: Optional[str] = None, 
                  default_value: Any = '1d', *args, **kwargs):

@@ -27,7 +27,7 @@ from tools.factors.FactorExpr import (
     CompositeExpr,
 )
 from tools.data.types import DataFreq
-from tools.factors.Parameters import FactorFreqParam, ReverseParam, ReturnFreqParam
+from tools.factors.Parameters import FactorFreqParam, ReverseParam
 from tools.data.types import UniqueNameObject
 from tools.parameters import Parameter
 from tools.parameters.Parameter import FactorParam
@@ -452,7 +452,6 @@ class FactorFamily(UniqueNameObject, FactorExpr):
     @factor_workspace
     def get_factors(
         self,
-        return_freq: Optional[Any] = None,
         params_list: Optional[list] = None,
         page_uuid: Optional[str] = None,
         factor_refs: Optional[Dict[str, str]] = None,
@@ -468,7 +467,6 @@ class FactorFamily(UniqueNameObject, FactorExpr):
           4. Factor.calc() 直接 evaluate(_resolved_expr)，不需要额外对齐
 
         参数：
-            return_freq      : 收益率计算频率（暂存于 tester 中）
             params_list      : 若提供，则使用此列表代替 self._params_list（用于 per-user 隔离）
             **kwargs         : 额外参数（如 timezone）
 
@@ -553,10 +551,6 @@ class FactorFamily(UniqueNameObject, FactorExpr):
             for key, value in current_params.items():
                 self.params_dict[key].register(factor, value)
 
-            if return_freq is not None:
-                t = Factor._get_active_tester()
-                if t is not None:
-                    t._get_result(factor).return_freq = ReturnFreqParam._value_space.rectify(return_freq)
             factors.append(factor)
 
         self.factors = factors

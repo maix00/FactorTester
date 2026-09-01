@@ -215,8 +215,6 @@ def _visual_param_type(param: Any) -> str:
     alias = getattr(param, 'alias', '') or ''
     if alias == '$F':
         return 'FactorFreqParam'
-    if alias == '$RF':
-        return 'ReturnFreqParam'
     if alias == '$Rev':
         return 'ReverseParam'
     return type(param).__name__

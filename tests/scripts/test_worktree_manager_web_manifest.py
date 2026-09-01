@@ -929,6 +929,8 @@ def test_factor_editor_family_picker_uses_the_shared_source_control() -> None:
     assert 'params: state.parameterValues || {}' in source
     assert "FTUI.actionButton" in source
     assert "FTUI.codeEditor" in source
+    assert 'loadSourceVersion(\n              context, state.family, "current"' in source
+    assert 'loadSourceVersion(\n          context, selectedFamily, "current"' in source
     assert "factor-editor-upload-action" not in source
     assert "const title = document.createElement(\"h2\")" not in source
     assert "test-factor-family-row" not in source
@@ -936,6 +938,21 @@ def test_factor_editor_family_picker_uses_the_shared_source_control() -> None:
     styles = (WEB_ROOT / "styles" / "app.css").read_text(encoding="utf-8")
     assert ".editable-code-editor textarea" in styles
     assert "background: transparent !important" in styles
+
+
+def test_factor_family_delete_warns_and_backend_cascades_registered_factors() -> None:
+    listing = (WEB_ROOT / "catalog" / "factor-catalog-list.js").read_text(
+        encoding="utf-8",
+    )
+    routes = (
+        ROOT / "server" / "modules" / "custom_factors" / "crud_routes.py"
+    ).read_text(encoding="utf-8")
+
+    assert "function confirmFamilyDeletion" in listing
+    assert "factor-family-delete-warning" in listing
+    assert "删除家族及因子" in listing
+    assert "delete_factor_family_configs" in routes
+    assert "cascade_deleted" in routes
 
 
 def test_frozen_factor_chip_detail_uses_its_snapshot_without_port_resolution() -> None:
@@ -2379,6 +2396,7 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     parameter_editor = (WEB_ROOT / "catalog" / "factor-parameter-editor.js").read_text(
         encoding="utf-8",
     )
+    app_css = (WEB_ROOT / "styles" / "app.css").read_text(encoding="utf-8")
 
     assert "context.toolbar.append(save)" in object_form
     assert "submit: save" in object_form
@@ -2389,7 +2407,16 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert 'parameter.type === "FactorParam"' in parameter_editor
     assert 'createLabel: context.t("新建因子")' in parameter_editor
     assert "factor-param-reference-control" in parameter_editor
-    assert "手工输入 ColumnRef 或因子 alias" in parameter_editor
+    assert 'input.placeholder = context.t("填写")' in parameter_editor
+    assert 'header.className = "factor-detail-parameter-header"' in parameter_editor
+    assert '["Key", "参数类型", "默认值", "Value"]' in parameter_editor
+    assert 'context.t("Column")' in parameter_editor
+    assert ".factor-detail-parameter-header, .factor-detail-parameter-row" in app_css
+    assert "grid-template-columns: minmax(70px, .45fr)" in app_css
+    assert ".factor-param-reference-control { display: grid; grid-template-columns: minmax(0, 1fr)" in app_css
+    assert "font-family: ui-monospace, SFMono-Regular" in app_css
+    assert "function numericConstant" in parameter_editor
+    assert 'setValue(constant, "manual")' in parameter_editor
     assert "请输入有效的 ColumnRef 或因子 alias" in parameter_editor
     assert "onValidateFactorAlias" in parameter_editor
     assert "factor-param-column-" in parameter_editor

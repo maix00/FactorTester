@@ -17,6 +17,11 @@ if TYPE_CHECKING:
 
 @factor_workspace
 class DataTimeParam(Parameter):
+    input_help = (
+        "填写可解析的日期或时间，例如 2026-09-01 或 2026-09-01 09:30:00；日期模式按交易日解释，"
+        "精确时间模式可携带时区。"
+    )
+
     @factor_workspace
     def __init__(self, alias: Optional[str] = None,
                  default_value: Optional[Any] = None, *args, **kwargs):

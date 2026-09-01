@@ -10,6 +10,7 @@ from .user import User as User
 from tools.data.sqlite.account_manager import (
     DEFAULT_SCOPE_KEY,
     delete_factor_param_config as _delete_factor_param_config,
+    delete_factor_family_configs as _delete_factor_family_configs,
     delete_scope as _delete_scope,
     ensure_account_manager_sqlite_store,
     factor_research_config_hash as _factor_research_config_hash,
@@ -681,6 +682,23 @@ def delete_factor_param_config(username: str, ff_alias: str, scope_key: str = DE
             deleted=True,
         )
     return deleted
+
+
+def delete_factor_family_configs(
+    ff_alias: str, *, username: str | None = None,
+) -> dict[str, int]:
+    """Delete a family's registrations and publish matching tombstones."""
+    ensure_account_manager_sqlite_store()
+    deleted = _delete_factor_family_configs(ff_alias, username=username)
+    for item in deleted:
+        _enqueue_domain_entity(
+            item["username"], "factor_param_config",
+            f'{item["scope_key"]}:{ff_alias}', {}, deleted=True,
+        )
+    return {
+        "config_count": len(deleted),
+        "factor_count": sum(item["factor_count"] for item in deleted),
+    }
 
 
 def list_factor_param_config_aliases(username: str, scope_key: str = DEFAULT_SCOPE_KEY) -> list[str]:

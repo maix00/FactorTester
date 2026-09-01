@@ -120,11 +120,11 @@
           runtimeStatus.processing_conversation_id || "",
         ).trim() === selectedConversationID;
         if (!processing && !observedProcessing) return;
-        // ChatKit's supported remount path is an authoritative item refresh.
-        // It reconstructs every persisted workflow/process item produced
-        // while this iframe was absent, then keeps polling until the final
-        // assistant item is durable.
-        await target.fetchUpdates();
+        // Refresh once when an active conversation is remounted and once when
+        // it finishes. Replacing ChatKit's authoritative item list every
+        // second resets its internal scroll anchor and makes the transcript
+        // appear to jump while the user is reading it.
+        if (!observedProcessing || !processing) await target.fetchUpdates();
         observedProcessing = processing;
         if (processing && !disposed) {
           updateTimer = setTimeout(refreshProcessingTurn, 1000);

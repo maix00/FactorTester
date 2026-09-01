@@ -290,12 +290,26 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-editor-version-picker { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .factor-editor-version-picker > *:first-child { min-width: 0; flex: 1 1 auto; }
 .factor-editor-version-actions { flex: 0 0 auto; }
-.factor-param-reference-control { display: grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); align-items: start; gap: 12px; min-width: 0; }
+.factor-detail-parameter-editor { display: grid; min-width: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+.factor-detail-parameter-editor input, .factor-detail-parameter-editor select, .factor-detail-parameter-editor button { font-family: inherit; }
+.factor-detail-parameter-header, .factor-detail-parameter-row { display: grid; grid-template-columns: minmax(70px, .45fr) minmax(130px, .7fr) minmax(100px, .7fr) minmax(280px, 2.15fr); align-items: start; gap: 12px; min-width: 0; padding: 10px 12px; }
+.factor-detail-parameter-header { color: var(--muted); background: var(--soft); font-size: 12px; }
+.factor-detail-parameter-row + .factor-detail-parameter-row { border-top: 1px solid var(--line); }
+.factor-detail-parameter-key, .factor-detail-parameter-default { overflow-wrap: anywhere; }
+.factor-detail-parameter-default { width: fit-content; max-width: 100%; }
+.factor-detail-parameter-type { display: inline-flex; align-items: center; gap: 5px; min-height: 24px; font-family: inherit; }
+.factor-detail-parameter-value { min-width: 0; }
+.factor-param-reference-control { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 10px; min-width: 0; }
 .factor-param-reference-control > * { min-width: 0; }
 .factor-param-choice-group { display: grid; gap: 6px; min-width: 0; }
 .factor-param-choice-group > small { color: var(--muted); font-weight: 600; }
 @media (max-width: 720px) {
-  .factor-param-reference-control { grid-template-columns: minmax(0, 1fr); }
+  .factor-detail-parameter-header { display: none; }
+  .factor-detail-parameter-row { grid-template-columns: minmax(90px, .55fr) minmax(0, 1.45fr); }
+  .factor-detail-parameter-key::before { content: "Key"; display: block; color: var(--muted); font-size: 10px; font-weight: 500; }
+  .factor-detail-parameter-type::before { content: "参数类型"; display: block; color: var(--muted); font-size: 10px; }
+  .factor-detail-parameter-default::before { content: "默认值"; display: block; color: var(--muted); font: 500 10px/1.3 system-ui, sans-serif; }
+  .factor-detail-parameter-value::before { content: "Value"; display: block; margin-bottom: 5px; color: var(--muted); font-size: 10px; }
 }
 .catalog-source-providers-button { border: 1px solid var(--accent); border-radius: 999px; padding: 4px 9px; color: var(--accent); background: var(--panel); cursor: pointer; font-size: 12px; }
 .catalog-source-providers-button:hover { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
@@ -557,6 +571,8 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .factor-family-summary { display: grid; gap: 9px; padding: 16px 18px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); }
 .factor-family-summary p { margin: 0; color: var(--muted); }
 .factor-family-formula { margin: 0; }
+.factor-family-delete-card { width: min(520px, calc(100vw - 32px)); }
+.factor-family-delete-warning { padding: 12px 14px; border-left: 4px solid var(--danger, #d92d20); background: color-mix(in srgb, var(--danger, #d92d20) 9%, transparent); }
 .job-section { display: grid; gap: 10px; min-width: 0; }
 .job-section h2 { font-size: 16px; margin: 0; }
 .research-workspace-page { display: grid; gap: 22px; min-width: 0; }

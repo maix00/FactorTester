@@ -39,11 +39,27 @@ def serialize_param_meta(param):
         'name': getattr(param, 'name', '') or getattr(param, 'alias', ''),
         'desc': getattr(param, 'desc', '') or '',
         'type': display_param_type(param),
+        'input_help': serialize_param_input_help(param),
         'default_value': serialize_default(param),
         'value_space_desc': describe_value_space(param),
         'options': serialize_param_options(param),
         'input_mode': serialize_param_input_mode(param),
     }
+
+
+def serialize_param_input_help(param) -> str:
+    """Return the parameter class-owned input guidance shown by every editor."""
+    help_text = getattr(param, 'input_help', '')
+    if callable(help_text):
+        try:
+            help_text = help_text()
+        except TypeError:
+            help_text = help_text(param)
+    return str(help_text or ParameterInputHelp.fallback)
+
+
+class ParameterInputHelp:
+    fallback = '填写该参数类型允许的值；保存或运行前会进行解析和校验。'
 
 
 def display_param_type(param) -> str:

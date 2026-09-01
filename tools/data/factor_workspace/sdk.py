@@ -128,7 +128,7 @@ AUTHOR_SDK_MODULES = (
         + "    SMALL_VAL as SMALL_VAL,\n"
         + ")\n"
         + "from tools.factors.Parameters import (\n"
-        + "    FactorNextPeriodReturns as FactorNextPeriodReturns, ReturnFreqParam as ReturnFreqParam,\n"
+        + "    FactorNextPeriodReturns as FactorNextPeriodReturns,\n"
         + "    FactorFreqParam as FactorFreqParam,\n"
         + "    ReverseParam as ReverseParam,\n"
         + ")\n",

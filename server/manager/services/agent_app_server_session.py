@@ -191,13 +191,15 @@ class AgentAppServerSession:
             if not self.ready or self.process is None or not self.process.is_running():
                 raise AgentAppServerError("Profile Agent is not running")
             try:
-                return self.process.request(
+                response = self.process.request(
                     method,
                     self._prepared_params(method, params or {}),
                     timeout=60 if method == "turn/start" else 20,
                 )
             except AgentAppServerProcessError as exc:
                 raise AgentAppServerError(str(exc)) from exc
+            self._error(response, method)
+            return response
 
     def delete_thread(self, thread_id: str) -> dict[str, Any]:
         """Delete a thread only after the supervisor verified its ownership."""
