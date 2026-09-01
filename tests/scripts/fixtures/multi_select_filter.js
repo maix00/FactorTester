@@ -95,9 +95,9 @@ global.document = {
     ));
   },
 };
-vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {
-  filename: process.argv[2],
-});
+for (const path of process.argv.slice(2)) {
+  vm.runInThisContext(fs.readFileSync(path, "utf8"), {filename: path});
+}
 
 const filter = window.FTMultiSelectFilter.create({t: value => value}, {
   title: "产品分类",
@@ -310,6 +310,40 @@ assert.equal(locked.dropdown.open, false);
   cancel.dropdown.listeners.toggle();
   assert.deepEqual(cancel.values, ["a"], "closing without saving discards the draft");
   assert.deepEqual(multiChanges, [["a", "c"]]);
+
+  const remoteCalls = [];
+  const remote = window.FTMultiSelectFilter.create({t: value => value}, {
+    items: [{value: "selected", label: "当前选中"}],
+    selected: ["selected"],
+    multi: false,
+    loadItems: query => new Promise(resolve => remoteCalls.push({query, resolve})),
+  });
+  remote.dropdown.open = true;
+  remote.dropdown.listeners.toggle();
+  assert.deepEqual(remoteCalls.map(call => call.query), [""]);
+  const wait = delay => new Promise(resolve => setTimeout(resolve, delay));
+  remote.search.value = "old";
+  remote.search.listeners.input();
+  await wait(240);
+  assert.deepEqual(remoteCalls.map(call => call.query), ["", "old"]);
+  remote.search.value = "new";
+  remote.search.listeners.input();
+  await wait(240);
+  assert.deepEqual(remoteCalls.map(call => call.query), ["", "old", "new"]);
+  remoteCalls[2].resolve([{value: "new", label: "新结果"}]);
+  await wait(0);
+  assert.deepEqual(remote.values, ["selected"]);
+  assert.equal(remote.summary.children[0].textContent, "当前选中");
+  assert.equal(remote.optionList.children[0].children[1].textContent, "新结果");
+  remoteCalls[1].resolve([{value: "old", label: "旧结果"}]);
+  await wait(0);
+  assert.ok(remote.optionList.children.some(row => (
+    row.children[1]?.textContent === "新结果"
+  )), "the latest remote result should remain visible");
+  assert.equal(remote.optionList.children.some(row => (
+    row.children[1]?.textContent === "旧结果"
+  )), false, "a stale remote result must not overwrite the latest result");
+
   console.log("ok");
 })().catch(error => {
   console.error(error);

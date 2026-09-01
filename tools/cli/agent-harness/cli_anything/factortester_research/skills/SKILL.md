@@ -91,6 +91,11 @@ selected server, but the server does not own the research transition.
 - `evidence`: delegate to the native fragment-bound Evidence catalog
 - `graph`: inspect a graph or resolve a locally approved implementation
 - `strategy`: list public templates and validate a `StrategySpec`
+- `strategy-library`: list, inspect, create, revise, share, and archive durable
+  Strategy entries; a revision is immutable and must be selected explicitly
+- `workspace strategy`: inspect, add, update, bind, and unbind strategies in
+  the active ResearchConfiguration; `add-inline` never writes to the durable
+  Strategy library
 - `skill-usage`: record actual, approved skill use locally
 - `gap`, `operator`, `service`: route platform gaps and source-owner work
 
@@ -183,8 +188,19 @@ factor-set identity and its flattened immutable member references together.
   synchronized into the canonical user factor library. The submitted source is
   retained as an immutable Job input after the Job reaches a terminal state;
   it is removed only when the user clears that Job's files
-- `StrategySpec` uses public templates or a `profile:<path>` Strategy Actor.
-  Do not put Flow, StrategyBook, or policy implementation names in it
+- A durable Strategy library entry is selected through a fixed
+  `strategy_ref` + `revision_ref`; do not silently follow the current revision.
+  Use `factortester strategy-library revisions show` when source inspection is
+  needed, and do not transfer source for a metadata-only read.
+- A configuration-owned strategy is created with
+  `factortester workspace strategy add-inline`; it remains in the active
+  ResearchConfiguration and is never registered in the Strategy library.
+  `bind-library` records a durable library reference, while `update-inline`
+  edits only the inline binding. Both forms are compiled into the same frozen
+  Run input and deduplicated by source hash.
+- `StrategySpec` uses public templates, a fixed Strategy library revision, or a
+  `profile:<path>` Strategy Actor. Do not put Flow, StrategyBook, or policy
+  implementation names in it
 - Attach future strategy configuration, data mapping, documentation, or another
   bounded text dependency with repeatable
   `--run-input [purpose=]path` on both `run preview` and `run submit`. Valid

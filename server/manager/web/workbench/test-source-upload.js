@@ -168,15 +168,25 @@
     note.textContent = context.t(contentOptions.description || "");
     heading.append(title, note); root.append(heading);
 
-    const strategyItems = (state.transientStrategySources || []).map(source => ({
+    // Keep the ordinary custom-strategy tab visible in the initial shell, but
+    // defer the library picker/editor bundle until the user opens that tab.
+    // This preserves the default tab layout without making every backtest
+    // download the strategy UI before it is needed.
+    const strategyItems = [{
+      key: "strategy_bindings",
+      label: context.t("自定义策略"),
+      description: context.t("选择策略库版本，或新建只随本次配置保存的临时策略"),
+      render: () => lazyStrategyBindingPanel(context, state, refresh),
+    }];
+    strategyItems.push(...(state.transientStrategySources || []).map(source => ({
       key: `strategy:${source.path}`,
       label: strategyLabel(state, source),
       description: source.path,
       render: () => strategyPreview(context, state, refresh, source),
-    }));
+    })));
     strategyItems.push({
       key: "__new_strategy__",
-      label: context.t("+ 自定义策略"),
+      label: context.t("导入策略源码（高级）"),
       render: () => newStrategyPanel(context, state, refresh, strategyDescriptors),
     });
     const tabContent = window.FTTabChipContent;
@@ -209,6 +219,34 @@
     }
 
     if (state.runInputStatus?.strategyError) root.append(error(state.runInputStatus.strategyError));
+    return root;
+  }
+
+  function lazyStrategyBindingPanel(context, state, refresh) {
+    const root = document.createElement("div");
+    root.className = "strategy-binding-panel-loading";
+    root.append(FTUI.loading(context.t("正在加载策略选择器…")));
+    const load = window.FTStaticLoader?.loadGroups?.([
+      "workbench-strategy-bindings",
+    ]) || Promise.resolve();
+    void load.then(() => {
+      if (!root.isConnected) return;
+      if (window.FTStrategyBindingPanel?.render) {
+        root.replaceChildren(window.FTStrategyBindingPanel.render(
+          context, state, refresh,
+        ));
+      } else {
+        root.replaceChildren(FTUI.empty(
+          context.t("策略选择器不可用"),
+          context.t("请稍后重试"),
+        ));
+      }
+    }).catch(error => {
+      if (!root.isConnected) return;
+      root.replaceChildren(FTUI.empty(
+        context.t("策略选择器加载失败"), error.message || String(error),
+      ));
+    });
     return root;
   }
 

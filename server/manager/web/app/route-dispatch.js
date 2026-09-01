@@ -19,6 +19,14 @@
         case "reference": return pages.reference?.(context(routeToken), route);
         case "report": return pages.report?.(route.id, routeToken);
         case "research": return pages.research?.(routeToken);
+        case "strategy-library": return guarded(
+          context(routeToken), {nav: "strategies", title: "策略库"},
+          pages.strategyLibrary, route.scope || "mine",
+        );
+        case "strategy": return guarded(
+          context(routeToken), {nav: "strategies", title: "策略库"},
+          pages.strategy, route.id || "", route.mode || "view", route,
+        );
         case "research-detail": return guarded(
           context(routeToken), {nav: "research", title: "研究"},
           pages.researchDetail, route.id,

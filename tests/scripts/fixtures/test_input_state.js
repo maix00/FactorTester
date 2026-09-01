@@ -16,6 +16,8 @@ assert.deepEqual(inputs.requestBody(state), {
   transient_factor_sources: [],
   transient_strategy_sources: [],
   strategy_specs: [],
+  strategies: [],
+  strategy_bindings: [],
   run_input_dependencies: [],
 });
 
@@ -91,6 +93,45 @@ inputs.removeStrategy(state, "strategies/dynamic_hold.py");
 assert.equal(inputs.strategyInspection(state, "strategies/dynamic_hold.py"), null);
 inputs.removeDependency(state, "strategy-configs/dynamic-hold.yaml");
 assert.deepEqual(inputs.counts(state), {factors: 0, strategies: 0, dependencies: 0});
+
+const inlineSource = "class InlineStrategy: pass\n";
+inputs.putInlineStrategy(state, {
+  temp_ref: "temporary-strategy:one",
+  name: "临时策略",
+  entrypoint: "InlineStrategy",
+  source_code: inlineSource,
+  source_sha256: "same-source",
+}, {
+  binding_id: "strategy-binding:one",
+  target_strategy_id: "group-1",
+  source: {kind: "inline", temp_ref: "temporary-strategy:one"},
+});
+inputs.putInlineStrategy(state, {
+  temp_ref: "temporary-strategy:two",
+  name: "同一源码",
+  entrypoint: "InlineStrategy",
+  source_code: inlineSource,
+  source_sha256: "same-source",
+}, {
+  binding_id: "strategy-binding:two",
+  target_strategy_id: "group-2",
+  source: {kind: "inline", temp_ref: "temporary-strategy:two"},
+});
+assert.equal(state.temporaryStrategies.length, 1,
+  "identical inline source must be stored once");
+assert.equal(state.strategyBindings.length, 2);
+assert.equal(state.strategyBindings[1].source.temp_ref,
+  state.strategyBindings[0].source.temp_ref);
+inputs.putStrategyBinding(state, {
+  binding_id: "strategy-binding:two",
+  target_strategy_id: "group-2",
+  source: {kind: "library", strategy_ref: "strategy:library", revision_ref: "revision:1"},
+});
+assert.equal(state.temporaryStrategies.length, 1,
+  "an inline source remains while another binding references it");
+inputs.removeStrategyBinding(state, "strategy-binding:one");
+assert.equal(state.temporaryStrategies.length, 0,
+  "unreferenced inline source must be pruned");
 state.customStrategyOverrides = {fee_mode: "custom"};
 state.customStrategyMountedTabs = ["__strategy__", "factor", "cost"];
 const customStrategyRequest = inputs.requestBody(state);

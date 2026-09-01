@@ -13,10 +13,12 @@ from tools.cli.commands.protocol import protocol
 from tools.cli.commands.settings import describe, edit
 from tools.cli.commands.strategy_intent import strategy_intent
 from tools.cli.commands.strategy import strategy
+from tools.cli.commands.strategy_library import strategy_library
 from tools.cli.commands.strategy_actor import register_strategy_actor_commands
 from tools.cli.commands.margin_budget import margin_budget
 from tools.cli.commands.job_orders import register_job_order_commands
 from tools.cli.commands.research import external_factor, job, run, workspace
+from tools.cli.commands.workspace_strategy import register_workspace_strategy_commands
 from tools.cli.commands.research_step import research
 from tools.cli.commands.direct_trial import trial_plan
 from tools.cli.modules.registry import register_cli_modules
@@ -89,10 +91,12 @@ cli.add_command(protocol)
 cli.add_command(describe)
 cli.add_command(edit)
 cli.add_command(strategy)
+cli.add_command(strategy_library)
 strategy.add_command(strategy_intent)
 register_strategy_actor_commands(strategy)
 cli.add_command(margin_budget)
 cli.add_command(workspace)
+register_workspace_strategy_commands(workspace)
 cli.add_command(external_factor)
 cli.add_command(run)
 cli.add_command(job)

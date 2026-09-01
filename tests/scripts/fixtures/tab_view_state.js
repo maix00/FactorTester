@@ -566,6 +566,11 @@ remountWrapper.dispatchEvent(dropEvent(researchDetailID));
 assert.strictEqual(orphan.parentTabID, researchDetailID);
 researchFolder.dispatchEvent(dropEvent(""));
 assert.strictEqual(orphan.parentTabID, undefined);
+assert.strictEqual(
+  hierarchyTabs.currentTabContext().parentResearchID,
+  "research-one",
+  "pages inherit the active tab's Research identity through shared context",
+);
 // A report opened from the Research detail list carries its Research identity
 // in the URL, so a fresh navigation recreates the correct parent folder and
 // does not leave the report in the global opened-tab rail.

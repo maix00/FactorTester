@@ -12,6 +12,7 @@ from .client_jobs import JobsClientMixin
 from .client_navigation import NavigationClientMixin
 from .client_order_audit import OrderAuditClientMixin
 from .client_product_library import ProductLibraryClientMixin
+from .client_strategy_library import StrategyLibraryClientMixin
 from .client_protocol import ProtocolClientMixin
 from .client_research import ResearchClientMixin
 from .client_research_evidence import ResearchEvidenceClientMixin
@@ -37,6 +38,7 @@ class FactorTesterClient(
     NavigationClientMixin,
     ProductLibraryClientMixin,
     FactorLibraryClientMixin,
+    StrategyLibraryClientMixin,
     ResearchStepClientMixin,
 ):
     """Stable public client composed from domain-specific HTTP adapters."""

@@ -500,6 +500,37 @@ def test_research_lifecycle_patch_uses_manager_database(tmp_path, monkeypatch) -
     }]
 
 
+def test_strategy_library_patch_uses_manager_application_route(tmp_path) -> None:
+    state = authenticated_state(tmp_path)
+    strategy = state.strategy_library.create(
+        {
+            "name": "Route strategy",
+            "entrypoint": "Demo",
+            "source_code": (
+                "from tools.testers.backtest.engines.native.strategy import Strategy\n"
+                "class Demo(Strategy):\n"
+                "    pass\n"
+            ),
+        },
+        principal="user@1",
+    )["strategy"]
+    strategy_ref = quote(strategy["strategy_ref"], safe="")
+    with running_manager(state) as base_url:
+        with urlopen(Request(
+            f"{base_url}/api/strategy-library/strategies/{strategy_ref}",
+            data=b'{"visibility":"public"}',
+            method="PATCH",
+            headers={
+                "Authorization": "Bearer user-token",
+                "Content-Type": "application/json",
+            },
+        )) as response:
+            value = json.loads(response.read())
+
+    assert response.status == 200
+    assert value["strategy"]["visibility"] == "public"
+
+
 def test_manager_session_can_resume_authorized_maintenance_on_selected_port(
     tmp_path, monkeypatch,
 ) -> None:

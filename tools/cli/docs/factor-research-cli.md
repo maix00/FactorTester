@@ -47,6 +47,25 @@ factortester strategy list --json
 factortester strategy template show group_quantile --json
 factortester strategy validate --spec strategy.yaml --json
 
+# 持久策略库：策略带不可变源码版本，可按权限共享。
+factortester strategy-library list --scope mine --json
+factortester strategy-library show strategy:<owner>/<name> --json
+factortester strategy-library revisions list strategy:<owner>/<name> --json
+factortester strategy-library revisions show strategy:<owner>/<name> <revision-ref> --json
+
+# 当前测试配置中的临时策略：只随 ResearchConfiguration 保存，绝不写入策略库。
+factortester workspace strategy list
+factortester workspace strategy add-inline \
+  --name "盘中反转" --source-file strategy.py \
+  --entrypoint IntradayReversal --target-strategy-id group-1
+factortester workspace strategy update-inline <binding-id> \
+  --source-file strategy-v2.py
+factortester workspace strategy bind-library \
+  --strategy-ref strategy:<owner>/<name> \
+  --revision-ref <revision-ref> --target-strategy-id group-2
+factortester workspace strategy show <binding-id> --json
+factortester workspace strategy unbind <binding-id>
+
 # Validate the full panel through GTHT and freeze its id/hashes in this workspace:
 factortester external-factor validate \
   /path/to/gtht_handoff.json \
