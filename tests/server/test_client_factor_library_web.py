@@ -643,12 +643,18 @@ def test_factor_operator_catalog_exposes_bar_search_operators() -> None:
 
     assert response.status_code == 200
     groups = response.get_json()["groups"]
-    keys = {
-        operator["key"]
+    operators = {
+        operator["key"]: operator
         for group in groups
         for operator in [*(group.get("operators") or []), *(group.get("more_operators") or [])]
     }
-    assert {"bar_since", "bar_distance"} <= keys
+    assert {"bar_since", "bar_distance"} <= operators.keys()
+    assert 'select="nearest"' in operators["bar_since"]["desc"]
+    assert "include_current=True" in operators["bar_since"]["desc"]
+    assert "CURRENT" in operators["bar_distance"]["desc"]
+    assert "CANDIDATE" in operators["bar_distance"]["desc"]
+    assert "session" in operators["bar_distance"]["desc"]
+    assert "trading_day" in operators["bar_distance"]["desc"]
 
 
 def test_validate_factor_alias_accepts_unregistered_canonical_member(monkeypatch) -> None:

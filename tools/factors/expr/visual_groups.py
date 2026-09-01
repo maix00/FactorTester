@@ -55,8 +55,31 @@ VISUAL_OPERATOR_GROUPS = [
             {'key': 'rolling_max', 'label': '最大值', 'symbol': 'RMax', 'desc': 'X.rolling_max(N)', 'arity': 2, 'slots': ['序列 X', '窗口 N']},
             {'key': 'shift', 'label': '平移', 'symbol': 'shift', 'desc': 'X.shift(N)', 'arity': 2, 'slots': ['序列 X', '步长 N']},
             {'key': 'delta', 'label': '差分', 'symbol': 'delta', 'desc': 'X.delta(N)', 'arity': 2, 'slots': ['序列 X', '步长 N']},
-            {'key': 'bar_since', 'label': '事件距离', 'symbol': 'BarSince', 'desc': 'bar_since(condition, scope=bars(N))', 'arity': 2, 'slots': ['条件', '回看范围']},
-            {'key': 'bar_distance', 'label': '历史匹配距离', 'symbol': 'BarDistance', 'desc': 'X.bar_distance(condition, scope=bars(N))', 'arity': 3, 'slots': ['序列 X', '匹配条件', '回看范围']},
+            {
+                'key': 'bar_since',
+                'label': '事件距离',
+                'symbol': 'BarSince',
+                'desc': (
+                    'bar_since(condition, scope=bars(N), select="nearest", '
+                    'default=nan, include_current=True)；scope 也可使用 '
+                    'session(gap="3h") 或 trading_day()'
+                ),
+                'arity': 2,
+                'slots': ['条件', '回看范围'],
+            },
+            {
+                'key': 'bar_distance',
+                'label': '历史匹配距离',
+                'symbol': 'BarDistance',
+                'desc': (
+                    'X.bar_distance(condition, scope=bars(N), '
+                    'select="nearest", default=nan)；condition 用 CURRENT 与 '
+                    'CANDIDATE 表示当前值和候选历史值；scope 也可使用 '
+                    'session(gap="3h") 或 trading_day()'
+                ),
+                'arity': 3,
+                'slots': ['序列 X', '匹配条件', '回看范围'],
+            },
         ],
         'more_label': '更多时序算子',
         'more_operators': [
