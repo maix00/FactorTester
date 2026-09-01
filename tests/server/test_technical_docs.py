@@ -4,7 +4,6 @@ import pytest
 
 from server.manager.services.technical_docs import TechnicalDocsLibrary
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -14,8 +13,102 @@ def test_public_catalog_contains_guides_and_implementation_maps() -> None:
     kinds = {page["kind"] for page in index["search"]}
 
     assert index["default_page"] == "getting-started"
-    assert {"guide", "implementation", "concept", "troubleshooting"} <= kinds
+    assert index["visibility"] == "public"
+    assert {"guide", "implementation", "concept", "reference", "troubleshooting"} <= kinds
     assert library.page("system-overview")["section_title"] == "实现架构"
+    assert library.page("compliance-architecture")["section_title"] == "合规与安全"
+
+
+def test_registered_field_catalog_is_a_flat_projection_of_application_manifests() -> None:
+    from tools.testers.settings.registry import BacktestSettingRegistry
+
+    class FakeApplication:
+        application = "demo"
+
+        @staticmethod
+        def manifest(*, client: str) -> dict[str, object]:
+            assert client == "web"
+            return {
+                "research_configuration_schema_version": 3,
+                "tab_lists": {
+                    "local-settings": [{
+                        "key": "time", "label": "时间", "default_mount_points": [],
+                    }],
+                    "group-settings": [],
+                },
+                "default_mounted_tabs": {"local-settings": ["time"]},
+                "defaults": {
+                    "start_date": {
+                        "label": "开始日期", "tab_key": "time", "help_text": "",
+                    },
+                },
+                "field_contracts": {
+                    "settings": {
+                        "start_date": {
+                            "label": "开始日期", "help_text": "交易开始日期",
+                            "value": {"value_type": "date", "cardinality": "one"},
+                            "setting": {
+                                "scope_policy": "local_only", "default": "2024-01-01",
+                                "rules": {},
+                            },
+                        },
+                    },
+                    "run": {},
+                },
+                "run_fields": [],
+            }
+
+    registry = BacktestSettingRegistry()
+    registry._applications["demo"] = FakeApplication()  # type: ignore[attr-defined]
+    rows = registry.field_catalog()
+
+    assert rows == [{
+        "application": "demo",
+        "configuration_schema_version": 3,
+        "role": "setting",
+        "field_path": "setting.start_date",
+        "key": "start_date",
+        "module": "",
+        "label": "开始日期",
+        "help_text": "交易开始日期",
+        "tab_key": "time",
+        "tab_label": "时间",
+        "tab_default_mounted": True,
+        "scope_policy": "local_only",
+        "request_location": "",
+        "freeze_target": "",
+        "placement": "",
+        "template_policy": "",
+        "value_type": "date",
+        "cardinality": "one",
+        "editor": "",
+        "format": "",
+        "unit": "",
+        "option_source": "",
+        "ref_kind": "",
+        "item_type": "",
+        "default": "2024-01-01",
+        "default_source": "backend-registration",
+        "options": [],
+        "minimum": None,
+        "maximum": None,
+        "step": None,
+        "rules": {},
+    }]
+
+
+def test_technical_docs_manifest_cannot_be_private(tmp_path: Path) -> None:
+    (tmp_path / "page.md").write_text("## Page {#page}\n", encoding="utf-8")
+    (tmp_path / "manifest.json").write_text(
+        '{"schema_version":1,"title":"Docs","visibility":"private",'
+        '"default_page":"page","sections":[{"id":"one","title":"One",'
+        '"pages":[{"slug":"page","title":"Page","summary":"Summary",'
+        '"kind":"guide","source":"page.md"}]}]}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="must be public"):
+        TechnicalDocsLibrary(tmp_path)
 
 
 def test_legacy_source_browser_and_templates_are_removed() -> None:

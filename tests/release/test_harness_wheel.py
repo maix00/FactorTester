@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
 import sys
 import zipfile
-
+from pathlib import Path, PurePosixPath
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HARNESS_ROOT = REPO_ROOT / "tools" / "cli" / "agent-harness"

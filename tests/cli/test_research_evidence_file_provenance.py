@@ -17,6 +17,18 @@ class _Client:
     def __init__(self) -> None:
         self.payload = None
 
+    def upload_research_evidence_file(
+        self, *, content, filename, content_type, sha256,
+    ):
+        assert content == b"exchange rules"
+        assert filename == "exchange.pdf"
+        assert content_type == "application/pdf"
+        assert len(sha256) == 64
+        return {
+            "object_id": "evidence-file-object",
+            "storage_server_id": "public-main",
+        }
+
     def put_research_evidence_source(self, payload):
         self.payload = payload
         return {

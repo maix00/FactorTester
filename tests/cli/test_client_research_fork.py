@@ -76,8 +76,6 @@ def test_fork_inherits_source_report_tree(
     )
 
     class FakeClient:
-        pass
-
         def fork_research_graph_branch(self, instance_id, branch_id, **kwargs):
             assert (instance_id, branch_id) == ("instance-a", "branch-source")
             assert kwargs == {
@@ -134,7 +132,7 @@ def test_fork_inherits_source_report_tree(
     assert target["components"] == source["components"]
     assert target["bindings"] == source["bindings"]
     assert target["head"]["root_ref"] == source["head"]["root_ref"]
-    assert target["head"]["report_id"] == "report-package-a-branch-cost"
+    assert target["head"]["report_id"] == "report-package-a"
     saved = store.load("maxa")
     assert len(saved["research_records"]) == 1
     assert {

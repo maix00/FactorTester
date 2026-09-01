@@ -400,6 +400,109 @@ class BacktestSettingRegistry:
                 counts[key] = counts.get(key, 0) + 1
         return [key for key in ordered if counts.get(key, 0) >= 2]
 
+    def field_catalog(self, *, client: str = "web") -> list[dict[str, Any]]:
+        """Return the generated, lifecycle-neutral field reference catalog.
+
+        The catalog is intentionally derived from the same application
+        manifests sent to Web, Swift, and CLI clients.  It is a documentation
+        projection, not a second field registry: adding or changing a
+        registered setting changes this result automatically.
+        """
+        if client not in {"web", "swift", "cli"}:
+            raise ValueError(f"unknown tester manifest client: {client}")
+
+        rows: list[dict[str, Any]] = []
+        for application in sorted(
+            self._applications.values(), key=lambda item: item.application,
+        ):
+            manifest = application.manifest(client=client)
+            default_tab_keys = {
+                tab_key
+                for tab_keys in manifest.get("default_mounted_tabs", {}).values()
+                for tab_key in tab_keys
+            }
+            tab_by_key: dict[str, dict[str, Any]] = {}
+            for tabs in manifest.get("tab_lists", {}).values():
+                for tab in tabs:
+                    tab_by_key.setdefault(str(tab.get("key") or ""), tab)
+            schema_version = manifest.get("research_configuration_schema_version")
+
+            def add_row(
+                *,
+                role: str,
+                key: str,
+                contract: dict[str, Any],
+                placement: dict[str, Any],
+                application_name: str = application.application,
+                schema_version: Any = schema_version,
+                default_tabs: set[str] = default_tab_keys,
+                tabs_by_key: dict[str, dict[str, Any]] = tab_by_key,
+            ) -> None:
+                value = dict(contract.get("value") or {})
+                role_contract = dict(contract.get(role) or {})
+                tab_key = str(placement.get("tab_key") or "")
+                tab = tabs_by_key.get(tab_key, {})
+                rows.append({
+                    "application": application_name,
+                    "configuration_schema_version": schema_version,
+                    "role": role,
+                    "field_path": f"{role}.{key}",
+                    "key": key,
+                    "module": placement.get("module") or "",
+                    "label": contract.get("label") or placement.get("label") or key,
+                    "help_text": contract.get("help_text") or placement.get("help_text") or "",
+                    "tab_key": tab_key,
+                    "tab_label": tab.get("label") or "",
+                    "tab_default_mounted": tab_key in default_tabs,
+                    "scope_policy": role_contract.get("scope_policy") or "",
+                    "request_location": role_contract.get("request_location") or "",
+                    "freeze_target": role_contract.get("freeze_target") or "",
+                    "placement": role_contract.get("placement") or "",
+                    "template_policy": role_contract.get("template_policy") or "",
+                    "value_type": value.get("value_type") or "",
+                    "cardinality": value.get("cardinality") or "one",
+                    "editor": value.get("editor") or "",
+                    "format": value.get("format") or "",
+                    "unit": value.get("unit") or "",
+                    "option_source": value.get("option_source") or "",
+                    "ref_kind": value.get("ref_kind") or "",
+                    "item_type": value.get("item_type") or "",
+                    "default": role_contract.get("default"),
+                    "default_source": "backend-registration",
+                    "options": list(value.get("options") or []),
+                    "minimum": value.get("minimum"),
+                    "maximum": value.get("maximum"),
+                    "step": value.get("step"),
+                    "rules": dict(role_contract.get("rules") or {}),
+                })
+
+            contracts = manifest.get("field_contracts", {})
+            settings = contracts.get("settings", {})
+            defaults = manifest.get("defaults", {})
+            for key, contract in settings.items():
+                add_row(
+                    role="setting",
+                    key=str(key),
+                    contract=contract,
+                    placement=dict(defaults.get(key) or {}),
+                )
+
+            run_contracts = contracts.get("run", {})
+            run_fields = {
+                str(item.get("key") or ""): item
+                for item in manifest.get("run_fields", [])
+                if item.get("key")
+            }
+            for key, contract in run_contracts.items():
+                add_row(
+                    role="run",
+                    key=str(key),
+                    contract=contract,
+                    placement=run_fields.get(str(key), {}),
+                )
+
+        return rows
+
     def audit_mounts(self, *, client: str = "web") -> list[str]:
         """Return field/tab contract violations for every application."""
         return [
