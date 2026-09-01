@@ -1135,3 +1135,9 @@ button.reference-item { cursor: pointer; }
   .page-agent-drawer { inset: .5rem; width: auto; }
   .page-agent-drawer-toggle[aria-expanded="true"] { display: none; }
 }
+@keyframes ft-refresh-spin { to { transform: rotate(360deg); } }
+.icon-action-button[data-refresh-state="refreshing"] .ft-icon {
+  animation: ft-refresh-spin .7s linear infinite;
+}
+.icon-action-button[data-refresh-state="complete"] { color: var(--accent); }
+.icon-action-button[data-refresh-state="error"] { color: var(--danger); }

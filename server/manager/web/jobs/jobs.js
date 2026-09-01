@@ -123,9 +123,9 @@
   function installScopeToolbar(context, state, scope) {
     context.toolbar.replaceChildren(
       FTTestPageTabs.render(context, "tasks"),
-      context.button(
-        "↻", () => list(context, null, scope, {forceRefresh: true}),
-        context.t("刷新任务列表"),
+      FTUI.refreshButton(
+        context, () => list(context, null, scope, {forceRefresh: true}),
+        {label: "刷新任务列表"},
       ),
     );
   }

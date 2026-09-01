@@ -56,7 +56,9 @@
     create.className = "primary";
     context.toolbar.append(create);
     if (!embedded) {
-      context.toolbar.append(context.button("↻", () => list(context, options), context.t("刷新")));
+      context.toolbar.append(FTUI.refreshButton(
+        context, () => list(context, options),
+      ));
     }
     if (!cached.length) {
       context.content.replaceChildren(FTUI.empty(

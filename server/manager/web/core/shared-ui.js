@@ -193,6 +193,38 @@
     return button;
   }
 
+  function refreshButton(context, reload, options = {}) {
+    const label = options.label || "刷新";
+    const button = iconButton(
+      context, "arrow.clockwise", label, async () => {
+        if (button.disabled) return;
+        button.disabled = true;
+        button.dataset.refreshState = "refreshing";
+        button.setAttribute("aria-busy", "true");
+        try {
+          await reload();
+          button.dataset.refreshState = "complete";
+          button.title = context?.t?.("已刷新") || "已刷新";
+          window.setTimeout?.(() => {
+            if (button.dataset.refreshState !== "complete") return;
+            button.dataset.refreshState = "idle";
+            button.title = context?.t?.(label) || label;
+          }, 900);
+        } catch (error) {
+          button.dataset.refreshState = "error";
+          context?.showNotice?.(
+            error?.message || context?.t?.("刷新失败") || "刷新失败", true,
+          );
+        } finally {
+          button.disabled = false;
+          button.removeAttribute("aria-busy");
+        }
+      }, options,
+    );
+    button.dataset.refreshState = "idle";
+    return button;
+  }
+
   function helpIcon(help, options = {}) {
     if (window.FTHelp?.create) return window.FTHelp.create(help, options);
     const label = help && typeof help === "object"
@@ -208,6 +240,7 @@
 
   window.FTUI = {
     actionButton, appendRow, code, codeEditor, empty, fieldRows, formatDate, helpIcon, iconButton,
+    refreshButton,
     loading, pagedTable, table, text,
   };
 })();
