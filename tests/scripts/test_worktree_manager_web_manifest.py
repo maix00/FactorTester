@@ -2387,6 +2387,19 @@ def test_factor_assistance_applies_documents_without_a_dom_event() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_persistent_factor_save_refreshes_catalog_but_inline_save_does_not() -> None:
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "factor_persistence_refresh.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+    editor = (WEB_ROOT / "catalog" / "factor-editor.js").read_text(encoding="utf-8")
+    assert "if (!state.familyMode)" in editor
+    assert "params_list: [state.parameterValues]" in editor
+
+
 def test_factor_object_editors_share_submit_assistance_and_reference_controls() -> None:
     object_form = (WEB_ROOT / "catalog" / "factor-object-form.js").read_text(
         encoding="utf-8",

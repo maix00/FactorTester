@@ -626,7 +626,7 @@
     const saved = value.factor || value;
     const alias = saved.name || saved.id || state.factorID;
     let registered = null;
-    if (!state.familyMode && Object.keys(state.parameterValues || {}).length) {
+    if (!state.familyMode) {
       const libraryValue = await context.api(
         `/api/factor-library/configurations/${encodeURIComponent(alias)}`,
         {
@@ -650,6 +650,24 @@
     return registered
       ? {...saved, ...registered, source_code: saved.source_code || payload.source_code}
       : saved;
+  }
+
+  async function refreshPersistedObject(context, state, result) {
+    if (context.testObjectTemporary) return result;
+    const data = await window.FTFactorCatalog.load(context, {
+      refresh: true, library: true,
+    });
+    if (state.familyMode) return result;
+    const targetRef = String(result?.factor_ref || result?.ref || "").trim();
+    const targetAlias = String(result?.factor_alias || result?.alias || "").trim();
+    const persisted = (data.factors || []).find(item => (
+      targetRef && String(item?.factor_ref || item?.ref || "") === targetRef
+      || targetAlias && String(item?.factor_alias || item?.alias || "") === targetAlias
+    ));
+    if (!persisted) {
+      throw new Error(context.t("因子保存后未在因子库中登记"));
+    }
+    return {...result, ...persisted};
   }
 
   async function render(context, data, targetRef, mode, options = {}) {
@@ -959,8 +977,8 @@
           : await saveSourceFactor(context, state, {
             name, chineseName, description, category,
           });
-        const result = normalizeSaved(saved, state, context);
-        window.FTFactorCatalog?.upsertFactor?.(result);
+        let result = normalizeSaved(saved, state, context);
+        result = await refreshPersistedObject(context, state, result);
         if (context.testObjectTemporary && result.source_code && context.testState) {
           window.FTTestInputState?.putFactor?.(context.testState, {
             factor_id: result.factor_alias,
@@ -1058,6 +1076,6 @@
 
   window.FTFactorEditor = Object.freeze({
     render, reconcileParameterValues, bindFieldValue, persistedFamilyClassName,
-    familyClassNameMatches,
+    familyClassNameMatches, refreshPersistedObject,
   });
 })();
