@@ -1345,8 +1345,10 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
         "factor-catalog-core",
         "object-editor-overlay",
     ]
+    assert manifest["group_dependencies"]["object-editor-overlay"] == [
+        "core", "workbench-object-picker",
+    ]
     assert manifest["groups"]["object-editor-overlay"] == [
-        "workbench/test-object-picker.js",
         "workbench/test-object-editor-overlay.js",
     ]
     assert "core/output-choices.js" not in research_static._initial_scripts(manifest)
@@ -1399,6 +1401,13 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
     ]
     assert manifest["group_dependencies"]["workbench-factors"] == [
         "workbench-core", "catalog-core", "workbench-source-inputs",
+        "workbench-object-picker",
+    ]
+    assert manifest["group_dependencies"]["workbench-products"] == [
+        "workbench-core", "catalog-core", "workbench-object-picker",
+    ]
+    assert manifest["groups"]["workbench-object-picker"] == [
+        "workbench/test-object-picker.js",
     ]
     assert manifest["group_dependencies"]["workbench-source-inputs"] == [
         "workbench-input-state",
