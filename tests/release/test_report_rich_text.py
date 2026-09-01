@@ -236,6 +236,53 @@ def test_versioned_factor_and_resolved_domain_links_are_valid() -> None:
         )
 
 
+def test_legacy_frozen_factor_links_remain_readable() -> None:
+    legacy_factor = (
+        "factor:v1:profile-maxa:cHVibGljX2ZhY3RvcnMvTW1UcmVuZC5weQ:"
+        "TW1UcmVuZHxOOjIwZA:"
+        f"{'a' * 40}:{'b' * 40}"
+    )
+    legacy_family = (
+        "factor-family:v1:profile-maxa:"
+        "cHVibGljX2ZhY3RvcnMvTW1UcmVuZC5weQ:TW1UcmVuZA:"
+        f"{'a' * 40}:{'b' * 40}"
+    )
+    legacy_set = (
+        "factor-set:v1:profile-maxa:"
+        "LmZhY3RvcnRlc3Rlci9mYWN0b3Itc2V0cy9tb21lbnR1bS5qc29u:"
+        "bW9tZW50dW0:"
+        f"{'a' * 40}:{'b' * 40}"
+    )
+
+    assert validate_rich_text(
+        typed_markdown_link(
+            kind="factor", target_ref=legacy_factor, label="MmTrend|N:20d",
+        ),
+        field="node.body",
+    )
+    assert validate_rich_text(
+        typed_markdown_link(
+            kind="factor", target_ref=legacy_family, label="MmTrend",
+        ),
+        field="node.body",
+    )
+    assert validate_rich_text(
+        typed_markdown_link(
+            kind="factor", target_ref=legacy_set, label="动量集合",
+        ),
+        field="node.body",
+    )
+
+
+def test_incomplete_legacy_factor_links_remain_rejected() -> None:
+    with pytest.raises(ValueError, match="frozen formula"):
+        typed_markdown_link(
+            kind="factor",
+            target_ref="factor:v1:profile-maxa:path:alias:commit:blob",
+            label="不完整引用",
+        )
+
+
 def test_typed_factor_set_uses_the_factor_link_kind() -> None:
     target = "factor-set:v2:" + "b" * 43
 

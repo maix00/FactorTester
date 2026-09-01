@@ -133,6 +133,27 @@ def test_public_library_exposes_index_and_chapter_reads(tmp_path):
     assert shared[0]["is_shared"] is True
 
 
+def test_public_library_keeps_report_branches_as_distinct_projections(tmp_path):
+    library = PublicResearchLibrary(tmp_path / "public-research")
+    first = library.sync({
+        "report_id": "r", "publication_key": "r:branch:first",
+        "branch_ref": "first", "owner_ref": "owner",
+        "projection": _projection(),
+    })
+    second_projection = {**_projection(), "generation": 5, "projection_hash": "hash-2"}
+    second = library.sync({
+        "report_id": "r", "publication_key": "r:branch:second",
+        "branch_ref": "second", "owner_ref": "owner",
+        "projection": second_projection,
+    })
+
+    assert first["publication_id"] != second["publication_id"]
+    values = library.list_owner("owner")
+    assert {(item["report_id"], item["branch_ref"]) for item in values} == {
+        ("r", "first"), ("r", "second"),
+    }
+
+
 def test_public_library_index_uses_persisted_sidecar(tmp_path, monkeypatch):
     library = PublicResearchLibrary(tmp_path / "public-research")
     projection = _projection()

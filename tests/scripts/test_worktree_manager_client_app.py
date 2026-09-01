@@ -2245,16 +2245,30 @@ def test_web_shell_has_swift_style_opened_tabs_and_per_tab_test_state(tmp_path) 
             report_source = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/rich-text.js") as response:
             rich_text = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/research/report-settings.js") as response:
+            report_settings = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/research/reports.js") as response:
+            research_reports = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/research/local.js") as response:
+            research_local = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/app/tabs.js") as response:
             tabs = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/app/tab-view-cache.js") as response:
             tab_view_cache = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/workbench/tests.js") as response:
             tests = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/styles/app.css") as response:
+            styles = response.read().decode("utf-8")
 
     assert 'id="opened-tabs"' in shell
     assert 'id="opened-caption"' in shell
     assert "function closeTab" in tabs
+    close_tab = tabs.split("function closeTab", 1)[1].split("function openModule", 1)[0]
+    assert "viewCache.discardView(tabID)" in close_tab
+    assert "viewCache.restoreView(state.activeTabID)" not in close_tab
+    assert "Always run the fallback route once" in close_tab
+    assert '.nav-research-detail-folder > .nav-folder-row { padding-right: 8px; }' in styles
+    assert '.nav-research-detail-folder > .nav-folder-row > .tab-close { width: auto;' in styles
     assert "function renderOpenedTabs" in tabs
     assert "forceNew: true" in tabs
     assert "activeTabHasOverlay" in tabs
@@ -2358,6 +2372,12 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
             icons = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/rich-text.js") as response:
             rich_text = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/research/report-settings.js") as response:
+            report_settings = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/research/reports.js") as response:
+            research_reports = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/research/local.js") as response:
+            research_local = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/rich-text-blocks.js") as response:
             rich_text_blocks = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/report/table-view.js") as response:
@@ -2387,7 +2407,22 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'window.FTIcons' in icons
     assert 'chart.xyaxis.line' in icons
     assert 'person.crop.rectangle.stack' in icons
+    assert '"research.reports": "doc.text"' in icons
+    assert '"research.evidence": "doc.text.magnifyingglass"' in icons
     assert 'FTIcons.reference' in rich_text
+    assert 'legacyFactorSnapshot' in rich_text
+    assert 'reference-legacy' in rich_text
+    assert 'window.FTResearchReportSettings' in report_settings
+    assert 'publication_id: settings.publication_id' in report_settings
+    assert '自动上传' in report_settings
+    assert '["superiors", "分享给上级"]' in report_settings
+    assert 'relation=superiors' in report_settings
+    assert '{readOnly: true}' in report_settings
+    assert 'selectedKind === "publication"' in research_reports
+    assert 'source_kind: branch.source_kind' in research_reports
+    assert 'research-report-tab-actions' in research_reports
+    assert '["superiors", "authorized", "public"]' in research_reports
+    assert '["superiors", "authorized", "public"]' in research_local
     assert 'factortester-local://' in rich_text
     assert '(?:file)' in rich_text
     assert 'return "file"' in rich_text
@@ -2498,7 +2533,7 @@ def test_client_module_catalog_keeps_test_routes_out_of_entry_surfaces(tmp_path)
         assert modules[module_id]["homeVisible"] is False
         assert modules[module_id]["path"] == path
     assert modules["jobs"]["sfSymbol"] == "checklist"
-    assert modules["jobs"]["title_key"] == "测试"
+    assert modules["jobs"]["title_key"] == "测试台"
     assert modules["jobs"]["path"] == "/jobs?section=types"
     assert modules["products"]["title"] == "产品库"
     assert modules["products"]["title_key"] == "产品库"
@@ -3435,6 +3470,20 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
             reports = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research/researches.js") as response:
             researches = response.read().decode("utf-8")
+        with urlopen(
+            f"{base_url}/research-static/profile/page-agent-profiles.js"
+        ) as response:
+            page_agent_profiles = response.read().decode("utf-8")
+        with urlopen(
+            f"{base_url}/research-static/profile/page-agent-drawer.js"
+        ) as response:
+            page_agent_drawer = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/profile/agent-chat.js") as response:
+            agent_chat = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/report/report-entry.js") as response:
+            report_entry = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/styles/app.css") as response:
+            app_styles = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/profile/agent-models.js") as response:
             agent_models = response.read().decode("utf-8")
         with urlopen(
@@ -3473,8 +3522,8 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert "我的研究报告" in reports
     assert "下级用户的研究报告" in reports
     assert "共享研究报告" in reports
-    assert "clientDownload" in reports
-    assert "loadClientRelease" in reports
+    assert "clientDownload" not in reports
+    assert "loadClientRelease" not in reports
     assert 'search.type = "search"' in agent_models
     assert 'search.addEventListener("input"' in agent_models
     assert "requestAnimationFrame" in agent_models
@@ -3483,17 +3532,32 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert "/duplicate`" in agent_models
     assert "window.FTAgentModelEditor" in agent_model_editor
     assert 'model.addEventListener("focus"' in agent_model_editor
-    assert "clientDownload?.(context, release)" in reports
+    assert "clientDownload?.(context, release)" not in reports
+    assert "clientDownloadButton" in local_page
+    assert 'clientDownloadButton(context, value, label = "客户端下载")' in local_page
+    assert 'context.button("×", () => dialog.close(), context.t("关闭"))' in local_page
+    assert "原生 Swift 客户端" not in local_page
+    assert "跨平台客户端尚未提供" not in local_page
+    assert "loadClientRelease" in local_page
+    assert 'loadGroups?.(["research-local"])' in shell
+    assert 'homeNetworkRow(\n        "FactorTester 客户端"' in shell
+    assert 'clientDownloadButton(appContext(routeToken), release, "下载")' in shell
     assert 'line.className = "research-report-info-line"' in reports
     assert 'metadata.className = "research-report-info-metadata"' in reports
     assert 'item.className = "secondary"' not in reports
     assert 'body.className = "research-report-embedded-body"' in reports
+    assert 'context, "plus", "新建研究报告"' in reports
+    assert 'context, "trash", "删除研究报告"' in reports
+    assert 'picker.setAttribute("aria-label", context.t("研究报告"))' in reports
+    assert 'item?.build_source === "workspace"' in reports
     assert 'loadGroups?.(["report"])' in reports
     assert "FTReportSource.create" in reports
     assert "FTReportRenderer.render" in reports
     assert 'context.t("属于研究")' not in reports
     assert "research-report-table-embedded" not in reports
     assert 'context.t("独立打开")' not in reports
+    assert 'context, "safari", "在独立页面打开"' in reports
+    assert 'state.selectedBranches[reportIdentity(selected)]' in reports
     assert 'section.className = "research-client-download-action"' in local_page
     assert "window.FTResearchCatalog" in researches
     assert "FTUI.pagedTable" in researches
@@ -3503,6 +3567,14 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert 'title: "共享研究"' in researches
     assert 'nav.className = "research-section-tabs research-root-scopes"' in researches
     assert "research-section-tab research-root-scope" in researches
+    assert 'context, "plus", "新建研究"' in researches
+    assert 'row.className = "research-root-scope-row"' in researches
+    assert 'item.classList.toggle("active", active)' in researches
+    assert 'addButton.hidden = state.scope !== "mine"' in researches
+    assert 'context.toolbar.replaceChildren(FTUI.iconButton(' not in researches
+    assert 'context, "plus", "添加研究身份"' in researches
+    assert 'context, "trash", "移除研究身份"' in researches
+    assert '&& !requiredSelf' in researches
     assert 'nav.className = "research-section-tabs research-detail-tabs"' in researches
     assert "research-section-tab research-detail-tab" in researches
     assert 'context.setHeading(value.title || id, context.t("研究"))' in researches
@@ -3542,6 +3614,20 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert 'context.content.replaceChildren(...(embedded ? [] : [tabBar(context, selected)]))' not in workspaces
     assert "/api/public-research" in shared_page
     assert "workPackage" not in workspaces
+    assert "runtime_bound_here: false" in page_agent_profiles
+    assert "未绑定当前服务器/客户端" in page_agent_drawer
+    assert "if (profile?.runtime_bound_here === false)" in page_agent_drawer
+    assert 'const title = await conversationTitle(context, profile)' in agent_chat
+    assert 'text: title' in agent_chat
+    assert 'match?.label || match?.display_name' in agent_chat
+    assert 'context.t("研究身份 Agent")' not in agent_chat
+    assert "assistantAllowed" in report_entry
+    assert 'access_basis === "research"' in report_entry
+    assert ".page-agent-drawer-close" in app_styles
+    assert "background: transparent" in app_styles
+    assert 'infoLine.className = "research-report-info-line"' in report_entry
+    assert 'content.replaceChildren(infoLine, layout, rail)' in report_entry
+    assert 'toolbar.append(branchPicker)' not in report_entry
     assert "research-graphs" not in shell
     assert 'parts[1] === "work"' not in shell
     assert "const pinnedModule = isPinnedPath(initial) ? moduleForPath(initial) : null" in shell

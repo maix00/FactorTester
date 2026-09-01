@@ -10,6 +10,8 @@ from urllib.error import HTTPError
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
+from tools.cli.manager.config import ManagerConfig, ManagerCredentialStore
+
 from tools.cli.commands.research_report_scope_identity import (
     resolve_branch_report_scope,
 )
@@ -64,6 +66,10 @@ class PublicResearchClient:
             except (FileNotFoundError, ValueError):
                 configured = "http://127.0.0.1:7998"
         self.manager_url = str(configured).rstrip("/")
+        # Explicit URLs are also used by offline tests and injected local
+        # runtimes. Persisted Manager configuration is validated when loaded.
+        self.manager_config = ManagerConfig(base_url=self.manager_url)
+        self.credentials = ManagerCredentialStore(self.manager_config)
 
     def list_publications(self) -> list[dict[str, Any]]:
         # A read is also a reconnect boundary.  Local browsing must continue
@@ -121,7 +127,7 @@ class PublicResearchClient:
                         publication.get("visibility", "private")
                         if publication else "private"
                     )
-                    shared = visibility in {"authorized", "public"}
+                    shared = visibility in {"superiors", "authorized", "public"}
                     values.append({
                         "profile_id": profile_id,
                         "work_package_id": work_package_id,
@@ -206,6 +212,8 @@ class PublicResearchClient:
         branch_id: str,
         public_title: str = "",
         show_profile: bool = False,
+        visibility: str = "public",
+        authorized_users: tuple[str, ...] = (),
     ) -> dict[str, Any]:
         scope = resolve_branch_report_scope(
             client_root=self.client_root,
@@ -233,6 +241,10 @@ class PublicResearchClient:
             owner_ref=owner_ref,
             profile_ref=profile_id,
             report_id=str(projection["report_id"]),
+            publication_key=f"{projection['report_id']}:branch:{branch_id}",
+            branch_ref=branch_id,
+            visibility=visibility,
+            authorized_users=authorized_users,
             projection=projection,
             public_title=title,
             show_profile=show_profile,
@@ -310,6 +322,11 @@ class PublicResearchClient:
                         "owner_ref": manifest["owner_ref"],
                         "profile_ref": manifest.get("profile_ref") or "",
                         "report_id": manifest["report_id"],
+                        "publication_key": manifest.get("publication_key")
+                        or manifest["report_id"],
+                        "branch_ref": manifest.get("branch_ref") or "",
+                        "visibility": manifest.get("visibility") or "public",
+                        "authorized_users": manifest.get("authorized_users") or [],
                         "projection": projection,
                         "public_title": manifest.get("public_title") or "",
                         "show_profile": bool(manifest.get("show_profile")),
@@ -446,6 +463,37 @@ class PublicResearchClient:
         )
         return self.sync_pending(operation_id=operation_id)[0]
 
+    def configure(
+        self,
+        publication_id: str,
+        *,
+        visibility: str,
+        auto_sync: bool,
+        relay_local_files: bool = False,
+        authorized_users: tuple[str, ...] = (),
+    ) -> dict[str, Any]:
+        """Update one uploaded Branch without changing its report projection."""
+        publication_id = str(publication_id or "").strip()
+        if not publication_id:
+            raise ValueError("publication_id is required")
+        value = self._request(
+            "POST", "/api/research-publications/settings",
+            payload={
+                "publication_id": publication_id,
+                "visibility": str(visibility or "private"),
+                "auto_sync": bool(auto_sync),
+                "relay_local_files": bool(relay_local_files),
+                "authorized_users": sorted({
+                    str(item).strip() for item in authorized_users
+                    if str(item).strip()
+                }),
+            },
+        )
+        settings = value.get("settings")
+        if not isinstance(settings, dict):
+            raise ManagerRequestError(502, "Manager returned no report settings")
+        return settings
+
     def _request(
         self,
         method: str,
@@ -460,6 +508,9 @@ class PublicResearchClient:
             "Accept": "application/json",
             "X-FactorTester-Client": "cli",
         }
+        token = self.credentials.read()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
         if payload is not None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             headers["Content-Type"] = "application/json"

@@ -129,8 +129,9 @@ class WriteRoutesMixin:
         if self._proxy_job_request(parsed, method="POST"):
             return
         if self.path == "/api/research-publications/sync":
-            if not self._is_local_ftclient():
-                json_response(self, {"success": False, "error": "local FTClient required"}, 403)
+            client_session = None if self._is_local_ftclient() else self._session()
+            if not self._is_local_ftclient() and client_session is None:
+                json_response(self, {"success": False, "error": "authenticated FTClient required"}, 403)
                 return
             try:
                 value = self.state.public_research.sync(self._json_body(32 * 1024 * 1024))
@@ -184,13 +185,21 @@ class WriteRoutesMixin:
                     return
                 json_response(self, {"success": True, **value}, 201)
                 return
-            if not self._is_local_ftclient():
-                json_response(self, {"success": False, "error": "local FTClient required"}, 403)
+            local_client = self._is_local_ftclient()
+            client_session = None if local_client else self._session()
+            if not local_client and client_session is None:
+                json_response(self, {"success": False, "error": "authenticated FTClient required"}, 403)
                 return
             try:
                 projection = payload.get("projection")
                 report_id = str(payload.get("report_id") or "")
-                owner_ref = str(payload.get("owner_ref") or "")
+                owner_ref = str(
+                    client_session.get("username") if client_session is not None
+                    else payload.get("owner_ref") or ""
+                )
+                supplied_owner = str(payload.get("owner_ref") or "").strip()
+                if client_session is not None and supplied_owner != owner_ref:
+                    raise PermissionError("report owner does not match authenticated user")
                 if isinstance(projection, dict) and str(payload.get("public_title") or "").strip():
                     projection = {
                         **projection,
@@ -214,6 +223,8 @@ class WriteRoutesMixin:
                     ).hexdigest()
                 synced = self.state.public_research.sync({
                     "report_id": report_id,
+                    "publication_key": str(payload.get("publication_key") or report_id),
+                    "branch_ref": str(payload.get("branch_ref") or ""),
                     "owner_ref": owner_ref,
                     "profile_ref": str(payload.get("profile_ref") or ""),
                     "projection": projection,
@@ -224,11 +235,12 @@ class WriteRoutesMixin:
                 settings = self.state.public_research.configure(
                     owner_ref=owner_ref,
                     report_id=report_id,
+                    publication_key=str(payload.get("publication_key") or report_id),
                     projection=None,
-                    visibility="public",
+                    visibility=str(payload.get("visibility") or "public"),
                     auto_sync=True,
                     relay_local_files=False,
-                    authorized_users=[],
+                    authorized_users=list(payload.get("authorized_users") or []),
                 )
                 self._sync_research_metadata(str(settings["publication_id"]))
                 self._invalidate_federated_public_research()
@@ -250,17 +262,31 @@ class WriteRoutesMixin:
             })
             return
         if self.path == "/api/research-publications/revoke":
-            if not self._is_local_ftclient():
-                json_response(self, {"success": False, "error": "local FTClient required"}, 403)
+            revoke_session = None if self._is_local_ftclient() else self._session()
+            if not self._is_local_ftclient() and revoke_session is None:
+                json_response(self, {"success": False, "error": "authenticated FTClient required"}, 403)
                 return
             try:
                 payload = self._json_body(64 * 1024)
                 publication_id = str(payload.get("publication_id") or "")
+                if revoke_session is not None:
+                    metadata = self.state.public_research.publication_metadata(
+                        publication_id,
+                    )
+                    if str(metadata.get("owner_ref") or "") != str(
+                        revoke_session.get("username") or ""
+                    ):
+                        raise PermissionError(
+                            "publication does not belong to authenticated user"
+                        )
                 self._sync_research_metadata(publication_id, deleted=True)
                 value = self.state.public_research.revoke_publication(
                     publication_id,
                 )
                 self._invalidate_federated_public_research()
+            except PermissionError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 403)
+                return
             except ValueError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 404)
                 return
@@ -275,24 +301,39 @@ class WriteRoutesMixin:
                 payload = self._json_body(256 * 1024)
                 owner = str(session["username"])
                 report_id = str(payload.get("report_id") or "")
+                publication_id = str(payload.get("publication_id") or "").strip()
                 visibility = str(payload.get("visibility") or "private")
+                authorized_users = list(payload.get("authorized_users") or [])
+                if visibility == "superiors":
+                    authorized_users = self._research_catalog_superior_refs(owner)
+                publication = None
+                if publication_id:
+                    publication = self.state.public_research.owner_settings(
+                        publication_id, owner,
+                    )
+                    if report_id and report_id != publication["report_id"]:
+                        raise PermissionError("report settings target does not match")
+                    report_id = str(publication["report_id"])
                 server_report = self.state.server_research.owner_report(
                     owner, report_id,
                 )
-                if server_report is not None:
+                if server_report is not None and publication is None:
                     value = self.state.server_research.publish(
                         owner,
                         str(server_report["server_ref"]),
                         public_research=self.state.public_research,
                         visibility=visibility,
                         authorized_users=list(
-                            payload.get("authorized_users") or []
+                            authorized_users
                         ),
                     )
                 else:
                     value = self.state.public_research.configure(
                         owner_ref=owner,
                         report_id=report_id,
+                        publication_key=str(
+                            (publication or {}).get("publication_key") or report_id
+                        ),
                         projection=None,
                         visibility=visibility,
                         auto_sync=bool(payload.get("auto_sync", True)),
@@ -300,7 +341,7 @@ class WriteRoutesMixin:
                             payload.get("relay_local_files", False)
                         ),
                         authorized_users=list(
-                            payload.get("authorized_users") or []
+                            authorized_users
                         ),
                     )
                 self._sync_research_metadata(str(value["publication_id"]))
@@ -460,6 +501,8 @@ class WriteRoutesMixin:
         if self._delete_page_assistance_routes(parsed):
             return
         if self._delete_agent_routes(parsed):
+            return
+        if self._delete_research_catalog_routes(parsed):
             return
         if self._proxy_job_request(parsed, method="DELETE"):
             return

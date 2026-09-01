@@ -5,7 +5,12 @@
   // keeping the same semantic symbol name and visual metrics as SwiftUI.
   const moduleSymbols = {
     home: "square.grid.2x2",
-    research: "chart.xyaxis.line",
+    research: "lightbulb",
+    "research.reports": "doc.text",
+    "research.evidence": "doc.text.magnifyingglass",
+    "research.graph": "point.3.connected.trianglepath.dotted",
+    "research.profiles": "person.2.crop.square.stack",
+    "research.agent-models": "server.rack",
     "ic-test": "chart.xyaxis.line",
     backtest: "chart.line.uptrend.xyaxis",
     jobs: "checklist",
@@ -52,6 +57,7 @@
   const shapes = {
     "square.grid.2x2": '<rect x="4" y="4" width="6" height="6" rx="1.2"/><rect x="14" y="4" width="6" height="6" rx="1.2"/><rect x="4" y="14" width="6" height="6" rx="1.2"/><rect x="14" y="14" width="6" height="6" rx="1.2"/>',
     "chart.xyaxis.line": '<path d="M4 20V4M4 20h17"/><path d="m7 15 3-4 3 2 5-7 3 2"/>',
+    "lightbulb": '<path d="M9 18h6M10 21h4"/><path d="M8.2 14.5A7 7 0 1 1 15.8 14.5C14.7 15.3 14 16.4 14 18h-4c0-1.6-.7-2.7-1.8-3.5Z"/>',
     "chart.line.uptrend.xyaxis": '<path d="M4 20V4M4 20h17"/><path d="m7 16 4-5 3 2 6-8"/><path d="M17 5h3v3"/>',
     "checklist": '<path d="M8 6h12M8 12h12M8 18h12"/><path d="m3.5 5.8 1.2 1.2 2.2-2.4M3.5 11.8l1.2 1.2 2.2-2.4M3.5 17.8l1.2 1.2 2.2-2.4"/>',
     "function": '<text x="3" y="17" fill="currentColor" stroke="none" font-size="16" font-family="ui-sans-serif, sans-serif" font-weight="650">ƒ(x)</text>',
@@ -87,6 +93,8 @@
     "doc.text": '<path d="M6 3h8l4 4v14H6zM14 3v5h5M9 12h6M9 16h6"/>',
     "globe": '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 2.5 4 5.5 4 9s-1 6.5-4 9c-3-2.5-4-5.5-4-9s1-6.5 4-9Z"/>',
     "arrow.down.circle": '<circle cx="12" cy="12" r="9"/><path d="M12 7v9M8.5 12.5 12 16l3.5-3.5"/>',
+    "arrow.clockwise": '<path d="M20 7v5h-5"/><path d="M19 12a7 7 0 1 1-2-5l3 3"/>',
+    "gearshape": '<circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1a7 7 0 0 0-1.8-1L14.4 3h-4.8l-.4 3.1a7 7 0 0 0-1.8 1l-2.4-1-2 3.4L5.1 11a7 7 0 0 0 0 2L3 14.5l2 3.4 2.4-1a7 7 0 0 0 1.8 1l.4 3.1h4.8l.4-3.1a7 7 0 0 0 1.8-1l2.4 1 2-3.4-2.1-1.5a7 7 0 0 0 .1-1Z"/>',
     "eye": '<path d="M3 12s3.2-6 9-6 9 6 9 6-3.2 6-9 6-9-6-9-6Z"/><circle cx="12" cy="12" r="2.5"/>',
     "square.and.pencil": '<rect x="4" y="4" width="14" height="16" rx="2"/><path d="m10 15 1-3 6.8-6.8a1.6 1.6 0 0 1 2.2 2.2L13.2 14l-3.2 1ZM15.8 7.2l2.2 2.2"/>',
     "plus": '<path d="M12 4v16M4 12h16"/>',
