@@ -1062,7 +1062,23 @@ button.reference-item { cursor: pointer; }
   min-height: 0;
 }
 .page-agent-drawer-status { color: var(--muted, #667085); padding: .75rem; }
-.page-agent-drawer-close { font-size: 1.5rem; line-height: 1; }
+.page-agent-drawer-close {
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.page-agent-drawer-close:hover,
+.page-agent-drawer-close:focus-visible { background: transparent; box-shadow: none; }
 .page-agent-drawer-toggle {
   position: fixed;
   z-index: 1190;

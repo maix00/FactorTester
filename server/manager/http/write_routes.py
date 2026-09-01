@@ -214,6 +214,8 @@ class WriteRoutesMixin:
                     ).hexdigest()
                 synced = self.state.public_research.sync({
                     "report_id": report_id,
+                    "publication_key": str(payload.get("publication_key") or report_id),
+                    "branch_ref": str(payload.get("branch_ref") or ""),
                     "owner_ref": owner_ref,
                     "profile_ref": str(payload.get("profile_ref") or ""),
                     "projection": projection,
@@ -224,11 +226,12 @@ class WriteRoutesMixin:
                 settings = self.state.public_research.configure(
                     owner_ref=owner_ref,
                     report_id=report_id,
+                    publication_key=str(payload.get("publication_key") or report_id),
                     projection=None,
-                    visibility="public",
+                    visibility=str(payload.get("visibility") or "public"),
                     auto_sync=True,
                     relay_local_files=False,
-                    authorized_users=[],
+                    authorized_users=list(payload.get("authorized_users") or []),
                 )
                 self._sync_research_metadata(str(settings["publication_id"]))
                 self._invalidate_federated_public_research()

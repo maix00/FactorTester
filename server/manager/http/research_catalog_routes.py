@@ -83,6 +83,7 @@ class ResearchCatalogRoutesMixin:
                     scope=scope,
                     subordinate_refs=self._research_catalog_subordinate_refs(viewer),
                 )
+                value = self._research_catalog_publication_branches(value, viewer)
                 payload = {
                     "reports": value,
                     "items": value,
@@ -110,9 +111,12 @@ class ResearchCatalogRoutesMixin:
                         ),
                     }
                 elif child == "reports":
+                    reports = service.list_reports(
+                        research_id, viewer=viewer,
+                    )
                     payload = {
-                        "reports": service.list_reports(
-                            research_id, viewer=viewer,
+                        "reports": self._research_catalog_publication_branches(
+                            reports, viewer,
                         ),
                     }
                 elif child == "evidence":
@@ -140,6 +144,47 @@ class ResearchCatalogRoutesMixin:
             return True
         json_response(self, {"success": True, **payload})
         return True
+
+    def _research_catalog_publication_branches(
+        self, reports: list[dict], viewer: str,
+    ) -> list[dict]:
+        """Attach readable server projections without loading report bytes."""
+        try:
+            publications = self._research_service().list_visible(viewer)
+        except (AttributeError, ConnectionError, OSError, RuntimeError, ValueError):
+            publications = []
+        by_report: dict[str, list[dict]] = {}
+        for item in publications:
+            if not isinstance(item, dict):
+                continue
+            report_id = str(item.get("report_id") or "").strip()
+            publication_id = str(item.get("publication_id") or "").strip()
+            if report_id and publication_id:
+                by_report.setdefault(report_id, []).append(item)
+        result = []
+        for original in reports:
+            value = dict(original)
+            local = [dict(item) for item in value.get("branches") or []]
+            projected = []
+            for item in by_report.get(str(value.get("report_id") or ""), []):
+                projected.append({
+                    "branch_ref": str(item.get("branch_ref") or ""),
+                    "title": str(item.get("branch_ref") or item.get("title") or ""),
+                    "profile_ref": str(item.get("profile_ref") or ""),
+                    "source_kind": "publication",
+                    "source_ref": str(item.get("publication_id") or ""),
+                    "publication_id": str(item.get("publication_id") or ""),
+                    "selected": not projected,
+                })
+            if projected:
+                for item in local:
+                    item["selected"] = False
+            seen = {item["publication_id"] for item in projected}
+            value["branches"] = projected + [
+                item for item in local if item.get("publication_id") not in seen
+            ]
+            result.append(value)
+        return result
 
     def _post_research_catalog_routes(self, parsed) -> bool:
         if not self._is_research_catalog_path(parsed.path):

@@ -206,6 +206,8 @@ class PublicResearchClient:
         branch_id: str,
         public_title: str = "",
         show_profile: bool = False,
+        visibility: str = "public",
+        authorized_users: tuple[str, ...] = (),
     ) -> dict[str, Any]:
         scope = resolve_branch_report_scope(
             client_root=self.client_root,
@@ -233,6 +235,10 @@ class PublicResearchClient:
             owner_ref=owner_ref,
             profile_ref=profile_id,
             report_id=str(projection["report_id"]),
+            publication_key=f"{projection['report_id']}:branch:{branch_id}",
+            branch_ref=branch_id,
+            visibility=visibility,
+            authorized_users=authorized_users,
             projection=projection,
             public_title=title,
             show_profile=show_profile,
@@ -310,6 +316,11 @@ class PublicResearchClient:
                         "owner_ref": manifest["owner_ref"],
                         "profile_ref": manifest.get("profile_ref") or "",
                         "report_id": manifest["report_id"],
+                        "publication_key": manifest.get("publication_key")
+                        or manifest["report_id"],
+                        "branch_ref": manifest.get("branch_ref") or "",
+                        "visibility": manifest.get("visibility") or "public",
+                        "authorized_users": manifest.get("authorized_users") or [],
                         "projection": projection,
                         "public_title": manifest.get("public_title") or "",
                         "show_profile": bool(manifest.get("show_profile")),

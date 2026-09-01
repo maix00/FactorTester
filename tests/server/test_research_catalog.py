@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from types import SimpleNamespace
 from urllib.parse import quote
 
@@ -34,6 +35,39 @@ def test_research_catalog_keeps_research_and_profile_workspaces_distinct(tmp_pat
         principal_ref="alice",
         profile_ref="self",
     )["workspace_id"] == workspace["workspace_id"]
+
+    members = catalog.list_members(first["research_id"], viewer="alice")
+    assert [(item["principal_ref"], item["profile_ref"]) for item in members] == [
+        ("alice", "self"),
+    ]
+    assert catalog.list_researches(viewer="alice")[0]["research_id"] in {
+        first["research_id"], second["research_id"],
+    }
+
+
+def test_existing_research_is_backfilled_with_owner_self_profile(tmp_path):
+    db_path = tmp_path / "research.sqlite"
+    catalog = ResearchCatalog(db_path)
+    research = catalog.create_research(owner_ref="alice", title="旧研究")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "DELETE FROM research_catalog_workspaces WHERE research_id=?",
+            (research["research_id"],),
+        )
+        conn.execute(
+            "DELETE FROM research_catalog_memberships WHERE research_id=?",
+            (research["research_id"],),
+        )
+
+    restored = ResearchCatalog(db_path)
+    members = restored.list_members(research["research_id"], viewer="alice")
+    workspaces = restored.list_workspaces(research["research_id"], viewer="alice")
+    assert [(item["principal_ref"], item["profile_ref"]) for item in members] == [
+        ("alice", "self"),
+    ]
+    assert [(item["principal_ref"], item["profile_ref"]) for item in workspaces] == [
+        ("alice", "self"),
+    ]
 
 
 def test_report_binding_and_its_research_drive_evidence_access(tmp_path):
@@ -178,12 +212,16 @@ def test_owner_can_remove_report_and_profile_from_research(tmp_path):
     assert removed_report["status"] == "archived"
     assert catalog.list_reports(research["research_id"], viewer="alice") == []
 
-    removed_member = catalog.remove_membership(
-        research["research_id"], profile_ref="self", actor="alice",
-    )
-    assert removed_member["status"] == "revoked"
-    assert catalog.list_members(research["research_id"], viewer="alice") == []
-    assert catalog.list_workspaces(research["research_id"], viewer="alice") == []
+    with pytest.raises(PermissionError, match="self Profile is a required member"):
+        catalog.remove_membership(
+            research["research_id"], profile_ref="self", actor="alice",
+        )
+    assert catalog.list_members(research["research_id"], viewer="alice")[0][
+        "profile_ref"
+    ] == "self"
+    assert catalog.list_workspaces(research["research_id"], viewer="alice")[0][
+        "profile_ref"
+    ] == "self"
 
     removed_research = catalog.remove_research(
         research["research_id"], actor="alice",

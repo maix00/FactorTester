@@ -39,6 +39,10 @@ class PublicResearchOutbox:
         owner_ref: str,
         profile_ref: str,
         report_id: str,
+        publication_key: str = "",
+        branch_ref: str = "",
+        visibility: str = "public",
+        authorized_users: tuple[str, ...] = (),
         projection: dict[str, Any],
         public_title: str,
         show_profile: bool,
@@ -49,11 +53,12 @@ class PublicResearchOutbox:
             str(projection.get("projection_hash") or ""),
             "projection_hash",
         )
-        operation_id = _operation_id("publish", report_id, projection_hash)
+        publication_key = str(publication_key or report_id).strip()
+        operation_id = _operation_id("publish", publication_key, projection_hash)
         operation_dir = self.root / operation_id
         with self._locked():
             self._mark_previous_publish_operations_locked(
-                report_id, superseded_by=operation_id,
+                publication_key, superseded_by=operation_id,
             )
             operation_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
             atomic_json(operation_dir / "projection.json", projection)
@@ -81,6 +86,12 @@ class PublicResearchOutbox:
                 "owner_ref": _required(owner_ref, "owner_ref"),
                 "profile_ref": str(profile_ref or ""),
                 "report_id": report_id,
+                "publication_key": publication_key,
+                "branch_ref": str(branch_ref or "").strip(),
+                "visibility": str(visibility or "public").strip(),
+                "authorized_users": sorted({
+                    str(item).strip() for item in authorized_users if str(item).strip()
+                }),
                 "projection_hash": projection_hash,
                 "generation": int(projection.get("generation") or 0),
                 "public_title": str(public_title or "").strip(),
@@ -196,7 +207,7 @@ class PublicResearchOutbox:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     def _mark_previous_publish_operations_locked(
-        self, report_id: str, *, superseded_by: str,
+        self, publication_key: str, *, superseded_by: str,
     ) -> None:
         for operation_dir in self.root.iterdir() if self.root.is_dir() else ():
             if not operation_dir.is_dir() or operation_dir.name.startswith("."):
@@ -208,7 +219,8 @@ class PublicResearchOutbox:
                 continue
             if (
                 manifest.get("kind") == "publish"
-                and manifest.get("report_id") == report_id
+                and str(manifest.get("publication_key") or manifest.get("report_id"))
+                == publication_key
                 and manifest.get("state") in _PENDING_STATES
             ):
                 manifest.update(

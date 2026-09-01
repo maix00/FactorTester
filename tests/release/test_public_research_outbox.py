@@ -74,6 +74,22 @@ def test_outbox_replaces_older_pending_projection_for_one_report(
     assert loaded["uploads"] == ()
 
 
+def test_outbox_keeps_pending_branches_of_one_report_distinct(tmp_path: Path) -> None:
+    outbox = PublicResearchOutbox(tmp_path)
+    operations = [
+        outbox.enqueue_publish(
+            owner_ref="GTHT@MaxJJW@1", profile_ref="profile-1",
+            report_id="report-1", publication_key=f"report-1:branch:{branch}",
+            branch_ref=branch, projection=_projection("report-1", generation),
+            public_title="", show_profile=False, uploads=(),
+        )
+        for branch, generation in (("first", 1), ("second", 2))
+    ]
+
+    assert [item["operation_id"] for item in outbox.pending()] == operations
+    assert {item["branch_ref"] for item in outbox.pending()} == {"first", "second"}
+
+
 def test_public_report_sync_keeps_operation_when_manager_is_offline(
     tmp_path: Path,
     monkeypatch,

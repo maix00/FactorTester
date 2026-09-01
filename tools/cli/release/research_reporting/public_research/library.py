@@ -30,6 +30,8 @@ class PublicResearchLibrary:
 
     def sync(self, payload: dict[str, Any]) -> dict[str, Any]:
         report_id = _required(payload, "report_id")
+        publication_key = _optional_text(payload.get("publication_key")) or report_id
+        branch_ref = _optional_text(payload.get("branch_ref"))
         owner_ref = _required(payload, "owner_ref")
         profile_ref = _optional_text(payload.get("profile_ref"))
         build_source = normalize_build_source(payload.get("build_source"))
@@ -37,11 +39,13 @@ class PublicResearchLibrary:
         projection = _projection(payload.get("projection"), report_id)
         now = time.time()
         with locked_registry(self.root) as registry:
-            record = _record_by_report(registry, report_id)
+            record = _record_by_publication_key(registry, publication_key)
             if record is None:
                 record = {
                     "publication_id": secrets.token_urlsafe(18),
                     "report_id": report_id,
+                    "publication_key": publication_key,
+                    "branch_ref": branch_ref,
                     "owner_ref": owner_ref,
                     "profile_ref": profile_ref,
                     "visibility": "private",
@@ -56,6 +60,8 @@ class PublicResearchLibrary:
                 registry["publications"].append(record)
             if record["owner_ref"] != owner_ref:
                 raise PermissionError("report owner does not match")
+            if str(record.get("report_id") or "") != report_id:
+                raise PermissionError("publication key belongs to another report")
             _merge_build_metadata(
                 record,
                 build_source=build_source,
@@ -95,6 +101,7 @@ class PublicResearchLibrary:
         *,
         owner_ref: str,
         report_id: str,
+        publication_key: str = "",
         projection: dict[str, Any] | None,
         visibility: str,
         auto_sync: bool,
@@ -107,7 +114,8 @@ class PublicResearchLibrary:
         report_id = _required_text(report_id, "report_id")
         if visibility not in VISIBILITIES:
             raise ValueError("visibility is invalid")
-        existing = _record_by_report(self._registry(), report_id)
+        publication_key = str(publication_key or report_id).strip()
+        existing = _record_by_publication_key(self._registry(), publication_key)
         requested_source = normalize_build_source(
             build_source,
             default=str(existing.get("build_source") or "client")
@@ -130,13 +138,14 @@ class PublicResearchLibrary:
             raise ValueError("report must be uploaded before it can be configured")
         now = time.time()
         with locked_registry(self.root) as registry:
-            record = _record_by_report(registry, report_id)
+            record = _record_by_publication_key(registry, publication_key)
             if record is not None and record["owner_ref"] != owner_ref:
                 raise PermissionError("report publication belongs to another user")
             if record is None:
                 record = {
                     "publication_id": secrets.token_urlsafe(18),
                     "report_id": report_id,
+                    "publication_key": publication_key,
                     "owner_ref": owner_ref,
                     "published_at": now,
                     "storage_server_id": self.storage_server_id,
@@ -210,6 +219,8 @@ class PublicResearchLibrary:
             values.append({
                 "publication_id": record["publication_id"],
                 "report_id": record["report_id"],
+                "publication_key": record.get("publication_key") or record["report_id"],
+                "branch_ref": record.get("branch_ref") or "",
                 "owner_ref": record["owner_ref"],
                 "profile_ref": record.get("profile_ref") or "",
                 "title": title,
@@ -639,6 +650,16 @@ def _record_by_report(
     ), None)
 
 
+def _record_by_publication_key(
+    registry: dict[str, Any], publication_key: str,
+) -> dict[str, Any] | None:
+    return next((
+        item for item in registry["publications"]
+        if str(item.get("publication_key") or item.get("report_id") or "")
+        == publication_key
+    ), None)
+
+
 def _can_read(record: dict[str, Any], viewer_ref: str | None) -> bool:
     if viewer_ref == record["owner_ref"]:
         return True
@@ -675,6 +696,7 @@ def _owner_record(record: dict[str, Any]) -> dict[str, Any]:
         key: record.get(key)
         for key in (
             "publication_id", "report_id", "owner_ref", "profile_ref", "visibility",
+            "publication_key", "branch_ref",
             "auto_sync", "relay_local_files", "authorized_users",
             "generation", "synced_at",
             "title", "projection_hash", "published_at", "storage_server_id",

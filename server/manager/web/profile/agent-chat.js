@@ -36,6 +36,15 @@
     );
   }
 
+  function conversationTitle(context, profile) {
+    const claim = profile?.active_claim || {};
+    const provider = String(claim.provider_id || "").trim();
+    const model = String(claim.provider_model || "").trim();
+    if (provider && model) return `${provider} · ${model}`;
+    if (provider) return provider;
+    return context.t("智能体助手");
+  }
+
   async function mountChatKit(context, profile, host, status, options = {}) {
     if (!window.FTProfileChatKit) {
       throw new Error(context.t("Agent 对话组件尚未加载"));
@@ -124,7 +133,7 @@
         : (options.readOnly || options.historyOnly ? {initialThread: null} : {})),
       header: {
         enabled: true,
-        title: {enabled: true, text: context.t("研究身份 Agent")},
+        title: {enabled: true, text: conversationTitle(context, profile)},
       },
       startScreen: {
         greeting: context.t("可以向这个研究 Agent 提问"),

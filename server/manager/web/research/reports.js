@@ -201,7 +201,10 @@
     const root = context.tabSession.researchReportLists
       || (context.tabSession.researchReportLists = {});
     const key = String(researchID || "");
-    const state = root[key] || {selectedReportID: "", reading: {}};
+    const state = root[key] || {
+      selectedReportID: "", selectedBranches: {}, reading: {},
+    };
+    state.selectedBranches ||= {};
     state.reading ||= {};
     root[key] = state;
     context.pageState?.register?.(`research-reports:${key}`, {
@@ -244,6 +247,23 @@
     if (item?.build_source === "client") return `local:${reference}`;
     if (item?.build_source === "server_agent") return `server:${reference}`;
     return reference;
+  }
+
+  function selectedBranch(item, state) {
+    const branches = Array.isArray(item?.branches) ? item.branches : [];
+    const reportID = reportIdentity(item);
+    const selectedID = state.selectedBranches?.[reportID] || "";
+    return branches.find(branch => branch.publication_id === selectedID)
+      || branches.find(branch => branch.selected)
+      || branches[0]
+      || null;
+  }
+
+  function selectedSource(item, state) {
+    const branch = selectedBranch(item, state);
+    return branch?.publication_id
+      ? {...item, source_ref: branch.publication_id, selected_branch: branch}
+      : item;
   }
 
   function reportActions(context, researchID, selected, rerender, canManage) {
@@ -350,6 +370,25 @@
       void rerender();
     });
     line.append(picker);
+    const branches = Array.isArray(selected?.branches) ? selected.branches : [];
+    if (branches.length > 1) {
+      const branch = selectedBranch(selected, state);
+      const branchPicker = document.createElement("select");
+      branchPicker.className = "branch-picker";
+      branchPicker.setAttribute("aria-label", context.t("研究路径"));
+      branches.forEach(item => {
+        const option = document.createElement("option");
+        option.value = item.publication_id || "";
+        option.textContent = item.title || item.branch_ref || context.t("研究路径");
+        option.selected = option.value === branch?.publication_id;
+        branchPicker.append(option);
+      });
+      branchPicker.addEventListener("change", () => {
+        state.selectedBranches[reportIdentity(selected)] = branchPicker.value;
+        void rerender();
+      });
+      line.append(branchPicker);
+    }
     const metadata = document.createElement("div");
     metadata.className = "research-report-info-metadata";
     [
@@ -361,9 +400,14 @@
       item.textContent = value;
       metadata.append(item);
     });
-    line.append(metadata, reportActions(
+    const actions = reportActions(
       context, researchID, selected, rerender, canManage,
+    );
+    actions.prepend(FTUI.iconButton(
+      context, "safari", "在独立页面打开",
+      () => context.navigate(reportRoute(selectedSource(selected, state), researchID)),
     ));
+    line.append(metadata, actions);
     return line;
   }
 
@@ -478,7 +522,7 @@
         options.canManage === true,
       ), body);
       mount.replaceChildren(root);
-      await renderReportBody(context, body, selected, state);
+      await renderReportBody(context, body, selectedSource(selected, state), state);
     } catch (error) {
       if (current(context)) mount.replaceChildren(
         FTUI.empty(context.t("无法读取"), error.message || String(error)),

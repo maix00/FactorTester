@@ -423,7 +423,9 @@
       [context.t("用户"), "Profile", context.t("角色"), context.t("操作")],
       members.map(item => {
         const actions = document.createElement("span");
-        if (research?.access?.can_manage === true) {
+        const requiredSelf = String(item.profile_ref || "") === "self"
+          && String(item.principal_ref || "") === String(research.owner_ref || "");
+        if (research?.access?.can_manage === true && !requiredSelf) {
           actions.append(FTUI.iconButton(
             context, "trash", "移除研究身份", async () => {
               if (!window.confirm(context.t("确定移除这个研究身份吗？"))) return;

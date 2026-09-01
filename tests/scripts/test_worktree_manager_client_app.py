@@ -3435,6 +3435,20 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
             reports = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research/researches.js") as response:
             researches = response.read().decode("utf-8")
+        with urlopen(
+            f"{base_url}/research-static/profile/page-agent-profiles.js"
+        ) as response:
+            page_agent_profiles = response.read().decode("utf-8")
+        with urlopen(
+            f"{base_url}/research-static/profile/page-agent-drawer.js"
+        ) as response:
+            page_agent_drawer = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/profile/agent-chat.js") as response:
+            agent_chat = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/report/report-entry.js") as response:
+            report_entry = response.read().decode("utf-8")
+        with urlopen(f"{base_url}/research-static/styles/app.css") as response:
+            app_styles = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/profile/agent-models.js") as response:
             agent_models = response.read().decode("utf-8")
         with urlopen(
@@ -3507,6 +3521,8 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert 'context.t("属于研究")' not in reports
     assert "research-report-table-embedded" not in reports
     assert 'context.t("独立打开")' not in reports
+    assert 'context, "safari", "在独立页面打开"' in reports
+    assert 'state.selectedBranches[reportIdentity(selected)]' in reports
     assert 'section.className = "research-client-download-action"' in local_page
     assert "window.FTResearchCatalog" in researches
     assert "FTUI.pagedTable" in researches
@@ -3523,6 +3539,7 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert 'context.toolbar.replaceChildren(FTUI.iconButton(' not in researches
     assert 'context, "plus", "添加研究身份"' in researches
     assert 'context, "trash", "移除研究身份"' in researches
+    assert '&& !requiredSelf' in researches
     assert 'nav.className = "research-section-tabs research-detail-tabs"' in researches
     assert "research-section-tab research-detail-tab" in researches
     assert 'context.setHeading(value.title || id, context.t("研究"))' in researches
@@ -3562,6 +3579,18 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert 'context.content.replaceChildren(...(embedded ? [] : [tabBar(context, selected)]))' not in workspaces
     assert "/api/public-research" in shared_page
     assert "workPackage" not in workspaces
+    assert "runtime_bound_here: false" in page_agent_profiles
+    assert "未绑定当前服务器/客户端" in page_agent_drawer
+    assert "if (profile?.runtime_bound_here === false)" in page_agent_drawer
+    assert 'text: conversationTitle(context, profile)' in agent_chat
+    assert 'context.t("研究身份 Agent")' not in agent_chat
+    assert "assistantAllowed" in report_entry
+    assert 'access_basis === "research"' in report_entry
+    assert ".page-agent-drawer-close" in app_styles
+    assert "background: transparent" in app_styles
+    assert 'infoLine.className = "research-report-info-line"' in report_entry
+    assert 'content.replaceChildren(infoLine, layout, rail)' in report_entry
+    assert 'toolbar.append(branchPicker)' not in report_entry
     assert "research-graphs" not in shell
     assert 'parts[1] === "work"' not in shell
     assert "const pinnedModule = isPinnedPath(initial) ? moduleForPath(initial) : null" in shell
