@@ -2387,6 +2387,7 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     parameter_editor = (WEB_ROOT / "catalog" / "factor-parameter-editor.js").read_text(
         encoding="utf-8",
     )
+    app_css = (WEB_ROOT / "styles" / "app.css").read_text(encoding="utf-8")
 
     assert "context.toolbar.append(save)" in object_form
     assert "submit: save" in object_form
@@ -2397,7 +2398,13 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert 'parameter.type === "FactorParam"' in parameter_editor
     assert 'createLabel: context.t("新建因子")' in parameter_editor
     assert "factor-param-reference-control" in parameter_editor
-    assert "手工输入数值、ColumnRef 或因子 alias" in parameter_editor
+    assert 'input.placeholder = context.t("填写")' in parameter_editor
+    assert 'header.className = "factor-detail-parameter-header"' in parameter_editor
+    assert '["Key", "参数类型", "默认值", "Value"]' in parameter_editor
+    assert 'context.t("Column")' in parameter_editor
+    assert ".factor-detail-parameter-header, .factor-detail-parameter-row" in app_css
+    assert "grid-template-columns: minmax(70px, .45fr)" in app_css
+    assert ".factor-param-reference-control { display: grid; grid-template-columns: minmax(0, 1fr)" in app_css
     assert "function numericConstant" in parameter_editor
     assert 'setValue(constant, "manual")' in parameter_editor
     assert "请输入有效的 ColumnRef 或因子 alias" in parameter_editor
