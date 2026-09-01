@@ -584,6 +584,9 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
     )
     assert promoted["result"]["accepted"] == "turn/start"
     assert promoted["result"]["managerTransition"] == "turn/start"
+    assert promoted["result"]["params"]["input"] == [
+        {"type": "text", "text": "stale turn"},
+    ]
     with pytest.raises(AgentAppServerError, match="use turn/steer"):
         supervisor.request(
             PRINCIPAL,
