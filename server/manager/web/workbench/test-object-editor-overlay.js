@@ -78,30 +78,25 @@
       mode === "edit" ? "编辑" : mode === "view" ? "查看" : "新建",
     )
       + context.t(definition.title);
-    if (mode !== "view") {
-      const note = document.createElement("p");
-      note.textContent = context.t("保存后返回当前测试，并立即更新候选列表");
-      copy.append(title, note);
-    } else {
-      copy.append(title);
-    }
+    copy.append(title);
     const closeButton = document.createElement("button");
     closeButton.type = "button";
-    closeButton.className = "dialog-close";
-    closeButton.textContent = "×";
+    closeButton.className = "dialog-close icon-action-button test-object-editor-close";
+    closeButton.replaceChildren?.(window.FTIcons?.node?.("close") || "×");
     closeButton.title = context.t("关闭");
     const backButton = document.createElement("button");
     backButton.type = "button";
-    backButton.className = "secondary test-object-editor-back";
-    backButton.textContent = context.t("返回");
-    backButton.title = context.t("返回因子集合");
+    backButton.className = "icon-action-button test-object-editor-back";
+    backButton.replaceChildren?.(window.FTIcons?.node?.("chevron-left") || "‹");
+    backButton.title = context.t("返回上一层");
+    backButton.setAttribute?.("aria-label", context.t("返回上一层"));
     backButton.hidden = true;
-    heading.append(backButton, copy, closeButton);
     const tabBar = document.createElement("div");
     tabBar.className = "test-object-editor-tabs";
+    heading.append(backButton, copy, tabBar, closeButton);
     const mount = document.createElement("div");
     mount.className = "test-object-editor-overlay-mount";
-    card.append(heading, tabBar, mount);
+    card.append(heading, mount);
     dialog.append(card);
     const state = {
       closed: false,
@@ -188,7 +183,7 @@
       title.textContent = prefix + context.t(frameDefinition.title);
       frame.label = name || `${prefix}${context.t(frameDefinition.title)}`;
       if (name && frame.kind === "factor") title.title = name;
-      backButton.hidden = frames.length < 2;
+      backButton.hidden = frame === frames[0];
       renderTabs();
     };
 
@@ -281,8 +276,8 @@
     };
 
     backButton.addEventListener("click", () => {
-      if (frames.length < 2) return;
-      closeFrame(activeFrame);
+      if (activeFrame === frames[0]) return;
+      void renderFrame(activeFrame.parent || frames[0]);
     });
     await renderFrame(frames[0]);
     return promise;
