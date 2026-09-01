@@ -211,7 +211,7 @@
       onCreate: context.session && options.canCreate !== false ? () => void (
         window.FTStrategyEditorFactorOverlay?.open
           ? FTStrategyEditorFactorOverlay.open(context, state, saved)
-          : FTTestObjectEditorOverlay.open(context, {
+          : FTTestLazyCode.openObjectEditor(context, {
             kind: "factor", mode: "create", ref: "new", onSaved: saved,
             testState: state, temporary: true,
           })
@@ -228,7 +228,7 @@
           buttonClass: "secondary",
           onClick: event => {
             event?.preventDefault();
-            void FTTestObjectEditorOverlay.open(context, {
+            void FTTestLazyCode.openObjectEditor(context, {
               kind: "factor", mode: "edit", ref: item.value,
               onSaved: saved, testState: state, initialValue: factor,
               temporary: factor.temporary === true,

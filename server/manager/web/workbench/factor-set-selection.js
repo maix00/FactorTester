@@ -112,7 +112,7 @@
       loading: FTTestObjectPicker.lazyLoading(state, "factors") && !items.length,
       loadingText: context.t("正在读取因子集合…"),
       onCreate: context.session ? () => {
-        void FTTestObjectEditorOverlay.open(context, {
+        void FTTestLazyCode.openObjectEditor(context, {
           kind: "factor_set",
           mode: "create",
           ref: "new",
