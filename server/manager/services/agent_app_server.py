@@ -204,7 +204,13 @@ class AgentAppServerSupervisor:
             or payload.get("turn_id")
             or ""
         ).strip()
-        if event_turn_id:
+        terminal_turn = (
+            method.startswith("turn/")
+            and method.rsplit("/", 1)[-1] in {
+                "completed", "failed", "error", "aborted", "interrupted",
+            }
+        )
+        if event_turn_id and not terminal_turn:
             with self._lock:
                 active = self._processing_turns.get(key)
                 if active is not None and not active.get("turn_id"):
@@ -215,15 +221,16 @@ class AgentAppServerSupervisor:
         final_assistant = method == "item/completed" and item_type in {
             "agentmessage", "assistantmessage",
         }
-        failed_turn = (
-            method.startswith("turn/")
-            and method.rsplit("/", 1)[-1] in {
-                "failed", "error", "aborted", "interrupted",
-            }
-        )
-        if method == "app_server_exit" or failed_turn or final_assistant:
+        if method == "app_server_exit" or terminal_turn or final_assistant:
             with self._lock:
-                self._processing_turns.pop(key, None)
+                active = self._processing_turns.get(key)
+                active_turn_id = str((active or {}).get("turn_id") or "")
+                same_turn = (
+                    not event_turn_id and not active_turn_id
+                    or bool(event_turn_id) and event_turn_id == active_turn_id
+                )
+                if method == "app_server_exit" or same_turn:
+                    self._processing_turns.pop(key, None)
         if method == "app_server_exit":
             LOGGER.warning(
                 "Profile Agent app-server exited profile=%s returncode=%r stderr=%r",
@@ -433,6 +440,8 @@ class AgentAppServerSupervisor:
         request_params = dict(params or {})
         with self._lock:
             processing = dict(self._processing_turns.get(key) or {})
+        requested_method = method
+        converted_steer = False
         if method == "turn/start" and processing:
             raise AgentAppServerError(
                 "Profile Agent is already processing a turn; use turn/steer"
@@ -445,13 +454,15 @@ class AgentAppServerSupervisor:
                 or request_params.get("turn_id")
                 or ""
             )
-            if (
-                not expected_conversation
-                or expected_conversation != identifier
-                or not expected_turn
-                or requested_turn != expected_turn
-            ):
+            if expected_conversation and expected_conversation != identifier:
                 raise AgentAppServerError("active Profile Agent turn binding is invalid")
+            if expected_turn and requested_turn != expected_turn:
+                raise AgentAppServerError("active Profile Agent turn binding is invalid")
+            if not expected_conversation or not expected_turn:
+                method = "turn/start"
+                converted_steer = True
+                request_params.pop("turnId", None)
+                request_params.pop("turn_id", None)
         if method == "turn/start" and conversation is not None:
             # The Manager-owned conversation is the settings authority.  A
             # browser cannot mutate a Provider default or smuggle a different
@@ -486,20 +497,55 @@ class AgentAppServerSupervisor:
                 # AgentAppServerSession's pre-send readiness check. No request
                 # was written in this exact failure mode, so one retry cannot
                 # duplicate a turn.
-                if str(exc) != "Profile Agent is not running":
+                inactive_steer = (
+                    method == "turn/steer"
+                    and any(fragment in str(exc).casefold() for fragment in (
+                        "no active turn", "turn is not active", "turn not found",
+                        "unknown turn", "invalid turn",
+                    ))
+                )
+                if inactive_steer:
+                    with self._lock:
+                        active = self._processing_turns.get(key) or {}
+                        if (
+                            str(active.get("conversation_id") or "") == identifier
+                            and str(active.get("turn_id") or "")
+                            == str(request_params.get("turnId") or "")
+                        ):
+                            self._processing_turns.pop(key, None)
+                    method = "turn/start"
+                    converted_steer = True
+                    request_params.pop("turnId", None)
+                    request_params.pop("turn_id", None)
+                    for field in ("model", "effort", "serviceTier"):
+                        request_params.pop(field, None)
+                    if conversation is not None:
+                        request_params.update({
+                            name: str(value)
+                            for name, value in {
+                                "model": conversation.get("model_id"),
+                                "effort": conversation.get("reasoning_effort"),
+                                "serviceTier": conversation.get("service_tier"),
+                            }.items()
+                            if str(value or "").strip()
+                        })
+                    bind_start_to_session()
+                    response = session.request(method, request_params)
+                elif str(exc) != "Profile Agent is not running":
                     raise
-                self.start(*key)
-                with self._lock:
-                    session = self._sessions.get(key)
-                if session is None:
-                    raise AgentAppServerError(
-                        "Profile Agent could not be started"
-                    ) from exc
-                # A replacement process owns a fresh event sequence.  Rebind
-                # the turn to that process before sending the request so a
-                # browser never resumes from the retired process cursor.
-                bind_start_to_session()
-                response = session.request(method, request_params)
+                else:
+                    self.start(*key)
+                    with self._lock:
+                        session = self._sessions.get(key)
+                    if session is None:
+                        raise AgentAppServerError(
+                            "Profile Agent could not be started"
+                        ) from exc
+                    # A replacement process owns a fresh event sequence.  Rebind
+                    # the turn to that process before sending the request so a
+                    # browser never resumes from the retired process cursor.
+                    bind_start_to_session()
+                    response = session.request(method, request_params)
         except Exception:
             if method == "turn/start":
                 with self._lock:
@@ -531,6 +577,10 @@ class AgentAppServerSupervisor:
                         == str(conversation["conversation_id"])
                     ):
                         active["turn_id"] = turn_id
+        if converted_steer and requested_method == "turn/steer":
+            result = response.get("result")
+            if isinstance(result, dict):
+                result["managerTransition"] = "turn/start"
         return response
 
     @staticmethod
