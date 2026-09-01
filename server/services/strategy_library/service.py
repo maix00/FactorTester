@@ -218,7 +218,11 @@ class StrategyLibraryService:
             expected_revision_ref=str(current["revision_ref"]),
             revision=revision,
         )
-        return self.get(strategy_ref, principal=principal)
+        return self.get(
+            strategy_ref,
+            principal=principal,
+            include_source=source_definition_changed,
+        )
 
     def delete(self, strategy_ref: str, *, principal: str) -> dict[str, Any]:
         entry = self.store.get_entry(strategy_ref)

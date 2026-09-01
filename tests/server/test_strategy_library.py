@@ -84,7 +84,10 @@ def test_library_scopes_and_immutable_revisions(tmp_path: Path) -> None:
     assert service.list(principal="alice", scope="subordinates")["total"] == 1
     assert service.list(principal="bob", scope="shared")["total"] == 0
 
-    service.update(strategy["strategy_ref"], {"visibility": "shared"}, principal="alice")
+    metadata_update = service.update(
+        strategy["strategy_ref"], {"visibility": "shared"}, principal="alice",
+    )
+    assert "source_code" not in metadata_update["strategy"]["current_revision"]
     service.grant(strategy["strategy_ref"], "bob", principal="alice")
     assert service.list(principal="bob", scope="shared")["total"] == 1
     old_revision = strategy["current_revision"]["revision_ref"]
