@@ -105,8 +105,10 @@ def infer_lookback_contract(
             child_contract = visit(getattr(expr, "operand", None))
             result = serial(resolve_window(getattr(expr, "periods", None)), child_contract)
         elif cls_name in {"BarSinceOp", "BarDistanceOp"}:
-            operands = _operands(expr)
-            child_contract = parallel(operands[:-1])
+            children = [getattr(expr, "condition", None)]
+            if cls_name == "BarDistanceOp":
+                children.insert(0, getattr(expr, "value", None))
+            child_contract = parallel(tuple(children))
             scope = getattr(expr, "scope", None)
             window_expr = getattr(scope, "count", None)
             result = serial(

@@ -15,10 +15,11 @@ if FACTOR_WORKSPACE:
         TermStructureOp,
         bar_distance,
         bar_since,
-        bars,
         expr_max,
         expr_min,
-        session,
+        scope_bars,
+        scope_session,
+        scope_trading_day,
         term_carry_annualized,
         term_contango,
         term_curvature,
@@ -28,8 +29,8 @@ if FACTOR_WORKSPACE:
         term_slope,
         term_slope_segment,
         term_spread,
-        trading_day,
         where,
+        window_bars,
     )
     from tools.factors.FactorFamily import FactorFamily
     from tools.factors.Factors import Factor

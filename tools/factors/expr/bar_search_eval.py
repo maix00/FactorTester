@@ -21,7 +21,9 @@ from .pointwise import apply_pointwise, carry_formed_signal
 Selection = Literal["nearest", "farthest"]
 
 
-def scalar_default(expr: FactorExpr) -> float:
+def scalar_default(expr: FactorExpr) -> float | None:
+    if type(expr).__name__ == "ScopeLengthDefault":
+        return None
     if not isinstance(expr, ConstExpr) or not np.isscalar(expr.value):
         raise TypeError("bar search default must resolve to a scalar constant")
     return float(expr.value)
@@ -66,7 +68,7 @@ def evaluate_bar_since(
     *,
     scope: LookbackScope,
     select: Selection,
-    default: float,
+    default: float | None,
     ctx: EvaluateContext,
     include_current: bool,
 ) -> pd.DataFrame:
@@ -78,14 +80,18 @@ def evaluate_bar_since(
         segments = _segment_keys(condition.index, rows, scope, ctx)
         matches: deque[int] = deque()
         previous_segment = -1
+        segment_ordinal = -1
         for ordinal, (row, segment_key) in enumerate(zip(rows, segments, strict=True)):
             if int(segment_key) != previous_segment:
                 matches.clear()
                 previous_segment = int(segment_key)
+                segment_ordinal = 0
+            else:
+                segment_ordinal += 1
             if include_current and values[int(row), column]:
                 matches.append(ordinal)
             minimum = (
-                ordinal - scope.resolved_count() + (1 if include_current else 0)
+                ordinal - scope.resolved_count(ctx=ctx)
                 if isinstance(scope, BarCountScope)
                 else 0
             )
@@ -95,7 +101,12 @@ def evaluate_bar_since(
                 matched = matches[-1] if select == "nearest" else matches[0]
                 output[int(row), column] = ordinal - matched
             else:
-                output[int(row), column] = default
+                scope_age = (
+                    min(scope.resolved_count(ctx=ctx), segment_ordinal)
+                    if isinstance(scope, BarCountScope)
+                    else segment_ordinal
+                )
+                output[int(row), column] = scope_age if default is None else default
             if not include_current and values[int(row), column]:
                 matches.append(ordinal)
     return pd.DataFrame(output, index=condition.index, columns=condition.columns)
@@ -154,13 +165,12 @@ def evaluate_bar_distance(
     *,
     scope: LookbackScope,
     select: Selection,
-    default: float,
+    default: float | None,
     ctx: EvaluateContext,
 ) -> pd.DataFrame:
     current = values.to_numpy(dtype=float)
     observed = _observed_mask(values, ctx)
     output = np.full(current.shape, np.nan, dtype=float)
-    output[observed] = default
     matched = np.zeros(current.shape, dtype=bool)
     static_cache: dict[int, Any] = {}
     row_maps: list[tuple[np.ndarray, np.ndarray]] = []
@@ -169,8 +179,22 @@ def evaluate_bar_distance(
         rows = np.flatnonzero(observed[:, column])
         segments = _segment_keys(values.index, rows, scope, ctx)
         row_maps.append((rows, segments))
+        segment_age = -1
+        previous_segment = -1
+        for row, segment in zip(rows, segments, strict=True):
+            if int(segment) != previous_segment:
+                segment_age = 0
+                previous_segment = int(segment)
+            else:
+                segment_age += 1
+            scope_age = (
+                min(scope.resolved_count(ctx=ctx), segment_age)
+                if isinstance(scope, BarCountScope)
+                else segment_age
+            )
+            output[int(row), column] = scope_age if default is None else default
         if isinstance(scope, BarCountScope):
-            max_lag = max(max_lag, scope.resolved_count())
+            max_lag = max(max_lag, scope.resolved_count(ctx=ctx))
         elif len(rows):
             _, counts = np.unique(segments, return_counts=True)
             max_lag = max(max_lag, int(counts.max()) - 1)

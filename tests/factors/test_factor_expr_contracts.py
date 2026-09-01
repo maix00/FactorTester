@@ -98,6 +98,16 @@ def test_to_latex_defines_shared_intermediate_before_dependents():
     assert r"\mathrm{BASE}_t + 3" in lines[right_line]
 
 
+def test_to_latex_does_not_repeat_a_named_root_intermediate():
+    expr = (ColumnRef(DataColumn.CLOSE) + ConstExpr(1)).as_intermediate("结果")
+
+    latex = expr.to_latex()
+
+    assert latex.count(":=") == 1
+    assert r"\mathrm{结果}_t &:=" in latex
+    assert "X_t" not in latex
+
+
 class _FrameExpr(FactorExpr):
     def __init__(self, frame: pd.DataFrame):
         self.frame = frame

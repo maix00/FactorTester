@@ -16,8 +16,9 @@ from tools.factors.expr import (
     RollingOp,
     SignalAlign,
     bar_since,
-    bars,
-    session,
+    scope_bars,
+    scope_session,
+    scope_trading_day,
     term_carry_annualized,
     term_contango,
     term_curvature,
@@ -27,9 +28,9 @@ from tools.factors.expr import (
     term_slope,
     term_slope_segment,
     term_spread,
-    trading_day,
 )
 from tools.factors.expr.timeline import build_panel_timeline
+from tools.parameters import WindowParam
 from tools.products.AdjustableTermStructure import (
     TERM_CONTRACT_COL,
     TERM_CONTRACT_UID_COL,
@@ -311,7 +312,7 @@ def test_incremental_shared_stateful_child_advances_once_across_signal_layers():
 def test_incremental_bar_since_matches_batch_fixed_scope():
     products, rows = _panel()
     close = ColumnRef(DataColumn.CLOSE)
-    expr = bar_since(close > 16.0, scope=bars(3), default=3)
+    expr = bar_since(close > 16.0, scope=scope_bars(3), default=3)
 
     batch = _batch_eval(expr, products, rows)
     live = _live_eval(expr, products, rows)
@@ -324,7 +325,7 @@ def test_incremental_bar_distance_matches_batch_dynamic_predicate():
     close = ColumnRef(DataColumn.CLOSE)
     expr = close.bar_distance(
         (CURRENT - CANDIDATE).abs() >= 2.0,
-        scope=bars(3),
+        scope=scope_bars(3),
         default=3,
     )
 
@@ -339,7 +340,7 @@ def test_incremental_bar_distance_farthest_matches_batch():
     close = ColumnRef(DataColumn.CLOSE)
     expr = close.bar_distance(
         CANDIDATE != CURRENT,
-        scope=bars(4),
+        scope=scope_bars(4),
         select="farthest",
         default=4,
     )
@@ -350,15 +351,57 @@ def test_incremental_bar_distance_farthest_matches_batch():
     pd.testing.assert_frame_equal(live, batch, check_exact=False)
 
 
+def test_incremental_bar_distance_default_tracks_trading_day_scope_length():
+    close = ColumnRef(DataColumn.CLOSE)
+    executor = close.bar_distance(
+        CANDIDATE < CURRENT,
+        scope=scope_trading_day(),
+    ).compile_incremental(
+        factor_alias="day_distance", products=("P1",), source_freq=DataFreq.MIN1,
+    )
+    rows = [
+        ("2026-01-01 09:01", "2026-01-01"),
+        ("2026-01-01 09:02", "2026-01-01"),
+        ("2026-01-01 21:01", "2026-01-02"),
+        ("2026-01-01 21:02", "2026-01-02"),
+    ]
+
+    observed = []
+    for timestamp, day in rows:
+        executor.on_bar(timestamp, {"P1": {"CLOSE": 1.0}}, trading_day=day)
+        observed.append(executor.on_signal(timestamp)["P1"])
+
+    np.testing.assert_allclose(observed, [0, 1, 0, 1])
+
+
+def test_incremental_bar_distance_resolves_duration_scope_from_source_frequency():
+    maximum = WindowParam("K", default_value="3m")
+    expr = ColumnRef(DataColumn.CLOSE).bar_distance(
+        CANDIDATE < CURRENT,
+        scope=scope_bars(maximum),
+    ).resolve(param_values={"K": pd.Timedelta("3m")})
+    executor = expr.compile_incremental(
+        factor_alias="duration_scope", products=("P1",), source_freq=DataFreq.MIN1,
+    )
+
+    observed = []
+    for minute in range(1, 6):
+        timestamp = f"2026-01-01 09:0{minute}"
+        executor.on_bar(timestamp, {"P1": {"CLOSE": 1.0}})
+        observed.append(executor.on_signal(timestamp)["P1"])
+
+    np.testing.assert_allclose(observed, [0, 1, 2, 3, 3])
+
+
 def test_incremental_bar_search_scopes_reset_at_session_and_trading_day():
     condition = ColumnRef(DataColumn.CLOSE) > 1.5
     session_executor = bar_since(
-        condition, scope=session(), default=9,
+        condition, scope=scope_session(), default=9,
     ).compile_incremental(
         factor_alias="session_bar_since", products=("P1",), source_freq=DataFreq.MIN1,
     )
     day_executor = bar_since(
-        condition, scope=trading_day(), default=9,
+        condition, scope=scope_trading_day(), default=9,
     ).compile_incremental(
         factor_alias="day_bar_since", products=("P1",), source_freq=DataFreq.MIN1,
     )
@@ -384,7 +427,7 @@ def test_incremental_bar_distance_reports_fixed_scope_lookback_contract():
     close = ColumnRef(DataColumn.CLOSE)
     executor = close.bar_distance(
         CANDIDATE < CURRENT,
-        scope=bars(4),
+        scope=scope_bars(4),
         default=4,
     ).compile_incremental(
         factor_alias="bar_distance_lookback",
