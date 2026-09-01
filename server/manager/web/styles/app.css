@@ -9,6 +9,11 @@
   --sidebar-collapsed-width: 64px;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
 }
+html:has(dialog[open]), body:has(dialog[open]) {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+dialog[open] { overscroll-behavior: contain; }
 * { box-sizing: border-box; }
 body { margin: 0; color: var(--text); background: var(--bg); font-size: 13px; line-height: 1.45; }
 button, input, select { font: inherit; }
@@ -234,13 +239,13 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .ft-multi-select-summary.is-disabled::after { content: ""; }
 .ft-multi-select-lock-indicator { flex: 0 0 auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .ft-multi-select-summary-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
-.ft-multi-select-menu { position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; display: grid; align-content: start; height: max-content; max-height: min(680px, calc(100vh - 32px)); min-width: min(300px, calc(100vw - 32px)); max-width: min(460px, calc(100vw - 32px)); gap: 6px; overflow: hidden; padding: 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); box-shadow: 0 12px 28px #0002; }
+.ft-multi-select-menu { position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; display: grid; align-content: start; height: max-content; max-height: min(680px, calc(100vh - 32px)); min-width: min(300px, calc(100vw - 32px)); max-width: min(460px, calc(100vw - 32px)); gap: 6px; overflow: hidden; overscroll-behavior: contain; padding: 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); box-shadow: 0 12px 28px #0002; }
 .ft-multi-select-menu.is-portaled { position: fixed; z-index: 10000; inset: auto; top: auto; height: max-content; max-height: min(680px, calc(100vh - 32px)); min-width: 0; max-width: calc(100vw - 16px); box-sizing: border-box; margin: 0; }
 .ft-multi-select-search-row { display: flex; gap: 5px; }
 .ft-multi-select-search { flex: 1 1 auto; min-width: 0; height: auto; min-height: 0; border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; color: inherit; background: var(--soft); }
 .ft-multi-select-clear { flex: 0 0 auto; width: 30px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: var(--panel); cursor: pointer; }
 .ft-multi-select-clear:hover { color: inherit; background: var(--soft); }
-.ft-multi-select-options { display: grid; gap: 2px; min-height: 0; max-height: min(320px, 42vh); overflow-y: auto; }
+.ft-multi-select-options { display: grid; gap: 2px; min-height: 0; max-height: min(320px, 42vh); overflow-y: auto; overscroll-behavior: contain; }
 .factor-product-group-filter-menu { max-height: min(680px, calc(100vh - 32px)); }
 .ft-multi-select-option { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 8px; min-width: 0; padding: 6px 7px; border-radius: 6px; cursor: pointer; }
 .ft-multi-select-option:hover, .ft-multi-select-option.is-selected { background: var(--soft); }
