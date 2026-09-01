@@ -251,12 +251,25 @@
       );
       if (!current(context)) return;
       const rows = Array.isArray(value.researches) ? value.researches : [];
-      content.replaceChildren(rows.length
+      const children = [];
+      if (state.scope === "mine" && context.session) {
+        const actions = document.createElement("div");
+        actions.className = "research-root-actions";
+        actions.append(FTUI.iconButton(
+          context, "plus", "新建研究",
+          () => void createResearchDialog(context, root).catch(error => (
+            context.showNotice?.(error.message || String(error), true)
+          )),
+        ));
+        children.push(actions);
+      }
+      children.push(rows.length
         ? listTable(context, rows, state, root)
         : FTUI.empty(
           context.t("暂无研究"),
           context.t("当前范围内还没有 Research 根对象"),
         ));
+      content.replaceChildren(...children);
     } catch (error) {
       if (current(context)) content.replaceChildren(
         FTUI.empty(context.t("无法读取"), error.message || String(error)),
@@ -275,14 +288,6 @@
     content.className = "research-root-content";
     root.append(content);
     mount.replaceChildren(root);
-    if (context.session) {
-      context.toolbar.replaceChildren(FTUI.iconButton(
-        context, "plus", "新建研究",
-        () => void createResearchDialog(context, root).catch(error => (
-          context.showNotice?.(error.message || String(error), true)
-        )),
-      ));
-    }
     await renderRootContent(context, root);
   }
 

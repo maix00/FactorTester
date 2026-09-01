@@ -584,6 +584,7 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .research-report-tab:disabled { cursor: default; opacity: .5; }
 .research-reports-page, .research-graph-list-page { display: grid; gap: 14px; min-width: 0; }
 .research-root-page, .research-root-detail { display: grid; gap: 14px; min-width: 0; }
+.research-root-actions { display: flex; justify-content: flex-end; margin: 8px 0; }
 .research-detail-actions, .research-report-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
 .research-report-actions { flex: 0 0 auto; }
 .research-report-info-line > .research-report-actions:only-child { margin-left: auto; }

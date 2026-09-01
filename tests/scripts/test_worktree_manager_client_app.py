@@ -3508,6 +3508,9 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert 'nav.className = "research-section-tabs research-root-scopes"' in researches
     assert "research-section-tab research-root-scope" in researches
     assert 'context, "plus", "新建研究"' in researches
+    assert 'state.scope === "mine" && context.session' in researches
+    assert 'actions.className = "research-root-actions"' in researches
+    assert 'context.toolbar.replaceChildren(FTUI.iconButton(' not in researches
     assert 'context, "plus", "添加研究身份"' in researches
     assert 'context, "trash", "移除研究身份"' in researches
     assert 'nav.className = "research-section-tabs research-detail-tabs"' in researches
