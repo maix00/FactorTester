@@ -19,7 +19,7 @@
       buttonClass: "secondary",
       onClick: event => {
         event?.preventDefault();
-        void FTTestObjectEditorOverlay.open(context, {
+        void FTTestLazyCode.openObjectEditor(context, {
           kind, mode: "edit", ref, onSaved, testState, initialValue,
           temporary: initialValue?.temporary === true,
         });
