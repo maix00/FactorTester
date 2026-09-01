@@ -2,7 +2,7 @@
   async function render(publicationID, context) {
     try { publicationID = decodeURIComponent(String(publicationID || "")); }
     catch (_) { publicationID = String(publicationID || ""); }
-    const {state, api, t, content, toolbar} = context;
+    const {state, api, t, content} = context;
     const isCurrent = () => context.isRouteCurrent?.() !== false;
     if (!isCurrent()) return;
     const source = FTReportSource.create(publicationID, api);
@@ -60,7 +60,31 @@
     };
     context.updateActiveTab({title: value.title});
     const transferContext = {api, t};
-    const branches = Array.isArray(value.branches) ? value.branches : [];
+    const researchID = String(
+      value.research_id
+      || new URLSearchParams(location.search).get("research_id")
+      || "",
+    ).trim();
+    let branches = Array.isArray(value.branches) ? value.branches : [];
+    if (researchID) {
+      try {
+        const catalog = await api(
+          `/api/research/${encodeURIComponent(researchID)}/reports`,
+        );
+        const report = (catalog.reports || []).find(item => (
+          String(item.report_id || "") === String(value.report_id || "")
+        ));
+        if (Array.isArray(report?.branches)) branches = report.branches;
+      } catch (_) {
+        // Keep the selected projection readable while sibling metadata is
+        // unavailable; only the Branch selector is omitted.
+      }
+    }
+    const infoLine = document.createElement("div");
+    infoLine.className = "research-report-info-line";
+    const reportTitle = document.createElement("strong");
+    reportTitle.textContent = value.title || t("研究报告");
+    infoLine.append(reportTitle);
     if (branches.length > 1) {
       const branchPicker = document.createElement("select");
       branchPicker.className = "branch-picker";
@@ -85,21 +109,33 @@
         }
         render(targetPublicationID, context);
       });
-      toolbar.append(branchPicker);
+      infoLine.append(branchPicker);
     }
-    toolbar.append(context.button("↻", () => render(publicationID, context), t("刷新")));
+    const infoActions = document.createElement("span");
+    infoActions.className = "research-report-actions";
+    infoActions.append(FTUI.iconButton(
+      context, "arrow.clockwise", "刷新", () => render(publicationID, context),
+    ));
     if (value.access?.can_manage) {
-      toolbar.append(context.button("⚙", context.openReportSettings, t("研究报告设置")));
+      infoActions.append(FTUI.iconButton(
+        context, "gearshape", "研究报告设置",
+        () => FTResearchReportSettings.open(
+          context, {...value, publication_id: publicationID},
+          () => render(publicationID, context),
+        ),
+      ));
     }
+    infoLine.append(infoActions);
     const boundProfileID = String(
       value.profile_ref || value.profile_id || value.generation?.profile_id || "",
     ).trim();
-    const researchID = String(
-      value.research_id
-      || new URLSearchParams(location.search).get("research_id")
-      || "",
-    ).trim();
-    if ((boundProfileID || researchID) && context.session) {
+    const assistantAllowed = value.access?.can_manage === true
+      || value.access?.access_basis === "membership"
+      || value.access?.access_basis === "research"
+      || value.access?.access_basis === "owner";
+    // A Report shared on its own is a read-only publication and must not
+    // expose an Agent. Research collaboration (owner/member access) does.
+    if ((boundProfileID || researchID) && context.session && assistantAllowed) {
       let profileListPromise = null;
       const resolveProfiles = researchID ? () => {
         profileListPromise ||= FTPageAgentProfiles.forResearch(context, researchID);
@@ -146,7 +182,7 @@
     const layout = document.createElement("div"); layout.className = "report-layout";
     const rail = document.createElement("nav"); rail.className = "chapter-rail";
     const mount = document.createElement("div"); mount.className = "report-mount";
-    layout.append(mount); content.replaceChildren(layout, rail);
+    layout.append(mount); content.replaceChildren(infoLine, layout, rail);
     FTReportRenderer.render(value, mount, {
       chapterRail: rail,
       loadChapter: source.chapterLazy ? source.loadChapter : null,

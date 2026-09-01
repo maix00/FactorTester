@@ -68,7 +68,8 @@
     };
     const profileLabel = profile => String(
       profile?.alias || profile?.title || profile?.name || profile?.profile_id || "",
-    ).trim();
+    ).trim() + (profile?.runtime_bound_here === false
+      ? ` · ${context.t("未绑定当前服务器/客户端")}` : "");
     const profileDetails = () => {
       if (!profileID) return;
       context.navigate?.(
@@ -144,6 +145,11 @@
           if (!profileID) throw new Error(context.t("页面 Agent 缺少 Profile"));
           if (!selectableProfiles.length) selectableProfiles = [profile];
           renderProfileSelector();
+          if (profile?.runtime_bound_here === false) {
+            status("该 Profile 未绑定当前服务器/客户端");
+            mounted = true;
+            return;
+          }
           const lifecycle = await context.pageAgentLifecycle.open(profileID, context.tabID);
           body.classList.add("page-agent-drawer-body-conversation-only");
           const assistanceReady = options.assistance.connect

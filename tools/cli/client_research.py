@@ -56,6 +56,12 @@ class ResearchClientMixin(ClientMixinBase):
             self._research_url(research_id), payload,
         ))
 
+    def remove_research(self, research_id: str) -> dict[str, Any]:
+        data = self._expect_success(self.session.delete(
+            self._research_url(research_id),
+        ))
+        return dict(data.get("research") or {})
+
     def add_research_member(
         self, research_id: str, payload: dict[str, Any],
     ) -> dict[str, Any]:
@@ -79,6 +85,32 @@ class ResearchClientMixin(ClientMixinBase):
             self._research_url(research_id, "/reports"), payload,
         ))
         return dict(data.get("report") or {})
+
+    def create_research_report(
+        self, research_id: str, payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        data = self._expect_success(self.session.post(
+            self._research_url(research_id, "/reports"), payload,
+        ))
+        return dict(data.get("report") or {})
+
+    def remove_research_report(
+        self, research_id: str, report_id: str,
+    ) -> dict[str, Any]:
+        target = quote(str(report_id or "").strip(), safe="")
+        data = self._expect_success(self.session.delete(
+            self._research_url(research_id, f"/reports/{target}"),
+        ))
+        return dict(data.get("report") or {})
+
+    def remove_research_member(
+        self, research_id: str, profile_ref: str,
+    ) -> dict[str, Any]:
+        target = quote(str(profile_ref or "").strip(), safe="")
+        data = self._expect_success(self.session.delete(
+            self._research_url(research_id, f"/members/{target}"),
+        ))
+        return dict(data.get("member") or {})
 
     def update_research_report(
         self, research_id: str, report_id: str, payload: dict[str, Any],

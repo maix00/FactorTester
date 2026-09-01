@@ -55,12 +55,13 @@
     "workbench-settings-controls": ["workbench-core"],
     "workbench-settings-chips": ["workbench-settings"],
     "research-reference": ["core", "code-viewer"],
-    "report": ["code-viewer", "object-transfer"],
+    "report-settings": ["core"],
+    "report": ["code-viewer", "object-transfer", "report-settings"],
     "research-shell": ["core"],
     "research-visibility": ["core"],
     "research-catalog": ["core", "research-visibility"],
     "research-evidence": ["core", "object-transfer"],
-    "research-reports": ["core", "research-visibility"],
+    "research-reports": ["core", "research-visibility", "report-settings"],
     "research-local": ["core"],
     "research-shared": ["research-shell"],
     "research-graph": ["core", "catalog-core"],
@@ -265,6 +266,7 @@
     "output-choice": [
       "core/output-choices.js"
     ],
+    "report-settings": ["research/report-settings.js"],
     "object-transfer": [
       "report/object-transfer.js"
     ],
@@ -602,6 +604,7 @@
     "jobs/job-artifact-viewers.js",
     "core/shared-ui.js",
     "core/output-choices.js",
+    "research/report-settings.js",
     "report/rich-text.js",
     "report/rich-text-blocks.js",
     "report/table-view.js",

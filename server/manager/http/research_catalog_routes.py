@@ -83,6 +83,7 @@ class ResearchCatalogRoutesMixin:
                     scope=scope,
                     subordinate_refs=self._research_catalog_subordinate_refs(viewer),
                 )
+                value = self._research_catalog_publication_branches(value, viewer)
                 payload = {
                     "reports": value,
                     "items": value,
@@ -110,9 +111,12 @@ class ResearchCatalogRoutesMixin:
                         ),
                     }
                 elif child == "reports":
+                    reports = service.list_reports(
+                        research_id, viewer=viewer,
+                    )
                     payload = {
-                        "reports": service.list_reports(
-                            research_id, viewer=viewer,
+                        "reports": self._research_catalog_publication_branches(
+                            reports, viewer,
                         ),
                     }
                 elif child == "evidence":
@@ -140,6 +144,47 @@ class ResearchCatalogRoutesMixin:
             return True
         json_response(self, {"success": True, **payload})
         return True
+
+    def _research_catalog_publication_branches(
+        self, reports: list[dict], viewer: str,
+    ) -> list[dict]:
+        """Attach readable server projections without loading report bytes."""
+        try:
+            publications = self._research_service().list_visible(viewer)
+        except (AttributeError, ConnectionError, OSError, RuntimeError, ValueError):
+            publications = []
+        by_report: dict[str, list[dict]] = {}
+        for item in publications:
+            if not isinstance(item, dict):
+                continue
+            report_id = str(item.get("report_id") or "").strip()
+            publication_id = str(item.get("publication_id") or "").strip()
+            if report_id and publication_id:
+                by_report.setdefault(report_id, []).append(item)
+        result = []
+        for original in reports:
+            value = dict(original)
+            local = [dict(item) for item in value.get("branches") or []]
+            projected = []
+            for item in by_report.get(str(value.get("report_id") or ""), []):
+                projected.append({
+                    "branch_ref": str(item.get("branch_ref") or ""),
+                    "title": str(item.get("branch_ref") or item.get("title") or ""),
+                    "profile_ref": str(item.get("profile_ref") or ""),
+                    "source_kind": "publication",
+                    "source_ref": str(item.get("publication_id") or ""),
+                    "publication_id": str(item.get("publication_id") or ""),
+                    "selected": not projected,
+                })
+            if projected:
+                for item in local:
+                    item["selected"] = False
+            seen = {item["publication_id"] for item in projected}
+            value["branches"] = projected + [
+                item for item in local if item.get("publication_id") not in seen
+            ]
+            result.append(value)
+        return result
 
     def _post_research_catalog_routes(self, parsed) -> bool:
         if not self._is_research_catalog_path(parsed.path):
@@ -208,19 +253,29 @@ class ResearchCatalogRoutesMixin:
                 json_response(self, {"success": True, "workspace": value}, 201)
                 return True
             if child == "reports":
-                value = service.register_report(
-                    research_id,
-                    actor=actor,
-                    report_id=data.get("report_id"),
-                    title=str(data.get("title") or ""),
-                    profile_ref=str(data.get("profile_ref") or ""),
-                    workspace_id=str(data.get("workspace_id") or ""),
-                    build_source=str(data.get("build_source") or "client"),
-                    build_source_ref=str(data.get("build_source_ref") or ""),
-                    visibility=str(data.get("visibility") or "private"),
-                    authorized_users=data.get("authorized_users"),
-                    source_ref=str(data.get("source_ref") or ""),
-                )
+                if data.get("report_id"):
+                    value = service.register_report(
+                        research_id,
+                        actor=actor,
+                        report_id=data.get("report_id"),
+                        title=str(data.get("title") or ""),
+                        profile_ref=str(data.get("profile_ref") or ""),
+                        workspace_id=str(data.get("workspace_id") or ""),
+                        build_source=str(data.get("build_source") or "client"),
+                        build_source_ref=str(data.get("build_source_ref") or ""),
+                        visibility=str(data.get("visibility") or "private"),
+                        authorized_users=data.get("authorized_users"),
+                        source_ref=str(data.get("source_ref") or ""),
+                    )
+                else:
+                    value = service.create_report_space(
+                        research_id,
+                        actor=actor,
+                        title=str(data.get("title") or ""),
+                        profile_ref=str(data.get("profile_ref") or ""),
+                        visibility=str(data.get("visibility") or "private"),
+                        authorized_users=data.get("authorized_users"),
+                    )
                 json_response(self, {"success": True, "report": value}, 201)
                 return True
             if child == "share-links":
@@ -318,6 +373,46 @@ class ResearchCatalogRoutesMixin:
             self._research_catalog_error(exc)
             return True
         json_response(self, {"success": True, "research": value})
+        return True
+
+    def _delete_research_catalog_routes(self, parsed) -> bool:
+        research_match = re.fullmatch(r"/api/research/([^/]+)", parsed.path)
+        report_match = re.fullmatch(
+            r"/api/research/([^/]+)/reports/([^/]+)", parsed.path,
+        )
+        member_match = re.fullmatch(
+            r"/api/research/([^/]+)/members/([^/]+)", parsed.path,
+        )
+        if not research_match and not report_match and not member_match:
+            return False
+        session = self._research_catalog_session()
+        if session is None:
+            return True
+        actor = str(session["username"])
+        try:
+            if research_match:
+                value = self._research_catalog_service().remove_research(
+                    unquote(research_match.group(1)), actor=actor,
+                )
+                payload = {"research": value}
+            elif report_match:
+                value = self._research_catalog_service().remove_report(
+                    unquote(report_match.group(1)),
+                    unquote(report_match.group(2)),
+                    actor=actor,
+                )
+                payload = {"report": value}
+            else:
+                value = self._research_catalog_service().remove_membership(
+                    unquote(member_match.group(1)),
+                    profile_ref=unquote(member_match.group(2)),
+                    actor=actor,
+                )
+                payload = {"member": value}
+        except (KeyError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
+            self._research_catalog_error(exc)
+            return True
+        json_response(self, {"success": True, **payload})
         return True
 
     @staticmethod

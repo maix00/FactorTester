@@ -1,13 +1,8 @@
 (() => {
   async function render(context, mount, embedded) {
-    const releaseResult = await Promise.allSettled([
-      context.api(context.servicePath("/api/client/releases/beta.json")),
-    ]).then(results => results[0]);
+    const release = await loadClientRelease(context);
     if (context.isRouteCurrent?.() === false) return;
-    mount.append(clientDownload(
-      context,
-      releaseResult.status === "fulfilled" ? releaseResult.value : null,
-    ));
+    mount.append(clientDownload(context, release));
     // A standalone browser cannot read the user's local filesystem.  The
     // embedded Swift client owns that projection and requests it explicitly.
     if (!embedded || !context.session) return;
@@ -77,14 +72,27 @@
   function clientDownload(context, value) {
     const section = document.createElement("section");
     section.className = "research-client-download-action";
+    section.append(clientDownloadButton(context, value));
+    return section;
+  }
+
+  function clientDownloadButton(context, value, label = "客户端下载") {
     const open = context.button(
-      context.t("客户端下载"),
+      context.t(label),
       () => showDownloadOverlay(context, value),
       context.t("打开客户端下载"),
     );
+    open.classList.add("client-download-button");
     open.prepend(FTIcons.node("arrow.down.circle"));
-    section.append(open);
-    return section;
+    return open;
+  }
+
+  async function loadClientRelease(context) {
+    try {
+      return await context.api(context.servicePath("/api/client/releases/beta.json"));
+    } catch (_) {
+      return null;
+    }
   }
 
   function downloadChoices(context, value) {
@@ -100,9 +108,7 @@
     macStatus.className = `client-platform-status${value ? " available" : ""}`;
     macStatus.textContent = value ? context.t("可下载") : context.t("暂不可用");
     macHeader.append(macTitle, macStatus);
-    const macDescription = document.createElement("p");
-    macDescription.textContent = context.t("原生 Swift 客户端，包含本地研究与研究图浏览");
-    mac.append(macHeader, macDescription);
+    mac.append(macHeader);
     const macMeta = document.createElement("small");
     macMeta.className = "client-platform-meta";
     macMeta.textContent = value?.version
@@ -133,9 +139,7 @@
       platformStatus.className = "client-platform-status";
       platformStatus.textContent = context.t("准备中");
       platformHeader.append(platformTitle, platformStatus);
-      const platformDescription = document.createElement("p");
-      platformDescription.textContent = context.t("跨平台客户端尚未提供");
-      item.append(platformHeader, platformDescription);
+      item.append(platformHeader);
       downloads.append(item);
     });
     return downloads;
@@ -149,8 +153,9 @@
     card.className = "dialog-card wide";
     const heading = document.createElement("h2");
     heading.textContent = context.t("客户端下载");
-    const close = context.button(context.t("关闭"), () => dialog.close(), context.t("关闭"));
+    const close = context.button("×", () => dialog.close(), context.t("关闭"));
     close.className = "dialog-close";
+    close.title = context.t("关闭");
     card.append(heading, close);
     const note = document.createElement("p");
     note.className = "secondary";
@@ -164,5 +169,7 @@
     dialog.showModal();
   }
 
-  window.FTResearchLocal = Object.freeze({render, clientDownload});
+  window.FTResearchLocal = Object.freeze({
+    render, clientDownload, clientDownloadButton, loadClientRelease,
+  });
 })();

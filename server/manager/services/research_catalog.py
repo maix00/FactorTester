@@ -209,6 +209,37 @@ class ResearchCatalog:
                        VALUES (?, 'schema', ?, '', '', 'completed', '', ?, ?)""",
                     (restoration_ref, restoration_ref, now, now),
                 )
+            # Every Research is always operable by its owner's self Profile.
+            # This is an idempotent catalog invariant, not a UI default: older
+            # migrated Research rows receive the same membership/workspace as
+            # newly created rows.
+            now = time.time()
+            for research in conn.execute(
+                "SELECT research_id, owner_ref, title FROM research_catalog_researches"
+            ).fetchall():
+                research_id = str(research["research_id"])
+                owner_ref = str(research["owner_ref"])
+                self._upsert_membership(
+                    conn, research_id=research_id, principal_ref=owner_ref,
+                    profile_ref="self", role="owner", status="active",
+                    invited_by=owner_ref, now=now,
+                )
+                workspace_id = "research-workspace:self:" + hashlib.sha256(
+                    f"{research_id}\x1fself".encode("utf-8")
+                ).hexdigest()[:24]
+                conn.execute(
+                    """INSERT INTO research_catalog_workspaces
+                       (workspace_id, research_id, principal_ref, profile_ref,
+                        title, status, created_at, updated_at)
+                       VALUES (?, ?, ?, 'self', ?, 'active', ?, ?)
+                       ON CONFLICT(research_id, profile_ref) DO UPDATE SET
+                         principal_ref=excluded.principal_ref,
+                         status='active', updated_at=excluded.updated_at""",
+                    (
+                        workspace_id, research_id, owner_ref,
+                        f"{str(research['title'])} / self", now, now,
+                    ),
+                )
 
     # ------------------------------------------------------------------
     # Research, membership, workspace, and report records
@@ -245,8 +276,11 @@ class ResearchCatalog:
                     clean_visibility, _json(users), now, now,
                 ),
             )
-            if profile_ref:
-                profile = _profile(profile_ref)
+            profiles = ["self"]
+            if profile_ref and _profile(profile_ref) != "self":
+                profiles.append(_profile(profile_ref))
+            initial_workspaces = []
+            for profile in profiles:
                 self._upsert_membership(
                     conn,
                     research_id=research_id,
@@ -273,13 +307,16 @@ class ResearchCatalog:
                        WHERE workspace_id=?""",
                     (workspace_id,),
                 ).fetchone()
+                initial_workspaces.append(initial_workspace)
             row = conn.execute(
                 "SELECT * FROM research_catalog_researches WHERE research_id=?",
                 (research_id,),
             ).fetchone()
         value = self._research_value(row, viewer=owner)
-        if initial_workspace is not None:
-            value["workspaces"] = [self._workspace_value(initial_workspace)]
+        if initial_workspaces:
+            value["workspaces"] = [
+                self._workspace_value(item) for item in initial_workspaces
+            ]
         return value
 
     def list_researches(
@@ -299,15 +336,24 @@ class ResearchCatalog:
         with connect_sqlite(self.db_path, readonly=True) as conn:
             rows = conn.execute(
                 """SELECT research.*,
-                          membership.role AS viewer_member_role,
-                          membership.status AS viewer_member_status
+                          (SELECT membership.role
+                             FROM research_catalog_memberships AS membership
+                            WHERE membership.research_id=research.research_id
+                              AND membership.principal_ref=?
+                              AND membership.status='active'
+                            ORDER BY CASE membership.role
+                              WHEN 'owner' THEN 0 WHEN 'editor' THEN 1
+                              WHEN 'contributor' THEN 2 ELSE 3 END
+                            LIMIT 1) AS viewer_member_role,
+                          (SELECT membership.status
+                             FROM research_catalog_memberships AS membership
+                            WHERE membership.research_id=research.research_id
+                              AND membership.principal_ref=?
+                              AND membership.status='active'
+                            LIMIT 1) AS viewer_member_status
                      FROM research_catalog_researches AS research
-                     LEFT JOIN research_catalog_memberships AS membership
-                       ON membership.research_id=research.research_id
-                      AND membership.principal_ref=?
-                      AND membership.status='active'
                     ORDER BY research.updated_at DESC, research.research_id""",
-                (viewer_ref,),
+                (viewer_ref, viewer_ref),
             ).fetchall()
         result = []
         for row in rows:
@@ -373,7 +419,8 @@ class ResearchCatalog:
         with connect_sqlite(self.db_path, readonly=True) as conn:
             rows = conn.execute(
                 """SELECT * FROM research_catalog_memberships
-                   WHERE research_id=? ORDER BY created_at, profile_ref""",
+                   WHERE research_id=? AND status='active'
+                   ORDER BY created_at, profile_ref""",
                 (research_id,),
             ).fetchall()
         return [self._membership_value(item) for item in rows]
@@ -385,7 +432,8 @@ class ResearchCatalog:
         with connect_sqlite(self.db_path, readonly=True) as conn:
             rows = conn.execute(
                 """SELECT * FROM research_catalog_workspaces
-                   WHERE research_id=? ORDER BY updated_at DESC, workspace_id""",
+                   WHERE research_id=? AND status='active'
+                   ORDER BY updated_at DESC, workspace_id""",
                 (research_id,),
             ).fetchall()
         return [self._workspace_value(item) for item in rows]
@@ -401,7 +449,73 @@ class ResearchCatalog:
                    ORDER BY updated_at DESC, report_id""",
                 (research_id,),
             ).fetchall()
-        return [self._report_value(item, viewer=viewer) for item in rows]
+        values = [self._report_value(item, viewer=viewer) for item in rows]
+        for value in values:
+            value["branches"] = self._report_branches(value)
+        return values
+
+    def _report_branches(self, report: dict[str, Any]) -> list[dict[str, Any]]:
+        """Project migrated source records as lazy Report branch choices.
+
+        The catalog stores only source references here. Report bytes remain in
+        the client, server Agent, or publication store and are fetched only
+        after the reader selects a branch.
+        """
+        research_id = str(report.get("research_id") or "").strip()
+        report_id = str(report.get("report_id") or "").strip()
+        selected_source = str(report.get("source_ref") or "").strip()
+        if not research_id or not report_id:
+            return []
+        with connect_sqlite(self.db_path, readonly=True) as conn:
+            research = conn.execute(
+                "SELECT migration_source FROM research_catalog_researches "
+                "WHERE research_id=?",
+                (research_id,),
+            ).fetchone()
+            rows = conn.execute(
+                """SELECT source_kind, source_ref
+                     FROM research_catalog_migrations
+                    WHERE research_id=? AND status='completed'
+                      AND source_kind!='schema'
+                    ORDER BY completed_at DESC, source_ref""",
+                (research_id,),
+            ).fetchall()
+        migration_source = str(research["migration_source"] if research else "")
+        if migration_source and not migration_source.endswith(f":{report_id}"):
+            return []
+        branches: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for row in rows:
+            source_kind = str(row["source_kind"] or "").strip()
+            source_ref = str(row["source_ref"] or "").strip()
+            if not source_ref:
+                continue
+            publication_id = source_ref
+            profile_ref = ""
+            branch_ref = source_ref.rsplit(":", 1)[-1]
+            if source_kind == "client":
+                parts = source_ref.split(":", 2)
+                if len(parts) == 3:
+                    profile_ref, record_id, branch_ref = parts
+                    publication_id = f"local:{record_id}:{branch_ref}"
+                else:
+                    publication_id = f"local:{source_ref}"
+            elif source_kind == "server_agent":
+                publication_id = source_ref if source_ref.startswith("server:") \
+                    else f"server:{source_ref}"
+            if publication_id in seen:
+                continue
+            seen.add(publication_id)
+            branches.append({
+                "branch_ref": branch_ref,
+                "title": branch_ref,
+                "profile_ref": profile_ref,
+                "source_kind": source_kind,
+                "source_ref": source_ref,
+                "publication_id": publication_id,
+                "selected": source_ref == selected_source,
+            })
+        return branches
 
     def list_reports_for_scope(
         self,
@@ -559,6 +673,10 @@ class ResearchCatalog:
                 _authorized_users(authorized_users, str(row["owner_ref"])),
             )
         if status is not None:
+            if status == "archived" and str(row["migration_source"]):
+                raise PermissionError(
+                    "research can only be deleted on its source server"
+                )
             values["status"] = _status(status)
         if not values:
             return self._research_value(row, viewer=actor, access=access)
@@ -568,6 +686,25 @@ class ResearchCatalog:
             conn.execute(
                 f"UPDATE research_catalog_researches SET {assignments} WHERE research_id=?",
                 (*values.values(), research_id),
+            )
+            updated = conn.execute(
+                "SELECT * FROM research_catalog_researches WHERE research_id=?",
+                (research_id,),
+            ).fetchone()
+        return self._research_value(updated, viewer=actor)
+
+    def remove_research(self, research_id: str, *, actor: str) -> dict[str, Any]:
+        """Archive a Research only in the catalog that created it."""
+        row = self._research_row(research_id)
+        if not self._research_access(row, actor)["can_manage"]:
+            raise PermissionError("research management is not authorized")
+        if str(row["migration_source"]):
+            raise PermissionError("research can only be deleted on its source server")
+        with connect_sqlite(self.db_path) as conn:
+            conn.execute(
+                """UPDATE research_catalog_researches
+                   SET status='archived', updated_at=? WHERE research_id=?""",
+                (time.time(), research_id),
             )
             updated = conn.execute(
                 "SELECT * FROM research_catalog_researches WHERE research_id=?",
@@ -611,6 +748,45 @@ class ResearchCatalog:
             ).fetchone()
         return self._membership_value(value)
 
+    def remove_membership(
+        self, research_id: str, *, profile_ref: str, actor: str,
+    ) -> dict[str, Any]:
+        row = self._research_row(research_id)
+        if not self._research_access(row, actor)["can_manage"]:
+            raise PermissionError("research membership management is not authorized")
+        profile = _profile(profile_ref)
+        if profile == "self":
+            raise PermissionError(
+                "the Research owner's self Profile is a required member"
+            )
+        now = time.time()
+        with connect_sqlite(self.db_path) as conn:
+            value = conn.execute(
+                """SELECT * FROM research_catalog_memberships
+                   WHERE research_id=? AND profile_ref=?""",
+                (research_id, profile),
+            ).fetchone()
+            if value is None:
+                raise KeyError("research member not found")
+            conn.execute(
+                """UPDATE research_catalog_memberships
+                   SET status='revoked', updated_at=?
+                   WHERE research_id=? AND profile_ref=?""",
+                (now, research_id, profile),
+            )
+            conn.execute(
+                """UPDATE research_catalog_workspaces
+                   SET status='archived', updated_at=?
+                   WHERE research_id=? AND profile_ref=? AND status='active'""",
+                (now, research_id, profile),
+            )
+            updated = conn.execute(
+                """SELECT * FROM research_catalog_memberships
+                   WHERE research_id=? AND profile_ref=?""",
+                (research_id, profile),
+            ).fetchone()
+        return self._membership_value(updated)
+
     def create_workspace(
         self,
         research_id: str,
@@ -644,6 +820,17 @@ class ResearchCatalog:
                 (research_id, profile),
             ).fetchone()
             if existing is not None:
+                if str(existing["status"]) != "active":
+                    conn.execute(
+                        """UPDATE research_catalog_workspaces
+                           SET status='active', principal_ref=?, title=?, updated_at=?
+                           WHERE workspace_id=?""",
+                        (principal, clean_title, now, str(existing["workspace_id"])),
+                    )
+                    existing = conn.execute(
+                        "SELECT * FROM research_catalog_workspaces WHERE workspace_id=?",
+                        (str(existing["workspace_id"]),),
+                    ).fetchone()
                 return self._workspace_value(existing)
             conn.execute(
                 """INSERT INTO research_catalog_workspaces
@@ -750,6 +937,49 @@ class ResearchCatalog:
             ).fetchone()
         return self._report_value(value, viewer=actor)
 
+    def create_report_space(
+        self,
+        research_id: str,
+        *,
+        actor: str,
+        title: str,
+        profile_ref: str,
+        visibility: str = "private",
+        authorized_users: list[str] | tuple[str, ...] | None = None,
+    ) -> dict[str, Any]:
+        """Create one empty Report space owned by a Research workspace.
+
+        A report space is the durable parent for later branch-authored report
+        content.  It deliberately has no source reference until a Profile
+        publishes the first branch generation.
+        """
+        profile = _profile(profile_ref)
+        workspaces = self.list_workspaces(research_id, viewer=actor)
+        workspace = next(
+            (item for item in workspaces if item["profile_ref"] == profile),
+            None,
+        )
+        if workspace is None:
+            research = self._research_row(research_id)
+            workspace = self.create_workspace(
+                research_id,
+                actor=actor,
+                principal_ref=str(research["owner_ref"]),
+                profile_ref=profile,
+                title=f"{str(research['title'])} / {profile}",
+            )
+        return self.register_report(
+            research_id,
+            actor=actor,
+            report_id="report:v1:" + secrets.token_urlsafe(18),
+            title=title,
+            profile_ref=profile,
+            workspace_id=str(workspace["workspace_id"]),
+            build_source="workspace",
+            visibility=visibility,
+            authorized_users=authorized_users,
+        )
+
     def update_report(
         self,
         research_id: str,
@@ -780,6 +1010,31 @@ class ResearchCatalog:
             conn.execute(
                 f"UPDATE research_catalog_reports SET {assignments} WHERE report_id=?",
                 (*values.values(), report_id),
+            )
+            updated = conn.execute(
+                "SELECT * FROM research_catalog_reports WHERE report_id=?",
+                (report_id,),
+            ).fetchone()
+        return self._report_value(updated, viewer=actor)
+
+    def remove_report(
+        self, research_id: str, report_id: str, *, actor: str,
+    ) -> dict[str, Any]:
+        research = self._research_row(research_id)
+        if not self._research_access(research, actor)["can_manage"]:
+            raise PermissionError("research report management is not authorized")
+        row = self._report_row(report_id)
+        if str(row["research_id"]) != research_id:
+            raise ValueError("report does not belong to research")
+        if not self._report_is_local(row):
+            raise PermissionError(
+                "research report can only be deleted on its source server"
+            )
+        with connect_sqlite(self.db_path) as conn:
+            conn.execute(
+                """UPDATE research_catalog_reports
+                   SET status='archived', updated_at=? WHERE report_id=?""",
+                (time.time(), report_id),
             )
             updated = conn.execute(
                 "SELECT * FROM research_catalog_reports WHERE report_id=?",
@@ -1479,6 +1734,10 @@ class ResearchCatalog:
             "updated_at": float(row["updated_at"]),
             "is_owned": str(row["owner_ref"]) == str(viewer or ""),
             "access": resolved_access,
+            "can_delete": (
+                resolved_access["can_manage"]
+                and not str(row["migration_source"])
+            ),
         }
 
     @staticmethod
@@ -1529,11 +1788,25 @@ class ResearchCatalog:
             "source_ref": str(row["source_ref"]),
             "created_at": float(row["created_at"]),
             "updated_at": float(row["updated_at"]),
+            "can_delete": self._report_is_local(row),
         }
         value["access"] = access or self._report_access(row, viewer)
         if value["access"]["can_manage"]:
             value["authorized_users"] = _loads_list(row["authorized_users_json"])
         return value
+
+    @staticmethod
+    def _report_is_local(row) -> bool:
+        """Only empty Report spaces created by this catalog are deletable here.
+
+        Imported client/server/public projections retain their source store;
+        this catalog must never turn a local UI action into remote deletion or
+        hide the projection as a substitute for deletion at the source.
+        """
+        return (
+            str(row["build_source"]) == "workspace"
+            and not str(row["source_ref"])
+        )
 
     @staticmethod
     def _evidence_link_value(row) -> dict[str, Any]:

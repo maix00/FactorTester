@@ -242,5 +242,7 @@
     return wrapper;
   }
 
-  window.FTResearchVisibility = Object.freeze({control, label, redeemFromLocation});
+  window.FTResearchVisibility = Object.freeze({
+    authorizedDialog, control, label, redeemFromLocation,
+  });
 })();

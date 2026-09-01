@@ -28,6 +28,18 @@ _PROFILE_REVISION_REFERENCE = re.compile(
     r"^profile-revision:v1:[a-z0-9][a-z0-9._-]{0,63}:"
     r"sha256:[0-9a-f]{64}$"
 )
+_LEGACY_FROZEN_FACTOR_REFERENCE = re.compile(
+    r"^factor:v1:[^:\s]+:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+:"
+    r"[0-9a-f]{40}:[0-9a-f]{40}$"
+)
+_LEGACY_FROZEN_FACTOR_FAMILY_REFERENCE = re.compile(
+    r"^factor-family:v1:[^:\s]+:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+:"
+    r"[0-9a-f]{40}:[0-9a-f]{40}$"
+)
+_LEGACY_FROZEN_FACTOR_SET_REFERENCE = re.compile(
+    r"^factor-set:v1:[^:\s]+:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+:"
+    r"[0-9a-f]{40}:[0-9a-f]{40}$"
+)
 MARKDOWN_LABEL_PATTERN = r"(?:\\[\[\]\\]|[^\[\]\\\n]){1,512}"
 MARKDOWN_LINK_PATTERN = (
     rf"(?<!\\)\[({MARKDOWN_LABEL_PATTERN})\]\(([^\s()]+)\)"
@@ -129,7 +141,14 @@ def _validate_domain_reference(
             require_factor_family_reference,
             require_factor_set_reference,
         )
-        if not any(_accepts(validator, target_ref) for validator in validators):
+        legacy_frozen = any(pattern.fullmatch(target_ref) for pattern in (
+            _LEGACY_FROZEN_FACTOR_REFERENCE,
+            _LEGACY_FROZEN_FACTOR_FAMILY_REFERENCE,
+            _LEGACY_FROZEN_FACTOR_SET_REFERENCE,
+        ))
+        if not legacy_frozen and not any(
+            _accepts(validator, target_ref) for validator in validators
+        ):
             raise ValueError(
                 f"{field} factor reference must identify one frozen formula"
             )

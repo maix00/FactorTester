@@ -13463,7 +13463,9 @@
     "刷新任务列表" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Refresh task list"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"刷新任务列表"}}}},
     "提交物" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Input artifacts"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"提交物"}}}},
     "当前提供 macOS 客户端；其他平台准备中" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"A macOS client is currently available; other platforms are in preparation"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"当前提供 macOS 客户端；其他平台准备中"}}}},
-    "预览运行配置尚未持久化，请提交任务后再在独立页面打开" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The preview RunSpec is not persisted; submit the task before opening it in a separate page"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"预览运行配置尚未持久化，请提交任务后再在独立页面打开"}}}}
+    "预览运行配置尚未持久化，请提交任务后再在独立页面打开" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The preview RunSpec is not persisted; submit the task before opening it in a separate page"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"预览运行配置尚未持久化，请提交任务后再在独立页面打开"}}}},
+    "研究台" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Research Desk"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究台"}}}},
+    "测试台" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Test Desk"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"测试台"}}}}
   },
   "version" : "1.0"
 }

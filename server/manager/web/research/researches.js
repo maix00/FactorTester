@@ -66,6 +66,8 @@
   }
 
   function scopeTabs(context, state, root) {
+    const row = document.createElement("div");
+    row.className = "research-root-scope-row";
     const nav = document.createElement("nav");
     nav.className = "research-section-tabs research-root-scopes";
     nav.setAttribute("aria-label", context.t("研究范围"));
@@ -73,6 +75,7 @@
       const button = document.createElement("button");
       button.type = "button";
       button.className = `research-section-tab research-root-scope${state.scope === definition.id ? " active" : ""}`;
+      button.dataset.researchScope = definition.id;
       button.textContent = context.t(definition.title);
       button.setAttribute("aria-current", state.scope === definition.id ? "page" : "false");
       button.disabled = !context.session && definition.id !== "shared";
@@ -80,6 +83,12 @@
         if (button.disabled || state.scope === definition.id) return;
         state.scope = definition.id;
         state.pages[definition.id] = 1;
+        nav.querySelectorAll(".research-root-scope").forEach(item => {
+          const active = item.dataset.researchScope === state.scope;
+          item.classList.toggle("active", active);
+          item.setAttribute("aria-current", active ? "page" : "false");
+        });
+        addButton.hidden = state.scope !== "mine";
         const url = new URL(location.href);
         url.searchParams.set("section", "researches");
         url.searchParams.set("research_scope", definition.id);
@@ -90,21 +99,136 @@
       });
       nav.append(button);
     });
-    return nav;
+    const addButton = FTUI.iconButton(
+      context, "plus", "新建研究",
+      () => void createResearchDialog(context, root).catch(error => (
+        context.showNotice?.(error.message || String(error), true)
+      )),
+    );
+    addButton.classList.add("research-root-add");
+    addButton.hidden = state.scope !== "mine" || !context.session;
+    row.append(nav, addButton);
+    return row;
+  }
+
+  function dialogButton(context, title, action, style = "secondary") {
+    const button = context.button(context.t(title), action);
+    button.classList.add(style);
+    return button;
+  }
+
+  async function createResearchDialog(context, root) {
+    const profiles = await FTPageAgentProfiles.profiles(context);
+    const dialog = document.createElement("dialog");
+    dialog.className = "ft-dialog research-visibility-dialog";
+    const card = document.createElement("div");
+    card.className = "dialog-card";
+    const heading = document.createElement("h2");
+    heading.textContent = context.t("新建研究");
+    const title = document.createElement("input");
+    title.placeholder = context.t("研究标题");
+    const description = document.createElement("textarea");
+    description.placeholder = context.t("研究说明（可选）");
+    const profile = document.createElement("select");
+    [["", context.t("暂不绑定研究身份")], ...profiles.map(item => [
+      String(item.profile_id || ""),
+      String(item.display_name || item.profile_id || ""),
+    ])].forEach(([value, label]) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      profile.append(option);
+    });
+    const visibility = document.createElement("select");
+    [
+      ["private", "仅自己"], ["superiors", "分享给上级"],
+      ["authorized", "指定用户可见"], ["public", "全体用户共享"],
+    ].forEach(([value, label]) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = context.t(label);
+      visibility.append(option);
+    });
+    const actions = document.createElement("div");
+    actions.className = "dialog-actions";
+    const cancel = dialogButton(context, "取消", () => dialog.close());
+    const save = dialogButton(context, "创建", async () => {
+      const cleanTitle = title.value.trim();
+      if (!cleanTitle) {
+        title.focus();
+        return;
+      }
+      let authorizedUsers = [];
+      if (visibility.value === "authorized") {
+        const selected = await FTResearchVisibility.authorizedDialog(context, []);
+        if (selected === null) return;
+        authorizedUsers = selected;
+      }
+      save.disabled = true;
+      try {
+        const response = await context.api("/api/research", {
+          method: "POST",
+          body: JSON.stringify({
+            title: cleanTitle,
+            description: description.value.trim(),
+            visibility: visibility.value,
+            authorized_users: authorizedUsers,
+            profile_ref: profile.value,
+          }),
+        });
+        dialog.close();
+        const item = response.research;
+        context.navigate(`/researches/${encodeURIComponent(item.research_id)}`, {
+          parentFolder: "research", parentResearchID: item.research_id,
+          title: item.title,
+        });
+      } catch (error) {
+        context.showNotice?.(error.message || String(error), true);
+        save.disabled = false;
+      }
+    }, "primary");
+    actions.append(cancel, save);
+    card.append(heading, title, description, profile, visibility, actions);
+    dialog.append(card);
+    dialog.addEventListener("close", () => dialog.remove(), {once: true});
+    document.body.append(dialog);
+    dialog.showModal();
+    title.focus();
   }
 
   function listTable(context, rows, state, root) {
     const scope = state.scope;
     const view = FTUI.pagedTable(
-      [context.t("研究"), context.t("所有者"), context.t("可见性"), context.t("更新时间")],
-      rows.map(item => [
+      [context.t("研究"), context.t("所有者"), context.t("可见性"), context.t("更新时间"), context.t("操作")],
+      rows.map(item => {
+        const actions = document.createElement("span");
+        actions.className = "research-row-actions";
+        if (item.can_delete === true) actions.append(FTUI.iconButton(
+          context, "trash", "删除研究", async event => {
+            event?.stopPropagation?.();
+            if (!window.confirm(context.t("确定删除这个研究吗？"))) return;
+            try {
+              await context.api(
+                `/api/research/${encodeURIComponent(item.research_id)}`,
+                {method: "DELETE"},
+              );
+              await renderRootContent(context, root);
+            } catch (error) {
+              context.showNotice?.(error.message || String(error), true);
+            }
+          },
+        ));
+        actions.addEventListener("click", event => event.stopPropagation());
+        return [
         item.title || item.research_id,
         item.owner_ref || context.t("未知"),
         FTResearchVisibility.control(context, item, {
           kind: "research", onSaved: () => renderRootContent(context, root),
         }),
         FTUI.formatDate(item.updated_at || item.created_at),
-      ]),
+        actions,
+      ];
+      }),
       {
         page: state.pages[scope] || 1,
         pageSize,
@@ -216,6 +340,117 @@
     return view.shell;
   }
 
+  async function addProfileDialog(context, researchID, research, rerender) {
+    const [profiles, response] = await Promise.all([
+      FTPageAgentProfiles.profiles(context),
+      context.api(`/api/research/${encodeURIComponent(researchID)}/members`),
+    ]);
+    const bound = new Set((response.members || []).map(item => (
+      String(item.profile_ref || "").replace(/^profile:/, "")
+    )));
+    const candidates = profiles.filter(item => !bound.has(
+      String(item.profile_id || "").replace(/^profile:/, ""),
+    ));
+    if (!candidates.length) {
+      context.showNotice?.(context.t("当前端没有可添加的研究身份"));
+      return;
+    }
+    const dialog = document.createElement("dialog");
+    dialog.className = "ft-dialog research-visibility-dialog";
+    const card = document.createElement("div");
+    card.className = "dialog-card";
+    const heading = document.createElement("h2");
+    heading.textContent = context.t("添加研究身份");
+    const picker = document.createElement("select");
+    candidates.forEach(item => {
+      const option = document.createElement("option");
+      option.value = String(item.profile_id || "");
+      option.textContent = String(item.display_name || item.profile_id || "");
+      option.dataset.principal = String(item.owner_ref || research.owner_ref || "");
+      picker.append(option);
+    });
+    const actions = document.createElement("div");
+    actions.className = "dialog-actions";
+    const cancel = dialogButton(context, "取消", () => dialog.close());
+    const save = dialogButton(context, "添加", async () => {
+      const option = picker.selectedOptions[0];
+      save.disabled = true;
+      try {
+        const payload = {
+          principal_ref: option.dataset.principal || research.owner_ref,
+          profile_ref: picker.value,
+          role: "contributor",
+          status: "active",
+        };
+        await context.api(`/api/research/${encodeURIComponent(researchID)}/members`, {
+          method: "POST", body: JSON.stringify(payload),
+        });
+        await context.api(`/api/research/${encodeURIComponent(researchID)}/workspaces`, {
+          method: "POST",
+          body: JSON.stringify({
+            principal_ref: payload.principal_ref,
+            profile_ref: payload.profile_ref,
+            title: `${research.title} / ${payload.profile_ref}`,
+          }),
+        });
+        dialog.close();
+        await rerender();
+      } catch (error) {
+        context.showNotice?.(error.message || String(error), true);
+        save.disabled = false;
+      }
+    }, "primary");
+    actions.append(cancel, save);
+    card.append(heading, picker, actions);
+    dialog.append(card);
+    dialog.addEventListener("close", () => dialog.remove(), {once: true});
+    document.body.append(dialog);
+    dialog.showModal();
+  }
+
+  function profileTable(context, researchID, research, members, rerender) {
+    const section = document.createElement("section");
+    section.className = "research-detail-section";
+    const toolbar = document.createElement("div");
+    toolbar.className = "research-detail-actions";
+    if (research?.access?.can_manage === true) {
+      toolbar.append(FTUI.iconButton(
+        context, "plus", "添加研究身份",
+        () => void addProfileDialog(context, researchID, research, rerender),
+      ));
+    }
+    const table = FTUI.table(
+      [context.t("用户"), "Profile", context.t("角色"), context.t("操作")],
+      members.map(item => {
+        const actions = document.createElement("span");
+        const requiredSelf = String(item.profile_ref || "") === "self"
+          && String(item.principal_ref || "") === String(research.owner_ref || "");
+        if (research?.access?.can_manage === true && !requiredSelf) {
+          actions.append(FTUI.iconButton(
+            context, "trash", "移除研究身份", async () => {
+              if (!window.confirm(context.t("确定移除这个研究身份吗？"))) return;
+              try {
+                await context.api(
+                  `/api/research/${encodeURIComponent(researchID)}`
+                    + `/members/${encodeURIComponent(item.profile_ref)}`,
+                  {method: "DELETE"},
+                );
+                await rerender();
+              } catch (error) {
+                context.showNotice?.(error.message || String(error), true);
+              }
+            },
+          ));
+        }
+        return [item.principal_ref, item.profile_ref, item.role, actions];
+      }),
+    );
+    section.append(toolbar, members.length
+      ? table.shell
+      : FTUI.empty(context.t("暂无研究身份")));
+    return section;
+  }
+
   function detailOverview(context, value) {
     const table = FTUI.table(
       [context.t("字段"), context.t("值")],
@@ -294,7 +529,10 @@
         await window.FTStaticLoader?.loadGroups?.(["research-reports"]);
         if (!current(context)) return;
         await FTResearchReports.renderForResearch(
-          context, pane, researchID, {title: value.title},
+          context, pane, researchID, {
+            title: value.title,
+            canManage: value?.access?.can_manage === true,
+          },
         );
         return;
       }
@@ -346,15 +584,9 @@
       const response = await context.api(endpoint);
       if (!current(context)) return;
       if (kind === "members") {
-        pane.replaceChildren(simpleTable(
-          context,
-          [context.t("用户"), "Profile", context.t("角色"), context.t("状态")],
-          (response.members || []).map(item => [
-            item.principal_ref, item.profile_ref, item.role, item.status,
-          ]),
-          state,
-          "profiles",
-          () => childTable(context, root, researchID, value, kind),
+        const rerender = () => childTable(context, root, researchID, value, kind);
+        pane.replaceChildren(profileTable(
+          context, researchID, value, response.members || [], rerender,
         ));
         return;
       }
@@ -383,6 +615,7 @@
     const state = detailState(context);
     const pane = root.querySelector(".research-detail-pane");
     if (!pane || !value) return;
+    root.querySelector(".research-report-tab-actions")?.remove();
     if (state.activeTab === "details") {
       pane.replaceChildren(detailOverview(context, value));
       return;

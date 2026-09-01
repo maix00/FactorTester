@@ -65,15 +65,29 @@
       profiles(context),
       context.api(`/api/research/${encodeURIComponent(id)}/members`),
     ]);
-    const boundIDs = new Set((membership.members || [])
+    const members = (membership.members || [])
       .filter(item => String(item.status || "active") === "active")
-      .map(item => identifier(item.profile_ref))
-      .filter(Boolean));
-    // /api/client/profiles already represents the current execution boundary:
-    // a Web server returns its server Profiles and a client returns its local
-    // Profiles.  Intersecting here prevents a Research membership on another
-    // host from appearing as a selectable but unusable assistant.
-    return available.filter(item => boundIDs.has(identifier(item.profile_id)));
+      .filter(item => identifier(item.profile_ref));
+    const availableByID = new Map(available.map(item => [
+      identifier(item.profile_id), {...item, runtime_bound_here: true},
+    ]));
+    return members.map(member => {
+      const profileID = identifier(member.profile_ref);
+      return availableByID.get(profileID) || {
+        profile_id: profileID,
+        alias: profileID,
+        title: profileID,
+        owner_ref: member.principal_ref || "",
+        runtime_bound_here: false,
+        binding_status: "unbound",
+      };
+    }).sort((left, right) => {
+      if (left.profile_id === "self") return -1;
+      if (right.profile_id === "self") return 1;
+      return String(left.alias || left.profile_id).localeCompare(
+        String(right.alias || right.profile_id), "zh-CN",
+      );
+    });
   }
 
   window.FTPageAgentProfiles = Object.freeze({bound, forResearch, profiles, self});

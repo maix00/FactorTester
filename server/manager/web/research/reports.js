@@ -71,14 +71,6 @@
     }));
   }
 
-  async function loadClientRelease(context) {
-    try {
-      return await context.api(context.servicePath("/api/client/releases/beta.json"));
-    } catch (_) {
-      return null;
-    }
-  }
-
   function ownerDisplay(context, item) {
     const owner = String(item.owner_ref || item.owner_username || "").trim();
     const profile = String(item.profile_ref || item.profile_id || "").trim();
@@ -174,27 +166,14 @@
     const content = root.querySelector(".research-report-scope-content");
     content.replaceChildren(FTUI.loading(context.t("正在读取研究报告…")));
     try {
-      if (scope === "mine") {
-        await window.FTStaticLoader?.loadGroups?.(["research-local"]);
-        if (!current(context)) return;
-      }
-      const [rows, release] = await Promise.all([
-        fetchRows(context, scope),
-        scope === "mine" ? loadClientRelease(context) : Promise.resolve(null),
-      ]);
+      const rows = await fetchRows(context, scope);
       if (!current(context)) return;
-      const children = [];
-      if (scope === "mine") {
-        const download = FTResearchLocal.clientDownload?.(context, release);
-        if (download) children.push(download);
-      }
-      children.push(rows.length
+      content.replaceChildren(rows.length
         ? table(context, rows, state, scope, root)
         : FTUI.empty(
           context.t(scope === "shared" ? "暂无共享研究报告" : "暂无研究报告"),
           context.t("研究报告会按来源显示在这里"),
         ));
-      content.replaceChildren(...children);
     } catch (error) {
       if (current(context)) content.replaceChildren(
         FTUI.empty(context.t("无法读取"), error.message || String(error)),
@@ -222,7 +201,10 @@
     const root = context.tabSession.researchReportLists
       || (context.tabSession.researchReportLists = {});
     const key = String(researchID || "");
-    const state = root[key] || {selectedReportID: "", reading: {}};
+    const state = root[key] || {
+      selectedReportID: "", selectedBranches: {}, reading: {},
+    };
+    state.selectedBranches ||= {};
     state.reading ||= {};
     root[key] = state;
     context.pageState?.register?.(`research-reports:${key}`, {
@@ -258,37 +240,188 @@
   }
 
   function publicationID(item) {
+    const selectedKind = String(item?.selected_branch?.source_kind || "").trim();
     const reference = String(
       item?.source_ref || item?.publication_id || item?.report_id || "",
     ).trim();
     if (!reference || /^(local|server):/.test(reference)) return reference;
+    // A publication id is already the canonical server projection key.  The
+    // parent report may still say build_source=client after migration; using
+    // that stale value here would incorrectly turn the projection into a
+    // local reference.
+    if (selectedKind === "publication" || item?.source_kind === "publication") {
+      return reference;
+    }
     if (item?.build_source === "client") return `local:${reference}`;
     if (item?.build_source === "server_agent") return `server:${reference}`;
     return reference;
   }
 
-  function reportInfoLine(context, rows, selected, state, rerender) {
+  function selectedBranch(item, state) {
+    const branches = Array.isArray(item?.branches) ? item.branches : [];
+    const reportID = reportIdentity(item);
+    const selectedID = state.selectedBranches?.[reportID] || "";
+    return branches.find(branch => branch.publication_id === selectedID)
+      || branches.find(branch => branch.selected)
+      || branches[0]
+      || null;
+  }
+
+  function selectedSource(item, state) {
+    const branch = selectedBranch(item, state);
+    return branch?.publication_id
+      ? {
+        ...item,
+        source_kind: branch.source_kind,
+        source_ref: branch.publication_id,
+        publication_id: branch.publication_id,
+        selected_branch: branch,
+      }
+      : item;
+  }
+
+  function installTabActions(mount, actions) {
+    const detail = mount.closest(".research-root-detail");
+    const tabs = detail?.querySelector(".research-detail-tabs");
+    if (!tabs) return false;
+    tabs.querySelector(".research-report-tab-actions")?.remove();
+    actions.classList.add("research-report-tab-actions");
+    tabs.append(actions);
+    return true;
+  }
+
+  function reportActions(context, researchID, selected, rerender, canManage) {
+    const actions = document.createElement("span");
+    actions.className = "research-report-actions";
+    if (canManage) {
+      actions.append(FTUI.iconButton(
+        context, "plus", "新建研究报告",
+        () => void createReportDialog(context, researchID, rerender),
+      ));
+    }
+    const settingsTarget = selected?.selected_branch?.publication_id
+      ? {...selected, ...selected.selected_branch,
+        publication_id: selected.selected_branch.publication_id}
+      : selected;
+    if (settingsTarget?.access?.can_manage === true || selected?.can_manage === true) {
+      actions.append(FTUI.iconButton(
+        context, "gearshape", "研究报告设置",
+        () => FTResearchReportSettings.open(context, settingsTarget, rerender),
+      ));
+    }
+    if (selected?.access?.can_manage === true && selected?.can_delete === true) {
+      actions.append(FTUI.iconButton(
+        context, "trash", "删除研究报告", async () => {
+          if (!window.confirm(context.t("确定删除这个研究报告空间吗？"))) return;
+          try {
+            await context.api(
+              `/api/research/${encodeURIComponent(researchID)}`
+                + `/reports/${encodeURIComponent(reportIdentity(selected))}`,
+              {method: "DELETE"},
+            );
+            await rerender();
+          } catch (error) {
+            context.showNotice?.(error.message || String(error), true);
+          }
+        },
+      ));
+    }
+    return actions;
+  }
+
+  async function createReportDialog(context, researchID, rerender) {
+    const profiles = await FTPageAgentProfiles.forResearch(context, researchID);
+    if (!profiles.length) {
+      context.showNotice?.(context.t("请先在“研究身份”中添加一个 Profile"), true);
+      return;
+    }
+    const dialog = document.createElement("dialog");
+    dialog.className = "ft-dialog research-visibility-dialog";
+    const card = document.createElement("div");
+    card.className = "dialog-card";
+    const heading = document.createElement("h2");
+    heading.textContent = context.t("新建研究报告");
+    const title = document.createElement("input");
+    title.placeholder = context.t("研究报告标题");
+    const profile = document.createElement("select");
+    profiles.forEach(item => {
+      const option = document.createElement("option");
+      option.value = String(item.profile_id || "");
+      option.textContent = String(item.display_name || item.profile_id || "");
+      profile.append(option);
+    });
+    const actions = document.createElement("div");
+    actions.className = "dialog-actions";
+    const cancel = context.button(context.t("取消"), () => dialog.close());
+    cancel.classList.add("secondary");
+    const create = context.button(context.t("创建"), async () => {
+      if (!title.value.trim()) {
+        title.focus();
+        return;
+      }
+      create.disabled = true;
+      try {
+        await context.api(`/api/research/${encodeURIComponent(researchID)}/reports`, {
+          method: "POST",
+          body: JSON.stringify({
+            title: title.value.trim(), profile_ref: profile.value,
+            visibility: "private",
+          }),
+        });
+        dialog.close();
+        await rerender();
+      } catch (error) {
+        context.showNotice?.(error.message || String(error), true);
+        create.disabled = false;
+      }
+    });
+    create.classList.add("primary");
+    actions.append(cancel, create);
+    card.append(heading, title, profile, actions);
+    dialog.append(card);
+    dialog.addEventListener("close", () => dialog.remove(), {once: true});
+    document.body.append(dialog);
+    dialog.showModal();
+    title.focus();
+  }
+
+  function reportInfoLine(
+    context, researchID, rows, selected, state, rerender, canManage,
+  ) {
     const line = document.createElement("div");
     line.className = "research-report-info-line";
-    if (rows.length > 1) {
-      const picker = document.createElement("select");
-      picker.setAttribute("aria-label", context.t("研究报告"));
-      rows.forEach(item => {
+    const picker = document.createElement("select");
+    picker.setAttribute("aria-label", context.t("研究报告"));
+    rows.forEach(item => {
+      const option = document.createElement("option");
+      option.value = reportIdentity(item);
+      option.textContent = item.title || item.report_id || context.t("未命名研究报告");
+      option.selected = option.value === reportIdentity(selected);
+      picker.append(option);
+    });
+    picker.addEventListener("change", () => {
+      state.selectedReportID = picker.value;
+      void rerender();
+    });
+    line.append(picker);
+    const branches = Array.isArray(selected?.branches) ? selected.branches : [];
+    if (branches.length > 1) {
+      const branch = selectedBranch(selected, state);
+      const branchPicker = document.createElement("select");
+      branchPicker.className = "branch-picker";
+      branchPicker.setAttribute("aria-label", context.t("研究路径"));
+      branches.forEach(item => {
         const option = document.createElement("option");
-        option.value = reportIdentity(item);
-        option.textContent = item.title || item.report_id || context.t("未命名研究报告");
-        option.selected = option.value === reportIdentity(selected);
-        picker.append(option);
+        option.value = item.publication_id || "";
+        option.textContent = item.title || item.branch_ref || context.t("研究路径");
+        option.selected = option.value === branch?.publication_id;
+        branchPicker.append(option);
       });
-      picker.addEventListener("change", () => {
-        state.selectedReportID = picker.value;
+      branchPicker.addEventListener("change", () => {
+        state.selectedBranches[reportIdentity(selected)] = branchPicker.value;
         void rerender();
       });
-      line.append(picker);
-    } else {
-      const title = document.createElement("strong");
-      title.textContent = selected.title || selected.report_id || context.t("未命名研究报告");
-      line.append(title);
+      line.append(branchPicker);
     }
     const metadata = document.createElement("div");
     metadata.className = "research-report-info-metadata";
@@ -301,11 +434,26 @@
       item.textContent = value;
       metadata.append(item);
     });
+    const actions = reportActions(
+      context, researchID, selectedSource(selected, state), rerender, canManage,
+    );
+    actions.prepend(FTUI.iconButton(
+      context, "safari", "在独立页面打开",
+      () => context.navigate(reportRoute(selectedSource(selected, state), researchID)),
+    ));
     line.append(metadata);
+    line.__reportActions = actions;
     return line;
   }
 
   async function renderReportBody(context, mount, item, state) {
+    if (item?.build_source === "workspace" && !item?.source_ref) {
+      mount.replaceChildren(FTUI.empty(
+        context.t("研究报告尚未撰写"),
+        context.t("绑定的 Profile 可以在这个报告空间中创建分支并撰写正文"),
+      ));
+      return;
+    }
     const id = publicationID(item);
     if (!id) {
       mount.replaceChildren(FTUI.empty(
@@ -368,7 +516,7 @@
     }
   }
 
-  async function renderForResearch(context, mount, researchID) {
+  async function renderForResearch(context, mount, researchID, options = {}) {
     const id = String(researchID || "").trim();
     if (!id) {
       mount.replaceChildren(FTUI.empty(context.t("无法读取"), context.t("缺少 Research 标识")));
@@ -385,8 +533,19 @@
       const root = document.createElement("div");
       root.className = "research-reports-for-research";
       if (!rows.length) {
+        const actions = reportActions(
+          context, id, null,
+          () => renderForResearch(context, mount, id, options),
+          options.canManage === true,
+        );
+        if (!installTabActions(mount, actions)) {
+          const toolbar = document.createElement("div");
+          toolbar.className = "research-report-info-line";
+          toolbar.append(actions);
+          root.append(toolbar);
+        }
         root.append(FTUI.empty(
-          context.t("暂无研究报告"), context.t("可在当前 Research 中登记研究报告"),
+          context.t("暂无研究报告"), context.t("点击加号新建研究报告"),
         ));
         mount.replaceChildren(root);
         return;
@@ -396,12 +555,17 @@
       state.selectedReportID = reportIdentity(selected);
       const body = document.createElement("div");
       body.className = "research-report-embedded-body";
-      root.append(reportInfoLine(
-        context, rows, selected, state,
-        () => renderForResearch(context, mount, id),
-      ), body);
+      const infoLine = reportInfoLine(
+        context, id, rows, selected, state,
+        () => renderForResearch(context, mount, id, options),
+        options.canManage === true,
+      );
+      root.append(infoLine, body);
       mount.replaceChildren(root);
-      await renderReportBody(context, body, selected, state);
+      if (!installTabActions(mount, infoLine.__reportActions)) {
+        infoLine.append(infoLine.__reportActions);
+      }
+      await renderReportBody(context, body, selectedSource(selected, state), state);
     } catch (error) {
       if (current(context)) mount.replaceChildren(
         FTUI.empty(context.t("无法读取"), error.message || String(error)),
