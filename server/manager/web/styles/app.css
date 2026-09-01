@@ -708,7 +708,7 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .client-download-icon .ft-icon, .client-download-icon .ft-icon-svg { width: 25px; height: 25px; flex-basis: 25px; }
 .client-download-note { margin: 0; color: var(--muted); font-size: 12px; }
 .client-download-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-.client-download-item { display: grid; align-content: start; gap: 9px; min-width: 0; min-height: 154px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--panel) 94%, var(--soft)); }
+.client-download-item { display: grid; align-content: start; gap: 9px; min-width: 0; min-height: 116px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--panel) 94%, var(--soft)); }
 .client-download-item p { margin: 0; min-height: 38px; color: var(--muted); line-height: 1.45; }
 .client-platform-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .client-platform-status { display: inline-flex; align-items: center; width: fit-content; padding: 3px 7px; border-radius: 999px; color: var(--muted); background: color-mix(in srgb, var(--line) 45%, transparent); font-size: 11px; white-space: nowrap; }

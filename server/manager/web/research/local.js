@@ -108,9 +108,7 @@
     macStatus.className = `client-platform-status${value ? " available" : ""}`;
     macStatus.textContent = value ? context.t("可下载") : context.t("暂不可用");
     macHeader.append(macTitle, macStatus);
-    const macDescription = document.createElement("p");
-    macDescription.textContent = context.t("原生 Swift 客户端，包含本地研究与研究图浏览");
-    mac.append(macHeader, macDescription);
+    mac.append(macHeader);
     const macMeta = document.createElement("small");
     macMeta.className = "client-platform-meta";
     macMeta.textContent = value?.version
@@ -141,9 +139,7 @@
       platformStatus.className = "client-platform-status";
       platformStatus.textContent = context.t("准备中");
       platformHeader.append(platformTitle, platformStatus);
-      const platformDescription = document.createElement("p");
-      platformDescription.textContent = context.t("跨平台客户端尚未提供");
-      item.append(platformHeader, platformDescription);
+      item.append(platformHeader);
       downloads.append(item);
     });
     return downloads;
@@ -157,8 +153,9 @@
     card.className = "dialog-card wide";
     const heading = document.createElement("h2");
     heading.textContent = context.t("客户端下载");
-    const close = context.button(context.t("关闭"), () => dialog.close(), context.t("关闭"));
+    const close = context.button("×", () => dialog.close(), context.t("关闭"));
     close.className = "dialog-close";
+    close.title = context.t("关闭");
     card.append(heading, close);
     const note = document.createElement("p");
     note.className = "secondary";

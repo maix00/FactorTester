@@ -3486,6 +3486,9 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert "clientDownload?.(context, release)" not in reports
     assert "clientDownloadButton" in local_page
     assert 'clientDownloadButton(context, value, label = "客户端下载")' in local_page
+    assert 'context.button("×", () => dialog.close(), context.t("关闭"))' in local_page
+    assert "原生 Swift 客户端" not in local_page
+    assert "跨平台客户端尚未提供" not in local_page
     assert "loadClientRelease" in local_page
     assert 'loadGroups?.(["research-local"])' in shell
     assert 'homeNetworkRow(\n        "FactorTester 客户端"' in shell
