@@ -168,6 +168,7 @@
           body: JSON.stringify({
             publication_id: settings.publication_id,
             report_id: settings.report_id,
+            research_id: settings.research_id || report?.research_id || "",
             auto_sync: automatic.input.checked,
             visibility: visibility.value,
             relay_local_files: relay.input.checked,

@@ -353,6 +353,12 @@ class ResearchCatalogRoutesMixin:
                     visibility=data.get("visibility"),
                     authorized_users=data.get("authorized_users"),
                 )
+                self._sync_research_report_publications(
+                    owner=str(session["username"]),
+                    report_id=str(value["report_id"]),
+                    visibility=str(value["visibility"]),
+                    authorized_users=list(value.get("authorized_users") or []),
+                )
             except (KeyError, PermissionError, TypeError, ValueError, RuntimeError) as exc:
                 self._research_catalog_error(exc)
                 return True
@@ -455,6 +461,32 @@ class ResearchCatalogRoutesMixin:
             result.append(parent)
             current = parent
         return result
+
+    def _sync_research_report_publications(
+        self,
+        *,
+        owner: str,
+        report_id: str,
+        visibility: str,
+        authorized_users: list[str],
+    ) -> None:
+        """Apply the canonical Report policy to each uploaded Branch."""
+        users = list(authorized_users)
+        if visibility == "superiors":
+            users = self._research_catalog_superior_refs(owner)
+        for publication in self.state.public_research.list_owner(owner):
+            if str(publication.get("report_id") or "") != report_id:
+                continue
+            self.state.public_research.configure(
+                owner_ref=owner,
+                report_id=report_id,
+                publication_key=str(publication.get("publication_key") or report_id),
+                projection=None,
+                visibility=visibility,
+                auto_sync=bool(publication.get("auto_sync", True)),
+                relay_local_files=bool(publication.get("relay_local_files", False)),
+                authorized_users=users,
+            )
 
     def _discover_research_report_records(self, actor: str) -> list[dict]:
         """Project all three existing report stores into one explicit plan."""
