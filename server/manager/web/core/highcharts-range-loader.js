@@ -51,15 +51,27 @@
       chart._ftRangeLoadTimer = setTimeout(async () => {
         chart.showLoading?.(displayOptions.loadingText || "Loading…");
         try {
+          const minimum = Number(event.min);
+          const maximum = Number(event.max);
+          const span = Math.max(0, maximum - minimum);
+          const overscanRatio = Math.max(
+            0, Number(displayOptions.rangeOverscanRatio ?? 0.25),
+          );
+          const padding = span * overscanRatio;
+          const baseMaximum = Math.max(
+            200, Math.ceil(Number(chart.plotWidth || 600) * 1.5),
+          );
           const payload = await displayOptions.loadRange(
-            Number(event.min), Number(event.max), {
-              maxPoints: Math.max(200, Math.ceil(Number(chart.plotWidth || 600) * 1.5)),
+            minimum - padding, maximum + padding, {
+              maxPoints: Math.ceil(baseMaximum * (1 + overscanRatio * 2)),
+              visibleMinimum: minimum,
+              visibleMaximum: maximum,
             },
           );
           if (!payload || chart._ftRangeLoadGeneration !== generation) return;
           replaceVisibleSeries(
             chart, displayOptions.rangeOptions(payload),
-            Number(event.min), Number(event.max),
+            minimum, maximum,
           );
         } catch (error) {
           if (error?.name !== "AbortError") displayOptions.onRangeError?.(error);

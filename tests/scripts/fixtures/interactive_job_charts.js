@@ -114,7 +114,7 @@ progressive.xAxis.events.afterSetExtremes.call(
   },
 );
 await new Promise(resolve => setTimeout(resolve, 20));
-assert.deepEqual(requestedRange, {min: 10, max: 11, maxPoints: 600});
+assert.deepEqual(requestedRange, {min: 9.75, max: 11.25, maxPoints: 900});
 assert.deepEqual(replacedData, [
   [1_700_000_000_000, 110], [1_700_000_001_000, 111],
 ]);
@@ -127,7 +127,7 @@ progressive.xAxis.events.afterSetExtremes.call(
   },
 );
 await new Promise(resolve => setTimeout(resolve, 20));
-assert.deepEqual(requestedRange, {min: 10, max: 11, maxPoints: 600});
+assert.deepEqual(requestedRange, {min: 9.75, max: 11.25, maxPoints: 900});
 
 const metrics = {
   artifact_kind: "metrics_over_time",

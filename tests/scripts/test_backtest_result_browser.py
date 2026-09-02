@@ -359,6 +359,7 @@ def test_factor_series_stock_chart_renders_visible_navigator() -> None:
         page.evaluate("""
           const dates = Array.from({length: 240}, (_, index) =>
             new Date(2026, 0, 2, 9, index).toISOString());
+          window.__factorRangeLoads = [];
           FTFactorSeriesChart.mount(
             {t: value => value}, document.querySelector('#chart'), {
               product: 'AP.CZC', factorLabel: 'factor',
@@ -370,7 +371,8 @@ def test_factor_series_stock_chart_renders_visible_navigator() -> None:
               }))},
               contracts: [],
             }, {
-              async loadRange(minimum, maximum) {
+              async loadRange(minimum, maximum, options) {
+                window.__factorRangeLoads.push({minimum, maximum, options});
                 return {
                   data: dates.slice(100, 141).map((timestamp, index) => ({
                     timestamp, open: 200 + index, high: 202 + index,
@@ -387,6 +389,17 @@ def test_factor_series_stock_chart_renders_visible_navigator() -> None:
           );
         """)
         page.wait_for_timeout(300)
+        loaded_range = page.evaluate("window.__factorRangeLoads.at(-1)")
+        visible_minimum = page.evaluate(
+            "Date.parse(new Date(2026, 0, 2, 9, 100).toISOString())"
+        )
+        visible_maximum = page.evaluate(
+            "Date.parse(new Date(2026, 0, 2, 9, 140).toISOString())"
+        )
+        assert loaded_range["minimum"] < visible_minimum
+        assert loaded_range["maximum"] > visible_maximum
+        assert loaded_range["options"]["visibleMinimum"] == visible_minimum
+        assert loaded_range["options"]["visibleMaximum"] == visible_maximum
         navigator = page.locator(".highcharts-navigator")
         assert navigator.count() > 0
         navigator_box = navigator.first.bounding_box()

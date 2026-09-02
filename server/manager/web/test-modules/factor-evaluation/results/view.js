@@ -160,7 +160,10 @@
           const result = await window.FTMarketData.prices(context, ranged, price.source);
           return {
             ...result.payload,
-            __ftRange: {minimum, maximum},
+            __ftRange: {
+              minimum: range.visibleMinimum ?? minimum,
+              maximum: range.visibleMaximum ?? maximum,
+            },
           };
         },
       });
