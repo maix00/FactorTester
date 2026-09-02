@@ -32,6 +32,23 @@
     ), preferred);
   }
 
+  function rangeRequest(request, minimum, maximum, maximumPoints) {
+    const payload = {...(request || {})};
+    const applyBound = (prefix, value) => {
+      if (!Number.isFinite(Number(value))) return;
+      const date = new Date(Number(value));
+      const pad = item => String(item).padStart(2, "0");
+      payload[`${prefix}_date`] = `${date.getFullYear()}-${pad(date.getMonth() + 1)}`
+        + `-${pad(date.getDate())}`;
+      payload[`${prefix}_time`] = `${pad(date.getHours())}:${pad(date.getMinutes())}`
+        + `:${pad(date.getSeconds())}`;
+    };
+    applyBound("start", minimum);
+    applyBound("end", maximum);
+    payload.max_points = Math.max(100, Number(maximumPoints) || 1200);
+    return payload;
+  }
+
   function contracts(context, product, preferred = "") {
     return firstAvailable(context, source => context.api(
       `${source === "local" ? "/api/client/product_contracts" : "/api/product-library/contracts"}`
@@ -39,5 +56,7 @@
     ), preferred);
   }
 
-  window.FTMarketData = Object.freeze({contracts, localAvailable, prices, sourceOrder});
+  window.FTMarketData = Object.freeze({
+    contracts, localAvailable, prices, rangeRequest, sourceOrder,
+  });
 })();

@@ -32,13 +32,16 @@
     return desc && desc !== name ? `${name} · ${desc}` : name;
   }
 
-  function points(item) {
+  function points(item, minimum, maximum) {
     const dates = Array.isArray(item?.dates) ? item.dates : [];
     const values = Array.isArray(item?.values) ? item.values : [];
     return values.flatMap((value, index) => {
       const time = window.FTPriceChart?.timestampOf(dates[index]);
       const number = Number(value);
-      return Number.isFinite(time) && Number.isFinite(number) ? [[time, number]] : [];
+      const inRange = (!Number.isFinite(Number(minimum)) || time >= Number(minimum))
+        && (!Number.isFinite(Number(maximum)) || time <= Number(maximum));
+      return Number.isFinite(time) && Number.isFinite(number) && inRange
+        ? [[time, number]] : [];
     });
   }
 

@@ -151,6 +151,18 @@
         factorSeries: item,
         price: price.payload,
         contracts: rows,
+      }, {
+        loadingText: context.t("正在读取当前时间范围…"),
+        loadRange: async (minimum, maximum, range = {}) => {
+          const ranged = window.FTMarketData.rangeRequest(
+            request, minimum, maximum, range.maxPoints,
+          );
+          const result = await window.FTMarketData.prices(context, ranged, price.source);
+          return {
+            ...result.payload,
+            __ftRange: {minimum, maximum},
+          };
+        },
       });
       note.textContent = price.source
         ? `${context.t("行情来源")}：${context.t(price.source === "local" ? "本地" : "服务器")}`

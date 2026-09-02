@@ -5,6 +5,7 @@ const vm = require("vm");
 
 const root = path.resolve(__dirname, "../../..");
 let captured = null;
+let capturedDisplayOptions = null;
 const chart = {xAxis: [{}], destroy() {}};
 const context = {
   window: {}, console,
@@ -14,15 +15,17 @@ const context = {
 };
 context.window = context;
 context.FTJobHighcharts = {
-  mountOptions(_context, target, options, stock) {
+  mountOptions(_context, target, options, stock, displayOptions) {
     assert.strictEqual(stock, true);
     captured = {target, options};
+    capturedDisplayOptions = displayOptions;
     return chart;
   },
 };
 vm.createContext(context);
 [
   "server/manager/web/core/price-chart.js",
+  "server/manager/web/core/market-data.js",
   "server/manager/web/jobs/highcharts-timeline.js",
   "server/manager/web/test-modules/factor-evaluation/results/model.js",
   "server/manager/web/test-modules/factor-evaluation/results/chart.js",
@@ -50,6 +53,18 @@ assert.deepStrictEqual(
   }, "SI.GFE"))),
   {product_name: "SI.GFE", freq: "MIN5", adjusted: false, start_date: "2025-01-01"},
 );
+assert.deepStrictEqual(
+  JSON.parse(JSON.stringify(context.FTMarketData.rangeRequest(
+    {product_name: "SI.GFE", freq: "MIN1"},
+    new Date(2025, 0, 2, 9, 30).getTime(),
+    new Date(2025, 0, 2, 10, 30).getTime(), 900,
+  ))),
+  {
+    product_name: "SI.GFE", freq: "MIN1",
+    start_date: "2025-01-02", start_time: "09:30:00",
+    end_date: "2025-01-02", end_time: "10:30:00", max_points: 900,
+  },
+);
 
 const target = {replaceChildren() {}, classList: {add() {}}};
 const mounted = context.FTFactorSeriesChart.mount({t: value => value}, target, {
@@ -75,6 +90,19 @@ assert.strictEqual(captured.options.navigator.series.dataGrouping.enabled, false
 captured.options.series.forEach(item => {
   assert.strictEqual(item.dataGrouping.enabled, false);
 });
+assert.strictEqual(typeof capturedDisplayOptions.rangeOptions, "function");
+const rangedOptions = capturedDisplayOptions.rangeOptions({
+  data: [{
+    timestamp: "2025-01-02T15:00:00+08:00",
+    open: 10, high: 12, low: 9, close: 11, volume: 100,
+  }],
+  __ftRange: {
+    minimum: Date.parse("2025-01-02T00:00:00+08:00"),
+    maximum: Date.parse("2025-01-02T23:59:59+08:00"),
+  },
+});
+assert.strictEqual(rangedOptions.series[0].data.length, 1);
+assert.strictEqual(rangedOptions.series[1].data.length, 1);
 assert.strictEqual(typeof captured.options.xAxis.labels.formatter, "function");
 const factorTooltip = captured.options.series[0].tooltip.pointFormatter.call({
   open: 10, high: 12, low: 9, close: 11,
