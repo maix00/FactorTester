@@ -346,6 +346,13 @@ class RollingOp(OperandExpr):
             raise ValueError("rolling quantile q must be between 0 and 1")
         return q
 
+    @property
+    def quantile_expr(self) -> FactorExpr | None:
+        """Return unresolved q for metadata/formula rendering before parameters resolve."""
+        if self.op != 'rolling_quantile':
+            return None
+        return self.operands[self._data_start + self._n_data]
+
     # ── 算子映射：op → lambda(*series_or_dfs, window) ──
 
     _OP_MAP = {
@@ -449,9 +456,15 @@ class RollingOp(OperandExpr):
                 'rolling_argmin_raw': f'\\text{{R}}_{{{w_str}{trunc_suffix}}}\\text{{ArgMinRaw}}\\left({operand_latex}\\right)',
             }
             if self.op == 'rolling_quantile':
+                q_expr = self.quantile_expr
+                q_latex = (
+                    q_expr._to_latex(subst)
+                    if isinstance(q_expr, FactorExpr)
+                    else str(q_expr)
+                )
                 return (
                     f'\\text{{R}}_{{{w_str}{trunc_suffix}}}'
-                    f'\\text{{Quantile}}_{{{self.quantile}}}'
+                    f'\\text{{Quantile}}_{{{q_latex}}}'
                     f'\\left({operand_latex}\\right)'
                 )
             return _LATEX_MAP.get(self.op, f'{self.op}_{{{w_str}}}{operand_latex}')
