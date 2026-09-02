@@ -11,7 +11,9 @@ from server.modules.custom_factors.visual_graph import factor_expr_to_visual_gra
 from server.modules.shared.factor_param_utils import (
     factor_param_value_storage,
     frozen_factor_dependencies,
+    frozen_factor_records_from_values,
     normalize_factor_param_row,
+    unique_frozen_factor_records,
 )
 from server.modules.shared.factor_param_resolver import resolve_factor_param_value
 from server.modules.shared.param_meta import serialize_param_meta
@@ -45,10 +47,13 @@ from tools.factors.factor_param_resolution import factor_param_resolver_scope
 def _freeze_validated_factor(factor_family, params, owner_ref):
     """Return the canonical Factor v2 record without persisting it."""
     username = current_user()
+    raw_params = params if isinstance(params, dict) else {}
+    raw_dependencies = frozen_factor_records_from_values(raw_params)
+    frozen_by_ref = {value['ref']: value for value in raw_dependencies}
     with factor_param_resolver_scope(lambda value: resolve_factor_param_value(
-        value, username=username,
+        value, username=username, frozen_by_ref=frozen_by_ref,
     )):
-        normalized = normalize_factor_param_row(factor_family, params or {})
+        normalized = normalize_factor_param_row(factor_family, raw_params)
         factor = factor_family.get_factor(**normalized)
     expression = getattr(factor, '_source_expr', None) or factor.expr
     frozen_params = {
@@ -65,9 +70,10 @@ def _freeze_validated_factor(factor_family, params, owner_ref):
         self_formula_fingerprint=expression.semantic_fingerprint(),
         params=frozen_params,
     )
-    dependencies = frozen_factor_dependencies(
-        factor_family.params, normalized,
-    )
+    dependencies = unique_frozen_factor_records([
+        *raw_dependencies,
+        *frozen_factor_dependencies(factor_family.params, normalized),
+    ])
     return {
         **frozen,
         **({'factor_dependencies': dependencies} if dependencies else {}),

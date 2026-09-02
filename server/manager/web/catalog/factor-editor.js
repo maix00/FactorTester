@@ -58,6 +58,66 @@
     });
   }
 
+  function parameterDefinitions(value, options = {}) {
+    const shared = window.FTFactorDetailShared?.parameterRows?.(value, options);
+    if (Array.isArray(shared) && shared.length) return shared;
+    const candidates = [
+      value?.parameter_definitions,
+      value?.params,
+      value?.factor_params,
+      value?.parameters,
+    ].filter(candidate => Array.isArray(candidate) && candidate.length);
+    return candidates.find(candidate => candidate.some(parameter => (
+      parameter && typeof parameter === "object"
+      && String(parameter.type || parameter.param_type || "").trim()
+        && String(parameter.type || parameter.param_type || "").trim() !== "Parameter"
+    ))) || candidates.find(candidate => candidate.some(parameter => (
+      parameter && typeof parameter === "object"
+      && parameter.default_value !== undefined
+    ))) || candidates[0] || [];
+  }
+
+  function parameterRows(value, options = {}) {
+    return parameterDefinitions(value, options);
+  }
+
+  function hasTypedParameters(value, options = {}) {
+    return parameterRows(value, options).some(parameter => (
+      parameter && parameter.type && parameter.type !== "Parameter"
+    ));
+  }
+
+  async function resolveFactorForDisplay(context, data, factor, item = {}) {
+    let family = item.family
+      || window.FTFactorDisplayEnrichment.factorFamilyForFactor(data, factor);
+    let merged = window.FTFactorDisplayEnrichment.enrichFactorWithFamily(
+      factor, family,
+    );
+    const hasFormula = Boolean(window.FTFactorDetailShared?.expression?.(merged));
+    if (family && (!hasTypedParameters(merged) || !hasFormula)
+        && window.FTFactorDetailShared?.loadSourceVersion) {
+      try {
+        const loaded = await window.FTFactorDetailShared.loadSourceVersion(
+          context, family, "current", {
+            familyID: familyAlias(family),
+            sourceKind: family.factor_kind === "public" || family.source === "public"
+              ? "public" : "custom",
+            ownerUsername: family.owner_username || context.session?.username || "",
+          },
+        );
+        family = {...family, ...loaded};
+        if (item.family) item.family = family;
+        merged = window.FTFactorDisplayEnrichment.enrichFactorWithFamily(
+          factor, family,
+        );
+      } catch (_) {
+        // The compact factor remains selectable; its frozen identity is still
+        // valid even when the optional family source cannot be loaded.
+      }
+    }
+    return merged;
+  }
+
   // The catalog page and the workbench overlay must use the same selector.
   // The workbench wrapper only adds create/edit actions when it is available;
   // the catalog module still works standalone with the shared base control.
@@ -98,7 +158,7 @@
             state.sourceCode = family.source_code || "";
             state.inspection = {
               ...family,
-              params: family.params || family.parameter_definitions || [],
+              params: parameterDefinitions(family),
             };
             state.parameterValues = defaults(state.inspection.params);
             state.sourceVersionFingerprint =
@@ -118,7 +178,7 @@
       onChange: async values => {
         state.family = familyItems(data).find(item => item.value === values[0])?.family || null;
         state.sourceMode = "family";
-        if (state.family && !(state.family.params || []).length) {
+        if (state.family && !parameterDefinitions(state.family).length) {
           try {
             const loaded = await window.FTFactorDetailShared.loadSourceVersion(
               context, state.family, "current", {
@@ -135,7 +195,7 @@
           }
         }
         state.latestFamily = state.family;
-        state.parameterValues = defaults(state.family?.params || []);
+        state.parameterValues = defaults(parameterDefinitions(state.family));
         state.sourceVersionFingerprint = "";
         state.sourceVersions = null;
         state.sourceVersionError = "";
@@ -201,7 +261,8 @@
       };
       state.sourceCode = payload.source_code || "";
       state.onFamilyChanged?.(state.family);
-      const nextParameters = payload.params || state.family.params || [];
+      const nextParameters = parameterDefinitions(payload).length
+        ? parameterDefinitions(payload) : parameterDefinitions(state.family);
       const previous = state.parameterValues || {};
       state.parameterValues = Object.fromEntries(nextParameters.map(parameter => {
         const alias = parameter.alias || parameter.name;
@@ -310,8 +371,8 @@
 
   function parameters(state) {
     if (state.familyMode) return [];
-    if (state.sourceMode === "source") return state.inspection?.params || [];
-    return state.family?.params || [];
+    if (state.sourceMode === "source") return parameterDefinitions(state.inspection);
+    return parameterDefinitions(state.family);
   }
 
   function factorParameterItems(data) {
@@ -321,10 +382,16 @@
       const value = String(factor?.factor_ref || factor?.ref || "").trim();
       if (!alias || !value || seen.has(value)) return [];
       seen.add(value);
+      const family = window.FTFactorDisplayEnrichment.factorFamilyForFactor(
+        data, factor,
+      );
+      const enriched = window.FTFactorDisplayEnrichment.enrichFactorWithFamily(
+        factor, family,
+      );
       return [{
-        value, label: alias, factor,
-        description: [factor.owner_alias || factor.owner_username,
-          factor.factor_family_alias].filter(Boolean).join(" · "),
+        value, label: alias, factor: enriched, family,
+        description: [enriched.owner_alias || enriched.owner_username,
+          enriched.factor_family_alias].filter(Boolean).join(" · "),
       }];
     });
   }
@@ -337,6 +404,9 @@
         factorItems: factorParameterItems(data),
         familyItems: familyItems(data),
         maxFamilyDepth: context.testObjectOverlay === true ? 1 : 12,
+        onSelectFactor: (factor, item) => resolveFactorForDisplay(
+          context, data, factor, item,
+        ),
         onValidateFactorAlias: async alias => {
           const normalizedAlias = String(alias || "").trim();
           const registered = (data?.factors || []).find(item => (
@@ -344,12 +414,19 @@
               === normalizedAlias
           ));
           if (registered) {
+            const family = window.FTFactorDisplayEnrichment.factorFamilyForFactor(
+              data, registered,
+            );
+            const enriched = await resolveFactorForDisplay(
+              context, data, registered, {family},
+            );
             return {
               valid: true,
               factor_alias: String(
                 registered.factor_alias || registered.alias || normalizedAlias,
               ),
-              factor: registered,
+              factor: enriched,
+              family,
             };
           }
           const familyAliasValue = normalizedAlias.split("|", 1)[0];
@@ -371,7 +448,7 @@
           });
         },
         onSelectFamily: async family => {
-          if ((family?.params || family?.parameter_definitions || []).length) {
+          if (parameterDefinitions(family).length) {
             return family;
           }
           try {
@@ -409,6 +486,7 @@
           }
           markDirty("parameters");
           context.pageState?.capture?.();
+          refreshParameterComposition(state.parameterValues);
           refreshFormulaPreview();
         },
       },
@@ -842,7 +920,7 @@
         || item.factor_family_alias === options.familyRef
         || item.factor_family_name === options.familyRef) || null
       : null;
-    if (selectedFamily && !(selectedFamily.params || []).length) {
+    if (selectedFamily && !parameterDefinitions(selectedFamily).length) {
       try {
         const familySource = await window.FTFactorDetailShared.loadSourceVersion(
           context, selectedFamily, "current", {
@@ -859,11 +937,12 @@
     }
     const loadedFamily = temporaryFamilyEdit
       ? data.families.find(item => familyRef(item) === (
-        loaded.family_ref
+          loaded.family_ref
       ) || familyAlias(item) === (
         loaded.factor_family_alias || loaded.family_alias
       )) || null
       : null;
+    const loadedParameters = parameterDefinitions(loaded, {family: loaded});
     const state = {
       mode, factorID, familyMode, publicMode,
       sourceMode: familyMode ? "source" : mode === "edit" && !temporaryFamilyEdit
@@ -874,14 +953,12 @@
         ? loaded : selectedFamily || loadedFamily,
       sourceCode: loaded.source_code || "",
       inspection: mode === "edit" && !temporaryFamilyEdit ? {
-        params: Array.isArray(loaded.parameter_definitions)
-          ? loaded.parameter_definitions
-          : window.FTFactorDetailShared.parameterRows(loaded),
+        params: loadedParameters,
         math_expr: loaded.math_expr || loaded.formula || "",
         description: loaded.description || loaded.chinese_name || "",
       } : null,
       parameterValues: Object.fromEntries(
-        window.FTFactorDetailShared.parameterRows(loaded).map(parameter => [
+        loadedParameters.map(parameter => [
           parameter.alias,
           parameter.value ?? parameter.default_value ?? "",
         ]),
@@ -941,6 +1018,7 @@
     const status = document.createElement("small");
     status.className = "form-error";
     let previewFrame = 0;
+    let refreshParameterComposition = () => {};
     const refreshFormulaPreview = () => {
       if (previewFrame) return;
       const schedule = window.requestAnimationFrame || (callback => setTimeout(callback, 0));
@@ -960,6 +1038,7 @@
       });
     };
     const redraw = () => {
+      refreshParameterComposition = () => {};
       topMount.replaceChildren();
       if (state.familyMode && state.mode === "edit") {
         const version = sourceVersionPicker(context, state, redraw);
@@ -1025,12 +1104,16 @@
         // request without inventing a second parameter form.
         state.parameterValues = editor.values;
         if (state.familyMode) parameterMount.append(editor.root);
-        else parameterMount.append(parameterComposition(
-          context, {
+        else {
+          const composition = parameterComposition(
+            context, {
             ...(state.family || state.inspection || {}),
             source_code: state.sourceCode || state.family?.source_code || "",
-          }, editor.root,
-        ));
+            }, editor.root, state.parameterValues,
+          );
+          refreshParameterComposition = composition.refresh;
+          parameterMount.append(composition.root);
+        }
       } else parameterMount.append(emptyState(context, state.familyMode
         ? "参数定义将在源码校验后生成" : "当前因子没有参数"));
     };
@@ -1211,7 +1294,7 @@
     return value;
   }
 
-  function parameterComposition(context, family, content) {
+  function parameterComposition(context, family, content, parameterValues = {}) {
     const root = document.createElement("details");
     root.open = true;
     root.className = "factor-param-root-family";
@@ -1226,18 +1309,26 @@
       heading.append(window.FTFactorDetailShared.familySourceHelp(context, family));
     }
     header.append(heading);
-    const expression = window.FTFactorDetailShared.expression(family);
-    if (expression) {
-      const formula = document.createElement("div");
-      formula.className = "factor-detail-parameter-formula display-math";
+    const formula = document.createElement("div");
+    formula.className = "factor-detail-parameter-formula display-math";
+    const renderFormula = values => {
+      const expression = window.FTFactorDetailShared.previewExpression(
+        family, values || {},
+      ) || window.FTFactorDetailShared.expression(family);
+      if (!expression) {
+        formula.replaceChildren?.();
+        formula.textContent = "";
+        return;
+      }
       if (window.katex) window.katex.render(expression, formula, {
         displayMode: true, throwOnError: false,
       });
       else formula.textContent = expression;
-      header.append(formula);
-    }
+    };
+    renderFormula(parameterValues);
+    if (formula.textContent || formula.childElementCount) header.append(formula);
     root.append(header, content);
-    return root;
+    return {root, refresh: renderFormula};
   }
 
   function textField(context, labelText, value, options = {}) {

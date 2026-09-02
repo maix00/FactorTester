@@ -178,6 +178,46 @@ def test_source_family_projections_preserve_formula_fingerprint(monkeypatch) -> 
     assert public["families"][0]["family_formula_fingerprint"] == "c" * 64
     assert custom[0]["family_formula_fingerprint"] == "c" * 64
     assert custom[0]["params"] == source["params"]
+    assert public["families"][0]["parameter_definitions"][0]["type"] == "WindowParam"
+    assert custom[0]["parameter_definitions"][0]["type"] == "WindowParam"
+
+
+def test_factor_projection_inherits_typed_definitions_from_matching_family() -> None:
+    frozen = _frozen_factor(
+        alias="Momentum|N:5d",
+        family="Momentum",
+    )
+    payload = build_client_library_projection({
+        "families": [{
+            "factor_family_alias": "Momentum",
+            "factor_family_name": "Momentum",
+            "owner_username": "alice",
+            "owner_alias": "Alice",
+            "factor_owner_ref": "principal:alice",
+            "source": "custom",
+            "family_formula_fingerprint": "a" * 64,
+            "params": [{
+                "alias": "N",
+                "type": "WindowParam",
+                "default_value": "20d",
+            }],
+        }],
+        "factors": [{
+            "factor_alias": "Momentum|N:5d",
+            "factor_family_alias": "Momentum",
+            "factor_family_name": "Momentum",
+            "owner_username": "alice",
+            "owner_alias": "Alice",
+            "source": "custom",
+            "params": [{"alias": "N", "value": "5d"}],
+            **frozen,
+        }],
+    }, principal="alice")
+
+    definitions = payload["factors"][0]["parameter_definitions"]
+    assert definitions[0]["type"] == "WindowParam"
+    assert definitions[0]["default_value"] == "20d"
+    assert definitions[0]["value"] == "5d"
 
 
 def test_public_source_applied_requires_superadmin_and_verifies_source(

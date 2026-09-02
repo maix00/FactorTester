@@ -7,7 +7,9 @@ from typing import Any
 from server.modules.shared.factor_param_utils import (
     factor_param_value_display,
     frozen_factor_dependencies,
+    frozen_factor_records_from_values,
     normalize_factor_param_row,
+    unique_frozen_factor_records,
 )
 from server.services.strategy_plans import normalize_strategy_plan
 from server.services.strategy_source_inspection import inspect_source
@@ -27,7 +29,9 @@ def family_template_latex(family: Any) -> str:
     return str(getattr(family, "math_expr", "") or "")
 
 
-def instantiate_factor_metadata(family: Any, params: Any = None) -> dict[str, Any]:
+def instantiate_factor_metadata(
+    family: Any, params: Any = None, *, username: str | None = None,
+) -> dict[str, Any]:
     """Return factor identity plus template and resolved formula views.
 
     ``math_expr`` is the family template: parameter references remain visible
@@ -37,12 +41,25 @@ def instantiate_factor_metadata(family: Any, params: Any = None) -> dict[str, An
     audit the concrete parameterized expression used for this row.
     """
     raw = params if isinstance(params, dict) else {}
-    normalized = normalize_factor_param_row(family, raw)
-    factor = family.get_factor(**normalized)
+    raw_dependencies = frozen_factor_records_from_values(raw)
+    frozen_by_ref = {value['ref']: value for value in raw_dependencies}
+    principal = str(
+        username or getattr(family, 'owner_ref', '') or '',
+    ).strip().removeprefix('principal:')
+    from server.modules.shared.factor_param_resolver import resolve_factor_param_value
+    from tools.factors.factor_param_resolution import factor_param_resolver_scope
+    with factor_param_resolver_scope(lambda value: resolve_factor_param_value(
+        value, username=principal or None, frozen_by_ref=frozen_by_ref,
+    )):
+        normalized = normalize_factor_param_row(family, raw)
+        factor = family.get_factor(**normalized)
     expression = getattr(factor, "_source_expr", None) or getattr(factor, "expr", None)
     resolved_formula = expression.to_latex() if expression is not None else ""
     template_formula = family_template_latex(family)
-    dependencies = frozen_factor_dependencies(family.params, normalized)
+    dependencies = unique_frozen_factor_records([
+        *raw_dependencies,
+        *frozen_factor_dependencies(family.params, normalized),
+    ])
     from server.modules.shared.factor_instance_metadata import (
         build_factor_instance_metadata,
     )

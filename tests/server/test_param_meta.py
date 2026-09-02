@@ -1,6 +1,7 @@
 import pytest
 
 from server.modules.shared import factor_param_resolver
+from server.modules.shared.factor_instance_metadata import _dependency_index
 from server.modules.shared.factor_param_resolver import resolve_factor_param_value
 from server.modules.shared.factor_param_utils import (
     factor_param_value_storage,
@@ -30,6 +31,27 @@ def _frozen(alias: str, *, params: dict | None = None) -> dict:
         self_formula_fingerprint="b" * 64,
         params=params or {},
     )
+
+
+def test_dependency_index_merges_compact_and_complete_same_frozen_identity():
+    leaf = _frozen("Leaf|N:5d")
+    complete = {
+        **leaf,
+        "source_kind": "transient",
+        "source_origin": "test_inline",
+        "source_code": "class Leaf: pass",
+    }
+    outer = {
+        **_frozen("Outer|P:[Leaf|N:5d]", params={"P": leaf["ref"]}),
+        "factor_dependencies": [leaf],
+    }
+
+    index = _dependency_index([complete, outer])
+
+    assert index[leaf["ref"]]["source_code"] == "class Leaf: pass"
+    nested = index[outer["ref"]]["factor_dependencies"][0]
+    assert nested["ref"] == complete["ref"]
+    assert nested["source_code"] == complete["source_code"].strip()
 
 
 def test_factor_param_declares_visible_factor_reference_editor():
@@ -121,9 +143,9 @@ def test_factor_param_dependencies_are_flattened_and_deduplicated():
         "factor_dependencies": [leaf, leaf],
     }
 
-    assert frozen_factor_dependencies([parameter], {"P": nested}) == [leaf, {
-        key: value for key, value in nested.items() if key != "factor_dependencies"
-    }]
+    assert frozen_factor_dependencies([parameter], {"P": nested}) == [
+        leaf, {**nested, "factor_dependencies": [leaf]},
+    ]
 
 
 def test_inline_factor_dependency_keeps_only_its_frozen_source_payload():

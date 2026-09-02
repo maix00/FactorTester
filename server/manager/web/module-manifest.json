@@ -95,9 +95,12 @@
     "catalog-detail-tabs": ["core"],
     "factor-catalog-core": ["core", "catalog-selection-core", "catalog-detail-tabs"],
     "factor-catalog-list": ["factor-catalog-core"],
-    "factor-catalog-detail": ["factor-catalog-core"],
+    "factor-catalog-enrichment": ["factor-catalog-core"],
+    "factor-catalog-detail": ["factor-catalog-core", "factor-catalog-enrichment"],
     "factor-catalog-detail-rendering": ["factor-catalog-detail"],
-    "factor-catalog-editor": ["factor-catalog-core", "object-editor-overlay"],
+    "factor-catalog-editor": [
+      "factor-catalog-core", "factor-catalog-enrichment", "object-editor-overlay"
+    ],
     "strategy-library-runtime": ["core"],
     "strategy-library-core": ["strategy-library-runtime", "code-viewer", "catalog-detail-tabs"],
     "strategy-library-list": ["strategy-library-runtime"],
@@ -280,6 +283,9 @@
       "catalog/factor-group-filter.js",
       "catalog/factor-list.js",
       "catalog/factor-catalog-list.js"
+    ],
+    "factor-catalog-enrichment": [
+      "catalog/factor-display-enrichment.js"
     ],
     "factor-catalog-detail": [
       "catalog/factor-details.js"
@@ -709,6 +715,7 @@
     "jobs/detail.js",
     "catalog/factor-model.js",
     "catalog/factor-detail-shared.js",
+    "catalog/factor-display-enrichment.js",
     "catalog/shared/object-detail-tabs.js",
     "catalog/shared/object-job-table.js",
     "catalog/factor-catalog-runtime.js",
