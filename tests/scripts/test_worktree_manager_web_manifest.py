@@ -2518,7 +2518,7 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert "editor.syncFromState()" in set_editor
     assert 'parameter.type === "FactorParam"' in parameter_editor
     assert '"新增因子家族"' in parameter_editor
-    assert "factor-param-choice-disabled" in parameter_editor
+    assert "factor-param-choice-disabled" not in parameter_editor
     assert "factor-param-reference-control" in parameter_editor
     assert 'input.placeholder = context.t("填写")' in parameter_editor
     assert 'header.className = "factor-detail-parameter-header"' in parameter_editor
@@ -2526,7 +2526,7 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert 'context.t("Column")' in parameter_editor
     assert ".factor-detail-parameter-header, .factor-detail-parameter-row" in app_css
     assert "grid-template-columns: minmax(70px, .45fr)" in app_css
-    assert ".factor-param-reference-control { display: grid; grid-template-columns: minmax(0, 1fr)" in app_css
+    assert ".factor-param-reference-control { display: grid; grid-template-columns: minmax(8rem, .38fr)" in app_css
     assert "font-family: ui-monospace, SFMono-Regular" in app_css
     assert "function numericConstant" in parameter_editor
     assert 'setValue(constant, "manual")' in parameter_editor
@@ -2534,11 +2534,15 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert "onValidateFactorAlias" in parameter_editor
     assert "factor-param-column-" in parameter_editor
     assert "factor-param-factor-" in parameter_editor
+    assert "factor-param-family-source" in parameter_editor
+    assert "factor-param-nested-factor-table" in parameter_editor
+    assert 'method: "POST"' in parameter_editor
+    assert "resolve_factor_alias" in parameter_editor
     assert "FTTestObjectEditorOverlay.open" in editor
     assert "factor-source-mode" not in editor
     assert '"新增因子家族"' in editor
     assert 'state.family.source_kind === "transient"' in editor
-    assert "factor-param-choice-family" in parameter_editor
+    assert "factor-param-choice-family" not in parameter_editor
     assert "compact: true, multi: false" in parameter_editor
     assert "state.onInspected?.(state.inspection)" in editor
     assert "name.value = inspection.factor_name" not in editor

@@ -4,7 +4,10 @@
   function create(context, parameters = [], initial = {}, options = {}) {
     const values = {...initial};
     const root = document.createElement("section");
-    root.className = "factor-detail-parameter-editor";
+    root.className = [
+      "factor-detail-parameter-editor",
+      options.readOnly ? "is-read-only" : "",
+    ].filter(Boolean).join(" ");
     const header = document.createElement("div");
     header.className = "factor-detail-parameter-header";
     ["Key", "参数类型", "默认值", "Value"].forEach(label => {
@@ -31,12 +34,14 @@
       values[alias] = initialValue;
       let nestedMount = null;
       if (parameter.type === "FactorParam") {
+        row.classList?.add?.("factor-detail-parameter-row-factor");
         nestedMount = renderReference(
           context, value, parameter, initialValue, values, options,
         );
       } else {
         const input = document.createElement("input");
         input.type = "text";
+        input.readOnly = Boolean(options.readOnly);
         input.value = initialValue;
         input.addEventListener("input", () => {
           values[alias] = input.value;
@@ -58,6 +63,8 @@
     const families = [...(options.familyItems || [])];
     const control = document.createElement("div");
     control.className = "factor-param-reference-control";
+    const sourceControl = document.createElement("div");
+    sourceControl.className = "factor-param-active-source";
     const input = document.createElement("input");
     const display = value => {
       if (value && typeof value === "object") {
@@ -71,27 +78,64 @@
       }
       return String(value ?? "").trim();
     };
+    const selectionValue = value => {
+      if (value && typeof value === "object") {
+        return String(value.value ?? value.ref ?? value.family_ref
+          ?? value.factor_ref ?? value.id ?? "").trim();
+      }
+      return String(value ?? "").trim();
+    };
+    const allowFamilyComposition = Number(options.depth || 0)
+      < Number(options.maxFamilyDepth ?? 12);
+    const sourceTypes = [
+      {
+        value: "manual", label: context.t("填写"),
+        description: context.t("手动填写 ColumnRef、因子 alias 或常量"),
+      },
+      {
+        value: "column", label: context.t("Column"),
+        description: context.t("从 DataColumn 候选中选择"),
+      },
+      {
+        value: "factor", label: context.t("因子库"),
+        description: context.t("从当前可见因子中选择"),
+      },
+    ];
+    if (allowFamilyComposition) {
+      sourceTypes.push({
+        value: "family", label: context.t("因子家族"),
+        description: context.t("选择因子家族并填写其嵌套参数"),
+      });
+    }
     let columnPicker;
     let factorPicker;
     let familyPicker;
+    let sourcePicker;
+    const initialFactor = factors.find(candidate => {
+      const candidateValue = selectionValue(candidate.value ?? candidate.ref);
+      const candidateFactor = candidate.factor || candidate;
+      const candidateAlias = display(candidateFactor);
+      return candidateValue && (
+        candidateValue === reference(initialValue)
+        || candidateAlias === display(initialValue)
+      );
+    });
+    if (isFrozenFactor(initialFactor?.factor || initialFactor)
+        && !isFrozenFactor(initialValue)) {
+      initialValue = initialFactor.factor || initialFactor;
+      values[alias] = initialValue;
+    }
     let activeSource = familyDraft(initialValue) ? "family"
-      : factors.some(item => item.value === reference(initialValue)) ? "factor"
-        : columns.some(item => item.value === initialValue) ? "column"
+      : factors.some(item => selectionValue(item.value ?? item.ref)
+        === reference(initialValue)) ? "factor"
+        : columns.some(item => selectionValue(item.value) === selectionValue(initialValue))
+          ? "column"
           : display(initialValue) ? "manual" : "";
-    const groups = {};
-    const syncSources = () => {
-      for (const [source, element] of Object.entries(groups)) {
-        const disabled = Boolean(activeSource && activeSource !== source);
-        element.classList?.toggle?.("factor-param-choice-disabled", disabled);
-        (element.querySelectorAll?.("input,select,button,textarea") || []).forEach(control => {
-          control.disabled = disabled;
-        });
-      }
-    };
-    const setValue = (value, source) => {
+    let renderSourceControl = () => {};
+    const setValue = (value, source, {retainSource = false} = {}) => {
       const empty = value === undefined || value === null || value === "";
       values[alias] = empty ? "" : value;
-      activeSource = empty ? "" : source;
+      activeSource = empty ? (retainSource ? source : "") : source;
       input.value = ["column", "manual"].includes(source) ? display(values[alias]) : "";
       input.setCustomValidity("");
       const shown = display(values[alias]);
@@ -100,44 +144,81 @@
       factorPicker?.setValues?.(source === "factor" && selectedRef ? [selectedRef] : []);
       familyPicker?.setValues?.(source === "family" && familyDraft(value)
         ? [familyRef(value.__factor_family)] : []);
-      syncSources();
+      sourcePicker?.setValues?.(activeSource ? [activeSource] : []);
+      renderSourceControl();
+      renderNested();
       options.onChange?.(values, alias);
     };
-    columnPicker = picker(context, `factor-param-column-${alias}`, context.t("DataColumn"),
-      columns, columns.some(item => item.value === initialValue) ? [initialValue] : [],
-      selected => setValue(selected[0] || "", "column"));
-    factorPicker = picker(context, `factor-param-factor-${alias}`, context.t("因子库"),
-      factors, factors.some(item => item.value === reference(initialValue))
-        ? [reference(initialValue)] : [],
-      selected => {
-        const item = factors.find(candidate => candidate.value === selected[0]);
-        setValue(item?.factor || "", "factor");
-      });
-    familyPicker = picker(
-      context, `factor-param-family-${alias}`, context.t("因子家族"),
-      families, familyDraft(initialValue) ? [familyRef(initialValue.__factor_family)] : [],
-      async selected => {
-        const item = families.find(candidate => candidate.value === selected[0]);
-        if (!item) { setValue("", "family"); renderNested(); return; }
-        const selectedFamily = await options.onSelectFamily?.(item.family) || item.family;
-        setValue(makeFamilyDraft(selectedFamily), "family");
-        renderNested();
+    const sourceValue = source => {
+      if (activeSource !== source) return "";
+      if (source === "column" && !columns.some(item => (
+        selectionValue(item.value) === selectionValue(values[alias])
+      ))) return "";
+      if (source === "factor" && !factors.some(item => (
+        selectionValue(item.value ?? item.ref) === reference(values[alias])
+      ))) return "";
+      if (source === "family" && !familyDraft(values[alias])) return "";
+      return values[alias];
+    };
+    sourcePicker = picker(
+      context, `factor-param-source-${alias}`, context.t("填写类型"),
+      sourceTypes, activeSource ? [activeSource] : [], selected => {
+        const source = selectionValue(selected?.[0]);
+        if (!sourceTypes.some(item => item.value === source)) {
+          setValue("", "");
+          return;
+        }
+        setValue(sourceValue(source), source, {retainSource: true});
       },
+      {disabled: options.readOnly === true},
     );
+    columnPicker = picker(context, `factor-param-column-${alias}`, context.t("DataColumn"),
+      columns, activeSource === "column" ? [initialValue] : [],
+      selected => setValue(selected?.[0] || "", "column"),
+      {disabled: options.readOnly === true});
+    factorPicker = picker(context, `factor-param-factor-${alias}`, context.t("因子库"),
+      factors, activeSource === "factor" ? [reference(initialValue)] : [], selected => {
+        const selectedRef = selectionValue(selected?.[0]);
+        const item = factors.find(candidate => (
+          selectionValue(candidate.value ?? candidate.ref) === selectedRef
+        ));
+        setValue(item?.factor || "", "factor");
+      }, {disabled: options.readOnly === true});
+    if (allowFamilyComposition) {
+      familyPicker = picker(
+        context, `factor-param-family-${alias}`, context.t("因子家族"),
+        families, familyDraft(initialValue) ? [familyRef(initialValue.__factor_family)] : [],
+        async selected => {
+          const selectedValue = selectionValue(selected?.[0]);
+          const item = families.find(candidate => (
+            selectionValue(candidate.value ?? candidate.ref) === selectedValue
+          ));
+          if (!item) { setValue("", "family"); return; }
+          const selectedFamily = await options.onSelectFamily?.(item.family) || item.family;
+          setValue(makeFamilyDraft(selectedFamily), "family");
+        },
+        {disabled: options.readOnly === true},
+      );
+    }
     input.type = "text";
     const initialText = display(initialValue);
-    input.value = columns.some(item => item.value === initialValue)
-      || numericConstant(initialText) !== null ? initialText : "";
+    input.value = activeSource === "manual" || activeSource === "column"
+      ? initialText : "";
     input.placeholder = context.t("填写");
     input.addEventListener("input", () => {
       const raw = input.value.trim().toUpperCase();
       const matched = columns.find(item => String(item.value || "").toUpperCase() === raw);
       input.setCustomValidity("");
       if (matched) setValue(String(matched.value), "column");
-      else if (!raw) setValue("", "column");
+      else if (!raw) setValue("", "manual", {retainSource: true});
       else {
         activeSource = "manual";
-        syncSources();
+        values[alias] = input.value;
+        factorPicker?.setValues?.([]);
+        familyPicker?.setValues?.([]);
+        sourcePicker?.setValues?.(["manual"]);
+        renderNested();
+        options.onChange?.(values, alias);
       }
     });
     input.addEventListener("change", async () => {
@@ -159,39 +240,57 @@
         input.reportValidity();
       }
     });
-    groups.manual = group(context.t("填写"), input);
-    groups.column = group(context.t("Column"), columnPicker.element || columnPicker);
-    groups.factor = group(context.t("因子库"), factorPicker.element || factorPicker);
-    const createFamily = actionButton(context, context.t(
-      familyDraft(values[alias]) ? "编辑因子家族" : "新增因子家族",
-    ), async () => {
-      const currentFamily = familyDraft(values[alias])
-        ? values[alias].__factor_family : null;
-      await options.onCreateFamily?.(family => {
-        if (!family) return;
-        if (!families.some(item => item.value === familyRef(family))) {
-          families.push({
-            value: familyRef(family), label: familyLabel(family), family,
-            description: context.t("本次配置中当场新建"),
-          });
-          familyPicker.setItems?.(families);
-        }
-        setValue(makeFamilyDraft(family), "family");
-        createFamily.textContent = context.t("编辑因子家族");
-        renderNested();
-      }, currentFamily);
-    }, {variant: "secondary"});
-    createFamily.classList?.add?.("factor-param-create-family");
-    groups.family = group(
-      context.t("因子家族"), familyPicker.element || familyPicker, createFamily,
-    );
-    groups.family.classList?.add?.("factor-param-choice-family");
+    let createFamily = null;
+    if (allowFamilyComposition) {
+      createFamily = actionButton(context, context.t(
+        familyDraft(values[alias]) ? "编辑因子家族" : "新增因子家族",
+      ), async () => {
+        const currentFamily = familyDraft(values[alias])
+          ? values[alias].__factor_family : null;
+        await options.onCreateFamily?.(family => {
+          if (!family) return;
+          if (!families.some(item => selectionValue(item.value ?? item.ref) === familyRef(family))) {
+            families.push({
+              value: familyRef(family), label: familyLabel(family), family,
+              description: context.t("本次配置中当场新建"),
+            });
+            familyPicker?.setItems?.(families);
+          }
+          setValue(makeFamilyDraft(family), "family");
+          createFamily.textContent = context.t("编辑因子家族");
+        }, currentFamily);
+      }, {variant: "secondary"});
+      createFamily.classList?.add?.("factor-param-create-family");
+    }
     const nestedMount = document.createElement("div");
     nestedMount.className = "factor-param-nested-family-mount";
     const renderNested = () => {
       if (nestedMount.replaceChildren) nestedMount.replaceChildren();
       else nestedMount.children = [];
       const draft = values[alias];
+      if (isFrozenFactor(draft) && ["factor", "manual"].includes(activeSource)) {
+        const table = window.FTFactorDetailShared?.parameterTable?.(context, draft);
+        if (table) {
+          table.classList?.add?.("factor-param-nested-factor-table");
+          nestedMount.append(table);
+          return;
+        }
+        const fallbackRows = familyParameters(draft);
+        if (fallbackRows.length) {
+          const fallbackValues = Object.fromEntries(fallbackRows.map(parameter => [
+            parameter.alias || parameter.name,
+            parameter.value ?? parameter.default_value
+              ?? draft.identity?.params?.[parameter.alias || parameter.name] ?? "",
+          ]).filter(([key]) => key));
+          const fallback = create(context, fallbackRows, fallbackValues, {
+            ...options, readOnly: true,
+            depth: (options.depth || 0) + 1,
+          });
+          fallback.root.classList?.add?.("factor-param-nested-factor-table");
+          nestedMount.append(fallback.root);
+        }
+        return;
+      }
       if (!familyDraft(draft)) return;
       const family = draft.__factor_family;
       const details = document.createElement("details");
@@ -221,8 +320,7 @@
         heading.append(formula);
       }
       const nested = create(
-        context, family.params || family.parameter_definitions || [],
-        draft.parameter_values || {}, {
+        context, familyParameters(family), draft.parameter_values || {}, {
           ...options,
           depth: (options.depth || 0) + 1,
           onChange: () => {
@@ -243,15 +341,34 @@
       details.append(heading, nested.root);
       nestedMount.append(details);
     };
-    const allowFamilyComposition = Number(options.depth || 0)
-      < Number(options.maxFamilyDepth ?? 12);
-    control.append(
-      groups.manual, groups.column, groups.factor,
-      ...(allowFamilyComposition ? [groups.family] : []),
-    );
+    renderSourceControl = () => {
+      if (sourceControl.replaceChildren) sourceControl.replaceChildren();
+      else sourceControl.children = [];
+      if (!activeSource) return;
+      if (activeSource === "manual") {
+        sourceControl.append(input);
+        return;
+      }
+      if (activeSource === "column") {
+        sourceControl.append(columnPicker.element || columnPicker);
+        return;
+      }
+      if (activeSource === "factor") {
+        sourceControl.append(factorPicker.element || factorPicker);
+        return;
+      }
+      if (activeSource === "family" && familyPicker) {
+        const familySource = document.createElement("div");
+        familySource.className = "factor-param-family-source";
+        familySource.append(familyPicker.element || familyPicker);
+        if (createFamily) familySource.append(createFamily);
+        sourceControl.append(familySource);
+      }
+    };
+    control.append(sourcePicker.element || sourcePicker, sourceControl);
     row.append(control);
     renderNested();
-    syncSources();
+    renderSourceControl();
     return nestedMount;
   }
 
@@ -287,10 +404,11 @@
     return Number.isFinite(parsed) ? parsed : null;
   }
 
-  function picker(context, name, title, items, selected, onChange) {
+  function picker(context, name, title, items, selected, onChange, pickerOptions = {}) {
     return (window.FTTestObjectPicker || window.FTMultiSelectFilter).create(context, {
       compact: true, multi: false,
       name, title, items, selected, onChange,
+      disabled: pickerOptions.disabled === true,
     });
   }
 
@@ -299,12 +417,24 @@
       && value.__factor_family_draft === true && value.__factor_family);
   }
 
+  function isFrozenFactor(value) {
+    return Boolean(value && typeof value === "object"
+      && value.schema_version === 2
+      && (value.ref || value.factor_ref)
+      && (value.alias || value.factor_alias));
+  }
+
+  function familyParameters(family) {
+    return family?.params || family?.parameter_definitions
+      || family?.factor_params || family?.parameters || [];
+  }
+
   function makeFamilyDraft(family) {
     return {
       __factor_family_draft: true,
       __factor_family: family,
       parameter_values: Object.fromEntries(
-        (family?.params || family?.parameter_definitions || []).map(parameter => [
+        familyParameters(family).map(parameter => [
           parameter.alias || parameter.name,
           parameter.value ?? parameter.default_value ?? "",
         ]).filter(([alias]) => alias),
@@ -332,15 +462,6 @@
     button.textContent = label;
     button.addEventListener("click", onClick);
     return button;
-  }
-
-  function group(label, ...children) {
-    const root = document.createElement("div");
-    root.className = "factor-param-choice-group";
-    const title = document.createElement("small");
-    title.textContent = label;
-    root.append(title, ...children);
-    return root;
   }
 
   window.FTFactorParameterEditor = Object.freeze({create});
