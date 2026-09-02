@@ -25,6 +25,8 @@ from server.modules.factors.helpers import (
 from server.modules.shared.factor_tester_runtime import create_factor_tester_for_run
 from server.modules.shared.factor_tester_runtime import create_isolated_factor_tester_for_run
 from server.modules.shared.factor_tester_runtime import selection_from_request
+from server.modules.shared.factor_tester_runtime import require_run_window
+from server.modules.shared.factor_data_coverage import require_factor_data_coverage
 from tools.products.product_path_selection import ProductPathSelection
 from server.services.factor_registry import factor_from_alias, get_factor_family_instance, get_page_factor, page_factors
 from server.services.session_runtime import current_user_obj, user_obj_for_name
@@ -163,17 +165,17 @@ def _load_and_calc_factor(
 
 def _run_window_datetimes(
     settings: dict[str, Any] | None,
-) -> tuple[DataTime | None, DataTime | None]:
+) -> tuple[DataTime, DataTime]:
     """从 settings 中解析时间范围。"""
     if not settings:
-        return None, None
+        return require_run_window(None, None)
     start_date = str(settings.get("start_date") or "").strip()
     end_date = str(settings.get("end_date") or "").strip()
     if not start_date or not end_date:
-        return None, None
+        return require_run_window(start_date or None, end_date or None)
     precision = str(settings.get("time_precision") or "exact")
     if precision == "trading_day":
-        return (
+        return require_run_window(
             DataTime(ts=pd.Timestamp(start_date), precision="trading_day"),
             DataTime(ts=pd.Timestamp(end_date), precision="trading_day"),
         )
@@ -182,7 +184,10 @@ def _run_window_datetimes(
     end_time = str(settings.get("end_time") or "23:59")
     start = pd.Timestamp(f"{start_date} {start_time}").tz_localize(timezone)
     end = pd.Timestamp(f"{end_date} {end_time}").tz_localize(timezone)
-    return DataTime(ts=start, precision="exact"), DataTime(ts=end, precision="exact")
+    return require_run_window(
+        DataTime(ts=start, precision="exact"),
+        DataTime(ts=end, precision="exact"),
+    )
 
 
 def _infer_asset_classes(selection: ProductPathSelection) -> tuple[str, ...]:
@@ -232,7 +237,9 @@ class FactorTypeAnalysisRun:
         if not factor_family_alias or not factor_alias:
             raise ValueError("请先选择因子")
         raw_settings = data.get("settings")
-        settings: dict[str, Any] = raw_settings if isinstance(raw_settings, dict) else {}
+        settings: dict[str, Any] = (
+            raw_settings if isinstance(raw_settings, dict) else data
+        )
         method = str(data.get("method") or settings.get("correlation_method") or "pearson").strip()
         if method not in ("pearson", "spearman"):
             method = "pearson"
@@ -304,6 +311,13 @@ class FactorTypeAnalysisRun:
             owner=self.owner,
             isolated=self.isolated,
             external_factor_artifacts=self.external_factor_artifacts,
+        )
+        require_factor_data_coverage(
+            tester.products,
+            target_factor,
+            start_dt=start_dt,
+            end_dt=end_dt,
+            data_source=str((self.settings or {}).get("data_source") or ""),
         )
 
         # 3) 提取目标因子在各产品上的序列

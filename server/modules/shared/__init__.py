@@ -19,7 +19,6 @@ def register_routes() -> None:
         "product_liquidity",
         "protocol_manifest",
         "submissions",
-        "time_range",
     )
     # A few lightweight tests embed the exported blueprint directly.  If
     # that happened before the application factory ran, Flask forbids adding

@@ -2,12 +2,70 @@ from __future__ import annotations
 
 import pandas as pd
 from types import SimpleNamespace
+from unittest.mock import sentinel
 
 from server.modules.single_factor_test.signal_schedule_diagnostics import (
     policy_for_factor,
     summarize_signal_schedule,
 )
 from server.modules.single_factor_test.evaluation import FactorEvaluation
+
+
+def test_factor_evaluation_run_spec_keeps_flattened_execution_window(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "server.modules.single_factor_test.evaluation.selection_from_request",
+        lambda data, page_uuid: sentinel.selection,
+    )
+
+    evaluation = FactorEvaluation.from_run_spec({
+        "_owner": "owner",
+        "run_id": "run-1",
+        "factor_family_alias": "Family",
+        "factor_alias": "Factor|$F:1m",
+        "start_date": "2024-01-02",
+        "end_date": "2025-05-30",
+        "start_time": "09:00",
+        "end_time": "15:00",
+        "time_precision": "exact",
+        "timezone": "Asia/Shanghai",
+    })
+
+    start, end = evaluation._run_window_datetimes()
+
+    assert evaluation.selection is sentinel.selection
+    assert start is not None and start.ts == pd.Timestamp(
+        "2024-01-02 09:00", tz="Asia/Shanghai",
+    )
+    assert end is not None and end.ts == pd.Timestamp(
+        "2025-05-30 15:00", tz="Asia/Shanghai",
+    )
+
+
+def test_factor_evaluation_rejects_missing_or_reversed_run_window(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "server.modules.single_factor_test.evaluation.selection_from_request",
+        lambda data, page_uuid: sentinel.selection,
+    )
+    base = {
+        "_owner": "owner",
+        "run_id": "run-1",
+        "factor_family_alias": "Family",
+        "factor_alias": "Factor|$F:1m",
+    }
+
+    missing = FactorEvaluation.from_run_spec(base)
+    reversed_window = FactorEvaluation.from_run_spec({
+        **base,
+        "start_date": "2025-06-01",
+        "end_date": "2025-05-30",
+    })
+
+    import pytest
+
+    with pytest.raises(ValueError, match="运行时间范围缺失"):
+        missing._run_window_datetimes()
+    with pytest.raises(ValueError, match="start_date 必须早于或等于 end_date"):
+        reversed_window._run_window_datetimes()
 
 
 def test_schedule_summary_is_compact_and_does_not_claim_incremental_equivalence() -> None:

@@ -15,6 +15,24 @@ from .operands import OperandExpr
 Selection = Literal["nearest", "farthest"]
 
 
+def _selection_latex(select: Selection) -> str:
+    return "argmin" if select == "nearest" else "argmax"
+
+
+def _search_latex(
+    *, scope: LookbackScope, select: Selection, body: str,
+    subst: dict | None = None,
+) -> str:
+    return (
+        "\\left[t\\mapsto"
+        f"\\underset{{[t-k,t]\\in{scope.to_latex(subst)}}}"
+        f"{{\\operatorname{{{_selection_latex(select)}}}}}"
+        "\\left\\{k\\middle|"
+        f"\\begin{{aligned}}{body}\\end{{aligned}}"
+        "\\right\\}\\right]"
+    )
+
+
 class ScopeLengthDefault(FactorExpr):
     """Marker meaning an unmatched search returns its current scope age."""
 
@@ -98,9 +116,11 @@ class BarSinceOp(OperandExpr):
 
     def _to_latex(self, subst: dict | None = None) -> str:
         condition = self.condition._to_latex(subst)
-        return (
-            f"\\operatorname{{BarSince}}^{{\\mathrm{{{self.select}}}}}"
-            f"_{{{self.scope.to_latex(subst)}}}\\left({condition}\\right)"
+        return _search_latex(
+            scope=self.scope,
+            select=self.select,
+            body=condition,
+            subst=subst,
         )
 
     def _get_alias(self) -> str:
@@ -187,10 +207,11 @@ class BarDistanceOp(OperandExpr):
     def _to_latex(self, subst: dict | None = None) -> str:
         value = self.value._to_latex(subst)
         condition = self.condition._to_latex(subst)
-        return (
-            f"\\operatorname{{BarDistance}}^{{\\mathrm{{{self.select}}}}}"
-            f"_{{{self.scope.to_latex(subst)}}}"
-            f"\\left({value};{condition}\\right)"
+        return _search_latex(
+            scope=self.scope,
+            select=self.select,
+            body=f"X_t:={value},\\\\{condition}",
+            subst=subst,
         )
 
     def _get_alias(self) -> str:

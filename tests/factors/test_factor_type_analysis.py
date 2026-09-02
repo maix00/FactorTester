@@ -378,14 +378,20 @@ class TestUtilities:
         assert start.ts.tzinfo is None
 
     def test_run_window_datetimes_none(self):
-        start, end = _run_window_datetimes(None)
-        assert start is None
-        assert end is None
+        with pytest.raises(ValueError, match="运行时间范围缺失"):
+            _run_window_datetimes(None)
 
     def test_run_window_datetimes_empty(self):
-        start, end = _run_window_datetimes({})
-        assert start is None
-        assert end is None
+        with pytest.raises(ValueError, match="运行时间范围缺失"):
+            _run_window_datetimes({})
+
+    def test_run_window_datetimes_rejects_reversed_range(self):
+        with pytest.raises(ValueError, match="start_date 必须早于或等于 end_date"):
+            _run_window_datetimes({
+                "start_date": "2025-02-01",
+                "end_date": "2025-01-01",
+                "time_precision": "trading_day",
+            })
 
 
 # =========================================================
@@ -735,6 +741,9 @@ class TestApiSimulation:
         monkeypatch.setattr(server_facade, "create_factor_tester_for_run", fake_create_factor_tester_for_run)
         monkeypatch.setattr(server_facade, "current_user_obj", fake_current_user_obj)
         monkeypatch.setattr(server_facade, "_load_and_calc_factor", fake_load_and_calc_factor)
+        monkeypatch.setattr(
+            server_facade, "require_factor_data_coverage", lambda *args, **kwargs: None,
+        )
         monkeypatch.setattr(server_facade, "default_registry", registry)
         monkeypatch.setattr(server_facade, "selection_from_request", lambda data, *, page_uuid: server_facade.ProductPathSelection(
             selection_id=data["product_path_selection"]["product_path_selection_id"],
@@ -751,7 +760,12 @@ class TestApiSimulation:
             "factor_family_alias": "Family",
             "factor_alias": "TargetFactor",
             "method": "pearson",
-            "settings": {"min_periods": 10},
+            "settings": {
+                "min_periods": 10,
+                "start_date": "2024-01-01",
+                "end_date": "2024-03-20",
+                "time_precision": "trading_day",
+            },
         }, page_uuid="page-1")
         response = run.run()
 

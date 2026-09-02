@@ -5,7 +5,6 @@ from __future__ import annotations
 # 全局配置文件
 #
 # 定义系统级常量与工厂函数：
-#   - 因子测试的默认日期区间
 #   - 数据目录、日志目录路径、SQLite 数据库路径
 #   - 按成交量筛选品种的默认比例
 #   - 交易时段默认时间
@@ -16,8 +15,6 @@ import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
-import pandas as pd
-
 # ── 平台感知的默认线程数 ──
 # macOS: 保持 merge 前经过实际使用验证的 8 worker 上限。
 # Windows/Linux: GIL 争抢重，线程过多反而互相踩踏，cap 更低。
@@ -38,14 +35,6 @@ IC_PARALLEL_MAX_WORKERS: int = _default_max_workers(cpu_bound=True)
 
 # waitress 生产模式线程数（I/O 密集型，可略高于 CPU workers）
 WAITRESS_THREADS: int = _default_max_workers(cpu_bound=False)
-
-# IC 测试的默认日期区间（带时区）
-default_test_start_date = pd.Timestamp('2025-01-02', tz='Asia/Shanghai')
-default_test_end_date = pd.Timestamp('2025-05-31', tz='Asia/Shanghai')
-
-# 绘制净值曲线的默认日期区间（可与 IC 测试区间不同）
-default_plot_test_start_date = pd.Timestamp('2025-01-02', tz='Asia/Shanghai')
-default_plot_test_end_date = pd.Timestamp('2025-12-31', tz='Asia/Shanghai')
 
 # data 根目录（统一由 scripts/data_dir.py 解析，支持 worktree 隔离）
 from scripts.data_dir import DATA_DIR, CACHE_DB_PATH
