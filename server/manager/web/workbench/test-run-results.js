@@ -16,13 +16,7 @@
   }
 
   function resultCode(state) {
-    if (state.kind === "ic") {
-      return {group: "job-detail-ic", global: "FTICResults"};
-    }
-    if (state.kind === "backtest") {
-      return {group: "job-detail-backtest", global: "FTBacktestResults"};
-    }
-    return null;
+    return window.FTTestTypeRegistry?.resultViewer(state.kind) || null;
   }
 
   async function ensureResultCode(state, item, rerender) {
@@ -98,16 +92,13 @@
       configuration: task.configuration || {}, productGroupRef: item.groupID || "",
       resultDeclarations: task.output_declarations || [],
     };
-    let domain = null;
-    if (state.kind === "ic") domain = window.FTICResults?.section(context, options);
-    if (state.kind === "backtest") {
-      domain = window.FTBacktestResults?.section(context, {
-        ...options,
-        configuration: task.configuration || {},
-        resultSummary: payload.result_summary || task.results?.summary || {},
-        job: item.job || {},
-      });
-    }
+    const descriptor = resultCode(state);
+    const domain = descriptor && window[descriptor.global]?.section(context, {
+      ...options,
+      jobKind: state.kind,
+      resultSummary: payload.result_summary || task.results?.summary || {},
+      job: item.job || {},
+    }) || null;
     const previews = domain ? null : artifactPreviewSection(
       context, task, outputArtifacts, item.jobID, item.artifactQuery || "",
     );

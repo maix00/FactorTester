@@ -1,9 +1,9 @@
 (() => {
   function kindOf(template) {
     const analyses = template.payload?.analyses || {};
-    if (analyses.ic) return "ic";
-    if (analyses.backtest) return "backtest";
-    return "";
+    return Object.keys(analyses).map(key => (
+      window.FTTestTypeRegistry?.normalize(key) || ""
+    )).find(Boolean) || "";
   }
 
   function summary(template, context) {
@@ -15,7 +15,9 @@
     const local = analysis.execution?.settings || {};
     return [
       [context.t("模板名称"), template.name],
-      [context.t("测试类型"), kind === "ic" ? context.t("IC 测试") : context.t("回测")],
+      [context.t("测试类型"), context.t(
+        window.FTTestTypeRegistry?.get(kind)?.title || kind,
+      )],
       [context.t("因子家族"), families.join("、")],
       [context.t("因子"), factors.join("、")],
       [context.t("时间范围"), [local.start_date, local.end_date].filter(Boolean).join(" → ")],

@@ -666,6 +666,9 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     assert manifest["group_dependencies"]["job-detail-previews"] == [
         "job-detail-core", "report", "charts",
     ]
+    assert manifest["group_dependencies"]["job-detail-factor-series"] == [
+        "job-detail-previews", "catalog-core",
+    ]
     assert "job-detail-previews" in manifest["group_dependencies"]["job-detail-backtest"]
     assert "output-choice" in manifest["group_dependencies"]["job-detail-core"]
     core_detail = set(manifest["groups"]["job-detail-core"])
@@ -681,11 +684,14 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
         encoding="utf-8"
     )
     run_results = (WEB_ROOT / "workbench" / "test-run-results.js").read_text(encoding="utf-8")
+    test_types = (WEB_ROOT / "core" / "test-type-registry.js").read_text(encoding="utf-8")
     assert 'loadGroups?.(["job-detail-previews"])' in artifacts
     assert 'loadGroups?.([name])' in result_viewers
     assert "FTJobResultViewers.loadGroup" in detail
     assert 'loadGroups?.(["job-detail"])' not in run_results
-    assert 'job-detail-ic' in run_results and 'job-detail-backtest' in run_results
+    assert "FTTestTypeRegistry" in run_results
+    assert 'job-detail-ic' in test_types and 'job-detail-backtest' in test_types
+    assert 'job-detail-factor-series' in test_types
     assert "FTTestRunProgress" in run_results
     assert "group_external_scripts" in loader
     assert manifest["initial_groups"] == ["core", "app"]
@@ -2308,6 +2314,13 @@ def test_test_run_results_freezes_the_ic_evaluation_matrix() -> None:
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
+
+    infrastructure = (
+        ROOT / "server" / "manager" / "web" / "test-modules" / "README.md"
+    ).read_text(encoding="utf-8")
+    assert "tab-chip-content.js" in infrastructure
+    assert "resultViewers" in infrastructure
+    assert "job-detail-previews" in infrastructure
 
     batch_source = (
         ROOT / "server" / "manager" / "web" / "workbench" / "test-run-batch.js"

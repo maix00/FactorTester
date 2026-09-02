@@ -103,7 +103,11 @@
     target.replaceChildren(header, content);
     const show = () => loadProduct(
       context, model, options, select.value, chart, contracts, source,
-    );
+    ).catch(error => {
+      chart.replaceChildren(FTUI.empty(
+        context.t("曲线暂不可用"), error.message || String(error),
+      ));
+    });
     select.addEventListener("change", show);
     show();
   }

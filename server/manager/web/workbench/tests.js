@@ -1,13 +1,7 @@
 (() => {
   const clientScope = new URLSearchParams(window.location?.search || "").get("client") || "web";
   window.FTTestClientScope = clientScope;
-  const definitions = {
-    ic: {application: "ic_test", nav: "ic-test", title: "IC 测试"},
-    backtest: {application: "group_test", nav: "backtest", title: "回测"},
-    factor_evaluation: {
-      application: "factor_evaluation", nav: "jobs", title: "查看因子序列",
-    },
-  };
+  const definitions = window.FTTestTypeRegistry.definitions;
   async function show(context, kind, options = {}) {
     const definition = definitions[kind];
     if (!definition) throw new Error(context.t("未知测试类型"));

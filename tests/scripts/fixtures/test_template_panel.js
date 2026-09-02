@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 
 global.window = globalThis;
+eval(fs.readFileSync("server/manager/web/core/test-type-registry.js", "utf8"));
 
 class Element {
   constructor(tagName) {

@@ -2133,6 +2133,7 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
             + manifest.get("initial_external_scripts", [])
         )
         for relative in (
+                "core/test-type-registry.js",
                 "workbench/test-settings.js", "workbench/test-setting-fields.js",
                 "workbench/test-factors.js",
                 "workbench/test-factor-candidates.js",
@@ -2183,8 +2184,11 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert "/api/runs" in scripts["run-batch-actions.js"]
     assert 'serviceRunPath(context, state, "/api/runs/preview")' in scripts["run-batch-actions.js"]
     assert 'serviceRunPath(context, state, "/api/runs")' in scripts["run-batch-actions.js"]
-    assert "FTICResults?.section" in scripts["test-run-results.js"]
-    assert "FTBacktestResults?.section" in scripts["test-run-results.js"]
+    assert "FTTestTypeRegistry?.resultViewer" in scripts["test-run-results.js"]
+    assert "job-detail-ic" in scripts["test-type-registry.js"]
+    assert "job-detail-backtest" in scripts["test-type-registry.js"]
+    assert "job-detail-factor-series" in scripts["test-type-registry.js"]
+    assert "window[descriptor.global]?.section" in scripts["test-run-results.js"]
     assert "window.FTJobs.loadDetail" in scripts["test-run-results.js"]
     assert "local-settings" in scripts["test-settings.js"]
     assert "FTTabChipContent.create" in scripts["test-settings.js"]

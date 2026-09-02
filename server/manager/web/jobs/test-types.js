@@ -1,24 +1,10 @@
 (() => {
-  const fallbackTypes = [
-    {
-      id: "factor-series", title: "查看因子序列", title_key: "查看因子序列",
-      description_key: "计算并查看因子值、价格与合约区间", icon: "FS",
-      sfSymbol: "waveform.path.ecg", path: "/factor-series",
-      requiresAuth: false, tab_behavior: "new",
-    },
-    {
-      id: "ic-test", title: "IC 测试", title_key: "IC 测试",
-      description_key: "配置并运行因子 IC 测试", icon: "IC",
-      sfSymbol: "chart.xyaxis.line", path: "/ic-test",
-      requiresAuth: true, tab_behavior: "new",
-    },
-    {
-      id: "backtest", title: "回测", title_key: "回测",
-      description_key: "配置并运行分组回测", icon: "BT",
-      sfSymbol: "chart.line.uptrend.xyaxis", path: "/backtest",
-      requiresAuth: true, tab_behavior: "new",
-    },
-  ];
+  const fallbackTypes = Object.values(window.FTTestTypeRegistry.definitions).map(item => ({
+    id: item.pageID, title: item.title, title_key: item.title,
+    description_key: item.description, icon: item.icon,
+    sfSymbol: item.sfSymbol, path: item.route,
+    requiresAuth: item.requiresAuth, tab_behavior: "new",
+  }));
 
   function definitions(context) {
     const jobs = (context.modules || []).find(item => item.id === "jobs");

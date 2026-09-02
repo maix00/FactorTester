@@ -2,17 +2,8 @@
   function group(job, artifacts = [], result = null) {
     const kind = String(job?.kind || job?.job_type || job?.application || "")
       .toLowerCase();
-    if (kind.includes("factor_evaluation")
-      || (kind.includes("factor") && kind.includes("series"))) {
-      return "job-detail-factor-series";
-    }
-    if (kind.includes("ic") || kind.includes("information_coefficient")) {
-      return "job-detail-ic";
-    }
-    if (kind.includes("backtest") || kind.includes("group_test")
-      || kind.includes("portfolio")) {
-      return "job-detail-backtest";
-    }
+    const registered = window.FTTestTypeRegistry?.resultViewer(kind);
+    if (registered) return registered.group;
     const names = new Set((artifacts || []).map(
       item => String(item.name || "").toLowerCase(),
     ));

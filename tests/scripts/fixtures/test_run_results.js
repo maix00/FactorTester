@@ -3,6 +3,9 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 
 global.window = {};
+vm.runInThisContext(fs.readFileSync(
+  "server/manager/web/core/test-type-registry.js", "utf8",
+), {filename: "test-type-registry.js"});
 global.FTTestProducts = {
   selectedGroups: state => state.groups || [],
 };
@@ -88,6 +91,25 @@ results.resultSection({}, {kind: "ic"}, {
 });
 assert.equal(icOptions.productGroupRef, "product-group:night");
 assert.equal(icOptions.configuration.payload.analyses.ic.product_path_selection_id, "fallback");
+
+let factorSeriesOptions = null;
+window.FTFactorSeriesResults = {
+  section: (_context, options) => {
+    factorSeriesOptions = options;
+    return {kind: "factor-series"};
+  },
+};
+const factorSeriesContent = results.resultSection({}, {kind: "factor_evaluation"}, {
+  jobID: "job-factor-series", groupID: "product-group:day",
+  taskDetail: {
+    artifacts: [{name: "result", state: "active"}],
+    configuration: {payload: {analyses: {factor_evaluation: {}}}},
+    output_declarations: [],
+  },
+});
+assert.ok(factorSeriesContent,
+  "the shared test result surface must mount factor-series results automatically");
+assert.equal(factorSeriesOptions.jobID, "job-factor-series");
 
 class MiniElement {
   constructor(tag) { this.tagName = tag; this.children = []; }
