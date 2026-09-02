@@ -74,7 +74,9 @@ assert.ok(save);
 save.listeners.click();
 assert.deepStrictEqual(changes, [["product-group:night"]]);
 view.clear.listeners.click();
-assert.strictEqual(rowLabel(view.options.children[0]), "夜盘期货");
+assert.strictEqual(rowLabel(view.options.children[0]), "全部产品组",
+  "clearing search must restore the declared option order");
+assert.ok(view.options.children.some(item => rowLabel(item) === "夜盘期货"));
 const day = view.options.children.find(item => rowLabel(item) === "日盘期货");
 day.children[0].checked = true;
 day.children[0].listeners.change();
