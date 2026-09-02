@@ -20,12 +20,14 @@ FACTOR_SET_SELECTION_KEYS = ("factor_set_selections",)
 FACTOR_SELECTION_KEYS = ("factor",)
 FACTOR_SELECTIONS_KEYS = ("factor_selections",)
 FACTOR_SOURCE_SELECTION_KEYS = ("factor_source_selections",)
+FACTOR_EXECUTION_KEYS = ("factor_mode", "warmup_mode", "warmup_window")
 
 
 def register_factor_execution_base(
     app: ApplicationSettings,
     *,
     tab: str = "factor",
+    warmup_mode_default: str = "auto",
 ) -> None:
     warmup_default_if = (
         {
@@ -59,7 +61,7 @@ def register_factor_execution_base(
         "前摇窗口",
         tab,
         "select",
-        "auto",
+        warmup_mode_default,
         ScopePolicy.LOCAL_ONLY,
         module="factor_execution",
         options=(
@@ -69,7 +71,11 @@ def register_factor_execution_base(
         ),
         chip_template="前摇窗口: {value}",
         default_if=warmup_default_if,
-        help_text="只用于扩大因子计算窗口和 live bar 预热事件；正式信号窗口、绩效统计窗口不随之改变。",
+        help_text=(
+            "正式起始日期始终定义输出区间；选择“不使用”时不读取更早数据，"
+            "滚动窗口在起始段数据不足时自然产生 NaN。固定或自动预热只扩大"
+            "因子计算与 live bar 预热范围，不改变正式信号和绩效统计区间。"
+        ),
     ))
     app.register_setting(SettingDefinition(
         "warmup_window",

@@ -19,6 +19,7 @@ from server.modules.single_factor_test.signal_schedule_diagnostics import (
     summarize_signal_schedule,
 )
 from server.modules.shared.factor_data_coverage import require_factor_data_coverage
+from server.modules.shared.factor_warmup import resolve_factor_warmup_policy
 from server.modules.shared.factor_tester_runtime import (
     create_factor_tester_for_run,
     create_isolated_factor_tester_for_run,
@@ -154,19 +155,26 @@ class FactorEvaluation:
         if factor is None:
             raise LookupError("请先提交参数设置，或从模板加载已有因子")
 
-        require_factor_data_coverage(
+        warmup = resolve_factor_warmup_policy(
+            self.settings, factor, default_mode="none",
+        )
+        coverage = require_factor_data_coverage(
             tester.products,
             factor,
             start_dt=start_dt,
             end_dt=end_dt,
             data_source=str((self.settings or {}).get("data_source") or ""),
+            warmup_window=warmup.evaluation_window(),
         )
 
         from tools.factors.FactorTester import _active_tester
 
         token = _active_tester.set(tester)
         try:
-            tester.calc_factor(factor, parallel=False)
+            tester.calc_factor(
+                factor, parallel=False,
+                warmup_window=warmup.evaluation_window(),
+            )
         finally:
             _active_tester.reset(token)
 
@@ -246,6 +254,8 @@ class FactorEvaluation:
             "meta": {
                 "elapsed_ms": round((time.time() - started_at) * 1000),
                 "product_count": len(series_items),
+                "warmup": warmup.as_dict(),
+                "data_coverage": coverage,
             },
             "external_factor_artifacts": result_metadata(
                 self.external_factor_artifacts

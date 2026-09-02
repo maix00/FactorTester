@@ -5,7 +5,10 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
-from server.modules.shared.factor_data_coverage import require_factor_data_coverage
+from server.modules.shared.factor_data_coverage import (
+    FactorDataCoverageError,
+    require_factor_data_coverage,
+)
 from tools.data.types import DataTime
 
 
@@ -49,3 +52,43 @@ def test_factor_data_coverage_rejects_truncated_source_range() -> None:
             start_dt=_time("2024-01-02 09:00"),
             end_dt=_time("2025-05-30 15:00"),
         )
+
+
+def test_factor_data_coverage_preserves_market_wall_clock_date() -> None:
+    result = require_factor_data_coverage(
+        [_product("2024-01-01 09:00", "2024-01-02 15:00")],
+        _factor(),
+        start_dt=_time("2024-01-01 00:00"),
+        end_dt=_time("2024-01-02 15:00"),
+    )
+
+    assert result["formal_start"] == "2024-01-01"
+
+
+def test_no_warmup_allows_leading_gap_that_will_produce_nan() -> None:
+    result = require_factor_data_coverage(
+        [_product("2024-01-02 09:00", "2024-01-05 15:00")],
+        _factor(),
+        start_dt=_time("2024-01-01 00:00"),
+        end_dt=_time("2024-01-05 15:00"),
+    )
+
+    assert result["required_data_start"] == "2024-01-01"
+    assert result["leading_gaps"] == [
+        {"product": "AP.CZC", "available_start": "2024-01-02"},
+    ]
+
+
+def test_fixed_warmup_requires_earlier_source_data() -> None:
+    with pytest.raises(FactorDataCoverageError) as caught:
+        require_factor_data_coverage(
+            [_product("2024-01-02 09:00", "2024-01-05 15:00")],
+            _factor(),
+            start_dt=_time("2024-01-03 00:00"),
+            end_dt=_time("2024-01-05 15:00"),
+            warmup_window=pd.Timedelta("2D"),
+        )
+
+    assert caught.value.code == "factor_data_coverage_unavailable"
+    assert caught.value.details["formal_start"] == "2024-01-03"
+    assert caught.value.details["required_data_start"] == "2024-01-01"

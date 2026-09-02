@@ -171,8 +171,14 @@ class FactorTester(UniqueNameObject):
     def discard_result(self, factor: Any, *, clear_factor: bool = True) -> None:
         _tasks.discard_result(self.state, factor, clear_factor=clear_factor)
 
-    def calc_factor(self, factors: Any, parallel: bool = True, max_workers: int = 4) -> None:
-        _tasks.calc_factor(self.state, factors, parallel=parallel, max_workers=max_workers)
+    def calc_factor(
+        self, factors: Any, parallel: bool = True, max_workers: int = 4,
+        warmup_window: Any = None,
+    ) -> None:
+        _tasks.calc_factor(
+            self.state, factors, parallel=parallel, max_workers=max_workers,
+            warmup_window=warmup_window,
+        )
 
     def resolve_factor(self, factor_alias: str) -> Any:
         return _tasks.resolve_factor(self.state, factor_alias)

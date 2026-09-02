@@ -60,6 +60,66 @@ def test_ic_groups_batch_roots_with_the_same_source_frequency(monkeypatch):
     assert discarded == roots
 
 
+@pytest.mark.parametrize(
+    ("mode", "fixed", "expected"),
+    [
+        ("none", None, None),
+        ("fixed", pd.Timedelta("2D"), pd.Timedelta("2D")),
+        ("auto", None, pd.Timedelta(seconds=300)),
+    ],
+)
+def test_ic_factor_warmup_mode_controls_pre_start_data(
+    monkeypatch, mode, fixed, expected,
+):
+    evaluated = []
+
+    class _Root:
+        pass
+
+    class _Factor:
+        _source_freq = DataFreq.MIN1
+
+    class _Tester:
+        products = ["P"]
+        start_dt = None
+        end_dt = None
+
+    key = ("A", "MIN1", 0, "OPEN", "MIN1", 0, "rank", "F")
+    support = SimpleNamespace(
+        factor_input_support_seconds=300,
+        label_horizon_seconds=0,
+    )
+    monkeypatch.setattr(
+        ic_module, "build_ic_factor", lambda *_args: (_Root(), DataFreq.MIN1),
+    )
+    monkeypatch.setattr(
+        ic_module, "_temporal_support_for_payload", lambda *_args: support,
+    )
+    monkeypatch.setattr(
+        ic_module, "collect_ic_result",
+        lambda *_args, **_kwargs: (
+            [], pd.Series(dtype=float), pd.Series(dtype=float),
+            pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+        ),
+    )
+    monkeypatch.setattr(ic_module, "discard_ic_factor", lambda *_args: None)
+    monkeypatch.setattr(
+        ic_module, "annotate_ic_temporal_support",
+        lambda *args, **_kwargs: args[3],
+    )
+    monkeypatch.setattr(
+        "tools.factors.evaluation.evaluate_factors",
+        lambda _factors, **kwargs: evaluated.append(kwargs),
+    )
+
+    ic_module._compute_ic_groups(
+        _Tester(), [(key, [_Factor()])], {key: {}}, 0, {"F": "MIN1"},
+        warmup_mode=mode, fixed_warmup_window=fixed,
+    )
+
+    assert evaluated[0].get("warmup_window") == expected
+
+
 def test_ic_progress_counts_the_chunk_dag_union(monkeypatch):
     roots = []
     evaluated = []

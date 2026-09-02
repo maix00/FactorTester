@@ -13,6 +13,7 @@ from server.modules.shared.factor_tester_runtime import (
     selection_from_request,
 )
 from server.modules.shared.factor_data_coverage import require_factor_data_coverage
+from server.modules.shared.factor_warmup import resolve_factor_warmup_policy
 from server.modules.single_factor_test.ic_params import (
     SCALE_AWARE_HORIZON_BASE,
     describe_forward_horizon_sampling,
@@ -296,6 +297,19 @@ def _batch_factor_warmup(
     return pd.Timedelta(seconds=max(values))
 
 
+def _effective_ic_warmup(
+    supports: Iterable[Any | None],
+    *,
+    mode: str,
+    fixed_window: pd.Timedelta | None,
+) -> pd.Timedelta | None:
+    if mode == "none":
+        return None
+    if mode == "fixed":
+        return fixed_window if fixed_window and fixed_window > pd.Timedelta(0) else None
+    return _batch_factor_warmup(supports)
+
+
 def _maximum_label_support(
     partition: Iterable[tuple[tuple, List[Factor], Factor, Any, Any | None]],
 ) -> Any | None:
@@ -433,6 +447,8 @@ def _compute_ic_groups(
     cancel_event: threading.Event | None = None,
     all_products: list[Any] | None = None,
     quantile_portfolio_config: Dict[str, Any] | None = None,
+    warmup_mode: str = "auto",
+    fixed_warmup_window: pd.Timedelta | None = None,
 ) -> _ICComputeResult:
     """执行 IC 分组计算（支持并行）。返回中间状态。"""
     state = _ICComputeResult()
@@ -532,7 +548,11 @@ def _compute_ic_groups(
         group_done = 0
         for partition in batch_partitions.values():
             _check_cancelled()
-            batch_warmup = _batch_factor_warmup(item[4] for item in partition)
+            batch_warmup = _effective_ic_warmup(
+                (item[4] for item in partition),
+                mode=warmup_mode,
+                fixed_window=fixed_warmup_window,
+            )
             evaluate_kwargs: Dict[str, Any] = {
                 "freq": partition[0][3],
                 "start_dt": tester.start_dt,
@@ -633,13 +653,13 @@ def _compute_ic_groups(
                     "start_dt": tester.start_dt,
                     "end_dt": ic_evaluation_end_dt(tester, temporal_support),
                 }
-                warmup_seconds = getattr(
-                    temporal_support, "factor_input_support_seconds", None,
+                fallback_warmup = _effective_ic_warmup(
+                    (temporal_support,),
+                    mode=warmup_mode,
+                    fixed_window=fixed_warmup_window,
                 )
-                if warmup_seconds is not None and warmup_seconds > 0:
-                    evaluate_kwargs["warmup_window"] = pd.Timedelta(
-                        seconds=warmup_seconds,
-                    )
+                if fallback_warmup is not None:
+                    evaluate_kwargs["warmup_window"] = fallback_warmup
                 ic_factor.evaluate(tester.products, **evaluate_kwargs)
                 expected_sign, expected_sign_source = (
                     expected_sign_for_factor(factor_list[0])
@@ -828,6 +848,13 @@ def _run_ic_compute_to_sink(
 
         param_items = list(ic_param_map.items())
 
+        warmup_mode = str(data.get("warmup_mode") or "auto").strip().lower()
+        fixed_warmup = None
+        if warmup_mode == "fixed":
+            # Resolve through the same parser/validation used by backtests.
+            fixed_warmup = resolve_factor_warmup_policy(
+                data, param_items[0][1][0], default_mode="auto",
+            ).evaluation_window()
         compute = _compute_ic_groups(
             tester, param_items, param_payloads, primary_ic_lag, primary_horizons,
             emitter=sink,
@@ -838,6 +865,8 @@ def _run_ic_compute_to_sink(
                 or data.get('quantile_portfolio')
                 or {}
             ),
+            warmup_mode=warmup_mode,
+            fixed_warmup_window=fixed_warmup,
         )
         if cancel_event is not None and cancel_event.is_set():
             raise _ICCancelled("IC test job cancelled")
@@ -876,9 +905,18 @@ def _run_ic_compute_to_sink(
         }
         sink.emit_result(response)
     except _ICCancelled as exc:
-        sink.emit_error(str(exc), cancelled=True)
+        sink.emit_error(str(exc), code="job_cancelled", cancelled=True)
     except Exception as e:
-        sink.emit_error(str(e), traceback=traceback.format_exc())
+        sink.emit_error(
+            str(e),
+            traceback=traceback.format_exc(),
+            code=str(getattr(e, "code", "") or "job_execution_failed"),
+            **(
+                {"details": getattr(e, "details")}
+                if isinstance(getattr(e, "details", None), dict)
+                else {}
+            ),
+        )
     finally:
         if _token is not None:
             _active_tester.reset(_token)
@@ -918,12 +956,16 @@ def execute_ic_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any) -
             external.get(alias) or factor_from_alias(alias, username=factor_owner)
         )
     for factor in resolved:
+        warmup = resolve_factor_warmup_policy(
+            data, factor, default_mode="auto",
+        )
         require_factor_data_coverage(
             tester.products,
             factor,
             start_dt=start_dt,
             end_dt=end_dt,
             data_source=str(data.get("data_source") or ""),
+            warmup_window=warmup.evaluation_window(),
         )
 
     class _ResolvedFactorCollection:
