@@ -13,22 +13,154 @@
   }
 
   function previewExpression(value, parameterValues = {}) {
-    let result = expression(value);
-    if (!result) return "";
-    for (const parameter of parameterRows(value)) {
+    const state = {active: new Set(), emitted: new Set()};
+    const root = unwrapFamilyDraft(value);
+    const rootKey = previewNodeKey(root, parameterValues);
+    if (rootKey) state.active.add(rootKey);
+    const rendered = renderPreviewNode(root, parameterValues, state);
+    if (rootKey) state.active.delete(rootKey);
+    if (!rendered.body) return "";
+    if (!rendered.lines.length) return rendered.body;
+    const separator = " " + "\\" + "\\";
+    return [
+      "\\begin{aligned}",
+      [...rendered.lines, stripFormulaEnvironment(rendered.body)]
+        .join(separator),
+      "\\end{aligned}",
+    ].join("\n");
+  }
+
+  // Nested factors are displayed as intermediate definitions. We recurse only
+  // through the dependency graph to collect those definitions; the parent
+  // expression keeps the child family as a named intermediate value.
+  function renderPreviewNode(value, parameterValues = {}, state) {
+    const item = unwrapFamilyDraft(value);
+    const resultValue = expression(item);
+    if (!resultValue) return {body: "", lines: []};
+    let result = resultValue;
+    const lines = [];
+    for (const parameter of parameterRows(item)) {
       const alias = String(parameter.alias || "").trim();
       if (!alias) continue;
       const raw = Object.prototype.hasOwnProperty.call(parameterValues || {}, alias)
         ? parameterValues[alias] : parameter.value;
-      const nested = raw?.__factor_family_draft === true
-        ? raw.__factor_family : raw?.schema_version === 2 ? raw : null;
-      const shown = nested
-        ? familySymbol(nested)
-        : latexValue(raw?.alias || raw?.factor_alias || raw);
+      const nested = nestedPreviewValue(raw, parameter);
+      let shown;
+      if (nested) {
+        shown = familySymbol(nested.value);
+        appendPreviewDefinition(lines, nested, state);
+      } else {
+        shown = latexValue(previewScalarValue(raw));
+      }
       const token = new RegExp(
-        String.raw`\\textcolor\{red\}\{${escapeRegExp(alias)}\}`, "g",
+        "\\\\textcolor\\{red\\}\\{" + escapeRegExp(alias) + "\\}", "g",
       );
-      result = result.replace(token, String.raw`\textcolor{red}{${shown}}`);
+      result = result.replace(token, "\\textcolor{red}{" + shown + "}");
+    }
+    return {body: result, lines};
+  }
+
+  function appendPreviewDefinition(lines, nested, state) {
+    const key = previewNodeKey(nested.value, nested.values);
+    if (key && (state.active.has(key) || state.emitted.has(key))) return;
+    if (key) {
+      state.active.add(key);
+      state.emitted.add(key);
+    }
+    const rendered = renderPreviewNode(nested.value, nested.values, state);
+    if (key) state.active.delete(key);
+    lines.push(...rendered.lines);
+    const body = stripFormulaEnvironment(rendered.body);
+    if (body) {
+      lines.push(familySymbol(nested.value) + "_t &:= " + body);
+    }
+  }
+
+  function nestedPreviewValue(raw, parameter) {
+    if (raw?.__factor_family_draft === true && raw.__factor_family) {
+      return {
+        value: raw.__factor_family,
+        values: raw.parameter_values || {},
+      };
+    }
+    if (isNestedPreviewValue(raw)) {
+      return {value: raw, values: nestedParameterValues(raw)};
+    }
+    if (isNestedPreviewValue(raw?.nested_factor)) {
+      return {
+        value: raw.nested_factor,
+        values: nestedParameterValues(raw.nested_factor),
+      };
+    }
+    if (isNestedPreviewValue(parameter?.nested_factor)) {
+      return {
+        value: parameter.nested_factor,
+        values: nestedParameterValues(parameter.nested_factor),
+      };
+    }
+    return null;
+  }
+
+  function isNestedPreviewValue(value) {
+    return Boolean(value && typeof value === "object" && (
+      Number(value.schema_version) === 2
+      || value.ref || value.factor_ref
+      || value.factor_family_alias || value.family_alias
+      || value.math_expr || value.resolved_math_expr
+    ));
+  }
+
+  function nestedParameterValues(value) {
+    if (value?.__factor_family_draft === true) {
+      return value.parameter_values || {};
+    }
+    const identityValues = value?.identity?.params || {};
+    return Object.fromEntries(parameterRows(value).map(parameter => {
+      const alias = parameter.alias;
+      const valueFromRow = parameter.value;
+      return [alias, valueFromRow !== undefined && valueFromRow !== ""
+        ? valueFromRow : identityValues[alias] ?? ""];
+    }).filter(([alias]) => alias));
+  }
+
+  function previewScalarValue(value) {
+    if (!value || typeof value !== "object") return value;
+    for (const key of ["alias", "factor_alias", "value"]) {
+      if (value[key] !== undefined && value[key] !== null) return value[key];
+    }
+    return value;
+  }
+
+  function previewNodeKey(value, parameterValues = {}) {
+    const item = unwrapFamilyDraft(value);
+    const identity = item?.ref || item?.factor_ref || item?.factor_alias
+      || item?.alias || item?.family_ref || item?.factor_family_alias
+      || item?.family_alias || "";
+    if (!identity) return "";
+    let values = "";
+    try {
+      values = JSON.stringify(parameterValues || {});
+    } catch (_) {
+      values = "";
+    }
+    return String(identity) + "|" + values;
+  }
+
+  function unwrapFamilyDraft(value) {
+    return value?.__factor_family_draft === true && value.__factor_family
+      ? value.__factor_family : value;
+  }
+
+  function stripFormulaEnvironment(value) {
+    let result = String(value || "").trim();
+    for (const [opening, closing] of [
+      ["\\begin{aligned}", "\\end{aligned}"],
+      ["\\begin{align*}", "\\end{align*}"],
+    ]) {
+      if (result.startsWith(opening) && result.endsWith(closing)) {
+        result = result.slice(opening.length, -closing.length).trim();
+        break;
+      }
     }
     return result;
   }
@@ -38,9 +170,10 @@
   }
 
   function familySymbol(value) {
+    const item = unwrapFamilyDraft(value);
     const alias = String(
-      value?.factor_family_alias || value?.family_alias
-      || value?.identity?.family_alias || value?.name || "Factor",
+      item?.factor_family_alias || item?.family_alias
+      || item?.identity?.family_alias || item?.name || "Factor",
     );
     const safe = alias.replace(/[^\p{L}\p{N}]+/gu, "_").replace(/^_+|_+$/g, "");
     return String.raw`\mathrm{${safe || "Factor"}}`;

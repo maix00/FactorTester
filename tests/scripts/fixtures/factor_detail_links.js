@@ -189,6 +189,37 @@ const preview = window.FTFactorDetailShared.previewExpression({
 assert.match(preview, /5\\,\\mathrm\{m\}/);
 assert.match(preview, /\\mathrm\{0\.9\}/);
 
+const nestedFamily = {
+  factor_family_alias: "SgChgPct",
+  math_expr: "\\operatorname{Quantile}_{\\textcolor{red}{M}}"
+    + "(\\textcolor{red}{P}_t-\\textcolor{red}{P}_{t-\\textcolor{red}{B}})",
+  parameter_definitions: [
+    {alias: "P", value: "CA"},
+    {alias: "B", value: "5m"},
+    {alias: "M", value: 0.9},
+  ],
+};
+const nestedPreview = window.FTFactorDetailShared.previewExpression({
+  factor_family_alias: "SgChgDurDay",
+  math_expr: "\\operatorname{argmin}(\\textcolor{red}{Th}_t)",
+  parameter_definitions: [{
+    alias: "Th", type: "FactorParam", value: {
+      __factor_family_draft: true,
+      __factor_family: nestedFamily,
+      parameter_values: {P: "CA", B: "5m", M: 0.9},
+    },
+  }],
+}, {});
+assert.match(nestedPreview, /\\begin\{aligned\}/);
+assert.match(nestedPreview, /\\mathrm\{SgChgPct\}_t &:=/);
+assert.match(nestedPreview, /\\textcolor\{red\}\{\\mathrm\{CA\}\}/);
+assert.match(nestedPreview, /\\textcolor\{red\}\{\\mathrm\{SgChgPct\}\}/);
+assert.ok(
+  nestedPreview.indexOf("\\mathrm{SgChgPct}_t &:=")
+    < nestedPreview.indexOf("\\operatorname{argmin}"),
+  "nested factor must be rendered as a preceding intermediate definition",
+);
+
 (async () => {
   const sourceView = window.FTFactorDetailShared.source(context, {
     source_code: "class MmRateOfChg(FactorFamily):\n    pass\n",

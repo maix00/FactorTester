@@ -399,7 +399,14 @@
           // explicitly submitted. Never publish it as a library family here.
           temporary: true,
         }),
-        onChange: () => {
+        onChange: nextValues => {
+          // FTFactorParameterEditor owns a copy of the values object. Keep
+          // the page draft in sync before rendering the outer expression;
+          // otherwise the picker visibly changes while the formula keeps the
+          // previous FactorParam value.
+          if (nextValues && typeof nextValues === "object") {
+            state.parameterValues = {...nextValues};
+          }
           markDirty("parameters");
           context.pageState?.capture?.();
           refreshFormulaPreview();

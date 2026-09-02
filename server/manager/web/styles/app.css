@@ -297,7 +297,7 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-editor-version-actions { flex: 0 0 auto; }
 .factor-detail-parameter-editor { display: grid; min-width: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
 .factor-detail-parameter-editor input, .factor-detail-parameter-editor select, .factor-detail-parameter-editor button { font-family: inherit; }
-.factor-detail-parameter-header, .factor-detail-parameter-row { display: grid; grid-template-columns: minmax(70px, .45fr) minmax(130px, .7fr) minmax(100px, .7fr) minmax(280px, 2.15fr); align-items: start; gap: 12px; min-width: 0; padding: 10px 12px; }
+.factor-detail-parameter-header, .factor-detail-parameter-row { display: grid; grid-template-columns: minmax(70px, .45fr) minmax(130px, .7fr) minmax(100px, .7fr) minmax(280px, 2.15fr); align-items: center; gap: 12px; min-width: 0; padding: 10px 12px; }
 .factor-detail-parameter-header { color: var(--muted); background: var(--soft); font-size: 12px; }
 .factor-detail-parameter-row + .factor-detail-parameter-row { border-top: 1px solid var(--line); }
 .factor-detail-parameter-row-factor { border-bottom: 1px solid var(--line); }
@@ -305,6 +305,8 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-detail-parameter-default { width: fit-content; max-width: 100%; }
 .factor-detail-parameter-type { display: inline-flex; align-items: center; gap: 5px; min-height: 24px; font-family: inherit; }
 .factor-detail-parameter-value { min-width: 0; }
+.factor-detail-parameter-value > input,
+.factor-param-active-source > input { width: 100%; min-height: 34px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 7px; padding: 6px 9px; color: inherit; background: var(--panel); line-height: 1.45; }
 .factor-detail-parameter-tree { display: grid; gap: 0; min-width: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); }
 .factor-detail-parameter-tree > summary { list-style: none; }
 .factor-detail-parameter-tree > summary::-webkit-details-marker { display: none; }
@@ -330,7 +332,7 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-param-reference-control > * { min-width: 0; }
 .factor-param-reference-control > .ft-test-object-picker,
 .factor-param-reference-control > .ft-multi-select-filter { width: 100%; max-width: none; box-sizing: border-box; }
-.factor-param-active-source { display: flex; align-items: center; min-width: 0; width: 100%; }
+.factor-param-active-source { display: flex; align-items: stretch; min-width: 0; width: 100%; }
 .factor-param-active-source > input,
 .factor-param-active-source > .ft-test-object-picker,
 .factor-param-active-source > .ft-multi-select-filter { width: 100%; max-width: none; box-sizing: border-box; }
