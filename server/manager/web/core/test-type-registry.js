@@ -19,7 +19,7 @@
       kind: "factor_evaluation", application: "factor_evaluation", nav: "jobs",
       title: "查看因子序列", route: "/factor-series",
       aliases: ["factor_evaluation", "factor-evaluation", "factor_series", "factor-series"],
-      pageID: "factor-series", description: "计算并查看因子值、价格与合约区间",
+      pageID: "factor-series", description: "计算并查看因子值、价格与期限结构",
       icon: "FS", sfSymbol: "waveform.path.ecg", requiresAuth: false,
       resultGroup: "job-detail-factor-series", resultGlobal: "FTFactorSeriesResults",
     }),

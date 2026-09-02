@@ -13,6 +13,13 @@ const context = {
   },
 };
 context.window = context;
+context.FTJobHighcharts = {
+  mountOptions(_context, target, options, stock) {
+    assert.strictEqual(stock, true);
+    captured = {target, options};
+    return chart;
+  },
+};
 vm.createContext(context);
 [
   "server/manager/web/core/price-chart.js",

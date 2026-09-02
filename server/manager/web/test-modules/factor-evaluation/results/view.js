@@ -84,16 +84,11 @@
     root.className = "factor-series-viewer";
     const controls = document.createElement("div");
     controls.className = "factor-series-controls";
-    const field = document.createElement("label");
+    const field = document.createElement("div");
+    field.className = "factor-series-product-control";
     const label = document.createElement("b"); label.textContent = context.t("产品");
-    const select = document.createElement("select");
-    model.series.forEach(item => select.append(new Option(
-      window.FTFactorSeriesModel.label(item),
-      window.FTFactorSeriesModel.identity(item),
-    )));
-    field.append(label, select);
+    let selectedProduct = window.FTFactorSeriesModel.identity(model.series[0]);
     const source = document.createElement("small");
-    controls.append(field, source);
     const chart = document.createElement("div");
     chart.className = "factor-series-chart-mount";
     const contracts = document.createElement("div");
@@ -102,13 +97,29 @@
     content.append(root);
     target.replaceChildren(header, content);
     const show = () => loadProduct(
-      context, model, options, select.value, chart, contracts, source,
+      context, model, options, selectedProduct, chart, contracts, source,
     ).catch(error => {
       chart.replaceChildren(FTUI.empty(
         context.t("曲线暂不可用"), error.message || String(error),
       ));
     });
-    select.addEventListener("change", show);
+    const picker = window.FTMultiSelectFilter.create(context, {
+      title: context.t("产品"), compact: true, multi: false,
+      className: "factor-series-product-filter",
+      items: model.series.map(item => ({
+        value: window.FTFactorSeriesModel.identity(item),
+        label: window.FTFactorSeriesModel.label(item),
+        description: context.t("切换要展示的产品价格、因子序列与期限结构"),
+      })),
+      selected: [selectedProduct],
+      searchPlaceholder: context.t("搜索产品…"),
+      onChange: async values => {
+        selectedProduct = values[0] || selectedProduct;
+        await show();
+      },
+    });
+    field.append(label, picker.element);
+    controls.append(field, source);
     show();
   }
 
@@ -155,7 +166,7 @@
       target.replaceChildren(FTUI.empty(context.t("暂无期限结构"), ""));
       return;
     }
-    const title = document.createElement("h3"); title.textContent = context.t("合约区间");
+    const title = document.createElement("h3"); title.textContent = context.t("期限结构列表");
     const view = FTUI.table(
       [context.t("合约"), context.t("开始"), context.t("结束"), context.t("数据")],
       rows.map(item => [
