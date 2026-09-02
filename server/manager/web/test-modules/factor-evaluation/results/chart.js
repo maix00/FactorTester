@@ -4,7 +4,7 @@
     volume: "#8aa4c8", openInterest: "#d97706",
   };
 
-  function mount(context, target, options) {
+  function mount(context, target, options, displayOptions = {}) {
     if (!window.Highcharts?.stockChart) {
       throw new Error(context.t("Highcharts 组件未加载"));
     }
@@ -18,7 +18,19 @@
     target.replaceChildren();
     target.classList.add("factor-series-chart");
     const chart = window.FTJobHighcharts.mountOptions(
-      context, target, chartOptions(context, options, bars, factorPoints), true,
+      context, target, chartOptions(context, options, bars, factorPoints), true, {
+        ...displayOptions,
+        rangeOptions: incoming => {
+          const range = incoming?.__ftRange || {};
+          const next = {...options, price: incoming};
+          return chartOptions(
+            context, next, window.FTPriceChart.barsOf(incoming || {}),
+            window.FTFactorSeriesModel.points(
+              options.factorSeries, range.minimum, range.maximum,
+            ),
+          );
+        },
+      },
     );
     target.__ftFactorSeriesChart = chart;
     if (window.ResizeObserver) {

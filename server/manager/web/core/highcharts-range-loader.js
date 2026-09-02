@@ -30,7 +30,7 @@
     options.rangeSelector = {
       ...(options.rangeSelector || {}), allButtonsEnabled: true,
     };
-    const overviewData = options.series?.[0]?.data;
+    const overviewData = options.navigator?.series?.data || options.series?.[0]?.data;
     options.navigator = {
       ...(options.navigator || {}), adaptToUpdatedData: false,
       ...(Array.isArray(overviewData) ? {series: {
