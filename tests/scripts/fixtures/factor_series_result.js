@@ -68,6 +68,13 @@ assert.deepStrictEqual(JSON.parse(JSON.stringify(captured.options.series.map(ite
 assert.strictEqual(captured.options.yAxis.length, 4);
 assert.strictEqual(captured.options.xAxis.plotBands.length, 1);
 assert.strictEqual(captured.options.chart.height, 650);
+assert.strictEqual(captured.options.navigator.enabled, true);
+assert.strictEqual(captured.options.navigator.series.type, "line");
+assert.strictEqual(captured.options.navigator.series.data.length, 2);
+assert.strictEqual(captured.options.navigator.series.dataGrouping.enabled, false);
+captured.options.series.forEach(item => {
+  assert.strictEqual(item.dataGrouping.enabled, false);
+});
 assert.strictEqual(typeof captured.options.xAxis.labels.formatter, "function");
 const factorTooltip = captured.options.series[0].tooltip.pointFormatter.call({
   open: 10, high: 12, low: 9, close: 11,

@@ -41,7 +41,7 @@
         ]),
         color: palette.priceDown, upColor: palette.priceUp,
         lineColor: palette.priceDown, upLineColor: palette.priceUp,
-        dataGrouping: {groupAll: true},
+        dataGrouping: {enabled: false},
         tooltip: {
           pointFormatter: window.FTPriceChart.ohlcPointFormatter(context),
         },
@@ -49,13 +49,13 @@
       {
         type: "line", name: options.factorLabel || t("因子"), yAxis: 1,
         data: factorPoints, color: palette.factor, lineWidth: 1.6,
-        dataGrouping: {approximation: "average", groupAll: true},
+        dataGrouping: {enabled: false},
       },
       {
         type: "column", name: t("成交量"), yAxis: 2,
         data: bars.map(item => [item.timestamp, item.volume]),
         color: palette.volume,
-        dataGrouping: {approximation: "sum", groupAll: true},
+        dataGrouping: {enabled: false},
         tooltip: {
           pointFormatter: window.FTPriceChart.scalarPointFormatter(context, "成交量"),
         },
@@ -65,7 +65,7 @@
       type: "line", name: t("持仓量"), yAxis: 3,
       data: bars.map(item => [item.timestamp, item.openInterest]),
       color: palette.openInterest, lineWidth: 1.2,
-      dataGrouping: {approximation: "average", groupAll: true},
+      dataGrouping: {enabled: false},
       tooltip: {
         pointFormatter: window.FTPriceChart.scalarPointFormatter(context, "持仓量"),
       },
@@ -80,7 +80,16 @@
       title: {text: `${options.product || ""} · ${options.factorLabel || t("因子")}`},
       subtitle: {text: `${bars.length} ${t("条价格")} · ${factorPoints.length} ${t("个因子值")}`},
       rangeSelector: {selected: 5},
-      navigator: {enabled: true}, scrollbar: {enabled: true},
+      navigator: {
+        enabled: true,
+        series: {
+          type: "line",
+          name: options.product || t("价格"),
+          data: bars.map(item => [item.timestamp, item.close]),
+          dataGrouping: {enabled: false},
+        },
+      },
+      scrollbar: {enabled: true},
       xAxis: {
         type: "datetime", ordinal: true,
         labels: {
