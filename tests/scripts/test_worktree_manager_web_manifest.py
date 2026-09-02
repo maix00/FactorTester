@@ -1850,6 +1850,8 @@ def test_shared_multi_select_enforces_exclusive_and_single_selection() -> None:
         encoding="utf-8"
     )
     assert 'options.menuClass || ""' in picker
+    assert "get hasSelection()" in picker
+    assert "selectedFirst" not in picker
     assert "height: max-content" in styles
     assert ".ft-multi-select-options" in styles
     assert 'menuClass: "factor-product-group-filter-menu"' in factor_filter
@@ -2515,7 +2517,7 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     )
     assert "editor.syncFromState()" in set_editor
     assert 'parameter.type === "FactorParam"' in parameter_editor
-    assert 'context.t("新增因子家族")' in parameter_editor
+    assert '"新增因子家族"' in parameter_editor
     assert "factor-param-choice-disabled" in parameter_editor
     assert "factor-param-reference-control" in parameter_editor
     assert 'input.placeholder = context.t("填写")' in parameter_editor
@@ -2534,10 +2536,10 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert "factor-param-factor-" in parameter_editor
     assert "FTTestObjectEditorOverlay.open" in editor
     assert "factor-source-mode" not in editor
-    assert 'createLabel: context.t("新增因子家族")' in editor
+    assert '"新增因子家族"' in editor
     assert 'state.family.source_kind === "transient"' in editor
     assert "factor-param-choice-family" in parameter_editor
-    assert "clearable: true" in parameter_editor
+    assert "compact: true, multi: false" in parameter_editor
     assert "state.onInspected?.(state.inspection)" in editor
     assert "name.value = inspection.factor_name" not in editor
     assert "familyClassNameMatches(name.value, state.inspection)" in editor

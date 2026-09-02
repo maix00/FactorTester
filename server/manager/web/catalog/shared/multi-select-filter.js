@@ -66,6 +66,7 @@
   let outsideCloseBound = false;
   const portaledControls = new Set();
   let orphanObserver = null;
+  let pickerSequence = 0;
 
   function watchPortaledControl(control) {
     portaledControls.add(control);
@@ -109,6 +110,8 @@
         ? Boolean(options.disabled(item)) : Boolean(options.disabled)),
     }));
     const multi = options.multi !== false;
+    const singleGroupName = `${String(options.name || "ft-single-select").trim()
+      || "ft-single-select"}-${++pickerSequence}`;
     let selected = normalizeSelected(options.selected ?? [], items);
     if (!multi && selected.length > 1) selected = [selected[selected.length - 1]];
     let committedSelected = [...selected];
@@ -303,24 +306,12 @@
       return values.map(value => itemLabel(itemFor(value), value));
     }
 
-    function selectedFirst(values) {
-      const selectedSet = new Set(selected);
-      if (String(search.value || "").trim()) return values;
-      return [...values].sort((left, right) => {
-        const leftSelected = selectedSet.has(left.value) ? 0 : 1;
-        const rightSelected = selectedSet.has(right.value) ? 0 : 1;
-        return leftSelected - rightSelected
-          || left.label.localeCompare(right.label, "zh-CN");
-      });
-    }
-
     function visibleItems() {
       const query = String(search.value || "").trim().toLocaleLowerCase();
-      const filtered = !query ? items : items.filter(item => (
+      return !query ? items : items.filter(item => (
         `${item.label} ${item.value} ${item.description}`
           .toLocaleLowerCase().includes(query)
       ));
-      return selectedFirst(filtered);
     }
 
     function setItems(nextItems, preserveSelected = false) {
@@ -379,7 +370,7 @@
         row.setAttribute("aria-label", `${item.label}：${item.description}`);
         const input = document.createElement("input");
         input.type = multi ? "checkbox" : "radio";
-        if (!multi) input.name = options.name || "ft-single-select";
+        if (!multi) input.name = singleGroupName;
         input.value = item.value;
         input.checked = selected.includes(item.value);
         input.disabled = item.disabled;
@@ -418,55 +409,43 @@
           actionHost.append(button);
         }
         if (actionHost.childElementCount) row.append(actionHost);
-        input.addEventListener("change", async () => {
-          if (item.disabled) return;
-          if (input.checked) {
-            selected = !multi
-              ? [item.value]
-              : item.exclusive
-              ? [item.value]
-              : [...selected.filter(value => !itemFor(value)?.exclusive), item.value];
-          } else {
-            selected = selected.filter(value => value !== item.value);
-          }
-          render();
-          if (!multi) {
-            const previous = [...committedSelected];
-            try {
-              // A single-choice callback may synchronously redraw and replace
-              // the owning field (for example the inline factor source mode).
-              // Close and unportal this control before invoking application
-              // code so its detached menu cannot survive or race the redraw.
-              dropdown.open = false;
-              restoreMenu();
-              const commit = options.onChange || options.onApply;
-              const result = commit?.([...selected]);
-              if (result && typeof result.then === "function") await result;
-              committedSelected = [...selected];
-            } catch (error) {
-              selected = previous;
-              render();
-              context.showNotice?.(
-                error.message || translate(context, "应用失败"), true,
-              );
-            }
-          }
-        });
-        input.addEventListener("click", async event => {
-          if (multi || options.clearable !== true || item.disabled
-              || !selected.includes(item.value)) return;
-          event.preventDefault();
+        function selectionAfterToggle() {
+          const isSelected = selected.includes(item.value);
+          if (!multi) return isSelected ? [] : [item.value];
+          if (isSelected) return selected.filter(value => value !== item.value);
+          if (item.exclusive) return [item.value];
+          return [
+            ...selected.filter(value => !itemFor(value)?.exclusive),
+            item.value,
+          ];
+        }
+
+        function selectionAfterNativeChange() {
+          if (!input.checked) return selected.filter(value => value !== item.value);
+          if (!multi) return [item.value];
+          if (item.exclusive) return [item.value];
+          return [
+            ...selected.filter(value => value !== item.value
+              && !itemFor(value)?.exclusive),
+            item.value,
+          ];
+        }
+
+        async function commitSingle(next) {
           const previous = [...committedSelected];
-          selected = [];
-          input.checked = false;
+          selected = [...next];
+          // A single-choice callback may synchronously redraw and replace the
+          // owning field (for example the inline factor source mode). Close
+          // and unportal this control before invoking application code so its
+          // detached menu cannot survive or race the redraw.
+          dropdown.open = false;
+          restoreMenu();
           render();
           try {
-            dropdown.open = false;
-            restoreMenu();
             const commit = options.onChange || options.onApply;
-            const result = commit?.([]);
+            const result = commit?.([...next]);
             if (result && typeof result.then === "function") await result;
-            committedSelected = [];
+            committedSelected = [...next];
           } catch (error) {
             selected = previous;
             render();
@@ -474,6 +453,40 @@
               error.message || translate(context, "应用失败"), true,
             );
           }
+        }
+
+        // Always own the pointer transition.  Native radio/checkbox defaults
+        // make the same interaction pass through a second change path and
+        // can also couple unrelated radio pickers through their name.
+        let clickHandled = false;
+        input.addEventListener("click", event => {
+          if (item.disabled) return;
+          event.preventDefault();
+          clickHandled = true;
+          const next = selectionAfterToggle();
+          if (!multi) {
+            void commitSingle(next);
+            return;
+          }
+          selected = next;
+          render();
+        });
+
+        // Keep change as a controlled fallback for keyboard/programmatic
+        // changes.  A real pointer click has already been handled above.
+        input.addEventListener("change", () => {
+          if (clickHandled) {
+            clickHandled = false;
+            return;
+          }
+          if (item.disabled) return;
+          const next = selectionAfterNativeChange();
+          if (!multi) {
+            void commitSingle(next);
+            return;
+          }
+          selected = next;
+          render();
         });
         return row;
       }));
@@ -559,6 +572,7 @@
       clear,
       render,
       get values() { return [...selected]; },
+      get hasSelection() { return selected.length > 0; },
       get multi() { return multi; },
       setValues(values) {
         selected = normalizeSelected(values, items);

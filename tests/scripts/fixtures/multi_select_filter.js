@@ -126,13 +126,12 @@ const multi = window.FTMultiSelectFilter.create({t: value => value}, {
   selected: ["a"],
   multi: false,
   compact: true,
-  clearable: true,
   onChange: values => { clearableChanges.push(values); },
 });
 assert.deepEqual(multi.values, ["a"]);
+assert.equal(multi.hasSelection, true);
 assert.equal(multi.summary.children[0].textContent, "A");
 const bInput = multi.optionList.children[1].children[0];
-bInput.checked = true;
 assert.equal(descendants(multi.element).some(item => (
   item.className === "ft-multi-select-selection-note"
 )), false, "single choice must not render a redundant selected note");
@@ -179,11 +178,14 @@ locked.summary.listeners.click({preventDefault() {}});
 assert.equal(locked.dropdown.open, false);
 
 (async () => {
-  await bInput.listeners.change();
+  await bInput.listeners.click({preventDefault() {}});
   assert.deepEqual(multi.values, ["b"]);
-  const selectedBInput = multi.optionList.children[0].children[0];
+  assert.equal(multi.optionList.children[0].children[1].textContent, "A",
+    "selection must not reorder the option list");
+  const selectedBInput = multi.optionList.children[1].children[0];
   await selectedBInput.listeners.click({preventDefault() {}});
   assert.deepEqual(multi.values, []);
+  assert.equal(multi.hasSelection, false);
   assert.deepEqual(clearableChanges.at(-1), []);
   assert.equal(multi.summary.children[0].textContent, "未筛选");
   assert.equal(multi.dropdown.open, false,
@@ -266,6 +268,24 @@ assert.equal(locked.dropdown.open, false);
   await saveButton.listeners.click();
   assert.deepEqual(multiChanges, [["a", "c"]]);
   assert.equal(multiSave.dropdown.open, false);
+
+  const exclusiveToggle = window.FTMultiSelectFilter.create({t: value => value}, {
+    items: [
+      {value: "normal", label: "普通"},
+      {value: "exclusive", label: "排他", exclusive: true},
+    ],
+    selected: ["normal"],
+  });
+  await exclusiveToggle.optionList.children[1].children[0].listeners.click({
+    preventDefault() {},
+  });
+  assert.deepEqual(exclusiveToggle.values, ["exclusive"],
+    "selecting an exclusive item clears normal selections");
+  await exclusiveToggle.optionList.children[1].children[0].listeners.click({
+    preventDefault() {},
+  });
+  assert.deepEqual(exclusiveToggle.values, [],
+    "clicking a selected exclusive item clears it");
 
   multiSave.dropdown.open = true;
   multiSave.dropdown.listeners.toggle();

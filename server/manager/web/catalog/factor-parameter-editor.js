@@ -59,8 +59,18 @@
     const control = document.createElement("div");
     control.className = "factor-param-reference-control";
     const input = document.createElement("input");
-    const display = value => String(value?.alias || value?.factor_alias || value || "").trim();
-    const reference = value => String(value?.ref || value?.factor_ref || value || "").trim();
+    const display = value => {
+      if (value && typeof value === "object") {
+        return String(value.alias ?? value.factor_alias ?? value.value ?? "").trim();
+      }
+      return String(value ?? "").trim();
+    };
+    const reference = value => {
+      if (value && typeof value === "object") {
+        return String(value.ref ?? value.factor_ref ?? value.value ?? "").trim();
+      }
+      return String(value ?? "").trim();
+    };
     let columnPicker;
     let factorPicker;
     let familyPicker;
@@ -79,8 +89,9 @@
       }
     };
     const setValue = (value, source) => {
-      values[alias] = value || "";
-      activeSource = value === "" || value === null ? "" : source;
+      const empty = value === undefined || value === null || value === "";
+      values[alias] = empty ? "" : value;
+      activeSource = empty ? "" : source;
       input.value = ["column", "manual"].includes(source) ? display(values[alias]) : "";
       input.setCustomValidity("");
       const shown = display(values[alias]);
@@ -124,6 +135,10 @@
       input.setCustomValidity("");
       if (matched) setValue(String(matched.value), "column");
       else if (!raw) setValue("", "column");
+      else {
+        activeSource = "manual";
+        syncSources();
+      }
     });
     input.addEventListener("change", async () => {
       const raw = input.value.trim();
@@ -274,7 +289,7 @@
 
   function picker(context, name, title, items, selected, onChange) {
     return (window.FTTestObjectPicker || window.FTMultiSelectFilter).create(context, {
-      compact: true, multi: false, clearable: true,
+      compact: true, multi: false,
       name, title, items, selected, onChange,
     });
   }

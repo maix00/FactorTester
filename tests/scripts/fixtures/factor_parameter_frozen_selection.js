@@ -20,6 +20,10 @@ class Element {
 global.document = {createElement: tag => new Element(tag)};
 global.window = globalThis;
 global.FTUI = window.FTUI = {helpIcon: () => new Element("span")};
+window.FTFactorDetailShared = {
+  familySourceHelp: () => new Element("span"),
+  previewExpression: () => "",
+};
 const pickers = [];
 window.FTTestObjectPicker = {
   create(_context, options) {
@@ -50,6 +54,11 @@ const frozen = {
     params: {N: "5d"},
   },
 };
+const nestedFamily = {
+  family_ref: "factor-family:v2:nested",
+  factor_family_alias: "NestedFamily",
+  params: [{alias: "N", type: "WindowParam", default_value: "5d"}],
+};
 let parameterChanges = 0;
 const editor = window.FTFactorParameterEditor.create(
   {t: value => value},
@@ -57,7 +66,11 @@ const editor = window.FTFactorParameterEditor.create(
   {},
   {
     factorItems: [{value: frozen.ref, label: frozen.alias, factor: frozen}],
-    familyItems: [],
+    familyItems: [{
+      value: nestedFamily.family_ref,
+      label: nestedFamily.factor_family_alias,
+      family: nestedFamily,
+    }],
     onChange: () => { parameterChanges += 1; },
   },
 );
@@ -76,8 +89,19 @@ pickers[1].options.onChange([]);
 assert.equal(editor.values.P, "",
   "clearing the selected picker must release the mutually-exclusive value");
 assert.equal(parameterChanges, 2);
-assert.equal(pickers.every(item => item.options.clearable === true), true,
-  "all mutually-exclusive FactorParam pickers must allow clearing their selection");
+assert.equal(pickers[1].selected.length, 0,
+  "clearing a picker must leave it with no selected object");
+const manualInput = descendants(editor.root).find(item => item.tagName === "INPUT");
+assert.ok(manualInput, "FactorParam must expose its manual input");
+manualInput.value = "0";
+manualInput.listeners.change();
+assert.equal(editor.values.P, 0,
+  "a zero constant must remain a value rather than being treated as empty");
+manualInput.value = "";
+manualInput.listeners.input();
+assert.equal(editor.values.P, "",
+  "emptying the manual input must release the mutually-exclusive value");
+assert.equal(parameterChanges, 4);
 const familyGroup = descendants(editor.root).find(item => (
   String(item.className).includes("factor-param-choice-family")
 ));
@@ -86,4 +110,20 @@ const nestedMount = editor.root.children.find(item => (
   String(item.className).includes("factor-param-nested-family-mount")
 ));
 assert.ok(nestedMount, "nested parameters must mount beside the outer row, not inside Value");
-console.log("ok");
+
+(async () => {
+  await pickers[2].options.onChange([nestedFamily.family_ref]);
+  assert.deepEqual(pickers[2].selected, [nestedFamily.family_ref],
+    "selected family must remain selected after its parameters load");
+  assert.equal(editor.values.P.__factor_family.factor_family_alias,
+    nestedFamily.factor_family_alias);
+  assert.ok(descendants(nestedMount).some(item => (
+    String(item.className).includes("factor-detail-parameter-editor")
+  )), "selected family must render its nested parameter table");
+  assert.ok(descendants(nestedMount).some(item => item.tagName === "INPUT"),
+    "nested family parameter table must expose editable parameter fields");
+  console.log("ok");
+})().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});

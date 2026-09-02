@@ -335,7 +335,9 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-param-choice-group > small { color: var(--muted); font-weight: 600; }
 .factor-param-choice-group > input,
 .factor-param-choice-group > .ft-test-object-picker,
-.factor-param-choice-group > .ft-multi-select-filter { width: 100%; box-sizing: border-box; }
+.factor-param-choice-group > .ft-multi-select-filter {
+  width: 100%; max-width: none; box-sizing: border-box;
+}
 .factor-param-choice-family { grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
 .factor-param-choice-family > small { grid-column: 1 / -1; }
 .factor-param-choice-family > .factor-param-create-family { align-self: stretch; white-space: nowrap; }
