@@ -21,7 +21,7 @@ class LookbackScope:
         return (type(self).__name__, self.kind)
 
     def to_latex(self, subst: dict | None = None) -> str:
-        return f"\\mathrm{{{self.kind}}}"
+        return f"\\operatorname{{Scope{self.kind.title()}}}"
 
 
 @dataclass(frozen=True)
@@ -72,7 +72,10 @@ class BarCountScope(LookbackScope):
         return (type(self).__name__, self.kind, self.count._structural_key())
 
     def to_latex(self, subst: dict | None = None) -> str:
-        return f"\\mathrm{{bars}}\\left({self.count._to_latex(subst)}\\right)"
+        return (
+            "\\operatorname{ScopeBars}"
+            f"\\left({self.count._to_latex(subst)}\\right)"
+        )
 
 
 @dataclass(frozen=True)
@@ -84,7 +87,10 @@ class SessionScope(LookbackScope):
         return (type(self).__name__, self.kind, self.gap)
 
     def to_latex(self, subst: dict | None = None) -> str:
-        return f"\\mathrm{{session}}\\left(\\mathrm{{{self.gap}}}\\right)"
+        return (
+            "\\operatorname{ScopeSession}"
+            f"\\left(\\mathrm{{{self.gap}}}\\right)"
+        )
 
 
 @dataclass(frozen=True)
@@ -92,7 +98,7 @@ class TradingDayScope(LookbackScope):
     kind: str = "trading_day"
 
     def to_latex(self, subst: dict | None = None) -> str:
-        return "\\mathrm{trading\\_day}"
+        return "\\operatorname{ScopeTradingDay}"
 
 
 def scope_bars(count: Any) -> BarCountScope:

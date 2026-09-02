@@ -24,6 +24,24 @@ def _as_data_time(value: Any) -> DataTime | None:
     return DataTime(ts=ts)
 
 
+def require_run_window(
+    start_dt: Any | None,
+    end_dt: Any | None,
+) -> tuple[DataTime, DataTime]:
+    """Return one explicit, ordered run window; never consult PageRuntime."""
+    start = _as_data_time(start_dt)
+    end = _as_data_time(end_dt)
+    missing = [
+        name for name, value in (("start_date", start), ("end_date", end))
+        if value is None or value.ts is None
+    ]
+    if missing:
+        raise ValueError(f"运行时间范围缺失: {', '.join(missing)}")
+    if start.sort_key() > end.sort_key():
+        raise ValueError("运行时间范围错误: start_date 必须早于或等于 end_date")
+    return start, end
+
+
 def selection_from_request(data: dict[str, Any], *, page_uuid: str) -> ProductPathSelection:
     """Resolve the product universe carried by a test request."""
     raw = data.get("product_path_selection")
@@ -197,18 +215,12 @@ def create_factor_tester_for_run(
     selection: ProductPathSelection,
     *,
     page_uuid: str,
-    start_dt: Any | None = None,
-    end_dt: Any | None = None,
+    start_dt: Any,
+    end_dt: Any,
     user: Any | None = None,
 ):
     """Create and register the FactorTester used by a concrete test run."""
-    time_entry = runtime_state.get_current_time(page_uuid)
-    if time_entry is not None:
-        default_start, default_end, _ = time_entry
-    else:
-        default_start, default_end = runtime_state.get_default_time()
-    start_dt = _as_data_time(start_dt if start_dt is not None else default_start)
-    end_dt = _as_data_time(end_dt if end_dt is not None else default_end)
+    start_dt, end_dt = require_run_window(start_dt, end_dt)
 
     from tools.factors.FactorTester import FactorTester
 
@@ -235,14 +247,12 @@ def create_isolated_factor_tester_for_run(
     selection: ProductPathSelection,
     *,
     run_id: str,
-    start_dt: Any | None = None,
-    end_dt: Any | None = None,
+    start_dt: Any,
+    end_dt: Any,
     user: Any | None = None,
 ):
     """Create a worker-local tester without reading or registering PageRuntime."""
-    default_start, default_end = runtime_state.get_default_time()
-    start_dt = _as_data_time(start_dt if start_dt is not None else default_start)
-    end_dt = _as_data_time(end_dt if end_dt is not None else default_end)
+    start_dt, end_dt = require_run_window(start_dt, end_dt)
 
     from tools.factors.FactorTester import FactorTester
 
@@ -264,18 +274,13 @@ def create_isolated_factor_tester_for_run(
     return tester
 
 
-def create_factor_tester_from_request(data: dict[str, Any], *, page_uuid: str, user: Any | None = None):
-    selection = selection_from_request(data, page_uuid=page_uuid)
-    return create_factor_tester_for_run(selection, page_uuid=page_uuid, user=user)
-
-
 def create_factor_tester_for_product_path_selection(
     data: dict[str, Any],
     product_path_selection_id: str,
     *,
     page_uuid: str,
-    start_dt: Any | None = None,
-    end_dt: Any | None = None,
+    start_dt: Any,
+    end_dt: Any,
     user: Any | None = None,
 ):
     selection = selection_for_product_path_selection(data, product_path_selection_id, page_uuid=page_uuid)

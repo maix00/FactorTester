@@ -18,9 +18,13 @@ from server.modules.single_factor_test.signal_schedule_diagnostics import (
     policy_for_factor,
     summarize_signal_schedule,
 )
-from server.modules.shared.factor_tester_runtime import create_factor_tester_for_run
-from server.modules.shared.factor_tester_runtime import create_isolated_factor_tester_for_run
-from server.modules.shared.factor_tester_runtime import selection_from_request
+from server.modules.shared.factor_data_coverage import require_factor_data_coverage
+from server.modules.shared.factor_tester_runtime import (
+    create_factor_tester_for_run,
+    create_isolated_factor_tester_for_run,
+    require_run_window,
+    selection_from_request,
+)
 from server.modules.shared.submission_helpers import product_attrs
 from tools.products.product_path_selection import ProductPathSelection
 from server.services.factor_registry import factor_from_alias, get_factor_family_instance
@@ -85,13 +89,18 @@ class FactorEvaluation:
         if not factor_family_alias or not factor_alias:
             raise ValueError("请先选择因子")
         selection = selection_from_request(data, page_uuid="")
+        nested_settings = data.get("settings")
+        # RunSpec v4 materializes ``analysis.execution.settings`` onto the
+        # worker payload at the execution boundary.  Keep accepting the older
+        # nested shape, but use the flattened execution contract otherwise.
+        settings = nested_settings if isinstance(nested_settings, dict) else data
         return cls(
             selection=selection,
             factor_family_alias=factor_family_alias,
             factor_alias=factor_alias,
             page_uuid="",
             product_name=str(data.get("product") or "").strip(),
-            settings=data.get("settings") if isinstance(data.get("settings"), dict) else None,
+            settings=settings,
             owner=owner,
             run_id=run_id,
             isolated=True,
@@ -144,6 +153,14 @@ class FactorEvaluation:
             factor = _find_factor(factors, self.factor_alias, self.factor_alias)
         if factor is None:
             raise LookupError("请先提交参数设置，或从模板加载已有因子")
+
+        require_factor_data_coverage(
+            tester.products,
+            factor,
+            start_dt=start_dt,
+            end_dt=end_dt,
+            data_source=str((self.settings or {}).get("data_source") or ""),
+        )
 
         from tools.factors.FactorTester import _active_tester
 
@@ -235,24 +252,27 @@ class FactorEvaluation:
             ),
         }
 
-    def _run_window_datetimes(self) -> tuple[DataTime | None, DataTime | None]:
+    def _run_window_datetimes(self) -> tuple[DataTime, DataTime]:
         settings = self.settings or {}
         start_date = str(settings.get("start_date") or "").strip()
         end_date = str(settings.get("end_date") or "").strip()
         if not start_date or not end_date:
-            return None, None
+            return require_run_window(None, None)
         precision = str(settings.get("time_precision") or "exact")
         if precision == "trading_day":
             timezone = str(settings.get("timezone") or "UTC")
             start = pd.Timestamp(start_date).tz_localize(timezone)
             end = pd.Timestamp(end_date).tz_localize(timezone)
-            return DataTime(ts=start, precision="trading_day"), DataTime(ts=end, precision="trading_day")
+            return require_run_window(
+                DataTime(ts=start, precision="trading_day"),
+                DataTime(ts=end, precision="trading_day"),
+            )
         timezone = str(settings.get("timezone") or "Asia/Shanghai")
         start_time = str(settings.get("start_time") or "00:00")
         end_time = str(settings.get("end_time") or "23:59")
         start = pd.Timestamp(f"{start_date} {start_time}").tz_localize(timezone)
         end = pd.Timestamp(f"{end_date} {end_time}").tz_localize(timezone)
-        return DataTime(ts=start), DataTime(ts=end)
+        return require_run_window(DataTime(ts=start), DataTime(ts=end))
 
     @staticmethod
     def _clip_series_by_run_window(

@@ -8,6 +8,7 @@ from flask import jsonify
 import server.services.page_runtime as page_runtime
 from server.services.session_runtime import current_user
 from server.modules.shared.factor_tester_runtime import create_factor_tester_for_product_path_selection
+from server.modules.single_factor_test.ic_params import run_window_datetimes
 
 
 def request_page_uuid(data: dict) -> tuple[str | None, Any | None]:
@@ -59,8 +60,13 @@ def get_or_create_selection_tester(data: dict[str, Any], *, page_uuid: str, call
             page_runtime.FACTOR_TESTER, selection_id, caller=caller, page_uuid=page_uuid
         )
     except AssertionError:
+        raw_settings = data.get("settings")
+        settings = raw_settings if isinstance(raw_settings, dict) else data
+        start_dt, end_dt = run_window_datetimes(settings)
         return create_factor_tester_for_product_path_selection(
             data,
             selection_id,
             page_uuid=page_uuid,
+            start_dt=start_dt,
+            end_dt=end_dt,
         )

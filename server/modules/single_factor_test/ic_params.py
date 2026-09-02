@@ -14,6 +14,7 @@ from tools.factors.tester_calc.single_factor_test.ic_diagnostics import (
 from server.modules.single_factor_test.ic_rolling_params import (
     normalize_rolling_window_specs,
 )
+from server.modules.shared.factor_tester_runtime import require_run_window
 
 
 # Reserved request marker.  It is never sent to ``FactorNextPeriodReturns``;
@@ -56,16 +57,19 @@ def _scale_aware_horizon_durations(signal_freq: DataFreq) -> list[DataFreq]:
 
 def run_window_datetimes(
     configuration: dict | None,
-) -> tuple[DataTime | None, DataTime | None]:
+) -> tuple[DataTime, DataTime]:
     if not configuration:
-        return None, None
+        return require_run_window(None, None)
     start_date = str(configuration.get("start_date") or "").strip()
     end_date = str(configuration.get("end_date") or "").strip()
     if not start_date or not end_date:
-        return None, None
+        return require_run_window(
+            start_date or None,
+            end_date or None,
+        )
     precision = str(configuration.get("time_precision") or "exact")
     if precision == "trading_day":
-        return (
+        return require_run_window(
             DataTime(ts=pd.Timestamp(start_date), precision="trading_day"),
             DataTime(ts=pd.Timestamp(end_date), precision="trading_day"),
         )
@@ -74,7 +78,10 @@ def run_window_datetimes(
     end_time = str(configuration.get("end_time") or "23:59")
     start = pd.Timestamp(f"{start_date} {start_time}").tz_localize(timezone)
     end = pd.Timestamp(f"{end_date} {end_time}").tz_localize(timezone)
-    return DataTime(ts=start, precision="exact"), DataTime(ts=end, precision="exact")
+    return require_run_window(
+        DataTime(ts=start, precision="exact"),
+        DataTime(ts=end, precision="exact"),
+    )
 
 
 def parse_forward_horizon_bases(data: dict, errors: List[str]) -> tuple[List[str], List[int]]:
