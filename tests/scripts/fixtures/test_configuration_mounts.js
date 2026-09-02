@@ -16,6 +16,11 @@ function frozenFactor(digest, alias, family) {
   };
 }
 const factor = frozenFactor("a", "ROC", "MmRateOfChg");
+const nestedTemporaryFactor = {
+  ...frozenFactor("c", "InlineThreshold", "InlineThreshold"),
+  temporary: true, source_kind: "transient",
+  source_code: "class InlineThreshold: pass\n",
+};
 const secondFactor = frozenFactor("b", "Momentum", "Momentum");
 const configurationGroup = {
   config_group_id: "icg-day-roc",
@@ -76,6 +81,7 @@ const state = {
   }, values: {
     factor_candidates: [{
       ...factor, temporary: true, source_origin: "test_inline",
+      factor_dependencies: [nestedTemporaryFactor, nestedTemporaryFactor],
     }, secondFactor],
     factor_selections: [factor],
     category_candidates: [{
@@ -173,7 +179,10 @@ const context = {t: value => value, api: async (path, options) => {
     [factor.ref],
     "authoring settings must persist the registered selection field",
   );
-  assert.equal(temporary.factors[0].ref, factor.ref);
+  assert.deepEqual(temporary.factors.map(item => item.ref), [
+    nestedTemporaryFactor.ref, factor.ref,
+  ]);
+  assert.equal(temporary.factors[0].source_code, "class InlineThreshold: pass\n");
   assert.equal(temporary.factor_sets[0].target_ref, "factor-set:v1:temporary");
   assert.equal(temporary.product_groups[0].id, "inline-product-group:session");
   assert.equal(temporary.categories[0].id, "inline-category:session");

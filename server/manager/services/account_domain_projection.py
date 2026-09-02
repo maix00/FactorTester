@@ -90,7 +90,7 @@ def factor_rows_from_account_entities(
                 {"alias": str(alias), "value": value}
                 for alias, value in identity["params"].items()
             ]
-            result.append({
+            projected = {
                 "factor_ref": frozen["ref"],
                 "factor_alias": factor_alias,
                 "factor_family_alias": identity["family_alias"],
@@ -98,7 +98,9 @@ def factor_rows_from_account_entities(
                 "factor_owner_ref": frozen["owner_ref"],
                 "chinese_name": str(payload.get("chinese_name") or ""),
                 "description": str(payload.get("description") or ""),
-                "math_expr": str(payload.get("math_expr") or ""),
+                "math_expr": str(
+                    item.get("math_expr") or payload.get("math_expr") or ""
+                ),
                 "category": str(payload.get("category") or ""),
                 "factor_kind": "registered",
                 "source": "registered",
@@ -124,7 +126,14 @@ def factor_rows_from_account_entities(
                 "self_formula_fingerprint": identity[
                     "self_formula_fingerprint"
                 ],
-            })
+            }
+            for key in (
+                "resolved_math_expr", "parameter_definitions",
+                "factor_dependencies",
+            ):
+                if item.get(key) not in (None, "", []):
+                    projected[key] = item[key]
+            result.append(projected)
     return result
 
 

@@ -30,7 +30,8 @@
     if (!factor) {
       throw new Error(context.t("因子不存在或当前端口无法解析该引用"));
     }
-    factor = await withSource(context, factor);
+    // Factor instances do not own a source panel. Keep source retrieval lazy;
+    // the family header help opens the exact frozen revision on demand.
     factor = model().withSourceMetadata(factor);
     factor.factor_source_version = factor.family_formula_fingerprint
       ? `公式版本 · ${factor.family_formula_fingerprint.slice(0, 12)}`
@@ -54,7 +55,9 @@
     root.className = window.FTFactorDetailShared.pageClass("view", "factor-page");
     const top = document.createElement("div");
     top.className = "factor-detail-top";
-    top.append(window.FTFactorDetailShared.summary(context, factor));
+    top.append(window.FTFactorDetailShared.summary(
+      context, factor, {instance: true, descriptionOnly: true},
+    ));
     root.append(top);
     const provenance = window.FTFactorDetailShared.provenance(context, factor);
     const parameters = window.FTFactorDetailShared.parameterTable(context, factor);
@@ -71,7 +74,6 @@
         overview: FTUI.table(
           [context.t("字段"), context.t("值")], FTUI.fieldRows(factor),
         ).shell,
-        source: window.FTFactorDetailShared.source(context, factor),
         parameters,
         identity: provenance,
         jobs: jobs.mount,
@@ -251,69 +253,6 @@
     };
 
     renderFamily(baseFamily);
-  }
-
-  async function withSource(context, value) {
-    const fingerprint = String(value?.family_formula_fingerprint || "").trim();
-    const options = window.FTFactorDetailShared.sourceOptions(value);
-    // A frozen source carried by a local/temporary object is authoritative. A
-    // catalog projection without source must instead resolve the exact server
-    // snapshot; it must never silently fall back to today's family source.
-    if (fingerprint && value?.source_code) return value;
-    if (fingerprint && ["custom", "public"].includes(options.sourceKind)) {
-      try {
-        const payload = await window.FTFactorDetailShared.loadSourceVersion(
-          context, value, fingerprint,
-        );
-        const valueParams = window.FTFactorDetailShared.parameterRows(value);
-        const sourceParams = window.FTFactorDetailShared.parameterRows(payload);
-        const params = valueParams.length ? valueParams : sourceParams;
-        return {
-          ...value,
-          ...payload,
-          family_formula_fingerprint:
-            payload.family_formula_fingerprint || fingerprint,
-          source_unavailable_reason: "",
-          ...(params.length ? {params, factor_params: params} : {}),
-        };
-      } catch (_) {
-        return {
-          ...value,
-          source_code: "",
-          source_unavailable_reason: window.FTFactorDetailShared.sourceUnavailableText(
-            context,
-          ),
-        };
-      }
-    }
-    if (value?.source_code || !context.session) return value;
-    const family = value.factor_family_alias || value.family_alias
-      || model().familyName(value);
-    if (!family) return value;
-    try {
-      const detail = await window.FTFactorDetailShared.loadSourceVersion(
-        context, value, "current", {familyID: family},
-      );
-      const valueParams = window.FTFactorDetailShared.parameterRows(value);
-      const detailParams = window.FTFactorDetailShared.parameterRows(detail);
-      // A registered factor carries its concrete parameter values; the
-      // source-detail response carries the family's parameter definitions.
-      // Keep the former when present so opening a factor detail page never
-      // replaces the saved factor values with family defaults.
-      const params = valueParams.length ? valueParams : detailParams;
-      return {
-        ...value,
-        ...detail,
-        // A source-detail transport may legitimately omit derived metadata.
-        // Never let an empty response erase the formula already present in
-        // the catalog projection.
-        math_expr: detail.math_expr || value.math_expr || "",
-        source_code: detail.source_code || value.source_code || "",
-        ...(params.length ? {params, factor_params: params} : {}),
-      };
-    } catch (_) {
-      return value;
-    }
   }
 
   async function withCurrentFamilySource(context, value) {

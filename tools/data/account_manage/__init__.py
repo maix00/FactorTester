@@ -20,6 +20,7 @@ from tools.data.sqlite.account_manager import (
     list_all_factor_param_aliases_across_scopes as _list_all_aliases_across_scopes,
     list_factor_param_config_aliases as _list_factor_param_config_aliases,
     list_factor_param_config_scopes as _list_factor_param_config_scopes,
+    list_factor_family_dependency_configs as _list_factor_family_dependency_configs,
     load_accounts as _load_accounts,
     load_levels as _load_levels,
     load_organizations as _load_organizations,
@@ -699,6 +700,15 @@ def delete_factor_family_configs(
         "config_count": len(deleted),
         "factor_count": sum(item["factor_count"] for item in deleted),
     }
+
+
+def list_factor_family_dependency_configs(
+    ff_alias: str, *, owner_ref: str,
+) -> list[dict]:
+    ensure_account_manager_sqlite_store()
+    return _list_factor_family_dependency_configs(
+        ff_alias, owner_ref=owner_ref,
+    )
 
 
 def list_factor_param_config_aliases(username: str, scope_key: str = DEFAULT_SCOPE_KEY) -> list[str]:

@@ -51,8 +51,8 @@ def test_manifest_matches_html_script_order_and_files() -> None:
         "styles/outputs/artifacts.css",
         "styles/outputs/backtest-results.css",
         "styles/workbench.css", "styles/workbench-settings.css",
-        "styles/docs.css", "styles/task-inputs.css",
-        "styles/strategy-library.css",
+        "styles/docs.css", "styles/strategy-library.css",
+        "styles/task-inputs.css",
     ]
     assert "FT_STATIC_STYLES" in template
     assert "FT_STATIC_SCRIPTS" in template
@@ -1902,7 +1902,7 @@ def test_nested_object_overlay_mounts_one_toolbar_per_frame() -> None:
     assert "testObjectOverlay: true" in overlay
     assert 'context.testObjectOverlay === true' in editor
     assert '? "保存" : mode === "create" ? "提交"' in editor
-    assert 'kind: "factor", mode: "create", ref: "new", onSaved' in editor
+    assert 'kind: "factor_family", mode: "create", ref: "new", onSaved' in editor
     assert "temporary: true" in editor
     assert ".test-object-editor-frame-actions" in styles
     assert ".test-object-editor-frame-toolbar" in styles
@@ -2515,7 +2515,8 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     )
     assert "editor.syncFromState()" in set_editor
     assert 'parameter.type === "FactorParam"' in parameter_editor
-    assert 'createLabel: context.t("新建因子")' in parameter_editor
+    assert 'context.t("新增因子家族")' in parameter_editor
+    assert "factor-param-choice-disabled" in parameter_editor
     assert "factor-param-reference-control" in parameter_editor
     assert 'input.placeholder = context.t("填写")' in parameter_editor
     assert 'header.className = "factor-detail-parameter-header"' in parameter_editor
@@ -2536,6 +2537,31 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert "name.value = inspection.factor_name" not in editor
     assert "familyClassNameMatches(name.value, state.inspection)" in editor
     assert 'readOnly: mode === "edit"' in editor
+
+
+def test_factor_parameter_picker_preserves_frozen_nested_factor_records() -> None:
+    fixture = (
+        ROOT / "tests" / "scripts" / "fixtures"
+        / "factor_parameter_frozen_selection.js"
+    )
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_factor_family_drafts_materialize_recursively_without_library_write() -> None:
+    fixture = (
+        ROOT / "tests" / "scripts" / "fixtures"
+        / "factor_family_draft_materialization.js"
+    )
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
 
 
 def test_factor_library_lists_original_class_name_and_description_columns() -> None:

@@ -10,6 +10,10 @@ global.FTPageAssistance = {
   register(_context, value) { adapter = value; return {}; },
 };
 vm.runInThisContext(
+  fs.readFileSync("server/manager/web/core/factor-param-contract.js", "utf8"),
+  {filename: "factor-param-contract.js"},
+);
+vm.runInThisContext(
   fs.readFileSync("server/manager/web/catalog/factor-assistance.js", "utf8"),
   {filename: "factor-assistance.js"},
 );
@@ -46,6 +50,16 @@ assert.equal(
 );
 assert.equal(dirtyKey, "source");
 assert.equal(redraws, 1);
+const schema = adapter.schema();
+assert.match(schema.properties.parameter_values.description, /FactorParam/);
+assert.equal(
+  schema["x-factor-tester-factor-param-contract"].inline_from_source.source_kind,
+  "transient",
+);
+assert.match(
+  schema["x-factor-tester-factor-param-contract"].signal_align,
+  /forward-fill/,
+);
 
 vm.runInThisContext(
   fs.readFileSync("server/manager/web/catalog/factor-editor.js", "utf8"),

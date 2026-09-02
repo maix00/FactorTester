@@ -1,16 +1,19 @@
 (() => {
-  function expression(value) {
-    const modelValue = window.FTFactorModel?.factorExpression?.(value) || "";
+  function expression(value, options = {}) {
+    const modelValue = window.FTFactorModel?.factorExpression?.(value, options) || "";
     if (modelValue) return modelValue;
-    for (const key of ["math_expr", "resolved_math_expr", "formula", "latex", "factor_expr", "expression"]) {
+    const keys = options.instance === true
+      ? ["resolved_math_expr", "math_expr", "formula", "latex", "factor_expr", "expression"]
+      : ["math_expr", "formula", "latex", "factor_expr", "expression", "resolved_math_expr"];
+    for (const key of keys) {
       const candidate = value?.[key];
       if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
     }
     return "";
   }
 
-  function summary(context, value) {
-    const expressionValue = expression(value);
+  function summary(context, value, options = {}) {
+    const expressionValue = options.descriptionOnly ? "" : expression(value, options);
     const description = String(
       value?.description || value?.chinese_name || value?.desc || "",
     ).trim();
@@ -91,9 +94,9 @@
   function parameterRows(value) {
     const item = value || {};
     const candidates = [
+      item.parameter_definitions,
       item.params,
       item.factor_params,
-      item.parameter_definitions,
     ];
     const raw = candidates.find(candidate => (
       Array.isArray(candidate) && candidate.length
@@ -116,6 +119,7 @@
           input_help: parameter.input_help || parameter.help_text || "",
           redacted: parameter.redacted === true,
           description: parameter.desc || parameter.value_space_desc || "",
+          nested_factor: parameter.nested_factor || null,
         }];
       });
     }
@@ -128,6 +132,7 @@
         type: parameter?.type || parameter?.param_type || "Parameter",
         input_help: parameter?.input_help || parameter?.help_text || "",
         description: parameter?.desc || parameter?.value_space_desc || "",
+        nested_factor: parameter?.nested_factor || null,
       }));
     }
     return [];
@@ -136,14 +141,63 @@
   function parameterTable(context, value) {
     const rows = parameterRows(value);
     if (!rows.length) return null;
-    return FTUI.table(
+    return parameterTree(context, value, rows, 0);
+  }
+
+  function parameterTree(context, value, rows = parameterRows(value), depth = 0) {
+    const root = document.createElement("details");
+    root.className = depth
+      ? "factor-detail-parameter-tree factor-detail-parameter-tree-nested"
+      : "factor-detail-parameter-tree";
+    root.open = true;
+    root.style?.setProperty?.("--factor-parameter-depth", String(depth));
+    const header = document.createElement("summary");
+    header.className = "factor-detail-parameter-tree-header";
+    const title = document.createElement("b");
+    title.textContent = String(
+      value?.factor_family_alias || value?.factor_family_name
+      || value?.factor_alias || context.t("因子参数"),
+    );
+    const heading = document.createElement("span");
+    heading.className = "factor-detail-parameter-tree-heading";
+    heading.append(title, familySourceHelp(context, value));
+    header.append(heading);
+    const formulaValue = expression(value, {instance: true});
+    if (formulaValue) header.append(formula(context, formulaValue));
+    const body = document.createElement("div");
+    body.className = "factor-detail-parameter-tree-body";
+    body.append(FTUI.table(
       [context.t("参数"), context.t("参数类别"), context.t("值")],
       rows.map(parameter => [
         parameter.alias,
         parameterType(context, parameter),
         parameter.redacted ? context.t("已隐藏") : parameter.value,
       ]),
-    ).shell;
+    ).shell);
+    for (const parameter of rows) {
+      if (!parameter.nested_factor) continue;
+      const nestedRows = parameterRows(parameter.nested_factor);
+      if (!nestedRows.length) continue;
+      const nested = parameterTree(
+        context, parameter.nested_factor, nestedRows, depth + 1,
+      );
+      nested.dataset.parameterAlias = parameter.alias;
+      body.append(nested);
+    }
+    root.append(header, body);
+    return root;
+  }
+
+  function formula(context, value) {
+    const root = document.createElement("div");
+    root.className = "factor-detail-parameter-formula display-math";
+    if (window.katex) {
+      window.katex.render(value, root, {displayMode: true, throwOnError: false});
+    } else {
+      root.textContent = value;
+      root.classList.add("factor-family-formula-raw");
+    }
+    return root;
   }
 
   function parameterType(context, parameter) {
@@ -269,10 +323,13 @@
     );
     const familyID = overrides.familyID || item.factor_family_alias
       || item.factor_family_name || item.family_alias || item.family || "";
+    const ownerRef = String(
+      item.owner_username || item.factor_owner_ref || item.owner_ref || "",
+    ).replace(/^principal:/, "");
     return {
       sourceKind,
       familyID: String(familyID || "").trim(),
-      ownerUsername: overrides.ownerUsername || item.owner_username || "",
+      ownerUsername: overrides.ownerUsername || ownerRef,
       workspaceUsername: overrides.workspaceUsername || item.workspace_username || "",
     };
   }
@@ -370,6 +427,34 @@
         return root;
       },
     }, {ariaLabel: context.t("查看该源码版本的公式和身份")});
+  }
+
+  function familySourceHelp(context, value = {}) {
+    const fingerprint = value.family_formula_fingerprint || "current";
+    const icon = helpIcon({
+      mode: "overlay",
+      title: context.t("因子家族源码"),
+      load: async () => {
+        if (String(value.source_code || "").trim()) {
+          return source(context, value);
+        }
+        try {
+          const payload = await loadSourceVersion(
+            context, value, fingerprint, sourceOptions(value),
+          );
+          return source(context, payload);
+        } catch (_) {
+          const unavailable = document.createElement("p");
+          unavailable.className = "factor-source-version-unavailable";
+          unavailable.textContent = sourceUnavailableText(context);
+          return unavailable;
+        }
+      },
+    }, {ariaLabel: context.t("查看该因子家族冻结版本的源码")});
+    icon.classList?.add?.("factor-detail-family-source-help");
+    icon.addEventListener?.("click", event => event.stopPropagation());
+    icon.addEventListener?.("keydown", event => event.stopPropagation());
+    return icon;
   }
 
   function appendIdentityRow(rows, context, label, value) {
@@ -520,7 +605,8 @@
   window.FTFactorDetailShared = Object.freeze({
     expression, loadSourceVersions, loadSourceVersion,
     parameterRows,
-    familyIdentity, fieldRow, helpIcon, parameterTable, pageClass, provenance, source,
+    familyIdentity, familySourceHelp, fieldRow, helpIcon, parameterTable,
+    pageClass, provenance, source,
     sourceOptions, sourceVersionHelp,
     sourceUnavailableText, sourceVersionHistory, versionItems, versionPicker,
     summary,

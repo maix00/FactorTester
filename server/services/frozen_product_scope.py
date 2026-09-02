@@ -7,6 +7,8 @@ import json
 from copy import deepcopy
 from typing import Any
 
+from server.modules.shared.factor_param_utils import unique_frozen_factor_records
+
 _UI_CATALOG_KEYS = {
     "product_path_candidates",
     "product_group_candidates",
@@ -108,6 +110,14 @@ def freeze_product_scope(
     shared["product_selections"] = canonical_selections
     if categories:
         shared["product_categories"] = categories
+    temporary_factors = temporary.get("factors")
+    if temporary_factors:
+        if not isinstance(temporary_factors, list):
+            raise ValueError("temporary factor collection must be a list")
+        shared["factors"] = unique_frozen_factor_records([
+            *(shared.get("factors") or []),
+            *temporary_factors,
+        ])
     _compact_execution_projections(shared, analysis_map, payload.get("ui"))
     _strip_ui_catalogs(payload.get("ui"))
     return frozen

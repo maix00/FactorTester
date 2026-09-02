@@ -248,6 +248,7 @@ def _family_projection(item: dict[str, Any]) -> dict[str, Any] | None:
         "chinese_name": _safe_text(item.get("chinese_name")),
         "description": _safe_long_text(item.get("description")),
         "math_expr": _safe_math_text(item.get("math_expr")),
+        "resolved_math_expr": _safe_math_text(item.get("resolved_math_expr")),
         "category": category,
         "categories": sorted(set(categories)),
         "params": _params(item.get("params")),
@@ -324,6 +325,9 @@ def _factor_projection(item: dict[str, Any]) -> dict[str, Any]:
         "family_formula_fingerprint": family_fingerprint,
         "self_formula_fingerprint": self_fingerprint,
         "factor_params": params,
+        "parameter_definitions": _params(
+            item.get("parameter_definitions"), rich=True,
+        ),
         "params_count": len(params),
         "owner_username": owner,
         "owner_alias": _safe_text(item.get("owner_alias") or owner),
@@ -339,7 +343,7 @@ def _factor_projection(item: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _params(value: Any) -> list[dict[str, Any]]:
+def _params(value: Any, *, rich: bool = False, depth: int = 0) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     result = []
@@ -358,12 +362,60 @@ def _params(value: Any) -> list[dict[str, Any]]:
                 "redacted": True,
             })
             continue
-        result.append({
+        row = {
             "alias": alias,
             "value": _safe_text(display),
             "redacted": False,
-        })
+        }
+        if rich:
+            for key in (
+                "name", "desc", "type", "input_help", "default_value",
+                "value_space_desc", "input_mode",
+            ):
+                if item.get(key) not in (None, ""):
+                    row[key] = _safe_long_text(item.get(key))
+            if isinstance(item.get("options"), list):
+                row["options"] = [
+                    {
+                        "value": _safe_text(option.get("value")),
+                        "label": _safe_text(option.get("label")),
+                    }
+                    for option in item["options"][:128]
+                    if isinstance(option, dict)
+                ]
+            if depth < 12 and isinstance(item.get("nested_factor"), dict):
+                row["nested_factor"] = _nested_factor_projection(
+                    item["nested_factor"], depth=depth + 1,
+                )
+        result.append(row)
     return result
+
+
+def _nested_factor_projection(value: dict[str, Any], *, depth: int) -> dict[str, Any]:
+    result = {
+        "factor_ref": _safe_text(value.get("factor_ref") or value.get("ref")),
+        "factor_alias": _safe_text(value.get("factor_alias") or value.get("alias")),
+        "factor_family_alias": _safe_text(value.get("factor_family_alias")),
+        "factor_family_name": _safe_text(value.get("factor_family_name")),
+        "factor_owner_ref": _safe_text(
+            value.get("factor_owner_ref") or value.get("owner_ref")
+        ),
+        "owner_username": _safe_text(value.get("owner_username")),
+        "factor_kind": _safe_text(value.get("factor_kind")),
+        "source": _safe_text(value.get("source")),
+        "family_formula_fingerprint": _safe_text(
+            value.get("family_formula_fingerprint")
+        ),
+        "self_formula_fingerprint": _safe_text(
+            value.get("self_formula_fingerprint")
+        ),
+        "math_expr": _safe_math_text(value.get("math_expr")),
+        "resolved_math_expr": _safe_math_text(value.get("resolved_math_expr")),
+        "parameter_definitions": _params(
+            value.get("parameter_definitions"), rich=True, depth=depth,
+        ),
+    }
+    return {key: item for key, item in result.items() if item not in (None, "", [])}
 
 
 def _safe_text(value: Any) -> str:

@@ -93,8 +93,11 @@
     ).trim();
   }
 
-  function factorExpression(value) {
-    for (const key of ["math_expr", "formula", "latex", "factor_expr", "expression"]) {
+  function factorExpression(value, options = {}) {
+    const keys = options.instance === true
+      ? ["resolved_math_expr", "math_expr", "formula", "latex", "factor_expr", "expression"]
+      : ["math_expr", "formula", "latex", "factor_expr", "expression", "resolved_math_expr"];
+    for (const key of keys) {
       const candidate = value?.[key];
       if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
     }

@@ -223,8 +223,8 @@
     "styles/workbench.css",
     "styles/workbench-settings.css",
     "styles/docs.css",
-    "styles/task-inputs.css",
-    "styles/strategy-library.css"
+    "styles/strategy-library.css",
+    "styles/task-inputs.css"
   ],
   "groups": {
     "code-viewer": [],
@@ -235,6 +235,7 @@
       "core/help-popover.js",
       "core/page-state.js",
       "core/test-type-registry.js",
+      "core/factor-param-contract.js",
       "app/route-presentation.js",
       "core/shared-ui.js"
     ],
@@ -623,6 +624,7 @@
     "core/help-popover.js",
     "core/page-state.js",
     "core/test-type-registry.js",
+    "core/factor-param-contract.js",
     "app/route-presentation.js",
     "profile/page-agent-lifecycle.js",
     "profile/page-agent-context.js",

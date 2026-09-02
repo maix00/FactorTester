@@ -6,6 +6,7 @@ from typing import Any
 
 from server.modules.shared.factor_param_utils import (
     factor_param_value_display,
+    frozen_factor_dependencies,
     normalize_factor_param_row,
 )
 from server.services.strategy_plans import normalize_strategy_plan
@@ -41,6 +42,13 @@ def instantiate_factor_metadata(family: Any, params: Any = None) -> dict[str, An
     expression = getattr(factor, "_source_expr", None) or getattr(factor, "expr", None)
     resolved_formula = expression.to_latex() if expression is not None else ""
     template_formula = family_template_latex(family)
+    dependencies = frozen_factor_dependencies(family.params, normalized)
+    from server.modules.shared.factor_instance_metadata import (
+        build_factor_instance_metadata,
+    )
+    instance = build_factor_instance_metadata(
+        family, factor, normalized, factor_dependencies=dependencies,
+    )
     return {
         "factor_alias": str(factor.alias),
         "family_formula_fingerprint": family.expr.semantic_fingerprint(),
@@ -52,7 +60,10 @@ def instantiate_factor_metadata(family: Any, params: Any = None) -> dict[str, An
             for parameter in family.params
         },
         "math_expr": str(template_formula or resolved_formula or ""),
-        "resolved_math_expr": str(resolved_formula or ""),
+        "resolved_math_expr": str(
+            instance.get("resolved_math_expr") or resolved_formula or ""
+        ),
+        "parameter_definitions": instance.get("parameter_definitions") or [],
     }
 
 

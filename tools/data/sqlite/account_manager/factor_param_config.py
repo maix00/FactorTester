@@ -187,6 +187,47 @@ def delete_factor_family_configs(
     return deleted
 
 
+def list_factor_family_dependency_configs(
+    ff_alias: str, *, owner_ref: str,
+) -> list[dict[str, Any]]:
+    """List outer registrations that freeze factors from one family."""
+    target_owner = str(owner_ref or '').removeprefix('principal:')
+    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+        ensure_factor_param_config_schema(conn)
+        rows = conn.execute(
+            "SELECT username, scope_key, ff_alias, payload_json "
+            "FROM account_factor_param_configs"
+        ).fetchall()
+    result = []
+    for row in rows:
+        try:
+            payload = json.loads(row['payload_json'])
+        except (TypeError, ValueError):
+            continue
+        metadata = payload.get('metadata') if isinstance(payload, dict) else {}
+        dependencies = metadata.get('factor_dependencies') if isinstance(metadata, dict) else []
+        matches = []
+        for dependency in dependencies if isinstance(dependencies, list) else []:
+            identity = dependency.get('identity') if isinstance(dependency, dict) else {}
+            dependency_owner = str(
+                dependency.get('owner_ref') if isinstance(dependency, dict) else ''
+            ).removeprefix('principal:')
+            if (
+                isinstance(identity, dict)
+                and str(identity.get('family_alias') or '') == ff_alias
+                and dependency_owner == target_owner
+            ):
+                matches.append(str(dependency.get('ref') or ''))
+        if matches:
+            result.append({
+                'username': str(row['username']),
+                'scope_key': str(row['scope_key']),
+                'outer_family_alias': str(row['ff_alias']),
+                'factor_refs': sorted(set(matches)),
+            })
+    return result
+
+
 def list_factor_param_config_aliases(username: str, scope_key: str = DEFAULT_SCOPE_KEY) -> list[str]:
     scope_key = normalize_product_group(scope_key)
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
