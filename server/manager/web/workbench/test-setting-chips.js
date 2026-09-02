@@ -260,6 +260,7 @@
     groups.forEach(([group, items]) => {
       const host = document.createElement(inline ? "span" : "div");
       host.className = group ? "backend-settings-chip-group" : "backend-settings-chip-group ungrouped";
+      host.tabChipKey = group;
       const label = groupLabel(group, items, options, groupBy);
       if (label && (groupBy === "tab" || groups.length > 1)) {
         const heading = document.createElement("small");

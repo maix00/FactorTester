@@ -20,6 +20,9 @@ global.FTTestSettings = window.FTTestSettings = {
   initialMountedTabs: () => ["engine"],
   initialValues: () => ({engine: "native"}),
 };
+vm.runInThisContext(fs.readFileSync(
+  "server/manager/web/core/test-type-registry.js", "utf8",
+), {filename: "test-type-registry.js"});
 
 const source = fs.readFileSync(process.argv[2], "utf8");
 vm.runInThisContext(source, {filename: process.argv[2]});

@@ -16,13 +16,9 @@
 
   function workbenchKind(job = {}) {
     const shared = window.FTJobGeneration?.analysisOf?.({job}, {});
-    if (shared) return shared;
+    if (shared) return window.FTTestTypeRegistry?.normalize(shared) || shared;
     const kind = String(job.kind || job.job_type || "").toLowerCase();
-    if (["ic", "ic_test", "ic-test"].includes(kind)) return "ic";
-    if (["backtest", "group_backtest", "group-test", "group_test"].includes(kind)) {
-      return "backtest";
-    }
-    return "";
+    return window.FTTestTypeRegistry?.normalize(kind) || "";
   }
 
   function runID(job = {}) {
@@ -79,7 +75,9 @@
         ...derivedPrefill, workspaceID,
       }));
     }
-    const route = kind === "ic" ? "/ic-test" : "/backtest";
+    const definition = window.FTTestTypeRegistry?.get(kind);
+    const route = definition?.route || "";
+    if (!route) throw new Error(context.t("未知测试类型"));
     if (openNewTab) {
       const params = new URLSearchParams({
         workspace_id: workspaceID,
@@ -95,7 +93,7 @@
       });
       context.openTab(`${route}?${params}`, {
         forceNew: true,
-        title: `${context.t(kind === "ic" ? "IC 测试" : "回测")} · ${String(jobID || sourceRunID).slice(0, 8)}`,
+        title: `${context.t(definition.title)} · ${String(jobID || sourceRunID).slice(0, 8)}`,
       });
     } else context.navigate(route);
     return value.workspace;

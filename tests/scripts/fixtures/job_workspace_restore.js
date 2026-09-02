@@ -14,6 +14,9 @@ global.sessionStorage = {
   removeItem: key => session.delete(key),
 };
 global.window = globalThis;
+vm.runInThisContext(fs.readFileSync(
+  "server/manager/web/core/test-type-registry.js", "utf8",
+), {filename: "test-type-registry.js"});
 vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {
   filename: "actions.js",
 });
@@ -54,7 +57,14 @@ const context = {
   assert.equal(opened.searchParams.get("workspace_id"), "workspace-restored");
   assert.equal(opened.searchParams.get("job_id"), "job-123");
   assert.equal(opened.searchParams.get("server_id"), "public-1");
+  await FTJobActions.cloneRunWorkspace(context, {
+    job: {kind: "factor_evaluation", run_id: "run-factor"},
+    title: "恢复因子序列配置", jobID: "job-factor", openNewTab: true,
+  });
+  assert.equal(new URL(tabs[1].path, "http://factortester.invalid").pathname, "/factor-series");
+  assert.ok(tabs[1].options.title.startsWith("查看因子序列"));
   assert.equal(FTJobActions.workbenchKind({kind: "ic_test"}), "ic");
+  assert.equal(FTJobActions.workbenchKind({kind: "factor-series"}), "factor_evaluation");
   assert.equal(FTJobActions.workbenchKind({kind: "unknown"}), "");
   console.log("ok");
 })().catch(error => {

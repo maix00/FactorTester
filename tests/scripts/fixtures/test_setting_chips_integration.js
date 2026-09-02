@@ -106,7 +106,7 @@ function render(factorAlias, onChipOpen) {
     t: value => value,
   }, {
     activeTab: "factor",
-    mountedTabs: ["factor", "time"],
+    mountedTabs: ["factor", "products", "time"],
     chipSources: {factorAlias: [factorAlias], n_groups: 5},
     lazyState: () => ({status: "ready"}),
     onTabChange: onChipOpen,
@@ -134,6 +134,11 @@ assert.equal(first.children[0].children[0].children[0].textContent, "因子");
 const chipRow = first.children[1].children[1];
 const factorGroup = chipRow.children.find(item => item.className === "backend-settings-chip-group");
 assert.ok(factorGroup, "tab-based chip group should be present");
+assert.deepEqual(
+  chipRow.children.map(group => group.tabChipKey),
+  ["factor", "products", "time"],
+  "the shared tab-chip-content helper must add one chip group for every mounted tab",
+);
 const factorChip = factorGroup.children.find(item => item.className.includes("backend-setting-chip"));
 assert.equal(factorChip.children[1].textContent, "ROC 1m");
 assert.equal(
