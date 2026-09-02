@@ -93,6 +93,13 @@ def require_factor_data_coverage(
         eligible += 1
         available_start = _bound(index.min())
         available_end = _bound(index.max())
+        if available_start > requested_end:
+            eligible -= 1
+            skipped.append({
+                "product": name,
+                "reason": "no_data_in_formal_window",
+            })
+            continue
         if available_end < requested_end:
             failures.append(
                 f"{name}: 可用范围 {available_start.date()} 至 {available_end.date()}"

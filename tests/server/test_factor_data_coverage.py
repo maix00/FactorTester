@@ -92,3 +92,19 @@ def test_fixed_warmup_requires_earlier_source_data() -> None:
     assert caught.value.code == "factor_data_coverage_unavailable"
     assert caught.value.details["formal_start"] == "2024-01-03"
     assert caught.value.details["required_data_start"] == "2024-01-01"
+
+
+def test_source_starting_after_formal_end_is_not_eligible() -> None:
+    with pytest.raises(FactorDataCoverageError) as caught:
+        require_factor_data_coverage(
+            [_product("2025-01-02 09:00", "2026-01-05 15:00")],
+            _factor(),
+            start_dt=_time("2024-01-01 00:00"),
+            end_dt=_time("2024-03-01 15:00"),
+        )
+
+    assert caught.value.code == "factor_data_source_unavailable"
+    assert caught.value.details["skipped_products"] == [{
+        "product": "AP.CZC",
+        "reason": "no_data_in_formal_window",
+    }]
