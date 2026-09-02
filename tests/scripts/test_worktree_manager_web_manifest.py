@@ -1904,7 +1904,8 @@ def test_nested_object_overlay_mounts_one_toolbar_per_frame() -> None:
     assert "testObjectOverlay: true" in overlay
     assert 'context.testObjectOverlay === true' in editor
     assert '? "保存" : mode === "create" ? "提交"' in editor
-    assert 'kind: "factor_family", mode: "create", ref: "new", onSaved' in editor
+    assert 'kind: "factor_family", mode: currentFamily ? "edit" : "create"' in editor
+    assert 'onSaved: family => {' in editor
     assert "temporary: true" in editor
     assert ".test-object-editor-frame-actions" in styles
     assert ".test-object-editor-frame-toolbar" in styles
@@ -2536,14 +2537,18 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert "factor-param-factor-" in parameter_editor
     assert "factor-param-family-source" in parameter_editor
     assert "factor-param-nested-factor-table" in parameter_editor
-    assert 'method: "POST"' in parameter_editor
-    assert "resolve_factor_alias" in parameter_editor
+    assert 'method: "POST"' in editor
+    assert "resolve_factor_alias" in editor
+    assert "onChange: nextValues =>" in editor
+    assert "state.parameterValues = {...nextValues}" in editor
     assert "FTTestObjectEditorOverlay.open" in editor
     assert "factor-source-mode" not in editor
     assert '"新增因子家族"' in editor
     assert 'state.family.source_kind === "transient"' in editor
     assert "factor-param-choice-family" not in parameter_editor
     assert "compact: true, multi: false" in parameter_editor
+    assert "align-items: center" in app_css
+    assert "min-height: 34px" in app_css
     assert "state.onInspected?.(state.inspection)" in editor
     assert "name.value = inspection.factor_name" not in editor
     assert "familyClassNameMatches(name.value, state.inspection)" in editor
