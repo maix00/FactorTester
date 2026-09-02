@@ -53,6 +53,9 @@ assert.deepStrictEqual(
   }, "SI.GFE"))),
   {product_name: "SI.GFE", freq: "MIN5", adjusted: false, start_date: "2025-01-01"},
 );
+assert.strictEqual(context.FTMarketData.rangeContextMs("MIN1"), 604800000);
+assert.strictEqual(context.FTMarketData.rangeContextMs("HOUR1"), 604800000);
+assert.strictEqual(context.FTMarketData.rangeContextMs("DAY1"), 0);
 assert.deepStrictEqual(
   JSON.parse(JSON.stringify(context.FTMarketData.rangeRequest(
     {product_name: "SI.GFE", freq: "MIN1"},

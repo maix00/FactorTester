@@ -49,6 +49,11 @@
     return payload;
   }
 
+  function rangeContextMs(frequency) {
+    const value = String(frequency || "").toUpperCase();
+    return /^(MIN|HOUR)/.test(value) ? 7 * 24 * 60 * 60 * 1000 : 0;
+  }
+
   function contracts(context, product, preferred = "") {
     return firstAvailable(context, source => context.api(
       `${source === "local" ? "/api/client/product_contracts" : "/api/product-library/contracts"}`
@@ -57,6 +62,6 @@
   }
 
   window.FTMarketData = Object.freeze({
-    contracts, localAvailable, prices, rangeRequest, sourceOrder,
+    contracts, localAvailable, prices, rangeContextMs, rangeRequest, sourceOrder,
   });
 })();
