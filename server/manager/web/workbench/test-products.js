@@ -217,6 +217,7 @@
         `${group.path_count ?? group.paths?.length ?? group.selected_paths?.length ?? 0} ${context.t("条产品路径")}`,
       ].filter(Boolean).join(" · "),
       source_managed: group.source_managed === true,
+      group,
     })).filter(item => item.value);
     let picker = null;
     const savedGroup = value => {
@@ -252,6 +253,12 @@
         ? () => void openEditor(context, "create", "new", savedGroup, state)
         : null,
       createLabel: context.t("新建产品组"),
+      editSelected: item => item.group?.temporary === true
+        || item.group?.source_origin === "test_inline",
+      onEdit: (_event, item) => void openEditor(
+        context, "edit", groupID(item.group), savedGroup, state, item.group,
+      ),
+      editLabel: context.t("编辑产品组"),
       itemActions: item => {
         const action = editAction(
           context,

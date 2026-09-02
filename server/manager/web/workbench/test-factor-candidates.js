@@ -84,6 +84,13 @@
         )
         : null,
       createLabel: context.t("新建因子"),
+      editSelected: item => item.factor?.temporary === true
+        || item.factor?.source_kind === "transient",
+      onEdit: (_event, item) => void openEditor(
+        context, "edit", FTTestFactorSelection.factorID(item.factor),
+        savedFactor, state, item.factor,
+      ),
+      editLabel: context.t("编辑因子"),
       itemActions: item => {
         const factor = rows.find(value => FTTestFactorSelection.factorID(value) === item.value);
         const actions = [];

@@ -8,12 +8,28 @@
     const actions = [
       ...(Array.isArray(options.actions) ? options.actions : []),
     ];
-    if (options.onCreate) {
+    const selectedValues = Array.isArray(options.selected)
+      ? options.selected : [options.selected].filter(Boolean);
+    const selectedItem = (options.items || []).find(item => (
+      selectedValues.includes(String(item.value ?? item.id ?? item.ref ?? ""))
+    ));
+    const editSelected = Boolean(
+      selectedItem && options.onEdit
+      && (typeof options.editSelected === "function"
+        ? options.editSelected(selectedItem) : options.editSelected === true),
+    );
+    if (editSelected || options.onCreate) {
       actions.push({
-      label: options.createLabel || context.t("新建"),
-        title: options.createTitle || context.t("新建并在当前浮层编辑"),
+        label: editSelected
+          ? options.editLabel || context.t("编辑")
+          : options.createLabel || context.t("新建"),
+        title: editSelected
+          ? options.editTitle || context.t("编辑当前选中的当场对象")
+          : options.createTitle || context.t("新建并在当前浮层编辑"),
         buttonClass: "primary",
-        onClick: options.onCreate,
+        onClick: editSelected
+          ? event => options.onEdit(event, selectedItem)
+          : options.onCreate,
       });
     }
     const filter = FTMultiSelectFilter.create(context, {

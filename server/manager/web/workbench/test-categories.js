@@ -105,6 +105,7 @@
       ].filter(Boolean).join(" · "),
       disabled: category.enabled === false,
       source_managed: category.source_managed === true,
+      category,
     })).filter(item => item.value);
     const savedCategory = value => {
       const category = upsertCategory(state, value);
@@ -128,6 +129,12 @@
         ? () => void openEditor(context, "create", "new", savedCategory, state)
         : null,
       createLabel: context.t("新建产品分类"),
+      editSelected: item => item.category?.temporary === true
+        || item.category?.source_origin === "test_inline",
+      onEdit: (_event, item) => void openEditor(
+        context, "edit", categoryID(item.category), savedCategory, state, item.category,
+      ),
+      editLabel: context.t("编辑产品分类"),
       itemActions: item => {
         const category = availableCandidates(state).find(value => categoryID(value) === item.value);
         const actions = [];

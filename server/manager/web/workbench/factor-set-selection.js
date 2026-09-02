@@ -72,6 +72,7 @@
         || `${item.member_count || 0} ${context.t("个因子")} · ${context.t(
           item.visibility === "local" ? "本地" : "服务器",
         )}`,
+      factorSet: item,
     })).filter(item => item.value);
     const updateSelection = async values => {
       const requested = new Set(values);
@@ -122,6 +123,16 @@
         });
       } : null,
       createLabel: context.t("新建因子集合"),
+      editSelected: item => item.factorSet?.temporary === true,
+      onEdit: (_event, item) => {
+        void FTTestLazyCode.openObjectEditor(context, {
+          kind: "factor_set", mode: "edit",
+          ref: item.factorSet.target_ref, initialValue: item.factorSet,
+          temporary: true, testState: state,
+          onSaved: value => { void addInlineSet(context, state, value, refresh); },
+        });
+      },
+      editLabel: context.t("编辑因子集合"),
       onChange: values => { void updateSelection(values); },
     });
     root.append(picker.element);
