@@ -120,11 +120,14 @@ assert.ok(exclusiveRow.children.some(item => (
   item.className === "ft-multi-select-exclusive-badge"
 )));
 
+const clearableChanges = [];
 const multi = window.FTMultiSelectFilter.create({t: value => value}, {
   items: [{value: "a", label: "A"}, {value: "b", label: "B"}],
   selected: ["a"],
   multi: false,
   compact: true,
+  clearable: true,
+  onChange: values => { clearableChanges.push(values); },
 });
 assert.deepEqual(multi.values, ["a"]);
 assert.equal(multi.summary.children[0].textContent, "A");
@@ -178,7 +181,11 @@ assert.equal(locked.dropdown.open, false);
 (async () => {
   await bInput.listeners.change();
   assert.deepEqual(multi.values, ["b"]);
-  assert.equal(multi.summary.children[0].textContent, "B");
+  const selectedBInput = multi.optionList.children[0].children[0];
+  await selectedBInput.listeners.click({preventDefault() {}});
+  assert.deepEqual(multi.values, []);
+  assert.deepEqual(clearableChanges.at(-1), []);
+  assert.equal(multi.summary.children[0].textContent, "未筛选");
   assert.equal(multi.dropdown.open, false,
     "single-select commits immediately and closes the dropdown");
 

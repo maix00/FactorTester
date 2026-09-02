@@ -369,6 +369,10 @@
           // explicitly submitted. Never publish it as a library family here.
           temporary: true,
         }),
+        onChange: () => {
+          markDirty("parameters");
+          context.pageState?.capture?.();
+        },
       },
     );
   }
@@ -1045,6 +1049,9 @@
           description: description.value,
           category: category.value,
           source_mode: state.sourceMode,
+          family: state.family,
+          latest_family: state.latestFamily,
+          inspection: state.inspection,
           source_code: state.sourceCode,
           parameter_values: state.parameterValues,
         }),
@@ -1054,6 +1061,9 @@
           description.value = value?.description || "";
           category.value = value?.category || "";
           state.sourceMode = value?.source_mode || state.sourceMode;
+          state.family = value?.family || state.family;
+          state.latestFamily = value?.latest_family || state.latestFamily;
+          state.inspection = value?.inspection || state.inspection;
           state.sourceCode = value?.source_code || "";
           state.parameterValues = value?.parameter_values || state.parameterValues;
           tabs.select(value?.active_tab || tabs.current(), false);

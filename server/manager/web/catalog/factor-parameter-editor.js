@@ -29,17 +29,24 @@
       value.className = "factor-detail-parameter-value";
       const initialValue = values[alias] ?? parameter.default_value ?? "";
       values[alias] = initialValue;
+      let nestedMount = null;
       if (parameter.type === "FactorParam") {
-        renderReference(context, value, parameter, initialValue, values, options);
+        nestedMount = renderReference(
+          context, value, parameter, initialValue, values, options,
+        );
       } else {
         const input = document.createElement("input");
         input.type = "text";
         input.value = initialValue;
-        input.addEventListener("input", () => { values[alias] = input.value; });
+        input.addEventListener("input", () => {
+          values[alias] = input.value;
+          options.onChange?.(values, alias);
+        });
         value.append(input);
       }
       row.append(key, type, defaultValue, value);
       root.append(row);
+      if (nestedMount) root.append(nestedMount);
     }
     return {root, values};
   }
@@ -83,6 +90,7 @@
       familyPicker?.setValues?.(source === "family" && familyDraft(value)
         ? [familyRef(value.__factor_family)] : []);
       syncSources();
+      options.onChange?.(values, alias);
     };
     columnPicker = picker(context, `factor-param-column-${alias}`, context.t("DataColumn"),
       columns, columns.some(item => item.value === initialValue) ? [initialValue] : [],
@@ -157,6 +165,7 @@
     groups.family = group(
       context.t("因子家族"), familyPicker.element || familyPicker, createFamily,
     );
+    groups.family.classList?.add?.("factor-param-choice-family");
     const nestedMount = document.createElement("div");
     nestedMount.className = "factor-param-nested-family-mount";
     const renderNested = () => {
@@ -185,7 +194,11 @@
       }
       const nested = create(
         context, family.params || family.parameter_definitions || [],
-        draft.parameter_values || {}, {...options, depth: (options.depth || 0) + 1},
+        draft.parameter_values || {}, {
+          ...options,
+          depth: (options.depth || 0) + 1,
+          onChange: () => options.onChange?.(values, alias),
+        },
       );
       draft.parameter_values = nested.values;
       details.append(heading, nested.root);
@@ -195,11 +208,12 @@
       < Number(options.maxFamilyDepth ?? 12);
     control.append(
       groups.manual, groups.column, groups.factor,
-      ...(allowFamilyComposition ? [groups.family] : []), nestedMount,
+      ...(allowFamilyComposition ? [groups.family] : []),
     );
     row.append(control);
     renderNested();
     syncSources();
+    return nestedMount;
   }
 
   function parameterType(context, parameter) {
@@ -236,7 +250,8 @@
 
   function picker(context, name, title, items, selected, onChange) {
     return (window.FTTestObjectPicker || window.FTMultiSelectFilter).create(context, {
-      compact: true, multi: false, name, title, items, selected, onChange,
+      compact: true, multi: false, clearable: true,
+      name, title, items, selected, onChange,
     });
   }
 
