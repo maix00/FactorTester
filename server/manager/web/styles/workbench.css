@@ -148,6 +148,9 @@
 .test-object-editor-dialog > .test-object-editor-overlay { width: 100%; height: calc(100dvh - 32px); max-width: none; max-height: calc(100dvh - 32px); box-sizing: border-box; }
 .test-object-editor-overlay { display: grid; grid-template-rows: auto minmax(0, 1fr); width: auto; gap: 6px; overflow: hidden; padding: 14px 16px 18px; }
 .test-object-editor-overlay > .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 30px; margin: 0; padding: 0; }
+.test-object-editor-overlay > .section-heading > div:first-child { min-width: 0; }
+.test-object-editor-frame-actions { display: flex; align-items: center; justify-content: flex-end; margin-left: auto; }
+.test-object-editor-frame-toolbar { display: flex; align-items: center; gap: 8px; }
 .test-object-editor-overlay > .section-heading h2 { overflow: hidden; font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }
 .test-object-editor-overlay .test-object-editor-close { width: 28px; height: 28px; min-width: 28px; padding: 0; border: 0; background: transparent; }
 .test-object-editor-body { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; min-height: 0; overflow: hidden; }

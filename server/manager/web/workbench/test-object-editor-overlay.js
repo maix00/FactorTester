@@ -83,7 +83,7 @@
   function editorContext(
     context, mount, closeOverlay, onSaved, options = {}, callbacks = {},
   ) {
-    const toolbar = document.createElement("div");
+    const toolbar = callbacks.toolbar || document.createElement("div");
     return {
       ...context,
       content: mount,
@@ -101,6 +101,7 @@
       testObjectSnapshot: options.snapshot === true,
       testObjectInitialValue: options.initialValue || null,
       testObjectViewOnly: options.mode === "view",
+      testObjectOverlay: true,
       isRouteCurrent: () => context.isRouteCurrent?.() !== false,
     };
   }
@@ -129,7 +130,9 @@
     closeButton.className = "dialog-close icon-action-button test-object-editor-close";
     closeButton.replaceChildren?.(window.FTIcons?.node?.("xmark") || "×");
     closeButton.title = context.t("关闭");
-    heading.append(copy, closeButton);
+    const frameActions = document.createElement("div");
+    frameActions.className = "test-object-editor-frame-actions";
+    heading.append(copy, frameActions, closeButton);
     const body = document.createElement("div");
     body.className = "test-object-editor-body";
     const tree = document.createElement("nav");
@@ -297,6 +300,9 @@
       updateFrameHeading(frame);
       frame.mount ||= document.createElement("div");
       frame.mount.className = "test-object-editor-frame";
+      frame.toolbar ||= document.createElement("div");
+      frame.toolbar.className = "toolbar test-object-editor-frame-toolbar";
+      frameActions.replaceChildren(frame.toolbar);
       mount.replaceChildren(frame.mount);
       if (frame.rendered) return;
       const frameOptions = {
@@ -321,6 +327,7 @@
           openFactor,
           openTestObject,
           closeFrame: () => closeFrame(frame),
+          toolbar: frame.toolbar,
           setHeading: (name, scope) => {
             updateFrameHeading(frame, name);
           },
