@@ -1,6 +1,12 @@
 (() => {
   function register(context, options) {
-    const {state, name, chineseName, description, category, tabs, redraw, markDirty} = options;
+    const {
+      state, name, chineseName, description, category, tabs, redraw, markDirty,
+      parameterDefinitions = () => [],
+    } = options;
+    const storageContext = state.familyMode ? "factor_family"
+      : context.testObjectTemporary ? "test_configuration_inline"
+        : "factor_library";
     return FTPageAssistance.register(context, {
       navigation: () => ({
         schema_version: 1,
@@ -41,9 +47,16 @@
           name: {type: "string"}, chinese_name: {type: "string"},
           description: {type: "string"}, category: {type: "string"},
           source: {type: "object", required: ["mode", "code"]},
-          parameter_values: {type: "object"},
+          storage_context: {const: storageContext, readOnly: true},
+          parameter_definitions: {type: "array", readOnly: true},
+          parameter_values: {
+            type: "object",
+            description: "参数 alias 到值的映射。FactorParam 按判别协议填写；界面始终显示因子 alias。",
+          },
         },
         additionalProperties: false,
+        "x-factor-tester-factor-param-contract":
+          window.FTFactorParamContract?.schema?.() || {},
       }),
       exportDocument: () => ({
         schema_version: 1,
@@ -51,11 +64,17 @@
         name: name.value, chinese_name: chineseName.value,
         description: description.value, category: category.value,
         source: {mode: state.sourceMode, code: state.sourceCode},
+        storage_context: storageContext,
+        parameter_definitions: structuredClone(parameterDefinitions()),
         parameter_values: structuredClone(state.parameterValues || {}),
       }),
       validate: document => {
         if (!String(document?.name || "").trim()) throw new Error("因子名称不能为空");
-        if (!String(document?.source?.code || "").trim()) throw new Error("因子源码不能为空");
+        const writesFamilySource = state.familyMode
+          || String(document?.source?.mode || "") === "source";
+        if (writesFamilySource && !String(document?.source?.code || "").trim()) {
+          throw new Error("因子家族源码不能为空");
+        }
       },
       importDocument: document => {
         const sourceCode = String(document.source?.code || "");

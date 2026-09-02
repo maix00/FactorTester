@@ -26,6 +26,7 @@ from tools.data.account_manage import (
     delete_factor_family_configs,
     get_account,
     is_super_admin_account,
+    list_factor_family_dependency_configs,
 )
 from tools.data.factor_workspace.storage import (
     delete_factor_source,
@@ -362,6 +363,9 @@ def api_delete_factor(factor_id):
         return jsonify({'success': False, 'error': '因子不存在'}), 404
 
     old_name = factor_class_name(existing_source)
+    frozen_dependents = list_factor_family_dependency_configs(
+        old_name or factor_id, owner_ref=username,
+    )
     cascade = delete_factor_family_configs(old_name or factor_id, username=username)
     delete_factor_source(username, factor_id)
 
@@ -373,6 +377,7 @@ def api_delete_factor(factor_id):
         'success': True,
         'message': f'因子家族 "{old_name}" 已删除',
         'cascade_deleted': cascade,
+        'frozen_dependents': frozen_dependents,
     })
 
 
@@ -384,6 +389,9 @@ def api_delete_public_factor(factor_id):
     existing_source = load_public_factor_source(factor_id)
     if existing_source is None:
         return jsonify({'success': False, 'error': '公共因子家族不存在'}), 404
+    frozen_dependents = list_factor_family_dependency_configs(
+        factor_id, owner_ref='public',
+    )
     cascade = delete_factor_family_configs(factor_id)
     delete_factor_source_row('public', '', factor_id)
     invalidate_factor_family_cache(factor_id)
@@ -391,6 +399,7 @@ def api_delete_public_factor(factor_id):
         'success': True,
         'message': f'公共因子家族 "{factor_id}" 已删除',
         'cascade_deleted': cascade,
+        'frozen_dependents': frozen_dependents,
     })
 
 

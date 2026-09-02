@@ -3,6 +3,7 @@ from __future__ import annotations
 import settings as Settings
 from tools.data.account_manage import (
     delete_factor_family_configs,
+    list_factor_family_dependency_configs,
     load_factor_param_config,
     save_factor_param_config,
 )
@@ -47,3 +48,31 @@ def test_delete_factor_family_configs_cascades_rows_across_scopes(monkeypatch, t
     assert load_factor_param_config("alice", "MmRet", "night") is None
     assert load_factor_param_config("alice", "MmOther", "default") is not None
     assert load_factor_param_config("bob", "MmRet", "default") is not None
+
+
+def test_factor_family_dependency_scan_finds_nested_frozen_factors(
+    monkeypatch, tmp_path,
+):
+    db_path = tmp_path / "cache.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", db_path)
+    nested = {
+        "schema_version": 2,
+        "ref": "factor:v2:nested",
+        "alias": "Inner|N:5d",
+        "owner_ref": "principal:alice",
+        "identity": {"family_alias": "Inner"},
+    }
+    save_factor_param_config(
+        "alice", "Outer", [{"P": nested["ref"]}], "default",
+        metadata={"factor_dependencies": [nested]},
+    )
+
+    assert list_factor_family_dependency_configs(
+        "Inner", owner_ref="alice",
+    ) == [{
+        "username": "alice",
+        "scope_key": "default",
+        "outer_family_alias": "Outer",
+        "factor_refs": ["factor:v2:nested"],
+    }]

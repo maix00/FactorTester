@@ -62,8 +62,8 @@ const createFactorDefinitions = window.FTObjectDetailTabs.definitions("factor", 
 });
 assert.deepStrictEqual(
   createFactorDefinitions.map(item => item.key),
-  ["source", "parameters", "identity"],
-  "factor creation must start with source selection and must not ask for family metadata",
+  ["parameters", "identity"],
+  "factor instances compose their frozen family and values in the parameters tab",
 );
 
 const panels = Object.fromEntries(definitions.map(item => [

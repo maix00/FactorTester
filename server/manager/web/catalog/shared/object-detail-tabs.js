@@ -10,7 +10,6 @@
     ],
     factor: [
       ["overview", "详情", true],
-      ["source", "源码", true],
       ["parameters", "参数", true],
       ["identity", "身份与来源", false],
       ["jobs", "测试任务", false],

@@ -1,26 +1,36 @@
 """Resolve serialized FactorParam selections from the visible factor library."""
 
 from __future__ import annotations
+from contextlib import contextmanager
 from typing import cast
 
 from server.modules.custom_factors.factor_library_service import build_factor_library_overview
 from server.modules.custom_factors.catalog import _load_factor_family_from_source
-from server.modules.shared.factor_param_utils import normalize_factor_param_row
+from server.modules.shared.factor_param_utils import (
+    frozen_factor_dependency_record,
+    normalize_factor_param_row,
+    unique_frozen_factor_records,
+)
 from server.services.factor_source_catalog import FactorSourceCatalog
 from server.services.factor_registry import get_factor_family_instance
 from server.services.session_runtime import current_user
 from tools.factors.factor_param_resolution import register_factor_param_resolver
+from tools.factors.factor_param_resolution import factor_param_resolver_scope
 from tools.factors.formula_identity import require_frozen_factor
 
 
 def resolve_factor_param_value(
     value, *, username: str | None = None,
     frozen_by_ref: dict[str, dict] | None = None,
+    _resolving_refs: set[str] | None = None,
 ):
     """Return a Factor for a FactorParam value selected in the UI."""
     if isinstance(value, dict):
         if value.get('schema_version') == 2 and value.get('identity'):
-            return _resolve_frozen_factor(value, username=username)
+            return _resolve_frozen_factor(
+                value, username=username, frozen_by_ref=frozen_by_ref,
+                resolving_refs=_resolving_refs,
+            )
         item = value
     else:
         alias = str(value or '').strip()
@@ -30,7 +40,10 @@ def resolve_factor_param_value(
             frozen = (frozen_by_ref or {}).get(alias)
             if frozen is None:
                 raise ValueError(f'FactorParam 引用未在 RunSpec 中冻结: {alias}')
-            return _resolve_frozen_factor(frozen, username=username)
+            return _resolve_frozen_factor(
+                frozen, username=username, frozen_by_ref=frozen_by_ref,
+                resolving_refs=_resolving_refs,
+            )
         # FactorParam._value_space.alias() 对 dict 用 [...] 包裹；
         # 前端回传的是 display 值，需要去掉方括号再匹配 factor_alias。
         if alias.startswith('[') and alias.endswith(']'):
@@ -48,44 +61,80 @@ def resolve_factor_param_value(
     return ff.get_factor(params_list=[normalized])
 
 
-def _resolve_frozen_factor(value: dict, *, username: str | None = None):
+def _resolve_frozen_factor(
+    value: dict, *, username: str | None = None,
+    frozen_by_ref: dict[str, dict] | None = None,
+    resolving_refs: set[str] | None = None,
+):
     """Rebuild a nested factor from its exact recorded family source."""
     frozen = require_frozen_factor(value)
-    identity = frozen['identity']
-    principal = str(username or current_user() or '').strip()
-    owner_ref = str(frozen['owner_ref'] or '').strip()
-    is_public = owner_ref in {'public', '__public_jobs__'}
-    owner_username = owner_ref.removeprefix('principal:')
-    source_kind = 'public' if is_public else 'custom'
-    family_alias = str(identity['family_alias'])
-    fingerprint = str(identity['family_formula_fingerprint'])
-    catalog = FactorSourceCatalog()
-    current = catalog.version(
-        principal, source_kind, family_alias, 'current',
-        owner_username='' if is_public else owner_username,
-    )
-    source = current
-    if str(current.get('family_formula_fingerprint') or '') != fingerprint:
-        source = catalog.version(
-            principal, source_kind, family_alias, fingerprint,
-            owner_username='' if is_public else owner_username,
+    factor_ref = frozen['ref']
+    active_refs = resolving_refs if resolving_refs is not None else set()
+    if factor_ref in active_refs:
+        raise ValueError(f'FactorParam 依赖形成循环: {factor_ref}')
+    with _resolving_factor(active_refs, factor_ref):
+        dependencies = dict(frozen_by_ref or {})
+        for dependency in value.get('factor_dependencies') or []:
+            dependency = frozen_factor_dependency_record(dependency)
+            existing = dependencies.get(dependency['ref'])
+            if existing is not None and existing != dependency:
+                raise ValueError(f'FactorParam 依赖记录冲突: {dependency["ref"]}')
+            dependencies[dependency['ref']] = dependency
+        identity = frozen['identity']
+        principal = str(username or current_user() or '').strip()
+        owner_ref = str(frozen['owner_ref'] or '').strip()
+        is_public = owner_ref in {'public', '__public_jobs__'}
+        owner_username = owner_ref.removeprefix('principal:')
+        source_kind = 'public' if is_public else 'custom'
+        family_alias = str(identity['family_alias'])
+        fingerprint = str(identity['family_formula_fingerprint'])
+        embedded_source = str(value.get('source_code') or '').strip()
+        has_inline_source = str(value.get('source_kind') or '') == 'transient'
+        if has_inline_source:
+            if not embedded_source:
+                raise ValueError(f'当场创建的嵌套因子缺少冻结源码: {family_alias}')
+            source = {'source_code': embedded_source}
+        else:
+            catalog = FactorSourceCatalog()
+            current = catalog.version(
+                principal, source_kind, family_alias, 'current',
+                owner_username='' if is_public else owner_username,
+            )
+            source = current
+            if str(current.get('family_formula_fingerprint') or '') != fingerprint:
+                source = catalog.version(
+                    principal, source_kind, family_alias, fingerprint,
+                    owner_username='' if is_public else owner_username,
+                )
+        factor_cls, _ = _load_factor_family_from_source(
+            str(source.get('source_code') or ''), family_alias,
         )
-    factor_cls, _ = _load_factor_family_from_source(
-        str(source.get('source_code') or ''), family_alias,
-    )
-    if factor_cls is None:
-        raise ValueError(f'因子家族源码无法加载: {family_alias}')
-    family = factor_cls()
-    if family.expr.semantic_fingerprint() != fingerprint:
-        raise ValueError(f'因子家族源码指纹不匹配: {family_alias}')
-    normalized = normalize_factor_param_row(family, identity.get('params') or {})
-    factor = family.get_factor(**normalized)
-    expression = getattr(factor, '_source_expr', None) or factor.expr
-    if str(factor.alias) != frozen['alias']:
-        raise ValueError(f'因子 alias 与冻结记录不匹配: {frozen["alias"]}')
-    if expression.semantic_fingerprint() != identity['self_formula_fingerprint']:
-        raise ValueError(f'因子公式指纹不匹配: {frozen["alias"]}')
-    return factor
+        if factor_cls is None:
+            raise ValueError(f'因子家族源码无法加载: {family_alias}')
+        family = factor_cls()
+        if family.expr.semantic_fingerprint() != fingerprint:
+            raise ValueError(f'因子家族源码指纹不匹配: {family_alias}')
+        normalized = normalize_factor_param_row(family, identity.get('params') or {})
+        with factor_param_resolver_scope(lambda nested: resolve_factor_param_value(
+            nested, username=principal, frozen_by_ref=dependencies,
+            _resolving_refs=active_refs,
+        )):
+            factor = family.get_factor(**normalized)
+        expression = getattr(factor, '_source_expr', None) or factor.expr
+        if str(factor.alias) != frozen['alias']:
+            raise ValueError(f'因子 alias 与冻结记录不匹配: {frozen["alias"]}')
+        if expression.semantic_fingerprint() != identity['self_formula_fingerprint']:
+            raise ValueError(f'因子公式指纹不匹配: {frozen["alias"]}')
+        return factor
+
+
+@contextmanager
+def _resolving_factor(active_refs: set[str], factor_ref: str):
+    active_refs.add(factor_ref)
+    try:
+        yield
+    finally:
+        active_refs.remove(factor_ref)
 
 
 def _find_visible_factor(alias: str, *, username: str | None = None) -> dict:
@@ -146,12 +195,8 @@ def register_factor_param_resolver_for_user(
     if not owner:
         raise ValueError('FactorParam worker resolver requires an owner')
     frozen_by_ref = {}
-    for value in frozen_factors or []:
-        try:
-            frozen = require_frozen_factor(value)
-        except (TypeError, ValueError):
-            continue
-        frozen_by_ref[frozen['ref']] = frozen
+    for value in unique_frozen_factor_records(frozen_factors or []):
+        frozen_by_ref[value['ref']] = value
     register_factor_param_resolver(lambda value: resolve_factor_param_value(
         value, username=owner, frozen_by_ref=frozen_by_ref,
     ))

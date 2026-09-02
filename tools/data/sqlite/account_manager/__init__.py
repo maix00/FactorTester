@@ -40,6 +40,7 @@ from .factor_param_config import (
     list_all_factor_param_aliases_across_scopes,
     list_factor_param_config_aliases,
     list_factor_param_config_scopes,
+    list_factor_family_dependency_configs,
     load_factor_param_config,
     normalize_product_group,
     rename_scope,

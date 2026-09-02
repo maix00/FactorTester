@@ -13,6 +13,7 @@ from server.modules.shared.factor_param_utils import (
     frozen_factor_dependencies,
     normalize_factor_param_row,
 )
+from server.modules.shared.factor_param_resolver import resolve_factor_param_value
 from server.modules.shared.param_meta import serialize_param_meta
 from server.services.factor_registry import (
     get_factor_family_instance,
@@ -38,12 +39,17 @@ from tools.data.factor_workspace.storage import (
     load_public_factor_source,
 )
 from tools.factors.formula_identity import freeze_factor_identity
+from tools.factors.factor_param_resolution import factor_param_resolver_scope
 
 
 def _freeze_validated_factor(factor_family, params, owner_ref):
     """Return the canonical Factor v2 record without persisting it."""
-    normalized = normalize_factor_param_row(factor_family, params or {})
-    factor = factor_family.get_factor(**normalized)
+    username = current_user()
+    with factor_param_resolver_scope(lambda value: resolve_factor_param_value(
+        value, username=username,
+    )):
+        normalized = normalize_factor_param_row(factor_family, params or {})
+        factor = factor_family.get_factor(**normalized)
     expression = getattr(factor, '_source_expr', None) or factor.expr
     frozen_params = {
         parameter.alias: factor_param_value_storage(

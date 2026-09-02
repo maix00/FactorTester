@@ -101,8 +101,25 @@
       || item?.source_kind === "transient"
       || item?.source_origin === "test_inline";
     const copy = value => structuredClone(value || []);
+    const temporaryFactors = [];
+    const seenFactorRefs = new Set();
+    const visitTemporaryFactor = factor => {
+      for (const dependency of factor?.factor_dependencies || []) {
+        visitTemporaryFactor(dependency);
+      }
+      const ref = factorRef(factor);
+      if (!temporary(factor) || !ref || seenFactorRefs.has(ref)) return;
+      seenFactorRefs.add(ref);
+      temporaryFactors.push(structuredClone(factor));
+    };
+    for (const factor of state.values?.factor_candidates || []) {
+      visitTemporaryFactor(factor);
+    }
     return {
-      factors: copy((state.values?.factor_candidates || []).filter(temporary)),
+      // Inline FactorParam children are configuration-owned too. Persist the
+      // dependency DAG once, dependency-first, so reload never needs a
+      // factor-library lookup for an on-the-fly factor.
+      factors: temporaryFactors,
       factor_sets: copy((state.factorSetCatalog?.items || []).filter(temporary)),
       product_groups: copy((state.groups || []).filter(temporary)),
       categories: copy((state.values?.category_candidates || []).filter(temporary)),

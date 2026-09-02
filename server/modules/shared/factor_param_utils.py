@@ -112,6 +112,118 @@ def factor_param_value_storage(param, value):
     return factor_param_value_display(param, value)
 
 
+def frozen_factor_dependency_record(value: dict) -> dict:
+    """Keep canonical identity plus the source required by inline factors."""
+    frozen = require_frozen_factor(value)
+    source_kind = str(value.get('source_kind') or '').strip()
+    is_configuration_local = value.get('temporary') is True or str(
+        value.get('source_origin') or '',
+    ) == 'test_inline'
+    if not is_configuration_local:
+        return frozen
+    record = {
+        **frozen,
+        'temporary': True,
+        'source_kind': source_kind or 'factor_library',
+        'source_origin': 'test_inline',
+        **({
+            'transient_factor_id': str(value.get('transient_factor_id')),
+        } if value.get('transient_factor_id') else {}),
+    }
+    if source_kind == 'transient':
+        source_code = str(value.get('source_code') or '').strip()
+        if not source_code:
+            raise ValueError(f'当场源码嵌套因子缺少冻结源码: {frozen["alias"]}')
+        record['source_code'] = source_code
+    return record
+
+
+def unique_frozen_factor_records(values) -> list[dict]:
+    """Canonicalize factors without discarding configuration-local evidence.
+
+    ``require_frozen_factor`` intentionally returns only the immutable v2
+    identity.  That is correct for references, but a RunSpec also needs the
+    source and flattened dependency graph of factors created inside the test
+    configuration.  This helper keeps only those explicitly supported fields,
+    recursively flattens dependencies, and rejects conflicting duplicates.
+    """
+    if values is None:
+        return []
+    if not isinstance(values, (list, tuple)):
+        raise ValueError('frozen factors must be a list')
+
+    ordered: list[dict] = []
+    positions: dict[str, int] = {}
+    visiting: set[str] = set()
+
+    def add(raw: dict) -> dict:
+        if not isinstance(raw, dict):
+            raise ValueError('frozen factor must be an object')
+        record = frozen_factor_dependency_record(raw)
+        factor_ref = record['ref']
+        if factor_ref in visiting:
+            raise ValueError(f'FactorParam 依赖形成循环: {factor_ref}')
+        visiting.add(factor_ref)
+        dependencies: list[dict] = []
+        dependency_refs: set[str] = set()
+        for dependency in raw.get('factor_dependencies') or []:
+            normalized = add(dependency)
+            if normalized['ref'] not in dependency_refs:
+                dependency_refs.add(normalized['ref'])
+                dependencies.append({
+                    key: value for key, value in normalized.items()
+                    if key != 'factor_dependencies'
+                })
+        visiting.remove(factor_ref)
+        if dependencies:
+            record['factor_dependencies'] = dependencies
+
+        index = positions.get(factor_ref)
+        if index is None:
+            positions[factor_ref] = len(ordered)
+            ordered.append(record)
+            return record
+        merged = _merge_frozen_factor_records(ordered[index], record)
+        ordered[index] = merged
+        return merged
+
+    for value in values:
+        add(value)
+    return ordered
+
+
+def _merge_frozen_factor_records(left: dict, right: dict) -> dict:
+    if require_frozen_factor(left) != require_frozen_factor(right):
+        raise ValueError(
+            'different frozen records share factor ref: '
+            f'{left.get("ref") or right.get("ref")}',
+        )
+    result = dict(require_frozen_factor(left))
+    for key in (
+        'temporary', 'source_kind', 'source_origin',
+        'transient_factor_id', 'source_code',
+    ):
+        left_value = left.get(key)
+        right_value = right.get(key)
+        if left_value not in (None, '') and right_value not in (None, '') \
+                and left_value != right_value:
+            raise ValueError(f'因子冻结来源冲突: {result["ref"]} ({key})')
+        value = right_value if right_value not in (None, '') else left_value
+        if value not in (None, ''):
+            result[key] = value
+    dependencies = unique_frozen_factor_records([
+        *(left.get('factor_dependencies') or []),
+        *(right.get('factor_dependencies') or []),
+    ])
+    if dependencies:
+        result['factor_dependencies'] = [
+            {key: value for key, value in item.items()
+             if key != 'factor_dependencies'}
+            for item in dependencies
+        ]
+    return result
+
+
 def frozen_factor_dependencies(parameters, values: dict) -> list[dict]:
     """Flatten complete FactorParam records in stable parameter order."""
     result = []
@@ -122,13 +234,13 @@ def frozen_factor_dependencies(parameters, values: dict) -> list[dict]:
             continue
         factor = require_frozen_factor(value)
         for dependency in value.get('factor_dependencies') or []:
-            dependency = require_frozen_factor(dependency)
+            dependency = frozen_factor_dependency_record(dependency)
             if dependency['ref'] not in seen:
                 seen.add(dependency['ref'])
                 result.append(dependency)
         if factor['ref'] not in seen:
             seen.add(factor['ref'])
-            result.append(factor)
+            result.append(frozen_factor_dependency_record(value))
     return result
 
 
@@ -226,6 +338,17 @@ def build_factor_param_item(
             for p in factor_family.params
         },
     )
+    dependency_records = frozen_factor_dependencies(
+        factor_family.params, normalized_row,
+    ) or list(metadata.get('factor_dependencies') or [])
+    from server.modules.shared.factor_instance_metadata import (
+        build_factor_instance_metadata,
+    )
+    instance_metadata = build_factor_instance_metadata(
+        factor_family, factor, normalized_row,
+        factor_dependencies=dependency_records,
+        username=current_username,
+    )
     # 条目级 category 优先于因子家族 meta category
     row_category = params.get('category', '') if isinstance(params, dict) else ''
     family_category = meta.get('category') or ''
@@ -242,6 +365,7 @@ def build_factor_param_item(
         or getattr(factor_family, 'description', '') or '',
         'math_expr': meta.get('math_expr')
         or getattr(factor_family, 'math_expr', '') or '',
+        'resolved_math_expr': instance_metadata['resolved_math_expr'],
         'category': row_category or family_category,
         'source': source,
         'source_label': '公共因子' if source == 'public' else ('自定义因子' if source == 'custom' else '未知来源'),
@@ -250,9 +374,8 @@ def build_factor_param_item(
         'template_row_index': row_idx,
         'params': params_display,
         'factor_params': params_display,
-        'factor_dependencies': frozen_factor_dependencies(
-            factor_family.params, normalized_row,
-        ) or list(metadata.get('factor_dependencies') or []),
+        'parameter_definitions': instance_metadata['parameter_definitions'],
+        'factor_dependencies': dependency_records,
         'params_count': len(params_display),
         'owner_username': owner_username,
         'owner_alias': owner_acct.get('alias') or owner_username,

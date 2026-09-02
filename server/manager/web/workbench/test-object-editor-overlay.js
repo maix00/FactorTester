@@ -6,7 +6,18 @@
       // The embedded editor is deliberately the catalog component itself.
       // The overlay context supplies its mount and onSaved callback, so the
       // catalog create/edit/view behavior is identical to the left-nav tab.
-      render: (context, ref, mode) => FTFactors.factorDetail(context, ref, mode),
+      render: (context, ref, mode, options) => (
+        FTFactors.factorDetail(context, ref, mode, options)
+      ),
+    },
+    factor_family: {
+      title: "因子家族",
+      load: "factor-catalog-detail-rendering",
+      render: (context, ref, mode, options) => (
+        FTFactors.familyDetail(context, ref, mode, {
+          ...options, familyMode: true,
+        })
+      ),
     },
     factor_set: {
       title: "因子集合",

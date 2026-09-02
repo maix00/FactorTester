@@ -96,6 +96,8 @@
       },
       additionalProperties: false,
       "x-factor-tester-field-registry": structuredClone(state.manifest || {}),
+      "x-factor-tester-factor-param-contract":
+        window.FTFactorParamContract?.schema?.() || {},
       "x-run-spec-shape": "RunRequest(configuration + registered run_fields)",
       "x-canonical-settings-path": `configuration.ui.${state.kind}.settings`,
     };

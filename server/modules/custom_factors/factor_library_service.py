@@ -21,6 +21,7 @@ from server.modules.custom_factors.factor_library_store import (
 from server.modules.products.product_group_store import load_product_groups
 from server.modules.shared.factor_param_utils import (
     build_factor_param_item,
+    frozen_factor_dependency_record,
     serialize_factor_param_rows,
 )
 from server.services.factor_registry import (
@@ -33,6 +34,23 @@ from tools.data.account_manage import (
     direct_subordinate_accounts_for,
     get_account,
 )
+from tools.factors.factor_param_resolution import factor_param_resolver_scope
+
+
+def _configuration_factor_resolver(config: dict, username: str):
+    """Resolve stored FactorParam refs only from this config's frozen DAG."""
+    metadata = config.get('metadata') if isinstance(config.get('metadata'), dict) else {}
+    frozen_by_ref = {}
+    for value in metadata.get('factor_dependencies') or []:
+        frozen = frozen_factor_dependency_record(value)
+        existing = frozen_by_ref.get(frozen['ref'])
+        if existing is not None and existing != frozen:
+            raise ValueError(f'因子参数依赖记录冲突: {frozen["ref"]}')
+        frozen_by_ref[frozen['ref']] = frozen
+    from server.modules.shared.factor_param_resolver import resolve_factor_param_value
+    return factor_param_resolver_scope(lambda value: resolve_factor_param_value(
+        value, username=username, frozen_by_ref=frozen_by_ref,
+    ))
 
 
 def template_time_from_id(template: dict) -> str:
@@ -89,7 +107,11 @@ def build_library_factor_param_item(
     factor_family, meta = resolve_param_factor_family(owner_username, ff_alias, public_by_alias, custom_by_alias)
     account = dict(owner_account)
     account['alias'] = account_display_name(owner_account)
-    return build_factor_param_item(factor_family, row or {}, row_index, account, current_username, meta=meta, config=config)
+    with _configuration_factor_resolver(config, current_username):
+        return build_factor_param_item(
+            factor_family, row or {}, row_index, account, current_username,
+            meta=meta, config=config,
+        )
 
 
 def build_factor_library_config_factors(current_username: str, owner_account: dict, ff_alias: str, config: dict) -> list:
@@ -101,30 +123,22 @@ def build_factor_library_config_factors(current_username: str, owner_account: di
     if not isinstance(params_list, list):
         return factors
     for row_index, row in enumerate(params_list):
-        try:
-            factors.append(build_library_factor_param_item(
-                current_username,
-                owner_account,
-                ff_alias,
-                config,
-                row if isinstance(row, dict) else {},
-                row_index,
-                public_by_alias,
-                custom_by_alias,
-            ))
-            factors[-1]['scope_key'] = config.get('scope_key') or config.get('product_group') or DEFAULT_SCOPE_KEY
-            factors[-1]['product_group'] = config.get('product_group') or config.get('scope_key') or DEFAULT_SCOPE_KEY
-            if isinstance(config.get('metadata'), dict):
-                factors[-1]['metadata'] = config.get('metadata')
-                for key in (
-                    'factor_owner_ref',
-                    'family_formula_fingerprint', 'self_formula_fingerprint',
-                ):
-                    value = config['metadata'].get(key)
-                    if value:
-                        factors[-1][key] = value
-        except Exception:
-            continue
+        factors.append(build_library_factor_param_item(
+            current_username, owner_account, ff_alias, config,
+            row if isinstance(row, dict) else {}, row_index,
+            public_by_alias, custom_by_alias,
+        ))
+        factors[-1]['scope_key'] = config.get('scope_key') or config.get('product_group') or DEFAULT_SCOPE_KEY
+        factors[-1]['product_group'] = config.get('product_group') or config.get('scope_key') or DEFAULT_SCOPE_KEY
+        if isinstance(config.get('metadata'), dict):
+            factors[-1]['metadata'] = config.get('metadata')
+            for key in (
+                'factor_owner_ref',
+                'family_formula_fingerprint', 'self_formula_fingerprint',
+            ):
+                value = config['metadata'].get(key)
+                if value:
+                    factors[-1][key] = value
     return factors
 
 
@@ -390,8 +404,26 @@ def save_current_user_library_config(
 ) -> tuple[dict, list]:
     product_group = normalize_product_group(product_group)
     factor_family = get_factor_family_instance(ff_alias, username=current_username)
-    serialized_rows = serialize_factor_param_rows(factor_family, params_list)
     config_metadata = _merged_library_metadata(current_username, ff_alias, product_group, metadata)
+    with _configuration_factor_resolver(
+        {'metadata': config_metadata}, current_username,
+    ):
+        serialized_rows = serialize_factor_param_rows(factor_family, params_list)
+    candidate_config = {
+        'params_list': serialized_rows,
+        'metadata': config_metadata,
+        'scope_key': product_group,
+        'product_group': product_group,
+    }
+    account = get_account(current_username) or {'username': current_username}
+    candidate_factors = build_factor_library_config_factors(
+        current_username, account, ff_alias, candidate_config,
+    )
+    if serialized_rows and len(candidate_factors) != len(serialized_rows):
+        raise ValueError(
+            f'因子配置无法按冻结依赖恢复: {ff_alias} '
+            f'({len(candidate_factors)}/{len(serialized_rows)})'
+        )
     config = save_factor_param_config(
         current_username,
         ff_alias,
@@ -399,8 +431,12 @@ def save_current_user_library_config(
         product_group,
         metadata=config_metadata,
     )
-    account = get_account(current_username) or {'username': current_username}
     factors = build_factor_library_config_factors(current_username, account, ff_alias, config)
+    if serialized_rows and len(factors) != len(serialized_rows):
+        raise ValueError(
+            f'因子配置保存后无法按冻结依赖恢复: {ff_alias} '
+            f'({len(factors)}/{len(serialized_rows)})'
+        )
     return config, factors
 
 

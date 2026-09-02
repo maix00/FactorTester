@@ -240,6 +240,51 @@
     return result;
   }
 
+  async function materializeFamilyDrafts(context, values = {}) {
+    const result = {...values};
+    for (const [alias, raw] of Object.entries(result)) {
+      if (!raw || raw.__factor_family_draft !== true || !raw.__factor_family) continue;
+      const family = raw.__factor_family;
+      const params = await materializeFamilyDrafts(
+        context, raw.parameter_values || {},
+      );
+      const transient = family.source_kind === "transient"
+        || family.temporary === true || Boolean(family.source_code);
+      const body = transient ? {
+        source_code: family.source_code || "",
+        params,
+      } : {
+        resolve_factor: true,
+        factor_family_alias: familyAlias(family),
+        owner_username: family.owner_username || family.owner_ref
+          || context.session?.username || "",
+        is_public: family.factor_kind === "public" || family.source === "public",
+        params,
+      };
+      const resolved = await context.api("/api/factor-library/families/validate", {
+        method: "POST", body: JSON.stringify(body),
+      });
+      if (!resolved.valid || !resolved.factor) {
+        throw new Error(resolved.error || context.t(`参数 ${alias} 的内嵌因子无法解析`));
+      }
+      result[alias] = {
+        ...resolved.factor,
+        factor_alias: resolved.factor.alias,
+        factor_family_alias: resolved.factor_family_alias
+          || familyAlias(family),
+        params,
+        parameter_definitions: resolved.params
+          || family.params || family.parameter_definitions || [],
+        source_kind: transient ? "transient" : "factor_library",
+        source_origin: transient ? "test_inline" : "factor_library",
+        source_code: transient ? family.source_code || "" : undefined,
+        factor_dependencies: parameterDependencies(params),
+        temporary: transient,
+      };
+    }
+    return result;
+  }
+
   function normalizedInspection(value) {
     const item = value || {};
     const factor = item.factor || item.frozen_factor || {};
@@ -261,11 +306,12 @@
   function factorParameterItems(data) {
     const seen = new Set();
     return (data?.factors || []).flatMap(factor => {
-      const value = String(factor?.factor_alias || factor?.alias || "").trim();
-      if (!value || seen.has(value)) return [];
+      const alias = String(factor?.factor_alias || factor?.alias || "").trim();
+      const value = String(factor?.factor_ref || factor?.ref || "").trim();
+      if (!alias || !value || seen.has(value)) return [];
       seen.add(value);
       return [{
-        value, label: value,
+        value, label: alias, factor,
         description: [factor.owner_alias || factor.owner_username,
           factor.factor_family_alias].filter(Boolean).join(" · "),
       }];
@@ -278,6 +324,8 @@
     return window.FTFactorParameterEditor.create(
       context, list, state.parameterValues, {
         factorItems: factorParameterItems(data),
+        familyItems: familyItems(data),
+        maxFamilyDepth: context.testObjectOverlay === true ? 1 : 12,
         onValidateFactorAlias: async alias => {
           const familyAliasValue = String(alias || "").split("|", 1)[0];
           const family = (data?.families || []).find(item => (
@@ -294,27 +342,33 @@
             is_public: family.factor_kind === "public" || family.source === "public",
           });
         },
-        onCreateFactor: onSaved => (
+        onSelectFamily: async family => {
+          if ((family?.params || family?.parameter_definitions || []).length) {
+            return family;
+          }
+          try {
+            const loaded = await window.FTFactorDetailShared.loadSourceVersion(
+              context, family, "current", {
+                familyID: familyAlias(family),
+                sourceKind: family.factor_kind === "public" ? "public" : undefined,
+                ownerUsername: family.owner_username || context.session?.username || "",
+              },
+            );
+            return {...family, ...loaded};
+          } catch (_) {
+            return family;
+          }
+        },
+        onCreateFamily: onSaved => (
           context.openTestObject || (childOptions => (
             FTTestObjectEditorOverlay.open(context, childOptions)
           ))
         )({
-          kind: "factor", mode: "create", ref: "new", onSaved,
-          // Nested FactorParam creation belongs to the current configuration
-          // draft and must never persist into the factor library implicitly.
+          kind: "factor_family", mode: "create", ref: "new", onSaved,
+          // A nested family is configuration-local until the owning factor is
+          // explicitly submitted. Never publish it as a library family here.
           temporary: true,
         }),
-        onFactorCreated: (factor, alias) => {
-          const value = String(factor?.factor_alias || factor?.alias || "").trim();
-          if (value) {
-            state.parameterValues[alias] = value;
-            data.factors ||= [];
-            if (!data.factors.some(item => (
-              item.factor_alias || item.alias
-            ) === value)) data.factors.push(factor);
-          }
-          redraw();
-        },
       },
     );
   }
@@ -547,6 +601,7 @@
         parameter_definitions: state.family?.params || [],
         source_kind: "factor_library",
         source_origin: "test_inline",
+        factor_dependencies: parameterDependencies(state.parameterValues),
         temporary: true,
       };
     }
@@ -587,6 +642,23 @@
     if (context.testObjectTemporary) {
       const alias = state.inspection?.factor_name || state.factorID
         || readInput(fields.name);
+      if (state.familyMode) {
+        return {
+          ...payload,
+          family_ref: `temporary-family:${crypto.randomUUID()}`,
+          factor_family_alias: alias,
+          family_class_name: alias,
+          name: alias,
+          params: state.inspection?.params || [],
+          parameter_definitions: state.inspection?.params || [],
+          math_expr: state.inspection?.math_expr || "",
+          family_formula_fingerprint:
+            state.inspection?.family_formula_fingerprint || "",
+          source_kind: "transient",
+          source_origin: "test_inline",
+          temporary: true,
+        };
+      }
       const value = await context.api("/api/factor-library/families/validate", {
         method: "POST",
         body: JSON.stringify({
@@ -607,6 +679,7 @@
         source_kind: "transient",
         source_origin: "test_inline",
         transient_factor_id: alias,
+        factor_dependencies: parameterDependencies(state.parameterValues),
         temporary: true,
       };
     }
@@ -882,13 +955,24 @@
         sourceMount.append(error);
       }
       parameterMount.replaceChildren();
+      if (!state.familyMode && state.mode === "create") {
+        // Factor instances do not own a source tab. Their family selection
+        // (or family creation) is part of the parameter composition flow.
+        parameterMount.append(sourceMount);
+      }
       const editor = parameterEditor(context, data, state, redraw);
       if (editor) {
         // parameterEditor owns the mutable values object; keep the same
         // object on state so edits made in the shared editor reach the save
         // request without inventing a second parameter form.
         state.parameterValues = editor.values;
-        parameterMount.append(editor.root);
+        if (state.familyMode) parameterMount.append(editor.root);
+        else parameterMount.append(parameterComposition(
+          context, {
+            ...(state.family || state.inspection || {}),
+            source_code: state.sourceCode || state.family?.source_code || "",
+          }, editor.root,
+        ));
       } else parameterMount.append(emptyState(context, state.familyMode
         ? "参数定义将在源码校验后生成" : "当前因子没有参数"));
     };
@@ -923,7 +1007,7 @@
       // Family descriptive metadata belongs to family creation, not factor
       // creation; keep the shared detail surface for factor view/edit only.
       overview: {hidden: mode === "create", save_mode: "auto"},
-      source: {save_mode: "auto"},
+      source: {hidden: true},
       parameters: {save_mode: "auto"},
       jobs: {
         hidden: mode === "create" || context.testObjectTemporary === true,
@@ -981,14 +1065,18 @@
     redraw();
     FTFactorAssistance.register(context, {
       state, name, chineseName, description, category, tabs, redraw, markDirty,
+      parameterDefinitions: () => parameters(state),
     });
     form.addEventListener("input", markDirty);
     form.addEventListener("change", markDirty);
     form.addEventListener("submit", async event => {
       event.preventDefault(); submit.disabled = true; status.textContent = "";
       try {
+        state.parameterValues = await materializeFamilyDrafts(
+          context, state.parameterValues,
+        );
         if (!await validateSourceDraft()) {
-          tabs.select("source", true);
+          tabs.select(state.familyMode ? "source" : "parameters", true);
           throw new Error(state.validationError || context.t("因子源码无法通过检查"));
         }
         if ((state.familyMode || state.sourceMode !== "family")
@@ -1059,6 +1147,32 @@
     return value;
   }
 
+  function parameterComposition(context, family, content) {
+    const root = document.createElement("details");
+    root.open = true;
+    root.className = "factor-param-root-family";
+    const header = document.createElement("summary");
+    header.className = "factor-param-nested-family-header";
+    const title = document.createElement("b");
+    title.textContent = familyAlias(family) || context.t("因子家族参数");
+    header.append(title);
+    if (familyAlias(family)) {
+      header.append(window.FTFactorDetailShared.familySourceHelp(context, family));
+    }
+    const expression = window.FTFactorDetailShared.expression(family);
+    if (expression) {
+      const formula = document.createElement("div");
+      formula.className = "factor-detail-parameter-formula display-math";
+      if (window.katex) window.katex.render(expression, formula, {
+        displayMode: true, throwOnError: false,
+      });
+      else formula.textContent = expression;
+      header.append(formula);
+    }
+    root.append(header, content);
+    return root;
+  }
+
   function textField(context, labelText, value, options = {}) {
     const input = document.createElement("input");
     input.value = value || "";
@@ -1098,6 +1212,6 @@
   window.FTFactorEditor = Object.freeze({
     render, reconcileParameterValues, bindFieldValue, persistedFamilyClassName,
     familyClassNameMatches, refreshPersistedObject, replacePersistedObjectTab,
-    saveSourceFactor,
+    saveSourceFactor, materializeFamilyDrafts,
   });
 })();
