@@ -23,6 +23,11 @@ global.FTUI = window.FTUI = {helpIcon: () => new Element("span")};
 window.FTFactorDetailShared = {
   familySourceHelp: () => new Element("span"),
   previewExpression: () => "",
+  parameterTable: () => {
+    const table = new Element("details");
+    table.className = "factor-param-readonly-table";
+    return table;
+  },
 };
 const pickers = [];
 window.FTTestObjectPicker = {
@@ -53,10 +58,18 @@ const frozen = {
     self_formula_fingerprint: "c".repeat(64),
     params: {N: "5d"},
   },
+  factor_family_alias: "Nested",
+  parameter_definitions: [{
+    alias: "N", type: "WindowParam", value: "5d", default_value: "5d",
+  }],
 };
 const nestedFamily = {
   family_ref: "factor-family:v2:nested",
   factor_family_alias: "NestedFamily",
+  params: [],
+};
+const loadedNestedFamily = {
+  ...nestedFamily,
   params: [{alias: "N", type: "WindowParam", default_value: "5d"}],
 };
 let parameterChanges = 0;
@@ -71,26 +84,52 @@ const editor = window.FTFactorParameterEditor.create(
       label: nestedFamily.factor_family_alias,
       family: nestedFamily,
     }],
+    onSelectFamily: async () => loadedNestedFamily,
+    onValidateFactorAlias: async () => ({
+      valid: true, factor_alias: frozen.alias, factor: frozen,
+    }),
     onChange: () => { parameterChanges += 1; },
   },
 );
 const descendants = root => [root, ...(root.children || []).flatMap(descendants)];
+const nestedMount = editor.root.children.find(item => (
+  String(item.className).includes("factor-param-nested-family-mount")
+));
+assert.ok(nestedMount, "nested parameters must mount beside the outer row, not inside Value");
 
-assert.equal(pickers.length, 3);
-assert.equal(pickers[1].options.items[0].label, frozen.alias,
+assert.equal(pickers.length, 4);
+const sourcePicker = pickers.find(picker => (
+  picker.options.name === "factor-param-source-P"
+));
+const factorPicker = pickers.find(picker => (
+  picker.options.name === "factor-param-factor-P"
+));
+const familyPicker = pickers.find(picker => (
+  picker.options.name === "factor-param-family-P"
+));
+assert.ok(sourcePicker, "FactorParam must expose a source-type picker");
+assert.ok(factorPicker, "FactorParam must expose a factor picker");
+assert.ok(familyPicker, "FactorParam must expose a family picker");
+assert.equal(factorPicker.options.items[0].label, frozen.alias,
   "factor picker must always present the human-readable alias");
-pickers[1].options.onChange([frozen.ref]);
+factorPicker.options.onChange([frozen.ref]);
 assert.equal(editor.values.P, frozen,
   "library selection must retain the complete frozen factor record");
-assert.deepEqual(pickers[1].selected, [frozen.ref]);
+assert.deepEqual(factorPicker.selected, [frozen.ref]);
+assert.ok(descendants(nestedMount).some(item => (
+  String(item.className).includes("factor-param-readonly-table")
+)), "selected factor must render a read-only nested parameter table");
+assert.equal(descendants(nestedMount).filter(item => item.tagName === "INPUT").length, 0,
+  "selected factor parameter table must not expose editable inputs");
 assert.equal(parameterChanges, 1,
   "picker changes must notify the durable page-draft owner");
-pickers[1].options.onChange([]);
+factorPicker.options.onChange([]);
 assert.equal(editor.values.P, "",
   "clearing the selected picker must release the mutually-exclusive value");
 assert.equal(parameterChanges, 2);
-assert.equal(pickers[1].selected.length, 0,
+assert.equal(factorPicker.selected.length, 0,
   "clearing a picker must leave it with no selected object");
+sourcePicker.options.onChange(["manual"]);
 const manualInput = descendants(editor.root).find(item => item.tagName === "INPUT");
 assert.ok(manualInput, "FactorParam must expose its manual input");
 manualInput.value = "0";
@@ -101,19 +140,36 @@ manualInput.value = "";
 manualInput.listeners.input();
 assert.equal(editor.values.P, "",
   "emptying the manual input must release the mutually-exclusive value");
-assert.equal(parameterChanges, 4);
-const familyGroup = descendants(editor.root).find(item => (
-  String(item.className).includes("factor-param-choice-family")
+assert.equal(parameterChanges, 5);
+const referenceControl = descendants(editor.root).find(item => (
+  String(item.className).includes("factor-param-reference-control")
 ));
-assert.ok(familyGroup, "family picker and create action must share the family choice row");
-const nestedMount = editor.root.children.find(item => (
-  String(item.className).includes("factor-param-nested-family-mount")
+assert.ok(referenceControl, "FactorParam must keep the source picker and value control on one row");
+const factorRow = descendants(editor.root).find(item => (
+  String(item.className).includes("factor-detail-parameter-row")
 ));
-assert.ok(nestedMount, "nested parameters must mount beside the outer row, not inside Value");
+assert.ok(factorRow, "FactorParam must render as a parameter row");
+assert.ok(String(factorRow.className).includes("factor-detail-parameter-row-factor"),
+  "FactorParam row must keep a divider before its nested parameter mount");
+
+const restored = window.FTFactorParameterEditor.create(
+  {t: value => value},
+  [{alias: "P", type: "FactorParam", default_value: "CA", options: []}],
+  {P: frozen.alias},
+  {
+    factorItems: [{value: frozen.ref, label: frozen.alias, factor: frozen}],
+    familyItems: [],
+  },
+);
+assert.equal(restored.values.P, frozen,
+  "a persisted factor alias should be normalised to its frozen record");
+assert.ok(descendants(restored.root).some(item => (
+  String(item.className).includes("factor-param-readonly-table")
+)), "a restored factor alias must render a read-only nested table");
 
 (async () => {
-  await pickers[2].options.onChange([nestedFamily.family_ref]);
-  assert.deepEqual(pickers[2].selected, [nestedFamily.family_ref],
+  await familyPicker.options.onChange([nestedFamily.family_ref]);
+  assert.deepEqual(familyPicker.selected, [nestedFamily.family_ref],
     "selected family must remain selected after its parameters load");
   assert.equal(editor.values.P.__factor_family.factor_family_alias,
     nestedFamily.factor_family_alias);
@@ -122,6 +178,11 @@ assert.ok(nestedMount, "nested parameters must mount beside the outer row, not i
   )), "selected family must render its nested parameter table");
   assert.ok(descendants(nestedMount).some(item => item.tagName === "INPUT"),
     "nested family parameter table must expose editable parameter fields");
+  manualInput.value = frozen.alias;
+  await manualInput.listeners.change();
+  assert.ok(descendants(nestedMount).some(item => (
+    String(item.className).includes("factor-param-readonly-table")
+  )), "an alias resolved from manual input must render a read-only factor table");
   console.log("ok");
 })().catch(error => {
   console.error(error);

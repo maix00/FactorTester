@@ -157,7 +157,11 @@ def test_source_family_projections_preserve_formula_fingerprint(monkeypatch) -> 
         "id": "Momentum",
         "name": "Momentum",
         "family_formula_fingerprint": "c" * 64,
-        "params": [],
+        "params": [{
+            "alias": "N",
+            "type": "WindowParam",
+            "default_value": "20d",
+        }],
     }
     monkeypatch.setattr(
         "server.modules.custom_factors.catalog.list_public_factors",
@@ -173,6 +177,7 @@ def test_source_family_projections_preserve_formula_fingerprint(monkeypatch) -> 
 
     assert public["families"][0]["family_formula_fingerprint"] == "c" * 64
     assert custom[0]["family_formula_fingerprint"] == "c" * 64
+    assert custom[0]["params"] == source["params"]
 
 
 def test_public_source_applied_requires_superadmin_and_verifies_source(
@@ -719,6 +724,20 @@ def test_validate_factor_alias_accepts_unregistered_canonical_member(monkeypatch
         editor_routes, "_freeze_validated_factor",
         lambda *_args: {"schema_version": 2, "alias": "Momentum|N:20d"},
     )
+    monkeypatch.setattr(
+        editor_routes, "instantiate_factor_metadata",
+        lambda *_args: {
+            "factor_alias": "Momentum|N:20d",
+            "family_formula_fingerprint": "a" * 64,
+            "self_formula_fingerprint": "b" * 64,
+            "normalized_params": {"N": "20d"},
+            "math_expr": r"\textcolor{red}{N}",
+            "resolved_math_expr": "20d",
+            "parameter_definitions": [{
+                "alias": "N", "type": "WindowParam", "value": "20d",
+            }],
+        },
+    )
     client = _app().test_client()
     _login(client)
 
@@ -739,5 +758,21 @@ def test_validate_factor_alias_accepts_unregistered_canonical_member(monkeypatch
         "error": None,
         "factor_alias": "Momentum|N:20d",
         "factor_family_alias": "Momentum",
-        "factor": {"schema_version": 2, "alias": "Momentum|N:20d"},
+        "factor": {
+            "schema_version": 2,
+            "alias": "Momentum|N:20d",
+            "factor_family_alias": "Momentum",
+            "factor_family_name": "Family",
+            "factor_kind": "custom",
+            "source": "custom",
+            "factor_alias": "Momentum|N:20d",
+            "family_formula_fingerprint": "a" * 64,
+            "self_formula_fingerprint": "b" * 64,
+            "normalized_params": {"N": "20d"},
+            "math_expr": r"\textcolor{red}{N}",
+            "resolved_math_expr": "20d",
+            "parameter_definitions": [{
+                "alias": "N", "type": "WindowParam", "value": "20d",
+            }],
+        },
     }

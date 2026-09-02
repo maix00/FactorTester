@@ -338,7 +338,21 @@
         familyItems: familyItems(data),
         maxFamilyDepth: context.testObjectOverlay === true ? 1 : 12,
         onValidateFactorAlias: async alias => {
-          const familyAliasValue = String(alias || "").split("|", 1)[0];
+          const normalizedAlias = String(alias || "").trim();
+          const registered = (data?.factors || []).find(item => (
+            String(item?.factor_alias || item?.alias || "").trim()
+              === normalizedAlias
+          ));
+          if (registered) {
+            return {
+              valid: true,
+              factor_alias: String(
+                registered.factor_alias || registered.alias || normalizedAlias,
+              ),
+              factor: registered,
+            };
+          }
+          const familyAliasValue = normalizedAlias.split("|", 1)[0];
           const family = (data?.families || []).find(item => (
             familyAlias(item) === familyAliasValue
           ));
@@ -346,11 +360,14 @@
             return {valid: false, error: context.t("找不到该 alias 对应的可见因子家族")};
           }
           return context.api("/api/factor-library/families/validate", {
-            resolve_factor_alias: true,
-            factor_alias: alias,
-            factor_family_alias: familyAliasValue,
-            owner_username: family.owner_username || family.workspace_username || "",
-            is_public: family.factor_kind === "public" || family.source === "public",
+            method: "POST",
+            body: JSON.stringify({
+              resolve_factor_alias: true,
+              factor_alias: normalizedAlias,
+              factor_family_alias: familyAliasValue,
+              owner_username: family.owner_username || family.workspace_username || "",
+              is_public: family.factor_kind === "public" || family.source === "public",
+            }),
           });
         },
         onSelectFamily: async family => {

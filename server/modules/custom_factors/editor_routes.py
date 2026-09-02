@@ -140,13 +140,23 @@ def api_validate_expr():
             frozen = _freeze_validated_factor(
                 factor_family, params, owner_ref,
             )
+            instance = instantiate_factor_metadata(factor_family, params)
             return jsonify({
                 'success': True,
                 'valid': True,
                 'error': None,
                 'factor_alias': str(factor.alias),
                 'factor_family_alias': family_alias,
-                'factor': frozen,
+                'factor': {
+                    **frozen,
+                    'factor_family_alias': str(
+                        getattr(factor_family, 'alias', '') or family_alias
+                    ),
+                    'factor_family_name': factor_family.__class__.__name__,
+                    'factor_kind': 'public' if is_public else 'custom',
+                    'source': 'public' if is_public else 'custom',
+                    **instance,
+                },
             })
         except Exception as exc:
             return jsonify({

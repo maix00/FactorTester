@@ -36,6 +36,10 @@ class ClientFactorCatalogMixin:
                 "source": "custom",
                 "factor_count": 0,
                 "factor_refs": [],
+                # Keep parameter metadata in the family projection so a
+                # nested FactorParam can render without waiting for a lazy
+                # source request.
+                "params": item.get("params") or [],
                 "family_formula_fingerprint": item.get(
                     "family_formula_fingerprint"
                 ) or "",
