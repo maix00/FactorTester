@@ -85,6 +85,11 @@
       },
       onCreate: () => openInline(context, state, group.id, refresh, redraw),
       createLabel: context.t("新建临时策略"),
+      editSelected: item => Boolean(item.strategy?.temp_ref),
+      onEdit: (_event, item) => openInline(
+        context, state, group.id, refresh, redraw, item.strategy, current,
+      ),
+      editLabel: context.t("编辑临时策略"),
     });
     root.append(picker.element);
     return root;
@@ -102,6 +107,7 @@
         value: `inline::${item.temp_ref}`,
         label: item.name || item.temp_ref,
         description: `临时策略 · ${item.entrypoint || "Strategy"}`,
+        strategy: item,
       });
     }
     const source = current?.source || {};
@@ -141,14 +147,17 @@
       : {kind: "library", strategy_ref: first, revision_ref: second};
   }
 
-  async function openInline(context, state, target, refresh, redraw) {
+  async function openInline(
+    context, state, target, refresh, redraw, existing = null, binding = null,
+  ) {
     // Temporary strategies use the same nested object editor as every other
     // test-time object.  The binding panel owns only inspection and state
     // persistence; it must not create a second dialog implementation.
     return FTTestObjectEditorOverlay.open(context, {
       kind: "strategy",
-      mode: "create",
-      ref: "new",
+      mode: existing ? "edit" : "create",
+      ref: existing?.temp_ref || "new",
+      initialValue: existing,
       temporary: true,
       storageMode: "configuration-inline",
       submitLabel: "添加到当前配置",
@@ -164,7 +173,7 @@
         if (!inspected.valid) {
           throw new Error(inspected.error || context.t("策略源码无法通过校验"));
         }
-        const tempRef = newID("temporary-strategy");
+        const tempRef = existing?.temp_ref || newID("temporary-strategy");
         return {
           temp_ref: tempRef,
           name: draft.name.trim(),
@@ -177,7 +186,7 @@
       },
       onSaved: strategy => {
         FTTestInputState.putInlineStrategy(state, strategy, {
-          binding_id: newID("binding"),
+          binding_id: binding?.binding_id || newID("binding"),
           target_strategy_id: target,
           source: {kind: "inline", temp_ref: strategy.temp_ref},
         });

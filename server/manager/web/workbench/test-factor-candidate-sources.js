@@ -136,6 +136,13 @@
           : null
       ) : null,
       createLabel: context.t("新建因子"),
+      editSelected: item => item.factor?.temporary === true
+        || item.factor?.source_kind === "transient",
+      onEdit: (_event, item) => void FTStrategyEditorFactorOverlay.open(
+        context, state,
+        value => saveFactor(context, state, refresh, picker, value), item.factor,
+      ),
+      editLabel: context.t("编辑因子"),
       onChange: values => {
         syncCandidates(state, values);
         refresh?.();
@@ -217,6 +224,14 @@
           })
       ) : null,
       createLabel: context.t("新建因子"),
+      editSelected: item => item.factor?.temporary === true
+        || item.factor?.source_kind === "transient",
+      onEdit: (_event, item) => void FTTestLazyCode.openObjectEditor(context, {
+        kind: "factor", mode: "edit", ref: item.value,
+        onSaved: saved, testState: state, initialValue: item.factor,
+        temporary: true,
+      }),
+      editLabel: context.t("编辑因子"),
       itemActions: item => {
         const factor = available.find(value => (
           factorID(value) === item.value
