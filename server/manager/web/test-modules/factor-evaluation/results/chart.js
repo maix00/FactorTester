@@ -84,7 +84,7 @@
     });
     return {
       chart: {
-        animation: false, height: 650,
+        animation: false,
         panning: {enabled: true, type: "x"}, panKey: "shift",
         zooming: {type: "x", mouseWheel: {enabled: true, type: "x"}},
       },
