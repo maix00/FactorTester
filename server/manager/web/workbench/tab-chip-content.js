@@ -139,6 +139,54 @@
     });
     let current = null;
 
+    function itemChips(content) {
+      if (options.autoChips === false) return content;
+      const isChipRow = content?.className?.split?.(/\s+/)
+        .includes("backend-settings-chip-row");
+      if (content && !isChipRow) return content;
+      const row = content || document.createElement("div");
+      if (!content) row.className = "backend-settings-chip-row";
+      const mountedItems = (options.items || []).filter(item => (
+        item?.key && item.key !== "__manage__" && item.showChip !== false
+      ));
+      if (!mountedItems.length) return content;
+      const groups = new Map();
+      const extras = [];
+      for (const child of [...(row.children || [])]) {
+        if (child?.tabChipKey) groups.set(child.tabChipKey, child);
+        else extras.push(child);
+      }
+      const ordered = mountedItems.map(item => {
+        if (groups.has(item.key)) return groups.get(item.key);
+        const group = document.createElement("div");
+        group.className = "backend-settings-chip-group";
+        group.tabChipKey = item.key;
+        const heading = document.createElement("small");
+        heading.className = "backend-settings-chip-group-label";
+        heading.textContent = item.label || item.key;
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "backend-setting-chip setting-default";
+        chip.title = options.context?.t?.("打开设置") || "打开设置";
+        const label = document.createElement("span");
+        label.className = "backend-setting-chip-label";
+        label.textContent = options.context?.t?.("默认") || "默认";
+        const value = document.createElement("span");
+        value.className = "backend-setting-chip-value";
+        value.textContent = options.context?.t?.("未设置（默认）") || "未设置（默认）";
+        chip.append(label, value);
+        chip.addEventListener("click", () => tabset.toggle(item.key));
+        group.append(heading, chip);
+        return group;
+      });
+      if (typeof row.replaceChildren === "function") row.replaceChildren(...ordered, ...extras);
+      else {
+        row.children = [];
+        row.append(...ordered, ...extras);
+      }
+      return row;
+    }
+
     function sync() {
       const children = [
         tabset.bar,
@@ -154,21 +202,24 @@
 
     function setCurrent(content, title = "") {
       current = null;
-      if (content) {
+      const resolved = itemChips(content);
+      if (resolved) {
         current = document.createElement("section");
         current.className = "test-settings-current";
-        if (title) {
+        const currentTitle = title || options.currentTitle
+          || options.context?.t?.("当前选择") || "当前选择";
+        if (currentTitle) {
           const heading = document.createElement("strong");
-          heading.textContent = title;
+          heading.textContent = currentTitle;
           current.append(heading);
         }
-        current.append(content);
+        current.append(resolved);
       }
       sync();
       return current;
     }
 
-    sync();
+    setCurrent(null);
     return Object.freeze({root, tabset, setCurrent});
   }
 

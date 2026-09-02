@@ -10,6 +10,9 @@ global.sessionStorage = {
 };
 global.window = globalThis;
 global.window.location = {search: ""};
+vm.runInThisContext(fs.readFileSync(
+  "server/manager/web/core/test-type-registry.js", "utf8",
+), {filename: "test-type-registry.js"});
 vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {
   filename: "tests.js",
 });
