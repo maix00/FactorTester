@@ -29,17 +29,24 @@
       value.className = "factor-detail-parameter-value";
       const initialValue = values[alias] ?? parameter.default_value ?? "";
       values[alias] = initialValue;
+      let nestedMount = null;
       if (parameter.type === "FactorParam") {
-        renderReference(context, value, parameter, initialValue, values, options);
+        nestedMount = renderReference(
+          context, value, parameter, initialValue, values, options,
+        );
       } else {
         const input = document.createElement("input");
         input.type = "text";
         input.value = initialValue;
-        input.addEventListener("input", () => { values[alias] = input.value; });
+        input.addEventListener("input", () => {
+          values[alias] = input.value;
+          options.onChange?.(values, alias);
+        });
         value.append(input);
       }
       row.append(key, type, defaultValue, value);
       root.append(row);
+      if (nestedMount) root.append(nestedMount);
     }
     return {root, values};
   }
@@ -83,6 +90,7 @@
       familyPicker?.setValues?.(source === "family" && familyDraft(value)
         ? [familyRef(value.__factor_family)] : []);
       syncSources();
+      options.onChange?.(values, alias);
     };
     columnPicker = picker(context, `factor-param-column-${alias}`, context.t("DataColumn"),
       columns, columns.some(item => item.value === initialValue) ? [initialValue] : [],
@@ -139,7 +147,11 @@
     groups.manual = group(context.t("填写"), input);
     groups.column = group(context.t("Column"), columnPicker.element || columnPicker);
     groups.factor = group(context.t("因子库"), factorPicker.element || factorPicker);
-    const createFamily = actionButton(context, context.t("新增因子家族"), async () => {
+    const createFamily = actionButton(context, context.t(
+      familyDraft(values[alias]) ? "编辑因子家族" : "新增因子家族",
+    ), async () => {
+      const currentFamily = familyDraft(values[alias])
+        ? values[alias].__factor_family : null;
       await options.onCreateFamily?.(family => {
         if (!family) return;
         if (!families.some(item => item.value === familyRef(family))) {
@@ -150,13 +162,15 @@
           familyPicker.setItems?.(families);
         }
         setValue(makeFamilyDraft(family), "family");
+        createFamily.textContent = context.t("编辑因子家族");
         renderNested();
-      });
+      }, currentFamily);
     }, {variant: "secondary"});
     createFamily.classList?.add?.("factor-param-create-family");
     groups.family = group(
       context.t("因子家族"), familyPicker.element || familyPicker, createFamily,
     );
+    groups.family.classList?.add?.("factor-param-choice-family");
     const nestedMount = document.createElement("div");
     nestedMount.className = "factor-param-nested-family-mount";
     const renderNested = () => {
@@ -170,12 +184,20 @@
       details.className = "factor-param-nested-family";
       const heading = document.createElement("summary");
       heading.className = "factor-param-nested-family-header";
+      const headingName = document.createElement("span");
+      headingName.className = "factor-param-nested-family-name";
       const title = document.createElement("b");
       title.textContent = familyLabel(family);
-      heading.append(title, window.FTFactorDetailShared.familySourceHelp(context, family));
-      const formulaValue = window.FTFactorDetailShared.expression(family);
+      headingName.append(
+        title, window.FTFactorDetailShared.familySourceHelp(context, family),
+      );
+      heading.append(headingName);
+      const formulaValue = window.FTFactorDetailShared.previewExpression(
+        family, draft.parameter_values || {},
+      );
+      let formula = null;
       if (formulaValue) {
-        const formula = document.createElement("div");
+        formula = document.createElement("div");
         formula.className = "factor-detail-parameter-formula display-math";
         if (window.katex) window.katex.render(formulaValue, formula, {
           displayMode: true, throwOnError: false,
@@ -185,7 +207,22 @@
       }
       const nested = create(
         context, family.params || family.parameter_definitions || [],
-        draft.parameter_values || {}, {...options, depth: (options.depth || 0) + 1},
+        draft.parameter_values || {}, {
+          ...options,
+          depth: (options.depth || 0) + 1,
+          onChange: () => {
+            if (formula) {
+              const next = window.FTFactorDetailShared.previewExpression(
+                family, nested.values,
+              );
+              if (window.katex) window.katex.render(next, formula, {
+                displayMode: true, throwOnError: false,
+              });
+              else formula.textContent = next;
+            }
+            options.onChange?.(values, alias);
+          },
+        },
       );
       draft.parameter_values = nested.values;
       details.append(heading, nested.root);
@@ -195,11 +232,12 @@
       < Number(options.maxFamilyDepth ?? 12);
     control.append(
       groups.manual, groups.column, groups.factor,
-      ...(allowFamilyComposition ? [groups.family] : []), nestedMount,
+      ...(allowFamilyComposition ? [groups.family] : []),
     );
     row.append(control);
     renderNested();
     syncSources();
+    return nestedMount;
   }
 
   function parameterType(context, parameter) {
@@ -236,7 +274,8 @@
 
   function picker(context, name, title, items, selected, onChange) {
     return (window.FTTestObjectPicker || window.FTMultiSelectFilter).create(context, {
-      compact: true, multi: false, name, title, items, selected, onChange,
+      compact: true, multi: false, clearable: true,
+      name, title, items, selected, onChange,
     });
   }
 

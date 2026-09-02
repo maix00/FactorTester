@@ -310,7 +310,7 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-detail-parameter-tree-header { display: grid; grid-template-columns: minmax(120px, auto) minmax(0, 1fr); align-items: center; gap: 16px; min-width: 0; padding: 10px 14px; cursor: pointer; background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
 .factor-detail-parameter-tree-header::before { content: "▾"; grid-column: 1; width: 14px; margin-right: -10px; color: var(--muted); }
 .factor-detail-parameter-tree:not([open]) > .factor-detail-parameter-tree-header::before { content: "▸"; }
-.factor-detail-parameter-tree-heading { grid-column: 1; display: inline-flex; align-items: center; gap: 6px; padding-left: 16px; min-width: 0; overflow-wrap: anywhere; }
+.factor-detail-parameter-tree-heading { grid-column: 1; display: inline-flex; align-items: center; gap: .25em; padding-left: 16px; min-width: 0; overflow-wrap: anywhere; }
 .factor-detail-family-source-help { flex: 0 0 auto; }
 .factor-detail-parameter-formula { grid-column: 2; min-width: 0; overflow-x: auto; color: var(--text); }
 .factor-detail-parameter-tree-body { display: grid; gap: 10px; min-width: 0; padding: 10px; }
@@ -320,17 +320,25 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-param-choice-disabled input,
 .factor-param-choice-disabled button,
 .factor-param-choice-disabled select { cursor: not-allowed; }
-.factor-param-nested-family-mount { grid-column: 1 / -1; min-width: 0; }
-.factor-param-nested-family { width: calc(100% - clamp(28px, 5vw, 84px)); margin-left: clamp(28px, 5vw, 84px); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); }
+.factor-param-nested-family-mount { min-width: 0; padding: 0 clamp(28px, 5vw, 84px) 12px; border-top: 1px solid var(--line); box-sizing: border-box; }
+.factor-param-nested-family-mount:empty { display: none; }
+.factor-param-nested-family { width: 100%; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); box-sizing: border-box; }
 .factor-param-nested-family > summary { list-style: none; }
 .factor-param-nested-family > summary::-webkit-details-marker { display: none; }
 .factor-param-nested-family-header { display: grid; grid-template-columns: minmax(130px, auto) minmax(0, 1fr); align-items: center; gap: 10px; padding: 10px 14px; background: color-mix(in srgb, var(--accent) 5%, var(--soft)); cursor: pointer; }
 .factor-param-nested-family-header > .ft-help-icon { justify-self: start; }
+.factor-param-nested-family-name { display: inline-flex; align-items: center; gap: .25em; min-width: 0; width: fit-content; }
 .factor-param-nested-family > .factor-detail-parameter-editor { border: 0; border-radius: 0; }
 .factor-param-reference-control { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 10px; min-width: 0; }
 .factor-param-reference-control > * { min-width: 0; }
 .factor-param-choice-group { display: grid; gap: 6px; min-width: 0; }
 .factor-param-choice-group > small { color: var(--muted); font-weight: 600; }
+.factor-param-choice-group > input,
+.factor-param-choice-group > .ft-test-object-picker,
+.factor-param-choice-group > .ft-multi-select-filter { width: 100%; box-sizing: border-box; }
+.factor-param-choice-family { grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
+.factor-param-choice-family > small { grid-column: 1 / -1; }
+.factor-param-choice-family > .factor-param-create-family { align-self: stretch; white-space: nowrap; }
 @media (max-width: 720px) {
   .factor-detail-parameter-header { display: none; }
   .factor-detail-parameter-row { grid-template-columns: minmax(90px, .55fr) minmax(0, 1.45fr); }

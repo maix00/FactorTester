@@ -452,6 +452,29 @@
             }
           }
         });
+        input.addEventListener("click", async event => {
+          if (multi || options.clearable !== true || item.disabled
+              || !selected.includes(item.value)) return;
+          event.preventDefault();
+          const previous = [...committedSelected];
+          selected = [];
+          input.checked = false;
+          render();
+          try {
+            dropdown.open = false;
+            restoreMenu();
+            const commit = options.onChange || options.onApply;
+            const result = commit?.([]);
+            if (result && typeof result.then === "function") await result;
+            committedSelected = [];
+          } catch (error) {
+            selected = previous;
+            render();
+            context.showNotice?.(
+              error.message || translate(context, "应用失败"), true,
+            );
+          }
+        });
         return row;
       }));
     }
