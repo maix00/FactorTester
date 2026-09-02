@@ -371,6 +371,7 @@ def test_factor_series_stock_chart_renders_visible_navigator() -> None:
               }))},
               contracts: [],
             }, {
+              rangeOverscanBeforeMs: 7 * 24 * 60 * 60 * 1000,
               async loadRange(minimum, maximum, options) {
                 window.__factorRangeLoads.push({minimum, maximum, options});
                 return {
@@ -396,8 +397,9 @@ def test_factor_series_stock_chart_renders_visible_navigator() -> None:
         visible_maximum = page.evaluate(
             "Date.parse(new Date(2026, 0, 2, 9, 140).toISOString())"
         )
-        assert loaded_range["minimum"] < visible_minimum
+        assert loaded_range["minimum"] == visible_minimum - 604800000
         assert loaded_range["maximum"] > visible_maximum
+        assert loaded_range["options"]["maxPoints"] == 5000
         assert loaded_range["options"]["visibleMinimum"] == visible_minimum
         assert loaded_range["options"]["visibleMaximum"] == visible_maximum
         navigator = page.locator(".highcharts-navigator")

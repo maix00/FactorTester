@@ -57,13 +57,24 @@
           const overscanRatio = Math.max(
             0, Number(displayOptions.rangeOverscanRatio ?? 0.25),
           );
-          const padding = span * overscanRatio;
+          const proportionalPadding = span * overscanRatio;
+          const beforePadding = Math.max(
+            proportionalPadding,
+            Math.max(0, Number(displayOptions.rangeOverscanBeforeMs) || 0),
+          );
+          const afterPadding = Math.max(
+            proportionalPadding,
+            Math.max(0, Number(displayOptions.rangeOverscanAfterMs) || 0),
+          );
           const baseMaximum = Math.max(
             200, Math.ceil(Number(chart.plotWidth || 600) * 1.5),
           );
+          const requestedRatio = span > 0
+            ? (span + beforePadding + afterPadding) / span
+            : 1 + overscanRatio * 2;
           const payload = await displayOptions.loadRange(
-            minimum - padding, maximum + padding, {
-              maxPoints: Math.ceil(baseMaximum * (1 + overscanRatio * 2)),
+            minimum - beforePadding, maximum + afterPadding, {
+              maxPoints: Math.min(5000, Math.ceil(baseMaximum * requestedRatio)),
               visibleMinimum: minimum,
               visibleMaximum: maximum,
             },
