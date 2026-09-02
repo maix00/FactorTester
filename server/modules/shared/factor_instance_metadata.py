@@ -5,6 +5,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from server.modules.shared.factor_param_utils import (
+    unique_frozen_factor_records,
+)
 from server.modules.shared.param_meta import serialize_param_meta
 from tools.factors.FactorExpr import ConstExpr
 from tools.factors.formula_identity import require_frozen_factor
@@ -132,19 +135,21 @@ def _nested_node(
 
 
 def _dependency_index(values: list[dict]) -> dict[str, dict]:
-    result: dict[str, dict] = {}
+    """Index the merged frozen DAG by canonical dependency identity.
 
-    def visit(value: dict) -> None:
+    The outer instance may contain a compact identity-only child while the
+    configuration's flattened dependency list contains the same node with
+    source/provenance.  Raw dictionary equality is the wrong comparison: the
+    frozen identity is authoritative for sameness, and the merge helper keeps
+    the complete source and recursive child links.
+    """
+    result: dict[str, dict] = {}
+    for value in unique_frozen_factor_records(values):
         frozen = require_frozen_factor(value)
-        existing = result.get(frozen["ref"])
-        if existing is not None and require_frozen_factor(existing) != frozen:
-            raise ValueError(f"FactorParam 依赖记录冲突: {frozen['ref']}")
         result[frozen["ref"]] = value
         for nested in value.get("factor_dependencies") or []:
-            visit(nested)
-
-    for value in values:
-        visit(value)
+            nested_frozen = require_frozen_factor(nested)
+            result[nested_frozen["ref"]] = nested
     return result
 
 

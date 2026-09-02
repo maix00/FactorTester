@@ -32,6 +32,8 @@
     }
     // Factor instances do not own a source panel. Keep source retrieval lazy;
     // the family header help opens the exact frozen revision on demand.
+    factor = window.FTFactorDisplayEnrichment?.enrichFactorForDisplay(data, factor)
+      || factor;
     factor = model().withSourceMetadata(factor);
     factor.factor_source_version = factor.family_formula_fingerprint
       ? `公式版本 · ${factor.family_formula_fingerprint.slice(0, 12)}`
@@ -60,7 +62,9 @@
     ));
     root.append(top);
     const provenance = window.FTFactorDetailShared.provenance(context, factor);
-    const parameters = window.FTFactorDetailShared.parameterTable(context, factor);
+    const parameters = window.FTFactorDetailShared.parameterTable(
+      context, factor, {preview: true},
+    );
     const jobs = objectJobs(context, "factor", frozenRef, factor);
     const tabs = window.FTObjectDetailTabs.create(context, {
       objectKind: "factor",

@@ -9,6 +9,7 @@ from typing import Any
 from server.modules.custom_factors.expression_inspection import fixed_column_refs
 from server.modules.shared.factor_param_utils import (
     factor_param_value_storage,
+    hydrate_frozen_factor_params,
     normalize_factor_param_row,
     unique_frozen_factor_records,
 )
@@ -172,7 +173,10 @@ def _assert_dependency_factor_current(
     with factor_param_resolver_scope(lambda value: resolve_factor_param_value(
         value, username=owner, frozen_by_ref=frozen_by_ref,
     )):
-        normalized = normalize_factor_param_row(family, identity["params"])
+        normalized = normalize_factor_param_row(
+            family,
+            hydrate_frozen_factor_params(identity["params"], frozen_by_ref),
+        )
         factor = family.get_factor(**normalized)
     expression = getattr(factor, "_source_expr", None) or factor.expr
     normalized_storage = {
@@ -233,7 +237,9 @@ def _load_revision_definition(
     for alias in factor_aliases:
         try:
             params = family.parse_alias(alias)
-            metadata = instantiate_factor_metadata(family, params)
+            metadata = instantiate_factor_metadata(
+                family, params, username=owner,
+            )
             factor = family.factor_from_alias(alias)
             if getattr(factor, "expr", None) is None:
                 raise ValueError(f"factor formula is unavailable: {alias}")

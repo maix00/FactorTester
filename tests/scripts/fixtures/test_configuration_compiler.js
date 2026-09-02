@@ -247,6 +247,19 @@ assert.deepEqual(
   }]),
   [nested, factor],
 );
+const nestedInline = {
+  ...nested,
+  temporary: true,
+  source_kind: "transient",
+  source_origin: "test_inline",
+  source_code: "class Nested: pass\n",
+};
+assert.deepEqual(
+  FTTestConfigurationCompiler.factorSubjects([{
+    ...factor, factor_dependencies: [nestedInline],
+  }]),
+  [nestedInline, factor],
+);
 assert.deepEqual(
   FTTestConfigurationCompiler.factorSubjects([factor, structuredClone(factor)]),
   [factor],

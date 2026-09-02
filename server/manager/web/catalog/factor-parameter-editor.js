@@ -120,9 +120,14 @@
         || candidateAlias === display(initialValue)
       );
     });
-    if (isFrozenFactor(initialFactor?.factor || initialFactor)
-        && !isFrozenFactor(initialValue)) {
-      initialValue = initialFactor.factor || initialFactor;
+    const initialFactorValue = initialFactor?.factor || initialFactor;
+    if (isFrozenFactor(initialFactorValue) && (
+      !isFrozenFactor(initialValue)
+      || initialFactorValue !== initialValue
+      || (Array.isArray(initialFactorValue.parameter_definitions)
+        && !Array.isArray(initialValue?.parameter_definitions))
+    )) {
+      initialValue = initialFactorValue;
       values[alias] = initialValue;
     }
     let activeSource = familyDraft(initialValue) ? "family"
@@ -176,14 +181,32 @@
       columns, activeSource === "column" ? [initialValue] : [],
       selected => setValue(selected?.[0] || "", "column"),
       {disabled: options.readOnly === true});
-    factorPicker = picker(context, `factor-param-factor-${alias}`, context.t("因子库"),
-      factors, activeSource === "factor" ? [reference(initialValue)] : [], selected => {
+    const selectFactor = selected => {
         const selectedRef = selectionValue(selected?.[0]);
         const item = factors.find(candidate => (
           selectionValue(candidate.value ?? candidate.ref) === selectedRef
         ));
-        setValue(item?.factor || "", "factor");
-      }, {disabled: options.readOnly === true});
+        if (!item) {
+          setValue("", "factor");
+          return;
+        }
+        const factor = item.factor || item;
+        const resolved = options.onSelectFactor?.(factor, item);
+        if (resolved && typeof resolved.then === "function") {
+          return resolved.then(value => {
+            const next = value || factor;
+            if (item.factor) item.factor = next;
+            setValue(next, "factor");
+          });
+        }
+        const next = resolved || factor;
+        if (item.factor) item.factor = next;
+        setValue(next, "factor");
+        return undefined;
+      };
+    factorPicker = picker(context, `factor-param-factor-${alias}`, context.t("因子库"),
+      factors, activeSource === "factor" ? [reference(initialValue)] : [], selectFactor,
+      {disabled: options.readOnly === true});
     if (allowFamilyComposition) {
       familyPicker = picker(
         context, `factor-param-family-${alias}`, context.t("因子家族"),
@@ -234,7 +257,13 @@
         if (!resolved?.valid || !resolved.factor_alias) throw new Error(
           resolved?.error || context.t("因子 alias 无法解析"),
         );
-        setValue(resolved.factor || String(resolved.factor_alias), "manual");
+        const factor = resolved.factor || String(resolved.factor_alias);
+        const enriched = options.onSelectFactor?.(factor, resolved);
+        if (enriched && typeof enriched.then === "function") {
+          await enriched.then(value => setValue(value || factor, "manual"));
+        } else {
+          setValue(enriched || factor, "manual");
+        }
       } catch (error) {
         input.setCustomValidity(error?.message || context.t("请输入有效的 ColumnRef 或因子 alias"));
         input.reportValidity();
@@ -269,7 +298,12 @@
       else nestedMount.children = [];
       const draft = values[alias];
       if (isFrozenFactor(draft) && ["factor", "manual"].includes(activeSource)) {
-        const table = window.FTFactorDetailShared?.parameterTable?.(context, draft);
+        const table = window.FTFactorDetailShared?.parameterTable?.(
+          context, draft, {
+            family: draft.family || draft.__factor_family,
+            preview: true,
+          },
+        );
         if (table) {
           table.classList?.add?.("factor-param-nested-factor-table");
           nestedMount.append(table);
@@ -425,8 +459,22 @@
   }
 
   function familyParameters(family) {
-    return family?.params || family?.parameter_definitions
-      || family?.factor_params || family?.parameters || [];
+    const shared = window.FTFactorDetailShared?.parameterRows?.(family);
+    if (Array.isArray(shared) && shared.length) return shared;
+    const candidates = [
+      family?.parameter_definitions,
+      family?.params,
+      family?.factor_params,
+      family?.parameters,
+    ].filter(candidate => Array.isArray(candidate) && candidate.length);
+    return candidates.find(candidate => candidate.some(parameter => (
+      parameter && typeof parameter === "object"
+      && String(parameter.type || parameter.param_type || "").trim()
+        && String(parameter.type || parameter.param_type || "").trim() !== "Parameter"
+    ))) || candidates.find(candidate => candidate.some(parameter => (
+      parameter && typeof parameter === "object"
+      && parameter.default_value !== undefined
+    ))) || candidates[0] || [];
   }
 
   function makeFamilyDraft(family) {

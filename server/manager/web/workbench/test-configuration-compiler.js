@@ -258,6 +258,17 @@
   function factorSubjects(factors) {
     const result = [];
     const byRef = new Map();
+    const provenanceKeys = [
+      "temporary", "source_kind", "source_origin",
+      "transient_factor_id", "source_code",
+    ];
+    const canonical = value => {
+      if (Array.isArray(value)) return value.map(canonical);
+      if (!value || typeof value !== "object") return value;
+      return Object.fromEntries(Object.keys(value).sort().map(key => [
+        key, canonical(value[key]),
+      ]));
+    };
     const visit = factor => {
       for (const dependency of factor?.factor_dependencies || []) visit(dependency);
       const alias = factorAlias(factor);
@@ -271,7 +282,13 @@
         owner_ref: factor.owner_ref,
         identity: clone(factor.identity),
       };
-      const encoded = JSON.stringify(record);
+      // Keep the execution evidence needed by configuration-local factors.
+      // The dependency links themselves are flattened into sibling records;
+      // identity.params still points at each sibling's immutable ref.
+      for (const key of provenanceKeys) {
+        if (factor[key] !== undefined) record[key] = clone(factor[key]);
+      }
+      const encoded = JSON.stringify(canonical(record));
       if (byRef.has(factorRef)) {
         if (byRef.get(factorRef) !== encoded) {
           throw new Error(`因子引用对应了不同的冻结对象: ${factorRef}`);

@@ -80,7 +80,17 @@ def normalize_factor_param_rows(factor_family, params_list: list) -> list:
         row = {}
         for p in factor_family.params:
             if p.alias in normalized:
-                v = p._value_space.rectify(normalized[p.alias])
+                # Keep a frozen Factor record as transport data.  Rectifying
+                # it through FactorParam would turn it into a FactorExpr and
+                # lose the dependency identity before the caller serializes
+                # the row.
+                frozen = (
+                    frozen_factor_record(normalized[p.alias])
+                    if isinstance(p, FactorParam) else None
+                )
+                v = frozen if frozen is not None else p._value_space.rectify(
+                    normalized[p.alias]
+                )
             else:
                 v = p.default_value
             row[p.alias] = v
@@ -103,12 +113,19 @@ def factor_param_value_display(param, value) -> str:
 
 def factor_param_value_storage(param, value):
     """Store FactorParam dependencies by opaque v2 ref, never nested inline."""
-    if isinstance(param, FactorParam) and isinstance(value, dict):
-        return require_frozen_factor(value)['ref']
     if isinstance(param, FactorParam):
+        frozen = frozen_factor_record(value)
+        if frozen is not None:
+            return frozen['ref']
         from tools.factors.FactorExpr import ConstExpr
         if isinstance(value, ConstExpr):
             return value.value
+        # A runtime Factor resolved from a frozen record keeps its immutable
+        # identity on the object.  Accept it here too so callers that already
+        # resolved a value do not silently fall back to a mutable alias.
+        factor_ref = str(getattr(value, 'factor_ref', '') or '').strip()
+        if factor_ref.startswith('factor:v2:'):
+            return factor_ref
     return factor_param_value_display(param, value)
 
 
@@ -135,6 +152,43 @@ def frozen_factor_dependency_record(value: dict) -> dict:
         if not source_code:
             raise ValueError(f'当场源码嵌套因子缺少冻结源码: {frozen["alias"]}')
         record['source_code'] = source_code
+    return record
+
+
+def frozen_factor_record(value) -> dict | None:
+    """Return a canonical frozen record while retaining its child links.
+
+    UI transport values are dictionaries, while the engine may hand a caller
+    a ``Factor`` object carrying ``frozen_identity``.  Both forms represent
+    the same dependency node and must feed the same persistence path.
+    """
+    if isinstance(value, dict):
+        raw = value
+    else:
+        identity = getattr(value, 'frozen_identity', None)
+        if not isinstance(identity, dict):
+            return None
+        raw = {
+            **identity,
+            **{
+                key: getattr(value, key)
+                for key in (
+                    'temporary', 'source_kind', 'source_origin',
+                    'transient_factor_id', 'source_code',
+                    'factor_dependencies',
+                )
+                if getattr(value, key, None) not in (None, '', [])
+            },
+        }
+    if raw.get('schema_version') != 2 or not raw.get('identity'):
+        return None
+    record = frozen_factor_dependency_record(raw)
+    dependencies = raw.get('factor_dependencies')
+    if isinstance(dependencies, list) and dependencies:
+        record['factor_dependencies'] = [
+            dependency for dependency in dependencies
+            if isinstance(dependency, dict)
+        ]
     return record
 
 
@@ -192,6 +246,45 @@ def unique_frozen_factor_records(values) -> list[dict]:
     return ordered
 
 
+def frozen_factor_records_from_values(values) -> list[dict]:
+    """Collect and flatten every frozen Factor node found in parameter data."""
+    records = []
+
+    def visit(value) -> None:
+        record = frozen_factor_record(value)
+        if record is not None:
+            records.append(record)
+            for dependency in record.get('factor_dependencies') or []:
+                visit(dependency)
+            return
+        if isinstance(value, dict):
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, (list, tuple)):
+            for child in value:
+                visit(child)
+
+    visit(values)
+    return unique_frozen_factor_records(records)
+
+
+def hydrate_frozen_factor_params(
+    values: dict | None, frozen_by_ref: dict[str, dict] | None,
+) -> dict:
+    """Replace opaque FactorParam refs with their complete frozen records.
+
+    FactorFamily uses the value's alias while constructing a Factor alias, so
+    an opaque ``factor:v2`` string would be rendered literally.  Hydration is
+    only a temporary calculation input; persistence continues to store the
+    opaque ref in ``identity.params``.
+    """
+    result = dict(values or {})
+    for key, value in list(result.items()):
+        if isinstance(value, str) and value.startswith('factor:v2:'):
+            result[key] = (frozen_by_ref or {}).get(value, value)
+    return result
+
+
 def _merge_frozen_factor_records(left: dict, right: dict) -> dict:
     if require_frozen_factor(left) != require_frozen_factor(right):
         raise ValueError(
@@ -226,22 +319,15 @@ def _merge_frozen_factor_records(left: dict, right: dict) -> dict:
 
 def frozen_factor_dependencies(parameters, values: dict) -> list[dict]:
     """Flatten complete FactorParam records in stable parameter order."""
-    result = []
-    seen = set()
+    records = []
     for param in parameters:
         value = values.get(param.alias)
-        if not isinstance(param, FactorParam) or not isinstance(value, dict):
+        if not isinstance(param, FactorParam):
             continue
-        factor = require_frozen_factor(value)
-        for dependency in value.get('factor_dependencies') or []:
-            dependency = frozen_factor_dependency_record(dependency)
-            if dependency['ref'] not in seen:
-                seen.add(dependency['ref'])
-                result.append(dependency)
-        if factor['ref'] not in seen:
-            seen.add(factor['ref'])
-            result.append(frozen_factor_dependency_record(value))
-    return result
+        record = frozen_factor_record(value)
+        if record is not None:
+            records.append(record)
+    return unique_frozen_factor_records(records)
 
 
 def build_factor_rows(factor_family, params_list: list) -> list:

@@ -140,6 +140,20 @@ def build_client_library_projection(
             }
         families_by_identity[identity] = family
 
+    # Account mirrors may contain only the compact ``params`` values.  Attach
+    # the matching family's typed definitions before the projection crosses
+    # the client boundary, so a nested FactorParam can render the real class
+    # (for example WindowParam) without loading source code eagerly.
+    for item in factors:
+        if _has_typed_parameter_rows(item.get("parameter_definitions")):
+            continue
+        family = families_by_identity.get(_family_group_key(item))
+        definitions = family.get("parameter_definitions") if family else []
+        if definitions:
+            item["parameter_definitions"] = _merge_parameter_values(
+                definitions, item.get("params"),
+            )
+
     families = sorted(
         families_by_identity.values(),
         key=lambda item: (
@@ -252,6 +266,10 @@ def _family_projection(item: dict[str, Any]) -> dict[str, Any] | None:
         "category": category,
         "categories": sorted(set(categories)),
         "params": _params(item.get("params")),
+        "parameter_definitions": _params(
+            item.get("parameter_definitions") or item.get("params"),
+            rich=True,
+        ),
         "owner_username": owner_username,
         "factor_owner_ref": owner_ref,
         "family_formula_fingerprint": family_fingerprint,
@@ -326,7 +344,7 @@ def _factor_projection(item: dict[str, Any]) -> dict[str, Any]:
         "self_formula_fingerprint": self_fingerprint,
         "factor_params": params,
         "parameter_definitions": _params(
-            item.get("parameter_definitions"), rich=True,
+            item.get("parameter_definitions") or item.get("params"), rich=True,
         ),
         "params_count": len(params),
         "owner_username": owner,
@@ -341,6 +359,41 @@ def _factor_projection(item: dict[str, Any]) -> dict[str, Any]:
         "updated_at": _safe_text(item.get("updated_at")),
     }
     return result
+
+
+def _has_typed_parameter_rows(value: Any) -> bool:
+    return isinstance(value, list) and any(
+        isinstance(item, dict)
+        and (
+            item.get("type")
+            or item.get("param_type")
+            or item.get("default_value") is not None
+        )
+        for item in value
+    )
+
+
+def _merge_parameter_values(
+    definitions: list[dict[str, Any]], values: Any,
+) -> list[dict[str, Any]]:
+    by_alias = {
+        str(item.get("alias") or "").strip(): item.get("value")
+        for item in values or []
+        if isinstance(item, dict)
+        and str(item.get("alias") or "").strip()
+        and item.get("value") not in (None, "")
+    }
+    return [
+        {
+            **definition,
+            **(
+                {"value": by_alias[definition["alias"]]}
+                if definition.get("alias") in by_alias else {}
+            ),
+        }
+        for definition in definitions
+        if isinstance(definition, dict)
+    ]
 
 
 def _params(value: Any, *, rich: bool = False, depth: int = 0) -> list[dict[str, Any]]:
@@ -412,7 +465,10 @@ def _nested_factor_projection(value: dict[str, Any], *, depth: int) -> dict[str,
         "math_expr": _safe_math_text(value.get("math_expr")),
         "resolved_math_expr": _safe_math_text(value.get("resolved_math_expr")),
         "parameter_definitions": _params(
-            value.get("parameter_definitions"), rich=True, depth=depth,
+            value.get("parameter_definitions")
+            or value.get("family_parameter_definitions")
+            or value.get("params"),
+            rich=True, depth=depth,
         ),
     }
     return {key: item for key, item in result.items() if item not in (None, "", [])}
