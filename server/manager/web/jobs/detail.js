@@ -23,6 +23,39 @@
     return content;
   }
 
+  function failureSection(context, payload, taskDetail, job) {
+    const status = String(job?.status || taskDetail?.status || payload?.status || "");
+    const raw = payload?.error || taskDetail?.results?.error
+      || taskDetail?.error || job?.error;
+    if (!raw && status !== "failed") return null;
+    const error = raw && typeof raw === "object" ? raw : {message: String(raw || "")};
+    const message = String(error.message || error.error || context.t("任务执行失败"));
+    const code = String(error.code || "job_execution_failed");
+    const section = document.createElement("section");
+    section.className = "job-section job-failure";
+    const heading = document.createElement("h2");
+    heading.textContent = context.t("失败详情");
+    const summary = document.createElement("div");
+    summary.className = "job-failure-summary";
+    const codeLabel = document.createElement("code");
+    codeLabel.textContent = code;
+    const messageNode = document.createElement("p");
+    messageNode.textContent = message;
+    summary.append(codeLabel, messageNode);
+    section.append(heading, summary);
+    if (error.details && typeof error.details === "object") {
+      section.append(FTUI.code(error.details));
+    }
+    if (error.traceback) {
+      const details = document.createElement("details");
+      const label = document.createElement("summary");
+      label.textContent = context.t("技术堆栈");
+      details.append(label, FTUI.code(String(error.traceback)));
+      section.append(details);
+    }
+    return section;
+  }
+
   function fieldValue(context, key, value) {
     if (key === "status") return statusPill(value, context);
     const reference = fieldReference(context, key, value);
@@ -232,6 +265,8 @@
     root.append(detailTabs.root);
     const progress = FTJobProgress.progressView(context, job.status);
     overview.append(progress.root);
+    const failure = failureSection(context, payload, taskDetail, job);
+    if (failure) overview.append(failure);
     overview.append(fieldSection(context, context.t("任务字段"), {
       ...job, port: resolvedPort || port,
     }));

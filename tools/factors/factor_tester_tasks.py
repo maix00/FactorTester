@@ -127,6 +127,7 @@ def sift_product_by_volumes(
 def calc_factor(
     state: "FactorTesterState", factors: "Factor|List[Factor]",
     parallel: bool = True, max_workers: int = 4,
+    warmup_window: pd.Timedelta | None = None,
 ) -> None:
     from tools.factors.Factors import Factor
     from tools.factors.FactorTester import _active_tester
@@ -160,6 +161,7 @@ def calc_factor(
                 batch, products=state.products, freq=batch[0]._source_freq
                 or batch[0].family._source_freq,
                 start_dt=state.start_dt, end_dt=state.end_dt,
+                warmup_window=warmup_window,
             )
         else:
             remaining.extend(batch)
@@ -173,7 +175,10 @@ def calc_factor(
 
         def _calc_one(factor: "Factor") -> None:
             _active_tester.set(token)
-            factor.evaluate(state.products, start_dt=state.start_dt, end_dt=state.end_dt)
+            factor.evaluate(
+                state.products, start_dt=state.start_dt, end_dt=state.end_dt,
+                warmup_window=warmup_window,
+            )
 
         with ThreadPoolExecutor(max_workers=min(max_workers, len(factors))) as pool:
             futures = {pool.submit(_calc_one, f): f for f in factors}
@@ -185,7 +190,10 @@ def calc_factor(
                     raise RuntimeError(f"calc_factor: {futures[future].alias} 计算失败") from exc
     else:
         for factor in tqdm(factors, desc=f'Calculate factors for {len(state.products)} products'):
-            factor.evaluate(state.products, start_dt=state.start_dt, end_dt=state.end_dt)
+            factor.evaluate(
+                state.products, start_dt=state.start_dt, end_dt=state.end_dt,
+                warmup_window=warmup_window,
+            )
 
 
 def ic_stats(state: "FactorTesterState", ic_series: pd.Series) -> pd.Series:

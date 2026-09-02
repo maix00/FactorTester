@@ -905,6 +905,10 @@ def test_factor_evaluation_reuses_product_path_selection_setting() -> None:
         "paths",
     ]
     assert "product" not in index["defaults"]
+    assert index["defaults"]["warmup_mode"]["value"] == "none"
+    assert index["defaults"]["warmup_window"]["rules"]["visible_if"] == {
+        "warmup_mode": ["fixed"],
+    }
 
 
 def test_setting_routes_reject_unknown_tabs_instead_of_falling_back() -> None:

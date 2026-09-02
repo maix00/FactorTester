@@ -6,6 +6,7 @@ from tools.testers._shared import (
     CATEGORY_CANDIDATE_KEYS,
     CATEGORY_SELECTION_KEYS,
     FACTOR_CANDIDATE_KEYS,
+    FACTOR_EXECUTION_KEYS,
     FACTOR_SET_SELECTION_KEYS,
     FACTOR_SELECTION_KEYS,
     FACTOR_SOURCE_SELECTION_KEYS,
@@ -14,6 +15,7 @@ from tools.testers._shared import (
     PRODUCT_PATH_SELECTION_KEYS,
     RUN_WINDOW_KEYS,
     register_factor_candidate_list_base,
+    register_factor_execution_base,
     register_factor_set_selections_base,
     register_factor_selection_base,
     register_factor_source_selections_base,
@@ -41,6 +43,7 @@ def register_factor_evaluation_settings(app: ApplicationSettings) -> None:
         *CATEGORY_CANDIDATE_KEYS,
         *CATEGORY_SELECTION_KEYS,
         *FACTOR_CANDIDATE_KEYS,
+        *FACTOR_EXECUTION_KEYS,
         *FACTOR_SET_SELECTION_KEYS,
         *FACTOR_SELECTION_KEYS,
         *FACTOR_SOURCE_SELECTION_KEYS,
@@ -104,6 +107,7 @@ def register_factor_evaluation_settings(app: ApplicationSettings) -> None:
     register_category_selection_base(app, tab="category")
     register_market_data_base(app, include_price_type=True)
     register_factor_candidate_list_base(app)
+    register_factor_execution_base(app, warmup_mode_default="none")
     register_factor_set_selections_base(app)
     register_factor_source_selections_base(app)
     register_factor_selection_base(app)

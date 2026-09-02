@@ -369,8 +369,11 @@ class _WorkerSink:
 
     def emit_error(self, error: str, traceback: str = "", **extra) -> None:
         self._flush_live_events()
+        code = str(extra.pop("code", "") or "job_execution_failed")
         self._emit("error", {
             "success": False,
+            "code": code,
+            "message": error,
             "error": error,
             "traceback": traceback,
             **extra,
@@ -602,14 +605,19 @@ def _worker_entry(
             runner(dict(task["payload"]), sink, cancel_flag)
         except BaseException as exc:
             terminal_emitted = True
+            code = str(getattr(exc, "code", "") or "job_execution_failed")
+            details = getattr(exc, "details", None)
             output_queue.put({
                 "type": "event",
                 "job_id": job_id,
                 "event": "error",
                 "data": {
                     "success": False,
+                    "code": code,
+                    "message": str(exc),
                     "error": str(exc),
                     "traceback": traceback.format_exc(),
+                    **({"details": details} if isinstance(details, dict) else {}),
                 },
                 "worker_pid": os.getpid(),
             })
