@@ -332,3 +332,72 @@ def test_strategy_statistics_opens_one_tabbed_analysis_overlay() -> None:
         page.get_by_role("button", name="排序诊断").click()
         page.get_by_text("ranking:shared").wait_for()
         browser.close()
+
+
+def test_factor_series_stock_chart_renders_visible_navigator() -> None:
+    with _playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        page = browser.new_page(viewport={"width": 1400, "height": 900})
+        page.set_content(
+            "<div id='chart' style='width:1200px;min-height:650px'></div>"
+        )
+        for path in (
+            "server/manager/web/styles/outputs/artifacts.css",
+            "server/manager/web/styles/outputs/backtest-results.css",
+        ):
+            page.add_style_tag(path=str(ROOT / path))
+        for path in (
+            "static/vendor/highcharts/highstock.min.js",
+            "server/manager/web/jobs/highcharts-timeline.js",
+            "server/manager/web/core/highcharts-range-loader.js",
+            "server/manager/web/core/price-chart.js",
+            "server/manager/web/test-modules/factor-evaluation/results/model.js",
+            "server/manager/web/jobs/highcharts-viewers.js",
+            "server/manager/web/test-modules/factor-evaluation/results/chart.js",
+        ):
+            page.add_script_tag(path=str(ROOT / path))
+        page.evaluate("""
+          const dates = Array.from({length: 240}, (_, index) =>
+            new Date(2026, 0, 2, 9, index).toISOString());
+          FTFactorSeriesChart.mount(
+            {t: value => value}, document.querySelector('#chart'), {
+              product: 'AP.CZC', factorLabel: 'factor',
+              factorSeries: {dates, values: dates.map((_, index) => index % 3)},
+              price: {data: dates.map((timestamp, index) => ({
+                timestamp, open: 100 + index, high: 102 + index,
+                low: 99 + index, close: 101 + index,
+                volume: 1000 + index,
+              }))},
+              contracts: [],
+            }, {
+              async loadRange(minimum, maximum) {
+                return {
+                  data: dates.slice(100, 141).map((timestamp, index) => ({
+                    timestamp, open: 200 + index, high: 202 + index,
+                    low: 199 + index, close: 201 + index,
+                    volume: 2000 + index,
+                  })),
+                  __ftRange: {minimum, maximum},
+                };
+              },
+            },
+          );
+          document.querySelector('#chart').__ftFactorSeriesChart.xAxis[0].setExtremes(
+            Date.parse(dates[100]), Date.parse(dates[140]), true,
+          );
+        """)
+        page.wait_for_timeout(300)
+        navigator = page.locator(".highcharts-navigator")
+        assert navigator.count() > 0
+        navigator_box = navigator.first.bounding_box()
+        mount_box = page.locator("#chart").bounding_box()
+        canvas_box = page.locator(".interactive-artifact-chart-canvas").bounding_box()
+        svg_box = page.locator(".interactive-artifact-chart-canvas svg").bounding_box()
+        assert abs(svg_box["height"] - canvas_box["height"]) < 1
+        assert navigator_box["height"] > 0
+        assert navigator_box["y"] >= mount_box["y"]
+        assert navigator_box["y"] + navigator_box["height"] <= (
+            mount_box["y"] + mount_box["height"]
+        )
+        assert page.locator(".highcharts-scrollbar").count() > 0
+        browser.close()

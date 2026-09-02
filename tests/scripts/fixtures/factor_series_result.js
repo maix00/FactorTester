@@ -82,7 +82,7 @@ assert.deepStrictEqual(JSON.parse(JSON.stringify(captured.options.series.map(ite
 ]);
 assert.strictEqual(captured.options.yAxis.length, 4);
 assert.strictEqual(captured.options.xAxis.plotBands.length, 1);
-assert.strictEqual(captured.options.chart.height, 650);
+assert.strictEqual(captured.options.chart.height, undefined);
 assert.strictEqual(captured.options.navigator.enabled, true);
 assert.strictEqual(captured.options.navigator.series.type, "line");
 assert.strictEqual(captured.options.navigator.series.data.length, 2);
