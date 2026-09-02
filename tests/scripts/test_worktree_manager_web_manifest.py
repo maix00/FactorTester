@@ -1349,6 +1349,7 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
 
     assert manifest["group_dependencies"]["factor-catalog-editor"] == [
         "factor-catalog-core",
+        "factor-catalog-enrichment",
         "object-editor-overlay",
     ]
     assert manifest["group_dependencies"]["object-editor-overlay"] == [
@@ -2567,6 +2568,19 @@ def test_factor_parameter_picker_preserves_frozen_nested_factor_records() -> Non
     assert result.returncode == 0, result.stderr or result.stdout
 
 
+def test_factor_parameter_picker_enriches_nested_family_metadata_and_preview() -> None:
+    fixture = (
+        ROOT / "tests" / "scripts" / "fixtures"
+        / "factor_nested_selection.js"
+    )
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_factor_family_drafts_materialize_recursively_without_library_write() -> None:
     fixture = (
         ROOT / "tests" / "scripts" / "fixtures"
@@ -2620,6 +2634,7 @@ def test_factor_detail_route_declares_katex_runtime_dependency() -> None:
     assert manifest["route_groups"]["factor-set"] == ["factor-catalog-detail"]
     assert manifest["group_dependencies"]["factor-catalog-detail"] == [
         "factor-catalog-core",
+        "factor-catalog-enrichment",
     ]
     assert "factor-catalog-list" not in manifest["group_dependencies"][
         "factor-catalog-detail"

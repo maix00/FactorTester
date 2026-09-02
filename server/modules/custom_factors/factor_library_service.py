@@ -21,8 +21,10 @@ from server.modules.custom_factors.factor_library_store import (
 from server.modules.products.product_group_store import load_product_groups
 from server.modules.shared.factor_param_utils import (
     build_factor_param_item,
-    frozen_factor_dependency_record,
+    frozen_factor_records_from_values,
+    hydrate_frozen_factor_params,
     serialize_factor_param_rows,
+    unique_frozen_factor_records,
 )
 from server.services.factor_registry import (
     factor_group_key,
@@ -37,20 +39,28 @@ from tools.data.account_manage import (
 from tools.factors.factor_param_resolution import factor_param_resolver_scope
 
 
-def _configuration_factor_resolver(config: dict, username: str):
+def _configuration_factor_resolver(
+    config: dict, username: str, values=None,
+):
     """Resolve stored FactorParam refs only from this config's frozen DAG."""
-    metadata = config.get('metadata') if isinstance(config.get('metadata'), dict) else {}
-    frozen_by_ref = {}
-    for value in metadata.get('factor_dependencies') or []:
-        frozen = frozen_factor_dependency_record(value)
-        existing = frozen_by_ref.get(frozen['ref'])
-        if existing is not None and existing != frozen:
-            raise ValueError(f'因子参数依赖记录冲突: {frozen["ref"]}')
-        frozen_by_ref[frozen['ref']] = frozen
+    frozen_by_ref = _configuration_frozen_factor_map(config, values)
     from server.modules.shared.factor_param_resolver import resolve_factor_param_value
     return factor_param_resolver_scope(lambda value: resolve_factor_param_value(
         value, username=username, frozen_by_ref=frozen_by_ref,
     ))
+
+
+def _configuration_frozen_factor_map(
+    config: dict, values=None,
+) -> dict[str, dict]:
+    metadata = config.get('metadata') if isinstance(config.get('metadata'), dict) else {}
+    records = list(metadata.get('factor_dependencies') or [])
+    if values is not None:
+        records.extend(frozen_factor_records_from_values(values))
+    return {
+        value['ref']: value
+        for value in unique_frozen_factor_records(records)
+    }
 
 
 def template_time_from_id(template: dict) -> str:
@@ -107,7 +117,11 @@ def build_library_factor_param_item(
     factor_family, meta = resolve_param_factor_family(owner_username, ff_alias, public_by_alias, custom_by_alias)
     account = dict(owner_account)
     account['alias'] = account_display_name(owner_account)
-    with _configuration_factor_resolver(config, current_username):
+    frozen_by_ref = _configuration_frozen_factor_map(config, row)
+    row = hydrate_frozen_factor_params(row, frozen_by_ref)
+    with _configuration_factor_resolver(
+        config, current_username, values=row,
+    ):
         return build_factor_param_item(
             factor_family, row or {}, row_index, account, current_username,
             meta=meta, config=config,
@@ -405,8 +419,16 @@ def save_current_user_library_config(
     product_group = normalize_product_group(product_group)
     factor_family = get_factor_family_instance(ff_alias, username=current_username)
     config_metadata = _merged_library_metadata(current_username, ff_alias, product_group, metadata)
+    dependency_records = unique_frozen_factor_records([
+        *(config_metadata.get('factor_dependencies') or []),
+        *frozen_factor_records_from_values(params_list),
+    ])
+    if dependency_records:
+        config_metadata['factor_dependencies'] = dependency_records
+    else:
+        config_metadata.pop('factor_dependencies', None)
     with _configuration_factor_resolver(
-        {'metadata': config_metadata}, current_username,
+        {'metadata': config_metadata}, current_username, values=params_list,
     ):
         serialized_rows = serialize_factor_param_rows(factor_family, params_list)
     candidate_config = {

@@ -7,7 +7,8 @@ from typing import cast
 from server.modules.custom_factors.factor_library_service import build_factor_library_overview
 from server.modules.custom_factors.catalog import _load_factor_family_from_source
 from server.modules.shared.factor_param_utils import (
-    frozen_factor_dependency_record,
+    frozen_factor_record,
+    hydrate_frozen_factor_params,
     normalize_factor_param_row,
     unique_frozen_factor_records,
 )
@@ -75,11 +76,21 @@ def _resolve_frozen_factor(
     with _resolving_factor(active_refs, factor_ref):
         dependencies = dict(frozen_by_ref or {})
         for dependency in value.get('factor_dependencies') or []:
-            dependency = frozen_factor_dependency_record(dependency)
+            dependency = frozen_factor_record(dependency)
+            if dependency is None:
+                raise ValueError('FactorParam 依赖记录不是有效的冻结因子')
+            # The outer record may carry only canonical identity for a child,
+            # while the RunSpec index carries its complete provenance/source.
+            # Compare and merge through the canonical DAG helper instead of
+            # comparing those two transport shapes as raw dictionaries.
+            merged_records = unique_frozen_factor_records([dependency])
             existing = dependencies.get(dependency['ref'])
-            if existing is not None and existing != dependency:
-                raise ValueError(f'FactorParam 依赖记录冲突: {dependency["ref"]}')
-            dependencies[dependency['ref']] = dependency
+            if existing is not None:
+                merged_records = unique_frozen_factor_records([
+                    existing, dependency,
+                ])
+            for merged in merged_records:
+                dependencies[merged['ref']] = merged
         identity = frozen['identity']
         principal = str(username or current_user() or '').strip()
         owner_ref = str(frozen['owner_ref'] or '').strip()
@@ -114,7 +125,16 @@ def _resolve_frozen_factor(
         family = factor_cls()
         if family.expr.semantic_fingerprint() != fingerprint:
             raise ValueError(f'因子家族源码指纹不匹配: {family_alias}')
-        normalized = normalize_factor_param_row(family, identity.get('params') or {})
+        # Keep FactorParam refs as complete frozen records while generating the
+        # alias.  Passing the opaque ref string straight into get_factor makes
+        # FactorParam.alias() render ``factor:v2:...`` instead of the nested
+        # factor alias, even though the expression resolver can still execute
+        # it.  Hydrating only these transport refs preserves the one resolver
+        # path and keeps identity.params unchanged on storage.
+        identity_params = hydrate_frozen_factor_params(
+            identity.get('params'), dependencies,
+        )
+        normalized = normalize_factor_param_row(family, identity_params)
         with factor_param_resolver_scope(lambda nested: resolve_factor_param_value(
             nested, username=principal, frozen_by_ref=dependencies,
             _resolving_refs=active_refs,

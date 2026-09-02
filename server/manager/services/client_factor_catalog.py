@@ -40,6 +40,11 @@ class ClientFactorCatalogMixin:
                 # nested FactorParam can render without waiting for a lazy
                 # source request.
                 "params": item.get("params") or [],
+                "parameter_definitions": (
+                    item.get("parameter_definitions")
+                    or item.get("params")
+                    or []
+                ),
                 "family_formula_fingerprint": item.get(
                     "family_formula_fingerprint"
                 ) or "",

@@ -41,6 +41,10 @@ vm.runInThisContext(
   {filename: "factor-detail-shared.js"},
 );
 vm.runInThisContext(
+  fs.readFileSync("server/manager/web/catalog/factor-display-enrichment.js", "utf8"),
+  {filename: "factor-display-enrichment.js"},
+);
+vm.runInThisContext(
   fs.readFileSync("server/manager/web/catalog/shared/object-detail-tabs.js", "utf8"),
   {filename: "object-detail-tabs.js"},
 );
@@ -144,10 +148,7 @@ const data = {
     math_expr: "\\frac{P_t-P_{t-N}}{P_{t-N}}",
     description: "端点变化率",
     owner_alias: "MaxA",
-    params: [{
-      alias: "N", value: "20d", type: "WindowParam",
-      input_help: "填写窗口长度，例如 20d。",
-    }],
+    params: [{alias: "N", value: "20d"}],
   }],
   families: [{
     family_ref: "factor-family:sha256:momentum",
@@ -158,6 +159,10 @@ const data = {
     owner_alias: "Alice",
     description: "动量变化率",
     source_code: "class MmRateOfChg(FactorFamily):\n    pass\n",
+    parameter_definitions: [{
+      alias: "N", type: "WindowParam", default_value: "20d",
+      input_help: "填写窗口长度，例如 20d。",
+    }],
     factor_refs: [],
   }],
   sets: [{target_ref: setRef, visibility: "server"}],
@@ -254,6 +259,55 @@ assert.ok(
   ));
   assert.ok(provenance.values.some(row => row[0] === "冻结因子家族"));
   assert.ok(provenance.values.some(row => row[1].children?.[0]?.textContent === "MmRateOfChg"));
+
+  const nestedFactorRef = `factor:v2:${"n".repeat(43)}`;
+  const nestedOuterRef = `factor:v2:${"o".repeat(43)}`;
+  const nestedLeaf = {
+    schema_version: 2,
+    ref: nestedFactorRef,
+    alias: "MmThreshold|N:5d",
+    factor_alias: "MmThreshold|N:5d",
+    factor_family_alias: "MmThreshold",
+    identity: {family_alias: "MmThreshold", params: {N: "5d"}},
+    params: [{alias: "N", value: "5d"}],
+  };
+  const nestedOuter = {
+    schema_version: 2,
+    ref: nestedOuterRef,
+    alias: "MmOuter|Th:MmThreshold|$F:1d",
+    factor_alias: "MmOuter|Th:MmThreshold|$F:1d",
+    factor_family_alias: "MmOuter",
+    identity: {family_alias: "MmOuter", params: {Th: nestedLeaf}},
+    params: [{alias: "Th", value: nestedLeaf}],
+  };
+  const nestedViewContext = {
+    ...context,
+    content: new Element(), toolbar: new Element(),
+  };
+  await window.FTFactorDetails.factorDetail(nestedViewContext, {
+    factors: [nestedOuter],
+    families: [{
+      family_ref: "family:mm-outer", factor_family_alias: "MmOuter",
+      description: "嵌套外层因子",
+      math_expr: String.raw`\textcolor{red}{Th}_t`,
+      parameter_definitions: [{alias: "Th", type: "FactorParam", value: nestedLeaf}],
+    }, {
+      family_ref: "family:mm-threshold", factor_family_alias: "MmThreshold",
+      description: "嵌套阈值因子",
+      math_expr: String.raw`\textcolor{red}{N}`,
+      parameter_definitions: [{alias: "N", type: "WindowParam", default_value: "20d"}],
+    }],
+  }, nestedOuterRef);
+  const nestedViewTree = walk(nestedViewContext.content).find(item => (
+    item.className?.includes("factor-detail-parameter-tree-nested")
+  ));
+  assert.ok(nestedViewTree, "view mode must render the nested factor table");
+  const nestedViewTable = walk(nestedViewTree).find(item => (
+    item.headers?.[0] === "参数"
+  ));
+  assert.ok(nestedViewTable);
+  assert.strictEqual(nestedViewTable.values[0][1].children[0].textContent, "WindowParam");
+  assert.ok(rendered.some(item => /MmThreshold/.test(item.expression)));
 
   const historicalFactorRef = "factor:sha256:historical-factor";
   const historicalCommit = "c".repeat(40);

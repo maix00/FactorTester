@@ -266,60 +266,131 @@
     return String(help?.title || help?.text || help?.description || "查看说明");
   }
 
-  function parameterRows(value) {
+  function parameterRows(value, options = {}) {
     const item = value || {};
+    const family = options.family || item.family || item.__factor_family || null;
     const candidates = [
       item.parameter_definitions,
+      item.family_parameter_definitions,
+      family?.parameter_definitions,
+      family?.params,
       item.params,
       item.factor_params,
+      item.parameters,
     ];
-    const raw = candidates.find(candidate => (
+    const arrays = candidates.filter(candidate => (
       Array.isArray(candidate) && candidate.length
-    )) ?? candidates.find(candidate => (
+    ));
+    const specific = arrays.find(candidate => candidate.some(parameter => (
+      parameter && typeof parameter === "object"
+      && specificParameterType(parameter)
+    )));
+    const withDefaults = arrays.find(candidate => candidate.some(parameter => (
+      parameter && typeof parameter === "object"
+      && parameter.default_value !== undefined
+    )));
+    const raw = specific || withDefaults || arrays[0] || candidates.find(candidate => (
       candidate && typeof candidate === "object"
         && !Array.isArray(candidate) && Object.keys(candidate).length
     ));
+    const values = parameterValueMap(item);
     if (Array.isArray(raw)) {
-      return raw.flatMap(parameter => {
-        const alias = String(
-          parameter?.alias || parameter?.name || "",
-        ).trim();
-        if (!alias) return [];
-        return [{
-          alias,
-          value: parameter.value ?? parameter.default_value ?? "",
-          input_mode: parameter.input_mode || "",
-          options: parameter.options || [],
-          type: parameter.type || parameter.param_type || "Parameter",
-          input_help: parameter.input_help || parameter.help_text || "",
-          redacted: parameter.redacted === true,
-          description: parameter.desc || parameter.value_space_desc || "",
-          nested_factor: parameter.nested_factor || null,
-        }];
-      });
+      return raw.flatMap(parameter => normalizeParameterRow(parameter, values));
     }
     if (raw && typeof raw === "object") {
-      return Object.entries(raw).map(([alias, parameter]) => ({
-        alias,
-        value: parameter && typeof parameter === "object"
-          ? parameter.value ?? parameter.default_value ?? "" : parameter,
-        redacted: parameter?.redacted === true,
-        type: parameter?.type || parameter?.param_type || "Parameter",
-        input_help: parameter?.input_help || parameter?.help_text || "",
-        description: parameter?.desc || parameter?.value_space_desc || "",
-        nested_factor: parameter?.nested_factor || null,
-      }));
+      return Object.entries(raw).flatMap(([alias, parameter]) => (
+        normalizeParameterRow(
+          parameter && typeof parameter === "object"
+            ? {...parameter, alias: parameter.alias || alias}
+            : {alias, value: parameter},
+          values,
+        )
+      ));
     }
     return [];
   }
 
-  function parameterTable(context, value) {
-    const rows = parameterRows(value);
-    if (!rows.length) return null;
-    return parameterTree(context, value, rows, 0);
+  function parameterValueMap(item) {
+    const result = {};
+    const collect = (source, allowEmpty = false) => {
+      if (Array.isArray(source)) {
+        for (const parameter of source) {
+          const alias = String(parameter?.alias || parameter?.name || "").trim();
+          if (!alias || !parameter || !Object.prototype.hasOwnProperty.call(parameter, "value")) {
+            continue;
+          }
+          const value = parameter.value;
+          if (allowEmpty || value !== undefined && value !== null && value !== "") {
+            result[alias] = value;
+          }
+        }
+        return;
+      }
+      if (!source || typeof source !== "object") return;
+      for (const [rawAlias, parameter] of Object.entries(source)) {
+        const alias = String(rawAlias || "").trim();
+        if (!alias) continue;
+        const value = parameter && typeof parameter === "object"
+          && Object.prototype.hasOwnProperty.call(parameter, "value")
+          ? parameter.value : parameter;
+        if (allowEmpty || value !== undefined && value !== null && value !== "") {
+          result[alias] = value;
+        }
+      }
+    };
+    // Compact params and identity params are fallbacks; empty values there are
+    // normally the projection's missing-value marker. parameter_values is the
+    // live editor state and intentionally wins, including an empty selection.
+    collect(item.params);
+    collect(item.factor_params);
+    collect(item.identity?.params);
+    collect(item.parameter_values, true);
+    return result;
   }
 
-  function parameterTree(context, value, rows = parameterRows(value), depth = 0) {
+  function parameterValues(value, options = {}) {
+    return Object.fromEntries(parameterRows(value, options).map(parameter => [
+      parameter.alias,
+      parameter.value ?? parameter.default_value ?? "",
+    ]).filter(([alias, current]) => alias && current !== ""));
+  }
+
+  function normalizeParameterRow(parameter, values = {}) {
+    const alias = String(parameter?.alias || parameter?.name || "").trim();
+    if (!alias) return [];
+    const hasValue = Object.prototype.hasOwnProperty.call(values, alias);
+    const fallback = parameter?.value ?? parameter?.default_value ?? "";
+    return [{
+      alias,
+      value: hasValue ? values[alias] : fallback,
+      default_value: parameter?.default_value,
+      input_mode: parameter?.input_mode || "",
+      options: parameter?.options || [],
+      type: parameter?.type || parameter?.param_type || "Parameter",
+      input_help: parameter?.input_help || parameter?.help_text || "",
+      redacted: parameter?.redacted === true,
+      description: parameter?.desc || parameter?.value_space_desc || "",
+      nested_factor: parameter?.nested_factor
+        || (parameter?.value?.__factor_family_draft === true
+          && parameter.value.__factor_family ? parameter.value : null)
+        || (isNestedPreviewValue(parameter?.value) ? parameter.value : null),
+    }];
+  }
+
+  function specificParameterType(parameter) {
+    const type = String(parameter?.type || parameter?.param_type || "").trim();
+    return Boolean(type && type !== "Parameter");
+  }
+
+  function parameterTable(context, value, options = {}) {
+    const rows = parameterRows(value, options);
+    if (!rows.length) return null;
+    return parameterTree(context, value, rows, 0, options);
+  }
+
+  function parameterTree(
+    context, value, rows = parameterRows(value), depth = 0, options = {},
+  ) {
     const root = document.createElement("details");
     root.className = depth
       ? "factor-detail-parameter-tree factor-detail-parameter-tree-nested"
@@ -337,7 +408,9 @@
     heading.className = "factor-detail-parameter-tree-heading";
     heading.append(title, familySourceHelp(context, value));
     header.append(heading);
-    const formulaValue = expression(value, {instance: true});
+    const formulaValue = options.preview
+      ? previewExpression(value, options.parameterValues || parameterValues(value, options))
+      : expression(value, {instance: true});
     if (formulaValue) header.append(formula(context, formulaValue));
     const body = document.createElement("div");
     body.className = "factor-detail-parameter-tree-body";
@@ -346,21 +419,34 @@
       rows.map(parameter => [
         parameter.alias,
         parameterType(context, parameter),
-        parameter.redacted ? context.t("已隐藏") : parameter.value,
+        parameter.redacted ? context.t("已隐藏") : parameterDisplayValue(parameter),
       ]),
     ).shell);
     for (const parameter of rows) {
       if (!parameter.nested_factor) continue;
-      const nestedRows = parameterRows(parameter.nested_factor);
+      const nestedRows = parameterRows(parameter.nested_factor, options);
       if (!nestedRows.length) continue;
       const nested = parameterTree(
-        context, parameter.nested_factor, nestedRows, depth + 1,
+        context, parameter.nested_factor, nestedRows, depth + 1, options,
       );
       nested.dataset.parameterAlias = parameter.alias;
       body.append(nested);
     }
     root.append(header, body);
     return root;
+  }
+
+  function parameterDisplayValue(parameter) {
+    if (parameter?.nested_factor) {
+      return String(
+        parameter.nested_factor.factor_alias
+        || parameter.nested_factor.alias
+        || parameter.nested_factor.factor_family_alias
+        || parameter.nested_factor.family_alias
+        || "FactorExpr",
+      );
+    }
+    return parameter?.value;
   }
 
   function formula(context, value) {
@@ -780,7 +866,7 @@
 
   window.FTFactorDetailShared = Object.freeze({
     expression, loadSourceVersions, loadSourceVersion,
-    parameterRows,
+    parameterRows, parameterValues,
     familyIdentity, familySourceHelp, fieldRow, helpIcon, parameterTable,
     previewExpression,
     pageClass, provenance, source,
