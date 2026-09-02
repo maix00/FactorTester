@@ -147,7 +147,11 @@
     groups.manual = group(context.t("填写"), input);
     groups.column = group(context.t("Column"), columnPicker.element || columnPicker);
     groups.factor = group(context.t("因子库"), factorPicker.element || factorPicker);
-    const createFamily = actionButton(context, context.t("新增因子家族"), async () => {
+    const createFamily = actionButton(context, context.t(
+      familyDraft(values[alias]) ? "编辑因子家族" : "新增因子家族",
+    ), async () => {
+      const currentFamily = familyDraft(values[alias])
+        ? values[alias].__factor_family : null;
       await options.onCreateFamily?.(family => {
         if (!family) return;
         if (!families.some(item => item.value === familyRef(family))) {
@@ -158,8 +162,9 @@
           familyPicker.setItems?.(families);
         }
         setValue(makeFamilyDraft(family), "family");
+        createFamily.textContent = context.t("编辑因子家族");
         renderNested();
-      });
+      }, currentFamily);
     }, {variant: "secondary"});
     createFamily.classList?.add?.("factor-param-create-family");
     groups.family = group(
@@ -179,12 +184,20 @@
       details.className = "factor-param-nested-family";
       const heading = document.createElement("summary");
       heading.className = "factor-param-nested-family-header";
+      const headingName = document.createElement("span");
+      headingName.className = "factor-param-nested-family-name";
       const title = document.createElement("b");
       title.textContent = familyLabel(family);
-      heading.append(title, window.FTFactorDetailShared.familySourceHelp(context, family));
-      const formulaValue = window.FTFactorDetailShared.expression(family);
+      headingName.append(
+        title, window.FTFactorDetailShared.familySourceHelp(context, family),
+      );
+      heading.append(headingName);
+      const formulaValue = window.FTFactorDetailShared.previewExpression(
+        family, draft.parameter_values || {},
+      );
+      let formula = null;
       if (formulaValue) {
-        const formula = document.createElement("div");
+        formula = document.createElement("div");
         formula.className = "factor-detail-parameter-formula display-math";
         if (window.katex) window.katex.render(formulaValue, formula, {
           displayMode: true, throwOnError: false,
@@ -197,7 +210,18 @@
         draft.parameter_values || {}, {
           ...options,
           depth: (options.depth || 0) + 1,
-          onChange: () => options.onChange?.(values, alias),
+          onChange: () => {
+            if (formula) {
+              const next = window.FTFactorDetailShared.previewExpression(
+                family, nested.values,
+              );
+              if (window.katex) window.katex.render(next, formula, {
+                displayMode: true, throwOnError: false,
+              });
+              else formula.textContent = next;
+            }
+            options.onChange?.(values, alias);
+          },
         },
       );
       draft.parameter_values = nested.values;

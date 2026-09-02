@@ -2533,6 +2533,11 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert "factor-param-column-" in parameter_editor
     assert "factor-param-factor-" in parameter_editor
     assert "FTTestObjectEditorOverlay.open" in editor
+    assert "factor-source-mode" not in editor
+    assert 'createLabel: context.t("新增因子家族")' in editor
+    assert 'state.family.source_kind === "transient"' in editor
+    assert "factor-param-choice-family" in parameter_editor
+    assert "clearable: true" in parameter_editor
     assert "state.onInspected?.(state.inspection)" in editor
     assert "name.value = inspection.factor_name" not in editor
     assert "familyClassNameMatches(name.value, state.inspection)" in editor

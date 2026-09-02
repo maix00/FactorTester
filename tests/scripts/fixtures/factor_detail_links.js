@@ -179,6 +179,16 @@ assert.deepStrictEqual(
   {alias: "", fingerprint: ""},
 );
 
+const preview = window.FTFactorDetailShared.previewExpression({
+  math_expr: String.raw`x_{\textcolor{red}{N},\textcolor{red}{P}}`,
+  parameter_definitions: [
+    {alias: "N", value: "20d"},
+    {alias: "P", value: "CA"},
+  ],
+}, {N: "5m", P: 0.9});
+assert.match(preview, /5\\,\\mathrm\{m\}/);
+assert.match(preview, /\\mathrm\{0\.9\}/);
+
 (async () => {
   const sourceView = window.FTFactorDetailShared.source(context, {
     source_code: "class MmRateOfChg(FactorFamily):\n    pass\n",

@@ -137,6 +137,7 @@
     dialog.dataset.ftHelp = "true";
     const card = document.createElement("div");
     card.className = "dialog-card ft-help-overlay-card";
+    if (descriptor.wide === true) card.classList.add("wide");
     const closeButton = document.createElement("button");
     closeButton.type = "button";
     closeButton.className = "dialog-close";

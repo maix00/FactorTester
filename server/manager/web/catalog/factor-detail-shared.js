@@ -12,6 +12,48 @@
     return "";
   }
 
+  function previewExpression(value, parameterValues = {}) {
+    let result = expression(value);
+    if (!result) return "";
+    for (const parameter of parameterRows(value)) {
+      const alias = String(parameter.alias || "").trim();
+      if (!alias) continue;
+      const raw = Object.prototype.hasOwnProperty.call(parameterValues || {}, alias)
+        ? parameterValues[alias] : parameter.value;
+      const nested = raw?.__factor_family_draft === true
+        ? raw.__factor_family : raw?.schema_version === 2 ? raw : null;
+      const shown = nested
+        ? familySymbol(nested)
+        : latexValue(raw?.alias || raw?.factor_alias || raw);
+      const token = new RegExp(
+        String.raw`\\textcolor\{red\}\{${escapeRegExp(alias)}\}`, "g",
+      );
+      result = result.replace(token, String.raw`\textcolor{red}{${shown}}`);
+    }
+    return result;
+  }
+
+  function escapeRegExp(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function familySymbol(value) {
+    const alias = String(
+      value?.factor_family_alias || value?.family_alias
+      || value?.identity?.family_alias || value?.name || "Factor",
+    );
+    const safe = alias.replace(/[^\p{L}\p{N}]+/gu, "_").replace(/^_+|_+$/g, "");
+    return String.raw`\mathrm{${safe || "Factor"}}`;
+  }
+
+  function latexValue(value) {
+    const text = String(value ?? "");
+    const duration = /^([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*(ns|us|ms|s|min|m|h|d|w)$/i
+      .exec(text);
+    if (duration) return String.raw`${duration[1]}\,\mathrm{${duration[2]}}`;
+    return String.raw`\mathrm{${text.replace(/([_{}%&#])/g, "\\$1")}}`;
+  }
+
   function summary(context, value, options = {}) {
     const expressionValue = options.descriptionOnly ? "" : expression(value, options);
     const description = String(
@@ -434,6 +476,7 @@
     const icon = helpIcon({
       mode: "overlay",
       title: context.t("因子家族源码"),
+      wide: true,
       load: async () => {
         if (String(value.source_code || "").trim()) {
           return source(context, value);
@@ -606,6 +649,7 @@
     expression, loadSourceVersions, loadSourceVersion,
     parameterRows,
     familyIdentity, familySourceHelp, fieldRow, helpIcon, parameterTable,
+    previewExpression,
     pageClass, provenance, source,
     sourceOptions, sourceVersionHelp,
     sourceUnavailableText, sourceVersionHistory, versionItems, versionPicker,

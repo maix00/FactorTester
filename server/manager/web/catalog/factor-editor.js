@@ -68,37 +68,6 @@
     return FTMultiSelectFilter.create(context, options);
   }
 
-  function sourceModePicker(context, state, redraw) {
-    const picker = sharedPicker(context, {
-      compact: true,
-      name: "factor-source-mode",
-      multi: false,
-      items: [
-        {
-          value: "family",
-          label: context.t("已有可见因子家族"),
-          description: context.t("从因子库家族选择参数并登记一个因子"),
-        },
-        {
-          value: "source",
-          label: context.t("上传或编写因子家族源码"),
-          description: context.t("校验源码并解析参数后保存到因子库"),
-        },
-      ],
-      selected: [state.sourceMode],
-      onChange: values => {
-        state.sourceMode = values[0] || "family";
-        state.inspection = state.sourceMode === "source"
-          ? state.inspection : null;
-        state.validationError = "";
-        state.validationMessage = "";
-        state.onFamilyChanged?.(state.family);
-        redraw();
-      },
-    });
-    return field(context.t("因子来源"), picker.element);
-  }
-
   function familyPicker(context, data, state, redraw) {
     const picker = sharedPicker(context, {
       compact: true,
@@ -107,8 +76,48 @@
       multi: false,
       items: familyItems(data),
       selected: state.family ? [familyRef(state.family)] : [],
+      onCreate: async () => {
+        const editingTemporary = state.family?.temporary === true
+          || state.family?.source_kind === "transient";
+        const open = context.openTestObject || (childOptions => (
+          FTTestObjectEditorOverlay.open(context, childOptions)
+        ));
+        await open({
+          kind: "factor_family", mode: editingTemporary ? "edit" : "create",
+          ref: editingTemporary ? familyRef(state.family) || "temporary" : "new",
+          initialValue: editingTemporary ? state.family : null,
+          temporary: true,
+          onSaved: family => {
+            if (!family) return;
+            if (!(data.families || []).some(item => familyRef(item) === familyRef(family))) {
+              data.families = [...(data.families || []), family];
+            }
+            state.family = family;
+            state.latestFamily = family;
+            state.sourceMode = "source";
+            state.sourceCode = family.source_code || "";
+            state.inspection = {
+              ...family,
+              params: family.params || family.parameter_definitions || [],
+            };
+            state.parameterValues = defaults(state.inspection.params);
+            state.sourceVersionFingerprint =
+              family.family_formula_fingerprint || "";
+            state.sourceVersions = null;
+            state.sourceVersionError = "";
+            state.onFamilyChanged?.(family);
+            redraw();
+          },
+        });
+      },
+      createLabel: context.t(
+        state.family?.temporary === true || state.family?.source_kind === "transient"
+          ? "编辑因子家族" : "新增因子家族",
+      ),
+      createTitle: context.t("现场新增或编辑因子家族并返回当前因子"),
       onChange: async values => {
         state.family = familyItems(data).find(item => item.value === values[0])?.family || null;
+        state.sourceMode = "family";
         if (state.family && !(state.family.params || []).length) {
           try {
             const loaded = await window.FTFactorDetailShared.loadSourceVersion(
@@ -140,7 +149,9 @@
   }
 
   function sourceVersionPicker(context, state, redraw) {
-    if (!state.family) return null;
+    if (!state.family || state.sourceMode !== "family"
+        || state.family.temporary === true
+        || state.family.source_kind === "transient") return null;
     const options = window.FTFactorDetailShared.sourceOptions(state.family);
     const picker = window.FTFactorDetailShared.versionPicker(
       context, state.family, {
@@ -359,12 +370,14 @@
             return family;
           }
         },
-        onCreateFamily: onSaved => (
+        onCreateFamily: (onSaved, currentFamily) => (
           context.openTestObject || (childOptions => (
             FTTestObjectEditorOverlay.open(context, childOptions)
           ))
         )({
-          kind: "factor_family", mode: "create", ref: "new", onSaved,
+          kind: "factor_family", mode: currentFamily ? "edit" : "create",
+          ref: currentFamily ? familyRef(currentFamily) || "temporary" : "new",
+          initialValue: currentFamily || null, onSaved,
           // A nested family is configuration-local until the owning factor is
           // explicitly submitted. Never publish it as a library family here.
           temporary: true,
@@ -372,6 +385,7 @@
         onChange: () => {
           markDirty("parameters");
           context.pageState?.capture?.();
+          refreshFormulaPreview();
         },
       },
     );
@@ -902,6 +916,25 @@
     let tabs;
     const status = document.createElement("small");
     status.className = "form-error";
+    let previewFrame = 0;
+    const refreshFormulaPreview = () => {
+      if (previewFrame) return;
+      const schedule = window.requestAnimationFrame || (callback => setTimeout(callback, 0));
+      previewFrame = schedule(() => {
+        previewFrame = 0;
+        const target = topMount.querySelector?.(".factor-family-formula");
+        if (!target) return;
+        const formula = window.FTFactorDetailShared.previewExpression(
+          state.family || state.inspection || state.loaded,
+          state.parameterValues || {},
+        );
+        if (!formula) return;
+        if (window.katex) window.katex.render(formula, target, {
+          displayMode: true, throwOnError: false,
+        });
+        else target.textContent = formula;
+      });
+    };
     const redraw = () => {
       topMount.replaceChildren();
       if (state.familyMode && state.mode === "edit") {
@@ -913,9 +946,13 @@
       // does not move the formula into the source tab or make it disappear
       // when the tab content is rebuilt.
       const formulaSource = state.inspection || state.family || state.loaded;
+      const liveExpression = !state.familyMode
+        ? window.FTFactorDetailShared.previewExpression(
+          formulaSource, state.parameterValues || {},
+        ) : "";
       topMount.append(window.FTFactorDetailShared.summary(context, {
         ...(formulaSource || {}),
-        math_expr: formulaSource?.math_expr
+        math_expr: liveExpression || formulaSource?.math_expr
           || formulaSource?.expression
           || formulaSource?.resolved_math_expr || "",
         description: formulaSource?.description || formulaSource?.desc || "",
@@ -927,16 +964,9 @@
           onChanged: () => tabs?.setDirty("source", true),
         }));
       } else if (state.mode === "create") {
-        sourceMount.append(sourceModePicker(context, state, redraw));
-        if (state.sourceMode === "family") {
-          sourceMount.append(familyPicker(context, data, state, redraw));
-          const version = sourceVersionPicker(context, state, redraw);
-          if (version) sourceMount.append(version);
-        } else {
-          sourceMount.append(sourceControls(context, state, redraw, {
-            onChanged: () => tabs?.setDirty("source", true),
-          }));
-        }
+        sourceMount.append(familyPicker(context, data, state, redraw));
+        const version = sourceVersionPicker(context, state, redraw);
+        if (version) sourceMount.append(version);
       } else {
         sourceMount.append(sourceControls(context, state, redraw, {
           onChanged: () => tabs?.setDirty("source", true),
@@ -1165,10 +1195,13 @@
     header.className = "factor-param-nested-family-header";
     const title = document.createElement("b");
     title.textContent = familyAlias(family) || context.t("因子家族参数");
-    header.append(title);
+    const heading = document.createElement("span");
+    heading.className = "factor-param-nested-family-name";
+    heading.append(title);
     if (familyAlias(family)) {
-      header.append(window.FTFactorDetailShared.familySourceHelp(context, family));
+      heading.append(window.FTFactorDetailShared.familySourceHelp(context, family));
     }
+    header.append(heading);
     const expression = window.FTFactorDetailShared.expression(family);
     if (expression) {
       const formula = document.createElement("div");
