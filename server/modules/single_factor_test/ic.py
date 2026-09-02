@@ -12,6 +12,7 @@ from server.modules.shared.factor_tester_runtime import (
     create_isolated_factor_tester_for_run,
     selection_from_request,
 )
+from server.modules.shared.factor_data_coverage import require_factor_data_coverage
 from server.modules.single_factor_test.ic_params import (
     SCALE_AWARE_HORIZON_BASE,
     describe_forward_horizon_sampling,
@@ -915,6 +916,14 @@ def execute_ic_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any) -
         factor_owner = str(descriptor.get("owner_ref") or owner).strip()
         resolved.append(
             external.get(alias) or factor_from_alias(alias, username=factor_owner)
+        )
+    for factor in resolved:
+        require_factor_data_coverage(
+            tester.products,
+            factor,
+            start_dt=start_dt,
+            end_dt=end_dt,
+            data_source=str(data.get("data_source") or ""),
         )
 
     class _ResolvedFactorCollection:

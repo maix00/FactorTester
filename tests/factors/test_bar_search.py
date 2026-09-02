@@ -346,8 +346,8 @@ def test_bar_search_identity_and_latex_include_scope_and_selection():
     )
 
     assert nearest.semantic_fingerprint() != farthest.semantic_fingerprint()
-    assert "BarDistance" in nearest.to_latex()
-    assert "nearest" in nearest.to_latex()
+    assert r"\operatorname{argmin}" in nearest.to_latex()
+    assert r"\operatorname{argmax}" in farthest.to_latex()
 
 
 def test_bar_search_latex_formats_selection_parentheses_and_resolved_scope():
@@ -359,10 +359,32 @@ def test_bar_search_latex_formats_selection_parentheses_and_resolved_scope():
 
     latex = expr.to_latex()
 
-    assert r"^{\mathrm{nearest}}" in latex
-    assert r"_{\mathrm{bars}\left(3\right)}" in latex
-    assert r"\left(" in latex
-    assert r"\right)" in latex
+    assert r"\left[t\mapsto" in latex
+    assert (
+        r"\underset{[t-k,t]\in\operatorname{ScopeBars}\left(3\right)}"
+        r"{\operatorname{argmin}}" in latex
+    )
+    assert r"X_t:=X" in latex
+    assert r"\left\{k\middle|" in latex
+    assert r"\end{aligned}\right\}" in latex
+
+
+def test_bar_since_latex_uses_argmin_or_argmax_over_named_scope():
+    condition = _FrameExpr(pd.DataFrame({"A": [True]}))
+
+    nearest = bar_since(condition, scope=scope_trading_day())
+    farthest = bar_since(
+        condition, scope=scope_session(gap="2h"), select="farthest",
+    )
+
+    assert (
+        r"\underset{[t-k,t]\in\operatorname{ScopeTradingDay}}"
+        r"{\operatorname{argmin}}" in nearest.to_latex()
+    )
+    assert (
+        r"\underset{[t-k,t]\in\operatorname{ScopeSession}\left(\mathrm{2h}\right)}"
+        r"{\operatorname{argmax}}" in farthest.to_latex()
+    )
 
 
 def test_match_placeholders_cannot_escape_bar_distance_condition():

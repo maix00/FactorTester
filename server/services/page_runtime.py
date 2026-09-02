@@ -10,10 +10,6 @@ import time
 import uuid
 from types import SimpleNamespace
 
-import pandas as pd
-
-import settings as Settings
-
 if TYPE_CHECKING:
     from tools.factors import FactorTester
 
@@ -237,16 +233,6 @@ def clear_page(page_uuid: str, *, delete: bool = True) -> None:
                         obj.delete()
                     except Exception:
                         pass
-
-
-def get_default_time():
-    start = Settings.default_test_start_date
-    end = Settings.default_test_end_date
-    if start is None:
-        start = pd.Timestamp('2025-01-02', tz='Asia/Shanghai')
-    if end is None:
-        end = pd.Timestamp('2025-05-31', tz='Asia/Shanghai')
-    return start, end
 
 
 def get_current_time(page_uuid: Optional[str] = None):

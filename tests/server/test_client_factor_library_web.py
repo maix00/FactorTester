@@ -661,12 +661,15 @@ def test_validate_transient_duration_factor_supports_bar_distance_source() -> No
     assert payload["valid"] is True, payload
     assert payload["normalized_params"]["Th"] == "0.001"
     assert payload["normalized_params"]["K"] == "30m"
-    assert "BarDistance" in payload["math_expr"]
-    assert r"\mathrm{nearest}" in payload["math_expr"]
-    assert r"\mathrm{bars}\left(\textcolor{red}{K}\right)" in payload["math_expr"]
-    assert payload["math_expr"].count(":=") == 1
+    assert r"\operatorname{argmin}" in payload["math_expr"]
+    assert r"\operatorname{ScopeBars}" in payload["math_expr"]
+    assert (
+        r"\operatorname{ScopeBars}\left(\textcolor{red}{K}\right)"
+        in payload["math_expr"]
+    )
+    assert payload["math_expr"].count(":=") == 3
     assert r"\mathrm{差持续期}_t" in payload["math_expr"]
-    assert "X_t :=" not in payload["math_expr"]
+    assert "X_t:=" in payload["math_expr"]
 
 
 def test_factor_operator_catalog_exposes_bar_search_operators() -> None:

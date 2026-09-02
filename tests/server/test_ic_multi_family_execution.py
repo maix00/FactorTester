@@ -67,7 +67,7 @@ def test_ic_run_spec_resolves_factors_across_families(monkeypatch) -> None:
     monkeypatch.setattr(
         ic,
         "create_isolated_factor_tester_for_run",
-        lambda *_args, **_kwargs: object(),
+        lambda *_args, **_kwargs: SimpleNamespace(products=[]),
     )
     monkeypatch.setattr(ic, "user_obj_for_name", lambda _owner: object())
     monkeypatch.setattr(
@@ -81,6 +81,7 @@ def test_ic_run_spec_resolves_factors_across_families(monkeypatch) -> None:
         "server.services.external_factor_artifacts.load_frozen_artifacts",
         lambda _raw: [],
     )
+    monkeypatch.setattr(ic, "require_factor_data_coverage", lambda *_args, **_kwargs: None)
 
     def capture(_data, _tester, factor_collection, _sink, **_kwargs):
         captured["aliases"] = [factor.alias for factor in factor_collection.factors]
@@ -159,7 +160,7 @@ def test_ic_run_spec_uses_frozen_top_level_window(monkeypatch) -> None:
 def test_ic_run_spec_rejects_missing_frozen_window(monkeypatch) -> None:
     monkeypatch.setattr(ic, "selection_from_request", lambda *_args, **_kwargs: object())
 
-    with pytest.raises(ValueError, match="requires start_date and end_date"):
+    with pytest.raises(ValueError, match="运行时间范围缺失.*start_date.*end_date"):
         ic.execute_ic_run_spec(
             {
                 "_owner": "18717974771",
