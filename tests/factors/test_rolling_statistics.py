@@ -4,11 +4,15 @@ import pandas as pd
 import pytest
 
 from tools.data.types import DataFreq
+from tools.data.types import DataColumn
+from tools.factors import FactorFamily
+from tools.factors.FactorExpr import ColumnRef
 from tools.factors.expr import (
     EvaluateContext,
     FactorExpr,
     build_panel_timeline,
 )
+from tools.parameters import TypeParam
 
 
 class _FrameExpr(FactorExpr):
@@ -26,6 +30,13 @@ class _FrameExpr(FactorExpr):
 
     def _to_latex(self, subst=None):
         return "F_t"
+
+
+class _ParameterizedQuantileFamily(FactorFamily):
+    @staticmethod
+    def factor_expr():
+        probability = TypeParam("M", default_value=0.9, typ=(int, float))
+        return ColumnRef(DataColumn.CLOSE).rolling_quantile(probability, 3)
 
 
 def _evaluate(expr: FactorExpr) -> pd.DataFrame:
@@ -51,6 +62,24 @@ def test_rolling_quantile_rejects_out_of_range_probability():
 
     with pytest.raises(ValueError, match="between 0 and 1"):
         values.rolling_quantile(1.1, 2)
+
+
+def test_rolling_quantile_accepts_scalar_parameter_after_resolution():
+    values = _FrameExpr(pd.DataFrame({"A": [1.0, 2.0, 3.0, 4.0]}))
+    probability = TypeParam("M", default_value=0.9, typ=(int, float))
+    expression = values.rolling_quantile(probability, 3)
+
+    assert "M" in expression.to_latex()
+
+    resolved = expression.resolve(param_values={"M": 0.5})
+    assert _evaluate(resolved).iloc[-1, 0] == 3.0
+
+
+def test_factor_family_builds_formula_before_quantile_parameter_resolution():
+    family = _ParameterizedQuantileFamily()
+
+    assert "M" in family.math_expr
+    assert "M:0.5" in family.get_factor(M=0.5).alias
 
 
 def test_robust_rolling_statistics_ignore_missing_observations():
