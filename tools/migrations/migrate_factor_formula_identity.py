@@ -876,7 +876,18 @@ def resolve_server_factor(request: dict[str, Any]) -> dict[str, Any]:
             raise IncompatibleFactorConfiguration(
                 f"factor parameters cannot be recovered from {legacy_alias!r}: {error}"
             ) from error
-    identity = instantiate_factor_metadata(family, params)
+    # Account-domain rows are migrated outside the editable-configuration
+    # dependency scope. Legacy FactorParam aliases still need the same visible
+    # library resolver; otherwise FactorFamily.get_factor() reaches the engine
+    # seam without an adapter and aborts the whole release migration.
+    from server.modules.shared.factor_param_resolver import (
+        resolve_factor_param_value,
+    )
+    from tools.factors.factor_param_resolution import factor_param_resolver_scope
+    with factor_param_resolver_scope(lambda value: resolve_factor_param_value(
+        value, username=username,
+    )):
+        identity = instantiate_factor_metadata(family, params)
     factor = next(
         (
             item for item in reversed(list(getattr(family, "factors", [])))
