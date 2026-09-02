@@ -17,8 +17,8 @@
     target.__ftFactorSeriesObserver?.disconnect?.();
     target.replaceChildren();
     target.classList.add("factor-series-chart");
-    const chart = window.Highcharts.stockChart(
-      target, chartOptions(context, options, bars, factorPoints),
+    const chart = window.FTJobHighcharts.mountOptions(
+      context, target, chartOptions(context, options, bars, factorPoints), true,
     );
     target.__ftFactorSeriesChart = chart;
     if (window.ResizeObserver) {

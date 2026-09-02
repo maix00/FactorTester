@@ -338,8 +338,8 @@
 
 .factor-series-viewer { display: grid; gap: 14px; min-width: 0; }
 .factor-series-controls { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; }
-.factor-series-controls label { display: grid; gap: 5px; min-width: min(360px, 100%); }
-.factor-series-controls select { min-width: min(360px, 100%); }
+.factor-series-product-control { display: grid; gap: 5px; min-width: min(360px, 100%); }
+.factor-series-product-filter { min-width: min(360px, 100%); }
 .factor-series-controls small { color: var(--muted); padding-bottom: 7px; }
 
 .factor-series-chart-mount {
