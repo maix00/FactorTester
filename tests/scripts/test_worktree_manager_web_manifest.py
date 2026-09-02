@@ -1887,6 +1887,27 @@ def test_inline_strategy_creation_uses_shared_nested_object_overlay() -> None:
     ]
 
 
+def test_nested_object_overlay_mounts_one_toolbar_per_frame() -> None:
+    overlay = (WEB_ROOT / "workbench" / "test-object-editor-overlay.js").read_text(
+        encoding="utf-8",
+    )
+    editor = (WEB_ROOT / "catalog" / "factor-editor.js").read_text(
+        encoding="utf-8",
+    )
+    styles = (WEB_ROOT / "styles" / "workbench.css").read_text(encoding="utf-8")
+
+    assert "frame.toolbar ||= document.createElement" in overlay
+    assert "frameActions.replaceChildren(frame.toolbar)" in overlay
+    assert "toolbar: frame.toolbar" in overlay
+    assert "testObjectOverlay: true" in overlay
+    assert 'context.testObjectOverlay === true' in editor
+    assert '? "保存" : mode === "create" ? "提交"' in editor
+    assert 'kind: "factor", mode: "create", ref: "new", onSaved' in editor
+    assert "temporary: true" in editor
+    assert ".test-object-editor-frame-actions" in styles
+    assert ".test-object-editor-frame-toolbar" in styles
+
+
 def test_registered_locked_fields_share_one_visual_and_picker_contract() -> None:
     fields = (WEB_ROOT / "workbench" / "test-setting-fields.js").read_text(
         encoding="utf-8"
@@ -2431,7 +2452,7 @@ def test_factor_create_editors_use_shared_actions_and_personal_factor_scope() ->
     assert "frozen Factor v2 identity" in editor
     assert "factor-editor-upload-action" not in editor
     assert 'FTUI.actionButton(context.t("取消编辑")' in editor
-    assert 'context.t(mode === "create" ? "提交" : "保存")' in editor
+    assert 'mode === "create" ? "提交" : "保存"' in editor
     assert 'if (mode === "edit") context.toolbar.append(cancelEdit)' in editor
     assert 'context.toolbar.append(submit)' in editor
     assert 'source: {save_mode: "auto"}' in editor

@@ -54,6 +54,8 @@ window.FTStaticLoader = {
 window.FTFactors = {
   async setDetail(context, ref) {
     calls.sets.push({ref, viewOnly: context.testObjectViewOnly});
+    const save = context.button("保存集合", () => {});
+    context.toolbar.append(save);
     const member = context.button("因子成员", () => context.openFactor({
       schema_version: 2,
       ref: factorRef,
@@ -77,6 +79,8 @@ window.FTFactors = {
       viewOnly: context.testObjectViewOnly,
       alias: context.testObjectInitialValue?.alias || "",
     });
+    const save = context.button(`保存因子-${ref}`, () => {});
+    context.toolbar.append(save);
   },
 };
 window.FTProducts = {};
@@ -107,7 +111,8 @@ const context = {
   const dialog = body.children[0];
   const card = dialog.children[0];
   const heading = card.children[0];
-  const close = heading.children[1];
+  const frameActions = heading.children[1];
+  const close = heading.children[2];
   const overlayBody = card.children[1];
   const tree = overlayBody.children[0];
   const mount = overlayBody.children[1];
@@ -116,6 +121,7 @@ const context = {
   assert.equal(calls.loads.length, 1);
   assert.deepEqual(calls.loads[0], ["factor-catalog-detail"]);
   assert.equal(tree.hidden, true);
+  assert.equal(frameActions.children[0].children[0].textContent, "保存集合");
 
   mount.children[0].children[0].listeners.click();
   await Promise.resolve();
@@ -126,12 +132,16 @@ const context = {
   assert.deepEqual(calls.loads[1], ["factor-catalog-detail-rendering"]);
   assert.equal(tree.hidden, false);
   assert.equal(tree.children.length, 2);
+  assert.equal(frameActions.children[0].children[0].textContent,
+    `保存因子-${factorRef}`, "child frame must expose its own save action");
 
   tree.children[0].children[1].listeners.click();
   await Promise.resolve();
   await Promise.resolve();
   assert.equal(calls.sets.length, 1);
   assert.equal(tree.children.length, 2, "parent navigation must preserve the child frame");
+  assert.equal(frameActions.children[0].children[0].textContent, "保存集合",
+    "returning to the parent must restore its save action");
   mount.children[0].children[0].listeners.click();
   await Promise.resolve();
   await Promise.resolve();

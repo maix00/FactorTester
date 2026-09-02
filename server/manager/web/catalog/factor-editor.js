@@ -300,7 +300,9 @@
           ))
         )({
           kind: "factor", mode: "create", ref: "new", onSaved,
-          temporary: context.testObjectTemporary === true,
+          // Nested FactorParam creation belongs to the current configuration
+          // draft and must never persist into the factor library implicitly.
+          temporary: true,
         }),
         onFactorCreated: (factor, alias) => {
           const value = String(factor?.factor_alias || factor?.alias || "").trim();
@@ -898,8 +900,10 @@
         context.closeTab?.(context.tabID); context.navigate("/factors");
       }
     }, {variant: "secondary"});
+    const submitLabel = context.testObjectOverlay === true
+      ? "保存" : mode === "create" ? "提交" : "保存";
     const submit = FTUI.actionButton(
-      context.t(mode === "create" ? "提交" : "保存"),
+      context.t(submitLabel),
       () => form.requestSubmit(), {variant: "primary"},
     );
     if (mode === "edit") context.toolbar.append(cancelEdit);
