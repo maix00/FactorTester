@@ -204,6 +204,7 @@ def _resolved_formula(
         body = str(expression._to_latex() or "")
     except Exception:
         body = _template_formula(family)
+    body = body.strip()
     child_by_parameter = dict(child_nodes)
     for parameter in getattr(family, "params", ()):
         raw = values.get(parameter.alias, getattr(parameter, "default_value", None))
@@ -232,19 +233,19 @@ def _resolved_formula(
             # put the child symbol on the final line so multiline formulas
             # read ``Child_t := final-definition := expression``.
             child_symbol = _blue(_symbol_latex(child.get("factor_family_alias")))
+            child_line = re.sub(r"[.;]\s*$", "", child_lines[-1].rstrip())
             output = re.match(
                 r"^(?:X|\\mathrm\{X\})_t\s*&?\s*:=\s*(.+)$",
-                child_lines[-1],
+                child_line,
             )
             if output:
-                child_lines[-1] = f"{child_symbol}_t := {output.group(1)}"
+                child_lines[-1] = f"{child_symbol}_t := {output.group(1)};"
             elif len(child_lines) == 1:
-                child_lines[-1] = f"& {child_symbol}_t := {child_lines[-1]}"
+                child_lines[-1] = f"& {child_symbol}_t := {child_line};"
             else:
-                child_lines[-1] = f"{child_symbol}_t := {child_lines[-1]}"
+                child_lines[-1] = f"{child_symbol}_t := {child_line};"
             lines.extend(child_lines)
-    ending = ";" if lines else "."
-    lines.append(f"{_symbol_latex(final_symbol)}_t &:= {body}{ending}")
+    lines.append(f"{_symbol_latex(final_symbol)}_t &:= {body}.")
     return "\\begin{aligned}\n" + " \\\\\n".join(lines) + "\n\\end{aligned}"
 
 

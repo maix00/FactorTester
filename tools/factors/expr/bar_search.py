@@ -24,12 +24,11 @@ def _search_latex(
     subst: dict | None = None,
 ) -> str:
     return (
-        "\\left[t\\mapsto"
         f"\\underset{{[t-k,t]\\in{scope.to_latex(subst)}}}"
         f"{{\\operatorname{{{_selection_latex(select)}}}}}"
         "\\left\\{k\\middle|"
         f"\\begin{{aligned}}{body}\\end{{aligned}}"
-        "\\right\\}\\right]"
+        "\\right\\}"
     )
 
 
