@@ -189,6 +189,10 @@
     closeButton.className = "dialog-close icon-action-button ft-object-overlay-close";
     closeButton.replaceChildren?.(window.FTIcons?.node?.("xmark") || "×");
     closeButton.title = context.t("关闭");
+    // The shared .dialog-close rule pins top:10px for absolute positioning;
+    // this close lives in the header row, so neutralize top inline and keep
+    // it as a normal header part (workbench.css also forces relative flow).
+    closeButton.style.setProperty("top", "auto", "important");
     const frameActions = document.createElement("div");
     frameActions.className = "ft-object-overlay-frame-actions";
     heading.append(copy, frameActions, closeButton);
