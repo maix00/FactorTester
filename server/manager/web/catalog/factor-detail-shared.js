@@ -279,7 +279,7 @@
     text.textContent = String(label);
     root.append(text);
     if (help) {
-      root.append(fieldHelp(help, {
+      root.append(" ", fieldHelp(help, {
         ariaLabel: context.t("查看字段说明"),
       }));
     }
@@ -346,28 +346,9 @@
         context,
       ), valueNode]);
     }
-    nestedIdentitySections(context, item, options, rows);
     return FTUI.table(
       [context.t("RunSpec 字段"), context.t("值")], rows,
     ).shell;
-  }
-
-  function nestedIdentitySections(context, value, options, rows, depth = 0) {
-    for (const parameter of parameterRows(value, options)) {
-      const nested = parameter.nested_factor;
-      if (!nested) continue;
-      const section = document.createElement("div");
-      section.className = "factor-identity-nested";
-      section.dataset.parameterAlias = parameter.alias;
-      const title = document.createElement("b");
-      title.textContent = `${context.t("嵌套因子身份")} · ${parameter.alias}`;
-      section.append(title, FTUI.table(
-        [context.t("RunSpec 字段"), context.t("值")],
-        identityFieldRows(context, nested),
-      ).shell);
-      rows.push({fullWidth: true, content: section});
-      nestedIdentitySections(context, nested, options, rows, depth + 1);
-    }
   }
 
   function contextHelpText(help) {
@@ -519,7 +500,7 @@
     );
     const heading = document.createElement("span");
     heading.className = "factor-detail-parameter-tree-heading";
-    heading.append(title, familySourceHelp(context, value));
+    heading.append(title, " ", familySourceHelp(context, value));
     header.append(heading);
     // The tree header is the family formula.  The resolved/aggregated
     // instance formula belongs to the page-level formula box above it.
@@ -532,8 +513,8 @@
       tableRows.push([
         parameter.alias,
         parameterType(context, parameter),
-      parameter.redacted ? context.t("已隐藏") : String(parameter.default_value ?? ""),
-        parameter.redacted ? context.t("已隐藏") : parameterDisplayValue(parameter),
+        parameter.redacted ? context.t("已隐藏") : String(parameter.default_value ?? ""),
+        parameter.redacted ? context.t("已隐藏") : parameterValueCell(context, parameter),
       ]);
       if (!parameter.nested_factor) continue;
       const nestedRows = parameterRows(parameter.nested_factor, options);
@@ -566,6 +547,30 @@
     return parameter?.value;
   }
 
+  function nestedIdentityHelp(context, parameter) {
+    const nested = parameter.nested_factor;
+    return fieldHelp({
+      title: `${context.t("嵌套因子身份")} · ${parameter.alias}`,
+      wide: true,
+      render: body => {
+        body.append(FTUI.table(
+          [context.t("RunSpec 字段"), context.t("值")],
+          identityFieldRows(context, nested),
+        ).shell);
+      },
+    }, {ariaLabel: context.t("查看嵌套因子身份")});
+  }
+
+  function parameterValueCell(context, parameter) {
+    if (!parameter?.nested_factor) return parameterDisplayValue(parameter);
+    const root = document.createElement("span");
+    root.className = "factor-detail-parameter-value";
+    const alias = document.createElement("span");
+    alias.textContent = parameterDisplayValue(parameter);
+    root.append(alias, " ", nestedIdentityHelp(context, parameter));
+    return root;
+  }
+
   function childDefinition(symbol, line, align) {
     const output = String(line).match(/^(?:X|\\mathrm\{X\})_t\s*&?\s*:=\s*(.+)$/);
     return `${output ? "" : align ? "& " : ""}${symbol}_t := ${output ? output[1] : line}`;
@@ -590,7 +595,7 @@
     name.textContent = String(parameter.type || parameter.param_type || "Parameter");
     const help = String(parameter.input_help || parameter.help_text
       || parameter.description || context.t("填写该参数类型允许的值。"));
-    root.append(name, (window.FTUI?.helpIcon || window.FTHelp?.create)(help, {
+    root.append(name, " ", (window.FTUI?.helpIcon || window.FTHelp?.create)(help, {
       ariaLabel: context.t("查看参数类型说明"),
     }));
     return root;
@@ -893,7 +898,7 @@
     const raw = value?.[key] || "";
     const textNode = document.createElement("span");
     textNode.textContent = raw || context.t("未设置");
-    root.append(textNode, helpIcon({
+    root.append(textNode, " ", helpIcon({
       mode: "overlay",
       title: title || context.t("引用详情"),
       content: referenceOverlay(context, value, key),

@@ -72,7 +72,7 @@
       const row = window.FTFactorDetailShared.fieldRow(
         context, context.t(spec.label), value,
       );
-      if (spec.help) row.append(window.FTFactorDetailShared.helpIcon(spec.help));
+      if (spec.help) row.append(" ", window.FTFactorDetailShared.helpIcon(spec.help));
       mount(spec.tab).append(row);
     }
     for (const section of definition.sections || []) {

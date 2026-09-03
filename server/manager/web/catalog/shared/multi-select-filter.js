@@ -380,7 +380,7 @@
         label.textContent = item.label;
         const info = helpIcon(item.description);
         info.classList.add("ft-multi-select-option-info");
-        row.append(input, label, info);
+        row.append(input, label, " ", info);
         if (item.exclusive) {
           const badge = document.createElement("span");
           badge.className = "ft-multi-select-exclusive-badge";

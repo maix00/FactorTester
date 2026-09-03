@@ -27,6 +27,10 @@ class Element {
   }
   append(...nodes) {
     nodes.forEach(node => {
+      if (typeof node === "string") {
+        this.children.push(node);
+        return;
+      }
       if (node.parentNode) {
         node.parentNode.children = node.parentNode.children.filter(child => child !== node);
       }
@@ -35,7 +39,9 @@ class Element {
     });
   }
   replaceChildren(...nodes) {
-    this.children.forEach(node => { node.parentNode = null; });
+    this.children.forEach(node => {
+      if (typeof node !== "string") node.parentNode = null;
+    });
     this.children = [];
     this.append(...nodes);
   }
@@ -61,7 +67,7 @@ class Element {
 }
 
 function descendants(root) {
-  return [root, ...root.children.flatMap(descendants)];
+  return [root, ...root.children.filter(child => typeof child !== "string").flatMap(descendants)];
 }
 
 global.window = {
