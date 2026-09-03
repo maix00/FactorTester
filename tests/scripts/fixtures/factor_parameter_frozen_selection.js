@@ -10,6 +10,7 @@ class Element {
     this.value = "";
     this.textContent = "";
     this.className = "";
+    this.dataset = {};
     this.classList = {add: name => { this.className += ` ${name}`; }};
   }
   append(...children) { this.children.push(...children); }
@@ -42,10 +43,18 @@ window.FTFactorDetailShared = {
   familySourceHelp: () => new Element("span"),
   localFormula: () => ({root: new Element("div"), update() {}}),
   previewExpression: () => "",
-  parameterTable: () => {
-    const table = new Element("details");
-    table.className = "factor-param-readonly-table";
-    return table;
+  parameterRows(value) {
+    const list = value?.parameter_definitions || value?.params || [];
+    return Array.isArray(list)
+      ? list.map(parameter => ({...parameter, alias: parameter.alias || parameter.name}))
+      : [];
+  },
+  parameterSection(_context, _value, rows, depth = 0, options = {}) {
+    const root = new Element("details");
+    root.className = "factor-detail-parameter-tree"
+      + (depth ? " factor-detail-parameter-tree-nested" : "");
+    if (options.content) root.append(options.content);
+    return {root, update() {}};
   },
 };
 const pickers = [];
@@ -112,7 +121,7 @@ const editor = window.FTFactorParameterEditor.create(
 );
 const descendants = root => [root, ...(root.children || []).flatMap(descendants)];
 const nestedMount = editor.root.children.find(item => (
-  String(item.className).includes("factor-param-nested-family-mount")
+  String(item.className).includes("factor-param-nested-factor-mount")
 ));
 assert.ok(nestedMount, "nested parameters must mount beside the outer row, not inside Value");
 
@@ -136,10 +145,10 @@ assert.equal(editor.values.P, frozen,
   "library selection must retain the complete frozen factor record");
 assert.deepEqual(factorPicker.selected, [frozen.ref]);
 assert.ok(descendants(nestedMount).some(item => (
-  String(item.className).includes("factor-param-readonly-table")
-)), "selected factor must render a read-only nested parameter table");
+  String(item.className).includes("factor-detail-parameter-tree")
+)), "selected factor must render its read-only nested parameter tree");
 assert.equal(descendants(nestedMount).filter(item => item.tagName === "INPUT").length, 0,
-  "selected factor parameter table must not expose editable inputs");
+  "selected factor parameter tree must not expose editable inputs");
 assert.equal(parameterChanges, 1,
   "picker changes must notify the durable page-draft owner");
 factorPicker.options.onChange([]);
@@ -183,8 +192,8 @@ const restored = window.FTFactorParameterEditor.create(
 assert.equal(restored.values.P, frozen,
   "a persisted factor alias should be normalised to its frozen record");
 assert.ok(descendants(restored.root).some(item => (
-  String(item.className).includes("factor-param-readonly-table")
-)), "a restored factor alias must render a read-only nested table");
+  String(item.className).includes("factor-detail-parameter-tree")
+)), "a restored factor alias must render its read-only nested parameter tree");
 
 (async () => {
   await familyPicker.options.onChange([nestedFamily.family_ref]);
@@ -200,8 +209,8 @@ assert.ok(descendants(restored.root).some(item => (
   manualInput.value = frozen.alias;
   await manualInput.listeners.change();
   assert.ok(descendants(nestedMount).some(item => (
-    String(item.className).includes("factor-param-readonly-table")
-  )), "an alias resolved from manual input must render a read-only factor table");
+    String(item.className).includes("factor-detail-parameter-tree")
+  )), "an alias resolved from manual input must render a read-only factor tree");
   console.log("ok");
 })().catch(error => {
   console.error(error);

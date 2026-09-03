@@ -596,7 +596,9 @@
     heading.className = "factor-detail-parameter-tree-heading";
     heading.append(title, " ", familySourceHelp(context, value));
     header.append(heading);
-    const values = Object.fromEntries(rows.map(row => [row.alias, row.value]));
+    const values = options.values || Object.fromEntries(
+      rows.map(row => [row.alias, row.value]),
+    );
     const local = localFormula(context, value, values);
     header.append(local.root);
     const body = document.createElement("div");
