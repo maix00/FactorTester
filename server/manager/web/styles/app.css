@@ -295,9 +295,15 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-editor-version-picker { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .factor-editor-version-picker > *:first-child { min-width: 0; flex: 1 1 auto; }
 .factor-editor-version-actions { flex: 0 0 auto; }
-.factor-detail-parameter-editor { display: grid; min-width: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+.factor-detail-parameter-editor { display: grid; grid-template-columns: minmax(70px, max-content) minmax(150px, max-content) minmax(90px, max-content) minmax(0, 1fr); column-gap: 12px; min-width: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
 .factor-detail-parameter-editor input, .factor-detail-parameter-editor select, .factor-detail-parameter-editor button { font-family: inherit; }
-.factor-detail-parameter-header, .factor-detail-parameter-row { display: grid; grid-template-columns: minmax(70px, max-content) minmax(150px, max-content) minmax(90px, max-content) minmax(0, 1fr); align-items: center; gap: 12px; min-width: 0; padding: 10px 12px; }
+/* The editor is the single grid: header and every row subgrid the shared
+   tracks so the whole table sizes its columns together (content-adaptive
+   once per table).  Nested parameter tables are their own editors and thus
+   adapt independently from the outer table. */
+.factor-detail-parameter-editor > .factor-detail-parameter-header,
+.factor-detail-parameter-editor > .factor-detail-parameter-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; min-width: 0; padding: 10px 12px; }
+.factor-detail-parameter-editor > :not(.factor-detail-parameter-header):not(.factor-detail-parameter-row) { grid-column: 1 / -1; min-width: 0; }
 .factor-detail-parameter-header { color: var(--muted); background: var(--soft); font-size: 12px; }
 .factor-detail-parameter-row + .factor-detail-parameter-row { border-top: 1px solid var(--line); }
 .factor-detail-parameter-row-factor { border-bottom: 0; }
@@ -356,7 +362,7 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-param-family-source > .factor-param-create-family { white-space: nowrap; }
 @media (max-width: 720px) {
   .factor-detail-parameter-header { display: none; }
-  .factor-detail-parameter-row { grid-template-columns: minmax(90px, .55fr) minmax(0, 1.45fr); }
+  .factor-detail-parameter-editor > .factor-detail-parameter-row { grid-template-columns: minmax(90px, .55fr) minmax(0, 1.45fr); column-gap: 12px; }
   .factor-detail-parameter-key::before { content: "参数名"; display: block; color: var(--muted); font-size: 10px; font-weight: 500; }
   .factor-detail-parameter-type::before { content: "参数类型"; display: block; color: var(--muted); font-size: 10px; }
   .factor-detail-parameter-default::before { content: "默认值"; display: block; color: var(--muted); font: 500 10px/1.3 system-ui, sans-serif; }
