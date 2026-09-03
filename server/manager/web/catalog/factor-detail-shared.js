@@ -72,7 +72,14 @@
     lines.push(...rendered.lines);
     const body = stripFormulaEnvironment(rendered.body);
     if (body) {
-      lines.push(familySymbol(nested.value) + "_t &:= " + body);
+      const bodyLines = body.split(/\s*\\\\\s*/).map(line => line.trim())
+        .filter(Boolean);
+      if (bodyLines.length > 1) {
+        bodyLines[bodyLines.length - 1] = `${familySymbol(nested.value)}_t &:= ${bodyLines[bodyLines.length - 1]}`;
+        lines.push(...bodyLines);
+      } else {
+        lines.push(`${familySymbol(nested.value)}_t &:= ${body}`);
+      }
     }
   }
 
@@ -421,6 +428,13 @@
       parameterType(context, parameter),
       parameter.redacted ? context.t("已隐藏") : parameterDisplayValue(parameter),
     ]);
+    body.append(FTUI.table(
+      [context.t("参数"), context.t("参数类别"), context.t("值")],
+      tableRows,
+    ).shell);
+    // Keep the same parent-row-first ordering as the editor. The nested
+    // panel is associated with its FactorParam row and follows that row's
+    // table, rather than appearing before the outer parameter table.
     for (const parameter of rows) {
       if (!parameter.nested_factor) continue;
       const nestedRows = parameterRows(parameter.nested_factor, options);
@@ -432,10 +446,6 @@
       nested.className = `${nested.className || ""} factor-detail-nested-parameter-row`.trim();
       body.append(nested);
     }
-    body.append(FTUI.table(
-      [context.t("参数"), context.t("参数类别"), context.t("值")],
-      tableRows,
-    ).shell);
     root.append(header, body);
     return root;
   }
