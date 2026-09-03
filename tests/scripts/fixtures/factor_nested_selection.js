@@ -147,9 +147,9 @@ assert.ok(factorPicker, "FactorParam must expose a factor picker");
   const preview = window.FTFactorDetailShared.previewExpression(
     outerFamily, latestValues,
   );
-  assert.match(preview, /\\mathrm\{SgChgPct\}_t :=/);
+  assert.match(preview, /\\textcolor\{blue\}\{\\mathrm\{SgChgPct\}\}_t :=/);
   assert.match(preview, /\\textcolor\{red\}\{200\\,\\mathrm\{d\}\}/);
-  assert.match(preview, /D_t\(\\textcolor\{red\}\{\\mathrm\{SgChgPct\}\}_t\)/);
+  assert.match(preview, /D_t\(\\textcolor\{blue\}\{\\mathrm\{SgChgPct\}\}_t\)/);
   console.log("ok");
 })().catch(error => {
   console.error(error);

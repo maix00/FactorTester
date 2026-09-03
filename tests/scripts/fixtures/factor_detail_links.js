@@ -224,10 +224,10 @@ const nestedPreview = window.FTFactorDetailShared.previewExpression({
   }],
 }, {});
 assert.match(nestedPreview, /\\begin\{aligned\}/);
-assert.match(nestedPreview, /\\mathrm\{SgChgPct\}_t :=/);
+assert.match(nestedPreview, /\\textcolor\{blue\}\{\\mathrm\{SgChgPct\}\}_t :=/);
 assert.doesNotMatch(nestedPreview, /\\mathrm\{SgChgPct\}_t &:=/);
 assert.match(nestedPreview, /\\textcolor\{red\}\{\\mathrm\{CA\}\}/);
-assert.match(nestedPreview, /\\textcolor\{red\}\{\\mathrm\{SgChgPct\}\}/);
+assert.match(nestedPreview, /\\textcolor\{blue\}\{\\mathrm\{SgChgPct\}\}/);
 assert.ok(
     nestedPreview.indexOf("\\mathrm{SgChgPct}_t :=")
     < nestedPreview.indexOf("\\operatorname{argmin}"),
