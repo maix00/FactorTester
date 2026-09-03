@@ -396,7 +396,7 @@
     });
   }
 
-  function parameterEditor(context, data, state, redraw) {
+  function parameterEditor(context, data, state, redraw, hooks = {}) {
     const list = parameters(state);
     if (!list.length) return null;
     return window.FTFactorParameterEditor.create(
@@ -484,10 +484,13 @@
           if (nextValues && typeof nextValues === "object") {
             state.parameterValues = {...nextValues};
           }
-          markDirty("parameters");
+          // parameterEditor is a top-level helper: its render-scope callbacks
+          // (markDirty, formula refresh) are injected through hooks instead of
+          // relying on ambient variables that do not exist in this scope.
+          hooks.markDirty?.("parameters");
           context.pageState?.capture?.();
-          refreshParameterComposition(state.parameterValues);
-          refreshFormulaPreview();
+          hooks.refreshComposition?.(state.parameterValues);
+          hooks.refreshFormula?.();
         },
       },
     );
@@ -1097,7 +1100,11 @@
         // (or family creation) is part of the parameter composition flow.
         parameterMount.append(sourceMount);
       }
-      const editor = parameterEditor(context, data, state, redraw);
+      const editor = parameterEditor(context, data, state, redraw, {
+        markDirty: name => markDirty(name),
+        refreshComposition: values => refreshParameterComposition(values),
+        refreshFormula: () => refreshFormulaPreview(),
+      });
       if (editor) {
         // parameterEditor owns the mutable values object; keep the same
         // object on state so edits made in the shared editor reach the save
