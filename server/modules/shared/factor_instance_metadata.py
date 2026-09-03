@@ -204,6 +204,10 @@ def _resolved_formula(
         body = str(expression._to_latex() or "")
     except Exception:
         body = _template_formula(family)
+    body = re.sub(
+        r"^\\left\[\s*t\s*\\mapsto\s*(.*)\\right\]$",
+        r"\1", body, flags=re.S,
+    ).strip()
     child_by_parameter = dict(child_nodes)
     for parameter in getattr(family, "params", ()):
         raw = values.get(parameter.alias, getattr(parameter, "default_value", None))

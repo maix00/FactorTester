@@ -7,9 +7,13 @@
       : ["math_expr", "formula", "latex", "factor_expr", "expression", "resolved_math_expr"];
     for (const key of keys) {
       const candidate = value?.[key];
-      if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+      if (typeof candidate === "string" && candidate.trim()) return stripBarMapping(candidate.trim());
     }
     return "";
+  }
+
+  function stripBarMapping(value) {
+    return String(value).replace(/^\\left\[\s*t\\s*\\mapsto\s*([\s\S]*)\\right\]$/, "$1").trim();
   }
 
   function previewExpression(value, parameterValues = {}) {
@@ -554,15 +558,24 @@
   function nestedIdentityHelp(context, parameter) {
     const nested = parameter.nested_factor;
     return fieldHelp({
-      title: `${context.t("嵌套因子身份")} · ${parameter.alias}`,
+      title: `${context.t("查看内嵌因子")} · ${parameter.alias}`,
       wide: true,
       render: body => {
-        body.append(FTUI.table(
-          [context.t("RunSpec 字段"), context.t("值")],
-          identityFieldRows(context, nested),
-        ).shell);
+        const renderContext = {...context, content: body, toolbar: document.createElement("div"), activeNav: () => {}};
+        const family = nested.family || nested.__factor_family || {
+          factor_family_alias: nested.factor_family_alias,
+          parameter_definitions: nested.params || nested.parameter_definitions || [],
+          math_expr: nested.math_expr || nested.formula || "",
+        };
+        const view = window.FTFactorDetails?.factorDetail;
+        if (view) {
+          void view(renderContext, {factors: [nested], families: [family]},
+            nested.factor_ref || nested.ref || nested.factor_alias, "view", null);
+          return;
+        }
+        body.append(parameterTable(context, nested, {family}));
       },
-    }, {ariaLabel: context.t("查看嵌套因子身份")});
+    }, {ariaLabel: context.t("查看内嵌因子")});
   }
 
   function parameterValueCell(context, parameter) {
