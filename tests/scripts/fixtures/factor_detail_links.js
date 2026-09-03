@@ -234,7 +234,8 @@ assert.match(nestedPreview, /\\textcolor\{blue\}\{\\mathrm\{SgChgPct\}\}_t :=/);
 assert.doesNotMatch(nestedPreview, /\\mathrm\{SgChgPct\}_t &:=/);
 assert.match(nestedPreview, /\\textcolor\{red\}\{\\mathrm\{CA\}\}/);
 assert.match(nestedPreview, /\\textcolor\{blue\}\{\\mathrm\{SgChgPct\}\}/);
-assert.match(nestedPreview, /\\operatorname\{argmin\}[^]*;/);
+assert.match(nestedPreview, /\\textcolor\{blue\}\{\\mathrm\{SgChgPct\}\}_t :=[^]*;/);
+assert.doesNotMatch(nestedPreview, /\\operatorname\{argmin\}[^]*;$/);
 assert.ok(
     nestedPreview.indexOf("\\mathrm{SgChgPct}_t :=")
     < nestedPreview.indexOf("\\operatorname{argmin}"),
@@ -263,14 +264,12 @@ assert.ok(
     navigated.at(-1), `/factor-series?factor_ref=${encodeURIComponent(factorRef)}`,
   );
   const parameterTable = walk(content).find(item => (
-    item.headers?.[0] === "参数"
+    item.className?.includes("factor-detail-parameter-editor")
   ));
   assert.ok(parameterTable);
-  assert.deepStrictEqual(parameterTable.headers, ["参数", "参数类别", "默认值", "值"]);
-  assert.ok(parameterTable.values.some(row => row[0] === "N"));
-  assert.strictEqual(parameterTable.values[0][1].children[0].textContent, "WindowParam");
-  assert.strictEqual(parameterTable.values[0][1].children[1], " ");
-  assert.match(parameterTable.values[0][1].children[2].helpText, /窗口长度/);
+  assert.equal(parameterTable.children[0].children.length, 4);
+  assert.ok(walk(parameterTable).some(item => item.textContent === "N"));
+  assert.ok(walk(parameterTable).some(item => item.textContent === "WindowParam"));
   const provenance = walk(content).find(item => (
     item.headers?.[0] === "RunSpec 字段"
   ));
@@ -318,20 +317,20 @@ assert.ok(
       parameter_definitions: [{alias: "N", type: "WindowParam", default_value: "20d"}],
     }],
   }, nestedOuterRef);
-  const outerTable = walk(nestedViewContext.content).find(item => (
-    item.headers?.[0] === "参数" && !item.className?.includes("factor-detail-parameter-tree-nested")
+  const outerTree = walk(nestedViewContext.content).find(item => (
+    item.className?.includes("factor-detail-parameter-tree")
+      && !item.className?.includes("factor-detail-parameter-tree-nested")
   ));
-  const nestedViewTree = outerTable?.values
-    .filter(row => row?.fullWidth === true)
-    .map(row => row.content)
-    .find(item => item.className?.includes("factor-detail-parameter-tree-nested"));
+  const nestedViewTree = walk(outerTree).find(item => (
+    item.className?.includes("factor-detail-parameter-tree-nested")
+  ));
   assert.ok(nestedViewTree, "view mode must render the nested factor table as a full-width row");
   assert.equal(nestedViewTree.dataset.parameterAlias, "Th");
   const nestedViewTable = walk(nestedViewTree).find(item => (
-    item.headers?.[0] === "参数"
+    item.className?.includes("factor-detail-parameter-editor")
   ));
   assert.ok(nestedViewTable);
-  assert.strictEqual(nestedViewTable.values[0][1].children[0].textContent, "WindowParam");
+  assert.ok(walk(nestedViewTable).some(item => item.textContent === "WindowParam"));
   assert.ok(
     !walk(nestedViewTree).some(item => item.headers?.[0] === "RunSpec 字段"),
     "parameter tab must not contain factor identity tables",
@@ -344,16 +343,22 @@ assert.ok(
     !outerIdentityTable.values.some(row => row?.fullWidth === true),
     "identity tab must not inline nested factor identity rows",
   );
-  const nestedParameterRow = outerTable.values.find(row => row?.[0] === "Th");
+  const nestedParameterRow = walk(outerTree).find(item => (
+    item.className?.includes("factor-detail-parameter-row")
+      && item.children?.[0]?.textContent === "Th"
+  ));
   assert.ok(nestedParameterRow);
-  const nestedValueCell = nestedParameterRow[3];
+  const nestedValueCell = nestedParameterRow.children[3];
   assert.ok(nestedValueCell.children);
-  assert.equal(nestedValueCell.children[0].textContent, "MmThreshold|N:5d");
-  assert.equal(
-    nestedValueCell.children[1], " ",
-    "help icon must be separated from the alias by one space",
-  );
-  const nestedIdentityIcon = nestedValueCell.children[2];
+  assert.ok(walk(nestedValueCell).some(item => (
+    item.textContent === "MmThreshold|N:5d"
+  )));
+  const nestedValueContent = nestedValueCell.children[0];
+  assert.equal(nestedValueContent.children[1], " ",
+    "help icon must be separated from the alias by one space");
+  const nestedIdentityIcon = walk(nestedValueCell).find(item => (
+    item.className === "ft-help-icon"
+  ));
   assert.equal(nestedIdentityIcon.className, "ft-help-icon");
   assert.equal(nestedIdentityIcon.textContent, "?");
   assert.ok(rendered.some(item => /MmThreshold/.test(item.expression)));
@@ -397,13 +402,17 @@ assert.ok(
     },
     historicalFactorRef,
   );
-  const historicalParameterTable = walk(historicalContext.content).find(
-    item => item.headers?.[0] === "参数",
-  );
+  const historicalParameterTable = walk(historicalContext.content).find(item => (
+    item.className?.includes("factor-detail-parameter-editor")
+  ));
   assert.ok(historicalParameterTable);
-  const historicalParameter = historicalParameterTable.values.find(row => row[0] === "N");
-  assert.strictEqual(historicalParameter[1].children[0].textContent, "WindowParam");
-  assert.strictEqual(historicalParameter[2], "20d");
+  const historicalParameter = walk(historicalParameterTable).find(item => (
+    item.className?.includes("factor-detail-parameter-row")
+      && item.children?.[0]?.textContent === "N"
+  ));
+  assert.ok(historicalParameter);
+  assert.ok(walk(historicalParameter).some(item => item.textContent === "WindowParam"));
+  assert.equal(historicalParameter.children[2].textContent, "20d");
 
   const currentFamilyContext = {
     ...context,

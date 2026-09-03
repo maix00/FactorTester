@@ -21,7 +21,26 @@ global.document = {createElement: tag => new Element(tag)};
 global.window = globalThis;
 global.FTUI = window.FTUI = {helpIcon: () => new Element("span")};
 window.FTFactorDetailShared = {
+  createParameterList(_context, parameters, initial, options) {
+    const values = {...initial};
+    const root = new Element("section");
+    root.className = "factor-detail-parameter-editor";
+    for (const parameter of parameters) {
+      const row = new Element("div");
+      const value = new Element("div");
+      const alias = parameter.alias || parameter.name;
+      values[alias] = values[alias] ?? parameter.default_value ?? "";
+      const rendered = options.renderValue(
+        value, parameter, values[alias], values, row,
+      );
+      row.append(value);
+      root.append(row);
+      if (rendered?.nested) root.append(rendered.nested);
+    }
+    return {root, values};
+  },
   familySourceHelp: () => new Element("span"),
+  localFormula: () => ({root: new Element("div"), update() {}}),
   previewExpression: () => "",
   parameterTable: () => {
     const table = new Element("details");

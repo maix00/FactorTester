@@ -259,7 +259,7 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .ft-help-icon:hover { color: var(--accent); border-color: var(--accent); }
 .ft-help-icon:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 2px; }
 .ft-help-bubble { position: fixed; z-index: 120; width: max-content; max-width: min(360px, calc(100vw - 16px)); box-sizing: border-box; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; color: var(--text); background: var(--panel); box-shadow: 0 12px 28px #0004; font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
-.ft-help-overlay { z-index: 130; border: 0; border-radius: 16px; padding: 0; background: transparent; color: inherit; box-shadow: 0 24px 80px #0006; }
+.ft-help-overlay { position: fixed; inset: 0; z-index: 1000 !important; margin: auto; border: 0; border-radius: 16px; padding: 0; background: transparent; color: inherit; box-shadow: 0 24px 80px #0006; }
 .ft-help-overlay::backdrop { background: #0005; backdrop-filter: blur(3px); }
 .ft-help-overlay-card { width: min(620px, 92vw); max-height: min(720px, calc(100vh - 48px)); overflow: auto; }
 .ft-help-overlay-body { min-width: 0; color: inherit; line-height: 1.55; }
@@ -316,8 +316,16 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-detail-parameter-tree-heading { grid-column: 1; display: inline-flex; align-items: center; gap: .25em; padding-left: 16px; min-width: 0; overflow-wrap: anywhere; }
 .factor-detail-family-source-help { flex: 0 0 auto; }
 .factor-detail-parameter-formula { grid-column: 2; min-width: 0; overflow-x: auto; color: var(--text); }
+.factor-detail-local-formula { position: relative; display: block; min-width: 0; }
+.factor-detail-local-formula-controls { position: absolute; top: 0; right: 0; z-index: 1; display: flex; gap: 2px; }
+.factor-detail-local-formula .factor-detail-parameter-formula { padding: 0 72px 0 0; box-sizing: border-box; }
+.factor-detail-local-formula-toggle { border: 1px solid var(--line); border-radius: 5px; padding: 2px 5px; background: var(--panel); color: var(--muted); font: 10px ui-monospace, monospace; }
 .factor-detail-parameter-tree-body { display: grid; gap: 10px; min-width: 0; padding: 10px; }
 .factor-detail-parameter-tree .table-shell { max-height: none; overflow-y: visible; }
+.factor-detail-parameter-tree .table-shell,
+.factor-detail-parameter-tree .table-shell table { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+.factor-detail-parameter-tree .table-shell th,
+.factor-detail-parameter-tree .table-shell td { padding: 10px 12px; vertical-align: middle; }
 .factor-detail-parameter-tree .shared-table-full-width-row > td { padding: 0; }
 .factor-detail-parameter-tree-nested { width: 100%; margin-left: 0; box-sizing: border-box; }
 .factor-detail-parameter-tree-nested .factor-detail-parameter-tree-header { background: color-mix(in srgb, var(--accent) 4%, var(--soft)); }

@@ -7,13 +7,51 @@
       : ["math_expr", "formula", "latex", "factor_expr", "expression", "resolved_math_expr"];
     for (const key of keys) {
       const candidate = value?.[key];
-      if (typeof candidate === "string" && candidate.trim()) return stripBarMapping(candidate.trim());
+      if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
     }
     return "";
   }
 
-  function stripBarMapping(value) {
-    return String(value).replace(/^\\left\[\s*t\\s*\\mapsto\s*([\s\S]*)\\right\]$/, "$1").trim();
+  function localFormula(context, value, values = {}) {
+    const root = document.createElement("div");
+    root.className = "factor-detail-local-formula";
+    const controls = document.createElement("div");
+    controls.className = "factor-detail-local-formula-controls";
+    const formulaMount = document.createElement("div");
+    formulaMount.className = "factor-detail-parameter-formula display-math";
+    let mode = "B1";
+    const render = () => {
+      const source = mode === "B1" ? expression(value) : valueFormula(value, values);
+      formulaMount.replaceChildren?.();
+      if (window.katex) window.katex.render(source || "", formulaMount, {
+        displayMode: true, throwOnError: false,
+      });
+      else formulaMount.textContent = source;
+    };
+    ["B1", "B2"].forEach(label => {
+      const button = document.createElement("button");
+      button.type = "button"; button.className = "factor-detail-local-formula-toggle";
+      button.textContent = label;
+      button.addEventListener("click", () => { mode = label; render(); });
+      controls.append(button);
+    });
+    root.append(controls, formulaMount); render();
+    return {root, update: next => { values = next || {}; render(); }};
+  }
+
+  function valueFormula(value, values) {
+    let result = expression(value);
+    for (const parameter of parameterRows(value)) {
+      const alias = String(parameter.alias || "").trim();
+      if (!alias) continue;
+      const raw = Object.prototype.hasOwnProperty.call(values, alias)
+        ? values[alias] : parameter.value ?? parameter.default_value;
+      const nested = nestedPreviewValue(raw, parameter);
+      const shown = nested ? familySymbol(nested.value) : latexValue(previewScalarValue(raw ?? alias));
+      const token = new RegExp("\\\\textcolor\\{red\\}\\{" + escapeRegExp(alias) + "\\}", "g");
+      result = result.replace(token, "\\textcolor{red}{" + shown + "}");
+    }
+    return result;
   }
 
   function previewExpression(value, parameterValues = {}) {
@@ -28,7 +66,7 @@
     const separator = " " + "\\" + "\\";
     return [
       "\\begin{aligned}",
-      [...rendered.lines, `${stripFormulaEnvironment(rendered.body)};`]
+      [...rendered.lines, stripFormulaEnvironment(rendered.body)]
         .join(separator),
       "\\end{aligned}",
     ].join("\n");
@@ -79,10 +117,14 @@
       const bodyLines = body.split(/\s*\\\\\s*/).map(line => line.trim())
         .filter(Boolean);
       if (bodyLines.length > 1) {
-        bodyLines[bodyLines.length - 1] = childDefinition(blue(familySymbol(nested.value)), bodyLines[bodyLines.length - 1], false);
+        bodyLines[bodyLines.length - 1] = childDefinition(
+          blue(familySymbol(nested.value)), bodyLines[bodyLines.length - 1], false, ";",
+        );
         lines.push(...bodyLines);
       } else {
-        lines.push(childDefinition(blue(familySymbol(nested.value)), body, true));
+        lines.push(childDefinition(
+          blue(familySymbol(nested.value)), body, true, ";",
+        ));
       }
     }
   }
@@ -490,6 +532,39 @@
     return parameterTree(context, value, rows, 0, options);
   }
 
+  function createParameterList(context, parameters = [], initial = {}, options = {}) {
+    const values = {...initial};
+    const root = document.createElement("section");
+    root.className = ["factor-detail-parameter-editor", options.readOnly ? "is-read-only" : ""]
+      .filter(Boolean).join(" ");
+    const header = document.createElement("div");
+    header.className = "factor-detail-parameter-header";
+    ["Key", "参数类型", "默认值", "Value"].forEach(label => {
+      const cell = document.createElement("b"); cell.textContent = context.t(label); header.append(cell);
+    });
+    root.append(header);
+    for (const parameter of parameters) {
+      const alias = String(parameter?.alias || parameter?.name || "").trim();
+      if (!alias) continue;
+      const row = document.createElement("div");
+      row.className = "factor-detail-parameter-row";
+      const key = document.createElement("b"); key.className = "factor-detail-parameter-key"; key.textContent = alias;
+      const type = parameterType(context, parameter);
+      const defaultValue = document.createElement("code"); defaultValue.className = "factor-detail-parameter-default";
+      defaultValue.textContent = String(parameter.default_value ?? "");
+      const value = document.createElement("div"); value.className = "factor-detail-parameter-value";
+      const initialValue = values[alias] ?? parameter.default_value ?? "";
+      values[alias] = initialValue;
+      const result = options.renderValue?.(value, parameter, initialValue, values, row) || {};
+      if (!result.control && !value.childElementCount) value.textContent = parameterDisplayValue(parameter) ?? "";
+      if (result.nested) row.classList?.add?.("factor-detail-parameter-row-factor");
+      row.append(key, type, defaultValue, value);
+      root.append(row);
+      if (result.nested) root.append(result.nested);
+    }
+    return {root, values};
+  }
+
   function parameterTree(
     context, value, rows = parameterRows(value), depth = 0, options = {},
   ) {
@@ -512,32 +587,26 @@
     header.append(heading);
     // The tree header is the family formula.  The resolved/aggregated
     // instance formula belongs to the page-level formula box above it.
-    const formulaValue = expression(value);
-    if (formulaValue) header.append(formula(context, formulaValue));
+    const local = localFormula(context, value, Object.fromEntries(rows.map(row => [row.alias, row.value])));
+    header.append(local.root);
     const body = document.createElement("div");
     body.className = "factor-detail-parameter-tree-body";
-    const tableRows = [];
-    for (const parameter of rows) {
-      tableRows.push([
-        parameter.alias,
-        parameterType(context, parameter),
-        parameter.redacted ? context.t("已隐藏") : String(parameter.default_value ?? ""),
-        parameter.redacted ? context.t("已隐藏") : parameterValueCell(context, parameter),
-      ]);
-      if (!parameter.nested_factor) continue;
-      const nestedRows = parameterRows(parameter.nested_factor, options);
-      if (!nestedRows.length) continue;
-      const nested = parameterTree(
-        context, parameter.nested_factor, nestedRows, depth + 1, options,
-      );
-      nested.dataset.parameterAlias = parameter.alias;
-      nested.className = `${nested.className || ""} factor-detail-nested-parameter-row`.trim();
-      tableRows.push({fullWidth: true, content: nested});
-    }
-    body.append(FTUI.table(
-      [context.t("参数"), context.t("参数类别"), context.t("默认值"), context.t("值")],
-      tableRows,
-    ).shell);
+    const list = createParameterList(context, rows, Object.fromEntries(rows.map(row => [row.alias, row.value])), {
+      readOnly: true,
+      renderValue: (value, parameter) => {
+        const displayed = parameter.redacted ? context.t("已隐藏") : parameterValueCell(context, parameter);
+        if (displayed && typeof displayed === "object" && typeof displayed.append === "function") value.append(displayed);
+        else value.textContent = String(displayed ?? "");
+        if (!parameter.nested_factor) return {control: true};
+        const nestedRows = parameterRows(parameter.nested_factor, options);
+        if (!nestedRows.length) return {control: true};
+        const nested = parameterTree(context, parameter.nested_factor, nestedRows, depth + 1, options);
+        nested.dataset.parameterAlias = parameter.alias;
+        nested.className = `${nested.className || ""} factor-detail-nested-parameter-row`.trim();
+        return {control: true, nested};
+      },
+    });
+    body.append(list.root);
     root.append(header, body);
     return root;
   }
@@ -588,9 +657,10 @@
     return root;
   }
 
-  function childDefinition(symbol, line, align) {
-    const output = String(line).match(/^(?:X|\\mathrm\{X\})_t\s*&?\s*:=\s*(.+)$/);
-    return `${output ? "" : align ? "& " : ""}${symbol}_t := ${output ? output[1] : line}`;
+  function childDefinition(symbol, line, align, punctuation = "") {
+    const clean = String(line).trim().replace(/[.;]\s*$/, "");
+    const output = clean.match(/^(?:X|\\mathrm\{X\})_t\s*&?\s*:=\s*(.+)$/);
+    return `${output ? "" : align ? "& " : ""}${symbol}_t := ${output ? output[1] : clean}${punctuation}`;
   }
 
   function formula(context, value) {
@@ -600,7 +670,7 @@
       window.katex.render(value, root, {displayMode: true, throwOnError: false});
     } else {
       root.textContent = value;
-      root.classList.add("factor-family-formula-raw");
+      root.classList?.add?.("factor-family-formula-raw");
     }
     return root;
   }
@@ -952,7 +1022,7 @@
 
   window.FTFactorDetailShared = Object.freeze({
     expression, loadSourceVersions, loadSourceVersion,
-    parameterRows, parameterValues,
+    parameterRows, parameterValues, createParameterList, localFormula,
     familyIdentity, familySourceHelp, fieldRow, helpIcon, parameterTable,
     previewExpression,
     pageClass, provenance, source,

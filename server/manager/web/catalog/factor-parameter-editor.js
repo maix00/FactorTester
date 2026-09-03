@@ -2,58 +2,31 @@
   "use strict";
 
   function create(context, parameters = [], initial = {}, options = {}) {
-    const values = {...initial};
-    const root = document.createElement("section");
-    root.className = [
-      "factor-detail-parameter-editor",
-      options.readOnly ? "is-read-only" : "",
-    ].filter(Boolean).join(" ");
-    const header = document.createElement("div");
-    header.className = "factor-detail-parameter-header";
-    ["Key", "参数类型", "默认值", "Value"].forEach(label => {
-      const cell = document.createElement("b");
-      cell.textContent = context.t(label);
-      header.append(cell);
-    });
-    root.append(header);
-    for (const parameter of parameters) {
-      const alias = String(parameter?.alias || parameter?.name || "").trim();
-      if (!alias) continue;
-      const row = document.createElement("div");
-      row.className = "factor-detail-parameter-row";
-      const key = document.createElement("b");
-      key.className = "factor-detail-parameter-key";
-      key.textContent = alias;
-      const type = parameterType(context, parameter);
-      const defaultValue = document.createElement("code");
-      defaultValue.className = "factor-detail-parameter-default";
-      defaultValue.textContent = displayValue(parameter.default_value);
-      const value = document.createElement("div");
-      value.className = "factor-detail-parameter-value";
-      const initialValue = values[alias] ?? parameter.default_value ?? "";
-      values[alias] = initialValue;
-      let nestedMount = null;
-      if (parameter.type === "FactorParam") {
-        row.classList?.add?.("factor-detail-parameter-row-factor");
-        nestedMount = renderReference(
-          context, value, parameter, initialValue, values, options,
-        );
-      } else {
-        const input = document.createElement("input");
-        input.type = "text";
-        input.readOnly = Boolean(options.readOnly);
-        input.value = initialValue;
-        input.addEventListener("input", () => {
-          values[alias] = input.value;
-          options.onChange?.(values, alias);
-        });
-        value.append(input);
-      }
-      row.append(key, type, defaultValue, value);
-      root.append(row);
-      if (nestedMount) root.append(nestedMount);
+    const shared = window.FTFactorDetailShared?.createParameterList;
+    if (shared) {
+      return shared(context, parameters, initial, {
+        ...options,
+        renderValue: (value, parameter, initialValue, values, row) => {
+          const alias = String(parameter?.alias || parameter?.name || "").trim();
+          if (parameter.type === "FactorParam") {
+            row.classList?.add?.("factor-detail-parameter-row-factor");
+            const nested = renderReference(context, value, parameter, initialValue, values, options);
+            return {control: true, nested};
+          }
+          const input = document.createElement("input");
+          input.type = "text";
+          input.readOnly = Boolean(options.readOnly);
+          input.value = initialValue;
+          input.addEventListener("input", () => {
+            values[alias] = input.value;
+            options.onChange?.(values, alias);
+          });
+          value.append(input);
+          return {control: true};
+        },
+      });
     }
-    return {root, values};
+    throw new Error("FTFactorDetailShared.createParameterList is required");
   }
 
   function renderReference(context, row, parameter, initialValue, values, options) {
@@ -340,33 +313,16 @@
         title, " ", window.FTFactorDetailShared.familySourceHelp(context, family),
       );
       heading.append(headingName);
-      const formulaValue = window.FTFactorDetailShared.previewExpression(
-        family, draft.parameter_values || {},
+      const formula = window.FTFactorDetailShared.localFormula(
+        context, family, draft.parameter_values || {},
       );
-      let formula = null;
-      if (formulaValue) {
-        formula = document.createElement("div");
-        formula.className = "factor-detail-parameter-formula display-math";
-        if (window.katex) window.katex.render(formulaValue, formula, {
-          displayMode: true, throwOnError: false,
-        });
-        else formula.textContent = formulaValue;
-        heading.append(formula);
-      }
+      heading.append(formula.root);
       const nested = create(
         context, familyParameters(family), draft.parameter_values || {}, {
           ...options,
           depth: (options.depth || 0) + 1,
           onChange: () => {
-            if (formula) {
-              const next = window.FTFactorDetailShared.previewExpression(
-                family, nested.values,
-              );
-              if (window.katex) window.katex.render(next, formula, {
-                displayMode: true, throwOnError: false,
-              });
-              else formula.textContent = next;
-            }
+            formula.update(nested.values);
             options.onChange?.(values, alias);
           },
         },

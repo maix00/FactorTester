@@ -359,7 +359,7 @@ def test_bar_search_latex_formats_selection_parentheses_and_resolved_scope():
 
     latex = expr.to_latex()
 
-    assert r"\left[t\mapsto" in latex
+    assert r"\left[t\mapsto" not in latex
     assert (
         r"\underset{[t-k,t]\in\operatorname{ScopeBars}\left(3\right)}"
         r"{\operatorname{argmin}}" in latex
@@ -367,6 +367,7 @@ def test_bar_search_latex_formats_selection_parentheses_and_resolved_scope():
     assert r"X_t:=X" in latex
     assert r"\left\{k\middle|" in latex
     assert r"\end{aligned}\right\}" in latex
+    assert r"\right\}]" not in latex
 
 
 def test_bar_since_latex_uses_argmin_or_argmax_over_named_scope():

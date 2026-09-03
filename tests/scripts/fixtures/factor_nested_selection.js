@@ -43,6 +43,13 @@ vm.runInThisContext(
   {filename: "factor-detail-shared.js"},
 );
 const pickers = [];
+function descendants(root) {
+  const result = [];
+  for (const child of root?.children || []) {
+    result.push(child, ...descendants(child));
+  }
+  return result;
+}
 window.FTTestObjectPicker = {
   create(_context, options) {
     const picker = {
@@ -133,16 +140,12 @@ assert.ok(factorPicker, "FactorParam must expose a factor picker");
   await factorPicker.options.onChange([childRef]);
   assert.equal(resolveCalls, 1, "selected factors must be enriched lazily");
   assert.equal(latestValues.Th.parameter_definitions[2].type, "WindowParam");
-  const nestedTables = [];
-  const visit = value => {
-    if (!value || typeof value !== "object") return;
-    if (value.tagName === "TABLE") nestedTables.push(value);
-    (value.children || []).forEach(visit);
-  };
-  visit(editor.root);
-  const nested = nestedTables.find(table => table.headers?.length === 4);
+  const nested = descendants(editor.root).find(item => (
+    item.className?.includes("factor-detail-parameter-editor")
+      && item !== editor.root
+  ));
   assert.ok(nested, "selected factors must render a nested read-only table");
-  assert.equal(nested.values[2][1].children[0].textContent, "WindowParam");
+  assert.ok(descendants(nested).some(item => item.textContent === "WindowParam"));
 
   const preview = window.FTFactorDetailShared.previewExpression(
     outerFamily, latestValues,
