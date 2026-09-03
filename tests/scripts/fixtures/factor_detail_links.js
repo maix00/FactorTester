@@ -61,7 +61,13 @@ vm.runInThisContext(
   {filename: "shared-ui.js"},
 );
 global.FTUI = window.FTUI = Object.assign(window.FTUI || {}, {
-  helpIcon(text) { const item = new Element("button"); item.helpText = text; return item; },
+  helpIcon(text) {
+    const item = new Element("button");
+    item.helpText = text;
+    item.className = "ft-help-icon";
+    item.textContent = "?";
+    return item;
+  },
   code(value, options = {}) {
     const pre = new Element("pre");
     pre.className = ["json-code", "code-viewer", options.className || ""]
@@ -262,7 +268,8 @@ assert.ok(
   assert.deepStrictEqual(parameterTable.headers, ["参数", "参数类别", "默认值", "值"]);
   assert.ok(parameterTable.values.some(row => row[0] === "N"));
   assert.strictEqual(parameterTable.values[0][1].children[0].textContent, "WindowParam");
-  assert.match(parameterTable.values[0][1].children[1].helpText, /窗口长度/);
+  assert.strictEqual(parameterTable.values[0][1].children[1], " ");
+  assert.match(parameterTable.values[0][1].children[2].helpText, /窗口长度/);
   const provenance = walk(content).find(item => (
     item.headers?.[0] === "RunSpec 字段"
   ));
@@ -330,24 +337,24 @@ assert.ok(
   );
   const outerIdentityTable = walk(nestedViewContext.content).find(item => (
     item.headers?.[0] === "RunSpec 字段"
-    && item.values.some(row => row?.fullWidth === true)
   ));
+  assert.ok(outerIdentityTable);
   assert.ok(
-    outerIdentityTable,
-    "identity tab must render nested factor identity as a full-width row",
+    !outerIdentityTable.values.some(row => row?.fullWidth === true),
+    "identity tab must not inline nested factor identity rows",
   );
-  const nestedIdentitySection = outerIdentityTable.values
-    .filter(row => row?.fullWidth === true)
-    .map(row => row.content)
-    .find(item => item.dataset?.parameterAlias === "Th");
-  assert.ok(nestedIdentitySection);
-  const nestedIdentityTable = walk(nestedIdentitySection).find(item => (
-    item.headers?.[0] === "RunSpec 字段"
-  ));
-  assert.ok(nestedIdentityTable);
-  assert.ok(nestedIdentityTable.values.some(row => (
-    row[1].children?.[0]?.textContent === "MmThreshold"
-  )));
+  const nestedParameterRow = outerTable.values.find(row => row?.[0] === "Th");
+  assert.ok(nestedParameterRow);
+  const nestedValueCell = nestedParameterRow[3];
+  assert.ok(nestedValueCell.children);
+  assert.equal(nestedValueCell.children[0].textContent, "MmThreshold|N:5d");
+  assert.equal(
+    nestedValueCell.children[1], " ",
+    "help icon must be separated from the alias by one space",
+  );
+  const nestedIdentityIcon = nestedValueCell.children[2];
+  assert.equal(nestedIdentityIcon.className, "ft-help-icon");
+  assert.equal(nestedIdentityIcon.textContent, "?");
   assert.ok(rendered.some(item => /MmThreshold/.test(item.expression)));
 
   const historicalFactorRef = "factor:sha256:historical-factor";

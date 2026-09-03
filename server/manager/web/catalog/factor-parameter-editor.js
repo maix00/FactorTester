@@ -337,7 +337,7 @@
       const title = document.createElement("b");
       title.textContent = familyLabel(family);
       headingName.append(
-        title, window.FTFactorDetailShared.familySourceHelp(context, family),
+        title, " ", window.FTFactorDetailShared.familySourceHelp(context, family),
       );
       heading.append(headingName);
       const formulaValue = window.FTFactorDetailShared.previewExpression(
@@ -415,7 +415,7 @@
     const help = String(parameter.input_help || parameter.desc
       || parameter.value_space_desc || context.t("填写该参数类型允许的值。"))
       .trim();
-    root.append((window.FTUI?.helpIcon || window.FTHelp?.create)(help, {
+    root.append(" ", (window.FTUI?.helpIcon || window.FTHelp?.create)(help, {
       ariaLabel: context.t("查看参数类型说明"),
     }));
     return root;

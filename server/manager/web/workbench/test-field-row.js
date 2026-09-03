@@ -34,7 +34,7 @@
     const helpValue = options.help || help;
     const tooltip = helpText(options.title || helpValue);
     if (helpValue && (tooltip || typeof helpValue === "object")) {
-      heading.append(helpIcon(helpValue));
+      heading.append(" ", helpIcon(helpValue));
     }
     copy.append(heading);
     if (options.disabledReason) {
