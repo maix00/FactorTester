@@ -706,7 +706,8 @@ def test_validate_transient_duration_factor_supports_bar_distance_source() -> No
     assert payload["valid"] is True, payload
     assert payload["normalized_params"]["Th"] == "0.001"
     assert payload["normalized_params"]["K"] == "30m"
-    assert r"\operatorname{argmin}" in payload["math_expr"]
+    assert r"\min_{[t-k,t]\in" in payload["math_expr"]
+    assert r"\operatorname{argm" not in payload["math_expr"]
     assert r"\operatorname{ScopeBars}" in payload["math_expr"]
     assert (
         r"\operatorname{ScopeBars}\left(\textcolor{red}{K}\right)"

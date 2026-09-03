@@ -15,17 +15,17 @@ from .operands import OperandExpr
 Selection = Literal["nearest", "farthest"]
 
 
-def _selection_latex(select: Selection) -> str:
-    return "argmin" if select == "nearest" else "argmax"
-
-
 def _search_latex(
     *, scope: LookbackScope, select: Selection, body: str,
     subst: dict | None = None,
 ) -> str:
+    # nearest selects the smallest k, farthest the largest k — render as the
+    # ordinary \min / \max with the scope as a subscript.  argmin/argmax
+    # (with \underset stacking) is not what is being computed and reads wrong.
+    operator = "\\min" if select == "nearest" else "\\max"
+    subscript = f"[t-k,t]\\in{scope.to_latex(subst)}"
     return (
-        f"\\underset{{[t-k,t]\\in{scope.to_latex(subst)}}}"
-        f"{{\\operatorname{{{_selection_latex(select)}}}}}"
+        f"{operator}_{{{subscript}}}"
         "\\left\\{k\\middle|"
         f"\\begin{{aligned}}{body}\\end{{aligned}}"
         "\\right\\}"

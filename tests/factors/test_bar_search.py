@@ -346,8 +346,11 @@ def test_bar_search_identity_and_latex_include_scope_and_selection():
     )
 
     assert nearest.semantic_fingerprint() != farthest.semantic_fingerprint()
-    assert r"\operatorname{argmin}" in nearest.to_latex()
-    assert r"\operatorname{argmax}" in farthest.to_latex()
+    assert r"\min_{[t-k,t]\in" in nearest.to_latex()
+    assert r"\max_{[t-k,t]\in" in farthest.to_latex()
+    assert r"\operatorname{argm" not in nearest.to_latex()
+    assert r"\operatorname{argm" not in farthest.to_latex()
+    assert r"\underset" not in nearest.to_latex()
 
 
 def test_bar_search_latex_formats_selection_parentheses_and_resolved_scope():
@@ -361,10 +364,11 @@ def test_bar_search_latex_formats_selection_parentheses_and_resolved_scope():
 
     assert r"\left[t\mapsto" not in latex
     assert (
-        r"\underset{[t-k,t]\in\operatorname{ScopeBars}\left(3\right)}"
-        r"{\operatorname{argmin}}" in latex
+        r"\min_{[t-k,t]\in\operatorname{ScopeBars}\left(3\right)}"
+        r"\left\{k\middle|" in latex
     )
-    assert r"X_t:=X" in latex
+    assert r"\underset" not in latex
+    assert r"\operatorname{argm" not in latex
     assert r"\left\{k\middle|" in latex
     assert r"\end{aligned}\right\}" in latex
     assert r"\right\}]" not in latex
@@ -379,13 +383,15 @@ def test_bar_since_latex_uses_argmin_or_argmax_over_named_scope():
     )
 
     assert (
-        r"\underset{[t-k,t]\in\operatorname{ScopeTradingDay}}"
-        r"{\operatorname{argmin}}" in nearest.to_latex()
+        r"\min_{[t-k,t]\in\operatorname{ScopeTradingDay}}"
+        r"\left\{k\middle|" in nearest.to_latex()
     )
     assert (
-        r"\underset{[t-k,t]\in\operatorname{ScopeSession}\left(\mathrm{2h}\right)}"
-        r"{\operatorname{argmax}}" in farthest.to_latex()
+        r"\max_{[t-k,t]\in\operatorname{ScopeSession}\left(\mathrm{2h}\right)}"
+        r"\left\{k\middle|" in farthest.to_latex()
     )
+    assert r"\operatorname{argm" not in nearest.to_latex()
+    assert r"\underset" not in farthest.to_latex()
 
 
 def test_match_placeholders_cannot_escape_bar_distance_condition():
