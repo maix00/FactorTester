@@ -342,10 +342,10 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-param-nested-family-name { flex: 0 1 auto; display: inline-flex; align-items: center; gap: .25em; min-width: 0; max-width: 34%; }
 .factor-param-nested-family-header .factor-detail-parameter-formula { flex: 1 1 auto; min-width: 0; overflow-x: auto; }
 .factor-param-nested-family > .factor-detail-parameter-editor { border: 0; border-radius: 0; }
-.factor-param-reference-control { display: grid; grid-template-columns: minmax(8rem, .38fr) minmax(0, 1fr); align-items: center; gap: 10px; min-width: 0; }
+.factor-param-reference-control { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 10px; min-width: 0; }
 .factor-param-reference-control > * { min-width: 0; }
 .factor-param-reference-control > .ft-test-object-picker,
-.factor-param-reference-control > .ft-multi-select-filter { width: 100%; max-width: none; box-sizing: border-box; }
+.factor-param-reference-control > .ft-multi-select-filter { width: max-content; max-width: none; box-sizing: border-box; }
 .factor-param-active-source { display: flex; align-items: stretch; min-width: 0; width: 100%; }
 .factor-param-active-source > input,
 .factor-param-active-source > .ft-test-object-picker,
@@ -361,7 +361,7 @@ tbody tr[data-href]:hover { background: var(--soft); }
   .factor-detail-parameter-type::before { content: "参数类型"; display: block; color: var(--muted); font-size: 10px; }
   .factor-detail-parameter-default::before { content: "默认值"; display: block; color: var(--muted); font: 500 10px/1.3 system-ui, sans-serif; }
   .factor-detail-parameter-value::before { content: "Value"; display: block; margin-bottom: 5px; color: var(--muted); font-size: 10px; }
-  .factor-param-reference-control { grid-template-columns: minmax(6rem, auto) minmax(0, 1fr); }
+  .factor-param-reference-control { grid-template-columns: max-content minmax(0, 1fr); }
   .factor-param-family-source { grid-template-columns: minmax(0, 1fr); }
   .factor-param-family-source > .factor-param-create-family { justify-self: start; }
 }
