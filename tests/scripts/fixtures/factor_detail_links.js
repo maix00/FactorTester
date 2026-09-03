@@ -10,6 +10,7 @@ class Element {
     this.dataset = {};
     this.attributes = {};
     this.className = "";
+    this.style = {setProperty: (name, value) => { this[name] = value; }};
     this.classList = {
       toggle: (name, enabled) => {
         const values = new Set(this.className.split(/\s+/).filter(Boolean));
