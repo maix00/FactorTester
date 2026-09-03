@@ -19,6 +19,10 @@ class Element {
     };
   }
   append(...children) { this.children.push(...children); }
+  createTHead() { const section = new Element("thead"); this.append(section); return section; }
+  createTBody() { const section = new Element("tbody"); this.append(section); return section; }
+  insertRow() { const row = new Element("tr"); this.append(row); return row; }
+  insertCell() { const cell = new Element("td"); this.append(cell); return cell; }
   replaceChildren(...children) { this.children = children; }
   addEventListener(name, handler) { this.listeners[name] = handler; }
   setAttribute(name, value) { this.attributes[name] = String(value); }
@@ -52,7 +56,11 @@ vm.runInThisContext(
   fs.readFileSync("server/manager/web/catalog/shared/object-job-table.js", "utf8"),
   {filename: "object-job-table.js"},
 );
-global.FTUI = window.FTUI = {
+vm.runInThisContext(
+  fs.readFileSync("server/manager/web/core/shared-ui.js", "utf8"),
+  {filename: "shared-ui.js"},
+);
+global.FTUI = window.FTUI = Object.assign(window.FTUI || {}, {
   helpIcon(text) { const item = new Element("button"); item.helpText = text; return item; },
   code(value, options = {}) {
     const pre = new Element("pre");
@@ -74,7 +82,7 @@ global.FTUI = window.FTUI = {
     shell._row = body.rows[0];
     return {shell, body};
   },
-};
+});
 window.FTMultiSelectFilter = {
   create(_context, options = {}) {
     const element = new Element("section");
@@ -257,7 +265,10 @@ assert.ok(
   const provenance = walk(content).find(item => (
     item.headers?.[0] === "RunSpec 字段"
   ));
-  assert.ok(provenance.values.some(row => row[0] === "冻结因子家族"));
+  const fieldText = value => (
+    typeof value === "string" ? value : value?.children?.[0]?.textContent
+  );
+  assert.ok(provenance.values.some(row => fieldText(row[0]) === "冻结因子家族"));
   assert.ok(provenance.values.some(row => row[1].children?.[0]?.textContent === "MmRateOfChg"));
 
   const nestedFactorRef = `factor:v2:${"n".repeat(43)}`;
@@ -298,10 +309,15 @@ assert.ok(
       parameter_definitions: [{alias: "N", type: "WindowParam", default_value: "20d"}],
     }],
   }, nestedOuterRef);
-  const nestedViewTree = walk(nestedViewContext.content).find(item => (
-    item.className?.includes("factor-detail-parameter-tree-nested")
+  const outerTable = walk(nestedViewContext.content).find(item => (
+    item.headers?.[0] === "参数" && !item.className?.includes("factor-detail-parameter-tree-nested")
   ));
-  assert.ok(nestedViewTree, "view mode must render the nested factor table");
+  const nestedViewTree = outerTable?.values
+    .filter(row => row?.fullWidth === true)
+    .map(row => row.content)
+    .find(item => item.className?.includes("factor-detail-parameter-tree-nested"));
+  assert.ok(nestedViewTree, "view mode must render the nested factor table as a full-width row");
+  assert.equal(nestedViewTree.dataset.parameterAlias, "Th");
   const nestedViewTable = walk(nestedViewTree).find(item => (
     item.headers?.[0] === "参数"
   ));
