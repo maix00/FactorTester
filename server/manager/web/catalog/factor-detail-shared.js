@@ -259,7 +259,7 @@
     }
     if (expressionValue) {
       const heading = document.createElement("h3");
-      heading.textContent = context.t("FactorExpr 公式");
+      heading.textContent = context.t("LaTeX 公式");
       const formula = document.createElement("div");
       formula.className = "factor-family-formula display-math";
       if (window.katex) {

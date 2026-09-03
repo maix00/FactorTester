@@ -363,7 +363,7 @@
     if (latex && window.katex) {
       const section = document.createElement("section");
       section.className = "factor-family-summary";
-      const heading = document.createElement("h3"); heading.textContent = t("FactorExpr 公式");
+      const heading = document.createElement("h3"); heading.textContent = t("LaTeX 公式");
       const formula = document.createElement("div"); formula.className = "factor-family-formula display-math";
       katex.render(String(latex), formula, {displayMode: true, throwOnError: false});
       section.append(heading, formula); root.append(section);

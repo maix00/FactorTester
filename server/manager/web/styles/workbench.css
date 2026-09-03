@@ -148,8 +148,8 @@
 .ft-object-overlay-dialog > .object-overlay-card { width: 100%; height: calc(100dvh - 32px); max-width: none; max-height: calc(100dvh - 32px); box-sizing: border-box; }
 .object-overlay-card { display: grid; grid-template-rows: auto minmax(0, 1fr); width: auto; gap: 6px; overflow: hidden; padding: 14px 16px 18px; }
 .object-overlay-card > .section-heading { display: flex; align-items: center; justify-content: flex-start; gap: 10px; min-height: 30px; margin: 0; padding: 0; }
-.object-overlay-card > .section-heading > div:first-child { flex: 1 1 auto; min-width: 0; max-width: 55%; }
-.ft-object-overlay-frame-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: 0 1 auto; margin-left: 0; min-width: 0; max-width: 45%; }
+.object-overlay-card > .section-heading > div:first-child { flex: 0 1 auto; min-width: 0; max-width: 60%; }
+.ft-object-overlay-frame-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: 0 1 auto; margin-left: auto; min-width: 0; max-width: 40%; }
 .ft-object-overlay-frame-toolbar { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-x: auto; }
 .object-overlay-card > .section-heading h2 { overflow: hidden; font-size: 16px; text-overflow: ellipsis; white-space: nowrap; margin: 0; }
 .object-overlay-card .ft-object-overlay-close { width: 28px; height: 28px; min-width: 28px; flex: 0 0 auto; padding: 0; border: 0; background: transparent; }
