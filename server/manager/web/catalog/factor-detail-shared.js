@@ -47,7 +47,7 @@
       const nested = nestedPreviewValue(raw, parameter);
       let shown;
       if (nested) {
-        shown = familySymbol(nested.value);
+        shown = blue(familySymbol(nested.value));
         appendPreviewDefinition(lines, nested, state);
       } else {
         shown = latexValue(previewScalarValue(raw));
@@ -55,7 +55,7 @@
       const token = new RegExp(
         "\\\\textcolor\\{red\\}\\{" + escapeRegExp(alias) + "\\}", "g",
       );
-      result = result.replace(token, "\\textcolor{red}{" + shown + "}");
+      result = result.replace(token, nested ? shown : "\\textcolor{red}{" + shown + "}");
     }
     return {body: result, lines};
   }
@@ -75,10 +75,10 @@
       const bodyLines = body.split(/\s*\\\\\s*/).map(line => line.trim())
         .filter(Boolean);
       if (bodyLines.length > 1) {
-        bodyLines[bodyLines.length - 1] = childDefinition(familySymbol(nested.value), bodyLines[bodyLines.length - 1], false);
+        bodyLines[bodyLines.length - 1] = childDefinition(blue(familySymbol(nested.value)), bodyLines[bodyLines.length - 1], false);
         lines.push(...bodyLines);
       } else {
-        lines.push(childDefinition(familySymbol(nested.value), body, true));
+        lines.push(childDefinition(blue(familySymbol(nested.value)), body, true));
       }
     }
   }
@@ -184,6 +184,10 @@
     );
     const safe = alias.replace(/[^\p{L}\p{N}]+/gu, "_").replace(/^_+|_+$/g, "");
     return String.raw`\mathrm{${safe || "Factor"}}`;
+  }
+
+  function blue(value) {
+    return `\\textcolor{blue}{${value}}`;
   }
 
   function latexValue(value) {

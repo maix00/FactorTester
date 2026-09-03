@@ -209,7 +209,7 @@ def _resolved_formula(
         raw = values.get(parameter.alias, getattr(parameter, "default_value", None))
         child = child_by_parameter.get(parameter.alias)
         replacement = (
-            _red(_symbol_latex(child["factor_family_alias"]))
+            _blue(_symbol_latex(child["factor_family_alias"]))
             if child is not None
             else _red(_latex_value(_display_value(parameter, raw, dependencies)))
         )
@@ -231,7 +231,7 @@ def _resolved_formula(
             # Intermediate definitions belong before the named child result;
             # put the child symbol on the final line so multiline formulas
             # read ``Child_t := final-definition := expression``.
-            child_symbol = _symbol_latex(child.get("factor_family_alias"))
+            child_symbol = _blue(_symbol_latex(child.get("factor_family_alias")))
             output = re.match(
                 r"^(?:X|\\mathrm\{X\})_t\s*&?\s*:=\s*(.+)$",
                 child_lines[-1],
@@ -281,6 +281,10 @@ def _latex_value(value: Any) -> str:
 
 def _red(value: str) -> str:
     return rf"\textcolor{{red}}{{{value}}}"
+
+
+def _blue(value: str) -> str:
+    return rf"\textcolor{{blue}}{{{value}}}"
 
 
 __all__ = ["build_factor_instance_metadata"]
