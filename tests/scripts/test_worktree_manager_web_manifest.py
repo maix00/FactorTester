@@ -2685,6 +2685,17 @@ def test_factor_details_render_latex_and_factor_set_members_open() -> None:
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
+    # Family view must render test-local families from their carried frozen
+    # value: no catalog round-trip for current source, no server version
+    # history picker.  (Family header "?" opens the family view overlay for
+    # both library and freshly created families.)
+    details = (WEB_ROOT / "catalog" / "factor-details.js").read_text(
+        encoding="utf-8"
+    )
+    assert "testObjectInitialValue" in details
+    assert "localView" in details
+    assert "canSelectVersion" in details
+    assert "withCurrentFamilySource" in details
 
 
 def test_factor_detail_route_declares_katex_runtime_dependency() -> None:
