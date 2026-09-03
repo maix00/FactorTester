@@ -84,7 +84,20 @@
       ? structuredClone(payload.shared.temporary_objects) : {};
     const selectedICGroup = state.kind === "ic"
       ? window.FTICConfigurationGroupModel?.selected?.(state)?.[0] : null;
-    state.factorRef = selectedICGroup?.factor_ref
+    // savedFactors are stored in dependency-first order (nested factors precede
+    // their owners).  savedFactors[0] is therefore never a reliable primary
+    // factor for any test kind.  Prefer the explicit factor_ref recorded in
+    // the analysis payload, then the IC group's frozen factor, then the first
+    // factor_candidate_refs entry (backtest), and only fall back to
+    // savedFactors[0] for legacy payloads that lack all of these.
+    const analysisFactorRef = state.analysis?.factor_ref
+      || selectedICGroup?.factor_ref
+      || (state.analysis?.groups || [])
+        .flatMap(group => Array.isArray(group?.factor_candidate_refs)
+          ? group.factor_candidate_refs : [])
+        .filter(Boolean)[0]
+      || "";
+    state.factorRef = analysisFactorRef
       || state.savedFactors[0]?.ref || "";
     state.groupRefs = window.FTTestProducts?.restoreReferences
       ? FTTestProducts.restoreReferences(state.analysis, applicationUI)
