@@ -336,6 +336,8 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-detail-parameter-tree-nested { width: 100%; margin-left: 0 !important; padding-left: 0 !important; border: 0 !important; border-radius: 0 !important; box-sizing: border-box; }
 .factor-detail-parameter-tree-nested { box-shadow: 0 1px 0 0 var(--line); }
 .factor-detail-parameter-tree-nested .factor-detail-parameter-tree-header { background: color-mix(in srgb, var(--accent) 4%, var(--soft)); }
+.factor-param-nested-factor-mount { min-width: 0; padding: 0; border: 0; box-sizing: border-box; }
+.factor-param-nested-factor-mount:empty { display: none; }
 .factor-param-nested-family-mount { min-width: 0; padding: 0 clamp(28px, 5vw, 84px) 12px; border-top: 1px solid var(--line); box-sizing: border-box; }
 .factor-param-nested-family-mount:empty { display: none; }
 .factor-param-nested-family { width: 100%; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); box-sizing: border-box; }

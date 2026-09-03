@@ -265,71 +265,59 @@
       createFamily.classList?.add?.("factor-param-create-family");
     }
     const nestedMount = document.createElement("div");
-    nestedMount.className = "factor-param-nested-family-mount";
+    nestedMount.className = "factor-param-nested-factor-mount";
     const renderNested = () => {
       if (nestedMount.replaceChildren) nestedMount.replaceChildren();
       else nestedMount.children = [];
       const draft = values[alias];
       if (isFrozenFactor(draft) && ["factor", "manual"].includes(activeSource)) {
-        const table = window.FTFactorDetailShared?.parameterTable?.(
-          context, draft, {
-            family: draft.family || draft.__factor_family,
-            preview: true,
-          },
-        );
-        if (table) {
-          table.classList?.add?.("factor-param-nested-factor-table");
-          nestedMount.append(table);
+        const family = draft.family || draft.__factor_family || null;
+        const shared = window.FTFactorDetailShared;
+        // Nested factors render through the same parameterSection component as
+        // the view mode (flat embedded tree with the family template formula
+        // and 参数/值 toggles); no second card structure.
+        const rows = family
+          ? shared?.parameterRows?.(draft, {family}) || []
+          : shared?.parameterRows?.(draft) || [];
+        if (rows.length) {
+          const section = shared.parameterSection(
+            context, {...draft, family}, rows, (options.depth || 0) + 1,
+          );
+          section.root.dataset.parameterAlias = alias;
+          nestedMount.append(section.root);
           return;
         }
         const fallbackRows = familyParameters(draft);
         if (fallbackRows.length) {
-          const fallbackValues = Object.fromEntries(fallbackRows.map(parameter => [
-            parameter.alias || parameter.name,
-            parameter.value ?? parameter.default_value
-              ?? draft.identity?.params?.[parameter.alias || parameter.name] ?? "",
-          ]).filter(([key]) => key));
-          const fallback = create(context, fallbackRows, fallbackValues, {
-            ...options, readOnly: true,
-            depth: (options.depth || 0) + 1,
-          });
-          fallback.root.classList?.add?.("factor-param-nested-factor-table");
-          nestedMount.append(fallback.root);
+          const section = shared.parameterSection(
+            context, {...draft, family}, fallbackRows,
+            (options.depth || 0) + 1,
+          );
+          section.root.dataset.parameterAlias = alias;
+          nestedMount.append(section.root);
         }
         return;
       }
       if (!familyDraft(draft)) return;
       const family = draft.__factor_family;
-      const details = document.createElement("details");
-      details.open = true;
-      details.className = "factor-param-nested-family";
-      const heading = document.createElement("summary");
-      heading.className = "factor-param-nested-family-header";
-      const headingName = document.createElement("span");
-      headingName.className = "factor-param-nested-family-name";
-      const title = document.createElement("b");
-      title.textContent = familyLabel(family);
-      headingName.append(
-        title, " ", window.FTFactorDetailShared.familySourceHelp(context, family),
-      );
-      heading.append(headingName);
-      const formula = window.FTFactorDetailShared.localFormula(
-        context, family, draft.parameter_values || {},
-      );
-      heading.append(formula.root);
+      const nestedValues = draft.parameter_values || {};
       const nested = create(
-        context, familyParameters(family), draft.parameter_values || {}, {
+        context, familyParameters(family), nestedValues, {
           ...options,
           depth: (options.depth || 0) + 1,
           onChange: () => {
-            formula.update(nested.values);
+            section?.update?.(nested.values);
             options.onChange?.(values, alias);
           },
         },
       );
       draft.parameter_values = nested.values;
-      details.append(heading, nested.root);
-      nestedMount.append(details);
+      const section = window.FTFactorDetailShared.parameterSection(
+        context, family, [], (options.depth || 0) + 1,
+        {content: nested.root, values: draft.parameter_values || {}},
+      );
+      section.root.dataset.parameterAlias = alias;
+      nestedMount.append(section.root);
     };
     renderSourceControl = () => {
       if (sourceControl.replaceChildren) sourceControl.replaceChildren();

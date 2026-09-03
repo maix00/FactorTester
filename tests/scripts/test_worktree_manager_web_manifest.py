@@ -2547,7 +2547,8 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert "factor-param-column-" in parameter_editor
     assert "factor-param-factor-" in parameter_editor
     assert "factor-param-family-source" in parameter_editor
-    assert "factor-param-nested-factor-table" in parameter_editor
+    assert "factor-param-nested-factor-mount" in parameter_editor
+    assert "FTFactorDetailShared.parameterSection" in parameter_editor
     assert 'method: "POST"' in editor
     assert "resolve_factor_alias" in editor
     assert "onChange: nextValues =>" in editor
