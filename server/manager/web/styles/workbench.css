@@ -147,7 +147,7 @@
 .ft-object-overlay-dialog { width: min(1080px, calc(100vw - 32px)); max-width: none; }
 .ft-object-overlay-dialog > .object-overlay-card { width: 100%; height: calc(100dvh - 32px); max-width: none; max-height: calc(100dvh - 32px); box-sizing: border-box; }
 .object-overlay-card { display: grid; grid-template-rows: auto minmax(0, 1fr); width: auto; gap: 6px; overflow: hidden; padding: 14px 16px 18px; }
-.object-overlay-card > .section-heading { position: relative; z-index: 2; display: flex; align-items: baseline; justify-content: flex-start; gap: 12px; min-height: 34px; margin: 0; padding: 0; }
+.object-overlay-card > .section-heading { position: relative; z-index: 2; display: flex; align-items: center; justify-content: flex-start; gap: 12px; min-height: 34px; margin: 0; padding: 0; }
 .object-overlay-card > .section-heading > div:first-child { order: 0; flex: 0 1 auto; min-width: 0; max-width: 60%; }
 .object-overlay-card .section-heading h2 { overflow: hidden; font-size: 16px; text-overflow: ellipsis; white-space: nowrap; margin: 0; line-height: 1.4; }
 .object-overlay-card .section-heading button,
