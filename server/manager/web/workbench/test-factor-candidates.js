@@ -71,6 +71,8 @@
         label: factor.alias,
         description: sourceDescription(context, state, factor),
         factor,
+        view: window.FTFactorDetailShared?.factorRowView?.(factor)
+          || {kind: "factor", ref: FTTestFactorSelection.factorID(factor)},
       })).filter(item => item.value),
       selected: FTTestFactorSelection.selectedIDs(state),
       multi: state.kind === "ic",

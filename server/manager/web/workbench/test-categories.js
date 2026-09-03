@@ -106,6 +106,8 @@
       disabled: category.enabled === false,
       source_managed: category.source_managed === true,
       category,
+      view: window.FTFactorDetailShared?.categoryRowView?.(category)
+        || {kind: "category", ref: categoryID(category)},
     })).filter(item => item.value);
     const savedCategory = value => {
       const category = upsertCategory(state, value);

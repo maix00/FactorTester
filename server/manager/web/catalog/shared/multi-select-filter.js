@@ -63,6 +63,54 @@
     return icon;
   }
 
+  // Row-level object viewing: an option item may declare an optional `view`
+  // descriptor so its trailing "?" opens the matching object's view overlay
+  // (factor, factor family, product group, category, factor set, ...) instead
+  // of a plain text bubble.  Descriptors are {kind, ref, initialValue,
+  // temporary} — the same shape FTObjectOverlay.open consumes.  The picker
+  // itself stays domain-free: it only needs a resolver that turns an item
+  // into such a descriptor (or null) and an opener that lifts it.
+  function openItemView(context, view, options = {}) {
+    if (!view || typeof view !== "object") return false;
+    const descriptor = {kind: view.kind, mode: "view", ref: view.ref || ""};
+    if (view.initialValue !== undefined) descriptor.initialValue = view.initialValue;
+    if (view.temporary === true) descriptor.temporary = true;
+    if (options.testState !== undefined) descriptor.testState = options.testState;
+    const open = context?.openObject || (window.FTObjectOverlay?.open
+      ? childOptions => window.FTObjectOverlay.open(context, childOptions)
+      : null);
+    if (open) { open(descriptor); return true; }
+    const loader = window.FTStaticLoader?.loadGroups;
+    if (typeof loader !== "function") return false;
+    void Promise.resolve(loader(["object-overlay"])).then(() => {
+      if (window.FTObjectOverlay?.open) {
+        window.FTObjectOverlay.open(context, descriptor);
+      }
+    }).catch(() => {});
+    return true;
+  }
+
+  function optionHelp(context, item, options = {}) {
+    const view = typeof options.viewOf === "function"
+      ? options.viewOf(item) : item?.view || null;
+    if (view && typeof view === "object") {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "ft-help-icon";
+      button.textContent = "?";
+      const label = view.title || translate(context, "查看", "查看");
+      button.setAttribute("aria-label", label);
+      button.title = label;
+      button.addEventListener("click", event => {
+        event.preventDefault?.();
+        event.stopPropagation?.();
+        openItemView(context, view, options);
+      });
+      return button;
+    }
+    return helpIcon(item?.description);
+  }
+
   let outsideCloseBound = false;
   const portaledControls = new Set();
   let orphanObserver = null;
@@ -378,7 +426,7 @@
         const label = document.createElement("span");
         label.className = "ft-multi-select-option-label";
         label.textContent = item.label;
-        const info = helpIcon(item.description);
+        const info = optionHelp(context, item, options);
         info.classList.add("ft-multi-select-option-info");
         row.append(input, label, " ", info);
         if (item.exclusive) {

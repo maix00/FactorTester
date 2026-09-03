@@ -218,6 +218,8 @@
       ].filter(Boolean).join(" · "),
       source_managed: group.source_managed === true,
       group,
+      view: window.FTFactorDetailShared?.productGroupRowView?.(group)
+        || {kind: "product_group", ref: groupID(group)},
     })).filter(item => item.value);
     let picker = null;
     const savedGroup = value => {
