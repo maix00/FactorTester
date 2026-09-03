@@ -89,13 +89,23 @@
     popup.style.top = `${top}px`;
   }
 
+  // Help surfaces must always paint above the component that triggered them,
+  // whatever container that component lives in (portaled dropdown menus run
+  // at z-index 10000; dialogs form their own stacking contexts).  Attach the
+  // popup to the nearest dialog when the trigger is inside one — otherwise it
+  // would sit behind the dialog's own stacking context — and let positionBubble
+  // place it from the button's viewport rect either way.
+  function popupHost(button) {
+    return button?.closest?.("dialog, [role=\"dialog\"]") || document.body;
+  }
+
   function openBubble(button, descriptor) {
     const popup = document.createElement("div");
     popup.className = "ft-help-bubble";
     popup.id = `ft-help-bubble-${++state.sequence}`;
     popup.setAttribute("role", "tooltip");
     popup.textContent = descriptor.text || "";
-    document.body?.append(popup);
+    popupHost(button)?.append(popup);
     button.setAttribute("aria-controls", popup.id);
     button.setAttribute("aria-describedby", popup.id);
     button.setAttribute("aria-expanded", "true");
