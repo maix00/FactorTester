@@ -346,9 +346,28 @@
         context,
       ), valueNode]);
     }
+    nestedIdentitySections(context, item, options, rows);
     return FTUI.table(
       [context.t("RunSpec 字段"), context.t("值")], rows,
     ).shell;
+  }
+
+  function nestedIdentitySections(context, value, options, rows, depth = 0) {
+    for (const parameter of parameterRows(value, options)) {
+      const nested = parameter.nested_factor;
+      if (!nested) continue;
+      const section = document.createElement("div");
+      section.className = "factor-identity-nested";
+      section.dataset.parameterAlias = parameter.alias;
+      const title = document.createElement("b");
+      title.textContent = `${context.t("嵌套因子身份")} · ${parameter.alias}`;
+      section.append(title, FTUI.table(
+        [context.t("RunSpec 字段"), context.t("值")],
+        identityFieldRows(context, nested),
+      ).shell);
+      rows.push({fullWidth: true, content: section});
+      nestedIdentitySections(context, nested, options, rows, depth + 1);
+    }
   }
 
   function contextHelpText(help) {
@@ -508,12 +527,6 @@
     if (formulaValue) header.append(formula(context, formulaValue));
     const body = document.createElement("div");
     body.className = "factor-detail-parameter-tree-body";
-    const identityRows = identityFieldRows(context, value);
-    if (identityRows.length) {
-      body.append(FTUI.table(
-        [context.t("RunSpec 字段"), context.t("值")], identityRows,
-      ).shell);
-    }
     const tableRows = [];
     for (const parameter of rows) {
       tableRows.push([
