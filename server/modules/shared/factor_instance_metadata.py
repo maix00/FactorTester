@@ -243,7 +243,8 @@ def _resolved_formula(
             else:
                 child_lines[-1] = f"{child_symbol}_t := {child_lines[-1]}"
             lines.extend(child_lines)
-    lines.append(f"{_symbol_latex(final_symbol)}_t &:= {body}.")
+    ending = ";" if lines else "."
+    lines.append(f"{_symbol_latex(final_symbol)}_t &:= {body}{ending}")
     return "\\begin{aligned}\n" + " \\\\\n".join(lines) + "\n\\end{aligned}"
 
 

@@ -234,6 +234,7 @@ assert.match(nestedPreview, /\\textcolor\{blue\}\{\\mathrm\{SgChgPct\}\}_t :=/);
 assert.doesNotMatch(nestedPreview, /\\mathrm\{SgChgPct\}_t &:=/);
 assert.match(nestedPreview, /\\textcolor\{red\}\{\\mathrm\{CA\}\}/);
 assert.match(nestedPreview, /\\textcolor\{blue\}\{\\mathrm\{SgChgPct\}\}/);
+assert.match(nestedPreview, /\\operatorname\{argmin\}[^]*;/);
 assert.ok(
     nestedPreview.indexOf("\\mathrm{SgChgPct}_t :=")
     < nestedPreview.indexOf("\\operatorname{argmin}"),
