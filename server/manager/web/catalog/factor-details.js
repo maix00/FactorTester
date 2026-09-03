@@ -115,8 +115,16 @@
       );
     }
     if (!family) throw new Error(context.t("因子家族不存在或当前端口无法解析该引用"));
-    family = await withCurrentFamilySource(context, family);
+    // A test-local family (created inline in a test editor, never persisted)
+    // has no server version history: render its carried frozen value directly
+    // instead of attempting a catalog round-trip for "current" source.
+    const localView = (context.testObjectTemporary || context.testObjectSnapshot)
+      && context.testObjectInitialValue;
+    if (!localView) family = await withCurrentFamilySource(context, family);
     const baseFamily = family;
+    const canSelectVersion = !localView && Boolean(
+      baseFamily.family_ref || baseFamily.factor_family_alias,
+    );
     context.setHeading(model().familyName(baseFamily), context.t("因子家族"));
     context.updateActiveTab?.({title: model().familyName(baseFamily)});
     const publicFamily = baseFamily.factor_kind === "public"
@@ -168,14 +176,16 @@
       );
       const top = document.createElement("div");
       top.className = "factor-detail-top";
-      top.append(window.FTFactorDetailShared.sourceVersionHistory(
-        context, baseFamily, {
-          payload: sourceVersions,
-          selected: selectedVersion || "__current__",
-          onLoaded: payload => { sourceVersions = payload; },
-          onChange: selected => { void selectVersion(selected); },
-        },
-      ));
+      if (canSelectVersion) {
+        top.append(window.FTFactorDetailShared.sourceVersionHistory(
+          context, baseFamily, {
+            payload: sourceVersions,
+            selected: selectedVersion || "__current__",
+            onLoaded: payload => { sourceVersions = payload; },
+            onChange: selected => { void selectVersion(selected); },
+          },
+        ));
+      }
       top.append(window.FTFactorDetailShared.summary(context, displayFamily));
       root.append(top);
       const provenance = window.FTFactorDetailShared.provenance(

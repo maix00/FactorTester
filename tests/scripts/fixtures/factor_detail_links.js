@@ -585,6 +585,52 @@ assert.ok(
   );
   assert.strictEqual(rendered.at(-1).expression, "P_t-P_{t-1}");
 
+  // A test-local family (created inline in a test editor, never persisted)
+  // must render its carried frozen value without a catalog round-trip and
+  // without a server version picker.
+  const localFamily = {
+    factor_family_alias: "InlineFamily",
+    factor_family_name: "InlineFamily",
+    math_expr: "P_t-P_{t-1}",
+    source_code: "class InlineFamily(FactorFamily):\n    pass\n",
+    temporary: true,
+    source_origin: "test_inline",
+    parameter_definitions: [{
+      alias: "N", type: "WindowParam", default_value: "20d",
+    }],
+  };
+  const localFamilyContext = {
+    ...context,
+    testObjectTemporary: true,
+    testObjectInitialValue: localFamily,
+    api: async path => {
+      throw new Error(`local family view must not call the catalog: ${path}`);
+    },
+  };
+  await window.FTFactorDetails.familyDetail(
+    localFamilyContext,
+    {families: [localFamily], factors: []},
+    "InlineFamily",
+    "view",
+    {temporary: true, initialValue: localFamily},
+  );
+  const localSummary = walk(localFamilyContext.content).find(item => (
+    item.className === "factor-family-summary"
+  ));
+  assert.ok(localSummary, "local family view must render its summary");
+  assert.strictEqual(
+    walk(localFamilyContext.content).some(item => (
+      item.className === "factor-source-version-history"
+    )),
+    false,
+    "a local family must not offer a server version history",
+  );
+  const localSource = walk(localFamilyContext.content).find(item => (
+    item.className === "factor-detail-source"
+  ));
+  assert.ok(localSource, "local family source tab renders the carried source");
+  assert.match(localSource.children[1].children[0].textContent, /InlineFamily/);
+
   await window.FTFactorDetails.setDetail(context, data, setRef, async () => ({}));
   const memberMount = walk(content).find(item => item.className === "factor-set-members");
   const table = memberMount.children[0];
