@@ -140,14 +140,14 @@ assert.ok(factorPicker, "FactorParam must expose a factor picker");
     (value.children || []).forEach(visit);
   };
   visit(editor.root);
-  const nested = nestedTables.find(table => table.headers?.length === 3);
+  const nested = nestedTables.find(table => table.headers?.length === 4);
   assert.ok(nested, "selected factors must render a nested read-only table");
   assert.equal(nested.values[2][1].children[0].textContent, "WindowParam");
 
   const preview = window.FTFactorDetailShared.previewExpression(
     outerFamily, latestValues,
   );
-  assert.match(preview, /\\mathrm\{SgChgPct\}_t &:=/);
+  assert.match(preview, /\\mathrm\{SgChgPct\}_t :=/);
   assert.match(preview, /\\textcolor\{red\}\{200\\,\\mathrm\{d\}\}/);
   assert.match(preview, /D_t\(\\textcolor\{red\}\{\\mathrm\{SgChgPct\}\}_t\)/);
   console.log("ok");
