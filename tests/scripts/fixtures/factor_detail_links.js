@@ -324,6 +324,30 @@ assert.ok(
   ));
   assert.ok(nestedViewTable);
   assert.strictEqual(nestedViewTable.values[0][1].children[0].textContent, "WindowParam");
+  assert.ok(
+    !walk(nestedViewTree).some(item => item.headers?.[0] === "RunSpec 字段"),
+    "parameter tab must not contain factor identity tables",
+  );
+  const outerIdentityTable = walk(nestedViewContext.content).find(item => (
+    item.headers?.[0] === "RunSpec 字段"
+    && item.values.some(row => row?.fullWidth === true)
+  ));
+  assert.ok(
+    outerIdentityTable,
+    "identity tab must render nested factor identity as a full-width row",
+  );
+  const nestedIdentitySection = outerIdentityTable.values
+    .filter(row => row?.fullWidth === true)
+    .map(row => row.content)
+    .find(item => item.dataset?.parameterAlias === "Th");
+  assert.ok(nestedIdentitySection);
+  const nestedIdentityTable = walk(nestedIdentitySection).find(item => (
+    item.headers?.[0] === "RunSpec 字段"
+  ));
+  assert.ok(nestedIdentityTable);
+  assert.ok(nestedIdentityTable.values.some(row => (
+    row[1].children?.[0]?.textContent === "MmThreshold"
+  )));
   assert.ok(rendered.some(item => /MmThreshold/.test(item.expression)));
 
   const historicalFactorRef = "factor:sha256:historical-factor";
