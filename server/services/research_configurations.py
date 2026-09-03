@@ -21,7 +21,7 @@ from tools.cli.identities.factor import (  # noqa: F401
     require_frozen_factor as _require_frozen_factor,
 )
 from tools.data.sqlite.db import connect_sqlite
-from tools.data.types.object_identity import unique_frozen_identities
+from server.modules.shared.factor_param_utils import unique_frozen_factor_records
 from tools.testers.configuration_schema import RESEARCH_CONFIGURATION_SCHEMA_VERSION
 
 SCHEMA_VERSION = RESEARCH_CONFIGURATION_SCHEMA_VERSION
@@ -86,7 +86,11 @@ def validate_payload(payload: Any) -> dict[str, Any]:
     # retires the old duplicate projection on its next save.
     shared.pop("factor_families", None)
     payload = {**payload, "shared": shared}
-    factors = unique_frozen_identities(shared.get("factors"))
+    # A reusable configuration must retain the complete frozen dependency
+    # graph.  The generic identity helper intentionally strips domain data,
+    # including nested FactorParam records, which makes a later RunSpec view
+    # fail closed when it validates the child reference.
+    factors = unique_frozen_factor_records(shared.get("factors"))
     shared["factors"] = factors
     factor_aliases: set[str] = set()
     for factor in factors:
