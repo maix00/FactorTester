@@ -2526,16 +2526,19 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert "factor-param-choice-disabled" not in parameter_editor
     assert "factor-param-reference-control" in parameter_editor
     assert 'input.placeholder = context.t("填写")' in parameter_editor
-    # The parameter list (header + column labels) is the shared control in
-    # factor-detail-shared.createParameterList; the parameter editor consumes
-    # that shared implementation instead of owning a second list renderer.
+    # The parameter table is the shared single-grid component: the editor
+    # container owns the tracks and header/rows subgrid them (one shared
+    # column layout per table), with the parameter list shared via
+    # createParameterList and the section shell shared via parameterSection.
     assert "FTFactorDetailShared.createParameterList" in parameter_editor
+    assert "FTFactorDetailShared.parameterSection" in editor
     assert 'header.className = "factor-detail-parameter-header"' in detail_shared
     assert '["参数名", "参数类型", "默认值", "Value"]' in detail_shared
     assert 'context.t("Column")' in parameter_editor
-    assert ".factor-detail-parameter-header, .factor-detail-parameter-row" in app_css
-    assert "grid-template-columns: minmax(70px, .45fr)" in app_css
-    assert ".factor-param-reference-control { display: grid; grid-template-columns: minmax(8rem, .38fr)" in app_css
+    assert ".factor-detail-parameter-editor > .factor-detail-parameter-row" in app_css
+    assert "grid-template-columns: subgrid" in app_css
+    assert "grid-template-columns: minmax(70px, max-content)" in app_css
+    assert ".factor-param-reference-control { display: grid; grid-template-columns: max-content" in app_css
     assert "font-family: ui-monospace, SFMono-Regular" in app_css
     assert "function numericConstant" in parameter_editor
     assert 'setValue(constant, "manual")' in parameter_editor

@@ -1103,17 +1103,21 @@
         // object on state so edits made in the shared editor reach the save
         // request without inventing a second parameter form.
         state.parameterValues = editor.values;
-        if (state.familyMode) parameterMount.append(editor.root);
-        else {
-          const composition = parameterComposition(
-            context, {
-            ...(state.family || state.inspection || {}),
-            source_code: state.sourceCode || state.family?.source_code || "",
-            }, editor.root, state.parameterValues,
-          );
-          refreshParameterComposition = composition.refresh;
-          parameterMount.append(composition.root);
-        }
+        // Edit/create render the same shared parameter section component as
+        // view mode: collapsible header with the family template formula and
+        // the 参数/值 toggles (parameterSection helper + localFormula),
+        // wrapping the shared editable parameter list.
+        const familySource = {
+          ...(state.family || state.inspection || state.loaded || {}),
+          source_code: state.sourceCode || state.family?.source_code || "",
+        };
+        const section = window.FTFactorDetailShared.parameterSection(
+          context, familySource, [], 0, {content: editor.root},
+        );
+        refreshParameterComposition = values => section.update(
+          values || state.parameterValues || {},
+        );
+        parameterMount.append(section.root);
       } else parameterMount.append(emptyState(context, state.familyMode
         ? "参数定义将在源码校验后生成" : "当前因子没有参数"));
     };
@@ -1292,43 +1296,6 @@
     value.className = "catalog-source-note";
     value.textContent = context.t(text);
     return value;
-  }
-
-  function parameterComposition(context, family, content, parameterValues = {}) {
-    const root = document.createElement("details");
-    root.open = true;
-    root.className = "factor-param-root-family";
-    const header = document.createElement("summary");
-    header.className = "factor-param-nested-family-header";
-    const title = document.createElement("b");
-    title.textContent = familyAlias(family) || context.t("因子家族参数");
-    const heading = document.createElement("span");
-    heading.className = "factor-param-nested-family-name";
-    heading.append(title);
-    if (familyAlias(family)) {
-      heading.append(" ", window.FTFactorDetailShared.familySourceHelp(context, family));
-    }
-    header.append(heading);
-    const formula = document.createElement("div");
-    formula.className = "factor-detail-parameter-formula display-math";
-    const renderFormula = values => {
-      const expression = window.FTFactorDetailShared.previewExpression(
-        family, values || {},
-      ) || window.FTFactorDetailShared.expression(family);
-      if (!expression) {
-        formula.replaceChildren?.();
-        formula.textContent = "";
-        return;
-      }
-      if (window.katex) window.katex.render(expression, formula, {
-        displayMode: true, throwOnError: false,
-      });
-      else formula.textContent = expression;
-    };
-    renderFormula(parameterValues);
-    if (formula.textContent || formula.childElementCount) header.append(formula);
-    root.append(header, content);
-    return {root, refresh: renderFormula};
   }
 
   function textField(context, labelText, value, options = {}) {

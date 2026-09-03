@@ -568,6 +568,17 @@
   function parameterTree(
     context, value, rows = parameterRows(value), depth = 0, options = {},
   ) {
+    return parameterSection(context, value, rows, depth, options).root;
+  }
+
+  // The one shared "factor parameter section" component used by view, edit
+  // and create modes (and by nested read-only blocks): a collapsible header
+  // carrying the family template formula with 参数/值 toggles (localFormula),
+  // plus the shared parameter list.  Callers that own an editable list pass
+  // it as content; the read-only flavour renders nested rows itself.
+  function parameterSection(
+    context, value, rows = parameterRows(value), depth = 0, options = {},
+  ) {
     const root = document.createElement("details");
     root.className = depth
       ? "factor-detail-parameter-tree factor-detail-parameter-tree-nested"
@@ -585,30 +596,40 @@
     heading.className = "factor-detail-parameter-tree-heading";
     heading.append(title, " ", familySourceHelp(context, value));
     header.append(heading);
-    // The tree header is the family formula.  The resolved/aggregated
-    // instance formula belongs to the page-level formula box above it.
-    const local = localFormula(context, value, Object.fromEntries(rows.map(row => [row.alias, row.value])));
+    const values = Object.fromEntries(rows.map(row => [row.alias, row.value]));
+    const local = localFormula(context, value, values);
     header.append(local.root);
     const body = document.createElement("div");
     body.className = "factor-detail-parameter-tree-body";
-    const list = createParameterList(context, rows, Object.fromEntries(rows.map(row => [row.alias, row.value])), {
-      readOnly: true,
-      renderValue: (value, parameter) => {
-        const displayed = parameter.redacted ? context.t("已隐藏") : parameterValueCell(context, parameter);
-        if (displayed && typeof displayed === "object" && typeof displayed.append === "function") value.append(displayed);
-        else value.textContent = String(displayed ?? "");
-        if (!parameter.nested_factor) return {control: true};
-        const nestedRows = parameterRows(parameter.nested_factor, options);
-        if (!nestedRows.length) return {control: true};
-        const nested = parameterTree(context, parameter.nested_factor, nestedRows, depth + 1, options);
-        nested.dataset.parameterAlias = parameter.alias;
-        nested.className = `${nested.className || ""} factor-detail-nested-parameter-row`.trim();
-        return {control: true, nested};
-      },
-    });
-    body.append(list.root);
+    if (options.content) {
+      body.append(options.content);
+    } else {
+      const list = createParameterList(context, rows, values, {
+        readOnly: true,
+        renderValue: (valueCell, parameter) => {
+          const displayed = parameter.redacted
+            ? context.t("已隐藏") : parameterValueCell(context, parameter);
+          if (displayed && typeof displayed === "object"
+            && typeof displayed.append === "function") {
+            valueCell.append(displayed);
+          } else {
+            valueCell.textContent = String(displayed ?? "");
+          }
+          if (!parameter.nested_factor) return {control: true};
+          const nestedRows = parameterRows(parameter.nested_factor, options);
+          if (!nestedRows.length) return {control: true};
+          const nested = parameterTree(
+            context, parameter.nested_factor, nestedRows, depth + 1, options,
+          );
+          nested.dataset.parameterAlias = parameter.alias;
+          nested.className = `${nested.className || ""} factor-detail-nested-parameter-row`.trim();
+          return {control: true, nested};
+        },
+      });
+      body.append(list.root);
+    }
     root.append(header, body);
-    return root;
+    return {root, update: next => local.update(next || {})};
   }
 
   function parameterDisplayValue(parameter) {
@@ -1067,6 +1088,7 @@
   window.FTFactorDetailShared = Object.freeze({
     expression, loadSourceVersions, loadSourceVersion,
     parameterRows, parameterValues, createParameterList, localFormula,
+    parameterSection,
     familyIdentity, familySourceHelp, fieldRow, helpIcon, parameterTable,
     previewExpression,
     pageClass, provenance, source,
