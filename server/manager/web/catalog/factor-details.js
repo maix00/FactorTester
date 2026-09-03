@@ -35,6 +35,11 @@
     factor = window.FTFactorDisplayEnrichment?.enrichFactorForDisplay(data, factor)
       || factor;
     factor = model().withSourceMetadata(factor);
+    const instanceValues = window.FTFactorDetailShared.parameterValues(factor);
+    const resolvedExpression = window.FTFactorDetailShared.previewExpression(
+      factor, instanceValues,
+    );
+    if (resolvedExpression) factor.resolved_math_expr = resolvedExpression;
     factor.factor_source_version = factor.family_formula_fingerprint
       ? `公式版本 · ${factor.family_formula_fingerprint.slice(0, 12)}`
       : "未固定公式版本";
@@ -58,12 +63,12 @@
     const top = document.createElement("div");
     top.className = "factor-detail-top";
     top.append(window.FTFactorDetailShared.summary(
-      context, factor, {instance: true, descriptionOnly: true},
+      context, factor, {instance: true},
     ));
     root.append(top);
     const provenance = window.FTFactorDetailShared.provenance(context, factor);
     const parameters = window.FTFactorDetailShared.parameterTable(
-      context, factor, {preview: true},
+      context, factor, {preview: false},
     );
     const jobs = objectJobs(context, "factor", frozenRef, factor);
     const tabs = window.FTObjectDetailTabs.create(context, {
