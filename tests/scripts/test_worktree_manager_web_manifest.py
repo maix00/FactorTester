@@ -2531,7 +2531,7 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     # that shared implementation instead of owning a second list renderer.
     assert "FTFactorDetailShared.createParameterList" in parameter_editor
     assert 'header.className = "factor-detail-parameter-header"' in detail_shared
-    assert '["Key", "参数类型", "默认值", "Value"]' in detail_shared
+    assert '["参数名", "参数类型", "默认值", "Value"]' in detail_shared
     assert 'context.t("Column")' in parameter_editor
     assert ".factor-detail-parameter-header, .factor-detail-parameter-row" in app_css
     assert "grid-template-columns: minmax(70px, .45fr)" in app_css

@@ -319,6 +319,12 @@ assert.ok(
     factor_family_alias: "MmThreshold",
     identity: {family_alias: "MmThreshold", params: {N: "5d"}},
     params: [{alias: "N", value: "5d"}],
+    // Server-provided nested projections carry the typed family definitions;
+    // the overlay must render those types instead of falling back to
+    // Parameter for every row.
+    parameter_definitions: [{
+      alias: "N", type: "WindowParam", default_value: "5d",
+    }],
   };
   const nestedOuter = {
     schema_version: 2,
@@ -436,6 +442,17 @@ assert.ok(
       item.className?.includes?.("factor-detail-parameter-editor")
     )),
     "overlay must embed the nested factor's dedicated page content",
+  );
+  const overlayTypeTexts = walk(overlayDialog)
+    .filter(item => item.className === "factor-detail-parameter-type")
+    .map(item => item.children?.[0]?.textContent ?? item.textContent);
+  assert.ok(
+    overlayTypeTexts.includes("WindowParam"),
+    "overlay parameter rows must render the real parameter types, not Parameter",
+  );
+  assert.ok(
+    !overlayTypeTexts.some(text => text === "Parameter"),
+    "overlay must not fall back to Parameter for every parameter row",
   );
 
   const historicalFactorRef = "factor:sha256:historical-factor";

@@ -26,17 +26,43 @@
     nested_factor: {
       title: "因子",
       load: "factor-catalog-detail-rendering",
-      render: (context, ref, mode, options) => {
-        const initial = options.initialValue || {};
+      render: async (context, ref, mode, options) => {
+        const initial = {...(options.initialValue || {})};
+        const factor = {...initial, ref, factor_ref: ref};
         const family = initial.family || initial.__factor_family || null;
+        const families = family ? [family] : [];
+        // The frozen nested record may lack typed parameter definitions (the
+        // types live on the family template).  Resolve them through the same
+        // family-template source the rest of the factor pages use — the
+        // catalog library cache — and enrich before rendering, so nested rows
+        // keep their real types instead of falling back to Parameter.
+        try {
+          const catalog = window.FTFactorCatalog;
+          if (catalog?.load && typeof catalog.load === "function") {
+            const cached = await catalog.load(context, {});
+            const cachedFamilies = Array.isArray(cached?.families)
+              ? cached.families : [];
+            if (cachedFamilies.length) {
+              const merged = [...families, ...cachedFamilies];
+              const enriched = window.FTFactorDisplayEnrichment
+                ?.enrichFactorForDisplay
+                ? window.FTFactorDisplayEnrichment.enrichFactorForDisplay(
+                  {factors: [factor], families: merged}, factor,
+                )
+                : null;
+              if (enriched && window.FTFactorDetails?.factorDetail) {
+                return window.FTFactorDetails.factorDetail(
+                  context, {factors: [enriched], families: merged}, ref, "view",
+                );
+              }
+            }
+          }
+        } catch (_) {
+          // Keep the frozen record as-is when no family template is available.
+        }
         return window.FTFactorDetails?.factorDetail
           ? window.FTFactorDetails.factorDetail(
-            context,
-            {
-              factors: [{...initial, ref, factor_ref: ref}],
-              families: family ? [family] : [],
-            },
-            ref, "view",
+            context, {factors: [factor], families}, ref, "view",
           )
           : null;
       },

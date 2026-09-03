@@ -539,7 +539,7 @@
       .filter(Boolean).join(" ");
     const header = document.createElement("div");
     header.className = "factor-detail-parameter-header";
-    ["Key", "参数类型", "默认值", "Value"].forEach(label => {
+    ["参数名", "参数类型", "默认值", "Value"].forEach(label => {
       const cell = document.createElement("b"); cell.textContent = context.t(label); header.append(cell);
     });
     root.append(header);
@@ -656,7 +656,12 @@
     const family = nested.family || nested.__factor_family || {
       factor_family_alias: nested.factor_family_alias
         || nested.family_alias || "",
-      parameter_definitions: nested.params || nested.parameter_definitions || [],
+      // Typed parameter definitions come from the nested projection's
+      // parameter_definitions / family_parameter_definitions.  nested.params
+      // is the *values* list and carries no types: it must never replace the
+      // typed definitions or every row falls back to Parameter.
+      parameter_definitions: nested.parameter_definitions
+        || nested.family_parameter_definitions || [],
       math_expr: nested.math_expr || nested.formula || "",
     };
     const initialValue = {
