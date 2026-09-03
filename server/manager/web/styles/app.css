@@ -300,7 +300,7 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-detail-parameter-header, .factor-detail-parameter-row { display: grid; grid-template-columns: minmax(70px, .45fr) minmax(164px, .7fr) minmax(100px, .7fr) minmax(280px, 2.15fr); align-items: center; gap: 12px; min-width: 0; padding: 10px 12px; }
 .factor-detail-parameter-header { color: var(--muted); background: var(--soft); font-size: 12px; }
 .factor-detail-parameter-row + .factor-detail-parameter-row { border-top: 1px solid var(--line); }
-.factor-detail-parameter-row-factor { border-bottom: 1px solid var(--line); }
+.factor-detail-parameter-row-factor { border-bottom: 0; }
 .factor-detail-parameter-key, .factor-detail-parameter-default { overflow-wrap: anywhere; }
 .factor-detail-parameter-default { width: fit-content; max-width: 100%; }
 .factor-detail-parameter-type { display: inline-flex; align-items: center; gap: 5px; min-height: 24px; font-family: inherit; }
@@ -326,9 +326,9 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-detail-parameter-tree .table-shell table { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
 .factor-detail-parameter-tree .table-shell th,
 .factor-detail-parameter-tree .table-shell td { padding: 10px 12px; vertical-align: middle; }
-.factor-detail-parameter-tree .shared-table-full-width-row > td { padding: 4px 12px 12px; }
-.factor-detail-parameter-tree .factor-detail-parameter-tree-nested { border-top: 1px solid var(--line); }
-.factor-detail-parameter-tree-nested { width: 100%; margin-left: 0; box-sizing: border-box; }
+.factor-detail-parameter-tree .shared-table-full-width-row > td { padding: 0; }
+.factor-detail-parameter-tree-nested { width: 100%; margin-left: 0 !important; padding-left: 0 !important; border: 0 !important; border-radius: 0 !important; box-sizing: border-box; }
+.factor-detail-parameter-tree-nested { box-shadow: 0 1px 0 0 var(--line); }
 .factor-detail-parameter-tree-nested .factor-detail-parameter-tree-header { background: color-mix(in srgb, var(--accent) 4%, var(--soft)); }
 .factor-param-nested-family-mount { min-width: 0; padding: 0 clamp(28px, 5vw, 84px) 12px; border-top: 1px solid var(--line); box-sizing: border-box; }
 .factor-param-nested-family-mount:empty { display: none; }
