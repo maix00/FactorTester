@@ -19,20 +19,20 @@
     controls.className = "factor-detail-local-formula-controls";
     const formulaMount = document.createElement("div");
     formulaMount.className = "factor-detail-parameter-formula display-math";
-    let mode = "B1";
+    let mode = "parameters";
     const render = () => {
-      const source = mode === "B1" ? expression(value) : valueFormula(value, values);
+      const source = mode === "parameters" ? expression(value) : valueFormula(value, values);
       formulaMount.replaceChildren?.();
       if (window.katex) window.katex.render(source || "", formulaMount, {
         displayMode: true, throwOnError: false,
       });
       else formulaMount.textContent = source;
     };
-    ["B1", "B2"].forEach(label => {
+    [["parameters", context.t("参数")], ["values", context.t("值")]].forEach(([modeName, label]) => {
       const button = document.createElement("button");
       button.type = "button"; button.className = "factor-detail-local-formula-toggle";
       button.textContent = label;
-      button.addEventListener("click", () => { mode = label; render(); });
+      button.addEventListener("click", () => { mode = modeName; render(); });
       controls.append(button);
     });
     root.append(controls, formulaMount); render();
