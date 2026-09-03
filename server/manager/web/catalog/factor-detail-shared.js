@@ -24,7 +24,7 @@
     const separator = " " + "\\" + "\\";
     return [
       "\\begin{aligned}",
-      [...rendered.lines, stripFormulaEnvironment(rendered.body)]
+      [...rendered.lines, `${stripFormulaEnvironment(rendered.body)};`]
         .join(separator),
       "\\end{aligned}",
     ].join("\n");
