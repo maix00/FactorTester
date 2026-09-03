@@ -71,6 +71,26 @@ class Element {
     this.removeAttribute("open");
   }
 
+  showPopover() {
+    this._popoverShown = true;
+    this.setAttribute("popover-open", "");
+  }
+
+  hidePopover() {
+    this._popoverShown = false;
+    this.removeAttribute("popover-open");
+  }
+
+  closest(selector) {
+    let node = this;
+    const wanted = String(selector).split(",")[0].trim().replace(/^\[role=/, "").replace(/"$/, "").replace(/^dialog$/, "dialog");
+    while (node) {
+      if (node.tagName && node.tagName.toUpperCase() === wanted.toUpperCase()) return node;
+      node = node.parentNode;
+    }
+    return null;
+  }
+
   focus() {
     this.focused = true;
   }
@@ -166,9 +186,13 @@ const parentButton = window.FTHelp.create({
   title: "外层说明",
   content: parentContent,
 });
-const overlayCount = () => body.children.filter(child => (
-  child.className.split(" ").includes("ft-help-overlay")
-)).length;
+const overlayCount = () => {
+  const collect = node => [
+    ...(node.className?.split?.(" ").includes("ft-help-overlay") ? [node] : []),
+    ...(node.children || []).flatMap(collect),
+  ];
+  return collect(body).length;
+};
 click(parentButton);
 assert.equal(overlayCount(), 1);
 click(childButton);
@@ -209,5 +233,72 @@ if (process.argv[3]) {
   assert.equal(descriptor.text, "译文:选择因子");
   assert.equal(window.FTTestFieldHelp.forField({}, "missing", context), "");
 }
+
+// A help bubble triggered inside a portaled dropdown menu (or any container)
+// must paint above the dropdown's expanded menu.  The menu is raised with the
+// Popover API into the browser top layer, so the bubble must join the top
+// layer too — z-index alone cannot cover a top-layer element.
+const insideMenu = new Element("div");
+insideMenu.className = "ft-multi-select-menu is-portaled";
+const dropdownHelp = window.FTHelp.create("选项行说明");
+insideMenu.append(dropdownHelp);
+body.append(insideMenu);
+click(dropdownHelp);
+const raisedBubble = body.children.find(child => (
+  child.className.split(" ").includes("ft-help-bubble")
+));
+assert.ok(raisedBubble, "bubble must open for a trigger inside the dropdown menu");
+assert.equal(
+  raisedBubble.getAttribute("popover"), "manual",
+  "bubble must be raised with the Popover API to paint above the portaled menu",
+);
+assert.equal(raisedBubble._popoverShown, true);
+assert.ok(Number.parseFloat(raisedBubble.style.top) < 40, "bubble stays above the trigger");
+// Closing removes it from the top layer again.
+click(dropdownHelp);
+assert.equal(insideMenu.children.find(child => (
+  child.className.split(" ").includes("ft-help-bubble")
+)), undefined);
+
+// When the help trigger lives inside a dialog (e.g. an open factor/object
+// overlay), the bubble must attach to that dialog — the dialog is its own
+// stacking context and makes the rest of the document inert, so a body child
+// could not paint above it nor receive input.
+const hostDialog = new Element("dialog");
+body.append(hostDialog);
+const inDialogButton = window.FTHelp.create("对话框内帮助");
+hostDialog.append(inDialogButton);
+click(inDialogButton);
+const hostedBubble = hostDialog.children.find(child => (
+  child.className.split(" ").includes("ft-help-bubble")
+));
+assert.ok(hostedBubble, "bubble must open for a trigger inside a dialog");
+assert.equal(hostedBubble.parentNode, hostDialog, "bubble attaches to the nearest dialog");
+assert.equal(hostedBubble.getAttribute("popover"), "manual");
+click(inDialogButton);
+assert.equal(hostDialog.children.find(child => (
+  child.className.split(" ").includes("ft-help-bubble")
+)), undefined);
+
+// Overlay-mode help (the "?" may open a full overlay dialog, not just a
+// bubble) must follow the same hosting rule: attach to the nearest dialog so
+// it stacks above both the triggering dialog and any open dropdown menu.
+const overlayInDialog = window.FTHelp.create({
+  mode: "overlay",
+  title: "选项行覆盖层",
+  content: new Element("p"),
+});
+hostDialog.append(overlayInDialog);
+click(overlayInDialog);
+const hostedOverlay = hostDialog.children.find(child => (
+  child.className.split(" ").includes("ft-help-overlay")
+));
+assert.ok(hostedOverlay, "overlay must open for a trigger inside a dialog");
+assert.equal(hostedOverlay.parentNode, hostDialog, "overlay attaches to the nearest dialog");
+assert.equal(hostedOverlay.open, true, "overlay dialog is shown modally (top layer)");
+window.FTHelp.close();
+assert.equal(hostDialog.children.find(child => (
+  child.className.split(" ").includes("ft-help-overlay")
+)), undefined);
 
 console.log("ok");

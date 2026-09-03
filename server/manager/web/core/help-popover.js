@@ -46,6 +46,7 @@
       if (item.popup?.open && typeof item.popup.close === "function") {
         item.popup.close();
       }
+      lowerFromTopLayer(item.popup);
       item.popup?.parentNode?.removeChild(item.popup);
     });
     state.stack = state.stack.slice(0, index);
@@ -90,13 +91,45 @@
   }
 
   // Help surfaces must always paint above the component that triggered them,
-  // whatever container that component lives in (portaled dropdown menus run
-  // at z-index 10000; dialogs form their own stacking contexts).  Attach the
-  // popup to the nearest dialog when the trigger is inside one — otherwise it
-  // would sit behind the dialog's own stacking context — and let positionBubble
-  // place it from the button's viewport rect either way.
+  // whatever container that component lives in.  Two independent mechanisms
+  // used to hide a bubble beneath its own dropdown:
+  //   1. The dropdown's expanded menu is portaled and raised with the Popover
+  //      API (showPopover), which puts it in the browser top layer — an
+  //      element that no z-index below it can ever cover.  A bubble that only
+  //      sits in the normal document layer is therefore painted *under* the
+  //      menu no matter how high its z-index is.
+  //   2. A modal <dialog> (showModal) also enters the top layer and makes the
+  //      rest of the document inert, so a body-attached bubble behind such a
+  //      dialog can neither paint above it nor receive pointer input.
+  // Fix: attach the popup to the nearest dialog when the trigger lives inside
+  // one (otherwise the dialog's stacking context and inertness would still win
+  // over a body child), then lift the bubble into the top layer with the same
+  // Popover API the menus use.  A bubble shown after its menu is stacked above
+  // the menu in the top layer, so the help text always paints over the open
+  // dropdown; in engines without the Popover API the z-index fallback applies.
   function popupHost(button) {
     return button?.closest?.("dialog, [role=\"dialog\"]") || document.body;
+  }
+
+  function raiseToTopLayer(popup) {
+    if (typeof popup?.showPopover !== "function") return false;
+    popup.setAttribute("popover", "manual");
+    try {
+      popup.showPopover();
+      return true;
+    } catch (_error) {
+      popup.removeAttribute?.("popover");
+      return false;
+    }
+  }
+
+  function lowerFromTopLayer(popup) {
+    if (typeof popup?.hidePopover !== "function") return;
+    try {
+      popup.hidePopover();
+    } catch (_error) {
+      // It may already be closed or detached.
+    }
   }
 
   function openBubble(button, descriptor) {
@@ -106,6 +139,7 @@
     popup.setAttribute("role", "tooltip");
     popup.textContent = descriptor.text || "";
     popupHost(button)?.append(popup);
+    raiseToTopLayer(popup);
     button.setAttribute("aria-controls", popup.id);
     button.setAttribute("aria-describedby", popup.id);
     button.setAttribute("aria-expanded", "true");
@@ -207,7 +241,13 @@
         });
       }
     });
-    document.body?.append(dialog);
+    // Attach to the nearest dialog when the trigger lives inside one: a modal
+    // <dialog> renders the rest of the document inert and forms its own
+    // stacking context, so a body-attached overlay could neither paint above
+    // the triggering dialog nor receive input from it.  The dialog is raised
+    // via showModal() (top layer) afterwards, so it paints above any portaled
+    // dropdown menu that is still open below the trigger.
+    popupHost(button)?.append(dialog);
     button.setAttribute("aria-controls", dialog.id);
     button.setAttribute("aria-expanded", "true");
     state.stack.push({button, popup: dialog, mode: "overlay"});
