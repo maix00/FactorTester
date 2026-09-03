@@ -54,7 +54,7 @@
         shown = blue(familySymbol(nested.value));
         appendPreviewDefinition(lines, nested, state);
       } else {
-        shown = latexValue(previewScalarValue(raw));
+        shown = latexValue(raw === "" || raw == null ? alias : previewScalarValue(raw));
       }
       const token = new RegExp(
         "\\\\textcolor\\{red\\}\\{" + escapeRegExp(alias) + "\\}", "g",
