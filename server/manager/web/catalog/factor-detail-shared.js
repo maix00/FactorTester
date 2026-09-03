@@ -682,7 +682,15 @@
       family.family_ref || family.factor_family_alias
       || family.factor_family_name || family.alias || "",
     ).trim();
-    const local = LOCAL_SOURCE(family);
+    // A frozen/template family without a library family_ref (inline draft,
+    // nested projection) can only render from its carried value: the alias is
+    // not a queryable library identity, so opening by ref would fail.
+    const hasTemplate = Boolean(
+      family.source_code || family.math_expr || family.formula
+      || family.parameter_definitions || family.factor_params || family.params,
+    );
+    const noLibraryRef = !String(family.family_ref || "").trim();
+    const local = LOCAL_SOURCE(family) || (noLibraryRef && hasTemplate);
     if (!ref && !local) return null;
     const descriptor = {kind: "factor_family", ref, title: "查看因子家族"};
     if (local) {
@@ -1061,31 +1069,40 @@
     }, {ariaLabel: context.t("查看该源码版本的公式和身份")});
   }
 
+  // The family template link in the shared parameter-section header.  It used
+  // to open a separately maintained source-code help overlay; the family now
+  // has its own view-mode page, so the "?" reuses the nestable overlay shell
+  // (FTObjectOverlay factor_family kind, mode view) exactly like the nested
+  // factor viewer — library families open by ref, frozen/temporary ones from
+  // their carried value.
   function familySourceHelp(context, value = {}) {
-    const fingerprint = value.family_formula_fingerprint || "current";
-    const icon = helpIcon({
-      mode: "overlay",
-      title: context.t("因子家族源码"),
-      wide: true,
-      load: async () => {
-        if (String(value.source_code || "").trim()) {
-          return source(context, value);
+    const view = familyRowView(value);
+    const icon = document.createElement("button");
+    icon.type = "button";
+    icon.className = "ft-help-icon factor-detail-family-source-help";
+    icon.textContent = "?";
+    const label = view?.title || context.t("查看因子家族");
+    icon.setAttribute("aria-label", label);
+    icon.title = label;
+    icon.addEventListener("click", event => {
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      if (!view) return;
+      const options = {kind: "factor_family", mode: "view", ref: view.ref};
+      if (view.initialValue !== undefined) options.initialValue = view.initialValue;
+      if (view.temporary === true) options.temporary = true;
+      const open = context.openObject || (window.FTObjectOverlay?.open
+        ? childOptions => window.FTObjectOverlay.open(context, childOptions)
+        : null);
+      if (open) { open(options); return; }
+      const loader = window.FTStaticLoader?.loadGroups;
+      if (typeof loader !== "function") return;
+      void Promise.resolve(loader(["object-overlay"])).then(() => {
+        if (window.FTObjectOverlay?.open) {
+          window.FTObjectOverlay.open(context, options);
         }
-        try {
-          const payload = await loadSourceVersion(
-            context, value, fingerprint, sourceOptions(value),
-          );
-          return source(context, payload);
-        } catch (_) {
-          const unavailable = document.createElement("p");
-          unavailable.className = "factor-source-version-unavailable";
-          unavailable.textContent = sourceUnavailableText(context);
-          return unavailable;
-        }
-      },
-    }, {ariaLabel: context.t("查看该因子家族冻结版本的源码")});
-    icon.classList?.add?.("factor-detail-family-source-help");
-    icon.addEventListener?.("click", event => event.stopPropagation());
+      }).catch(() => {});
+    });
     icon.addEventListener?.("keydown", event => event.stopPropagation());
     return icon;
   }
