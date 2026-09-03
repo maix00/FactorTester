@@ -377,6 +377,66 @@ assert.equal(locked.dropdown.open, false);
     row.children[1]?.textContent === "旧结果"
   )), false, "a stale remote result must not overwrite the latest result");
 
+  const overlayOpens = [];
+  window.FTObjectOverlay = {
+    open: (context, options) => { overlayOpens.push(options); return Promise.resolve(); },
+  };
+  const viewed = window.FTMultiSelectFilter.create({t: value => value}, {
+    items: [
+      {
+        value: "factor:v2:abc",
+        label: "现场因子",
+        description: "库内因子 · owner",
+        view: {kind: "factor", ref: "factor:v2:abc", title: "查看因子"},
+      },
+      {value: "text", label: "纯文本行", description: "没有对象的行"},
+    ],
+    selected: [], multi: true,
+  });
+  const viewButton = viewed.optionList.children[0].children[3];
+  assert.equal(viewButton.className.split(" ").includes("ft-help-icon"), true,
+    "an object row keeps the help icon affordance");
+  viewButton.listeners.click({
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  assert.deepEqual(overlayOpens, [{
+    kind: "factor", mode: "view", ref: "factor:v2:abc",
+  }], "an object row's help icon must open the matching view overlay");
+  const plainButton = viewed.optionList.children[1].children[3];
+  plainButton.listeners?.click?.({
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  assert.equal(overlayOpens.length, 1,
+    "a plain text row must not open an object overlay");
+
+  // Inside an existing object overlay the opener must route through the
+  // overlay's own frame stack (context.openObject) so the view page becomes a
+  // nested child overlay instead of a second top-level dialog.
+  const nestedOpens = [];
+  const nestedContext = {
+    t: value => value,
+    openObject: options => { nestedOpens.push(options); },
+  };
+  const nestedPicker = window.FTMultiSelectFilter.create(nestedContext, {
+    items: [{
+      value: "group:g1",
+      label: "产品组",
+      view: {kind: "product_group", ref: "group:g1"},
+    }],
+    selected: [], multi: true,
+  });
+  nestedPicker.optionList.children[0].children[3].listeners.click({
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  assert.deepEqual(nestedOpens, [{
+    kind: "product_group", mode: "view", ref: "group:g1",
+  }], "inside an overlay the row viewer must use the nested frame stack");
+  assert.equal(overlayOpens.length, 1,
+    "nested opens must not fall back to a top-level overlay");
+
   console.log("ok");
 })().catch(error => {
   console.error(error);

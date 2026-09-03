@@ -1864,6 +1864,64 @@ def test_shared_multi_select_enforces_exclusive_and_single_selection() -> None:
         "groups"]["catalog-selection-remote"]
 
 
+def test_multi_select_object_rows_open_matching_view_overlays() -> None:
+    import subprocess
+
+    # Option rows that carry an object (factor, family, product group,
+    # category, factor set, ...) must open the matching view overlay from
+    # their "?" icon; plain text rows keep the text bubble.  Inside an open
+    # overlay the opener must route through the frame stack so the view is a
+    # nested child overlay, not a second top-level dialog.
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "multi_select_filter.js"
+    source = WEB_ROOT / "catalog" / "shared" / "multi-select-filter.js"
+    remote_source = WEB_ROOT / "catalog" / "shared" / "multi-select-filter-remote.js"
+    result = subprocess.run(
+        ["node", str(fixture), str(remote_source), str(source)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+    picker = source.read_text(encoding="utf-8")
+    assert "function openItemView" in picker
+    assert "function optionHelp" in picker
+    assert "options.viewOf" in picker
+    assert 'item?.view || null' in picker
+
+    # The shared row-view helpers classify library vs test-local objects.
+    helpers_fixture = ROOT / "tests" / "scripts" / "fixtures" / "row_view_helpers.js"
+    shared = WEB_ROOT / "catalog" / "factor-detail-shared.js"
+    helper_result = subprocess.run(
+        ["node", str(helpers_fixture), str(shared)], cwd=ROOT,
+        capture_output=True, text=True, check=False,
+    )
+    assert helper_result.returncode == 0, (
+        helper_result.stderr or helper_result.stdout
+    )
+    assert helper_result.stdout.strip() == "ok"
+
+    # Call sites must declare row views so the shared picker can open them.
+    factor_editor = (WEB_ROOT / "catalog" / "factor-editor.js").read_text(
+        encoding="utf-8"
+    )
+    factors_page = (WEB_ROOT / "catalog" / "factors.js").read_text(
+        encoding="utf-8"
+    )
+    for candidate in [
+        "workbench/test-factor-candidates.js",
+        "workbench/test-factor-candidate-sources.js",
+        "workbench/test-products.js",
+        "workbench/test-categories.js",
+        "workbench/factor-set-selection.js",
+    ]:
+        text = (WEB_ROOT / candidate).read_text(encoding="utf-8")
+        assert "factorRowView" in text or "productGroupRowView" in text \
+            or "categoryRowView" in text or "factorSetRowView" in text, candidate
+    assert "familyRowView" in factor_editor
+    assert "factorRowView" in factor_editor
+    assert "factor_set_only === true" in shared.read_text(encoding="utf-8")
+    assert "testObjectTemporary" in factors_page
+
+
 def test_inline_strategy_creation_uses_shared_nested_object_overlay() -> None:
     panel = (WEB_ROOT / "workbench" / "strategy-binding-panel.js").read_text(
         encoding="utf-8",

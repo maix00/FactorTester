@@ -73,6 +73,8 @@
           item.visibility === "local" ? "本地" : "服务器",
         )}`,
       factorSet: item,
+      view: window.FTFactorDetailShared?.factorSetRowView?.(item)
+        || {kind: "factor_set", ref: item.target_ref},
     })).filter(item => item.value);
     const updateSelection = async values => {
       const requested = new Set(values);

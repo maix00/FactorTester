@@ -36,8 +36,15 @@
 
   async function familyDetail(context, targetRef, mode = "view", options = {}) {
     context.activeNav("factors");
-    let data = await catalog().load(context, {library: true});
-    if (mode === "view" && targetRef && !data.families.some(item =>
+    // A factor family created inline in the test editor already carries its
+    // complete view model; render it read-only without a catalog round-trip.
+    const inline = mode === "view"
+      && (context.testObjectTemporary || context.testObjectSnapshot)
+      && context.testObjectInitialValue;
+    let data = inline
+      ? {families: [context.testObjectInitialValue]}
+      : await catalog().load(context, {library: true});
+    if (!inline && mode === "view" && targetRef && !data.families.some(item =>
       item.family_ref === targetRef || item.factor_family_alias === targetRef
     )) {
       data = await catalog().load(context, {refresh: true, library: true});

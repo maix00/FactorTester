@@ -647,6 +647,96 @@
     return parameter?.value;
   }
 
+  // Row-level "view object" descriptors for picker option rows.  A row that
+  // references a library object opens the library's own view overlay by ref;
+  // a row that carries a test-local / temporary object (created inline in a
+  // test editor, factor-set member, never persisted) renders from the carried
+  // frozen value instead — the same inline path the nested overlays use — so
+  // freshly created factors, families, groups and categories stay viewable.
+  const LOCAL_SOURCE = item => (
+    item?.temporary === true
+    || item?.source_kind === "transient"
+    || item?.source_origin === "test_inline"
+    || item?.source_origin === "inline"
+    || item?.factor_set_only === true
+  );
+
+  function factorRowView(factor) {
+    if (!factor || typeof factor !== "object") return null;
+    const ref = String(factor.factor_ref || factor.ref || "").trim();
+    const local = LOCAL_SOURCE(factor);
+    if (!ref && !local) return null;
+    if (!local && ref) {
+      return {kind: "factor", ref, title: "查看因子"};
+    }
+    return {
+      kind: "factor", ref: ref || "temporary", temporary: true,
+      initialValue: {...factor, ref: ref || "temporary", factor_ref: ref || "temporary"},
+      title: "查看因子",
+    };
+  }
+
+  function familyRowView(family) {
+    if (!family || typeof family !== "object") return null;
+    const ref = String(
+      family.family_ref || family.factor_family_alias
+      || family.factor_family_name || family.alias || "",
+    ).trim();
+    const local = LOCAL_SOURCE(family);
+    if (!ref && !local) return null;
+    const descriptor = {kind: "factor_family", ref, title: "查看因子家族"};
+    if (local) {
+      descriptor.temporary = true;
+      descriptor.initialValue = {
+        ...family, family_ref: ref, factor_family_alias: ref,
+      };
+    }
+    return descriptor;
+  }
+
+  function factorSetRowView(set) {
+    if (!set || typeof set !== "object") return null;
+    const ref = String(
+      set.target_ref || set.set_ref || set.factor_set_ref || set.id || "",
+    ).trim();
+    const local = LOCAL_SOURCE(set);
+    if (!ref && !local) return null;
+    const descriptor = {kind: "factor_set", ref, title: "查看因子集合"};
+    if (local) {
+      descriptor.temporary = true;
+      descriptor.initialValue = {...set, target_ref: ref, set_ref: ref};
+    }
+    return descriptor;
+  }
+
+  function productGroupRowView(group) {
+    if (!group || typeof group !== "object") return null;
+    const ref = String(
+      group.group_ref || group.product_group_ref || group.id || "",
+    ).trim();
+    const local = LOCAL_SOURCE(group);
+    if (!ref && !local) return null;
+    const descriptor = {kind: "product_group", ref, title: "查看产品组"};
+    if (local) {
+      descriptor.temporary = true;
+      descriptor.initialValue = {...group, group_ref: ref, product_group_ref: ref};
+    }
+    return descriptor;
+  }
+
+  function categoryRowView(category) {
+    if (!category || typeof category !== "object") return null;
+    const ref = String(category.id || category.name || category.alias || "").trim();
+    const local = LOCAL_SOURCE(category);
+    if (!ref && !local) return null;
+    const descriptor = {kind: "category", ref, title: "查看产品分类"};
+    if (local) {
+      descriptor.temporary = true;
+      descriptor.initialValue = {...category, id: ref, name: ref};
+    }
+    return descriptor;
+  }
+
   // View-mode nested FactorParam rows open the nested factor's own dedicated
   // page in the shared nested object overlay (FTObjectOverlay), the same
   // frame-stack infrastructure the workbench uses.  The opener button keeps the
@@ -1091,6 +1181,8 @@
     expression, loadSourceVersions, loadSourceVersion,
     parameterRows, parameterValues, createParameterList, localFormula,
     parameterSection,
+    factorRowView, familyRowView, factorSetRowView,
+    productGroupRowView, categoryRowView,
     familyIdentity, familySourceHelp, fieldRow, helpIcon, parameterTable,
     previewExpression,
     pageClass, provenance, source,

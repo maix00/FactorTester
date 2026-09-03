@@ -54,6 +54,8 @@
       label: factorLabel(factor),
       description: FTTestFactorCandidates.sourceDescription(context, state, factor),
       factor,
+      view: window.FTFactorDetailShared?.factorRowView?.(factor)
+        || {kind: "factor", ref: factorID(factor)},
     })).filter(item => item.value);
   }
 
@@ -182,6 +184,8 @@
         label: factorAlias(item) || id,
         description: FTTestFactorCandidates.sourceDescription(context, state, item),
         factor: item,
+        view: window.FTFactorDetailShared?.factorRowView?.(item)
+          || {kind: "factor", ref: id},
       };
     }).filter(item => item.value);
     let picker;

@@ -54,6 +54,8 @@
           item.factor_kind === "public" ? "公共因子家族" : "可见因子家族",
         ].filter(Boolean).join(" · "),
         family: item,
+        view: window.FTFactorDetailShared?.familyRowView?.(item)
+          || {kind: "factor_family", ref: value},
       }];
     });
   }
@@ -392,6 +394,8 @@
         value, label: alias, factor: enriched, family,
         description: [enriched.owner_alias || enriched.owner_username,
           enriched.factor_family_alias].filter(Boolean).join(" · "),
+        view: window.FTFactorDetailShared?.factorRowView?.(enriched)
+          || {kind: "factor", ref: value},
       }];
     });
   }
