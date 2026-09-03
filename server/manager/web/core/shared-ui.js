@@ -10,7 +10,11 @@
       const cell = document.createElement("th"); cell.textContent = label; head.append(cell);
     });
     const body = element.createTBody();
-    rows.forEach(values => appendRow(body, values));
+    rows.forEach(values => {
+      if (values?.fullWidth === true) {
+        appendFullWidthRow(body, headers.length, values.content);
+      } else appendRow(body, values);
+    });
     shell.append(element);
     return {shell, table: element, body};
   }
@@ -74,6 +78,15 @@
       const cell = row.insertCell();
       if (value instanceof Node) cell.append(value); else cell.textContent = text(value);
     });
+    return row;
+  }
+
+  function appendFullWidthRow(body, columns, value) {
+    const row = body.insertRow();
+    row.className = "shared-table-full-width-row";
+    const cell = row.insertCell();
+    cell.colSpan = Math.max(1, Number(columns) || 1);
+    if (value instanceof Node) cell.append(value); else cell.textContent = text(value);
     return row;
   }
 
