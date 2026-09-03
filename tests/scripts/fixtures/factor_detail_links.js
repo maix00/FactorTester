@@ -224,11 +224,12 @@ const nestedPreview = window.FTFactorDetailShared.previewExpression({
   }],
 }, {});
 assert.match(nestedPreview, /\\begin\{aligned\}/);
-assert.match(nestedPreview, /\\mathrm\{SgChgPct\}_t &:=/);
+assert.match(nestedPreview, /\\mathrm\{SgChgPct\}_t :=/);
+assert.doesNotMatch(nestedPreview, /\\mathrm\{SgChgPct\}_t &:=/);
 assert.match(nestedPreview, /\\textcolor\{red\}\{\\mathrm\{CA\}\}/);
 assert.match(nestedPreview, /\\textcolor\{red\}\{\\mathrm\{SgChgPct\}\}/);
 assert.ok(
-  nestedPreview.indexOf("\\mathrm{SgChgPct}_t &:=")
+    nestedPreview.indexOf("\\mathrm{SgChgPct}_t :=")
     < nestedPreview.indexOf("\\operatorname{argmin}"),
   "nested factor must be rendered as a preceding intermediate definition",
 );
@@ -258,7 +259,7 @@ assert.ok(
     item.headers?.[0] === "参数"
   ));
   assert.ok(parameterTable);
-  assert.deepStrictEqual(parameterTable.headers, ["参数", "参数类别", "值"]);
+  assert.deepStrictEqual(parameterTable.headers, ["参数", "参数类别", "默认值", "值"]);
   assert.ok(parameterTable.values.some(row => row[0] === "N"));
   assert.strictEqual(parameterTable.values[0][1].children[0].textContent, "WindowParam");
   assert.match(parameterTable.values[0][1].children[1].helpText, /窗口长度/);

@@ -75,10 +75,10 @@
       const bodyLines = body.split(/\s*\\\\\s*/).map(line => line.trim())
         .filter(Boolean);
       if (bodyLines.length > 1) {
-        bodyLines[bodyLines.length - 1] = `${familySymbol(nested.value)}_t &:= ${bodyLines[bodyLines.length - 1]}`;
+        bodyLines[bodyLines.length - 1] = childDefinition(familySymbol(nested.value), bodyLines[bodyLines.length - 1], false);
         lines.push(...bodyLines);
       } else {
-        lines.push(`${familySymbol(nested.value)}_t &:= ${body}`);
+        lines.push(childDefinition(familySymbol(nested.value), body, true));
       }
     }
   }
@@ -519,6 +519,7 @@
       tableRows.push([
         parameter.alias,
         parameterType(context, parameter),
+      parameter.redacted ? context.t("已隐藏") : String(parameter.default_value ?? ""),
         parameter.redacted ? context.t("已隐藏") : parameterDisplayValue(parameter),
       ]);
       if (!parameter.nested_factor) continue;
@@ -532,7 +533,7 @@
       tableRows.push({fullWidth: true, content: nested});
     }
     body.append(FTUI.table(
-      [context.t("参数"), context.t("参数类别"), context.t("值")],
+      [context.t("参数"), context.t("参数类别"), context.t("默认值"), context.t("值")],
       tableRows,
     ).shell);
     root.append(header, body);
@@ -550,6 +551,11 @@
       );
     }
     return parameter?.value;
+  }
+
+  function childDefinition(symbol, line, align) {
+    const output = String(line).match(/^(?:X|\\mathrm\{X\})_t\s*&?\s*:=\s*(.+)$/);
+    return `${output ? "" : align ? "& " : ""}${symbol}_t := ${output ? output[1] : line}`;
   }
 
   function formula(context, value) {

@@ -231,10 +231,17 @@ def _resolved_formula(
             # Intermediate definitions belong before the named child result;
             # put the child symbol on the final line so multiline formulas
             # read ``Child_t := final-definition := expression``.
-            child_lines[-1] = (
-                f"{_symbol_latex(child.get('factor_family_alias'))}_t &:= "
-                f"{child_lines[-1]}"
+            child_symbol = _symbol_latex(child.get("factor_family_alias"))
+            output = re.match(
+                r"^(?:X|\\mathrm\{X\})_t\s*&?\s*:=\s*(.+)$",
+                child_lines[-1],
             )
+            if output:
+                child_lines[-1] = f"{child_symbol}_t := {output.group(1)}"
+            elif len(child_lines) == 1:
+                child_lines[-1] = f"& {child_symbol}_t := {child_lines[-1]}"
+            else:
+                child_lines[-1] = f"{child_symbol}_t := {child_lines[-1]}"
             lines.extend(child_lines)
     lines.append(f"{_symbol_latex(final_symbol)}_t &:= {body}.")
     return "\\begin{aligned}\n" + " \\\\\n".join(lines) + "\n\\end{aligned}"
