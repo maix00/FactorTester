@@ -624,27 +624,66 @@
     return parameter?.value;
   }
 
-  function nestedIdentityHelp(context, parameter) {
-    const nested = parameter.nested_factor;
-    return fieldHelp({
-      title: `${context.t("查看内嵌因子")} · ${parameter.alias}`,
-      wide: true,
-      render: body => {
-        const renderContext = {...context, content: body, toolbar: document.createElement("div"), activeNav: () => {}};
-        const family = nested.family || nested.__factor_family || {
-          factor_family_alias: nested.factor_family_alias,
-          parameter_definitions: nested.params || nested.parameter_definitions || [],
-          math_expr: nested.math_expr || nested.formula || "",
-        };
-        const view = window.FTFactorDetails?.factorDetail;
-        if (view) {
-          void view(renderContext, {factors: [nested], families: [family]},
-            nested.factor_ref || nested.ref || nested.factor_alias, "view", null);
-          return;
-        }
-        body.append(parameterTable(context, nested, {family}));
-      },
-    }, {ariaLabel: context.t("查看内嵌因子")});
+  // View-mode nested FactorParam rows open the nested factor's own dedicated
+  // page in the shared nested object overlay (FTObjectOverlay), the same
+  // frame-stack infrastructure the workbench uses.  The opener button keeps the
+  // established "?" affordance; the overlay renders the full factor page and
+  // its heading comes from the nested page itself, so the parent page header
+  // is never touched.
+  function nestedFactorViewer(context, parameter) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ft-help-icon";
+    button.textContent = "?";
+    button.setAttribute("aria-label", context.t("查看内嵌因子"));
+    button.addEventListener("click", event => {
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      openNestedFactorPage(context, parameter.nested_factor);
+    });
+    return button;
+  }
+
+  function openNestedFactorPage(context, nested) {
+    if (!nested || typeof nested !== "object") return;
+    const alias = String(
+      nested?.factor_alias || nested?.alias || nested?.factor_family_alias || "",
+    ).trim();
+    const ref = String(
+      nested?.factor_ref || nested?.ref || nested?.factor_alias || alias || "",
+    ).trim();
+    if (!ref) return;
+    const family = nested.family || nested.__factor_family || {
+      factor_family_alias: nested.factor_family_alias
+        || nested.family_alias || "",
+      parameter_definitions: nested.params || nested.parameter_definitions || [],
+      math_expr: nested.math_expr || nested.formula || "",
+    };
+    const initialValue = {
+      ...nested,
+      ref,
+      factor_ref: ref,
+      factor_alias: alias,
+      factor_family_alias: nested.factor_family_alias
+        || nested.family_alias || family.factor_family_alias || "",
+      family,
+      __factor_family: family,
+    };
+    const options = {
+      kind: "nested_factor", ref, mode: "view",
+      initialValue, temporary: true,
+    };
+    const open = context.openObject || (window.FTObjectOverlay?.open
+      ? childOptions => window.FTObjectOverlay.open(context, childOptions)
+      : null);
+    if (open) { open(options); return; }
+    const loader = window.FTStaticLoader?.loadGroups;
+    if (typeof loader !== "function") return;
+    void Promise.resolve(loader(["object-overlay"])).then(() => {
+      if (window.FTObjectOverlay?.open) {
+        window.FTObjectOverlay.open(context, options);
+      }
+    }).catch(() => {});
   }
 
   function parameterValueCell(context, parameter) {
@@ -653,7 +692,7 @@
     root.className = "factor-detail-parameter-value";
     const alias = document.createElement("span");
     alias.textContent = parameterDisplayValue(parameter);
-    root.append(alias, " ", nestedIdentityHelp(context, parameter));
+    root.append(alias, " ", nestedFactorViewer(context, parameter));
     return root;
   }
 

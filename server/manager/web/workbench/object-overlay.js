@@ -7,34 +7,56 @@
       // The overlay context supplies its mount and onSaved callback, so the
       // catalog create/edit/view behavior is identical to the left-nav tab.
       render: (context, ref, mode, options) => (
-        FTFactors.factorDetail(context, ref, mode, options)
+        window.FTFactors.factorDetail(context, ref, mode, options)
       ),
     },
     factor_family: {
       title: "因子家族",
       load: "factor-catalog-detail-rendering",
       render: (context, ref, mode, options) => (
-        FTFactors.familyDetail(context, ref, mode, {
+        window.FTFactors.familyDetail(context, ref, mode, {
           ...options, familyMode: true,
         })
       ),
+    },
+    // A nested FactorParam factor is configuration-local: it has no catalog
+    // round-trip.  Render its dedicated page straight from the frozen row the
+    // opener carried (factor + resolved family), exactly like the nested view
+    // of the parameter tree but as a full page inside this nested overlay.
+    nested_factor: {
+      title: "因子",
+      load: "factor-catalog-detail-rendering",
+      render: (context, ref, mode, options) => {
+        const initial = options.initialValue || {};
+        const family = initial.family || initial.__factor_family || null;
+        return window.FTFactorDetails?.factorDetail
+          ? window.FTFactorDetails.factorDetail(
+            context,
+            {
+              factors: [{...initial, ref, factor_ref: ref}],
+              families: family ? [family] : [],
+            },
+            ref, "view",
+          )
+          : null;
+      },
     },
     factor_set: {
       title: "因子集合",
       load: "factor-catalog-detail",
       render: (context, ref, mode, options) => (
-        FTFactors.setDetail(context, ref, mode, options)
+        window.FTFactors.setDetail(context, ref, mode, options)
       ),
     },
     product_group: {
       title: "产品组",
       load: "catalog",
-      render: (context, ref, mode) => FTProducts.groupDetail(context, ref, mode),
+      render: (context, ref, mode) => window.FTProducts.groupDetail(context, ref, mode),
     },
     category: {
       title: "产品分类",
       load: "catalog",
-      render: (context, ref, mode) => FTProducts.categoryDetail(context, ref, mode),
+      render: (context, ref, mode) => window.FTProducts.categoryDetail(context, ref, mode),
     },
     strategy: {
       title: "策略",
@@ -44,7 +66,7 @@
           throw new Error("策略编辑器不可用");
         }
         let submitButton = null;
-        const editor = FTStrategyLibraryEditor.create(
+        const editor = window.FTStrategyLibraryEditor.create(
           context,
           options.initialValue || {},
           {
@@ -71,7 +93,7 @@
         if (mode !== "view") {
           const actions = document.createElement("div");
           actions.className = "dialog-actions";
-          submitButton = FTUI.actionButton(
+          submitButton = window.FTUI.actionButton(
             context.t(options.submitLabel || "保存"), null, {variant: "primary"},
           );
           submitButton.type = "submit";
@@ -104,7 +126,7 @@
       activeNav: () => {},
       navigate: callbacks.navigate || (() => closeOverlay()),
       openFactor: callbacks.openFactor,
-      openTestObject: callbacks.openTestObject,
+      openObject: callbacks.openObject,
       closeTab: callbacks.closeFrame || (() => closeOverlay()),
       onSaved,
       testState: options.testState || null,
@@ -123,10 +145,10 @@
     const mode = ["create", "edit", "view"].includes(options.mode)
       ? options.mode : "create";
     const dialog = document.createElement("dialog");
-    dialog.className = "test-object-editor-dialog";
+    dialog.className = "ft-object-overlay-dialog";
     dialog.dataset.ftTabID = context.tabID || "";
     const card = document.createElement("section");
-    card.className = "dialog-card wide test-object-editor-overlay";
+    card.className = "dialog-card wide object-overlay-card";
     const heading = document.createElement("div");
     heading.className = "section-heading";
     const copy = document.createElement("div");
@@ -138,19 +160,19 @@
     copy.append(title);
     const closeButton = document.createElement("button");
     closeButton.type = "button";
-    closeButton.className = "dialog-close icon-action-button test-object-editor-close";
+    closeButton.className = "dialog-close icon-action-button ft-object-overlay-close";
     closeButton.replaceChildren?.(window.FTIcons?.node?.("xmark") || "×");
     closeButton.title = context.t("关闭");
     const frameActions = document.createElement("div");
-    frameActions.className = "test-object-editor-frame-actions";
+    frameActions.className = "ft-object-overlay-frame-actions";
     heading.append(copy, frameActions, closeButton);
     const body = document.createElement("div");
-    body.className = "test-object-editor-body";
+    body.className = "ft-object-overlay-body";
     const tree = document.createElement("nav");
-    tree.className = "test-object-editor-tree";
+    tree.className = "ft-object-overlay-tree";
     tree.setAttribute?.("aria-label", context.t("已打开页面"));
     const mount = document.createElement("div");
-    mount.className = "test-object-editor-overlay-mount";
+    mount.className = "ft-object-overlay-mount";
     body.append(tree, mount);
     card.append(heading, body);
     dialog.append(card);
@@ -205,13 +227,13 @@
     const renderTree = () => {
       const renderNode = (frame, depth) => {
         const item = document.createElement("div");
-        item.className = "test-object-editor-tree-item";
+        item.className = "ft-object-overlay-tree-item";
         item.style?.setProperty?.("--tree-depth", String(depth));
         item.classList.toggle("active", frame === activeFrame);
         const children = childrenOf(frame);
         const toggle = document.createElement("button");
         toggle.type = "button";
-        toggle.className = "icon-action-button test-object-editor-tree-toggle";
+        toggle.className = "icon-action-button ft-object-overlay-tree-toggle";
         toggle.hidden = children.length === 0;
         toggle.replaceChildren?.(window.FTIcons?.node?.(
           expandedFrames.has(frame.id) ? "triangle.down" : "triangle.right",
@@ -226,7 +248,7 @@
         });
         const label = document.createElement("button");
         label.type = "button";
-        label.className = "test-object-editor-tree-label";
+        label.className = "ft-object-overlay-tree-label";
         const frameDefinition = definitions[frame.kind];
         label.textContent = frame.label || context.t(frameDefinition.title);
         label.title = label.textContent;
@@ -235,7 +257,7 @@
         if (frame !== frames[0]) {
           const cancel = document.createElement("button");
           cancel.type = "button";
-          cancel.className = "icon-action-button test-object-editor-tree-cancel";
+          cancel.className = "icon-action-button ft-object-overlay-tree-cancel";
           cancel.replaceChildren?.(window.FTIcons?.node?.("xmark") || "×");
           cancel.title = context.t("取消这一层");
           cancel.setAttribute?.("aria-label", context.t("取消这一层"));
@@ -293,13 +315,22 @@
       void renderFrame(frame.parent || frames.at(-1) || frames[0]);
     };
 
-    const updateFrameHeading = (frame, name = "") => {
+    const updateFrameHeading = (frame, name = "", scope = "") => {
       const frameDefinition = definitions[frame.kind] || definition;
       const prefix = frame.mode === "edit"
         ? context.t("编辑") : frame.mode === "view" ? context.t("查看") : context.t("新建");
-      title.textContent = prefix + context.t(frameDefinition.title);
-      frame.label = name || `${prefix}${context.t(frameDefinition.title)}`;
-      if (name && frame.kind === "factor") title.title = name;
+      const typeTitle = context.t(frameDefinition.title);
+      // The overlay is an embed of the object's own dedicated page, so its
+      // heading is the page heading the embedded detail reported (the alias /
+      // display name).  The mode+type label is only the fallback until the
+      // page renders, and is kept as an accessible hint on the element.
+      title.textContent = name ? String(name) : prefix + typeTitle;
+      if (name) {
+        title.title = `${prefix}${typeTitle}${scope ? ` · ${scope}` : ""}`;
+      } else {
+        title.removeAttribute?.("title");
+      }
+      frame.label = name || `${prefix}${typeTitle}`;
       renderTree();
     };
 
@@ -310,9 +341,9 @@
       if (!frameDefinition) return;
       updateFrameHeading(frame);
       frame.mount ||= document.createElement("div");
-      frame.mount.className = "test-object-editor-frame";
+      frame.mount.className = "ft-object-overlay-frame";
       frame.toolbar ||= document.createElement("div");
-      frame.toolbar.className = "toolbar test-object-editor-frame-toolbar";
+      frame.toolbar.className = "toolbar ft-object-overlay-frame-toolbar";
       frameActions.replaceChildren(frame.toolbar);
       mount.replaceChildren(frame.mount);
       if (frame.rendered) return;
@@ -336,11 +367,11 @@
             finish(null);
           },
           openFactor,
-          openTestObject,
+          openObject,
           closeFrame: () => closeFrame(frame),
           toolbar: frame.toolbar,
           setHeading: (name, scope) => {
-            updateFrameHeading(frame, name);
+            updateFrameHeading(frame, name, scope);
           },
         },
       );
@@ -354,7 +385,7 @@
         await frameDefinition.render(proxy, frame.ref, frame.mode, frameOptions);
       } catch (error) {
         if (!state.closed && token === renderToken) {
-          frame.mount.replaceChildren(FTUI.empty(
+          frame.mount.replaceChildren(window.FTUI.empty(
             context.t("读取失败"), error.message || context.t("请稍后重试"),
           ));
         }
@@ -374,7 +405,7 @@
       void renderFrame(frames.at(-1));
     };
 
-    const openTestObject = childOptions => {
+    const openObject = childOptions => {
       const childDefinition = definitions[childOptions?.kind];
       if (!childDefinition) {
         return Promise.reject(new Error(`unsupported test object: ${childOptions?.kind}`));
@@ -435,5 +466,5 @@
     };
   }
 
-  window.FTTestObjectEditorOverlay = Object.freeze({open});
+  window.FTObjectOverlay = Object.freeze({open});
 })();

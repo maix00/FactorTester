@@ -153,7 +153,7 @@
     // Temporary strategies use the same nested object editor as every other
     // test-time object.  The binding panel owns only inspection and state
     // persistence; it must not create a second dialog implementation.
-    return FTTestObjectEditorOverlay.open(context, {
+    return FTObjectOverlay.open(context, {
       kind: "strategy",
       mode: existing ? "edit" : "create",
       ref: existing?.temp_ref || "new",

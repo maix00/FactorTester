@@ -49,13 +49,13 @@
   }
 
   async function openObjectEditor(context, options) {
-    if (!window.FTTestObjectEditorOverlay?.open) {
-      await loadGroup("object-editor-overlay");
+    if (!window.FTObjectOverlay?.open) {
+      await loadGroup("object-overlay");
     }
-    if (!window.FTTestObjectEditorOverlay?.open) {
+    if (!window.FTObjectOverlay?.open) {
       throw new Error(context?.t?.("对象编辑器不可用") || "对象编辑器不可用");
     }
-    return window.FTTestObjectEditorOverlay.open(context, options);
+    return window.FTObjectOverlay.open(context, options);
   }
 
   function codeGroupForTab(tab) {

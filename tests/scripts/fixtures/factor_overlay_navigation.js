@@ -86,8 +86,8 @@ window.FTFactors = {
 window.FTProducts = {};
 
 vm.runInThisContext(
-  fs.readFileSync("server/manager/web/workbench/test-object-editor-overlay.js", "utf8"),
-  {filename: "test-object-editor-overlay.js"},
+  fs.readFileSync("server/manager/web/workbench/object-overlay.js", "utf8"),
+  {filename: "object-overlay.js"},
 );
 
 const context = {
@@ -102,7 +102,7 @@ const context = {
 };
 
 (async () => {
-  const pending = window.FTTestObjectEditorOverlay.open(context, {
+  const pending = window.FTObjectOverlay.open(context, {
     kind: "factor_set", ref: setRef, mode: "view",
   });
   await Promise.resolve();

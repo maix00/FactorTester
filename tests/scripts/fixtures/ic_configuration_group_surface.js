@@ -63,10 +63,10 @@ global.FTTests = {
 };
 window.FTTests = global.FTTests;
 let openedObject = null;
-global.FTTestObjectEditorOverlay = {
+global.FTObjectOverlay = {
   open: async (_context, options) => { openedObject = options; },
 };
-window.FTTestObjectEditorOverlay = global.FTTestObjectEditorOverlay;
+window.FTObjectOverlay = global.FTObjectOverlay;
 global.FTICConfigurationGroupForm = {
   render: (_context, _state, editor) => {
     const form = new Element("form");
