@@ -268,6 +268,89 @@
     return icon;
   }
 
+  function fieldHelp(help, options = {}) {
+    return helpIcon(help, options);
+  }
+
+  function labeledField(label, help, context) {
+    const root = document.createElement("span");
+    root.className = "factor-reference-field";
+    const text = document.createElement("span");
+    text.textContent = String(label);
+    root.append(text);
+    if (help) {
+      root.append(fieldHelp(help, {
+        ariaLabel: context.t("查看字段说明"),
+      }));
+    }
+    return root;
+  }
+
+  function identityFieldRows(context, item, rows = []) {
+    const append = (label, value, help = "") => {
+      if (value === undefined || value === null || String(value).trim() === "") {
+        return;
+      }
+      const cell = document.createElement("span");
+      cell.className = "factor-reference-value";
+      const text = document.createElement("span");
+      text.textContent = String(value);
+      cell.append(text);
+      rows.push([labeledField(label, help, context), cell]);
+    };
+    append(
+      context.t("因子引用"), item.factor_ref || item.ref || "",
+      "冻结的因子实例身份：同一引用固定所有者、家族公式指纹、当前实例参数及嵌套依赖，运行和结果追溯都以它为准。",
+    );
+    append(
+      context.t("factor_owner_ref"), item.factor_owner_ref || item.owner_ref
+      || item.owner_username || "",
+      "因子身份所在的所有者命名空间：不同所有者可以使用相同的因子家族 alias，但源码和公式版本可能不同。",
+    );
+    append(
+      context.t("冻结因子家族"),
+      item.factor_family_alias || item.factor_family_name
+      || item.identity?.family_alias || "",
+      "因子家族 alias 是公式模板的名称；它不代表源码版本，公式内容仍由 family_formula_fingerprint 固定。",
+    );
+    append(
+      context.t("family_formula_fingerprint"),
+      item.family_formula_fingerprint
+      || item.identity?.family_formula_fingerprint || "",
+      "家族公式源码的 SHA-256 指纹：只描述公式模板源码，不包含实例参数；相同 alias 但指纹不同说明家族源码已变化。",
+    );
+    append(
+      context.t("self_formula_fingerprint"),
+      item.self_formula_fingerprint
+      || item.identity?.self_formula_fingerprint || "",
+      "当前因子实例的公式指纹：由家族公式和具体参数共同决定；参数、嵌套因子或家族公式任一变化都会得到不同实例指纹。",
+    );
+    return rows;
+  }
+
+  function provenance(context, value, options = {}) {
+    const item = value || {};
+    const rows = identityFieldRows(context, item);
+    const params = item.factor_params ?? item.params;
+    if (!rows.length && params == null) return null;
+    if (params != null) {
+      const valueNode = document.createElement("span");
+      valueNode.className = "factor-reference-value";
+      const count = Array.isArray(params) ? params.length : Object.keys(params || {}).length;
+      const countNode = document.createElement("span");
+      countNode.textContent = `${count}${context.t("个参数")}`;
+      valueNode.append(countNode);
+      rows.push([labeledField(
+        context.t("factor_params"),
+        "当前实例冻结的参数集合。这里应显示每个参数的实际值；FactorParam 值必须继续递归显示其嵌套因子身份。",
+        context,
+      ), valueNode]);
+    }
+    return FTUI.table(
+      [context.t("RunSpec 字段"), context.t("值")], rows,
+    ).shell;
+  }
+
   function contextHelpText(help) {
     if (typeof help === "string") return help;
     return String(help?.title || help?.text || help?.description || "查看说明");
@@ -378,6 +461,8 @@
       redacted: parameter?.redacted === true,
       description: parameter?.desc || parameter?.value_space_desc || "",
       nested_factor: parameter?.nested_factor
+        || (parameter?.value?.nested_factor
+          ? parameter.value.nested_factor : null)
         || (parameter?.value?.__factor_family_draft === true
           && parameter.value.__factor_family ? parameter.value : null)
         || (isNestedPreviewValue(parameter?.value) ? parameter.value : null)
@@ -423,19 +508,19 @@
     if (formulaValue) header.append(formula(context, formulaValue));
     const body = document.createElement("div");
     body.className = "factor-detail-parameter-tree-body";
-    const tableRows = rows.map(parameter => [
-      parameter.alias,
-      parameterType(context, parameter),
-      parameter.redacted ? context.t("已隐藏") : parameterDisplayValue(parameter),
-    ]);
-    body.append(FTUI.table(
-      [context.t("参数"), context.t("参数类别"), context.t("值")],
-      tableRows,
-    ).shell);
-    // Keep the same parent-row-first ordering as the editor. The nested
-    // panel is associated with its FactorParam row and follows that row's
-    // table, rather than appearing before the outer parameter table.
+    const identityRows = identityFieldRows(context, value);
+    if (identityRows.length) {
+      body.append(FTUI.table(
+        [context.t("RunSpec 字段"), context.t("值")], identityRows,
+      ).shell);
+    }
+    const tableRows = [];
     for (const parameter of rows) {
+      tableRows.push([
+        parameter.alias,
+        parameterType(context, parameter),
+        parameter.redacted ? context.t("已隐藏") : parameterDisplayValue(parameter),
+      ]);
       if (!parameter.nested_factor) continue;
       const nestedRows = parameterRows(parameter.nested_factor, options);
       if (!nestedRows.length) continue;
@@ -444,8 +529,12 @@
       );
       nested.dataset.parameterAlias = parameter.alias;
       nested.className = `${nested.className || ""} factor-detail-nested-parameter-row`.trim();
-      body.append(nested);
+      tableRows.push({fullWidth: true, content: nested});
     }
+    body.append(FTUI.table(
+      [context.t("参数"), context.t("参数类别"), context.t("值")],
+      tableRows,
+    ).shell);
     root.append(header, body);
     return root;
   }
@@ -791,64 +880,6 @@
       content: referenceOverlay(context, value, key),
     }, {ariaLabel: context.t("查看引用的真实身份")}));
     return root;
-  }
-
-  function provenance(context, value) {
-    const item = value || {};
-    const owner = item.factor_owner_ref || "";
-    const family = item.factor_family_alias || item.factor_family_name || "";
-    const familyFingerprint = item.family_formula_fingerprint || "";
-    const selfFingerprint = item.self_formula_fingerprint || "";
-    const factorRef = item.factor_ref || item.target_ref || "";
-    const params = item.factor_params ?? item.params;
-    if (!owner && !family && !familyFingerprint && !selfFingerprint
-      && !factorRef && params == null) return null;
-    const rows = [];
-    if (factorRef) rows.push([
-      context.t("因子引用"), referenceValue(
-        context, {...item, factor_ref: factorRef}, "factor_ref", context.t("因子引用详情"),
-      ),
-    ]);
-    if (owner) rows.push([
-      context.t("factor_owner_ref"), referenceValue(
-        context, {...item, factor_owner_ref: owner}, "factor_owner_ref",
-        context.t("因子所有者详情"),
-      ),
-    ]);
-    const familyIdentityValue = familyIdentity(item);
-    if (familyIdentityValue.alias) {
-      const familyValue = document.createElement("span");
-      familyValue.className = "factor-reference-value";
-      const familyText = document.createElement("span");
-      familyText.textContent = familyIdentityValue.alias;
-      familyValue.append(familyText);
-      rows.push([context.t("冻结因子家族"), familyValue]);
-    }
-    if (familyFingerprint) rows.push([
-      context.t("family_formula_fingerprint"), familyFingerprint,
-    ]);
-    if (selfFingerprint) rows.push([
-      context.t("self_formula_fingerprint"), selfFingerprint,
-    ]);
-    if (params != null) {
-      const valueNode = document.createElement("span");
-      valueNode.className = "factor-reference-value";
-      const count = Array.isArray(params) ? params.length : Object.keys(params || {}).length;
-      const countNode = document.createElement("span");
-      countNode.textContent = `${count}${context.t("个参数")}`;
-      valueNode.append(
-        countNode,
-        helpIcon({
-          mode: "overlay",
-          title: context.t("因子参数详情"),
-          content: referenceOverlay(context, item, context.t("因子参数详情")),
-        }, {ariaLabel: context.t("查看因子参数")} ),
-      );
-      rows.push([context.t("factor_params"), valueNode]);
-    }
-    return FTUI.table(
-      [context.t("RunSpec 字段"), context.t("值")], rows,
-    ).shell;
   }
 
   function sourceVersionHistory(context, value, options = {}) {
