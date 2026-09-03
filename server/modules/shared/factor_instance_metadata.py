@@ -226,7 +226,16 @@ def _resolved_formula(
             continue
         seen_children.add(child_ref)
         child_formula = str(child.get("resolved_math_expr") or "")
-        lines.extend(_aligned_lines(child_formula))
+        child_lines = _aligned_lines(child_formula)
+        if child_lines:
+            # Intermediate definitions belong before the named child result;
+            # put the child symbol on the final line so multiline formulas
+            # read ``Child_t := final-definition := expression``.
+            child_lines[-1] = (
+                f"{_symbol_latex(child.get('factor_family_alias'))}_t &:= "
+                f"{child_lines[-1]}"
+            )
+            lines.extend(child_lines)
     lines.append(f"{_symbol_latex(final_symbol)}_t &:= {body}.")
     return "\\begin{aligned}\n" + " \\\\\n".join(lines) + "\n\\end{aligned}"
 
