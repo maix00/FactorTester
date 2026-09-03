@@ -373,7 +373,9 @@
       nested_factor: parameter?.nested_factor
         || (parameter?.value?.__factor_family_draft === true
           && parameter.value.__factor_family ? parameter.value : null)
-        || (isNestedPreviewValue(parameter?.value) ? parameter.value : null),
+        || (isNestedPreviewValue(parameter?.value) ? parameter.value : null)
+        || (parameter?.value?.schema_version === 2
+          && parameter.value.identity ? parameter.value : null),
     }];
   }
 
@@ -408,20 +410,17 @@
     heading.className = "factor-detail-parameter-tree-heading";
     heading.append(title, familySourceHelp(context, value));
     header.append(heading);
-    const formulaValue = options.preview
-      ? previewExpression(value, options.parameterValues || parameterValues(value, options))
-      : expression(value, {instance: true});
+    // The tree header is the family formula.  The resolved/aggregated
+    // instance formula belongs to the page-level formula box above it.
+    const formulaValue = expression(value);
     if (formulaValue) header.append(formula(context, formulaValue));
     const body = document.createElement("div");
     body.className = "factor-detail-parameter-tree-body";
-    body.append(FTUI.table(
-      [context.t("参数"), context.t("参数类别"), context.t("值")],
-      rows.map(parameter => [
-        parameter.alias,
-        parameterType(context, parameter),
-        parameter.redacted ? context.t("已隐藏") : parameterDisplayValue(parameter),
-      ]),
-    ).shell);
+    const tableRows = rows.map(parameter => [
+      parameter.alias,
+      parameterType(context, parameter),
+      parameter.redacted ? context.t("已隐藏") : parameterDisplayValue(parameter),
+    ]);
     for (const parameter of rows) {
       if (!parameter.nested_factor) continue;
       const nestedRows = parameterRows(parameter.nested_factor, options);
@@ -430,8 +429,13 @@
         context, parameter.nested_factor, nestedRows, depth + 1, options,
       );
       nested.dataset.parameterAlias = parameter.alias;
+      nested.className = `${nested.className || ""} factor-detail-nested-parameter-row`.trim();
       body.append(nested);
     }
+    body.append(FTUI.table(
+      [context.t("参数"), context.t("参数类别"), context.t("值")],
+      tableRows,
+    ).shell);
     root.append(header, body);
     return root;
   }
