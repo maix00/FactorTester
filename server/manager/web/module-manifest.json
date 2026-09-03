@@ -47,7 +47,7 @@
     "charts": ["core"],
     "catalog-selection-core": ["core"],
     "workbench-object-picker": ["core", "catalog-selection-core"],
-    "object-editor-overlay": ["core", "workbench-object-picker"],
+    "object-overlay": ["core", "workbench-object-picker"],
     "catalog-core": ["product-catalog-core", "factor-catalog-core"],
     "output-choice": ["core"],
     "object-transfer": ["core"],
@@ -99,7 +99,7 @@
     "factor-catalog-detail": ["factor-catalog-core", "factor-catalog-enrichment"],
     "factor-catalog-detail-rendering": ["factor-catalog-detail"],
     "factor-catalog-editor": [
-      "factor-catalog-core", "factor-catalog-enrichment", "object-editor-overlay"
+      "factor-catalog-core", "factor-catalog-enrichment", "object-overlay"
     ],
     "strategy-library-runtime": ["core"],
     "strategy-library-core": ["strategy-library-runtime", "code-viewer", "catalog-detail-tabs"],
@@ -152,7 +152,7 @@
       "workbench-configuration-groups", "workbench-ic-controls"
     ],
     "workbench-strategy-bindings": [
-      "workbench-input-state", "object-editor-overlay", "strategy-library-runtime",
+      "workbench-input-state", "object-overlay", "strategy-library-runtime",
       "catalog-selection-remote"
     ],
     "workbench-backtest": ["workbench-configuration-groups"],
@@ -263,8 +263,8 @@
     "workbench-object-picker": [
       "workbench/test-object-picker.js"
     ],
-    "object-editor-overlay": [
-      "workbench/test-object-editor-overlay.js"
+    "object-overlay": [
+      "workbench/object-overlay.js"
     ],
     "product-catalog-core": [
       "catalog/product-category-model.js",
@@ -759,7 +759,7 @@
     "workbench/test-configuration-compiler.js",
     "workbench/test-lazy-code.js",
     "workbench/test-object-picker.js",
-    "workbench/test-object-editor-overlay.js",
+    "workbench/object-overlay.js",
     "workbench/test-field-row.js",
     "workbench/test-field-help.js",
     "workbench/test-control-loader.js",

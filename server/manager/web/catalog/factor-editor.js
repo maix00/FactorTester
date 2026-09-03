@@ -139,8 +139,8 @@
       onCreate: async () => {
         const editingTemporary = state.family?.temporary === true
           || state.family?.source_kind === "transient";
-        const open = context.openTestObject || (childOptions => (
-          FTTestObjectEditorOverlay.open(context, childOptions)
+        const open = context.openObject || (childOptions => (
+          FTObjectOverlay.open(context, childOptions)
         ));
         await open({
           kind: "factor_family", mode: editingTemporary ? "edit" : "create",
@@ -465,8 +465,8 @@
           }
         },
         onCreateFamily: (onSaved, currentFamily) => (
-          context.openTestObject || (childOptions => (
-            FTTestObjectEditorOverlay.open(context, childOptions)
+          context.openObject || (childOptions => (
+            FTObjectOverlay.open(context, childOptions)
           ))
         )({
           kind: "factor_family", mode: currentFamily ? "edit" : "create",

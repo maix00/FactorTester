@@ -965,7 +965,7 @@ def test_frozen_factor_chip_detail_uses_its_snapshot_without_port_resolution() -
     chips = (WEB_ROOT / "workbench" / "test-setting-chips.js").read_text(
         encoding="utf-8",
     )
-    overlay = (WEB_ROOT / "workbench" / "test-object-editor-overlay.js").read_text(
+    overlay = (WEB_ROOT / "workbench" / "object-overlay.js").read_text(
         encoding="utf-8",
     )
     factors = (WEB_ROOT / "catalog" / "factors.js").read_text(encoding="utf-8")
@@ -1202,8 +1202,8 @@ def test_nested_strategy_editor_and_object_overlays_have_explicit_layout_contrac
     ).read_text(encoding="utf-8")
     assert ".strategy-editor-chip-row" not in styles
     assert ".backtest-group-shell > .backtest-group-form" in styles
-    assert ".test-object-editor-dialog > .test-object-editor-overlay" in styles
-    assert ".test-object-editor-overlay-mount > .detail-stack" in styles
+    assert ".ft-object-overlay-dialog > .object-overlay-card" in styles
+    assert ".ft-object-overlay-mount > .detail-stack" in styles
 
 
 def test_dialog_cards_have_shared_viewport_scroll_fallback() -> None:
@@ -1350,13 +1350,13 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
     assert manifest["group_dependencies"]["factor-catalog-editor"] == [
         "factor-catalog-core",
         "factor-catalog-enrichment",
-        "object-editor-overlay",
+        "object-overlay",
     ]
-    assert manifest["group_dependencies"]["object-editor-overlay"] == [
+    assert manifest["group_dependencies"]["object-overlay"] == [
         "core", "workbench-object-picker",
     ]
-    assert manifest["groups"]["object-editor-overlay"] == [
-        "workbench/test-object-editor-overlay.js",
+    assert manifest["groups"]["object-overlay"] == [
+        "workbench/object-overlay.js",
     ]
     assert "core/output-choices.js" not in research_static._initial_scripts(manifest)
     assert manifest["group_dependencies"]["workbench-compiler"] == ["core"]
@@ -1868,7 +1868,7 @@ def test_inline_strategy_creation_uses_shared_nested_object_overlay() -> None:
     panel = (WEB_ROOT / "workbench" / "strategy-binding-panel.js").read_text(
         encoding="utf-8",
     )
-    overlay = (WEB_ROOT / "workbench" / "test-object-editor-overlay.js").read_text(
+    overlay = (WEB_ROOT / "workbench" / "object-overlay.js").read_text(
         encoding="utf-8",
     )
     styles = (WEB_ROOT / "styles" / "strategy-library.css").read_text(
@@ -1876,7 +1876,7 @@ def test_inline_strategy_creation_uses_shared_nested_object_overlay() -> None:
     )
 
     assert 'kind: "strategy"' in panel
-    assert "FTTestObjectEditorOverlay.open" in panel
+    assert "FTObjectOverlay.open" in panel
     assert "FTStrategyLibraryEditor.create" not in panel
     assert 'temporary: true' in panel
     assert "strategy-inline-dialog" not in panel
@@ -1891,7 +1891,7 @@ def test_inline_strategy_creation_uses_shared_nested_object_overlay() -> None:
 
 
 def test_nested_object_overlay_mounts_one_toolbar_per_frame() -> None:
-    overlay = (WEB_ROOT / "workbench" / "test-object-editor-overlay.js").read_text(
+    overlay = (WEB_ROOT / "workbench" / "object-overlay.js").read_text(
         encoding="utf-8",
     )
     editor = (WEB_ROOT / "catalog" / "factor-editor.js").read_text(
@@ -1908,8 +1908,8 @@ def test_nested_object_overlay_mounts_one_toolbar_per_frame() -> None:
     assert 'kind: "factor_family", mode: currentFamily ? "edit" : "create"' in editor
     assert 'onSaved: family => {' in editor
     assert "temporary: true" in editor
-    assert ".test-object-editor-frame-actions" in styles
-    assert ".test-object-editor-frame-toolbar" in styles
+    assert ".ft-object-overlay-frame-actions" in styles
+    assert ".ft-object-overlay-frame-toolbar" in styles
 
 
 def test_registered_locked_fields_share_one_visual_and_picker_contract() -> None:
@@ -2510,6 +2510,9 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     parameter_editor = (WEB_ROOT / "catalog" / "factor-parameter-editor.js").read_text(
         encoding="utf-8",
     )
+    detail_shared = (WEB_ROOT / "catalog" / "factor-detail-shared.js").read_text(
+        encoding="utf-8",
+    )
     app_css = (WEB_ROOT / "styles" / "app.css").read_text(encoding="utf-8")
 
     assert "context.toolbar.append(save)" in object_form
@@ -2523,8 +2526,12 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert "factor-param-choice-disabled" not in parameter_editor
     assert "factor-param-reference-control" in parameter_editor
     assert 'input.placeholder = context.t("填写")' in parameter_editor
-    assert 'header.className = "factor-detail-parameter-header"' in parameter_editor
-    assert '["Key", "参数类型", "默认值", "Value"]' in parameter_editor
+    # The parameter list (header + column labels) is the shared control in
+    # factor-detail-shared.createParameterList; the parameter editor consumes
+    # that shared implementation instead of owning a second list renderer.
+    assert "FTFactorDetailShared.createParameterList" in parameter_editor
+    assert 'header.className = "factor-detail-parameter-header"' in detail_shared
+    assert '["Key", "参数类型", "默认值", "Value"]' in detail_shared
     assert 'context.t("Column")' in parameter_editor
     assert ".factor-detail-parameter-header, .factor-detail-parameter-row" in app_css
     assert "grid-template-columns: minmax(70px, .45fr)" in app_css
@@ -2542,7 +2549,7 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert "resolve_factor_alias" in editor
     assert "onChange: nextValues =>" in editor
     assert "state.parameterValues = {...nextValues}" in editor
-    assert "FTTestObjectEditorOverlay.open" in editor
+    assert "FTObjectOverlay.open" in editor
     assert "factor-source-mode" not in editor
     assert '"新增因子家族"' in editor
     assert 'state.family.source_kind === "transient"' in editor
@@ -2650,7 +2657,7 @@ def test_factor_detail_route_declares_katex_runtime_dependency() -> None:
 def test_test_object_overlay_loads_the_detail_group_before_first_factor_chip() -> None:
     overlay = (
         ROOT / "server" / "manager" / "web" / "workbench"
-        / "test-object-editor-overlay.js"
+        / "object-overlay.js"
     ).read_text(encoding="utf-8")
     factors = (
         ROOT / "server" / "manager" / "web" / "catalog" / "factors.js"

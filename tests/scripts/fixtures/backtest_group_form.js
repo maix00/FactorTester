@@ -53,7 +53,7 @@ global.FTTestObjectPicker = {
 global.FTTestChoicePicker = {
   create: () => ({element: new Element("choice"), values: []}),
 };
-global.FTTestObjectEditorOverlay = {open: async () => {}};
+global.FTObjectOverlay = {open: async () => {}};
 global.FTBacktestGroupOverrides = {
   render: () => {
     const value = new Element("overrides");

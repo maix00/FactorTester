@@ -2142,7 +2142,7 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
                 "workbench/factor-family-picker.js",
             "workbench/test-configuration-compiler.js",
             "workbench/test-object-picker.js",
-            "workbench/test-object-editor-overlay.js",
+            "workbench/object-overlay.js",
             "workbench/test-products.js",
             "workbench/test-categories.js",
             "workbench/backtest-group-model.js",
@@ -2204,7 +2204,7 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
     assert "FTTestLazyCode.openObjectEditor" in scripts["test-products.js"]
     assert "FTTestObjectPicker.create" in scripts["test-products.js"]
     assert "FTTestObjectPicker" in scripts["test-object-picker.js"]
-    assert "FTTestObjectEditorOverlay" in scripts["test-object-editor-overlay.js"]
+    assert "FTObjectOverlay" in scripts["object-overlay.js"]
     assert "/api/product-library/data-source-categories" in scripts["test-categories.js"]
     assert "window.FTTestConfiguration" in scripts["test-configuration.js"]
     assert "window.FTTestConfigurationCompiler" in scripts[
@@ -2238,7 +2238,7 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
         "test-factor-candidate-sources.js"
     ]
     assert "FTFactors.factorDetail" in scripts[
-        "test-object-editor-overlay.js"
+        "object-overlay.js"
     ]
     assert "function parameterEditor" in scripts["factor-editor.js"]
     assert "setting_template" not in scripts["tests.js"]

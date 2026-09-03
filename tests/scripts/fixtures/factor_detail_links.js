@@ -26,16 +26,33 @@ class Element {
   replaceChildren(...children) { this.children = children; }
   addEventListener(name, handler) { this.listeners[name] = handler; }
   setAttribute(name, value) { this.attributes[name] = String(value); }
+  removeAttribute(name) { delete this.attributes[name]; }
   focus() { this.focused = true; }
+  showModal() { this.open = true; }
+  close() { this.open = false; }
+  remove() {
+    this.parentNode?.removeChild?.(this);
+    this.parentNode = null;
+  }
+  removeChild(child) {
+    const index = this.children.indexOf(child);
+    if (index >= 0) this.children.splice(index, 1);
+    child.parentNode = null;
+    return child;
+  }
 }
 
 global.Node = Element;
-global.document = {createElement: tagName => new Element(tagName)};
+global.document = {
+  createElement: tagName => new Element(tagName),
+  body: new Element("body"),
+};
 global.CustomEvent = class CustomEvent { constructor(type, options) {
   this.type = type; this.detail = options?.detail;
 } };
 global.navigator.clipboard = {async writeText(value) { navigator.copied = value; }};
 global.window = {};
+window.document = global.document;
 vm.runInThisContext(
   fs.readFileSync("server/manager/web/catalog/factor-model.js", "utf8"),
   {filename: "factor-model.js"},
@@ -110,6 +127,11 @@ vm.runInThisContext(
   fs.readFileSync("server/manager/web/catalog/factor-details.js", "utf8"),
   {filename: "factor-details.js"},
 );
+vm.runInThisContext(
+  fs.readFileSync("server/manager/web/workbench/object-overlay.js", "utf8"),
+  {filename: "object-overlay.js"},
+);
+window.FTStaticLoader = {loadGroups: async () => {}};
 
 const alias = "MmRateOfChg|P:[CA]|N:20d|$F:1d";
 const factorRef = `factor:v2:${"x".repeat(43)}`;
@@ -270,6 +292,14 @@ assert.ok(
   assert.equal(parameterTable.children[0].children.length, 4);
   assert.ok(walk(parameterTable).some(item => item.textContent === "N"));
   assert.ok(walk(parameterTable).some(item => item.textContent === "WindowParam"));
+  const formulaToggles = walk(content).filter(item => (
+    item.className === "factor-detail-local-formula-toggle"
+  ));
+  assert.deepEqual(
+    formulaToggles.map(item => item.textContent),
+    ["参数", "值"],
+    "formula toggle must use user-facing labels, never B1/B2",
+  );
   const provenance = walk(content).find(item => (
     item.headers?.[0] === "RunSpec 字段"
   ));
@@ -362,6 +392,51 @@ assert.ok(
   assert.equal(nestedIdentityIcon.className, "ft-help-icon");
   assert.equal(nestedIdentityIcon.textContent, "?");
   assert.ok(rendered.some(item => /MmThreshold/.test(item.expression)));
+
+  // The nested-row "?" opens the nested factor's dedicated page in the shared
+  // nested object overlay (FTObjectOverlay).  The overlay heading becomes the
+  // nested factor's own page heading (its alias); the parent page heading is
+  // never replaced.
+  const waitFor = async predicate => {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (predicate()) return true;
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    return false;
+  };
+  const parentHeadingBefore = nestedViewContext.heading?.name || "";
+  assert.ok(nestedIdentityIcon.listeners.click);
+  nestedIdentityIcon.listeners.click({preventDefault() {}, stopPropagation() {}});
+  await waitFor(() => document.body.children.some(item => (
+    item.className === "ft-object-overlay-dialog"
+  )));
+  const overlayDialog = document.body.children.find(item => (
+    item.className === "ft-object-overlay-dialog"
+  ));
+  assert.ok(overlayDialog, "nested viewer must open the shared object overlay");
+  await waitFor(() => {
+    const heading = walk(overlayDialog).find(item => item.tagName === "H2");
+    return heading?.textContent === "MmThreshold|N:5d";
+  });
+  const overlayHeading = walk(overlayDialog).find(item => item.tagName === "H2");
+  assert.equal(
+    overlayHeading.textContent, "MmThreshold|N:5d",
+    "overlay heading must be the nested factor's dedicated page heading",
+  );
+  assert.notEqual(
+    overlayHeading.textContent, "查看内嵌因子 · Th",
+    "overlay heading must not be the 查看内嵌因子 placeholder",
+  );
+  assert.equal(
+    nestedViewContext.heading?.name || "", parentHeadingBefore,
+    "parent page heading must not be replaced by the nested factor alias",
+  );
+  assert.ok(
+    walk(overlayDialog).some(item => (
+      item.className?.includes?.("factor-detail-parameter-editor")
+    )),
+    "overlay must embed the nested factor's dedicated page content",
+  );
 
   const historicalFactorRef = "factor:sha256:historical-factor";
   const historicalCommit = "c".repeat(40);

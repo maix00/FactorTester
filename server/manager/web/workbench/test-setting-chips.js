@@ -420,7 +420,7 @@
       && value?.schema_version === 2
       && String(value?.ref || "") === String(target.ref);
     const openEditor = window.FTTestLazyCode?.openObjectEditor
-      || window.FTTestObjectEditorOverlay?.open;
+      || window.FTObjectOverlay?.open;
     if (!openEditor) return false;
     void openEditor(context, {
       kind: action.kind,
