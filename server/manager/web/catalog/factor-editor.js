@@ -1306,7 +1306,7 @@
     heading.className = "factor-param-nested-family-name";
     heading.append(title);
     if (familyAlias(family)) {
-      heading.append(window.FTFactorDetailShared.familySourceHelp(context, family));
+      heading.append(" ", window.FTFactorDetailShared.familySourceHelp(context, family));
     }
     header.append(heading);
     const formula = document.createElement("div");

@@ -1,8 +1,6 @@
 (() => {
   const state = {
-    button: null,
-    popup: null,
-    mode: "",
+    stack: [],
     sequence: 0,
     listenersInstalled: false,
   };
@@ -37,18 +35,36 @@
     return descriptor;
   }
 
+  function closeEntry(entry, options = {}) {
+    const index = state.stack.indexOf(entry);
+    if (index < 0) return;
+    // Nested entries opened from this popup are closed first.
+    state.stack.slice(index).reverse().forEach(item => {
+      item.button.setAttribute("aria-expanded", "false");
+      item.button.removeAttribute?.("aria-controls");
+      item.button.removeAttribute?.("aria-describedby");
+      if (item.popup?.open && typeof item.popup.close === "function") {
+        item.popup.close();
+      }
+      item.popup?.parentNode?.removeChild(item.popup);
+    });
+    state.stack = state.stack.slice(0, index);
+    if (options.restoreFocus && entry.button.isConnected !== false) {
+      entry.button.focus?.();
+    }
+  }
+
   function close(options = {}) {
-    const {button, popup} = state;
-    if (!button) return;
-    state.button = null;
-    state.popup = null;
-    state.mode = "";
-    button.setAttribute("aria-expanded", "false");
-    button.removeAttribute?.("aria-controls");
-    button.removeAttribute?.("aria-describedby");
-    if (popup?.open && typeof popup.close === "function") popup.close();
-    popup?.parentNode?.removeChild(popup);
-    if (options.restoreFocus && button.isConnected !== false) button.focus?.();
+    const top = state.stack[state.stack.length - 1];
+    if (!top) return;
+    state.stack.slice().forEach(entry => closeEntry(entry));
+    if (options.restoreFocus && top.button.isConnected !== false) {
+      top.button.focus?.();
+    }
+  }
+
+  function isInsideAnyPopup(node) {
+    return state.stack.some(entry => entry.popup?.contains?.(node));
   }
 
   function positionBubble(button, popup) {
@@ -83,9 +99,7 @@
     button.setAttribute("aria-controls", popup.id);
     button.setAttribute("aria-describedby", popup.id);
     button.setAttribute("aria-expanded", "true");
-    state.button = button;
-    state.popup = popup;
-    state.mode = "bubble";
+    state.stack.push({button, popup, mode: "bubble"});
     positionBubble(button, popup);
   }
 
@@ -108,6 +122,10 @@
     else body.textContent = text(value);
   }
 
+  function isOpen(dialog) {
+    return state.stack.some(entry => entry.popup === dialog);
+  }
+
   async function loadOverlayContent(dialog, body, descriptor) {
     const loader = typeof descriptor.load === "function"
       ? descriptor.load
@@ -118,12 +136,13 @@
     }
     body.textContent = window.FTI18n?.t("正在读取说明…", "正在读取说明…")
       || "正在读取说明…";
+    const entry = state.stack.find(item => item.popup === dialog);
     try {
-      const value = await loader(descriptor, {dialog, button: state.button});
-      if (state.popup !== dialog) return;
+      const value = await loader(descriptor, {dialog, button: entry?.button});
+      if (!isOpen(dialog)) return;
       appendLoadedContent(body, value);
     } catch (error) {
-      if (state.popup !== dialog) return;
+      if (!isOpen(dialog)) return;
       body.textContent = error?.message
         || window.FTI18n?.t("读取说明失败", "读取说明失败")
         || "读取说明失败";
@@ -146,7 +165,11 @@
       "aria-label",
       window.FTI18n?.t("关闭", "关闭") || "关闭",
     );
-    closeButton.addEventListener("click", () => close({restoreFocus: true}));
+    closeButton.addEventListener("click", () => {
+      closeEntry(state.stack.find(entry => entry.popup === dialog) || {}, {
+        restoreFocus: true,
+      });
+    });
     card.append(closeButton);
     if (descriptor.title) {
       const heading = document.createElement("h2");
@@ -163,39 +186,44 @@
     dialog.append(card);
     dialog.addEventListener("cancel", event => {
       event.preventDefault();
-      close({restoreFocus: true});
+      closeEntry(state.stack.find(entry => entry.popup === dialog) || {}, {
+        restoreFocus: true,
+      });
     });
     dialog.addEventListener("click", event => {
-      if (event.target === dialog) close({restoreFocus: true});
+      if (event.target === dialog) {
+        closeEntry(state.stack.find(entry => entry.popup === dialog) || {}, {
+          restoreFocus: true,
+        });
+      }
     });
     document.body?.append(dialog);
     button.setAttribute("aria-controls", dialog.id);
     button.setAttribute("aria-expanded", "true");
-    state.button = button;
-    state.popup = dialog;
-    state.mode = "overlay";
+    state.stack.push({button, popup: dialog, mode: "overlay"});
     if (typeof dialog.showModal === "function") dialog.showModal();
     else dialog.setAttribute("open", "");
     void loadOverlayContent(dialog, body, descriptor);
   }
 
   function onPointerDown(event) {
-    if (!state.button || event.target === state.button) return;
-    if (state.popup?.contains?.(event.target)) return;
+    if (!state.stack.length) return;
+    if (state.stack.some(entry => entry.button === event.target)) return;
+    if (isInsideAnyPopup(event.target)) return;
     close();
   }
 
   function onKeyDown(event) {
-    if (event.key === "Escape" && state.button) {
+    if (event.key === "Escape" && state.stack.length) {
       event.preventDefault();
-      close({restoreFocus: true});
+      closeEntry(state.stack[state.stack.length - 1], {restoreFocus: true});
     }
   }
 
   function reposition() {
-    if (state.mode === "bubble" && state.button && state.popup) {
-      positionBubble(state.button, state.popup);
-    }
+    state.stack.forEach(entry => {
+      if (entry.mode === "bubble") positionBubble(entry.button, entry.popup);
+    });
   }
 
   function installListeners() {
@@ -227,11 +255,14 @@
     button.addEventListener("click", event => {
       event.preventDefault();
       event.stopPropagation();
-      if (state.button === button) {
-        close({restoreFocus: true});
+      const existing = state.stack.find(entry => entry.button === button);
+      if (existing) {
+        closeEntry(existing, {restoreFocus: true});
         return;
       }
-      close();
+      // Help icons living inside an open popup open a nested layer; icons
+      // outside every popup replace the current stack.
+      if (!isInsideAnyPopup(button)) close();
       if (descriptor.mode === "overlay") openOverlay(button, descriptor);
       else if (descriptor.text) openBubble(button, descriptor);
     });

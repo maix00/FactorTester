@@ -152,6 +152,45 @@ click(lazyButton);
 assert.equal(loaderCalls, 1);
 window.FTHelp.close();
 
+// Nested mode: a help icon inside an open overlay opens a stacked layer
+// instead of replacing the parent overlay.
+const childButton = window.FTHelp.create({
+  mode: "overlay",
+  title: "嵌套因子身份",
+  content: new Element("p"),
+});
+const parentContent = new Element("div");
+parentContent.append(childButton);
+const parentButton = window.FTHelp.create({
+  mode: "overlay",
+  title: "外层说明",
+  content: parentContent,
+});
+const overlayCount = () => body.children.filter(child => (
+  child.className.split(" ").includes("ft-help-overlay")
+)).length;
+click(parentButton);
+assert.equal(overlayCount(), 1);
+click(childButton);
+assert.equal(overlayCount(), 2, "child overlay must stack above the parent");
+assert.equal(
+  childButton.getAttribute("aria-expanded"), "true",
+);
+assert.equal(
+  parentButton.getAttribute("aria-expanded"), "true",
+  "parent trigger must stay expanded while the nested overlay is open",
+);
+click(childButton);
+assert.equal(overlayCount(), 1, "toggling the child closes only the child");
+assert.equal(parentButton.getAttribute("aria-expanded"), "true");
+// A trigger outside every open popup replaces the whole stack.
+const outsideButton = window.FTHelp.create("外部帮助");
+click(outsideButton);
+assert.equal(overlayCount(), 0);
+assert.equal(parentButton.getAttribute("aria-expanded"), "false");
+assert.ok(byClass("ft-help-bubble"));
+window.FTHelp.close();
+
 if (process.argv[3]) {
   const manifest = {
     defaults: {

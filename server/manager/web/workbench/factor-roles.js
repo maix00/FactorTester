@@ -115,7 +115,7 @@
     const help = window.FTTestFieldHelp?.forField?.(
       options.manifest, options.fieldKey || "factor_role_bindings", context,
     );
-    if (help && window.FTUI?.helpIcon) copy.append(FTUI.helpIcon(help));
+    if (help && window.FTUI?.helpIcon) copy.append(" ", FTUI.helpIcon(help));
     const value = document.createElement("span");
     value.className = "factor-role-section-value";
     value.setAttribute("aria-hidden", "true");

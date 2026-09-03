@@ -8,7 +8,7 @@
       "first_party_script_overrides": {
         "backtest": 512000,
         "factor-evaluation": 224000,
-        "ic-test": 482304
+        "ic-test": 483840
       },
       "default_max_initial_external_scripts": 1,
       "external_script_overrides": {
