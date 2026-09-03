@@ -317,7 +317,9 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-detail-family-source-help { flex: 0 0 auto; }
 .factor-detail-parameter-formula { grid-column: 2; min-width: 0; overflow-x: auto; color: var(--text); }
 .factor-detail-parameter-tree-body { display: grid; gap: 10px; min-width: 0; padding: 10px; }
-.factor-detail-parameter-tree-nested { width: calc(100% - clamp(36px, 7vw, 110px)); margin-left: clamp(36px, 7vw, 110px); box-sizing: border-box; }
+.factor-detail-parameter-tree .table-shell { max-height: none; overflow-y: visible; }
+.factor-detail-parameter-tree .shared-table-full-width-row > td { padding: 0; }
+.factor-detail-parameter-tree-nested { width: 100%; margin-left: 0; box-sizing: border-box; }
 .factor-detail-parameter-tree-nested .factor-detail-parameter-tree-header { background: color-mix(in srgb, var(--accent) 4%, var(--soft)); }
 .factor-param-nested-family-mount { min-width: 0; padding: 0 clamp(28px, 5vw, 84px) 12px; border-top: 1px solid var(--line); box-sizing: border-box; }
 .factor-param-nested-family-mount:empty { display: none; }
