@@ -6,9 +6,29 @@ const vm = require("node:vm");
 // route library rows to the ref-based view overlay while test-local rows
 // (created inline in a test editor, never persisted) stay viewable through
 // their carried frozen value.
-const body = {children: []};
+class Element {
+  constructor(tagName = "div") {
+    this.tagName = tagName;
+    this.children = [];
+    this.listeners = {};
+    this.attributes = {};
+    this.className = "";
+    this.textContent = "";
+    this.title = "";
+    this.style = {};
+  }
+  append(...children) { this.children.push(...children); }
+  addEventListener(name, handler) { this.listeners[name] = handler; }
+  setAttribute(name, value) { this.attributes[name] = String(value); }
+  getAttribute(name) { return this.attributes[name] ?? null; }
+  removeAttribute(name) { delete this.attributes[name]; }
+}
+const body = new Element("body");
 global.window = {innerWidth: 1024, innerHeight: 768};
-global.document = {body, createElement: () => ({})};
+global.document = {
+  body,
+  createElement: tagName => new Element(tagName),
+};
 for (const source of process.argv.slice(2)) {
   vm.runInThisContext(fs.readFileSync(source, "utf8"), {filename: source});
 }
@@ -80,5 +100,37 @@ const inlineSet = shared.factorSetRowView({
   target_ref: "set:local", source_origin: "inline", temporary: true,
 });
 assert.equal(inlineSet.temporary, true);
+
+// The shared parameter-section header's family "?" is the same nestable view
+// overlay (factor_family, mode view) as row viewers — the standalone family
+// source-code help overlay is gone.  Library families open by ref; frozen /
+// temporary families carry their value so they stay viewable.
+const opens = [];
+const context = {
+  t: value => value,
+  openObject: options => { opens.push(options); },
+};
+const headerIcon = shared.familySourceHelp(context, {
+  family_ref: "factor-family:v2:fam9", factor_family_alias: "Family9",
+});
+assert.equal(headerIcon.className.split(" ").includes("ft-help-icon"), true);
+assert.equal(headerIcon.getAttribute("aria-label"), "查看因子家族");
+headerIcon.listeners.click({preventDefault() {}, stopPropagation() {}});
+assert.deepEqual(opens, [{
+  kind: "factor_family", mode: "view", ref: "factor-family:v2:fam9",
+}], "the header family link must open the factor-family view overlay by ref");
+
+opens.length = 0;
+const frozenHeaderIcon = shared.familySourceHelp(context, {
+  factor_family_alias: "InlineFamily",
+  source_origin: "test_inline", temporary: true,
+  parameter_definitions: [{alias: "N", type: "WindowParam"}],
+});
+frozenHeaderIcon.listeners.click({preventDefault() {}, stopPropagation() {}});
+assert.equal(opens.length, 1, "frozen family header link must open an overlay");
+assert.equal(opens[0].kind, "factor_family");
+assert.equal(opens[0].mode, "view");
+assert.equal(opens[0].temporary, true, "frozen family opens from carried value");
+assert.equal(opens[0].initialValue.factor_family_alias, "InlineFamily");
 
 console.log("ok");
