@@ -315,10 +315,10 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-detail-parameter-tree:not([open]) > .factor-detail-parameter-tree-header::before { content: "▸"; }
 .factor-detail-parameter-tree-heading { flex: 0 1 auto; display: inline-flex; align-items: center; gap: .25em; min-width: 0; max-width: 34%; overflow-wrap: anywhere; }
 .factor-detail-family-source-help { flex: 0 0 auto; }
-.factor-detail-parameter-formula { flex: 1 1 auto; min-width: 0; overflow-x: auto; color: var(--text); }
-.factor-detail-local-formula { position: relative; display: block; min-width: 0; }
-.factor-detail-local-formula-controls { position: absolute; top: 0; right: 0; z-index: 1; display: flex; gap: 2px; }
-.factor-detail-local-formula .factor-detail-parameter-formula { padding: 0 72px 0 0; box-sizing: border-box; }
+.factor-detail-parameter-formula { flex: 1 1 auto; min-width: 0; overflow-x: auto; color: var(--text); text-align: center; }
+.factor-detail-local-formula { position: relative; flex: 1 1 auto; display: block; min-width: 0; }
+.factor-detail-local-formula-controls { position: absolute; top: 50%; right: 8px; transform: translateY(-50%); z-index: 1; display: flex; gap: 2px; }
+.factor-detail-local-formula .factor-detail-parameter-formula { padding: 0 88px; box-sizing: border-box; }
 .factor-detail-local-formula-toggle { border: 1px solid var(--line); border-radius: 5px; padding: 2px 5px; background: var(--panel); color: var(--muted); font: 10px ui-monospace, monospace; }
 .factor-detail-parameter-tree-body { display: grid; gap: 10px; min-width: 0; padding: 10px; }
 .factor-detail-parameter-tree .table-shell { max-height: none; overflow-y: visible; }
