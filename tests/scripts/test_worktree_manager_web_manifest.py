@@ -100,6 +100,40 @@ def test_manifest_matches_html_script_order_and_files() -> None:
     assert not list(WEB_ROOT.glob("*.css"))
 
 
+def test_editor_validation_instantiates_frozen_dependencies_as_the_session_user() -> None:
+    """Every validate-path instantiation must run as the logged-in user.
+
+    ``api_validate_expr`` compiles freshly submitted source into a bare
+    FactorFamily whose ``owner_ref`` defaults to ``public``; passing that as
+    the resolver principal made saving a custom factor whose FactorParam
+    references the user's own custom family fail with
+    ``PermissionError: 无权查看该用户因子源码`` (principal='public').  All
+    instantiations and the inspection fallback must prefer the session user.
+    """
+    editor = (ROOT / "server/modules/custom_factors/editor_routes.py").read_text(
+        encoding="utf-8",
+    )
+    calls = re.findall(
+        r"instantiate_factor_metadata\(\s*factor_family,\s*(?:params|data\.get\('params'\))",
+        editor,
+    )
+    with_username = re.findall(
+        r"instantiate_factor_metadata\(\s*factor_family,\s*(?:params|data\.get\('params'\)),"
+        r"\s*username=username,?\s*\)",
+        editor,
+    )
+    assert calls, "expected instantiate_factor_metadata calls in validate paths"
+    assert len(with_username) == len(calls), (
+        f"every validate-path instantiation must pass username= "
+        f"({len(with_username)}/{len(calls)})"
+    )
+    inspection = (ROOT / "server/services/run_input_inspection.py").read_text(
+        encoding="utf-8",
+    )
+    assert "current_user()" in inspection
+    assert "getattr(family, 'owner_ref', '')" in inspection
+
+
 def test_route_script_groups_obey_the_initial_load_contract() -> None:
     manifest = json.loads(
         (WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8")
