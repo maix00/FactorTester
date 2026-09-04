@@ -402,23 +402,38 @@
         }
         return;
       }
-      // A hand-typed alias (manual source) still carries the parameters in
-      // its text: ``Family|K:V|K:V|…``.  Parse it into a read-only table so
-      // the reference is inspectable even before any validation round-trip.
+      // A hand-typed value (manual source) is parsed into its visible form:
+      // an alias renders a read-only parameter table; a numeric constant is
+      // shown as ConstExpr; a data column as ColumnRef — so the reference is
+      // inspectable before any validation round-trip.
       if (activeSource === "manual" && typeof draft === "string"
-        && draft.includes("|")) {
-        const analysis = parseFactorAlias(draft);
-        const aliasRows = analysis && Object.keys(analysis.params).length
-          ? Object.entries(analysis.params).map(([name, value]) => ({
-            alias: name, value,
-          })) : [];
-        if (aliasRows.length) {
-          const section = window.FTFactorDetailShared.parameterSection(
-            context, {...draft, family: null}, aliasRows,
-            (options.depth || 0) + 1,
-          );
-          section.root.dataset.parameterAlias = alias;
-          nestedMount.append(section.root);
+        && draft.trim()) {
+        const text = draft.trim();
+        if (text.includes("|")) {
+          const analysis = parseFactorAlias(text);
+          const aliasRows = analysis && Object.keys(analysis.params).length
+            ? Object.entries(analysis.params).map(([name, value]) => ({
+              alias: name, value,
+            })) : [];
+          if (aliasRows.length) {
+            const section = window.FTFactorDetailShared.parameterSection(
+              context, {...draft, family: null}, aliasRows,
+              (options.depth || 0) + 1,
+            );
+            section.root.dataset.parameterAlias = alias;
+            nestedMount.append(section.root);
+          }
+        } else {
+          const previewKind = numericConstant(text) !== null ? "const"
+            : columns.some(item => selectionValue(item.value) === text)
+              || /^[A-Za-z_][A-Za-z0-9_.]*$/.test(text) ? "column" : null;
+          if (previewKind) {
+            const preview = document.createElement("div");
+            preview.className = "factor-param-manual-preview";
+            preview.textContent = previewKind === "const"
+              ? `ConstExpr ${numericConstant(text)}` : `ColumnRef ${text}`;
+            nestedMount.append(preview);
+          }
         }
       }
       if (!familyDraft(draft)) return;

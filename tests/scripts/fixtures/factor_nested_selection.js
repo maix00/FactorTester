@@ -223,6 +223,37 @@ assert.ok(
   "alias rows must carry the parsed parameter names and values",
 );
 
+// Manual numeric constants parse into a ConstExpr preview…
+const numericParam = window.FTFactorParameterEditor.create(
+  {t: value => value},
+  outerFamily.parameter_definitions,
+  {Th: "0.6"},
+  {factorItems: [], familyItems: [], onChange: () => {}},
+);
+const numericPreview = descendants(numericParam.root).find(
+  item => item.className === "factor-param-manual-preview",
+);
+assert.ok(numericPreview, "numeric manual value must show a parse preview");
+assert.ok(
+  (numericPreview.textContent || "").includes("ConstExpr 0.6"),
+  "numeric manual value must parse as ConstExpr",
+);
+// …and bare data columns parse into a ColumnRef preview.
+const columnParam = window.FTFactorParameterEditor.create(
+  {t: value => value},
+  outerFamily.parameter_definitions,
+  {Th: "CLOSE"},
+  {factorItems: [], familyItems: [], onChange: () => {}},
+);
+const columnPreview = descendants(columnParam.root).find(
+  item => item.className === "factor-param-manual-preview",
+);
+assert.ok(columnPreview, "column manual value must show a parse preview");
+assert.ok(
+  (columnPreview.textContent || "").includes("ColumnRef CLOSE"),
+  "column manual value must parse as ColumnRef",
+);
+
 (async () => {
   await factorPicker.options.onChange([childRef]);
   assert.equal(resolveCalls, 1, "selected factors must be enriched lazily");
