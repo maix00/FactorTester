@@ -172,12 +172,17 @@
       context.t(mode === "create" ? "提交" : "保存"),
       () => editor.form.requestSubmit(), {variant: "primary"},
     );
-    context.toolbar.append(save);
-    if (mode === "edit") context.toolbar.append(FTUI.actionButton(
-      context.t("取消"), () => context.navigate(
-        `/strategies/${encodeURIComponent(value.strategy_ref)}`,
-      ), {variant: "secondary"},
-    ));
+    // Route-session guard: the toolbar is shared across tabs; an async editor
+    // render completing after navigation must not append its actions to the
+    // next page's header.
+    if (context.isRouteCurrent?.() !== false) {
+      context.toolbar.append(save);
+      if (mode === "edit") context.toolbar.append(FTUI.actionButton(
+        context.t("取消"), () => context.navigate(
+          `/strategies/${encodeURIComponent(value.strategy_ref)}`,
+        ), {variant: "secondary"},
+      ));
+    }
     context.content.replaceChildren(editor.form);
     const explicitProfileID = String(route?.researchProfileID || "").trim();
     const researchID = context.parentFolder === "research"

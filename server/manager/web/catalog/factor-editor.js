@@ -1146,8 +1146,16 @@
       context.t(submitLabel),
       () => form.requestSubmit(), {variant: "primary"},
     );
-    if (mode === "edit") context.toolbar.append(cancelEdit);
-    context.toolbar.append(submit);
+    // The header/toolbar is shared across the tab rail.  An editor whose
+    // async render completes after this route session ended (saved and
+    // navigated to the read-only detail page, or the tab was switched away)
+    // must not append its actions to the next page's header — the view page
+    // would show a stale "提交/保存" button until a refresh.  Only mount the
+    // actions while this render is still the current route session.
+    if (context.isRouteCurrent?.() !== false) {
+      if (mode === "edit") context.toolbar.append(cancelEdit);
+      context.toolbar.append(submit);
+    }
     if (familyFileInput) form.append(familyFileInput);
     const overrides = state.familyMode ? {
       overview: {save_mode: "auto"},

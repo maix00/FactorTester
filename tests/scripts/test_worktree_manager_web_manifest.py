@@ -207,6 +207,23 @@ def test_factor_series_entry_auto_mounts_factor_ref_before_run_preview_sgchg() -
     assert "factor_dependencies" in server_source
 
 
+def test_editor_header_actions_respect_route_session() -> None:
+    # The header/toolbar is shared across the tab rail.  Async create/edit
+    # renderers must not mount their actions after the route session ended
+    # (saved → navigated to the read-only detail page, or tab switched away);
+    # otherwise the next page's header shows a stale 提交/保存 button until a
+    # refresh.  Each editor guards the toolbar append with isRouteCurrent.
+    guarded = [
+        "catalog/factor-editor.js",
+        "catalog/factor-object-form.js",
+        "catalog/strategy-library-detail.js",
+    ]
+    for relative in guarded:
+        source = (WEB_ROOT / relative).read_text(encoding="utf-8")
+        assert "context.isRouteCurrent?.() !== false" in source, relative
+        assert "context.toolbar.append" in source, relative
+
+
 def test_page_agent_drawer_uses_the_published_group_loader_api() -> None:
     source = (WEB_ROOT / "profile" / "page-agent-drawer.js").read_text(encoding="utf-8")
     assert 'FTStaticLoader?.loadGroups?.(["profile-agent-chat"])' in source
