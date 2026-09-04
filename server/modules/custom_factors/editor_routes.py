@@ -149,7 +149,9 @@ def api_validate_expr():
             frozen = _freeze_validated_factor(
                 factor_family, params, owner_ref,
             )
-            instance = instantiate_factor_metadata(factor_family, params)
+            instance = instantiate_factor_metadata(
+                factor_family, params, username=username,
+            )
             return jsonify({
                 'success': True,
                 'valid': True,
@@ -194,7 +196,7 @@ def api_validate_expr():
                 family_ref, username=username,
             )
             instance = instantiate_factor_metadata(
-                factor_family, data.get('params'),
+                factor_family, data.get('params'), username=username,
             )
             owner_ref = 'public' if is_public else owner_username
             return jsonify({
@@ -230,7 +232,7 @@ def api_validate_expr():
                 tree_repr = factor_family.expr.tree_repr()
                 visual_graph = factor_expr_to_visual_graph(factor_family.expr)
             instance = instantiate_factor_metadata(
-                factor_family, data.get('params')
+                factor_family, data.get('params'), username=username,
             )
             return jsonify({
                 'success': True,
@@ -311,7 +313,7 @@ def api_validate_expr():
                 tree_repr = factor_family.expr.tree_repr()
                 visual_graph = factor_expr_to_visual_graph(factor_family.expr)
             instance = instantiate_factor_metadata(
-                factor_family, data.get('params')
+                factor_family, data.get('params'), username=username,
             )
             owner_ref = str(
                 data.get('owner_ref')

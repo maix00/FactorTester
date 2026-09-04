@@ -43,8 +43,12 @@ def instantiate_factor_metadata(
     raw = params if isinstance(params, dict) else {}
     raw_dependencies = frozen_factor_records_from_values(raw)
     frozen_by_ref = {value['ref']: value for value in raw_dependencies}
+    from server.services.session_runtime import current_user
     principal = str(
-        username or getattr(family, 'owner_ref', '') or '',
+        username
+        or current_user()
+        or getattr(family, 'owner_ref', '')
+        or '',
     ).strip().removeprefix('principal:')
     from server.modules.shared.factor_param_resolver import resolve_factor_param_value
     from tools.factors.factor_param_resolution import factor_param_resolver_scope
