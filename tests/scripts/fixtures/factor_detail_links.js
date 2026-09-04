@@ -17,6 +17,17 @@ class Element {
         if (enabled) values.add(name); else values.delete(name);
         this.className = [...values].join(" ");
       },
+      add: (...names) => {
+        const values = new Set(this.className.split(/\s+/).filter(Boolean));
+        for (const name of names) values.add(name);
+        this.className = [...values].join(" ");
+      },
+      remove: (...names) => {
+        const values = new Set(this.className.split(/\s+/).filter(Boolean));
+        for (const name of names) values.delete(name);
+        this.className = [...values].join(" ");
+      },
+      contains: name => this.className.split(/\s+/).includes(name),
     };
   }
   append(...children) { this.children.push(...children); }
@@ -300,15 +311,15 @@ assert.ok(
   assert.equal(parameterTable.children[0].children.length, 4);
   assert.ok(walk(parameterTable).some(item => item.textContent === "N"));
   assert.ok(walk(parameterTable).some(item => item.textContent === "WindowParam"));
-  // The parameter-tree header always renders the family template formula in
-  // 参数 mode — there is no 参数/值 mode toggle anymore.
+  // Factor pages keep the 参数/值 mode toggle on the parameter-tree header
+  // (a family page hides it and stays on the 参数/template rendering).
   const formulaToggles = walk(content).filter(item => (
     item.className === "factor-detail-local-formula-toggle"
   ));
   assert.deepEqual(
     formulaToggles.map(item => item.textContent),
-    [],
-    "parameter-tree header must not offer a 参数/值 toggle",
+    ["参数", "值"],
+    "factor page keeps the 参数/值 toggle; family pages hide it",
   );
   const treeFormula = walk(content).find(item => (
     item.className?.includes("factor-detail-parameter-formula")

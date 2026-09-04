@@ -360,6 +360,10 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-detail-local-formula-controls { position: absolute; top: 50%; right: 8px; transform: translateY(-50%); z-index: 1; display: flex; gap: 2px; }
 .factor-detail-local-formula .factor-detail-parameter-formula { padding: 0 88px; box-sizing: border-box; }
 .factor-detail-local-formula-toggle { border: 1px solid var(--line); border-radius: 5px; padding: 2px 5px; background: var(--panel); color: var(--muted); font: 10px ui-monospace, monospace; }
+/* Family parameter trees stay on the 参数 (template) rendering: hide the
+   参数/值 toggle controls and let the formula use the full header width. */
+.factor-detail-local-formula-parameter-only .factor-detail-local-formula-controls { display: none; }
+.factor-detail-local-formula-parameter-only .factor-detail-parameter-formula { padding: 0 12px; }
 .factor-detail-parameter-tree-body { display: grid; gap: 10px; min-width: 0; padding: 10px; }
 .factor-detail-parameter-tree .table-shell { max-height: none; overflow-y: visible; }
 .factor-detail-parameter-tree .table-shell,

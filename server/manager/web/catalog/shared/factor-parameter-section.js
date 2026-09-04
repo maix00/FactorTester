@@ -120,12 +120,25 @@
     const values = options.values || Object.fromEntries(
       rows.map(row => [row.alias, row.value]),
     );
-    // The tree header always renders the family template formula (参数
-    // mode): a family defines parameters only, and an instance's concrete
-    // values live in the aggregated formula above the tree — so there is no
-    // 参数/值 mode toggle on the tree header.
-    const formulaMount = templateFormula(value);
-    header.append(formulaMount);
+    // Parameter-tree headers keep the shared local-formula component (the
+    // original header layout, untouched).  Factor pages keep the 参数/值
+    // mode toggle; family pages (showValue=false) hide the toggle controls
+    // and stay on the 参数 (template) rendering.
+    const showValue = options.showValue !== false;
+    const local = shared()?.localFormula?.(context, value, values);
+    let formula;
+    let updateFormula;
+    if (local) {
+      if (!showValue) {
+        local.root.classList.add("factor-detail-local-formula-parameter-only");
+      }
+      formula = local.root;
+      updateFormula = next => local.update(next || {});
+    } else {
+      formula = templateFormula(value);
+      updateFormula = () => renderFormula(formula, shared()?.expression?.(value) || "");
+    }
+    header.append(formula);
     const body = document.createElement("div");
     body.className = "factor-detail-parameter-tree-body";
     if (options.content) {
@@ -158,10 +171,7 @@
       body.append(list.root);
     }
     root.append(header, body);
-    return {
-      root,
-      update: () => renderFormula(formulaMount, shared()?.expression?.(value) || ""),
-    };
+    return {root, update: updateFormula};
   }
 
   window.FTFactorParameterSection = Object.freeze({
