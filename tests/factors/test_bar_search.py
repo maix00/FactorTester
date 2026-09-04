@@ -23,6 +23,7 @@ from tools.factors.expr import (
     CANDIDATE,
     CURRENT,
     EvaluateContext,
+    SignalAlign,
     bar_since,
     scope_bars,
     scope_session,
@@ -142,6 +143,28 @@ def test_bar_distance_matches_nearest_dynamic_historical_candidate():
     ).evaluate(ctx=_ctx())
 
     np.testing.assert_allclose(result["A"], [3, 3, 1, 2, 1, 2])
+
+
+def test_bar_distance_condition_embedding_signal_align_evaluates_whole_expression():
+    # A nested-factor reference inside a bar-distance condition compiles to a
+    # SignalAlign operand whose formed-signal grid is carried (ffill) onto the
+    # outer bar timeline.  The match predicate must evaluate it as a whole
+    # expression; treating every CompositeExpr as a pointwise op raised
+    # "unsupported pointwise op: SIGNAL_ALIGN".
+    index = pd.date_range("2026-01-01 09:01", periods=720, freq="min")
+    value = _FrameExpr(pd.DataFrame({"A": np.full(720, 100.0)}, index=index))
+    formed = SignalAlign(_FrameExpr(pd.DataFrame(
+        {"A": np.zeros(720, dtype=bool)}, index=index,
+    )), "1d")
+
+    result = value.bar_distance(
+        formed,
+        scope=scope_bars(60),
+        default=60.0,
+    ).evaluate(ctx=_ctx())
+
+    assert list(result.columns) == ["A"]
+    assert result["A"].notna().all()
 
 
 def test_bar_distance_default_tracks_available_scope_length():

@@ -16,7 +16,7 @@ from .core import EvaluateContext, FactorExpr
 from .leaf import ConstExpr
 from .lookback_scope import BarCountScope, LookbackScope, SessionScope, TradingDayScope
 from .match_refs import MatchValueRef
-from .pointwise import apply_pointwise, carry_formed_signal
+from .pointwise import POINTWISE_OPS, apply_pointwise, carry_formed_signal
 
 Selection = Literal["nearest", "farthest"]
 
@@ -135,14 +135,24 @@ def _evaluate_match_predicate(
         ]
         return apply_where(*values)
     if isinstance(expr, CompositeExpr):
-        values = tuple(
-            _evaluate_match_predicate(
-                operand, ctx=ctx, current=current, candidate=candidate,
-                template=template, static_cache=static_cache,
+        # CompositeExpr is the shared base for binary pointwise math and for
+        # structured composite operators (SignalAlign etc.).  Only true
+        # pointwise ops can be applied operand-by-operand against the current
+        # bar candidate; a nested-frequency operand such as a FactorParam
+        # reference compiles to a SignalAlign whose own evaluate() must run as
+        # a whole expression.  Treating it as a pointwise call raises
+        # "unsupported pointwise op" in the bar-search condition.
+        if expr.op in POINTWISE_OPS:
+            values = tuple(
+                _evaluate_match_predicate(
+                    operand, ctx=ctx, current=current, candidate=candidate,
+                    template=template, static_cache=static_cache,
+                )
+                for operand in expr.operands
             )
-            for operand in expr.operands
-        )
-        return apply_pointwise(expr.op, values)
+            return apply_pointwise(expr.op, values)
+        # Non-pointwise composite: fall through to whole-expression
+        # evaluation below.
     key = id(expr)
     if key in static_cache:
         return static_cache[key]
