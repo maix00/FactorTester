@@ -43,10 +43,16 @@ def instantiate_factor_metadata(
     raw = params if isinstance(params, dict) else {}
     raw_dependencies = frozen_factor_records_from_values(raw)
     frozen_by_ref = {value['ref']: value for value in raw_dependencies}
-    from server.services.session_runtime import current_user
+    try:
+        from server.services.session_runtime import current_user
+        session_user = current_user()
+    except Exception:
+        # Migration/background threads have no HTTP request context; the
+        # caller then must pass username explicitly.
+        session_user = None
     principal = str(
         username
-        or current_user()
+        or session_user
         or getattr(family, 'owner_ref', '')
         or '',
     ).strip().removeprefix('principal:')
