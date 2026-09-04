@@ -45,7 +45,10 @@
       : "未固定公式版本";
     const alias = factorAlias(factor);
     const frozenRef = factorRef(factor) || targetRef;
-    context.setHeading(alias || context.t("因子详情"), model().familyName(factor));
+    // The eyebrow is the object-kind scope, uniform with other detail pages
+    // (因子家族/产品组/策略库…).  The owning family name stays visible in
+    // the summary block instead of occupying the header eyebrow.
+    context.setHeading(alias || context.t("因子详情"), context.t("因子"));
     context.toolbar?.append(context.button(context.t("查看因子序列"), () => {
       context.navigate(`/factor-series?factor_ref=${encodeURIComponent(frozenRef)}`);
     }, context.t("使用冻结因子配置运行序列查看任务")));
