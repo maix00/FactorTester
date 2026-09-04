@@ -363,6 +363,7 @@
     let nestedFamilyPending = false;
     let editingFactor = false;
     const editingParams = {};
+    let onTheFlyFactor = null;
     const renderNested = () => {
       if (nestedMount.replaceChildren) nestedMount.replaceChildren();
       else nestedMount.children = [];
@@ -434,15 +435,30 @@
           };
           setValue(composed, "family");
         };
-        // Pencil → convert the selected factor (library / on-the-fly / alias)
-        // into an on-the-fly factor so its parameters become editable in place.
+        // Pencil → create a backup on-the-fly factor, then let edits mutate
+        // that factor in place and sync its alias back to the selected display.
         const unlockFactorEditing = () => {
           editingFactor = true;
-          Object.assign(editingParams, savedParams);
-          if (draft && typeof draft === "object") {
-            draft.temporary = true;
-            draft.source_origin = draft.source_origin || "test_inline";
-          }
+          const base = draft && typeof draft === "object" ? draft : {};
+          const saved = draft?.identity?.params || draft?.parameter_values || {};
+          const identity = {...(draft?.identity || {}), params: {...saved}};
+          const familyMeta = draft?.family
+            || {factor_family_alias: draft?.identity?.family_alias || draft?.factor_family_alias};
+          onTheFlyFactor = {
+            ...base,
+            identity,
+            params: Object.entries(saved)
+              .filter(([key]) => key && !key.startsWith("$"))
+              .map(([key, value]) => ({alias: key, value})),
+            parameter_values: {...saved},
+            family: familyMeta,
+            temporary: true,
+            source_origin: base.source_origin || "test_inline",
+            alias: base.alias || base.factor_alias
+              || composeFactorAlias(familyMeta, saved),
+          };
+          onTheFlyFactor.factor_alias = onTheFlyFactor.alias;
+          setValue(onTheFlyFactor, "factor");
           renderNested();
         };
         const unlockLabel = context.t("编辑");
@@ -477,10 +493,25 @@
             edit.value = initVal;
             edit.addEventListener("input", () => {
               editingParams[param.alias] = edit.value;
-              if (draft && typeof draft === "object") {
-                const target = (draft.identity && draft.identity.params)
-                  || (draft.parameter_values ||= {});
-                target[param.alias] = edit.value;
+              if (onTheFlyFactor) {
+                // Mutate the backup on-the-fly factor in place.
+                onTheFlyFactor.identity.params[param.alias] = edit.value;
+                onTheFlyFactor.parameter_values[param.alias] = edit.value;
+                onTheFlyFactor.params = Object.entries(onTheFlyFactor.identity.params)
+                  .filter(([key]) => key && !key.startsWith("$"))
+                  .map(([key, value]) => ({alias: key, value}));
+                // Recompute the alias and sync it into the picker display.
+                const familyMeta = onTheFlyFactor.family
+                  || {factor_family_alias: onTheFlyFactor.identity.family_alias};
+                const alias = composeFactorAlias(familyMeta, onTheFlyFactor.identity.params);
+                onTheFlyFactor.alias = alias;
+                onTheFlyFactor.factor_alias = alias;
+                const ref = reference(onTheFlyFactor);
+                const idx = candidateItems.findIndex(item => (
+                  item.type === "factor" && item.value === ref
+                ));
+                if (idx >= 0 && candidateItems[idx]) candidateItems[idx].label = alias;
+                valuePicker?.setItems?.(candidateItems, true);
               }
               options.onChange?.(values, alias);
             });
@@ -685,6 +716,29 @@
       if (key && !key.startsWith("$")) params[key] = value;
     }
     return {family: segments[0], params};
+  }
+
+  // Compose a factor alias (e.g. `SgChgPct|P:[CA]|M:0.6|B:1|N:200d`) from a
+  // family template and its parameter values, preserving the template order.
+  function composeFactorAlias(family, params) {
+    const familyAlias = String(
+      family?.factor_family_alias || family?.family_alias || family || "",
+    ).trim();
+    const order = (family?.parameter_definitions || [])
+      .map(p => p?.alias || p?.name).filter(Boolean);
+    const entries = Object.entries(params || {})
+      .filter(([key]) => key && !key.startsWith("$"));
+    let ordered = entries;
+    if (order.length) {
+      const seen = new Set(order);
+      const rest = entries.filter(([key]) => !seen.has(key));
+      ordered = [
+        ...order.filter(key => params[key] !== undefined).map(key => [key, params[key]]),
+        ...rest,
+      ];
+    }
+    return [familyAlias, ...ordered.map(([key, value]) => `${key}:${value}`)]
+      .filter(Boolean).join("|");
   }
 
   function familyParameters(family) {
