@@ -270,7 +270,7 @@ tbody tr[data-href]:hover { background: var(--soft); }
 /* CSS Anchor Positioning: fixed under the summary anchor; tries to flip when
    near the viewport edge; width matches the dropdown, capped to the viewport. */
 .ft-multi-select-menu.ft-anchor-positioning { z-index: 10000; width: max-content; min-width: min(300px, calc(100vw - 32px)); max-width: min(460px, calc(100vw - 16px)); box-sizing: border-box; position-try-fallbacks: flip-block, flip-inline; }
-.ft-multi-select-search-row { display: flex; gap: 5px; }
+.ft-multi-select-search-row { display: flex; gap: 3px; align-items: center; }
 .ft-multi-select-search { flex: 1 1 auto; min-width: 0; height: auto; min-height: 0; border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; color: inherit; background: var(--soft); }
 .ft-multi-select-clear { flex: 0 0 auto; width: 30px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: var(--panel); cursor: pointer; }
 .ft-multi-select-clear:hover { color: inherit; background: var(--soft); }

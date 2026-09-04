@@ -328,9 +328,20 @@
       }
       searchRow.append(addToggle);
     }
-    // Default refresh icon in the search row: re-pull the long-lived
-    // candidate source (options.onRefresh, or the remote loader).
-    {
+    // Default refresh icon in the search row: reuse FTUI.refreshButton, which
+    // owns the spin/lock animation (refreshing → complete → idle, error tint)
+    // and disables the button while re-pulling the long-lived candidate source.
+    if (window.FTUI?.refreshButton) {
+      const syncButton = window.FTUI.refreshButton(context, async () => {
+        if (typeof options.onRefresh === "function") {
+          await options.onRefresh(context);
+        } else if (remote?.refresh) {
+          await remote.refresh();
+        }
+        if (remote) remote.render(); else render();
+      }, { label: "同步候选", className: "ft-multi-select-sync-toggle" });
+      searchRow.append(syncButton);
+    } else {
       const syncToggle = document.createElement("button");
       syncToggle.type = "button";
       syncToggle.className = "ft-multi-select-sync-toggle icon-action-button";
