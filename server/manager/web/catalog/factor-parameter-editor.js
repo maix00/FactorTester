@@ -301,14 +301,28 @@
       else nestedMount.children = [];
       const draft = values[alias];
       if (isFrozenFactor(draft) && ["factor", "manual"].includes(activeSource)) {
-        const family = draft.family || draft.__factor_family || null;
+        // The frozen record may only carry identity.params; the family
+        // template (parameter types/defaults) comes from the library row
+        // that produced this value.  Reattach it so the nested parameter
+        // table renders with real definitions and the saved values.
+        const choice = factorChoices.find(item => (
+          selectionValue(item.value ?? item.ref) === reference(draft)
+          || item.factor === draft
+        ));
+        const family = draft.family || draft.__factor_family
+          || choice?.family || null;
         const shared = window.FTFactorDetailShared;
         // Nested factors render through the same parameterSection component as
         // the view mode (flat embedded tree with the family template formula
         // and 参数/值 toggles); no second card structure.
-        const rows = family
+        const definitionRows = (family
           ? shared?.parameterRows?.(draft, {family}) || []
-          : shared?.parameterRows?.(draft) || [];
+          : shared?.parameterRows?.(draft) || []);
+        const savedParams = draft.identity?.params || draft.parameter_values || {};
+        const rows = definitionRows.map(row => {
+          const saved = savedParams[row.alias];
+          return saved === undefined ? row : {...row, value: saved};
+        });
         if (rows.length) {
           const section = shared.parameterSection(
             context, {...draft, family}, rows, (options.depth || 0) + 1,

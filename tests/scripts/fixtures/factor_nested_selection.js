@@ -178,6 +178,21 @@ assert.equal(
   reopenedManualInputs.length, 0,
   "the factor-library source must not show a hand-typed text box",
 );
+// Reopening must also render the nested parameter table of the referenced
+// factor, carrying the frozen identity values (not family defaults).
+const reopenedNested = descendants(reopened.root).find(item => (
+  item.className?.includes("factor-detail-parameter-editor")
+    && item !== reopened.root
+));
+assert.ok(
+  reopenedNested,
+  "reopened frozen factor must render its nested parameter table",
+);
+const nestedText = descendants(reopenedNested).map(item => item.textContent);
+assert.ok(
+  nestedText.includes("0.6"),
+  "nested table must show the saved identity value (M:0.6), not the family default",
+);
 
 // A hand-typed alias stays on the manual source with its text intact.
 const manual = window.FTFactorParameterEditor.create(
