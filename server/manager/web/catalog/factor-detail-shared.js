@@ -909,7 +909,22 @@
       name: options.name || "factor-source-version",
       title: options.title || context.t("源码版本"),
       multi: false,
-      items: versionItems(context, payload),
+      items: (() => {
+        const items = versionItems(context, payload);
+        const selected = options.selected || "__current__";
+        // Editing a frozen factor echoes its own source version: ensure the
+        // frozen fingerprint has a selectable item even when the server's
+        // version list (for a subordinate-owner family) has not returned it.
+        if (selected !== "__current__"
+          && !items.some(item => item.value === selected)) {
+          items.push({
+            value: selected,
+            label: String(selected).slice(0, 12),
+            description: context.t("冻结因子家族版本"),
+          });
+        }
+        return items;
+      })(),
       selected: [options.selected || "__current__"],
       onChange: values => options.onChange?.(values[0] || "__current__"),
       onOpen: async () => {
