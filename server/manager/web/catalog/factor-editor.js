@@ -151,10 +151,8 @@
           temporary: true,
           onSaved: family => {
             if (!family) return;
-            if (!(data.families || []).some(item => familyRef(item) === familyRef(family))) {
-              data.families = [...(data.families || []), family];
-            }
-            // Join the selectable family candidates (flagged 当场).
+            // On-the-fly candidate only — never into the library family list,
+            // so it does not linger in 候选 nor appear on later pages.
             add({
               value: familyRef(family),
               label: familyAlias(family) || familyRef(family),
