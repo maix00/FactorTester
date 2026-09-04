@@ -482,6 +482,25 @@
     await ensureLazyKey(context, state, "factors");
   }
 
+  function autoMountFactorRef(context, state) {
+    // A factor-series/backtest entry opened with ?factor_ref= must mount that
+    // factor before the user opens any tab.  Candidate mounting happens in
+    // restoreFrozenSelections once `state.factors` is populated, which until
+    // now only occurred when the factor tab was actually opened — so
+    // "查看运行配置" reported "没有选择因子" unless the user first clicked
+    // the factor tab.  Fire the same lazy catalog load the tab would trigger
+    // (idempotent, coalesced on the shared lazy record) right after the
+    // settings registry has built the final editable values object.
+    if (!state.factorRef) return;
+    if (state.lazy?.factors?.status === "error") return;
+    const rows = Array.isArray(state.values?.factor_candidates)
+      ? state.values.factor_candidates : [];
+    if (rows.some(item => String(item?.ref || item?.factor_ref || "") === state.factorRef)) {
+      return;
+    }
+    void ensureFactorsForExecution(context, state);
+  }
+
   function ensureProductReferenceLabels(context, state, refresh) {
     if (!(state.groupRefs || []).some(ref => String(ref).startsWith("product-group:"))) {
       return Promise.resolve(false);
@@ -561,6 +580,7 @@
       ensureRunSubmitCode: () => ensureRunSubmitCode(context, state),
       render: () => render(context, state),
     });
+    autoMountFactorRef(context, state);
     ensureProductReferenceLabels(context, state, () => render(context, state));
     root.append(FTTestSettings.render(state.manifest, state.values, context, {
       kind: state.kind,

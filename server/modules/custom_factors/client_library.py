@@ -358,6 +358,16 @@ def _factor_projection(item: dict[str, Any]) -> dict[str, Any]:
         "product_group": _safe_text(item.get("product_group")),
         "updated_at": _safe_text(item.get("updated_at")),
     }
+    # Nested FactorParam factor references must survive the catalog
+    # projection.  Client factor subjects are flattened into RunSpec sibling
+    # records from these dependency links; dropping them freezes a factor
+    # whose identity.params still points at a nested ref that was never
+    # included, and the server resolver rejects the configuration.
+    dependencies = item.get("factor_dependencies")
+    if isinstance(dependencies, list):
+        kept = [dict(value) for value in dependencies if isinstance(value, dict)]
+        if kept:
+            result["factor_dependencies"] = kept
     return result
 
 

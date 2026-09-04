@@ -172,6 +172,41 @@ def test_route_script_groups_obey_the_initial_load_contract() -> None:
         )
 
 
+def test_factor_series_entry_auto_mounts_factor_ref_before_run_preview() -> None:
+    # factor-series entries arrive with ?factor_ref= but the referenced factor
+    # used to mount only after the factor tab was opened.  Two guards keep the
+    # execution path correct:
+    #  - the workbench first render fires the lazy factor catalog load when a
+    #    factorRef is present but not yet mounted (autoMountFactorRef);
+    #  - the preview action mounts factor candidates before
+    #    FTTestConfiguration.save compiles factor subjects, not after (the old
+    #    runRequest placement was too late and preview reported no factor).
+    tests_source = (WEB_ROOT / "workbench" / "tests.js").read_text(encoding="utf-8")
+    assert "autoMountFactorRef(context, state)" in tests_source
+    assert "function autoMountFactorRef(context, state)" in tests_source
+    assert "ensureFactorsForExecution" in tests_source
+    actions_source = (WEB_ROOT / "workbench" / "run-batch" / "actions.js").read_text(
+        encoding="utf-8",
+    )
+    ensure_call = "await window.FTTests?.ensureFactorsForExecution?.(context, state);"
+    assert ensure_call in actions_source
+    assert actions_source.index(ensure_call) < actions_source.index(
+        "await requestForPreview(context, state, group);",
+    )
+
+
+def test_factor_series_entry_auto_mounts_factor_ref_before_run_preview_sgchg() -> None:
+    # The compiler must flatten a mounted candidate's nested dependencies into
+    # RunSpec sibling records so the server resolver never sees an
+    # unfrozen FactorParam reference (regression: SgChgDurDay -> SgChgPct).
+    fixture = (ROOT / "tests" / "scripts" / "fixtures" / "test_configuration_compiler.js")
+    assert "factor_dependencies" in fixture.read_text(encoding="utf-8")
+    server_source = (
+        ROOT / "server" / "modules" / "custom_factors" / "client_library.py"
+    ).read_text(encoding="utf-8")
+    assert "factor_dependencies" in server_source
+
+
 def test_page_agent_drawer_uses_the_published_group_loader_api() -> None:
     source = (WEB_ROOT / "profile" / "page-agent-drawer.js").read_text(encoding="utf-8")
     assert 'FTStaticLoader?.loadGroups?.(["profile-agent-chat"])' in source

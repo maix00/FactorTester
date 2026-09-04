@@ -393,6 +393,77 @@ def test_factor_projection_preserves_formula_identity_per_factor() -> None:
     assert "factor_family_ref" not in factor
 
 
+def test_factor_projection_preserves_nested_dependency_siblings() -> None:
+    # Nested FactorParam factors are referenced from identity.params and must
+    # stay reachable through factor_dependencies on the projected catalog row.
+    # factorSubjects flattens those dependency links into RunSpec sibling
+    # records; dropping them freezes a factor whose nested ref is missing, and
+    # the server resolver rejects the configuration ("FactorParam 引用未在
+    # RunSpec 中冻结").
+    outer = {
+        "factor_alias": "SgChgDurDay|Th:24",
+        "factor_family_alias": "SgChgDurDay",
+        "owner_username": "alice",
+        "factor_owner_ref": "profile:alice",
+        "family_formula_fingerprint": "a" * 64,
+        "self_formula_fingerprint": "b" * 64,
+        **_frozen_factor(
+            alias="SgChgDurDay|Th:24",
+            family="SgChgDurDay",
+            owner_ref="profile:alice",
+        ),
+        "params": [{"alias": "Th", "value": "factor:v2:dependencydigest"}],
+        "source": "custom",
+    }
+    nested_identity = {
+        "family_ref": "factor-family:v2:familydigest",
+        "family_alias": "SgChgPct",
+        "family_formula_fingerprint": "c" * 64,
+        "self_formula_fingerprint": "d" * 64,
+        "params": {},
+    }
+    nested = {
+        "schema_version": 2,
+        "ref": "factor:v2:dependencydigest",
+        "alias": "SgChgPct|Th:0",
+        "owner_ref": "profile:alice",
+        "identity": nested_identity,
+    }
+    payload = build_client_library_projection({
+        "factors": [{**outer, "factor_dependencies": [nested]}],
+    }, principal="alice")
+
+    factor = payload["factors"][0]
+    dependencies = factor["factor_dependencies"]
+    assert len(dependencies) == 1
+    assert dependencies[0]["ref"] == "factor:v2:dependencydigest"
+    assert dependencies[0]["alias"] == "SgChgPct|Th:0"
+    assert dependencies[0]["identity"]["family_alias"] == "SgChgPct"
+    assert factor["identity"]["params"] == {"Th": "factor:v2:dependencydigest"}
+
+
+def test_factor_projection_omits_empty_dependency_lists() -> None:
+    payload = build_client_library_projection({
+        "factors": [{
+            "factor_alias": "Plain",
+            "factor_family_alias": "Plain",
+            "owner_username": "alice",
+            "factor_owner_ref": "profile:alice",
+            "family_formula_fingerprint": "a" * 64,
+            "self_formula_fingerprint": "b" * 64,
+            **_frozen_factor(
+                alias="Plain",
+                family="Plain",
+                owner_ref="profile:alice",
+            ),
+            "params": [],
+            "source": "custom",
+            "factor_dependencies": [],
+        }],
+    }, principal="alice")
+    assert "factor_dependencies" not in payload["factors"][0]
+
+
 def test_family_projection_merges_registered_historical_factor_into_current_family() -> None:
     """A registered factor revision is a member, not a second family row."""
     payload = build_client_library_projection({

@@ -121,6 +121,11 @@
     model().update(item, "freezing", refresh);
     try {
       await window.FTStaticLoader?.loadGroups?.(["workbench-factors", "workbench-products"]);
+      // Factor candidates must be mounted before the configuration save
+      // compiles factor subjects.  runRequest also calls this, but only
+      // after save() — too late for the compiler, which reports
+      // "没有选择因子" when the referenced factor was never mounted.
+      await window.FTTests?.ensureFactorsForExecution?.(context, state);
       await window.FTTests?.ensureProductsForExecution?.(context, state);
       const request = await requestForPreview(context, state, group);
       // Bind the immutable request to the page inputs that produced it.  Do
