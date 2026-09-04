@@ -198,6 +198,7 @@
         label: context.t("手填排他"),
         placeholder: context.t("填写 ConstExpr、DataColumn alias 或因子 alias"),
       },
+      canAddForType: type => type === "factor",
       onAddCandidateForType: (type, _ctx, {add}) => {
         if (type !== "factor") return; // a DataColumn cannot be created on the fly
         const open = value => {
@@ -213,12 +214,28 @@
         };
         if (typeof options.onCreateFactor === "function") {
           void options.onCreateFactor(open);
-        } else if (window.FTTestLazyCode?.openObjectEditor) {
-          void window.FTTestLazyCode.openObjectEditor(context, {
-            kind: "factor", mode: "create", ref: "new", onSaved: open,
-            testState: options.testState, temporary: true,
-          });
+          return;
         }
+        // Reliable on-the-fly factor creation: lift via the object overlay
+        // (lazy-loading it if not mounted yet), falling back to a lazy editor.
+        const lift = props => {
+          const openOverlay = context.openObject
+            || (window.FTObjectOverlay?.open
+              ? childOptions => window.FTObjectOverlay.open(context, childOptions)
+              : null);
+          if (openOverlay) { openOverlay(props); return; }
+          void Promise.resolve(
+            window.FTStaticLoader?.loadGroups?.(["object-overlay"]),
+          ).then(() => {
+            if (window.FTObjectOverlay?.open) {
+              window.FTObjectOverlay.open(context, props);
+            }
+          }).catch(() => {});
+        };
+        lift({
+          kind: "factor", mode: "create", ref: "new", onSaved: open,
+          testState: options.testState, temporary: true,
+        });
       },
       // 手填排他 (exclusiveManual): resolve a typed value into ConstExpr /
       // DataColumn / 因子 alias.  An alias resolves through the host so any

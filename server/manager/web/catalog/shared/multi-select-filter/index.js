@@ -907,7 +907,9 @@
               `${label} (${list.length})`,
               othersCollapsed,
               () => { othersCollapsed = !othersCollapsed; render(); },
-              (typeof options.onAddCandidateForType === "function" && key)
+              (typeof options.onAddCandidateForType === "function" && key
+                && (typeof options.canAddForType !== "function"
+                  || options.canAddForType(key)))
                 ? () => addTypedCandidate(key) : undefined,
             ));
             if (!othersCollapsed) {
