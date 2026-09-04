@@ -402,6 +402,25 @@
         }
         return;
       }
+      // A hand-typed alias (manual source) still carries the parameters in
+      // its text: ``Family|K:V|K:V|…``.  Parse it into a read-only table so
+      // the reference is inspectable even before any validation round-trip.
+      if (activeSource === "manual" && typeof draft === "string"
+        && draft.includes("|")) {
+        const analysis = parseFactorAlias(draft);
+        const aliasRows = analysis && Object.keys(analysis.params).length
+          ? Object.entries(analysis.params).map(([name, value]) => ({
+            alias: name, value,
+          })) : [];
+        if (aliasRows.length) {
+          const section = window.FTFactorDetailShared.parameterSection(
+            context, {...draft, family: null}, aliasRows,
+            (options.depth || 0) + 1,
+          );
+          section.root.dataset.parameterAlias = alias;
+          nestedMount.append(section.root);
+        }
+      }
       if (!familyDraft(draft)) return;
       const family = draft.__factor_family;
       const nestedValues = draft.parameter_values || {};
@@ -511,6 +530,23 @@
   function isFrozenFactorValue(value) {
     if (typeof value === "string") return value.startsWith("factor:v2:");
     return isFrozenFactor(value);
+  }
+
+  // Parse a display alias like ``SgChgPct|P:[CA]|M:0.6|B:1|N:200d|$F:1d``
+  // into {family, params}; engine-internal keys ($F/$Rev) are dropped.
+  function parseFactorAlias(alias) {
+    const text = String(alias || "").trim();
+    const segments = text.split("|").map(part => part.trim()).filter(Boolean);
+    if (segments.length < 2) return null;
+    const params = {};
+    for (const segment of segments.slice(1)) {
+      const separator = segment.indexOf(":");
+      if (separator <= 0) continue;
+      const key = segment.slice(0, separator).trim();
+      const value = segment.slice(separator + 1).trim();
+      if (key && !key.startsWith("$")) params[key] = value;
+    }
+    return {family: segments[0], params};
   }
 
   function familyParameters(family) {

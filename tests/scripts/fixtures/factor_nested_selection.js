@@ -208,6 +208,20 @@ assert.deepEqual(
   manualSource.selected, ["manual"],
   "a hand-typed alias must reopen on the manual source",
 );
+// The hand-typed alias parses into a read-only nested parameter table.
+const manualNested = descendants(manual.root).find(item => (
+  item.className?.includes("factor-detail-parameter-editor")
+    && item !== manual.root
+));
+assert.ok(
+  manualNested,
+  "a hand-typed alias must parse into a read-only nested parameter table",
+);
+const manualText = descendants(manualNested).map(item => item.textContent);
+assert.ok(
+  manualText.includes("M") && manualText.includes("0.6"),
+  "alias rows must carry the parsed parameter names and values",
+);
 
 (async () => {
   await factorPicker.options.onChange([childRef]);
