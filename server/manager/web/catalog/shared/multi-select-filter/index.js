@@ -273,7 +273,7 @@
       toggle.title = translate(context, "筛选类型", "筛选类型");
       toggle.setAttribute("aria-label", toggle.title);
       toggle.addEventListener("click", event => {
-        event.stopPropagation();
+        event.stopPropagation?.();
         typeFilter.toggle();
       });
       const iconNode = window.FTIcons?.node?.("line.3.horizontal.decrease.circle")
@@ -297,7 +297,7 @@
       addToggle.title = addTitle;
       addToggle.setAttribute("aria-label", addTitle);
       addToggle.addEventListener("click", event => {
-        event.stopPropagation();
+        event.stopPropagation?.();
         const add = value => {
           if (!value || typeof value !== "object") return;
           const ref = String(
@@ -581,7 +581,7 @@
             ? Boolean(action.disabled()) : Boolean(action.disabled));
           button.addEventListener("click", event => {
             event.preventDefault();
-            event.stopPropagation();
+            event.stopPropagation?.();
             action.onClick?.(event, item);
           });
           actionHost.append(button);
@@ -666,7 +666,7 @@
         head.append(marker, title);
         head.addEventListener("click", event => {
           event.preventDefault();
-          event.stopPropagation();
+          event.stopPropagation?.();
           onToggle();
         });
         return head;
@@ -804,6 +804,17 @@
     });
     // Typing only narrows the candidates below (已选 stays untouched).
     search.addEventListener("input", () => render());
+    // Drop on-the-fly ("+") candidates that were never confirmed as selected
+    // once the menu closes — they are session-only and must not persist.
+    function cleanupTemporaryCandidates() {
+      const removed = items.filter(item => (
+        item.onsite === true && !selected.includes(item.value)
+      ));
+      if (!removed.length) return;
+      for (const item of removed) items.splice(items.indexOf(item), 1);
+      render();
+    }
+
     // Outside click / collapse commits multi selections (no apply button);
     // single mode already commits on each pick.
     dropdown.addEventListener("toggle", () => {
@@ -828,6 +839,7 @@
       }
       restoreMenu();
       if (multi && !applying) void commitMultiOnClose();
+      cleanupTemporaryCandidates();
     });
     // A disabled control never opens (native details toggling suppressed).
     summary.addEventListener("click", event => {

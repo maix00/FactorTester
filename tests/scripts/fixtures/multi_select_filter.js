@@ -307,5 +307,35 @@ assert.equal(locked.dropdown.open, false);
   await withManual.dropdown.listeners.toggle();
   assert.deepEqual(manualChanges.at(-1), ["自定义"]);
 
+  // On-the-fly ("+") candidates are session-only: cancelling the pick and
+  // closing the menu drops them from the pool.
+  const tmpChanges = [];
+  const tmp = window.FTMultiSelectFilter.create({t: value => value}, {
+    items: [{value: "a", label: "A"}],
+    selected: [], multi: true,
+    onChange: values => tmpChanges.push(values),
+    onAddCandidate: (_ctx, {add}) => {
+      add({value: "tmp1", label: "临时候选", temporary: true});
+    },
+  });
+  const addToggle = descendants(tmp.element).find(item => (
+    String(item.className || "").includes("ft-multi-select-add-toggle")
+  ));
+  assert.ok(addToggle, "+ entry rendered for onAddCandidate");
+  addToggle.listeners.click({preventDefault() {}, stopPropagation() {}});
+  assert.ok(optionRows(tmp).some(item => String(item.children[1]?.textContent) === "临时候选"),
+    "on-the-fly candidate joins the pool");
+  const tmpRow = optionRows(tmp).find(item => item.children[1]?.textContent === "临时候选");
+  tmpRow.children[0].listeners.click({preventDefault() {}});
+  assert.deepEqual(tmp.values, ["tmp1"], "temporary candidate is selectable");
+  // Cancel: unpick it, then closing drops it.
+  const tmpRow2 = optionRows(tmp).find(item => item.children[1]?.textContent === "临时候选");
+  tmpRow2.children[0].listeners.click({preventDefault() {}});
+  assert.deepEqual(tmp.values, [], "temporary candidate can be deselected");
+  tmp.dropdown.open = false;
+  await tmp.dropdown.listeners.toggle();
+  assert.equal(optionRows(tmp).some(item => item.children[1]?.textContent === "临时候选"), false,
+    "deselected on-the-fly candidate is dropped on close");
+
   console.log("ok");
 })();
