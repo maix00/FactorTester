@@ -310,6 +310,11 @@
       })).catch(() => null);
     };
     let nestedFamilyPending = false;
+    // Echo mode: on the very first render the editor replays a saved frozen
+    // reference straight into an editable family-composition list (its own
+    // parameter values column), matching the create-mode page — the only
+    // difference is that initialization comes from the frozen record.
+    let echoPending = true;
     const renderNested = () => {
       if (nestedMount.replaceChildren) nestedMount.replaceChildren();
       else nestedMount.children = [];
@@ -396,6 +401,14 @@
             button.addEventListener("click", unlockFamilyEditing);
             return button;
           })();
+        // First render of a saved factor: replay the frozen reference
+        // directly as an editable family composition (its parameter value
+        // column becomes an editor), the same page shape as create mode.
+        if (echoPending && isFrozenFactor(draft) && currentTemplate) {
+          echoPending = false;
+          unlockFamilyEditing();
+          return;
+        }
         const definitionRows = (template
           ? shared?.parameterRows?.(draft, {family: template}) || []
           : shared?.parameterRows?.(draft) || [])
@@ -439,6 +452,11 @@
               if (upgraded.length) {
                 currentTemplate = loadedFamily;
                 reportNestedFamily(loadedFamily);
+                if (echoPending) {
+                  echoPending = false;
+                  unlockFamilyEditing();
+                  return;
+                }
                 renderSection(upgraded, loadedFamily);
                 return;
               }
