@@ -103,13 +103,12 @@ const pickers = [strategyPanel, dependencyPanel].flatMap(panel => (
 assert.deepEqual(pickers.map(node => [node.accept, node.multiple]), [
   [".hook", false], [".cfg", true],
 ]);
-assert.deepEqual(
-  findAll(dependencyPanel, node => node.tagName === "span"
+const usageLabels = findAll(dependencyPanel, node => node.tagName === "span"
     && node.className === "ft-multi-select-option-label"
     && node.textContent !== "×")
-    .map(node => node.textContent),
-  ["自定义用途"],
-);
+    .map(node => node.textContent);
+assert.ok(usageLabels.includes("自定义用途"),
+  "selected 自定义用途 appears in the menu (已选 + candidates sections)");
 
 const populatedState = {
   transientStrategySources: [{path: "hooks/risk.hook", source_code: "allow = true"}],

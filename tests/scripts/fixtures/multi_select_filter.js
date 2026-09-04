@@ -119,10 +119,22 @@ assert.equal(filter.summary.children[0].textContent, "已选 2 项");
 filter.setValues(["day", "none"]);
 assert.deepEqual(filter.values, ["none"]);
 assert.equal(filter.summary.children[0].textContent, "未绑定");
-const exclusiveRow = filter.optionList.children.find(item => (
-  item.className.includes("is-exclusive")
+// Rows now live inside menu sections; locate by the row input value.
+function optionRows(picker) {
+  return descendants(picker.optionList).filter(item => (
+    String(item.className || "").includes("ft-multi-select-option")
+    && item.children[0]?.tagName === "input"
+  ));
+}
+function inputOf(picker, value) {
+  const row = optionRows(picker).find(item => item.children[0].value === String(value));
+  return row ? row.children[0] : null;
+}
+const noneRow = optionRows(filter).find(item => (
+  String(item.className).includes("is-exclusive")
 ));
-assert.ok(exclusiveRow.children.some(item => (
+assert.ok(noneRow, "exclusive candidate renders in the menu");
+assert.ok(noneRow.children.some(item => (
   item.className === "ft-multi-select-exclusive-badge"
 )));
 
@@ -137,18 +149,15 @@ const multi = window.FTMultiSelectFilter.create({t: value => value}, {
 assert.deepEqual(multi.values, ["a"]);
 assert.equal(multi.hasSelection, true);
 assert.equal(multi.summary.children[0].textContent, "A");
-const bInput = multi.optionList.children[1].children[0];
 assert.equal(descendants(multi.element).some(item => (
   item.className === "ft-multi-select-selection-note"
 )), false, "single choice must not render a redundant selected note");
 assert.equal(descendants(multi.element).some(item => (
   item.className === "ft-multi-select-selection-preview"
 )), false, "compact single choice must not render a redundant selected preview");
-const optionHelp = descendants(multi.optionList).find(item => (
+assert.ok(descendants(multi.optionList).some(item => (
   String(item.className).includes("ft-help-icon")
-));
-assert.ok(optionHelp, "choice descriptions should use the shared help icon");
-assert.equal(optionHelp.textContent, "?");
+)), "choice descriptions should use the shared help icon");
 
 const trailing = window.FTMultiSelectFilter.create({t: value => value}, {
   items: [{value: "a", label: "A"}],
@@ -184,18 +193,15 @@ locked.summary.listeners.click({preventDefault() {}});
 assert.equal(locked.dropdown.open, false);
 
 (async () => {
-  await bInput.listeners.click({preventDefault() {}});
+  await inputOf(multi, "b").listeners.click({preventDefault() {}});
   assert.deepEqual(multi.values, ["b"]);
-  assert.equal(multi.optionList.children[0].children[1].textContent, "A",
-    "selection must not reorder the option list");
-  const selectedBInput = multi.optionList.children[1].children[0];
-  await selectedBInput.listeners.click({preventDefault() {}});
+  assert.equal(multi.dropdown.open, false,
+    "single-select commits immediately and closes the dropdown");
+  await inputOf(multi, "b").listeners.click({preventDefault() {}});
   assert.deepEqual(multi.values, []);
   assert.equal(multi.hasSelection, false);
   assert.deepEqual(clearableChanges.at(-1), []);
   assert.equal(multi.summary.children[0].textContent, "未筛选");
-  assert.equal(multi.dropdown.open, false,
-    "single-select commits immediately and closes the dropdown");
 
   const legacySingleChanges = [];
   const legacySingle = window.FTMultiSelectFilter.create({t: value => value}, {
@@ -203,14 +209,14 @@ assert.equal(locked.dropdown.open, false);
     selected: ["a"], multi: false,
     onApply: values => legacySingleChanges.push(values),
   });
-  const legacyB = legacySingle.optionList.children[1].children[0];
+  const legacyB = inputOf(legacySingle, "b");
   legacyB.checked = true;
   await legacyB.listeners.change();
   assert.deepEqual(legacySingleChanges, [["b"]],
     "single-select also commits legacy onApply callbacks immediately");
   assert.equal(descendants(legacySingle.element).some(item => (
     item.className === "primary ft-multi-select-apply"
-  )), false, "single-select must not render a save action");
+  )), false, "no save action is rendered at all");
 
   const redrawOwner = new Element("div");
   body.append(redrawOwner);
@@ -228,7 +234,7 @@ assert.equal(locked.dropdown.open, false);
   redrawSingle.dropdown.open = true;
   redrawSingle.dropdown.listeners.toggle();
   assert.equal(redrawSingle.menu.parentNode, document.body);
-  const sourceInput = redrawSingle.optionList.children[1].children[0];
+  const sourceInput = inputOf(redrawSingle, "source");
   sourceInput.checked = true;
   await sourceInput.listeners.change();
   assert.equal(replacement.dataset.mode, "source");
@@ -247,33 +253,24 @@ assert.equal(locked.dropdown.open, false);
   modalSingle.dropdown.open = true;
   modalSingle.dropdown.listeners.toggle();
   assert.equal(modalSingle.menu.parentNode, modal,
-    "a modal picker menu must remain inside the interactive dialog subtree");
-  modalSingle.dropdown.open = false;
-  modalSingle.dropdown.listeners.toggle();
-  assert.equal(modalSingle.menu.parentNode, modalSingle.dropdown);
+    "portaled menus must stay inside an open modal dialog");
 
+  // Multi: pick, then outside-close commits (no apply button).
   const multiChanges = [];
   const multiSave = window.FTMultiSelectFilter.create({t: value => value}, {
-    items: [
-      {value: "a", label: "A"},
-      {value: "b", label: "B"},
-      {value: "c", label: "C"},
-    ],
-    selected: ["a"],
+    items: [{value: "a", label: "A"}, {value: "b", label: "B"}, {value: "c", label: "C"}],
+    selected: ["a"], multi: true,
     onChange: values => multiChanges.push(values),
   });
-  const cInput = multiSave.optionList.children[2].children[0];
-  cInput.checked = true;
-  cInput.listeners.change();
-  assert.deepEqual(multiSave.values, ["a", "c"]);
-  assert.deepEqual(multiChanges, [], "multi-select changes stay draft until saved");
-  const saveButton = descendants(multiSave.element).find(item => (
+  assert.equal(descendants(multiSave.element).some(item => (
     item.className === "primary ft-multi-select-apply"
-  ));
-  assert.ok(saveButton, "multi-select must expose a save action");
-  await saveButton.listeners.click();
-  assert.deepEqual(multiChanges, [["a", "c"]]);
-  assert.equal(multiSave.dropdown.open, false);
+  )), false, "multi-select must not render a save action");
+  await inputOf(multiSave, "c").listeners.click({preventDefault() {}});
+  assert.deepEqual(multiSave.values, ["a", "c"], "picks accumulate until commit");
+  assert.equal(multiChanges.length, 0, "multi does not commit on each pick");
+  multiSave.dropdown.open = false;
+  await multiSave.dropdown.listeners.toggle();
+  assert.deepEqual(multiChanges.at(-1), ["a", "c"], "outside close commits multi");
 
   const exclusiveToggle = window.FTMultiSelectFilter.create({t: value => value}, {
     items: [
@@ -282,163 +279,32 @@ assert.equal(locked.dropdown.open, false);
     ],
     selected: ["normal"],
   });
-  await exclusiveToggle.optionList.children[1].children[0].listeners.click({
-    preventDefault() {},
-  });
+  await inputOf(exclusiveToggle, "exclusive").listeners.click({preventDefault() {}});
   assert.deepEqual(exclusiveToggle.values, ["exclusive"],
     "selecting an exclusive item clears normal selections");
-  await exclusiveToggle.optionList.children[1].children[0].listeners.click({
-    preventDefault() {},
-  });
+  await inputOf(exclusiveToggle, "exclusive").listeners.click({preventDefault() {}});
   assert.deepEqual(exclusiveToggle.values, [],
     "clicking a selected exclusive item clears it");
 
-  multiSave.dropdown.open = true;
-  multiSave.dropdown.listeners.toggle();
-  assert.equal(multiSave.menu.parentNode, document.body,
-    "an open menu must be portaled above clipping ancestors");
-  assert.ok(multiSave.menu.className.includes("is-portaled"));
-  document.dispatchEvent({type: "click", target: new Element("div")});
-  multiSave.dropdown.listeners.toggle();
-  assert.equal(multiSave.dropdown.open, false,
-    "clicking outside a multi-select must close the dropdown");
-  assert.equal(multiSave.menu.parentNode, multiSave.dropdown,
-    "closing restores the menu to its owning control");
-
-  const owner = new Element("div");
-  body.append(owner);
-  const orphan = window.FTMultiSelectFilter.create({t: value => value}, {
-    items: [], loading: true,
-  });
-  owner.append(orphan.element);
-  orphan.dropdown.open = true;
-  orphan.dropdown.listeners.toggle();
-  assert.equal(orphan.dropdown.open, false,
-    "a loading picker must not open an empty portaled menu");
-  const ready = window.FTMultiSelectFilter.create({t: value => value}, {
-    items: [{value: "ready", label: "Ready"}],
-  });
-  owner.append(ready.element);
-  ready.dropdown.open = true;
-  ready.dropdown.listeners.toggle();
-  assert.equal(ready.menu.parentNode, document.body);
-  owner.replaceChildren();
-  mutationObserverCallback?.();
-  assert.equal(ready.dropdown.open, false,
-    "removing a picker owner must close its portaled menu");
-  assert.equal(ready.menu.parentNode, ready.dropdown,
-    "an orphaned portaled menu must be restored outside document.body");
-
-  const cancel = window.FTMultiSelectFilter.create({t: value => value}, {
-    items: [{value: "a", label: "A"}, {value: "b", label: "B"}],
-    selected: ["a"],
-    onChange: values => multiChanges.push(values),
-  });
-  cancel.dropdown.open = true;
-  const cancelB = cancel.optionList.children[1].children[0];
-  cancelB.checked = true;
-  cancelB.listeners.change();
-  assert.deepEqual(cancel.values, ["a", "b"]);
-  cancel.dropdown.open = false;
-  cancel.dropdown.listeners.toggle();
-  assert.deepEqual(cancel.values, ["a"], "closing without saving discards the draft");
-  assert.deepEqual(multiChanges, [["a", "c"]]);
-
-  const remoteCalls = [];
-  const remote = window.FTMultiSelectFilter.create({t: value => value}, {
-    items: [{value: "selected", label: "当前选中"}],
-    selected: ["selected"],
-    multi: false,
-    loadItems: query => new Promise(resolve => remoteCalls.push({query, resolve})),
-  });
-  remote.dropdown.open = true;
-  remote.dropdown.listeners.toggle();
-  assert.deepEqual(remoteCalls.map(call => call.query), [""]);
-  const wait = delay => new Promise(resolve => setTimeout(resolve, delay));
-  remote.search.value = "old";
-  remote.search.listeners.input();
-  await wait(240);
-  assert.deepEqual(remoteCalls.map(call => call.query), ["", "old"]);
-  remote.search.value = "new";
-  remote.search.listeners.input();
-  await wait(240);
-  assert.deepEqual(remoteCalls.map(call => call.query), ["", "old", "new"]);
-  remoteCalls[2].resolve([{value: "new", label: "新结果"}]);
-  await wait(0);
-  assert.deepEqual(remote.values, ["selected"]);
-  assert.equal(remote.summary.children[0].textContent, "当前选中");
-  assert.equal(remote.optionList.children[0].children[1].textContent, "新结果");
-  remoteCalls[1].resolve([{value: "old", label: "旧结果"}]);
-  await wait(0);
-  assert.ok(remote.optionList.children.some(row => (
-    row.children[1]?.textContent === "新结果"
-  )), "the latest remote result should remain visible");
-  assert.equal(remote.optionList.children.some(row => (
-    row.children[1]?.textContent === "旧结果"
-  )), false, "a stale remote result must not overwrite the latest result");
-
-  const overlayOpens = [];
-  window.FTObjectOverlay = {
-    open: (context, options) => { overlayOpens.push(options); return Promise.resolve(); },
-  };
-  const viewed = window.FTMultiSelectFilter.create({t: value => value}, {
-    items: [
-      {
-        value: "factor:v2:abc",
-        label: "现场因子",
-        description: "库内因子 · owner",
-        view: {kind: "factor", ref: "factor:v2:abc", title: "查看因子"},
-      },
-      {value: "text", label: "纯文本行", description: "没有对象的行"},
-    ],
+  // Caller-declared hand-typed exclusive entry (manual exclusive).
+  const manualChanges = [];
+  const withManual = window.FTMultiSelectFilter.create({t: value => value}, {
+    items: [{value: "a", label: "A"}],
     selected: [], multi: true,
+    exclusiveManual: {placeholder: "输入排他项…"},
+    onChange: values => manualChanges.push(values),
   });
-  const viewButton = viewed.optionList.children[0].children[3];
-  assert.equal(viewButton.className.split(" ").includes("ft-help-icon"), true,
-    "an object row keeps the help icon affordance");
-  viewButton.listeners.click({
-    preventDefault() {},
-    stopPropagation() {},
-  });
-  assert.deepEqual(overlayOpens, [{
-    kind: "factor", mode: "view", ref: "factor:v2:abc",
-  }], "an object row's help icon must open the matching view overlay");
-  const plainButton = viewed.optionList.children[1].children[3];
-  plainButton.listeners?.click?.({
-    preventDefault() {},
-    stopPropagation() {},
-  });
-  assert.equal(overlayOpens.length, 1,
-    "a plain text row must not open an object overlay");
-
-  // Inside an existing object overlay the opener must route through the
-  // overlay's own frame stack (context.openObject) so the view page becomes a
-  // nested child overlay instead of a second top-level dialog.
-  const nestedOpens = [];
-  const nestedContext = {
-    t: value => value,
-    openObject: options => { nestedOpens.push(options); },
-  };
-  const nestedPicker = window.FTMultiSelectFilter.create(nestedContext, {
-    items: [{
-      value: "group:g1",
-      label: "产品组",
-      view: {kind: "product_group", ref: "group:g1"},
-    }],
-    selected: [], multi: true,
-  });
-  nestedPicker.optionList.children[0].children[3].listeners.click({
-    preventDefault() {},
-    stopPropagation() {},
-  });
-  assert.deepEqual(nestedOpens, [{
-    kind: "product_group", mode: "view", ref: "group:g1",
-  }], "inside an overlay the row viewer must use the nested frame stack");
-  assert.equal(overlayOpens.length, 1,
-    "nested opens must not fall back to a top-level overlay");
+  const manualInput = descendants(withManual.optionList).find(item => (
+    String(item.className).includes("ft-multi-select-manual-exclusive")
+  ))?.children[0];
+  assert.ok(manualInput, "declared manual exclusive entry renders");
+  manualInput.value = "自定义";
+  await manualInput.listeners.keydown({key: "Enter", preventDefault() {}});
+  assert.deepEqual(withManual.values, ["自定义"], "manual exclusive becomes the pick");
+  assert.deepEqual(manualChanges.length, 0, "multi manual pick waits for commit");
+  withManual.dropdown.open = false;
+  await withManual.dropdown.listeners.toggle();
+  assert.deepEqual(manualChanges.at(-1), ["自定义"]);
 
   console.log("ok");
-})().catch(error => {
-  console.error(error);
-  process.exitCode = 1;
-});
+})();

@@ -2207,7 +2207,7 @@ def test_settings_picker_can_escape_the_tab_content_boundary() -> None:
 
     assert ".backend-settings-shell.has-open-multi-select" in settings_css
     assert ".test-workbench .test-settings-shell.has-open-multi-select" in task_css
-    assert 'shell.classList.toggle("has-open-multi-select"' in picker
+    assert 'settingsShell.classList.toggle("has-open-multi-select"' in picker
 
 
 def test_backtest_group_form_uses_registered_override_editor() -> None:

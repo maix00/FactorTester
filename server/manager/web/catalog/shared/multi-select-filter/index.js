@@ -487,6 +487,8 @@
     // is-selected visual; clicking a row toggles it (multi keeps the change
     // until the outside click commits, single commits immediately).
     var selectedCollapsed = false;
+    var exclusiveCollapsed = false;
+    var othersCollapsed = false;
     function buildMenuSections() {
       const shown = visibleItems();
       const rows = [];
@@ -651,12 +653,19 @@
       }
       const exclusiveShown = shown.filter(item => item.exclusive);
       if (exclusiveShown.length || options.exclusiveManual) {
-        rows.push(sectionHeading(translate(context, "排他", "排他"), false, () => {}));
-        rows.push(wrap(
-          exclusiveShown.map(item => buildRow(item)),
-          "ft-multi-select-section-exclusive",
+        rows.push(sectionHeading(
+          translate(context, "排他", "排他"),
+          exclusiveCollapsed,
+          () => { exclusiveCollapsed = !exclusiveCollapsed; render(); },
         ));
-        if (options.exclusiveManual) {
+        if (!exclusiveCollapsed) {
+          if (exclusiveShown.length) {
+            rows.push(wrap(
+              exclusiveShown.map(item => buildRow(item)),
+              "ft-multi-select-section-exclusive",
+            ));
+          }
+          if (options.exclusiveManual) {
           const manualRow = document.createElement("label");
           manualRow.className = "ft-multi-select-option ft-multi-select-exclusive ft-multi-select-manual-exclusive";
           const input = document.createElement("input");
@@ -701,20 +710,24 @@
             render();
           };
           input.addEventListener("keydown", event => {
-            event.stopPropagation();
+            event.stopPropagation?.();
             if (event.key === "Enter") confirm();
           });
           manualRow.append(input);
           rows.push(wrap([manualRow], "ft-multi-select-section-exclusive"));
         }
       }
+      }
       const others = shown.filter(item => !item.exclusive);
       if (others.length) {
         rows.push(sectionHeading(
           `${translate(context, "其他候选", "其他候选")} (${others.length})`,
-          false, () => {},
+          othersCollapsed,
+          () => { othersCollapsed = !othersCollapsed; render(); },
         ));
-        rows.push(wrap(others.map(item => buildRow(item)), "ft-multi-select-section-others"));
+        if (!othersCollapsed) {
+          rows.push(wrap(others.map(item => buildRow(item)), "ft-multi-select-section-others"));
+        }
       }
       return rows;
     }
@@ -748,15 +761,29 @@
       render();
       search.focus?.();
     });
+    // Typing only narrows the candidates below (已选 stays untouched).
+    search.addEventListener("input", () => render());
     // Outside click / collapse commits multi selections (no apply button);
     // single mode already commits on each pick.
     dropdown.addEventListener("toggle", () => {
+      const settingsShell = section.closest
+        ? section.closest('[class*="settings-shell"]')
+        : null;
+      if (settingsShell) {
+        settingsShell.classList.toggle("has-open-multi-select", dropdown.open);
+      }
       if (dropdown.open) {
         if (!menuPortaled) portalMenu();
         return;
       }
       restoreMenu();
       if (multi && !applying) void commitMultiOnClose();
+    });
+    // A disabled control never opens (native details toggling suppressed).
+    summary.addEventListener("click", event => {
+      if (!controlDisabled) return;
+      event.preventDefault();
+      if (dropdown.open) dropdown.open = false;
     });
 
     render();
