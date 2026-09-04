@@ -274,7 +274,8 @@
     // reuses the caller's existing on-the-fly path; created candidates join
     // the selectable pool flagged with an 当场 badge.  Editing stays on the
     // view-overlay (?) infrastructure.
-    if (typeof options.onAddCandidate === "function") {
+    if (typeof options.onAddCandidate === "function"
+      && !(candidateGrouped && typeof options.onAddCandidateForType === "function")) {
       const addToggle = document.createElement("button");
       addToggle.type = "button";
       addToggle.className = "ft-multi-select-add-toggle icon-action-button";
@@ -558,6 +559,39 @@
     var exclusiveCollapsed = false;
     var onsiteCollapsed = false;
     var othersCollapsed = false;
+    // Add a typed on-the-fly candidate: the per-type 「候选（××类型）」 heading "+"
+    // delegates to the caller's onAddCandidateForType(type, context, {add}).
+    // The pushed row carries `type` so it lands in (and stays in) that type's
+    // 候选 group; it is never surfaced into a separate 当场 section.
+    function addTypedCandidate(key) {
+      if (typeof options.onAddCandidateForType !== "function") return;
+      const add = value => {
+        if (!value || typeof value !== "object") return;
+        const ref = String(
+          value.value ?? value.ref ?? value.id ?? value.factor_ref ?? "",
+        ).trim();
+        const valueKey = ref || String(value.label || value.alias || "").trim();
+        if (!valueKey) return;
+        if (items.some(item => (
+          String(item.value ?? item.ref ?? item.id ?? "").trim() === valueKey
+          || (item.label || "").trim() === valueKey
+        ))) return;
+        items.push({
+          ...value,
+          value: valueKey,
+          type: key,
+          onsite: true,
+          temporary: true,
+          label: value.label || value.alias || valueKey,
+        });
+        if (!multi) {
+          selected = [valueKey];
+          committedSelected = [...selected];
+        }
+        render();
+      };
+      options.onAddCandidateForType(key, context, {add, close: () => {}});
+    }
     function buildMenuSections() {
       const shown = visibleItems();
       const rows = [];
@@ -693,7 +727,7 @@
         });
         return row;
       };
-      function sectionHeading(text, collapsed, onToggle) {
+      function sectionHeading(text, collapsed, onToggle, onAdd) {
         const head = document.createElement("div");
         head.className = "ft-multi-select-section-heading";
         const marker = document.createElement("span");
@@ -702,6 +736,22 @@
         const title = document.createElement("span");
         title.textContent = text;
         head.append(marker, title);
+        if (onAdd) {
+          const add = document.createElement("button");
+          add.type = "button";
+          add.className = "ft-multi-select-section-add icon-action-button";
+          const addTitle = translate(context, "当场新增", "当场新增");
+          add.title = addTitle;
+          add.setAttribute("aria-label", addTitle);
+          add.addEventListener("click", event => {
+            event.preventDefault();
+            event.stopPropagation?.();
+            onAdd();
+          });
+          const plusNode = window.FTIcons?.node?.("plus");
+          if (plusNode) add.replaceChildren?.(plusNode); else add.textContent = "+";
+          head.append(add);
+        }
         head.addEventListener("click", event => {
           event.preventDefault();
           event.stopPropagation?.();
@@ -797,9 +847,10 @@
         }
       }
       }
-      // On-the-fly candidates get their own section between 排他 and 候选.
+      // 当场区 only exists for a single-type (non-grouped) picker; typed
+      // on-the-fly candidates stay in their type's 候选 group when grouping.
       const onsiteItems = shown.filter(item => item.onsite === true && !item.exclusive);
-      if (onsiteItems.length) {
+      if (!candidateGrouped && onsiteItems.length) {
         rows.push(sectionHeading(
           `${translate(context, "当场", "当场")} (${onsiteItems.length})`,
           onsiteCollapsed,
@@ -812,7 +863,12 @@
           ));
         }
       }
-      const others = shown.filter(item => !item.exclusive && item.onsite !== true);
+      // When grouping, all candidates (incl. typed on-the-fly ones) go into
+      // their per-type section; when not grouping, on-the-fly items are shown
+      // in the 当场 section above.
+      const others = shown.filter(item => (
+        !item.exclusive && (candidateGrouped || item.onsite !== true)
+      ));
       if (others.length) {
         if (candidateGrouped) {
           const grouped = new Map();
@@ -830,6 +886,8 @@
               `${label} (${list.length})`,
               othersCollapsed,
               () => { othersCollapsed = !othersCollapsed; render(); },
+              (typeof options.onAddCandidateForType === "function" && key)
+                ? () => addTypedCandidate(key) : undefined,
             ));
             if (!othersCollapsed) {
               rows.push(wrap(list.map(item => buildRow(item)), "ft-multi-select-section-others"));

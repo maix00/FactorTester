@@ -229,6 +229,42 @@
           picker.setValues(currentSelected());
         }
       },
+      // Per-type on-the-fly entry: the 「候选（因子）」/「候选（因子集合）」 heading "+"
+      // creates the matching object type and lands it in that type's group.
+      onAddCandidateForType: (type, _context, {add}) => {
+        if (type === "factor_set") {
+          void FTTestLazyCode.openObjectEditor(context, {
+            kind: "factor_set", mode: "create", ref: "new",
+            temporary: true, testState: state,
+            onSaved: value => {
+              if (!value) return;
+              add({
+                value: value.target_ref,
+                label: value.title_zh || value.set_id || value.target_ref,
+                factorSet: value,
+                view: {kind: "factor_set", ref: value.target_ref},
+              });
+            },
+          });
+          return;
+        }
+        const onSaved = value => {
+          if (!value) return;
+          add({
+            value: factorID(value),
+            label: factorLabel(value),
+            factor: value,
+            view: window.FTFactorDetailShared?.factorRowView?.(value)
+              || {kind: "factor", ref: factorID(value)},
+          });
+        };
+        void (window.FTStrategyEditorFactorOverlay?.open
+          ? FTStrategyEditorFactorOverlay.open(context, state, onSaved)
+          : FTTestLazyCode.openObjectEditor(context, {
+            kind: "factor", mode: "create", ref: "new", onSaved,
+            testState: state, temporary: true,
+          }));
+      },
       onCreate: context.session ? () => void (
         window.FTStrategyEditorFactorOverlay?.open
           ? FTStrategyEditorFactorOverlay.open(
