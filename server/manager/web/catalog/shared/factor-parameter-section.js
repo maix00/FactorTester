@@ -55,9 +55,17 @@
     const header = document.createElement("div");
     header.className = "factor-detail-parameter-header";
     const labels = ["参数名", "参数类型", "默认值"];
-    if (showValue) labels.push("Value");
-    labels.forEach(label => {
-      const cell = document.createElement("b"); cell.textContent = context.t(label); header.append(cell);
+    if (showValue) labels.push("参数值");
+    labels.forEach((label, index) => {
+      const cell = document.createElement("b");
+      cell.textContent = context.t(label);
+      header.append(cell);
+      // Nested/reference tables may hang an action (e.g. 编辑) next to the
+      // value-column heading.
+      if (showValue && index === labels.length - 1
+        && options.valueHeaderExtra) {
+        cell.append(options.valueHeaderExtra);
+      }
     });
     root.append(header);
     for (const parameter of parameters) {
@@ -104,13 +112,22 @@
       : "factor-detail-parameter-tree";
     root.open = true;
     root.style?.setProperty?.("--factor-parameter-depth", String(depth));
+    // Family rows may carry the alias under any of these keys depending on
+    // which projection produced them; never fall back to the generic label
+    // while a name is available.
+    const familyValue = value?.family || value?.__factor_family
+      || value?.inspection || value;
+    const familyTitle = value?.factor_family_alias || value?.factor_family_name
+      || familyValue?.factor_family_alias || familyValue?.family_alias
+      || familyValue?.factor_family_name || familyValue?.alias
+      || familyValue?.name || familyValue?.factor_id || familyValue?.family_id
+      || familyValue?.chinese_name || familyValue?.factor_class_name
+      || familyValue?.factor_name || value?.factor_alias || value?.factor_name
+      || "";
     const header = document.createElement("summary");
     header.className = "factor-detail-parameter-tree-header";
     const title = document.createElement("b");
-    title.textContent = String(
-      value?.factor_family_alias || value?.factor_family_name
-      || value?.factor_alias || context.t("因子参数"),
-    );
+    title.textContent = String(familyTitle || context.t("因子参数"));
     const heading = document.createElement("span");
     heading.className = "factor-detail-parameter-tree-heading";
     heading.append(title, " ");
@@ -120,12 +137,25 @@
     const values = options.values || Object.fromEntries(
       rows.map(row => [row.alias, row.value]),
     );
-    // The tree header always renders the family template formula (参数
-    // mode): a family defines parameters only, and an instance's concrete
-    // values live in the aggregated formula above the tree — so there is no
-    // 参数/值 mode toggle on the tree header.
-    const formulaMount = templateFormula(value);
-    header.append(formulaMount);
+    // Parameter-tree headers keep the shared local-formula component (the
+    // original header layout, untouched).  Factor pages keep the 参数/值
+    // mode toggle; family pages (showValue=false) hide the toggle controls
+    // and stay on the 参数 (template) rendering.
+    const showValue = options.showValue !== false;
+    const local = shared()?.localFormula?.(context, value, values);
+    let formula;
+    let updateFormula;
+    if (local) {
+      if (!showValue) {
+        local.root.classList.add("factor-detail-local-formula-parameter-only");
+      }
+      formula = local.root;
+      updateFormula = next => local.update(next || {});
+    } else {
+      formula = templateFormula(value);
+      updateFormula = () => renderFormula(formula, shared()?.expression?.(value) || "");
+    }
+    header.append(formula);
     const body = document.createElement("div");
     body.className = "factor-detail-parameter-tree-body";
     if (options.content) {
@@ -134,6 +164,7 @@
       const list = createParameterList(context, rows, values, {
         readOnly: true,
         showValue: options.showValue !== false,
+        valueHeaderExtra: options.valueHeaderExtra,
         renderValue: (valueCell, parameter) => {
           const displayed = parameter.redacted
             ? context.t("已隐藏")
@@ -158,10 +189,7 @@
       body.append(list.root);
     }
     root.append(header, body);
-    return {
-      root,
-      update: () => renderFormula(formulaMount, shared()?.expression?.(value) || ""),
-    };
+    return {root, update: updateFormula};
   }
 
   window.FTFactorParameterSection = Object.freeze({

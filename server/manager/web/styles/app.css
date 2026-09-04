@@ -271,6 +271,12 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .ft-multi-select-search { flex: 1 1 auto; min-width: 0; height: auto; min-height: 0; border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; color: inherit; background: var(--soft); }
 .ft-multi-select-clear { flex: 0 0 auto; width: 30px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: var(--panel); cursor: pointer; }
 .ft-multi-select-clear:hover { color: inherit; background: var(--soft); }
+/* Embedded candidate-type filter (funnel next to the search box). */
+.ft-multi-select-type-toggle { flex: 0 0 auto; width: 30px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: var(--panel); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.ft-multi-select-type-toggle:hover { color: inherit; background: var(--soft); }
+.ft-multi-select-type-panel { border: 1px solid var(--line); border-radius: 8px; padding: 5px 6px; background: var(--soft); }
+.ft-multi-select-type-options { display: flex; flex-wrap: wrap; gap: 2px 6px; max-height: min(180px, 28vh); overflow-y: auto; }
+.ft-multi-select-type-options .ft-multi-select-option { display: inline-flex; grid-template-columns: none; padding: 3px 6px; font-size: 12px; }
 .ft-multi-select-load-status { color: var(--muted); font-size: 11px; line-height: 1.35; }
 .ft-multi-select-load-status.is-error { color: var(--danger, #c0392b); }
 .ft-multi-select-options { display: grid; gap: 2px; min-height: 0; max-height: min(320px, 42vh); overflow-y: auto; overscroll-behavior: contain; }
@@ -339,6 +345,10 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-detail-parameter-editor > .factor-detail-parameter-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; min-width: 0; padding: 10px 12px; }
 .factor-detail-parameter-editor > :not(.factor-detail-parameter-header):not(.factor-detail-parameter-row) { grid-column: 1 / -1; min-width: 0; }
 .factor-detail-parameter-header { color: var(--muted); background: var(--soft); font-size: 12px; }
+/* Header cells align inline actions (nested-table edit icon) flush with the
+   localized column label. */
+.factor-detail-parameter-header b { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.factor-detail-parameter-header button { margin: 0; padding: 2px; line-height: 1; vertical-align: middle; }
 .factor-detail-parameter-row + .factor-detail-parameter-row { border-top: 1px solid var(--line); }
 .factor-detail-parameter-row-factor { border-bottom: 0; }
 .factor-detail-parameter-key, .factor-detail-parameter-default { overflow-wrap: anywhere; }
@@ -360,6 +370,10 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-detail-local-formula-controls { position: absolute; top: 50%; right: 8px; transform: translateY(-50%); z-index: 1; display: flex; gap: 2px; }
 .factor-detail-local-formula .factor-detail-parameter-formula { padding: 0 88px; box-sizing: border-box; }
 .factor-detail-local-formula-toggle { border: 1px solid var(--line); border-radius: 5px; padding: 2px 5px; background: var(--panel); color: var(--muted); font: 10px ui-monospace, monospace; }
+/* Family parameter trees stay on the 参数 (template) rendering: hide the
+   参数/值 toggle controls and let the formula use the full header width. */
+.factor-detail-local-formula-parameter-only .factor-detail-local-formula-controls { display: none; }
+.factor-detail-local-formula-parameter-only .factor-detail-parameter-formula { padding: 0 12px; }
 .factor-detail-parameter-tree-body { display: grid; gap: 10px; min-width: 0; padding: 10px; }
 .factor-detail-parameter-tree .table-shell { max-height: none; overflow-y: visible; }
 .factor-detail-parameter-tree .table-shell,

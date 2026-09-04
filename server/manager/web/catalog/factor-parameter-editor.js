@@ -103,12 +103,35 @@
       initialValue = initialFactorValue;
       values[alias] = initialValue;
     }
-    let activeSource = familyDraft(initialValue) ? "family"
-      : factors.some(item => selectionValue(item.value ?? item.ref)
-        === reference(initialValue)) ? "factor"
-        : columns.some(item => selectionValue(item.value) === selectionValue(initialValue))
-          ? "column"
-          : display(initialValue) ? "manual" : "";
+    // Only references present in the visible library rows are 因子库
+    // sources.  A frozen combination that is not in the library (freshly
+    // saved parameters, another scope) reopens as its alias on the manual
+    // source instead of claiming a library origin it does not have.
+    const factorChoices = [...factors];
+    let activeSource = "";
+    // Preserve the value's origin: a factor-library reference (opaque
+    // ``factor:v2`` ref or a frozen v2 record) reopens on the 因子库 source;
+    // hand-typed aliases/columns stay manual/column; on-the-fly family
+    // compositions stay family.  Never degrade any of them into the others.
+    const frozenInitial = isFrozenFactorValue(initialValue);
+    // A value is a 因子库 source when its ref (or its alias, e.g. for rows
+    // echoed through a different digest) matches a visible library row.
+    // Matching is done per nesting level, recursively, as levels open.
+    const inLibraryRows = value => factorChoices.some(item => {
+      const candidateFactor = item.factor || item;
+      return selectionValue(item.value ?? item.ref) === reference(value)
+        || String(item.label || display(candidateFactor) || "").trim()
+          === String(display(value) || "").trim();
+    });
+    if (familyDraft(initialValue)) {
+      activeSource = "family";
+    } else if (frozenInitial && inLibraryRows(initialValue)) {
+      activeSource = "factor";
+    } else if (columns.some(item => selectionValue(item.value) === selectionValue(initialValue))) {
+      activeSource = "column";
+    } else if (display(initialValue)) {
+      activeSource = "manual";
+    }
     let renderSourceControl = () => {};
     const setValue = (value, source, {retainSource = false} = {}) => {
       const empty = value === undefined || value === null || value === "";
@@ -132,7 +155,7 @@
       if (source === "column" && !columns.some(item => (
         selectionValue(item.value) === selectionValue(values[alias])
       ))) return "";
-      if (source === "factor" && !factors.some(item => (
+      if (source === "factor" && !factorChoices.some(item => (
         selectionValue(item.value ?? item.ref) === reference(values[alias])
       ))) return "";
       if (source === "family" && !familyDraft(values[alias])) return "";
@@ -155,10 +178,10 @@
       selected => setValue(selected?.[0] || "", "column"),
       {disabled: options.readOnly === true});
     const selectFactor = selected => {
-        const selectedRef = selectionValue(selected?.[0]);
-        const item = factors.find(candidate => (
-          selectionValue(candidate.value ?? candidate.ref) === selectedRef
-        ));
+      const selectedRef = selectionValue(selected?.[0]);
+      const item = factorChoices.find(candidate => (
+        selectionValue(candidate.value ?? candidate.ref) === selectedRef
+      ));
         if (!item) {
           setValue("", "factor");
           return;
@@ -178,7 +201,7 @@
         return undefined;
       };
     factorPicker = picker(context, `factor-param-factor-${alias}`, context.t("因子库"),
-      factors, activeSource === "factor" ? [reference(initialValue)] : [], selectFactor,
+      factorChoices, activeSource === "factor" ? [reference(initialValue)] : [], selectFactor,
       {disabled: options.readOnly === true});
     if (allowFamilyComposition) {
       familyPicker = picker(
@@ -266,37 +289,217 @@
     }
     const nestedMount = document.createElement("div");
     nestedMount.className = "factor-param-nested-factor-mount";
+    // A frozen record only carries identity.params; parameter types and
+    // defaults belong to the referenced factor family.  Load that family's
+    // current template (source-backed definitions) so the nested table shows
+    // real 参数类型/默认值 columns instead of guessing from the record.
+    const loadNestedFamilyDefinitions = draft => {
+      const identity = draft.identity || {};
+      const familyAlias = String(
+        identity.family_alias || draft.factor_family_alias || "",
+      ).trim();
+      const loader = window.FTFactorDetailShared?.loadSourceVersion;
+      if (!familyAlias || typeof loader !== "function") return Promise.resolve(null);
+      const ownerRef = String(draft.owner_ref || "").trim().replace(/^principal:/, "");
+      const isPublic = ["public", "__public_jobs__"].includes(ownerRef);
+      return loader(context, {
+        factor_family_alias: familyAlias,
+        factor_family_name: familyAlias,
+        family_ref: identity.family_ref || draft.family_ref || "",
+      }, "current", {
+        familyID: familyAlias,
+        sourceKind: isPublic ? "public" : undefined,
+        ownerUsername: isPublic ? "" : ownerRef,
+      }).then(loaded => ({
+        ...(loaded || {}),
+        factor_family_alias: familyAlias,
+        factor_family_name: familyAlias,
+      })).catch(() => null);
+    };
+    let nestedFamilyPending = false;
     const renderNested = () => {
       if (nestedMount.replaceChildren) nestedMount.replaceChildren();
       else nestedMount.children = [];
       const draft = values[alias];
       if (isFrozenFactor(draft) && ["factor", "manual"].includes(activeSource)) {
-        const family = draft.family || draft.__factor_family || null;
         const shared = window.FTFactorDetailShared;
-        // Nested factors render through the same parameterSection component as
-        // the view mode (flat embedded tree with the family template formula
-        // and 参数/值 toggles); no second card structure.
-        const rows = family
-          ? shared?.parameterRows?.(draft, {family}) || []
-          : shared?.parameterRows?.(draft) || [];
-        if (rows.length) {
+        // Parameter types/defaults live on the referenced factor family.
+        // Prefer what the current context already carries (the library
+        // choice's family, or an attached template); otherwise load that
+        // family once — never guess types from the frozen record.
+        const choice = factorChoices.find(item => (
+          selectionValue(item.value ?? item.ref) === reference(draft)
+          || item.factor === draft
+        ));
+        const savedParams = draft.identity?.params || draft.parameter_values || {};
+        const template = draft.family || draft.__factor_family
+          || choice?.family || null;
+        // The tree header renders the family template LaTeX and the family
+        // alias as title; the frozen record alone carries neither, so build
+        // the section value from the attached/loaded family template.
+        const familyAliasOf = String(
+          draft.identity?.family_alias || draft.factor_family_alias
+          || draft.factor_family_name || String(draft.alias || "").split("|")[0]
+          || (template?.factor_family_alias) || "",
+        ).trim();
+        const sectionValue = templateValue => ({
+          ...draft,
+          family: templateValue || null,
+          factor_family_alias: familyAliasOf,
+          factor_family_name: familyAliasOf,
+          math_expr: templateValue?.math_expr || templateValue?.formula
+            || templateValue?.latex || "",
+        });
+        // Even when the reference exists in the library, the nested
+        // parameter list offers an edit entry (next to the 参数值 column
+        // heading) that switches the value into 因子家族来源 mode (editable
+        // family composition); saving goes through the existing on-the-fly
+        // freeze path.
+        // Report the referenced family template so the outer editor's top
+        // formula preview can render the nested definition lines too (the
+        // frozen record carries only identity params, no template formula).
+        const reportNestedFamily = fam => {
+          if (fam && typeof options.onNestedFamilyTemplate === "function") {
+            options.onNestedFamilyTemplate(familyAliasOf, fam);
+          }
+        };
+        if (choice?.family) reportNestedFamily(choice.family);
+        let currentTemplate = template;
+        const unlockFamilyEditing = () => {
+          const family = currentTemplate;
+          if (!family) return;
+          // Make sure the family appears among the 因子家族 candidates so
+          // the picker actually shows it as selected.
+          if (!families.some(item => (
+            selectionValue(item.value ?? item.ref) === familyRef(family)
+          ))) {
+            families.push({
+              value: familyRef(family),
+              label: familyLabel(family),
+              family,
+              description: context.t("本次配置中当场新建"),
+            });
+            familyPicker?.setItems?.(families);
+          }
+          const composed = makeFamilyDraft(family);
+          composed.parameter_values = {
+            ...(composed.parameter_values || {}),
+            ...(draft.identity?.params || draft.parameter_values || {}),
+          };
+          setValue(composed, "family");
+        };
+        const unlockLabel = context.t("编辑");
+        const editEntry = window.FTUI?.iconButton
+          ? window.FTUI.iconButton(
+            context, "square.and.pencil", unlockLabel, unlockFamilyEditing,
+            {className: "factor-param-nested-edit"},
+          )
+          : (() => {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "icon-action-button factor-param-nested-edit";
+            button.textContent = "✎";
+            button.title = unlockLabel;
+            button.addEventListener("click", unlockFamilyEditing);
+            return button;
+          })();
+        const definitionRows = (template
+          ? shared?.parameterRows?.(draft, {family: template}) || []
+          : shared?.parameterRows?.(draft) || [])
+          .map(row => {
+            const saved = savedParams[row.alias];
+            return saved === undefined ? row : {...row, value: saved};
+          });
+        const renderSection = (rowsValue, templateValue) => {
           const section = shared.parameterSection(
-            context, {...draft, family}, rows, (options.depth || 0) + 1,
+            context,
+            sectionValue(templateValue === undefined ? template : templateValue),
+            rowsValue, (options.depth || 0) + 1,
+            {valueHeaderExtra: editEntry},
           );
           section.root.dataset.parameterAlias = alias;
           nestedMount.append(section.root);
+        };
+        const identityRows = () => Object.entries(savedParams).map(([name, saved]) => ({
+          alias: name, value: saved,
+        })).filter(row => row.alias && !/^\$/.test(row.alias));
+        if (definitionRows.length) {
+          renderSection(definitionRows);
           return;
         }
-        const fallbackRows = familyParameters(draft);
-        if (fallbackRows.length) {
-          const section = shared.parameterSection(
-            context, {...draft, family}, fallbackRows,
-            (options.depth || 0) + 1,
-          );
-          section.root.dataset.parameterAlias = alias;
-          nestedMount.append(section.root);
+        // No template attached yet: load the referenced factor family so the
+        // 参数类型/默认值 columns are correct.  Until it arrives, do not
+        // render a table that would mislabel types.
+        if (!nestedFamilyPending) {
+          nestedFamilyPending = true;
+          void loadNestedFamilyDefinitions(draft).then(loadedFamily => {
+            nestedFamilyPending = false;
+            if (values[alias] !== draft) return;
+            if (nestedMount.replaceChildren) nestedMount.replaceChildren();
+            else nestedMount.children = [];
+            if (loadedFamily) {
+              const upgraded = (shared?.parameterRows?.(draft, {family: loadedFamily}) || [])
+                .map(row => {
+                  const saved = savedParams[row.alias];
+                  return saved === undefined ? row : {...row, value: saved};
+                });
+              if (upgraded.length) {
+                currentTemplate = loadedFamily;
+                reportNestedFamily(loadedFamily);
+                renderSection(upgraded, loadedFamily);
+                return;
+              }
+            }
+            const rows = identityRows();
+            if (rows.length) renderSection(rows);
+          }).catch(() => {
+            nestedFamilyPending = false;
+            if (values[alias] !== draft) return;
+            if (nestedMount.replaceChildren) nestedMount.replaceChildren();
+            else nestedMount.children = [];
+            const rows = identityRows();
+            if (rows.length) renderSection(rows);
+          });
         }
         return;
+      }
+      // A hand-typed value (manual source) is parsed into its visible form:
+      // an alias renders a read-only parameter table; a numeric constant is
+      // shown as ConstExpr; a data column as ColumnRef — so the reference is
+      // inspectable before any validation round-trip.
+      if (activeSource === "manual" && typeof draft === "string"
+        && draft.trim()) {
+        const text = draft.trim();
+        if (text.includes("|")) {
+          const analysis = parseFactorAlias(text);
+          const aliasRows = analysis && Object.keys(analysis.params).length
+            ? Object.entries(analysis.params).map(([name, value]) => ({
+              alias: name, value,
+            })) : [];
+          if (aliasRows.length) {
+            const section = window.FTFactorDetailShared.parameterSection(
+              context, {
+                ...draft, family: null,
+                factor_family_alias: analysis.family || "",
+                factor_family_name: analysis.family || "",
+              }, aliasRows,
+              (options.depth || 0) + 1,
+            );
+            section.root.dataset.parameterAlias = alias;
+            nestedMount.append(section.root);
+          }
+        } else {
+          const previewKind = numericConstant(text) !== null ? "const"
+            : columns.some(item => selectionValue(item.value) === text)
+              || /^[A-Za-z_][A-Za-z0-9_.]*$/.test(text) ? "column" : null;
+          if (previewKind) {
+            const preview = document.createElement("div");
+            preview.className = "factor-param-manual-preview";
+            preview.textContent = previewKind === "const"
+              ? `ConstExpr ${numericConstant(text)}` : `ColumnRef ${text}`;
+            nestedMount.append(preview);
+          }
+        }
       }
       if (!familyDraft(draft)) return;
       const family = draft.__factor_family;
@@ -339,6 +542,10 @@
         const familySource = document.createElement("div");
         familySource.className = "factor-param-family-source";
         familySource.append(familyPicker.element || familyPicker);
+        // The family entry stays available in every family-composition
+        // mode: composing against an existing/referenced family offers
+        // 新增因子家族 (on-the-fly creation replaces the reference), while
+        // an on-the-fly inline family offers 编辑因子家族.
         if (createFamily) familySource.append(createFamily);
         sourceControl.append(familySource);
       }
@@ -400,6 +607,30 @@
       && value.schema_version === 2
       && (value.ref || value.factor_ref)
       && (value.alias || value.factor_alias));
+  }
+
+  // A factor-library reference may arrive either as the opaque ``factor:v2``
+  // ref string (as stored in identity.params) or as its frozen v2 record.
+  function isFrozenFactorValue(value) {
+    if (typeof value === "string") return value.startsWith("factor:v2:");
+    return isFrozenFactor(value);
+  }
+
+  // Parse a display alias like ``SgChgPct|P:[CA]|M:0.6|B:1|N:200d|$F:1d``
+  // into {family, params}; engine-internal keys ($F/$Rev) are dropped.
+  function parseFactorAlias(alias) {
+    const text = String(alias || "").trim();
+    const segments = text.split("|").map(part => part.trim()).filter(Boolean);
+    if (segments.length < 2) return null;
+    const params = {};
+    for (const segment of segments.slice(1)) {
+      const separator = segment.indexOf(":");
+      if (separator <= 0) continue;
+      const key = segment.slice(0, separator).trim();
+      const value = segment.slice(separator + 1).trim();
+      if (key && !key.startsWith("$")) params[key] = value;
+    }
+    return {family: segments[0], params};
   }
 
   function familyParameters(family) {

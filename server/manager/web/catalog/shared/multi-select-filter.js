@@ -145,6 +145,63 @@
     outsideCloseBound = true;
   }
 
+  // Type filter = an embedded (single/multi) candidate-type dropdown next to
+  // the search box.  It only filters which candidates are *shown*; it never
+  // changes the selection.
+  function makeTypeFilterPanel(context, spec, onChanged) {
+    const panel = document.createElement("div");
+    panel.className = "ft-multi-select-type-panel";
+    panel.hidden = true;
+    const entries = Array.isArray(spec?.items) ? spec.items : [];
+    const multi = spec?.multi !== false;
+    const typeOf = typeof spec?.typeOf === "function"
+      ? spec.typeOf : item => String(item?.type || item?.kind || "").trim();
+    const active = new Set();
+    const list = document.createElement("div");
+    list.className = "ft-multi-select-type-options";
+    const apply = value => {
+      if (multi) {
+        if (active.has(value)) active.delete(value); else active.add(value);
+      } else {
+        active.clear();
+        if (value) active.add(value);
+      }
+      onChanged?.();
+    };
+    const refresh = () => {
+      list.replaceChildren();
+      const options = multi ? entries : [{value: "", label: spec.allLabel || "全部"}, ...entries];
+      const groupName = `ft-type-filter-${++pickerSequence}`;
+      for (const entry of options) {
+        const label = document.createElement("label");
+        label.className = "ft-multi-select-option";
+        label.setAttribute("aria-label", entry.label);
+        const input = document.createElement("input");
+        input.type = multi ? "checkbox" : "radio";
+        input.name = groupName;
+        input.checked = entry.value !== "" && active.has(entry.value);
+        input.addEventListener("change", () => { apply(entry.value); });
+        const text = document.createElement("span");
+        text.textContent = entry.label;
+        label.append(input, text);
+        list.append(label);
+      }
+    };
+    refresh();
+    panel.append(list);
+    return {
+      panel,
+      toggle: () => { panel.hidden = !panel.hidden; },
+      visible: item => {
+        if (!active.size) return true;
+        return active.has(typeOf(item));
+      },
+      isActive: () => active.size > 0,
+      activeCount: () => active.size,
+      refresh,
+    };
+  }
+
   function create(context, options = {}) {
     bindOutsideClose();
     const controlDisabled = Boolean(options.loading) || (
@@ -251,6 +308,31 @@
     clear.title = translate(context, "清除搜索", "清除搜索");
     clear.setAttribute("aria-label", clear.title);
     searchRow.append(search, clear);
+    // Optional embedded candidate-type filter (funnel next to the search
+    // box).  It filters only the visible candidates — selection untouched.
+    let typeFilter = null;
+    if (options.typeFilter && options.typeFilter.items?.length) {
+      typeFilter = makeTypeFilterPanel(context, options.typeFilter, () => {
+        render();
+      });
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "ft-multi-select-type-toggle icon-action-button";
+      toggle.title = translate(context, "筛选类型", "筛选类型");
+      toggle.setAttribute("aria-label", toggle.title);
+      toggle.addEventListener("click", event => {
+        event.stopPropagation();
+        typeFilter.toggle();
+      });
+      const iconNode = window.FTIcons?.node?.("line.3.horizontal.decrease.circle")
+        || window.FTIcons?.node?.("funnel");
+      if (iconNode) {
+        toggle.replaceChildren?.(iconNode);
+      } else {
+        toggle.textContent = "⧩";
+      }
+      searchRow.append(toggle);
+    }
     const optionList = document.createElement("div");
     optionList.className = "ft-multi-select-options";
     optionList.setAttribute("role", "group");
@@ -261,7 +343,8 @@
     note.className = "ft-multi-select-selection-note";
     const actions = document.createElement("div");
     actions.className = "ft-multi-select-actions";
-    menu.append(searchRow, ...(loadStatus ? [loadStatus] : []), optionList);
+    menu.append(searchRow, ...(typeFilter ? [typeFilter.panel] : []),
+      ...(loadStatus ? [loadStatus] : []), optionList);
     if (multi) menu.append(note);
     if (multi) menu.append(actions);
     dropdown.append(summary, menu);
@@ -358,10 +441,11 @@
 
     function visibleItems() {
       const query = String(search.value || "").trim().toLocaleLowerCase();
-      return !query ? items : items.filter(item => (
+      const base = !query ? items : items.filter(item => (
         `${item.label} ${item.value} ${item.description}`
           .toLocaleLowerCase().includes(query)
       ));
+      return typeFilter ? base.filter(item => typeFilter.visible(item)) : base;
     }
 
     function setItems(nextItems, preserveSelected = false) {

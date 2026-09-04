@@ -169,6 +169,20 @@ def test_temporary_object_edit_flows_through_shared_actions_and_stays_temporary(
     assert "strategy.access?.can_edit || context.testObjectTemporary === true" in strategy
 
 
+def test_multi_select_supports_embedded_candidate_type_filter() -> None:
+    """The shared picker may embed a candidate-type filter next to its search
+    box (single or multi choice, per caller) that narrows only the visible
+    candidates and never touches the selection."""
+    source = (WEB_ROOT / "catalog/shared/multi-select-filter.js").read_text(
+        encoding="utf-8",
+    )
+    assert "makeTypeFilterPanel" in source
+    assert "options.typeFilter" in source
+    assert "typeFilter.visible(item)" in source
+    assert 'spec?.multi !== false' in source
+    assert "ft-multi-select-type-panel" in source
+
+
 def test_route_script_groups_obey_the_initial_load_contract() -> None:
     manifest = json.loads(
         (WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8")
@@ -2780,7 +2794,8 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     # from the base labels and appends Value exactly when shown.
     assert 'header.className = "factor-detail-parameter-header"' in parameter_section
     assert 'const labels = ["参数名", "参数类型", "默认值"];' in parameter_section
-    assert 'if (showValue) labels.push("Value");' in parameter_section
+    assert 'if (showValue) labels.push("参数值");' in parameter_section
+    assert "options.valueHeaderExtra" in parameter_section
     assert 'const showValue = options.showValue !== false;' in parameter_section
     assert 'showValue ? "" : "no-value-column"' in parameter_section
     assert "no-value-column" in app_css
@@ -2808,6 +2823,12 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert "resolve_factor_alias" in editor
     assert "onChange: nextValues =>" in editor
     assert "state.parameterValues = {...nextValues}" in editor
+    # Editing a saved object must hydrate opaque factor:v2 FactorParam refs
+    # from the row's frozen factor_dependencies instead of showing a bare
+    # ref in a manual input.
+    assert "function hydrateFactorParamValues" in editor
+    assert "hydrateFactorParamValues(" in editor
+    assert "loaded.factor_dependencies" in editor
     assert "FTObjectOverlay.open" in editor
     assert "factor-source-mode" not in editor
     assert '"新增因子家族"' in editor
