@@ -1259,9 +1259,9 @@
         sourceMount.append(familyPicker(context, data, state, redraw));
         const version = sourceVersionPicker(context, state, redraw);
         if (version) sourceMount.append(version);
-        sourceMount.append(sourceControls(context, state, redraw, {
-          onChanged: () => tabs?.setDirty("source", true),
-        }));
+        // A factor instance's source code comes from its family template; the
+        // parameter tab shows only the family/source-version rows — no Python
+        // source editor (that belongs to a family page).
       }
       const metadata = sourceMetadata(context, state);
       identityMount.replaceChildren();
