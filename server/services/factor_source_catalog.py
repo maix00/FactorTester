@@ -48,6 +48,15 @@ class FactorSourceCatalog:
                     load_factor_source(owner or principal, factor_id) or ""
                 )
             if not can_view_user_scope(principal, owner):
+                import sys
+                import traceback
+                print(
+                    "[fsc-deny] PermissionError deny: "
+                    f"principal={principal!r} owner={owner!r} "
+                    f"factor={factor_id!r}\n"
+                    + "".join(traceback.format_stack()[-6:-1]),
+                    file=sys.stderr, flush=True,
+                )
                 raise PermissionError(
                     "无权查看该用户因子源码: "
                     f"principal={principal!r} owner={owner!r} "
