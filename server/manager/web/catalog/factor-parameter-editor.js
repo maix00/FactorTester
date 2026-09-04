@@ -259,13 +259,19 @@
           item.type === "column" && item.value === v
         ));
         if (colItem) { setValue(v, "column"); return; }
+        // A/B match the library factor first: match an existing factor
+        // candidate (library OR on-the-fly) by value, label/alias, or display.
         const facItem = candidateItems.find(item => (
-          item.type === "factor" && item.value === v
+          item.type === "factor"
+          && (item.value === v
+            || String(item.label || "").trim() === v
+            || display(item.factor) === v
+            || selectionValue(item.factor) === v)
         ));
         if (facItem) {
           const factor = facItem.factor || facItem;
-          // Library / on-the-fly factor selection resolves through the host so
-          // nested family source versions are fixed at selection time.
+          // Selection resolves through the host so nested family source
+          // versions are fixed at selection time.
           const resolved = options.onSelectFactor?.(factor, facItem);
           if (resolved && typeof resolved.then === "function") {
             await resolved.then(next => setValue(next || factor, "factor"));
@@ -274,22 +280,6 @@
           }
           return;
         }
-        // Hand-typed on-the-fly factor alias: resolve against an already-present
-        // on-the-fly candidate (by label/alias/ref) BEFORE the library alias
-        // validator, so an on-the-fly alias becomes that on-the-fly factor (and
-        // keeps its 当场 badge + view overlay) instead of a raw exclusive item.
-        const onsiteCandidate = candidateItems.find(item => (
-          item.type === "factor" && (item.onsite || item.temporary)
-          && (String(item.label || "").trim() === v
-            || display(item.factor) === v
-            || selectionValue(item.factor) === v)
-        ));
-        if (onsiteCandidate) {
-          valuePicker?.setValues?.([onsiteCandidate.value]);
-          setValue(onsiteCandidate.factor, "manual");
-          return;
-        }
-        // Hand-typed exclusive value.
         const constant = numericConstant(v);
         if (constant !== null) { setValue(constant, "manual"); return; }
         if (columns.some(item => selectionValue(item.value) === v)) {
@@ -297,39 +287,6 @@
           setValue(v, "column");
           return;
         }
-        try {
-          const resolved = typeof options.onValidateFactorAlias === "function"
-            ? await options.onValidateFactorAlias(v) : null;
-          if (resolved?.valid && (resolved.factor || resolved.factor_alias)) {
-            const factor = resolved.factor || String(resolved.factor_alias);
-            const id = selectionValue(factor);
-            const isOnsite = Boolean(factor && typeof factor === "object"
-              && (factor.temporary === true
-                || factor.source_origin === "test_inline"
-                || factor.source_kind === "transient"));
-            const item = {
-              value: id, label: display(factor) || id, factor,
-              type: "factor", typeLabel: context.t("因子"),
-              temporary: isOnsite, onsite: isOnsite,
-              view: {
-                kind: "factor", ref: id,
-                initialValue: factor, temporary: isOnsite,
-              },
-            };
-            const idx = candidateItems.findIndex(candidate => (
-              candidate.type === "factor" && candidate.value === id
-            ));
-            if (idx >= 0) candidateItems.splice(idx, 1, item);
-            else candidateItems.push(item);
-            // Not preserving selected drops the exclusive "raw" row the manual
-            // entry temporarily created — a resolved alias must become a factor
-            // candidate (onsite-badged when on-the-fly), not an exclusive item.
-            valuePicker?.setItems?.(candidateItems, false);
-            valuePicker?.setValues?.([id]);
-            setValue(factor, "manual");
-            return;
-          }
-        } catch (_error) { /* fall through to a literal manual value */ }
         // Hand-typed alias that is NOT a library factor: parse it locally into
         // an on-the-fly factor (same 当场 object pool as the "+" entry and the
         // pencil edit) so it appears as a 当场-badged factor candidate.
