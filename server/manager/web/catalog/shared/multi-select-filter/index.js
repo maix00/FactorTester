@@ -168,6 +168,15 @@
     const remoteFactory = typeof options.loadItems === "function"
       && window.FTMultiSelectRemote?.create;
 
+    // CSS Anchor Positioning → single native path when available: fixed under
+    // the summary anchor, pinned on pinch-zoom, immune to host overflow, no
+    // manual coordinates / portal.  Otherwise fall back to the dual mode.
+    const supportsAnchor = typeof CSS !== "undefined"
+      && typeof CSS.supports === "function"
+      && CSS.supports("anchor-name", "--x")
+      && CSS.supports("top", "anchor(--x bottom)");
+    const anchorName = supportsAnchor ? `--ft-picker-${++pickerSequence}` : "";
+
     const section = document.createElement("section");
     section.className = ["ft-multi-select-filter", options.className || ""]
       .filter(Boolean).join(" ");
@@ -332,6 +341,13 @@
     menu.append(searchRow, ...(typeFilter ? [typeFilter.panel] : []),
       ...(loadStatus ? [loadStatus] : []), optionList);
     dropdown.append(summary, menu);
+    if (supportsAnchor) {
+      dropdown.style.setProperty("anchor-name", anchorName);
+      menu.style.position = "fixed";
+      menu.style.top = `anchor(${anchorName} bottom)`;
+      menu.style.left = `anchor(${anchorName} left)`;
+      menu.classList.add("ft-anchor-positioning");
+    }
     if (trailingActions) {
       const controlRow = document.createElement("div");
       controlRow.className = "ft-multi-select-control-row";
@@ -798,10 +814,12 @@
         settingsShell.classList.toggle("has-open-multi-select", dropdown.open);
       }
       if (dropdown.open) {
-        // Two modes for the many possible host containers: stay in-flow
-        // (absolute under the dropdown → pinch-zoom stays anchored) for
-        // ordinary containers, but portal to <body> when an ancestor clips
-        // the menu or the menu would run off the viewport.
+        // Anchor-positioning mode needs no portal: fixed + anchor() is already
+        // viewport-stable under pinch-zoom and never clipped by the host.
+        if (supportsAnchor) return;
+        // Fall back: stay in-flow (absolute under the dropdown → pinch-zoom
+        // stays anchored) for ordinary containers, portal when an ancestor
+        // would clip the menu.
         if (!menuNeedsPortal() || menuPortaled) {
           return;
         }

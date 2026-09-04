@@ -267,6 +267,9 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .ft-multi-select-summary-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .ft-multi-select-menu { position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; display: grid; align-content: start; height: max-content; max-height: min(680px, calc(100vh - 32px)); min-width: min(300px, calc(100vw - 32px)); max-width: min(460px, calc(100vw - 32px)); gap: 6px; overflow: hidden; overscroll-behavior: contain; padding: 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); box-shadow: 0 12px 28px #0002; }
 .ft-multi-select-menu.is-portaled { position: fixed; z-index: 10000; inset: auto; top: auto; height: max-content; max-height: min(680px, calc(100vh - 32px)); min-width: 0; max-width: calc(100vw - 16px); box-sizing: border-box; margin: 0; }
+/* CSS Anchor Positioning: fixed under the summary anchor; tries to flip when
+   near the viewport edge; width matches the dropdown, capped to the viewport. */
+.ft-multi-select-menu.ft-anchor-positioning { z-index: 10000; width: max-content; min-width: min(300px, calc(100vw - 32px)); max-width: min(460px, calc(100vw - 16px)); box-sizing: border-box; position-try-fallbacks: flip-block, flip-inline; }
 .ft-multi-select-search-row { display: flex; gap: 5px; }
 .ft-multi-select-search { flex: 1 1 auto; min-width: 0; height: auto; min-height: 0; border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; color: inherit; background: var(--soft); }
 .ft-multi-select-clear { flex: 0 0 auto; width: 30px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: var(--panel); cursor: pointer; }
