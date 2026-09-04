@@ -91,8 +91,10 @@ const dependencyPanel = window.FTTestSourceUpload.dependencyPanel(
 assert.deepEqual(
   [...findAll(strategyPanel, node => node.tagName === "button"
     && !node.className.split(" ").includes("ft-help-icon")
+    && !node.className.split(" ").includes("ft-multi-select-sync-toggle")
     && node.textContent !== "×"), ...findAll(dependencyPanel, node => node.tagName === "button"
     && !node.className.split(" ").includes("ft-help-icon")
+    && !node.className.split(" ").includes("ft-multi-select-sync-toggle")
     && node.textContent !== "×")]
     .map(node => node.textContent),
   ["自定义策略源码", "自定义依赖"],
