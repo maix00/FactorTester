@@ -1304,10 +1304,12 @@
         onActivate: jobs.load,
       },
     } : {
-      // A factor is defined by its frozen family formula and parameter values.
-      // Family descriptive metadata belongs to family creation, not factor
-      // creation; keep the shared detail surface for factor view/edit only.
-      overview: {hidden: mode === "create", save_mode: "auto"},
+      // A factor is defined by its frozen family formula and parameter
+      // values; family descriptive metadata belongs to the family pages and
+      // the read-only detail view.  Edit mode must present the same tab
+      // form as create mode (parameters and related tabs only) — no extra
+      // read-only 详情 tab.
+      overview: {hidden: true},
       source: {hidden: true},
       parameters: {save_mode: "auto"},
       jobs: {
