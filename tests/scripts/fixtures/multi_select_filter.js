@@ -343,8 +343,8 @@ assert.equal(locked.dropdown.open, false);
   assert.deepEqual(tmp.values, [], "temporary candidate can be deselected");
   tmp.dropdown.open = false;
   await tmp.dropdown.listeners.toggle();
-  assert.equal(optionRows(tmp).some(item => item.children[1]?.textContent === "临时候选"), false,
-    "deselected on-the-fly candidate is dropped on close");
+  assert.equal(optionRows(tmp).some(item => item.children[1]?.textContent === "临时候选"), true,
+    "deselected on-the-fly candidate is kept on close (lifecycle is by the delete icon)");
 
   // Delete entry (icon) removes the on-the-fly candidate and notifies caller.
   let removedCandidate = null;

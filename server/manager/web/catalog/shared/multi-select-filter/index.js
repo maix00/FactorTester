@@ -614,7 +614,20 @@
         label.textContent = item.label;
         const info = optionHelp(context, item, options);
         info.classList.add("ft-multi-select-option-info");
-        row.append(input, label, " ", info);
+        row.append(input, label, " ");
+        if (item.onsite === true) {
+          // Delete icon sits to the LEFT of the row's "?" (view overlay) so the
+          // on-the-fly object is removed without entering its view overlay.
+          const del = window.FTUI?.iconButton
+            ? window.FTUI.iconButton(
+              context, "trash", translate(context, "删除", "删除"),
+              () => removeTemporaryCandidate(item),
+              {className: "ft-multi-select-option-remove"},
+            )
+            : null;
+          if (del) row.append(del, " ");
+        }
+        row.append(info);
         if (item.exclusive) {
           const badge = document.createElement("span");
           badge.className = "ft-multi-select-exclusive-badge";
@@ -649,16 +662,6 @@
           actionHost.append(button);
         }
         if (actionHost.childElementCount) row.append(actionHost);
-        if (item.onsite === true) {
-          const del = window.FTUI?.iconButton
-            ? window.FTUI.iconButton(
-              context, "trash", translate(context, "删除", "删除"),
-              () => removeTemporaryCandidate(item),
-              {className: "ft-multi-select-option-remove"},
-            )
-            : null;
-          if (del) row.append(del);
-        }
         function selectionAfterToggle() {
           const isSelected = selected.includes(item.value);
           if (!multi) return isSelected ? [] : [item.value];
@@ -950,22 +953,9 @@
       options.onTemporaryCandidateRemoved?.(item);
     }
 
-    // Drop on-the-fly ("+") candidates that were never confirmed as selected
-    // once the menu closes — they are session-only and must not persist.
-    function cleanupTemporaryCandidates() {
-      const removed = items.filter(item => (
-        item.onsite === true && !selected.includes(item.value)
-      ));
-      if (!removed.length) return;
-      const removedValues = new Set(removed.map(item => item.value));
-      for (const item of removed) items.splice(items.indexOf(item), 1);
-      // Drop them from both selection states so nothing stale lingers in the
-      // summary / committed values (and no leaked references keep the objects
-      // alive).
-      selected = selected.filter(value => !removedValues.has(value));
-      committedSelected = committedSelected.filter(value => !removedValues.has(value));
-      render();
-    }
+    // On-the-fly object lifecycle is fully managed by the row's delete ("×")
+    // icon; there is no automatic sweep on menu close.  When the hosting tab /
+    // page unmounts, the candidates are released with the component memory.
 
     // Outside click / collapse commits multi selections (no apply button);
     // single mode already commits on each pick.
@@ -991,7 +981,6 @@
       }
       restoreMenu();
       if (multi && !applying) void commitMultiOnClose();
-      cleanupTemporaryCandidates();
     });
     // A disabled control never opens (native details toggling suppressed).
     summary.addEventListener("click", event => {
