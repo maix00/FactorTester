@@ -342,14 +342,17 @@ assert.ok(
     unlockedFamilyPicker.selected, ["SgChgPct"],
     "family source must show the unlocked family selected",
   );
-  // Composing against an existing family offers no 新增/编辑因子家族 entry.
-  assert.equal(
-    descendants(unlockable.root).filter(
-      item => String(item.className || "").includes("factor-param-create-family"),
-    ).length, 0,
-    "existing-family composition must not offer the inline family entry",
+  // Composing against an existing family keeps 新增因子家族 so the user can
+  // create an on-the-fly family to replace the referenced factor.
+  const unlockedCreate = descendants(unlockable.root).find(
+    item => String(item.className || "").includes("factor-param-create-family"),
   );
-  // …while an on-the-fly inline family keeps that entry.
+  assert.ok(unlockedCreate, "existing-family composition keeps the family entry");
+  assert.ok(
+    (unlockedCreate.textContent || "").includes("新增因子家族"),
+    "referenced-family composition offers 新增因子家族",
+  );
+  // …while an on-the-fly inline family offers 编辑因子家族.
   const inlineDraft = {
     __factor_family_draft: true,
     __factor_family: {
@@ -367,11 +370,13 @@ assert.ok(
     {Th: inlineDraft},
     {factorItems: [], familyItems: [], onChange: () => {}},
   );
+  const inlineCreate = descendants(inlineParam.root).find(
+    item => String(item.className || "").includes("factor-param-create-family"),
+  );
+  assert.ok(inlineCreate, "an inline family composition keeps the family entry");
   assert.ok(
-    descendants(inlineParam.root).some(
-      item => String(item.className || "").includes("factor-param-create-family"),
-    ),
-    "an inline family composition must offer the family entry",
+    (inlineCreate.textContent || "").includes("编辑因子家族"),
+    "inline family composition offers 编辑因子家族",
   );
 
   await factorPicker.options.onChange([childRef]);

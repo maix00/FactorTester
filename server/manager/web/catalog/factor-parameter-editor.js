@@ -365,9 +365,6 @@
             });
             familyPicker?.setItems?.(families);
           }
-          if (createFamily) {
-            createFamily.textContent = context.t("编辑因子家族");
-          }
           const composed = makeFamilyDraft(family);
           composed.parameter_values = {
             ...(composed.parameter_values || {}),
@@ -528,16 +525,11 @@
         const familySource = document.createElement("div");
         familySource.className = "factor-param-family-source";
         familySource.append(familyPicker.element || familyPicker);
-        // 新增/编辑因子家族 only applies while composing an on-the-fly
-        // family; composing parameters against an existing (library or
-        // referenced) family does not offer that entry.
-        const composedFamily = values[alias]?.__factor_family;
-        const familyIsInline = Boolean(composedFamily) && (
-          composedFamily.temporary === true
-          || composedFamily.source_kind === "transient"
-          || composedFamily.source_origin === "test_inline"
-        );
-        if (createFamily && familyIsInline) familySource.append(createFamily);
+        // The family entry stays available in every family-composition
+        // mode: composing against an existing/referenced family offers
+        // 新增因子家族 (on-the-fly creation replaces the reference), while
+        // an on-the-fly inline family offers 编辑因子家族.
+        if (createFamily) familySource.append(createFamily);
         sourceControl.append(familySource);
       }
     };

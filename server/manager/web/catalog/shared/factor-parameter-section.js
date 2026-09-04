@@ -112,19 +112,22 @@
       : "factor-detail-parameter-tree";
     root.open = true;
     root.style?.setProperty?.("--factor-parameter-depth", String(depth));
-    const header = document.createElement("summary");
-    header.className = "factor-detail-parameter-tree-header";
-    const title = document.createElement("b");
     // Family rows may carry the alias under any of these keys depending on
     // which projection produced them; never fall back to the generic label
     // while a name is available.
-    const familyValue = value?.family || value?.__factor_family || value;
-    title.textContent = String(
-      value?.factor_family_alias || value?.factor_family_name
+    const familyValue = value?.family || value?.__factor_family
+      || value?.inspection || value;
+    const familyTitle = value?.factor_family_alias || value?.factor_family_name
       || familyValue?.factor_family_alias || familyValue?.family_alias
       || familyValue?.factor_family_name || familyValue?.alias
-      || familyValue?.name || value?.factor_alias || context.t("因子参数"),
-    );
+      || familyValue?.name || familyValue?.factor_id || familyValue?.family_id
+      || familyValue?.chinese_name || familyValue?.factor_class_name
+      || familyValue?.factor_name || value?.factor_alias || value?.factor_name
+      || "";
+    const header = document.createElement("summary");
+    header.className = "factor-detail-parameter-tree-header";
+    const title = document.createElement("b");
+    title.textContent = String(familyTitle || context.t("因子参数"));
     const heading = document.createElement("span");
     heading.className = "factor-detail-parameter-tree-heading";
     heading.append(title, " ");
