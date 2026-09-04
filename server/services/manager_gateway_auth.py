@@ -22,6 +22,18 @@ def install_manager_gateway_auth(app: Flask) -> None:
         owner = str(request.headers.get("X-FactorTester-Principal") or "").strip()
         supplied = str(request.headers.get("X-FactorTester-Manager") or "").strip()
         expected = os.environ.get("GTHT_MANAGER_CAPABILITY_TOKEN", "").strip()
+        if "/api/factor-library/" in (request.path or "") and (
+            not owner or owner == "public"
+        ):
+            import sys
+            print(
+                "[gw-auth] path=" + (request.path or "")
+                + " owner=" + repr(owner)
+                + " supplied=" + repr(bool(supplied))
+                + " expected=" + repr(bool(expected))
+                + " remote=" + str(request.remote_addr),
+                file=sys.stderr, flush=True,
+            )
         if not owner or not supplied or not expected:
             return
         if request.remote_addr not in {"127.0.0.1", "::1"}:
