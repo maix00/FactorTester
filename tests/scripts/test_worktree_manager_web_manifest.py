@@ -2808,6 +2808,12 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert "resolve_factor_alias" in editor
     assert "onChange: nextValues =>" in editor
     assert "state.parameterValues = {...nextValues}" in editor
+    # Editing a saved object must hydrate opaque factor:v2 FactorParam refs
+    # from the row's frozen factor_dependencies instead of showing a bare
+    # ref in a manual input.
+    assert "function hydrateFactorParamValues" in editor
+    assert "hydrateFactorParamValues(" in editor
+    assert "loaded.factor_dependencies" in editor
     assert "FTObjectOverlay.open" in editor
     assert "factor-source-mode" not in editor
     assert '"新增因子家族"' in editor

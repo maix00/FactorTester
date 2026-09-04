@@ -299,6 +299,29 @@
     }).filter(([alias]) => alias));
   }
 
+  // Editing an already-saved factor object echoes the object's parameter
+  // rows, where a FactorParam value is stored as its opaque ``factor:v2``
+  // ref.  The row's frozen factor_dependencies carry the full record
+  // (identity + owner) for that ref — hydrate it so the parameter editor
+  // opens the frozen factor (pickable / tree) instead of a bare ref in a
+  // manual input.
+  function hydrateFactorParamValues(parameters, dependencies = []) {
+    const byRef = new Map();
+    for (const dependency of dependencies || []) {
+      const ref = String(dependency?.ref || dependency?.factor_ref || "").trim();
+      if (ref) byRef.set(ref, dependency);
+    }
+    return Object.fromEntries((parameters || []).map(parameter => {
+      const alias = parameter.alias || parameter.name;
+      if (!alias) return [];
+      const value = parameter.value ?? parameter.default_value ?? "";
+      const resolved = typeof value === "string" && value.startsWith("factor:v2:")
+        && byRef.has(value)
+        ? byRef.get(value) : value;
+      return [alias, resolved];
+    }).filter(([alias]) => alias));
+  }
+
   function parameterDependencies(values = {}) {
     const result = [];
     const seen = new Set();
@@ -968,11 +991,8 @@
         math_expr: loaded.math_expr || loaded.formula || "",
         description: loaded.description || loaded.chinese_name || "",
       } : null,
-      parameterValues: Object.fromEntries(
-        loadedParameters.map(parameter => [
-          parameter.alias,
-          parameter.value ?? parameter.default_value ?? "",
-        ]),
+      parameterValues: hydrateFactorParamValues(
+        loadedParameters, loaded.factor_dependencies,
       ),
       loaded,
       validationError: "",
