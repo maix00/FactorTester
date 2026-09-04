@@ -25,7 +25,6 @@
       window.FTObjectModeActions?.mount?.(context, {
         mode: "view",
         onEdit: true,
-        editHref: `/strategies/${encodeURIComponent(strategy.strategy_ref)}?mode=edit`,
         editLabel: "编辑",
         editHelp: "编辑策略",
       });

@@ -104,6 +104,9 @@ vm.runInThisContext(
   ),
   {filename: "object-mode-actions.js"},
 );
+window.FTPageMode = {
+  hrefForMode: mode => `/factors/factor/Probe%7CN%3A5d?mode=${mode}`,
+};
 vm.runInThisContext(
   fs.readFileSync("server/manager/web/catalog/factor-details.js", "utf8"),
   {filename: "factor-details.js"},

@@ -41,5 +41,32 @@
     apply(modeForPath(path), translate);
   }
 
-  window.FTPageMode = Object.freeze({apply, applyFromPath, modeForPath});
+  // Same-tab authoring: the edit/create/view URL of the current object must
+  // keep this tab's pathname (detail tab ids derive from the pathname), so it
+  // is derived from the current location by replacing only the mode query —
+  // never from the object's alias/ref, which can differ from the path segment
+  // the tab was opened with (e.g. a frozen factor:v2:… view URL).
+  function hrefForMode(mode, pathnameOverride = "") {
+    let url;
+    try {
+      url = new URL(window.location?.href || "", "http://local");
+    } catch (_) {
+      return "";
+    }
+    if (pathnameOverride) {
+      try {
+        url.pathname = pathnameOverride;
+      } catch (_) { /* keep the current pathname */ }
+    }
+    if (["view", "edit", "create"].includes(mode)) {
+      url.searchParams.set("mode", mode);
+    } else {
+      url.searchParams.delete("mode");
+    }
+    return url.pathname + url.search;
+  }
+
+  window.FTPageMode = Object.freeze({
+    apply, applyFromPath, modeForPath, hrefForMode,
+  });
 })();

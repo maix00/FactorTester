@@ -35,13 +35,21 @@
     };
 
     if (mode === "view") {
-      if (options.onEdit && options.editHref && !context.testObjectViewOnly) {
-        button(
-          ICONS.edit,
-          options.editLabel || "编辑",
-          options.editHelp,
-          () => context.navigate(options.editHref),
-        );
+      if (options.onEdit && !context.testObjectViewOnly) {
+        // The edit URL keeps the current tab's pathname (detail tab ids derive
+        // from the pathname), so the swap happens inside the same tab.  The
+        // page may override it, but deriving from the location is what
+        // guarantees an in-place mode change for frozen/alias view URLs.
+        const href = options.editHref
+          || window.FTPageMode?.hrefForMode?.("edit") || "";
+        if (href) {
+          button(
+            ICONS.edit,
+            options.editLabel || "编辑",
+            options.editHelp,
+            () => context.navigate(href),
+          );
+        }
       }
     } else {
       const editingInline = mode === "edit" && context.testObjectTemporary;

@@ -59,6 +59,22 @@ function context(extra = {}) {
   assert.equal(actions.length, 1);
 })();
 
+// view mode without editHref: derive from the location (same pathname → same
+// tab swap even for frozen/alias view URLs).
+(() => {
+  window.FTPageMode = {
+    hrefForMode: mode => `/factors/factor/factor%3Av2%3Astored?mode=${mode}`,
+  };
+  const ctx = context();
+  window.FTObjectModeActions.mount(ctx, {mode: "view", onEdit: true});
+  assert.equal(ctx.toolbar.children.length, 1);
+  ctx.toolbar.children[0].onclick();
+  assert.equal(
+    ctx._navigated, "/factors/factor/factor%3Av2%3Astored?mode=edit",
+  );
+  delete window.FTPageMode;
+})();
+
 // view mode: no edit action when testObjectViewOnly.
 (() => {
   const ctx = context({testObjectViewOnly: true});
