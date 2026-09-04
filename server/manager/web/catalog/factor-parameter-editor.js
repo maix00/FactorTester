@@ -331,6 +331,20 @@
           nestedMount.append(section.root);
           return;
         }
+        // No family template is attached (frozen record without the library
+        // row/family in this context): still render the table from the
+        // frozen identity values so the nested parameters are visible.
+        const identityRows = Object.entries(savedParams).map(([name, saved]) => ({
+          alias: name, value: saved,
+        })).filter(row => row.alias && !/^\$/.test(row.alias));
+        if (identityRows.length) {
+          const section = shared.parameterSection(
+            context, {...draft, family}, identityRows,
+            (options.depth || 0) + 1,
+          );
+          section.root.dataset.parameterAlias = alias;
+          nestedMount.append(section.root);
+        }
         const fallbackRows = familyParameters(draft);
         if (fallbackRows.length) {
           const section = shared.parameterSection(
