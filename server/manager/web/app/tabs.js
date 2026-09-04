@@ -842,6 +842,46 @@
       }
     }
 
+    // Same-tab authoring navigation: the active tab itself changes identity.
+    // Object edits (and their cancels) stay in the tab they started in even
+    // when the resulting object — and therefore the URL, alias and ref —
+    // differs from the one that opened the tab (factor edits mint new aliases
+    // and immutable refs).  The current tab adopts the destination path and,
+    // for detail destinations, its canonical tab id, then re-renders in
+    // place; no second tab is opened and no stale tab is left behind.
+    // Destination ids already owned by another tab fall back to normal
+    // navigation plus closing this tab.
+    function navigateInPlace(path) {
+      path = String(path || "").trim();
+      if (!path) return;
+      const tab = state.tabs.find(item => item.id === state.activeTabID);
+      if (!tab) return navigate(path);
+      const targetID = detailTabIDForPath(path);
+      if (targetID && targetID !== tab.id) {
+        const occupant = state.tabs.find(item => item.id === targetID);
+        if (occupant) {
+          const closingID = tab.id;
+          navigate(path);
+          if (closingID !== state.activeTabID) closeTab(closingID);
+          return;
+        }
+      }
+      const previousID = tab.id;
+      viewCache.saveActiveTabSession?.();
+      viewCache.discardView?.(previousID);
+      if (targetID) tab.id = targetID;
+      tab.path = path;
+      if (previousID !== tab.id) {
+        state.tabSessions.delete(previousID);
+        workspace?.removeSession?.(previousID);
+      }
+      history.replaceState({}, "", path);
+      renderOpenedTabs();
+      checkpointWorkspace();
+      window.FTPageMode?.applyFromPath?.(path, t);
+      renderRoute();
+    }
+
     function discardViews() {
       // Authentication and language changes alter both page data and the
       // module list.  Cached DOM from the previous session must not be
@@ -945,6 +985,7 @@
     return {
       ...viewCache,
       renderOpenedTabs, activateTab, closeTab, openModule, openTab, navigate,
+      navigateInPlace,
       updateActiveTab, discardViews, initializeTabs, currentTabContext,
       detailTabIDForPath, researchDetailTabID, checkpointWorkspace, setWorkspace,
       checkpointActiveSession, scheduleActiveSessionCheckpoint,

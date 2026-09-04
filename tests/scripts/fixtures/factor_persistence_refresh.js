@@ -42,50 +42,38 @@ vm.runInThisContext(
   );
 
   const transitions = [];
-  window.FTFactorEditor.replacePersistedObjectTab({
+  const inPlaceContext = {
     tabID: "factor-detail:factor:old",
     navigate(path) { transitions.push(["navigate", path]); },
+    navigateInPlace(path) { transitions.push(["navigateInPlace", path]); },
     closeTab(tabID) { transitions.push(["close", tabID]); },
-  }, {familyMode: false, mode: "create"}, {
-    factor_ref: "factor:v2:new",
-    factor_alias: "Probe|N:10d",
-  });
-  assert.equal(transitions[0][0], "navigate");
-  assert.equal(transitions[0][1], "/factors/factor/Probe%7CN%3A10d");
-  assert.deepEqual(transitions[1], ["close", "factor-detail:factor:old"]);
-
-  // Same-tab authoring: an edit-mode save whose canonical view URL keeps the
-  // current pathname navigates the same tab back without closing it.
-  const edits = [];
+  };
+  window.FTFactorEditor.replacePersistedObjectTab(
+    inPlaceContext, {familyMode: false, mode: "create"}, {
+      factor_ref: "factor:v2:new",
+      factor_alias: "Probe|N:10d",
+    },
+  );
+  // Same-tab authoring: saves adopt the result view inside the SAME tab —
+  // factor aliases/refs change after an edit, so the destination URL differs
+  // from the editing URL; navigateInPlace keeps one tab (no close, no second
+  // tab).  When the host lacks navigateInPlace, plain navigate is the
+  // fallback.
+  assert.deepEqual(transitions, [
+    ["navigateInPlace", "/factors/factor/Probe%7CN%3A10d"],
+  ]);
+  const fallback = [];
   window.FTFactorEditor.replacePersistedObjectTab({
     tabID: "factor-detail:factor:stored",
-    navigate(path) { edits.push(["navigate", path]); },
-    closeTab(tabID) { edits.push(["close", tabID]); },
+    navigate(path) { fallback.push(["navigate", path]); },
+    closeTab() { fallback.push(["close"]); },
   }, {familyMode: false, mode: "edit"}, {
     factor_ref: "factor:v2:stored",
     factor_alias: "Probe|N:5d",
   });
-  // No location in the fixture: pathname mismatch must close the old tab.
-  assert.deepEqual(edits, [
-    ["navigate", "/factors/factor/Probe%7CN%3A5d"],
-    ["close", "factor-detail:factor:stored"],
-  ]);
-
-  // With the matching pathname the save swaps the same tab in place.
-  globalThis.location = {pathname: "/factors/factor/Probe%7CN%3A5d"};
-  const sameTabEdits = [];
-  window.FTFactorEditor.replacePersistedObjectTab({
-    tabID: "factor-detail:factor:stored",
-    navigate(path) { sameTabEdits.push(["navigate", path]); },
-    closeTab(tabID) { sameTabEdits.push(["close", tabID]); },
-  }, {familyMode: false, mode: "edit"}, {
-    factor_ref: "factor:v2:stored",
-    factor_alias: "Probe|N:5d",
-  });
-  assert.deepEqual(sameTabEdits, [
+  assert.deepEqual(fallback, [
     ["navigate", "/factors/factor/Probe%7CN%3A5d"],
   ]);
-  delete globalThis.location;
 
   const requests = [];
   const field = value => ({querySelector() { return {value}; }});

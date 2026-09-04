@@ -140,13 +140,14 @@
         const value = payload.factor_set || payload;
         if (context.onSaved) return context.onSaved(value);
         const ref = value.target_ref || value.manifest?.ref;
-        // Same-tab authoring: an edit-mode save navigates this tab back to
-        // the read-only set view; a freshly created set first gets its new
-        // identity in a new tab, so the old placeholder tab closes.
-        const sameTab = mode === "edit" && !context.testObjectTemporary;
-        const previousTabID = context.tabID;
-        context.navigate(`/factors/set/${encodeURIComponent(ref)}`);
-        if (!sameTab && previousTabID) context.closeTab?.(previousTabID);
+        // Same-tab authoring: the set tab survives the save — navigateInPlace
+        // adopts the resulting set's canonical view in this same tab.
+        const setPath = `/factors/set/${encodeURIComponent(ref)}`;
+        if (typeof context.navigateInPlace === "function") {
+          context.navigateInPlace(setPath);
+        } else {
+          context.navigate(setPath);
+        }
       },
     });
   }

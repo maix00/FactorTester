@@ -879,26 +879,22 @@
   }
 
   function replacePersistedObjectTab(context, state, result) {
-    // Same-tab authoring: an edit-mode save navigates back to the read-only
-    // view of the same object.  Detail tab ids derive from the pathname, so
-    // the save only stays in this tab when the resulting view URL keeps the
-    // current pathname (factor aliases can change when parameters change, and
-    // the tab may have been opened from a frozen factor:v2:… URL — both cases
-    // get the result's canonical view in a fresh tab and the old one closes).
+    // Same-tab authoring: the editor lives in the object's own tab and the
+    // tab survives the save.  A factor edit can mint a NEW alias and ref, so
+    // the destination view URL differs from the editing URL — navigateInPlace
+    // lets the current tab adopt the resulting object's canonical view (no
+    // second tab, no stale placeholder).
     const ref = state.familyMode
       ? result.family_ref || result.id || result.name || state.factorID
       : result.factor_alias || result.factor_ref || result.name;
     const path = state.familyMode
       ? `/factors/family/${encodeURIComponent(ref)}`
       : `/factors/factor/${encodeURIComponent(ref)}`;
-    const previousTabID = context.tabID;
-    const currentPathname = String(
-      globalThis.location?.pathname || "",
-    );
-    const sameTab = state.mode === "edit"
-      && Boolean(currentPathname) && currentPathname === path;
-    context.navigate(path);
-    if (!sameTab && previousTabID) context.closeTab?.(previousTabID);
+    if (typeof context.navigateInPlace === "function") {
+      context.navigateInPlace(path);
+    } else {
+      context.navigate(path);
+    }
   }
 
   async function render(context, data, targetRef, mode, options = {}) {
