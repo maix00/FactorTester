@@ -46,16 +46,26 @@ vm.runInThisContext(
     tabID: "factor-detail:factor:old",
     navigate(path) { transitions.push(["navigate", path]); },
     closeTab(tabID) { transitions.push(["close", tabID]); },
-  }, {familyMode: false}, {
+  }, {familyMode: false, mode: "create"}, {
     factor_ref: "factor:v2:new",
     factor_alias: "Probe|N:10d",
   });
   assert.equal(transitions[0][0], "navigate");
-  assert.match(
-    transitions[0][1],
-    /^\/factors\/factor\/factor%3Av2%3Anew\?updated=\d+$/,
-  );
+  assert.equal(transitions[0][1], "/factors/factor/factor%3Av2%3Anew");
   assert.deepEqual(transitions[1], ["close", "factor-detail:factor:old"]);
+
+  // Same-tab authoring: an edit-mode save navigates the same tab back to the
+  // read-only URL and must not close the tab (no separate editor tab).
+  const edits = [];
+  window.FTFactorEditor.replacePersistedObjectTab({
+    tabID: "factor-detail:factor:stored",
+    navigate(path) { edits.push(["navigate", path]); },
+    closeTab(tabID) { edits.push(["close", tabID]); },
+  }, {familyMode: false, mode: "edit"}, {
+    factor_ref: "factor:v2:stored",
+    factor_alias: "Probe|N:5d",
+  });
+  assert.deepEqual(edits, [["navigate", "/factors/factor/factor%3Av2%3Astored"]]);
 
   const requests = [];
   const field = value => ({querySelector() { return {value}; }});

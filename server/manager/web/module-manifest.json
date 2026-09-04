@@ -1,852 +1,1196 @@
 {
-  "schema_version": 1,
-  "entry": "research.html",
-  "architecture": {
-    "module_boundary_policy": "semantic",
-    "route_load_policy": {
-      "default_max_first_party_script_bytes": 204800,
-      "first_party_script_overrides": {
-        "backtest": 512000,
-        "factor-evaluation": 224000,
-        "ic-test": 483840
-      },
-      "default_max_initial_external_scripts": 1,
-      "external_script_overrides": {
-        "factor": 2,
-        "factor-family": 2,
-        "job-input": 2,
-        "report": 2
-      },
-      "forbidden_route_groups": ["catalog", "profile", "research"]
-    }
-  },
-  "initial_groups": ["core", "app"],
-  "initial_external_scripts": [],
-  "group_external_scripts": {
-    "code-viewer": ["vendor/highlight/highlight.min.js"],
-    "report": ["katex/katex.min.js"],
-    "job-detail-previews": ["vendor/highcharts/highstock.min.js"],
-    "job-detail-factor-series": ["vendor/highcharts/highstock.min.js"],
-    "job-detail-ic": ["vendor/highcharts/highstock.min.js"],
-    "job-detail-backtest": ["vendor/highcharts/highstock.min.js"],
-    "job-detail-input": ["katex/katex.min.js"],
-    "factor-catalog-detail-rendering": [
-      "vendor/highlight/highlight.min.js", "katex/katex.min.js"
-    ],
-    "factor-catalog-editor": [
-      "vendor/highlight/highlight.min.js", "katex/katex.min.js"
-    ],
-    "catalog": ["vendor/highcharts/highstock.min.js", "katex/katex.min.js"],
-    "catalog-product-detail": ["vendor/highcharts/highstock.min.js"],
-    "research": ["vendor/cytoscape/cytoscape.min.js"],
-    "research-graph": ["vendor/cytoscape/cytoscape.min.js"],
-    "profile": []
-  },
-  "group_dependencies": {
-    "code-viewer": ["core"],
-    "charts": ["core"],
-    "catalog-selection-core": ["core"],
-    "workbench-object-picker": ["core", "catalog-selection-core"],
-    "object-overlay": ["core", "workbench-object-picker"],
-    "catalog-core": ["product-catalog-core", "factor-catalog-core"],
-    "output-choice": ["core"],
-    "object-transfer": ["core"],
-    "workbench-compiler": ["core"],
-    "workbench-input-state": ["workbench-core"],
-    "workbench-settings-controls": ["workbench-core"],
-    "workbench-settings-chips": ["workbench-settings"],
-    "research-reference": ["core", "code-viewer"],
-    "report-settings": ["core"],
-    "report": ["code-viewer", "object-transfer", "report-settings"],
-    "research-shell": ["core"],
-    "research-visibility": ["core"],
-    "research-catalog": ["core", "research-visibility"],
-    "research-evidence": ["core", "object-transfer"],
-    "research-reports": ["core", "research-visibility", "report-settings"],
-    "research-local": ["core"],
-    "research-shared": ["research-shell"],
-    "research-graph": ["core", "catalog-core"],
-    "research": ["research-graph"],
-    "job-detail-core": ["jobs", "research-reference", "output-choice"],
-    "job-detail-input": ["job-detail-core"],
-    "job-detail-previews": ["job-detail-core", "report", "charts"],
-    "job-detail-factor-series": ["job-detail-previews", "catalog-core"],
-    "job-detail-ic": ["job-detail-previews", "catalog-core"],
-    "job-detail-backtest": ["job-detail-previews", "catalog-core"],
-    "product-catalog-core": ["core", "catalog-selection-core"],
-    "catalog-products-base": ["product-catalog-core"],
-    "catalog-product-sources": ["catalog-products-base"],
-    "catalog-product-source-family": ["catalog-products-base"],
-    "catalog-product-groups": ["catalog-products-base"],
-    "catalog-product-editing-shared": ["catalog-products-base"],
-    "catalog-product-group": [
-      "catalog-product-groups", "catalog-product-editing-shared"
-    ],
-    "catalog-product-categories": [
-      "catalog-product-editing-shared"
-    ],
-    "catalog-product-category": ["catalog-product-categories"],
-    "catalog-product-detail": ["catalog-products-base", "charts"],
-    "catalog": [
-      "catalog-product-sources", "catalog-product-source-family",
-      "catalog-product-group", "catalog-product-category",
-      "catalog-product-detail", "factor-catalog-core"
-    ],
-    "catalog-detail-tabs": ["core"],
-    "factor-catalog-core": ["core", "catalog-selection-core", "catalog-detail-tabs"],
-    "factor-catalog-list": ["factor-catalog-core"],
-    "factor-catalog-enrichment": ["factor-catalog-core"],
-    "factor-catalog-detail": ["factor-catalog-core", "factor-catalog-enrichment"],
-    "factor-catalog-detail-rendering": ["factor-catalog-detail"],
-    "factor-catalog-editor": [
-      "factor-catalog-core", "factor-catalog-enrichment", "object-overlay"
-    ],
-    "strategy-library-runtime": ["core"],
-    "strategy-library-core": ["strategy-library-runtime", "code-viewer", "catalog-detail-tabs"],
-    "strategy-library-list": ["strategy-library-runtime"],
-    "strategy-library-editor-core": ["strategy-library-core"],
-    "strategy-library-editor": ["strategy-library-editor-core"],
-    "strategy-library-detail": ["strategy-library-editor"],
-    "profile-agent-chat": ["core"],
-    "profile-directory": ["core"],
-    "profile-skills": ["profile-directory"],
-    "profile-workspace": ["profile-directory"],
-    "profile-agent-session": ["profile-directory", "profile-agent-chat"],
-    "profile-agent-models": ["profile-directory"],
-    "profile": [
-      "profile-skills", "profile-workspace", "profile-agent-session",
-      "profile-agent-models"
-    ],
-    "workbench-core": [],
-    "workbench-settings": ["workbench-core", "catalog-selection-core"],
-    "workbench-settings-fields": ["workbench-settings-controls"],
-    "workbench-ic-controls": ["workbench-core"],
-    "workbench-factor-controls": ["workbench-core"],
-    "workbench-product-controls": ["workbench-core"],
-    "workbench-source-inputs": ["workbench-input-state"],
-    "workbench-run": ["workbench-core", "workbench-settings-controls"],
-    "workbench-run-batch": ["workbench-core"],
-    "workbench-run-batch-actions": [
-      "workbench-run-batch", "workbench-input-state", "workbench-run-submit"
-    ],
-    "workbench-run-results": ["workbench-run", "job-detail-core"],
-    "workbench-run-submit": [
-      "workbench-run", "workbench-compiler", "workbench-ic-controls"
-    ],
-    "workbench-factors": [
-      "workbench-core", "catalog-core", "workbench-source-inputs",
-      "workbench-object-picker"
-    ],
-    "workbench-products": [
-      "workbench-core", "catalog-core", "workbench-object-picker"
-    ],
-    "workbench-test-ui": [
-      "workbench-settings", "workbench-settings-fields",
-      "workbench-run"
-    ],
-    "workbench-configuration-groups": [
-      "workbench-settings", "workbench-settings-controls",
-      "workbench-products", "workbench-factors"
-    ],
-    "workbench-ic-groups": [
-      "workbench-configuration-groups", "workbench-ic-controls"
-    ],
-    "workbench-strategy-bindings": [
-      "workbench-input-state", "object-overlay", "strategy-library-runtime",
-      "catalog-selection-remote"
-    ],
-    "workbench-backtest": ["workbench-configuration-groups"],
-    "workbench-templates": ["workbench-core", "code-viewer"],
-    "settings": ["core"],
-    "settings-devices": ["settings"],
-    "settings-control-database": ["settings"],
-    "manager": ["core"],
-    "manager-access": ["manager"],
-    "manager-accounts": ["manager"],
-    "manager-mihomo": ["manager"],
-    "docs": ["core"]
-  },
-  "control_groups": {
-    "ic_horizon_grid": {"group": "workbench-ic-controls", "global": "FTICHorizonSettings"},
-    "ic_delay_grid": {"group": "workbench-ic-controls", "global": "FTICHorizonSettings"},
-    "ic_decay_grid": {"group": "workbench-ic-controls", "global": "FTICHorizonSettings"},
-    "factor_role_bindings": {"group": "workbench-factor-controls", "global": "FTTestFactorRoles"},
-    "custom_product_overrides": {"group": "workbench-product-controls", "global": "FTCustomProductOverrides"}
-  },
-  "route_groups": {
-    "report": ["report"],
-    "public-reference": ["research-reference"],
-    "reference": ["research-reference"],
-    "research": ["research-shell"],
-    "research-detail": ["research-catalog"],
-    "research-graph": ["research-graph"],
-    "jobs": ["jobs"],
-    "job": ["job-detail-core"],
-    "job-configuration": ["job-detail-core"],
-    "job-input": ["job-detail-input"],
-    "ic-test": ["workbench-test-ui", "workbench-ic-groups"],
-    "backtest": ["workbench-test-ui"],
-    "factor-evaluation": ["workbench-test-ui"],
-    "factor-series": ["workbench-core"],
-    "test-template": ["workbench-templates"],
-    "factor-families": ["factor-catalog-list"],
-    "factor-sets": ["factor-catalog-list"],
-    "factor-family": ["factor-catalog-detail-rendering"],
-    "factor": ["factor-catalog-detail-rendering"],
-    "factor-set": ["factor-catalog-detail"],
-    "factors": ["factor-catalog-list"],
-    "strategy-library": ["strategy-library-list"],
-    "strategy": ["strategy-library-detail"],
-    "product-group": ["catalog-product-group"],
-    "product": ["catalog-product-detail"],
-    "product-reference": ["catalog-product-detail"],
-    "product-sources": ["catalog-product-sources"],
-    "product-source-family": ["catalog-product-source-family"],
-    "product-groups": ["catalog-product-groups"],
-    "product-categories": ["catalog-product-categories"],
-    "product-category": ["catalog-product-category"],
-    "products": ["catalog-products-base"],
-    "profile": ["profile-directory"],
-    "profiles": ["profile-directory"],
-    "settings": ["settings"],
-    "manager": ["manager"],
-    "mihomo": ["manager-mihomo"],
-    "docs": ["docs"]
-  },
-  "external_styles": [
-    "katex/katex.min.css",
-    "vendor/highlight/github.min.css"
+ "schema_version": 1,
+ "entry": "research.html",
+ "architecture": {
+  "module_boundary_policy": "semantic",
+  "route_load_policy": {
+   "default_max_first_party_script_bytes": 204800,
+   "first_party_script_overrides": {
+    "backtest": 512000,
+    "factor-evaluation": 224000,
+    "ic-test": 483840
+   },
+   "default_max_initial_external_scripts": 1,
+   "external_script_overrides": {
+    "factor": 2,
+    "factor-family": 2,
+    "job-input": 2,
+    "report": 2
+   },
+   "forbidden_route_groups": [
+    "catalog",
+    "profile",
+    "research"
+   ]
+  }
+ },
+ "initial_groups": [
+  "core",
+  "app"
+ ],
+ "initial_external_scripts": [],
+ "group_external_scripts": {
+  "code-viewer": [
+   "vendor/highlight/highlight.min.js"
   ],
-  "styles": [
-    "styles/app.css",
-    "styles/jobs/result-tabs.css",
-    "styles/report.css",
-    "styles/outputs/artifacts.css",
-    "styles/outputs/backtest-results.css",
-    "styles/workbench.css",
-    "styles/workbench-settings.css",
-    "styles/docs.css",
-    "styles/strategy-library.css",
-    "styles/task-inputs.css"
+  "report": [
+   "katex/katex.min.js"
   ],
-  "groups": {
-    "code-viewer": [],
-    "core": [
-      "core/module-loader.js",
-      "core/i18n.js",
-      "core/icons.js",
-      "core/help-popover.js",
-      "core/page-state.js",
-      "core/test-type-registry.js",
-      "core/factor-param-contract.js",
-      "app/route-presentation.js",
-      "core/shared-ui.js"
-    ],
-    "charts": [
-      "core/highcharts-range-loader.js",
-      "core/price-chart.js"
-    ],
-    "docs": [
-      "docs/source.js",
-      "docs/field-catalog.js",
-      "docs/reader.js"
-    ],
-    "catalog-selection-core": [
-      "catalog/shared/multi-select-filter.js"
-    ],
-    "catalog-selection-remote": [
-      "catalog/shared/multi-select-filter-remote.js"
-    ],
-    "catalog-detail-tabs": [
-      "catalog/shared/object-detail-tabs.js"
-    ],
-    "workbench-object-picker": [
-      "workbench/test-object-picker.js"
-    ],
-    "object-overlay": [
-      "workbench/object-overlay.js"
-    ],
-    "product-catalog-core": [
-      "catalog/product-category-model.js",
-      "catalog/product-list-table.js",
-      "catalog/product-tree.js"
-    ],
-    "catalog-core": [],
-    "factor-catalog-core": [
-      "catalog/factor-model.js",
-      "catalog/factor-detail-shared.js",
-      "catalog/shared/object-job-table.js",
-      "catalog/factor-catalog-runtime.js",
-      "catalog/factors.js"
-    ],
-    "factor-catalog-list": [
-      "catalog/factor-group-filter.js",
-      "catalog/factor-list.js",
-      "catalog/factor-catalog-list.js"
-    ],
-    "factor-catalog-enrichment": [
-      "catalog/factor-display-enrichment.js"
-    ],
-    "factor-catalog-detail": [
-      "catalog/factor-details.js"
-    ],
-    "factor-catalog-detail-rendering": [],
-    "strategy-library-runtime": [
-      "catalog/strategy-library-runtime.js"
-    ],
-    "strategy-library-core": [],
-    "strategy-library-editor-core": [
-      "catalog/strategy-library-editor.js"
-    ],
-    "strategy-library-list": [
-      "catalog/strategy-library-list.js"
-    ],
-    "strategy-library-editor": [
-      "catalog/strategy-library-assistance.js"
-    ],
-    "strategy-library-detail": [
-      "catalog/strategy-library-detail.js"
-    ],
-    "factor-catalog-editor": [
-      "catalog/factor-assistance.js",
-      "catalog/factor-parameter-editor.js",
-      "catalog/factor-editor.js",
-      "catalog/factor-object-form.js",
-      "catalog/factor-set-assistance.js",
-      "catalog/factor-set-editor.js"
-    ],
-    "output-choice": [
-      "core/output-choices.js"
-    ],
-    "report-settings": ["research/report-settings.js"],
-    "object-transfer": [
-      "report/object-transfer.js"
-    ],
-    "report": [
-      "report/rich-text.js",
-      "report/rich-text-blocks.js",
-      "report/table-view.js",
-      "report/lazy-runtime.js",
-      "report/tree.js",
-      "report/chapter-cache.js",
-      "report/component-view.js",
-      "report/chapter-rail.js",
-      "report/report-renderer.js",
-      "report/source.js",
-      "report/report-entry.js"
-    ],
-    "research-shell": ["research/workspaces.js"],
-    "research-visibility": ["research/visibility.js"],
-    "research-catalog": ["research/researches.js"],
-    "research-evidence": [
-      "research/evidence-applicability.js",
-      "research/evidence.js"
-    ],
-    "research-reports": ["research/reports.js"],
-    "research-local": ["research/local.js"],
-    "research-shared": ["research/shared.js"],
-    "research-graph": [
-      "research/graph.js",
-      "research/graph-list.js"
-    ],
-    "research": [],
-    "research-reference": [
-      "research/run-spec-view.js",
-      "research/reference.js"
-    ],
-    "jobs": [
-      "jobs/list-format.js",
-      "jobs/progress.js",
-      "jobs/page-tabs.js",
-      "jobs/test-types.js",
-      "jobs/jobs.js"
-    ],
-    "job-detail-core": [
-      "jobs/artifacts.js",
-      "jobs/artifact-query.js",
-      "jobs/generation.js",
-      "jobs/actions.js",
-      "jobs/detail-tabs.js",
-      "jobs/supplementals.js",
-      "jobs/result-tabs.js",
-      "jobs/custom-analysis-assistance.js",
-      "jobs/custom-analyses.js",
-      "jobs/result-viewers.js",
-      "jobs/detail.js"
-    ],
-    "job-detail-input": [
-      "jobs/input-detail.js"
-    ],
-    "job-detail-previews": [
-      "core/market-data.js",
-      "jobs/highcharts-timeline.js",
-      "jobs/highcharts-viewers.js",
-      "jobs/job-artifact-viewers.js"
-    ],
-    "job-detail-factor-series": [
-      "test-modules/factor-evaluation/results/model.js",
-      "test-modules/factor-evaluation/results/chart.js",
-      "test-modules/factor-evaluation/results/view.js"
-    ],
-    "job-detail-ic": [
-      "jobs/ic-result-model.js",
-      "jobs/ic-portfolio-view.js",
-      "jobs/ic-result-charts.js",
-      "jobs/ic-result-view.js"
-    ],
-    "job-detail-backtest": [
-      "test-modules/backtest/results/runtime-model.js",
-      "test-modules/backtest/results/model.js",
-      "test-modules/backtest/results/strategy-selection.js",
-      "test-modules/backtest/results/analysis/api.js",
-      "test-modules/backtest/results/analysis/ui.js",
-      "test-modules/backtest/results/analysis/group-products.js",
-      "test-modules/backtest/results/analysis/group-detail-parts.js",
-      "test-modules/backtest/results/analysis/group-detail.js",
-      "test-modules/backtest/results/analysis/ranking-view.js",
-      "test-modules/backtest/results/analysis/snapshot-view.js",
-      "test-modules/backtest/results/analysis/strategy-analysis.js",
-      "test-modules/backtest/results/event-flow.js",
-      "test-modules/backtest/results/surfaces.js",
-      "test-modules/backtest/results/view.js"
-    ],
-    "catalog-products-base": [
-      "catalog/products.js"
-    ],
-    "catalog-product-sources": [
-      "catalog/source-list.js"
-    ],
-    "catalog-product-source-family": [
-      "catalog/source-family-detail.js"
-    ],
-    "catalog-product-groups": [],
-    "catalog-product-editing-shared": [
-      "catalog/shared/detail-ui.js",
-      "catalog/shared/selection-tree.js"
-    ],
-    "catalog-product-group": [
-      "catalog/product-group-path-editor.js",
-      "catalog/product-group-detail.js"
-    ],
-    "catalog-product-categories": [
-      "catalog/product-category-overlay.js",
-      "catalog/product-category-create.js",
-      "catalog/product-category-label-editor.js",
-      "catalog/product-categories.js"
-    ],
-    "catalog-product-category": [
-      "catalog/product-category-detail-layout.js",
-      "catalog/product-category-detail.js"
-    ],
-    "catalog-product-detail": [
-      "catalog/product-price-panel.js",
-      "catalog/details.js"
-    ],
-    "catalog": [],
-    "workbench-core": [
-      "workbench/test-page-assistance.js",
-      "workbench/setting-rules.js",
-      "workbench/test-lazy-code.js",
-      "workbench/templates/actions.js",
-      "workbench/test-field-row.js",
-      "workbench/test-field-help.js",
-      "workbench/test-state.js",
-      "workbench/tests.js"
-    ],
-    "workbench-input-state": [
-      "workbench/test-input-state.js"
-    ],
-    "workbench-compiler": [
-      "workbench/test-configuration-compiler.js"
-    ],
-    "workbench-settings": [
-      "workbench/tab-chip-content.js",
-      "workbench/test-settings.js",
-      "workbench/test-content-adapters.js"
-    ],
-    "workbench-settings-chips": [
-      "workbench/test-setting-chips.js"
-    ],
-    "workbench-settings-fields": [
-      "workbench/test-control-loader.js",
-      "workbench/test-settings-schema.js"
-    ],
-    "workbench-settings-controls": [
-      "workbench/test-setting-fields.js"
-    ],
-    "workbench-ic-controls": [
-      "workbench/ic-configuration.js",
-      "workbench/ic-horizon-settings.js"
-    ],
-    "workbench-factor-controls": [
-      "workbench/factor-roles.js"
-    ],
-    "workbench-product-controls": [
-      "workbench/custom-product-overrides.js"
-    ],
-    "workbench-run": [
-      "workbench/test-run-fields.js"
-    ],
-    "workbench-run-batch": [
-      "workbench/run-batch/model.js",
-      "workbench/test-run-summary.js",
-      "workbench/test-run-batch.js"
-    ],
-    "workbench-run-batch-actions": [
-      "workbench/run-batch/actions.js"
-    ],
-    "workbench-run-results": [
-      "workbench/test-run-progress.js",
-      "workbench/test-run-results.js"
-    ],
-    "workbench-run-submit": [
-      "workbench/test-configuration.js"
-    ],
-    "workbench-factors": [
-      "workbench/factor-selection.js",
-      "workbench/factor-set-selection.js",
-      "workbench/factor-family-picker.js",
-      "workbench/strategy-editor-factor-overlay.js",
-      "workbench/test-factor-candidates.js",
-      "workbench/test-factor-candidate-sources.js",
-      "workbench/test-factors.js"
-    ],
-    "workbench-source-inputs": [
-      "workbench/test-source-upload.js"
-    ],
-    "workbench-strategy-bindings": [
-      "workbench/strategy-binding-panel.js"
-    ],
-    "workbench-products": [
-      "workbench/test-products.js",
-      "workbench/test-categories.js"
-    ],
-    "workbench-test-ui": [],
-    "workbench-configuration-groups": [
-      "workbench/tab-list-chip.js",
-      "workbench/configuration-groups/common/surface.js",
-      "workbench/strategy-editor-scope.js",
-      "workbench/strategy-editor-tabs.js",
-      "workbench/strategy-editor-pickers.js",
-      "workbench/strategy-list.js"
-    ],
-    "workbench-ic-groups": [
-      "workbench/configuration-groups/ic/model.js",
-      "workbench/configuration-groups/ic/form.js",
-      "workbench/configuration-groups/ic/adapter.js"
-    ],
-    "workbench-backtest": [
-      "workbench/backtest-group-overrides.js",
-      "workbench/strategy-editor-overrides.js",
-      "workbench/strategy-editor-custom-source.js",
-      "workbench/strategy-editor-product-filter.js",
-      "workbench/backtest-group-batches.js",
-      "workbench/backtest-group-model.js",
-      "workbench/backtest-group-form.js",
-      "workbench/backtest-groups.js"
-    ],
-    "workbench-templates": [
-      "workbench/test-templates.js"
-    ],
-    "profile-agent-chat": [
-      "profile/chatkit-protocol.js",
-      "profile/chatkit-conversations.js",
-      "profile/chatkit-event-source.js",
-      "profile/chatkit-stream.js",
-      "profile/chatkit-adapter.js",
-      "profile/agent-chat.js"
-    ],
-    "profile-directory": [
-      "profile/profile-directory.js",
-      "profile/profile-directory-detail.js",
-      "profile/profiles.js"
-    ],
-    "profile-skills": [
-      "profile/agent-skills.js"
-    ],
-    "profile-workspace": [
-      "profile/workspace-browser.js"
-    ],
-    "profile-agent-session": [
-      "profile/agent-runtime-controls.js"
-    ],
-    "profile-agent-models": [
-      "profile/agent-model-editor.js",
-      "profile/agent-models.js"
-    ],
-    "profile": [],
-    "settings": [
-      "settings/settings.js"
-    ],
-    "settings-devices": [
-      "settings/devices.js"
-    ],
-    "settings-control-database": [
-      "settings/control-database.js"
-    ],
-    "manager": [
-      "settings/manager.js"
-    ],
-    "manager-access": [
-      "manager/access-control-table.js",
-      "manager/access-control.js"
-    ],
-    "manager-accounts": [
-      "manager/accounts.js"
-    ],
-    "manager-mihomo": [
-      "manager/mihomo.js"
-    ],
-    "app": [
-      "profile/page-agent-lifecycle.js",
-      "profile/page-agent-context.js",
-      "profile/page-agent-drawer.js",
-      "profile/page-agent-profiles.js",
-      "profile/page-assistance.js",
-      "app/navigation.js",
-      "app/route-dispatch.js",
-      "app/tab-workspace.js",
-      "app/tab-view-cache.js",
-      "app/tabs.js",
-      "app/webmcp.js",
-      "app/tab-return.js",
-      "app/visitor-device.js",
-      "app/auth.js",
-      "app/runtime.js",
-      "app/shell.js",
-      "app/coordinator.js"
-    ]
+  "job-detail-previews": [
+   "vendor/highcharts/highstock.min.js"
+  ],
+  "job-detail-factor-series": [
+   "vendor/highcharts/highstock.min.js"
+  ],
+  "job-detail-ic": [
+   "vendor/highcharts/highstock.min.js"
+  ],
+  "job-detail-backtest": [
+   "vendor/highcharts/highstock.min.js"
+  ],
+  "job-detail-input": [
+   "katex/katex.min.js"
+  ],
+  "factor-catalog-detail-rendering": [
+   "vendor/highlight/highlight.min.js",
+   "katex/katex.min.js"
+  ],
+  "factor-catalog-editor": [
+   "vendor/highlight/highlight.min.js",
+   "katex/katex.min.js"
+  ],
+  "catalog": [
+   "vendor/highcharts/highstock.min.js",
+   "katex/katex.min.js"
+  ],
+  "catalog-product-detail": [
+   "vendor/highcharts/highstock.min.js"
+  ],
+  "research": [
+   "vendor/cytoscape/cytoscape.min.js"
+  ],
+  "research-graph": [
+   "vendor/cytoscape/cytoscape.min.js"
+  ],
+  "profile": []
+ },
+ "group_dependencies": {
+  "code-viewer": [
+   "core"
+  ],
+  "charts": [
+   "core"
+  ],
+  "catalog-selection-core": [
+   "core"
+  ],
+  "workbench-object-picker": [
+   "core",
+   "catalog-selection-core"
+  ],
+  "object-overlay": [
+   "core",
+   "workbench-object-picker"
+  ],
+  "catalog-core": [
+   "product-catalog-core",
+   "factor-catalog-core"
+  ],
+  "output-choice": [
+   "core"
+  ],
+  "object-transfer": [
+   "core"
+  ],
+  "workbench-compiler": [
+   "core"
+  ],
+  "workbench-input-state": [
+   "workbench-core"
+  ],
+  "workbench-settings-controls": [
+   "workbench-core"
+  ],
+  "workbench-settings-chips": [
+   "workbench-settings"
+  ],
+  "research-reference": [
+   "core",
+   "code-viewer"
+  ],
+  "report-settings": [
+   "core"
+  ],
+  "report": [
+   "code-viewer",
+   "object-transfer",
+   "report-settings"
+  ],
+  "research-shell": [
+   "core"
+  ],
+  "research-visibility": [
+   "core"
+  ],
+  "research-catalog": [
+   "core",
+   "research-visibility"
+  ],
+  "research-evidence": [
+   "core",
+   "object-transfer"
+  ],
+  "research-reports": [
+   "core",
+   "research-visibility",
+   "report-settings"
+  ],
+  "research-local": [
+   "core"
+  ],
+  "research-shared": [
+   "research-shell"
+  ],
+  "research-graph": [
+   "core",
+   "catalog-core"
+  ],
+  "research": [
+   "research-graph"
+  ],
+  "job-detail-core": [
+   "jobs",
+   "research-reference",
+   "output-choice"
+  ],
+  "job-detail-input": [
+   "job-detail-core"
+  ],
+  "job-detail-previews": [
+   "job-detail-core",
+   "report",
+   "charts"
+  ],
+  "job-detail-factor-series": [
+   "job-detail-previews",
+   "catalog-core"
+  ],
+  "job-detail-ic": [
+   "job-detail-previews",
+   "catalog-core"
+  ],
+  "job-detail-backtest": [
+   "job-detail-previews",
+   "catalog-core"
+  ],
+  "product-catalog-core": [
+   "core",
+   "catalog-selection-core"
+  ],
+  "catalog-products-base": [
+   "product-catalog-core"
+  ],
+  "catalog-product-sources": [
+   "catalog-products-base"
+  ],
+  "catalog-product-source-family": [
+   "catalog-products-base"
+  ],
+  "catalog-product-groups": [
+   "catalog-products-base"
+  ],
+  "catalog-product-editing-shared": [
+   "catalog-products-base"
+  ],
+  "catalog-product-group": [
+   "catalog-product-groups",
+   "catalog-product-editing-shared"
+  ],
+  "catalog-product-categories": [
+   "catalog-product-editing-shared"
+  ],
+  "catalog-product-category": [
+   "catalog-product-categories"
+  ],
+  "catalog-product-detail": [
+   "catalog-products-base",
+   "charts"
+  ],
+  "catalog": [
+   "catalog-product-sources",
+   "catalog-product-source-family",
+   "catalog-product-group",
+   "catalog-product-category",
+   "catalog-product-detail",
+   "factor-catalog-core"
+  ],
+  "catalog-detail-tabs": [
+   "core"
+  ],
+  "factor-catalog-core": [
+   "core",
+   "catalog-selection-core",
+   "catalog-detail-tabs"
+  ],
+  "factor-catalog-list": [
+   "factor-catalog-core"
+  ],
+  "factor-catalog-enrichment": [
+   "factor-catalog-core"
+  ],
+  "factor-catalog-detail": [
+   "factor-catalog-core",
+   "factor-catalog-enrichment"
+  ],
+  "factor-catalog-detail-rendering": [
+   "factor-catalog-detail"
+  ],
+  "factor-catalog-editor": [
+   "factor-catalog-core",
+   "factor-catalog-enrichment",
+   "object-overlay"
+  ],
+  "strategy-library-runtime": [
+   "core"
+  ],
+  "strategy-library-core": [
+   "strategy-library-runtime",
+   "code-viewer",
+   "catalog-detail-tabs"
+  ],
+  "strategy-library-list": [
+   "strategy-library-runtime"
+  ],
+  "strategy-library-editor-core": [
+   "strategy-library-core"
+  ],
+  "strategy-library-editor": [
+   "strategy-library-editor-core"
+  ],
+  "strategy-library-detail": [
+   "strategy-library-editor"
+  ],
+  "profile-agent-chat": [
+   "core"
+  ],
+  "profile-directory": [
+   "core"
+  ],
+  "profile-skills": [
+   "profile-directory"
+  ],
+  "profile-workspace": [
+   "profile-directory"
+  ],
+  "profile-agent-session": [
+   "profile-directory",
+   "profile-agent-chat"
+  ],
+  "profile-agent-models": [
+   "profile-directory"
+  ],
+  "profile": [
+   "profile-skills",
+   "profile-workspace",
+   "profile-agent-session",
+   "profile-agent-models"
+  ],
+  "workbench-core": [],
+  "workbench-settings": [
+   "workbench-core",
+   "catalog-selection-core"
+  ],
+  "workbench-settings-fields": [
+   "workbench-settings-controls"
+  ],
+  "workbench-ic-controls": [
+   "workbench-core"
+  ],
+  "workbench-factor-controls": [
+   "workbench-core"
+  ],
+  "workbench-product-controls": [
+   "workbench-core"
+  ],
+  "workbench-source-inputs": [
+   "workbench-input-state"
+  ],
+  "workbench-run": [
+   "workbench-core",
+   "workbench-settings-controls"
+  ],
+  "workbench-run-batch": [
+   "workbench-core"
+  ],
+  "workbench-run-batch-actions": [
+   "workbench-run-batch",
+   "workbench-input-state",
+   "workbench-run-submit"
+  ],
+  "workbench-run-results": [
+   "workbench-run",
+   "job-detail-core"
+  ],
+  "workbench-run-submit": [
+   "workbench-run",
+   "workbench-compiler",
+   "workbench-ic-controls"
+  ],
+  "workbench-factors": [
+   "workbench-core",
+   "catalog-core",
+   "workbench-source-inputs",
+   "workbench-object-picker"
+  ],
+  "workbench-products": [
+   "workbench-core",
+   "catalog-core",
+   "workbench-object-picker"
+  ],
+  "workbench-test-ui": [
+   "workbench-settings",
+   "workbench-settings-fields",
+   "workbench-run"
+  ],
+  "workbench-configuration-groups": [
+   "workbench-settings",
+   "workbench-settings-controls",
+   "workbench-products",
+   "workbench-factors"
+  ],
+  "workbench-ic-groups": [
+   "workbench-configuration-groups",
+   "workbench-ic-controls"
+  ],
+  "workbench-strategy-bindings": [
+   "workbench-input-state",
+   "object-overlay",
+   "strategy-library-runtime",
+   "catalog-selection-remote"
+  ],
+  "workbench-backtest": [
+   "workbench-configuration-groups"
+  ],
+  "workbench-templates": [
+   "workbench-core",
+   "code-viewer"
+  ],
+  "settings": [
+   "core"
+  ],
+  "settings-devices": [
+   "settings"
+  ],
+  "settings-control-database": [
+   "settings"
+  ],
+  "manager": [
+   "core"
+  ],
+  "manager-access": [
+   "manager"
+  ],
+  "manager-accounts": [
+   "manager"
+  ],
+  "manager-mihomo": [
+   "manager"
+  ],
+  "docs": [
+   "core"
+  ]
+ },
+ "control_groups": {
+  "ic_horizon_grid": {
+   "group": "workbench-ic-controls",
+   "global": "FTICHorizonSettings"
   },
-  "external_scripts": [
-    "katex/katex.min.js",
-    "vendor/highlight/highlight.min.js",
-    "vendor/highcharts/highstock.min.js",
-    "vendor/cytoscape/cytoscape.min.js"
+  "ic_delay_grid": {
+   "group": "workbench-ic-controls",
+   "global": "FTICHorizonSettings"
+  },
+  "ic_decay_grid": {
+   "group": "workbench-ic-controls",
+   "global": "FTICHorizonSettings"
+  },
+  "factor_role_bindings": {
+   "group": "workbench-factor-controls",
+   "global": "FTTestFactorRoles"
+  },
+  "custom_product_overrides": {
+   "group": "workbench-product-controls",
+   "global": "FTCustomProductOverrides"
+  }
+ },
+ "route_groups": {
+  "report": [
+   "report"
   ],
-  "scripts": [
-    "core/module-loader.js",
-    "core/i18n.js",
-    "core/icons.js",
-    "core/help-popover.js",
-    "core/page-state.js",
-    "core/test-type-registry.js",
-    "core/factor-param-contract.js",
-    "app/route-presentation.js",
-    "profile/page-agent-lifecycle.js",
-    "profile/page-agent-context.js",
-    "profile/page-agent-drawer.js",
-    "profile/page-agent-profiles.js",
-    "profile/page-assistance.js",
-    "docs/source.js",
-    "docs/field-catalog.js",
-    "docs/reader.js",
-    "core/highcharts-range-loader.js",
-    "core/price-chart.js",
-    "core/market-data.js",
-    "catalog/shared/multi-select-filter.js",
-    "catalog/shared/multi-select-filter-remote.js",
-    "jobs/list-format.js",
-    "jobs/page-tabs.js",
-    "jobs/test-types.js",
-    "jobs/highcharts-timeline.js",
-    "jobs/highcharts-viewers.js",
-    "test-modules/factor-evaluation/results/model.js",
-    "test-modules/factor-evaluation/results/chart.js",
-    "jobs/ic-result-model.js",
-    "jobs/ic-portfolio-view.js",
-    "jobs/ic-result-charts.js",
-    "test-modules/backtest/results/runtime-model.js",
-    "test-modules/backtest/results/model.js",
-    "test-modules/backtest/results/strategy-selection.js",
-    "test-modules/backtest/results/event-flow.js",
-    "test-modules/backtest/results/surfaces.js",
-    "jobs/job-artifact-viewers.js",
-    "core/shared-ui.js",
-    "core/output-choices.js",
-    "research/report-settings.js",
-    "report/rich-text.js",
-    "report/rich-text-blocks.js",
-    "report/table-view.js",
-    "report/lazy-runtime.js",
-    "report/tree.js",
-    "report/chapter-cache.js",
-    "report/component-view.js",
-    "report/chapter-rail.js",
-    "report/report-renderer.js",
-    "report/object-transfer.js",
-    "report/source.js",
-    "report/report-entry.js",
-    "research/run-spec-view.js",
-    "research/reference.js",
-    "research/graph.js",
-    "research/graph-list.js",
-    "research/local.js",
-    "research/evidence-applicability.js",
-    "research/evidence.js",
-    "research/visibility.js",
-    "research/reports.js",
-    "research/shared.js",
-    "research/researches.js",
-    "research/workspaces.js",
-    "jobs/artifacts.js",
-    "jobs/artifact-query.js",
-    "test-modules/factor-evaluation/results/view.js",
-    "jobs/ic-result-view.js",
-    "test-modules/backtest/results/analysis/api.js",
-    "test-modules/backtest/results/analysis/ui.js",
-    "test-modules/backtest/results/analysis/group-products.js",
-    "test-modules/backtest/results/analysis/group-detail-parts.js",
-    "test-modules/backtest/results/analysis/group-detail.js",
-    "test-modules/backtest/results/analysis/ranking-view.js",
-    "test-modules/backtest/results/analysis/snapshot-view.js",
-    "test-modules/backtest/results/analysis/strategy-analysis.js",
-    "test-modules/backtest/results/view.js",
-    "jobs/generation.js",
-    "jobs/progress.js",
-    "jobs/jobs.js",
-    "jobs/actions.js",
-    "jobs/input-detail.js",
-    "jobs/detail-tabs.js",
-    "jobs/supplementals.js",
-    "jobs/result-tabs.js",
-    "jobs/custom-analysis-assistance.js",
-    "jobs/custom-analyses.js",
-    "jobs/result-viewers.js",
-    "jobs/detail.js",
-    "catalog/factor-model.js",
-    "catalog/factor-detail-shared.js",
-    "catalog/factor-display-enrichment.js",
-    "catalog/shared/object-detail-tabs.js",
-    "catalog/shared/object-job-table.js",
-    "catalog/factor-catalog-runtime.js",
-    "catalog/factor-group-filter.js",
-    "catalog/factor-list.js",
-    "catalog/factor-catalog-list.js",
-    "catalog/factor-assistance.js",
-    "catalog/factor-parameter-editor.js",
-    "catalog/factor-editor.js",
-    "catalog/factor-object-form.js",
-    "catalog/factor-set-assistance.js",
-    "catalog/factor-set-editor.js",
-    "catalog/factor-details.js",
-    "catalog/factors.js",
-    "catalog/strategy-library-runtime.js",
-    "catalog/strategy-library-list.js",
-    "catalog/strategy-library-assistance.js",
-    "catalog/strategy-library-editor.js",
-    "catalog/strategy-library-detail.js",
-    "catalog/product-category-model.js",
-    "catalog/product-category-overlay.js",
-    "catalog/product-category-create.js",
-    "catalog/product-category-label-editor.js",
-    "catalog/shared/detail-ui.js",
-    "catalog/shared/selection-tree.js",
-    "catalog/product-category-detail-layout.js",
-    "catalog/product-category-detail.js",
-    "catalog/product-categories.js",
-    "catalog/product-list-table.js",
-    "catalog/product-tree.js",
-    "catalog/source-list.js",
-    "catalog/source-family-detail.js",
-    "catalog/products.js",
-    "catalog/product-group-path-editor.js",
-    "catalog/product-group-detail.js",
-    "catalog/product-price-panel.js",
-    "catalog/details.js",
-    "workbench/test-page-assistance.js",
-    "workbench/setting-rules.js",
-    "workbench/test-input-state.js",
-    "workbench/test-configuration-compiler.js",
-    "workbench/test-lazy-code.js",
-    "workbench/test-object-picker.js",
-    "workbench/object-overlay.js",
-    "workbench/test-field-row.js",
-    "workbench/test-field-help.js",
-    "workbench/test-control-loader.js",
-    "workbench/test-state.js",
-    "workbench/ic-configuration.js",
-    "workbench/ic-horizon-settings.js",
-    "workbench/factor-roles.js",
-    "workbench/custom-product-overrides.js",
-    "workbench/test-setting-chips.js",
-    "workbench/tab-chip-content.js",
-    "workbench/test-setting-fields.js",
-    "workbench/tab-list-chip.js",
-    "workbench/configuration-groups/common/surface.js",
-    "workbench/configuration-groups/ic/model.js",
-    "workbench/configuration-groups/ic/form.js",
-    "workbench/configuration-groups/ic/adapter.js",
-    "workbench/test-settings.js",
-    "workbench/test-settings-schema.js",
-    "workbench/backtest-group-overrides.js",
-    "workbench/strategy-editor-scope.js",
-    "workbench/strategy-editor-tabs.js",
-    "workbench/strategy-editor-overrides.js",
-    "workbench/strategy-editor-pickers.js",
-    "workbench/strategy-editor-product-filter.js",
-    "workbench/factor-selection.js",
-    "workbench/factor-set-selection.js",
-    "workbench/factor-family-picker.js",
-    "workbench/test-source-upload.js",
-    "workbench/strategy-binding-panel.js",
-    "workbench/strategy-editor-factor-overlay.js",
-    "workbench/strategy-editor-custom-source.js",
-    "workbench/test-factor-candidates.js",
-    "workbench/test-factor-candidate-sources.js",
-    "workbench/test-factors.js",
-    "workbench/test-products.js",
-    "workbench/test-categories.js",
-    "workbench/backtest-group-batches.js",
-    "workbench/backtest-group-model.js",
-    "workbench/strategy-list.js",
-    "workbench/backtest-group-form.js",
-    "workbench/backtest-groups.js",
-    "workbench/test-configuration.js",
-    "workbench/templates/actions.js",
-    "workbench/test-templates.js",
-    "workbench/test-content-adapters.js",
-    "workbench/test-run-fields.js",
-    "workbench/run-batch/model.js",
-    "workbench/test-run-summary.js",
-    "workbench/test-run-progress.js",
-    "workbench/test-run-results.js",
-    "workbench/test-run-batch.js",
-    "workbench/run-batch/actions.js",
-    "workbench/tests.js",
-    "profile/agent-skills.js",
-    "profile/chatkit-protocol.js",
-    "profile/chatkit-conversations.js",
-    "profile/agent-runtime-controls.js",
-    "profile/chatkit-event-source.js",
-    "profile/chatkit-stream.js",
-    "profile/chatkit-adapter.js",
-    "profile/agent-chat.js",
-    "profile/profile-directory.js",
-    "profile/profile-directory-detail.js",
-    "profile/workspace-browser.js",
-    "profile/profiles.js",
-    "profile/agent-model-editor.js",
-    "profile/agent-models.js",
-    "settings/settings.js",
-    "settings/devices.js",
-    "settings/control-database.js",
-    "manager/access-control-table.js",
-    "manager/access-control.js",
-    "manager/accounts.js",
-    "settings/manager.js",
-    "manager/mihomo.js",
-    "app/navigation.js",
-    "app/route-dispatch.js",
-    "app/tab-workspace.js",
-    "app/tab-view-cache.js",
-    "app/tabs.js",
-    "app/webmcp.js",
-    "app/tab-return.js",
-    "app/visitor-device.js",
-    "app/auth.js",
-    "app/runtime.js",
-    "app/shell.js",
-    "app/coordinator.js"
+  "public-reference": [
+   "research-reference"
   ],
-  "notes": "The order is an intentional global-IIFE dependency contract; keep it synchronized with research.html until the loader is replaced."
+  "reference": [
+   "research-reference"
+  ],
+  "research": [
+   "research-shell"
+  ],
+  "research-detail": [
+   "research-catalog"
+  ],
+  "research-graph": [
+   "research-graph"
+  ],
+  "jobs": [
+   "jobs"
+  ],
+  "job": [
+   "job-detail-core"
+  ],
+  "job-configuration": [
+   "job-detail-core"
+  ],
+  "job-input": [
+   "job-detail-input"
+  ],
+  "ic-test": [
+   "workbench-test-ui",
+   "workbench-ic-groups"
+  ],
+  "backtest": [
+   "workbench-test-ui"
+  ],
+  "factor-evaluation": [
+   "workbench-test-ui"
+  ],
+  "factor-series": [
+   "workbench-core"
+  ],
+  "test-template": [
+   "workbench-templates"
+  ],
+  "factor-families": [
+   "factor-catalog-list"
+  ],
+  "factor-sets": [
+   "factor-catalog-list"
+  ],
+  "factor-family": [
+   "factor-catalog-detail-rendering"
+  ],
+  "factor": [
+   "factor-catalog-detail-rendering"
+  ],
+  "factor-set": [
+   "factor-catalog-detail"
+  ],
+  "factors": [
+   "factor-catalog-list"
+  ],
+  "strategy-library": [
+   "strategy-library-list"
+  ],
+  "strategy": [
+   "strategy-library-detail"
+  ],
+  "product-group": [
+   "catalog-product-group"
+  ],
+  "product": [
+   "catalog-product-detail"
+  ],
+  "product-reference": [
+   "catalog-product-detail"
+  ],
+  "product-sources": [
+   "catalog-product-sources"
+  ],
+  "product-source-family": [
+   "catalog-product-source-family"
+  ],
+  "product-groups": [
+   "catalog-product-groups"
+  ],
+  "product-categories": [
+   "catalog-product-categories"
+  ],
+  "product-category": [
+   "catalog-product-category"
+  ],
+  "products": [
+   "catalog-products-base"
+  ],
+  "profile": [
+   "profile-directory"
+  ],
+  "profiles": [
+   "profile-directory"
+  ],
+  "settings": [
+   "settings"
+  ],
+  "manager": [
+   "manager"
+  ],
+  "mihomo": [
+   "manager-mihomo"
+  ],
+  "docs": [
+   "docs"
+  ]
+ },
+ "external_styles": [
+  "katex/katex.min.css",
+  "vendor/highlight/github.min.css"
+ ],
+ "styles": [
+  "styles/app.css",
+  "styles/jobs/result-tabs.css",
+  "styles/report.css",
+  "styles/outputs/artifacts.css",
+  "styles/outputs/backtest-results.css",
+  "styles/workbench.css",
+  "styles/workbench-settings.css",
+  "styles/docs.css",
+  "styles/strategy-library.css",
+  "styles/task-inputs.css"
+ ],
+ "groups": {
+  "code-viewer": [],
+  "core": [
+   "core/module-loader.js",
+   "core/i18n.js",
+   "core/icons.js",
+   "core/help-popover.js",
+   "core/page-state.js",
+   "core/test-type-registry.js",
+   "core/factor-param-contract.js",
+   "app/route-presentation.js",
+   "core/shared-ui.js"
+  ],
+  "charts": [
+   "core/highcharts-range-loader.js",
+   "core/price-chart.js"
+  ],
+  "docs": [
+   "docs/source.js",
+   "docs/field-catalog.js",
+   "docs/reader.js"
+  ],
+  "catalog-selection-core": [
+   "catalog/shared/multi-select-filter.js"
+  ],
+  "catalog-selection-remote": [
+   "catalog/shared/multi-select-filter-remote.js"
+  ],
+  "catalog-detail-tabs": [
+   "catalog/shared/object-detail-tabs.js"
+  ],
+  "workbench-object-picker": [
+   "workbench/test-object-picker.js"
+  ],
+  "object-overlay": [
+   "workbench/object-overlay.js"
+  ],
+  "product-catalog-core": [
+   "catalog/product-category-model.js",
+   "catalog/product-list-table.js",
+   "catalog/product-tree.js"
+  ],
+  "catalog-core": [],
+  "factor-catalog-core": [
+   "catalog/factor-model.js",
+   "catalog/factor-detail-shared.js",
+   "catalog/shared/object-mode-actions.js",
+   "catalog/shared/object-job-table.js",
+   "catalog/factor-catalog-runtime.js",
+   "catalog/factors.js"
+  ],
+  "factor-catalog-list": [
+   "catalog/factor-group-filter.js",
+   "catalog/factor-list.js",
+   "catalog/factor-catalog-list.js"
+  ],
+  "factor-catalog-enrichment": [
+   "catalog/factor-display-enrichment.js"
+  ],
+  "factor-catalog-detail": [
+   "catalog/factor-details.js"
+  ],
+  "factor-catalog-detail-rendering": [],
+  "strategy-library-runtime": [
+   "catalog/strategy-library-runtime.js"
+  ],
+  "strategy-library-core": [],
+  "strategy-library-editor-core": [
+   "catalog/strategy-library-editor.js"
+  ],
+  "strategy-library-list": [
+   "catalog/strategy-library-list.js"
+  ],
+  "strategy-library-editor": [
+   "catalog/strategy-library-assistance.js"
+  ],
+  "strategy-library-detail": [
+   "catalog/strategy-library-detail.js"
+  ],
+  "factor-catalog-editor": [
+   "catalog/factor-assistance.js",
+   "catalog/factor-parameter-editor.js",
+   "catalog/factor-editor.js",
+   "catalog/factor-object-form.js",
+   "catalog/factor-set-assistance.js",
+   "catalog/factor-set-editor.js"
+  ],
+  "output-choice": [
+   "core/output-choices.js"
+  ],
+  "report-settings": [
+   "research/report-settings.js"
+  ],
+  "object-transfer": [
+   "report/object-transfer.js"
+  ],
+  "report": [
+   "report/rich-text.js",
+   "report/rich-text-blocks.js",
+   "report/table-view.js",
+   "report/lazy-runtime.js",
+   "report/tree.js",
+   "report/chapter-cache.js",
+   "report/component-view.js",
+   "report/chapter-rail.js",
+   "report/report-renderer.js",
+   "report/source.js",
+   "report/report-entry.js"
+  ],
+  "research-shell": [
+   "research/workspaces.js"
+  ],
+  "research-visibility": [
+   "research/visibility.js"
+  ],
+  "research-catalog": [
+   "research/researches.js"
+  ],
+  "research-evidence": [
+   "research/evidence-applicability.js",
+   "research/evidence.js"
+  ],
+  "research-reports": [
+   "research/reports.js"
+  ],
+  "research-local": [
+   "research/local.js"
+  ],
+  "research-shared": [
+   "research/shared.js"
+  ],
+  "research-graph": [
+   "research/graph.js",
+   "research/graph-list.js"
+  ],
+  "research": [],
+  "research-reference": [
+   "research/run-spec-view.js",
+   "research/reference.js"
+  ],
+  "jobs": [
+   "jobs/list-format.js",
+   "jobs/progress.js",
+   "jobs/page-tabs.js",
+   "jobs/test-types.js",
+   "jobs/jobs.js"
+  ],
+  "job-detail-core": [
+   "jobs/artifacts.js",
+   "jobs/artifact-query.js",
+   "jobs/generation.js",
+   "jobs/actions.js",
+   "jobs/detail-tabs.js",
+   "jobs/supplementals.js",
+   "jobs/result-tabs.js",
+   "jobs/custom-analysis-assistance.js",
+   "jobs/custom-analyses.js",
+   "jobs/result-viewers.js",
+   "jobs/detail.js"
+  ],
+  "job-detail-input": [
+   "jobs/input-detail.js"
+  ],
+  "job-detail-previews": [
+   "core/market-data.js",
+   "jobs/highcharts-timeline.js",
+   "jobs/highcharts-viewers.js",
+   "jobs/job-artifact-viewers.js"
+  ],
+  "job-detail-factor-series": [
+   "test-modules/factor-evaluation/results/model.js",
+   "test-modules/factor-evaluation/results/chart.js",
+   "test-modules/factor-evaluation/results/view.js"
+  ],
+  "job-detail-ic": [
+   "jobs/ic-result-model.js",
+   "jobs/ic-portfolio-view.js",
+   "jobs/ic-result-charts.js",
+   "jobs/ic-result-view.js"
+  ],
+  "job-detail-backtest": [
+   "test-modules/backtest/results/runtime-model.js",
+   "test-modules/backtest/results/model.js",
+   "test-modules/backtest/results/strategy-selection.js",
+   "test-modules/backtest/results/analysis/api.js",
+   "test-modules/backtest/results/analysis/ui.js",
+   "test-modules/backtest/results/analysis/group-products.js",
+   "test-modules/backtest/results/analysis/group-detail-parts.js",
+   "test-modules/backtest/results/analysis/group-detail.js",
+   "test-modules/backtest/results/analysis/ranking-view.js",
+   "test-modules/backtest/results/analysis/snapshot-view.js",
+   "test-modules/backtest/results/analysis/strategy-analysis.js",
+   "test-modules/backtest/results/event-flow.js",
+   "test-modules/backtest/results/surfaces.js",
+   "test-modules/backtest/results/view.js"
+  ],
+  "catalog-products-base": [
+   "catalog/products.js"
+  ],
+  "catalog-product-sources": [
+   "catalog/source-list.js"
+  ],
+  "catalog-product-source-family": [
+   "catalog/source-family-detail.js"
+  ],
+  "catalog-product-groups": [],
+  "catalog-product-editing-shared": [
+   "catalog/shared/detail-ui.js",
+   "catalog/shared/selection-tree.js"
+  ],
+  "catalog-product-group": [
+   "catalog/product-group-path-editor.js",
+   "catalog/product-group-detail.js"
+  ],
+  "catalog-product-categories": [
+   "catalog/product-category-overlay.js",
+   "catalog/product-category-create.js",
+   "catalog/product-category-label-editor.js",
+   "catalog/product-categories.js"
+  ],
+  "catalog-product-category": [
+   "catalog/product-category-detail-layout.js",
+   "catalog/product-category-detail.js"
+  ],
+  "catalog-product-detail": [
+   "catalog/product-price-panel.js",
+   "catalog/details.js"
+  ],
+  "catalog": [],
+  "workbench-core": [
+   "workbench/test-page-assistance.js",
+   "workbench/setting-rules.js",
+   "workbench/test-lazy-code.js",
+   "workbench/templates/actions.js",
+   "workbench/test-field-row.js",
+   "workbench/test-field-help.js",
+   "workbench/test-state.js",
+   "workbench/tests.js"
+  ],
+  "workbench-input-state": [
+   "workbench/test-input-state.js"
+  ],
+  "workbench-compiler": [
+   "workbench/test-configuration-compiler.js"
+  ],
+  "workbench-settings": [
+   "workbench/tab-chip-content.js",
+   "workbench/test-settings.js",
+   "workbench/test-content-adapters.js"
+  ],
+  "workbench-settings-chips": [
+   "workbench/test-setting-chips.js"
+  ],
+  "workbench-settings-fields": [
+   "workbench/test-control-loader.js",
+   "workbench/test-settings-schema.js"
+  ],
+  "workbench-settings-controls": [
+   "workbench/test-setting-fields.js"
+  ],
+  "workbench-ic-controls": [
+   "workbench/ic-configuration.js",
+   "workbench/ic-horizon-settings.js"
+  ],
+  "workbench-factor-controls": [
+   "workbench/factor-roles.js"
+  ],
+  "workbench-product-controls": [
+   "workbench/custom-product-overrides.js"
+  ],
+  "workbench-run": [
+   "workbench/test-run-fields.js"
+  ],
+  "workbench-run-batch": [
+   "workbench/run-batch/model.js",
+   "workbench/test-run-summary.js",
+   "workbench/test-run-batch.js"
+  ],
+  "workbench-run-batch-actions": [
+   "workbench/run-batch/actions.js"
+  ],
+  "workbench-run-results": [
+   "workbench/test-run-progress.js",
+   "workbench/test-run-results.js"
+  ],
+  "workbench-run-submit": [
+   "workbench/test-configuration.js"
+  ],
+  "workbench-factors": [
+   "workbench/factor-selection.js",
+   "workbench/factor-set-selection.js",
+   "workbench/factor-family-picker.js",
+   "workbench/strategy-editor-factor-overlay.js",
+   "workbench/test-factor-candidates.js",
+   "workbench/test-factor-candidate-sources.js",
+   "workbench/test-factors.js"
+  ],
+  "workbench-source-inputs": [
+   "workbench/test-source-upload.js"
+  ],
+  "workbench-strategy-bindings": [
+   "workbench/strategy-binding-panel.js"
+  ],
+  "workbench-products": [
+   "workbench/test-products.js",
+   "workbench/test-categories.js"
+  ],
+  "workbench-test-ui": [],
+  "workbench-configuration-groups": [
+   "workbench/tab-list-chip.js",
+   "workbench/configuration-groups/common/surface.js",
+   "workbench/strategy-editor-scope.js",
+   "workbench/strategy-editor-tabs.js",
+   "workbench/strategy-editor-pickers.js",
+   "workbench/strategy-list.js"
+  ],
+  "workbench-ic-groups": [
+   "workbench/configuration-groups/ic/model.js",
+   "workbench/configuration-groups/ic/form.js",
+   "workbench/configuration-groups/ic/adapter.js"
+  ],
+  "workbench-backtest": [
+   "workbench/backtest-group-overrides.js",
+   "workbench/strategy-editor-overrides.js",
+   "workbench/strategy-editor-custom-source.js",
+   "workbench/strategy-editor-product-filter.js",
+   "workbench/backtest-group-batches.js",
+   "workbench/backtest-group-model.js",
+   "workbench/backtest-group-form.js",
+   "workbench/backtest-groups.js"
+  ],
+  "workbench-templates": [
+   "workbench/test-templates.js"
+  ],
+  "profile-agent-chat": [
+   "profile/chatkit-protocol.js",
+   "profile/chatkit-conversations.js",
+   "profile/chatkit-event-source.js",
+   "profile/chatkit-stream.js",
+   "profile/chatkit-adapter.js",
+   "profile/agent-chat.js"
+  ],
+  "profile-directory": [
+   "profile/profile-directory.js",
+   "profile/profile-directory-detail.js",
+   "profile/profiles.js"
+  ],
+  "profile-skills": [
+   "profile/agent-skills.js"
+  ],
+  "profile-workspace": [
+   "profile/workspace-browser.js"
+  ],
+  "profile-agent-session": [
+   "profile/agent-runtime-controls.js"
+  ],
+  "profile-agent-models": [
+   "profile/agent-model-editor.js",
+   "profile/agent-models.js"
+  ],
+  "profile": [],
+  "settings": [
+   "settings/settings.js"
+  ],
+  "settings-devices": [
+   "settings/devices.js"
+  ],
+  "settings-control-database": [
+   "settings/control-database.js"
+  ],
+  "manager": [
+   "settings/manager.js"
+  ],
+  "manager-access": [
+   "manager/access-control-table.js",
+   "manager/access-control.js"
+  ],
+  "manager-accounts": [
+   "manager/accounts.js"
+  ],
+  "manager-mihomo": [
+   "manager/mihomo.js"
+  ],
+  "app": [
+   "profile/page-agent-lifecycle.js",
+   "profile/page-agent-context.js",
+   "profile/page-agent-drawer.js",
+   "profile/page-agent-profiles.js",
+   "profile/page-assistance.js",
+   "app/navigation.js",
+   "app/route-dispatch.js",
+   "app/tab-workspace.js",
+   "app/tab-view-cache.js",
+   "app/tabs.js",
+   "app/webmcp.js",
+   "app/tab-return.js",
+   "app/visitor-device.js",
+   "app/auth.js",
+   "app/runtime.js",
+   "app/shell.js",
+   "app/page-mode.js",
+   "app/coordinator.js"
+  ]
+ },
+ "external_scripts": [
+  "katex/katex.min.js",
+  "vendor/highlight/highlight.min.js",
+  "vendor/highcharts/highstock.min.js",
+  "vendor/cytoscape/cytoscape.min.js"
+ ],
+ "scripts": [
+  "core/module-loader.js",
+  "core/i18n.js",
+  "core/icons.js",
+  "core/help-popover.js",
+  "core/page-state.js",
+  "core/test-type-registry.js",
+  "core/factor-param-contract.js",
+  "app/route-presentation.js",
+  "profile/page-agent-lifecycle.js",
+  "profile/page-agent-context.js",
+  "profile/page-agent-drawer.js",
+  "profile/page-agent-profiles.js",
+  "profile/page-assistance.js",
+  "docs/source.js",
+  "docs/field-catalog.js",
+  "docs/reader.js",
+  "core/highcharts-range-loader.js",
+  "core/price-chart.js",
+  "core/market-data.js",
+  "catalog/shared/multi-select-filter.js",
+  "catalog/shared/multi-select-filter-remote.js",
+  "jobs/list-format.js",
+  "jobs/page-tabs.js",
+  "jobs/test-types.js",
+  "jobs/highcharts-timeline.js",
+  "jobs/highcharts-viewers.js",
+  "test-modules/factor-evaluation/results/model.js",
+  "test-modules/factor-evaluation/results/chart.js",
+  "jobs/ic-result-model.js",
+  "jobs/ic-portfolio-view.js",
+  "jobs/ic-result-charts.js",
+  "test-modules/backtest/results/runtime-model.js",
+  "test-modules/backtest/results/model.js",
+  "test-modules/backtest/results/strategy-selection.js",
+  "test-modules/backtest/results/event-flow.js",
+  "test-modules/backtest/results/surfaces.js",
+  "jobs/job-artifact-viewers.js",
+  "core/shared-ui.js",
+  "core/output-choices.js",
+  "research/report-settings.js",
+  "report/rich-text.js",
+  "report/rich-text-blocks.js",
+  "report/table-view.js",
+  "report/lazy-runtime.js",
+  "report/tree.js",
+  "report/chapter-cache.js",
+  "report/component-view.js",
+  "report/chapter-rail.js",
+  "report/report-renderer.js",
+  "report/object-transfer.js",
+  "report/source.js",
+  "report/report-entry.js",
+  "research/run-spec-view.js",
+  "research/reference.js",
+  "research/graph.js",
+  "research/graph-list.js",
+  "research/local.js",
+  "research/evidence-applicability.js",
+  "research/evidence.js",
+  "research/visibility.js",
+  "research/reports.js",
+  "research/shared.js",
+  "research/researches.js",
+  "research/workspaces.js",
+  "jobs/artifacts.js",
+  "jobs/artifact-query.js",
+  "test-modules/factor-evaluation/results/view.js",
+  "jobs/ic-result-view.js",
+  "test-modules/backtest/results/analysis/api.js",
+  "test-modules/backtest/results/analysis/ui.js",
+  "test-modules/backtest/results/analysis/group-products.js",
+  "test-modules/backtest/results/analysis/group-detail-parts.js",
+  "test-modules/backtest/results/analysis/group-detail.js",
+  "test-modules/backtest/results/analysis/ranking-view.js",
+  "test-modules/backtest/results/analysis/snapshot-view.js",
+  "test-modules/backtest/results/analysis/strategy-analysis.js",
+  "test-modules/backtest/results/view.js",
+  "jobs/generation.js",
+  "jobs/progress.js",
+  "jobs/jobs.js",
+  "jobs/actions.js",
+  "jobs/input-detail.js",
+  "jobs/detail-tabs.js",
+  "jobs/supplementals.js",
+  "jobs/result-tabs.js",
+  "jobs/custom-analysis-assistance.js",
+  "jobs/custom-analyses.js",
+  "jobs/result-viewers.js",
+  "jobs/detail.js",
+  "catalog/factor-model.js",
+  "catalog/factor-detail-shared.js",
+  "catalog/shared/object-mode-actions.js",
+  "catalog/factor-display-enrichment.js",
+  "catalog/shared/object-detail-tabs.js",
+  "catalog/shared/object-job-table.js",
+  "catalog/factor-catalog-runtime.js",
+  "catalog/factor-group-filter.js",
+  "catalog/factor-list.js",
+  "catalog/factor-catalog-list.js",
+  "catalog/factor-assistance.js",
+  "catalog/factor-parameter-editor.js",
+  "catalog/factor-editor.js",
+  "catalog/factor-object-form.js",
+  "catalog/factor-set-assistance.js",
+  "catalog/factor-set-editor.js",
+  "catalog/factor-details.js",
+  "catalog/factors.js",
+  "catalog/strategy-library-runtime.js",
+  "catalog/strategy-library-list.js",
+  "catalog/strategy-library-assistance.js",
+  "catalog/strategy-library-editor.js",
+  "catalog/strategy-library-detail.js",
+  "catalog/product-category-model.js",
+  "catalog/product-category-overlay.js",
+  "catalog/product-category-create.js",
+  "catalog/product-category-label-editor.js",
+  "catalog/shared/detail-ui.js",
+  "catalog/shared/selection-tree.js",
+  "catalog/product-category-detail-layout.js",
+  "catalog/product-category-detail.js",
+  "catalog/product-categories.js",
+  "catalog/product-list-table.js",
+  "catalog/product-tree.js",
+  "catalog/source-list.js",
+  "catalog/source-family-detail.js",
+  "catalog/products.js",
+  "catalog/product-group-path-editor.js",
+  "catalog/product-group-detail.js",
+  "catalog/product-price-panel.js",
+  "catalog/details.js",
+  "workbench/test-page-assistance.js",
+  "workbench/setting-rules.js",
+  "workbench/test-input-state.js",
+  "workbench/test-configuration-compiler.js",
+  "workbench/test-lazy-code.js",
+  "workbench/test-object-picker.js",
+  "workbench/object-overlay.js",
+  "workbench/test-field-row.js",
+  "workbench/test-field-help.js",
+  "workbench/test-control-loader.js",
+  "workbench/test-state.js",
+  "workbench/ic-configuration.js",
+  "workbench/ic-horizon-settings.js",
+  "workbench/factor-roles.js",
+  "workbench/custom-product-overrides.js",
+  "workbench/test-setting-chips.js",
+  "workbench/tab-chip-content.js",
+  "workbench/test-setting-fields.js",
+  "workbench/tab-list-chip.js",
+  "workbench/configuration-groups/common/surface.js",
+  "workbench/configuration-groups/ic/model.js",
+  "workbench/configuration-groups/ic/form.js",
+  "workbench/configuration-groups/ic/adapter.js",
+  "workbench/test-settings.js",
+  "workbench/test-settings-schema.js",
+  "workbench/backtest-group-overrides.js",
+  "workbench/strategy-editor-scope.js",
+  "workbench/strategy-editor-tabs.js",
+  "workbench/strategy-editor-overrides.js",
+  "workbench/strategy-editor-pickers.js",
+  "workbench/strategy-editor-product-filter.js",
+  "workbench/factor-selection.js",
+  "workbench/factor-set-selection.js",
+  "workbench/factor-family-picker.js",
+  "workbench/test-source-upload.js",
+  "workbench/strategy-binding-panel.js",
+  "workbench/strategy-editor-factor-overlay.js",
+  "workbench/strategy-editor-custom-source.js",
+  "workbench/test-factor-candidates.js",
+  "workbench/test-factor-candidate-sources.js",
+  "workbench/test-factors.js",
+  "workbench/test-products.js",
+  "workbench/test-categories.js",
+  "workbench/backtest-group-batches.js",
+  "workbench/backtest-group-model.js",
+  "workbench/strategy-list.js",
+  "workbench/backtest-group-form.js",
+  "workbench/backtest-groups.js",
+  "workbench/test-configuration.js",
+  "workbench/templates/actions.js",
+  "workbench/test-templates.js",
+  "workbench/test-content-adapters.js",
+  "workbench/test-run-fields.js",
+  "workbench/run-batch/model.js",
+  "workbench/test-run-summary.js",
+  "workbench/test-run-progress.js",
+  "workbench/test-run-results.js",
+  "workbench/test-run-batch.js",
+  "workbench/run-batch/actions.js",
+  "workbench/tests.js",
+  "profile/agent-skills.js",
+  "profile/chatkit-protocol.js",
+  "profile/chatkit-conversations.js",
+  "profile/agent-runtime-controls.js",
+  "profile/chatkit-event-source.js",
+  "profile/chatkit-stream.js",
+  "profile/chatkit-adapter.js",
+  "profile/agent-chat.js",
+  "profile/profile-directory.js",
+  "profile/profile-directory-detail.js",
+  "profile/workspace-browser.js",
+  "profile/profiles.js",
+  "profile/agent-model-editor.js",
+  "profile/agent-models.js",
+  "settings/settings.js",
+  "settings/devices.js",
+  "settings/control-database.js",
+  "manager/access-control-table.js",
+  "manager/access-control.js",
+  "manager/accounts.js",
+  "settings/manager.js",
+  "manager/mihomo.js",
+  "app/navigation.js",
+  "app/route-dispatch.js",
+  "app/tab-workspace.js",
+  "app/tab-view-cache.js",
+  "app/tabs.js",
+  "app/webmcp.js",
+  "app/tab-return.js",
+  "app/visitor-device.js",
+  "app/auth.js",
+  "app/runtime.js",
+  "app/shell.js",
+  "app/page-mode.js",
+  "app/coordinator.js"
+ ],
+ "notes": "The order is an intentional global-IIFE dependency contract; keep it synchronized with research.html until the loader is replaced."
 }

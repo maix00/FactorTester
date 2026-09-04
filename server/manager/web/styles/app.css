@@ -140,6 +140,32 @@ body.sidebar-collapsed .opened-tab .tab-label { display: none !important; }
 .account-button { border-top: 1px solid var(--line); border-radius: 0; padding-top: 13px; }
 main { min-width: 0; }
 .topbar { position: sticky; top: 0; z-index: 10; height: 88px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px 28px; background: color-mix(in srgb, var(--panel) 92%, transparent); backdrop-filter: blur(18px); border-bottom: 1px solid var(--line); }
+/* Object-page authoring mode: view keeps the quiet header; edit and create
+   tint the header and show a small mode badge (page-mode.js drives the
+   documentElement data attribute from the active tab path). */
+.eyebrow-row { display: flex; align-items: center; gap: 8px; }
+.page-mode-badge {
+  font-size: 11px; line-height: 1; padding: 3px 8px; border-radius: 999px;
+  border: 1px solid transparent; white-space: nowrap;
+}
+html[data-page-mode="edit"] .topbar {
+  background: color-mix(in srgb, var(--accent, #4a90d9) 12%, var(--panel));
+  border-bottom-color: color-mix(in srgb, var(--accent, #4a90d9) 45%, var(--line));
+}
+html[data-page-mode="edit"] .page-mode-badge {
+  color: color-mix(in srgb, var(--accent, #4a90d9) 85%, #000);
+  border-color: color-mix(in srgb, var(--accent, #4a90d9) 55%, transparent);
+  background: color-mix(in srgb, var(--accent, #4a90d9) 14%, transparent);
+}
+html[data-page-mode="create"] .topbar {
+  background: color-mix(in srgb, #3aa05a 14%, var(--panel));
+  border-bottom-color: color-mix(in srgb, #3aa05a 48%, var(--line));
+}
+html[data-page-mode="create"] .page-mode-badge {
+  color: #2b7a45;
+  border-color: color-mix(in srgb, #3aa05a 55%, transparent);
+  background: color-mix(in srgb, #3aa05a 16%, transparent);
+}
 .topbar h1 { margin: 2px 0 0; font-size: 20px; }
 .eyebrow { font-size: 12px; color: var(--muted); }
 .toolbar { display: flex; align-items: center; gap: 8px; }

@@ -53,12 +53,16 @@
       context.navigate(`/factor-series?factor_ref=${encodeURIComponent(frozenRef)}`);
     }, context.t("使用冻结因子配置运行序列查看任务")));
     if (factor.can_edit && context.session && !context.testObjectViewOnly) {
-      context.toolbar?.append(context.button(context.t("编辑"), () => {
-        context.navigate(FTTabReturn.withSource(
-          `/factors/factor/${encodeURIComponent(alias || frozenRef)}?mode=edit`,
-          context, {kind: "factor", ref: alias || frozenRef},
-        ));
-      }, context.t("在独立标签页编辑因子")));
+      // Same-tab authoring: the shared mode-actions component swaps this tab
+      // to the edit mode of the same object (?mode=edit on the same pathname
+      // reuses the factor detail tab).
+      window.FTObjectModeActions?.mount?.(context, {
+        mode: "view",
+        onEdit: true,
+        editHref: `/factors/factor/${encodeURIComponent(alias || frozenRef)}?mode=edit`,
+        editLabel: "编辑",
+        editHelp: "编辑因子",
+      });
     }
     context.updateActiveTab?.({title: alias || context.t("因子详情")});
     const root = document.createElement("div");
@@ -143,12 +147,15 @@
     if (canEdit && !context.testObjectViewOnly) {
       const editQuery = publicFamily
         ? "?mode=edit&visibility=public" : "?mode=edit";
-      context.toolbar?.append(context.button(context.t("编辑"), () => {
-        context.navigate(FTTabReturn.withSource(
-          `/factors/family/${encodeURIComponent(family.family_ref)}${editQuery}`,
-          context, {kind: "family", ref: family.family_ref},
-        ));
-      }, context.t("在独立标签页编辑因子家族")));
+      // Same-tab authoring: the shared mode-actions component swaps this tab
+      // to the edit mode of the same family.
+      window.FTObjectModeActions?.mount?.(context, {
+        mode: "view",
+        onEdit: true,
+        editHref: `/factors/family/${encodeURIComponent(family.family_ref)}${editQuery}`,
+        editLabel: "编辑",
+        editHelp: "编辑因子家族",
+      });
       context.toolbar?.append(context.button(context.t("删除"), async () => {
         if (!window.confirm(context.t("确认删除该因子家族？"))) return;
         const alias = baseFamily.factor_family_alias || baseFamily.factor_family_name;
