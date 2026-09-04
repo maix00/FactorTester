@@ -169,22 +169,28 @@ def test_temporary_object_edit_flows_through_shared_actions_and_stays_temporary(
     assert "strategy.access?.can_edit || context.testObjectTemporary === true" in strategy
 
 
-def test_multi_select_supports_embedded_candidate_type_filter() -> None:
-    """The shared picker may embed a candidate-type filter next to its search
-    box (single or multi choice, per caller) that narrows only the visible
-    candidates and never touches the selection."""
+def test_multi_select_groups_candidates_by_object_type() -> None:
+    """The shared picker splits the 候选 section into one 「候选（××类型）」
+    group per candidate type when any item carries a type/kind field (object
+    pickers); scalar providers without a type field keep a single 候选 group.
+    The funnel type filter is removed in favour of the per-type sections."""
     source = (WEB_ROOT / "catalog/shared/multi-select-filter/index.js").read_text(
         encoding="utf-8",
     )
-    type_filter = (
-        WEB_ROOT / "catalog/shared/multi-select-filter/type-filter.js"
-    ).read_text(encoding="utf-8")
-    assert "makeTypeFilterPanel" not in source
-    assert "window.FTMultiSelectTypeFilter?.create" in source
-    assert "window.FTMultiSelectTypeFilter" in type_filter
-    assert "typeFilter.visible(item)" in source
-    assert 'spec?.multi !== false' in type_filter
-    assert "ft-multi-select-type-panel" in type_filter
+    assert "candidateGrouped" in source
+    assert "typeOf" in source
+    assert "typeLabelOf" in source
+    assert "候选" in source
+    assert "ft-multi-select-section-others" in source
+    assert "FTMultiSelectTypeFilter" not in source
+    assert "typeFilter" not in source
+    # The unified object picker is a thin FTMultiSelectFilter wrapper that
+    # concentrates object-choice semantics; the legacy names alias to it.
+    opk = (WEB_ROOT / "workbench/test-object-picker.js").read_text(encoding="utf-8")
+    assert "window.FTObjectPicker" in opk
+    assert "window.FTTestObjectPicker = window.FTObjectPicker" in opk
+    assert "window.FTTestChoicePicker = window.FTObjectPicker" in opk
+    assert "typeLabelOf" in opk
     # Optional "+" entry reusing the caller's on-the-fly path; created
     # candidates join the pool with an 当场 badge (editing stays on the
     # view-overlay ? infrastructure).

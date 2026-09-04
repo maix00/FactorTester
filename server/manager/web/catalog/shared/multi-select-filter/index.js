@@ -160,6 +160,16 @@
         ? Boolean(options.disabled(item)) : Boolean(options.disabled)),
     }));
     const multi = options.multi !== false;
+    // Candidate-type grouping: when any candidate carries a `type`/`kind`
+    // field (object pickers), the 候选 section is split into one
+    // 「候选（××类型）」 group per type; scalar providers without a type field
+    // keep a single plain 「候选」 group.
+    const typeOf = options.typeOf
+      || (item => String(item?.type || item?.kind || "").trim());
+    const typeLabelOf = options.typeLabelOf
+      || ((key, item) => String(item?.typeLabel || key || "").trim());
+    const candidateGrouped = options.groupByType !== false
+      && items.some(item => typeOf(item));
     const singleGroupName = `${String(options.name || "ft-single-select").trim()
       || "ft-single-select"}-${++pickerSequence}`;
     let selected = normalizeSelected(options.selected ?? [], items);
@@ -260,31 +270,6 @@
     clear.title = translate(context, "清除搜索", "清除搜索");
     clear.setAttribute("aria-label", clear.title);
     searchRow.append(search, clear);
-    // Optional embedded candidate-type filter (funnel next to the search
-    // box).  It filters only the visible candidates — selection untouched.
-    let typeFilter = null;
-    if (options.typeFilter && options.typeFilter.items?.length) {
-      typeFilter = window.FTMultiSelectTypeFilter?.create(context, options.typeFilter, () => {
-        render();
-      });
-      const toggle = document.createElement("button");
-      toggle.type = "button";
-      toggle.className = "ft-multi-select-type-toggle icon-action-button";
-      toggle.title = translate(context, "筛选类型", "筛选类型");
-      toggle.setAttribute("aria-label", toggle.title);
-      toggle.addEventListener("click", event => {
-        event.stopPropagation?.();
-        typeFilter.toggle();
-      });
-      const iconNode = window.FTIcons?.node?.("line.3.horizontal.decrease.circle")
-        || window.FTIcons?.node?.("funnel");
-      if (iconNode) {
-        toggle.replaceChildren?.(iconNode);
-      } else {
-        toggle.textContent = "⧩";
-      }
-      searchRow.append(toggle);
-    }
     // Optional on-the-fly creation entry ("+") declared by the caller.  It
     // reuses the caller's existing on-the-fly path; created candidates join
     // the selectable pool flagged with an 当场 badge.  Editing stays on the
@@ -380,7 +365,7 @@
     note.className = "ft-multi-select-selection-note";
     const actions = document.createElement("div");
     actions.className = "ft-multi-select-actions";
-    menu.append(searchRow, ...(typeFilter ? [typeFilter.panel] : []),
+    menu.append(searchRow,
       ...(loadStatus ? [loadStatus] : []), optionList);
     dropdown.append(summary, menu);
     if (supportsAnchor) {
@@ -512,7 +497,7 @@
         `${item.label} ${item.value} ${item.description}`
           .toLocaleLowerCase().includes(query)
       ));
-      return typeFilter ? base.filter(item => typeFilter.visible(item)) : base;
+      return base;
     }
 
     function setItems(nextItems, preserveSelected = false) {
@@ -829,13 +814,36 @@
       }
       const others = shown.filter(item => !item.exclusive && item.onsite !== true);
       if (others.length) {
-        rows.push(sectionHeading(
-          `${translate(context, "候选", "候选")} (${others.length})`,
-          othersCollapsed,
-          () => { othersCollapsed = !othersCollapsed; render(); },
-        ));
-        if (!othersCollapsed) {
-          rows.push(wrap(others.map(item => buildRow(item)), "ft-multi-select-section-others"));
+        if (candidateGrouped) {
+          const grouped = new Map();
+          for (const item of others) {
+            const key = typeOf(item);
+            if (!grouped.has(key)) grouped.set(key, []);
+            grouped.get(key).push(item);
+          }
+          for (const [key, list] of grouped) {
+            const baseLabel = translate(context, "候选", "候选");
+            const label = key
+              ? `${baseLabel}（${typeLabelOf(key, list[0])}）`
+              : baseLabel;
+            rows.push(sectionHeading(
+              `${label} (${list.length})`,
+              othersCollapsed,
+              () => { othersCollapsed = !othersCollapsed; render(); },
+            ));
+            if (!othersCollapsed) {
+              rows.push(wrap(list.map(item => buildRow(item)), "ft-multi-select-section-others"));
+            }
+          }
+        } else {
+          rows.push(sectionHeading(
+            `${translate(context, "候选", "候选")} (${others.length})`,
+            othersCollapsed,
+            () => { othersCollapsed = !othersCollapsed; render(); },
+          ));
+          if (!othersCollapsed) {
+            rows.push(wrap(others.map(item => buildRow(item)), "ft-multi-select-section-others"));
+          }
         }
       }
       return rows;

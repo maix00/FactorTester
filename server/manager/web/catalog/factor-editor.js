@@ -130,13 +130,29 @@
     return FTMultiSelectFilter.create(context, options);
   }
 
+  // The picker's candidate source: library families plus this-session on-the-fly
+  // families (which survive a redraw via state.onsiteFamilies). Used both for
+  // the rendered items and for onChange lookups so a rebuild keeps 当场 + selection.
+  function familyPickerItems(data, state) {
+    const base = familyItems(data);
+    const onsite = (state?.onsiteFamilies || []).map(f => ({
+      value: familyRef(f),
+      label: familyAlias(f) || familyRef(f),
+      family: f,
+      onsite: true,
+      temporary: true,
+    }));
+    const seen = new Set(base.map(item => item.value));
+    return base.concat(onsite.filter(item => !seen.has(item.value)));
+  }
+
   function familyPicker(context, data, state, redraw) {
     const picker = sharedPicker(context, {
       compact: true,
       name: "factor-family-source",
       title: context.t("因子家族"),
       multi: false,
-      items: familyItems(data),
+      items: familyPickerItems(data, state),
       selected: state.family ? [familyRef(state.family)] : [],
       onAddCandidate: async (_context, {add}) => {
         const editingTemporary = state.family?.temporary === true
@@ -159,6 +175,11 @@
               family,
               temporary: true,
             });
+            // Keep the on-the-fly family for this session so a redraw rebuilds
+            // the picker with it in 当场 + selected. Dedupe by ref.
+            if (!state.onsiteFamilies.some(f => familyRef(f) === familyRef(family))) {
+              state.onsiteFamilies.push(family);
+            }
             state.family = family;
             state.latestFamily = family;
             state.sourceMode = "source";
@@ -177,8 +198,19 @@
           },
         });
       },
+      onTemporaryCandidateRemoved: item => {
+        const removedRef = String(item?.value ?? item?.ref ?? "").trim();
+        state.onsiteFamilies = (state.onsiteFamilies || []).filter(f => (
+          familyRef(f) !== removedRef
+        ));
+        if (state.family && familyRef(state.family) === removedRef) {
+          state.family = null;
+          state.latestFamily = null;
+        }
+      },
       onChange: async values => {
-        state.family = familyItems(data).find(item => item.value === values[0])?.family || null;
+        state.family = familyPickerItems(data, state)
+          .find(item => item.value === values[0])?.family || null;
         state.sourceMode = "family";
         if (state.family && !parameterDefinitions(state.family).length) {
           try {
@@ -1002,6 +1034,10 @@
       sourceVersions: null,
       sourceVersionError: "",
       sourceVersionLoading: false,
+      // On-the-fly factor families created through the picker "+" this session.
+      // They are NOT pushed into data.families (never persist), but must survive
+      // a redraw so the 当场 section + selection survive a picker rebuild.
+      onsiteFamilies: [],
     };
     const noun = familyMode ? context.t("因子家族") : context.t("因子");
     const titleText = mode === "create"
