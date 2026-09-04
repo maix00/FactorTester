@@ -54,7 +54,7 @@ class FactorSourceCatalog:
                     "[fsc-deny] PermissionError deny: "
                     f"principal={principal!r} owner={owner!r} "
                     f"factor={factor_id!r}\n"
-                    + "".join(traceback.format_stack()[-6:-1]),
+                    + "\n".join(traceback.format_stack()),
                     file=sys.stderr, flush=True,
                 )
                 raise PermissionError(
