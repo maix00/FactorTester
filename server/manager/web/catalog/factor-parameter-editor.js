@@ -262,6 +262,21 @@
           }
           return;
         }
+        // Hand-typed on-the-fly factor alias: resolve against an already-present
+        // on-the-fly candidate (by label/alias/ref) BEFORE the library alias
+        // validator, so an on-the-fly alias becomes that on-the-fly factor (and
+        // keeps its 当场 badge + view overlay) instead of a raw exclusive item.
+        const onsiteCandidate = candidateItems.find(item => (
+          item.type === "factor" && (item.onsite || item.temporary)
+          && (String(item.label || "").trim() === v
+            || display(item.factor) === v
+            || selectionValue(item.factor) === v)
+        ));
+        if (onsiteCandidate) {
+          valuePicker?.setValues?.([onsiteCandidate.value]);
+          setValue(onsiteCandidate.factor, "manual");
+          return;
+        }
         // Hand-typed exclusive value.
         const constant = numericConstant(v);
         if (constant !== null) { setValue(constant, "manual"); return; }

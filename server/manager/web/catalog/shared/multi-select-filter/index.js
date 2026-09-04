@@ -82,6 +82,7 @@
     const descriptor = {kind: view.kind, mode: "view", ref: view.ref || ""};
     if (view.initialValue !== undefined) descriptor.initialValue = view.initialValue;
     if (view.temporary === true) descriptor.temporary = true;
+    if (typeof view.onSaved === "function") descriptor.onSaved = view.onSaved;
     if (options.testState !== undefined) descriptor.testState = options.testState;
     const open = context?.openObject || (window.FTObjectOverlay?.open
       ? childOptions => window.FTObjectOverlay.open(context, childOptions)
@@ -113,7 +114,38 @@
       button.addEventListener("click", event => {
         event.preventDefault?.();
         event.stopPropagation?.();
-        openItemView(context, view, options);
+        // On-the-fly objects: the view overlay edits in place and, on save,
+        // overwrites this candidate — a shared capability for every temporary
+        // object (factor, family, set, ...), not just the factor parameter.
+        const enhanced = (item.onsite === true || item.temporary === true)
+          ? {
+              ...view,
+              initialValue: view.initialValue !== undefined
+                ? view.initialValue
+                : (item.factor || item.family || item.factorSet || item),
+              temporary: view.temporary !== true ? true : view.temporary,
+              onSaved: typeof view.onSaved === "function" ? view.onSaved : saved => {
+                if (!saved) return;
+                const idx = items.indexOf(item);
+                if (idx < 0) return;
+                const label = String(
+                  saved?.alias || saved?.factor_alias || saved?.factor_family_alias
+                  || saved?.title_zh || saved?.set_id || item.label || "",
+                ).trim() || item.label;
+                const next = {
+                  ...item,
+                  label,
+                  view: {...(item.view || {}), initialValue: saved},
+                };
+                if (item.factor !== undefined) next.factor = saved;
+                if (item.family !== undefined) next.family = saved;
+                if (item.factorSet !== undefined) next.factorSet = saved;
+                items[idx] = next;
+                render();
+              },
+            }
+          : view;
+        openItemView(context, enhanced, options);
       });
       return button;
     }
