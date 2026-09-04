@@ -20,11 +20,16 @@
     const revision = strategy.current_revision || {};
     context.setHeading(strategy.name || context.t("策略详情"), context.t("策略库"));
     context.updateActiveTab?.({title: strategy.name || context.t("策略详情")});
-    if (strategy.access?.can_edit) context.toolbar.append(FTUI.actionButton(
-      context.t("编辑"), () => context.navigate(
-        `/strategies/${encodeURIComponent(strategy.strategy_ref)}?mode=edit`,
-      ), {variant: "secondary"},
-    ));
+    if (strategy.access?.can_edit) {
+      // Same-tab authoring entry via the shared mode-actions component.
+      window.FTObjectModeActions?.mount?.(context, {
+        mode: "view",
+        onEdit: true,
+        editHref: `/strategies/${encodeURIComponent(strategy.strategy_ref)}?mode=edit`,
+        editLabel: "编辑",
+        editHelp: "编辑策略",
+      });
+    }
     if (strategy.access?.can_share) context.toolbar.append(FTUI.iconButton(
       context, "person.2", "共享", () => share(context, strategy),
       {className: "strategy-library-toolbar-action"},
@@ -168,21 +173,15 @@
   function renderEditor(context, value, mode, route) {
     context.setHeading(mode === "create" ? context.t("新建策略") : context.t("编辑策略"), context.t("策略库"));
     const editor = FTStrategyLibraryEditor.create(context, value, {mode, storageMode: "library"});
-    const save = FTUI.actionButton(
-      context.t(mode === "create" ? "提交" : "保存"),
-      () => editor.form.requestSubmit(), {variant: "primary"},
-    );
-    // Route-session guard: the toolbar is shared across tabs; an async editor
-    // render completing after navigation must not append its actions to the
-    // next page's header.
-    if (context.isRouteCurrent?.() !== false) {
-      context.toolbar.append(save);
-      if (mode === "edit") context.toolbar.append(FTUI.actionButton(
-        context.t("取消"), () => context.navigate(
-          `/strategies/${encodeURIComponent(value.strategy_ref)}`,
-        ), {variant: "secondary"},
-      ));
-    }
+    // Mode actions come from the shared component (icons + route-session
+    // guard + same-tab cancel); the last returned action is the save button.
+    const actions = window.FTObjectModeActions?.mount?.(context, {
+      mode,
+      viewHref: mode === "edit"
+        ? `/strategies/${encodeURIComponent(value.strategy_ref)}` : "",
+      onSave: () => editor.form.requestSubmit(),
+    }) || [];
+    const save = actions[actions.length - 1];
     context.content.replaceChildren(editor.form);
     const explicitProfileID = String(route?.researchProfileID || "").trim();
     const researchID = context.parentFolder === "research"

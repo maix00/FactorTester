@@ -339,6 +339,19 @@
     const fallbackTitle = context.testObjectTemporary ? "因子候选" : "因子集合";
     context.setHeading(value.title_zh || context.t(fallbackTitle), context.t(fallbackTitle));
     context.updateActiveTab?.({title: value.title_zh || context.t(fallbackTitle)});
+    // Same-tab authoring entry: the shared component mounts the pencil
+    // action that swaps this tab to the set editor.
+    const setEditable = selected?.can_edit === true
+      || editableBySession(context, selected || value);
+    if (setEditable) {
+      window.FTObjectModeActions?.mount?.(context, {
+        mode: "view",
+        onEdit: true,
+        editHref: `/factors/set/${encodeURIComponent(frozenRef)}?mode=edit`,
+        editLabel: "编辑",
+        editHelp: "编辑因子集合",
+      });
+    }
     const root = document.createElement("div");
     root.className = window.FTFactorDetailShared.pageClass(
       "view", "factor-set-page",
