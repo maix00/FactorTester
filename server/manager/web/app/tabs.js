@@ -478,6 +478,10 @@
       history.pushState({}, "", tab.path);
       renderOpenedTabs();
       checkpointWorkspace();
+      // Reflect the active tab's authoring mode (view/edit/create) in the
+      // header presentation (page-mode.js); the URL is the single source of
+      // truth so same-tab mode replacements and live restores stay in sync.
+      window.FTPageMode?.applyFromPath?.(tab.path, t);
       // The heading area (top-left title/eyebrow and the action toolbar)
       // belongs to the active tab.  On a tab switch, refresh the whole region
       // immediately from the target tab's persisted identity so the previous

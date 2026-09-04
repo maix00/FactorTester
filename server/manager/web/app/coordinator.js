@@ -313,6 +313,10 @@
   async function renderRoute() {
     const routeToken = ++activeRouteToken;
     tabs?.markActiveViewLoading?.();
+    // The header authoring-mode presentation follows the route being
+    // rendered: edit/create pages tint the header (page-mode.js).
+    const renderedPath = location.pathname + location.search;
+    window.FTPageMode?.applyFromPath?.(renderedPath, t);
     if (await clientAssetsChanged()) {
       location.reload();
       return;

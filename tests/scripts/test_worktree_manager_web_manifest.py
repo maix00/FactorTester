@@ -230,16 +230,20 @@ def test_editor_header_actions_respect_route_session() -> None:
     # renderers must not mount their actions after the route session ended
     # (saved → navigated to the read-only detail page, or tab switched away);
     # otherwise the next page's header shows a stale 提交/保存 button until a
-    # refresh.  Each editor guards the toolbar append with isRouteCurrent.
-    guarded = [
+    # refresh.  Editors route their mode actions through the shared component,
+    # which owns the isRouteCurrent guard; standalone appenders keep their own.
+    component = (WEB_ROOT / "catalog" / "shared" / "object-mode-actions.js").read_text(
+        encoding="utf-8",
+    )
+    assert "context.isRouteCurrent?.() !== false" in component
+    for relative in [
         "catalog/factor-editor.js",
         "catalog/factor-object-form.js",
         "catalog/strategy-library-detail.js",
-    ]
-    for relative in guarded:
+    ]:
         source = (WEB_ROOT / relative).read_text(encoding="utf-8")
-        assert "context.isRouteCurrent?.() !== false" in source, relative
-        assert "context.toolbar.append" in source, relative
+        assert "window.FTObjectModeActions?.mount?.(context" in source \
+            or "context.isRouteCurrent?.() !== false" in source, relative
 
 
 def test_page_agent_drawer_uses_the_published_group_loader_api() -> None:
@@ -1934,6 +1938,32 @@ def test_shared_multi_select_enforces_exclusive_and_single_selection() -> None:
         "groups"]["catalog-selection-remote"]
 
 
+def test_object_mode_actions_component_mounts_shared_header_actions() -> None:
+    import subprocess
+
+    # The shared mode-actions component owns header actions across object
+    # detail pages: view → 编辑 (same-tab edit href), edit → 取消(回查看) +
+    # 保存, create → 取消 + 提交, with the route-session guard.
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "object_mode_actions.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+    # factor/family detail pages and the editor must go through the component
+    # instead of appending their own mode buttons.
+    details = (WEB_ROOT / "catalog" / "factor-details.js").read_text(
+        encoding="utf-8",
+    )
+    assert "window.FTObjectModeActions?.mount?.(context" in details
+    editor = (WEB_ROOT / "catalog" / "factor-editor.js").read_text(
+        encoding="utf-8",
+    )
+    assert "window.FTObjectModeActions?.mount?.(context" in editor
+    assert "const submit = actions[actions.length - 1];" in editor
+
+
 def test_multi_select_object_rows_open_matching_view_overlays() -> None:
     import subprocess
 
@@ -2032,7 +2062,13 @@ def test_nested_object_overlay_mounts_one_toolbar_per_frame() -> None:
     assert "toolbar: frame.toolbar" in overlay
     assert "testObjectOverlay: true" in overlay
     assert 'context.testObjectOverlay === true' in editor
-    assert '? "保存" : mode === "create" ? "提交"' in editor
+    # Overlay save label (保存) vs standalone create 提交 now lives in the
+    # shared mode-actions component that the editor mounts.
+    actions = (WEB_ROOT / "catalog" / "shared" / "object-mode-actions.js").read_text(
+        encoding="utf-8",
+    )
+    assert "overlaySaveLabel" in actions
+    assert 'mode === "create" ? "提交" : "保存"' in actions
     assert 'kind: "factor_family", mode: currentFamily ? "edit" : "create"' in editor
     assert 'onSaved: family => {' in editor
     assert "temporary: true" in editor
@@ -2583,10 +2619,15 @@ def test_factor_create_editors_use_shared_actions_and_personal_factor_scope() ->
     assert "registered = libraryValue.factors?.[0] || null" in editor
     assert "frozen Factor v2 identity" in editor
     assert "factor-editor-upload-action" not in editor
-    assert 'FTUI.actionButton(context.t("取消编辑")' in editor
-    assert 'mode === "create" ? "提交" : "保存"' in editor
-    assert 'if (mode === "edit") context.toolbar.append(cancelEdit)' in editor
-    assert 'context.toolbar.append(submit)' in editor
+    # Mode actions (取消编辑/保存/提交) moved into the shared component that
+    # the editor mounts; the editor keeps only its save-button reference.
+    actions = (WEB_ROOT / "catalog" / "shared" / "object-mode-actions.js").read_text(
+        encoding="utf-8",
+    )
+    assert 'context.t("取消编辑")' in actions or '"取消编辑"' in actions
+    assert 'mode === "create" ? "提交" : "保存"' in actions
+    assert "window.FTObjectModeActions?.mount?.(context" in editor
+    assert "const submit = actions[actions.length - 1];" in editor
     assert 'source: {save_mode: "auto"}' in editor
     assert 'await validateSourceDraft()' in editor
     assert 'object-detail-tab-change' in editor

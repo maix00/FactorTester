@@ -1,0 +1,45 @@
+// page-mode.js — object-page editing-mode presentation for the shared header.
+//
+// Object detail pages carry an authoring mode (view / edit / create) in the
+// route (query ?mode= or the reserved "new" id).  View mode keeps the normal
+// quiet header; edit and create modes tint the header background and show a
+// small mode badge ("编辑中"/"新建") so the user always sees which object
+// surface is writable.  Mode is derived from the active tab's path so tab
+// switches, live restores and same-tab mode replacements all re-apply it
+// without page code having to announce anything.
+(() => {
+  const BADGE_KEYS = {edit: "编辑中", create: "新建"};
+  const MODE_QUERY = /[?&]mode=(view|edit|create)(?:&|$)/;
+
+  function modeForPath(path) {
+    const value = String(path || "").split("#", 1)[0];
+    const match = MODE_QUERY.exec(value);
+    if (match) return match[1];
+    const pathname = value.split(/[?#]/, 1)[0];
+    if (/(?:^|\/)(new)$/.test(pathname)) return "create";
+    return "view";
+  }
+
+  function apply(mode, translate = null) {
+    const normalized = ["edit", "create"].includes(mode) ? mode : "";
+    if (normalized) document.documentElement.dataset.pageMode = normalized;
+    else delete document.documentElement.dataset.pageMode;
+    const badge = document.getElementById("page-mode-badge");
+    if (!badge) return;
+    const key = BADGE_KEYS[normalized];
+    if (!key) {
+      badge.hidden = true;
+      badge.textContent = "";
+      return;
+    }
+    badge.hidden = false;
+    // The catalog keys are localized (zh-Hans / en) by the caller's t().
+    badge.textContent = typeof translate === "function" ? translate(key) : key;
+  }
+
+  function applyFromPath(path, translate = null) {
+    apply(modeForPath(path), translate);
+  }
+
+  window.FTPageMode = Object.freeze({apply, applyFromPath, modeForPath});
+})();

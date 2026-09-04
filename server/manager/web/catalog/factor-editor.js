@@ -879,18 +879,21 @@
   }
 
   function replacePersistedObjectTab(context, state, result) {
+    // Same-tab authoring model: editing happens in the object's own detail
+    // tab (?mode=edit), so a successful save navigates the same tab back to
+    // the read-only view URL.  A freshly created object (create mode) first
+    // receives its new immutable identity in a new tab, so the old "new"
+    // placeholder tab is closed.
     const ref = state.familyMode
       ? result.family_ref || result.id || result.name || state.factorID
       : result.factor_ref || result.factor_alias || result.name;
     const path = state.familyMode
-      ? `/factors/family/${encodeURIComponent(ref)}?updated=${Date.now()}`
-      : `/factors/factor/${encodeURIComponent(ref)}?updated=${Date.now()}`;
+      ? `/factors/family/${encodeURIComponent(ref)}`
+      : `/factors/factor/${encodeURIComponent(ref)}`;
     const previousTabID = context.tabID;
-    // Activate the new immutable identity first. The old editor is then an
-    // inactive tab, so removing it cannot render a fallback route that races
-    // the new detail request and restores the obsolete Factor reference.
+    const sameTab = state.mode === "edit";
     context.navigate(path);
-    if (previousTabID) context.closeTab?.(previousTabID);
+    if (!sameTab && previousTabID) context.closeTab?.(previousTabID);
   }
 
   async function render(context, data, targetRef, mode, options = {}) {
@@ -1135,27 +1138,31 @@
     const familyFileInput = familyMode ? filePicker(
       context, state, redraw, () => tabs?.setDirty("source", true),
     ) : null;
-    const cancelEdit = FTUI.actionButton(context.t("取消编辑"), () => {
-      if (!FTTabReturn.returnToSource(context)) {
-        context.closeTab?.(context.tabID); context.navigate("/factors");
-      }
-    }, {variant: "secondary"});
-    const submitLabel = context.testObjectOverlay === true
-      ? "保存" : mode === "create" ? "提交" : "保存";
-    const submit = FTUI.actionButton(
-      context.t(submitLabel),
-      () => form.requestSubmit(), {variant: "primary"},
-    );
-    // The header/toolbar is shared across the tab rail.  An editor whose
-    // async render completes after this route session ended (saved and
-    // navigated to the read-only detail page, or the tab was switched away)
-    // must not append its actions to the next page's header — the view page
-    // would show a stale "提交/保存" button until a refresh.  Only mount the
-    // actions while this render is still the current route session.
-    if (context.isRouteCurrent?.() !== false) {
-      if (mode === "edit") context.toolbar.append(cancelEdit);
-      context.toolbar.append(submit);
-    }
+    // Mode actions come from the shared component: edit → 取消(回同 tab 查看)
+    // + 保存; create → 取消 + 提交; overlay save label stays 保存.  The
+    // component owns ordering, the same-tab navigation and the route-session
+    // guard; the last returned action is the save button so the submit
+    // handler can disable it while the request is in flight.
+    const editingInline = mode === "edit" && context.testObjectTemporary;
+    const viewHref = mode === "edit" && !editingInline
+      ? (state.familyMode
+        ? `/factors/family/${encodeURIComponent(targetRef)}`
+        : `/factors/factor/${encodeURIComponent(targetRef)}`)
+      : "";
+    const actions = window.FTObjectModeActions?.mount?.(context, {
+      mode,
+      viewHref,
+      cancel: mode === "edit" ? !editingInline : undefined,
+      onCancel: (mode === "create" || editingInline) ? (() => {
+        if (!FTTabReturn.returnToSource(context)) {
+          context.closeTab?.(context.tabID);
+          if (!context.testObjectOverlay) context.navigate("/factors");
+        }
+      }) : undefined,
+      onSave: () => form.requestSubmit(),
+      overlaySaveLabel: "保存",
+    }) || [];
+    const submit = actions[actions.length - 1];
     if (familyFileInput) form.append(familyFileInput);
     const overrides = state.familyMode ? {
       overview: {save_mode: "auto"},
