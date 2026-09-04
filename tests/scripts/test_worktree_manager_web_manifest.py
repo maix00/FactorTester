@@ -134,6 +134,16 @@ def test_editor_validation_instantiates_frozen_dependencies_as_the_session_user(
     assert "getattr(family, 'owner_ref', '')" in inspection
 
 
+def test_temporary_object_view_offers_edit_and_saves_back_in_place() -> None:
+    """Batch C: overlay 查看→编辑→保存 lands back on the temporary object."""
+    source = (WEB_ROOT / "workbench/object-overlay.js").read_text(encoding="utf-8")
+    assert 'frame.mode === "view" && frame.temporary' in source
+    assert '"square.and.pencil"' in source
+    assert "options.onSaved?.(next)" in source
+    assert "frame.rendered = false" in source
+    assert "frame.initialValue = next" in source
+
+
 def test_route_script_groups_obey_the_initial_load_contract() -> None:
     manifest = json.loads(
         (WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8")

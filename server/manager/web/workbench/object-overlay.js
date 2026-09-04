@@ -413,6 +413,41 @@
         if (state.closed || token !== renderToken) return;
         frame.rendered = true;
         await frameDefinition.render(proxy, frame.ref, frame.mode, frameOptions);
+        if (frame.mode === "view" && frame.temporary
+            && frame._viewEditToken !== renderToken) {
+          // Batch C: an in-place temporary object (created on the test page)
+          // must be reachable through 查看 → 编辑 → 保存 and land back on
+          // that same in-place object.  The dedicated detail page renders
+          // view mode with testObjectViewOnly, so no shared edit action is
+          // mounted there; the overlay owns that entry instead and opens the
+          // editor as a sibling frame seeded with the temporary value.
+          frame._viewEditToken = renderToken;
+          const openTemporaryEdit = () => {
+            openObject({
+              kind: frame.kind,
+              ref: frame.ref,
+              mode: "edit",
+              initialValue: frame.initialValue || null,
+              temporary: true,
+              onSaved: value => {
+                const next = normalizedValue(frame, value);
+                // The saved object stays temporary: it replaces the value the
+                // view frame (and the caller's picker) holds, never the
+                // user library.
+                frame.initialValue = next;
+                frame.rendered = false;
+                frame.mount.replaceChildren();
+                frame.label = undefined;
+                options.onSaved?.(next);
+              },
+            });
+          };
+          const label = context.t("编辑");
+          const editItem = window.FTUI?.iconButton?.(
+            context, "square.and.pencil", label, openTemporaryEdit,
+          );
+          if (editItem) frame.toolbar.append(editItem);
+        }
       } catch (error) {
         if (!state.closed && token === renderToken) {
           frame.mount.replaceChildren(window.FTUI.empty(
