@@ -169,6 +169,20 @@ def test_temporary_object_edit_flows_through_shared_actions_and_stays_temporary(
     assert "strategy.access?.can_edit || context.testObjectTemporary === true" in strategy
 
 
+def test_multi_select_supports_embedded_candidate_type_filter() -> None:
+    """The shared picker may embed a candidate-type filter next to its search
+    box (single or multi choice, per caller) that narrows only the visible
+    candidates and never touches the selection."""
+    source = (WEB_ROOT / "catalog/shared/multi-select-filter.js").read_text(
+        encoding="utf-8",
+    )
+    assert "makeTypeFilterPanel" in source
+    assert "options.typeFilter" in source
+    assert "typeFilter.visible(item)" in source
+    assert 'spec?.multi !== false' in source
+    assert "ft-multi-select-type-panel" in source
+
+
 def test_route_script_groups_obey_the_initial_load_contract() -> None:
     manifest = json.loads(
         (WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8")
