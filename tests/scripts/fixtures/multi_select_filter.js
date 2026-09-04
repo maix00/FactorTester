@@ -233,7 +233,8 @@ assert.equal(locked.dropdown.open, false);
   redrawOwner.append(redrawSingle.element);
   redrawSingle.dropdown.open = true;
   redrawSingle.dropdown.listeners.toggle();
-  assert.equal(redrawSingle.menu.parentNode, document.body);
+  assert.equal(redrawSingle.menu.parentNode, redrawSingle.dropdown,
+    "menu stays in-flow inside the dropdown");
   const sourceInput = inputOf(redrawSingle, "source");
   sourceInput.checked = true;
   await sourceInput.listeners.change();
@@ -252,8 +253,8 @@ assert.equal(locked.dropdown.open, false);
   modal.append(modalSingle.element);
   modalSingle.dropdown.open = true;
   modalSingle.dropdown.listeners.toggle();
-  assert.equal(modalSingle.menu.parentNode, modal,
-    "portaled menus must stay inside an open modal dialog");
+  assert.ok(descendants(modal).includes(modalSingle.menu),
+    "in-flow menu stays inside the open modal dialog");
 
   // Multi: pick, then outside-close commits (no apply button).
   const multiChanges = [];

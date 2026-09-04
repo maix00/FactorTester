@@ -779,7 +779,8 @@
         settingsShell.classList.toggle("has-open-multi-select", dropdown.open);
       }
       if (dropdown.open) {
-        if (!menuPortaled) portalMenu();
+        // Stay in-flow (absolute under the dropdown) so pinch-zoom keeps the
+        // menu anchored to its summary — no fixed/portal coordinate drift.
         return;
       }
       restoreMenu();
