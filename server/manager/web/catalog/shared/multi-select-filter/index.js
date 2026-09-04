@@ -380,6 +380,24 @@
       }
     }
 
+    // Host containers vary: only portal when an ancestor would clip the
+    // in-flow menu (overflow != visible) — otherwise stay anchored in-flow so
+    // pinch-zoom keeps it in place.
+    function menuNeedsPortal() {
+      if (!section.parentElement || typeof window.getComputedStyle !== "function") {
+        return false;
+      }
+      let node = section.parentElement;
+      while (node && node !== document.body && node.nodeType === 1) {
+        const style = window.getComputedStyle(node);
+        if (style && style.overflow !== "visible" && style.overflow !== "clip") {
+          return true;
+        }
+        node = node.parentElement;
+      }
+      return false;
+    }
+
     function portalMenu() {
       if (menuPortaled || !canPortalMenu()) return;
       portalHost().append(menu);
@@ -408,6 +426,7 @@
       window.removeEventListener?.("scroll", positionPortaledMenu, true);
       window.visualViewport?.removeEventListener?.("resize", positionPortaledMenu);
       window.visualViewport?.removeEventListener?.("scroll", positionPortaledMenu);
+      menu.classList.remove?.("menu-open-flip");
       if (typeof menu.hidePopover === "function") {
         try { menu.hidePopover(); } catch (_error) { /* it may already be closed */ }
       }
@@ -779,8 +798,14 @@
         settingsShell.classList.toggle("has-open-multi-select", dropdown.open);
       }
       if (dropdown.open) {
-        // Stay in-flow (absolute under the dropdown) so pinch-zoom keeps the
-        // menu anchored to its summary — no fixed/portal coordinate drift.
+        // Two modes for the many possible host containers: stay in-flow
+        // (absolute under the dropdown → pinch-zoom stays anchored) for
+        // ordinary containers, but portal to <body> when an ancestor clips
+        // the menu or the menu would run off the viewport.
+        if (!menuNeedsPortal() || menuPortaled) {
+          return;
+        }
+        portalMenu();
         return;
       }
       restoreMenu();
