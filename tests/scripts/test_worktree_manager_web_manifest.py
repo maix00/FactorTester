@@ -2825,7 +2825,7 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert ".factor-detail-parameter-editor > .factor-detail-parameter-row" in app_css
     assert "grid-template-columns: subgrid" in app_css
     assert "grid-template-columns: minmax(70px, max-content)" in app_css
-    assert ".factor-param-reference-control { display: grid; grid-template-columns: max-content" in app_css
+    assert ".factor-param-reference-control { display: grid; grid-template-columns: minmax(0, 1fr)" in app_css
     assert "font-family: ui-monospace, SFMono-Regular" in app_css
     assert "function numericConstant" in parameter_editor
     assert 'setValue(constant, "manual")' in parameter_editor
