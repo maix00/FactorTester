@@ -415,6 +415,12 @@ def visible_usernames_for(username: str | None, include_self: bool = True) -> li
 def can_view_user_scope(current_username: str | None, target_username: str | None) -> bool:
     if not current_username or not target_username:
         return False
+    # One's own scope is always visible to oneself.  The organization/level
+    # catalog below only decides visibility of *other* users, and its backing
+    # store may transiently be unavailable (control-db fallback to an empty
+    # local store) — that must never lock a user out of their own data.
+    if current_username == target_username:
+        return True
     return target_username in set(visible_usernames_for(current_username, include_self=True))
 
 

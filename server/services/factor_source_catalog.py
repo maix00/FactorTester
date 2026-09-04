@@ -38,6 +38,15 @@ class FactorSourceCatalog:
     ) -> tuple[str, str]:
         if source_kind == "custom":
             owner = str(owner_username or principal).strip()
+            # A principal always may read its own factor sources: the account
+            # catalog only decides visibility of *other* users' sources, and
+            # it may transiently fail (e.g. control-db fallback to an empty
+            # local store) — that must never lock a user out of their own
+            # source.  Reading one's own file needs no cross-account grant.
+            if not owner or owner == principal:
+                return owner or principal, (
+                    load_factor_source(owner or principal, factor_id) or ""
+                )
             if not can_view_user_scope(principal, owner):
                 raise PermissionError("无权查看该用户因子源码")
             return owner, load_factor_source(owner, factor_id) or ""
