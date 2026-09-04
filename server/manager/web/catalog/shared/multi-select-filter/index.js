@@ -1,4 +1,11 @@
 (() => {
+  // Page-level mutual exclusion: only one dropdown is expanded at a time.  A
+  // module-level handle to the currently-open dropdown lets any newly opened
+  // dropdown collapse the previous one regardless of host shell structure —
+  // this is what makes "同一个 tab 同时只能展开一个" hold even when the pickers
+  // live in different settings shells / parameter tables.
+  let activeMultiSelect = null;
+
   function translate(context, key, fallback = key) {
     return typeof context?.t === "function" ? context.t(key, fallback) : fallback;
   }
@@ -970,6 +977,7 @@
 
     // Outside click / collapse commits multi selections (no apply button);
     // single mode already commits on each pick.
+    const holdOpen = () => { try { dropdown.open = false; } catch (_error) {} };
     dropdown.addEventListener("toggle", () => {
       const settingsShell = section.closest
         ? section.closest('[class*="settings-shell"]')
@@ -978,17 +986,13 @@
         settingsShell.classList.toggle("has-open-multi-select", dropdown.open);
       }
       if (dropdown.open) {
-        // Mutual exclusion: only one dropdown in the same host shell is open
-        // at a time — opening one collapses every other one in the tab.
-        const host = section.closest('[class*="settings-shell"]')
-          || (section.parentElement ? section.parentElement : section);
-        if (host && typeof host.querySelectorAll === "function") {
-          host.querySelectorAll(".ft-multi-select-dropdown").forEach(other => {
-            if (other !== dropdown && other.open) {
-              try { other.open = false; } catch (_error) { /* already closed */ }
-            }
-          });
+        // Mutual exclusion: opening one dropdown collapses any previously-open
+        // one, page-wide (handles the same-tab / same-shell / parameter-table
+        // cases uniformly).
+        if (activeMultiSelect && activeMultiSelect !== holdOpen) {
+          try { activeMultiSelect(); } catch (_error) { /* already closed */ }
         }
+        activeMultiSelect = holdOpen;
         // Any ancestor that would clip the in-flow OR the anchored menu
         // (non-visible overflow, or a transform/filter/contain/perspective
         // establishing a containing block) → portal to the body so the menu is
@@ -1004,6 +1008,7 @@
         return;
       }
       restoreMenu();
+      if (activeMultiSelect === holdOpen) activeMultiSelect = null;
       if (multi && !applying) void commitMultiOnClose();
     });
     // A disabled control never opens (native details toggling suppressed).
