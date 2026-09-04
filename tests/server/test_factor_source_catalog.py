@@ -4,6 +4,20 @@ import pytest
 
 from server.services import factor_source_catalog
 from server.services.factor_source_catalog import FactorSourceCatalog
+from tools.data.account_manage import can_view_user_scope
+
+
+def test_can_view_user_scope_own_scope_survives_empty_catalog(
+    monkeypatch,
+) -> None:
+    """One's own scope is visible even when the account store is empty."""
+    monkeypatch.setattr(
+        "tools.data.account_manage.visible_usernames_for",
+        lambda *_args, **_kwargs: [],
+    )
+    assert can_view_user_scope("user@one", "user@one") is True
+    assert can_view_user_scope("user@one", "user@two") is False
+    assert can_view_user_scope(None, None) is False
 
 
 def _detail(_source: str, _factor_id: str, _metadata: dict) -> dict:
@@ -54,6 +68,42 @@ def test_custom_source_rejects_unreadable_owner(monkeypatch) -> None:
             "reader", "custom", "Secret", "current",
             owner_username="owner",
         )
+
+
+def test_custom_source_own_owner_reads_even_when_scope_catalog_fails(
+    monkeypatch,
+) -> None:
+    """A principal must never be locked out of its own source.
+
+    The account catalog may transiently fail (control-db fallback to an empty
+    local store) and answer ``False`` for every pair — saving a factor whose
+    frozen FactorParam dependency points back at the same user surfaced
+    ``PermissionError: 无权查看该用户因子源码``.  Own-source reads need no
+    cross-account grant and must bypass the catalog.
+    """
+    monkeypatch.setattr(
+        factor_source_catalog, "can_view_user_scope", lambda *_args: False,
+    )
+    loaded = []
+    monkeypatch.setattr(
+        factor_source_catalog, "load_factor_source",
+        lambda owner, factor_id: loaded.append((owner, factor_id)) or "own-source",
+    )
+    monkeypatch.setattr(
+        factor_source_catalog, "get_factor_source_metadata", lambda *_args: {},
+    )
+    monkeypatch.setattr(
+        FactorSourceCatalog, "_detail",
+        staticmethod(lambda *_args: {"source_code": "own-source", "params": []}),
+    )
+
+    value = FactorSourceCatalog().version(
+        "GTHT@MaxJJW@392452984564", "custom", "SgChgPct", "current",
+        owner_username="GTHT@MaxJJW@392452984564",
+    )
+
+    assert loaded == [("GTHT@MaxJJW@392452984564", "SgChgPct")]
+    assert value["source_code"] == "own-source"
 
 
 def test_historical_source_does_not_require_current_copy(monkeypatch) -> None:
