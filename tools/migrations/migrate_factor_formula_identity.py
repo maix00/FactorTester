@@ -887,7 +887,9 @@ def resolve_server_factor(request: dict[str, Any]) -> dict[str, Any]:
     with factor_param_resolver_scope(lambda value: resolve_factor_param_value(
         value, username=username,
     )):
-        identity = instantiate_factor_metadata(family, params)
+        identity = instantiate_factor_metadata(
+            family, params, username=username,
+        )
     factor = next(
         (
             item for item in reversed(list(getattr(family, "factors", [])))
