@@ -296,63 +296,109 @@
     }
     const nestedMount = document.createElement("div");
     nestedMount.className = "factor-param-nested-factor-mount";
+    // A frozen record only carries identity.params; parameter types and
+    // defaults belong to the referenced factor family.  Load that family's
+    // current template (source-backed definitions) so the nested table shows
+    // real 参数类型/默认值 columns instead of guessing from the record.
+    const loadNestedFamilyDefinitions = draft => {
+      const identity = draft.identity || {};
+      const familyAlias = String(
+        identity.family_alias || draft.factor_family_alias || "",
+      ).trim();
+      const loader = window.FTFactorDetailShared?.loadSourceVersion;
+      if (!familyAlias || typeof loader !== "function") return Promise.resolve(null);
+      const ownerRef = String(draft.owner_ref || "").trim().replace(/^principal:/, "");
+      const isPublic = ["public", "__public_jobs__"].includes(ownerRef);
+      return loader(context, {
+        factor_family_alias: familyAlias,
+        factor_family_name: familyAlias,
+        family_ref: identity.family_ref || draft.family_ref || "",
+      }, "current", {
+        familyID: familyAlias,
+        sourceKind: isPublic ? "public" : undefined,
+        ownerUsername: isPublic ? "" : ownerRef,
+      }).then(loaded => ({
+        ...(loaded || {}),
+        factor_family_alias: familyAlias,
+        factor_family_name: familyAlias,
+      })).catch(() => null);
+    };
+    let nestedFamilyPending = false;
     const renderNested = () => {
       if (nestedMount.replaceChildren) nestedMount.replaceChildren();
       else nestedMount.children = [];
       const draft = values[alias];
       if (isFrozenFactor(draft) && ["factor", "manual"].includes(activeSource)) {
-        // The frozen record may only carry identity.params; the family
-        // template (parameter types/defaults) comes from the library row
-        // that produced this value.  Reattach it so the nested parameter
-        // table renders with real definitions and the saved values.
+        const shared = window.FTFactorDetailShared;
+        // Parameter types/defaults live on the referenced factor family.
+        // Prefer what the current context already carries (the library
+        // choice's family, or an attached template); otherwise load that
+        // family once — never guess types from the frozen record.
         const choice = factorChoices.find(item => (
           selectionValue(item.value ?? item.ref) === reference(draft)
           || item.factor === draft
         ));
-        const family = draft.family || draft.__factor_family
-          || choice?.family || null;
-        const shared = window.FTFactorDetailShared;
-        // Nested factors render through the same parameterSection component as
-        // the view mode (flat embedded tree with the family template formula
-        // and 参数/值 toggles); no second card structure.
-        const definitionRows = (family
-          ? shared?.parameterRows?.(draft, {family}) || []
-          : shared?.parameterRows?.(draft) || []);
         const savedParams = draft.identity?.params || draft.parameter_values || {};
-        const rows = definitionRows.map(row => {
-          const saved = savedParams[row.alias];
-          return saved === undefined ? row : {...row, value: saved};
-        });
-        if (rows.length) {
+        const template = draft.family || draft.__factor_family
+          || choice?.family || null;
+        const definitionRows = (template
+          ? shared?.parameterRows?.(draft, {family: template}) || []
+          : shared?.parameterRows?.(draft) || [])
+          .map(row => {
+            const saved = savedParams[row.alias];
+            return saved === undefined ? row : {...row, value: saved};
+          });
+        const renderSection = rowsValue => {
           const section = shared.parameterSection(
-            context, {...draft, family}, rows, (options.depth || 0) + 1,
+            context, {...draft, family: template}, rowsValue,
+            (options.depth || 0) + 1,
           );
           section.root.dataset.parameterAlias = alias;
           nestedMount.append(section.root);
-          return;
-        }
-        // No family template is attached (frozen record without the library
-        // row/family in this context): still render the table from the
-        // frozen identity values so the nested parameters are visible.
-        const identityRows = Object.entries(savedParams).map(([name, saved]) => ({
+        };
+        const identityRows = () => Object.entries(savedParams).map(([name, saved]) => ({
           alias: name, value: saved,
         })).filter(row => row.alias && !/^\$/.test(row.alias));
-        if (identityRows.length) {
-          const section = shared.parameterSection(
-            context, {...draft, family}, identityRows,
-            (options.depth || 0) + 1,
-          );
-          section.root.dataset.parameterAlias = alias;
-          nestedMount.append(section.root);
+        if (definitionRows.length) {
+          renderSection(definitionRows);
+          return;
         }
-        const fallbackRows = familyParameters(draft);
-        if (fallbackRows.length) {
-          const section = shared.parameterSection(
-            context, {...draft, family}, fallbackRows,
-            (options.depth || 0) + 1,
-          );
-          section.root.dataset.parameterAlias = alias;
-          nestedMount.append(section.root);
+        // No template attached yet: load the referenced factor family so the
+        // 参数类型/默认值 columns are correct.  Until it arrives, do not
+        // render a table that would mislabel types.
+        if (!nestedFamilyPending) {
+          nestedFamilyPending = true;
+          void loadNestedFamilyDefinitions(draft).then(loadedFamily => {
+            nestedFamilyPending = false;
+            if (values[alias] !== draft) return;
+            if (nestedMount.replaceChildren) nestedMount.replaceChildren();
+            else nestedMount.children = [];
+            if (loadedFamily) {
+              const upgraded = (shared?.parameterRows?.(draft, {family: loadedFamily}) || [])
+                .map(row => {
+                  const saved = savedParams[row.alias];
+                  return saved === undefined ? row : {...row, value: saved};
+                });
+              if (upgraded.length) {
+                const section = shared.parameterSection(
+                  context, {...draft, family: loadedFamily}, upgraded,
+                  (options.depth || 0) + 1,
+                );
+                section.root.dataset.parameterAlias = alias;
+                nestedMount.append(section.root);
+                return;
+              }
+            }
+            const rows = identityRows();
+            if (rows.length) renderSection(rows);
+          }).catch(() => {
+            nestedFamilyPending = false;
+            if (values[alias] !== draft) return;
+            if (nestedMount.replaceChildren) nestedMount.replaceChildren();
+            else nestedMount.children = [];
+            const rows = identityRows();
+            if (rows.length) renderSection(rows);
+          });
         }
         return;
       }
