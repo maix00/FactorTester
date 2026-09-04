@@ -396,7 +396,7 @@ tbody tr[data-href]:hover { background: var(--soft); }
    localized column label. */
 .factor-detail-parameter-header b { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .factor-detail-parameter-header button { margin: 0; padding: 2px; line-height: 1; vertical-align: middle; }
-.factor-detail-parameter-row + .factor-detail-parameter-row { border-top: 1px solid var(--line); }
+.factor-detail-parameter-editor > .factor-detail-parameter-row:not(:first-child) { border-top: 1px solid var(--line); }
 .factor-detail-parameter-row-factor { border-bottom: 0; }
 .factor-detail-parameter-key, .factor-detail-parameter-default { overflow-wrap: anywhere; }
 .factor-detail-parameter-default { width: fit-content; max-width: 100%; }
@@ -445,7 +445,7 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-param-nested-family-name { flex: 0 1 auto; display: inline-flex; align-items: center; gap: .25em; min-width: 0; max-width: 34%; }
 .factor-param-nested-family-header .factor-detail-parameter-formula { flex: 1 1 auto; min-width: 0; overflow-x: auto; }
 .factor-param-nested-family > .factor-detail-parameter-editor { border: 0; border-radius: 0; }
-.factor-param-reference-control { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 10px; min-width: 0; }
+.factor-param-reference-control { display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap: 10px; min-width: 0; }
 .factor-param-reference-control > * { min-width: 0; }
 .factor-param-reference-control > .ft-test-object-picker,
 .factor-param-reference-control > .ft-multi-select-filter { width: max-content; max-width: none; box-sizing: border-box; }
@@ -464,7 +464,7 @@ tbody tr[data-href]:hover { background: var(--soft); }
   .factor-detail-parameter-type::before { content: "参数类型"; display: block; color: var(--muted); font-size: 10px; }
   .factor-detail-parameter-default::before { content: "默认值"; display: block; color: var(--muted); font: 500 10px/1.3 system-ui, sans-serif; }
   .factor-detail-parameter-value::before { content: "Value"; display: block; margin-bottom: 5px; color: var(--muted); font-size: 10px; }
-  .factor-param-reference-control { grid-template-columns: max-content minmax(0, 1fr); }
+  .factor-param-reference-control { grid-template-columns: minmax(0, 1fr); }
   .factor-param-family-source { grid-template-columns: minmax(0, 1fr); }
   .factor-param-family-source > .factor-param-create-family { justify-self: start; }
 }
