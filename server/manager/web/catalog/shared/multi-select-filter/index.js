@@ -842,6 +842,7 @@
               items.push(item);
             }
             if (!multi) {
+              selected = [item.value];
               void (async () => {
                 dropdown.open = false;
                 restoreMenu();
@@ -865,6 +866,9 @@
           input.addEventListener("keydown", event => {
             event.stopPropagation?.();
             if (event.key === "Enter") confirm();
+          });
+          input.addEventListener("blur", () => {
+            if (String(input.value || "").trim()) confirm();
           });
           manualRow.append(input);
           rows.push(wrap([manualRow], "ft-multi-select-section-exclusive"));
