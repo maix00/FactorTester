@@ -2753,6 +2753,9 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     detail_shared = (WEB_ROOT / "catalog" / "factor-detail-shared.js").read_text(
         encoding="utf-8",
     )
+    parameter_section = (
+        WEB_ROOT / "catalog" / "shared" / "factor-parameter-section.js"
+    ).read_text(encoding="utf-8")
     app_css = (WEB_ROOT / "styles" / "app.css").read_text(encoding="utf-8")
 
     assert "window.FTObjectModeActions?.mount?.(context" in object_form
@@ -2772,15 +2775,20 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     # createParameterList and the section shell shared via parameterSection.
     assert "FTFactorDetailShared.createParameterList" in parameter_editor
     assert "FTFactorDetailShared.parameterSection" in editor
-    assert 'header.className = "factor-detail-parameter-header"' in detail_shared
     # Family tables carry no Value column (a family defines parameters only);
     # factor-instance tables always do.  The shared list builds the header
     # from the base labels and appends Value exactly when shown.
-    assert 'const labels = ["参数名", "参数类型", "默认值"];' in detail_shared
-    assert 'if (showValue) labels.push("Value");' in detail_shared
-    assert 'const showValue = options.showValue !== false;' in detail_shared
-    assert 'showValue ? "" : "no-value-column"' in detail_shared
-    assert 'no-value-column' in app_css
+    assert 'header.className = "factor-detail-parameter-header"' in parameter_section
+    assert 'const labels = ["参数名", "参数类型", "默认值"];' in parameter_section
+    assert 'if (showValue) labels.push("Value");' in parameter_section
+    assert 'const showValue = options.showValue !== false;' in parameter_section
+    assert 'showValue ? "" : "no-value-column"' in parameter_section
+    assert "no-value-column" in app_css
+    # The historical FTFactorDetailShared surface delegates to the shared
+    # parameter-section module at runtime.
+    assert 'delegateSection("parameterTable")' in detail_shared
+    assert 'delegateSection("parameterSection")' in detail_shared
+    assert 'delegateSection("createParameterList")' in detail_shared
     assert 'context.t("Column")' in parameter_editor
     assert ".factor-detail-parameter-editor > .factor-detail-parameter-row" in app_css
     assert "grid-template-columns: subgrid" in app_css

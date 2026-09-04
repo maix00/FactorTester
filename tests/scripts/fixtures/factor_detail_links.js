@@ -63,6 +63,12 @@ vm.runInThisContext(
   {filename: "factor-detail-shared.js"},
 );
 vm.runInThisContext(
+  fs.readFileSync(
+    "server/manager/web/catalog/shared/factor-parameter-section.js", "utf8",
+  ),
+  {filename: "factor-parameter-section.js"},
+);
+vm.runInThisContext(
   fs.readFileSync("server/manager/web/catalog/factor-display-enrichment.js", "utf8"),
   {filename: "factor-display-enrichment.js"},
 );
