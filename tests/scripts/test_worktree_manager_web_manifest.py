@@ -2773,7 +2773,14 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert "FTFactorDetailShared.createParameterList" in parameter_editor
     assert "FTFactorDetailShared.parameterSection" in editor
     assert 'header.className = "factor-detail-parameter-header"' in detail_shared
-    assert '["参数名", "参数类型", "默认值", "Value"]' in detail_shared
+    # Family tables carry no Value column (a family defines parameters only);
+    # factor-instance tables always do.  The shared list builds the header
+    # from the base labels and appends Value exactly when shown.
+    assert 'const labels = ["参数名", "参数类型", "默认值"];' in detail_shared
+    assert 'if (showValue) labels.push("Value");' in detail_shared
+    assert 'const showValue = options.showValue !== false;' in detail_shared
+    assert 'showValue ? "" : "no-value-column"' in detail_shared
+    assert 'no-value-column' in app_css
     assert 'context.t("Column")' in parameter_editor
     assert ".factor-detail-parameter-editor > .factor-detail-parameter-row" in app_css
     assert "grid-template-columns: subgrid" in app_css

@@ -534,12 +534,21 @@
 
   function createParameterList(context, parameters = [], initial = {}, options = {}) {
     const values = {...initial};
+    // A factor family defines parameters (and their defaults) but never
+    // concrete parameter values: family-context tables carry no Value
+    // column.  Factor-instance tables always do (the instance value).
+    const showValue = options.showValue !== false;
     const root = document.createElement("section");
-    root.className = ["factor-detail-parameter-editor", options.readOnly ? "is-read-only" : ""]
-      .filter(Boolean).join(" ");
+    root.className = [
+      "factor-detail-parameter-editor",
+      options.readOnly ? "is-read-only" : "",
+      showValue ? "" : "no-value-column",
+    ].filter(Boolean).join(" ");
     const header = document.createElement("div");
     header.className = "factor-detail-parameter-header";
-    ["参数名", "参数类型", "默认值", "Value"].forEach(label => {
+    const labels = ["参数名", "参数类型", "默认值"];
+    if (showValue) labels.push("Value");
+    labels.forEach(label => {
       const cell = document.createElement("b"); cell.textContent = context.t(label); header.append(cell);
     });
     root.append(header);
@@ -552,14 +561,16 @@
       const type = parameterType(context, parameter);
       const defaultValue = document.createElement("code"); defaultValue.className = "factor-detail-parameter-default";
       defaultValue.textContent = String(parameter.default_value ?? "");
+      row.append(key, type, defaultValue);
+      root.append(row);
+      if (!showValue) continue;
       const value = document.createElement("div"); value.className = "factor-detail-parameter-value";
       const initialValue = values[alias] ?? parameter.default_value ?? "";
       values[alias] = initialValue;
       const result = options.renderValue?.(value, parameter, initialValue, values, row) || {};
       if (!result.control && !value.childElementCount) value.textContent = parameterDisplayValue(parameter) ?? "";
       if (result.nested) row.classList?.add?.("factor-detail-parameter-row-factor");
-      row.append(key, type, defaultValue, value);
-      root.append(row);
+      row.append(value);
       if (result.nested) root.append(result.nested);
     }
     return {root, values};
@@ -599,8 +610,22 @@
     const values = options.values || Object.fromEntries(
       rows.map(row => [row.alias, row.value]),
     );
-    const local = localFormula(context, value, values);
-    header.append(local.root);
+    // The tree header always renders the family template formula (参数
+    // mode): a family defines parameters only, and an instance's concrete
+    // values live in the aggregated formula above the tree — so there is no
+    // 参数/值 mode toggle on the tree header.
+    const formulaMount = document.createElement("div");
+    formulaMount.className = "factor-detail-parameter-formula display-math";
+    const renderFormula = () => {
+      const source = expression(value);
+      formulaMount.replaceChildren?.();
+      if (window.katex) window.katex.render(source || "", formulaMount, {
+        displayMode: true, throwOnError: false,
+      });
+      else formulaMount.textContent = source;
+    };
+    renderFormula();
+    header.append(formulaMount);
     const body = document.createElement("div");
     body.className = "factor-detail-parameter-tree-body";
     if (options.content) {
@@ -608,6 +633,7 @@
     } else {
       const list = createParameterList(context, rows, values, {
         readOnly: true,
+        showValue: options.showValue !== false,
         renderValue: (valueCell, parameter) => {
           const displayed = parameter.redacted
             ? context.t("已隐藏") : parameterValueCell(context, parameter);
@@ -631,7 +657,7 @@
       body.append(list.root);
     }
     root.append(header, body);
-    return {root, update: next => local.update(next || {})};
+    return {root, update: () => renderFormula()};
   }
 
   function parameterDisplayValue(parameter) {

@@ -327,6 +327,9 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-editor-version-picker > *:first-child { min-width: 0; flex: 1 1 auto; }
 .factor-editor-version-actions { flex: 0 0 auto; }
 .factor-detail-parameter-editor { display: grid; grid-template-columns: minmax(70px, max-content) minmax(150px, max-content) minmax(90px, max-content) minmax(0, 1fr); column-gap: 12px; min-width: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+/* Factor-family tables define parameters (and defaults) only: no Value
+   column, so the table spans three tracks. */
+.factor-detail-parameter-editor.no-value-column { grid-template-columns: minmax(70px, max-content) minmax(150px, max-content) minmax(0, 1fr); }
 .factor-detail-parameter-editor input, .factor-detail-parameter-editor select, .factor-detail-parameter-editor button { font-family: inherit; }
 /* The editor is the single grid: header and every row subgrid the shared
    tracks so the whole table sizes its columns together (content-adaptive

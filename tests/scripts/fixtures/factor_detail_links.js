@@ -290,17 +290,24 @@ assert.ok(
     item.className?.includes("factor-detail-parameter-editor")
   ));
   assert.ok(parameterTable);
+  // Factor-instance parameter tables keep the Value column.
   assert.equal(parameterTable.children[0].children.length, 4);
   assert.ok(walk(parameterTable).some(item => item.textContent === "N"));
   assert.ok(walk(parameterTable).some(item => item.textContent === "WindowParam"));
+  // The parameter-tree header always renders the family template formula in
+  // 参数 mode — there is no 参数/值 mode toggle anymore.
   const formulaToggles = walk(content).filter(item => (
     item.className === "factor-detail-local-formula-toggle"
   ));
   assert.deepEqual(
     formulaToggles.map(item => item.textContent),
-    ["参数", "值"],
-    "formula toggle must use user-facing labels, never B1/B2",
+    [],
+    "parameter-tree header must not offer a 参数/值 toggle",
   );
+  const treeFormula = walk(content).find(item => (
+    item.className?.includes("factor-detail-parameter-formula")
+  ));
+  assert.ok(treeFormula, "parameter-tree header must carry the template formula");
   const provenance = walk(content).find(item => (
     item.headers?.[0] === "RunSpec 字段"
   ));

@@ -231,7 +231,7 @@
         `/factors/factor/${encodeURIComponent(item.factor_ref)}`, context,
       );
       const parameters = window.FTFactorDetailShared.parameterTable(
-        context, displayFamily,
+        context, displayFamily, {showValue: false},
       );
       const jobs = objectJobs(
         context, "family", baseFamily.family_ref || targetRef, baseFamily,
