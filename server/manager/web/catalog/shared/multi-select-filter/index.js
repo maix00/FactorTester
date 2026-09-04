@@ -587,6 +587,16 @@
           actionHost.append(button);
         }
         if (actionHost.childElementCount) row.append(actionHost);
+        if (item.onsite === true) {
+          const del = window.FTUI?.iconButton
+            ? window.FTUI.iconButton(
+              context, "trash", translate(context, "删除", "删除"),
+              () => removeTemporaryCandidate(item),
+              {className: "ft-multi-select-option-remove"},
+            )
+            : null;
+          if (del) row.append(del);
+        }
         function selectionAfterToggle() {
           const isSelected = selected.includes(item.value);
           if (!multi) return isSelected ? [] : [item.value];
@@ -804,6 +814,18 @@
     });
     // Typing only narrows the candidates below (已选 stays untouched).
     search.addEventListener("input", () => render());
+    // Delete an on-the-fly candidate: pull it from the pool and selection
+    // states, then let the caller release any view overlay / state.
+    function removeTemporaryCandidate(item) {
+      if (!item) return;
+      const index = items.indexOf(item);
+      if (index >= 0) items.splice(index, 1);
+      selected = selected.filter(value => value !== item.value);
+      committedSelected = committedSelected.filter(value => value !== item.value);
+      render();
+      options.onTemporaryCandidateRemoved?.(item);
+    }
+
     // Drop on-the-fly ("+") candidates that were never confirmed as selected
     // once the menu closes — they are session-only and must not persist.
     function cleanupTemporaryCandidates() {

@@ -355,17 +355,21 @@
       const prefix = frame.mode === "edit"
         ? context.t("编辑") : frame.mode === "view" ? context.t("查看") : context.t("新建");
       const typeTitle = context.t(frameDefinition.title);
-      // The overlay is an embed of the object's own dedicated page, so its
-      // heading is the page heading the embedded detail reported (the alias /
-      // display name).  The mode+type label is only the fallback until the
-      // page renders, and is kept as an accessible hint on the element.
-      title.textContent = name ? String(name) : prefix + typeTitle;
+      // Mirror the regular tab header: title + eyebrow (object kind / mode).
+      copy.replaceChildren();
+      const titleElement = document.createElement("b");
+      titleElement.className = "ft-object-overlay-title";
+      const eyebrow = document.createElement("small");
+      eyebrow.className = "ft-object-overlay-eyebrow";
+      const modeText = `${prefix}${typeTitle}${scope ? ` · ${scope}` : ""}`;
       if (name) {
-        title.title = `${prefix}${typeTitle}${scope ? ` · ${scope}` : ""}`;
+        titleElement.textContent = String(name);
+        eyebrow.textContent = modeText;
       } else {
-        title.removeAttribute?.("title");
+        titleElement.textContent = modeText;
       }
-      frame.label = name || `${prefix}${typeTitle}`;
+      copy.append(titleElement, eyebrow);
+      frame.label = name || modeText;
       renderTree();
     };
 

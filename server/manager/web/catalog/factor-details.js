@@ -216,7 +216,7 @@
       const provenance = window.FTFactorDetailShared.provenance(
         context, displayFamily,
       );
-      const members = data.factors.filter(item =>
+      const members = (data.factors || []).filter(item =>
         baseFamily.factor_refs?.includes(item.factor_ref)
       );
       const view = FTUI.table(

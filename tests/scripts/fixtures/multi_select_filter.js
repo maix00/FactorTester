@@ -72,6 +72,15 @@ function descendants(root) {
 
 global.window = {
   innerWidth: 1024, innerHeight: 768, listeners: {},
+  FTUI: {
+    iconButton(_context, _symbol, label, handler) {
+      const button = new Element("button");
+      button.className = "icon-action-button ft-multi-select-option-remove";
+      button.textContent = label;
+      button.addEventListener("click", handler);
+      return button;
+    },
+  },
   addEventListener(name, callback) { this.listeners[name] = callback; },
   removeEventListener(name) { delete this.listeners[name]; },
 };
@@ -336,6 +345,27 @@ assert.equal(locked.dropdown.open, false);
   await tmp.dropdown.listeners.toggle();
   assert.equal(optionRows(tmp).some(item => item.children[1]?.textContent === "临时候选"), false,
     "deselected on-the-fly candidate is dropped on close");
+
+  // Delete entry (icon) removes the on-the-fly candidate and notifies caller.
+  let removedCandidate = null;
+  const tmpDel = window.FTMultiSelectFilter.create({t: value => value}, {
+    items: [{value: "a", label: "A"}], selected: [], multi: true,
+    onChange: () => {},
+    onAddCandidate: (_ctx, {add}) => { add({value: "t2", label: "消除", temporary: true}); },
+    onTemporaryCandidateRemoved: item => { removedCandidate = item; },
+  });
+  const addBtn2 = descendants(tmpDel.element).find(item => (
+    String(item.className || "").includes("ft-multi-select-add-toggle")
+  ));
+  addBtn2.listeners.click({preventDefault() {}, stopPropagation() {}});
+  const delIcon = descendants(tmpDel.element).find(item => (
+    String(item.className || "").includes("ft-multi-select-option-remove")
+  ));
+  assert.ok(delIcon, "on-the-fly row shows a delete icon");
+  delIcon.listeners.click({preventDefault() {}});
+  assert.equal(optionRows(tmpDel).some(item => item.children[1]?.textContent === "消除"), false,
+    "delete removes the on-the-fly candidate");
+  assert.equal(removedCandidate?.value, "t2", "caller notified of the removal");
 
   console.log("ok");
 })();
