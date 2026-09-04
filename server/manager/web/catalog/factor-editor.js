@@ -157,7 +157,7 @@
             // Join the selectable family candidates (flagged 当场).
             add({
               value: familyRef(family),
-              label: familyLabel(family) || familyRef(family),
+              label: familyAlias(family) || familyRef(family),
               family,
               temporary: true,
             });
