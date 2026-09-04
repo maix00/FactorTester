@@ -577,6 +577,9 @@
     var exclusiveCollapsed = false;
     var onsiteCollapsed = false;
     var othersCollapsed = false;
+    // Per-type collapse state (each defaults to collapsed) for the multi-type
+    // 候选（××类型） groups so they can fold independently.
+    const groupedCollapsed = new Map();
     // Add a typed on-the-fly candidate: the per-type 「候选（××类型）」 heading "+"
     // delegates to the caller's onAddCandidateForType(type, context, {add}).
     // The pushed row carries `type` so it lands in (and stays in) that type's
@@ -903,16 +906,20 @@
             const label = key
               ? `${baseLabel}（${typeLabelOf(key, list[0])}）`
               : baseLabel;
+            const typeCollapsed = groupedCollapsed.get(key) ?? true;
             rows.push(sectionHeading(
               `${label} (${list.length})`,
-              othersCollapsed,
-              () => { othersCollapsed = !othersCollapsed; render(); },
+              typeCollapsed,
+              () => {
+                groupedCollapsed.set(key, !(groupedCollapsed.get(key) ?? true));
+                render();
+              },
               (typeof options.onAddCandidateForType === "function" && key
                 && (typeof options.canAddForType !== "function"
                   || options.canAddForType(key)))
                 ? () => addTypedCandidate(key) : undefined,
             ));
-            if (!othersCollapsed) {
+            if (!typeCollapsed) {
               rows.push(wrap(list.map(item => buildRow(item)), "ft-multi-select-section-others"));
             }
           }
