@@ -330,6 +330,35 @@
             return;
           }
         } catch (_error) { /* fall through to a literal manual value */ }
+        // Hand-typed alias that is NOT a library factor: parse it locally into
+        // an on-the-fly factor (same 当场 object pool as the "+" entry and the
+        // pencil edit) so it appears as a 当场-badged factor candidate.
+        const analysis = parseFactorAlias(v);
+        if (analysis && analysis.family) {
+          const onsiteFactor = {
+            alias: v, factor_alias: v,
+            factor_family_alias: analysis.family,
+            identity: {family_alias: analysis.family, params: analysis.params},
+            params: Object.entries(analysis.params)
+              .map(([key, value]) => ({alias: key, value})),
+            temporary: true, source_origin: "test_inline",
+          };
+          const item = {
+            value: v, label: v, factor: onsiteFactor,
+            type: "factor", typeLabel: context.t("因子"),
+            onsite: true, temporary: true,
+            view: {kind: "factor", ref: v, initialValue: onsiteFactor, temporary: true},
+          };
+          const idx = candidateItems.findIndex(c => (
+            c.type === "factor" && c.value === v
+          ));
+          if (idx >= 0) candidateItems.splice(idx, 1, item);
+          else candidateItems.push(item);
+          valuePicker?.setItems?.(candidateItems, false);
+          valuePicker?.setValues?.([v]);
+          setValue(onsiteFactor, "manual");
+          return;
+        }
         setValue(v, "manual");
       },
     });
