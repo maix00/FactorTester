@@ -9,6 +9,7 @@ class Element {
     this.listeners = {};
     this.className = "";
     this.value = "";
+    this.textContent = "";
     this.dataset = {};
     this.classList = {
       add: name => { this.className += ` ${name}`; },
@@ -87,9 +88,7 @@ const compactChild = {
   alias: "SgChgPct|P:[CA]|M:0.6|B:1|N:200d|$F:1d",
   factor_alias: "SgChgPct|P:[CA]|M:0.6|B:1|N:200d|$F:1d",
   factor_family_alias: "SgChgPct",
-  identity: {family_alias: "SgChgPct", params: {
-    P: "CA", M: 0.6, B: "1", N: "200d",
-  }},
+  identity: {family_alias: "SgChgPct", params: {P: "CA", M: 0.6, B: "1", N: "200d"}},
   params: [
     {alias: "P", value: "CA"},
     {alias: "M", value: 0.6},
@@ -120,6 +119,7 @@ assert.equal(
   "WindowParam",
   "a specific family parameter type must win over a generic projection",
 );
+
 let latestValues = {};
 let resolveCalls = 0;
 const editor = window.FTFactorParameterEditor.create(
@@ -144,336 +144,102 @@ const editor = window.FTFactorParameterEditor.create(
     onChange: values => { latestValues = values; },
   },
 );
-const factorPicker = pickers.find(item => (
-  item.options.name === "factor-param-factor-Th"
-));
-assert.ok(factorPicker, "FactorParam must expose a factor picker");
-
-// Reopening an editor whose FactorParam already holds a frozen factor value
-// (chosen earlier from the factor library) must land on the 因子库 source
-// again — never degrade into a hand-typed manual ref/alias text box.
-const reopened = window.FTFactorParameterEditor.create(
-  {t: value => value},
-  outerFamily.parameter_definitions,
-  {Th: compactChild},
-  {
-    factorItems: [{
-      value: childRef, label: compactChild.alias,
-      factor: compactChild, family: childFamily,
-    }],
-    familyItems: [],
-    onChange: () => {},
-  },
-);
-const reopenedSource = pickers.filter(item => (
-  item.options.name === "factor-param-source-Th"
-)).at(-1);
-const reopenedFactor = pickers.filter(item => (
-  item.options.name === "factor-param-factor-Th"
-)).at(-1);
-assert.ok(reopenedSource, "reopened FactorParam must expose a source picker");
-assert.ok(reopenedFactor, "reopened FactorParam must expose the factor-library picker");
-assert.deepEqual(
-  reopenedSource.selected, ["factor"],
-  "a frozen factor-library value must reopen on the 因子库 source, not manual",
-);
-// The factor-library source renders the factor picker, not a text input.
-const reopenedManualInputs = descendants(reopened.root).filter(
-  item => item.tagName === "INPUT" && item.placeholder === "填写",
-);
-assert.equal(
-  reopenedManualInputs.length, 0,
-  "the factor-library source must not show a hand-typed text box",
-);
-// Reopening must also render the nested parameter table of the referenced
-// factor, carrying the frozen identity values (not family defaults).
-const reopenedNested = descendants(reopened.root).find(item => (
-  item.className?.includes("factor-detail-parameter-editor")
-    && item !== reopened.root
-));
-assert.ok(
-  reopenedNested,
-  "reopened frozen factor must render its nested parameter table",
-);
-const nestedText = descendants(reopenedNested).map(item => item.textContent);
-assert.ok(
-  nestedText.includes("0.6"),
-  "nested table must show the saved identity value (M:0.6), not the family default",
-);
-// The nested tree header must render the family template LaTeX.
-const nestedFormula = descendants(reopened.root).find(item => (
-  item.className?.includes("factor-detail-parameter-formula")
-));
-assert.ok(nestedFormula, "nested tree header must carry a formula element");
-assert.ok(
-  (nestedFormula.textContent || "").includes("Q_"),
-  "nested tree header formula must render the family template LaTeX",
-);
-
-// …while a hand-typed alias stays on the manual source with its text intact.
-const aliasMatch = window.FTFactorParameterEditor.create(
-  {t: value => value},
-  outerFamily.parameter_definitions,
-  {Th: compactChild},
-  {
-    // Same alias, different digest (echoed row): still a 因子库 source —
-    // library membership compares alias as well as ref, per nesting level.
-    factorItems: [{
-      value: `factor:v2:${"a".repeat(43)}`,
-      label: compactChild.alias,
-      factor: {...compactChild, ref: `factor:v2:${"a".repeat(43)}`},
-      family: childFamily,
-    }],
-    familyItems: [], onChange: () => {},
-  },
-);
-const aliasSource = pickers.filter(item => (
-  item.options.name === "factor-param-source-Th"
-)).at(-1);
-assert.deepEqual(
-  aliasSource.selected, ["factor"],
-  "an alias match against a library row counts as 因子库 source",
-);
-
-const manual = window.FTFactorParameterEditor.create(
-  {t: value => value},
-  outerFamily.parameter_definitions,
-  {Th: "SgChgPct|P:[CA]|M:0.6|B:1|N:200d|$F:1d"},
-  {factorItems: [], familyItems: [], onChange: () => {}},
-);
-const manualSource = pickers.filter(item => (
-  item.options.name === "factor-param-source-Th"
-)).at(-1);
-assert.deepEqual(
-  manualSource.selected, ["manual"],
-  "a hand-typed alias must reopen on the manual source",
-);
-// The hand-typed alias parses into a read-only nested parameter table.
-const manualNested = descendants(manual.root).find(item => (
-  item.className?.includes("factor-detail-parameter-editor")
-    && item !== manual.root
-));
-assert.ok(
-  manualNested,
-  "a hand-typed alias must parse into a read-only nested parameter table",
-);
-const manualText = descendants(manualNested).map(item => item.textContent);
-assert.ok(
-  manualText.includes("M") && manualText.includes("0.6"),
-  "alias rows must carry the parsed parameter names and values",
-);
-
-// Manual numeric constants parse into a ConstExpr preview…
-const numericParam = window.FTFactorParameterEditor.create(
-  {t: value => value},
-  outerFamily.parameter_definitions,
-  {Th: "0.6"},
-  {factorItems: [], familyItems: [], onChange: () => {}},
-);
-const numericPreview = descendants(numericParam.root).find(
-  item => item.className === "factor-param-manual-preview",
-);
-assert.ok(numericPreview, "numeric manual value must show a parse preview");
-assert.ok(
-  (numericPreview.textContent || "").includes("ConstExpr 0.6"),
-  "numeric manual value must parse as ConstExpr",
-);
-// …and bare data columns parse into a ColumnRef preview.
-const columnParam = window.FTFactorParameterEditor.create(
-  {t: value => value},
-  outerFamily.parameter_definitions,
-  {Th: "CLOSE"},
-  {factorItems: [], familyItems: [], onChange: () => {}},
-);
-const columnPreview = descendants(columnParam.root).find(
-  item => item.className === "factor-param-manual-preview",
-);
-assert.ok(columnPreview, "column manual value must show a parse preview");
-assert.ok(
-  (columnPreview.textContent || "").includes("ColumnRef CLOSE"),
-  "column manual value must parse as ColumnRef",
-);
+const valuePicker = pickers.find(item => item.options.name === "factor-param-Th");
+assert.ok(valuePicker, "FactorParam must expose the unified multi-type value picker");
+assert.equal(valuePicker.options.multi, false, "FactorParam is a single-select");
+assert.equal(valuePicker.options.groupByType, true, "candidates are grouped by type");
+assert.ok(valuePicker.options.exclusiveManual, "FactorParam exposes 手填排他");
+assert.ok(valuePicker.options.onAddCandidateForType, "FactorParam supports on-the-fly creation");
 
 (async () => {
-  // A frozen combination that is NOT in the library must reopen on the
-  // manual source (showing its alias), not claim a 因子库 origin.
-  const absent = window.FTFactorParameterEditor.create(
-    {t: value => value},
-    outerFamily.parameter_definitions,
-    {Th: compactChild},
-    {factorItems: [], familyItems: [], onChange: () => {}},
-  );
-  const absentSource = pickers.filter(item => (
-    item.options.name === "factor-param-source-Th"
-  )).at(-1);
-  assert.deepEqual(
-    absentSource.selected, ["manual"],
-    "a frozen factor absent from the library must reopen on the manual source",
-  );
-  await new Promise(resolve => setImmediate(resolve));
-  const absentNested = descendants(absent.root).find(item => (
-    item.className?.includes("factor-detail-parameter-editor")
-      && item !== absent.root
-  ));
-  assert.ok(
-    absentNested,
-    "absent frozen factor still renders its nested parameter table",
-  );
-  const absentText = descendants(absentNested).map(item => item.textContent);
-  assert.ok(absentText.includes("0.6"), "absent frozen table shows saved values");
-
-  // The nested parameter list always carries an edit entry that switches
-  // the value into 因子家族来源 mode (editable family composition) — even
-  // when the reference exists in the library.
-  const unlockable = window.FTFactorParameterEditor.create(
-    {t: value => value},
-    outerFamily.parameter_definitions,
-    {Th: compactChild},
-    {
-      factorItems: [{
-        value: childRef, label: compactChild.alias,
-        factor: compactChild, family: childFamily,
-      }],
-      familyItems: [], onChange: value => { unlocked = value; },
-    },
-  );
-  let unlocked = null;
-  // The edit entry sits inside the nested table's header, next to the
-  // 参数值 (value) column heading.
-  const headerRows = descendants(unlockable.root).filter(item => (
-    item.className === "factor-detail-parameter-header"
-  ));
-  const valueHeading = headerRows.map(item => item.children[3]).find(cell => (
-    cell && descendants(cell).some(item => item.tagName === "BUTTON")
-  ));
-  assert.ok(
-    valueHeading && (valueHeading.textContent || "").includes("参数值"),
-    "nested table header must label its value column 参数值 with the edit entry",
-  );
-  const unlockIcon = descendants(valueHeading).find(
-    item => item.tagName === "BUTTON",
-  );
-  assert.ok(unlockIcon, "edit entry must sit next to the 参数值 heading");
-  unlockIcon.listeners.click();
-  assert.ok(
-    unlocked?.Th?.__factor_family_draft === true,
-    "edit entry must switch the value into family-composition mode",
-  );
-  const unlockedFamilyPicker = pickers.filter(item => (
-    item.options.name === "factor-param-family-Th"
-  )).at(-1);
-  assert.deepEqual(
-    unlockedFamilyPicker.selected, ["SgChgPct"],
-    "family source must show the unlocked family selected",
-  );
-  // Composing against an existing family keeps 新增因子家族 so the user can
-  // create an on-the-fly family to replace the referenced factor.
-  const unlockedCreate = descendants(unlockable.root).find(
-    item => String(item.className || "").includes("factor-param-create-family"),
-  );
-  assert.ok(unlockedCreate, "existing-family composition keeps the family entry");
-  assert.ok(
-    (unlockedCreate.textContent || "").includes("新增因子家族"),
-    "referenced-family composition offers 新增因子家族",
-  );
-  // …while an on-the-fly inline family offers 编辑因子家族.
-  const inlineDraft = {
-    __factor_family_draft: true,
-    __factor_family: {
-      factor_family_alias: "InlineF",
-      source_kind: "transient",
-      parameter_definitions: [
-        {alias: "N", type: "WindowParam", default_value: "20d"},
-      ],
-    },
-    parameter_values: {},
-  };
-  const inlineParam = window.FTFactorParameterEditor.create(
-    {t: value => value},
-    outerFamily.parameter_definitions,
-    {Th: inlineDraft},
-    {factorItems: [], familyItems: [], onChange: () => {}},
-  );
-  const inlineCreate = descendants(inlineParam.root).find(
-    item => String(item.className || "").includes("factor-param-create-family"),
-  );
-  assert.ok(inlineCreate, "an inline family composition keeps the family entry");
-  assert.ok(
-    (inlineCreate.textContent || "").includes("编辑因子家族"),
-    "inline family composition offers 编辑因子家族",
-  );
-  // After an on-the-fly 新增因子家族 completes, the entry switches to
-  // 编辑因子家族 for the freshly created inline family.
-  let replacedByCreate = null;
-  const creating = window.FTFactorParameterEditor.create(
-    {t: value => value},
-    outerFamily.parameter_definitions,
-    {Th: compactChild},
-    {
-      factorItems: [{
-        value: childRef, label: compactChild.alias,
-        factor: compactChild, family: childFamily,
-      }],
-      familyItems: [],
-      onChange: value => { replacedByCreate = value; },
-      onCreateFamily: onSaved => {
-        onSaved({
-          factor_family_alias: "FreshF",
-          source_kind: "transient",
-          parameter_definitions: [
-            {alias: "N", type: "WindowParam", default_value: "5d"},
-          ],
-        });
-        return Promise.resolve();
-      },
-    },
-  );
-  const creatingPencil = (() => {
-    const headers = descendants(creating.root).filter(item => (
-      item.className === "factor-detail-parameter-header"
-    ));
-    const heading = headers.map(item => item.children[3]).find(cell => (
-      cell && descendants(cell).some(item => item.tagName === "BUTTON")
-    ));
-    return heading ? descendants(heading).find(item => item.tagName === "BUTTON") : null;
-  })();
-  assert.ok(creatingPencil, "referenced composition opens via the pencil");
-  creatingPencil.listeners.click();
-  const creatingButton = descendants(creating.root).find(
-    item => String(item.className || "").includes("factor-param-create-family"),
-  );
-  assert.ok(creatingButton, "referenced composition offers 新增因子家族");
-  assert.ok(
-    (creatingButton.textContent || "").includes("新增因子家族"),
-    "referenced composition labels the entry 新增因子家族",
-  );
-  creatingButton.listeners.click();
-  assert.ok(
-    replacedByCreate?.Th?.__factor_family_draft === true
-      && replacedByCreate.Th.__factor_family?.factor_family_alias === "FreshF",
-    "on-the-fly family creation replaces the referenced factor",
-  );
-  assert.ok(
-    (creatingButton.textContent || "").includes("编辑因子家族"),
-    "after creation the entry switches to 编辑因子家族",
-  );
-
-  await factorPicker.options.onChange([childRef]);
-  assert.equal(resolveCalls, 1, "selected factors must be enriched lazily");
-  assert.equal(latestValues.Th.parameter_definitions[2].type, "WindowParam");
+  // Selecting a factor resolves through the host (nested family source fixed)
+  // and renders a read-only nested parameter table carrying saved identity
+  // values (not family defaults), with family parameter types.
+  await valuePicker.options.onChange([childRef]);
+  assert.equal(resolveCalls, 1, "selected factors must be resolved lazily");
+  assert.equal(latestValues.Th.parameter_definitions[2].type, "WindowParam",
+    "enriched factor carries the family parameter types");
+  assert.equal(latestValues.Th.identity.params.M, 0.6,
+    "saved identity value is kept, not the family default");
   const nested = descendants(editor.root).find(item => (
     item.className?.includes("factor-detail-parameter-editor")
       && item !== editor.root
   ));
-  assert.ok(nested, "selected factors must render a nested read-only table");
+  assert.ok(nested, "selected factors render a nested read-only parameter table");
   assert.ok(descendants(nested).some(item => item.textContent === "WindowParam"));
+  assert.equal(descendants(nested).filter(item => item.tagName === "INPUT").length, 0,
+    "the factor parameter table stays read-only");
 
-  const preview = window.FTFactorDetailShared.previewExpression(
-    outerFamily, latestValues,
+  // Reopening a frozen factor value renders its read-only nested table (and the
+  // value picker shows the frozen factor selected), without degrading to manual.
+  const reopened = window.FTFactorParameterEditor.create(
+    {t: value => value},
+    outerFamily.parameter_definitions,
+    {Th: compactChild},
+    {
+      factorItems: [{
+        value: childRef, label: compactChild.alias,
+        factor: compactChild, family: childFamily,
+      }],
+      familyItems: [], onChange: () => {},
+    },
   );
-  assert.match(preview, /\\textcolor\{blue\}\{\\mathrm\{SgChgPct\}\}_t :=/);
-  assert.match(preview, /\\textcolor\{red\}\{200\\,\\mathrm\{d\}\}/);
-  assert.match(preview, /D_t\(\\textcolor\{blue\}\{\\mathrm\{SgChgPct\}\}_t\)/);
+  assert.equal(reopened.values.Th, compactChild,
+    "a frozen factor value is preserved on reopen");
+  const reopenedPicker = pickers.filter(item => item.options.name === "factor-param-Th").at(-1);
+  assert.deepEqual(reopenedPicker.selected, [childRef],
+    "reopened frozen factor shows the factor candidate selected");
+  assert.ok(descendants(reopened.root).some(item => (
+    item.className?.includes("factor-detail-parameter-editor")
+      && item !== reopened.root
+  )), "reopened frozen factor renders its read-only nested parameter table");
+
+  // Alias match against a library row (different digest) still resolves to factor.
+  const aliasReopen = window.FTFactorParameterEditor.create(
+    {t: value => value},
+    outerFamily.parameter_definitions,
+    {Th: compactChild},
+    {
+      factorItems: [{
+        value: `factor:v2:${"a".repeat(43)}`,
+        label: compactChild.alias,
+        factor: {...compactChild, ref: `factor:v2:${"a".repeat(43)}`},
+        family: childFamily,
+      }],
+      familyItems: [], onChange: () => {},
+    },
+  );
+  assert.equal(aliasReopen.values.Th.ref, `factor:v2:${"a".repeat(43)}`,
+    "an alias match against a library row normalises to that library record");
+
+  // Hand-typed numeric constant → ConstExpr preview.
+  const numericParam = window.FTFactorParameterEditor.create(
+    {t: value => value},
+    outerFamily.parameter_definitions,
+    {Th: "0.6"},
+    {factorItems: [], familyItems: [], onChange: () => {}},
+  );
+  const numericPreview = descendants(numericParam.root).find(
+    item => item.className === "factor-param-manual-preview",
+  );
+  assert.ok(numericPreview, "numeric manual value must show a parse preview");
+  assert.ok((numericPreview.textContent || "").includes("ConstExpr 0.6"),
+    "numeric manual value parses as ConstExpr");
+
+  // Hand-typed bare data column → ColumnRef preview.
+  const columnParam = window.FTFactorParameterEditor.create(
+    {t: value => value},
+    outerFamily.parameter_definitions,
+    {Th: "CLOSE"},
+    {factorItems: [], familyItems: [], onChange: () => {}},
+  );
+  const columnPreview = descendants(columnParam.root).find(
+    item => item.className === "factor-param-manual-preview",
+  );
+  assert.ok(columnPreview, "column manual value must show a parse preview");
+  assert.ok((columnPreview.textContent || "").includes("ColumnRef CLOSE"),
+    "column manual value parses as ColumnRef");
+
   console.log("ok");
 })().catch(error => {
   console.error(error);

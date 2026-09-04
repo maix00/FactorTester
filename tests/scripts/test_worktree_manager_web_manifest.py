@@ -2821,7 +2821,7 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert 'delegateSection("parameterTable")' in detail_shared
     assert 'delegateSection("parameterSection")' in detail_shared
     assert 'delegateSection("createParameterList")' in detail_shared
-    assert 'context.t("Column")' in parameter_editor
+    assert 'context.t("DataColumn")' in parameter_editor
     assert ".factor-detail-parameter-editor > .factor-detail-parameter-row" in app_css
     assert "grid-template-columns: subgrid" in app_css
     assert "grid-template-columns: minmax(70px, max-content)" in app_css
@@ -2831,9 +2831,10 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert 'setValue(constant, "manual")' in parameter_editor
     assert "请输入有效的 ColumnRef 或因子 alias" in parameter_editor
     assert "onValidateFactorAlias" in parameter_editor
-    assert "factor-param-column-" in parameter_editor
-    assert "factor-param-factor-" in parameter_editor
-    assert "factor-param-family-source" in parameter_editor
+    assert "groupByType: true" in parameter_editor
+    assert "onAddCandidateForType" in parameter_editor
+    assert "exclusiveManual" in parameter_editor
+    assert "valuePicker" in parameter_editor
     assert "factor-param-nested-factor-mount" in parameter_editor
     assert "FTFactorDetailShared.parameterSection" in parameter_editor
     assert 'method: "POST"' in editor
