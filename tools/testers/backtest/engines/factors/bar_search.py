@@ -18,7 +18,7 @@ from tools.factors.expr.lookback_scope import (
     TradingDayScope,
 )
 from tools.factors.expr.match_refs import MatchValueRef
-from tools.factors.expr.pointwise import apply_pointwise
+from tools.factors.expr.pointwise import POINTWISE_OPS, apply_pointwise
 
 Predicate = Callable[[np.ndarray, np.ndarray, Any, dict[int, np.ndarray]], np.ndarray]
 
@@ -36,12 +36,17 @@ def compile_match_predicate(expr: Any, compile_node: Callable[[Any], Any]) -> Pr
         return lambda current, candidate, market, cache: np.asarray(apply_where(*(
             child(current, candidate, market, cache) for child in children
         )))
-    if isinstance(expr, CompositeExpr):
+    if isinstance(expr, CompositeExpr) and expr.op in POINTWISE_OPS:
         children = tuple(compile_match_predicate(item, compile_node) for item in expr.operands)
         return lambda current, candidate, market, cache: np.asarray(apply_pointwise(
             expr.op,
             tuple(child(current, candidate, market, cache) for child in children),
         ))
+    # Non-pointwise CompositeExpr nodes (SignalAlign embedding a
+    # nested-frequency FactorParam reference, ...) must compile as a whole
+    # streaming node (SignalHoldNode carries the formed signal forward onto
+    # the outer bar timeline) instead of being treated as a pointwise op,
+    # which would raise "unsupported pointwise op" per bar.
     node = compile_node(expr)
     return lambda current, candidate, market, cache: node.update(market, cache)
 

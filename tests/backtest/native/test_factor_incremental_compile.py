@@ -335,6 +335,46 @@ def test_incremental_bar_distance_matches_batch_dynamic_predicate():
     pd.testing.assert_frame_equal(live, batch, check_exact=False)
 
 
+def test_incremental_bar_distance_condition_embedding_signal_align_compiles_and_runs():
+    # A nested-factor reference inside a bar-distance condition compiles to a
+    # SignalAlign operand.  The streaming match predicate must compile it as a
+    # whole SignalHoldNode (formed signal carried forward onto the outer bar
+    # timeline) instead of treating SIGNAL_ALIGN as a pointwise op, which
+    # raised "unsupported pointwise op" per bar during compilation.
+    products, rows = _panel()
+    close = ColumnRef(DataColumn.CLOSE)
+    expr = close.bar_distance(
+        SignalAlign(close.shift(1), "1m") > CURRENT,
+        scope=scope_bars(3),
+        default=3,
+    )
+
+    executor = expr.compile_incremental(
+        factor_alias="factor",
+        products=products,
+        source_freq=DataFreq.MIN1,
+    )
+    observed = []
+    for timestamp, row in rows.iterrows():
+        fields = {
+            product: {
+                column: row[(product, column)]
+                for column in rows[product].columns
+            }
+            for product in products
+        }
+        executor.on_bar(timestamp, fields)
+        observed.append(executor.on_signal(timestamp))
+
+    assert len(observed) == len(rows)
+    assert set(observed[-1]) == set(products)
+    # Batch evaluation of the same expression succeeds and stays on the same
+    # default when nothing matches (P1 rises monotonically).
+    batch = _batch_eval(expr, products, rows)
+    assert set(batch.columns) == set(products)
+    assert batch["P1"].tolist() == [3.0, 3.0, 3.0, 3.0, 3.0]
+
+
 def test_incremental_bar_distance_farthest_matches_batch():
     products, rows = _panel()
     close = ColumnRef(DataColumn.CLOSE)
