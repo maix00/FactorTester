@@ -103,12 +103,42 @@
       initialValue = initialFactorValue;
       values[alias] = initialValue;
     }
-    let activeSource = familyDraft(initialValue) ? "family"
-      : factors.some(item => selectionValue(item.value ?? item.ref)
-        === reference(initialValue)) ? "factor"
-        : columns.some(item => selectionValue(item.value) === selectionValue(initialValue))
-          ? "column"
-          : display(initialValue) ? "manual" : "";
+    // When the current frozen reference is not among the visible library
+    // rows (different product-group scope, freshly saved combination, …),
+    // carry it as its own choice so the 因子库 source stays selectable and
+    // the value never falls back into a hand-typed box.
+    const factorChoices = [...factors];
+    if (isFrozenFactorValue(initialValue) && !factorChoices.some(item => (
+      selectionValue(item.value ?? item.ref) === reference(initialValue)
+    ))) {
+      const frozenRef = reference(initialValue) || display(initialValue) || alias;
+      factorChoices.push({
+        value: frozenRef,
+        label: display(initialValue) || alias,
+        factor: initialValue && typeof initialValue === "object"
+          ? initialValue
+          : {ref: frozenRef, alias: display(initialValue) || alias},
+        family: null,
+      });
+    }
+    let activeSource = "";
+    // Preserve the value's origin: a factor-library reference (opaque
+    // ``factor:v2`` ref or a frozen v2 record) reopens on the 因子库 source;
+    // hand-typed aliases/columns stay manual/column; on-the-fly family
+    // compositions stay family.  Never degrade any of them into the others.
+    const frozenInitial = isFrozenFactorValue(initialValue);
+    if (familyDraft(initialValue)) {
+      activeSource = "family";
+    } else if (frozenInitial) {
+      activeSource = "factor";
+    } else if (factorChoices.some(item => selectionValue(item.value ?? item.ref)
+      === reference(initialValue))) {
+      activeSource = "factor";
+    } else if (columns.some(item => selectionValue(item.value) === selectionValue(initialValue))) {
+      activeSource = "column";
+    } else if (display(initialValue)) {
+      activeSource = "manual";
+    }
     let renderSourceControl = () => {};
     const setValue = (value, source, {retainSource = false} = {}) => {
       const empty = value === undefined || value === null || value === "";
@@ -132,7 +162,7 @@
       if (source === "column" && !columns.some(item => (
         selectionValue(item.value) === selectionValue(values[alias])
       ))) return "";
-      if (source === "factor" && !factors.some(item => (
+      if (source === "factor" && !factorChoices.some(item => (
         selectionValue(item.value ?? item.ref) === reference(values[alias])
       ))) return "";
       if (source === "family" && !familyDraft(values[alias])) return "";
@@ -155,10 +185,10 @@
       selected => setValue(selected?.[0] || "", "column"),
       {disabled: options.readOnly === true});
     const selectFactor = selected => {
-        const selectedRef = selectionValue(selected?.[0]);
-        const item = factors.find(candidate => (
-          selectionValue(candidate.value ?? candidate.ref) === selectedRef
-        ));
+      const selectedRef = selectionValue(selected?.[0]);
+      const item = factorChoices.find(candidate => (
+        selectionValue(candidate.value ?? candidate.ref) === selectedRef
+      ));
         if (!item) {
           setValue("", "factor");
           return;
@@ -178,7 +208,7 @@
         return undefined;
       };
     factorPicker = picker(context, `factor-param-factor-${alias}`, context.t("因子库"),
-      factors, activeSource === "factor" ? [reference(initialValue)] : [], selectFactor,
+      factorChoices, activeSource === "factor" ? [reference(initialValue)] : [], selectFactor,
       {disabled: options.readOnly === true});
     if (allowFamilyComposition) {
       familyPicker = picker(
@@ -400,6 +430,13 @@
       && value.schema_version === 2
       && (value.ref || value.factor_ref)
       && (value.alias || value.factor_alias));
+  }
+
+  // A factor-library reference may arrive either as the opaque ``factor:v2``
+  // ref string (as stored in identity.params) or as its frozen v2 record.
+  function isFrozenFactorValue(value) {
+    if (typeof value === "string") return value.startsWith("factor:v2:");
+    return isFrozenFactor(value);
   }
 
   function familyParameters(family) {

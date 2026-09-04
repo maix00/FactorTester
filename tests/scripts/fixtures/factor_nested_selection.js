@@ -142,6 +142,58 @@ const factorPicker = pickers.find(item => (
 ));
 assert.ok(factorPicker, "FactorParam must expose a factor picker");
 
+// Reopening an editor whose FactorParam already holds a frozen factor value
+// (chosen earlier from the factor library) must land on the 因子库 source
+// again — never degrade into a hand-typed manual ref/alias text box.
+const reopened = window.FTFactorParameterEditor.create(
+  {t: value => value},
+  outerFamily.parameter_definitions,
+  {Th: compactChild},
+  {
+    factorItems: [{
+      value: childRef, label: compactChild.alias,
+      factor: compactChild, family: childFamily,
+    }],
+    familyItems: [],
+    onChange: () => {},
+  },
+);
+const reopenedSource = pickers.filter(item => (
+  item.options.name === "factor-param-source-Th"
+)).at(-1);
+const reopenedFactor = pickers.filter(item => (
+  item.options.name === "factor-param-factor-Th"
+)).at(-1);
+assert.ok(reopenedSource, "reopened FactorParam must expose a source picker");
+assert.ok(reopenedFactor, "reopened FactorParam must expose the factor-library picker");
+assert.deepEqual(
+  reopenedSource.selected, ["factor"],
+  "a frozen factor-library value must reopen on the 因子库 source, not manual",
+);
+// The factor-library source renders the factor picker, not a text input.
+const reopenedManualInputs = descendants(reopened.root).filter(
+  item => item.tagName === "INPUT" && item.placeholder === "填写",
+);
+assert.equal(
+  reopenedManualInputs.length, 0,
+  "the factor-library source must not show a hand-typed text box",
+);
+
+// A hand-typed alias stays on the manual source with its text intact.
+const manual = window.FTFactorParameterEditor.create(
+  {t: value => value},
+  outerFamily.parameter_definitions,
+  {Th: "SgChgPct|P:[CA]|M:0.6|B:1|N:200d|$F:1d"},
+  {factorItems: [], familyItems: [], onChange: () => {}},
+);
+const manualSource = pickers.filter(item => (
+  item.options.name === "factor-param-source-Th"
+)).at(-1);
+assert.deepEqual(
+  manualSource.selected, ["manual"],
+  "a hand-typed alias must reopen on the manual source",
+);
+
 (async () => {
   await factorPicker.options.onChange([childRef]);
   assert.equal(resolveCalls, 1, "selected factors must be enriched lazily");
