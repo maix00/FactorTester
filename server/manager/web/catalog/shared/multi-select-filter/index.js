@@ -392,6 +392,10 @@
       positionPortaledMenu();
       window.addEventListener?.("resize", positionPortaledMenu);
       window.addEventListener?.("scroll", positionPortaledMenu, true);
+      // Pinch-zoom changes the visual viewport without firing window resize;
+      // reposition so the menu stays anchored to its summary.
+      window.visualViewport?.addEventListener?.("resize", positionPortaledMenu);
+      window.visualViewport?.addEventListener?.("scroll", positionPortaledMenu);
       watchPortaledControl({section, close: () => {
         dropdown.open = false;
         restoreMenu();
@@ -402,6 +406,8 @@
       if (!menuPortaled) return;
       window.removeEventListener?.("resize", positionPortaledMenu);
       window.removeEventListener?.("scroll", positionPortaledMenu, true);
+      window.visualViewport?.removeEventListener?.("resize", positionPortaledMenu);
+      window.visualViewport?.removeEventListener?.("scroll", positionPortaledMenu);
       if (typeof menu.hidePopover === "function") {
         try { menu.hidePopover(); } catch (_error) { /* it may already be closed */ }
       }
