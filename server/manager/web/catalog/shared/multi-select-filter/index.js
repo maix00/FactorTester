@@ -145,63 +145,6 @@
     outsideCloseBound = true;
   }
 
-  // Type filter = an embedded (single/multi) candidate-type dropdown next to
-  // the search box.  It only filters which candidates are *shown*; it never
-  // changes the selection.
-  function makeTypeFilterPanel(context, spec, onChanged) {
-    const panel = document.createElement("div");
-    panel.className = "ft-multi-select-type-panel";
-    panel.hidden = true;
-    const entries = Array.isArray(spec?.items) ? spec.items : [];
-    const multi = spec?.multi !== false;
-    const typeOf = typeof spec?.typeOf === "function"
-      ? spec.typeOf : item => String(item?.type || item?.kind || "").trim();
-    const active = new Set();
-    const list = document.createElement("div");
-    list.className = "ft-multi-select-type-options";
-    const apply = value => {
-      if (multi) {
-        if (active.has(value)) active.delete(value); else active.add(value);
-      } else {
-        active.clear();
-        if (value) active.add(value);
-      }
-      onChanged?.();
-    };
-    const refresh = () => {
-      list.replaceChildren();
-      const options = multi ? entries : [{value: "", label: spec.allLabel || "全部"}, ...entries];
-      const groupName = `ft-type-filter-${++pickerSequence}`;
-      for (const entry of options) {
-        const label = document.createElement("label");
-        label.className = "ft-multi-select-option";
-        label.setAttribute("aria-label", entry.label);
-        const input = document.createElement("input");
-        input.type = multi ? "checkbox" : "radio";
-        input.name = groupName;
-        input.checked = entry.value !== "" && active.has(entry.value);
-        input.addEventListener("change", () => { apply(entry.value); });
-        const text = document.createElement("span");
-        text.textContent = entry.label;
-        label.append(input, text);
-        list.append(label);
-      }
-    };
-    refresh();
-    panel.append(list);
-    return {
-      panel,
-      toggle: () => { panel.hidden = !panel.hidden; },
-      visible: item => {
-        if (!active.size) return true;
-        return active.has(typeOf(item));
-      },
-      isActive: () => active.size > 0,
-      activeCount: () => active.size,
-      refresh,
-    };
-  }
-
   function create(context, options = {}) {
     bindOutsideClose();
     const controlDisabled = Boolean(options.loading) || (
@@ -312,7 +255,7 @@
     // box).  It filters only the visible candidates — selection untouched.
     let typeFilter = null;
     if (options.typeFilter && options.typeFilter.items?.length) {
-      typeFilter = makeTypeFilterPanel(context, options.typeFilter, () => {
+      typeFilter = window.FTMultiSelectTypeFilter?.create(context, options.typeFilter, () => {
         render();
       });
       const toggle = document.createElement("button");
@@ -388,8 +331,6 @@
     actions.className = "ft-multi-select-actions";
     menu.append(searchRow, ...(typeFilter ? [typeFilter.panel] : []),
       ...(loadStatus ? [loadStatus] : []), optionList);
-    if (multi) menu.append(note);
-    if (multi) menu.append(actions);
     dropdown.append(summary, menu);
     if (trailingActions) {
       const controlRow = document.createElement("div");
@@ -538,7 +479,18 @@
       }
       remote?.render();
       clear.hidden = !String(search.value || "");
-      optionList.replaceChildren(...visibleItems().map(item => {
+      optionList.replaceChildren(...buildMenuSections());
+    }
+    // Rebuild list rows: collapsible 已选 section, 排他 section (an optional
+    // caller-declared hand-typed exclusive entry), then the other candidates.
+    // Selected rows reappear in the other-candidates section with the
+    // is-selected visual; clicking a row toggles it (multi keeps the change
+    // until the outside click commits, single commits immediately).
+    var selectedCollapsed = false;
+    function buildMenuSections() {
+      const shown = visibleItems();
+      const rows = [];
+      const buildRow = item => {
         const row = document.createElement("label");
         row.className = "ft-multi-select-option";
         if (selected.includes(item.value)) row.classList.add("is-selected");
@@ -602,7 +554,6 @@
             item.value,
           ];
         }
-
         function selectionAfterNativeChange() {
           if (!input.checked) return selected.filter(value => value !== item.value);
           if (!multi) return [item.value];
@@ -613,14 +564,9 @@
             item.value,
           ];
         }
-
         async function commitSingle(next) {
           const previous = [...committedSelected];
           selected = [...next];
-          // A single-choice callback may synchronously redraw and replace the
-          // owning field (for example the inline factor source mode). Close
-          // and unportal this control before invoking application code so its
-          // detached menu cannot survive or race the redraw.
           dropdown.open = false;
           restoreMenu();
           render();
@@ -637,10 +583,6 @@
             );
           }
         }
-
-        // Always own the pointer transition.  Native radio/checkbox defaults
-        // make the same interaction pass through a second change path and
-        // can also couple unrelated radio pickers through their name.
         let clickHandled = false;
         input.addEventListener("click", event => {
           if (item.disabled) return;
@@ -654,9 +596,6 @@
           selected = next;
           render();
         });
-
-        // Keep change as a controlled fallback for keyboard/programmatic
-        // changes.  A real pointer click has already been handled above.
         input.addEventListener("change", () => {
           if (clickHandled) {
             clickHandled = false;
@@ -672,77 +611,153 @@
           render();
         });
         return row;
-      }));
+      };
+      function sectionHeading(text, collapsed, onToggle) {
+        const head = document.createElement("div");
+        head.className = "ft-multi-select-section-heading";
+        const marker = document.createElement("span");
+        marker.className = "ft-multi-select-section-marker";
+        marker.textContent = collapsed ? "▸" : "▾";
+        const title = document.createElement("span");
+        title.textContent = text;
+        head.append(marker, title);
+        head.addEventListener("click", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          onToggle();
+        });
+        return head;
+      }
+      const wrap = (rows, className) => {
+        const box = document.createElement("div");
+        box.className = className;
+        for (const row of rows) box.append(row);
+        return box;
+      };
+      const selectedItems = items.filter(item => selected.includes(item.value));
+      if (selectedItems.length) {
+        const head = sectionHeading(
+          `${translate(context, "已选", "已选")} (${selectedItems.length})`,
+          selectedCollapsed,
+          () => { selectedCollapsed = !selectedCollapsed; render(); },
+        );
+        rows.push(head);
+        if (!selectedCollapsed) {
+          rows.push(wrap(
+            selectedItems.map(item => buildRow(item)),
+            "ft-multi-select-section-selected",
+          ));
+        }
+      }
+      const exclusiveShown = shown.filter(item => item.exclusive);
+      if (exclusiveShown.length || options.exclusiveManual) {
+        rows.push(sectionHeading(translate(context, "排他", "排他"), false, () => {}));
+        rows.push(wrap(
+          exclusiveShown.map(item => buildRow(item)),
+          "ft-multi-select-section-exclusive",
+        ));
+        if (options.exclusiveManual) {
+          const manualRow = document.createElement("label");
+          manualRow.className = "ft-multi-select-option ft-multi-select-exclusive ft-multi-select-manual-exclusive";
+          const input = document.createElement("input");
+          input.type = "text";
+          input.placeholder = options.exclusiveManual.placeholder
+            || options.exclusiveManual.label
+            || translate(context, "手填排他项…", "手填排他项…");
+          input.disabled = controlDisabled;
+          const confirm = () => {
+            const raw = String(input.value || "").trim();
+            input.value = "";
+            if (!raw) return;
+            let item = itemFor(raw) || items.find(candidate => (
+              String(candidate.label || "") === raw
+            ));
+            if (!item) {
+              item = {
+                value: raw, label: raw, exclusive: true,
+                description: translate(context, "手填排他项", "手填排他项"),
+              };
+              items.push(item);
+            }
+            if (!multi) {
+              void (async () => {
+                dropdown.open = false;
+                restoreMenu();
+                render();
+                try {
+                  const commit = options.onChange || options.onApply;
+                  const result = commit?.([item.value]);
+                  if (result && typeof result.then === "function") await result;
+                  committedSelected = [item.value];
+                } catch (error) {
+                  context.showNotice?.(
+                    error.message || translate(context, "应用失败"), true,
+                  );
+                }
+              })();
+              return;
+            }
+            selected = [item.value];
+            render();
+          };
+          input.addEventListener("keydown", event => {
+            event.stopPropagation();
+            if (event.key === "Enter") confirm();
+          });
+          manualRow.append(input);
+          rows.push(wrap([manualRow], "ft-multi-select-section-exclusive"));
+        }
+      }
+      const others = shown.filter(item => !item.exclusive);
+      if (others.length) {
+        rows.push(sectionHeading(
+          `${translate(context, "其他候选", "其他候选")} (${others.length})`,
+          false, () => {},
+        ));
+        rows.push(wrap(others.map(item => buildRow(item)), "ft-multi-select-section-others"));
+      }
+      return rows;
+    }
+    // Commit-on-outside-close for multi: no explicit apply button.
+    async function commitMultiOnClose() {
+      if (applying || controlDisabled) return;
+      applying = true;
+      try {
+        const changed = JSON.stringify(selected)
+          !== JSON.stringify(committedSelected);
+        if (!changed) return;
+        let result;
+        if (typeof options.onApply === "function") {
+          result = options.onApply([...selected]);
+        } else {
+          result = options.onChange?.([...selected]);
+        }
+        if (result && typeof result.then === "function") await result;
+        committedSelected = [...selected];
+      } catch (error) {
+        selected = [...committedSelected];
+        render();
+        context.showNotice?.(error.message || translate(context, "应用失败"), true);
+      } finally {
+        applying = false;
+      }
     }
 
     clear.addEventListener("click", () => {
       search.value = "";
-      remote?.schedule(0);
-      if (!remote) render();
-      search.focus();
+      render();
+      search.focus?.();
     });
-    search.addEventListener("input", () => {
-      remote?.schedule();
-      if (!remote) render();
-    });
+    // Outside click / collapse commits multi selections (no apply button);
+    // single mode already commits on each pick.
     dropdown.addEventListener("toggle", () => {
-      const shell = section.closest?.(".backend-settings-shell");
-      if (shell?.classList?.toggle) {
-        const openPicker = shell.querySelector?.(
-          ".ft-multi-select-dropdown[open]",
-        );
-        shell.classList.toggle("has-open-multi-select", Boolean(openPicker));
+      if (dropdown.open) {
+        if (!menuPortaled) portalMenu();
+        return;
       }
-      if (dropdown.open && !controlDisabled) {
-        portalMenu();
-        void remote?.load(search.value);
-        options.onOpen?.();
-      } else {
-        if (dropdown.open && controlDisabled) dropdown.open = false;
-        restoreMenu();
-      }
-      if (!dropdown.open && multi && !applying) {
-        selected = [...committedSelected];
-        render();
-      }
+      restoreMenu();
+      if (multi && !applying) void commitMultiOnClose();
     });
-    if (controlDisabled) {
-      summary.addEventListener("click", event => {
-        event.preventDefault();
-        dropdown.open = false;
-      });
-    }
-
-    if (multi) {
-      const apply = document.createElement("button");
-      apply.type = "button";
-      apply.className = "primary ft-multi-select-apply";
-      apply.textContent = options.applyLabel
-        || translate(context, "保存", "保存");
-      apply.disabled = controlDisabled;
-      apply.addEventListener("click", async () => {
-        if (applying || controlDisabled) return;
-        applying = true;
-        apply.disabled = true;
-        try {
-          let result;
-          if (typeof options.onApply === "function") {
-            result = options.onApply([...selected]);
-          } else {
-            result = options.onChange?.([...selected]);
-          }
-          if (result && typeof result.then === "function") await result;
-          committedSelected = [...selected];
-          dropdown.open = false;
-        } catch (error) {
-          context.showNotice?.(error.message || translate(context, "应用失败"), true);
-        } finally {
-          applying = false;
-          apply.disabled = controlDisabled;
-        }
-      });
-      actions.append(apply);
-    }
 
     render();
     return Object.freeze({

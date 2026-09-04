@@ -579,7 +579,8 @@
    "docs/reader.js"
   ],
   "catalog-selection-core": [
-   "catalog/shared/multi-select-filter.js"
+   "catalog/shared/multi-select-filter/type-filter.js",
+   "catalog/shared/multi-select-filter/index.js"
   ],
   "catalog-selection-remote": [
    "catalog/shared/multi-select-filter-remote.js"
@@ -987,7 +988,8 @@
   "core/highcharts-range-loader.js",
   "core/price-chart.js",
   "core/market-data.js",
-  "catalog/shared/multi-select-filter.js",
+  "catalog/shared/multi-select-filter/type-filter.js",
+   "catalog/shared/multi-select-filter/index.js",
   "catalog/shared/multi-select-filter-remote.js",
   "jobs/list-format.js",
   "jobs/page-tabs.js",

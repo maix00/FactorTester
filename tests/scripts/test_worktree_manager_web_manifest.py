@@ -173,14 +173,18 @@ def test_multi_select_supports_embedded_candidate_type_filter() -> None:
     """The shared picker may embed a candidate-type filter next to its search
     box (single or multi choice, per caller) that narrows only the visible
     candidates and never touches the selection."""
-    source = (WEB_ROOT / "catalog/shared/multi-select-filter.js").read_text(
+    source = (WEB_ROOT / "catalog/shared/multi-select-filter/index.js").read_text(
         encoding="utf-8",
     )
-    assert "makeTypeFilterPanel" in source
-    assert "options.typeFilter" in source
+    type_filter = (
+        WEB_ROOT / "catalog/shared/multi-select-filter/type-filter.js"
+    ).read_text(encoding="utf-8")
+    assert "makeTypeFilterPanel" not in source
+    assert "window.FTMultiSelectTypeFilter?.create" in source
+    assert "window.FTMultiSelectTypeFilter" in type_filter
     assert "typeFilter.visible(item)" in source
-    assert 'spec?.multi !== false' in source
-    assert "ft-multi-select-type-panel" in source
+    assert 'spec?.multi !== false' in type_filter
+    assert "ft-multi-select-type-panel" in type_filter
     # Optional "+" entry reusing the caller's on-the-fly path; created
     # candidates join the pool with an 当场 badge (editing stays on the
     # view-overlay ? infrastructure).
@@ -667,7 +671,7 @@ def test_run_input_panel_only_renders_backend_declared_controls() -> None:
 
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_run_input_panel.js"
     modules = [
-        WEB_ROOT / "catalog" / "shared" / "multi-select-filter.js",
+        WEB_ROOT / "catalog" / "shared" / "multi-select-filter" / "index.js",
         WEB_ROOT / "workbench" / "test-object-picker.js",
         WEB_ROOT / "workbench" / "test-source-upload.js",
     ]
@@ -1008,7 +1012,7 @@ def test_ic_job_results_load_the_shared_chart_timeline_first() -> None:
     ]
     assert "factor-catalog-core" in manifest["group_dependencies"]["catalog-core"]
     assert "catalog-selection-core" in manifest["group_dependencies"]["factor-catalog-core"]
-    assert "catalog/shared/multi-select-filter.js" in manifest["groups"]["catalog-selection-core"]
+    assert "catalog/shared/multi-select-filter/index.js" in manifest["groups"]["catalog-selection-core"]
     assert manifest["groups"]["job-detail-previews"].index(
         "jobs/highcharts-timeline.js",
     ) < len(manifest["groups"]["job-detail-previews"])
@@ -1066,7 +1070,7 @@ def test_test_settings_mount_live_chips_between_tabs_and_panel() -> None:
         WEB_ROOT / "workbench" / "test-setting-chips.js",
         WEB_ROOT / "workbench" / "tab-chip-content.js",
         WEB_ROOT / "workbench" / "test-content-adapters.js",
-        WEB_ROOT / "catalog" / "shared" / "multi-select-filter.js",
+        WEB_ROOT / "catalog" / "shared" / "multi-select-filter" / "index.js",
         WEB_ROOT / "workbench" / "test-object-picker.js",
         WEB_ROOT / "workbench" / "test-field-row.js",
         WEB_ROOT / "workbench" / "test-setting-fields.js",
@@ -1321,7 +1325,7 @@ def test_restored_nested_editors_restart_idle_catalog_loads() -> None:
 
 
 def test_object_picker_places_create_action_beside_the_shared_control() -> None:
-    shared = (WEB_ROOT / "catalog" / "shared" / "multi-select-filter.js").read_text(
+    shared = (WEB_ROOT / "catalog" / "shared" / "multi-select-filter" / "index.js").read_text(
         encoding="utf-8",
     )
     picker = (WEB_ROOT / "workbench" / "test-object-picker.js").read_text(
@@ -1888,7 +1892,7 @@ def test_backtest_result_group_loads_shared_multi_select_dependency() -> None:
     )
     assert "catalog-selection-core" in manifest["group_dependencies"]["factor-catalog-core"]
     assert (
-        "catalog/shared/multi-select-filter.js"
+        "catalog/shared/multi-select-filter/index.js"
         in manifest["groups"]["catalog-selection-core"]
     )
 
@@ -2003,7 +2007,7 @@ def test_shared_multi_select_enforces_exclusive_and_single_selection() -> None:
     import subprocess
 
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "multi_select_filter.js"
-    source = WEB_ROOT / "catalog" / "shared" / "multi-select-filter.js"
+    source = WEB_ROOT / "catalog" / "shared" / "multi-select-filter" / "index.js"
     remote_source = WEB_ROOT / "catalog" / "shared" / "multi-select-filter-remote.js"
     result = subprocess.run(
         ["node", str(fixture), str(remote_source), str(source)], cwd=ROOT,
@@ -2065,7 +2069,7 @@ def test_multi_select_object_rows_open_matching_view_overlays() -> None:
     # overlay the opener must route through the frame stack so the view is a
     # nested child overlay, not a second top-level dialog.
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "multi_select_filter.js"
-    source = WEB_ROOT / "catalog" / "shared" / "multi-select-filter.js"
+    source = WEB_ROOT / "catalog" / "shared" / "multi-select-filter" / "index.js"
     remote_source = WEB_ROOT / "catalog" / "shared" / "multi-select-filter-remote.js"
     result = subprocess.run(
         ["node", str(fixture), str(remote_source), str(source)], cwd=ROOT,
@@ -2175,7 +2179,7 @@ def test_registered_locked_fields_share_one_visual_and_picker_contract() -> None
     rows = (WEB_ROOT / "workbench" / "test-field-row.js").read_text(
         encoding="utf-8"
     )
-    picker = (WEB_ROOT / "catalog" / "shared" / "multi-select-filter.js").read_text(
+    picker = (WEB_ROOT / "catalog" / "shared" / "multi-select-filter" / "index.js").read_text(
         encoding="utf-8"
     )
     styles = (WEB_ROOT / "styles" / "workbench-settings.css").read_text(
@@ -2197,7 +2201,7 @@ def test_settings_picker_can_escape_the_tab_content_boundary() -> None:
     task_css = (WEB_ROOT / "styles" / "task-inputs.css").read_text(
         encoding="utf-8"
     )
-    picker = (WEB_ROOT / "catalog" / "shared" / "multi-select-filter.js").read_text(
+    picker = (WEB_ROOT / "catalog" / "shared" / "multi-select-filter" / "index.js").read_text(
         encoding="utf-8"
     )
 
