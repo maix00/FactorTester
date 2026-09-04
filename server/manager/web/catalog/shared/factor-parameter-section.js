@@ -64,7 +64,7 @@
       // value-column heading.
       if (showValue && index === labels.length - 1
         && options.valueHeaderExtra) {
-        cell.append(" ", options.valueHeaderExtra);
+        cell.append(options.valueHeaderExtra);
       }
     });
     root.append(header);
@@ -115,9 +115,15 @@
     const header = document.createElement("summary");
     header.className = "factor-detail-parameter-tree-header";
     const title = document.createElement("b");
+    // Family rows may carry the alias under any of these keys depending on
+    // which projection produced them; never fall back to the generic label
+    // while a name is available.
+    const familyValue = value?.family || value?.__factor_family || value;
     title.textContent = String(
       value?.factor_family_alias || value?.factor_family_name
-      || value?.factor_alias || context.t("因子参数"),
+      || familyValue?.factor_family_alias || familyValue?.family_alias
+      || familyValue?.factor_family_name || familyValue?.alias
+      || familyValue?.name || value?.factor_alias || context.t("因子参数"),
     );
     const heading = document.createElement("span");
     heading.className = "factor-detail-parameter-tree-heading";

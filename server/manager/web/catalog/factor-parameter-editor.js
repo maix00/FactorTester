@@ -352,6 +352,22 @@
         const unlockFamilyEditing = () => {
           const family = currentTemplate;
           if (!family) return;
+          // Make sure the family appears among the 因子家族 candidates so
+          // the picker actually shows it as selected.
+          if (!families.some(item => (
+            selectionValue(item.value ?? item.ref) === familyRef(family)
+          ))) {
+            families.push({
+              value: familyRef(family),
+              label: familyLabel(family),
+              family,
+              description: context.t("本次配置中当场新建"),
+            });
+            familyPicker?.setItems?.(families);
+          }
+          if (createFamily) {
+            createFamily.textContent = context.t("编辑因子家族");
+          }
           const composed = makeFamilyDraft(family);
           composed.parameter_values = {
             ...(composed.parameter_values || {}),
@@ -512,7 +528,16 @@
         const familySource = document.createElement("div");
         familySource.className = "factor-param-family-source";
         familySource.append(familyPicker.element || familyPicker);
-        if (createFamily) familySource.append(createFamily);
+        // 新增/编辑因子家族 only applies while composing an on-the-fly
+        // family; composing parameters against an existing (library or
+        // referenced) family does not offer that entry.
+        const composedFamily = values[alias]?.__factor_family;
+        const familyIsInline = Boolean(composedFamily) && (
+          composedFamily.temporary === true
+          || composedFamily.source_kind === "transient"
+          || composedFamily.source_origin === "test_inline"
+        );
+        if (createFamily && familyIsInline) familySource.append(createFamily);
         sourceControl.append(familySource);
       }
     };

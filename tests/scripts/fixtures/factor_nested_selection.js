@@ -335,6 +335,44 @@ assert.ok(
     unlocked?.Th?.__factor_family_draft === true,
     "edit entry must switch the value into family-composition mode",
   );
+  const unlockedFamilyPicker = pickers.filter(item => (
+    item.options.name === "factor-param-family-Th"
+  )).at(-1);
+  assert.deepEqual(
+    unlockedFamilyPicker.selected, ["SgChgPct"],
+    "family source must show the unlocked family selected",
+  );
+  // Composing against an existing family offers no 新增/编辑因子家族 entry.
+  assert.equal(
+    descendants(unlockable.root).filter(
+      item => String(item.className || "").includes("factor-param-create-family"),
+    ).length, 0,
+    "existing-family composition must not offer the inline family entry",
+  );
+  // …while an on-the-fly inline family keeps that entry.
+  const inlineDraft = {
+    __factor_family_draft: true,
+    __factor_family: {
+      factor_family_alias: "InlineF",
+      source_kind: "transient",
+      parameter_definitions: [
+        {alias: "N", type: "WindowParam", default_value: "20d"},
+      ],
+    },
+    parameter_values: {},
+  };
+  const inlineParam = window.FTFactorParameterEditor.create(
+    {t: value => value},
+    outerFamily.parameter_definitions,
+    {Th: inlineDraft},
+    {factorItems: [], familyItems: [], onChange: () => {}},
+  );
+  assert.ok(
+    descendants(inlineParam.root).some(
+      item => String(item.className || "").includes("factor-param-create-family"),
+    ),
+    "an inline family composition must offer the family entry",
+  );
 
   await factorPicker.options.onChange([childRef]);
   assert.equal(resolveCalls, 1, "selected factors must be enriched lazily");

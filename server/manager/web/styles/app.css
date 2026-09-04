@@ -339,6 +339,10 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .factor-detail-parameter-editor > .factor-detail-parameter-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; min-width: 0; padding: 10px 12px; }
 .factor-detail-parameter-editor > :not(.factor-detail-parameter-header):not(.factor-detail-parameter-row) { grid-column: 1 / -1; min-width: 0; }
 .factor-detail-parameter-header { color: var(--muted); background: var(--soft); font-size: 12px; }
+/* Header cells align inline actions (nested-table edit icon) flush with the
+   localized column label. */
+.factor-detail-parameter-header b { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.factor-detail-parameter-header button { margin: 0; padding: 2px; line-height: 1; vertical-align: middle; }
 .factor-detail-parameter-row + .factor-detail-parameter-row { border-top: 1px solid var(--line); }
 .factor-detail-parameter-row-factor { border-bottom: 0; }
 .factor-detail-parameter-key, .factor-detail-parameter-default { overflow-wrap: anywhere; }
