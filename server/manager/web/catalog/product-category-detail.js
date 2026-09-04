@@ -94,13 +94,16 @@
       context.onSaved(saved);
       return;
     }
-    if (FTTabReturn.returnToSource(context, {
-      kind: "category", ref: String(saved.id || ""),
-    })) return;
+    // Same-tab authoring: the current tab adopts the saved category's view.
+    const savedViewURL = helpers.pathFor(
+      `/products/categories/${encodeURIComponent(saved.id)}`, source,
+    );
+    if (typeof context.navigateInPlace === "function") {
+      context.navigateInPlace(savedViewURL);
+      return;
+    }
     if (category) {
-      context.navigate(helpers.pathFor(
-        `/products/categories/${encodeURIComponent(saved.id)}`, source,
-      ));
+      context.navigate(savedViewURL);
       return;
     }
     context.closeTab?.(context.tabID);

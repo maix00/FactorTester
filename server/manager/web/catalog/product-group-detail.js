@@ -199,40 +199,81 @@
     const surface = editing ? document.createElement("form") : document.createElement("div");
     surface.className = "product-group-detail-surface";
     if (editing) surface.noValidate = true;
+    const groupViewURL = group
+      ? helpers.pathFor(
+        `/products/group/${encodeURIComponent(groupPath(group))}`, source,
+      )
+      : "";
+    const deleteGroup = async () => {
+      if (!window.confirm(context.t("确认删除该产品组？"))) return;
+      try {
+        await context.api(endpoint(source, groupPath(group)), {method: "DELETE"});
+        context.closeTab?.(context.tabID);
+        context.navigate(helpers.pathFor(
+          `/products/groups?updated=${Date.now()}`, source,
+        ));
+      } catch (error) {
+        context.showNotice?.(error.message || context.t("产品组删除失败"), true);
+      }
+    };
+    // Standalone pages own their authoring actions in the global top header
+    // (shared mode component: pencil edit / save / cancel icons, delete);
+    // overlays keep the in-dialog header actions.
+    const globalHeader = !context.testObjectOverlay;
+    let save = null;
+    if (globalHeader) {
+      if (editing) {
+        const actions = window.FTObjectModeActions?.mount?.(context, {
+          mode: creating ? "create" : "edit",
+          viewHref: creating ? "" : groupViewURL,
+          onCancel: creating ? (() => {
+            context.closeTab?.(context.tabID);
+            context.navigate(helpers.pathFor("/products/groups", source));
+          }) : undefined,
+          onSave: () => surface.requestSubmit(),
+        }) || [];
+        save = actions[actions.length - 1];
+      } else if (editable && group) {
+        // Same-tab authoring: the edit URL derives from the current location.
+        window.FTObjectModeActions?.mount?.(context, {
+          mode: "view",
+          onEdit: true,
+          editLabel: "编辑",
+          editHelp: "编辑产品组",
+        });
+        if (source === "server") {
+          context.toolbar?.append(FTUI.iconButton(
+            context, "trash", "删除", deleteGroup,
+            {className: "danger-action"},
+          ));
+        }
+      }
+    }
     const headerValue = FTCatalogDetailUI.header(context, {
       title,
-      editing,
+      // Standalone pages: authoring actions live in the global top header,
+      // and there is no list-back button — tabs are the navigation surface.
+      editing: globalHeader ? false : editing,
       creating,
-      canEdit: editable,
-      onBack: () => context.navigate(helpers.pathFor("/products/groups", source)),
-      onCancel: () => {
+      canEdit: globalHeader ? false : editable,
+      onBack: undefined,
+      onCancel: globalHeader ? undefined : () => {
         if (creating) {
           context.closeTab?.(context.tabID);
           context.navigate(helpers.pathFor("/products/groups", source));
         } else {
-          context.navigate(helpers.pathFor(
-            `/products/group/${encodeURIComponent(groupPath(group))}`, source,
-          ));
+          context.navigate(groupViewURL);
         }
       },
-      onEdit: () => context.navigate(helpers.pathFor(
-        `/products/group/${encodeURIComponent(groupPath(group))}?mode=edit`, source,
-      )),
-      onDelete: async () => {
-        if (!window.confirm(context.t("确认删除该产品组？"))) return;
-        try {
-          await context.api(endpoint(source, groupPath(group)), {method: "DELETE"});
-          context.closeTab?.(context.tabID);
-          context.navigate(helpers.pathFor(
-            `/products/groups?updated=${Date.now()}`, source,
-          ));
-        } catch (error) {
-          context.showNotice?.(error.message || context.t("产品组删除失败"), true);
-        }
-      },
+      onEdit: globalHeader ? undefined : () => context.navigate(
+        helpers.pathFor(
+          `/products/group/${encodeURIComponent(groupPath(group))}?mode=edit`,
+          source,
+        ),
+      ),
+      onDelete: globalHeader ? undefined : deleteGroup,
     });
     const header = headerValue.root;
-    const save = headerValue.save;
     if (save) save.dataset.productGroupSave = "true";
     surface.append(header, helpers.sourceSummary(context));
 
@@ -344,21 +385,19 @@
             context.onSaved(value.group || value);
             return;
           }
-          if (FTTabReturn.returnToSource(context, {
-            kind: "product_group",
-            ref: String(value.group?.group_ref || value.group?.id || ""),
-          })) return;
-          if (creating) {
-            context.closeTab?.(context.tabID);
-            context.navigate(helpers.pathFor(
-              `/products/groups?updated=${Date.now()}`, source,
-            ));
-          } else {
-            context.navigate(helpers.pathFor(
-              `/products/group/${encodeURIComponent(groupPath(value.group || group))}?mode=edit&updated=${Date.now()}`,
-              source,
-            ));
+          // Same-tab authoring: the current tab adopts the saved group's view
+          // (the path can change when the name changes); nothing new opens and
+          // no stale tab is left behind.
+          const resultViewURL = helpers.pathFor(
+            `/products/group/${encodeURIComponent(groupPath(value.group || group))}`,
+            source,
+          );
+          if (typeof context.navigateInPlace === "function") {
+            context.navigateInPlace(resultViewURL);
+            return;
           }
+          if (creating) context.closeTab?.(context.tabID);
+          context.navigate(resultViewURL);
         } catch (error) {
           status.textContent = error.message || context.t("产品组保存失败");
           save.disabled = false;
