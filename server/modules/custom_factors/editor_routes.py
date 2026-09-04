@@ -1,9 +1,12 @@
 """Routes supporting custom-factor source validation and visual editor metadata."""
 
 import hashlib
+import logging
 import os
 
 from flask import jsonify, request
+
+_LOGGER = logging.getLogger(__name__)
 
 from server.modules.custom_factors import factor_library_internal_bp
 from server.modules.custom_factors.expression_inspection import fixed_column_refs
@@ -165,6 +168,9 @@ def api_validate_expr():
                 },
             })
         except Exception as exc:
+            _LOGGER.exception(
+                "factor validate resolve_factor_alias failed: %r", exc,
+            )
             return jsonify({
                 'success': True,
                 'valid': False,
@@ -243,6 +249,9 @@ def api_validate_expr():
                 **instance,
             })
         except Exception as exc:
+            _LOGGER.exception(
+                "factor validate public factor failed: %r", exc,
+            )
             return jsonify({
                 'success': True,
                 'valid': False,
