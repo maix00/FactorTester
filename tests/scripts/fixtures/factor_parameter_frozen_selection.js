@@ -108,6 +108,7 @@ const descendants = root => [root, ...(root.children || []).flatMap(descendants)
     {
       factorItems: [{value: frozen.ref, label: frozen.alias, factor: frozen}],
       onSelectFactor: async factor => factor,
+    onValidateFactorAlias: async () => ({valid: true, factor_alias: frozen.alias, factor: frozen}),
       onChange: () => { parameterChanges += 1; },
     },
   );
