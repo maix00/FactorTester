@@ -363,6 +363,7 @@
     let nestedFamilyPending = false;
     let editingFactor = false;
     const editingParams = {};
+    let baseFactor = null;
     let onTheFlyFactor = null;
     const renderNested = () => {
       if (nestedMount.replaceChildren) nestedMount.replaceChildren();
@@ -435,30 +436,21 @@
           };
           setValue(composed, "family");
         };
-        // Pencil → create a backup on-the-fly factor, then let edits mutate
-        // that factor in place and sync its alias back to the selected display.
+        // Pencil → enter an edit state only: the selected value stays the
+        // library / alias factor until the user actually edits a parameter.
+        // The first edit materialises an independent on-the-fly factor.
         const unlockFactorEditing = () => {
           editingFactor = true;
-          const base = draft && typeof draft === "object" ? draft : {};
-          const saved = draft?.identity?.params || draft?.parameter_values || {};
-          const identity = {...(draft?.identity || {}), params: {...saved}};
-          const familyMeta = draft?.family
-            || {factor_family_alias: draft?.identity?.family_alias || draft?.factor_family_alias};
-          onTheFlyFactor = {
-            ...base,
-            identity,
-            params: Object.entries(saved)
-              .filter(([key]) => key && !key.startsWith("$"))
-              .map(([key, value]) => ({alias: key, value})),
-            parameter_values: {...saved},
-            family: familyMeta,
-            temporary: true,
-            source_origin: base.source_origin || "test_inline",
-            alias: base.alias || base.factor_alias
-              || composeFactorAlias(familyMeta, saved),
-          };
-          onTheFlyFactor.factor_alias = onTheFlyFactor.alias;
-          setValue(onTheFlyFactor, "factor");
+          if (draft && typeof draft === "object") {
+            const saved = draft.identity?.params || draft.parameter_values || {};
+            baseFactor = {
+              ...draft,
+              identity: {...(draft.identity || {}), params: {...saved}},
+            };
+          } else {
+            baseFactor = null;
+          }
+          onTheFlyFactor = null;
           renderNested();
         };
         const unlockLabel = context.t("编辑");
@@ -493,24 +485,60 @@
             edit.value = initVal;
             edit.addEventListener("input", () => {
               editingParams[param.alias] = edit.value;
-              if (onTheFlyFactor) {
-                // Mutate the backup on-the-fly factor in place.
+              if (!onTheFlyFactor) {
+                // First real edit: materialise an independent on-the-fly factor
+                // (only now does it cease to be the library / alias factor).
+                const base = baseFactor && typeof baseFactor === "object"
+                  ? baseFactor : {identity: {}, params: {}};
+                const saved = base.identity?.params || base.parameter_values || {};
+                const familyMeta = base.family
+                  || {factor_family_alias: base.identity?.family_alias || base.factor_family_alias};
+                const identity = {...(base.identity || {}), params: {...editingParams}};
+                onTheFlyFactor = {
+                  ...base,
+                  identity,
+                  params: Object.entries(editingParams)
+                    .filter(([key]) => key && !key.startsWith("$"))
+                    .map(([key, value]) => ({alias: key, value})),
+                  parameter_values: {...editingParams},
+                  family: familyMeta,
+                  temporary: true,
+                  source_origin: base.source_origin || "test_inline",
+                  alias: composeFactorAlias(familyMeta, editingParams),
+                };
+                onTheFlyFactor.factor_alias = onTheFlyFactor.alias;
+                values[alias] = onTheFlyFactor;
+                // Replace the library/alias candidate with this on-the-fly item.
+                const ref = reference(onTheFlyFactor);
+                const idx = candidateItems.findIndex(item => (
+                  item.type === "factor" && item.value === ref
+                ));
+                const item = {
+                  value: ref, label: onTheFlyFactor.alias, factor: onTheFlyFactor,
+                  type: "factor", typeLabel: context.t("因子"), temporary: true,
+                  onsite: true,
+                  view: window.FTFactorDetailShared?.factorRowView?.(onTheFlyFactor)
+                    || {kind: "factor", ref},
+                };
+                if (idx >= 0) candidateItems.splice(idx, 1, item);
+                else candidateItems.push(item);
+                valuePicker?.setItems?.(candidateItems, true);
+              } else {
                 onTheFlyFactor.identity.params[param.alias] = edit.value;
                 onTheFlyFactor.parameter_values[param.alias] = edit.value;
                 onTheFlyFactor.params = Object.entries(onTheFlyFactor.identity.params)
                   .filter(([key]) => key && !key.startsWith("$"))
                   .map(([key, value]) => ({alias: key, value}));
-                // Recompute the alias and sync it into the picker display.
                 const familyMeta = onTheFlyFactor.family
                   || {factor_family_alias: onTheFlyFactor.identity.family_alias};
-                const alias = composeFactorAlias(familyMeta, onTheFlyFactor.identity.params);
-                onTheFlyFactor.alias = alias;
-                onTheFlyFactor.factor_alias = alias;
+                const newAlias = composeFactorAlias(familyMeta, onTheFlyFactor.identity.params);
+                onTheFlyFactor.alias = newAlias;
+                onTheFlyFactor.factor_alias = newAlias;
                 const ref = reference(onTheFlyFactor);
                 const idx = candidateItems.findIndex(item => (
                   item.type === "factor" && item.value === ref
                 ));
-                if (idx >= 0 && candidateItems[idx]) candidateItems[idx].label = alias;
+                if (idx >= 0 && candidateItems[idx]) candidateItems[idx].label = newAlias;
                 valuePicker?.setItems?.(candidateItems, true);
               }
               options.onChange?.(values, alias);
