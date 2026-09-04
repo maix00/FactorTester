@@ -333,6 +333,49 @@
       }
       searchRow.append(toggle);
     }
+    // Optional on-the-fly creation entry ("+") declared by the caller.  It
+    // reuses the caller's existing on-the-fly path; created candidates join
+    // the selectable pool flagged with an 当场 badge.  Editing stays on the
+    // view-overlay (?) infrastructure.
+    if (typeof options.onAddCandidate === "function") {
+      const addToggle = document.createElement("button");
+      addToggle.type = "button";
+      addToggle.className = "ft-multi-select-add-toggle icon-action-button";
+      const addTitle = translate(context, "当场新增", "当场新增");
+      addToggle.title = addTitle;
+      addToggle.setAttribute("aria-label", addTitle);
+      addToggle.addEventListener("click", event => {
+        event.stopPropagation();
+        const add = value => {
+          if (!value || typeof value !== "object") return;
+          const ref = String(
+            value.value ?? value.ref ?? value.id ?? value.factor_ref ?? "",
+          ).trim();
+          const valueKey = ref || String(value.label || value.alias || "").trim();
+          if (!valueKey) return;
+          if (items.some(item => (
+            String(item.value ?? item.ref ?? item.id ?? "").trim() === valueKey
+            || (item.label || "").trim() === valueKey
+          ))) return;
+          items.push({
+            ...value,
+            value: valueKey,
+            onsite: true,
+            temporary: true,
+            label: value.label || value.alias || valueKey,
+          });
+          render();
+        };
+        options.onAddCandidate(context, {add, close: () => {}});
+      });
+      const plusNode = window.FTIcons?.node?.("plus");
+      if (plusNode) {
+        addToggle.replaceChildren?.(plusNode);
+      } else {
+        addToggle.textContent = "+";
+      }
+      searchRow.append(addToggle);
+    }
     const optionList = document.createElement("div");
     optionList.className = "ft-multi-select-options";
     optionList.setAttribute("role", "group");
@@ -519,6 +562,12 @@
           const badge = document.createElement("span");
           badge.className = "ft-multi-select-exclusive-badge";
           badge.textContent = translate(context, "排他项", "排他");
+          row.append(badge);
+        }
+        if (item.onsite || item.temporary === true) {
+          const badge = document.createElement("span");
+          badge.className = "ft-multi-select-onsite-badge";
+          badge.textContent = translate(context, "当场", "当场");
           row.append(badge);
         }
         const itemActions = typeof options.itemActions === "function"

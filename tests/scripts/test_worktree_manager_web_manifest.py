@@ -181,6 +181,13 @@ def test_multi_select_supports_embedded_candidate_type_filter() -> None:
     assert "typeFilter.visible(item)" in source
     assert 'spec?.multi !== false' in source
     assert "ft-multi-select-type-panel" in source
+    # Optional "+" entry reusing the caller's on-the-fly path; created
+    # candidates join the pool with an 当场 badge (editing stays on the
+    # view-overlay ? infrastructure).
+    assert "options.onAddCandidate" in source
+    assert "ft-multi-select-add-toggle" in source
+    assert "onsite: true" in source
+    assert "ft-multi-select-onsite-badge" in source
 
 
 def test_route_script_groups_obey_the_initial_load_contract() -> None:
