@@ -103,24 +103,11 @@
       initialValue = initialFactorValue;
       values[alias] = initialValue;
     }
-    // When the current frozen reference is not among the visible library
-    // rows (different product-group scope, freshly saved combination, …),
-    // carry it as its own choice so the 因子库 source stays selectable and
-    // the value never falls back into a hand-typed box.
+    // Only references present in the visible library rows are 因子库
+    // sources.  A frozen combination that is not in the library (freshly
+    // saved parameters, another scope) reopens as its alias on the manual
+    // source instead of claiming a library origin it does not have.
     const factorChoices = [...factors];
-    if (isFrozenFactorValue(initialValue) && !factorChoices.some(item => (
-      selectionValue(item.value ?? item.ref) === reference(initialValue)
-    ))) {
-      const frozenRef = reference(initialValue) || display(initialValue) || alias;
-      factorChoices.push({
-        value: frozenRef,
-        label: display(initialValue) || alias,
-        factor: initialValue && typeof initialValue === "object"
-          ? initialValue
-          : {ref: frozenRef, alias: display(initialValue) || alias},
-        family: null,
-      });
-    }
     let activeSource = "";
     // Preserve the value's origin: a factor-library reference (opaque
     // ``factor:v2`` ref or a frozen v2 record) reopens on the 因子库 source;
@@ -129,10 +116,9 @@
     const frozenInitial = isFrozenFactorValue(initialValue);
     if (familyDraft(initialValue)) {
       activeSource = "family";
-    } else if (frozenInitial) {
-      activeSource = "factor";
-    } else if (factorChoices.some(item => selectionValue(item.value ?? item.ref)
-      === reference(initialValue))) {
+    } else if (frozenInitial && factorChoices.some(item => selectionValue(
+      item.value ?? item.ref,
+    ) === reference(initialValue))) {
       activeSource = "factor";
     } else if (columns.some(item => selectionValue(item.value) === selectionValue(initialValue))) {
       activeSource = "column";
@@ -357,6 +343,49 @@
           math_expr: templateValue?.math_expr || templateValue?.formula
             || templateValue?.latex || "",
         });
+        // Even when the reference exists in the library, the nested
+        // parameter list offers an edit entry that switches the value into
+        // 因子家族来源 mode (editable family composition); saving goes
+        // through the existing on-the-fly freeze path.
+        let currentTemplate = template;
+        const unlockFamilyEditing = () => {
+          const family = currentTemplate;
+          if (!family) return;
+          const composed = makeFamilyDraft(family);
+          composed.parameter_values = {
+            ...(composed.parameter_values || {}),
+            ...(draft.identity?.params || draft.parameter_values || {}),
+          };
+          setValue(composed, "family");
+        };
+        const ensureUnlockBar = () => {
+          const existing = nestedMount.querySelector
+            ? nestedMount.querySelector(".factor-param-nested-unlock")
+            : Array.from(nestedMount.children || []).some(child => (
+              String(child.className || "").includes("factor-param-nested-unlock")
+            ));
+          if (existing) return;
+          const bar = document.createElement("div");
+          bar.className = "factor-param-nested-unlock";
+          const label = context.t("编辑");
+          const icon = window.FTUI?.iconButton
+            ? window.FTUI.iconButton(
+              context, "square.and.pencil", label, unlockFamilyEditing,
+            )
+            : null;
+          if (icon) {
+            bar.append(icon);
+          } else {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "icon-action-button";
+            button.textContent = "✎";
+            button.title = label;
+            button.addEventListener("click", unlockFamilyEditing);
+            bar.append(button);
+          }
+          nestedMount.append(bar);
+        };
         const definitionRows = (template
           ? shared?.parameterRows?.(draft, {family: template}) || []
           : shared?.parameterRows?.(draft) || [])
@@ -365,6 +394,7 @@
             return saved === undefined ? row : {...row, value: saved};
           });
         const renderSection = (rowsValue, templateValue) => {
+          ensureUnlockBar();
           const section = shared.parameterSection(
             context, sectionValue(templateValue === undefined ? template : templateValue),
             rowsValue, (options.depth || 0) + 1,
@@ -396,12 +426,8 @@
                   return saved === undefined ? row : {...row, value: saved};
                 });
               if (upgraded.length) {
-                const section = shared.parameterSection(
-                  context, sectionValue(loadedFamily), upgraded,
-                  (options.depth || 0) + 1,
-                );
-                section.root.dataset.parameterAlias = alias;
-                nestedMount.append(section.root);
+                currentTemplate = loadedFamily;
+                renderSection(upgraded, loadedFamily);
                 return;
               }
             }

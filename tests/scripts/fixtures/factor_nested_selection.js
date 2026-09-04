@@ -30,6 +30,13 @@ global.document = {createElement: tag => new Element(tag)};
 global.window = globalThis;
 window.FTUI = {
   helpIcon: () => new Element("button"),
+  iconButton(_context, _symbol, label, handler) {
+    const button = new Element("button");
+    button.className = "icon-action-button";
+    button.textContent = label;
+    button.addEventListener("click", handler);
+    return button;
+  },
   table(headers, values) {
     const shell = new Element("table");
     shell.headers = headers;
@@ -264,6 +271,63 @@ assert.ok(
 );
 
 (async () => {
+  // A frozen combination that is NOT in the library must reopen on the
+  // manual source (showing its alias), not claim a 因子库 origin.
+  const absent = window.FTFactorParameterEditor.create(
+    {t: value => value},
+    outerFamily.parameter_definitions,
+    {Th: compactChild},
+    {factorItems: [], familyItems: [], onChange: () => {}},
+  );
+  const absentSource = pickers.filter(item => (
+    item.options.name === "factor-param-source-Th"
+  )).at(-1);
+  assert.deepEqual(
+    absentSource.selected, ["manual"],
+    "a frozen factor absent from the library must reopen on the manual source",
+  );
+  await new Promise(resolve => setImmediate(resolve));
+  const absentNested = descendants(absent.root).find(item => (
+    item.className?.includes("factor-detail-parameter-editor")
+      && item !== absent.root
+  ));
+  assert.ok(
+    absentNested,
+    "absent frozen factor still renders its nested parameter table",
+  );
+  const absentText = descendants(absentNested).map(item => item.textContent);
+  assert.ok(absentText.includes("0.6"), "absent frozen table shows saved values");
+
+  // The nested parameter list always carries an edit entry that switches
+  // the value into 因子家族来源 mode (editable family composition) — even
+  // when the reference exists in the library.
+  const unlockable = window.FTFactorParameterEditor.create(
+    {t: value => value},
+    outerFamily.parameter_definitions,
+    {Th: compactChild},
+    {
+      factorItems: [{
+        value: childRef, label: compactChild.alias,
+        factor: compactChild, family: childFamily,
+      }],
+      familyItems: [], onChange: value => { unlocked = value; },
+    },
+  );
+  let unlocked = null;
+  const unlockButton = descendants(unlockable.root).find(item => (
+    item.className === "factor-param-nested-unlock"
+  ));
+  assert.ok(unlockButton, "nested parameter list must show the 编辑 entry");
+  const unlockIcon = descendants(unlockButton).find(
+    item => item.tagName === "BUTTON",
+  );
+  assert.ok(unlockIcon, "unlock entry must be an icon button");
+  unlockIcon.listeners.click();
+  assert.ok(
+    unlocked?.Th?.__factor_family_draft === true,
+    "edit entry must switch the value into family-composition mode",
+  );
+
   await factorPicker.options.onChange([childRef]);
   assert.equal(resolveCalls, 1, "selected factors must be enriched lazily");
   assert.equal(latestValues.Th.parameter_definitions[2].type, "WindowParam");
