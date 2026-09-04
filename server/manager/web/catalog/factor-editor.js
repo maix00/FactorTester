@@ -1043,6 +1043,11 @@
             parameter_definitions: loaded.parameter_definitions
               || loaded.family_parameter_definitions || [],
             math_expr: loaded.math_expr || loaded.formula || "",
+            owner_username: loaded.owner_username
+              || loaded.owner_ref || loaded.factor_owner_ref || "",
+            factor_owner_ref: loaded.factor_owner_ref
+              || loaded.owner_ref || loaded.owner_username || "",
+            factor_kind: loaded.factor_kind || (loaded.source || ""),
           } : null),
       latestFamily: familyMode && mode === "edit"
         ? loaded : selectedFamily || loadedFamily,
