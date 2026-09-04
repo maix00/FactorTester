@@ -292,7 +292,10 @@
             ));
             if (idx >= 0) candidateItems.splice(idx, 1, item);
             else candidateItems.push(item);
-            valuePicker?.setItems?.(candidateItems, true);
+            // Not preserving selected drops the exclusive "raw" row the manual
+            // entry temporarily created — a resolved alias must become a factor
+            // candidate (onsite-badged when on-the-fly), not an exclusive item.
+            valuePicker?.setItems?.(candidateItems, false);
             valuePicker?.setValues?.([id]);
             setValue(factor, "manual");
             return;
