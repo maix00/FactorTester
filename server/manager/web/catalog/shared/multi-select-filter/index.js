@@ -721,7 +721,7 @@
       const others = shown.filter(item => !item.exclusive);
       if (others.length) {
         rows.push(sectionHeading(
-          `${translate(context, "其他候选", "其他候选")} (${others.length})`,
+          `${translate(context, "候选", "候选")} (${others.length})`,
           othersCollapsed,
           () => { othersCollapsed = !othersCollapsed; render(); },
         ));

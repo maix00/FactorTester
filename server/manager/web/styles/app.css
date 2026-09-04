@@ -281,21 +281,33 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .ft-multi-select-load-status.is-error { color: var(--danger, #c0392b); }
 .ft-multi-select-options { display: grid; gap: 2px; min-height: 0; max-height: min(320px, 42vh); overflow-y: auto; overscroll-behavior: contain; }
 .factor-product-group-filter-menu { max-height: min(680px, calc(100vh - 32px)); }
-.ft-multi-select-option { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 8px; min-width: 0; padding: 6px 7px; border-radius: 6px; cursor: pointer; }
-/* Left selection circle stays visible (accent color when checked). */
-.ft-multi-select-option input[type="checkbox"],
-.ft-multi-select-option input[type="radio"] {
-  appearance: auto;
-  -webkit-appearance: auto;
-  width: 15px;
-  height: 15px;
-  margin: 0;
-  flex: 0 0 auto;
-  accent-color: var(--accent);
+.ft-multi-select-option { display: grid; grid-template-columns: 15px minmax(0, 1fr) auto auto; align-items: center; column-gap: 8px; min-width: 0; padding: 6px 7px; border-radius: 6px; cursor: pointer; position: relative; }
+/* Custom round selection indicator (per row, independent of radio groups),
+   so the same selected row shows a filled dot in both 已选 and 候选 sections. */
+.ft-multi-select-option > input[type="checkbox"],
+.ft-multi-select-option > input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  width: 0;
+  height: 0;
 }
-.ft-multi-select-option.is-selected input[type="checkbox"],
-.ft-multi-select-option.is-selected input[type="radio"] {
-  accent-color: var(--accent);
+.ft-multi-select-option::before {
+  content: "";
+  grid-row: 1;
+  grid-column: 1;
+  width: 13px;
+  height: 13px;
+  justify-self: start;
+  border-radius: 50%;
+  border: 2px solid var(--muted);
+  background: var(--panel);
+  box-sizing: border-box;
+}
+.ft-multi-select-option.is-selected::before {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--panel);
 }
 .ft-multi-select-option:hover, .ft-multi-select-option.is-selected { background: var(--soft); }
 .ft-multi-select-option.is-exclusive { margin-bottom: 3px; border: 1px solid color-mix(in srgb, var(--accent) 48%, var(--line)); border-left: 3px solid var(--accent); border-radius: 6px; background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
