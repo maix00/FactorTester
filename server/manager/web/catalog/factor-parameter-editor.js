@@ -348,6 +348,15 @@
         // heading) that switches the value into 因子家族来源 mode (editable
         // family composition); saving goes through the existing on-the-fly
         // freeze path.
+        // Report the referenced family template so the outer editor's top
+        // formula preview can render the nested definition lines too (the
+        // frozen record carries only identity params, no template formula).
+        const reportNestedFamily = fam => {
+          if (fam && typeof options.onNestedFamilyTemplate === "function") {
+            options.onNestedFamilyTemplate(familyAliasOf, fam);
+          }
+        };
+        if (choice?.family) reportNestedFamily(choice.family);
         let currentTemplate = template;
         const unlockFamilyEditing = () => {
           const family = currentTemplate;
@@ -429,6 +438,7 @@
                 });
               if (upgraded.length) {
                 currentTemplate = loadedFamily;
+                reportNestedFamily(loadedFamily);
                 renderSection(upgraded, loadedFamily);
                 return;
               }

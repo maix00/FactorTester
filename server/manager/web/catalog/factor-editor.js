@@ -431,6 +431,7 @@
         factorItems: factorParameterItems(data),
         familyItems: familyItems(data),
         maxFamilyDepth: context.testObjectOverlay === true ? 1 : 12,
+        onNestedFamilyTemplate: hooks.onNestedFamilyTemplate,
         onSelectFactor: (factor, item) => resolveFactorForDisplay(
           context, data, factor, item,
         ),
@@ -1048,6 +1049,109 @@
     let tabs;
     const status = document.createElement("small");
     status.className = "form-error";
+    // Opening the editor first resolves every nested factor (recursively —
+    // including factors nested inside factors) to its family template, so
+    // the top formula preview can render each nested definition line.
+    const nestedTemplates = new Map();
+    const resolveNestedTemplates = async values => {
+      const records = [];
+      const seen = new Set();
+      const visit = value => {
+        if (!value || typeof value !== "object") return;
+        if (Number(value.schema_version) === 2 && (value.ref || value.factor_ref)) {
+          const ref = String(value.ref || value.factor_ref);
+          if (seen.has(ref)) return;
+          seen.add(ref);
+          records.push(value);
+          for (const dep of value.factor_dependencies || []) visit(dep);
+          for (const child of Object.values(value.identity?.params || {})) visit(child);
+          return;
+        }
+        if (value.__factor_family_draft) visit(value.__factor_family);
+        for (const dep of value.factor_dependencies || []) visit(dep);
+      };
+      for (const value of Object.values(values || {})) visit(value);
+      const loads = [];
+      for (const record of records) {
+        const alias = String(
+          record.identity?.family_alias || record.factor_family_alias || "",
+        ).trim();
+        if (!alias || nestedTemplates.has(alias)
+          || loads.some(item => item.alias === alias)) continue;
+        const row = (data.families || []).find(item => (
+          familyAlias(item) === alias || (item.family || item)?.family_alias === alias
+        ));
+        const family = row ? (row.family || row) : null;
+        if (family && (family.math_expr || family.formula || family.parameter_definitions?.length)) {
+          nestedTemplates.set(alias, family);
+          continue;
+        }
+        loads.push({alias, record});
+      }
+      await Promise.all(loads.map(async ({alias, record}) => {
+        try {
+          const ownerRef = String(record.owner_ref || "").trim().replace(/^principal:/, "");
+          const isPublic = ["public", "__public_jobs__"].includes(ownerRef);
+          const loaded = await window.FTFactorDetailShared.loadSourceVersion(
+            context, {
+              factor_family_alias: alias,
+              factor_family_name: alias,
+              family_ref: record.identity?.family_ref || record.family_ref || "",
+            }, "current", {
+              familyID: alias,
+              sourceKind: isPublic ? "public" : undefined,
+              ownerUsername: isPublic ? "" : ownerRef,
+            },
+          );
+          if (loaded) nestedTemplates.set(alias, {...loaded, factor_family_alias: alias});
+        } catch (_) {
+          // Nested template unavailable: the preview just omits that line.
+        }
+      }));
+    };
+    // Attach each frozen record's family template formula so renderPreviewNode
+    // can emit the nested definition lines; deeper records (nested inside
+    // identity.params / factor_dependencies) are augmented recursively.
+    const attachNestedTemplates = values => {
+      const out = {...(values || {})};
+      const attach = value => {
+        if (!value || typeof value !== "object") return value;
+        if (value.__factor_family_draft === true && value.__factor_family) {
+          return value;
+        }
+        if (Number(value.schema_version) === 2 && (value.ref || value.factor_ref)) {
+          const alias = String(
+            value.identity?.family_alias || value.factor_family_alias || "",
+          ).trim();
+          const family = nestedTemplates.get(alias);
+          const params = value.identity?.params || {};
+          let paramsChanged = false;
+          const nextParams = {};
+          for (const [key, child] of Object.entries(params)) {
+            const attached = attach(child);
+            nextParams[key] = attached;
+            paramsChanged = paramsChanged || attached !== child;
+          }
+          let next = value;
+          if (paramsChanged) {
+            next = {...next, identity: {...next.identity, params: nextParams}};
+          }
+          if (family && !value.math_expr) {
+            next = {
+              ...next,
+              math_expr: family.math_expr || family.formula || family.latex || "",
+              factor_family_alias: alias,
+              factor_family_name: alias,
+              family,
+            };
+          }
+          return next;
+        }
+        return value;
+      };
+      for (const [key, value] of Object.entries(out)) out[key] = attach(value);
+      return out;
+    };
     let previewFrame = 0;
     let refreshParameterComposition = () => {};
     const refreshFormulaPreview = () => {
@@ -1059,7 +1163,7 @@
         if (!target) return;
         const formula = window.FTFactorDetailShared.previewExpression(
           state.family || state.inspection || state.loaded,
-          state.parameterValues || {},
+          attachNestedTemplates(state.parameterValues),
         );
         if (!formula) return;
         if (window.katex) window.katex.render(formula, target, {
@@ -1082,7 +1186,7 @@
       const formulaSource = state.inspection || state.family || state.loaded;
       const liveExpression = !state.familyMode
         ? window.FTFactorDetailShared.previewExpression(
-          formulaSource, state.parameterValues || {},
+          formulaSource, attachNestedTemplates(state.parameterValues),
         ) : "";
       topMount.append(window.FTFactorDetailShared.summary(context, {
         ...(formulaSource || {}),
@@ -1132,6 +1236,11 @@
         markDirty: name => markDirty(name),
         refreshComposition: values => refreshParameterComposition(values),
         refreshFormula: () => refreshFormulaPreview(),
+        onNestedFamilyTemplate: (alias, family) => {
+          if (!alias || !family) return;
+          if (!nestedTemplates.has(alias)) nestedTemplates.set(alias, family);
+          refreshFormulaPreview();
+        },
       });
       if (editor) {
         // parameterEditor owns the mutable values object; keep the same
@@ -1260,6 +1369,11 @@
     }
     form.append(topMount, tabs.root, status);
     context.content.replaceChildren(form);
+    if (!state.familyMode) {
+      // Resolve nested factor family templates before the first render so
+      // the top formula preview carries every nested definition line.
+      await resolveNestedTemplates(state.parameterValues);
+    }
     redraw();
     FTFactorAssistance.register(context, {
       state, name, chineseName, description, category, tabs, redraw, markDirty,
