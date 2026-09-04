@@ -685,13 +685,13 @@
           const badge = document.createElement("span");
           badge.className = "ft-multi-select-exclusive-badge";
           badge.textContent = translate(context, "排他项", "排他");
-          row.append(badge);
+          label.append(" ", badge);
         }
         if (item.onsite || item.temporary === true) {
           const badge = document.createElement("span");
           badge.className = "ft-multi-select-onsite-badge";
           badge.textContent = translate(context, "当场", "当场");
-          row.append(badge);
+          label.append(" ", badge);
         }
         const itemActions = typeof options.itemActions === "function"
           ? options.itemActions(item) : [];

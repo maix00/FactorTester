@@ -143,7 +143,7 @@ const noneRow = optionRows(filter).find(item => (
   String(item.className).includes("is-exclusive")
 ));
 assert.ok(noneRow, "exclusive candidate renders in the menu");
-assert.ok(noneRow.children.some(item => (
+assert.ok(descendants(noneRow).some(item => (
   item.className === "ft-multi-select-exclusive-badge"
 )));
 

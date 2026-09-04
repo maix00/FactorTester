@@ -322,7 +322,7 @@ tbody tr[data-href]:hover { background: var(--soft); }
 /* Default refresh icon in the search row (re-pull candidate source). */
 .ft-multi-select-sync-toggle { flex: 0 0 auto; width: 30px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: var(--panel); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 .ft-multi-select-sync-toggle:hover { color: inherit; background: var(--soft); }
-.ft-multi-select-onsite-badge { border: 0; border-radius: 0; padding: 0; color: var(--success, #2e7d32); background: transparent; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.ft-multi-select-onsite-badge { border: 0; border-radius: 0; padding: 0; color: var(--accent); background: transparent; font-size: 10px; font-weight: 700; white-space: nowrap; }
 /* Dropdown menu sections: collapsible 已选 / 排他 (+ manual) / other candidates. */
 .ft-multi-select-section-add { flex: 0 0 auto; width: 22px; height: 22px; min-width: 22px; margin-left: auto; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: var(--panel); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 .ft-multi-select-section-add:hover { color: inherit; background: var(--soft); }

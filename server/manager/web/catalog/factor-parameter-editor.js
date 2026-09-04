@@ -292,28 +292,37 @@
         // pencil edit) so it appears as a 当场-badged factor candidate.
         const analysis = parseFactorAlias(v);
         if (analysis && analysis.family) {
+          const family = families.find(item => (
+            familyRef(item) === analysis.family
+            || String(item?.factor_family_alias || item?.family_alias || item?.name || "")
+              .trim() === analysis.family
+          ));
           const onsiteFactor = {
+            schema_version: 2,
+            ref: `temporary-factor:${v}`,
             alias: v, factor_alias: v,
             factor_family_alias: analysis.family,
             identity: {family_alias: analysis.family, params: analysis.params},
             params: Object.entries(analysis.params)
               .map(([key, value]) => ({alias: key, value})),
-            temporary: true, source_origin: "test_inline",
+            family: family || null,
+            parameter_definitions: family?.parameter_definitions
+              || family?.params || family?.factor_params || [],
           };
           const item = {
-            value: v, label: v, factor: onsiteFactor,
+            value: onsiteFactor.ref, label: v, factor: onsiteFactor,
             type: "factor", typeLabel: context.t("因子"),
-            onsite: true, temporary: true,
-            view: {kind: "factor", ref: v, initialValue: onsiteFactor, temporary: true},
+            onsite: true,
+            view: {kind: "factor", ref: onsiteFactor.ref, initialValue: onsiteFactor, temporary: true},
           };
           const idx = candidateItems.findIndex(c => (
-            c.type === "factor" && c.value === v
+            c.type === "factor" && c.value === onsiteFactor.ref
           ));
           if (idx >= 0) candidateItems.splice(idx, 1, item);
           else candidateItems.push(item);
           valuePicker?.setItems?.(candidateItems, false);
-          valuePicker?.setValues?.([v]);
-          setValue(onsiteFactor, "manual");
+          valuePicker?.setValues?.([onsiteFactor.ref]);
+          setValue(onsiteFactor, "factor");
           return;
         }
         setValue(v, "manual");
