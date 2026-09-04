@@ -65,13 +65,11 @@
       context.navigate(`/factor-series?factor_ref=${encodeURIComponent(frozenRef)}`);
     }, context.t("使用冻结因子配置运行序列查看任务")));
     if (editableBySession(context, factor)) {
-      // Same-tab authoring: the shared mode-actions component swaps this tab
-      // to the edit mode of the same object (?mode=edit on the same pathname
-      // reuses the factor detail tab).
+      // Same-tab authoring: the shared mode-actions component derives the edit
+      // URL from the current location (same pathname → same detail tab).
       window.FTObjectModeActions?.mount?.(context, {
         mode: "view",
         onEdit: true,
-        editHref: `/factors/factor/${encodeURIComponent(alias || frozenRef)}?mode=edit`,
         editLabel: "编辑",
         editHelp: "编辑因子",
       });
@@ -157,14 +155,12 @@
           )
     );
     if (canEdit && !context.testObjectViewOnly) {
-      const editQuery = publicFamily
-        ? "?mode=edit&visibility=public" : "?mode=edit";
-      // Same-tab authoring: the shared mode-actions component swaps this tab
-      // to the edit mode of the same family.
+      // Same-tab authoring: the shared mode-actions component derives the edit
+      // URL from the current location (keeps visibility=public etc. and the
+      // pathname, so the same family tab swaps in place).
       window.FTObjectModeActions?.mount?.(context, {
         mode: "view",
         onEdit: true,
-        editHref: `/factors/family/${encodeURIComponent(family.family_ref)}${editQuery}`,
         editLabel: "编辑",
         editHelp: "编辑因子家族",
       });
@@ -347,7 +343,6 @@
       window.FTObjectModeActions?.mount?.(context, {
         mode: "view",
         onEdit: true,
-        editHref: `/factors/set/${encodeURIComponent(frozenRef)}?mode=edit`,
         editLabel: "编辑",
         editHelp: "编辑因子集合",
       });
