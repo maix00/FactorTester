@@ -204,12 +204,24 @@
         const open = value => {
           if (!value) return;
           const id = selectionValue(value);
-          add({
+          const item = {
             value: id, label: display(value) || id, factor: value,
             type: "factor", typeLabel: context.t("因子"),
-            view: window.FTFactorDetailShared?.factorRowView?.(value)
-              || {kind: "factor", ref: id},
-          });
+            onsite: true, temporary: true,
+            view: {
+              kind: "factor", ref: id, initialValue: value, temporary: true,
+            },
+          };
+          // Keep the on-the-fly factor in OUR candidate list (the shared picker
+          // maintains its own items) so later hand-typed alias resolution finds
+          // it, it carries the 当场 badge, and its view overlay opens seeded.
+          const idx = candidateItems.findIndex(c => (
+            c.type === "factor" && c.value === id
+          ));
+          if (idx >= 0) candidateItems.splice(idx, 1, item);
+          else candidateItems.push(item);
+          valuePicker?.setItems?.(candidateItems, true);
+          valuePicker?.setValues?.([id]);
           setValue(value, "factor");
         };
         if (typeof options.onCreateFactor === "function") {
@@ -299,8 +311,10 @@
               value: id, label: display(factor) || id, factor,
               type: "factor", typeLabel: context.t("因子"),
               temporary: isOnsite, onsite: isOnsite,
-              view: window.FTFactorDetailShared?.factorRowView?.(factor)
-                || {kind: "factor", ref: id},
+              view: {
+                kind: "factor", ref: id,
+                initialValue: factor, temporary: isOnsite,
+              },
             };
             const idx = candidateItems.findIndex(candidate => (
               candidate.type === "factor" && candidate.value === id
