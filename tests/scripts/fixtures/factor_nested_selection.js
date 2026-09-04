@@ -314,14 +314,22 @@ assert.ok(
     },
   );
   let unlocked = null;
-  const unlockButton = descendants(unlockable.root).find(item => (
-    item.className === "factor-param-nested-unlock"
+  // The edit entry sits inside the nested table's header, next to the
+  // 参数值 (value) column heading.
+  const headerRows = descendants(unlockable.root).filter(item => (
+    item.className === "factor-detail-parameter-header"
   ));
-  assert.ok(unlockButton, "nested parameter list must show the 编辑 entry");
-  const unlockIcon = descendants(unlockButton).find(
+  const valueHeading = headerRows.map(item => item.children[3]).find(cell => (
+    cell && descendants(cell).some(item => item.tagName === "BUTTON")
+  ));
+  assert.ok(
+    valueHeading && (valueHeading.textContent || "").includes("参数值"),
+    "nested table header must label its value column 参数值 with the edit entry",
+  );
+  const unlockIcon = descendants(valueHeading).find(
     item => item.tagName === "BUTTON",
   );
-  assert.ok(unlockIcon, "unlock entry must be an icon button");
+  assert.ok(unlockIcon, "edit entry must sit next to the 参数值 heading");
   unlockIcon.listeners.click();
   assert.ok(
     unlocked?.Th?.__factor_family_draft === true,

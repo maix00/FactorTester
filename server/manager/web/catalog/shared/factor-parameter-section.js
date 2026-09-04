@@ -55,9 +55,17 @@
     const header = document.createElement("div");
     header.className = "factor-detail-parameter-header";
     const labels = ["参数名", "参数类型", "默认值"];
-    if (showValue) labels.push("Value");
-    labels.forEach(label => {
-      const cell = document.createElement("b"); cell.textContent = context.t(label); header.append(cell);
+    if (showValue) labels.push("参数值");
+    labels.forEach((label, index) => {
+      const cell = document.createElement("b");
+      cell.textContent = context.t(label);
+      header.append(cell);
+      // Nested/reference tables may hang an action (e.g. 编辑) next to the
+      // value-column heading.
+      if (showValue && index === labels.length - 1
+        && options.valueHeaderExtra) {
+        cell.append(" ", options.valueHeaderExtra);
+      }
     });
     root.append(header);
     for (const parameter of parameters) {
@@ -147,6 +155,7 @@
       const list = createParameterList(context, rows, values, {
         readOnly: true,
         showValue: options.showValue !== false,
+        valueHeaderExtra: options.valueHeaderExtra,
         renderValue: (valueCell, parameter) => {
           const displayed = parameter.redacted
             ? context.t("已隐藏")

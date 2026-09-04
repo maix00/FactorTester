@@ -13469,6 +13469,10 @@
     "预览运行配置尚未持久化，请提交任务后再在独立页面打开" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"The preview RunSpec is not persisted; submit the task before opening it in a separate page"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"预览运行配置尚未持久化，请提交任务后再在独立页面打开"}}}},
     "研究台" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Research Desk"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"研究台"}}}},
     "测试台" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Test Desk"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"测试台"}}}},
+    "参数名" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Parameter"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"参数名"}}}},
+    "参数类型" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Parameter Type"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"参数类型"}}}},
+    "默认值" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Default"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"默认值"}}}},
+    "参数值" : {"extractionState":"manual","localizations":{"en":{"stringUnit":{"state":"translated","value":"Value"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"参数值"}}}},
     "提交" : {"extractionState":"manual","localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"提交"}},"en":{"stringUnit":{"state":"translated","value":"Submit"}}}},
     "编辑因子家族" : {"extractionState":"manual","localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"编辑因子家族"}},"en":{"stringUnit":{"state":"translated","value":"Edit factor family"}}}},
     "编辑中" : {"extractionState":"manual","localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"编辑中"}},"en":{"stringUnit":{"state":"translated","value":"Editing"}}}}

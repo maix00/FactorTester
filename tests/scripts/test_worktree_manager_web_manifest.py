@@ -2780,7 +2780,8 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     # from the base labels and appends Value exactly when shown.
     assert 'header.className = "factor-detail-parameter-header"' in parameter_section
     assert 'const labels = ["参数名", "参数类型", "默认值"];' in parameter_section
-    assert 'if (showValue) labels.push("Value");' in parameter_section
+    assert 'if (showValue) labels.push("参数值");' in parameter_section
+    assert "options.valueHeaderExtra" in parameter_section
     assert 'const showValue = options.showValue !== false;' in parameter_section
     assert 'showValue ? "" : "no-value-column"' in parameter_section
     assert "no-value-column" in app_css

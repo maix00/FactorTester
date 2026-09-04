@@ -344,9 +344,10 @@
             || templateValue?.latex || "",
         });
         // Even when the reference exists in the library, the nested
-        // parameter list offers an edit entry that switches the value into
-        // 因子家族来源 mode (editable family composition); saving goes
-        // through the existing on-the-fly freeze path.
+        // parameter list offers an edit entry (next to the 参数值 column
+        // heading) that switches the value into 因子家族来源 mode (editable
+        // family composition); saving goes through the existing on-the-fly
+        // freeze path.
         let currentTemplate = template;
         const unlockFamilyEditing = () => {
           const family = currentTemplate;
@@ -358,34 +359,21 @@
           };
           setValue(composed, "family");
         };
-        const ensureUnlockBar = () => {
-          const existing = nestedMount.querySelector
-            ? nestedMount.querySelector(".factor-param-nested-unlock")
-            : Array.from(nestedMount.children || []).some(child => (
-              String(child.className || "").includes("factor-param-nested-unlock")
-            ));
-          if (existing) return;
-          const bar = document.createElement("div");
-          bar.className = "factor-param-nested-unlock";
-          const label = context.t("编辑");
-          const icon = window.FTUI?.iconButton
-            ? window.FTUI.iconButton(
-              context, "square.and.pencil", label, unlockFamilyEditing,
-            )
-            : null;
-          if (icon) {
-            bar.append(icon);
-          } else {
+        const unlockLabel = context.t("编辑");
+        const editEntry = window.FTUI?.iconButton
+          ? window.FTUI.iconButton(
+            context, "square.and.pencil", unlockLabel, unlockFamilyEditing,
+            {className: "factor-param-nested-edit"},
+          )
+          : (() => {
             const button = document.createElement("button");
             button.type = "button";
-            button.className = "icon-action-button";
+            button.className = "icon-action-button factor-param-nested-edit";
             button.textContent = "✎";
-            button.title = label;
+            button.title = unlockLabel;
             button.addEventListener("click", unlockFamilyEditing);
-            bar.append(button);
-          }
-          nestedMount.append(bar);
-        };
+            return button;
+          })();
         const definitionRows = (template
           ? shared?.parameterRows?.(draft, {family: template}) || []
           : shared?.parameterRows?.(draft) || [])
@@ -394,10 +382,11 @@
             return saved === undefined ? row : {...row, value: saved};
           });
         const renderSection = (rowsValue, templateValue) => {
-          ensureUnlockBar();
           const section = shared.parameterSection(
-            context, sectionValue(templateValue === undefined ? template : templateValue),
+            context,
+            sectionValue(templateValue === undefined ? template : templateValue),
             rowsValue, (options.depth || 0) + 1,
+            {valueHeaderExtra: editEntry},
           );
           section.root.dataset.parameterAlias = alias;
           nestedMount.append(section.root);
