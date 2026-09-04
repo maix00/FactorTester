@@ -92,8 +92,13 @@
       context.t(definition.mode === "create" ? "提交" : "保存"),
       () => form.requestSubmit(), {variant: "primary"},
     );
-    if (definition.mode === "edit") context.toolbar.append(cancelEdit);
-    context.toolbar.append(save);
+    // Route-session guard: the toolbar is shared across tabs, so an async
+    // renderer that completes after navigation must not mount its actions on
+    // the next page's header (stale 提交/保存 button visible until refresh).
+    if (context.isRouteCurrent?.() !== false) {
+      if (definition.mode === "edit") context.toolbar.append(cancelEdit);
+      context.toolbar.append(save);
+    }
     const definitions = window.FTObjectDetailTabs.definitions(
       definition.objectKind, definition.tabOverrides || {},
     );
