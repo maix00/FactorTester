@@ -378,6 +378,61 @@ assert.ok(
     (inlineCreate.textContent || "").includes("编辑因子家族"),
     "inline family composition offers 编辑因子家族",
   );
+  // After an on-the-fly 新增因子家族 completes, the entry switches to
+  // 编辑因子家族 for the freshly created inline family.
+  let replacedByCreate = null;
+  const creating = window.FTFactorParameterEditor.create(
+    {t: value => value},
+    outerFamily.parameter_definitions,
+    {Th: compactChild},
+    {
+      factorItems: [{
+        value: childRef, label: compactChild.alias,
+        factor: compactChild, family: childFamily,
+      }],
+      familyItems: [],
+      onChange: value => { replacedByCreate = value; },
+      onCreateFamily: onSaved => {
+        onSaved({
+          factor_family_alias: "FreshF",
+          source_kind: "transient",
+          parameter_definitions: [
+            {alias: "N", type: "WindowParam", default_value: "5d"},
+          ],
+        });
+        return Promise.resolve();
+      },
+    },
+  );
+  const creatingPencil = (() => {
+    const headers = descendants(creating.root).filter(item => (
+      item.className === "factor-detail-parameter-header"
+    ));
+    const heading = headers.map(item => item.children[3]).find(cell => (
+      cell && descendants(cell).some(item => item.tagName === "BUTTON")
+    ));
+    return heading ? descendants(heading).find(item => item.tagName === "BUTTON") : null;
+  })();
+  assert.ok(creatingPencil, "referenced composition opens via the pencil");
+  creatingPencil.listeners.click();
+  const creatingButton = descendants(creating.root).find(
+    item => String(item.className || "").includes("factor-param-create-family"),
+  );
+  assert.ok(creatingButton, "referenced composition offers 新增因子家族");
+  assert.ok(
+    (creatingButton.textContent || "").includes("新增因子家族"),
+    "referenced composition labels the entry 新增因子家族",
+  );
+  creatingButton.listeners.click();
+  assert.ok(
+    replacedByCreate?.Th?.__factor_family_draft === true
+      && replacedByCreate.Th.__factor_family?.factor_family_alias === "FreshF",
+    "on-the-fly family creation replaces the referenced factor",
+  );
+  assert.ok(
+    (creatingButton.textContent || "").includes("编辑因子家族"),
+    "after creation the entry switches to 编辑因子家族",
+  );
 
   await factorPicker.options.onChange([childRef]);
   assert.equal(resolveCalls, 1, "selected factors must be enriched lazily");
