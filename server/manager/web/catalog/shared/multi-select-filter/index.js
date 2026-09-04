@@ -978,6 +978,17 @@
         settingsShell.classList.toggle("has-open-multi-select", dropdown.open);
       }
       if (dropdown.open) {
+        // Mutual exclusion: only one dropdown in the same host shell is open
+        // at a time — opening one collapses every other one in the tab.
+        const host = section.closest('[class*="settings-shell"]')
+          || (section.parentElement ? section.parentElement : section);
+        if (host && typeof host.querySelectorAll === "function") {
+          host.querySelectorAll(".ft-multi-select-dropdown").forEach(other => {
+            if (other !== dropdown && other.open) {
+              try { other.open = false; } catch (_error) { /* already closed */ }
+            }
+          });
+        }
         // Any ancestor that would clip the in-flow OR the anchored menu
         // (non-visible overflow, or a transform/filter/contain/perspective
         // establishing a containing block) → portal to the body so the menu is
