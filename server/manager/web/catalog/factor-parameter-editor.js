@@ -404,8 +404,10 @@
         // the section value from the attached/loaded family template.
         const familyAliasOf = String(
           draft.identity?.family_alias || draft.factor_family_alias
-          || draft.factor_family_name || String(draft.alias || "").split("|")[0]
-          || (template?.factor_family_alias) || "",
+          || draft.factor_family_name || draft.factor_class_name
+          || String(draft.alias || "").split("|")[0]
+          || String(draft.name || "").split("|")[0]
+          || (template?.factor_family_alias) || (template?.factor_family_name) || "",
         ).trim();
         const sectionValue = templateValue => ({
           ...draft,
