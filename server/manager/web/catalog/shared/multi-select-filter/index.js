@@ -811,7 +811,13 @@
         item.onsite === true && !selected.includes(item.value)
       ));
       if (!removed.length) return;
+      const removedValues = new Set(removed.map(item => item.value));
       for (const item of removed) items.splice(items.indexOf(item), 1);
+      // Drop them from both selection states so nothing stale lingers in the
+      // summary / committed values (and no leaked references keep the objects
+      // alive).
+      selected = selected.filter(value => !removedValues.has(value));
+      committedSelected = committedSelected.filter(value => !removedValues.has(value));
       render();
     }
 
