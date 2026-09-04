@@ -30,29 +30,66 @@
     const headingText = creating
       ? context.t("新增分类")
       : category.title_zh || category.alias || category.id;
+    const categoryViewURL = category
+      ? helpers.pathFor(
+        `/products/categories/${encodeURIComponent(category.id)}`, source,
+      )
+      : "";
+    // Standalone pages own their authoring actions in the global top header
+    // (shared mode component); overlays keep the in-dialog header actions.
+    const globalHeader = !context.testObjectOverlay;
+    let save = null;
+    if (globalHeader) {
+      if (editing) {
+        const actions = window.FTObjectModeActions?.mount?.(context, {
+          mode: creating ? "create" : "edit",
+          viewHref: creating ? "" : categoryViewURL,
+          onCancel: () => {
+            if (category) {
+              context.navigate(categoryViewURL);
+            } else {
+              context.closeTab?.(context.tabID);
+              context.navigate(helpers.pathFor("/products/categories", source));
+            }
+          },
+          onSave: () => surface.requestSubmit(),
+        }) || [];
+        save = actions[actions.length - 1];
+      } else if (canEdit && category) {
+        // Same-tab authoring: the edit URL derives from the current location.
+        window.FTObjectModeActions?.mount?.(context, {
+          mode: "view",
+          onEdit: true,
+          editLabel: "编辑",
+          editHelp: "编辑产品分类",
+        });
+      }
+    }
     const headerValue = FTCatalogDetailUI.header(context, {
       title: headingText,
-      editing: creating || editing,
+      // Standalone pages: authoring actions live in the global top header,
+      // and there is no list-back button — tabs are the navigation surface.
+      editing: globalHeader ? false : editing,
       creating,
-      canEdit,
-      backLabel: "返回产品分类",
-      onBack: () => context.navigate(helpers.pathFor("/products/categories", source)),
-      onCancel: () => {
+      canEdit: globalHeader ? false : canEdit,
+      onBack: undefined,
+      onCancel: globalHeader ? undefined : () => {
         if (category) {
-          context.navigate(helpers.pathFor(
-            `/products/categories/${encodeURIComponent(category.id)}`, source,
-          ));
+          context.navigate(categoryViewURL);
         } else {
           context.closeTab?.(context.tabID);
           context.navigate(helpers.pathFor("/products/categories", source));
         }
       },
-      onEdit: () => context.navigate(helpers.pathFor(
-        `/products/categories/${encodeURIComponent(category.id)}?mode=edit`, source,
-      )),
+      onEdit: globalHeader ? undefined : () => context.navigate(
+        helpers.pathFor(
+          `/products/categories/${encodeURIComponent(category.id)}?mode=edit`,
+          source,
+        ),
+      ),
     });
     const header = headerValue.root;
-    const save = headerValue.save;
+    if (!save) save = headerValue.save;
     if (save) save.dataset.categorySave = "true";
     if (category && canEdit && policy.delete !== false && !sourceManaged) {
       header.append(options.deleteButton?.());

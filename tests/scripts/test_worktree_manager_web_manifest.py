@@ -240,6 +240,8 @@ def test_editor_header_actions_respect_route_session() -> None:
         "catalog/factor-editor.js",
         "catalog/factor-object-form.js",
         "catalog/strategy-library-detail.js",
+        "catalog/product-group-detail.js",
+        "catalog/product-category-detail-layout.js",
     ]:
         source = (WEB_ROOT / relative).read_text(encoding="utf-8")
         assert "window.FTObjectModeActions?.mount?.(context" in source \
