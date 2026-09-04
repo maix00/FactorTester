@@ -17,6 +17,18 @@
       || String(value?.alias || "") === target;
   }
 
+  // An object row is editable by its owner (or super admin); catalog
+  // projections deliberately do not carry a can_edit flag on factor rows.
+  function editableBySession(context, value) {
+    if (!context.session) return false;
+    if (value?.can_edit === true) return true;
+    if (context.session.role === "super_admin") return true;
+    const owner = String(
+      value?.owner_username || value?.owner_alias || "",
+    ).trim();
+    return Boolean(owner) && owner === String(context.session.username || "");
+  }
+
   async function factorDetail(
     context, data, targetRef, mode = "view", nativeRequest, options = {},
   ) {
@@ -52,7 +64,7 @@
     context.toolbar?.append(context.button(context.t("查看因子序列"), () => {
       context.navigate(`/factor-series?factor_ref=${encodeURIComponent(frozenRef)}`);
     }, context.t("使用冻结因子配置运行序列查看任务")));
-    if (factor.can_edit && context.session && !context.testObjectViewOnly) {
+    if (editableBySession(context, factor)) {
       // Same-tab authoring: the shared mode-actions component swaps this tab
       // to the edit mode of the same object (?mode=edit on the same pathname
       // reuses the factor detail tab).
