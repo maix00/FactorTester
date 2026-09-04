@@ -434,10 +434,19 @@
       let node = section.parentElement;
       while (node && node !== document.body && node.nodeType === 1) {
         const style = window.getComputedStyle(node);
-        // Any non-visible overflow clips the in-flow menu — including `clip`
-        // (hard clipping, no scrollbar) — so portal to the body in that case.
-        if (style && style.overflow !== "visible") {
-          return true;
+        if (style) {
+          // Any non-visible overflow clips the in-flow menu — including `clip`
+          // (hard clipping, no scrollbar).
+          if (style.overflow !== "visible") return true;
+          // Ancestors that turn a fixed/anchored descendant into an absolutely
+          // positioned descendant relative to THEMSELVES (transform / filter /
+          // perspective / contain / will-change) would clip the anchored menu,
+          // so portal to the body (viewport-relative) instead.
+          if (style.transform && style.transform !== "none") return true;
+          if (style.perspective && style.perspective !== "none") return true;
+          if (style.filter && style.filter !== "none") return true;
+          if ((style.willChange || "").includes("transform")) return true;
+          if (style.contain && style.contain !== "none" && style.contain !== "style") return true;
         }
         node = node.parentElement;
       }
@@ -969,16 +978,18 @@
         settingsShell.classList.toggle("has-open-multi-select", dropdown.open);
       }
       if (dropdown.open) {
-        // Anchor-positioning mode needs no portal: fixed + anchor() is already
-        // viewport-stable under pinch-zoom and never clipped by the host.
-        if (supportsAnchor) return;
-        // Fall back: stay in-flow (absolute under the dropdown → pinch-zoom
-        // stays anchored) for ordinary containers, portal when an ancestor
-        // would clip the menu.
-        if (!menuNeedsPortal() || menuPortaled) {
+        // Any ancestor that would clip the in-flow OR the anchored menu
+        // (non-visible overflow, or a transform/filter/contain/perspective
+        // establishing a containing block) → portal to the body so the menu is
+        // never truncated.  This also covers parameter-table nested containers
+        // whose transform turns a fixed/anchored menu into a clipped child.
+        if (menuNeedsPortal()) {
+          if (!menuPortaled) portalMenu();
           return;
         }
-        portalMenu();
+        // No clipping ancestor: anchor-positioning (fixed) is viewport-stable
+        // on pinch-zoom and immune to host clipping — ideal for clean hosts.
+        if (supportsAnchor) return;
         return;
       }
       restoreMenu();
