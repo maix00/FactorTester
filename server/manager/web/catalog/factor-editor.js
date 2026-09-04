@@ -267,6 +267,22 @@
         ); },
       },
     );
+    // Editing a frozen factor must echo its actual source version, not 未筛选:
+    // eagerly load the version list so the frozen fingerprint matches a real
+    // version item (onOpen above only lazily loads it on user interaction).
+    if (!state.sourceVersions && !state.sourceVersionLoading
+      && state.sourceVersionFingerprint) {
+      state.sourceVersionLoading = true;
+      void window.FTFactorDetailShared.loadSourceVersions(
+        context, state.family, options,
+      ).then(payload => {
+        state.sourceVersions = payload;
+        state.sourceVersionLoading = false;
+        redraw();
+      }).catch(() => {
+        state.sourceVersionLoading = false;
+      });
+    }
     return field(context.t("源码版本"), picker.element);
   }
 
