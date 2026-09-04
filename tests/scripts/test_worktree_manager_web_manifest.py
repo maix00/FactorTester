@@ -2633,8 +2633,8 @@ def test_factor_create_editors_use_shared_actions_and_personal_factor_scope() ->
     assert 'object-detail-tab-change' in editor
     assert "familyClassNameMatches(name.value, state.inspection)" in editor
     assert 'form.append(topMount, tabs.root, status)' in editor
-    assert "FTUI.actionButton(" in object_form
-    assert 'if (definition.mode === "edit") context.toolbar.append(cancelEdit)' in object_form
+    # The shared object form routes its actions through the mode component.
+    assert "window.FTObjectModeActions?.mount?.(context" in object_form
     assert 'form.append(tabs.root, status)' in object_form
     assert "familyScopes?.mine" in set_editor
     assert "mine?.factors" in set_editor
@@ -2684,10 +2684,10 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     )
     app_css = (WEB_ROOT / "styles" / "app.css").read_text(encoding="utf-8")
 
-    assert "context.toolbar.append(save)" in object_form
-    assert "submit: save" in object_form
+    assert "window.FTObjectModeActions?.mount?.(context" in object_form
+    assert "const save = actions[actions.length - 1];" in object_form
     assert object_form.index("context.setHeading") < object_form.index(
-        "context.toolbar.append(save)",
+        "window.FTObjectModeActions?.mount?.(context",
     )
     assert "editor.syncFromState()" in set_editor
     assert 'parameter.type === "FactorParam"' in parameter_editor

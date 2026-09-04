@@ -46,14 +46,18 @@
     } else {
       const editingInline = mode === "edit" && context.testObjectTemporary;
       if (options.cancel !== false) {
-        if (mode === "edit" && !editingInline) {
+        const cancelViaHref = mode === "edit" && !editingInline
+          && Boolean(options.viewHref || options.editHref);
+        if (cancelViaHref) {
           // Same-tab authoring: cancel returns to the read-only view of the
           // same object inside this tab.
           button(
             ICONS.cancel,
             options.cancelLabel || "取消编辑",
             options.cancelHelp,
-            () => context.navigate(options.viewHref || stripMode(options.editHref || "")),
+            () => context.navigate(
+              options.viewHref || stripMode(options.editHref || ""),
+            ),
             "secondary",
           );
         } else if (options.onCancel) {

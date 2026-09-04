@@ -85,20 +85,17 @@
     // mounting actions so create-page submit buttons are not discarded.
     context.setHeading(definition.title, definition.subtitle || "");
     context.updateActiveTab?.({title: definition.title});
-    const cancelEdit = FTUI.actionButton(
-      context.t("取消编辑"), () => definition.onCancel?.(state), {variant: "secondary"},
-    );
-    const save = FTUI.actionButton(
-      context.t(definition.mode === "create" ? "提交" : "保存"),
-      () => form.requestSubmit(), {variant: "primary"},
-    );
-    // Route-session guard: the toolbar is shared across tabs, so an async
-    // renderer that completes after navigation must not mount its actions on
-    // the next page's header (stale 提交/保存 button visible until refresh).
-    if (context.isRouteCurrent?.() !== false) {
-      if (definition.mode === "edit") context.toolbar.append(cancelEdit);
-      context.toolbar.append(save);
-    }
+    // Mode actions come from the shared component (icons + route-session
+    // guard + same-tab navigation); the last returned action is the save
+    // button so the submit handler can disable it while saving.
+    const actions = window.FTObjectModeActions?.mount?.(context, {
+      mode: definition.mode,
+      viewHref: definition.viewHref || "",
+      onCancel: definition.onCancel
+        ? () => definition.onCancel(state) : undefined,
+      onSave: () => form.requestSubmit(),
+    }) || [];
+    const save = actions[actions.length - 1];
     const definitions = window.FTObjectDetailTabs.definitions(
       definition.objectKind, definition.tabOverrides || {},
     );
