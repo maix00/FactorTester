@@ -55,7 +55,16 @@ function factorRow(overrides = {}) {
 }
 
 window.FTUI = {
-  actionButton(label, handler) { return {textContent: label, onclick: handler}; },
+  iconButton(context, symbol, label, handler) {
+    return {
+      symbol, label,
+      title: context.t ? context.t(label) : label,
+      onclick: handler,
+    };
+  },
+  actionButton(label, handler) {
+    return {textContent: label, title: label, onclick: handler};
+  },
   table() { return {shell: fakeNode()}; },
   fieldRows() { return []; },
   loading() { return fakeNode(); },
@@ -112,22 +121,27 @@ async function renderView(overrides) {
 (async () => {
   // Owner session sees the shared 编辑 action (no can_edit flag on rows).
   const owned = await renderView({});
-  const labels = owned.toolbar.map(item => item.textContent || "");
+  const labels = owned.toolbar.map(item => item.title || item.textContent || "");
   assert(labels.includes("查看因子序列"), "expected 查看因子序列");
-  assert(labels.includes("编辑"), "owner must see the shared 编辑 action");
-  const edit = owned.toolbar[labels.indexOf("编辑")];
-  edit.onclick();
+  const editAction = owned.toolbar.find(item => item.symbol === "square.and.pencil");
+  assert(editAction, "owner must see the shared pencil 编辑 action");
+  assert(["编辑", "编辑因子"].includes(editAction.title), "localized tooltip");
+  editAction.onclick();
   assert.equal(owned.navigated[0], "/factors/factor/Probe%7CN%3A5d?mode=edit");
 
   // can_edit=true also grants the action even without an owner match.
   const flagged = await renderView({can_edit: true, owner_username: "other"});
-  const flaggedLabels = flagged.toolbar.map(item => item.textContent || "");
-  assert(flaggedLabels.includes("编辑"), "can_edit must grant the action");
+  assert(
+    flagged.toolbar.some(item => item.symbol === "square.and.pencil"),
+    "can_edit must grant the action",
+  );
 
   // A different user's factor stays read-only.
   const foreign = await renderView({owner_username: "bob"});
-  const foreignLabels = foreign.toolbar.map(item => item.textContent || "");
-  assert(!foreignLabels.includes("编辑"), "non-owner must not see 编辑");
+  assert(
+    !foreign.toolbar.some(item => item.symbol === "square.and.pencil"),
+    "non-owner must not see the edit action",
+  );
 
   // Read-only overlay contexts never mount the action.
   const overlay = await (async () => {
@@ -139,8 +153,10 @@ async function renderView(overrides) {
     );
     return toolbar;
   })();
-  const overlayLabels = overlay.map(item => item.textContent || "");
-  assert(!overlayLabels.includes("编辑"), "view-only overlays hide 编辑");
+  assert(
+    !overlay.some(item => item.symbol === "square.and.pencil"),
+    "view-only overlays hide the edit action",
+  );
 
   console.log("ok");
 })().catch(error => {
