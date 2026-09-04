@@ -193,6 +193,15 @@ assert.ok(
   nestedText.includes("0.6"),
   "nested table must show the saved identity value (M:0.6), not the family default",
 );
+// The nested tree header must render the family template LaTeX.
+const nestedFormula = descendants(reopened.root).find(item => (
+  item.className?.includes("factor-detail-parameter-formula")
+));
+assert.ok(nestedFormula, "nested tree header must carry a formula element");
+assert.ok(
+  (nestedFormula.textContent || "").includes("Q_"),
+  "nested tree header formula must render the family template LaTeX",
+);
 
 // A hand-typed alias stays on the manual source with its text intact.
 const manual = window.FTFactorParameterEditor.create(

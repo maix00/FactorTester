@@ -341,6 +341,22 @@
         const savedParams = draft.identity?.params || draft.parameter_values || {};
         const template = draft.family || draft.__factor_family
           || choice?.family || null;
+        // The tree header renders the family template LaTeX and the family
+        // alias as title; the frozen record alone carries neither, so build
+        // the section value from the attached/loaded family template.
+        const familyAliasOf = String(
+          draft.identity?.family_alias || draft.factor_family_alias
+          || draft.factor_family_name || String(draft.alias || "").split("|")[0]
+          || (template?.factor_family_alias) || "",
+        ).trim();
+        const sectionValue = templateValue => ({
+          ...draft,
+          family: templateValue || null,
+          factor_family_alias: familyAliasOf,
+          factor_family_name: familyAliasOf,
+          math_expr: templateValue?.math_expr || templateValue?.formula
+            || templateValue?.latex || "",
+        });
         const definitionRows = (template
           ? shared?.parameterRows?.(draft, {family: template}) || []
           : shared?.parameterRows?.(draft) || [])
@@ -348,10 +364,10 @@
             const saved = savedParams[row.alias];
             return saved === undefined ? row : {...row, value: saved};
           });
-        const renderSection = rowsValue => {
+        const renderSection = (rowsValue, templateValue) => {
           const section = shared.parameterSection(
-            context, {...draft, family: template}, rowsValue,
-            (options.depth || 0) + 1,
+            context, sectionValue(templateValue === undefined ? template : templateValue),
+            rowsValue, (options.depth || 0) + 1,
           );
           section.root.dataset.parameterAlias = alias;
           nestedMount.append(section.root);
@@ -381,7 +397,7 @@
                 });
               if (upgraded.length) {
                 const section = shared.parameterSection(
-                  context, {...draft, family: loadedFamily}, upgraded,
+                  context, sectionValue(loadedFamily), upgraded,
                   (options.depth || 0) + 1,
                 );
                 section.root.dataset.parameterAlias = alias;
@@ -417,7 +433,11 @@
             })) : [];
           if (aliasRows.length) {
             const section = window.FTFactorDetailShared.parameterSection(
-              context, {...draft, family: null}, aliasRows,
+              context, {
+                ...draft, family: null,
+                factor_family_alias: analysis.family || "",
+                factor_family_name: analysis.family || "",
+              }, aliasRows,
               (options.depth || 0) + 1,
             );
             section.root.dataset.parameterAlias = alias;
