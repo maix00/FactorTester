@@ -1282,9 +1282,9 @@ def test_factor_candidate_sources_do_not_nest_field_rows_in_the_control_column()
     assert "test-factor-candidate-sources-inner" in source
     assert "test-factor-candidate-source-row" not in source
     assert source.count("FTTestFieldRow.create(") >= 3
-    candidate_index = source.index("function candidateHeading")
-    assert candidate_index < source.index("FTTestFactorSets.control")
-    assert candidate_index < source.index("FTTestFactorRoles.section")
+    assert "function combinedControl" in source
+    assert "FTTestFactorSets.control" not in source
+    assert source.index("function candidateHeading") < source.index("FTTestFactorRoles.section")
     assert 'className: "factor-candidate-child-row"' in source
     assert 'direct.classList.add("factor-candidate-child-row")' in source
     assert "factor-candidate-child-section" in roles
