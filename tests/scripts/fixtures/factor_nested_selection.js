@@ -210,7 +210,31 @@ assert.ok(
   "nested tree header formula must render the family template LaTeX",
 );
 
-// A hand-typed alias stays on the manual source with its text intact.
+// …while a hand-typed alias stays on the manual source with its text intact.
+const aliasMatch = window.FTFactorParameterEditor.create(
+  {t: value => value},
+  outerFamily.parameter_definitions,
+  {Th: compactChild},
+  {
+    // Same alias, different digest (echoed row): still a 因子库 source —
+    // library membership compares alias as well as ref, per nesting level.
+    factorItems: [{
+      value: `factor:v2:${"a".repeat(43)}`,
+      label: compactChild.alias,
+      factor: {...compactChild, ref: `factor:v2:${"a".repeat(43)}`},
+      family: childFamily,
+    }],
+    familyItems: [], onChange: () => {},
+  },
+);
+const aliasSource = pickers.filter(item => (
+  item.options.name === "factor-param-source-Th"
+)).at(-1);
+assert.deepEqual(
+  aliasSource.selected, ["factor"],
+  "an alias match against a library row counts as 因子库 source",
+);
+
 const manual = window.FTFactorParameterEditor.create(
   {t: value => value},
   outerFamily.parameter_definitions,

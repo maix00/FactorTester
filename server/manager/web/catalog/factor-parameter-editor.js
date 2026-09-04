@@ -114,11 +114,18 @@
     // hand-typed aliases/columns stay manual/column; on-the-fly family
     // compositions stay family.  Never degrade any of them into the others.
     const frozenInitial = isFrozenFactorValue(initialValue);
+    // A value is a 因子库 source when its ref (or its alias, e.g. for rows
+    // echoed through a different digest) matches a visible library row.
+    // Matching is done per nesting level, recursively, as levels open.
+    const inLibraryRows = value => factorChoices.some(item => {
+      const candidateFactor = item.factor || item;
+      return selectionValue(item.value ?? item.ref) === reference(value)
+        || String(item.label || display(candidateFactor) || "").trim()
+          === String(display(value) || "").trim();
+    });
     if (familyDraft(initialValue)) {
       activeSource = "family";
-    } else if (frozenInitial && factorChoices.some(item => selectionValue(
-      item.value ?? item.ref,
-    ) === reference(initialValue))) {
+    } else if (frozenInitial && inLibraryRows(initialValue)) {
       activeSource = "factor";
     } else if (columns.some(item => selectionValue(item.value) === selectionValue(initialValue))) {
       activeSource = "column";
@@ -310,11 +317,6 @@
       })).catch(() => null);
     };
     let nestedFamilyPending = false;
-    // Echo mode: on the very first render the editor replays a saved frozen
-    // reference straight into an editable family-composition list (its own
-    // parameter values column), matching the create-mode page — the only
-    // difference is that initialization comes from the frozen record.
-    let echoPending = true;
     const renderNested = () => {
       if (nestedMount.replaceChildren) nestedMount.replaceChildren();
       else nestedMount.children = [];
@@ -401,14 +403,6 @@
             button.addEventListener("click", unlockFamilyEditing);
             return button;
           })();
-        // First render of a saved factor: replay the frozen reference
-        // directly as an editable family composition (its parameter value
-        // column becomes an editor), the same page shape as create mode.
-        if (echoPending && isFrozenFactor(draft) && currentTemplate) {
-          echoPending = false;
-          unlockFamilyEditing();
-          return;
-        }
         const definitionRows = (template
           ? shared?.parameterRows?.(draft, {family: template}) || []
           : shared?.parameterRows?.(draft) || [])
@@ -452,11 +446,6 @@
               if (upgraded.length) {
                 currentTemplate = loadedFamily;
                 reportNestedFamily(loadedFamily);
-                if (echoPending) {
-                  echoPending = false;
-                  unlockFamilyEditing();
-                  return;
-                }
                 renderSection(upgraded, loadedFamily);
                 return;
               }
