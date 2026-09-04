@@ -1015,7 +1015,19 @@
       sourceMode: familyMode ? "source" : mode === "edit" && !temporaryFamilyEdit
         ? "source" : "family",
       family: familyMode && mode === "edit"
-        ? loaded : selectedFamily || loadedFamily,
+        ? loaded
+        : selectedFamily || loadedFamily || (loaded && (
+            loaded.factor_family_alias || loaded.identity?.family_alias
+          ) ? {
+            factor_family_alias: loaded.factor_family_alias
+              || loaded.identity?.family_alias,
+            factor_family_name: loaded.factor_family_alias
+              || loaded.identity?.family_alias,
+            family_ref: loaded.family_ref || loaded.identity?.family_ref || "",
+            parameter_definitions: loaded.parameter_definitions
+              || loaded.family_parameter_definitions || [],
+            math_expr: loaded.math_expr || loaded.formula || "",
+          } : null),
       latestFamily: familyMode && mode === "edit"
         ? loaded : selectedFamily || loadedFamily,
       sourceCode: loaded.source_code || "",
