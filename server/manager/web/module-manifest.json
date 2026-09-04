@@ -602,6 +602,7 @@
   "factor-catalog-core": [
    "catalog/factor-model.js",
    "catalog/factor-detail-shared.js",
+   "catalog/shared/factor-parameter-section.js",
    "catalog/shared/object-mode-actions.js",
    "catalog/shared/object-job-table.js",
    "catalog/factor-catalog-runtime.js",
@@ -1058,6 +1059,7 @@
   "jobs/detail.js",
   "catalog/factor-model.js",
   "catalog/factor-detail-shared.js",
+  "catalog/shared/factor-parameter-section.js",
   "catalog/shared/object-mode-actions.js",
   "catalog/factor-display-enrichment.js",
   "catalog/shared/object-detail-tabs.js",

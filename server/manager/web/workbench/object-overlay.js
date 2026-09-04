@@ -159,8 +159,13 @@
       testObjectTemporary: options.temporary === true,
       testObjectSnapshot: options.snapshot === true,
       testObjectInitialValue: options.initialValue || null,
-      testObjectViewOnly: options.mode === "view",
+      // A temporary object belongs to the current test session: its detail
+      // view may offer authoring through the shared mode actions (the page
+      // decides), while a plain read-only view (library objects opened as
+      // view) stays quiet.
+      testObjectViewOnly: options.mode === "view" && options.temporary !== true,
       testObjectOverlay: true,
+      openInlineEdit: callbacks.openInlineEdit,
       isRouteCurrent: () => context.isRouteCurrent?.() !== false,
     };
   }
@@ -402,6 +407,29 @@
           toolbar: frame.toolbar,
           setHeading: (name, scope) => {
             updateFrameHeading(frame, name, scope);
+          },
+          // The page's shared edit action (object-mode-actions) raises the
+          // request here; the overlay opens the editor as a nested frame
+          // seeded with the temporary value, and the save lands back on the
+          // same in-place object through options.onSaved.  The overlay keeps
+          // only frame management — it never fabricates its own actions.
+          openInlineEdit: () => {
+            if (frame.mode !== "view" || frame.temporary !== true) return;
+            openObject({
+              kind: frame.kind,
+              ref: frame.ref,
+              mode: "edit",
+              initialValue: frame.initialValue || null,
+              temporary: true,
+              onSaved: value => {
+                const next = normalizedValue(frame, value);
+                frame.initialValue = next;
+                frame.rendered = false;
+                frame.mount.replaceChildren();
+                frame.label = undefined;
+                options.onSaved?.(next);
+              },
+            });
           },
         },
       );

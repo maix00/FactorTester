@@ -526,113 +526,10 @@
     return Boolean(type && type !== "Parameter");
   }
 
-  function parameterTable(context, value, options = {}) {
-    const rows = parameterRows(value, options);
-    if (!rows.length) return null;
-    return parameterTree(context, value, rows, 0, options);
-  }
-
-  function createParameterList(context, parameters = [], initial = {}, options = {}) {
-    const values = {...initial};
-    const root = document.createElement("section");
-    root.className = ["factor-detail-parameter-editor", options.readOnly ? "is-read-only" : ""]
-      .filter(Boolean).join(" ");
-    const header = document.createElement("div");
-    header.className = "factor-detail-parameter-header";
-    ["参数名", "参数类型", "默认值", "Value"].forEach(label => {
-      const cell = document.createElement("b"); cell.textContent = context.t(label); header.append(cell);
-    });
-    root.append(header);
-    for (const parameter of parameters) {
-      const alias = String(parameter?.alias || parameter?.name || "").trim();
-      if (!alias) continue;
-      const row = document.createElement("div");
-      row.className = "factor-detail-parameter-row";
-      const key = document.createElement("b"); key.className = "factor-detail-parameter-key"; key.textContent = alias;
-      const type = parameterType(context, parameter);
-      const defaultValue = document.createElement("code"); defaultValue.className = "factor-detail-parameter-default";
-      defaultValue.textContent = String(parameter.default_value ?? "");
-      const value = document.createElement("div"); value.className = "factor-detail-parameter-value";
-      const initialValue = values[alias] ?? parameter.default_value ?? "";
-      values[alias] = initialValue;
-      const result = options.renderValue?.(value, parameter, initialValue, values, row) || {};
-      if (!result.control && !value.childElementCount) value.textContent = parameterDisplayValue(parameter) ?? "";
-      if (result.nested) row.classList?.add?.("factor-detail-parameter-row-factor");
-      row.append(key, type, defaultValue, value);
-      root.append(row);
-      if (result.nested) root.append(result.nested);
-    }
-    return {root, values};
-  }
-
-  function parameterTree(
-    context, value, rows = parameterRows(value), depth = 0, options = {},
-  ) {
-    return parameterSection(context, value, rows, depth, options).root;
-  }
-
-  // The one shared "factor parameter section" component used by view, edit
-  // and create modes (and by nested read-only blocks): a collapsible header
-  // carrying the family template formula with 参数/值 toggles (localFormula),
-  // plus the shared parameter list.  Callers that own an editable list pass
-  // it as content; the read-only flavour renders nested rows itself.
-  function parameterSection(
-    context, value, rows = parameterRows(value), depth = 0, options = {},
-  ) {
-    const root = document.createElement("details");
-    root.className = depth
-      ? "factor-detail-parameter-tree factor-detail-parameter-tree-nested"
-      : "factor-detail-parameter-tree";
-    root.open = true;
-    root.style?.setProperty?.("--factor-parameter-depth", String(depth));
-    const header = document.createElement("summary");
-    header.className = "factor-detail-parameter-tree-header";
-    const title = document.createElement("b");
-    title.textContent = String(
-      value?.factor_family_alias || value?.factor_family_name
-      || value?.factor_alias || context.t("因子参数"),
-    );
-    const heading = document.createElement("span");
-    heading.className = "factor-detail-parameter-tree-heading";
-    heading.append(title, " ", familySourceHelp(context, value));
-    header.append(heading);
-    const values = options.values || Object.fromEntries(
-      rows.map(row => [row.alias, row.value]),
-    );
-    const local = localFormula(context, value, values);
-    header.append(local.root);
-    const body = document.createElement("div");
-    body.className = "factor-detail-parameter-tree-body";
-    if (options.content) {
-      body.append(options.content);
-    } else {
-      const list = createParameterList(context, rows, values, {
-        readOnly: true,
-        renderValue: (valueCell, parameter) => {
-          const displayed = parameter.redacted
-            ? context.t("已隐藏") : parameterValueCell(context, parameter);
-          if (displayed && typeof displayed === "object"
-            && typeof displayed.append === "function") {
-            valueCell.append(displayed);
-          } else {
-            valueCell.textContent = String(displayed ?? "");
-          }
-          if (!parameter.nested_factor) return {control: true};
-          const nestedRows = parameterRows(parameter.nested_factor, options);
-          if (!nestedRows.length) return {control: true};
-          const nested = parameterTree(
-            context, parameter.nested_factor, nestedRows, depth + 1, options,
-          );
-          nested.dataset.parameterAlias = parameter.alias;
-          nested.className = `${nested.className || ""} factor-detail-nested-parameter-row`.trim();
-          return {control: true, nested};
-        },
-      });
-      body.append(list.root);
-    }
-    root.append(header, body);
-    return {root, update: next => local.update(next || {})};
-  }
+  // parameterTable / parameterTree / parameterSection / createParameterList
+  // moved to catalog/shared/factor-parameter-section.js (loaded after this
+  // module); the exports below delegate lazily so every existing caller keeps
+  // working through FTFactorDetailShared.
 
   function parameterDisplayValue(parameter) {
     if (parameter?.nested_factor) {
@@ -1081,7 +978,9 @@
     icon.type = "button";
     icon.className = "ft-help-icon factor-detail-family-source-help";
     icon.textContent = "?";
-    const label = view?.title || context.t("查看因子家族");
+    const label = view?.title
+      ? context.t(view.title)
+      : context.t("查看因子家族");
     icon.setAttribute("aria-label", label);
     icon.title = label;
     icon.addEventListener("click", event => {
@@ -1194,13 +1093,29 @@
     return root;
   }
 
+  // The parameter section/table UI components live in
+  // catalog/shared/factor-parameter-section.js; keep the historical
+  // FTFactorDetailShared surface working by delegating lazily.
+  const delegateSection = name => (...args) => {
+    const section = window.FTFactorParameterSection;
+    if (!section || typeof section[name] !== "function") {
+      throw new Error(`factor-parameter-section module is not loaded: ${name}`);
+    }
+    return section[name](...args);
+  };
+
   window.FTFactorDetailShared = Object.freeze({
     expression, loadSourceVersions, loadSourceVersion,
-    parameterRows, parameterValues, createParameterList, localFormula,
-    parameterSection,
+    parameterRows, parameterValues,
+    createParameterList: delegateSection("createParameterList"),
+    localFormula,
+    parameterSection: delegateSection("parameterSection"),
     factorRowView, familyRowView, factorSetRowView,
     productGroupRowView, categoryRowView,
-    familyIdentity, familySourceHelp, fieldRow, helpIcon, parameterTable,
+    familyIdentity, familySourceHelp, fieldRow, helpIcon,
+    parameterTable: delegateSection("parameterTable"),
+    // Row/value helpers shared with the parameter-section module.
+    parameterType, parameterValueCell, parameterDisplayValue,
     previewExpression,
     pageClass, provenance, source,
     sourceOptions, sourceVersionHelp,

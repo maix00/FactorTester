@@ -42,12 +42,23 @@
         // guarantees an in-place mode change for frozen/alias view URLs.
         const href = options.editHref
           || window.FTPageMode?.hrefForMode?.("edit") || "";
-        if (href) {
+        if (href || typeof context.openInlineEdit === "function") {
           button(
             ICONS.edit,
             options.editLabel || "编辑",
             options.editHelp,
-            () => context.navigate(href),
+            () => {
+              // Nested containers (the test-page object overlay) own the
+              // edit destination: the shared component only raises the
+              // request, the container opens the editor frame for the same
+              // in-place object.  Standalone pages keep navigating to the
+              // same-tab edit URL.
+              if (typeof context.openInlineEdit === "function") {
+                context.openInlineEdit();
+                return;
+              }
+              context.navigate(href);
+            },
           );
         }
       }

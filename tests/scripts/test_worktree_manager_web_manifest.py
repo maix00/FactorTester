@@ -134,6 +134,41 @@ def test_editor_validation_instantiates_frozen_dependencies_as_the_session_user(
     assert "getattr(family, 'owner_ref', '')" in inspection
 
 
+def test_temporary_object_edit_flows_through_shared_actions_and_stays_temporary() -> None:
+    """Batch C: the *page's* shared edit action drives the nested edit frame;
+    the overlay only manages frames; saves land back on the temporary object."""
+    actions = (WEB_ROOT / "catalog/shared/object-mode-actions.js").read_text(
+        encoding="utf-8",
+    )
+    # Shared component raises the request; the container owns the destination.
+    assert 'typeof context.openInlineEdit === "function"' in actions
+    assert "context.openInlineEdit()" in actions
+
+    overlay = (WEB_ROOT / "workbench/object-overlay.js").read_text(
+        encoding="utf-8",
+    )
+    # Overlay stays a container: temporary views may author through the page
+    # (viewOnly only for read-only library objects)…
+    assert 'options.mode === "view" && options.temporary !== true' in overlay
+    # …and the nested editor frame is seeded temporary; saving replaces the
+    # in-place value through options.onSaved (never the user library).
+    assert "openInlineEdit: callbacks.openInlineEdit" in overlay
+    assert 'frame.mode !== "view" || frame.temporary !== true' in overlay
+    assert 'temporary: true,\n              onSaved: value => {' in overlay
+    assert "options.onSaved?.(next)" in overlay
+
+    details = (WEB_ROOT / "catalog/factor-details.js").read_text(
+        encoding="utf-8",
+    )
+    assert "context.testObjectTemporary === true) return true;" in details
+    assert "const canEdit = context.testObjectTemporary === true || (" in details
+
+    strategy = (WEB_ROOT / "catalog/strategy-library-detail.js").read_text(
+        encoding="utf-8",
+    )
+    assert "strategy.access?.can_edit || context.testObjectTemporary === true" in strategy
+
+
 def test_route_script_groups_obey_the_initial_load_contract() -> None:
     manifest = json.loads(
         (WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8")
@@ -2718,6 +2753,9 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     detail_shared = (WEB_ROOT / "catalog" / "factor-detail-shared.js").read_text(
         encoding="utf-8",
     )
+    parameter_section = (
+        WEB_ROOT / "catalog" / "shared" / "factor-parameter-section.js"
+    ).read_text(encoding="utf-8")
     app_css = (WEB_ROOT / "styles" / "app.css").read_text(encoding="utf-8")
 
     assert "window.FTObjectModeActions?.mount?.(context" in object_form
@@ -2737,8 +2775,20 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     # createParameterList and the section shell shared via parameterSection.
     assert "FTFactorDetailShared.createParameterList" in parameter_editor
     assert "FTFactorDetailShared.parameterSection" in editor
-    assert 'header.className = "factor-detail-parameter-header"' in detail_shared
-    assert '["参数名", "参数类型", "默认值", "Value"]' in detail_shared
+    # Family tables carry no Value column (a family defines parameters only);
+    # factor-instance tables always do.  The shared list builds the header
+    # from the base labels and appends Value exactly when shown.
+    assert 'header.className = "factor-detail-parameter-header"' in parameter_section
+    assert 'const labels = ["参数名", "参数类型", "默认值"];' in parameter_section
+    assert 'if (showValue) labels.push("Value");' in parameter_section
+    assert 'const showValue = options.showValue !== false;' in parameter_section
+    assert 'showValue ? "" : "no-value-column"' in parameter_section
+    assert "no-value-column" in app_css
+    # The historical FTFactorDetailShared surface delegates to the shared
+    # parameter-section module at runtime.
+    assert 'delegateSection("parameterTable")' in detail_shared
+    assert 'delegateSection("parameterSection")' in detail_shared
+    assert 'delegateSection("createParameterList")' in detail_shared
     assert 'context.t("Column")' in parameter_editor
     assert ".factor-detail-parameter-editor > .factor-detail-parameter-row" in app_css
     assert "grid-template-columns: subgrid" in app_css

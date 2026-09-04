@@ -42,6 +42,12 @@ vm.runInThisContext(
   fs.readFileSync("server/manager/web/catalog/factor-detail-shared.js", "utf8"),
   {filename: "factor-detail-shared.js"},
 );
+vm.runInThisContext(
+  fs.readFileSync(
+    "server/manager/web/catalog/shared/factor-parameter-section.js", "utf8",
+  ),
+  {filename: "factor-parameter-section.js"},
+);
 const pickers = [];
 function descendants(root) {
   const result = [];
