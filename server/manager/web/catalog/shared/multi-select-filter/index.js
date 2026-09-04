@@ -328,6 +328,37 @@
       }
       searchRow.append(addToggle);
     }
+    // Default refresh icon in the search row: re-pull the long-lived
+    // candidate source (options.onRefresh, or the remote loader).
+    {
+      const syncToggle = document.createElement("button");
+      syncToggle.type = "button";
+      syncToggle.className = "ft-multi-select-sync-toggle icon-action-button";
+      const syncTitle = translate(context, "同步候选", "同步候选");
+      syncToggle.title = syncTitle;
+      syncToggle.setAttribute("aria-label", syncTitle);
+      syncToggle.addEventListener("click", event => {
+        event.stopPropagation?.();
+        if (typeof options.onRefresh === "function") {
+          const result = options.onRefresh(context);
+          if (result && typeof result.then === "function") {
+            result.finally(() => { if (remote) remote.render(); else render(); });
+          }
+          return;
+        }
+        remote?.refresh?.();
+      });
+      const syncIcon = window.FTIcons?.node
+        ? (window.FTIcons.node("arrow.clockwise")
+          || window.FTIcons.node("arrow.2.circlepath"))
+        : null;
+      if (syncIcon) {
+        syncToggle.replaceChildren?.(syncIcon);
+      } else {
+        syncToggle.textContent = "↻";
+      }
+      searchRow.append(syncToggle);
+    }
     const optionList = document.createElement("div");
     optionList.className = "ft-multi-select-options";
     optionList.setAttribute("role", "group");
