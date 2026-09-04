@@ -434,7 +434,9 @@
       let node = section.parentElement;
       while (node && node !== document.body && node.nodeType === 1) {
         const style = window.getComputedStyle(node);
-        if (style && style.overflow !== "visible" && style.overflow !== "clip") {
+        // Any non-visible overflow clips the in-flow menu — including `clip`
+        // (hard clipping, no scrollbar) — so portal to the body in that case.
+        if (style && style.overflow !== "visible") {
           return true;
         }
         node = node.parentElement;
