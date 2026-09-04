@@ -266,6 +266,7 @@
         const constant = numericConstant(v);
         if (constant !== null) { setValue(constant, "manual"); return; }
         if (columns.some(item => selectionValue(item.value) === v)) {
+          valuePicker?.setValues?.([v]);
           setValue(v, "column");
           return;
         }
@@ -273,7 +274,27 @@
           const resolved = typeof options.onValidateFactorAlias === "function"
             ? await options.onValidateFactorAlias(v) : null;
           if (resolved?.valid && (resolved.factor || resolved.factor_alias)) {
-            setValue(resolved.factor || String(resolved.factor_alias), "manual");
+            const factor = resolved.factor || String(resolved.factor_alias);
+            const id = selectionValue(factor);
+            const isOnsite = Boolean(factor && typeof factor === "object"
+              && (factor.temporary === true
+                || factor.source_origin === "test_inline"
+                || factor.source_kind === "transient"));
+            const item = {
+              value: id, label: display(factor) || id, factor,
+              type: "factor", typeLabel: context.t("因子"),
+              temporary: isOnsite, onsite: isOnsite,
+              view: window.FTFactorDetailShared?.factorRowView?.(factor)
+                || {kind: "factor", ref: id},
+            };
+            const idx = candidateItems.findIndex(candidate => (
+              candidate.type === "factor" && candidate.value === id
+            ));
+            if (idx >= 0) candidateItems.splice(idx, 1, item);
+            else candidateItems.push(item);
+            valuePicker?.setItems?.(candidateItems, true);
+            valuePicker?.setValues?.([id]);
+            setValue(factor, "manual");
             return;
           }
         } catch (_error) { /* fall through to a literal manual value */ }
