@@ -218,10 +218,13 @@
           : await FTStrategyLibraryRuntime.update(context, value.strategy_ref, payload);
         const saved = response.strategy || response;
         const path = `/strategies/${encodeURIComponent(saved.strategy_ref)}`;
-        if (mode === "create") {
-          context.closeTab?.(context.tabID);
+        // Same-tab authoring: the strategy tab survives create/edit — the
+        // current tab adopts the resulting strategy's canonical view.
+        if (typeof context.navigateInPlace === "function") {
+          context.navigateInPlace(path);
+        } else {
+          context.navigate(path);
         }
-        context.navigate(path);
       } catch (error) {
         editor.status.textContent = error.message || context.t("保存失败");
         save.disabled = false;

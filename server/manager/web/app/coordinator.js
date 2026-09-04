@@ -89,6 +89,7 @@
 
   const appContext = (routeToken = activeRouteToken) => ({
     api, raw, navigate, button, content, toolbar,
+    navigateInPlace: tabs?.navigateInPlace,
     servicePath, showNotice, openLogin, logout,
     activateTab: tabs?.activateTab, closeTab: tabs?.closeTab,
     session: state.session, t, ...currentTabContext(),
