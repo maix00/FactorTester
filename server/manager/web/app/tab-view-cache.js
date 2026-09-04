@@ -409,8 +409,8 @@
         parking.remove?.();
         view.connectedContent = null;
         restoreChildren(toolbar, view.toolbar);
-        if (title) title.textContent = view.title || "";
-        if (eyebrow) eyebrow.textContent = view.eyebrow || "";
+        if (title && view.title) title.textContent = view.title;
+        if (eyebrow && view.eyebrow) eyebrow.textContent = view.eyebrow;
         if (notice && view.notice) {
           notice.textContent = view.notice.text;
           notice.style.color = view.notice.color;
@@ -441,8 +441,8 @@
       view.lastUsedAt = nextActivityAt();
       restoreChildren(content, view.content);
       restoreChildren(toolbar, view.toolbar);
-      if (title) title.textContent = view.title || "";
-      if (eyebrow) eyebrow.textContent = view.eyebrow || "";
+      if (title && view.title) title.textContent = view.title;
+      if (eyebrow && view.eyebrow) eyebrow.textContent = view.eyebrow;
       if (notice && view.notice) {
         notice.textContent = view.notice.text;
         notice.style.color = view.notice.color;

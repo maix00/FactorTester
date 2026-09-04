@@ -207,6 +207,24 @@ def test_factor_series_entry_auto_mounts_factor_ref_before_run_preview_sgchg() -
     assert "factor_dependencies" in server_source
 
 
+def test_tab_switch_refreshes_the_whole_header_region() -> None:
+    # The heading area belongs to the active tab.  Activating a different tab
+    # must immediately reset top-left title/eyebrow and empty the action
+    # toolbar from the target tab's persisted identity, and live restore must
+    # not overwrite that heading with an empty snapshot.
+    tabs_source = (WEB_ROOT / "app" / "tabs.js").read_text(encoding="utf-8")
+    assert "const switchingTab = tabID !== state.activeTabID;" in tabs_source
+    assert "title.textContent = tab.title || \"\";" in tabs_source
+    assert "toolbar?.replaceChildren?.();" in tabs_source
+    cache_source = (WEB_ROOT / "app" / "tab-view-cache.js").read_text(
+        encoding="utf-8",
+    )
+    assert "if (title && view.title) title.textContent = view.title;" in cache_source
+    assert "if (eyebrow && view.eyebrow) eyebrow.textContent = view.eyebrow;" in (
+        cache_source
+    )
+
+
 def test_editor_header_actions_respect_route_session() -> None:
     # The header/toolbar is shared across the tab rail.  Async create/edit
     # renderers must not mount their actions after the route session ended
