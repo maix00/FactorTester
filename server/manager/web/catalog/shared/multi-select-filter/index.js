@@ -995,6 +995,13 @@
           try { activeMultiSelect(); } catch (_error) { /* already closed */ }
         }
         activeMultiSelect = holdOpen;
+        // Menu width: min-width = max(240px, trigger/dropdown width) and
+        // max-width = min(560px, viewport) so it never falls below the trigger
+        // (too narrow) nor overflows the outer container.  Set inline so it
+        // wins over the viewport-relative stylesheet rule in portal / anchor
+        // modes where a percentage would resolve against the body.
+        const triggerWidth = summary.getBoundingClientRect?.().width || 0;
+        menu.style.minWidth = `${Math.max(240, triggerWidth)}px`;
         // Any ancestor that would clip the in-flow OR the anchored menu
         // (non-visible overflow, or a transform/filter/contain/perspective
         // establishing a containing block) → portal to the body so the menu is
