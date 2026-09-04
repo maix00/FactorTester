@@ -1042,7 +1042,8 @@
       loaded,
       validationError: "",
       validationMessage: "",
-      sourceVersionFingerprint: loaded.family_formula_fingerprint || "",
+      sourceVersionFingerprint: loaded.family_formula_fingerprint
+        || loaded.identity?.family_formula_fingerprint || "",
       sourceVersions: null,
       sourceVersionError: "",
       sourceVersionLoading: false,
