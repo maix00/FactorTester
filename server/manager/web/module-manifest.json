@@ -203,6 +203,7 @@
    "catalog-products-base"
   ],
   "catalog-product-group": [
+   "catalog-product-detail",
    "catalog-product-groups",
    "catalog-product-editing-shared"
   ],
