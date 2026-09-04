@@ -48,7 +48,11 @@ class FactorSourceCatalog:
                     load_factor_source(owner or principal, factor_id) or ""
                 )
             if not can_view_user_scope(principal, owner):
-                raise PermissionError("无权查看该用户因子源码")
+                raise PermissionError(
+                    "无权查看该用户因子源码: "
+                    f"principal={principal!r} owner={owner!r} "
+                    f"factor={factor_id!r}"
+                )
             return owner, load_factor_source(owner, factor_id) or ""
         return "__public_jobs__", load_public_factor_source(factor_id) or ""
 
