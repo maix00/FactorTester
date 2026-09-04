@@ -978,7 +978,9 @@
     icon.type = "button";
     icon.className = "ft-help-icon factor-detail-family-source-help";
     icon.textContent = "?";
-    const label = view?.title || context.t("查看因子家族");
+    const label = view?.title
+      ? context.t(view.title)
+      : context.t("查看因子家族");
     icon.setAttribute("aria-label", label);
     icon.title = label;
     icon.addEventListener("click", event => {

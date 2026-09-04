@@ -98,7 +98,9 @@
       button.type = "button";
       button.className = "ft-help-icon";
       button.textContent = "?";
-      const label = view.title || translate(context, "查看", "查看");
+      // Descriptor titles are i18n keys ("查看因子", "查看因子家族", …).
+      const label = view.title ? context.t(view.title)
+        : translate(context, "查看", "查看");
       button.setAttribute("aria-label", label);
       button.title = label;
       button.addEventListener("click", event => {
