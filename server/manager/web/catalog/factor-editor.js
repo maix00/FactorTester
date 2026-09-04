@@ -138,7 +138,7 @@
       multi: false,
       items: familyItems(data),
       selected: state.family ? [familyRef(state.family)] : [],
-      onCreate: async () => {
+      onAddCandidate: async (_context, {add}) => {
         const editingTemporary = state.family?.temporary === true
           || state.family?.source_kind === "transient";
         const open = context.openObject || (childOptions => (
@@ -154,6 +154,13 @@
             if (!(data.families || []).some(item => familyRef(item) === familyRef(family))) {
               data.families = [...(data.families || []), family];
             }
+            // Join the selectable family candidates (flagged 当场).
+            add({
+              value: familyRef(family),
+              label: familyLabel(family) || familyRef(family),
+              family,
+              temporary: true,
+            });
             state.family = family;
             state.latestFamily = family;
             state.sourceMode = "source";
@@ -172,11 +179,6 @@
           },
         });
       },
-      createLabel: context.t(
-        state.family?.temporary === true || state.family?.source_kind === "transient"
-          ? "编辑因子家族" : "新增因子家族",
-      ),
-      createTitle: context.t("现场新增或编辑因子家族并返回当前因子"),
       onChange: async values => {
         state.family = familyItems(data).find(item => item.value === values[0])?.family || null;
         state.sourceMode = "family";
@@ -211,7 +213,7 @@
   }
 
   function sourceVersionPicker(context, state, redraw) {
-    if (!state.family || state.sourceMode !== "family"
+    if (!state.family
         || state.family.temporary === true
         || state.family.source_kind === "transient") return null;
     const options = window.FTFactorDetailShared.sourceOptions(state.family);
@@ -1206,6 +1208,11 @@
         const version = sourceVersionPicker(context, state, redraw);
         if (version) sourceMount.append(version);
       } else {
+        // Edit mode shows the same family picker (+ 当场新建) and the family
+        // source-version picker as create mode, then the source editor.
+        sourceMount.append(familyPicker(context, data, state, redraw));
+        const version = sourceVersionPicker(context, state, redraw);
+        if (version) sourceMount.append(version);
         sourceMount.append(sourceControls(context, state, redraw, {
           onChanged: () => tabs?.setDirty("source", true),
         }));
