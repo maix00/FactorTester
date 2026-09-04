@@ -529,6 +529,7 @@
     // until the outside click commits, single commits immediately).
     var selectedCollapsed = false;
     var exclusiveCollapsed = false;
+    var onsiteCollapsed = false;
     var othersCollapsed = false;
     function buildMenuSections() {
       const shown = visibleItems();
@@ -769,7 +770,22 @@
         }
       }
       }
-      const others = shown.filter(item => !item.exclusive);
+      // On-the-fly candidates get their own section between 排他 and 候选.
+      const onsiteItems = shown.filter(item => item.onsite === true && !item.exclusive);
+      if (onsiteItems.length) {
+        rows.push(sectionHeading(
+          `${translate(context, "当场", "当场")} (${onsiteItems.length})`,
+          onsiteCollapsed,
+          () => { onsiteCollapsed = !onsiteCollapsed; render(); },
+        ));
+        if (!onsiteCollapsed) {
+          rows.push(wrap(
+            onsiteItems.map(item => buildRow(item)),
+            "ft-multi-select-section-onsite",
+          ));
+        }
+      }
+      const others = shown.filter(item => !item.exclusive && item.onsite !== true);
       if (others.length) {
         rows.push(sectionHeading(
           `${translate(context, "候选", "候选")} (${others.length})`,
