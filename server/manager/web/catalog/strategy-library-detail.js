@@ -20,8 +20,11 @@
     const revision = strategy.current_revision || {};
     context.setHeading(strategy.name || context.t("策略详情"), context.t("策略库"));
     context.updateActiveTab?.({title: strategy.name || context.t("策略详情")});
-    if (strategy.access?.can_edit) {
-      // Same-tab authoring entry via the shared mode-actions component.
+    if (strategy.access?.can_edit || context.testObjectTemporary === true) {
+      // Same-tab authoring entry via the shared mode-actions component.  An
+      // in-place temporary strategy (created on the test page) is editable by
+      // the owning session regardless of library access metadata; saving it
+      // stays on the temporary object.
       window.FTObjectModeActions?.mount?.(context, {
         mode: "view",
         onEdit: true,

@@ -19,8 +19,11 @@
 
   // An object row is editable by its owner (or super admin); catalog
   // projections deliberately do not carry a can_edit flag on factor rows.
+  // An in-place temporary object was created by this test session, so it is
+  // editable regardless of library ownership metadata.
   function editableBySession(context, value) {
     if (!context.session) return false;
+    if (context.testObjectTemporary === true) return true;
     if (value?.can_edit === true) return true;
     if (context.session.role === "super_admin") return true;
     const owner = String(
@@ -146,13 +149,17 @@
     context.updateActiveTab?.({title: model().familyName(baseFamily)});
     const publicFamily = baseFamily.factor_kind === "public"
       || baseFamily.source === "public";
-    const canEdit = Boolean(context.session) && (
-      publicFamily
-        ? context.session.role === "super_admin"
-        : baseFamily.can_edit === true
-          || String(baseFamily.owner_username || "") === String(
-            context.session.username || "",
-          )
+    // In-place temporary families (created in a test editor) are editable by
+    // the owning session regardless of library ownership metadata.
+    const canEdit = context.testObjectTemporary === true || (
+      Boolean(context.session) && (
+        publicFamily
+          ? context.session.role === "super_admin"
+          : baseFamily.can_edit === true
+            || String(baseFamily.owner_username || "") === String(
+              context.session.username || "",
+            )
+      )
     );
     if (canEdit && !context.testObjectViewOnly) {
       // Same-tab authoring: the shared mode-actions component derives the edit

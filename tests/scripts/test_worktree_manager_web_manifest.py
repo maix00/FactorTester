@@ -134,14 +134,39 @@ def test_editor_validation_instantiates_frozen_dependencies_as_the_session_user(
     assert "getattr(family, 'owner_ref', '')" in inspection
 
 
-def test_temporary_object_view_offers_edit_and_saves_back_in_place() -> None:
-    """Batch C: overlay 查看→编辑→保存 lands back on the temporary object."""
-    source = (WEB_ROOT / "workbench/object-overlay.js").read_text(encoding="utf-8")
-    assert 'frame.mode === "view" && frame.temporary' in source
-    assert '"square.and.pencil"' in source
-    assert "options.onSaved?.(next)" in source
-    assert "frame.rendered = false" in source
-    assert "frame.initialValue = next" in source
+def test_temporary_object_edit_flows_through_shared_actions_and_stays_temporary() -> None:
+    """Batch C: the *page's* shared edit action drives the nested edit frame;
+    the overlay only manages frames; saves land back on the temporary object."""
+    actions = (WEB_ROOT / "catalog/shared/object-mode-actions.js").read_text(
+        encoding="utf-8",
+    )
+    # Shared component raises the request; the container owns the destination.
+    assert 'typeof context.openInlineEdit === "function"' in actions
+    assert "context.openInlineEdit()" in actions
+
+    overlay = (WEB_ROOT / "workbench/object-overlay.js").read_text(
+        encoding="utf-8",
+    )
+    # Overlay stays a container: temporary views may author through the page
+    # (viewOnly only for read-only library objects)…
+    assert 'options.mode === "view" && options.temporary !== true' in overlay
+    # …and the nested editor frame is seeded temporary; saving replaces the
+    # in-place value through options.onSaved (never the user library).
+    assert "openInlineEdit: callbacks.openInlineEdit" in overlay
+    assert 'frame.mode !== "view" || frame.temporary !== true' in overlay
+    assert 'temporary: true,\n              onSaved: value => {' in overlay
+    assert "options.onSaved?.(next)" in overlay
+
+    details = (WEB_ROOT / "catalog/factor-details.js").read_text(
+        encoding="utf-8",
+    )
+    assert "context.testObjectTemporary === true) return true;" in details
+    assert "const canEdit = context.testObjectTemporary === true || (" in details
+
+    strategy = (WEB_ROOT / "catalog/strategy-library-detail.js").read_text(
+        encoding="utf-8",
+    )
+    assert "strategy.access?.can_edit || context.testObjectTemporary === true" in strategy
 
 
 def test_route_script_groups_obey_the_initial_load_contract() -> None:
