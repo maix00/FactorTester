@@ -470,13 +470,25 @@
       if (!tab) return;
       viewCache.saveActiveTabSession();
       if (options.discardView) viewCache.discardView(tabID);
-      if (tabID !== state.activeTabID || options.forceRender) {
+      const switchingTab = tabID !== state.activeTabID;
+      if (switchingTab || options.forceRender) {
         (options.beforeTabChange || beforeTabChange)?.();
       }
       state.activeTabID = tabID;
       history.pushState({}, "", tab.path);
       renderOpenedTabs();
       checkpointWorkspace();
+      // The heading area (top-left title/eyebrow and the action toolbar)
+      // belongs to the active tab.  On a tab switch, refresh the whole region
+      // immediately from the target tab's persisted identity so the previous
+      // tab's heading never lingers while the target view is being restored
+      // or rendered.  Live restore or the route render then refines it (the
+      // restore path must not overwrite this with an empty snapshot).
+      if (switchingTab) {
+        if (title) title.textContent = tab.title || "";
+        if (eyebrow) eyebrow.textContent = tab.eyebrow || "";
+        toolbar?.replaceChildren?.();
+      }
       if (!options.forceRender) {
         const restored = viewCache.restoreView(tabID);
         if (restored === "live") return;
