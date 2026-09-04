@@ -1280,9 +1280,12 @@
         sourceMount.append(error);
       }
       parameterMount.replaceChildren();
-      if (!state.familyMode && state.mode === "create") {
+      if (!state.familyMode) {
         // Factor instances do not own a source tab. Their family selection
-        // (or family creation) is part of the parameter composition flow.
+        // (or family creation) + source version is part of the parameter
+        // composition flow.  Both create and edit render the same family /
+        // source-version rows on the parameter tab (edit included), so
+        // changing the family/version means starting a fresh factor.
         parameterMount.append(sourceMount);
       }
       const editor = parameterEditor(context, data, state, redraw, {
