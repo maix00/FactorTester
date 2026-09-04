@@ -2842,7 +2842,8 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert "loaded.factor_dependencies" in editor
     assert "FTObjectOverlay.open" in editor
     assert "factor-source-mode" not in editor
-    assert '"新增因子家族"' in editor
+    assert 'onAddCandidate: async (_context, {add})' in editor
+    assert "sourceMount.append(familyPicker(context, data, state, redraw));" in editor
     assert 'state.family.source_kind === "transient"' in editor
     assert "factor-param-choice-family" not in parameter_editor
     assert "compact: true, multi: false" in parameter_editor
