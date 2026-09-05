@@ -9,7 +9,6 @@ from tools.data.sqlite import factor_source_versions
 def _fingerprint(character: str) -> str:
     return character * 64
 
-
 def test_formula_versions_roundtrip_without_git_identity(monkeypatch, tmp_path):
     database = tmp_path / "factor-source-versions.sqlite"
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", database)
@@ -108,3 +107,47 @@ def test_formula_version_requires_full_semantic_fingerprint(monkeypatch, tmp_pat
             "class Momentum(FactorFamily):\n    pass\n",
             family_formula_fingerprint="short",
         )
+
+
+def test_upsert_factor_source_enqueues_fingerprint_into_outbox(monkeypatch, tmp_path):
+    """Saving a factor source must put its family_formula_fingerprint into the
+    factor_source outbox payload, so a receiving server can converge version
+    history (source body is still pulled lazily on demand).
+
+    This is the source-end half of the cross-server version-sync chain that
+    keeps factor_family_formula_versions consistent across servers.
+    """
+    database = tmp_path / "factor-source.sqlite"
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", database)
+    fingerprint = _fingerprint("c")
+
+    import tools.data.sqlite.factor_source_store as store
+
+    store.upsert_factor_source(
+        "custom",
+        "alice",
+        "Momentum",
+        "Momentum",
+        "class Momentum(FactorFamily):\n    pass\n",
+        family_formula_fingerprint=fingerprint,
+    )
+
+    # The enqueued factor_source row is held in the local outbox as an
+    # account-domain entity.  Read it back and confirm the fingerprint travelled
+    # with the payload.
+    from server.manager.storage.account_domain.local import LocalAccountDomainStore
+
+    local = LocalAccountDomainStore(str(database))
+    pending = local.pending(principal="alice", limit=1000)
+    rows = [item for item in pending if item["entity_type"] == "factor_source"]
+    assert rows, "expected a pending factor_source outbox row after upsert"
+    payload = rows[0]["payload"]
+    assert payload["factor_id"] == "Momentum"
+    assert payload["family_formula_fingerprint"] == fingerprint, (
+        "factor_source outbox payload must carry family_formula_fingerprint so "
+        "the receiving server can record version history"
+    )
+    # storage_server_id is set from FACTORTESTER_SERVER_ID and is empty in a
+    # bare test run; the fingerprint (the cross-server convergence key) is what
+    # matters here, not the origin label.
+    assert "source_sha256" in payload

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import settings as Settings
+
 from server.manager.services.federated_public_data import FederatedPublicDataService
 from server.manager.storage.account_domain import AccountDomainSyncService
 from server.manager.storage.account_domain.local import LocalAccountDomainStore
@@ -423,6 +425,215 @@ def test_concurrent_edit_is_recorded_without_overwriting_local_state(tmp_path: P
     assert first.local.pending(principal="u")
 
 
+def test_two_servers_bidirectionally_sync_and_bridge_missing_content(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    """Two servers sharing one control DB reconcile the SAME principal in opposite
+    directions and each ends up with BOTH sides' factor sources.
+
+    This is the invariant that makes the staging/public pair converge when a user
+    opens the affected factor-library view: B sends its content up (flush) and A
+    pulls it down (and vice-versa), so each local cache is the *union*, not a
+    one-way mirror.  Neither server is authoritative; the shared control DB is.
+    """
+    alice_a = {
+        "owner_username": "alice", "factor_id": "Alpha",
+        "factor_name": "Alpha", "source_code": "class Alpha: pass",
+    }
+    alice_b = {
+        "owner_username": "alice", "factor_id": "Beta",
+        "factor_name": "Beta", "source_code": "class Beta: pass",
+    }
+    monkeypatch.setattr(
+        "tools.data.sqlite.factor_source_store.list_factor_sources",
+        lambda kind: [alice_a] if kind == "custom" else [],
+    )
+
+    control = MemoryControlStore()
+    server_a = AccountDomainSyncService(
+        sqlite_path=tmp_path / "a.sqlite", control_store=control, manager_id="office-a",
+    )
+    server_b = AccountDomainSyncService(
+        sqlite_path=tmp_path / "b.sqlite", control_store=control, manager_id="office-b",
+    )
+
+    # reconcile A: enqueues custom:Alpha@office-a into the shared control DB.
+    assert server_a.reconcile_factor_sources("alice") == 1
+
+    # B (same principal) does its own reconcile: enqueues custom:Beta@office-b.
+    # Crucial: B's source list is DIFFERENT from A's; the monkeypatch returns the
+    # same list for both, so to make the missing-content case real we swap the
+    # list for B so A and B each own a distinct factor.
+    monkeypatch.setattr(
+        "tools.data.sqlite.factor_source_store.list_factor_sources",
+        lambda kind: [alice_b] if kind == "custom" else [],
+    )
+    assert server_b.reconcile_factor_sources("alice") == 1
+
+    # Shared control DB now holds both, tagged by origin storage server.
+    ids = {
+        row["entity_id"]
+        for row in control.rows.values()
+        if row["principal"] == "alice" and row["entity_type"] == "factor_source"
+    }
+    assert ids == {"custom:Alpha@office-a", "custom:Beta@office-b"}
+
+    # A's local cache has only Alpha before pulling; it still owns its own row.
+    assert (
+        "alice", "factor_source", "custom:Alpha@office-a"
+    ) in control.rows
+    # server_a.local.entities → list_entities (LocalAccountDomainStore API)
+    a_local_before = {
+        row["entity_id"]
+        for row in server_a.local.list_entities(
+            principal="alice", entity_type="factor_source",
+        )
+    }
+    assert "custom:Alpha@office-a" in a_local_before
+    assert "custom:Beta@office-b" not in a_local_before
+
+    # A syncs: flush is a no-op (nothing local pending) but pull must now fetch
+    # B's Beta row from the shared control DB, bridging the missing content.
+    server_a.sync("alice", force=True)
+    a_local_after = {
+        row["entity_id"]
+        for row in server_a.local.list_entities(
+            principal="alice", entity_type="factor_source",
+        )
+    }
+    assert "custom:Beta@office-b" in a_local_after, (
+        "server A must pull server B's factor source (missing content bridged)"
+    )
+    assert "custom:Alpha@office-a" in a_local_after
+
+    # B syncs: it pulls A's Alpha row too, so both sides converge on the union.
+    server_b.sync("alice", force=True)
+    b_local_after = {
+        row["entity_id"]
+        for row in server_b.local.list_entities(
+            principal="alice", entity_type="factor_source",
+        )
+    }
+    assert "custom:Alpha@office-a" in b_local_after, (
+        "server B must pull server A's factor source (missing content bridged)"
+    )
+    assert "custom:Beta@office-b" in b_local_after
+
+    # No conflicts: each side's own row was authored by itself, the other's was
+    # pulled whole.  Conflicting edits would surface here.
+    assert server_a.local.conflicts(principal="alice") == []
+    assert server_b.local.conflicts(principal="alice") == []
+
+
+def test_receiver_materializes_version_history_for_locally_held_source(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    """A server that holds a factor source's bytes but never authored it still
+    records its formula version (from the fingerprint carried on the outbox
+    manifest), so factor_family_formula_versions converges across servers.
+
+    This is the consumer half of the cross-server version-sync chain: the body
+    travels lazily over the data plane, the fingerprint arrives via the
+    factor_source outbox, and the receiver materializes the version row.
+    """
+    source = "class Gamma(FactorFamily):\n    pass\n"
+    fingerprint = "d" * 64
+
+    # The receiver's local factor_source store holds the bodies (as if hydrated).
+    def load_source(kind, owner_username, factor_id):
+        if owner_username == "carol" and factor_id == "Gamma":
+            return source
+        return None
+
+    from tools.data.sqlite.factor_source_versions import (
+        list_factor_formula_versions,
+    )
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "receiver.sqlite")
+    monkeypatch.setattr(
+        "tools.data.sqlite.factor_source_store.load_factor_source",
+        load_source,
+    )
+
+    control = MemoryControlStore()
+    receiver = AccountDomainSyncService(
+        sqlite_path=tmp_path / "r.sqlite", control_store=control, manager_id="office-b",
+    )
+
+    # Seed the receiver's local account_domain_entities with a factor_source
+    # manifest that advertises the fingerprint (as if pulled from the control DB).
+    receiver.local.upsert_local(
+        principal="carol",
+        entity_type="factor_source",
+        entity_id="custom:Gamma@office-a",
+        payload={
+            "source_kind": "custom",
+            "owner_username": "carol",
+            "factor_id": "Gamma",
+            "factor_name": "Gamma",
+            "source_sha256": "x" * 64,
+            "source_bytes": 0,
+            "storage_server_id": "office-a",
+            "visibility": "private",
+            "family_formula_fingerprint": fingerprint,
+        },
+        manager_id="office-a",
+    )
+
+    count = receiver.materialize_factor_source_versions("carol")
+    assert count == 1, "receiver should materialize one version for the held body"
+
+    versions = list_factor_formula_versions("custom", "carol", "Gamma")
+    assert [v["family_formula_fingerprint"] for v in versions] == [fingerprint]
+
+
+def test_receiver_skips_version_when_source_body_is_absent(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    """No body -> no version row: bytes arrive lazily over the data plane, so a
+    receiver that only has the manifest yet must not fabricate version history."""
+    fingerprint = "e" * 64
+
+    def load_source(kind, owner_username, factor_id):
+        return None  # bytes not local yet
+
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "receiver.sqlite")
+    monkeypatch.setattr(
+        "tools.data.sqlite.factor_source_store.load_factor_source",
+        load_source,
+    )
+
+    from tools.data.sqlite.factor_source_versions import (
+        list_factor_formula_versions,
+    )
+
+    control = MemoryControlStore()
+    receiver = AccountDomainSyncService(
+        sqlite_path=tmp_path / "r2.sqlite", control_store=control, manager_id="office-b",
+    )
+    receiver.local.upsert_local(
+        principal="carol",
+        entity_type="factor_source",
+        entity_id="custom:Delta@office-a",
+        payload={
+            "source_kind": "custom",
+            "owner_username": "carol",
+            "factor_id": "Delta",
+            "factor_name": "Delta",
+            "source_sha256": "y" * 64,
+            "source_bytes": 0,
+            "storage_server_id": "office-a",
+            "visibility": "private",
+            "family_formula_fingerprint": fingerprint,
+        },
+        manager_id="office-a",
+    )
+
+    count = receiver.materialize_factor_source_versions("carol")
+    assert count == 0, "no body -> must not materialize a version"
+    assert list_factor_formula_versions("custom", "carol", "Delta") == []
+
+
+
 def test_public_research_metadata_identifies_storage_manager(tmp_path: Path) -> None:
     library = PublicResearchLibrary(tmp_path / "research", storage_server_id="public-1")
     projection = {
@@ -444,3 +655,106 @@ def test_public_research_metadata_identifies_storage_manager(tmp_path: Path) -> 
     assert metadata["storage_server_id"] == "public-1"
     assert "projection" not in metadata
     assert "source_code" not in metadata
+
+
+def test_producer_outbox_manifest_carries_formula_fingerprint(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    """The producer records the immutable formula fingerprint on the factor_source
+    manifest that leaves the authoring server.
+
+    This is the half of the cross-server version-sync chain that the consumer
+    ``materialize_factor_source_versions`` depends on: a receiver only backfills
+    ``factor_family_formula_versions`` when the pulled manifest advertises a
+    non-empty ``family_formula_fingerprint``.  If the authoring path ever drops
+    it, every receiver silently skips and the version catalog drifts.
+    """
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "producer.sqlite")
+    import json
+
+    observed: dict[str, object] = {}
+
+    def fake_enqueue(
+        source_kind, owner_username, factor_id, factor_name, source_code,
+        *, metadata=None, deleted=False, family_formula_fingerprint="",
+    ):
+        observed["source_kind"] = source_kind
+        observed["owner_username"] = owner_username
+        observed["factor_id"] = factor_id
+        observed["factor_name"] = factor_name
+        observed["source_code"] = source_code
+        observed["metadata"] = dict(metadata or {})
+        observed["fingerprint"] = family_formula_fingerprint
+        return None
+
+    monkeypatch.setattr(
+        "tools.data.sqlite.factor_source_store._enqueue_source_metadata",
+        fake_enqueue,
+    )
+
+    source = "class Delta(FactorFamily):\n    pass\n"
+    fingerprint = "e" * 64
+    from tools.data.sqlite.factor_source_store import upsert_factor_source
+
+    upsert_factor_source(
+        "custom", "dave", "Delta", "Delta", source,
+        chinese_name="Delta",
+        family_formula_fingerprint=fingerprint,
+    )
+
+    assert observed.get("factor_id") == "Delta"
+    assert observed.get("source_kind") == "custom"
+    assert observed.get("owner_username") == "dave"
+    assert observed["metadata"].get("chinese_name") == "Delta"
+    # The formula fingerprint is threaded as a distinct keyword to the outbox
+    # manifest (it is not part of the user-facing metadata dict), so it can be
+    # consumed by the receiver's materialize pass.
+    assert observed.get("fingerprint") == fingerprint, (
+        "the factor_source outbox manifest must carry the formula fingerprint "
+        "so the receiver can materialize its version history"
+    )
+
+
+def test_producer_outbox_manifest_keeps_fingerprint_after_update(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    """Updating a custom factor family must keep the fingerprint on the manifest.
+
+    This guards the api_update_factor path: editing a factor family recomputes
+    the formula fingerprint and must thread it through the outbox, otherwise the
+    updated version identity never leaves the authoring server.
+    """
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "producer2.sqlite")
+
+    observed: dict[str, object] = {}
+
+    def fake_enqueue(
+        source_kind, owner_username, factor_id, factor_name, source_code,
+        *, metadata=None, deleted=False, family_formula_fingerprint="",
+    ):
+        observed["factor_id"] = factor_id
+        observed["metadata"] = dict(metadata or {})
+        observed["fingerprint"] = family_formula_fingerprint
+        return None
+
+    monkeypatch.setattr(
+        "tools.data.sqlite.factor_source_store._enqueue_source_metadata",
+        fake_enqueue,
+    )
+
+    source = "class Delta(FactorFamily):\n    pass\n"
+    fingerprint = "f" * 64
+    from tools.data.sqlite.factor_source_store import upsert_factor_source
+
+    upsert_factor_source(
+        "custom", "dave", "Delta", "Delta", source,
+        chinese_name="Delta",
+        family_formula_fingerprint=fingerprint,
+    )
+
+    assert observed.get("factor_id") == "Delta"
+    assert observed["metadata"].get("chinese_name") == "Delta"
+    assert observed.get("fingerprint") == fingerprint, (
+        "an updated custom factor family must still advertise its formula "
+        "fingerprint on the outbox manifest"
+    )

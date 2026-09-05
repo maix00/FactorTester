@@ -238,6 +238,7 @@ def upsert_factor_source(
     chinese_name: str | None = None,
     description: str | None = None,
     category: str | None = None,
+    family_formula_fingerprint: str = "",
 ) -> str:
     normalized_source_code = canonical_factor_source_code(source_code or "")
     metadata = {
@@ -273,6 +274,7 @@ def upsert_factor_source(
         source_kind, owner_username, factor_id, factor_name,
         normalized_source_code,
         metadata=metadata,
+        family_formula_fingerprint=family_formula_fingerprint,
     )
     return str(Settings.CACHE_DB_PATH)
 
@@ -395,6 +397,7 @@ def _enqueue_source_metadata(
     *,
     metadata: dict[str, str] | None = None,
     deleted: bool = False,
+    family_formula_fingerprint: str = "",
 ) -> None:
     """Sync a source manifest, never the source code itself."""
     try:
@@ -420,6 +423,13 @@ def _enqueue_source_metadata(
                 "chinese_name": str((metadata or {}).get("chinese_name") or ""),
                 "description": str((metadata or {}).get("description") or ""),
                 "category": str((metadata or {}).get("category") or ""),
+                # family formula fingerprint is the immutable semantic identity of
+                # the source.  The receiving server records it (and, on demand,
+                # hydrates the source body) so version history converges across
+                # servers even though the body itself is pulled lazily.
+                "family_formula_fingerprint": str(
+                    family_formula_fingerprint or ""
+                ).strip(),
             },
             deleted=deleted,
         )
@@ -434,7 +444,13 @@ def list_factor_sources(source_kind: str) -> list[dict[str, Any]]:
             """
             SELECT s.source_kind, s.owner_username, s.factor_id, s.factor_name,
                    s.source_code, s.updated_at,
-                   m.chinese_name, m.description, m.category
+                   m.chinese_name, m.description, m.category,
+                   (SELECT v.family_formula_fingerprint
+                      FROM factor_family_formula_versions v
+                     WHERE v.source_kind = s.source_kind
+                       AND v.owner_username = s.owner_username
+                       AND v.factor_id = s.factor_id
+                     ORDER BY v.created_at DESC LIMIT 1) AS family_formula_fingerprint
             FROM factor_family_sources AS s
             LEFT JOIN factor_family_source_metadata AS m
               ON m.source_kind = s.source_kind
@@ -463,6 +479,7 @@ def list_factor_sources(source_kind: str) -> list[dict[str, Any]]:
             "factor_name": row["factor_name"],
             "source_code": canonical_factor_source_code(str(row["source_code"] or "")),
             "updated_at": row["updated_at"],
+            "family_formula_fingerprint": str(row["family_formula_fingerprint"] or ""),
             **metadata,
         })
     return result

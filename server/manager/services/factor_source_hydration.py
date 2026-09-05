@@ -8,6 +8,7 @@ from urllib.request import Request, urlopen
 
 from server.manager.services.data_plane_client import loopback_client_access
 from tools.data.sqlite.factor_source_store import upsert_factor_source
+from tools.data.sqlite.factor_source_versions import record_factor_formula_version
 
 
 class FactorSourceHydrator:
@@ -67,6 +68,19 @@ class FactorSourceHydrator:
             except UnicodeDecodeError:
                 continue
             source_kind = "public" if owner == "public" else "custom"
+            fingerprint = ""
+            try:
+                from server.modules.custom_factors.catalog import (
+                    _load_factor_family_from_source,
+                )
+
+                factor_cls, _ = _load_factor_family_from_source(
+                    source, f"_factor_formula_{factor_id}",
+                )
+                if factor_cls is not None:
+                    fingerprint = str(factor_cls().expr.semantic_fingerprint())
+            except Exception:
+                fingerprint = ""
             upsert_factor_source(
                 source_kind,
                 "" if source_kind == "public" else owner,
@@ -76,7 +90,27 @@ class FactorSourceHydrator:
                 chinese_name=str(metadata.get("chinese_name") or ""),
                 description=str(metadata.get("description") or ""),
                 category=str(metadata.get("category") or ""),
+                family_formula_fingerprint=fingerprint,
             )
+            # A hydrated source was fetched by its immutable fingerprint from
+            # the authoritative storage Manager.  Record the formula version so
+            # this server's factor-library version catalog stays consistent with
+            # the source that was actually frozen — this is the "visit the
+            # factor library and asynchronously backfill history" path.
+            if fingerprint:
+                try:
+                    record_factor_formula_version(
+                        source_kind,
+                        "" if source_kind == "public" else owner,
+                        factor_id,
+                        source,
+                        family_formula_fingerprint=fingerprint,
+                        subject=f"factor: {source_kind} {factor_id}",
+                    )
+                except (RuntimeError, TypeError, ValueError):
+                    # Recording a version is best-effort: a hydrated source that
+                    # cannot produce a stable snapshot must not fail hydration.
+                    pass
             return True
         return False
 
