@@ -391,7 +391,7 @@ class AccountDomainSyncService:
                     if isinstance(item, Mapping)
                 ],
                 "factor_param_config": materialized_factor_configs(owner, existing=self.local.list_entities(
-                    principal=owner, entity_type="factor_param_config", include_shared=False,
+                    principal=owner, entity_type="factor_param_config", include_shared=False, include_deleted=True,
                 )),
             }
         except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
@@ -404,7 +404,7 @@ class AccountDomainSyncService:
                 for row in self.local.list_entities(
                     principal=owner,
                     entity_type=entity_type,
-                    include_shared=False,
+                    include_shared=False, include_deleted=True,
                 )
             }
             current_ids: set[str] = set()
