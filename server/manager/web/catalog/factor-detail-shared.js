@@ -721,8 +721,12 @@
 
   function childDefinition(symbol, line, align, punctuation = "") {
     const clean = String(line).trim().replace(/[.;]\s*$/, "");
-    const output = clean.match(/^(?:X|\\mathrm\{X\})_t\s*&?\s*:=\s*(.+)$/);
-    return `${output ? "" : align ? "& " : ""}${symbol}_t := ${output ? output[1] : clean}${punctuation}`;
+    const output = clean.match(/^(?:X|\\mathrm{X})_t\s*&?\s*:=\s*(.+)$/);
+    // If the nested definition line already carries an alignment `&` (it is an
+    // aligned intermediate definition), do not add another `&` prefix for the
+    // referring family-name symbol — otherwise we get a duplicate/misaligned &.
+    const prefix = (output || /&/.test(clean)) ? "" : align ? "& " : "";
+    return `${prefix}${symbol}_t := ${output ? output[1] : clean}${punctuation}`;
   }
 
   function formula(context, value) {
