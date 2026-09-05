@@ -82,18 +82,25 @@ class CatalogRoutesMixin:
         self, principal: str, target_ref: str, requested_owner: str,
     ) -> str:
         """Resolve own/direct-child Factor Set ownership once for all reads."""
-        owner = str(requested_owner or principal).strip()
+        owner = str(requested_owner or "").strip()
         if owner == principal:
             return principal
-        subordinate = self.state.client_state.factor_set_scopes(
-            principal,
-        ).get("subordinates") or []
-        if any(
-            str(item.get("target_ref") or "") == target_ref
-            and str(item.get("owner_username") or "") == owner
-            for item in subordinate
-        ):
-            return owner
+        reader = getattr(self.state.client_state, "factor_set_scopes", None)
+        scopes = reader(principal) if callable(reader) else {}
+        if not owner and any(str(item.get("target_ref") or "") == target_ref
+                             for item in scopes.get("mine") or []):
+            return principal
+        matches = {
+            str(item.get("owner_username") or "")
+            for item in scopes.get("subordinates") or []
+            if str(item.get("target_ref") or "") == target_ref
+            and (not owner or str(item.get("owner_username") or "") == owner)
+        } - {""}
+        if len(matches) == 1:
+            return matches.pop()
+        if not owner and not matches:
+            # Preserve the own-set 404 response without searching other users.
+            return principal
         raise PermissionError("无权查看该用户因子集合")
 
     def _ensure_visitor_price_access(self, payload: dict) -> None:
@@ -604,7 +611,7 @@ class CatalogRoutesMixin:
                 owner = self._visible_factor_set_owner(
                     principal,
                     target_ref,
-                    str(query.get("owner_username", [principal])[0] or principal),
+                    str(query.get("owner_username", [""])[0] or ""),
                 )
                 value = self.state.client_state.factor_set_detail(
                     owner,
@@ -632,7 +639,7 @@ class CatalogRoutesMixin:
                 owner = self._visible_factor_set_owner(
                     principal,
                     target_ref,
-                    str(query.get("owner_username", [principal])[0] or principal),
+                    str(query.get("owner_username", [""])[0] or ""),
                 )
                 value = self.state.client_state.factor_set_descriptor(
                     owner, target_ref,

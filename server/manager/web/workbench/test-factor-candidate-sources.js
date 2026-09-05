@@ -279,7 +279,11 @@
         value => saveFactor(context, state, refresh, picker, value), item.factor,
       ),
       editLabel: context.t("编辑因子"),
-      onChange: values => { void updateCombined(context, state, items, values, refresh); },
+      onChange: values => {
+        void updateCombined(context, state, items, values, refresh).finally(() => {
+          picker.setValues(currentSelected());
+        });
+      },
     });
     // A nested editor can open before the shared visible-factor catalog has
     // finished loading; refresh this picker when that request completes so the
@@ -309,6 +313,7 @@
     const added = setItems.filter(item => requested.has(item.value)
       && !currentSets.some(value => value.target_ref === item.value));
     state.factorSetCatalog.busy = true;
+    state.factorSetCatalog.error = "";
     refresh?.();
     try {
       for (const item of removed) {
@@ -485,6 +490,12 @@
     const direct = combinedControl(context, state, refresh);
     direct.classList.add("factor-candidate-child-row");
     root.append(direct);
+    if (state.factorSetCatalog?.error) {
+      const error = document.createElement("p");
+      error.className = "form-error";
+      error.textContent = state.factorSetCatalog.error;
+      root.append(error);
+    }
     const roleField = options.includeRoles === false
       ? null : state.manifest?.defaults?.factor_role_bindings;
     if (roleField && FTSettingRules.isVisible(roleField, state.values)
