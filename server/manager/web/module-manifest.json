@@ -231,7 +231,8 @@
   "factor-catalog-core": [
    "core",
    "catalog-selection-core",
-   "catalog-detail-tabs"
+   "catalog-detail-tabs",
+   "factor-catalog-runtime"
   ],
   "factor-catalog-list": [
    "factor-catalog-core"
@@ -399,7 +400,8 @@
   ],
   "docs": [
    "core"
-  ]
+  ],
+  "factor-catalog-runtime": []
  },
  "control_groups": {
   "ic_horizon_grid": {
@@ -606,7 +608,6 @@
    "catalog/shared/factor-parameter-section.js",
    "catalog/shared/object-mode-actions.js",
    "catalog/shared/object-job-table.js",
-   "catalog/factor-catalog-runtime.js",
    "catalog/factors.js"
   ],
   "factor-catalog-list": [
@@ -960,6 +961,9 @@
    "app/shell.js",
    "app/page-mode.js",
    "app/coordinator.js"
+  ],
+  "factor-catalog-runtime": [
+   "catalog/factor-catalog-runtime.js"
   ]
  },
  "external_scripts": [
@@ -989,7 +993,7 @@
   "core/price-chart.js",
   "core/market-data.js",
   "catalog/shared/multi-select-filter/type-filter.js",
-   "catalog/shared/multi-select-filter/index.js",
+  "catalog/shared/multi-select-filter/index.js",
   "catalog/shared/multi-select-filter-remote.js",
   "jobs/list-format.js",
   "jobs/page-tabs.js",

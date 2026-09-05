@@ -6,6 +6,8 @@ sqlite-web inspection without depending only on in-memory scans.
 from __future__ import annotations
 
 import importlib.util
+import json
+import hashlib
 import os
 import sqlite3
 import tempfile
@@ -103,6 +105,12 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         """
     )
 
+    columns = {row[1] for row in conn.execute(f"PRAGMA table_info({CATALOG_TABLE})")}
+    if "catalog_json" not in columns:
+        conn.execute(f"ALTER TABLE {CATALOG_TABLE} ADD COLUMN catalog_json TEXT NOT NULL DEFAULT '{{}}'")
+    if "source_sha256" not in columns:
+        conn.execute(f"ALTER TABLE {CATALOG_TABLE} ADD COLUMN source_sha256 TEXT NOT NULL DEFAULT ''")
+
 
 def _account_map() -> dict[str, str]:
     result: dict[str, str] = {}
@@ -131,8 +139,8 @@ def _insert_factor_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]], *,
             INSERT OR REPLACE INTO factor_family_catalog (
                 source_kind, owner_username, owner_alias, factor_id, factor_name,
                 factor_family, chinese_name, description, math_expr, category,
-                source_file, is_public, load_error, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                source_file, is_public, load_error, updated_at, catalog_json, source_sha256
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 source_kind,
@@ -149,9 +157,14 @@ def _insert_factor_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]], *,
                 1 if row.get("is_public") else 0,
                 1 if row.get("load_error") else 0,
                 now,
+                json.dumps({k: v for k, v in row.items() if k not in {"source_code", "source_file"}}, ensure_ascii=False),
+                str(row.get("source_sha256") or hashlib.sha256(str(row.get("source_code") or "").encode()).hexdigest()),
             ),
         )
-
+        conn.execute(
+            "DELETE FROM factor_family_catalog_params WHERE source_kind=? AND owner_username=? AND factor_id=?",
+            (source_kind, owner_username, str(row.get("id") or row.get("name") or "")),
+        )
         params = row.get("params") or []
         if not isinstance(params, list):
             continue
@@ -183,141 +196,73 @@ def _public_factor_rows() -> list[dict[str, Any]]:
     return list_factor_sources("public")
 
 
-def _public_factor_dicts() -> list[dict[str, Any]]:
-    result: list[dict[str, Any]] = []
-    for row in _public_factor_rows():
-        factor_id = str(row.get("factor_id") or "")
-        source_code = str(row.get("source_code") or "")
-        updated_at = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(float(row.get("updated_at") or time.time())))
-        factor_cls, _ = _load_factor_family_from_source(source_code, factor_id)
+def project_factor_source(row: dict[str, Any], *, source_kind: str) -> dict[str, Any]:
+    """Compute a source-free summary once at the authoring/backfill boundary."""
+    from server.modules.shared.param_meta import serialize_param_meta
+
+    factor_id = str(row.get("factor_id") or "")
+    source = str(row.get("source_code") or "")
+    summary = {
+        "id": factor_id, "name": str(row.get("factor_name") or factor_id),
+        "factor_family": "FactorFamily", "category": str(row.get("category") or ""),
+        "chinese_name": str(row.get("chinese_name") or ""),
+        "description": str(row.get("description") or ""), "params": [],
+        "math_expr": "", "is_public": source_kind == "public",
+        "source_sha256": hashlib.sha256(source.encode()).hexdigest(),
+        "source_bytes": len(source.encode()),
+        "updated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(float(row.get("updated_at") or time.time()))),
+    }
+    factor_cls, _ = _load_factor_family_from_source(source, "_factor_catalog_projection")
+    try:
         if factor_cls is None:
-            result.append(
-                {
-                    "id": factor_id,
-                    "name": factor_id,
-                    "category": row.get("category") or "",
-                    "factor_family": "FactorFamily",
-                    "chinese_name": row.get("chinese_name") or "",
-                    "description": row.get("description") or "",
-                    "params": [],
-                    "source_code": source_code,
-                    "is_public": True,
-                    "updated_at": updated_at,
-                    "load_error": True,
-                }
-            )
-            continue
-        try:
-            ff = factor_cls()
-            result.append(
-                {
-                    "id": factor_id,
-                    "name": factor_id,
-                    "category": row.get("category") or _factor_family_name(factor_cls),
-                    "factor_family": _factor_family_name(factor_cls),
-                    "chinese_name": row.get("chinese_name") or "",
-                    "description": row.get("description") or "",
-                    "math_expr": getattr(ff, "math_expr", "") or "",
-                    "source_code": source_code,
-                    "params": [
-                        {
-                            "alias": getattr(param, "alias", ""),
-                            "type": type(param).__name__,
-                            "default_value": str(getattr(param, "default_value", "")),
-                            "description": getattr(param, "desc", "") or "",
-                        }
-                        for param in getattr(ff, "params", [])
-                    ],
-                    "is_public": True,
-                    "updated_at": updated_at,
-                }
-            )
-        except Exception:
-            result.append(
-                {
-                    "id": factor_id,
-                    "name": factor_id,
-                    "category": row.get("category") or "",
-                    "factor_family": "FactorFamily",
-                    "chinese_name": row.get("chinese_name") or "",
-                    "description": row.get("description") or "",
-                    "params": [],
-                    "source_code": source_code,
-                    "is_public": True,
-                    "updated_at": updated_at,
-                    "load_error": True,
-                }
-            )
-    return result
+            raise ValueError("source does not load a family")
+        family = factor_cls()
+        summary.update(
+            factor_family=_factor_family_name(factor_cls),
+            family_formula_fingerprint=family.expr.semantic_fingerprint(),
+            math_expr=getattr(family, "math_expr", "") or "",
+            params=[serialize_param_meta(param) for param in family.params],
+        )
+    except Exception:
+        summary["load_error"] = True
+    return summary
+
+
+def _public_factor_dicts() -> list[dict[str, Any]]:
+    return [project_factor_source(row, source_kind="public") for row in _public_factor_rows()]
 
 
 def _custom_factor_dicts(owner_username: str) -> list[dict[str, Any]]:
-    result: list[dict[str, Any]] = []
-    rows = [row for row in list_factor_sources("custom") if row.get("owner_username") == owner_username]
-    for row in rows:
-        factor_id = str(row.get("factor_id") or "")
-        source_code = str(row.get("source_code") or "")
-        updated_at = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(float(row.get("updated_at") or time.time())))
-        factor_cls, _ = _load_factor_family_from_source(source_code, f"_cf_{owner_username}_{factor_id}")
-        if factor_cls is None:
-            result.append(
-                {
-                    "id": factor_id,
-                    "name": factor_id,
-                    "category": row.get("category") or "自编",
-                    "factor_family": "FactorFamily",
-                    "chinese_name": row.get("chinese_name") or "",
-                    "description": row.get("description") or "",
-                    "params": [],
-                    "source_code": source_code,
-                    "is_public": False,
-                    "updated_at": updated_at,
-                    "load_error": True,
-                }
-            )
-            continue
-        try:
-            ff = factor_cls()
-            result.append(
-                {
-                    "id": factor_id,
-                    "name": factor_cls.__name__,
-                    "category": row.get("category") or "自编",
-                    "factor_family": _factor_family_name(factor_cls),
-                    "chinese_name": row.get("chinese_name") or "",
-                    "description": row.get("description") or "",
-                    "math_expr": getattr(ff, "math_expr", "") or "",
-                    "source_code": source_code,
-                    "params": [
-                        {
-                            "alias": getattr(param, "alias", ""),
-                            "type": type(param).__name__,
-                            "default_value": str(getattr(param, "default_value", "")),
-                            "description": getattr(param, "desc", "") or "",
-                        }
-                        for param in getattr(ff, "params", [])
-                    ],
-                    "is_public": False,
-                    "updated_at": updated_at,
-                }
-            )
-        except Exception:
-            result.append(
-                {
-                    "id": factor_id,
-                    "name": factor_id,
-                    "category": row.get("category") or "自编",
-                    "factor_family": "FactorFamily",
-                    "chinese_name": row.get("chinese_name") or "",
-                    "description": row.get("description") or "",
-                    "params": [],
-                    "source_code": source_code,
-                    "is_public": False,
-                    "updated_at": updated_at,
-                    "load_error": True,
-                }
-            )
-    return result
+    return [project_factor_source(row, source_kind="custom")
+            for row in list_factor_sources("custom") if row.get("owner_username") == owner_username]
+
+
+def store_factor_summary(conn: sqlite3.Connection, source_kind: str, owner: str, row: dict[str, Any]) -> None:
+    """Persist a prepared projection in the source writer's transaction."""
+    _ensure_schema(conn)
+    _insert_factor_rows(conn, [row], source_kind=source_kind, owner_username=owner,
+                        owner_alias="", now=time.time())
+
+
+def list_factor_summaries(source_kind: str, owner: str | None = "") -> list[dict[str, Any]]:
+    """Read existing projections only; never import, repair, or write on a GET."""
+    try:
+        with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+            rows = conn.execute(
+                "SELECT c.catalog_json, c.owner_username, c.factor_id, m.chinese_name, m.description, m.category FROM factor_family_catalog c "
+                "JOIN factor_family_sources s ON s.source_kind=c.source_kind AND s.owner_username=c.owner_username AND s.factor_id=c.factor_id "
+                "LEFT JOIN factor_family_source_metadata m ON m.source_kind=c.source_kind AND m.owner_username=c.owner_username AND m.factor_id=c.factor_id "
+                "WHERE c.source_kind=?" + (" AND c.owner_username=?" if owner is not None else "") +
+                " ORDER BY c.updated_at DESC, c.factor_id",
+                (source_kind, owner) if owner is not None else (source_kind,),
+            ).fetchall()
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc) or "no such column" in str(exc):
+            return []  # Explicit deployment backfill owns legacy projections.
+        raise
+    return [{**json.loads(row[0]), "owner_username": row[1], "factor_id": row[2], "source_kind": source_kind,
+             **({"chinese_name": row[3], "description": row[4], "category": row[5]} if row[3] is not None else {})}
+            for row in rows if row[0] != "{}"]
 
 
 def sync_factor_metadata_sqlite_store() -> str:

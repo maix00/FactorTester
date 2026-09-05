@@ -30,7 +30,7 @@ window.FTUI = {
     const page = options.page || 1;
     const start = (page - 1) * pageSize;
     return {
-      shell: {headers, rows: rows.slice(start, start + pageSize)},
+      shell: {headers, rows: rows.slice(start, start + pageSize).map(options.renderRow || (row => row))},
       body: {rows: []}, page, pageSize, start,
     };
   },

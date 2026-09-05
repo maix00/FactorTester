@@ -83,8 +83,10 @@ def test_network_info_lists_current_and_at_most_three_public_ip_hosts():
     assert value["internal_server_addresses"] == ["192.168.10.8"]
 
 
-def test_public_factor_library_contains_public_metadata_only(monkeypatch):
+def test_public_factor_library_contains_public_metadata_only(monkeypatch, tmp_path):
     from server.modules.custom_factors import catalog
+    import settings
+    monkeypatch.setattr(settings, "CACHE_DB_PATH", tmp_path / "isolated.sqlite")
 
     monkeypatch.setattr(catalog, "list_public_factors", lambda: [{
         "id": "momentum",

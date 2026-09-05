@@ -246,6 +246,11 @@ def upsert_factor_source(
         "description": str(description or ""),
         "category": str(category or ""),
     }
+    from tools.data.sqlite.factor_metadata import project_factor_source, store_factor_summary
+    summary = project_factor_source({
+        "factor_id": factor_id, "factor_name": factor_name,
+        "source_code": normalized_source_code, **metadata,
+    }, source_kind=source_kind)
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         _ensure_schema(conn)
         conn.execute(
@@ -270,11 +275,12 @@ def upsert_factor_source(
         _upsert_metadata(
             conn, source_kind, owner_username, factor_id, metadata,
         )
+        store_factor_summary(conn, source_kind, owner_username or "", summary)
     _enqueue_source_metadata(
         source_kind, owner_username, factor_id, factor_name,
         normalized_source_code,
-        metadata=metadata,
-        family_formula_fingerprint=family_formula_fingerprint,
+        metadata={**metadata, **summary},
+        family_formula_fingerprint=summary.get("family_formula_fingerprint") or family_formula_fingerprint,
     )
     return str(Settings.CACHE_DB_PATH)
 
@@ -329,6 +335,12 @@ def rename_factor_source(
             """,
             (source_kind, owner_username or "", old_factor_id),
         ).fetchone()
+        from tools.data.sqlite.factor_metadata import project_factor_source, store_factor_summary
+        summary = project_factor_source({
+            "factor_id": new_factor_id, "factor_name": new_factor_name,
+            "source_code": canonical_factor_source_code(str(row["source_code"] or "")),
+            **(dict(metadata_row) if metadata_row is not None else {}),
+        }, source_kind=source_kind)
         conn.execute(
             """
             DELETE FROM factor_family_sources
@@ -374,6 +386,9 @@ def rename_factor_source(
             (source_kind, owner_username or "", old_factor_id),
         )
         source_code = canonical_factor_source_code(str(row["source_code"] or ""))
+        store_factor_summary(conn, source_kind, owner_username or "", summary)
+        conn.execute("DELETE FROM factor_family_catalog WHERE source_kind=? AND owner_username=? AND factor_id=?", (source_kind, owner_username or "", old_factor_id))
+        conn.execute("DELETE FROM factor_family_catalog_params WHERE source_kind=? AND owner_username=? AND factor_id=?", (source_kind, owner_username or "", old_factor_id))
     # The outbox uses a second connection to the same SQLite database.  It
     # must run after this write transaction is closed; otherwise SQLite keeps
     # the rename transaction open and the nested outbox write raises
@@ -383,7 +398,8 @@ def rename_factor_source(
     )
     _enqueue_source_metadata(
         source_kind, owner_username, new_factor_id, new_factor_name,
-        source_code, metadata=metadata,
+        source_code, metadata={**metadata, **summary},
+        family_formula_fingerprint=summary.get("family_formula_fingerprint") or "",
     )
     return str(Settings.CACHE_DB_PATH)
 
@@ -407,7 +423,7 @@ def _enqueue_source_metadata(
         enqueue_entity(
             principal,
             "factor_source",
-            f"{source_kind}:{factor_id}",
+            f"{source_kind}:{factor_id}@{str(os.environ.get('FACTORTESTER_SERVER_ID') or 'local').strip()}",
             {
                 "source_kind": source_kind,
                 "owner_username": owner_username or "",
@@ -417,12 +433,14 @@ def _enqueue_source_metadata(
                 if source_code else "",
                 "source_bytes": len(source_code.encode("utf-8")),
                 "storage_server_id": str(
-                    os.environ.get("FACTORTESTER_SERVER_ID") or ""
+                    os.environ.get("FACTORTESTER_SERVER_ID") or "local"
                 ).strip(),
                 "visibility": "public" if source_kind == "public" else "private",
                 "chinese_name": str((metadata or {}).get("chinese_name") or ""),
                 "description": str((metadata or {}).get("description") or ""),
                 "category": str((metadata or {}).get("category") or ""),
+                "catalog": {key: value for key, value in (metadata or {}).items()
+                            if key not in {"source_code", "source_file"}},
                 # family formula fingerprint is the immutable semantic identity of
                 # the source.  The receiving server records it (and, on demand,
                 # hydrates the source body) so version history converges across
@@ -440,17 +458,16 @@ def _enqueue_source_metadata(
 def list_factor_sources(source_kind: str) -> list[dict[str, Any]]:
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         _ensure_schema(conn)
+        has_versions = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='factor_family_formula_versions'").fetchone()
+        fingerprint_sql = """(SELECT v.family_formula_fingerprint FROM factor_family_formula_versions v
+            WHERE v.source_kind=s.source_kind AND v.owner_username=s.owner_username AND v.factor_id=s.factor_id
+            ORDER BY v.created_at DESC LIMIT 1)""" if has_versions else "''"
         rows = conn.execute(
-            """
+            f"""
             SELECT s.source_kind, s.owner_username, s.factor_id, s.factor_name,
                    s.source_code, s.updated_at,
                    m.chinese_name, m.description, m.category,
-                   (SELECT v.family_formula_fingerprint
-                      FROM factor_family_formula_versions v
-                     WHERE v.source_kind = s.source_kind
-                       AND v.owner_username = s.owner_username
-                       AND v.factor_id = s.factor_id
-                     ORDER BY v.created_at DESC LIMIT 1) AS family_formula_fingerprint
+                   {fingerprint_sql} AS family_formula_fingerprint
             FROM factor_family_sources AS s
             LEFT JOIN factor_family_source_metadata AS m
               ON m.source_kind = s.source_kind
@@ -556,5 +573,15 @@ def upsert_factor_source_metadata(
                 "description": description,
                 "category": category,
             },
+        )
+    from tools.data.sqlite.factor_metadata import list_factor_summaries
+    record = get_factor_source_record(source_kind, owner_username, factor_id)
+    if record:
+        summary = next((row for row in list_factor_summaries(source_kind, owner_username or "")
+                        if row.get("id") == factor_id), {})
+        _enqueue_source_metadata(
+            source_kind, owner_username, factor_id, record["factor_name"], record["source_code"],
+            metadata={**summary, "chinese_name": chinese_name, "description": description, "category": category},
+            family_formula_fingerprint=summary.get("family_formula_fingerprint") or "",
         )
     return str(Settings.CACHE_DB_PATH)

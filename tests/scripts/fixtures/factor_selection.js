@@ -93,3 +93,16 @@ selection.addCandidate(savedState, inlineSaved);
 assert.equal(selection.candidates(savedState)[0].alias, "InlineMomentum|N:5d");
 assert.equal(savedState.values.factor, "InlineMomentum|N:5d");
 console.log("ok");
+
+// Bulk set expansion must preserve the same selection and provenance as individual additions.
+for (const kind of ["ic", "backtest"]) {
+  const inputs = Array.from({length: 2000}, (_, i) => ({...first, ref: `bulk:${i}`, alias: `Bulk${i}`, factor_set_refs: ["set:a"], factor_set_only: true}));
+  const bulk = {kind, values: {factor_candidates: [], factor_selections: []}};
+  window.FTTestFactorSelection.addCandidates(bulk, inputs, {select: false});
+  assert.strictEqual(bulk.values.factor_candidates.length, inputs.length);
+  window.FTTestFactorSelection.addCandidates(bulk, [{...inputs[0], factor_set_refs: ["set:b"]}], {select: false});
+  assert.deepStrictEqual(bulk.values.factor_candidates[0].factor_set_refs, ["set:a", "set:b"]);
+  window.FTTestFactorSelection.detachFactorSet(bulk, "set:a");
+  assert.strictEqual(bulk.values.factor_candidates.length, 1);
+  assert.strictEqual(bulk.values.factor_candidates[0].ref, inputs[0].ref);
+}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
 
 import settings as Settings
 
@@ -14,6 +15,12 @@ from server.manager.storage.account_domain.remote import (
 from server.manager.storage.account_domain.factor_sync import materialized_factor_configs
 from tools.cli.release.research_reporting.public_research.library import PublicResearchLibrary
 from tools.factors.formula_identity import freeze_factor_identity
+
+
+def _source_summary(source):
+    body = source["source_code"].encode()
+    return {**{key: value for key, value in source.items() if key != "source_code"},
+            "source_sha256": hashlib.sha256(body).hexdigest(), "source_bytes": len(body)}
 
 
 class MemoryControlStore:
@@ -86,8 +93,8 @@ def test_factor_sync_materializes_resolved_aliases(monkeypatch) -> None:
         lambda _owner, _family, _scope: {"params_list": [{"$F": "1m"}]},
     )
     monkeypatch.setattr(
-        "server.modules.custom_factors.factor_library_service.build_factor_library_overview",
-        lambda *_args, **_kwargs: {"factors": [{
+        "server.modules.custom_factors.factor_library_service.build_factor_library_config_factors",
+        lambda *_args, **_kwargs: [{
             **frozen,
             "factor_ref": frozen["ref"],
             "factor_alias": "CA|$F:1m",
@@ -96,7 +103,7 @@ def test_factor_sync_materializes_resolved_aliases(monkeypatch) -> None:
             "scope_key": "default",
             "params": [{"alias": "$F", "value": "1m"}],
             "owner_username": "alice",
-        }]},
+        }],
     )
 
     values = materialized_factor_configs("alice")
@@ -109,7 +116,7 @@ def test_factor_sync_materializes_resolved_aliases(monkeypatch) -> None:
     assert resolved["identity"] == frozen["identity"]
 
 
-def test_factor_catalog_reconcile_is_idempotent_and_removes_local_stale_rows(
+def test_factor_catalog_reconcile_preserves_absent_rows_until_explicit_delete(
     monkeypatch, tmp_path: Path,
 ) -> None:
     service = AccountDomainSyncService(
@@ -134,7 +141,7 @@ def test_factor_catalog_reconcile_is_idempotent_and_removes_local_stale_rows(
     )
     monkeypatch.setattr(
         "server.manager.storage.account_domain.factor_sync.materialized_factor_configs",
-        lambda _owner: list(configs),
+        lambda _owner, **kwargs: list(configs),
     )
 
     assert service.reconcile_factor_catalog("alice", force=True) == 1
@@ -145,7 +152,9 @@ def test_factor_catalog_reconcile_is_idempotent_and_removes_local_stale_rows(
     assert rows[0]["payload"]["resolved_factors"][0]["factor_alias"] == "CA|$F:1m"
 
     configs.clear()
-    assert service.reconcile_factor_catalog("alice", force=True) == 1
+    assert service.reconcile_factor_catalog("alice", force=True) == 0
+    assert service.entities("alice", entity_type="factor_param_config", sync=False)
+    service.delete("alice", "factor_param_config", "default:CA", flush=False)
     assert service.entities(
         "alice", entity_type="factor_param_config", sync=False,
     ) == []
@@ -162,8 +171,8 @@ def test_factor_source_sync_tracks_each_storage_provider_without_conflicts(
         "source_code": "class CA: pass",
     }
     monkeypatch.setattr(
-        "tools.data.sqlite.factor_source_store.list_factor_sources",
-        lambda kind: [source] if kind == "custom" else [],
+        "tools.data.sqlite.factor_metadata.list_factor_summaries",
+        lambda kind, owner="": [_source_summary(source)] if kind == "custom" else [],
     )
     control = MemoryControlStore()
     first = AccountDomainSyncService(
@@ -198,8 +207,8 @@ def test_lazy_sync_reconciles_factor_source_provider_before_peer_reads(
         "source_code": "class CA: pass",
     }
     monkeypatch.setattr(
-        "tools.data.sqlite.factor_source_store.list_factor_sources",
-        lambda kind: [source] if kind == "custom" else [],
+        "tools.data.sqlite.factor_metadata.list_factor_summaries",
+        lambda kind, owner="": [_source_summary(source)] if kind == "custom" else [],
     )
     monkeypatch.setattr(
         "tools.data.account_manage.load_product_categories", lambda _owner: [],
@@ -251,8 +260,8 @@ def test_factor_source_reconcile_retires_matching_legacy_conflict(
         "source_code": source_code,
     }
     monkeypatch.setattr(
-        "tools.data.sqlite.factor_source_store.list_factor_sources",
-        lambda kind: [source] if kind == "custom" else [],
+        "tools.data.sqlite.factor_metadata.list_factor_summaries",
+        lambda kind, owner="": [_source_summary(source)] if kind == "custom" else [],
     )
     control = MemoryControlStore()
     legacy = AccountDomainSyncService(
@@ -419,10 +428,15 @@ def test_concurrent_edit_is_recorded_without_overwriting_local_state(tmp_path: P
     first.upsert("u", "product_category", "c1", {"id": "c1", "title_zh": "C"})
 
     assert first.local.conflicts(principal="u")
-    # The second edit has a fresh remote base and wins; the stale first edit
-    # remains pending and is reported as a conflict when it is retried.
+    # A CAS rejection preserves the local edit but blocks automatic retry.
     assert second.local.pending(principal="u") == []
-    assert first.local.pending(principal="u")
+    assert first.local.pending(principal="u") == []
+    initial = len(first.local.conflicts(principal="u"))
+    for _ in range(4):
+        first.upsert("u", "product_category", "c1", {"id": "c1", "title_zh": "C"})
+        first.flush(principal="u")
+    assert len(first.local.conflicts(principal="u")) == initial
+    assert first.local.sync_state(principal="u") == {"pending": 1, "blocked": 1}
 
 
 def test_two_servers_bidirectionally_sync_and_bridge_missing_content(
@@ -445,8 +459,8 @@ def test_two_servers_bidirectionally_sync_and_bridge_missing_content(
         "factor_name": "Beta", "source_code": "class Beta: pass",
     }
     monkeypatch.setattr(
-        "tools.data.sqlite.factor_source_store.list_factor_sources",
-        lambda kind: [alice_a] if kind == "custom" else [],
+        "tools.data.sqlite.factor_metadata.list_factor_summaries",
+        lambda kind, owner="": [_source_summary(alice_a)] if kind == "custom" else [],
     )
 
     control = MemoryControlStore()
@@ -465,8 +479,8 @@ def test_two_servers_bidirectionally_sync_and_bridge_missing_content(
     # same list for both, so to make the missing-content case real we swap the
     # list for B so A and B each own a distinct factor.
     monkeypatch.setattr(
-        "tools.data.sqlite.factor_source_store.list_factor_sources",
-        lambda kind: [alice_b] if kind == "custom" else [],
+        "tools.data.sqlite.factor_metadata.list_factor_summaries",
+        lambda kind, owner="": [_source_summary(alice_b)] if kind == "custom" else [],
     )
     assert server_b.reconcile_factor_sources("alice") == 1
 
@@ -570,7 +584,7 @@ def test_receiver_materializes_version_history_for_locally_held_source(
             "owner_username": "carol",
             "factor_id": "Gamma",
             "factor_name": "Gamma",
-            "source_sha256": "x" * 64,
+            "source_sha256": hashlib.sha256(source.encode()).hexdigest(),
             "source_bytes": 0,
             "storage_server_id": "office-a",
             "visibility": "private",
@@ -758,3 +772,119 @@ def test_producer_outbox_manifest_keeps_fingerprint_after_update(
         "an updated custom factor family must still advertise its formula "
         "fingerprint on the outbox manifest"
     )
+
+
+def test_pull_conflict_replay_is_bounded_and_retains_local_edit(tmp_path):
+    local = LocalAccountDomainStore(tmp_path / "conflict.sqlite")
+    kwargs = dict(principal="u", entity_type="factor_set", entity_id="s", manager_id="a")
+    operation = local.upsert_local(**kwargs, payload={"label": "local"})
+    remote = dict(principal="u", entity_type="factor_set", entity_id="s",
+                  payload={"label": "remote"}, deleted=False, revision=5)
+    for _ in range(5):
+        assert local.apply_remote(remote) == "conflict"
+    assert len(local.conflicts(principal="u")) == 1
+    assert local.pending(principal="u") == []
+    assert local.upsert_local(**kwargs, payload={"label": "local"}) == operation
+    local.upsert_local(**kwargs, payload={"label": "edited again"})
+    assert local.pending(principal="u") == []
+    assert local.list_entities(principal="u")[0]["payload"] == {"label": "edited again"}
+
+
+def test_metadata_collections_and_nested_identities_are_not_truncated():
+    payload = {"members": list(range(4100)), "nested": {"a": {"b": {"c": {"d": {"e": {"f": {"g": {"h": {"ref": "frozen"}}}}}}}}}}
+    assert public_payload(payload) == payload
+
+
+def test_receiver_rejects_wrong_source_version(monkeypatch, tmp_path):
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "source-versions.sqlite")
+    monkeypatch.setattr("tools.data.sqlite.factor_source_store.load_factor_source", lambda *args: "new version")
+    monkeypatch.setattr("tools.data.sqlite.factor_source_versions.record_factor_formula_version",
+                        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not label new bytes with old identity")))
+    service = AccountDomainSyncService(sqlite_path=tmp_path / "versions.sqlite", control_store=None, manager_id="b")
+    service.local.upsert_local(principal="u", entity_type="factor_source", entity_id="custom:F@a",
+        manager_id="a", payload={"source_kind": "custom", "factor_id": "F", "owner_username": "u",
+        "family_formula_fingerprint": "a" * 64, "source_sha256": hashlib.sha256(b"old version").hexdigest()})
+    assert service.materialize_factor_source_versions("u") == 0
+
+
+def test_explicit_resolution_rebases_only_reviewed_local_value(tmp_path):
+    import pytest
+    local = LocalAccountDomainStore(tmp_path / "resolution.sqlite")
+    key = dict(principal="u", entity_type="factor_set", entity_id="s")
+    local.upsert_local(**key, manager_id="a", payload={"label": "local"})
+    local.apply_remote({**key, "payload": {"label": "remote"}, "revision": 5})
+    with pytest.raises(ValueError, match="precondition"):
+        local.resolve_conflict(**key, manager_id="a", expected_payload={}, remote_revision=5, payload={"label": "local"})
+    local.resolve_conflict(**key, manager_id="a", expected_payload={"label": "local"}, remote_revision=5, payload={"label": "merged"})
+    assert local.pending(principal="u")[0]["base_revision"] == 5
+    assert local.conflicts(principal="u") == []
+    assert local.apply_remote({**key, "payload": {"label": "new remote"}, "revision": 6}) == "conflict"
+    assert local.pending(principal="u") == []
+
+
+def test_acknowledgment_of_coalesced_inflight_edit_rebases_successor(tmp_path):
+    local = LocalAccountDomainStore(tmp_path / "inflight.sqlite")
+    key = dict(principal="u", entity_type="product_category", entity_id="c", manager_id="a")
+    original = local.upsert_local(**key, payload={"title": "first"})
+    sent = local.pending()[0]
+    successor = local.upsert_local(**key, payload={"title": "second"})
+    local.acknowledge(original, revision=10, sent_item=sent)
+    pending = local.pending()[0]
+    assert pending["operation_id"] == successor
+    assert pending["base_revision"] == 10
+    assert pending["payload"] == {"title": "second"}
+    local.acknowledge(successor, revision=11, sent_item=pending)
+    assert local.pending() == []
+    assert local.list_entities()[0]["payload"] == {"title": "second"}
+
+
+def test_factor_catalog_materializes_all_rows_and_queries_without_refreezing(monkeypatch, tmp_path):
+    local = LocalAccountDomainStore(tmp_path / "catalog.sqlite")
+    factors = [freeze_factor_identity(owner_ref="alice", family_alias="F", factor_alias=f"F{i}",
+        family_formula_fingerprint="a" * 64, self_formula_fingerprint="b" * 64, params={"N": i}) for i in range(600)]
+    payload = {"resolved_factors": factors, "params_list": [{"N": i} for i in range(600)]}
+    local.upsert_local(principal="alice", entity_type="factor_param_config", entity_id="default:F", payload=payload, manager_id="a")
+    monkeypatch.setattr("server.manager.services.account_domain_projection.factor_rows_from_account_entities",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("read rebuilt catalog")))
+    assert len(local.factor_catalog("alice")) == 600
+    assert len(local.factor_catalog("alice", offset=580, limit=20)) == 20
+    assert local.factor_catalog("alice", factor_ref=factors[-1]["ref"])[0]["factor_ref"] == factors[-1]["ref"]
+    assert local.factor_catalog("bob") == []
+    # Authoring drafts do not destroy already frozen candidates.
+    local.upsert_local(principal="alice", entity_type="factor_param_config", entity_id="default:F", payload={"params_list": []}, manager_id="a")
+    assert len(local.factor_catalog("alice")) == 600
+    assert local.pending() == []
+
+
+def test_unchanged_authoring_config_reuses_frozen_rows(monkeypatch):
+    monkeypatch.setattr("tools.data.account_manage.get_account", lambda owner: {"username": owner})
+    monkeypatch.setattr("tools.data.account_manage.list_factor_param_config_scopes", lambda owner: ["default"])
+    monkeypatch.setattr("tools.data.account_manage.list_factor_param_config_aliases", lambda owner, scope: ["F"])
+    config = {"params_list": [{"N": 1}]}
+    monkeypatch.setattr("tools.data.account_manage.load_factor_param_config", lambda *args: config)
+    calls = []
+    def freeze(*args):
+        calls.append(1)
+        return [freeze_factor_identity(owner_ref="alice", family_alias="F", factor_alias="F1",
+            family_formula_fingerprint="a" * 64, self_formula_fingerprint="b" * 64, params={"N": 1})]
+    monkeypatch.setattr("server.modules.custom_factors.factor_library_service.build_factor_library_config_factors", freeze)
+    first = materialized_factor_configs("alice")
+    second = materialized_factor_configs("alice", existing=[{"entity_id": key, "payload": value} for key, value in first])
+    assert first == second
+    assert calls == [1]
+    config["params_list"] = [{"N": 2}]
+    materialized_factor_configs("alice", existing=[{"entity_id": key, "payload": value} for key, value in first])
+    assert calls == [1, 1]
+
+
+def test_v2_set_reconcile_publishes_actual_ref(monkeypatch, tmp_path):
+    from tools.factors.factor_set_identity import freeze_factor_set_identity
+    frozen = freeze_factor_identity(owner_ref="alice", family_alias="F", factor_alias="F1",
+        family_formula_fingerprint="a" * 64, self_formula_fingerprint="b" * 64, params={})
+    value = freeze_factor_set_identity(owner_ref="principal:alice", set_id="s", alias="Set", members=[frozen])
+    monkeypatch.setattr("tools.data.account_manage.list_factor_sets", lambda owner: [value])
+    monkeypatch.setattr("server.manager.storage.account_domain.factor_sync.materialized_factor_configs", lambda *args, **kwargs: [])
+    control = MemoryControlStore()
+    service = AccountDomainSyncService(sqlite_path=tmp_path / "sets.sqlite", control_store=control, manager_id="a")
+    assert service.reconcile_factor_catalog("alice", force=True) == 1
+    assert control.rows[("alice", "factor_set", value["ref"])]["payload"]["identity"] == value["identity"]

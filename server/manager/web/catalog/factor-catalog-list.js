@@ -120,7 +120,13 @@
         : null,
     });
     function resetAndRender() { tablePage = 1; render(); }
-    search.addEventListener("input", resetAndRender);
+    let searchTimer;
+    search.addEventListener("input", () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => {
+        if (catalog().isCurrent(context)) resetAndRender();
+      }, 100);
+    });
     render();
   }
 

@@ -129,3 +129,19 @@ def test_factor_metadata_loads_sources_before_opening_write_connection(monkeypat
 
     path = factor_metadata_sqlite.ensure_factor_metadata_sqlite_store()
     assert path == str(sqlite_path)
+
+
+def test_catalog_reads_never_execute_source_and_metadata_edits_are_visible(monkeypatch, tmp_path):
+    from server.modules.custom_factors.catalog import list_custom_factors
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "catalog.sqlite")
+    factor_source_store.upsert_factor_source("custom", "alice", "F", "F", "invalid source", chinese_name="before")
+    def forbidden(*args, **kwargs):
+        raise AssertionError("catalog read executed source")
+    monkeypatch.setattr(factor_metadata_sqlite, "_load_factor_family_from_source", forbidden)
+    first = list_custom_factors("alice")
+    assert first[0]["load_error"]
+    assert "source_code" not in first[0]
+    assert list_custom_factors("other") == []
+    factor_source_store.upsert_factor_source_metadata("custom", "alice", "F", chinese_name="after")
+    assert list_custom_factors("alice")[0]["chinese_name"] == "after"
+    assert list_custom_factors("alice")[0]["chinese_name"] == "after"

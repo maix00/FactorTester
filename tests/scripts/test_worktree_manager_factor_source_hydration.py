@@ -276,7 +276,7 @@ def test_delegated_hydration_queries_the_authorized_source_owner() -> None:
     assert calls == [("child", {
         "entity_type": "factor_source",
         "include_shared": True,
-        "sync": True,
+        "sync": False,
     })]
 
 
@@ -312,3 +312,40 @@ def test_hydration_skips_stale_provider_and_uses_current_replica(monkeypatch) ->
 
     assert hydrator.hydrate("DemoFactor", principal="alice")
     assert saved[0][0][2] == "DemoFactor"
+
+
+def test_existing_source_manifest_does_not_scan_control_catalog():
+    class Control:
+        def pull_account_domain_entities(self, **kwargs):
+            raise AssertionError("local manifest must not trigger full control scan")
+    class Sync:
+        control_store = Control()
+        def entities(self, *args, **kwargs):
+            assert kwargs["sync"] is False
+            return [{"payload": {"source_kind": "custom", "owner_username": "alice", "factor_id": "F", "storage_server_id": "a"}}]
+    class State:
+        account_domain_sync = Sync()
+    assert factor_source_hydration.FactorSourceHydrator(State())._candidates("alice", "F", principal="alice")
+
+
+def test_missing_source_uses_targeted_manifest_query():
+    calls = []
+    row = {"principal": "alice", "entity_type": "factor_source", "entity_id": "custom:F@a",
+           "payload": {"source_kind": "custom", "owner_username": "alice", "factor_id": "F"}, "revision": 1}
+    class Control:
+        def find_factor_source_manifests(self, **kwargs):
+            calls.append(kwargs)
+            return [row]
+        def pull_account_domain_entities(self, **kwargs):
+            raise AssertionError("targeted lookup must not scan account domain")
+    class Local:
+        def apply_remote(self, value):
+            assert value == row
+    class Sync:
+        control_store = Control()
+        local = Local()
+        def entities(self, *args, **kwargs): return []
+    class State:
+        account_domain_sync = Sync()
+    assert factor_source_hydration.FactorSourceHydrator(State())._candidates("alice", "F", principal="parent") == [row["payload"]]
+    assert calls == [{"principal": "alice", "factor_id": "F", "source_kind": "custom"}]

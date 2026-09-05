@@ -457,7 +457,8 @@ def test_public_factor_identity_migration_is_explicit_and_rollback_safe() -> Non
     assert "migrate-factor-identities" in script
     assert "migrate_factor_source_metadata" in script
     assert "migrate_factor_formula_identity" in script
-    assert "--apply --discard-incompatible" in script
+    assert "--discard-incompatible" not in script
+    assert "migrate_factor_catalog_projection --apply" in script
     assert "--control-plan /state/factor-v2-control-plan.json" in script
     assert "migrate-factor-control-identities" in script
     assert "restore-factor-control-identities" in script

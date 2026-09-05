@@ -28,7 +28,9 @@
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     const page = Math.min(totalPages, Math.max(1, Number(options.page) || 1));
     const start = (page - 1) * pageSize;
-    const view = table(headers, remote ? rows : rows.slice(start, start + pageSize));
+    const visibleRows = remote ? rows : rows.slice(start, start + pageSize);
+    const view = table(headers, typeof options.renderRow === "function"
+      ? visibleRows.map(options.renderRow) : visibleRows);
     const pagination = document.createElement("div");
     pagination.className = "product-list-pagination shared-table-pagination";
     const previous = actionButton(options.previousLabel || "上一页", () => {

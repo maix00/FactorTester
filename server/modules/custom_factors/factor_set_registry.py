@@ -13,7 +13,7 @@ from tools.data.account_manage import (
     list_factor_sets,
     save_factor_set,
 )
-from tools.factors.factor_set_identity import freeze_factor_set_identity
+from tools.factors.factor_set_identity import freeze_factor_set_identity, require_frozen_factor_set
 from tools.factors.formula_identity import require_frozen_factor
 
 
@@ -102,9 +102,15 @@ def factor_set_detail(
     value = get_factor_set(username, target_ref)
     if value is None:
         return None
-    members = list(value.get("members") or [])
-    if not members:
-        members = list((value.get("identity") or {}).get("members") or [])
+    return factor_set_page(value, offset=offset, limit=limit)
+
+
+def factor_set_page(value: dict[str, Any], *, offset: int, limit: int) -> dict[str, Any]:
+    """Page the same validated frozen members for authored and mirrored sets."""
+    frozen = require_frozen_factor_set(value)
+    members = frozen["identity"]["members"]
+    offset = max(0, int(offset))
+    limit = max(1, min(1000, int(limit)))
     page = members[offset:offset + limit]
     return {
         **_summary(value),
@@ -143,7 +149,7 @@ def unregister_factor_set(username: str, target_ref: str) -> bool:
 
 
 def _summary(value: dict[str, Any]) -> dict[str, Any]:
-    identity = value["identity"]
+    identity = require_frozen_factor_set(value)["identity"]
     return {
         "schema_version": value["schema_version"],
         "target_ref": value["ref"],

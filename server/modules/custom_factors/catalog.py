@@ -55,64 +55,9 @@ def _load_factor_family_from_source(source_code: str, module_name: str) -> tuple
 
 
 def list_custom_factors(username: str) -> list:
-    """List a user's custom FactorFamily rows from the database."""
-    factors = []
-    rows = [row for row in list_factor_sources('custom') if row.get('owner_username') == username]
-
-    for row in rows:
-        factor_id = str(row.get('factor_id') or '')
-        source_code = str(row.get('source_code') or '')
-        updated_at = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(float(row.get('updated_at') or time.time())))
-        factor_cls, module = _load_factor_family_from_source(source_code, f'_cf_{username}_{factor_id}')
-        if factor_cls is None:
-            factors.append({
-                'id': factor_id,
-                'name': factor_id,
-                'category': row.get('category') or '自编',
-                'factor_family': 'FactorFamily',
-                'chinese_name': row.get('chinese_name') or '',
-                'description': row.get('description') or '',
-                'params': [],
-                'source_code': source_code,
-                'is_public': False,
-                'updated_at': updated_at,
-                'load_error': True,
-            })
-            continue
-
-        try:
-            ff = factor_cls()
-            family = _factor_family_name(factor_cls)
-            factors.append({
-                'id': factor_id,
-                'name': factor_cls.__name__,
-                'category': row.get('category') or '自编',
-                'factor_family': family,
-                'chinese_name': row.get('chinese_name') or '',
-                'description': row.get('description') or '',
-                'math_expr': getattr(ff, 'math_expr', '') or '',
-                'source_code': source_code,
-                'family_formula_fingerprint': ff.expr.semantic_fingerprint(),
-                'params': [serialize_param_meta(param) for param in ff.params],
-                'is_public': False,
-                'updated_at': updated_at,
-            })
-        except Exception:
-            factors.append({
-                'id': factor_id,
-                'name': factor_id,
-                'category': row.get('category') or '自编',
-                'factor_family': 'FactorFamily',
-                'chinese_name': row.get('chinese_name') or '',
-                'description': row.get('description') or '',
-                'params': [],
-                'source_code': source_code,
-                'is_public': False,
-                'updated_at': updated_at,
-                'load_error': True,
-            })
-    factors.sort(key=lambda factor: factor.get('updated_at', ''), reverse=True)
-    return factors
+    """Return the persisted family summaries for one owner."""
+    from tools.data.sqlite.factor_metadata import list_factor_summaries
+    return list_factor_summaries("custom", username)
 
 
 def list_visible_custom_factors(username: str) -> list:
@@ -142,62 +87,9 @@ def list_visible_custom_factors(username: str) -> list:
 
 
 def list_public_factors() -> list:
-    """List public FactorFamily classes from the SQLite source registry."""
-    result = []
-    rows = list_factor_sources('public')
-
-    for row in rows:
-        name = str(row.get('factor_id') or '')
-        source_code = str(row.get('source_code') or '')
-        updated_at = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(float(row.get('updated_at') or time.time())))
-        factor_cls, _ = _load_factor_family_from_source(source_code, name)
-        if factor_cls is None:
-            result.append({
-                'id': name,
-                'name': name,
-                'category': row.get('category') or '',
-                'factor_family': 'FactorFamily',
-                'chinese_name': row.get('chinese_name') or '',
-                'description': row.get('description') or '',
-                'params': [],
-                'source_code': source_code,
-                'is_public': True,
-                'updated_at': updated_at,
-                'load_error': True,
-            })
-            continue
-        try:
-            ff = factor_cls()
-            family = _factor_family_name(factor_cls)
-            result.append({
-                'id': name,
-                'name': name,
-                'category': row.get('category') or family,
-                'factor_family': family,
-                'chinese_name': row.get('chinese_name') or '',
-                'description': row.get('description') or '',
-                'math_expr': getattr(ff, 'math_expr', '') or '',
-                'source_code': source_code,
-                'family_formula_fingerprint': ff.expr.semantic_fingerprint(),
-                'params': [serialize_param_meta(param) for param in ff.params],
-                'is_public': True,
-                'updated_at': updated_at,
-            })
-        except Exception:
-            result.append({
-                'id': name,
-                'name': name,
-                'category': row.get('category') or '',
-                'factor_family': 'FactorFamily',
-                'chinese_name': row.get('chinese_name') or '',
-                'description': row.get('description') or '',
-                'params': [],
-                'source_code': source_code,
-                'is_public': True,
-                'updated_at': updated_at,
-                'load_error': True,
-            })
-    return result
+    """Return public summaries without loading executable source."""
+    from tools.data.sqlite.factor_metadata import list_factor_summaries
+    return list_factor_summaries("public")
 
 
 def get_public_factor_detail(factor_name: str) -> dict | None:

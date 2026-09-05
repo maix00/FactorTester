@@ -50,6 +50,13 @@ done
   exit 2
 }
 
+git -C "$repo_root" fetch origin
+for baseline in origin/main origin/feat; do
+  git -C "$repo_root" merge-base --is-ancestor "$baseline" main || {
+    echo "main must include $baseline before publication" >&2
+    exit 2
+  }
+done
 revision="$(git -C "$repo_root" rev-parse main)"
 
 echo "Pushing main $revision to GitHub"
