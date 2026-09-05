@@ -100,42 +100,78 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
         return [dict(row) for row in rows if isinstance(row, dict)]
 
     def _refresh_account_domain_async(self, principal: str) -> None:
-        """Refresh the local account mirror without delaying a catalog read."""
+        """Refresh the local account mirror without delaying a catalog read.
+
+        This also refreshes the direct subordinates of the requesting principal,
+        so a manager opening the factor-library tab pulls and reconciles the
+        factor sources (and their formula-version history) that live under the
+        subordinate accounts they can see — otherwise those rows would never
+        sync and the higher-level user would see stale/empty subordinate data.
+        """
         owner = str(principal or "").strip()
         synchronizer = self.account_domain_sync
         if not owner or synchronizer is None:
             return
+        owners = [owner]
+        try:
+            from server.manager.services.subordinate_factor_library import (
+                direct_subordinate_accounts,
+            )
+
+            subordinate_rows = direct_subordinate_accounts(
+                owner, self.local_account_store,
+            )
+            owners.extend(
+                str(row.get("username") or "").strip()
+                for row in subordinate_rows
+                if str(row.get("username") or "").strip()
+            )
+        except (
+            AttributeError, ConnectionError, OSError, RuntimeError,
+            TypeError, ValueError,
+        ):
+            pass
+        # Deduplicate while preserving order.
+        owners = list(dict.fromkeys(o for o in owners if o))
         now = time.monotonic()
         cooldown = max(
             0.0, float(getattr(synchronizer, "access_cooldown", 5.0)),
         )
         with self._catalog_refresh_lock:
-            if owner in self._catalog_refresh_inflight:
+            if owners and owners[0] in self._catalog_refresh_inflight:
                 return
-            if now - self._catalog_refresh_started.get(owner, 0.0) < cooldown:
+            if owners and now - self._catalog_refresh_started.get(
+                owners[0], 0.0,
+            ) < cooldown:
                 return
-            self._catalog_refresh_inflight.add(owner)
-            self._catalog_refresh_started[owner] = now
+            for item in owners:
+                self._catalog_refresh_inflight.add(item)
+            self._catalog_refresh_started[owners[0]] = now
 
         def refresh() -> None:
             try:
-                synchronizer.sync(owner)
-            except (
-                AttributeError,
-                ConnectionError,
-                OSError,
-                RuntimeError,
-                TypeError,
-                ValueError,
-            ):
-                pass
+                for item in owners:
+                    try:
+                        synchronizer.sync(item)
+                    except (
+                        AttributeError,
+                        ConnectionError,
+                        OSError,
+                        RuntimeError,
+                        TypeError,
+                        ValueError,
+                    ):
+                        # A single subordinate may be offline / unconfigured;
+                        # keep refreshing the rest of the account set.
+                        continue
             finally:
                 with self._catalog_refresh_lock:
-                    self._catalog_refresh_inflight.discard(owner)
+                    for item in owners:
+                        self._catalog_refresh_inflight.discard(item)
 
         threading.Thread(
             target=refresh,
-            name=f"account-catalog-refresh:{owner}",
+            name=f"account-catalog-refresh:{owners[0]}:{len(owners)}",
             daemon=True,
         ).start()
 
