@@ -13,7 +13,6 @@ from tools.factors.FactorExpr import ConstExpr
 from tools.factors.formula_identity import require_frozen_factor
 from tools.parameters import FactorParam
 
-
 def build_factor_instance_metadata(
     family: Any,
     factor: Any,
@@ -37,7 +36,6 @@ def build_factor_instance_metadata(
         username=username, active=set(), final_symbol=_family_symbol(family),
     )
 
-
 def _instance_node(
     family: Any,
     factor: Any,
@@ -49,7 +47,6 @@ def _instance_node(
     final_symbol: str,
 ) -> dict[str, Any]:
     rows = []
-    child_nodes: list[tuple[str, dict[str, Any]]] = []
     for parameter in getattr(family, "params", ()):
         raw = values.get(parameter.alias, getattr(parameter, "default_value", None))
         row = {
@@ -63,14 +60,10 @@ def _instance_node(
                 active=active,
             )
             row["nested_factor"] = child
-            child_nodes.append((parameter.alias, child))
         rows.append(row)
 
     template = _template_formula(family)
-    resolved = _resolved_formula(
-        family, values, child_nodes, dependencies, final_symbol=final_symbol,
-    )
-    return {
+    node = {
         "factor_alias": str(getattr(factor, "alias", "") or ""),
         "factor_family_alias": str(getattr(family, "alias", "") or ""),
         "factor_family_name": str(
@@ -80,11 +73,17 @@ def _instance_node(
             getattr(family, "formula_fingerprint", "")
             or getattr(factor, "family_formula_fingerprint", "") or ""
         ),
+        # math_expr stays the self-contained template (parameter references
+        # surface as ``\\textcolor{red}{Alias}``), matching the browser's
+        # template view.  resolved_math_expr is the fully composed block that
+        # the catalog detail page renders directly in view mode.
         "math_expr": template,
-        "resolved_math_expr": resolved,
+        "resolved_math_expr": "",
         "parameter_definitions": rows,
     }
-
+    from server.modules.shared.factor_preview_latex import preview_expression
+    node["resolved_math_expr"] = preview_expression(node)
+    return node
 
 def _nested_node(
     record: dict,
@@ -133,7 +132,6 @@ def _nested_node(
     finally:
         active.remove(factor_ref)
 
-
 def _dependency_index(values: list[dict]) -> dict[str, dict]:
     """Index the merged frozen DAG by canonical dependency identity.
 
@@ -152,7 +150,6 @@ def _dependency_index(values: list[dict]) -> dict[str, dict]:
             result[nested_frozen["ref"]] = nested
     return result
 
-
 def _nested_record(
     parameter: Any, value: Any, dependencies: dict[str, dict],
 ) -> dict | None:
@@ -163,7 +160,6 @@ def _nested_record(
     if isinstance(value, str) and value.startswith("factor:v2:"):
         return dependencies.get(value)
     return None
-
 
 def _display_value(
     parameter: Any, value: Any, dependencies: dict[str, dict],
@@ -178,7 +174,6 @@ def _display_value(
     except Exception:
         return "" if value is None else str(value)
 
-
 def _template_formula(family: Any) -> str:
     expression = getattr(family, "expr", None)
     if expression is not None:
@@ -188,105 +183,7 @@ def _template_formula(family: Any) -> str:
             pass
     return str(getattr(family, "math_expr", "") or "")
 
-
-def _resolved_formula(
-    family: Any,
-    values: dict[str, Any],
-    child_nodes: list[tuple[str, dict[str, Any]]],
-    dependencies: dict[str, dict],
-    *,
-    final_symbol: str,
-) -> str:
-    expression = getattr(family, "expr", None)
-    if expression is None:
-        return ""
-    try:
-        body = str(expression._to_latex() or "")
-    except Exception:
-        body = _template_formula(family)
-    body = body.strip()
-    child_by_parameter = dict(child_nodes)
-    for parameter in getattr(family, "params", ()):
-        raw = values.get(parameter.alias, getattr(parameter, "default_value", None))
-        child = child_by_parameter.get(parameter.alias)
-        replacement = (
-            _blue(_symbol_latex(child["factor_family_alias"]))
-            if child is not None
-            else _red(_latex_value(_display_value(parameter, raw, dependencies)))
-        )
-        token = re.compile(
-            r"\\textcolor\{red\}\{" + re.escape(str(parameter.alias)) + r"\}",
-        )
-        body = token.sub(lambda _match: replacement, body)
-
-    lines: list[str] = []
-    seen_children: set[str] = set()
-    for _alias, child in child_nodes:
-        child_ref = str(child.get("factor_ref") or child.get("factor_alias") or "")
-        if child_ref in seen_children:
-            continue
-        seen_children.add(child_ref)
-        child_formula = str(child.get("resolved_math_expr") or "")
-        child_lines = _aligned_lines(child_formula)
-        if child_lines:
-            # Intermediate definitions belong before the named child result;
-            # put the child symbol on the final line so multiline formulas
-            # read ``Child_t := final-definition := expression``.
-            child_symbol = _blue(_symbol_latex(child.get("factor_family_alias")))
-            child_line = re.sub(r"[.;]\s*$", "", child_lines[-1].rstrip())
-            output = re.match(
-                r"^(?:X|\\mathrm\{X\})_t\s*&?\s*:=\s*(.+)$",
-                child_line,
-            )
-            if output:
-                child_lines[-1] = f"{child_symbol}_t := {output.group(1)};"
-            elif len(child_lines) == 1:
-                child_lines[-1] = f"& {child_symbol}_t := {child_line};"
-            else:
-                child_lines[-1] = f"{child_symbol}_t := {child_line};"
-            lines.extend(child_lines)
-    lines.append(f"{_symbol_latex(final_symbol)}_t &:= {body}.")
-    return "\\begin{aligned}\n" + " \\\\\n".join(lines) + "\n\\end{aligned}"
-
-
-def _aligned_lines(value: str) -> list[str]:
-    text = str(value or "").strip()
-    if text.startswith(r"\begin{aligned}") and text.endswith(r"\end{aligned}"):
-        text = text[len(r"\begin{aligned}"):-len(r"\end{aligned}")].strip()
-    return [line.strip() for line in re.split(r"\s*\\\\\s*", text) if line.strip()]
-
-
 def _family_symbol(family: Any) -> str:
     return str(getattr(family, "alias", "") or "Factor")
-
-
-def _symbol_latex(value: str) -> str:
-    safe = "".join(char if char.isalnum() else "_" for char in str(value)).strip("_")
-    return rf"\mathrm{{{safe or 'Factor'}}}"
-
-
-def _latex_value(value: Any) -> str:
-    text = str(value)
-    duration = re.fullmatch(
-        r"([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*(ns|us|ms|s|min|m|h|d|w)",
-        text,
-        flags=re.IGNORECASE,
-    )
-    if duration:
-        return rf"{duration.group(1)}\,\mathrm{{{duration.group(2)}}}"
-    escaped = "".join(
-        rf"\{char}" if char in "_{}%&#" else char
-        for char in text
-    )
-    return rf"\mathrm{{{escaped}}}"
-
-
-def _red(value: str) -> str:
-    return rf"\textcolor{{red}}{{{value}}}"
-
-
-def _blue(value: str) -> str:
-    return rf"\textcolor{{blue}}{{{value}}}"
-
 
 __all__ = ["build_factor_instance_metadata"]
