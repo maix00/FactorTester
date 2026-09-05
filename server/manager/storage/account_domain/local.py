@@ -111,14 +111,22 @@ class LocalAccountDomainStore:
         operation_id = uuid.uuid4().hex
         encoded = _encode(payload)
         with connect_sqlite(self.path) as conn:
-            ensure_schema(conn)
+            conn.execute("BEGIN IMMEDIATE")
             current = conn.execute(
                 """
-                SELECT remote_revision FROM account_domain_entities
+                SELECT remote_revision, payload_json, deleted FROM account_domain_entities
                 WHERE principal=? AND entity_type=? AND entity_id=?
                 """,
                 (principal, entity_type, entity_id),
             ).fetchone()
+            previous = conn.execute(
+                "SELECT operation_id, last_error FROM account_domain_outbox "
+                "WHERE principal=? AND entity_type=? AND entity_id=?",
+                (principal, entity_type, entity_id),
+            ).fetchone()
+            if current and current["payload_json"] == encoded and bool(current["deleted"]) == bool(deleted):
+                return str(previous["operation_id"]) if previous else ""
+            blocked = bool(previous and previous["last_error"] == "remote revision conflict")
             base_revision = (
                 int(current["remote_revision"])
                 if current and current["remote_revision"] is not None else None
@@ -155,18 +163,19 @@ class LocalAccountDomainStore:
                 """
                 INSERT INTO account_domain_outbox(
                     operation_id, principal, entity_type, entity_id,
-                    payload_json, deleted, base_revision, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    payload_json, deleted, base_revision, created_at, last_error
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     operation_id, principal, entity_type, entity_id, encoded,
                     int(deleted), base_revision, now,
+                    "remote revision conflict" if blocked else "",
                 ),
             )
         return operation_id
 
-    def pending(self, *, principal: str = "", limit: int = 100) -> list[dict[str, Any]]:
-        clauses = []
+    def pending(self, *, principal: str = "", limit: int = 100, include_blocked: bool = False) -> list[dict[str, Any]]:
+        clauses = [] if include_blocked else ["last_error != 'remote revision conflict'"]
         params: list[Any] = []
         if principal:
             clauses.append("principal=?")
@@ -190,7 +199,6 @@ class LocalAccountDomainStore:
     ) -> None:
         """Remove one superseded local identity and resolve its old conflicts."""
         with connect_sqlite(self.path) as conn:
-            ensure_schema(conn)
             key = (principal, entity_type, entity_id)
             conn.execute(
                 """
@@ -232,27 +240,68 @@ class LocalAccountDomainStore:
     ) -> None:
         """Persist a compare-and-set rejection for later user resolution."""
         with connect_sqlite(self.path) as conn:
-            ensure_schema(conn)
+            conn.execute("BEGIN IMMEDIATE")
+            _record_conflict(conn, item, remote)
             conn.execute(
-                """
-                INSERT INTO account_domain_conflicts(
-                    conflict_id, principal, entity_type, entity_id,
-                    local_payload_json, remote_payload_json,
-                    remote_deleted, remote_revision, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    uuid.uuid4().hex,
-                    item["principal"], item["entity_type"], item["entity_id"],
-                    _encode(item.get("payload") or {}),
-                    _encode(remote.get("payload") or {}),
-                    int(bool(remote.get("deleted"))),
-                    int(remote.get("revision") or 0), time.time(),
-                ),
+                "UPDATE account_domain_outbox SET last_error='remote revision conflict' WHERE operation_id=?",
+                (item["operation_id"],),
             )
 
-    def acknowledge(self, operation_id: str, *, revision: int) -> None:
+    def sync_state(self, *, principal: str = "") -> dict[str, int]:
+        where = " WHERE principal=?" if principal else ""
+        args = (principal,) if principal else ()
         with connect_sqlite(self.path) as conn:
+            row = conn.execute(
+                "SELECT count(*) AS pending, coalesce(sum(last_error='remote revision conflict'),0) AS blocked "
+                "FROM account_domain_outbox" + where, args,
+            ).fetchone()
+        return {"pending": int(row["pending"]), "blocked": int(row["blocked"])}
+
+    def resolve_conflict(
+        self, *, principal: str, entity_type: str, entity_id: str,
+        expected_payload: dict[str, Any], remote_revision: int,
+        payload: dict[str, Any], manager_id: str, deleted: bool = False,
+    ) -> str:
+        """Queue an explicitly reviewed resolution against the observed authority.
+
+        The local value and latest conflict revision are preconditions. A new
+        authority edit is still protected by the normal remote compare-and-set.
+        """
+        key = (principal, entity_type, entity_id)
+        encoded = _encode(payload)
+        operation = uuid.uuid4().hex
+        now = time.time()
+        with connect_sqlite(self.path) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT payload_json FROM account_domain_entities WHERE principal=? AND entity_type=? AND entity_id=?", key,
+            ).fetchone()
+            latest = conn.execute(
+                "SELECT max(remote_revision) FROM account_domain_conflicts "
+                "WHERE principal=? AND entity_type=? AND entity_id=? AND status='open'", key,
+            ).fetchone()[0]
+            if row is None or row["payload_json"] != _encode(expected_payload) or latest != remote_revision:
+                raise ValueError("conflict resolution precondition changed; inspect again")
+            conn.execute(
+                "UPDATE account_domain_entities SET payload_json=?, deleted=?, remote_revision=?, base_revision=?, "
+                "origin_manager_id=?, updated_at=? WHERE principal=? AND entity_type=? AND entity_id=?",
+                (encoded, int(deleted), remote_revision, remote_revision, manager_id, now, *key),
+            )
+            conn.execute("DELETE FROM account_domain_outbox WHERE principal=? AND entity_type=? AND entity_id=?", key)
+            conn.execute(
+                "INSERT INTO account_domain_outbox(operation_id, principal, entity_type, entity_id, payload_json, "
+                "deleted, base_revision, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (operation, *key, encoded, int(deleted), remote_revision, now),
+            )
+            conn.execute(
+                "UPDATE account_domain_conflicts SET status='resolved', resolved_at=? "
+                "WHERE principal=? AND entity_type=? AND entity_id=? AND status='open'", (now, *key),
+            )
+        return operation
+
+    def acknowledge(self, operation_id: str, *, revision: int, sent_item: dict[str, Any] | None = None) -> None:
+        with connect_sqlite(self.path) as conn:
+            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 """
                 SELECT principal, entity_type, entity_id
@@ -261,6 +310,21 @@ class LocalAccountDomainStore:
                 (operation_id,),
             ).fetchone()
             if row is None:
+                if sent_item is None:
+                    return
+                # An edit coalesced the in-flight operation. Keep its payload,
+                # but carry the successful CAS revision to its successor.
+                key = (sent_item["principal"], sent_item["entity_type"], sent_item["entity_id"])
+                changed = conn.execute(
+                    "UPDATE account_domain_outbox SET base_revision=? WHERE principal=? AND entity_type=? AND entity_id=? "
+                    "AND base_revision IS ? AND last_error != 'remote revision conflict'",
+                    (revision, *key, sent_item["base_revision"]),
+                ).rowcount
+                if changed:
+                    conn.execute(
+                        "UPDATE account_domain_entities SET remote_revision=?, base_revision=? "
+                        "WHERE principal=? AND entity_type=? AND entity_id=?", (revision, revision, *key),
+                    )
                 return
             conn.execute(
                 """
@@ -288,10 +352,10 @@ class LocalAccountDomainStore:
         revision = int(row.get("revision") or 0)
         deleted = bool(row.get("deleted"))
         with connect_sqlite(self.path) as conn:
-            ensure_schema(conn)
+            conn.execute("BEGIN IMMEDIATE")
             pending = conn.execute(
                 """
-                SELECT payload_json, deleted FROM account_domain_outbox
+                SELECT operation_id, payload_json, deleted FROM account_domain_outbox
                 WHERE principal=? AND entity_type=? AND entity_id=?
                 ORDER BY created_at DESC LIMIT 1
                 """,
@@ -303,22 +367,17 @@ class LocalAccountDomainStore:
                     "deleted": bool(pending["deleted"]),
                 }
                 if local != {"payload": payload, "deleted": deleted}:
-                    conflict_id = uuid.uuid4().hex
+                    _record_conflict(conn, {
+                        "principal": principal, "entity_type": entity_type,
+                        "entity_id": entity_id, "payload": local["payload"],
+                    }, row)
                     conn.execute(
-                        """
-                        INSERT INTO account_domain_conflicts(
-                            conflict_id, principal, entity_type, entity_id,
-                            local_payload_json, remote_payload_json,
-                            remote_deleted, remote_revision, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            conflict_id, principal, entity_type, entity_id,
-                            pending["payload_json"], _encode(payload),
-                            int(deleted), revision, time.time(),
-                        ),
+                        "UPDATE account_domain_outbox SET last_error='remote revision conflict' WHERE operation_id=?",
+                        (pending["operation_id"],),
                     )
                     return "conflict"
+            if pending is not None:
+                conn.execute("DELETE FROM account_domain_outbox WHERE operation_id=?", (pending["operation_id"],))
             current = conn.execute(
                 """
                 SELECT remote_revision FROM account_domain_entities
@@ -352,7 +411,6 @@ class LocalAccountDomainStore:
 
     def cursor(self, scope_key: str) -> int:
         with connect_sqlite(self.path) as conn:
-            ensure_schema(conn)
             row = conn.execute(
                 "SELECT remote_revision FROM account_domain_cursors WHERE scope_key=?",
                 (scope_key,),
@@ -361,7 +419,6 @@ class LocalAccountDomainStore:
 
     def advance_cursor(self, scope_key: str, revision: int) -> None:
         with connect_sqlite(self.path) as conn:
-            ensure_schema(conn)
             conn.execute(
                 """
                 INSERT INTO account_domain_cursors(scope_key, remote_revision, updated_at)
@@ -418,6 +475,27 @@ class LocalAccountDomainStore:
                 tuple(params),
             ).fetchall()
         return [dict(row) for row in rows]
+
+
+def _record_conflict(conn: sqlite3.Connection, item: dict[str, Any], remote: dict[str, Any]) -> None:
+    """One durable observation per local value and authority revision, even on replay."""
+    values = (
+        item["principal"], item["entity_type"], item["entity_id"],
+        _encode(item.get("payload") or {}), _encode(remote.get("payload") or {}),
+        int(bool(remote.get("deleted"))), int(remote.get("revision") or 0),
+    )
+    exists = conn.execute(
+        "SELECT 1 FROM account_domain_conflicts WHERE principal=? AND entity_type=? AND entity_id=? "
+        "AND local_payload_json=? AND remote_payload_json=? AND remote_deleted=? AND remote_revision=? "
+        "AND status='open' LIMIT 1", values,
+    ).fetchone()
+    if not exists:
+        conn.execute(
+            "INSERT INTO account_domain_conflicts(conflict_id, principal, entity_type, entity_id, "
+            "local_payload_json, remote_payload_json, remote_deleted, remote_revision, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (uuid.uuid4().hex, *values, time.time()),
+        )
 
 
 def _encode(value: dict[str, Any]) -> str:

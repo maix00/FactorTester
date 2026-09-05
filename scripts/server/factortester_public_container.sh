@@ -143,7 +143,7 @@ Path("/state/factor-v2-migration-backup-path").write_text(str(backup), encoding=
 PY
 gosu factortester python -m tools.migrations.migrate_factor_source_metadata
 gosu factortester python -m tools.migrations.migrate_factor_formula_identity \
-  --apply --discard-incompatible \
+  --apply \
   --control-plan /state/factor-v2-control-plan.json
 gosu factortester python - <<"PY"
 import json

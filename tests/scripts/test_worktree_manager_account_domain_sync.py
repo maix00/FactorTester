@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
 
 import settings as Settings
 
@@ -419,10 +420,15 @@ def test_concurrent_edit_is_recorded_without_overwriting_local_state(tmp_path: P
     first.upsert("u", "product_category", "c1", {"id": "c1", "title_zh": "C"})
 
     assert first.local.conflicts(principal="u")
-    # The second edit has a fresh remote base and wins; the stale first edit
-    # remains pending and is reported as a conflict when it is retried.
+    # A CAS rejection preserves the local edit but blocks automatic retry.
     assert second.local.pending(principal="u") == []
-    assert first.local.pending(principal="u")
+    assert first.local.pending(principal="u") == []
+    initial = len(first.local.conflicts(principal="u"))
+    for _ in range(4):
+        first.upsert("u", "product_category", "c1", {"id": "c1", "title_zh": "C"})
+        first.flush(principal="u")
+    assert len(first.local.conflicts(principal="u")) == initial
+    assert first.local.sync_state(principal="u") == {"pending": 1, "blocked": 1}
 
 
 def test_two_servers_bidirectionally_sync_and_bridge_missing_content(
@@ -570,7 +576,7 @@ def test_receiver_materializes_version_history_for_locally_held_source(
             "owner_username": "carol",
             "factor_id": "Gamma",
             "factor_name": "Gamma",
-            "source_sha256": "x" * 64,
+            "source_sha256": hashlib.sha256(source.encode()).hexdigest(),
             "source_bytes": 0,
             "storage_server_id": "office-a",
             "visibility": "private",
@@ -758,3 +764,66 @@ def test_producer_outbox_manifest_keeps_fingerprint_after_update(
         "an updated custom factor family must still advertise its formula "
         "fingerprint on the outbox manifest"
     )
+
+
+def test_pull_conflict_replay_is_bounded_and_retains_local_edit(tmp_path):
+    local = LocalAccountDomainStore(tmp_path / "conflict.sqlite")
+    kwargs = dict(principal="u", entity_type="factor_set", entity_id="s", manager_id="a")
+    operation = local.upsert_local(**kwargs, payload={"label": "local"})
+    remote = dict(principal="u", entity_type="factor_set", entity_id="s",
+                  payload={"label": "remote"}, deleted=False, revision=5)
+    for _ in range(5):
+        assert local.apply_remote(remote) == "conflict"
+    assert len(local.conflicts(principal="u")) == 1
+    assert local.pending(principal="u") == []
+    assert local.upsert_local(**kwargs, payload={"label": "local"}) == operation
+    local.upsert_local(**kwargs, payload={"label": "edited again"})
+    assert local.pending(principal="u") == []
+    assert local.list_entities(principal="u")[0]["payload"] == {"label": "edited again"}
+
+
+def test_metadata_collections_and_nested_identities_are_not_truncated():
+    payload = {"members": list(range(4100)), "nested": {"a": {"b": {"c": {"d": {"e": {"f": {"g": {"h": {"ref": "frozen"}}}}}}}}}}
+    assert public_payload(payload) == payload
+
+
+def test_receiver_rejects_wrong_source_version(monkeypatch, tmp_path):
+    monkeypatch.setattr("tools.data.sqlite.factor_source_store.load_factor_source", lambda *args: "new version")
+    monkeypatch.setattr("tools.data.sqlite.factor_source_versions.record_factor_formula_version",
+                        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not label new bytes with old identity")))
+    service = AccountDomainSyncService(sqlite_path=tmp_path / "versions.sqlite", control_store=None, manager_id="b")
+    service.local.upsert_local(principal="u", entity_type="factor_source", entity_id="custom:F@a",
+        manager_id="a", payload={"source_kind": "custom", "factor_id": "F", "owner_username": "u",
+        "family_formula_fingerprint": "a" * 64, "source_sha256": hashlib.sha256(b"old version").hexdigest()})
+    assert service.materialize_factor_source_versions("u") == 0
+
+
+def test_explicit_resolution_rebases_only_reviewed_local_value(tmp_path):
+    import pytest
+    local = LocalAccountDomainStore(tmp_path / "resolution.sqlite")
+    key = dict(principal="u", entity_type="factor_set", entity_id="s")
+    local.upsert_local(**key, manager_id="a", payload={"label": "local"})
+    local.apply_remote({**key, "payload": {"label": "remote"}, "revision": 5})
+    with pytest.raises(ValueError, match="precondition"):
+        local.resolve_conflict(**key, manager_id="a", expected_payload={}, remote_revision=5, payload={"label": "local"})
+    local.resolve_conflict(**key, manager_id="a", expected_payload={"label": "local"}, remote_revision=5, payload={"label": "merged"})
+    assert local.pending(principal="u")[0]["base_revision"] == 5
+    assert local.conflicts(principal="u") == []
+    assert local.apply_remote({**key, "payload": {"label": "new remote"}, "revision": 6}) == "conflict"
+    assert local.pending(principal="u") == []
+
+
+def test_acknowledgment_of_coalesced_inflight_edit_rebases_successor(tmp_path):
+    local = LocalAccountDomainStore(tmp_path / "inflight.sqlite")
+    key = dict(principal="u", entity_type="product_category", entity_id="c", manager_id="a")
+    original = local.upsert_local(**key, payload={"title": "first"})
+    sent = local.pending()[0]
+    successor = local.upsert_local(**key, payload={"title": "second"})
+    local.acknowledge(original, revision=10, sent_item=sent)
+    pending = local.pending()[0]
+    assert pending["operation_id"] == successor
+    assert pending["base_revision"] == 10
+    assert pending["payload"] == {"title": "second"}
+    local.acknowledge(successor, revision=11, sent_item=pending)
+    assert local.pending() == []
+    assert local.list_entities()[0]["payload"] == {"title": "second"}

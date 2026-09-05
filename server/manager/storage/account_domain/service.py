@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import hashlib
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -100,7 +101,7 @@ class AccountDomainSyncService:
         # lazily over the data plane; the fingerprint arrives via outbox).
         versioned = self.materialize_factor_source_versions(owner)
         return {
-            "status": "synced",
+            "status": "incomplete" if (flushed.get("pending") or flushed.get("offline") or pulled.get("offline")) else "synced",
             "principal": owner,
             "reconciled": reconciled,
             "flushed": flushed,
@@ -145,7 +146,7 @@ class AccountDomainSyncService:
             # over the data plane via the hash-bound transfer; manifests carry the
             # fingerprint.  If the body is absent, skip (hydrated on demand).
             body = load_factor_source(source_kind, owner_username, factor_id)
-            if not body:
+            if not body or hashlib.sha256(body.encode("utf-8")).hexdigest() != payload.get("source_sha256"):
                 continue
             try:
                 record_factor_formula_version(
@@ -164,7 +165,7 @@ class AccountDomainSyncService:
     def flush(self, *, principal: str = "", limit: int = 100) -> dict[str, Any]:
         pending = self.local.pending(principal=principal, limit=limit)
         if not pending:
-            return {"sent": 0, "pending": 0, "conflicts": 0}
+            return {"sent": 0, "conflicts": 0, **self.local.sync_state(principal=principal)}
         if self.control_store is None:
             return {"sent": 0, "pending": len(pending), "conflicts": 0, "offline": True}
         sent = conflicts = 0
@@ -186,7 +187,7 @@ class AccountDomainSyncService:
                     self.local.mark_attempt(item["operation_id"], "remote revision conflict")
                     continue
                 self.local.acknowledge(
-                    item["operation_id"], revision=int(receipt.get("revision") or 0),
+                    item["operation_id"], revision=int(receipt.get("revision") or 0), sent_item=item,
                 )
                 sent += 1
             except (AttributeError, ControlDatabaseError, ConnectionError, OSError, RuntimeError, TypeError, ValueError) as exc:
@@ -197,7 +198,7 @@ class AccountDomainSyncService:
                     "conflicts": conflicts,
                     "offline": True,
                 }
-        return {"sent": sent, "pending": len(pending) - sent, "conflicts": conflicts}
+        return {"sent": sent, "conflicts": conflicts, **self.local.sync_state(principal=principal)}
 
     def pull(self, *, principal: str, limit: int = 100) -> dict[str, Any]:
         if self.control_store is None:
@@ -504,7 +505,7 @@ class AccountDomainSyncService:
                     pending_by_principal[target] = {
                         str(item.get("entity_id") or ""): item
                         for item in self.local.pending(
-                            principal=target, limit=1000,
+                            principal=target, limit=1000, include_blocked=True,
                         )
                         if item.get("entity_type") == "factor_source"
                     }

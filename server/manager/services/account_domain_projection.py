@@ -77,7 +77,7 @@ def factor_rows_from_account_entities(
         factors = payload.get("resolved_factors")
         if not isinstance(factors, list):
             factors = []
-        for item in factors[:512]:
+        for item in factors:
             try:
                 frozen = require_frozen_factor(
                     _restore_legacy_factor_identity(item)
