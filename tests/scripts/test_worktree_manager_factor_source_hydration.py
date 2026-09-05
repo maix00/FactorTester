@@ -37,6 +37,7 @@ def test_hydrates_referenced_factor_source_from_provider(monkeypatch) -> None:
 
     saved = []
     requested = []
+    recorded = []
     monkeypatch.setattr(
         factor_source_hydration, "urlopen",
         lambda request, **kwargs: (
@@ -48,14 +49,28 @@ def test_hydrates_referenced_factor_source_from_provider(monkeypatch) -> None:
         factor_source_hydration, "upsert_factor_source",
         lambda *args, **kwargs: saved.append((args, kwargs)),
     )
+    monkeypatch.setattr(
+        factor_source_hydration, "record_factor_formula_version",
+        lambda *args, **kwargs: recorded.append((args, kwargs)),
+    )
 
     assert factor_source_hydration.FactorSourceHydrator(State()).hydrate(
         "DemoFactor", principal="alice",
     )
-    assert saved == [(("custom", "alice", "DemoFactor", "Demo", source), {
-        "chinese_name": "", "description": "", "category": "",
-    })]
+    # Hydration now threads the formula fingerprint through the upsert payload
+    # (so the outbox sync publishes the immutable version identity) and records
+    # the formula version snapshot locally.
+    assert saved == [(
+        ("custom", "alice", "DemoFactor", "Demo", source),
+        {
+            "chinese_name": "", "description": "", "category": "",
+            "family_formula_fingerprint": "",
+        },
+    )]
     assert requested == [("https://public.example:7997/source", None)]
+    # The DemoFactor source is not a FactorFamily subclass, so no stable formula
+    # fingerprint can be derived and no version snapshot is recorded.
+    assert recorded == []
 
 
 def test_internal_download_uses_loopback_http_client_listener() -> None:
