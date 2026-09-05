@@ -1,5 +1,7 @@
 (() => {
   let cache = null;
+  let generation = 0;
+  let accessKey = "";
   let libraryPromise = null;
   let setsPromise = null;
   let groupsPromise = null;
@@ -19,6 +21,7 @@
   }
 
   function reset() {
+    generation += 1;
     cache = null;
     libraryPromise = null;
     setsPromise = null;
@@ -115,10 +118,14 @@
         context.api(`/api/factor-library/families${suffix}`),
         context.api(`/api/factor-library/factors${suffix}`),
       ]).then(([families, factors]) => mergeLibraryResources(families, factors));
+      const started = generation;
       libraryPromise = request
-        .then(applyLibrary)
+        .then(value => {
+          if (started !== generation) throw new Error("因子目录已刷新，请重试");
+          return applyLibrary(value);
+        })
         .catch(error => {
-          libraryPromise = null;
+          if (started === generation) libraryPromise = null;
           throw error;
         });
     }
@@ -129,13 +136,15 @@
     const data = ensureCache();
     if (data.setsLoaded) return data;
     if (!setsPromise) {
+      const started = generation;
       setsPromise = context.api("/api/factor-library/factor-sets").then(sets => {
+        if (started !== generation) throw new Error("因子目录已刷新，请重试");
         data.sets = Array.isArray(sets?.items) ? sets.items : [];
         data.setScopes = sets.item_scopes || {};
         data.setsLoaded = true;
         return data;
       }).catch(error => {
-        setsPromise = null;
+        if (started === generation) setsPromise = null;
         throw error;
       });
     }
@@ -146,14 +155,16 @@
     const data = ensureCache();
     if (data.groupsLoaded) return data;
     if (!groupsPromise) {
+      const started = generation;
       groupsPromise = context.api("/api/product-library/product-groups")
         .then(value => {
+          if (started !== generation) throw new Error("因子目录已刷新，请重试");
           data.groups = Array.isArray(value?.groups) ? value.groups : [];
           data.groupsLoaded = true;
           return data;
         })
         .catch(error => {
-          groupsPromise = null;
+          if (started === generation) groupsPromise = null;
           throw error;
         });
     }
@@ -165,7 +176,11 @@
     const includeLibrary = options === true || options.library === true;
     const includeSets = options === true || options.sets === true;
     const includeGroups = options === true || options.groups === true;
-    if (refresh) reset();
+    const key = `${globalThis.location?.origin || ""}:${context.session?.username || ""}:${context.session?.role || ""}`;
+    if (refresh || key !== accessKey) {
+      reset();
+      accessKey = key;
+    }
     let data = ensureCache();
     if (includeLibrary) data = await loadLibrary(context, refresh);
     if (includeSets) data = await loadSets(context);

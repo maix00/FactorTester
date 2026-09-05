@@ -394,11 +394,7 @@
   async function loadLazyState(context, state, key) {
     if (key === "factors") {
       await FTTestLazyCode.loadGroup("workbench-factors");
-      const [families, factors] = await Promise.all([
-        context.api("/api/factor-library/families"),
-        context.api("/api/factor-library/factors"),
-      ]);
-      const value = { ...families, ...factors };
+      const value = await window.FTFactorCatalog.load(context, {library: true});
       state.factors = FTTestState.mergeByID(state.factors, value.factors);
       state.families = FTTestState.mergeByID(state.families, value.families);
       await FTTestFactors.initialize(context, state);

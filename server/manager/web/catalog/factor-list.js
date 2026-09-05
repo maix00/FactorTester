@@ -131,7 +131,8 @@
     if (canModify || showAddFactor) headers.push(context.t("操作"));
     const view = FTUI.pagedTable(
       headers,
-      rows.map(item => [
+      rows,
+      {...pagingOptions(context, tablePage, onPageChange), renderRow: item => [
         model().familyName(item),
         model().description(item),
         (item.categories || []).join("、"),
@@ -145,11 +146,10 @@
           showAddFactor ? onAddFactor : null,
           item,
         )] : []),
-      ]),
-      pagingOptions(context, tablePage, onPageChange),
+      ]},
     );
     linkRows(view, rows.slice(view.start, view.start + view.pageSize), item =>
-      `/factors/family/${encodeURIComponent(item.family_ref)}`, context,
+      item.family_ref ? `/factors/family/${encodeURIComponent(item.family_ref)}` : "", context,
     );
     panel.append(view.shell);
     mount.replaceChildren(panel);
@@ -224,10 +224,8 @@
       const labels = model().groupLabels(
         item, names, bySubject, context.t("未绑定产品组"),
       );
-      return groupMatches && ownerMatches(item.value) && model().matches({
-        ...item.value,
-        product_group_labels: labels.join(" "),
-      }, query);
+      return groupMatches && ownerMatches(item.value) && (model().matches(item.value, query)
+        || labels.join(" ").toLowerCase().includes(String(query).toLowerCase()));
     });
     if (!items.length) {
       mount.replaceChildren(FTUI.empty(
@@ -247,7 +245,7 @@
     if (canModify) {
       headers.push(context.t("操作"));
     }
-    const rows = items.map(item => kind === "factor-set" ? [
+    const renderRow = item => kind === "factor-set" ? [
       item.value.title_zh || item.value.set_id,
       item.value.member_count || 0,
       model().owner(item.value),
@@ -269,9 +267,9 @@
       model().groupLabels(item, names, bySubject, context.t("未绑定产品组")).join("、"),
       ...(canModify
         ? [actionCell(context, onDelete, onEdit, null, item.value)] : []),
-    ]);
+    ];
     const view = FTUI.pagedTable(
-      headers, rows, pagingOptions(context, tablePage, onPageChange),
+      headers, items, {...pagingOptions(context, tablePage, onPageChange), renderRow},
     );
     linkRows(view, items.slice(view.start, view.start + view.pageSize), item => item.kind === "factor"
       ? `/factors/factor/${encodeURIComponent(item.value.factor_ref)}`
@@ -330,8 +328,13 @@
 
   function linkRows(view, items, path, context) {
     [...view.body.rows].forEach((row, index) => {
+      const target = path(items[index]);
+      if (!target) {
+        row.setAttribute("aria-disabled", "true");
+        return;
+      }
       row.dataset.href = "true";
-      row.addEventListener("click", () => context.navigate(path(items[index])));
+      row.addEventListener("click", () => context.navigate(target));
     });
   }
 

@@ -132,6 +132,21 @@ async function main() {
     "/api/factor-library/factors",
   ].sort());
 
+  // Old responses must not populate the cache of a refreshed session.
+  const oldFamilies = deferred();
+  const oldFactors = deferred();
+  const staleContext = {...context, session: {username: "old"}, api(path) {
+    return path.includes("families") ? oldFamilies.promise : oldFactors.promise;
+  }};
+  const stale = window.FTFactorCatalog.load(staleContext, {library: true});
+  const rejection = assert.rejects(stale, /目录已刷新/);
+  const freshContext = {...context, session: {username: "new"}, api: async () => ({principal: "new", factors: [{factor_ref: "new-factor"}], families: []})};
+  const fresh = await window.FTFactorCatalog.load(freshContext, {library: true});
+  oldFamilies.resolve({principal: "old", families: []});
+  oldFactors.resolve({principal: "old", factors: [{factor_ref: "old-factor"}]});
+  await rejection;
+  assert.strictEqual((await window.FTFactorCatalog.load(freshContext, {library: true})), fresh);
+  assert.strictEqual(fresh.factors[0].factor_ref, "new-factor");
   console.log("ok");
 }
 
