@@ -279,11 +279,9 @@
         value => saveFactor(context, state, refresh, picker, value), item.factor,
       ),
       editLabel: context.t("编辑因子"),
-      onChange: values => {
-        void updateCombined(context, state, items, values, refresh).finally(() => {
-          picker.setValues(currentSelected());
-        });
-      },
+      onChange: values => updateCombined(context, state, items, values, refresh).finally(() => {
+        picker.setValues(currentSelected());
+      }),
     });
     // A nested editor can open before the shared visible-factor catalog has
     // finished loading; refresh this picker when that request completes so the
@@ -482,20 +480,24 @@
   function panel(context, state, refresh, options = {}) {
     const root = document.createElement("div");
     root.className = "test-factor-candidate-sources";
-    root.append(candidateHeading(
-      context, state, FTTestFactorCandidates.summaryControl(context, state),
-    ));
-    // Unified multi-type candidate control: 因子 + 因子集合 as one picker
-    // (custom-grouped 「候选（因子）」 / 「候选（因子集合）」).
-    const direct = combinedControl(context, state, refresh);
+    const summaryHost = document.createElement("div");
+    const error = document.createElement("p");
+    error.className = "form-error";
+    const refreshPanel = () => {
+      summaryHost.replaceChildren(FTTestFactorCandidates.summaryControl(context, state));
+      error.textContent = state.factorSetCatalog?.error || "";
+      error.hidden = !error.textContent;
+      refresh?.();
+    };
+    summaryHost.append(FTTestFactorCandidates.summaryControl(context, state));
+    error.textContent = state.factorSetCatalog?.error || "";
+    error.hidden = !error.textContent;
+    root.append(candidateHeading(context, state, summaryHost));
+    // Nested forms refresh their chips without remounting the factor panel.
+    // Update the derived summary after the async expansion, keeping the picker.
+    const direct = combinedControl(context, state, refreshPanel);
     direct.classList.add("factor-candidate-child-row");
-    root.append(direct);
-    if (state.factorSetCatalog?.error) {
-      const error = document.createElement("p");
-      error.className = "form-error";
-      error.textContent = state.factorSetCatalog.error;
-      root.append(error);
-    }
+    root.append(direct, error);
     const roleField = options.includeRoles === false
       ? null : state.manifest?.defaults?.factor_role_bindings;
     if (roleField && FTSettingRules.isVisible(roleField, state.values)
