@@ -50,11 +50,19 @@
     factor = window.FTFactorDisplayEnrichment?.enrichFactorForDisplay(data, factor)
       || factor;
     factor = model().withSourceMetadata(factor);
-    const instanceValues = window.FTFactorDetailShared.parameterValues(factor);
-    const resolvedExpression = window.FTFactorDetailShared.previewExpression(
-      factor, instanceValues,
-    );
-    if (resolvedExpression) factor.resolved_math_expr = resolvedExpression;
+    // View mode renders the backend-composed block directly.  The backend
+    // resolves the full recursive LaTeX (template + parameter substitution +
+    // nested-family intermediate definitions) at serialization time and
+    // returns it as resolved_math_expr, so the browser no longer recomputes
+    // the same composition here.  Only fall back to the frontend preview when
+    // the backend left it empty (transient / inline object never hydrated).
+    if (!String(factor.resolved_math_expr || "").trim()) {
+      const instanceValues = window.FTFactorDetailShared.parameterValues(factor);
+      const resolvedExpression = window.FTFactorDetailShared.previewExpression(
+        factor, instanceValues,
+      );
+      if (resolvedExpression) factor.resolved_math_expr = resolvedExpression;
+    }
     factor.factor_source_version = factor.family_formula_fingerprint
       ? `公式版本 · ${factor.family_formula_fingerprint.slice(0, 12)}`
       : "未固定公式版本";
