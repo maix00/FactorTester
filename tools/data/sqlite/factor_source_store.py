@@ -444,7 +444,13 @@ def list_factor_sources(source_kind: str) -> list[dict[str, Any]]:
             """
             SELECT s.source_kind, s.owner_username, s.factor_id, s.factor_name,
                    s.source_code, s.updated_at,
-                   m.chinese_name, m.description, m.category
+                   m.chinese_name, m.description, m.category,
+                   (SELECT v.family_formula_fingerprint
+                      FROM factor_family_formula_versions v
+                     WHERE v.source_kind = s.source_kind
+                       AND v.owner_username = s.owner_username
+                       AND v.factor_id = s.factor_id
+                     ORDER BY v.created_at DESC LIMIT 1) AS family_formula_fingerprint
             FROM factor_family_sources AS s
             LEFT JOIN factor_family_source_metadata AS m
               ON m.source_kind = s.source_kind
@@ -473,6 +479,7 @@ def list_factor_sources(source_kind: str) -> list[dict[str, Any]]:
             "factor_name": row["factor_name"],
             "source_code": canonical_factor_source_code(str(row["source_code"] or "")),
             "updated_at": row["updated_at"],
+            "family_formula_fingerprint": str(row["family_formula_fingerprint"] or ""),
             **metadata,
         })
     return result

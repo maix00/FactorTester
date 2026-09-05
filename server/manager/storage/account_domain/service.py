@@ -461,6 +461,12 @@ class AccountDomainSyncService:
                     "source_bytes": len(source_code.encode()),
                     "storage_server_id": self.manager_id,
                     "visibility": "public" if source_kind == "public" else "private",
+                    # Carry the immutable semantic fingerprint so a receiving
+                    # server converges its factor_family_formula_versions local
+                    # mirror even though the source body is pulled lazily.
+                    "family_formula_fingerprint": str(
+                        value.get("family_formula_fingerprint") or ""
+                    ).strip(),
                 }
                 # Source identity and storage availability are different
                 # dimensions. The same immutable source may be present on

@@ -655,3 +655,106 @@ def test_public_research_metadata_identifies_storage_manager(tmp_path: Path) -> 
     assert metadata["storage_server_id"] == "public-1"
     assert "projection" not in metadata
     assert "source_code" not in metadata
+
+
+def test_producer_outbox_manifest_carries_formula_fingerprint(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    """The producer records the immutable formula fingerprint on the factor_source
+    manifest that leaves the authoring server.
+
+    This is the half of the cross-server version-sync chain that the consumer
+    ``materialize_factor_source_versions`` depends on: a receiver only backfills
+    ``factor_family_formula_versions`` when the pulled manifest advertises a
+    non-empty ``family_formula_fingerprint``.  If the authoring path ever drops
+    it, every receiver silently skips and the version catalog drifts.
+    """
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "producer.sqlite")
+    import json
+
+    observed: dict[str, object] = {}
+
+    def fake_enqueue(
+        source_kind, owner_username, factor_id, factor_name, source_code,
+        *, metadata=None, deleted=False, family_formula_fingerprint="",
+    ):
+        observed["source_kind"] = source_kind
+        observed["owner_username"] = owner_username
+        observed["factor_id"] = factor_id
+        observed["factor_name"] = factor_name
+        observed["source_code"] = source_code
+        observed["metadata"] = dict(metadata or {})
+        observed["fingerprint"] = family_formula_fingerprint
+        return None
+
+    monkeypatch.setattr(
+        "tools.data.sqlite.factor_source_store._enqueue_source_metadata",
+        fake_enqueue,
+    )
+
+    source = "class Delta(FactorFamily):\n    pass\n"
+    fingerprint = "e" * 64
+    from tools.data.sqlite.factor_source_store import upsert_factor_source
+
+    upsert_factor_source(
+        "custom", "dave", "Delta", "Delta", source,
+        chinese_name="Delta",
+        family_formula_fingerprint=fingerprint,
+    )
+
+    assert observed.get("factor_id") == "Delta"
+    assert observed.get("source_kind") == "custom"
+    assert observed.get("owner_username") == "dave"
+    assert observed["metadata"].get("chinese_name") == "Delta"
+    # The formula fingerprint is threaded as a distinct keyword to the outbox
+    # manifest (it is not part of the user-facing metadata dict), so it can be
+    # consumed by the receiver's materialize pass.
+    assert observed.get("fingerprint") == fingerprint, (
+        "the factor_source outbox manifest must carry the formula fingerprint "
+        "so the receiver can materialize its version history"
+    )
+
+
+def test_producer_outbox_manifest_keeps_fingerprint_after_update(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    """Updating a custom factor family must keep the fingerprint on the manifest.
+
+    This guards the api_update_factor path: editing a factor family recomputes
+    the formula fingerprint and must thread it through the outbox, otherwise the
+    updated version identity never leaves the authoring server.
+    """
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "producer2.sqlite")
+
+    observed: dict[str, object] = {}
+
+    def fake_enqueue(
+        source_kind, owner_username, factor_id, factor_name, source_code,
+        *, metadata=None, deleted=False, family_formula_fingerprint="",
+    ):
+        observed["factor_id"] = factor_id
+        observed["metadata"] = dict(metadata or {})
+        observed["fingerprint"] = family_formula_fingerprint
+        return None
+
+    monkeypatch.setattr(
+        "tools.data.sqlite.factor_source_store._enqueue_source_metadata",
+        fake_enqueue,
+    )
+
+    source = "class Delta(FactorFamily):\n    pass\n"
+    fingerprint = "f" * 64
+    from tools.data.sqlite.factor_source_store import upsert_factor_source
+
+    upsert_factor_source(
+        "custom", "dave", "Delta", "Delta", source,
+        chinese_name="Delta",
+        family_formula_fingerprint=fingerprint,
+    )
+
+    assert observed.get("factor_id") == "Delta"
+    assert observed["metadata"].get("chinese_name") == "Delta"
+    assert observed.get("fingerprint") == fingerprint, (
+        "an updated custom factor family must still advertise its formula "
+        "fingerprint on the outbox manifest"
+    )
