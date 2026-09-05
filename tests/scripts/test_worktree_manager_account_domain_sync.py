@@ -17,6 +17,12 @@ from tools.cli.release.research_reporting.public_research.library import PublicR
 from tools.factors.formula_identity import freeze_factor_identity
 
 
+def _source_summary(source):
+    body = source["source_code"].encode()
+    return {**{key: value for key, value in source.items() if key != "source_code"},
+            "source_sha256": hashlib.sha256(body).hexdigest(), "source_bytes": len(body)}
+
+
 class MemoryControlStore:
     def __init__(self) -> None:
         self.revision = 0
@@ -163,8 +169,8 @@ def test_factor_source_sync_tracks_each_storage_provider_without_conflicts(
         "source_code": "class CA: pass",
     }
     monkeypatch.setattr(
-        "tools.data.sqlite.factor_source_store.list_factor_sources",
-        lambda kind: [source] if kind == "custom" else [],
+        "tools.data.sqlite.factor_metadata.list_factor_summaries",
+        lambda kind, owner="": [_source_summary(source)] if kind == "custom" else [],
     )
     control = MemoryControlStore()
     first = AccountDomainSyncService(
@@ -199,8 +205,8 @@ def test_lazy_sync_reconciles_factor_source_provider_before_peer_reads(
         "source_code": "class CA: pass",
     }
     monkeypatch.setattr(
-        "tools.data.sqlite.factor_source_store.list_factor_sources",
-        lambda kind: [source] if kind == "custom" else [],
+        "tools.data.sqlite.factor_metadata.list_factor_summaries",
+        lambda kind, owner="": [_source_summary(source)] if kind == "custom" else [],
     )
     monkeypatch.setattr(
         "tools.data.account_manage.load_product_categories", lambda _owner: [],
@@ -252,8 +258,8 @@ def test_factor_source_reconcile_retires_matching_legacy_conflict(
         "source_code": source_code,
     }
     monkeypatch.setattr(
-        "tools.data.sqlite.factor_source_store.list_factor_sources",
-        lambda kind: [source] if kind == "custom" else [],
+        "tools.data.sqlite.factor_metadata.list_factor_summaries",
+        lambda kind, owner="": [_source_summary(source)] if kind == "custom" else [],
     )
     control = MemoryControlStore()
     legacy = AccountDomainSyncService(
@@ -451,8 +457,8 @@ def test_two_servers_bidirectionally_sync_and_bridge_missing_content(
         "factor_name": "Beta", "source_code": "class Beta: pass",
     }
     monkeypatch.setattr(
-        "tools.data.sqlite.factor_source_store.list_factor_sources",
-        lambda kind: [alice_a] if kind == "custom" else [],
+        "tools.data.sqlite.factor_metadata.list_factor_summaries",
+        lambda kind, owner="": [_source_summary(alice_a)] if kind == "custom" else [],
     )
 
     control = MemoryControlStore()
@@ -471,8 +477,8 @@ def test_two_servers_bidirectionally_sync_and_bridge_missing_content(
     # same list for both, so to make the missing-content case real we swap the
     # list for B so A and B each own a distinct factor.
     monkeypatch.setattr(
-        "tools.data.sqlite.factor_source_store.list_factor_sources",
-        lambda kind: [alice_b] if kind == "custom" else [],
+        "tools.data.sqlite.factor_metadata.list_factor_summaries",
+        lambda kind, owner="": [_source_summary(alice_b)] if kind == "custom" else [],
     )
     assert server_b.reconcile_factor_sources("alice") == 1
 

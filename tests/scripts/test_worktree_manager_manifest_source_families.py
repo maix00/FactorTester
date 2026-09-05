@@ -88,22 +88,10 @@ def test_manifest_source_families_skips_non_dict_payload() -> None:
     assert families == []
 
 
-def test_manifest_source_families_synthesizes_stable_fingerprint() -> None:
-    # A synced source with no materialized fingerprint must still be listed;
-    # the projection refuses fingerprint-less rows, so a stable seed is
-    # synthesized from the immutable identity.
-    stub = _Stub(_StubSynchronizer([
-        _mirror_row("VpTurnoverEntropy", owner="alice", fingerprint=""),
-    ]))
-    (families,) = stub._manifest_source_families("alice")
-    fp = families["family_formula_fingerprint"]
-    assert len(fp) == 64
-    assert fp == hashlib.sha256(
-        "alice:custom:VpTurnoverEntropy".encode("utf-8"),
-    ).hexdigest()
-    # Same identity twice => identical stable seed.
-    again = stub._manifest_source_families("alice")
-    assert again[0]["family_formula_fingerprint"] == fp
+def test_manifest_source_families_preserves_unresolved_identity() -> None:
+    stub = _Stub(_StubSynchronizer([_mirror_row("VpTurnoverEntropy", owner="alice", fingerprint="")]))
+    (family,) = stub._manifest_source_families("alice")
+    assert family["family_formula_fingerprint"] == ""
 
 
 def test_manifest_source_families_projects_through_build_projection() -> None:
@@ -127,9 +115,9 @@ def test_manifest_source_families_projects_through_build_projection() -> None:
         "SgChgPct", "VpTurnoverEntropy",
     }
     by_alias = {f["factor_family_alias"]: f for f in family_rows}
-    # The synthesized fingerprint must be a valid 64-hex identity.
-    assert len(by_alias["VpTurnoverEntropy"]["family_formula_fingerprint"]) == 64
-    assert by_alias["VpTurnoverEntropy"]["family_ref"]
+    assert by_alias["VpTurnoverEntropy"]["family_formula_fingerprint"] == ""
+    assert by_alias["VpTurnoverEntropy"]["family_ref"] == ""
+    assert by_alias["VpTurnoverEntropy"]["identity_status"] == "unresolved"
 
 
 def test_merge_source_families_prefers_rich_row_over_manifest() -> None:
@@ -164,3 +152,10 @@ def test_merge_source_families_dedupes_but_keeps_distinct() -> None:
     )
     # A/alice, B/alice, A/bob are three distinct identities
     assert len(merged) == 3
+
+
+def test_failed_local_source_does_not_mask_valid_manifest():
+    stub = _Stub(_StubSynchronizer([]))
+    failed = {"factor_family_alias": "F", "owner_username": "alice", "family_formula_fingerprint": ""}
+    valid = {**failed, "family_formula_fingerprint": "a" * 64}
+    assert stub._merge_source_families([failed], [valid]) == [valid]

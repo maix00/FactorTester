@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-
 from typing import Any
 
 
@@ -87,41 +85,28 @@ class ClientFactorCatalogMixin:
             source_kind = str(
                 payload.get("source_kind") or "custom",
             ).strip().lower() or "custom"
-            # The mirror manifest may carry no formula fingerprint (older
-            # sources, or rows whose body was never hydrated so the
-            # semantic fingerprint was never materialized).  The catalog
-            # projection refuses rows without a fingerprint, which would
-            # silently drop a synced family from the public listing.
-            # Since the listing only needs the family name + description,
-            # synthesize a *stable* reference seed from the immutable
-            # identity (owner + kind + alias) so every synced family is
-            # listed; the true fingerprint/body is still hydrated lazily
-            # when a single family is opened or a RunSpec is frozen.
-            fingerprint = str(
-                payload.get("family_formula_fingerprint") or "",
-            ).strip()
-            if not fingerprint:
-                fingerprint = hashlib.sha256(
-                    f"{username}:{source_kind}:{factor_id}".encode("utf-8"),
-                ).hexdigest()
+            if source_kind != "custom" or str(payload.get("owner_username") or row.get("principal") or "") != username:
+                continue
+            fingerprint = str(payload.get("family_formula_fingerprint") or "").strip()
+            summary = payload.get("catalog") or payload
             families.append({
                 "factor_family_alias": factor_id,
                 "factor_family_name": str(
                     payload.get("factor_name") or factor_id,
                 ).strip() or factor_id,
-                "chinese_name": "",
-                "description": "",
-                "math_expr": "",
-                "category": "",
-                "categories": [],
+                "chinese_name": summary.get("chinese_name") or "",
+                "description": summary.get("description") or "",
+                "math_expr": summary.get("math_expr") or "",
+                "category": summary.get("category") or "",
+                "categories": [summary["category"]] if summary.get("category") else [],
                 "owner_username": username,
                 "owner_alias": owner_alias or username,
                 "factor_kind": source_kind,
                 "source": source_kind,
                 "factor_count": 0,
                 "factor_refs": [],
-                "params": [],
-                "parameter_definitions": [],
+                "params": summary.get("params") or [],
+                "parameter_definitions": summary.get("params") or [],
                 "family_formula_fingerprint": fingerprint,
                 "updated_at": "",
             })
@@ -150,7 +135,9 @@ class ClientFactorCatalogMixin:
                 if not alias:
                     continue
                 key = (owner, alias)
-                merged.setdefault(key, family)
+                current = merged.get(key)
+                if current is None or (not current.get("family_formula_fingerprint") and family.get("family_formula_fingerprint")):
+                    merged[key] = family
         return list(merged.values())
 
     def factor_library(
@@ -169,16 +156,6 @@ class ClientFactorCatalogMixin:
         )
 
         owner_account = self._local_account(principal)
-        if refresh and self.account_domain_sync is not None:
-            try:
-                self.account_domain_sync.reconcile_factor_catalog(
-                    principal, force=True,
-                )
-            except (
-                AttributeError, ConnectionError, OSError, RuntimeError,
-                TypeError, ValueError,
-            ):
-                pass
         source_families = self._merge_source_families(
             self._custom_source_families(
                 principal,
@@ -196,32 +173,9 @@ class ClientFactorCatalogMixin:
                 principal,
                 owner_account=owner_account,
             )
-            try:
-                # A picker must never wait for PostgreSQL or another Manager.
-                # Only seed an empty source-side mirror from local factor
-                # definitions; normal writes/background sync keep it fresh.
-                if not mirrored:
-                    self.account_domain_sync.reconcile_factor_catalog(principal)
-            except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
-                pass
-            if not mirrored:
-                mirrored = factor_rows_from_account_entities(
-                    self._account_catalog_entities(
-                        principal,
-                        entity_type="factor_param_config",
-                        include_shared=False,
-                    ),
-                    principal,
-                    owner_account=owner_account,
-                )
-            if mirrored:
-                return build_client_library_projection(
-                    {
-                        "factors": mirrored,
-                        "families": source_families,
-                        "errors": [],
-                    }, principal=principal,
-                )
+            return build_client_library_projection(
+                {"factors": mirrored, "families": source_families, "errors": []}, principal=principal,
+            )
         payload = build_factor_library_overview(
             principal, include_subordinates=False,
             account=owner_account,
@@ -271,6 +225,7 @@ class ClientFactorCatalogMixin:
             owner = str(account.get("username") or "").strip()
             if not owner:
                 continue
+            self._refresh_account_domain_async(owner)
             subordinate_rows.extend(factor_rows_from_account_entities(
                 self._account_catalog_entities(
                     owner,
@@ -292,7 +247,7 @@ class ClientFactorCatalogMixin:
                 ),
                 self._manifest_source_families(owner),
             ))
-        if not subordinate_rows:
+        if self.account_domain_sync is None:
             for account in accounts:
                 owner = str(account.get("username") or "")
                 subordinate_payload = build_factor_library_overview(
@@ -323,17 +278,7 @@ class ClientFactorCatalogMixin:
         rows = self._account_catalog_entities(
             principal, entity_type="factor_set", include_shared=False,
         )
-        if not rows:
-            try:
-                self.account_domain_sync.reconcile_factor_catalog(principal)
-            except (
-                AttributeError, ConnectionError, OSError, RuntimeError,
-                TypeError, ValueError,
-            ):
-                pass
-            rows = self._account_catalog_entities(
-                principal, entity_type="factor_set", include_shared=False,
-            )
+        self._refresh_account_domain_async(principal)
         known = {str(item.get("target_ref") or "") for item in values}
         for row in rows:
             payload = row.get("payload") if isinstance(row, dict) else None

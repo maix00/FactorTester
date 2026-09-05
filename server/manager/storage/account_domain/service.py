@@ -435,14 +435,14 @@ class AccountDomainSyncService:
     def reconcile_factor_sources(self, principal: str = "") -> int:
         """Backfill one source manifest per storage provider, without bodies."""
         try:
-            from tools.data.sqlite.factor_source_store import list_factor_sources
+            from tools.data.sqlite.factor_metadata import list_factor_summaries
         except ImportError:
             return 0
         count = 0
         existing_by_principal: dict[str, dict[str, dict[str, Any]]] = {}
         pending_by_principal: dict[str, dict[str, dict[str, Any]]] = {}
         for source_kind in ("custom", "public"):
-            for value in list_factor_sources(source_kind):
+            for value in list_factor_summaries(source_kind, str(principal or "").strip() if source_kind == "custom" else ""):
                 owner = str(value.get("owner_username") or "").strip()
                 target = owner or "__public__"
                 if source_kind == "custom" and target != str(principal or "").strip():
@@ -450,16 +450,14 @@ class AccountDomainSyncService:
                 factor_id = str(value.get("factor_id") or "").strip()
                 if not factor_id:
                     continue
-                source_code = str(value.get("source_code") or "")
-                import hashlib
-
                 payload = {
                     "source_kind": source_kind,
                     "owner_username": owner,
                     "factor_id": factor_id,
-                    "factor_name": str(value.get("factor_name") or factor_id),
-                    "source_sha256": hashlib.sha256(source_code.encode()).hexdigest(),
-                    "source_bytes": len(source_code.encode()),
+                    "factor_name": str(value.get("name") or value.get("factor_name") or factor_id),
+                    "catalog": value,
+                    "source_sha256": str(value.get("source_sha256") or ""),
+                    "source_bytes": int(value.get("source_bytes") or 0),
                     "storage_server_id": self.manager_id,
                     "visibility": "public" if source_kind == "public" else "private",
                     # Carry the immutable semantic fingerprint so a receiving

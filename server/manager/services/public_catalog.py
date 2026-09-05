@@ -144,7 +144,33 @@ def public_factor_library() -> dict[str, Any]:
     )
 
     families: list[dict[str, Any]] = []
-    for item in list_public_factors():
+    local = {str(item.get("id") or item.get("name") or ""): item for item in list_public_factors()}
+    # Source providers advertise visible identity independently from resident bytes.
+    import json
+    import sqlite3
+    import settings as Settings
+    from tools.data.sqlite.db import connect_sqlite
+    try:
+        with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+            manifests = conn.execute(
+                "SELECT payload_json FROM account_domain_entities WHERE principal='__public__' "
+                "AND entity_type='factor_source' AND deleted=0 ORDER BY remote_revision DESC, updated_at DESC"
+            ).fetchall()
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc):
+            raise
+        manifests = []
+    for row in manifests:
+        payload = json.loads(row[0])
+        alias = str(payload.get("factor_id") or "")
+        if payload.get("source_kind") != "public" or not alias:
+            continue
+        current = local.get(alias)
+        if current is None or (not current.get("family_formula_fingerprint") and payload.get("family_formula_fingerprint")):
+            summary = payload.get("catalog") or payload
+            local[alias] = {**summary, "id": alias, "name": payload.get("factor_name") or alias,
+                            "family_formula_fingerprint": payload.get("family_formula_fingerprint") or ""}
+    for item in local.values():
         alias = str(item.get("name") or item.get("id") or "").strip()
         if not alias:
             continue
