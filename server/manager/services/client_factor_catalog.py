@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 from typing import Any
 
 
@@ -52,6 +54,105 @@ class ClientFactorCatalogMixin:
             })
         return families
 
+    def _manifest_source_families(
+        self, username: str, owner_alias: str = "",
+    ) -> list[dict[str, Any]]:
+        """Project factor-source families from the synced account-domain mirror.
+
+        Source *bodies* are never shipped over the account-domain outbox; the
+        mirror only carries the immutable manifest (``factor_id``,
+        ``factor_name``, ``family_formula_fingerprint``, ``owner_username``,
+        ``source_kind``).  A family that has synced its manifest but is missing
+        its local source body would otherwise disappear from the public catalog
+        listing.  The listing only needs the identity fields (family name plus
+        the description column), so we render those directly from the mirror and
+        leave the source body to be hydrated lazily when a single family is
+        opened or a RunSpec is frozen.
+        """
+        rows = self._account_catalog_entities(
+            username,
+            entity_type="factor_source",
+            include_deleted=False,
+        )
+        families: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict) or row.get("deleted"):
+                continue
+            payload = row.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            factor_id = str(payload.get("factor_id") or "").strip()
+            if not factor_id:
+                continue
+            source_kind = str(
+                payload.get("source_kind") or "custom",
+            ).strip().lower() or "custom"
+            # The mirror manifest may carry no formula fingerprint (older
+            # sources, or rows whose body was never hydrated so the
+            # semantic fingerprint was never materialized).  The catalog
+            # projection refuses rows without a fingerprint, which would
+            # silently drop a synced family from the public listing.
+            # Since the listing only needs the family name + description,
+            # synthesize a *stable* reference seed from the immutable
+            # identity (owner + kind + alias) so every synced family is
+            # listed; the true fingerprint/body is still hydrated lazily
+            # when a single family is opened or a RunSpec is frozen.
+            fingerprint = str(
+                payload.get("family_formula_fingerprint") or "",
+            ).strip()
+            if not fingerprint:
+                fingerprint = hashlib.sha256(
+                    f"{username}:{source_kind}:{factor_id}".encode("utf-8"),
+                ).hexdigest()
+            families.append({
+                "factor_family_alias": factor_id,
+                "factor_family_name": str(
+                    payload.get("factor_name") or factor_id,
+                ).strip() or factor_id,
+                "chinese_name": "",
+                "description": "",
+                "math_expr": "",
+                "category": "",
+                "categories": [],
+                "owner_username": username,
+                "owner_alias": owner_alias or username,
+                "factor_kind": source_kind,
+                "source": source_kind,
+                "factor_count": 0,
+                "factor_refs": [],
+                "params": [],
+                "parameter_definitions": [],
+                "family_formula_fingerprint": fingerprint,
+                "updated_at": "",
+            })
+        return families
+
+    def _merge_source_families(
+        self, *family_lists: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Merge family rows, preferring the richest (local body) entry.
+
+        The first list carries fully-materialized families from the local
+        source table (with description/category/params); later lists are the
+        manifest-only mirrors.  Same-identity rows keep the earlier, richer one.
+        """
+        merged: dict[tuple[str, str], dict[str, Any]] = {}
+        for family_list in family_lists:
+            for family in family_list:
+                alias = str(
+                    family.get("factor_family_alias")
+                    or family.get("factor_family_name") or "",
+                ).strip()
+                owner = str(
+                    family.get("owner_username")
+                    or family.get("factor_owner_ref") or "",
+                ).strip()
+                if not alias:
+                    continue
+                key = (owner, alias)
+                merged.setdefault(key, family)
+        return list(merged.values())
+
     def factor_library(
         self, principal: str, *, refresh: bool = False,
     ) -> dict[str, Any]:
@@ -78,9 +179,12 @@ class ClientFactorCatalogMixin:
                 TypeError, ValueError,
             ):
                 pass
-        source_families = self._custom_source_families(
-            principal,
-            str(owner_account.get("alias") or owner_account.get("username") or principal),
+        source_families = self._merge_source_families(
+            self._custom_source_families(
+                principal,
+                str(owner_account.get("alias") or owner_account.get("username") or principal),
+            ),
+            self._manifest_source_families(principal),
         )
         if self.account_domain_sync is not None:
             mirrored = factor_rows_from_account_entities(
@@ -181,9 +285,12 @@ class ClientFactorCatalogMixin:
             owner = str(account.get("username") or "").strip()
             if not owner:
                 continue
-            subordinate_families.extend(self._custom_source_families(
-                owner,
-                str(account.get("alias") or account.get("display_name") or owner),
+            subordinate_families.extend(self._merge_source_families(
+                self._custom_source_families(
+                    owner,
+                    str(account.get("alias") or account.get("display_name") or owner),
+                ),
+                self._manifest_source_families(owner),
             ))
         if not subordinate_rows:
             for account in accounts:
