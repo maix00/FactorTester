@@ -204,9 +204,13 @@
           `${serialization.detail_endpoint}?target_ref=${encodeURIComponent(item.target_ref)}`
           + `&offset=${offset}&limit=100`,
         );
+      if (payload.success === false) throw new Error(payload.error || context.t("因子集合读取失败"));
       const value = payload.factor_set || payload;
       result.push(...(value.related_references || []));
-      if (!value.has_more) return result;
+      if (!value.has_more) {
+        if (!result.length) throw new Error(context.t("因子集合没有可用的冻结成员"));
+        return result;
+      }
       offset = Number(value.next_offset || result.length);
     }
     throw new Error(context.t("因子集合成员超过允许上限"));

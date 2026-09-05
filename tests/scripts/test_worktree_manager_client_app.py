@@ -3462,6 +3462,12 @@ def test_manager_factor_set_detail_allows_only_a_direct_child(
             headers=headers,
         )) as response:
             child = json.loads(response.read())
+        with urlopen(Request(
+            f"{base_url}/api/factor-library/factor-sets/detail"
+            "?target_ref=factor-set%3Achild", headers=headers,
+        )) as response:
+            inferred = json.loads(response.read())
+        assert inferred["factor_set"]["owner_username"] == "child@1"
         with pytest.raises(HTTPError) as forbidden:
             urlopen(Request(
                 f"{base_url}/api/factor-library/factor-sets/detail"

@@ -3044,3 +3044,9 @@ def test_product_group_detail_never_uses_retired_business_route() -> None:
     assert '"/api/client/product-groups"' in detail
     assert '"/api/product-library/product-groups"' in detail
     assert '"/api/product-groups"' not in detail
+
+
+def test_factor_set_candidate_expansion_is_atomic_and_reports_failed_reads():
+    fixture = ROOT / "tests/scripts/fixtures/factor_set_candidates.js"
+    result = subprocess.run(["node", str(fixture)], cwd=ROOT, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
