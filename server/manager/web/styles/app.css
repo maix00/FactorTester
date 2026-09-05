@@ -324,15 +324,15 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .ft-multi-select-sync-toggle:hover { color: inherit; background: var(--soft); }
 .ft-multi-select-onsite-badge { border: 0; border-radius: 0; padding: 0; color: var(--accent); background: transparent; font-size: 10px; font-weight: 700; white-space: nowrap; }
 /* Dropdown menu sections: collapsible 已选 / 排他 (+ manual) / other candidates. */
-.ft-multi-select-section-add { flex: 0 0 auto; width: 22px; height: 22px; min-width: 22px; margin-left: auto; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: var(--panel); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.ft-multi-select-section-add { flex: 0 0 auto; width: 16px; height: 16px; min-width: 16px; margin-left: auto; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); background: var(--panel); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 .ft-multi-select-section-add:hover { color: inherit; background: var(--soft); }
-.ft-multi-select-section-heading { display: flex; align-items: center; gap: 6px; margin-top: 4px; padding: 5px 7px; color: var(--muted); font-size: 11px; font-weight: 700; cursor: pointer; user-select: none; }
+.ft-multi-select-section-heading { display: flex; align-items: center; gap: 6px; min-height: 18px; margin-top: 4px; padding: 3px 7px; color: var(--muted); font-size: 11px; font-weight: 700; line-height: 1; cursor: pointer; user-select: none; }
 .ft-multi-select-section-heading:first-child { margin-top: 0; }
 .ft-multi-select-section-marker { flex: 0 0 auto; color: var(--muted); }
 .ft-multi-select-section-selected { display: grid; gap: 2px; }
 .ft-multi-select-section-exclusive, .ft-multi-select-section-others { display: grid; gap: 2px; }
 .ft-multi-select-manual-exclusive { grid-template-columns: 15px minmax(0, 1fr); }
-.ft-multi-select-manual-exclusive input { width: 100%; min-height: 30px; box-sizing: border-box; border: 1px dashed var(--line); border-radius: 6px; padding: 5px 8px; color: inherit; background: var(--panel); }
+.ft-multi-select-manual-exclusive input { width: 100%; min-height: 0; box-sizing: border-box; border: 1px dashed var(--line); border-radius: 6px; padding: 2px 8px; font: inherit; line-height: 1.4; color: inherit; background: var(--panel); }
 .ft-multi-select-option-label { min-width: 0; overflow-wrap: anywhere; }
 /* Badges ride inline on the label text baseline; line-height 1 keeps them from
    inflating the candidate-row height (same height as a plain row). */
