@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import settings as Settings
+
 from server.manager.services.federated_public_data import FederatedPublicDataService
 from server.manager.storage.account_domain import AccountDomainSyncService
 from server.manager.storage.account_domain.local import LocalAccountDomainStore
@@ -521,6 +523,115 @@ def test_two_servers_bidirectionally_sync_and_bridge_missing_content(
     # pulled whole.  Conflicting edits would surface here.
     assert server_a.local.conflicts(principal="alice") == []
     assert server_b.local.conflicts(principal="alice") == []
+
+
+def test_receiver_materializes_version_history_for_locally_held_source(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    """A server that holds a factor source's bytes but never authored it still
+    records its formula version (from the fingerprint carried on the outbox
+    manifest), so factor_family_formula_versions converges across servers.
+
+    This is the consumer half of the cross-server version-sync chain: the body
+    travels lazily over the data plane, the fingerprint arrives via the
+    factor_source outbox, and the receiver materializes the version row.
+    """
+    source = "class Gamma(FactorFamily):\n    pass\n"
+    fingerprint = "d" * 64
+
+    # The receiver's local factor_source store holds the bodies (as if hydrated).
+    def load_source(kind, owner_username, factor_id):
+        if owner_username == "carol" and factor_id == "Gamma":
+            return source
+        return None
+
+    from tools.data.sqlite.factor_source_versions import (
+        list_factor_formula_versions,
+    )
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "receiver.sqlite")
+    monkeypatch.setattr(
+        "tools.data.sqlite.factor_source_store.load_factor_source",
+        load_source,
+    )
+
+    control = MemoryControlStore()
+    receiver = AccountDomainSyncService(
+        sqlite_path=tmp_path / "r.sqlite", control_store=control, manager_id="office-b",
+    )
+
+    # Seed the receiver's local account_domain_entities with a factor_source
+    # manifest that advertises the fingerprint (as if pulled from the control DB).
+    receiver.local.upsert_local(
+        principal="carol",
+        entity_type="factor_source",
+        entity_id="custom:Gamma@office-a",
+        payload={
+            "source_kind": "custom",
+            "owner_username": "carol",
+            "factor_id": "Gamma",
+            "factor_name": "Gamma",
+            "source_sha256": "x" * 64,
+            "source_bytes": 0,
+            "storage_server_id": "office-a",
+            "visibility": "private",
+            "family_formula_fingerprint": fingerprint,
+        },
+        manager_id="office-a",
+    )
+
+    count = receiver.materialize_factor_source_versions("carol")
+    assert count == 1, "receiver should materialize one version for the held body"
+
+    versions = list_factor_formula_versions("custom", "carol", "Gamma")
+    assert [v["family_formula_fingerprint"] for v in versions] == [fingerprint]
+
+
+def test_receiver_skips_version_when_source_body_is_absent(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    """No body -> no version row: bytes arrive lazily over the data plane, so a
+    receiver that only has the manifest yet must not fabricate version history."""
+    fingerprint = "e" * 64
+
+    def load_source(kind, owner_username, factor_id):
+        return None  # bytes not local yet
+
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "receiver.sqlite")
+    monkeypatch.setattr(
+        "tools.data.sqlite.factor_source_store.load_factor_source",
+        load_source,
+    )
+
+    from tools.data.sqlite.factor_source_versions import (
+        list_factor_formula_versions,
+    )
+
+    control = MemoryControlStore()
+    receiver = AccountDomainSyncService(
+        sqlite_path=tmp_path / "r2.sqlite", control_store=control, manager_id="office-b",
+    )
+    receiver.local.upsert_local(
+        principal="carol",
+        entity_type="factor_source",
+        entity_id="custom:Delta@office-a",
+        payload={
+            "source_kind": "custom",
+            "owner_username": "carol",
+            "factor_id": "Delta",
+            "factor_name": "Delta",
+            "source_sha256": "y" * 64,
+            "source_bytes": 0,
+            "storage_server_id": "office-a",
+            "visibility": "private",
+            "family_formula_fingerprint": fingerprint,
+        },
+        manager_id="office-a",
+    )
+
+    count = receiver.materialize_factor_source_versions("carol")
+    assert count == 0, "no body -> must not materialize a version"
+    assert list_factor_formula_versions("custom", "carol", "Delta") == []
+
 
 
 def test_public_research_metadata_identifies_storage_manager(tmp_path: Path) -> None:

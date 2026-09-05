@@ -93,13 +93,73 @@ class AccountDomainSyncService:
         reconciled = self.reconcile_principal(owner)
         flushed = self.flush(principal=owner, limit=limit)
         pulled = self.pull(principal=owner, limit=limit)
+        # After pulling factor_source manifests, localize version history for any
+        # source whose bytes are already present locally.  A receiver that never
+        # authored the source still records its formula versions, so
+        # factor_family_formula_versions converges across servers (body is pulled
+        # lazily over the data plane; the fingerprint arrives via outbox).
+        versioned = self.materialize_factor_source_versions(owner)
         return {
             "status": "synced",
             "principal": owner,
             "reconciled": reconciled,
             "flushed": flushed,
             "pulled": pulled,
+            "versioned": versioned,
         }
+
+    def materialize_factor_source_versions(self, principal: str = "") -> int:
+        """Record local formula-version history for factor sources we already hold.
+
+        Reconcile/pull carries the ``family_formula_fingerprint`` on each
+        ``factor_source`` manifest, but the ``factor_family_formula_versions``
+        table is only written on the authoring server.  This pass backfills a
+        version row for every factor source whose bytes are present locally,
+        using the fingerprint advertised by the origin — so the version history
+        (and the source-version picker) is no longer empty on a receiver.
+        """
+        count = 0
+        try:
+            from tools.data.sqlite.factor_source_store import load_factor_source
+            from tools.data.sqlite.factor_source_versions import (
+                record_factor_formula_version,
+            )
+        except ImportError:
+            return 0
+        target = str(principal or "").strip()
+        for row in self.local.list_entities(
+            principal=target, entity_type="factor_source",
+        ):
+            payload = (row.get("payload") or {}) if isinstance(row, dict) else {}
+            if not isinstance(payload, dict):
+                continue
+            source_kind = str(payload.get("source_kind") or "").strip()
+            factor_id = str(payload.get("factor_id") or "").strip()
+            fingerprint = str(
+                payload.get("family_formula_fingerprint") or ""
+            ).strip()
+            owner_username = str(payload.get("owner_username") or "").strip()
+            if not source_kind or not factor_id or not fingerprint:
+                continue
+            # Only localize when we already hold the body (bytes).  Bodies travel
+            # over the data plane via the hash-bound transfer; manifests carry the
+            # fingerprint.  If the body is absent, skip (hydrated on demand).
+            body = load_factor_source(source_kind, owner_username, factor_id)
+            if not body:
+                continue
+            try:
+                record_factor_formula_version(
+                    source_kind,
+                    owner_username,
+                    factor_id,
+                    body,
+                    family_formula_fingerprint=fingerprint,
+                    subject=f"reconcile: {source_kind} {factor_id}",
+                )
+                count += 1
+            except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+                continue
+        return count
 
     def flush(self, *, principal: str = "", limit: int = 100) -> dict[str, Any]:
         pending = self.local.pending(principal=principal, limit=limit)
