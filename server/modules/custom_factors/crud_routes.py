@@ -257,6 +257,7 @@ def api_update_factor(factor_id):
         chinese_name=chinese_name,
         description=description,
         category=category,
+        family_formula_fingerprint=formula_fingerprint,
     )
     invalidate_custom_factor_cache(username, factor_id)
     if old_name and old_name != new_name:
