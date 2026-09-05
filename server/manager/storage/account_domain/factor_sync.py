@@ -19,37 +19,33 @@ _FACTOR_KEYS = (
 )
 
 
-def materialized_factor_configs(owner: str, *, existing: list[dict[str, Any]] | None = None, fingerprints: dict[str, str] | None = None) -> list[tuple[str, dict[str, Any]]]:
+def materialized_factor_configs(owner: str, *, existing: list[dict[str, Any]] | None = None) -> list[tuple[str, dict[str, Any]]]:
     """Freeze changed authoring configurations; reuse persisted frozen rows otherwise."""
-    import hashlib
-    import json
     from server.modules.custom_factors.factor_library_service import build_factor_library_config_factors
     from tools.data.account_manage import (
         get_account, list_factor_param_config_aliases, list_factor_param_config_scopes,
         load_factor_param_config,
     )
     account = get_account(owner) or {"username": owner}
-    prior = {row["entity_id"]: row.get("payload") or {} for row in existing or [] if not row.get("deleted")}
+    prior = {row["entity_id"]: row for row in existing or []}
     result = []
     for scope in list_factor_param_config_scopes(owner):
         for family in list_factor_param_config_aliases(owner, scope):
+            identifier = f"{scope}:{family}"
+            previous_row = prior.get(identifier)
+            previous = (previous_row or {}).get("payload") or {}
+            if previous_row and previous_row.get("deleted"):
+                # An old authored copy is not a request to resurrect a deletion.
+                continue
+            if (isinstance(previous.get("resolved_factors"), list)
+                    and len(previous["resolved_factors"]) >= len(previous.get("params_list") or [])):
+                # The write hook replaces this payload with a raw draft before
+                # a real authoring edit. On restart, the durable frozen mirror
+                # wins over a stale authored copy from another Manager.
+                result.append((identifier, previous))
+                continue
             config = load_factor_param_config(owner, family, scope)
             if not isinstance(config, dict):
-                continue
-            identifier = f"{scope}:{family}"
-            digest = hashlib.sha256(json.dumps(
-                {key: value for key, value in config.items() if key != "updated_at"},
-                sort_keys=True, separators=(",", ":"), ensure_ascii=False,
-            ).encode()).hexdigest()
-            previous = prior.get(identifier, {})
-            if (fingerprints is not None and fingerprints.get(identifier) == digest
-                    and isinstance(previous.get("resolved_factors"), list)):
-                continue
-            comparable = {key: previous.get(key) for key in config if key != "updated_at"}
-            if comparable == {key: value for key, value in config.items() if key != "updated_at"} and isinstance(previous.get("resolved_factors"), list):
-                result.append((identifier, previous))
-                if fingerprints is not None:
-                    fingerprints[identifier] = digest
                 continue
             try:
                 factors = build_factor_library_config_factors(owner, account, family, config)
@@ -65,6 +61,4 @@ def materialized_factor_configs(owner: str, *, existing: list[dict[str, Any]] | 
             payload = public_payload({**config, "factor_family_alias": family,
                                       "resolved_factors": resolved})
             result.append((identifier, payload))
-            if fingerprints is not None:
-                fingerprints[identifier] = digest
     return result

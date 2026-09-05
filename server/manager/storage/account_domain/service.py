@@ -37,7 +37,6 @@ class AccountDomainSyncService:
         self.access_cooldown = max(0.0, float(access_cooldown))
         self._last_sync: dict[str, float] = {}
         self._last_reconcile: dict[str, float] = {}
-        self._factor_authoring_fingerprints: dict[str, dict[str, str]] = {}
 
     def upsert(
         self,
@@ -392,8 +391,8 @@ class AccountDomainSyncService:
                     if isinstance(item, Mapping)
                 ],
                 "factor_param_config": materialized_factor_configs(owner, existing=self.local.list_entities(
-                    principal=owner, entity_type="factor_param_config", include_shared=False,
-                ), fingerprints=self._factor_authoring_fingerprints.setdefault(owner, {})),
+                    principal=owner, entity_type="factor_param_config", include_shared=False, include_deleted=True,
+                )),
             }
         except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
             return 0
@@ -405,7 +404,7 @@ class AccountDomainSyncService:
                 for row in self.local.list_entities(
                     principal=owner,
                     entity_type=entity_type,
-                    include_shared=False,
+                    include_shared=False, include_deleted=True,
                 )
             }
             current_ids: set[str] = set()
@@ -414,8 +413,12 @@ class AccountDomainSyncService:
                 if not identifier or not isinstance(value, Mapping):
                     continue
                 current_ids.add(identifier)
-                clean = public_payload(value)
                 row = existing.get(identifier)
+                if entity_type == "factor_set" and row is not None:
+                    # Save/delete hooks already persist immutable set changes.
+                    # A retained authoring copy must not replace a peer mirror.
+                    continue
+                clean = public_payload(value)
                 if (
                     row is not None
                     and row.get("payload") == clean

@@ -873,7 +873,14 @@ def test_unchanged_authoring_config_reuses_frozen_rows(monkeypatch):
     assert first == second
     assert calls == [1]
     config["params_list"] = [{"N": 2}]
-    materialized_factor_configs("alice", existing=[{"entity_id": key, "payload": value} for key, value in first])
+    # A stale authored copy after a restart is not a new edit.
+    assert materialized_factor_configs("alice", existing=[{"entity_id": key, "payload": value} for key, value in first]) == first
+    assert calls == [1]
+    # Real save hooks replace the mirror with the raw pending draft.
+    materialized_factor_configs("alice", existing=[{"entity_id": "default:F", "payload": config}])
+    assert calls == [1, 1]
+    # A retained authored copy must never resurrect an authority tombstone.
+    assert materialized_factor_configs("alice", existing=[{"entity_id": "default:F", "payload": {}, "deleted": True}]) == []
     assert calls == [1, 1]
 
 
@@ -888,3 +895,16 @@ def test_v2_set_reconcile_publishes_actual_ref(monkeypatch, tmp_path):
     service = AccountDomainSyncService(sqlite_path=tmp_path / "sets.sqlite", control_store=control, manager_id="a")
     assert service.reconcile_factor_catalog("alice", force=True) == 1
     assert control.rows[("alice", "factor_set", value["ref"])]["payload"]["identity"] == value["identity"]
+
+
+def test_reconcile_does_not_resurrect_deleted_authored_set(monkeypatch, tmp_path):
+    from tools.factors.factor_set_identity import freeze_factor_set_identity
+    frozen = freeze_factor_identity(owner_ref="alice", family_alias="F", factor_alias="F1",
+        family_formula_fingerprint="a" * 64, self_formula_fingerprint="b" * 64, params={})
+    value = freeze_factor_set_identity(owner_ref="principal:alice", set_id="s", alias="Set", members=[frozen])
+    monkeypatch.setattr("tools.data.account_manage.list_factor_sets", lambda owner: [value])
+    monkeypatch.setattr("server.manager.storage.account_domain.factor_sync.materialized_factor_configs", lambda *a, **k: [])
+    service = AccountDomainSyncService(sqlite_path=tmp_path / "set.sqlite", control_store=None, manager_id="local")
+    service.delete("alice", "factor_set", value["ref"], flush=False)
+    assert service.reconcile_factor_catalog("alice", force=True) == 0
+    assert service.local.pending(principal="alice")[0]["deleted"] is True
