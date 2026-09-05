@@ -659,6 +659,25 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
         refresh: bool = False,
     ) -> dict[str, Any]:
         viewer = VISITOR_PRINCIPAL if visitor else str(principal)
+        # Opening the factor-library tab must trigger the lazy account-domain
+        # sync regardless of the projection cache.  The refresh is asynchronous
+        # (background thread + cooldown + in-flight guard) so it never delays or
+        # blocks the catalog read, and it is a no-op for a visitor / anonymous
+        # principal (no owner).  This keeps the shared mirror fresh: new factor
+        # sources reconciled by a peer are pulled, stale local rows are flushed,
+        # and formula-version history is materialized for held sources.
+        if not visitor:
+            async_refresh = getattr(
+                self.client_state, "_refresh_account_domain_async", None,
+            )
+            if callable(async_refresh):
+                try:
+                    async_refresh(principal)
+                except (
+                    AttributeError, ConnectionError, OSError, RuntimeError,
+                    TypeError, ValueError,
+                ):
+                    pass
         key = ("factors", viewer)
         cached = None if refresh else self._cached(key)
         if cached is not None:
