@@ -94,6 +94,9 @@
   }
 
   function factorExpression(value, options = {}) {
+    // math_expr = 因子家族_LATEX模板_（自包含，\textcolor{red}{alias} 占位，未叠加）
+    // resolved_math_expr = 参数解析+嵌套因子叠加后的完整公式（查看模式渲染）
+    // instance=true → 优先 resolved_math_expr（叠加后）；否则 math_expr（模板）。
     const keys = options.instance === true
       ? ["resolved_math_expr", "math_expr", "formula", "latex", "factor_expr", "expression"]
       : ["math_expr", "formula", "latex", "factor_expr", "expression", "resolved_math_expr"];

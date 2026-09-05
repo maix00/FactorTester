@@ -86,6 +86,9 @@ def instantiate_factor_metadata(
             )
             for parameter in family.params
         },
+        # math_expr = 因子家族的_LATEX模板_（自包含，参数以 \textcolor{red}{alias} 占位，未做
+        # 参数替换/嵌套叠加）。resolved_math_expr = 参数解析+嵌套因子叠加后的完整公式。
+        # 前端查看模式渲染 resolved_math_expr；编辑/新建模式用 math_expr(模板)+参数列表现场叠加。
         "math_expr": str(template_formula or resolved_formula or ""),
         "resolved_math_expr": str(
             instance.get("resolved_math_expr") or resolved_formula or ""

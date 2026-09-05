@@ -73,10 +73,10 @@ def _instance_node(
             getattr(family, "formula_fingerprint", "")
             or getattr(factor, "family_formula_fingerprint", "") or ""
         ),
-        # math_expr stays the self-contained template (parameter references
-        # surface as ``\\textcolor{red}{Alias}``), matching the browser's
-        # template view.  resolved_math_expr is the fully composed block that
-        # the catalog detail page renders directly in view mode.
+        # math_expr = 因子家族的_LATEX模板_：自包含表达式，参数以 \textcolor{red}{Alias} 占位，
+        # 未做参数替换 / 嵌套因子叠加。它是"输入"，供前端编辑/新建预览与叠加函数的起点。
+        # resolved_math_expr = 叠加后_输出_：用模板+参数列表做参数替换 + 递归嵌套因子叠加
+        # 得到的完整公式，前端查看模式直接渲染它。两者为"输入/输出"，勿互换。
         "math_expr": template,
         "resolved_math_expr": "",
         "parameter_definitions": rows,

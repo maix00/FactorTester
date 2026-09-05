@@ -82,6 +82,9 @@ class FactorSourceCatalog:
                 "params": [],
             }
         family = factor_cls()
+        # math_expr = 因子家族的_LATEX模板_（自包含，参数以 \textcolor{red}{alias} 占位，
+        # 未做参数替换/嵌套因子叠加）。它是"模板/输入"，供前端编辑预览与后端叠加函数的起点。
+        # 叠加后的完整公式在 factor_instance_metadata 的 resolved_math_expr（前端查看渲染）。
         return {
             "source_code": source_code,
             "math_expr": getattr(family, "math_expr", "") or "",

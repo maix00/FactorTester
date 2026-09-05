@@ -261,6 +261,9 @@ def _family_projection(item: dict[str, Any]) -> dict[str, Any] | None:
         ),
         "chinese_name": _safe_text(item.get("chinese_name")),
         "description": _safe_long_text(item.get("description")),
+        # math_expr = 因子家族_LATEX模板_（自包含，\textcolor{red}{alias} 占位，未叠加）。
+        # resolved_math_expr = 参数解析+嵌套因子叠加后的完整公式（前端查看模式渲染）。
+        # 两者是「模板输入 / 叠加输出」，勿互换。
         "math_expr": _safe_math_text(item.get("math_expr")),
         "resolved_math_expr": _safe_math_text(item.get("resolved_math_expr")),
         "category": category,

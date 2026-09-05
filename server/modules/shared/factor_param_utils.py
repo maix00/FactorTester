@@ -449,6 +449,10 @@ def build_factor_param_item(
         'chinese_name': meta.get('chinese_name') or '',
         'description': meta.get('description')
         or getattr(factor_family, 'description', '') or '',
+        # math_expr = 因子家族的_LATEX模板_（自包含，参数以 \textcolor{red}{alias} 占位，
+        # 尚未做参数替换/嵌套叠加）。TOKEN preview 用它当起点。
+        # resolved_math_expr = 参数解析+嵌套因子叠加后的完整公式（前端查看模式渲染）。
+        # 注意：math_expr 是"模板/输入"，resolved_math_expr 是"最终/输出"，勿混用。
         'math_expr': meta.get('math_expr')
         or getattr(factor_family, 'math_expr', '') or '',
         'resolved_math_expr': instance_metadata['resolved_math_expr'],

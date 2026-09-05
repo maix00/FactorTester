@@ -50,12 +50,12 @@
     factor = window.FTFactorDisplayEnrichment?.enrichFactorForDisplay(data, factor)
       || factor;
     factor = model().withSourceMetadata(factor);
-    // View mode renders the backend-composed block directly.  The backend
-    // resolves the full recursive LaTeX (template + parameter substitution +
-    // nested-family intermediate definitions) at serialization time and
-    // returns it as resolved_math_expr, so the browser no longer recomputes
-    // the same composition here.  Only fall back to the frontend preview when
-    // the backend left it empty (transient / inline object never hydrated).
+    // 查看模式：factor 携带的两类公式字段
+    //   math_expr        = 因子家族_LATEX模板_（\textcolor{red}{alias} 占位，未叠加）
+    //   resolved_math_expr = 后端_叠加后_的完整公式（参数替换+嵌套因子展开）
+    // 后端在序列化时已算好 resolved_math_expr，查看模式直接渲染它；仅当后端未水合该对象
+    // （瞬态/内联）时才回退到前端 previewExpression 现场叠加。编辑/新建模式仍在 factor-editor
+    // 里用 math_expr(模板)+参数列表现场叠加，两处勿混用。
     if (!String(factor.resolved_math_expr || "").trim()) {
       const instanceValues = window.FTFactorDetailShared.parameterValues(factor);
       const resolvedExpression = window.FTFactorDetailShared.previewExpression(
