@@ -63,6 +63,10 @@ class FactorFamily(UniqueNameObject, FactorExpr):
     _runtime_ctx: threading.local
     _source_freqs_lock: threading.Lock
 
+    # math_expr = 因子家族的_LATEX模板_：自包含表达式，参数引用以 \textcolor{red}{alias} 占位，
+    # 尚未做参数替换 / 嵌套因子叠加。它是"模板/输入"，供前端编辑预览与后端叠加函数的起点；
+    # 叠加后的完整公式在因子实例序列化的 resolved_math_expr（前端查看模式渲染）。切勿把本字段
+    # 当作"叠加后结果"。
     math_expr: str = ""
     desc: str = ""
     description: str = ""

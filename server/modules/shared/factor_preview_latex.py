@@ -11,6 +11,13 @@ nested factor references recursively as blue family-name intermediate
 definitions.  The result is an ``aligned`` block for the root + every nested
 definition.
 
+———— 字段语义（全仓库统一，勿混淆）————
+- ``math_expr``          = 因子家族_LaTeX模板_：自包含表达式，参数以 \\textcolor{red}{alias} 占位，
+                           尚未做参数替换 / 嵌套因子叠加。它是叠加的**输入**，供编辑/新建预览起点。
+- ``resolved_math_expr`` = **叠加后_输出_**：用 math_expr(模板)+参数列表做参数替换 + 递归展开嵌套
+                           因子家族得到的完整公式。前端**查看模式**直接渲染它。
+- 两者为「输入 / 输出」，绝不可互换：前端叠加函数读 math_expr(模板)作起点，查看模式渲染 resolved。
+
 Everything below is a faithful translation of the JavaScript in
 ``factor-detail-shared.js``.  ``preview_expression`` is the public entry point;
 it accepts a factor object (a ``dict`` mirroring the frontend factor payload)

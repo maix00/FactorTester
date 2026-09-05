@@ -1235,6 +1235,9 @@
           state.family || state.inspection || state.loaded,
           attachNestedTemplates(state.parameterValues),
         );
+        // 编辑/新建模式：用「因子家族 math_expr(LATEX模板) + 参数列表」在现场（浏览器）做
+        // 参数替换 + 嵌套因子叠加，得到预览公式。这与查看模式（渲染后端 resolved_math_expr）
+        // 是两条路径：编辑可改嵌套因子，故须前端即时重算。math_expr=模板输入、resolved=输出。
         if (!formula) return;
         if (window.katex) window.katex.render(formula, target, {
           displayMode: true, throwOnError: false,
