@@ -423,6 +423,106 @@ def test_concurrent_edit_is_recorded_without_overwriting_local_state(tmp_path: P
     assert first.local.pending(principal="u")
 
 
+def test_two_servers_bidirectionally_sync_and_bridge_missing_content(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    """Two servers sharing one control DB reconcile the SAME principal in opposite
+    directions and each ends up with BOTH sides' factor sources.
+
+    This is the invariant that makes the staging/public pair converge when a user
+    opens the affected factor-library view: B sends its content up (flush) and A
+    pulls it down (and vice-versa), so each local cache is the *union*, not a
+    one-way mirror.  Neither server is authoritative; the shared control DB is.
+    """
+    alice_a = {
+        "owner_username": "alice", "factor_id": "Alpha",
+        "factor_name": "Alpha", "source_code": "class Alpha: pass",
+    }
+    alice_b = {
+        "owner_username": "alice", "factor_id": "Beta",
+        "factor_name": "Beta", "source_code": "class Beta: pass",
+    }
+    monkeypatch.setattr(
+        "tools.data.sqlite.factor_source_store.list_factor_sources",
+        lambda kind: [alice_a] if kind == "custom" else [],
+    )
+
+    control = MemoryControlStore()
+    server_a = AccountDomainSyncService(
+        sqlite_path=tmp_path / "a.sqlite", control_store=control, manager_id="office-a",
+    )
+    server_b = AccountDomainSyncService(
+        sqlite_path=tmp_path / "b.sqlite", control_store=control, manager_id="office-b",
+    )
+
+    # reconcile A: enqueues custom:Alpha@office-a into the shared control DB.
+    assert server_a.reconcile_factor_sources("alice") == 1
+
+    # B (same principal) does its own reconcile: enqueues custom:Beta@office-b.
+    # Crucial: B's source list is DIFFERENT from A's; the monkeypatch returns the
+    # same list for both, so to make the missing-content case real we swap the
+    # list for B so A and B each own a distinct factor.
+    monkeypatch.setattr(
+        "tools.data.sqlite.factor_source_store.list_factor_sources",
+        lambda kind: [alice_b] if kind == "custom" else [],
+    )
+    assert server_b.reconcile_factor_sources("alice") == 1
+
+    # Shared control DB now holds both, tagged by origin storage server.
+    ids = {
+        row["entity_id"]
+        for row in control.rows.values()
+        if row["principal"] == "alice" and row["entity_type"] == "factor_source"
+    }
+    assert ids == {"custom:Alpha@office-a", "custom:Beta@office-b"}
+
+    # A's local cache has only Alpha before pulling; it still owns its own row.
+    assert (
+        "alice", "factor_source", "custom:Alpha@office-a"
+    ) in control.rows
+    # server_a.local.entities → list_entities (LocalAccountDomainStore API)
+    a_local_before = {
+        row["entity_id"]
+        for row in server_a.local.list_entities(
+            principal="alice", entity_type="factor_source",
+        )
+    }
+    assert "custom:Alpha@office-a" in a_local_before
+    assert "custom:Beta@office-b" not in a_local_before
+
+    # A syncs: flush is a no-op (nothing local pending) but pull must now fetch
+    # B's Beta row from the shared control DB, bridging the missing content.
+    server_a.sync("alice", force=True)
+    a_local_after = {
+        row["entity_id"]
+        for row in server_a.local.list_entities(
+            principal="alice", entity_type="factor_source",
+        )
+    }
+    assert "custom:Beta@office-b" in a_local_after, (
+        "server A must pull server B's factor source (missing content bridged)"
+    )
+    assert "custom:Alpha@office-a" in a_local_after
+
+    # B syncs: it pulls A's Alpha row too, so both sides converge on the union.
+    server_b.sync("alice", force=True)
+    b_local_after = {
+        row["entity_id"]
+        for row in server_b.local.list_entities(
+            principal="alice", entity_type="factor_source",
+        )
+    }
+    assert "custom:Alpha@office-a" in b_local_after, (
+        "server B must pull server A's factor source (missing content bridged)"
+    )
+    assert "custom:Beta@office-b" in b_local_after
+
+    # No conflicts: each side's own row was authored by itself, the other's was
+    # pulled whole.  Conflicting edits would surface here.
+    assert server_a.local.conflicts(principal="alice") == []
+    assert server_b.local.conflicts(principal="alice") == []
+
+
 def test_public_research_metadata_identifies_storage_manager(tmp_path: Path) -> None:
     library = PublicResearchLibrary(tmp_path / "research", storage_server_id="public-1")
     projection = {

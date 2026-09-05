@@ -143,6 +143,7 @@ def save_factor_source(
     chinese_name: str | None = None,
     description: str | None = None,
     category: str | None = None,
+    family_formula_fingerprint: str = "",
 ) -> None:
     source_code = normalize_factor_source_code(source_code)
     upsert_factor_source_row(
@@ -150,6 +151,7 @@ def save_factor_source(
         chinese_name=chinese_name,
         description=description,
         category=category,
+        family_formula_fingerprint=family_formula_fingerprint,
     )
     root = existing_factor_workspace_root(username)
     if root:
@@ -166,6 +168,7 @@ def save_public_factor_source(
     chinese_name: str | None = None,
     description: str | None = None,
     category: str | None = None,
+    family_formula_fingerprint: str = "",
 ) -> None:
     source_code = normalize_factor_source_code(source_code)
     upsert_factor_source_row(
@@ -173,6 +176,7 @@ def save_public_factor_source(
         chinese_name=chinese_name,
         description=description,
         category=category,
+        family_formula_fingerprint=family_formula_fingerprint,
     )
 
 

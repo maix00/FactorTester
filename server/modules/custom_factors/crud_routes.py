@@ -127,6 +127,7 @@ def api_create_factor():
         chinese_name=chinese_name,
         description=description,
         category=category,
+        family_formula_fingerprint=formula_fingerprint,
     )
     try:
         _record_saved_formula_version(
@@ -179,6 +180,7 @@ def api_create_public_factor():
         chinese_name=chinese_name,
         description=description,
         category=category,
+        family_formula_fingerprint=formula_fingerprint,
     )
     invalidate_factor_family_cache(factor_id)
     try:
@@ -325,6 +327,7 @@ def api_update_public_factor(factor_id):
         chinese_name=chinese_name,
         description=description,
         category=category,
+        family_formula_fingerprint=formula_fingerprint,
     )
     invalidate_factor_family_cache(factor_id)
     try:

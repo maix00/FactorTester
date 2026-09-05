@@ -238,6 +238,7 @@ def upsert_factor_source(
     chinese_name: str | None = None,
     description: str | None = None,
     category: str | None = None,
+    family_formula_fingerprint: str = "",
 ) -> str:
     normalized_source_code = canonical_factor_source_code(source_code or "")
     metadata = {
@@ -273,6 +274,7 @@ def upsert_factor_source(
         source_kind, owner_username, factor_id, factor_name,
         normalized_source_code,
         metadata=metadata,
+        family_formula_fingerprint=family_formula_fingerprint,
     )
     return str(Settings.CACHE_DB_PATH)
 
@@ -395,6 +397,7 @@ def _enqueue_source_metadata(
     *,
     metadata: dict[str, str] | None = None,
     deleted: bool = False,
+    family_formula_fingerprint: str = "",
 ) -> None:
     """Sync a source manifest, never the source code itself."""
     try:
@@ -420,6 +423,13 @@ def _enqueue_source_metadata(
                 "chinese_name": str((metadata or {}).get("chinese_name") or ""),
                 "description": str((metadata or {}).get("description") or ""),
                 "category": str((metadata or {}).get("category") or ""),
+                # family formula fingerprint is the immutable semantic identity of
+                # the source.  The receiving server records it (and, on demand,
+                # hydrates the source body) so version history converges across
+                # servers even though the body itself is pulled lazily.
+                "family_formula_fingerprint": str(
+                    family_formula_fingerprint or ""
+                ).strip(),
             },
             deleted=deleted,
         )
