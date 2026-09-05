@@ -1,97 +1,66 @@
 from __future__ import annotations
 
+import copy
 import json
-
+import pytest
 from tools.migrations import migrate_factor_control_domain as migration
 
 
-class _Cursor:
-    rowcount = 1
-
-    def fetchone(self):
-        return None
-
-
-class _Connection:
-    def __init__(self) -> None:
+class Connection:
+    def __init__(self, current):
+        self.current = current
+        self.sequence = 1000
         self.calls = []
-
     def __enter__(self):
+        self.before = copy.deepcopy(self.current)
         return self
-
-    def __exit__(self, *_args):
-        return False
-
-    def execute(self, statement, parameters):
+    def __exit__(self, kind, *_args):
+        if kind: self.current = self.before
+    def execute(self, statement, parameters=()):
         self.calls.append((statement, parameters))
-        return _Cursor()
+        value = None
+        if statement.startswith("SELECT payload"):
+            value = self.current
+        elif statement.startswith("SELECT nextval"):
+            self.sequence += 1
+            value = (self.sequence,)
+        elif statement.startswith("INSERT"):
+            self.current = (parameters[3].obj, parameters[4], parameters[5])
+        return type("Cursor", (), {"fetchone": lambda _self: value})()
 
 
-def test_control_domain_plan_applies_and_restores_expected_revision(
-    tmp_path, monkeypatch,
-) -> None:
+def plan_files(tmp_path):
     plan = tmp_path / "plan.json"
-    plan.write_text(json.dumps({"rows": [{
-        "principal": "alice",
-        "entity_type": "factor_param_config",
-        "entity_id": "default:Momentum",
-        "expected_revision": 3,
-        "old_payload": {"schema_version": 1},
-        "old_deleted": False,
-        "new_payload": {"schema_version": 2},
-        "new_deleted": False,
-    }]}), encoding="utf-8")
-    environment = tmp_path / "control.env"
-    environment.write_text(
-        "FACTORTESTER_CONTROL_DATABASE_URL=postgresql://example\n",
-        encoding="utf-8",
-    )
-    connections: list[_Connection] = []
-
-    def connect(_url):
-        connection = _Connection()
-        connections.append(connection)
-        return connection
-
-    monkeypatch.setattr(migration.psycopg, "connect", connect)
-
-    assert migration.apply_plan(
-        plan_path=plan, environment_path=environment,
-    ) == 1
-    assert migration.apply_plan(
-        plan_path=plan, environment_path=environment, restore=True,
-    ) == 1
-
-    applied = connections[0].calls[0][1]
-    restored = connections[1].calls[0][1]
-    assert applied[2] == 4
-    assert applied[-1] == 3
-    assert restored[2] == 3
-    assert restored[-1] == 4
-
-
-def test_control_domain_plan_is_idempotent_when_target_is_already_present(
-    tmp_path, monkeypatch,
-) -> None:
-    plan = tmp_path / "plan.json"
-    target = {"schema_version": 2}
     plan.write_text(json.dumps({"rows": [{
         "principal": "alice", "entity_type": "factor_param_config",
-        "entity_id": "default:Momentum", "expected_revision": 3,
+        "entity_id": "default:F", "expected_revision": 3,
         "old_payload": {"schema_version": 1}, "old_deleted": False,
-        "new_payload": target, "new_deleted": False,
-    }]}), encoding="utf-8")
+        "new_payload": {"schema_version": 2}, "new_deleted": False,
+    }]}))
     environment = tmp_path / "control.env"
-    environment.write_text(
-        "FACTORTESTER_CONTROL_DATABASE_URL=postgresql://example\n", encoding="utf-8",
-    )
+    environment.write_text("FACTORTESTER_CONTROL_DATABASE_URL=postgresql://example\n")
+    return plan, environment
 
-    class Connection(_Connection):
-        def execute(self, statement, parameters):
-            self.calls.append((statement, parameters))
-            if statement.startswith("UPDATE"):
-                return type("Cursor", (), {"rowcount": 0})()
-            return type("Cursor", (), {"fetchone": lambda _self: (target, False)})()
 
-    monkeypatch.setattr(migration.psycopg, "connect", lambda _url: Connection())
+def test_apply_and_restore_both_advance_global_cursor(tmp_path, monkeypatch):
+    plan, environment = plan_files(tmp_path)
+    connection = Connection(({"schema_version": 1}, False, 3))
+    monkeypatch.setattr(migration.psycopg, "connect", lambda url: connection)
     assert migration.apply_plan(plan_path=plan, environment_path=environment) == 1
+    assert connection.current == ({"schema_version": 2}, False, 1001)
+    receipt = json.loads(plan.with_suffix(".json.receipt.json").read_text())
+    assert receipt["rows"][0]["revision"] == 1001
+    assert migration.apply_plan(plan_path=plan, environment_path=environment, restore=True) == 1
+    assert connection.current == ({"schema_version": 1}, False, 1002)
+
+
+def test_replay_is_idempotent_and_intervening_edits_are_preserved(tmp_path, monkeypatch):
+    plan, environment = plan_files(tmp_path)
+    connection = Connection(({"schema_version": 2}, False, 99))
+    monkeypatch.setattr(migration.psycopg, "connect", lambda url: connection)
+    assert migration.apply_plan(plan_path=plan, environment_path=environment) == 1
+    assert connection.sequence == 1000
+    connection.current = ({"schema_version": 2, "user_edit": True}, False, 100)
+    with pytest.raises(RuntimeError, match="precondition"):
+        migration.apply_plan(plan_path=plan, environment_path=environment, restore=True)
+    assert connection.current[0]["user_edit"] is True

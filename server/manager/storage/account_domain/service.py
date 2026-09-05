@@ -37,6 +37,7 @@ class AccountDomainSyncService:
         self.access_cooldown = max(0.0, float(access_cooldown))
         self._last_sync: dict[str, float] = {}
         self._last_reconcile: dict[str, float] = {}
+        self._factor_authoring_fingerprints: dict[str, dict[str, str]] = {}
 
     def upsert(
         self,
@@ -123,7 +124,7 @@ class AccountDomainSyncService:
         try:
             from tools.data.sqlite.factor_source_store import load_factor_source
             from tools.data.sqlite.factor_source_versions import (
-                record_factor_formula_version,
+                record_factor_formula_version, load_factor_formula_version,
             )
         except ImportError:
             return 0
@@ -141,6 +142,8 @@ class AccountDomainSyncService:
             ).strip()
             owner_username = str(payload.get("owner_username") or "").strip()
             if not source_kind or not factor_id or not fingerprint:
+                continue
+            if load_factor_formula_version(source_kind, owner_username, factor_id, fingerprint):
                 continue
             # Only localize when we already hold the body (bytes).  Bodies travel
             # over the data plane via the hash-bound transfer; manifests carry the
@@ -382,13 +385,15 @@ class AccountDomainSyncService:
             values = {
                 "factor_set": [
                     (
-                        str(item.get("target_ref") or item.get("set_ref") or ""),
+                        str(item.get("ref") or item.get("target_ref") or item.get("set_ref") or ""),
                         item,
                     )
                     for item in list_factor_sets(owner)
                     if isinstance(item, Mapping)
                 ],
-                "factor_param_config": materialized_factor_configs(owner),
+                "factor_param_config": materialized_factor_configs(owner, existing=self.local.list_entities(
+                    principal=owner, entity_type="factor_param_config", include_shared=False,
+                ), fingerprints=self._factor_authoring_fingerprints.setdefault(owner, {})),
             }
         except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
             return 0
@@ -414,20 +419,15 @@ class AccountDomainSyncService:
                 if (
                     row is not None
                     and row.get("payload") == clean
-                    and str(row.get("origin_manager_id") or "") == self.manager_id
                 ):
                     continue
                 self.upsert(
                     owner, entity_type, identifier, clean, flush=False,
                 )
                 count += 1
-            for identifier, row in existing.items():
-                if (
-                    identifier not in current_ids
-                    and str(row.get("origin_manager_id") or "") == self.manager_id
-                ):
-                    self.delete(owner, entity_type, identifier, flush=False)
-                    count += 1
+            # Absence from an authored collection is not proof of deletion:
+            # this Manager may only hold peer projections or lack a dependency.
+            # Explicit authoring delete APIs already enqueue tombstones.
         if count and flush:
             self.flush(principal=owner)
         return count

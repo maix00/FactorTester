@@ -138,15 +138,13 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
             0.0, float(getattr(synchronizer, "access_cooldown", 5.0)),
         )
         with self._catalog_refresh_lock:
-            if owners and owners[0] in self._catalog_refresh_inflight:
-                return
-            if owners and now - self._catalog_refresh_started.get(
-                owners[0], 0.0,
-            ) < cooldown:
+            owners = [item for item in owners if item not in self._catalog_refresh_inflight
+                      and now - self._catalog_refresh_started.get(item, 0.0) >= cooldown]
+            if not owners:
                 return
             for item in owners:
                 self._catalog_refresh_inflight.add(item)
-            self._catalog_refresh_started[owners[0]] = now
+                self._catalog_refresh_started[item] = now
 
         def refresh() -> None:
             try:

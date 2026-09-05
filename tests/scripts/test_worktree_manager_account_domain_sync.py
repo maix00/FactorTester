@@ -93,8 +93,8 @@ def test_factor_sync_materializes_resolved_aliases(monkeypatch) -> None:
         lambda _owner, _family, _scope: {"params_list": [{"$F": "1m"}]},
     )
     monkeypatch.setattr(
-        "server.modules.custom_factors.factor_library_service.build_factor_library_overview",
-        lambda *_args, **_kwargs: {"factors": [{
+        "server.modules.custom_factors.factor_library_service.build_factor_library_config_factors",
+        lambda *_args, **_kwargs: [{
             **frozen,
             "factor_ref": frozen["ref"],
             "factor_alias": "CA|$F:1m",
@@ -103,7 +103,7 @@ def test_factor_sync_materializes_resolved_aliases(monkeypatch) -> None:
             "scope_key": "default",
             "params": [{"alias": "$F", "value": "1m"}],
             "owner_username": "alice",
-        }]},
+        }],
     )
 
     values = materialized_factor_configs("alice")
@@ -116,7 +116,7 @@ def test_factor_sync_materializes_resolved_aliases(monkeypatch) -> None:
     assert resolved["identity"] == frozen["identity"]
 
 
-def test_factor_catalog_reconcile_is_idempotent_and_removes_local_stale_rows(
+def test_factor_catalog_reconcile_preserves_absent_rows_until_explicit_delete(
     monkeypatch, tmp_path: Path,
 ) -> None:
     service = AccountDomainSyncService(
@@ -141,7 +141,7 @@ def test_factor_catalog_reconcile_is_idempotent_and_removes_local_stale_rows(
     )
     monkeypatch.setattr(
         "server.manager.storage.account_domain.factor_sync.materialized_factor_configs",
-        lambda _owner: list(configs),
+        lambda _owner, **kwargs: list(configs),
     )
 
     assert service.reconcile_factor_catalog("alice", force=True) == 1
@@ -152,7 +152,9 @@ def test_factor_catalog_reconcile_is_idempotent_and_removes_local_stale_rows(
     assert rows[0]["payload"]["resolved_factors"][0]["factor_alias"] == "CA|$F:1m"
 
     configs.clear()
-    assert service.reconcile_factor_catalog("alice", force=True) == 1
+    assert service.reconcile_factor_catalog("alice", force=True) == 0
+    assert service.entities("alice", entity_type="factor_param_config", sync=False)
+    service.delete("alice", "factor_param_config", "default:CA", flush=False)
     assert service.entities(
         "alice", entity_type="factor_param_config", sync=False,
     ) == []
@@ -794,6 +796,7 @@ def test_metadata_collections_and_nested_identities_are_not_truncated():
 
 
 def test_receiver_rejects_wrong_source_version(monkeypatch, tmp_path):
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "source-versions.sqlite")
     monkeypatch.setattr("tools.data.sqlite.factor_source_store.load_factor_source", lambda *args: "new version")
     monkeypatch.setattr("tools.data.sqlite.factor_source_versions.record_factor_formula_version",
                         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not label new bytes with old identity")))
@@ -833,3 +836,55 @@ def test_acknowledgment_of_coalesced_inflight_edit_rebases_successor(tmp_path):
     local.acknowledge(successor, revision=11, sent_item=pending)
     assert local.pending() == []
     assert local.list_entities()[0]["payload"] == {"title": "second"}
+
+
+def test_factor_catalog_materializes_all_rows_and_queries_without_refreezing(monkeypatch, tmp_path):
+    local = LocalAccountDomainStore(tmp_path / "catalog.sqlite")
+    factors = [freeze_factor_identity(owner_ref="alice", family_alias="F", factor_alias=f"F{i}",
+        family_formula_fingerprint="a" * 64, self_formula_fingerprint="b" * 64, params={"N": i}) for i in range(600)]
+    payload = {"resolved_factors": factors, "params_list": [{"N": i} for i in range(600)]}
+    local.upsert_local(principal="alice", entity_type="factor_param_config", entity_id="default:F", payload=payload, manager_id="a")
+    monkeypatch.setattr("server.manager.services.account_domain_projection.factor_rows_from_account_entities",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("read rebuilt catalog")))
+    assert len(local.factor_catalog("alice")) == 600
+    assert len(local.factor_catalog("alice", offset=580, limit=20)) == 20
+    assert local.factor_catalog("alice", factor_ref=factors[-1]["ref"])[0]["factor_ref"] == factors[-1]["ref"]
+    assert local.factor_catalog("bob") == []
+    # Authoring drafts do not destroy already frozen candidates.
+    local.upsert_local(principal="alice", entity_type="factor_param_config", entity_id="default:F", payload={"params_list": []}, manager_id="a")
+    assert len(local.factor_catalog("alice")) == 600
+    assert local.pending() == []
+
+
+def test_unchanged_authoring_config_reuses_frozen_rows(monkeypatch):
+    monkeypatch.setattr("tools.data.account_manage.get_account", lambda owner: {"username": owner})
+    monkeypatch.setattr("tools.data.account_manage.list_factor_param_config_scopes", lambda owner: ["default"])
+    monkeypatch.setattr("tools.data.account_manage.list_factor_param_config_aliases", lambda owner, scope: ["F"])
+    config = {"params_list": [{"N": 1}]}
+    monkeypatch.setattr("tools.data.account_manage.load_factor_param_config", lambda *args: config)
+    calls = []
+    def freeze(*args):
+        calls.append(1)
+        return [freeze_factor_identity(owner_ref="alice", family_alias="F", factor_alias="F1",
+            family_formula_fingerprint="a" * 64, self_formula_fingerprint="b" * 64, params={"N": 1})]
+    monkeypatch.setattr("server.modules.custom_factors.factor_library_service.build_factor_library_config_factors", freeze)
+    first = materialized_factor_configs("alice")
+    second = materialized_factor_configs("alice", existing=[{"entity_id": key, "payload": value} for key, value in first])
+    assert first == second
+    assert calls == [1]
+    config["params_list"] = [{"N": 2}]
+    materialized_factor_configs("alice", existing=[{"entity_id": key, "payload": value} for key, value in first])
+    assert calls == [1, 1]
+
+
+def test_v2_set_reconcile_publishes_actual_ref(monkeypatch, tmp_path):
+    from tools.factors.factor_set_identity import freeze_factor_set_identity
+    frozen = freeze_factor_identity(owner_ref="alice", family_alias="F", factor_alias="F1",
+        family_formula_fingerprint="a" * 64, self_formula_fingerprint="b" * 64, params={})
+    value = freeze_factor_set_identity(owner_ref="principal:alice", set_id="s", alias="Set", members=[frozen])
+    monkeypatch.setattr("tools.data.account_manage.list_factor_sets", lambda owner: [value])
+    monkeypatch.setattr("server.manager.storage.account_domain.factor_sync.materialized_factor_configs", lambda *args, **kwargs: [])
+    control = MemoryControlStore()
+    service = AccountDomainSyncService(sqlite_path=tmp_path / "sets.sqlite", control_store=control, manager_id="a")
+    assert service.reconcile_factor_catalog("alice", force=True) == 1
+    assert control.rows[("alice", "factor_set", value["ref"])]["payload"]["identity"] == value["identity"]

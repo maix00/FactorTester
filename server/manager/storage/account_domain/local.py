@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 import time
 import uuid
@@ -47,6 +48,14 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             ON account_domain_entities(entity_type, principal, updated_at DESC);
         CREATE INDEX IF NOT EXISTS account_domain_entities_remote_revision
             ON account_domain_entities(remote_revision);
+
+        CREATE INDEX IF NOT EXISTS account_domain_factor_catalog_config
+            ON account_domain_entities(principal, json_extract(payload_json, '$.source_config_id'))
+            WHERE entity_type='factor_catalog_entry';
+
+        CREATE INDEX IF NOT EXISTS account_domain_factor_catalog_ref
+            ON account_domain_entities(principal, json_extract(payload_json, '$.factor.factor_ref'))
+            WHERE entity_type='factor_catalog_entry';
 
         CREATE TABLE IF NOT EXISTS account_domain_outbox (
             operation_id TEXT PRIMARY KEY,
@@ -149,6 +158,7 @@ class LocalAccountDomainStore:
                     base_revision, manager_id, now,
                 ),
             )
+            _materialize_factor_entries(conn, principal, entity_type, entity_id, payload, deleted, manager_id)
             # Coalesce local edits. The newest state is the only state that
             # needs to reach the authority; operation_id still makes retries
             # auditable and independent of a process lifetime.
@@ -169,13 +179,16 @@ class LocalAccountDomainStore:
                 (
                     operation_id, principal, entity_type, entity_id, encoded,
                     int(deleted), base_revision, now,
-                    "remote revision conflict" if blocked else "",
+                    "remote revision conflict" if blocked else (
+                        "factor materialization required" if entity_type == "factor_param_config"
+                        and not deleted and not isinstance(payload.get("resolved_factors"), list) else ""
+                    ),
                 ),
             )
         return operation_id
 
     def pending(self, *, principal: str = "", limit: int = 100, include_blocked: bool = False) -> list[dict[str, Any]]:
-        clauses = [] if include_blocked else ["last_error != 'remote revision conflict'"]
+        clauses = [] if include_blocked else ["last_error NOT IN ('remote revision conflict', 'factor materialization required')"]
         params: list[Any] = []
         if principal:
             clauses.append("principal=?")
@@ -199,7 +212,9 @@ class LocalAccountDomainStore:
     ) -> None:
         """Remove one superseded local identity and resolve its old conflicts."""
         with connect_sqlite(self.path) as conn:
+            conn.execute("BEGIN IMMEDIATE")
             key = (principal, entity_type, entity_id)
+            _materialize_factor_entries(conn, *key, {}, True, "")
             conn.execute(
                 """
                 DELETE FROM account_domain_outbox
@@ -287,6 +302,7 @@ class LocalAccountDomainStore:
                 "origin_manager_id=?, updated_at=? WHERE principal=? AND entity_type=? AND entity_id=?",
                 (encoded, int(deleted), remote_revision, remote_revision, manager_id, now, *key),
             )
+            _materialize_factor_entries(conn, principal, entity_type, entity_id, payload, deleted, manager_id)
             conn.execute("DELETE FROM account_domain_outbox WHERE principal=? AND entity_type=? AND entity_id=?", key)
             conn.execute(
                 "INSERT INTO account_domain_outbox(operation_id, principal, entity_type, entity_id, payload_json, "
@@ -407,7 +423,38 @@ class LocalAccountDomainStore:
                     str(row.get("origin_manager_id") or ""), time.time(),
                 ),
             )
+            _materialize_factor_entries(conn, principal, entity_type, entity_id, payload, deleted, str(row.get("origin_manager_id") or ""))
         return "applied"
+
+    def rebuild_factor_catalog(self, principal: str = "") -> int:
+        """Explicit deployment backfill; normal reads never run migration work."""
+        with connect_sqlite(self.path) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                "SELECT * FROM account_domain_entities WHERE entity_type='factor_param_config'" +
+                (" AND principal=?" if principal else ""), (principal,) if principal else (),
+            ).fetchall()
+            for row in rows:
+                _materialize_factor_entries(conn, row["principal"], row["entity_type"], row["entity_id"],
+                    _decode(row["payload_json"]), bool(row["deleted"]), row["origin_manager_id"])
+        return len(rows)
+
+    def factor_catalog(self, principal: str, *, factor_ref: str = "", offset: int = 0, limit: int | None = None) -> list[dict[str, Any]]:
+        clauses = ["principal=?", "entity_type='factor_catalog_entry'", "deleted=0"]
+        args: list[Any] = [principal]
+        if factor_ref:
+            clauses.append("json_extract(payload_json, '$.factor.factor_ref')=?")
+            args.append(factor_ref)
+        paging = ""
+        if limit is not None:
+            paging = " LIMIT ? OFFSET ?"
+            args.extend((max(1, min(1000, int(limit))), max(0, int(offset))))
+        with connect_sqlite(self.path) as conn:
+            rows = conn.execute(
+                "SELECT payload_json FROM account_domain_entities WHERE " + " AND ".join(clauses) +
+                " ORDER BY entity_id" + paging, args,
+            ).fetchall()
+        return [_decode(row["payload_json"])["factor"] for row in rows]
 
     def cursor(self, scope_key: str) -> int:
         with connect_sqlite(self.path) as conn:
@@ -439,6 +486,8 @@ class LocalAccountDomainStore:
         include_deleted: bool = False,
     ) -> list[dict[str, Any]]:
         clauses = [] if include_deleted else ["deleted=0"]
+        if entity_type != "factor_catalog_entry":
+            clauses.append("entity_type != 'factor_catalog_entry'")
         params: list[Any] = []
         if principal:
             if include_shared:
@@ -475,6 +524,46 @@ class LocalAccountDomainStore:
                 tuple(params),
             ).fetchall()
         return [dict(row) for row in rows]
+
+
+def _materialize_factor_entries(conn, principal, entity_type, entity_id, payload, deleted, manager_id):
+    """Normalize registered rows in the existing mirror, separately from authoring JSON.
+
+    These local read projections never enter the outbox. The source config and
+    its frozen row projections change in one transaction; an unresolved draft
+    retains the last successfully materialized catalog until it can be frozen.
+    """
+    if entity_type != "factor_param_config":
+        return
+    if not deleted and not isinstance(payload.get("resolved_factors"), list):
+        return
+    from server.manager.services.account_domain_projection import factor_rows_from_account_entities
+    rows = [] if deleted else factor_rows_from_account_entities([{
+        "principal": principal, "entity_id": entity_id, "payload": payload,
+    }], principal)
+    # A partial source-dependent rebuild cannot remove registered objects.
+    if not deleted and len(rows) < len(payload.get("params_list") or []):
+        return
+    previous = {row[0] for row in conn.execute(
+        "SELECT entity_id FROM account_domain_entities WHERE principal=? AND entity_type='factor_catalog_entry' "
+        "AND json_extract(payload_json, '$.source_config_id')=?", (principal, entity_id),
+    )}
+    retained = set()
+    for factor in rows:
+        identifier = hashlib.sha256(_encode({"config": entity_id, "ref": factor["factor_ref"]}).encode()).hexdigest()
+        retained.add(identifier)
+        value = _encode({"source_config_id": entity_id, "factor": factor})
+        conn.execute(
+            "INSERT INTO account_domain_entities(principal, entity_type, entity_id, payload_json, deleted, origin_manager_id, updated_at) "
+            "VALUES (?, 'factor_catalog_entry', ?, ?, 0, ?, ?) "
+            "ON CONFLICT(principal, entity_type, entity_id) DO UPDATE SET payload_json=excluded.payload_json, updated_at=excluded.updated_at "
+            "WHERE payload_json != excluded.payload_json",
+            (principal, identifier, value, manager_id, time.time()),
+        )
+    conn.executemany(
+        "DELETE FROM account_domain_entities WHERE principal=? AND entity_type='factor_catalog_entry' AND entity_id=?",
+        [(principal, identifier) for identifier in previous-retained],
+    )
 
 
 def _record_conflict(conn: sqlite3.Connection, item: dict[str, Any], remote: dict[str, Any]) -> None:

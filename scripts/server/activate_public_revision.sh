@@ -224,5 +224,7 @@ trap - ERR INT TERM
 printf '%s\t%s\t%s\n' \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$revision" "verified" \
   >> "$deployment_log"
-cleanup_old_application_releases
-echo "Published public main $revision; PostgreSQL container preserved; retained $release_retention application releases"
+if [[ "${FACTORTESTER_CLEANUP_RELEASES:-0}" == "1" ]]; then
+  cleanup_old_application_releases
+fi
+echo "Published public main $revision; PostgreSQL container preserved; release cleanup is opt-in"
