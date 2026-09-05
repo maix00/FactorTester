@@ -31,7 +31,11 @@ global.window = {
   },
 };
 vm.runInThisContext(
-  fs.readFileSync("server/manager/web/catalog/shared/multi-select-filter.js", "utf8"),
+  fs.readFileSync("server/manager/web/catalog/shared/multi-select-filter/type-filter.js", "utf8"),
+  {filename: "multi-select-filter/type-filter.js"},
+);
+vm.runInThisContext(
+  fs.readFileSync("server/manager/web/catalog/shared/multi-select-filter/index.js", "utf8"),
   {filename: "multi-select-filter.js"},
 );
 vm.runInThisContext(
@@ -55,54 +59,50 @@ assert.strictEqual(view.search.type, "search");
 assert.strictEqual(view.search.placeholder, "搜索产品组");
 assert.strictEqual(typeof view.setItems, "function");
 assert.strictEqual(view.value, "*");
+function walk(node, out = []) {
+  for (const child of node.children || []) {
+    if (typeof child === "string") continue;
+    out.push(child);
+    walk(child, out);
+  }
+  return out;
+}
+function optionRows(picker) {
+  return walk(picker.optionList).filter(item => (
+    String(item.className || "").includes("ft-multi-select-option")
+    && String(item.tagName).toLowerCase() === "label"
+  ));
+}
 const rowLabel = item => item.children[1]?.textContent || item.textContent;
-assert.ok(view.options.children.some(item => rowLabel(item) === "全部产品组"));
-assert.ok(view.options.children.some(item => rowLabel(item) === "未绑定产品组"));
-assert.ok(view.options.children.some(item => rowLabel(item) === "日盘期货"));
+function findRow(label) {
+  return optionRows(view).find(item => rowLabel(item) === label);
+}
+assert.ok(findRow("全部产品组"));
+assert.ok(findRow("未绑定产品组"));
+assert.ok(findRow("日盘期货"));
 
 view.search.value = "夜盘";
 view.search.listeners.input();
-assert.deepStrictEqual(
-  view.options.children.map(rowLabel), ["夜盘期货"],
-);
-view.options.children[0].children[0].checked = true;
-view.options.children[0].children[0].listeners.change();
-assert.strictEqual(view.value, "product-group:night");
-assert.deepStrictEqual(changes, []);
-const save = find(view.element, item => item.className === "primary ft-multi-select-apply");
-assert.ok(save);
-save.listeners.click();
+const filteredRows = optionRows(view).map(rowLabel);
+assert.ok(filteredRows.includes("夜盘期货"), "search narrows candidates");
+assert.ok(filteredRows.includes("全部产品组"),
+  "search must not filter the already-selected section");
+const night = findRow("夜盘期货");
+night.children[0].checked = true;
+night.children[0].listeners.change();
+assert.strictEqual(changes.length, 0, "multi pick waits for outside-close commit");
+view.dropdown.open = false;
+view.dropdown.listeners.toggle();
 assert.deepStrictEqual(changes, [["product-group:night"]]);
 view.clear.listeners.click();
-assert.strictEqual(rowLabel(view.options.children[0]), "全部产品组",
-  "clearing search must restore the declared option order");
-assert.ok(view.options.children.some(item => rowLabel(item) === "夜盘期货"));
-const day = view.options.children.find(item => rowLabel(item) === "日盘期货");
+assert.ok(findRow("夜盘期货"), "clearing search restores candidates");
+const day = findRow("日盘期货");
 day.children[0].checked = true;
 day.children[0].listeners.change();
-assert.deepStrictEqual(view.values, ["product-group:night", "product-group:day"]);
-const all = view.options.children.find(item => rowLabel(item) === "全部产品组");
-all.children[0].checked = true;
-all.children[0].listeners.change();
-assert.deepStrictEqual(view.values, ["*"]);
-
-view.setItems([
-  {group_ref: "product-group:updated", name: "更新后的产品组"},
-]);
-assert.ok(view.options.children.some(item => rowLabel(item) === "更新后的产品组"));
-
-function tags(node) {
-  return [node.tagName, ...(node.children || []).flatMap(tags)];
-}
-
-function find(node, predicate) {
-  if (predicate(node)) return node;
-  for (const child of node.children || []) {
-    const result = find(child, predicate);
-    if (result) return result;
-  }
-  return null;
-}
-
-assert.ok(!tags(view.element).includes("SELECT"));
+view.dropdown.open = false;
+view.dropdown.listeners.toggle();
+assert.deepStrictEqual(changes.at(-1), ["product-group:night", "product-group:day"]);
+assert.equal(optionRows(view).some(item => (
+  String(item.className).includes("ft-multi-select-apply")
+)), false, "no save action is rendered");
 console.log("ok");

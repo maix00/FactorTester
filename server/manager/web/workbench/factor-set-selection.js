@@ -268,5 +268,6 @@
 
   window.FTTestFactorSets = Object.freeze({
     control, descriptors, initialize, panel, prepare, selections,
+    selectSet, loadMembers, addInlineSet, setSelections, loadCatalog,
   });
 })();

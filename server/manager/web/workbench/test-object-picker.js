@@ -32,6 +32,18 @@
           : options.onCreate,
       });
     }
+    const kindLabelOf = options.typeLabelOf || ((key, item) => {
+      const kind = String(item?.type || item?.kind || key || "").trim();
+      const known = {
+        factor: context.t("因子"), factor_family: context.t("因子家族"),
+        product: context.t("产品"), product_group: context.t("产品组"),
+        category: context.t("分类"), strategy: context.t("策略"),
+        factor_set: context.t("因子候选"), factor_sequence: context.t("因子序列"),
+        nested_factor: context.t("嵌套因子"), factor: context.t("因子"),
+        column: context.t("DataColumn"),
+      };
+      return known[kind] || kind || "";
+    });
     const filter = FTMultiSelectFilter.create(context, {
       ...options,
       items: (options.items || []).map(item => ({
@@ -44,6 +56,8 @@
       actionsPlacement: options.actionsPlacement
         || (actions.length ? "trailing" : undefined),
       multi: options.multi !== false,
+      typeLabelOf: options.typeLabelOf
+        || ((key, item) => item?.typeLabel || kindLabelOf(key, item)),
     });
     filter.element.classList.add("ft-test-object-picker");
     const insertBeforeDropdown = node => {
@@ -67,9 +81,13 @@
     return filter;
   }
 
-  // Object and scalar choice fields intentionally share this exact picker.
-  // The product/factor catalog filters call FTMultiSelectFilter directly; the
+  // The unified object picker: a thin wrapper over FTMultiSelectFilter that
+  // concentrates the object-choice semantics (create/edit current object,
+  // loading/note affordances, candidate-type grouping via type/kind).  Object
+  // and scalar choice fields intentionally share this exact picker.  The
+  // product/factor catalog filters call FTMultiSelectFilter directly; the
   // workbench wrapper only adds the create/edit actions and field semantics.
-  window.FTTestObjectPicker = Object.freeze({create, lazyLoading});
-  window.FTTestChoicePicker = Object.freeze({create, lazyLoading});
+  window.FTObjectPicker = Object.freeze({create, lazyLoading});
+  window.FTTestObjectPicker = window.FTObjectPicker;
+  window.FTTestChoicePicker = window.FTObjectPicker;
 })();

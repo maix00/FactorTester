@@ -130,15 +130,31 @@
     return FTMultiSelectFilter.create(context, options);
   }
 
+  // The picker's candidate source: library families plus this-session on-the-fly
+  // families (which survive a redraw via state.onsiteFamilies). Used both for
+  // the rendered items and for onChange lookups so a rebuild keeps 当场 + selection.
+  function familyPickerItems(data, state) {
+    const base = familyItems(data);
+    const onsite = (state?.onsiteFamilies || []).map(f => ({
+      value: familyRef(f),
+      label: familyAlias(f) || familyRef(f),
+      family: f,
+      onsite: true,
+      temporary: true,
+    }));
+    const seen = new Set(base.map(item => item.value));
+    return base.concat(onsite.filter(item => !seen.has(item.value)));
+  }
+
   function familyPicker(context, data, state, redraw) {
     const picker = sharedPicker(context, {
       compact: true,
       name: "factor-family-source",
       title: context.t("因子家族"),
       multi: false,
-      items: familyItems(data),
+      items: familyPickerItems(data, state),
       selected: state.family ? [familyRef(state.family)] : [],
-      onCreate: async () => {
+      onAddCandidate: async (_context, {add}) => {
         const editingTemporary = state.family?.temporary === true
           || state.family?.source_kind === "transient";
         const open = context.openObject || (childOptions => (
@@ -151,8 +167,18 @@
           temporary: true,
           onSaved: family => {
             if (!family) return;
-            if (!(data.families || []).some(item => familyRef(item) === familyRef(family))) {
-              data.families = [...(data.families || []), family];
+            // On-the-fly candidate only — never into the library family list,
+            // so it does not linger in 候选 nor appear on later pages.
+            add({
+              value: familyRef(family),
+              label: familyAlias(family) || familyRef(family),
+              family,
+              temporary: true,
+            });
+            // Keep the on-the-fly family for this session so a redraw rebuilds
+            // the picker with it in 当场 + selected. Dedupe by ref.
+            if (!state.onsiteFamilies.some(f => familyRef(f) === familyRef(family))) {
+              state.onsiteFamilies.push(family);
             }
             state.family = family;
             state.latestFamily = family;
@@ -172,13 +198,19 @@
           },
         });
       },
-      createLabel: context.t(
-        state.family?.temporary === true || state.family?.source_kind === "transient"
-          ? "编辑因子家族" : "新增因子家族",
-      ),
-      createTitle: context.t("现场新增或编辑因子家族并返回当前因子"),
+      onTemporaryCandidateRemoved: item => {
+        const removedRef = String(item?.value ?? item?.ref ?? "").trim();
+        state.onsiteFamilies = (state.onsiteFamilies || []).filter(f => (
+          familyRef(f) !== removedRef
+        ));
+        if (state.family && familyRef(state.family) === removedRef) {
+          state.family = null;
+          state.latestFamily = null;
+        }
+      },
       onChange: async values => {
-        state.family = familyItems(data).find(item => item.value === values[0])?.family || null;
+        state.family = familyPickerItems(data, state)
+          .find(item => item.value === values[0])?.family || null;
         state.sourceMode = "family";
         if (state.family && !parameterDefinitions(state.family).length) {
           try {
@@ -211,7 +243,7 @@
   }
 
   function sourceVersionPicker(context, state, redraw) {
-    if (!state.family || state.sourceMode !== "family"
+    if (!state.family
         || state.family.temporary === true
         || state.family.source_kind === "transient") return null;
     const options = window.FTFactorDetailShared.sourceOptions(state.family);
@@ -235,6 +267,22 @@
         ); },
       },
     );
+    // Editing a frozen factor must echo its actual source version, not 未筛选:
+    // eagerly load the version list so the frozen fingerprint matches a real
+    // version item (onOpen above only lazily loads it on user interaction).
+    if (!state.sourceVersions && !state.sourceVersionLoading
+      && state.sourceVersionFingerprint) {
+      state.sourceVersionLoading = true;
+      void window.FTFactorDetailShared.loadSourceVersions(
+        context, state.family, options,
+      ).then(payload => {
+        state.sourceVersions = payload;
+        state.sourceVersionLoading = false;
+        redraw();
+      }).catch(() => {
+        state.sourceVersionLoading = false;
+      });
+    }
     return field(context.t("源码版本"), picker.element);
   }
 
@@ -983,7 +1031,24 @@
       sourceMode: familyMode ? "source" : mode === "edit" && !temporaryFamilyEdit
         ? "source" : "family",
       family: familyMode && mode === "edit"
-        ? loaded : selectedFamily || loadedFamily,
+        ? loaded
+        : selectedFamily || loadedFamily || (loaded && (
+            loaded.factor_family_alias || loaded.identity?.family_alias
+          ) ? {
+            factor_family_alias: loaded.factor_family_alias
+              || loaded.identity?.family_alias,
+            factor_family_name: loaded.factor_family_alias
+              || loaded.identity?.family_alias,
+            family_ref: loaded.family_ref || loaded.identity?.family_ref || "",
+            parameter_definitions: loaded.parameter_definitions
+              || loaded.family_parameter_definitions || [],
+            math_expr: loaded.math_expr || loaded.formula || "",
+            owner_username: loaded.owner_username
+              || loaded.owner_ref || loaded.factor_owner_ref || "",
+            factor_owner_ref: loaded.factor_owner_ref
+              || loaded.owner_ref || loaded.owner_username || "",
+            factor_kind: loaded.factor_kind || (loaded.source || ""),
+          } : null),
       latestFamily: familyMode && mode === "edit"
         ? loaded : selectedFamily || loadedFamily,
       sourceCode: loaded.source_code || "",
@@ -998,10 +1063,15 @@
       loaded,
       validationError: "",
       validationMessage: "",
-      sourceVersionFingerprint: loaded.family_formula_fingerprint || "",
+      sourceVersionFingerprint: loaded.family_formula_fingerprint
+        || loaded.identity?.family_formula_fingerprint || "",
       sourceVersions: null,
       sourceVersionError: "",
       sourceVersionLoading: false,
+      // On-the-fly factor families created through the picker "+" this session.
+      // They are NOT pushed into data.families (never persist), but must survive
+      // a redraw so the 当场 section + selection survive a picker rebuild.
+      onsiteFamilies: [],
     };
     const noun = familyMode ? context.t("因子家族") : context.t("因子");
     const titleText = mode === "create"
@@ -1206,9 +1276,14 @@
         const version = sourceVersionPicker(context, state, redraw);
         if (version) sourceMount.append(version);
       } else {
-        sourceMount.append(sourceControls(context, state, redraw, {
-          onChanged: () => tabs?.setDirty("source", true),
-        }));
+        // Edit mode shows the same family picker (+ 当场新建) and the family
+        // source-version picker as create mode, then the source editor.
+        sourceMount.append(familyPicker(context, data, state, redraw));
+        const version = sourceVersionPicker(context, state, redraw);
+        if (version) sourceMount.append(version);
+        // A factor instance's source code comes from its family template; the
+        // parameter tab shows only the family/source-version rows — no Python
+        // source editor (that belongs to a family page).
       }
       const metadata = sourceMetadata(context, state);
       identityMount.replaceChildren();
@@ -1227,9 +1302,12 @@
         sourceMount.append(error);
       }
       parameterMount.replaceChildren();
-      if (!state.familyMode && state.mode === "create") {
+      if (!state.familyMode) {
         // Factor instances do not own a source tab. Their family selection
-        // (or family creation) is part of the parameter composition flow.
+        // (or family creation) + source version is part of the parameter
+        // composition flow.  Both create and edit render the same family /
+        // source-version rows on the parameter tab (edit included), so
+        // changing the family/version means starting a fresh factor.
         parameterMount.append(sourceMount);
       }
       const editor = parameterEditor(context, data, state, redraw, {

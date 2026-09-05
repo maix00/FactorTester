@@ -91,8 +91,10 @@ const dependencyPanel = window.FTTestSourceUpload.dependencyPanel(
 assert.deepEqual(
   [...findAll(strategyPanel, node => node.tagName === "button"
     && !node.className.split(" ").includes("ft-help-icon")
+    && !node.className.split(" ").includes("ft-multi-select-sync-toggle")
     && node.textContent !== "×"), ...findAll(dependencyPanel, node => node.tagName === "button"
     && !node.className.split(" ").includes("ft-help-icon")
+    && !node.className.split(" ").includes("ft-multi-select-sync-toggle")
     && node.textContent !== "×")]
     .map(node => node.textContent),
   ["自定义策略源码", "自定义依赖"],
@@ -103,13 +105,12 @@ const pickers = [strategyPanel, dependencyPanel].flatMap(panel => (
 assert.deepEqual(pickers.map(node => [node.accept, node.multiple]), [
   [".hook", false], [".cfg", true],
 ]);
-assert.deepEqual(
-  findAll(dependencyPanel, node => node.tagName === "span"
+const usageLabels = findAll(dependencyPanel, node => node.tagName === "span"
     && node.className === "ft-multi-select-option-label"
     && node.textContent !== "×")
-    .map(node => node.textContent),
-  ["自定义用途"],
-);
+    .map(node => node.textContent);
+assert.ok(usageLabels.includes("自定义用途"),
+  "selected 自定义用途 appears in the menu (已选 + candidates sections)");
 
 const populatedState = {
   transientStrategySources: [{path: "hooks/risk.hook", source_code: "allow = true"}],

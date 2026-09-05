@@ -58,28 +58,27 @@
       }
       return String(value ?? "").trim();
     };
-    const allowFamilyComposition = Number(options.depth || 0)
-      < Number(options.maxFamilyDepth ?? 12);
+    // FactorParam is now a single multi-type single-select: the candidate pool
+    // is DataColumn / 手填排他(manual) / 因子 — no family source.  Family
+    // composition remains only as a value shape (see renderNested), never as a
+    // selectable 来源.
     const sourceTypes = [
       {
-        value: "manual", label: context.t("填写"),
-        description: context.t("手动填写 ColumnRef、因子 alias 或常量"),
+        value: "manual", label: context.t("手填排他"),
+        description: context.t("手动填写 ConstExpr、DataColumn alias 或因子 alias"),
       },
       {
-        value: "column", label: context.t("Column"),
+        value: "column", label: context.t("DataColumn"),
         description: context.t("从 DataColumn 候选中选择"),
       },
       {
-        value: "factor", label: context.t("因子库"),
-        description: context.t("从当前可见因子中选择"),
+        value: "factor", label: context.t("因子"),
+        description: context.t("从当前可见因子中选择，或当场新建"),
       },
     ];
-    if (allowFamilyComposition) {
-      sourceTypes.push({
-        value: "family", label: context.t("因子家族"),
-        description: context.t("选择因子家族并填写其嵌套参数"),
-      });
-    }
+    // Family composition is no longer a FactorParam source; keep the value
+    // shape handled below but never surface the 因子家族 来源/编辑 UI.
+    const allowFamilyComposition = false;
     let columnPicker;
     let factorPicker;
     let familyPicker;
@@ -161,64 +160,174 @@
       if (source === "family" && !familyDraft(values[alias])) return "";
       return values[alias];
     };
-    sourcePicker = picker(
-      context, `factor-param-source-${alias}`, context.t("填写类型"),
-      sourceTypes, activeSource ? [activeSource] : [], selected => {
-        const source = selectionValue(selected?.[0]);
-        if (!sourceTypes.some(item => item.value === source)) {
-          setValue("", "");
-          return;
-        }
-        setValue(sourceValue(source), source, {retainSource: true});
+    // Unified multi-type single-select: DataColumn + 因子 candidates grouped as
+    // 「候选(DataColumn)」「候选(因子)」, 手填排他 via exclusiveManual, no family
+    // source.  Selecting a value resolves its source and drives setValue.
+    const candidateItems = [
+      ...columns.map(c => {
+        const id = selectionValue(c.value ?? c);
+        return {
+          value: id,
+          label: String(c.label || c.alias || c.value || c).trim() || id,
+          type: "column", typeLabel: context.t("DataColumn"), column: c,
+        };
+      }),
+      ...factors.map(f => {
+        const factor = f.factor || f;
+        const id = selectionValue(f.value ?? f.ref ?? factor);
+        return {
+          value: id,
+          label: display(factor) || id,
+          type: "factor", typeLabel: context.t("因子"), factor,
+          view: window.FTFactorDetailShared?.factorRowView?.(factor)
+            || {kind: "factor", ref: id},
+        };
+      }),
+    ].filter(item => item.value);
+    let valuePicker;
+    valuePicker = (window.FTTestObjectPicker || window.FTMultiSelectFilter).create(context, {
+      compact: true, multi: false,
+      name: `factor-param-${alias}`,
+      title: context.t("参数值"),
+      items: candidateItems,
+      selected: [selectionValue(values[alias])].filter(Boolean),
+      loading: Boolean(options.loading),
+      loadingText: context.t("正在读取参数候选…"),
+      groupByType: true,
+      exclusiveManual: {
+        label: context.t("手填排他"),
+        placeholder: context.t("填写 ConstExpr、DataColumn alias 或因子 alias"),
       },
-      {disabled: options.readOnly === true},
-    );
-    columnPicker = picker(context, `factor-param-column-${alias}`, context.t("DataColumn"),
-      columns, activeSource === "column" ? [initialValue] : [],
-      selected => setValue(selected?.[0] || "", "column"),
-      {disabled: options.readOnly === true});
-    const selectFactor = selected => {
-      const selectedRef = selectionValue(selected?.[0]);
-      const item = factorChoices.find(candidate => (
-        selectionValue(candidate.value ?? candidate.ref) === selectedRef
-      ));
-        if (!item) {
-          setValue("", "factor");
+      canAddForType: type => type === "factor",
+      onAddCandidateForType: (type, _ctx, {add}) => {
+        if (type !== "factor") return; // a DataColumn cannot be created on the fly
+        const open = value => {
+          if (!value) return;
+          const id = selectionValue(value);
+          const item = {
+            value: id, label: display(value) || id, factor: value,
+            type: "factor", typeLabel: context.t("因子"),
+            onsite: true, temporary: true,
+            view: {
+              kind: "factor", ref: id, initialValue: value, temporary: true,
+            },
+          };
+          // Keep the on-the-fly factor in OUR candidate list (the shared picker
+          // maintains its own items) so later hand-typed alias resolution finds
+          // it, it carries the 当场 badge, and its view overlay opens seeded.
+          const idx = candidateItems.findIndex(c => (
+            c.type === "factor" && c.value === id
+          ));
+          if (idx >= 0) candidateItems.splice(idx, 1, item);
+          else candidateItems.push(item);
+          valuePicker?.setItems?.(candidateItems, true);
+          valuePicker?.setValues?.([id]);
+          setValue(value, "factor");
+        };
+        if (typeof options.onCreateFactor === "function") {
+          void options.onCreateFactor(open);
           return;
         }
-        const factor = item.factor || item;
-        const resolved = options.onSelectFactor?.(factor, item);
-        if (resolved && typeof resolved.then === "function") {
-          return resolved.then(value => {
-            const next = value || factor;
-            if (item.factor) item.factor = next;
-            setValue(next, "factor");
-          });
+        // Reliable on-the-fly factor creation: lift via the object overlay
+        // (lazy-loading it if not mounted yet), falling back to a lazy editor.
+        const lift = props => {
+          const openOverlay = context.openObject
+            || (window.FTObjectOverlay?.open
+              ? childOptions => window.FTObjectOverlay.open(context, childOptions)
+              : null);
+          if (openOverlay) { openOverlay(props); return; }
+          void Promise.resolve(
+            window.FTStaticLoader?.loadGroups?.(["object-overlay"]),
+          ).then(() => {
+            if (window.FTObjectOverlay?.open) {
+              window.FTObjectOverlay.open(context, props);
+            }
+          }).catch(() => {});
+        };
+        lift({
+          kind: "factor", mode: "create", ref: "new", onSaved: open,
+          testState: options.testState, temporary: true,
+        });
+      },
+      // 手填排他 (exclusiveManual): resolve a typed value into ConstExpr /
+      // DataColumn / 因子 alias.  An alias resolves through the host so any
+      // nested factor-family source versions are fixed at parse time.
+      onChange: async values => {
+        const v = selectionValue(values[0]);
+        if (!v) { setValue("", ""); return; }
+        const colItem = candidateItems.find(item => (
+          item.type === "column" && item.value === v
+        ));
+        if (colItem) { setValue(v, "column"); return; }
+        // A/B match the library factor first: match an existing factor
+        // candidate (library OR on-the-fly) by value, label/alias, or display.
+        const facItem = candidateItems.find(item => (
+          item.type === "factor"
+          && (item.value === v
+            || String(item.label || "").trim() === v
+            || display(item.factor) === v
+            || selectionValue(item.factor) === v)
+        ));
+        if (facItem) {
+          const factor = facItem.factor || facItem;
+          // Selection resolves through the host so nested family source
+          // versions are fixed at selection time.
+          const resolved = options.onSelectFactor?.(factor, facItem);
+          if (resolved && typeof resolved.then === "function") {
+            await resolved.then(next => setValue(next || factor, "factor"));
+          } else {
+            setValue(resolved || factor, "factor");
+          }
+          return;
         }
-        const next = resolved || factor;
-        if (item.factor) item.factor = next;
-        setValue(next, "factor");
-        return undefined;
-      };
-    factorPicker = picker(context, `factor-param-factor-${alias}`, context.t("因子库"),
-      factorChoices, activeSource === "factor" ? [reference(initialValue)] : [], selectFactor,
-      {disabled: options.readOnly === true});
-    if (allowFamilyComposition) {
-      familyPicker = picker(
-        context, `factor-param-family-${alias}`, context.t("因子家族"),
-        families, familyDraft(initialValue) ? [familyRef(initialValue.__factor_family)] : [],
-        async selected => {
-          const selectedValue = selectionValue(selected?.[0]);
-          const item = families.find(candidate => (
-            selectionValue(candidate.value ?? candidate.ref) === selectedValue
+        const constant = numericConstant(v);
+        if (constant !== null) { setValue(constant, "manual"); return; }
+        if (columns.some(item => selectionValue(item.value) === v)) {
+          valuePicker?.setValues?.([v]);
+          setValue(v, "column");
+          return;
+        }
+        // Hand-typed alias that is NOT a library factor: parse it locally into
+        // an on-the-fly factor (same 当场 object pool as the "+" entry and the
+        // pencil edit) so it appears as a 当场-badged factor candidate.
+        const analysis = parseFactorAlias(v);
+        if (analysis && analysis.family) {
+          const family = families.find(item => (
+            familyRef(item) === analysis.family
+            || String(item?.factor_family_alias || item?.family_alias || item?.name || "")
+              .trim() === analysis.family
           ));
-          if (!item) { setValue("", "family"); return; }
-          const selectedFamily = await options.onSelectFamily?.(item.family) || item.family;
-          setValue(makeFamilyDraft(selectedFamily), "family");
-        },
-        {disabled: options.readOnly === true},
-      );
-    }
+          const onsiteFactor = {
+            schema_version: 2,
+            ref: `temporary-factor:${v}`,
+            alias: v, factor_alias: v,
+            factor_family_alias: analysis.family,
+            identity: {family_alias: analysis.family, params: analysis.params},
+            params: Object.entries(analysis.params)
+              .map(([key, value]) => ({alias: key, value})),
+            family: family || null,
+            parameter_definitions: family?.parameter_definitions
+              || family?.params || family?.factor_params || [],
+          };
+          const item = {
+            value: onsiteFactor.ref, label: v, factor: onsiteFactor,
+            type: "factor", typeLabel: context.t("因子"),
+            onsite: true,
+            view: {kind: "factor", ref: onsiteFactor.ref, initialValue: onsiteFactor, temporary: true},
+          };
+          const idx = candidateItems.findIndex(c => (
+            c.type === "factor" && c.value === onsiteFactor.ref
+          ));
+          if (idx >= 0) candidateItems.splice(idx, 1, item);
+          else candidateItems.push(item);
+          valuePicker?.setItems?.(candidateItems, false);
+          valuePicker?.setValues?.([onsiteFactor.ref]);
+          setValue(onsiteFactor, "factor");
+          return;
+        }
+        setValue(v, "manual");
+      },
+    });
     input.type = "text";
     const initialText = display(initialValue);
     input.value = activeSource === "manual" || activeSource === "column"
@@ -317,6 +426,10 @@
       })).catch(() => null);
     };
     let nestedFamilyPending = false;
+    let editingFactor = false;
+    const editingParams = {};
+    let baseFactor = null;
+    let onTheFlyFactor = null;
     const renderNested = () => {
       if (nestedMount.replaceChildren) nestedMount.replaceChildren();
       else nestedMount.children = [];
@@ -339,8 +452,10 @@
         // the section value from the attached/loaded family template.
         const familyAliasOf = String(
           draft.identity?.family_alias || draft.factor_family_alias
-          || draft.factor_family_name || String(draft.alias || "").split("|")[0]
-          || (template?.factor_family_alias) || "",
+          || draft.factor_family_name || draft.factor_class_name
+          || String(draft.alias || "").split("|")[0]
+          || String(draft.name || "").split("|")[0]
+          || (template?.factor_family_alias) || (template?.factor_family_name) || "",
         ).trim();
         const sectionValue = templateValue => ({
           ...draft,
@@ -388,10 +503,27 @@
           };
           setValue(composed, "family");
         };
+        // Pencil → enter an edit state only: the selected value stays the
+        // library / alias factor until the user actually edits a parameter.
+        // The first edit materialises an independent on-the-fly factor.
+        const unlockFactorEditing = () => {
+          editingFactor = true;
+          if (draft && typeof draft === "object") {
+            const saved = draft.identity?.params || draft.parameter_values || {};
+            baseFactor = {
+              ...draft,
+              identity: {...(draft.identity || {}), params: {...saved}},
+            };
+          } else {
+            baseFactor = null;
+          }
+          onTheFlyFactor = null;
+          renderNested();
+        };
         const unlockLabel = context.t("编辑");
         const editEntry = window.FTUI?.iconButton
           ? window.FTUI.iconButton(
-            context, "square.and.pencil", unlockLabel, unlockFamilyEditing,
+            context, "square.and.pencil", unlockLabel, unlockFactorEditing,
             {className: "factor-param-nested-edit"},
           )
           : (() => {
@@ -400,7 +532,7 @@
             button.className = "icon-action-button factor-param-nested-edit";
             button.textContent = "✎";
             button.title = unlockLabel;
-            button.addEventListener("click", unlockFamilyEditing);
+            button.addEventListener("click", unlockFactorEditing);
             return button;
           })();
         const definitionRows = (template
@@ -411,11 +543,81 @@
             return saved === undefined ? row : {...row, value: saved};
           });
         const renderSection = (rowsValue, templateValue) => {
+          // When the pencil has converted the factor into an on-the-fly
+          // (editable) factor, the value column becomes editable inputs that
+          // write back to the factor's identity params.
+          const renderValue = (cell, param, initVal, vals, row) => {
+            if (!editingFactor) return undefined;
+            const edit = document.createElement("input");
+            edit.value = initVal;
+            edit.addEventListener("input", () => {
+              editingParams[param.alias] = edit.value;
+              if (!onTheFlyFactor) {
+                // First real edit: materialise an independent on-the-fly factor
+                // (only now does it cease to be the library / alias factor).
+                const base = baseFactor && typeof baseFactor === "object"
+                  ? baseFactor : {identity: {}, params: {}};
+                const saved = base.identity?.params || base.parameter_values || {};
+                const familyMeta = base.family
+                  || {factor_family_alias: base.identity?.family_alias || base.factor_family_alias};
+                const identity = {...(base.identity || {}), params: {...editingParams}};
+                onTheFlyFactor = {
+                  ...base,
+                  identity,
+                  params: Object.entries(editingParams)
+                    .filter(([key]) => key && !key.startsWith("$"))
+                    .map(([key, value]) => ({alias: key, value})),
+                  parameter_values: {...editingParams},
+                  family: familyMeta,
+                  temporary: true,
+                  source_origin: base.source_origin || "test_inline",
+                  alias: composeFactorAlias(familyMeta, editingParams),
+                };
+                onTheFlyFactor.factor_alias = onTheFlyFactor.alias;
+                values[alias] = onTheFlyFactor;
+                // Replace the library/alias candidate with this on-the-fly item.
+                const ref = reference(onTheFlyFactor);
+                const idx = candidateItems.findIndex(item => (
+                  item.type === "factor" && item.value === ref
+                ));
+                const item = {
+                  value: ref, label: onTheFlyFactor.alias, factor: onTheFlyFactor,
+                  type: "factor", typeLabel: context.t("因子"), temporary: true,
+                  onsite: true,
+                  view: window.FTFactorDetailShared?.factorRowView?.(onTheFlyFactor)
+                    || {kind: "factor", ref},
+                };
+                if (idx >= 0) candidateItems.splice(idx, 1, item);
+                else candidateItems.push(item);
+                valuePicker?.setItems?.(candidateItems, true);
+              } else {
+                onTheFlyFactor.identity.params[param.alias] = edit.value;
+                onTheFlyFactor.parameter_values[param.alias] = edit.value;
+                onTheFlyFactor.params = Object.entries(onTheFlyFactor.identity.params)
+                  .filter(([key]) => key && !key.startsWith("$"))
+                  .map(([key, value]) => ({alias: key, value}));
+                const familyMeta = onTheFlyFactor.family
+                  || {factor_family_alias: onTheFlyFactor.identity.family_alias};
+                const newAlias = composeFactorAlias(familyMeta, onTheFlyFactor.identity.params);
+                onTheFlyFactor.alias = newAlias;
+                onTheFlyFactor.factor_alias = newAlias;
+                const ref = reference(onTheFlyFactor);
+                const idx = candidateItems.findIndex(item => (
+                  item.type === "factor" && item.value === ref
+                ));
+                if (idx >= 0 && candidateItems[idx]) candidateItems[idx].label = newAlias;
+                valuePicker?.setItems?.(candidateItems, true);
+              }
+              options.onChange?.(values, alias);
+            });
+            cell.append(edit);
+            return {control: true};
+          };
           const section = shared.parameterSection(
             context,
             sectionValue(templateValue === undefined ? template : templateValue),
             rowsValue, (options.depth || 0) + 1,
-            {valueHeaderExtra: editEntry},
+            {valueHeaderExtra: editEntry, renderValue},
           );
           section.root.dataset.parameterAlias = alias;
           nestedMount.append(section.root);
@@ -525,32 +727,10 @@
     renderSourceControl = () => {
       if (sourceControl.replaceChildren) sourceControl.replaceChildren();
       else sourceControl.children = [];
-      if (!activeSource) return;
-      if (activeSource === "manual") {
-        sourceControl.append(input);
-        return;
-      }
-      if (activeSource === "column") {
-        sourceControl.append(columnPicker.element || columnPicker);
-        return;
-      }
-      if (activeSource === "factor") {
-        sourceControl.append(factorPicker.element || factorPicker);
-        return;
-      }
-      if (activeSource === "family" && familyPicker) {
-        const familySource = document.createElement("div");
-        familySource.className = "factor-param-family-source";
-        familySource.append(familyPicker.element || familyPicker);
-        // The family entry stays available in every family-composition
-        // mode: composing against an existing/referenced family offers
-        // 新增因子家族 (on-the-fly creation replaces the reference), while
-        // an on-the-fly inline family offers 编辑因子家族.
-        if (createFamily) familySource.append(createFamily);
-        sourceControl.append(familySource);
-      }
+      // Single multi-type value picker (DataColumn / 手填排他 / 因子).
+      if (valuePicker) sourceControl.append(valuePicker.element || valuePicker);
     };
-    control.append(sourcePicker.element || sourcePicker, sourceControl);
+    control.append(sourceControl);
     row.append(control);
     renderNested();
     renderSourceControl();
@@ -631,6 +811,29 @@
       if (key && !key.startsWith("$")) params[key] = value;
     }
     return {family: segments[0], params};
+  }
+
+  // Compose a factor alias (e.g. `SgChgPct|P:[CA]|M:0.6|B:1|N:200d`) from a
+  // family template and its parameter values, preserving the template order.
+  function composeFactorAlias(family, params) {
+    const familyAlias = String(
+      family?.factor_family_alias || family?.family_alias || family || "",
+    ).trim();
+    const order = (family?.parameter_definitions || [])
+      .map(p => p?.alias || p?.name).filter(Boolean);
+    const entries = Object.entries(params || {})
+      .filter(([key]) => key && !key.startsWith("$"));
+    let ordered = entries;
+    if (order.length) {
+      const seen = new Set(order);
+      const rest = entries.filter(([key]) => !seen.has(key));
+      ordered = [
+        ...order.filter(key => params[key] !== undefined).map(key => [key, params[key]]),
+        ...rest,
+      ];
+    }
+    return [familyAlias, ...ordered.map(([key, value]) => `${key}:${value}`)]
+      .filter(Boolean).join("|");
   }
 
   function familyParameters(family) {

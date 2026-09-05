@@ -174,6 +174,167 @@
     return control?.element || control;
   }
 
+  // Unified multi-type candidate picker: 因子 + 因子集合 in one control,
+  // each grouped as 「候选（因子）」 / 「候选（因子集合）」 (via the shared
+  // FTMultiSelectFilter candidate-type grouping).  Selection writes back to
+  // the two distinct source fields: factor_source_selections (syncCandidates)
+  // and factor_set_selections (FTTestFactorSets.updateSelection semantics).
+  function combinedPickerItems(context, state) {
+    const factors = pickerItems(context, state).map(item => ({
+      ...item,
+      type: "factor",
+      typeLabel: context.t("因子"),
+    }));
+    const sets = (state.factorSetCatalog?.items || []).map(item => ({
+      value: item.target_ref,
+      label: item.title_zh || item.set_id || item.target_ref,
+      description: item.description_zh
+        || `${item.member_count || 0} ${context.t("个因子")}`,
+      type: "factor_set",
+      typeLabel: context.t("因子集合"),
+      factorSet: item,
+      view: window.FTFactorDetailShared?.factorSetRowView?.(item)
+        || {kind: "factor_set", ref: item.target_ref},
+    })).filter(item => item.value);
+    return [...factors, ...sets];
+  }
+
+  function combinedControl(context, state, refresh) {
+    const currentSetSelections = () => (
+      window.FTTestFactorSets?.selections?.(state) || []
+    );
+    const currentSelected = () => [
+      ...selections(state).map(factorID).filter(Boolean),
+      ...currentSetSelections().map(item => item.target_ref).filter(Boolean),
+    ];
+    let items = combinedPickerItems(context, state);
+    const picker = FTTestObjectPicker.create(context, {
+      title: context.t("因子候选"),
+      note: context.t("因子与冻结集合均作为候选，可跨类型多选"),
+      className: "test-factor-direct-source-picker",
+      compact: true,
+      name: "test-factor-candidates",
+      items,
+      selected: currentSelected(),
+      multi: true,
+      loading: FTTestObjectPicker.lazyLoading(state, "factors"),
+      loadingText: context.t("正在读取因子候选…"),
+      // Lazily load factor-set candidates so the 因子集合 group is populated.
+      onOpen: async () => {
+        if (!(state.factorSetCatalog?.items || []).length
+          && window.FTTestFactorSets?.loadCatalog) {
+          await window.FTTestFactorSets.loadCatalog(context, state);
+          items = combinedPickerItems(context, state);
+          picker.setItems(items);
+          picker.setValues(currentSelected());
+        }
+      },
+      // Per-type on-the-fly entry: the 「候选（因子）」/「候选（因子集合）」 heading "+"
+      // creates the matching object type and lands it in that type's group.
+      onAddCandidateForType: (type, _context, {add}) => {
+        if (type === "factor_set") {
+          void FTTestLazyCode.openObjectEditor(context, {
+            kind: "factor_set", mode: "create", ref: "new",
+            temporary: true, testState: state,
+            onSaved: value => {
+              if (!value) return;
+              add({
+                value: value.target_ref,
+                label: value.title_zh || value.set_id || value.target_ref,
+                factorSet: value,
+                view: {kind: "factor_set", ref: value.target_ref},
+              });
+            },
+          });
+          return;
+        }
+        const onSaved = value => {
+          if (!value) return;
+          add({
+            value: factorID(value),
+            label: factorLabel(value),
+            factor: value,
+            view: window.FTFactorDetailShared?.factorRowView?.(value)
+              || {kind: "factor", ref: factorID(value)},
+          });
+        };
+        void (window.FTStrategyEditorFactorOverlay?.open
+          ? FTStrategyEditorFactorOverlay.open(context, state, onSaved)
+          : FTTestLazyCode.openObjectEditor(context, {
+            kind: "factor", mode: "create", ref: "new", onSaved,
+            testState: state, temporary: true,
+          }));
+      },
+      onCreate: context.session ? () => void (
+        window.FTStrategyEditorFactorOverlay?.open
+          ? FTStrategyEditorFactorOverlay.open(
+            context, state, value => saveFactor(context, state, refresh, picker, value),
+          ) : null
+      ) : null,
+      createLabel: context.t("新建因子"),
+      editSelected: item => item.factor?.temporary === true
+        || item.factor?.source_kind === "transient",
+      onEdit: (_event, item) => void FTStrategyEditorFactorOverlay.open(
+        context, state,
+        value => saveFactor(context, state, refresh, picker, value), item.factor,
+      ),
+      editLabel: context.t("编辑因子"),
+      onChange: values => { void updateCombined(context, state, items, values, refresh); },
+    });
+    // A nested editor can open before the shared visible-factor catalog has
+    // finished loading; refresh this picker when that request completes so the
+    // 因子 candidate group stays live instead of freezing the seeded factor.
+    const catalogPromise = state.lazy?.factors?.promise;
+    if (catalogPromise && typeof catalogPromise.then === "function") {
+      void catalogPromise.then(() => {
+        items = combinedPickerItems(context, state);
+        picker?.setItems(items);
+        picker?.setValues(currentSelected());
+      }).catch(() => {});
+    }
+    return picker.element;
+  }
+
+  async function updateCombined(context, state, items, values, refresh) {
+    const requested = new Set(values);
+    const factorItems = items.filter(item => item.type === "factor");
+    const setItems = items.filter(item => item.type === "factor_set");
+    // Factor branch: existing source-selection sync (factor_source_selections).
+    syncCandidates(state, values.filter(value => (
+      factorItems.some(item => item.value === value)
+    )));
+    // Factor-set branch: mirror FTTestFactorSets.updateSelection semantics.
+    const currentSets = window.FTTestFactorSets?.selections?.(state) || [];
+    const removed = currentSets.filter(item => !requested.has(item.target_ref));
+    const added = setItems.filter(item => requested.has(item.value)
+      && !currentSets.some(value => value.target_ref === item.value));
+    state.factorSetCatalog.busy = true;
+    refresh?.();
+    try {
+      for (const item of removed) {
+        FTTestFactorSelection.detachFactorSet(state, item.target_ref);
+        FTTestInputState.detachFactorSet(state, item.target_ref);
+        state.factorSetCatalog.runInputs.delete(item.target_ref);
+      }
+      window.FTTestFactorSets?.setSelections?.(
+        state, currentSets.filter(item => requested.has(item.target_ref)),
+      );
+      for (const item of added) {
+        const source = (state.factorSetCatalog?.items || []).find(value => (
+          value.target_ref === item.value
+        ));
+        if (source && window.FTTestFactorSets?.selectSet) {
+          await window.FTTestFactorSets.selectSet(context, state, source);
+        }
+      }
+    } catch (error) {
+      state.factorSetCatalog.error = error.message || String(error);
+    } finally {
+      state.factorSetCatalog.busy = false;
+      refresh?.();
+    }
+  }
+
   function candidatePicker(context, state, options = {}) {
     const available = Array.isArray(options.items) ? options.items : catalogItems(state);
     const factorAlias = value => FTTestFactorSelection.factorAlias(value);
@@ -319,13 +480,9 @@
     root.append(candidateHeading(
       context, state, FTTestFactorCandidates.summaryControl(context, state),
     ));
-    const sets = FTTestFactorSets.control(context, state, refresh);
-    if (sets) root.append(FTTestFieldRow.create(
-      context.t("因子集合"), sets,
-      helpFor(context, state, "factor_set_selections"),
-      {className: "factor-candidate-child-row"},
-    ));
-    const direct = directControl(context, state, refresh);
+    // Unified multi-type candidate control: 因子 + 因子集合 as one picker
+    // (custom-grouped 「候选（因子）」 / 「候选（因子集合）」).
+    const direct = combinedControl(context, state, refresh);
     direct.classList.add("factor-candidate-child-row");
     root.append(direct);
     const roleField = options.includeRoles === false

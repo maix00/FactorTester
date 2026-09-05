@@ -169,18 +169,28 @@ def test_temporary_object_edit_flows_through_shared_actions_and_stays_temporary(
     assert "strategy.access?.can_edit || context.testObjectTemporary === true" in strategy
 
 
-def test_multi_select_supports_embedded_candidate_type_filter() -> None:
-    """The shared picker may embed a candidate-type filter next to its search
-    box (single or multi choice, per caller) that narrows only the visible
-    candidates and never touches the selection."""
-    source = (WEB_ROOT / "catalog/shared/multi-select-filter.js").read_text(
+def test_multi_select_groups_candidates_by_object_type() -> None:
+    """The shared picker splits the 候选 section into one 「候选（××类型）」
+    group per candidate type when any item carries a type/kind field (object
+    pickers); scalar providers without a type field keep a single 候选 group.
+    The funnel type filter is removed in favour of the per-type sections."""
+    source = (WEB_ROOT / "catalog/shared/multi-select-filter/index.js").read_text(
         encoding="utf-8",
     )
-    assert "makeTypeFilterPanel" in source
-    assert "options.typeFilter" in source
-    assert "typeFilter.visible(item)" in source
-    assert 'spec?.multi !== false' in source
-    assert "ft-multi-select-type-panel" in source
+    assert "candidateGrouped" in source
+    assert "typeOf" in source
+    assert "typeLabelOf" in source
+    assert "候选" in source
+    assert "ft-multi-select-section-others" in source
+    assert "FTMultiSelectTypeFilter" not in source
+    assert "typeFilter" not in source
+    # The unified object picker is a thin FTMultiSelectFilter wrapper that
+    # concentrates object-choice semantics; the legacy names alias to it.
+    opk = (WEB_ROOT / "workbench/test-object-picker.js").read_text(encoding="utf-8")
+    assert "window.FTObjectPicker" in opk
+    assert "window.FTTestObjectPicker = window.FTObjectPicker" in opk
+    assert "window.FTTestChoicePicker = window.FTObjectPicker" in opk
+    assert "typeLabelOf" in opk
     # Optional "+" entry reusing the caller's on-the-fly path; created
     # candidates join the pool with an 当场 badge (editing stays on the
     # view-overlay ? infrastructure).
@@ -667,7 +677,7 @@ def test_run_input_panel_only_renders_backend_declared_controls() -> None:
 
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "test_run_input_panel.js"
     modules = [
-        WEB_ROOT / "catalog" / "shared" / "multi-select-filter.js",
+        WEB_ROOT / "catalog" / "shared" / "multi-select-filter" / "index.js",
         WEB_ROOT / "workbench" / "test-object-picker.js",
         WEB_ROOT / "workbench" / "test-source-upload.js",
     ]
@@ -1008,7 +1018,7 @@ def test_ic_job_results_load_the_shared_chart_timeline_first() -> None:
     ]
     assert "factor-catalog-core" in manifest["group_dependencies"]["catalog-core"]
     assert "catalog-selection-core" in manifest["group_dependencies"]["factor-catalog-core"]
-    assert "catalog/shared/multi-select-filter.js" in manifest["groups"]["catalog-selection-core"]
+    assert "catalog/shared/multi-select-filter/index.js" in manifest["groups"]["catalog-selection-core"]
     assert manifest["groups"]["job-detail-previews"].index(
         "jobs/highcharts-timeline.js",
     ) < len(manifest["groups"]["job-detail-previews"])
@@ -1066,7 +1076,7 @@ def test_test_settings_mount_live_chips_between_tabs_and_panel() -> None:
         WEB_ROOT / "workbench" / "test-setting-chips.js",
         WEB_ROOT / "workbench" / "tab-chip-content.js",
         WEB_ROOT / "workbench" / "test-content-adapters.js",
-        WEB_ROOT / "catalog" / "shared" / "multi-select-filter.js",
+        WEB_ROOT / "catalog" / "shared" / "multi-select-filter" / "index.js",
         WEB_ROOT / "workbench" / "test-object-picker.js",
         WEB_ROOT / "workbench" / "test-field-row.js",
         WEB_ROOT / "workbench" / "test-setting-fields.js",
@@ -1272,9 +1282,9 @@ def test_factor_candidate_sources_do_not_nest_field_rows_in_the_control_column()
     assert "test-factor-candidate-sources-inner" in source
     assert "test-factor-candidate-source-row" not in source
     assert source.count("FTTestFieldRow.create(") >= 3
-    candidate_index = source.index("function candidateHeading")
-    assert candidate_index < source.index("FTTestFactorSets.control")
-    assert candidate_index < source.index("FTTestFactorRoles.section")
+    assert "function combinedControl" in source
+    assert "FTTestFactorSets.control" not in source
+    assert source.index("function candidateHeading") < source.index("FTTestFactorRoles.section")
     assert 'className: "factor-candidate-child-row"' in source
     assert 'direct.classList.add("factor-candidate-child-row")' in source
     assert "factor-candidate-child-section" in roles
@@ -1321,7 +1331,7 @@ def test_restored_nested_editors_restart_idle_catalog_loads() -> None:
 
 
 def test_object_picker_places_create_action_beside_the_shared_control() -> None:
-    shared = (WEB_ROOT / "catalog" / "shared" / "multi-select-filter.js").read_text(
+    shared = (WEB_ROOT / "catalog" / "shared" / "multi-select-filter" / "index.js").read_text(
         encoding="utf-8",
     )
     picker = (WEB_ROOT / "workbench" / "test-object-picker.js").read_text(
@@ -1888,7 +1898,7 @@ def test_backtest_result_group_loads_shared_multi_select_dependency() -> None:
     )
     assert "catalog-selection-core" in manifest["group_dependencies"]["factor-catalog-core"]
     assert (
-        "catalog/shared/multi-select-filter.js"
+        "catalog/shared/multi-select-filter/index.js"
         in manifest["groups"]["catalog-selection-core"]
     )
 
@@ -2003,7 +2013,7 @@ def test_shared_multi_select_enforces_exclusive_and_single_selection() -> None:
     import subprocess
 
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "multi_select_filter.js"
-    source = WEB_ROOT / "catalog" / "shared" / "multi-select-filter.js"
+    source = WEB_ROOT / "catalog" / "shared" / "multi-select-filter" / "index.js"
     remote_source = WEB_ROOT / "catalog" / "shared" / "multi-select-filter-remote.js"
     result = subprocess.run(
         ["node", str(fixture), str(remote_source), str(source)], cwd=ROOT,
@@ -2065,7 +2075,7 @@ def test_multi_select_object_rows_open_matching_view_overlays() -> None:
     # overlay the opener must route through the frame stack so the view is a
     # nested child overlay, not a second top-level dialog.
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "multi_select_filter.js"
-    source = WEB_ROOT / "catalog" / "shared" / "multi-select-filter.js"
+    source = WEB_ROOT / "catalog" / "shared" / "multi-select-filter" / "index.js"
     remote_source = WEB_ROOT / "catalog" / "shared" / "multi-select-filter-remote.js"
     result = subprocess.run(
         ["node", str(fixture), str(remote_source), str(source)], cwd=ROOT,
@@ -2175,7 +2185,7 @@ def test_registered_locked_fields_share_one_visual_and_picker_contract() -> None
     rows = (WEB_ROOT / "workbench" / "test-field-row.js").read_text(
         encoding="utf-8"
     )
-    picker = (WEB_ROOT / "catalog" / "shared" / "multi-select-filter.js").read_text(
+    picker = (WEB_ROOT / "catalog" / "shared" / "multi-select-filter" / "index.js").read_text(
         encoding="utf-8"
     )
     styles = (WEB_ROOT / "styles" / "workbench-settings.css").read_text(
@@ -2197,13 +2207,13 @@ def test_settings_picker_can_escape_the_tab_content_boundary() -> None:
     task_css = (WEB_ROOT / "styles" / "task-inputs.css").read_text(
         encoding="utf-8"
     )
-    picker = (WEB_ROOT / "catalog" / "shared" / "multi-select-filter.js").read_text(
+    picker = (WEB_ROOT / "catalog" / "shared" / "multi-select-filter" / "index.js").read_text(
         encoding="utf-8"
     )
 
     assert ".backend-settings-shell.has-open-multi-select" in settings_css
     assert ".test-workbench .test-settings-shell.has-open-multi-select" in task_css
-    assert 'shell.classList.toggle("has-open-multi-select"' in picker
+    assert 'settingsShell.classList.toggle("has-open-multi-select"' in picker
 
 
 def test_backtest_group_form_uses_registered_override_editor() -> None:
@@ -2811,19 +2821,20 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert 'delegateSection("parameterTable")' in detail_shared
     assert 'delegateSection("parameterSection")' in detail_shared
     assert 'delegateSection("createParameterList")' in detail_shared
-    assert 'context.t("Column")' in parameter_editor
+    assert 'context.t("DataColumn")' in parameter_editor
     assert ".factor-detail-parameter-editor > .factor-detail-parameter-row" in app_css
     assert "grid-template-columns: subgrid" in app_css
     assert "grid-template-columns: minmax(70px, max-content)" in app_css
-    assert ".factor-param-reference-control { display: grid; grid-template-columns: max-content" in app_css
+    assert ".factor-param-reference-control { display: grid; grid-template-columns: minmax(0, 1fr)" in app_css
     assert "font-family: ui-monospace, SFMono-Regular" in app_css
     assert "function numericConstant" in parameter_editor
     assert 'setValue(constant, "manual")' in parameter_editor
     assert "请输入有效的 ColumnRef 或因子 alias" in parameter_editor
     assert "onValidateFactorAlias" in parameter_editor
-    assert "factor-param-column-" in parameter_editor
-    assert "factor-param-factor-" in parameter_editor
-    assert "factor-param-family-source" in parameter_editor
+    assert "groupByType: true" in parameter_editor
+    assert "onAddCandidateForType" in parameter_editor
+    assert "exclusiveManual" in parameter_editor
+    assert "valuePicker" in parameter_editor
     assert "factor-param-nested-factor-mount" in parameter_editor
     assert "FTFactorDetailShared.parameterSection" in parameter_editor
     assert 'method: "POST"' in editor
@@ -2838,7 +2849,8 @@ def test_factor_object_editors_share_submit_assistance_and_reference_controls() 
     assert "loaded.factor_dependencies" in editor
     assert "FTObjectOverlay.open" in editor
     assert "factor-source-mode" not in editor
-    assert '"新增因子家族"' in editor
+    assert 'onAddCandidate: async (_context, {add})' in editor
+    assert "sourceMount.append(familyPicker(context, data, state, redraw));" in editor
     assert 'state.family.source_kind === "transient"' in editor
     assert "factor-param-choice-family" not in parameter_editor
     assert "compact: true, multi: false" in parameter_editor

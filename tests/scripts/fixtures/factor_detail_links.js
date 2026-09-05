@@ -446,10 +446,14 @@ assert.ok(
   ));
   assert.ok(overlayDialog, "nested viewer must open the shared object overlay");
   await waitFor(() => {
-    const heading = walk(overlayDialog).find(item => item.tagName === "H2");
+    const heading = walk(overlayDialog).find(item => (
+      String(item.className || "").includes("ft-object-overlay-title")
+    ));
     return heading?.textContent === "MmThreshold|N:5d";
   });
-  const overlayHeading = walk(overlayDialog).find(item => item.tagName === "H2");
+  const overlayHeading = walk(overlayDialog).find(item => (
+    String(item.className || "").includes("ft-object-overlay-title")
+  ));
   assert.equal(
     overlayHeading.textContent, "MmThreshold|N:5d",
     "overlay heading must be the nested factor's dedicated page heading",

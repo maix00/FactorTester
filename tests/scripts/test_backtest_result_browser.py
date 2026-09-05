@@ -30,7 +30,7 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
         page.set_content("<main id='root'></main>")
         for path in (
             "server/manager/web/core/shared-ui.js",
-            "server/manager/web/catalog/shared/multi-select-filter.js",
+            "server/manager/web/catalog/shared/multi-select-filter/index.js",
             "server/manager/web/jobs/result-tabs.js",
             "server/manager/web/jobs/artifact-query.js",
             "server/manager/web/jobs/highcharts-timeline.js",
@@ -201,14 +201,15 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
         chart_options = page.locator(
             "body > .ft-multi-select-menu.is-portaled .ft-multi-select-options"
         )
-        chart_options.get_by_text("净值", exact=True).wait_for()
-        chart_options.get_by_text("回撤", exact=True).wait_for()
-        chart_options.get_by_text("年化收益率", exact=True).wait_for()
-        chart_options.get_by_text("Sharpe ratio", exact=True).wait_for()
-        page.locator('input[data-filter-value="equity"]').uncheck()
-        page.locator('input[data-filter-value="drawdown"]').check()
-        page.locator('input[data-filter-value="metric:sharpe_ratio"]').check()
-        page.get_by_role("button", name="保存").click()
+        chart_options.locator("span.ft-multi-select-option-label", has_text="净值").first.wait_for()
+        chart_options.locator("span.ft-multi-select-option-label", has_text="回撤").first.wait_for()
+        chart_options.locator("span.ft-multi-select-option-label", has_text="年化收益率").first.wait_for()
+        chart_options.locator("span.ft-multi-select-option-label", has_text="Sharpe ratio").first.wait_for()
+        page.locator('input[data-filter-value="equity"]').first.uncheck()
+        page.locator('input[data-filter-value="drawdown"]').first.check()
+        page.locator('input[data-filter-value="metric:sharpe_ratio"]').first.check()
+        # Multi picks commit when the menu collapses (no save button).
+        page.locator(".backtest-result-chart-filter summary").click()
         page.wait_for_function(
             "document.querySelector('[data-mounted-viewer=\"drawdown_curve\"]') !== null"
         )
@@ -220,8 +221,8 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
         ]
 
         page.locator(".backtest-result-strategy-filter summary").click()
-        page.locator('input[data-filter-value="strategy-a1"]').check()
-        page.get_by_role("button", name="保存").click()
+        page.locator('input[data-filter-value="strategy-a1"]').first.check()
+        page.locator(".backtest-result-strategy-filter summary").click()
         page.wait_for_function(
             "document.querySelector('[data-mounted-viewer=\"drawdown_curve\"]')?.dataset.seriesCount === '1'"
         )
@@ -266,8 +267,9 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
         )
         assert page.locator(".backtest-domain-content").get_by_text("order-25").count() == 1
         page.get_by_label("账户", exact=True).click()
-        page.locator('input[data-filter-value="account-1"]').check()
-        page.get_by_role("button", name="保存").click()
+        page.locator('input[data-filter-value="account-1"]').first.check()
+        # Collapse the open menu (outside click) to commit the multi pick.
+        page.mouse.click(6, 6)
         page.get_by_text("共 13 行").wait_for()
 
         page.get_by_role("button", name="时变指标").click()
