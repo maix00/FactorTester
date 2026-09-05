@@ -38,8 +38,8 @@ def public_payload(value: Mapping[str, Any] | None) -> dict[str, Any]:
 
 
 def _clean(value: Any, *, depth: int) -> Any:
-    if depth > 8:
-        return "[truncated]"
+    if depth > 64:
+        raise ValueError("account-domain metadata nesting is too deep")
     if isinstance(value, Mapping):
         output: dict[str, Any] = {}
         for key, item in value.items():
@@ -50,7 +50,7 @@ def _clean(value: Any, *, depth: int) -> Any:
             output[name] = _clean(item, depth=depth + 1)
         return output
     if isinstance(value, (list, tuple)):
-        return [_clean(item, depth=depth + 1) for item in list(value)[:4096]]
+        return [_clean(item, depth=depth + 1) for item in value]
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     return str(value)

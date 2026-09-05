@@ -684,15 +684,15 @@ def _account_domain_migration_plan(
                         f"legacy synchronized factor set cannot be recovered: {error}"
                     ) from error
             existing = payload.get("resolved_factors")
-            if int(payload.get("schema_version") or 0) == 2 and isinstance(
-                existing, list,
-            ):
+            if isinstance(existing, list):
                 try:
                     for item in existing:
                         require_frozen_factor(item)
                 except (TypeError, ValueError):
                     pass
                 else:
+                    if int(payload.get("schema_version") or 0) != 2:
+                        planned.append(_account_domain_change(row, payload, {**payload, "schema_version": 2}, False))
                     continue
             eligible += 1
             params_list = payload.get("params_list")
@@ -811,12 +811,12 @@ def _apply_account_domain_migration(
             "UPDATE account_domain_entities SET payload_json=?, deleted=?, "
             "remote_revision=?, base_revision=? "
             "WHERE principal=? AND entity_type=? AND entity_id=? "
-            "AND remote_revision=?",
+            "AND coalesce(remote_revision,0)=?",
             (
                 _canonical_json(item["new_payload"]),
                 int(item["new_deleted"]),
-                item["expected_revision"] + 1,
-                item["expected_revision"] + 1,
+                item["expected_revision"],
+                item["expected_revision"],
                 item["principal"], item["entity_type"], item["entity_id"],
                 item["expected_revision"],
             ),

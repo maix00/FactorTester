@@ -13,35 +13,41 @@
   }
 
   function addCandidate(state, value, options = {}) {
-    if (!value || typeof value !== "object" || value.schema_version !== 2
-        || !value.ref || !value.alias || !value.identity) return;
+    addCandidates(state, [value], options);
+  }
+
+  function addCandidates(state, values, options = {}) {
     const rows = candidates(state);
-    const index = rows.findIndex(item => factorID(item) === factorID(value));
-    const existing = index >= 0 ? rows[index] : {};
-    const sourceSets = [...new Set([
-      ...(existing.factor_set_refs || []), ...(value.factor_set_refs || []),
-    ].filter(Boolean))];
-    const setOnly = index >= 0
-      ? Boolean(existing.factor_set_only) && Boolean(value.factor_set_only)
-      : Boolean(value.factor_set_only);
-    const candidate = {
-      ...existing, ...value,
-      ...(sourceSets.length ? {factor_set_refs: sourceSets} : {}),
-      ...(setOnly ? {factor_set_only: true} : {}),
-    };
-    if (!setOnly) delete candidate.factor_set_only;
-    if (index >= 0) rows[index] = candidate; else rows.push(candidate);
+    const byRef = new Map(rows.map((item, index) => [factorID(item), index]));
+    const selected = new Set(selectedIDs(state));
+    let last = null;
+    for (const value of values || []) {
+      if (!value || typeof value !== "object" || value.schema_version !== 2
+          || !value.ref || !value.alias || !value.identity) continue;
+      const index = byRef.get(factorID(value));
+      const existing = index === undefined ? {} : rows[index];
+      const sourceSets = [...new Set([
+        ...(existing.factor_set_refs || []), ...(value.factor_set_refs || []),
+      ].filter(Boolean))];
+      const setOnly = index === undefined ? Boolean(value.factor_set_only)
+        : Boolean(existing.factor_set_only) && Boolean(value.factor_set_only);
+      const candidate = {...existing, ...value, ...(sourceSets.length ? {factor_set_refs: sourceSets} : {})};
+      if (setOnly) candidate.factor_set_only = true; else delete candidate.factor_set_only;
+      if (index === undefined) {
+        byRef.set(factorID(value), rows.length);
+        rows.push(candidate);
+      } else rows[index] = candidate;
+      selected.add(factorID(candidate));
+      last = candidate;
+    }
+    if (!last) return;
     state.values.factor_candidates = rows;
     if (state.kind === "ic") {
-      const selected = selectedIDs(state);
-      if (!selected.includes(factorID(candidate))) selected.push(factorID(candidate));
-      state.values.factor_selections = rows.filter(item => selected.includes(factorID(item)));
+      state.values.factor_selections = rows.filter(item => selected.has(factorID(item)));
+      state.factorRef = factorID(last);
     } else {
-      // `select: false` means “do not make this newly added row preferred”;
-      // it does not disable the automatic scalar primary selection.
-      autoSelectPrimary(state, options.select === false ? null : candidate);
+      autoSelectPrimary(state, options.select === false ? null : last);
     }
-    if (state.kind === "ic") state.factorRef = factorID(candidate);
   }
 
   // Backtest factor candidates form an outer, derived pool.  The legacy
@@ -149,7 +155,7 @@
         item && typeof item === "object"
       )));
     }
-    for (const factor of restored) addCandidate(state, factor, {select: false});
+    addCandidates(state, restored, {select: false});
     if (state.kind !== "ic") autoSelectPrimary(state);
   }
 
@@ -180,7 +186,7 @@
   }
 
   window.FTTestFactorSelection = Object.freeze({
-    candidates, factorID, factorAlias, addCandidate, autoSelectPrimary,
+    candidates, factorID, factorAlias, addCandidate, addCandidates, autoSelectPrimary,
     removeCandidate, detachFactorSet,
     setSelected, setSelectedIDs, isSelected, selectedIDs,
     syncSelection, restoreFrozenSelections,

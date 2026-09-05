@@ -17,11 +17,14 @@ class FactorSourceHydrator:
     def __init__(self, state: object) -> None:
         self.state = state
 
-    def hydrate(self, factor_ref: str, *, principal: str) -> bool:
+    def hydrate(self, factor_ref: str, *, principal: str, fingerprint: str = "") -> bool:
         owner, factor_id = self._identity(factor_ref, principal=principal)
         if not factor_id:
             return False
+        requested_fingerprint = str(fingerprint or "").strip()
         for metadata in self._candidates(owner, factor_id, principal=principal):
+            if requested_fingerprint and requested_fingerprint != str(metadata.get("family_formula_fingerprint") or ""):
+                continue
             storage_server_id = str(metadata.get("storage_server_id") or "").strip()
             if not storage_server_id or storage_server_id == self.state.server_id:
                 continue
@@ -81,6 +84,9 @@ class FactorSourceHydrator:
                     fingerprint = str(factor_cls().expr.semantic_fingerprint())
             except Exception:
                 fingerprint = ""
+            advertised = str(metadata.get("family_formula_fingerprint") or "")
+            if advertised and fingerprint != advertised:
+                continue
             upsert_factor_source(
                 source_kind,
                 "" if source_kind == "public" else owner,
@@ -130,7 +136,7 @@ class FactorSourceHydrator:
             scope,
             entity_type="factor_source",
             include_shared=True,
-            sync=True,
+            sync=False,
         )
         values = self._matching_payloads(
             rows, owner=owner, factor_id=factor_id,
@@ -139,8 +145,18 @@ class FactorSourceHydrator:
         # full page. This is metadata-only and bounded; source bytes still use
         # the 7997 data plane.
         control = getattr(synchronizer, "control_store", None)
-        if control is None:
+        if values or control is None:
             return values
+        lookup = getattr(control, "find_factor_source_manifests", None)
+        if callable(lookup):
+            try:
+                remote_rows = lookup(principal=scope, factor_id=factor_id,
+                                     source_kind="public" if owner == "public" else "custom")
+                for row in remote_rows:
+                    synchronizer.local.apply_remote(row)
+                return self._matching_payloads(remote_rows, owner=owner, factor_id=factor_id)
+            except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+                return []
         after_revision = 0
         for _page in range(32):
             try:
@@ -173,6 +189,8 @@ class FactorSourceHydrator:
     ) -> list[dict[str, object]]:
         values: list[dict[str, object]] = []
         for row in rows if isinstance(rows, list) else []:
+            if isinstance(row, dict) and row.get("deleted"):
+                continue
             payload = row.get("payload") if isinstance(row, dict) else None
             if not isinstance(payload, dict):
                 continue

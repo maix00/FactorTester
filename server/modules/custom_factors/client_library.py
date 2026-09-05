@@ -224,13 +224,13 @@ def _family_projection(item: dict[str, Any]) -> dict[str, Any] | None:
         item.get("factor_owner_ref") or item.get("owner_ref") or owner_username
     )
     family_fingerprint = _safe_text(item.get("family_formula_fingerprint"))
-    if not owner_ref or not family_fingerprint:
+    if not owner_ref:
         return None
     family_ref = build_factor_family_reference(
         owner_ref=owner_ref,
         family_alias=family_alias,
         family_formula_fingerprint=family_fingerprint,
-    )
+    ) if family_fingerprint else ""
     source = str(
         item.get("source") or item.get("factor_kind") or "registered"
     ).strip().lower()
@@ -255,6 +255,8 @@ def _family_projection(item: dict[str, Any]) -> dict[str, Any] | None:
     ]
     return {
         "family_ref": family_ref,
+        "catalog_key": f"{owner_ref}:{family_alias}",
+        "identity_status": "ready" if family_fingerprint else "unresolved",
         "factor_family_alias": family_alias,
         "factor_family_name": _safe_text(
             item.get("factor_family_name") or family_alias

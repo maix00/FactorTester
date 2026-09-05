@@ -435,7 +435,7 @@ def test_explicit_migration_updates_account_domain_and_writes_control_plan(
     factor_payload = json.loads(factor_raw)
     require_frozen_factor(factor_payload["resolved_factors"][0])
     assert factor_payload["schema_version"] == 2
-    assert (factor_deleted, factor_revision) == (0, 4)
+    assert (factor_deleted, factor_revision) == (0, 3)
     assert set_deleted == 1
     assert json.loads(set_raw)["schema_version"] == 2
     plan = json.loads(control_plan.read_text(encoding="utf-8"))["rows"]

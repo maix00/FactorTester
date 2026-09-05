@@ -443,6 +443,7 @@ class CatalogRoutesMixin:
                     )
                     if not FactorSourceHydrator(self.state).hydrate(
                         f"{source_owner}:{factor_id}", principal=principal,
+                        fingerprint=selected_version if selected_version not in (None, "current") else "",
                     ):
                         raise
                     value = read_source_catalog()

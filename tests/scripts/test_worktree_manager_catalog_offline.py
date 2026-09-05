@@ -251,13 +251,13 @@ def test_factor_set_scopes_include_only_direct_children(tmp_path, monkeypatch):
         {"username": peer, "alias": "peer", "organization_id": "GTHT",
          "parent_username": "", "active": True},
     ])
+    from tools.factors.factor_set_identity import freeze_factor_set_identity
+    sets = {name: {**freeze_factor_set_identity(owner_ref=f"principal:{owner}", set_id=name,
+               alias=name, members=[_factor("F", "F", owner)]), "owner_username": owner}
+            for name, owner in [("mine", parent), ("child", child), ("peer", peer)]}
     sync = LocalOnlySync([
-        {"principal": parent, "entity_type": "factor_set", "entity_id": "mine",
-         "payload": {"target_ref": "set:mine", "set_id": "mine"}},
-        {"principal": child, "entity_type": "factor_set", "entity_id": "child",
-         "payload": {"target_ref": "set:child", "set_id": "child"}},
-        {"principal": peer, "entity_type": "factor_set", "entity_id": "peer",
-         "payload": {"target_ref": "set:peer", "set_id": "peer"}},
+        {"principal": owner, "entity_type": "factor_set", "entity_id": sets[name]["ref"], "payload": sets[name]}
+        for name, owner in [("mine", parent), ("child", child), ("peer", peer)]
     ])
     monkeypatch.setattr(
         "server.modules.custom_factors.factor_set_registry.factor_set_catalog",
@@ -270,5 +270,21 @@ def test_factor_set_scopes_include_only_direct_children(tmp_path, monkeypatch):
 
     scopes = service.factor_set_scopes(parent)
 
-    assert [item["target_ref"] for item in scopes["mine"]] == ["set:mine"]
-    assert [item["target_ref"] for item in scopes["subordinates"]] == ["set:child"]
+    assert [item["target_ref"] for item in scopes["mine"]] == [sets["mine"]["ref"]]
+    assert [item["target_ref"] for item in scopes["subordinates"]] == [sets["child"]["ref"]]
+
+
+def test_mirrored_v2_set_detail_and_runspec_descriptor_preserve_members(tmp_path, monkeypatch):
+    from tools.factors.factor_set_identity import freeze_factor_set_identity
+    members = [_factor("F1", "F", "alice"), _factor("G1", "G", "alice")]
+    frozen = {**freeze_factor_set_identity(owner_ref="principal:alice", set_id="s", alias="Set", members=members),
+              "owner_username": "alice"}
+    sync = LocalOnlySync([{"principal": "alice", "entity_type": "factor_set", "entity_id": frozen["ref"], "payload": frozen}])
+    monkeypatch.setattr("server.modules.custom_factors.factor_set_registry.get_factor_set", lambda *args: None)
+    service = ClientStateService(tmp_path / "client", account_domain_sync=sync, local_account_store=LocalAccounts())
+    detail = service.factor_set_detail("alice", frozen["ref"], offset=0, limit=1)
+    assert detail["member_count"] == 2 and detail["has_more"]
+    assert detail["related_references"][0]["data"] in members
+    descriptor = service.factor_set_descriptor("alice", frozen["ref"])
+    assert descriptor["target_ref"] == frozen["ref"]
+    assert descriptor["manifest"]["identity"] == frozen["identity"]

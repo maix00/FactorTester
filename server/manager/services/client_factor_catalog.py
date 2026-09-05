@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-
 from typing import Any
 
 
@@ -87,41 +85,28 @@ class ClientFactorCatalogMixin:
             source_kind = str(
                 payload.get("source_kind") or "custom",
             ).strip().lower() or "custom"
-            # The mirror manifest may carry no formula fingerprint (older
-            # sources, or rows whose body was never hydrated so the
-            # semantic fingerprint was never materialized).  The catalog
-            # projection refuses rows without a fingerprint, which would
-            # silently drop a synced family from the public listing.
-            # Since the listing only needs the family name + description,
-            # synthesize a *stable* reference seed from the immutable
-            # identity (owner + kind + alias) so every synced family is
-            # listed; the true fingerprint/body is still hydrated lazily
-            # when a single family is opened or a RunSpec is frozen.
-            fingerprint = str(
-                payload.get("family_formula_fingerprint") or "",
-            ).strip()
-            if not fingerprint:
-                fingerprint = hashlib.sha256(
-                    f"{username}:{source_kind}:{factor_id}".encode("utf-8"),
-                ).hexdigest()
+            if source_kind != "custom" or str(payload.get("owner_username") or row.get("principal") or "") != username:
+                continue
+            fingerprint = str(payload.get("family_formula_fingerprint") or "").strip()
+            summary = payload.get("catalog") or payload
             families.append({
                 "factor_family_alias": factor_id,
                 "factor_family_name": str(
                     payload.get("factor_name") or factor_id,
                 ).strip() or factor_id,
-                "chinese_name": "",
-                "description": "",
-                "math_expr": "",
-                "category": "",
-                "categories": [],
+                "chinese_name": summary.get("chinese_name") or "",
+                "description": summary.get("description") or "",
+                "math_expr": summary.get("math_expr") or "",
+                "category": summary.get("category") or "",
+                "categories": [summary["category"]] if summary.get("category") else [],
                 "owner_username": username,
                 "owner_alias": owner_alias or username,
                 "factor_kind": source_kind,
                 "source": source_kind,
                 "factor_count": 0,
                 "factor_refs": [],
-                "params": [],
-                "parameter_definitions": [],
+                "params": summary.get("params") or [],
+                "parameter_definitions": summary.get("params") or [],
                 "family_formula_fingerprint": fingerprint,
                 "updated_at": "",
             })
@@ -150,8 +135,23 @@ class ClientFactorCatalogMixin:
                 if not alias:
                     continue
                 key = (owner, alias)
-                merged.setdefault(key, family)
+                current = merged.get(key)
+                if current is None or (not current.get("family_formula_fingerprint") and family.get("family_formula_fingerprint")):
+                    merged[key] = family
         return list(merged.values())
+
+    def _registered_factor_rows(self, principal: str, account: dict[str, Any]) -> list[dict[str, Any]]:
+        local = getattr(self.account_domain_sync, "local", None)
+        reader = getattr(local, "factor_catalog", None)
+        if callable(reader):
+            return [{**row, "owner_alias": account.get("alias") or principal,
+                     "owner_organization_id": account.get("organization_id") or "",
+                     "owner_organization_name": account.get("organization_name") or ""}
+                    for row in reader(principal)]
+        from server.manager.services.account_domain_projection import factor_rows_from_account_entities
+        return factor_rows_from_account_entities(self._account_catalog_entities(
+            principal, entity_type="factor_param_config", include_shared=False,
+        ), principal, owner_account=account)
 
     def factor_library(
         self, principal: str, *, refresh: bool = False,
@@ -169,16 +169,6 @@ class ClientFactorCatalogMixin:
         )
 
         owner_account = self._local_account(principal)
-        if refresh and self.account_domain_sync is not None:
-            try:
-                self.account_domain_sync.reconcile_factor_catalog(
-                    principal, force=True,
-                )
-            except (
-                AttributeError, ConnectionError, OSError, RuntimeError,
-                TypeError, ValueError,
-            ):
-                pass
         source_families = self._merge_source_families(
             self._custom_source_families(
                 principal,
@@ -187,41 +177,10 @@ class ClientFactorCatalogMixin:
             self._manifest_source_families(principal),
         )
         if self.account_domain_sync is not None:
-            mirrored = factor_rows_from_account_entities(
-                self._account_catalog_entities(
-                    principal,
-                    entity_type="factor_param_config",
-                    include_shared=False,
-                ),
-                principal,
-                owner_account=owner_account,
+            mirrored = self._registered_factor_rows(principal, owner_account)
+            return build_client_library_projection(
+                {"factors": mirrored, "families": source_families, "errors": []}, principal=principal,
             )
-            try:
-                # A picker must never wait for PostgreSQL or another Manager.
-                # Only seed an empty source-side mirror from local factor
-                # definitions; normal writes/background sync keep it fresh.
-                if not mirrored:
-                    self.account_domain_sync.reconcile_factor_catalog(principal)
-            except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
-                pass
-            if not mirrored:
-                mirrored = factor_rows_from_account_entities(
-                    self._account_catalog_entities(
-                        principal,
-                        entity_type="factor_param_config",
-                        include_shared=False,
-                    ),
-                    principal,
-                    owner_account=owner_account,
-                )
-            if mirrored:
-                return build_client_library_projection(
-                    {
-                        "factors": mirrored,
-                        "families": source_families,
-                        "errors": [],
-                    }, principal=principal,
-                )
         payload = build_factor_library_overview(
             principal, include_subordinates=False,
             account=owner_account,
@@ -271,15 +230,8 @@ class ClientFactorCatalogMixin:
             owner = str(account.get("username") or "").strip()
             if not owner:
                 continue
-            subordinate_rows.extend(factor_rows_from_account_entities(
-                self._account_catalog_entities(
-                    owner,
-                    entity_type="factor_param_config",
-                    include_shared=False,
-                ),
-                owner,
-                owner_account=account,
-            ))
+            self._refresh_account_domain_async(owner)
+            subordinate_rows.extend(self._registered_factor_rows(owner, account))
         subordinate_families: list[dict[str, Any]] = []
         for account in accounts:
             owner = str(account.get("username") or "").strip()
@@ -292,7 +244,7 @@ class ClientFactorCatalogMixin:
                 ),
                 self._manifest_source_families(owner),
             ))
-        if not subordinate_rows:
+        if self.account_domain_sync is None:
             for account in accounts:
                 owner = str(account.get("username") or "")
                 subordinate_payload = build_factor_library_overview(
@@ -323,34 +275,24 @@ class ClientFactorCatalogMixin:
         rows = self._account_catalog_entities(
             principal, entity_type="factor_set", include_shared=False,
         )
-        if not rows:
-            try:
-                self.account_domain_sync.reconcile_factor_catalog(principal)
-            except (
-                AttributeError, ConnectionError, OSError, RuntimeError,
-                TypeError, ValueError,
-            ):
-                pass
-            rows = self._account_catalog_entities(
-                principal, entity_type="factor_set", include_shared=False,
-            )
+        self._refresh_account_domain_async(principal)
+        from server.modules.custom_factors.factor_set_registry import _summary
         known = {str(item.get("target_ref") or "") for item in values}
         for row in rows:
             payload = row.get("payload") if isinstance(row, dict) else None
             if not isinstance(payload, dict) or row.get("deleted"):
                 continue
-            target_ref = str(payload.get("target_ref") or "")
-            if target_ref and target_ref not in known:
-                values.append({
-                    key: payload.get(key)
-                    for key in (
-                        "schema_version", "target_ref", "set_ref", "set_id",
-                        "title_zh", "description_zh", "member_hash",
-                        "member_count", "authority", "owner_username", "updated_at",
-                    )
-                })
-                known.add(target_ref)
-        return values
+            try:
+                summary = _summary(payload)
+            except (KeyError, TypeError, ValueError):
+                continue
+            if summary["target_ref"] not in known:
+                values.append(summary)
+                known.add(summary["target_ref"])
+        needle = query.strip().casefold()
+        return [value for value in values if not needle or needle in " ".join(
+            str(value.get(key) or "") for key in ("set_id", "title_zh", "description_zh", "owner_ref")
+        ).casefold()]
 
     def factor_set_scopes(
         self, principal: str, query: str = "",
@@ -409,24 +351,11 @@ class ClientFactorCatalogMixin:
         )
         if not isinstance(payload, dict):
             return None
-        members = list(payload.get("member_refs") or [])
-        page = members[offset:offset + limit]
-        return {
-            **{key: payload.get(key) for key in (
-                "schema_version", "target_ref", "set_ref", "set_id",
-                "title_zh", "description_zh", "member_hash", "member_count",
-                "authority", "owner_username", "updated_at",
-            )},
-            "offset": offset,
-            "limit": limit,
-            "has_more": offset + len(page) < len(members),
-            "next_offset": offset + len(page),
-            "related_references": [
-                {"relation": "集合成员", "kind": "factor", "target_ref": item,
-                 "label": item}
-                for item in page
-            ],
-        }
+        from server.modules.custom_factors.factor_set_registry import factor_set_page
+        try:
+            return factor_set_page(payload, offset=offset, limit=limit)
+        except (KeyError, TypeError, ValueError):
+            return None
 
     def factor_set_descriptor(
         self,
@@ -455,15 +384,10 @@ class ClientFactorCatalogMixin:
         )
         if not isinstance(payload, dict):
             return None
-        return {
-            "target_ref": payload.get("target_ref"),
-            "manifest": {
-                "schema_version": 1,
-                "set_id": payload.get("set_id"),
-                "set_ref": payload.get("set_ref"),
-                "title_zh": payload.get("title_zh"),
-                "description_zh": payload.get("description_zh") or "",
-                "member_refs": list(payload.get("member_refs") or []),
-                "member_hash": payload.get("member_hash"),
-            },
-        }
+        from tools.factors.factor_set_identity import require_frozen_factor_set
+        from server.modules.custom_factors.factor_set_registry import _manifest
+        try:
+            frozen = require_frozen_factor_set(payload)
+        except (TypeError, ValueError):
+            return None
+        return {"target_ref": frozen["ref"], "manifest": _manifest(payload)}

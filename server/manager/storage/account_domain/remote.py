@@ -77,6 +77,7 @@ class AccountDomainControlMixin:
             raise ValueError("factor source provider identity is inconsistent")
         self.ensure_schema()
         with self._connection() as connection:
+            connection.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ("factortester:account-domain:revision",))
             lock_key = f"factortester:account-domain:{owner}:{kind}:{identifier}"
             connection.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (lock_key,))
             current = connection.execute(
@@ -163,6 +164,18 @@ class AccountDomainControlMixin:
             "revision": revision,
             "operation_id": str(operation_id or ""),
         }
+    def find_factor_source_manifests(self, *, principal: str, factor_id: str, source_kind: str) -> list[dict[str, Any]]:
+        """Targeted metadata lookup for one already-authorized source request."""
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT principal, entity_type, entity_id, payload, deleted, revision, origin_manager_id "
+                "FROM control_account_domain_entities WHERE principal=%s AND entity_type='factor_source' AND NOT deleted "
+                "AND payload->>'factor_id'=%s AND payload->>'source_kind'=%s ORDER BY revision DESC LIMIT 100",
+                (principal, factor_id, source_kind),
+            ).fetchall()
+        keys = ("principal", "entity_type", "entity_id", "payload", "deleted", "revision", "origin_manager_id")
+        return [{key: _row_value(row, key, index, None) for index, key in enumerate(keys)} for row in rows]
+
     def pull_account_domain_entities(
         self,
         *,

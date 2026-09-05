@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import hashlib
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -36,6 +37,7 @@ class AccountDomainSyncService:
         self.access_cooldown = max(0.0, float(access_cooldown))
         self._last_sync: dict[str, float] = {}
         self._last_reconcile: dict[str, float] = {}
+        self._factor_authoring_fingerprints: dict[str, dict[str, str]] = {}
 
     def upsert(
         self,
@@ -100,7 +102,7 @@ class AccountDomainSyncService:
         # lazily over the data plane; the fingerprint arrives via outbox).
         versioned = self.materialize_factor_source_versions(owner)
         return {
-            "status": "synced",
+            "status": "incomplete" if (flushed.get("pending") or flushed.get("offline") or pulled.get("offline")) else "synced",
             "principal": owner,
             "reconciled": reconciled,
             "flushed": flushed,
@@ -122,7 +124,7 @@ class AccountDomainSyncService:
         try:
             from tools.data.sqlite.factor_source_store import load_factor_source
             from tools.data.sqlite.factor_source_versions import (
-                record_factor_formula_version,
+                record_factor_formula_version, load_factor_formula_version,
             )
         except ImportError:
             return 0
@@ -141,11 +143,13 @@ class AccountDomainSyncService:
             owner_username = str(payload.get("owner_username") or "").strip()
             if not source_kind or not factor_id or not fingerprint:
                 continue
+            if load_factor_formula_version(source_kind, owner_username, factor_id, fingerprint):
+                continue
             # Only localize when we already hold the body (bytes).  Bodies travel
             # over the data plane via the hash-bound transfer; manifests carry the
             # fingerprint.  If the body is absent, skip (hydrated on demand).
             body = load_factor_source(source_kind, owner_username, factor_id)
-            if not body:
+            if not body or hashlib.sha256(body.encode("utf-8")).hexdigest() != payload.get("source_sha256"):
                 continue
             try:
                 record_factor_formula_version(
@@ -164,7 +168,7 @@ class AccountDomainSyncService:
     def flush(self, *, principal: str = "", limit: int = 100) -> dict[str, Any]:
         pending = self.local.pending(principal=principal, limit=limit)
         if not pending:
-            return {"sent": 0, "pending": 0, "conflicts": 0}
+            return {"sent": 0, "conflicts": 0, **self.local.sync_state(principal=principal)}
         if self.control_store is None:
             return {"sent": 0, "pending": len(pending), "conflicts": 0, "offline": True}
         sent = conflicts = 0
@@ -186,7 +190,7 @@ class AccountDomainSyncService:
                     self.local.mark_attempt(item["operation_id"], "remote revision conflict")
                     continue
                 self.local.acknowledge(
-                    item["operation_id"], revision=int(receipt.get("revision") or 0),
+                    item["operation_id"], revision=int(receipt.get("revision") or 0), sent_item=item,
                 )
                 sent += 1
             except (AttributeError, ControlDatabaseError, ConnectionError, OSError, RuntimeError, TypeError, ValueError) as exc:
@@ -197,7 +201,7 @@ class AccountDomainSyncService:
                     "conflicts": conflicts,
                     "offline": True,
                 }
-        return {"sent": sent, "pending": len(pending) - sent, "conflicts": conflicts}
+        return {"sent": sent, "conflicts": conflicts, **self.local.sync_state(principal=principal)}
 
     def pull(self, *, principal: str, limit: int = 100) -> dict[str, Any]:
         if self.control_store is None:
@@ -381,13 +385,15 @@ class AccountDomainSyncService:
             values = {
                 "factor_set": [
                     (
-                        str(item.get("target_ref") or item.get("set_ref") or ""),
+                        str(item.get("ref") or item.get("target_ref") or item.get("set_ref") or ""),
                         item,
                     )
                     for item in list_factor_sets(owner)
                     if isinstance(item, Mapping)
                 ],
-                "factor_param_config": materialized_factor_configs(owner),
+                "factor_param_config": materialized_factor_configs(owner, existing=self.local.list_entities(
+                    principal=owner, entity_type="factor_param_config", include_shared=False,
+                ), fingerprints=self._factor_authoring_fingerprints.setdefault(owner, {})),
             }
         except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
             return 0
@@ -413,20 +419,15 @@ class AccountDomainSyncService:
                 if (
                     row is not None
                     and row.get("payload") == clean
-                    and str(row.get("origin_manager_id") or "") == self.manager_id
                 ):
                     continue
                 self.upsert(
                     owner, entity_type, identifier, clean, flush=False,
                 )
                 count += 1
-            for identifier, row in existing.items():
-                if (
-                    identifier not in current_ids
-                    and str(row.get("origin_manager_id") or "") == self.manager_id
-                ):
-                    self.delete(owner, entity_type, identifier, flush=False)
-                    count += 1
+            # Absence from an authored collection is not proof of deletion:
+            # this Manager may only hold peer projections or lack a dependency.
+            # Explicit authoring delete APIs already enqueue tombstones.
         if count and flush:
             self.flush(principal=owner)
         return count
@@ -434,14 +435,14 @@ class AccountDomainSyncService:
     def reconcile_factor_sources(self, principal: str = "") -> int:
         """Backfill one source manifest per storage provider, without bodies."""
         try:
-            from tools.data.sqlite.factor_source_store import list_factor_sources
+            from tools.data.sqlite.factor_metadata import list_factor_summaries
         except ImportError:
             return 0
         count = 0
         existing_by_principal: dict[str, dict[str, dict[str, Any]]] = {}
         pending_by_principal: dict[str, dict[str, dict[str, Any]]] = {}
         for source_kind in ("custom", "public"):
-            for value in list_factor_sources(source_kind):
+            for value in list_factor_summaries(source_kind, str(principal or "").strip() if source_kind == "custom" else ""):
                 owner = str(value.get("owner_username") or "").strip()
                 target = owner or "__public__"
                 if source_kind == "custom" and target != str(principal or "").strip():
@@ -449,16 +450,14 @@ class AccountDomainSyncService:
                 factor_id = str(value.get("factor_id") or "").strip()
                 if not factor_id:
                     continue
-                source_code = str(value.get("source_code") or "")
-                import hashlib
-
                 payload = {
                     "source_kind": source_kind,
                     "owner_username": owner,
                     "factor_id": factor_id,
-                    "factor_name": str(value.get("factor_name") or factor_id),
-                    "source_sha256": hashlib.sha256(source_code.encode()).hexdigest(),
-                    "source_bytes": len(source_code.encode()),
+                    "factor_name": str(value.get("name") or value.get("factor_name") or factor_id),
+                    "catalog": value,
+                    "source_sha256": str(value.get("source_sha256") or ""),
+                    "source_bytes": int(value.get("source_bytes") or 0),
                     "storage_server_id": self.manager_id,
                     "visibility": "public" if source_kind == "public" else "private",
                     # Carry the immutable semantic fingerprint so a receiving
@@ -504,7 +503,7 @@ class AccountDomainSyncService:
                     pending_by_principal[target] = {
                         str(item.get("entity_id") or ""): item
                         for item in self.local.pending(
-                            principal=target, limit=1000,
+                            principal=target, limit=1000, include_blocked=True,
                         )
                         if item.get("entity_type") == "factor_source"
                     }

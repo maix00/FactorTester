@@ -53,8 +53,17 @@
     return refs.map(ref => names.get(ref) || ref);
   }
 
+  const searchTexts = new WeakMap();
+  const familyTexts = new WeakMap();
   function matches(value, query) {
-    return !query || JSON.stringify(value || {}).toLowerCase().includes(query);
+    if (!query) return true;
+    if (!value || typeof value !== "object") return false;
+    let text = searchTexts.get(value);
+    if (text === undefined) {
+      text = JSON.stringify(value).toLowerCase();
+      searchTexts.set(value, text);
+    }
+    return text.includes(String(query).toLowerCase());
   }
 
   function familySearchText(value) {
@@ -70,7 +79,13 @@
   }
 
   function matchesFamily(value, query) {
-    return !query || familySearchText(value).includes(String(query).toLowerCase());
+    if (!query) return true;
+    let text = familyTexts.get(value);
+    if (text === undefined) {
+      text = familySearchText(value);
+      familyTexts.set(value, text);
+    }
+    return text.includes(String(query).toLowerCase());
   }
 
   function familyName(value) {
