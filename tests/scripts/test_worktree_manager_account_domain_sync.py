@@ -109,6 +109,7 @@ def test_factor_sync_materializes_resolved_aliases(monkeypatch) -> None:
     values = materialized_factor_configs("alice")
 
     assert values[0][0] == "default:CA"
+    assert values[0][1]["schema_version"] == 2
     resolved = values[0][1]["resolved_factors"][0]
     assert resolved["factor_alias"] == "CA|$F:1m"
     assert resolved["factor_ref"] == frozen["ref"]

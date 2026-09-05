@@ -58,7 +58,7 @@ def materialized_factor_configs(owner: str, *, existing: list[dict[str, Any]] | 
             resolved = [{key: item[key] for key in _FACTOR_KEYS if item.get(key) not in (None, "")}
                         for item in factors if isinstance(item, dict)]
             from .payloads import public_payload
-            payload = public_payload({**config, "factor_family_alias": family,
+            payload = public_payload({**config, "schema_version": 2, "factor_family_alias": family,
                                       "resolved_factors": resolved})
             result.append((identifier, payload))
     return result
