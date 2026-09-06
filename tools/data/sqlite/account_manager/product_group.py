@@ -46,7 +46,8 @@ def load_product_groups(username: str) -> list[dict[str, Any]]:
             continue
         if isinstance(payload, dict):
             groups.append(payload)
-    return groups
+    from tools.data.sqlite.account_manager.domain_sync import overlay_entities
+    return overlay_entities(username, 'product_group', groups, id_key='id')
 
 
 def save_product_groups(username: str, groups: list[dict[str, Any]]) -> None:
@@ -74,4 +75,3 @@ def save_product_groups(username: str, groups: list[dict[str, Any]]) -> None:
                     now,
                 ),
             )
-
