@@ -529,10 +529,14 @@
         // Pencil → enter an edit state only: the selected value stays the
         // library / alias factor until the user actually edits a parameter.
         // The first edit materialises an independent on-the-fly factor.
-        const unlockFactorEditing = () => {
+        const unlockFactorEditing = event => {
+          event?.preventDefault?.();
+          event?.stopPropagation?.();
           editingFactor = true;
           if (draft && typeof draft === "object") {
             const saved = draft.identity?.params || draft.parameter_values || {};
+            for (const key of Object.keys(editingParams)) delete editingParams[key];
+            Object.assign(editingParams, saved);
             baseFactor = {
               ...draft,
               identity: {...(draft.identity || {}), params: {...saved}},
@@ -586,6 +590,12 @@
                 const identity = {...(base.identity || {}), params: {...editingParams}};
                 onTheFlyFactor = {
                   ...base,
+                  // Reuse the existing save-time family-draft freezer; an
+                  // edited parameter set must not reuse the old frozen ref.
+                  __factor_family_draft: true,
+                  __factor_family: {...familyMeta,
+                    owner_username: base.owner_ref || base.owner_username,
+                  },
                   identity,
                   params: Object.entries(editingParams)
                     .filter(([key]) => key && !key.startsWith("$"))
