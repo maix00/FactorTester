@@ -36,7 +36,7 @@ from typing import Any
 # bump it whenever the resolved-formula semantics change.  The view page must
 # continue to render the persisted resolved value instead of repairing it in
 # JavaScript.
-RESOLVED_MATH_EXPR_VERSION = 4
+RESOLVED_MATH_EXPR_VERSION = 5
 
 
 # Sentinel used to distinguish "attribute present with value None" from

@@ -394,11 +394,10 @@ def test_bar_search_latex_formats_selection_parentheses_and_resolved_scope():
     assert r"\operatorname{argm" not in latex
     assert r"\left\{k\middle|" in latex
     assert r"\end{aligned}\right\}" in latex
-    # The second row is a continuation in the same cell as ``X_t``.  It must
-    # not receive a second alignment marker, which would move the condition to
-    # the right-hand column inside the braces.
-    assert r"X_t &:= X,\\&" not in latex
-    assert r"X_t &:= X,\\" in latex
+    # The search body is a single-column continuation.  Alignment markers
+    # would move parts of the condition into separate columns in KaTeX.
+    assert r"X_t &" not in latex
+    assert r"X_t:=X,\\" in latex
     assert r"\right\}]" not in latex
 
 
