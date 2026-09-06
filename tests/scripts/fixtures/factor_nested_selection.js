@@ -102,7 +102,7 @@ const compactChild = {
 };
 const childFamily = {
   factor_family_alias: "SgChgPct",
-  math_expr: String.raw`\operatorname{Resample}_{\textcolor{red}{\$F}}(R_{\textcolor{red}{N}}Q_{\textcolor{red}{M}}(\textcolor{red}{P}_t-\textcolor{red}{P}_{t-\textcolor{red}{B}}))`,
+  math_expr: String.raw`\textcolor{red}{\$Rev}\cdot \operatorname{Resample}_{\textcolor{red}{\$F}}(R_{\textcolor{red}{N}}Q_{\textcolor{red}{M}}(\textcolor{red}{P}_t-\textcolor{red}{P}_{t-\textcolor{red}{B}}))`,
   parameter_definitions: [
     {alias: "P", type: "FactorParam", default_value: "CA"},
     {alias: "M", type: "FactorParam", default_value: 0.9},
@@ -200,6 +200,8 @@ assert.ok(valuePicker.options.onAddCandidateForType, "FactorParam supports on-th
     item.className?.includes("factor-detail-local-formula")
   ));
   assert.ok(nestedFormula, "nested factor keeps its local formula mount");
+  assert.ok(nestedFormula.children[1].textContent.includes(String.raw`\textcolor{red}{\$Rev}\cdot `),
+    "parameter mode shows the symbolic red direction multiplier");
   const reverseInput = descendants(editor.root).find(item => (
     item.tagName === "INPUT" && String(item.value) === "0"
   ));

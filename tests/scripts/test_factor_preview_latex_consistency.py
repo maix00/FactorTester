@@ -171,6 +171,14 @@ def test_parameter_values_round_trip():
     assert fpl.parameter_values(factor) == {"N": "20d"}
 
 
+def test_nested_output_assignment_preserves_alignment():
+    child = _child('Nested', r'\begin{aligned}A_t &:= 1, \\ X_t &:= A_t.\end{aligned}', [])
+    parent = _factor('Parent', r'X_t &:= \textcolor{red}{P}', [('P', 'FactorParam', child)])
+    result = fpl.preview_expression(parent)
+    assert r'\textcolor{blue}{\mathrm{Nested}}_t &:= A_t;' in result
+    assert _node_previews([parent], [{}])[0]['expression'] == result
+
+
 def test_signal_alignment_intermediates_and_reverse_match_real_metadata():
     from types import SimpleNamespace
     from tools.factors import FactorFamily
@@ -182,6 +190,7 @@ def test_signal_alignment_intermediates_and_reverse_match_real_metadata():
     root = ColumnRef(DataColumn.CLOSE).as_intermediate()
     family = FactorFamily(alias="LatexSignalAlignmentProbe", expr=root)
     template = family.math_expr
+    assert r'\textcolor{red}{\$Rev}\cdot ' in template
     assert template == family_template_latex(family)
     assert r"\operatorname{Resample}_{\textcolor{red}{\$F}}" in template
     assert r"\mathrm{I1}_t &:=" in template

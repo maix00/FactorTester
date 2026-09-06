@@ -12,6 +12,30 @@ from tools.data.sqlite.factor_metadata import list_factor_summaries
 from tools.data.sqlite.factor_source_store import upsert_factor_source, delete_factor_source, load_factor_source
 
 
+def test_current_head_restores_exact_local_snapshot_without_network(tmp_path, monkeypatch):
+    from tools.data.sqlite.factor_source_versions import record_factor_formula_version
+    from tools.data.sqlite.factor_family_heads import family_head
+    monkeypatch.setattr(settings, 'CACHE_DB_PATH', tmp_path / 'cache.sqlite')
+    monkeypatch.setenv('FACTORTESTER_SERVER_ID', 'peer')
+    source = ('from tools.factors import FactorFamily\nfrom tools.factors.FactorExpr import ConstExpr\n'
+              'class SnapshotProbe(FactorFamily):\n    @staticmethod\n'
+              '    def factor_expr():\n        return ConstExpr(1)\n')
+    upsert_factor_source('custom', 'alice', 'SnapshotProbe', 'SnapshotProbe', source)
+    head = family_head('custom', 'alice', 'SnapshotProbe')
+    record_factor_formula_version('custom', 'alice', 'SnapshotProbe', source,
+        family_formula_fingerprint=head['payload']['family_formula_fingerprint'])
+    # A reconciled mutable copy differs while the exact authoritative bytes
+    # are already present in this server's immutable version store.
+    upsert_factor_source('custom', 'alice', 'SnapshotProbe', 'SnapshotProbe',
+                         source + '\n', publish_family=False)
+    monkeypatch.setattr(factor_source_hydration.FactorSourceHydrator, 'hydrate',
+                        lambda *args, **kwargs: False)
+    assert ensure_current_family(SimpleNamespace(server_id='peer'), 'custom',
+                                 'SnapshotProbe', principal='alice')
+    assert load_factor_source('custom', 'alice', 'SnapshotProbe') == source
+    assert family_head('custom', 'alice', 'SnapshotProbe') == head
+
+
 def test_family_head_controls_peer_detail_edit_delete_and_cache(tmp_path, monkeypatch):
     control = MemoryControlStore()
     left = AccountDomainSyncService(sqlite_path=tmp_path/'left.sqlite', control_store=control, manager_id='left')
