@@ -50,10 +50,13 @@
   // has become active.  Consumers use this small guard after awaited IO;
   // it avoids stale report/job responses replacing the current tab.
   let activeRouteToken = 0;
+  // Live tab restoration retains DOM handlers. Their lifetime belongs to
+  // that rendered tab, not to the last navigation anywhere in the app.
+  const routeLifetimes = FTRoutePresentation.createLifetimes(() => state.activeTabID);
 
   function routePresentation(routeToken) {
     return FTRoutePresentation.create({
-      isCurrent: () => routeToken === activeRouteToken,
+      isCurrent: () => routeLifetimes.isCurrent(routeToken),
       activeNav, setHeading, updateActiveTab,
     });
   }
@@ -71,11 +74,11 @@
     return note;
   }
 
-  const jobsContext = (routeToken = activeRouteToken) => ({
+  const jobsContext = (routeToken = routeLifetimes.current() ?? activeRouteToken) => ({
     api, raw, navigate, openTab, button, content, toolbar, t,
     openLogin, showNotice, servicePath,
     loginRequiredView, session: state.session, modules: state.modules,
-    isRouteCurrent: () => routeToken === activeRouteToken,
+    isRouteCurrent: () => routeLifetimes.isCurrent(routeToken),
     ...routePresentation(routeToken),
     ...currentTabContext(),
   });
@@ -87,13 +90,13 @@
     return `${path}${separator}port=${encodeURIComponent(port)}`;
   }
 
-  const appContext = (routeToken = activeRouteToken) => ({
+  const appContext = (routeToken = routeLifetimes.current() ?? activeRouteToken) => ({
     api, raw, navigate, button, content, toolbar,
     navigateInPlace: tabs?.navigateInPlace,
     servicePath, showNotice, openLogin, logout,
     activateTab: tabs?.activateTab, closeTab: tabs?.closeTab,
     session: state.session, t, ...currentTabContext(),
-    isRouteCurrent: () => routeToken === activeRouteToken,
+    isRouteCurrent: () => routeLifetimes.isCurrent(routeToken),
     ...routePresentation(routeToken),
     languagePreference: state.languagePreference,
     setLanguagePreference,
@@ -135,6 +138,7 @@
     // Invalidate any in-flight page work before replacing the session.  The
     // old request must not paint visitor/anonymous content after login.
     activeRouteToken += 1;
+    routeLifetimes.clear();
     tabs?.discardViews?.();
     await loadLanguage();
     await loadModules();
@@ -243,7 +247,7 @@
     });
   }
 
-  function reportContext(routeToken = activeRouteToken) {
+  function reportContext(routeToken = routeLifetimes.current() ?? activeRouteToken) {
     return {
       state, api, t, content, toolbar, button,
       ...currentTabContext(),
@@ -252,7 +256,7 @@
       saveActiveTabSession, openTab, navigate, showNotice,
       captureScrollPosition,
       checkpointTabSession: tabs?.scheduleActiveSessionCheckpoint,
-      isRouteCurrent: () => routeToken === activeRouteToken,
+      isRouteCurrent: () => routeLifetimes.isCurrent(routeToken),
     };
   }
 
@@ -313,6 +317,7 @@
 
   async function renderRoute() {
     const routeToken = ++activeRouteToken;
+    routeLifetimes.begin(routeToken);
     tabs?.markActiveViewLoading?.();
     // The header authoring-mode presentation follows the route being
     // rendered: edit/create pages tint the header (page-mode.js).
@@ -361,8 +366,12 @@
     state, embeddedPresentation, t, renderRoute,
     content, title, eyebrow, toolbar, notice,
     beforeTabChange: () => { activeRouteToken += 1; },
-    onTabEvicted: tabID => pageAgentLifecycle.evict(tabID),
+    onTabEvicted: tabID => {
+      routeLifetimes.discard(tabID);
+      pageAgentLifecycle.evict(tabID);
+    },
     onTabClosed: (_tab, session) => {
+      routeLifetimes.discard(_tab.id);
       const drafts = session?.durable?.testDrafts;
       const workspaceIDs = new Set(Object.values(drafts || {}).map(
         draft => draft?.schemaVersion === 2 ? String(draft.workspaceID || "") : "",
