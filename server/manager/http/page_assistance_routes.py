@@ -334,6 +334,10 @@ subtrees or enumerate candidate collections. Use the candidate lookup command
 registered by a field when candidates are needed. Build one complete
 structured document patch. Start from the page's complete document without
 printing it by running `factortester assist drafts create --from-current`.
+An authoring draft may be incomplete and need not be runnable. Preserve
+unrequested fields and empty configuration groups when editing only names,
+dates, or settings. Never add factors, products, or groups merely to satisfy
+run readiness; report a validation blocker rather than expanding the request.
 For a test configuration, inspect the registered `configurations` node before
 creating a strategy or configuration group. Its `collection_path`,
 `create_template`, `required_fields`, `field_sources`, and `item_schema` are
