@@ -2446,11 +2446,11 @@ def test_test_configuration_uses_a_tabbed_settings_page() -> None:
     assert "function jobPath(item)" in run_batch_model
     assert "function runSpecPath(item)" in run_batch_model
     assert "function runSpecTarget(item)" in run_batch_model
-    assert 'context.t("查看运行配置")' in run_batch
+    assert 'FTUI.iconButton(context, "doc.text", "查看运行配置"' in run_batch
     assert "FTRunSpecView.openMany" in run_batch
     assert 'invokeAction("runAll"' in run_batch
     assert 'context.t("查看 RunSpec")' not in run_batch
-    assert 'context.t("运行")' in run_batch
+    assert 'FTUI.iconButton(context, "play.circle", "运行"' in run_batch
 
 
 def test_public_jobs_and_account_navigation_do_not_reuse_stale_page_state() -> None:
