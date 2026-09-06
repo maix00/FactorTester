@@ -331,7 +331,8 @@
     const declarations = FTJobArtifacts.effectiveDeclarations(
       taskDetail.output_declarations || [], outputArtifacts, context,
     );
-    const results = taskDetail.results || payload.result_summary || payload.result;
+    const results = taskDetail.results?.summary || payload.result_summary
+      || taskDetail.results || payload.result;
     const runtimeRows = results?.runtime_info_rows || [];
     if (job.kind !== "backtest" && runtimeRows.length) {
       const heading = document.createElement("h3");
