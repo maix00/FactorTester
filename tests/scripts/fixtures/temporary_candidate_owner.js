@@ -25,6 +25,16 @@ state.catalogSourceState = {factors: [], savedFactors: []};
 FTTestFactorSets.prepare(state);
 const factor=(ref)=>({schema_version:2,ref,alias:ref,identity:{},temporary:true});
 (async()=>{
+ const isolated = {kind:'ic',values:{},factors:[],savedFactors:[]};
+ const frozen = factor('factor:v2:restored');
+ const source = FTTestFactorCandidateSources.scopedSourceState(isolated, {}, {
+   factor_candidate_refs:[frozen.ref],factor_candidates:[frozen],
+   factor_source_selections:[frozen],
+ });
+ assert.deepEqual(FTTestFactorCandidateSources.scopedSourceSnapshot(source).factor_candidates,[frozen]);
+ FTTestFactorCandidateSources.retainScopedSources(isolated, source);
+ isolated.factors=[];
+ assert.deepEqual(isolated.savedFactors,[frozen]);
  FTTestFactorCandidateSources.panel(context,state);
  pickerOptions.onAddCandidateForType('factor',context,{add(){}});
  saved(factor('factor:v2:one'));

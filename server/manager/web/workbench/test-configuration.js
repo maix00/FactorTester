@@ -113,7 +113,7 @@
       if (!temporary(factor)) return;
       temporaryFactors.push(structuredClone(factor));
     };
-    for (const factor of [...(state.values?.factor_candidates || []), ...(state.factors || [])]) {
+    for (const factor of [...(state.values?.factor_candidates || []), ...(state.factors || []), ...(state.savedFactors || [])]) {
       visitTemporaryFactor(factor);
     }
     return {
