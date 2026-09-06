@@ -549,7 +549,13 @@
       ? scopedSourceStates.get(owner) : null;
     if (!local) {
       const wanted = new Set((initial.factor_candidate_refs || []).map(String));
-      const candidates = catalogItems(state).filter(item => wanted.has(factorID(item)));
+      const available = new Map([
+        ...catalogItems(state),
+        ...(initial.factor_candidates || []),
+        ...(initial.factor_source_selections || []),
+      ].filter(item => item?.schema_version === 2 && factorID(item))
+        .map(item => [factorID(item), item]));
+      const candidates = [...available.values()].filter(item => wanted.has(factorID(item)));
       const direct = Array.isArray(initial.factor_source_selections)
         ? structuredClone(initial.factor_source_selections)
         : candidates.filter(item => !(item.factor_set_refs || []).length);
@@ -585,6 +591,17 @@
     };
   }
 
+  function retainScopedSources(owner, source) {
+    if (!source) return;
+    const records = new Map((owner.savedFactors || []).map(item => [factorID(item), item]));
+    for (const item of FTTestFactorSelection.candidates(source)) {
+      if (factorID(item)) records.set(factorID(item), structuredClone(item));
+    }
+    // Persist the records a submitted inner group refers to, independently
+    // of the asynchronously replaced visible catalog array.
+    owner.savedFactors = [...records.values()];
+  }
+
   function scopedSourcePanel(context, state, refresh, options = {}) {
     const root = panel(context, state, refresh, {includeRoles: false});
     root.classList.add("test-factor-candidate-sources-scoped");
@@ -612,7 +629,7 @@
 
   window.FTTestFactorCandidateSources = Object.freeze({
     candidateHeading, candidatePicker, innerPanel, panel,
-    scopedSourcePanel, scopedSourceSnapshot, scopedSourceState,
+    scopedSourcePanel, scopedSourceSnapshot, scopedSourceState, retainScopedSources,
     selections, syncCandidates,
   });
 })();

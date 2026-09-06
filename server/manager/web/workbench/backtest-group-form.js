@@ -123,6 +123,7 @@
     const factorSourceState = !factorScopeBlocked && factorScope.source !== "outer"
       ? FTTestFactorCandidateSources.scopedSourceState(state, editor, {
           factor_candidate_refs: editor.draft?.factor_candidate_refs ?? selectedFactors,
+          factor_candidates: editor.draft?.factor_candidates,
           factor_source_selections: editor.draft?.factor_source_selections
             ?? defaults.factor_source_selections,
           factor_set_selections: editor.draft?.factor_set_selections
@@ -149,6 +150,7 @@
     };
     const factorSourceMetadata = () => {
       const snapshot = syncScopedFactorSources();
+      FTTestFactorCandidateSources.retainScopedSources(state, factorSourceState);
       return snapshot ? {
         factor_source_selections: snapshot.factor_source_selections,
         factor_set_selections: snapshot.factor_set_selections,

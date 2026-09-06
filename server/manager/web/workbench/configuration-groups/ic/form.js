@@ -37,6 +37,7 @@
       ? FTTestFactorCandidateSources.scopedSourceState(state, editor, {
           factor_candidate_refs: draft.factor_candidate_refs
             ?? (factorRef ? [factorRef] : []),
+          factor_candidates: draft.factor_candidates,
           factor_source_selections: draft.factor_source_selections
             ?? current?.factor_source_selections,
           factor_set_selections: draft.factor_set_selections
@@ -216,6 +217,7 @@
           } : {}),
           editor_mounted_tabs: editorTabs?.value?.().mountedTabs,
         };
+        FTTestFactorCandidateSources.retainScopedSources(state, factorSourceState);
         if (current) model().update(state, current.config_group_id, value);
         else model().add(state, value);
         onFinish();
