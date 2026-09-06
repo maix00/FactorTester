@@ -70,7 +70,8 @@
     const item = unwrapFamilyDraft(value);
     const resultValue = expression(item);
     if (!resultValue) return {body: "", lines: []};
-    let result = resultValue;
+    // Resolve the template's direction switch below; $Rev=0 is not zero times X.
+    let result = resultValue.split("\\textcolor{red}{\\$Rev}\\cdot ").join("");
     const lines = [];
     const rows = parameterRows(item);
     const reverseValue = Object.prototype.hasOwnProperty.call(parameterValues, "$Rev")
@@ -741,6 +742,7 @@
   function childDefinition(symbol, line, align, punctuation = "") {
     const clean = String(line).trim().replace(/[.;]\s*$/, "");
     const output = clean.match(/^(?:X|\\mathrm{X})_t\s*&?\s*:=\s*(.+)$/);
+    if (output) return `${symbol}_t &:= ${output[1]}${punctuation}`;
     // If the nested definition line already carries an alignment `&` (it is an
     // aligned intermediate definition), do not add another `&` prefix for the
     // referring family-name symbol — otherwise we get a duplicate/misaligned &.

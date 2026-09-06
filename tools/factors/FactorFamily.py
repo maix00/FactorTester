@@ -206,6 +206,13 @@ class FactorFamily(UniqueNameObject, FactorExpr):
             instance.desc = desc if desc is not None else getattr(cls, 'desc', '')
             instance.description = description if description is not None else getattr(cls, 'description', '')
             instance.math_expr = _math or (SignalAlign(_expr, '$F').to_latex() if _expr is not None else '')
+            if not _math:
+                # Symbolic direction in the family template. Resolved previews
+                # translate this switch to a red minus (1) or no prefix (0).
+                instance.math_expr = instance.math_expr.replace(
+                    r'\operatorname{Resample}_',
+                    r'\textcolor{red}{\$Rev}\cdot \operatorname{Resample}_', 1,
+                )
 
             # 信号对齐参数（None 则从类属性取默认值）
             instance.basepoint = basepoint if basepoint is not None else getattr(cls, 'basepoint', 'last')
