@@ -91,9 +91,11 @@ class FactorSourceHydrator:
             read_head = getattr(local, "get_entity", None)
             head = read_head("__public__" if owner == "public" else owner,
                              "factor_family", f"{source_kind}:{factor_id}") if callable(read_head) else None
-            current_fingerprint = (head or {}).get("payload", {}).get("family_formula_fingerprint")
+            current_payload = (head or {}).get("payload", {})
+            current_fingerprint = current_payload.get("family_formula_fingerprint")
             is_current = (not requested_fingerprint and not head) or bool(
                 head and not head.get("deleted") and current_fingerprint == fingerprint
+                and current_payload.get("source_sha256") == expected_sha256
             )
             if is_current:
                 upsert_factor_source(

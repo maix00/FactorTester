@@ -1031,6 +1031,7 @@
       ? data.families.find(item => item.family_ref === targetRef
         || item.factor_family_alias === targetRef)
       : context.testObjectInitialValue || data.factors.find(item => item.factor_ref === targetRef
+        || item.ref === targetRef || item.alias === targetRef
         || item.factor_alias === targetRef || item.id === targetRef);
     const factorID = familyMode
       ? familyAlias(factor) || targetRef
@@ -1042,10 +1043,13 @@
         ? factorID
         : loaded.factor_family_alias || loaded.family_alias || factorID;
       const value = await window.FTFactorDetailShared.loadSourceVersion(
-        context, loaded, "current", {
+        context, loaded, familyMode ? "current"
+          : loaded.family_formula_fingerprint
+            || loaded.identity?.family_formula_fingerprint || "current", {
           familyID,
           sourceKind: publicMode ? "public" : undefined,
-          ownerUsername: loaded.owner_username || context.session.username || "",
+          ownerUsername: loaded.owner_username || loaded.factor_owner_ref
+            || loaded.owner_ref || context.session.username || "",
         },
       );
       loaded = {...loaded, ...value};
