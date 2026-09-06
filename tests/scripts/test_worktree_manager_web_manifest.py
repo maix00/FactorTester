@@ -1175,6 +1175,8 @@ def test_factor_detail_modes_share_page_shell_and_family_only_has_version_picker
     assert "resolved_math_expr" in shared
     assert "factor-family-formula-raw" in shared
     assert "FTFactorDetailShared.pageClass" in factor_view
+    assert "resolvedOnly: true" in factor_view
+    assert "previewExpression(" not in factor_view
     assert "FTFactorDetailShared.pageClass" in family_view
     assert "sourceVersionHistory" not in factor_view
     assert "sourceVersionHistory" in family_view

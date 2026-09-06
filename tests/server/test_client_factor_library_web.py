@@ -281,6 +281,7 @@ def test_embedded_library_api_is_sanitized_and_redacts_local_paths(
                 "source": "custom",
                 "source_code": "class Secret: pass",
                 "math_expr": r"\frac{x}{y}",
+                "resolved_math_expr": r"\textcolor{red}{-}\operatorname{Resample}_{\textcolor{red}{10m}}(x)",
                 "tree_repr": "private expression tree",
                 "source_path": "/Users/alice/Secret.py",
                 "params": [
@@ -321,6 +322,9 @@ def test_embedded_library_api_is_sanitized_and_redacts_local_paths(
     assert "product_group_refs" not in payload["families"][0]
     serialized = json.dumps(payload, ensure_ascii=False)
     assert payload["families"][0]["math_expr"] == r"\frac{x}{y}"
+    assert payload["factors"][0]["resolved_math_expr"] == (
+        r"\textcolor{red}{-}\operatorname{Resample}_{\textcolor{red}{10m}}(x)"
+    )
     for forbidden in (
         "source_code",
         "tree_repr",
@@ -791,9 +795,9 @@ def test_validate_transient_duration_factor_supports_bar_distance_source() -> No
         r"\operatorname{ScopeBars}\left(\textcolor{red}{K}\right)"
         in payload["math_expr"]
     )
-    assert payload["math_expr"].count(":=") == 3
+    assert payload["math_expr"].count(":=") == 4
     assert r"\mathrm{差持续期}_t" in payload["math_expr"]
-    assert "X_t:=" in payload["math_expr"]
+    assert "X_t &:= " in payload["math_expr"]
 
 
 def test_factor_operator_catalog_exposes_bar_search_operators() -> None:

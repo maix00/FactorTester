@@ -209,7 +209,7 @@ class BarDistanceOp(OperandExpr):
         return _search_latex(
             scope=self.scope,
             select=self.select,
-            body=f"X_t:={value},\\\\{condition}",
+            body=f"X_t &:= {value},\\\\{condition}",
             subst=subst,
         )
 

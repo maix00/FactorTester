@@ -37,8 +37,17 @@ def materialized_factor_configs(owner: str, *, existing: list[dict[str, Any]] | 
             if previous_row and previous_row.get("deleted"):
                 # An old authored copy is not a request to resurrect a deletion.
                 continue
-            if (isinstance(previous.get("resolved_factors"), list)
-                    and len(previous["resolved_factors"]) >= len(previous.get("params_list") or [])):
+            previous_factors = previous.get("resolved_factors")
+            has_resolved_formulas = (
+                isinstance(previous_factors, list)
+                and all(
+                    isinstance(item, dict)
+                    and str(item.get("resolved_math_expr") or "").strip()
+                    for item in previous_factors
+                )
+            )
+            if (has_resolved_formulas
+                    and len(previous_factors) >= len(previous.get("params_list") or [])):
                 # The write hook replaces this payload with a raw draft before
                 # a real authoring edit. On restart, the durable frozen mirror
                 # wins over a stale authored copy from another Manager.

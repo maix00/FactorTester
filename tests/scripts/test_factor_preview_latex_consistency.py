@@ -217,6 +217,7 @@ def test_signal_alignment_intermediates_and_reverse_match_real_metadata():
     assert result == fpl.preview_expression(outer)
     assert result.count(r"\operatorname{Resample}") == 3
     assert result.count(r"\textcolor{red}{-}") == 2
+    assert r"\operatorname{Resample}_{\textcolor{red}{\$F}}\left(" not in result
 
     # A signal operand may itself contain line breaks (e.g. BarSearch).
     # Reversal belongs outside Resample, never inside that inner alignment.
@@ -229,6 +230,16 @@ def test_signal_alignment_intermediates_and_reverse_match_real_metadata():
     result = _node_previews([complex_node], [overrides])[0]["expression"]
     assert result == fpl.preview_expression(complex_node, overrides)
     assert result.startswith(r"\textcolor{red}{-}\operatorname{Resample}")
+
+    actual_frequency = _factor(
+        "ActualFrequency",
+        r"\operatorname{Resample}_{\textcolor{red}{10m}}\left(\mathrm{I1}_t\right)",
+        [("$F", "FactorFrequencyParam", "10m"),
+         ("$Rev", "ReverseSignalParam", "1")],
+    )
+    actual_result = _node_previews([actual_frequency], [{}])[0]["expression"]
+    assert actual_result.startswith(r"\textcolor{red}{-}\operatorname{Resample}")
+    assert actual_result == fpl.preview_expression(actual_frequency)
 
     class ReversedReturn(FactorFamily):
         @staticmethod

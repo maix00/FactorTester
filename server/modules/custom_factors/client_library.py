@@ -341,6 +341,10 @@ def _factor_projection(item: dict[str, Any]) -> dict[str, Any]:
         "chinese_name": _safe_text(item.get("chinese_name")),
         "description": _safe_long_text(item.get("description")),
         "math_expr": _safe_math_text(item.get("math_expr")),
+        # View mode renders this backend-composed output directly.  Keep it
+        # beside the template so a Manager projection cannot silently fall
+        # back to browser-side parameter composition.
+        "resolved_math_expr": _safe_math_text(item.get("resolved_math_expr")),
         "category": _safe_text(item.get("category")),
         "factor_kind": kind,
         "params": params,

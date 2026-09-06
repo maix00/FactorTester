@@ -6,7 +6,9 @@
     //   - math_expr        = 因子家族_LATEX模板_（自包含，\textcolor{red}{alias} 占位，未叠加）
     //   - resolved_math_expr = 参数解析+嵌套因子叠加后的完整公式（查看模式渲染）
     // instance=true（看实例）→ 优先读 resolved_math_expr（叠加后）；否则读 math_expr（模板）。
-    const keys = options.instance === true
+    const keys = options.resolvedOnly === true
+      ? ["resolved_math_expr"]
+      : options.instance === true
       ? ["resolved_math_expr", "math_expr", "formula", "latex", "factor_expr", "expression"]
       : ["math_expr", "formula", "latex", "factor_expr", "expression", "resolved_math_expr"];
     for (const key of keys) {
@@ -76,8 +78,14 @@
     const reversed = ["1", "-1", "true", "t", "yes", "y", "rev", "reverse"]
       .includes(String(reverseValue).trim().toLowerCase());
     const signal = "\\operatorname{Resample}_{\\textcolor{red}{\\$F}}";
-    const reverseSignal = reversed && result.includes(signal);
+    const signalPrefix = "\\operatorname{Resample}_";
+    const reverseSignal = reversed && result.includes(signalPrefix);
     if (reverseSignal) result = result.replace(signal, "\\textcolor{red}{-}" + signal);
+    if (reverseSignal && !result.includes("\\textcolor{red}{-}" + signal)) {
+      const position = result.indexOf(signalPrefix);
+      result = result.slice(0, position)
+        + "\\textcolor{red}{-}" + result.slice(position);
+    }
     for (const parameter of rows) {
       const alias = String(parameter.alias || "").trim();
       if (!alias) continue;
