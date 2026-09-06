@@ -22,7 +22,7 @@ class FactorSourceHydrator:
         if not factor_id:
             return False
         requested_fingerprint = str(fingerprint or "").strip()
-        for metadata in self._candidates(owner, factor_id, principal=principal):
+        for metadata in self._candidates(owner, factor_id, principal=principal, fingerprint=requested_fingerprint):
             if requested_fingerprint and requested_fingerprint != str(metadata.get("family_formula_fingerprint") or ""):
                 continue
             storage_server_id = str(metadata.get("storage_server_id") or "").strip()
@@ -87,18 +87,27 @@ class FactorSourceHydrator:
             advertised = str(metadata.get("family_formula_fingerprint") or "")
             if advertised and fingerprint != advertised:
                 continue
-            upsert_factor_source(
-                source_kind,
-                "" if source_kind == "public" else owner,
-                factor_id,
-                str(metadata.get("factor_name") or factor_id),
-                source,
-                chinese_name=str(metadata.get("chinese_name") or ""),
-                description=str(metadata.get("description") or ""),
-                category=str(metadata.get("category") or ""),
-                family_formula_fingerprint=fingerprint,
-                publish_family=False,
+            local = getattr(getattr(self.state, "account_domain_sync", None), "local", None)
+            read_head = getattr(local, "get_entity", None)
+            head = read_head("__public__" if owner == "public" else owner,
+                             "factor_family", f"{source_kind}:{factor_id}") if callable(read_head) else None
+            current_fingerprint = (head or {}).get("payload", {}).get("family_formula_fingerprint")
+            is_current = (not requested_fingerprint and not head) or bool(
+                head and not head.get("deleted") and current_fingerprint == fingerprint
             )
+            if is_current:
+                upsert_factor_source(
+                    source_kind,
+                    "" if source_kind == "public" else owner,
+                    factor_id,
+                    str(metadata.get("factor_name") or factor_id),
+                    source,
+                    chinese_name=str(metadata.get("chinese_name") or ""),
+                    description=str(metadata.get("description") or ""),
+                    category=str(metadata.get("category") or ""),
+                    family_formula_fingerprint=fingerprint,
+                    publish_family=False,
+                )
             # A hydrated source was fetched by its immutable fingerprint from
             # the authoritative storage Manager.  Record the formula version so
             # this server's factor-library version catalog stays consistent with
@@ -117,12 +126,13 @@ class FactorSourceHydrator:
                 except (RuntimeError, TypeError, ValueError):
                     # Recording a version is best-effort: a hydrated source that
                     # cannot produce a stable snapshot must not fail hydration.
-                    pass
+                    if not is_current:
+                        continue
             return True
         return False
 
     def _candidates(
-        self, owner: str, factor_id: str, *, principal: str,
+        self, owner: str, factor_id: str, *, principal: str, fingerprint: str = "",
     ) -> list[dict[str, object]]:
         synchronizer = getattr(self.state, "account_domain_sync", None)
         if synchronizer is None:
@@ -139,18 +149,24 @@ class FactorSourceHydrator:
             include_shared=True,
             sync=False,
         )
+        if fingerprint:
+            rows = [*rows, *synchronizer.entities(
+                scope, entity_type="factor_source_version", include_shared=True, sync=False,
+            )]
         values = self._matching_payloads(
             rows, owner=owner, factor_id=factor_id,
         )
         read_head = getattr(getattr(synchronizer, 'local', None), 'get_entity', None)
         head = read_head(scope, 'factor_family',
                     f"{'public' if owner == 'public' else 'custom'}:{factor_id}") if callable(read_head) else None
-        if head is not None:
+        if head is not None and not fingerprint:
             if head.get('deleted'):
                 return []
             current = head.get('payload') or {}
             values = [current, *[value for value in values
                       if value.get('source_sha256') == current.get('source_sha256')]]
+        if fingerprint:
+            values = [value for value in values if value.get("family_formula_fingerprint") == fingerprint]
         # Repair mirrors created while the account-domain cursor skipped a
         # full page. This is metadata-only and bounded; source bytes still use
         # the 7997 data plane.
@@ -161,7 +177,8 @@ class FactorSourceHydrator:
         if callable(lookup):
             try:
                 remote_rows = lookup(principal=scope, factor_id=factor_id,
-                                     source_kind="public" if owner == "public" else "custom")
+                                     source_kind="public" if owner == "public" else "custom",
+                                     **({"fingerprint": fingerprint} if fingerprint else {}))
                 for row in remote_rows:
                     synchronizer.local.apply_remote(row)
                 return self._matching_payloads(remote_rows, owner=owner, factor_id=factor_id)

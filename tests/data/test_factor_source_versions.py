@@ -9,6 +9,72 @@ from tools.data.sqlite import factor_source_versions
 def _fingerprint(character: str) -> str:
     return character * 64
 
+
+def test_history_manifest_and_bytes_survive_current_source_change(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from server.manager.objects.adapters.factor_source import FactorSourceOriginAdapter
+    from server.manager.storage.account_domain.local import LocalAccountDomainStore
+    from server.manager.storage.account_domain.factor_version_sync import backfill_factor_versions
+    from tools.data.sqlite.db import connect_sqlite
+
+    database = tmp_path / 'history.sqlite'
+    monkeypatch.setattr(Settings, 'CACHE_DB_PATH', database)
+    monkeypatch.setenv('FACTORTESTER_SERVER_ID', 'origin')
+    old = factor_source_versions.record_factor_formula_version(
+        'custom', 'alice', 'History', 'class History:\n    pass\n',
+        family_formula_fingerprint='a' * 64,
+    )
+    mirror = LocalAccountDomainStore(database)
+    rows = mirror.list_entities(principal='alice', entity_type='factor_source_version')
+    assert len(rows) == 1
+    assert rows[0]['payload']['source_sha256'] == old['source_sha256']
+    assert 'source_code' not in rows[0]['payload']
+    adapter = FactorSourceOriginAdapter(database=database, cache_root=tmp_path / 'cache')
+    transfer = SimpleNamespace(object_id='alice:History', expected_sha256=old['source_sha256'],
+                               expected_size=len(old['source_code'].encode()))
+    assert adapter(transfer).read_text() == old['source_code']
+    transfer.object_id = 'bob:History'
+    with pytest.raises(FileNotFoundError):
+        adapter(transfer)
+    # Simulate a pre-migration version row with no version manifest.
+    with connect_sqlite(database) as connection:
+        connection.execute("DELETE FROM account_domain_entities WHERE entity_type='factor_source_version'")
+        connection.execute("DELETE FROM account_domain_outbox WHERE entity_type='factor_source_version'")
+    sync = SimpleNamespace(local=mirror, manager_id='origin')
+    backfill_factor_versions(sync, 'bob')
+    assert mirror.list_entities(principal='alice', entity_type='factor_source_version') == []
+    backfill_factor_versions(sync, 'alice')
+    assert len(mirror.list_entities(principal='alice', entity_type='factor_source_version')) == 1
+
+
+def test_history_and_outbox_roll_back_together(monkeypatch, tmp_path):
+    from server.manager.storage.account_domain.local import LocalAccountDomainStore
+    monkeypatch.setattr(Settings, 'CACHE_DB_PATH', tmp_path / 'rollback.sqlite')
+    def fail(*args, **kwargs):
+        raise RuntimeError('outbox unavailable')
+    monkeypatch.setattr(LocalAccountDomainStore, 'upsert_local', fail)
+    with pytest.raises(RuntimeError, match='outbox unavailable'):
+        factor_source_versions.record_factor_formula_version(
+            'custom', 'alice', 'History', 'class History:\n    pass\n',
+            family_formula_fingerprint='a' * 64,
+        )
+    assert factor_source_versions.load_factor_formula_version('custom', 'alice', 'History', 'a'*64) is None
+
+
+def test_version_list_uses_remote_metadata_without_source_bodies(monkeypatch, tmp_path):
+    from server.manager.storage.account_domain.local import LocalAccountDomainStore
+    monkeypatch.setattr(Settings, 'CACHE_DB_PATH', tmp_path / 'metadata.sqlite')
+    mirror = LocalAccountDomainStore(Settings.CACHE_DB_PATH)
+    mirror.apply_remote({'principal':'alice','entity_type':'factor_source_version',
+                         'entity_id':'custom:History:'+'a'*64+'@origin', 'revision':1,
+                         'payload':{'source_kind':'custom','factor_id':'History',
+                                    'family_formula_fingerprint':'a'*64,'source_sha256':'b'*64,
+                                    'source_bytes':123,'created_at':1}})
+    versions = factor_source_versions.list_factor_formula_versions('custom','alice','History')
+    assert [v['family_formula_fingerprint'] for v in versions] == ['a'*64]
+    assert all('source_code' not in v for v in versions)
+    assert factor_source_versions.load_factor_formula_version('custom','alice','History','a'*64) is None
+
 def test_formula_versions_roundtrip_without_git_identity(monkeypatch, tmp_path):
     database = tmp_path / "factor-source-versions.sqlite"
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", database)

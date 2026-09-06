@@ -30,7 +30,7 @@ class FactorSourceStore:
         owner_username = "" if source_kind == "public" else owner
         return owner, factor_id, source_kind, owner_username
 
-    def source(self, object_id: str) -> str:
+    def source(self, object_id: str, *, expected_sha256: str = "") -> str:
         _owner, factor_id, source_kind, owner_username = self.identity(object_id)
         with connect_sqlite(self.database) as connection:
             _ensure_schema(connection)
@@ -41,16 +41,28 @@ class FactorSourceStore:
                 """,
                 (source_kind, owner_username, factor_id),
             ).fetchone()
-        if row is None:
+        if row is None and not expected_sha256:
             raise FileNotFoundError("factor source object is unavailable")
-        source = normalize_factor_source_code(str(row["source_code"] or ""))
+        source = normalize_factor_source_code(str(row["source_code"] or "")) if row else ""
+        if expected_sha256 and hashlib.sha256(source.encode()).hexdigest() != expected_sha256:
+            from tools.data.sqlite.factor_source_versions import _ensure_schema as ensure_versions
+            with connect_sqlite(self.database) as connection:
+                ensure_versions(connection)
+                version = connection.execute(
+                    "SELECT source_code FROM factor_family_formula_versions "
+                    "WHERE source_kind=? AND owner_username=? AND factor_id=? AND source_sha256=?",
+                    (source_kind, owner_username, factor_id, expected_sha256),
+                ).fetchone()
+            if version is None:
+                raise FileNotFoundError("factor source version is unavailable")
+            source = str(version["source_code"])
         if not source.strip():
             raise FileNotFoundError("factor source object is empty")
         return source
 
-    def metadata(self, object_id: str) -> dict[str, object]:
+    def metadata(self, object_id: str, *, expected_sha256: str = "") -> dict[str, object]:
         owner, factor_id, source_kind, owner_username = self.identity(object_id)
-        source = self.source(object_id)
+        source = self.source(object_id, expected_sha256=expected_sha256)
         raw = source.encode("utf-8")
         return {
             "object_id": f"{owner}:{factor_id}",
@@ -125,7 +137,7 @@ class FactorSourceOriginAdapter:
         _owner, factor_id, _source_kind, _owner_username = self.store.identity(
             str(transfer.object_id or ""),
         )
-        source = self.store.source(str(transfer.object_id or ""))
+        source = self.store.source(str(transfer.object_id or ""), expected_sha256=str(transfer.expected_sha256 or "").lower())
         raw = source.encode("utf-8")
         digest = hashlib.sha256(raw).hexdigest()
         if digest != str(transfer.expected_sha256 or "").lower():

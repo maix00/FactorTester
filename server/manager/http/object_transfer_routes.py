@@ -125,15 +125,15 @@ class ObjectTransferRoutesMixin:
                 if not object_id:
                     raise ValueError("object_id is required")
                 factor_store = FactorSourceStore(database=CACHE_DB_PATH)
-                metadata = factor_store.metadata(object_id)
+                supplied_hash = str(
+                    payload.get("source_sha256") or payload.get("sha256") or ""
+                ).strip().lower()
+                metadata = factor_store.metadata(object_id, expected_sha256=supplied_hash)
                 owner = str(metadata.get("source_owner") or "").strip()
                 if owner != "public" and owner != principal and not can_view_user_scope(
                     principal, owner,
                 ):
                     raise PermissionError("factor source is outside your visible scope")
-                supplied_hash = str(
-                    payload.get("source_sha256") or payload.get("sha256") or ""
-                ).strip().lower()
                 expected_sha256 = str(
                     metadata.get("source_sha256") or ""
                 ).strip().lower()
