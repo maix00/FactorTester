@@ -41,7 +41,7 @@
       "x-forbidden-properties": FTTestConfigurationCompiler.derivedSettingsKeys(),
       properties: {
         groups: {
-          type: "array", minItems: 1,
+          type: "array", minItems: 0,
           items: structuredClone(itemSchema),
         },
       },
@@ -52,7 +52,9 @@
       properties: {
         configuration_groups: {
           type: "array",
-          minItems: Number(itemContract.min_items) || 1,
+          // Assistance edits authoring drafts, including a freshly opened
+          // empty page. Run submission enforces the execution minimum.
+          minItems: 0,
           maxItems: Number(itemContract.max_items) || undefined,
           items: structuredClone(itemSchema),
         },
@@ -62,7 +64,7 @@
       required: ["factor_ref", "product_path_selection"],
       "x-forbidden-properties": FTTestConfigurationCompiler.derivedSettingsKeys(),
       properties: {
-        factor_ref: {type: "string", minLength: 1},
+        factor_ref: {type: "string"},
         factor_alias: {type: "string"},
         factor_family_alias: {type: "string"},
         product_path_selection_id: {type: "string"},
@@ -348,10 +350,6 @@
             || document?.configuration?.schema_version !== configurationSchemaVersion
             || !document.configuration.analyses?.[state.kind]) {
           throw new Error("测试配置文档与当前测试类型不兼容");
-        }
-        if (state.kind === "backtest"
-            && !document.configuration.analyses.backtest.groups?.length) {
-          throw new Error("回测配置至少需要一个策略");
         }
         const analysis = document.configuration.analyses[state.kind];
         for (const key of FTTestConfigurationCompiler.derivedSettingsKeys()) {

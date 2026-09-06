@@ -53,6 +53,12 @@ const analysis = schema.properties.configuration.properties.analyses
   .properties.factor_evaluation;
 assert.deepEqual(analysis.required, ["factor_ref", "product_path_selection"]);
 assert.equal(analysis.properties.factor_ref.type, "string");
+assert.equal(analysis.properties.factor_ref.minLength, undefined);
+for (const kind of ["ic", "backtest"]) {
+  const draftSchema = window.FTTestPageAssistance.schemaFor({...state, kind});
+  const fields = draftSchema.properties.configuration.properties.analyses.properties[kind].properties;
+  assert.equal(fields[kind === "ic" ? "configuration_groups" : "groups"].minItems, 0);
+}
 
 const navigation = window.FTTestPageAssistance.navigationFor(state);
 assert.equal(navigation.nodes.page.label, "查看因子序列配置");
