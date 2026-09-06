@@ -588,4 +588,15 @@ assert(inferredReport);
 assert.strictEqual(inferredReport.parentFolder, "research");
 assert(inferredParent);
 assert.strictEqual(inferredParent.path, "/researches/research-inferred");
+// Two test drafts share their route, but refresh must retain the active one.
+restoredTabs.initializeTabs({tabs: [
+  {id: "ic-first", path: "/ic-test", title: "IC 测试", closable: true},
+  {id: "ic-second", path: "/ic-test", title: "IC 测试", closable: true},
+], activeTabID: "ic-second"});
+assert.equal(restoredTabs.restoredTabForPath("/ic-test").id, "ic-second");
+restoredState.activeTabID = "ic-first";
+assert.equal(restoredTabs.restoredTabForPath("/ic-test").id, "ic-first");
+restoredState.activeTabID = "home";
+assert.equal(restoredTabs.restoredTabForPath("/ic-test").id, "ic-first");
+assert.equal(restoredTabs.restoredTabForPath("/factor-series"), undefined);
 console.log("ok");

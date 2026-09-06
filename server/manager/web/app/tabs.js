@@ -965,6 +965,17 @@
       return Boolean(snapshot);
     }
 
+    function restoredTabForPath(path) {
+      // Authoring tabs intentionally share a URL. The saved active identity
+      // distinguishes their independent drafts when the browser reloads.
+      const active = state.tabs.find(tab => tab.id === state.activeTabID);
+      if (active?.path === path) return active;
+      const detailID = detailTabIDForPath(path);
+      return state.tabs.find(tab => (
+        (detailID && tab.id === detailID) || (tab.closable && tab.path === path)
+      ));
+    }
+
     function currentTabContext() {
       const activeTab = state.tabs.find(tab => tab.id === state.activeTabID);
       return {
@@ -986,7 +997,7 @@
       ...viewCache,
       renderOpenedTabs, activateTab, closeTab, openModule, openTab, navigate,
       navigateInPlace,
-      updateActiveTab, discardViews, initializeTabs, currentTabContext,
+      updateActiveTab, discardViews, initializeTabs, currentTabContext, restoredTabForPath,
       detailTabIDForPath, researchDetailTabID, checkpointWorkspace, setWorkspace,
       checkpointActiveSession, scheduleActiveSessionCheckpoint,
     };
