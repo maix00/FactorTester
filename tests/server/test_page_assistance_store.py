@@ -418,3 +418,26 @@ def test_unassisted_turn_is_not_modified() -> None:
         )
         == original
     )
+
+
+def test_background_heartbeat_does_not_steal_the_assisted_page(monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr(time, 'time', lambda: clock[0])
+    store = PageAssistanceStore()
+    def publish(tab, activate=None):
+        payload = {'tab_id': tab, 'assistance': {
+            'schema_version': 1, 'navigation': _navigation(),
+        }}
+        if activate is not None:
+            payload['activate'] = activate
+        store.publish('owner', 'self', payload)
+    publish('old', True)
+    clock[0] += 1
+    publish('current', True)
+    clock[0] += 1
+    publish('old', False)
+    publish('legacy')
+    assert store.current('owner', 'self')['tab_id'] == 'current'
+    clock[0] += 1
+    publish('old', True)
+    assert store.current('owner', 'self')['tab_id'] == 'old'
