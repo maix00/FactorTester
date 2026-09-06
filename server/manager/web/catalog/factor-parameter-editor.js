@@ -194,8 +194,9 @@
       candidateItems.push({
         value: id, label: display(initialValue) || id, factor: initialValue,
         type: "factor", typeLabel: context.t("因子"),
-        view: window.FTFactorDetailShared?.factorRowView?.(initialValue)
-          || {kind: "factor", ref: id, initialValue, temporary: true},
+        onsite: true, temporary: true,
+        view: {...(window.FTFactorDetailShared?.factorRowView?.(initialValue)
+          || {kind: "factor", ref: id}), initialValue, temporary: true},
       });
     }
     let valuePicker;

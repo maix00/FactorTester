@@ -129,6 +129,8 @@ const descendants = root => [root, ...(root.children || []).flatMap(descendants)
   const factorItem = valuePicker.options.items.find(item => item.type === "factor");
   assert.ok(factorItem, "factor candidates are present");
   assert.equal(factorItem.label, frozen.alias, "factor picker presents the alias");
+  assert.equal(Boolean(factorItem.onsite || factorItem.temporary), false,
+    "a catalog factor does not receive an onsite badge");
   assert.ok(valuePicker.options.items.some(item => item.type === "column"),
     "DataColumn candidates are present");
 
@@ -183,6 +185,8 @@ const descendants = root => [root, ...(root.children || []).flatMap(descendants)
   assert.deepEqual(isolatedPicker.selected, [frozen.ref]);
   assert.equal(isolatedPicker.options.items.find(x => x.value === frozen.ref)?.label,
     frozen.alias, "a frozen nested value remains displayable outside the global catalog");
+  assert.equal(isolatedPicker.options.items.find(x => x.value === frozen.ref)?.onsite,
+    true, "a selected factor outside the catalog receives the onsite badge");
   const otherRevision = {...frozen, ref: "factor:v2:other-revision"};
   const exact = window.FTFactorParameterEditor.create(
     {t: value => value}, [{alias: "P", type: "FactorParam", options: []}],
