@@ -194,7 +194,7 @@ assert.ok(valuePicker.options.onAddCandidateForType, "FactorParam supports on-th
       && item !== reopened.root
   )), "reopened frozen factor renders its read-only nested parameter table");
 
-  // Alias match against a library row (different digest) still resolves to factor.
+  // A same-alias library row must not replace a different frozen version.
   const aliasReopen = window.FTFactorParameterEditor.create(
     {t: value => value},
     outerFamily.parameter_definitions,
@@ -209,8 +209,8 @@ assert.ok(valuePicker.options.onAddCandidateForType, "FactorParam supports on-th
       familyItems: [], onChange: () => {},
     },
   );
-  assert.equal(aliasReopen.values.Th.ref, `factor:v2:${"a".repeat(43)}`,
-    "an alias match against a library row normalises to that library record");
+  assert.equal(aliasReopen.values.Th.ref, compactChild.ref,
+    "an alias match preserves the selected immutable identity");
 
   // Hand-typed numeric constant → ConstExpr preview.
   const numericParam = window.FTFactorParameterEditor.create(

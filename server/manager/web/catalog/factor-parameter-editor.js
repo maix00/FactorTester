@@ -89,7 +89,7 @@
       const candidateAlias = display(candidateFactor);
       return candidateValue && (
         candidateValue === reference(initialValue)
-        || candidateAlias === display(initialValue)
+        || (!isFrozenFactorValue(initialValue) && candidateAlias === display(initialValue))
       );
     });
     const initialFactorValue = initialFactor?.factor || initialFactor;
@@ -184,6 +184,20 @@
         };
       }),
     ].filter(item => item.value);
+    // A nested frozen value need not be registered as a standalone catalog
+    // row. Keep the selected record in this control's local choices so the
+    // shared picker can display its alias after refresh, without registering it.
+    if (isFrozenFactor(initialValue) && !candidateItems.some(
+      item => item.value === reference(initialValue),
+    )) {
+      const id = reference(initialValue);
+      candidateItems.push({
+        value: id, label: display(initialValue) || id, factor: initialValue,
+        type: "factor", typeLabel: context.t("因子"),
+        view: window.FTFactorDetailShared?.factorRowView?.(initialValue)
+          || {kind: "factor", ref: id, initialValue, temporary: true},
+      });
+    }
     let valuePicker;
     valuePicker = (window.FTTestObjectPicker || window.FTMultiSelectFilter).create(context, {
       compact: true, multi: false,

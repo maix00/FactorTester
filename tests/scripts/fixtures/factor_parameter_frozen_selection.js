@@ -173,6 +173,22 @@ const descendants = root => [root, ...(root.children || []).flatMap(descendants)
     String(item.className).includes("factor-detail-parameter-tree")
   )), "a restored factor alias renders its read-only nested parameter table");
 
+  const isolated = window.FTFactorParameterEditor.create(
+    {t: value => value},
+    [{alias: "P", type: "FactorParam", options: []}],
+    {P: frozen}, {factorItems: []},
+  );
+  const isolatedPicker = pickers.at(-1);
+  assert.equal(isolated.values.P.ref, frozen.ref);
+  assert.deepEqual(isolatedPicker.selected, [frozen.ref]);
+  assert.equal(isolatedPicker.options.items.find(x => x.value === frozen.ref)?.label,
+    frozen.alias, "a frozen nested value remains displayable outside the global catalog");
+  const otherRevision = {...frozen, ref: "factor:v2:other-revision"};
+  const exact = window.FTFactorParameterEditor.create(
+    {t: value => value}, [{alias: "P", type: "FactorParam", options: []}],
+    {P: frozen}, {factorItems: [{value: otherRevision.ref, factor: otherRevision}]},
+  );
+  assert.equal(exact.values.P.ref, frozen.ref, "matching alias must not replace a frozen identity");
   console.log("ok");
 })().catch(error => {
   console.error(error);
