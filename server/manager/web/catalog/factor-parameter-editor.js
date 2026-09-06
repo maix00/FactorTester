@@ -438,7 +438,7 @@
         factor_family_alias: familyAlias,
         factor_family_name: familyAlias,
         family_ref: identity.family_ref || draft.family_ref || "",
-      }, "current", {
+      }, identity.family_formula_fingerprint || draft.family_formula_fingerprint || "current", {
         familyID: familyAlias,
         sourceKind: isPublic ? "public" : undefined,
         ownerUsername: isPublic ? "" : ownerRef,
@@ -498,10 +498,9 @@
         // frozen record carries only identity params, no template formula).
         const reportNestedFamily = fam => {
           if (fam && typeof options.onNestedFamilyTemplate === "function") {
-            options.onNestedFamilyTemplate(familyAliasOf, fam);
+            options.onNestedFamilyTemplate(familyAliasOf, fam, draft);
           }
         };
-        if (choice?.family) reportNestedFamily(choice.family);
         let currentTemplate = template;
         const unlockFamilyEditing = () => {
           const family = currentTemplate;
