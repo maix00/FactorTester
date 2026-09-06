@@ -221,6 +221,7 @@
     "transientFactorFamilies", "transientStrategySources", "strategySpecs",
     "strategyInspections", "temporaryStrategies", "strategyBindings",
     "runInputDependencies", "selectedBacktestGroupIDs",
+    "backtestGroupEditor", "backtestGroupsOpen", "backtestGroupConfigOpen",
     "selectedBacktestLongShortIDs", "backtestExpandedBatches",
     "selectedICConfigurationGroupIDs", "icConfigurationGroupSurfaceKey",
     "icConfigurationGroupEditor", "icConfigurationGroupsOpen",
@@ -238,6 +239,21 @@
       workspaceID: String(state.workspace?.workspace_id || ""),
       values,
     };
+  }
+
+  function bindDraftCheckpoint(context, state) {
+    const durable = context.tabSession.durable ||= {};
+    durable.testDrafts ||= {};
+    const capture = () => {
+      durable.testDrafts[state.kind] = draftSnapshot(state);
+    };
+    // Nested editors update their owner without rerendering the workbench.
+    // Capture that live owner on the shared pagehide/tab checkpoint path.
+    if (context.pageState?.register && state.draftCheckpointPage !== context.pageState) {
+      state.draftCheckpointPage = context.pageState;
+      context.pageState.register(`test-draft:${state.kind}`, {capture});
+    }
+    capture();
   }
 
   function restoreDraft(state, snapshot) {
@@ -307,7 +323,7 @@
 
   window.FTTestState = Object.freeze({
     applyRegisteredRunValues, applyWorkspaceConfiguration, clearDraft, defaultRunValues,
-    draftSnapshot, restoreDraft,
+    draftSnapshot, restoreDraft, bindDraftCheckpoint,
     initializeInputState, lazyState,
     mergeByID, registeredRunValues, restoreWorkspace, savedMountedTabs, savedSettings,
     restoreTemporaryObjects, seedSavedCatalogs,

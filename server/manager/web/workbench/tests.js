@@ -531,9 +531,7 @@
     // token in this context. The shared content host may already belong to a
     // different left-rail tab by the time it resolves.
     if (context.isRouteCurrent?.() === false) return false;
-    const durable = context.tabSession.durable || (context.tabSession.durable = {});
-    durable.testDrafts = durable.testDrafts || {};
-    durable.testDrafts[state.kind] = FTTestState.draftSnapshot(state);
+    FTTestState.bindDraftCheckpoint(context, state);
     context.checkpointTabSession?.();
     installRunToolbar(context, state, () => render(context, state));
     if (!window.FTTestRunBatch && !state.runBatchCode?.error) {
