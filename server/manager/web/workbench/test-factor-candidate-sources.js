@@ -501,24 +501,20 @@
   function panel(context, state, refresh, options = {}) {
     const root = document.createElement("div");
     root.className = "test-factor-candidate-sources";
-    const summaryHost = document.createElement("div");
     const error = document.createElement("p");
     error.className = "form-error";
     const refreshPanel = () => {
-      summaryHost.replaceChildren(FTTestFactorCandidates.summaryControl(context, state));
       error.textContent = state.factorSetCatalog?.error || "";
       error.hidden = !error.textContent;
       refresh?.();
     };
-    summaryHost.append(FTTestFactorCandidates.summaryControl(context, state));
     error.textContent = state.factorSetCatalog?.error || "";
     error.hidden = !error.textContent;
-    root.append(candidateHeading(context, state, summaryHost));
-    // Nested forms refresh their chips without remounting the factor panel.
-    // Update the derived summary after the async expansion, keeping the picker.
+    // The candidate field is the shared multi-select itself. Its closed
+    // summary and checked menu rows are the only selected-object rendering in
+    // Factor Execution; callers must not duplicate that state beside it.
     const direct = combinedControl(context, state, refreshPanel);
-    direct.classList.add("factor-candidate-child-row");
-    root.append(direct, error);
+    root.append(candidateHeading(context, state, direct), error);
     const roleField = options.includeRoles === false
       ? null : state.manifest?.defaults?.factor_role_bindings;
     if (roleField && FTSettingRules.isVisible(roleField, state.values)
