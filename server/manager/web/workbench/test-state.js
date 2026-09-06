@@ -229,6 +229,9 @@
   function draftSnapshot(state) {
     const values = {};
     for (const key of draftKeys) values[key] = structuredClone(state[key]);
+    if (window.FTTestConfiguration?.temporaryObjects) {
+      values.savedTemporaryObjects = window.FTTestConfiguration.temporaryObjects(state);
+    }
     return {
       schemaVersion: 2,
       kind: state.kind,
@@ -245,6 +248,8 @@
     for (const key of draftKeys) {
       if (key in snapshot.values) state[key] = structuredClone(snapshot.values[key]);
     }
+    state.factors = mergeByID(state.factors, state.savedTemporaryObjects?.factors);
+    state.groups = mergeByID(state.groups, state.savedTemporaryObjects?.product_groups);
     state.settingsInitialized = false;
     return true;
   }

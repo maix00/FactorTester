@@ -1,12 +1,50 @@
 from __future__ import annotations
 
 import settings as Settings
+import pytest
 from tools.data.account_manage import (
     delete_factor_family_configs,
     list_factor_family_dependency_configs,
     load_factor_param_config,
     save_factor_param_config,
 )
+
+
+def test_materialized_configuration_and_outbox_rollback_together(monkeypatch, tmp_path):
+    from server.manager.storage.account_domain.local import LocalAccountDomainStore
+    from tools.data.sqlite.db import connect_sqlite
+    database = tmp_path/'atomic.sqlite'
+    monkeypatch.setattr(Settings, 'CACHE_DIR', tmp_path)
+    monkeypatch.setattr(Settings, 'CACHE_DB_PATH', database)
+    original = LocalAccountDomainStore.upsert_local
+    def fail_after_outbox(self, **kwargs):
+        original(self, **kwargs)
+        raise RuntimeError('simulated failure before commit')
+    monkeypatch.setattr(LocalAccountDomainStore, 'upsert_local', fail_after_outbox)
+    with pytest.raises(RuntimeError, match='before commit'):
+        save_factor_param_config('alice', 'Family', [], resolved_factors=[])
+    assert load_factor_param_config('alice', 'Family') is None
+    with connect_sqlite(database, readonly=True) as db:
+        assert db.execute('SELECT count(*) FROM account_domain_outbox').fetchone()[0] == 0
+        assert db.execute('SELECT count(*) FROM account_domain_entities').fetchone()[0] == 0
+    monkeypatch.setattr(LocalAccountDomainStore, 'upsert_local', original)
+    value = save_factor_param_config('alice', 'Family', [], resolved_factors=[])
+    assert load_factor_param_config('alice', 'Family') == value
+    assert LocalAccountDomainStore(database).get_entity('alice', 'factor_param_config', 'default:Family')['payload']['resolved_factors'] == []
+
+
+def test_received_factor_configuration_can_be_deleted_without_authored_row(monkeypatch, tmp_path):
+    from server.manager.storage.account_domain.local import LocalAccountDomainStore
+    from server.modules.custom_factors import factor_library_store
+    database = tmp_path/'receiver.sqlite'
+    monkeypatch.setattr(Settings, 'CACHE_DB_PATH', database)
+    mirror = LocalAccountDomainStore(database)
+    mirror.upsert_local(principal='alice', entity_type='factor_param_config',
+                        entity_id='default:Family', payload={'resolved_factors': []}, manager_id='origin')
+    assert factor_library_store.delete_factor_param_config('alice', 'Family')
+    assert mirror.get_entity('alice', 'factor_param_config', 'default:Family')['deleted']
+    assert factor_library_store.load_factor_param_config('alice', 'Family') is None
+    assert not factor_library_store.delete_factor_param_config('alice', 'Family')
 
 
 def test_factor_param_config_preserves_research_metadata(monkeypatch, tmp_path):

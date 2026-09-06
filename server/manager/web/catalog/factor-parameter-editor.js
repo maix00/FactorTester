@@ -190,6 +190,14 @@
       name: `factor-param-${alias}`,
       title: context.t("参数值"),
       items: candidateItems,
+      onTemporaryCandidateUpdated: (previous, next) => {
+        const index = candidateItems.findIndex(item => item.value === previous.value);
+        if (index >= 0) candidateItems.splice(index, 1, next);
+      },
+      onTemporaryCandidateRemoved: removed => {
+        const index = candidateItems.findIndex(item => item.value === removed.value);
+        if (index >= 0) candidateItems.splice(index, 1);
+      },
       selected: [selectionValue(values[alias])].filter(Boolean),
       loading: Boolean(options.loading),
       loadingText: context.t("正在读取参数候选…"),

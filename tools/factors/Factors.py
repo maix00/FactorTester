@@ -252,63 +252,8 @@ class Factor(UniqueNameObject, FactorExpr):
         if self.family is None:
             raise ValueError(f"{self}: 没有关联的 FactorFamily，无法计算。")
 
-        # 数据源频率 —— 外部指定 > 显式配置 > 自动推断
-        if freq is not None:
-            freq = DataFreq(freq)
-        else:
-            freq_name = (
-                getattr(self.family, '_source_freq', None)
-                or getattr(self.family, '_freq_name', None)
-            )
-            if freq_name is not None:
-                freq = DataFreq(freq_name)
-            else:
-                if products:
-                    const_refs = self._expr.const_refs
-                    desired_freq = set()
-                    if const_refs:
-                        def get_freq(val: Any) -> Optional[DataFreq]:
-                            try:
-                                return DataFreq(val)
-                            except Exception:
-                                return
-                        desired_freq = set(filter(None, (get_freq(cr.value) for cr in const_refs)))
-                    desired_freq.add(self.freq)
-                    valid_products: List[Product] = []
-                    available_freqs_set: Optional[Set[DataFreq]] = None
-                    for p in products:
-                        freqs = set(p.list_available_freqs())
-                        if not freqs:
-                            continue
-                        # 剔除自身频率无法整除 desired_freq 的产品（如只有 DAY1 的退市品种）
-                        if desired_freq:
-                            has_compatible = any(
-                                all(df.value.total_seconds() % af.value.total_seconds() == 0 for df in desired_freq)
-                                for af in freqs
-                            )
-                            if not has_compatible:
-                                continue
-                        valid_products.append(p)
-                        if available_freqs_set is None:
-                            available_freqs_set = freqs
-                        else:
-                            available_freqs_set &= freqs
-                    products = valid_products
-                    if available_freqs_set is None:
-                        available_freqs_set = set()
-                    available_freqs = sorted(available_freqs_set, key=lambda f: f.value, reverse=True)
-                    if not available_freqs:
-                        raise ValueError(f"{self}: 产品数据没有公共可用频率，无法确定数据频率")
-                    if desired_freq:
-                        freq = next((af for af in available_freqs if all(df.value.total_seconds() % af.value.total_seconds() == 0 for df in desired_freq)), None)
-                        if freq is None:
-                            desired_freq_str = ', '.join(sorted({d.name for d in desired_freq}))
-                            available_freq_str = ', '.join(sorted({af.name for af in available_freqs}))
-                            raise ValueError(f"{self}: 期望频率 {{{desired_freq_str}}} 与产品可用频率 {{{available_freq_str}}} 不兼容，无法确定数据频率")
-                    else:
-                        freq = available_freqs[-1]
-                else:
-                    raise ValueError(f"{self}: 无法推断数据频率，因为没有提供产品")
+        from tools.factors.evaluation.source_frequency import resolve_source_frequency
+        freq = resolve_source_frequency(self, products, freq)
 
         requested_products = list(products)
         freq_name = freq.name

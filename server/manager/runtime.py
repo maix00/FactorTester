@@ -379,11 +379,7 @@ class ManagerState(
         )
         self.strategy_library = StrategyLibraryService(
             self.sessions_db_path,
-            account_provider=(
-                lambda: [] if self.control_store is None else [
-                    dict(item) for item in self.control_store.load_accounts()
-                ]
-            ),
+            account_provider=lambda: self.client_state._local_account_rows(),
         )
         self.device_registry = DeviceRegistry(
             self.state_root / "device-registry.json",
@@ -434,6 +430,8 @@ class ManagerState(
             control_store=self.control_store,
             manager_id=self.server_id,
         )
+        from server.manager.services.strategy_revision_hydration import StrategyRevisionHydrator
+        self.strategy_library.source_loader = StrategyRevisionHydrator(self)
         self.public_factor_replication = PublicFactorReplicationService(
             self,
             PublicFactorReplicationStore(self.sessions_db_path),

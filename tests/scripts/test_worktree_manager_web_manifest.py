@@ -820,7 +820,7 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     assert manifest["route_groups"]["report"] == ["report"]
     assert manifest["group_dependencies"]["research"] == ["research-graph"]
     assert manifest["group_dependencies"]["research-graph"] == [
-        "core", "catalog-core"
+        "core", "catalog-selection-core"
     ]
     assert "report" not in manifest["group_dependencies"]["research"]
     workspaces = (WEB_ROOT / "research" / "workspaces.js").read_text(encoding="utf-8")
@@ -1525,6 +1525,7 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
 
     assert manifest["group_dependencies"]["factor-catalog-editor"] == [
         "factor-catalog-core",
+        "factor-detail-widgets",
         "factor-catalog-enrichment",
         "object-overlay",
     ]
@@ -1583,11 +1584,11 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
         "workbench/test-source-upload.js",
     ]
     assert manifest["group_dependencies"]["workbench-factors"] == [
-        "workbench-core", "catalog-core", "workbench-source-inputs",
+        "workbench-core", "factor-model", "factor-catalog-runtime", "workbench-source-inputs",
         "workbench-object-picker",
     ]
     assert manifest["group_dependencies"]["workbench-products"] == [
-        "workbench-core", "catalog-core", "workbench-object-picker",
+        "workbench-core", "workbench-object-picker",
     ]
     assert manifest["groups"]["workbench-object-picker"] == [
         "workbench/test-object-picker.js",
@@ -2765,7 +2766,8 @@ def test_persistent_factor_save_refreshes_catalog_but_inline_save_does_not() -> 
     assert result.stdout.strip() == "ok"
     editor = (WEB_ROOT / "catalog" / "factor-editor.js").read_text(encoding="utf-8")
     assert "if (!state.familyMode)" in editor
-    assert "params_list: [state.parameterValues]" in editor
+    assert "params_list: [state.parameterValues]" not in editor
+    assert "replace_factor_ref: state.mode === \"edit\"" in editor
 
 
 def test_factor_object_editors_share_submit_assistance_and_reference_controls() -> None:
@@ -2951,6 +2953,7 @@ def test_factor_detail_route_declares_katex_runtime_dependency() -> None:
     assert manifest["route_groups"]["factor-set"] == ["factor-catalog-detail"]
     assert manifest["group_dependencies"]["factor-catalog-detail"] == [
         "factor-catalog-core",
+        "factor-detail-widgets",
         "factor-catalog-enrichment",
     ]
     assert "factor-catalog-list" not in manifest["group_dependencies"][

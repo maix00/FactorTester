@@ -10,6 +10,7 @@ from typing import Any
 from uuid import uuid4
 
 from tools.data.sqlite.db import connect_sqlite
+from .schema import migrate_revision_identity
 
 
 class StrategyLibraryStore:
@@ -45,8 +46,7 @@ class StrategyLibraryStore:
                     hooks_json TEXT NOT NULL,
                     requirements_json TEXT NOT NULL,
                     created_by TEXT NOT NULL,
-                    created_at REAL NOT NULL,
-                    UNIQUE(strategy_ref, revision_number)
+                    created_at REAL NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS strategy_library_shares (
                     strategy_ref TEXT NOT NULL,
@@ -64,6 +64,7 @@ class StrategyLibraryStore:
                     ON strategy_library_shares(principal_ref, strategy_ref);
                 """
             )
+            migrate_revision_identity(db)
 
     @staticmethod
     def _entry(row: Any) -> dict[str, Any]:
@@ -347,7 +348,7 @@ class StrategyLibraryStore:
     def list_revisions(self, strategy_ref: str) -> list[dict[str, Any]]:
         with self._lock, connect_sqlite(self.db_path, readonly=True) as db:
             rows = db.execute(
-                "SELECT * FROM strategy_library_revisions WHERE strategy_ref=? ORDER BY revision_number DESC",
+                "SELECT * FROM strategy_library_revisions WHERE strategy_ref=? ORDER BY revision_number DESC, created_at DESC, revision_ref",
                 (strategy_ref,),
             ).fetchall()
         return [self._revision(row, include_source=False) for row in rows]

@@ -15,6 +15,7 @@ class TransferObjectKind(StrEnum):
     RESEARCH_LOCAL_RESOURCE = "research_local_resource"
     EVIDENCE_FILE = "evidence_file"
     FACTOR_SOURCE = "factor_source"
+    STRATEGY_REVISION = "strategy_revision"
     PROFILE_WORKSPACE = "profile_workspace"
     CLIENT_RELEASE = "client_release"
 

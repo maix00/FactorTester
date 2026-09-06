@@ -58,6 +58,9 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
         self._catalog_refresh_lock = threading.RLock()
         self._catalog_refresh_inflight: set[str] = set()
         self._catalog_refresh_started: dict[str, float] = {}
+        self._catalog_refresh_requested: set[str] = set()
+        self._catalog_refresh_results: dict[str, dict[str, Any]] = {}
+        self._catalog_refresh_changed = threading.Condition(self._catalog_refresh_lock)
 
     def _account_catalog_entities(
         self,
@@ -99,7 +102,7 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
             rows = []
         return [dict(row) for row in rows if isinstance(row, dict)]
 
-    def _refresh_account_domain_async(self, principal: str) -> None:
+    def _refresh_account_domain_async(self, principal: str, *, force: bool = False) -> list[str]:
         """Refresh the local account mirror without delaying a catalog read.
 
         This also refreshes the direct subordinates of the requesting principal,
@@ -111,7 +114,7 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
         owner = str(principal or "").strip()
         synchronizer = self.account_domain_sync
         if not owner or synchronizer is None:
-            return
+            return []
         owners = [owner]
         try:
             from server.manager.services.subordinate_factor_library import (
@@ -133,45 +136,81 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
             pass
         # Deduplicate while preserving order.
         owners = list(dict.fromkeys(o for o in owners if o))
+        requested_owners = list(owners)
         now = time.monotonic()
         cooldown = max(
             0.0, float(getattr(synchronizer, "access_cooldown", 5.0)),
         )
         with self._catalog_refresh_lock:
+            if force:
+                self._catalog_refresh_requested.update(owners)
             owners = [item for item in owners if item not in self._catalog_refresh_inflight
-                      and now - self._catalog_refresh_started.get(item, 0.0) >= cooldown]
+                      and (force or now - self._catalog_refresh_started.get(item, 0.0) >= cooldown)]
             if not owners:
-                return
+                return requested_owners
             for item in owners:
                 self._catalog_refresh_inflight.add(item)
                 self._catalog_refresh_started[item] = now
 
         def refresh() -> None:
+            unfinished = set(owners)
             try:
                 for item in owners:
-                    try:
-                        synchronizer.sync(item)
-                    except (
-                        AttributeError,
-                        ConnectionError,
-                        OSError,
-                        RuntimeError,
-                        TypeError,
-                        ValueError,
-                    ):
-                        # A single subordinate may be offline / unconfigured;
-                        # keep refreshing the rest of the account set.
-                        continue
+                    while True:
+                        with self._catalog_refresh_lock:
+                            requested = item in self._catalog_refresh_requested
+                            self._catalog_refresh_requested.discard(item)
+                        try:
+                            result = synchronizer.sync(item, force=True) if requested else synchronizer.sync(item)
+                        except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+                            result = {"status": "incomplete", "reason": "sync unavailable"}
+                        with self._catalog_refresh_lock:
+                            self._catalog_refresh_results[item] = result
+                            if item not in self._catalog_refresh_requested:
+                                self._catalog_refresh_inflight.discard(item)
+                                unfinished.discard(item)
+                                self._catalog_refresh_changed.notify_all()
+                                break
             finally:
                 with self._catalog_refresh_lock:
-                    for item in owners:
+                    for item in unfinished:
                         self._catalog_refresh_inflight.discard(item)
+                    self._catalog_refresh_changed.notify_all()
 
         threading.Thread(
             target=refresh,
             name=f"account-catalog-refresh:{owners[0]}:{len(owners)}",
             daemon=True,
         ).start()
+        return requested_owners
+
+    def refresh_account_catalog(self, principal: str, *, timeout: float = 20.0) -> dict[str, Any]:
+        """Explicit refresh barrier; normal list reads remain local and immediate."""
+        if self.account_domain_sync is None:
+            return {"status": "unavailable"}
+        owners = self._refresh_account_domain_async(principal, force=True)
+        deadline = time.monotonic() + timeout
+        with self._catalog_refresh_changed:
+            while any(owner in self._catalog_refresh_inflight for owner in owners):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return {"status": "pending"}
+                self._catalog_refresh_changed.wait(remaining)
+            reports = {owner: self._catalog_refresh_results.get(owner) or {"status": "pending"}
+                       for owner in owners}
+            return {"status": "synced" if all(report.get("status") == "synced"
+                                               for report in reports.values()) else "incomplete",
+                    "reports": reports}
+
+    def _local_account_rows(self) -> list[dict[str, Any]]:
+        from tools.data.sqlite.db import connect_sqlite
+        database = getattr(getattr(self.account_domain_sync, 'local', None), 'path', None)
+        if database is None:
+            return []
+        with connect_sqlite(database, readonly=True) as conn:
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='accounts'").fetchone() is None:
+                return []
+            return [dict(row) for row in conn.execute('SELECT username, parent_username FROM accounts')]
 
     def _local_account(self, principal: str) -> dict[str, Any]:
         """Read the account projection from this Manager's SQLite first.

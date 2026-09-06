@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+import os
 from typing import Any
 
 import settings as Settings
@@ -89,6 +90,7 @@ def save_factor_param_config(
     scope_key: str = DEFAULT_SCOPE_KEY,
     *,
     metadata: dict[str, Any] | None = None,
+    resolved_factors: list[dict] | None = None,
 ) -> dict[str, Any]:
     scope_key = ensure_scope_exists(username, scope_key)
     config = {
@@ -103,6 +105,9 @@ def save_factor_param_config(
     }
     if metadata:
         config["metadata"] = metadata
+    if resolved_factors is not None:
+        config.update(schema_version=2, factor_family_alias=ff_alias,
+                      resolved_factors=resolved_factors)
     save_factor_param_config_payload(username, ff_alias, config, scope_key)
     return config
 
@@ -115,8 +120,13 @@ def save_factor_param_config_payload(
 ) -> None:
     scope_key = ensure_scope_exists(username, scope_key)
     now = time.time()
+    mirror = None
+    if isinstance(config.get('resolved_factors'), list):
+        from server.manager.storage.account_domain.local import LocalAccountDomainStore
+        mirror = LocalAccountDomainStore(Settings.CACHE_DB_PATH)
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         ensure_factor_param_config_schema(conn)
+        conn.execute('BEGIN IMMEDIATE')
         conn.execute(
             """
             INSERT INTO account_factor_param_configs (
@@ -133,6 +143,12 @@ def save_factor_param_config_payload(
                 now,
             ),
         )
+        if mirror is not None:
+            from server.manager.storage.account_domain.payloads import public_payload
+            mirror.upsert_local(principal=username, entity_type='factor_param_config',
+                                entity_id=f'{scope_key}:{ff_alias}', payload=public_payload(config),
+                                manager_id=os.environ.get('FACTORTESTER_SERVER_ID') or 'local',
+                                connection=conn)
 
 
 def delete_factor_param_config(username: str, ff_alias: str, scope_key: str = DEFAULT_SCOPE_KEY) -> bool:

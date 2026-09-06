@@ -9,7 +9,17 @@ from server.modules.shared.factor_data_coverage import (
     FactorDataCoverageError,
     require_factor_data_coverage,
 )
-from tools.data.types import DataTime
+from tools.data.types import DataTime, DataFreq
+
+
+def test_coverage_uses_available_input_frequency_not_five_minute_output():
+    product = _product('2025-01-01 09:00', '2025-02-03 15:00')
+    product.list_available_freqs = lambda: [DataFreq.MIN1]
+    factor = SimpleNamespace(family=SimpleNamespace(_source_freq=None, _freq_name=None),
+                             freq=DataFreq.MIN5, _expr=SimpleNamespace(const_refs=[]))
+    result = require_factor_data_coverage([product], factor,
+                                         start_dt=_time('2025-01-01'), end_dt=_time('2025-02-03'))
+    assert result['eligible_product_count'] == 1
 
 
 class _View:

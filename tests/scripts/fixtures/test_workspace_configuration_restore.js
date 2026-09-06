@@ -123,4 +123,20 @@ load("server/manager/web/workbench/test-state.js");
   );
 }
 
+{
+  const temporaryFactor = {...topFactorWithDeps, temporary: true};
+  const temporaryGroup = {group_ref: "product-group:onsite", temporary: true, paths: ["AP.CZC"]};
+  window.FTTestConfiguration = {temporaryObjects: () => ({
+    factors: [nestedFactor, temporaryFactor], product_groups: [temporaryGroup],
+  })};
+  const state = {kind: "ic", values: {}, factors: [temporaryFactor], groups: [temporaryGroup]};
+  const snapshot = window.FTTestState.draftSnapshot(state);
+  const restored = {kind: "ic", values: {}, factors: [], groups: []};
+  assert.equal(window.FTTestState.restoreDraft(restored, snapshot), true);
+  assert.equal(restored.factors.find(item => item.ref === temporaryFactor.ref).temporary, true,
+    "unselected on-site factors survive page reload as complete objects");
+  assert.deepEqual(restored.groups, [temporaryGroup], "on-site product groups survive page reload");
+  delete window.FTTestConfiguration;
+}
+
 console.log("ok");

@@ -33,6 +33,9 @@ class StrategyLibraryRoutesMixin:
         try:
             service = self._strategy_library_service()
             if method == "GET":
+                client = getattr(self.state, 'client_state', None)
+                if client is not None:
+                    client._refresh_account_domain_async(principal)
                 value = self._strategy_library_get(
                     service, parts[3:], principal,
                     parse_qs(parsed.query, keep_blank_values=True),
@@ -48,6 +51,12 @@ class StrategyLibraryRoutesMixin:
             value, status = self._strategy_library_write(
                 service, method, parts[3:], principal, payload,
             )
+            synchronizer = getattr(self.state, 'account_domain_sync', None)
+            if synchronizer is not None:
+                from server.manager.storage.account_domain.strategy_sync import publish_strategy
+                strategy_ref = parts[3] if len(parts) > 3 else value['strategy']['strategy_ref']
+                publish_strategy(synchronizer, strategy_ref, principal)
+                self.state.client_state._refresh_account_domain_async(principal, force=True)
             json_response(self, value, status)
             return True
         except PermissionError as exc:

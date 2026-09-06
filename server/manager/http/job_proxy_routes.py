@@ -150,6 +150,10 @@ class JobProxyRoutesMixin:
                 502,
             )
             return True
+        if method != "GET" and 200 <= response.status < 300:
+            refresh = getattr(getattr(self.state, "client_state", None), "_refresh_account_domain_async", None)
+            if callable(refresh) and response.json_object().get("success", True):
+                refresh(str(session["username"]), force=True)
         if workspace_push and 200 <= response.status < 300:
             try:
                 value = response.json_object()

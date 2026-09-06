@@ -10,6 +10,7 @@ from server.modules.custom_factors.factor_library_service import (
     list_factor_library_config_users,
     list_factor_library_product_groups,
     save_current_user_library_config,
+    save_single_library_factor,
 )
 from server.modules.custom_factors.factor_library_store import (
     DEFAULT_SCOPE_KEY,
@@ -133,6 +134,22 @@ def api_add_factor_to_library_config(ff_alias):
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
     data = request.get_json() or {}
+    if 'params' in data:
+        if not isinstance(data['params'], dict):
+            return jsonify({'success': False, 'error': '因子参数格式无效'}), 400
+        if data.get('mode') == 'edit' and not str(data.get('replace_factor_ref') or '').strip():
+            return jsonify({'success': False, 'error': '编辑目标缺少冻结引用，请刷新后重试'}), 409
+        try:
+            with get_user_file_lock(username):
+                config, factor = save_single_library_factor(
+                    username, ff_alias, data['params'],
+                    product_group=data.get('product_group') or data.get('scope_key') or DEFAULT_SCOPE_KEY,
+                    metadata=data.get('metadata') if isinstance(data.get('metadata'), dict) else {},
+                    replace_factor_ref=str(data.get('replace_factor_ref') or ''),
+                )
+        except ValueError as exc:
+            return jsonify({'success': False, 'error': str(exc)}), 409
+        return api_ok({'config': config, 'factor': factor, 'factors': [factor]})
     factor_alias = (data.get('factor_alias') or '').strip()
     product_group = data.get('product_group') or data.get('scope_key') or DEFAULT_SCOPE_KEY
     scope_key = normalize_product_group(product_group)
