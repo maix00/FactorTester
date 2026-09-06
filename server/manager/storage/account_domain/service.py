@@ -374,6 +374,8 @@ class AccountDomainSyncService:
         except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
             pass
         count += self.reconcile_factor_sources(owner)
+        from .factor_version_sync import backfill_factor_versions
+        count += backfill_factor_versions(self, owner)
         from .strategy_sync import backfill_strategies
         count += backfill_strategies(self, owner)
         if count:

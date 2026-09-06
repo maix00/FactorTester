@@ -12,7 +12,7 @@ from tools.data.factor_workspace.storage import (
     load_factor_source,
     load_public_factor_source,
 )
-from tools.data.sqlite.factor_source_store import get_factor_source_metadata
+from tools.data.sqlite.factor_source_store import get_factor_source_metadata, FactorSourceMetadataUnavailable
 from tools.data.sqlite.factor_source_versions import (
     list_factor_formula_versions,
     load_factor_formula_version,
@@ -28,6 +28,15 @@ class FactorSourceCatalog:
         if kind not in {"custom", "public"}:
             raise ValueError("源码类型无效")
         return kind
+
+    @staticmethod
+    def _authorized_owner(principal: str, source_kind: str, owner_username: str = "") -> str:
+        if source_kind == "public":
+            return "__public_jobs__"
+        owner = str(owner_username or principal).strip()
+        if owner != principal and not can_view_user_scope(principal, owner):
+            raise PermissionError("无权查看该用户因子源码")
+        return owner
 
     @staticmethod
     def _source(
@@ -149,13 +158,21 @@ class FactorSourceCatalog:
         owner_username: str = "",
     ) -> dict[str, Any]:
         kind = self._kind(source_kind)
-        owner, current_source = self._source(
-            principal, kind, factor_id, owner_username,
-        )
+        # A historical record is independently readable on a cold peer; do
+        # not require loading the unrelated current source to authorize it.
+        owner = self._authorized_owner(principal, kind, owner_username)
+        current_source = ""
+        if fingerprint == "current":
+            _, current_source = self._source(principal, kind, factor_id, owner_username)
         if fingerprint == "current" and not current_source:
             raise FileNotFoundError("因子家族当前源码不存在")
         metadata_owner = owner if kind == "custom" else ""
-        metadata = get_factor_source_metadata(kind, metadata_owner, factor_id)
+        try:
+            metadata = get_factor_source_metadata(kind, metadata_owner, factor_id)
+        except FactorSourceMetadataUnavailable:
+            if fingerprint == "current":
+                raise
+            metadata = {}
         if fingerprint == "current":
             detail = self._detail(current_source, factor_id, metadata)
             return {
