@@ -15,11 +15,22 @@ class Element {
     this.title = "";
     this.type = "";
     this.attributes = {};
+    this.style = {values: {}, setProperty: (key, value) => { this.style.values[key] = value; }};
     this.classList = {toggle() {}};
   }
   append(...children) { this.children.push(...children); }
   addEventListener(name, callback) { this.listeners[name] = callback; }
   setAttribute(name, value) { this.attributes[name] = String(value); }
+  querySelector(selector) {
+    return this.querySelectorAll(selector)[0] || null;
+  }
+  querySelectorAll(selector) {
+    const className = selector.startsWith(".") ? selector.slice(1) : "";
+    return [this, ...this.children.filter(child => child instanceof Element)
+      .flatMap(child => child.querySelectorAll(selector))]
+      .filter(item => className && item.className.split(/\s+/).includes(className));
+  }
+  getBoundingClientRect() { return {width: 600}; }
 }
 
 global.document = {createElement: tagName => new Element(tagName)};
@@ -96,9 +107,10 @@ const deferred = FTTestSettings.render(manifest, {start_date: "2025-01-02"}, {
 });
 assert.equal(requestedFieldCode, 1, "active settings panel should request field code");
 assert.equal(
-  deferred.children[2].children[0].children[0].children[0].tagName,
+  deferred.children[2].children[0].children[0].children[0].children[0].tagName,
   "loading",
 );
+assert.equal(deferred.children[2].children[0].children[0].className, "test-field-table");
 window.FTTestSettingFields = deferredFields;
 
 function render(factorAlias, onChipOpen) {
@@ -175,7 +187,7 @@ assert.equal(closed.children[2].children[0].hidden, true,
 const manageButton = first.children[0].children[first.children[0].children.length - 1];
 manageButton.listeners.click();
 const managePanel = host.children[host.children.length - 1];
-const manager = managePanel.children[0];
+const manager = managePanel.children[0].children[0];
 const managerList = manager.children[0];
 const timeRow = managerList.children.find(item => item.className === "test-settings-manager-row"
   && item.children[1].children[0].children[0].textContent === "时间范围");
@@ -382,6 +394,15 @@ assert.equal(describedHeading.children[2].textContent, "?");
 assert.equal(describedHeading.children[2].title, "",
   "field help must not use hover title text");
 assert.equal(describedHeading.children[2].attributes["aria-label"], "设置样本开始日期");
+describedCopy.scrollWidth = 280;
+const describedTable = FTTestFieldRow.table(describedField);
+describedTable.refreshFieldColumns();
+assert.equal(describedTable.attributes.role, "table");
+assert.equal(describedField.attributes.role, "row");
+assert.equal(describedCopy.attributes.role, "rowheader");
+assert.equal(describedField.children[1].attributes.role, "cell");
+assert.equal(describedTable.style.values["--test-field-label-width"], "240px",
+  "the shared table caps its adaptive label column to preserve value space");
 
 const updated = render("SgCCS 5m", () => {});
 const updatedGroup = updated.children[1].children[1].children.find(

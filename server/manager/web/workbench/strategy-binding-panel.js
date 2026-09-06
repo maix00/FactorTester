@@ -41,11 +41,6 @@
   }
 
   function bindingRow(context, state, group, searchStrategies, refresh, redraw) {
-    const root = document.createElement("div");
-    root.className = "strategy-binding-row";
-    const title = document.createElement("strong");
-    title.textContent = group.name || group.id;
-    root.append(title);
     const current = (state.strategyBindings || []).find(item => (
       item.target_strategy_id === group.id
     ));
@@ -91,8 +86,14 @@
       ),
       editLabel: context.t("编辑临时策略"),
     });
-    root.append(picker.element);
-    return root;
+    return FTTestFieldRow.create(
+      group.name || group.id,
+      picker.element,
+      window.FTTestFieldHelp?.forField?.(
+        state.manifest, "strategy_bindings", context,
+      ) || "",
+      {className: "strategy-binding-row"},
+    );
   }
 
   function strategyItems(state, candidates, current) {

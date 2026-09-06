@@ -77,6 +77,7 @@ button.backend-setting-chip:hover { border-color: color-mix(in srgb, var(--accen
 .backend-setting-chip-value { min-width: 0; color: var(--text); font-weight: 650; overflow: hidden; text-overflow: ellipsis; }
 .backend-settings-host { min-width: 0; padding: 8px 12px 10px; }
 .tab-chip-content-panel { min-width: 0; }
+.test-field-table { --test-field-label-width: 160px; display: grid; min-width: 0; }
 .tab-chip-content-panel .ft-multi-select-filter { width: 100%; max-width: none; }
 .ft-test-object-picker-loading { display: block; margin-top: 4px; color: var(--muted); }
 .shared-field-value-selector { min-width: 0; }
@@ -102,7 +103,7 @@ button.backend-setting-chip:hover { border-color: color-mix(in srgb, var(--accen
 .test-factor-candidate-sources { display: grid; gap: 0; min-width: 0; }
 .test-factor-candidate-sources > .test-setting-row { min-width: 0; }
 .test-factor-candidate-heading-row .test-field-row-control { min-width: 0; }
-.test-setting-row { min-height: 44px; display: grid; grid-template-columns: minmax(160px, 1fr) minmax(150px, .9fr); gap: 12px; align-items: center; border-bottom: 1px solid var(--line); }
+.test-setting-row { min-height: 44px; display: grid; grid-template-columns: minmax(0, var(--test-field-label-width, 160px)) minmax(0, 1fr); gap: 12px; align-items: center; border-bottom: 1px solid var(--line); }
 .test-setting-row.is-locked { background: color-mix(in srgb, var(--panel) 72%, var(--line)); }
 .test-setting-row.is-locked .test-field-row-control { opacity: .72; }
 .test-field-row-lock { color: var(--muted); font-size: 12px; line-height: 1.35; }
@@ -110,7 +111,7 @@ button.backend-setting-chip:hover { border-color: color-mix(in srgb, var(--accen
 .test-field-row-heading { display: inline-flex; align-items: center; gap: 5px; min-width: 0; width: fit-content; }
 .test-setting-row input[type="checkbox"] { width: auto; justify-self: end; }
 .factor-role-section { display: grid; gap: 0; min-width: 0; }
-.factor-role-section-heading { min-height: 44px; display: grid; grid-template-columns: minmax(160px, 1fr) minmax(150px, .9fr); gap: 12px; align-items: center; border-bottom: 1px solid var(--line); }
+.factor-role-section-heading { min-height: 44px; display: grid; grid-template-columns: minmax(0, var(--test-field-label-width, 160px)) minmax(0, 1fr); gap: 12px; align-items: center; border-bottom: 1px solid var(--line); }
 .factor-role-section-copy { display: inline-flex; align-items: center; gap: 5px; width: fit-content; min-width: 0; }
 .factor-role-section-value { min-width: 0; }
 .factor-role-bindings { display: grid; gap: 0; min-width: 0; }

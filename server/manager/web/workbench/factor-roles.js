@@ -106,9 +106,11 @@
     const root = document.createElement("section");
     root.className = "factor-role-section factor-candidate-child-section";
     const heading = document.createElement("div");
-    heading.className = "factor-role-section-heading";
+    heading.className = "factor-role-section-heading test-setting-row";
+    heading.setAttribute("role", "row");
     const copy = document.createElement("span");
     copy.className = "factor-role-section-copy";
+    copy.setAttribute("role", "rowheader");
     const title = document.createElement("b");
     title.textContent = context.t(field?.label || "因子角色");
     copy.append(title);
@@ -118,6 +120,7 @@
     if (help && window.FTUI?.helpIcon) copy.append(" ", FTUI.helpIcon(help));
     const value = document.createElement("span");
     value.className = "factor-role-section-value";
+    value.setAttribute("role", "cell");
     value.setAttribute("aria-hidden", "true");
     heading.append(copy, value);
     root.append(heading, render(options));
