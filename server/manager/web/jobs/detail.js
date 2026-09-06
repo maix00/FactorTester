@@ -179,10 +179,11 @@
     );
     const resolvedPort = target.port;
     const resolvedExecutionQuery = routeQuery(resolvedPort, target.serverID);
-    // Artifact storage is owned by the server, not by the worker port that
-    // happened to execute the Job.  Keep this query server-only so a stopped
-    // worktree cannot break 7997 reads for a retained artifact.
-    const artifactQuery = routeQuery(null, target.serverID);
+    // Artifact storage is owned by the server recorded in the Manager's Job
+    // index, not necessarily by the execution server projected on this page.
+    // Let the artifact route resolve that storage identity from the Job ID;
+    // forwarding the execution server here can hide a valid retained result.
+    const artifactQuery = routeQuery(null, "");
     return {
       payload, taskDetail, job, resolvedPort,
       serverID: target.serverID,
