@@ -169,6 +169,23 @@ assert.ok(valuePicker.options.onAddCandidateForType, "FactorParam supports on-th
   assert.ok(descendants(nested).some(item => item.textContent === "WindowParam"));
   assert.equal(descendants(nested).filter(item => item.tagName === "INPUT").length, 0,
     "the factor parameter table stays read-only");
+  const pencil = descendants(nested).find(item => item.textContent === "编辑");
+  assert.ok(pencil);
+  const beforePencil = latestValues.Th;
+  const changesBeforePencil = {...latestValues.Th};
+  await pencil.listeners.click({preventDefault() {}, stopPropagation() {}});
+  assert.equal(latestValues.Th, beforePencil, "pencil alone does not replace the factor");
+  assert.deepEqual(latestValues.Th, changesBeforePencil, "pencil does not mark the factor temporary");
+  const editableInputs = descendants(editor.root).filter(item => item.tagName === "INPUT");
+  const windowInput = editableInputs.find(item => item.value === "200d");
+  assert.ok(windowInput, "pencil exposes the existing typed parameter editor");
+  windowInput.value = "25d";
+  windowInput.listeners.input();
+  assert.equal(latestValues.Th.parameter_values.N, "25d");
+  assert.equal(latestValues.Th.__factor_family_draft, true,
+    "changed parameters reuse the existing save-time freezer");
+  assert.equal(latestValues.Th.parameter_values.M, 0.6, "untouched values survive");
+  assert.equal(compactChild.identity.params.N, "200d", "library identity remains immutable");
 
   // Reopening a frozen factor value renders its read-only nested table (and the
   // value picker shows the frozen factor selected), without degrading to manual.

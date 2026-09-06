@@ -165,7 +165,9 @@
         readOnly: true,
         showValue: options.showValue !== false,
         valueHeaderExtra: options.valueHeaderExtra,
-        renderValue: (valueCell, parameter) => {
+        renderValue: (valueCell, parameter, initialValue, values, row) => {
+          const edited = options.renderValue?.(valueCell, parameter, initialValue, values, row);
+          if (edited?.control) return edited;
           const displayed = parameter.redacted
             ? context.t("已隐藏")
             : shared()?.parameterValueCell?.(context, parameter);
