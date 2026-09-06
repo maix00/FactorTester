@@ -65,6 +65,7 @@ def test_hydrates_referenced_factor_source_from_provider(monkeypatch) -> None:
         {
             "chinese_name": "", "description": "", "category": "",
             "family_formula_fingerprint": "",
+            "publish_family": False,
         },
     )]
     assert requested == [("https://public.example:7997/source", None)]

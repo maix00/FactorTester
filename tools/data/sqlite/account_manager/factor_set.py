@@ -45,13 +45,19 @@ def list_factor_sets(username: str) -> list[dict[str, Any]]:
             """,
             (username,),
         ).fetchall()
-    return [
+    values = [
         value for row in rows
         if isinstance((value := _payload(row["payload_json"])), dict)
     ]
+    from tools.data.sqlite.account_manager.domain_sync import overlay_entities
+    return overlay_entities(username, 'factor_set', values, id_key='ref')
 
 
 def get_factor_set(username: str, target_ref: str) -> dict[str, Any] | None:
+    from server.manager.storage.account_domain.local import LocalAccountDomainStore
+    mirrored = LocalAccountDomainStore(Settings.CACHE_DB_PATH).get_entity(username, 'factor_set', target_ref)
+    if mirrored is not None:
+        return None if mirrored['deleted'] else mirrored['payload']
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         ensure_factor_set_schema(conn)
         row = conn.execute(
@@ -100,13 +106,14 @@ def save_factor_set(username: str, value: dict[str, Any]) -> dict[str, Any]:
 
 
 def delete_factor_set(username: str, target_ref: str) -> bool:
+    visible = get_factor_set(username, target_ref)
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         ensure_factor_set_schema(conn)
         cursor = conn.execute(
             "DELETE FROM account_factor_sets WHERE username = ? AND target_ref = ?",
             (username, target_ref),
         )
-    return cursor.rowcount > 0
+    return cursor.rowcount > 0 or visible is not None
 
 
 def _payload(raw: str) -> dict[str, Any] | None:

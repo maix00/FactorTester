@@ -632,7 +632,7 @@ def save_factor_set(username: str, value: dict) -> dict:
     ensure_account_manager_sqlite_store()
     result = _save_factor_set(username, value)
     _enqueue_domain_entity(
-        username, "factor_set", str(result.get("target_ref") or result.get("set_ref") or ""), result,
+        username, "factor_set", str(result.get("ref") or result.get("target_ref") or result.get("set_ref") or ""), result,
     )
     return result
 

@@ -244,7 +244,7 @@ def store_factor_summary(conn: sqlite3.Connection, source_kind: str, owner: str,
                         owner_alias="", now=time.time())
 
 
-def list_factor_summaries(source_kind: str, owner: str | None = "") -> list[dict[str, Any]]:
+def list_factor_summaries(source_kind: str, owner: str | None = "", *, include_heads: bool = True) -> list[dict[str, Any]]:
     """Read existing projections only; never import, repair, or write on a GET."""
     try:
         with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
@@ -258,11 +258,16 @@ def list_factor_summaries(source_kind: str, owner: str | None = "") -> list[dict
             ).fetchall()
     except sqlite3.OperationalError as exc:
         if "no such table" in str(exc) or "no such column" in str(exc):
-            return []  # Explicit deployment backfill owns legacy projections.
-        raise
-    return [{**json.loads(row[0]), "owner_username": row[1], "factor_id": row[2], "source_kind": source_kind,
+            rows = []  # A peer may have current metadata before any source body.
+        else:
+            raise
+    values = [{**json.loads(row[0]), "owner_username": row[1], "factor_id": row[2], "source_kind": source_kind,
              **({"chinese_name": row[3], "description": row[4], "category": row[5]} if row[3] is not None else {})}
             for row in rows if row[0] != "{}"]
+    if include_heads:
+        from tools.data.sqlite.factor_family_heads import project_family_heads
+        return project_family_heads(values, source_kind, owner)
+    return values
 
 
 def sync_factor_metadata_sqlite_store() -> str:

@@ -22,6 +22,7 @@ ENTITY_TYPES = {
     "factor_set",
     "factor_param_config",
     "factor_source",
+    "factor_family",
     "factor_research_run",
     "product_category",
     "product_group",

@@ -214,7 +214,7 @@ def test_factor_source_sync_tracks_each_storage_provider_without_conflicts(
     }
     monkeypatch.setattr(
         "tools.data.sqlite.factor_metadata.list_factor_summaries",
-        lambda kind, owner="": [_source_summary(source)] if kind == "custom" else [],
+        lambda kind, owner="", **kwargs: [_source_summary(source)] if kind == "custom" else [],
     )
     control = MemoryControlStore()
     first = AccountDomainSyncService(
@@ -250,7 +250,7 @@ def test_lazy_sync_reconciles_factor_source_provider_before_peer_reads(
     }
     monkeypatch.setattr(
         "tools.data.sqlite.factor_metadata.list_factor_summaries",
-        lambda kind, owner="": [_source_summary(source)] if kind == "custom" else [],
+        lambda kind, owner="", **kwargs: [_source_summary(source)] if kind == "custom" else [],
     )
     monkeypatch.setattr(
         "tools.data.account_manage.load_product_categories", lambda _owner: [],
@@ -303,7 +303,7 @@ def test_factor_source_reconcile_retires_matching_legacy_conflict(
     }
     monkeypatch.setattr(
         "tools.data.sqlite.factor_metadata.list_factor_summaries",
-        lambda kind, owner="": [_source_summary(source)] if kind == "custom" else [],
+        lambda kind, owner="", **kwargs: [_source_summary(source)] if kind == "custom" else [],
     )
     control = MemoryControlStore()
     legacy = AccountDomainSyncService(
@@ -502,7 +502,7 @@ def test_two_servers_bidirectionally_sync_and_bridge_missing_content(
     }
     monkeypatch.setattr(
         "tools.data.sqlite.factor_metadata.list_factor_summaries",
-        lambda kind, owner="": [_source_summary(alice_a)] if kind == "custom" else [],
+        lambda kind, owner="", **kwargs: [_source_summary(alice_a)] if kind == "custom" else [],
     )
 
     control = MemoryControlStore()
@@ -522,7 +522,7 @@ def test_two_servers_bidirectionally_sync_and_bridge_missing_content(
     # list for B so A and B each own a distinct factor.
     monkeypatch.setattr(
         "tools.data.sqlite.factor_metadata.list_factor_summaries",
-        lambda kind, owner="": [_source_summary(alice_b)] if kind == "custom" else [],
+        lambda kind, owner="", **kwargs: [_source_summary(alice_b)] if kind == "custom" else [],
     )
     assert server_b.reconcile_factor_sources("alice") == 1
 
@@ -732,7 +732,7 @@ def test_producer_outbox_manifest_carries_formula_fingerprint(
 
     def fake_enqueue(
         source_kind, owner_username, factor_id, factor_name, source_code,
-        *, metadata=None, deleted=False, family_formula_fingerprint="",
+        *, metadata=None, deleted=False, family_formula_fingerprint="", publish_family=True,
     ):
         observed["source_kind"] = source_kind
         observed["owner_username"] = owner_username
@@ -786,7 +786,7 @@ def test_producer_outbox_manifest_keeps_fingerprint_after_update(
 
     def fake_enqueue(
         source_kind, owner_username, factor_id, factor_name, source_code,
-        *, metadata=None, deleted=False, family_formula_fingerprint="",
+        *, metadata=None, deleted=False, family_formula_fingerprint="", publish_family=True,
     ):
         observed["factor_id"] = factor_id
         observed["metadata"] = dict(metadata or {})
