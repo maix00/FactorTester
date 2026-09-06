@@ -190,6 +190,12 @@ assert.equal(chipSources.factor_candidate_detail.ref, factorRef);
 assert.equal(chipSources.factor_candidate_detail.schema_version, 2);
 
 assert.equal(FTConfigurationGroupSurface.renderer("ic"), window.FTICConfigurationGroups);
+const readyChips = window.FTTestSettingChips;
+delete window.FTTestSettingChips;
+delete global.FTTestSettingChips;
+assert.doesNotThrow(() => window.FTICConfigurationGroups.render(context, state, refresh),
+  "restored configuration groups render before lazy summary formatter arrives");
+window.FTTestSettingChips = global.FTTestSettingChips = readyChips;
 let root = window.FTICConfigurationGroups.render(context, state, refresh);
 assert.deepEqual(state.analysis.configuration_groups[0].editor_mounted_tabs, [
   "__configuration__", "factor", "product_path_selection",

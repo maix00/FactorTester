@@ -106,6 +106,8 @@
   }
 
   function summaryChips(context, state, group) {
+    // The formatter is lazy; the page shell schedules a repaint when ready.
+    if (!window.FTTestSettingChips?.render) return null;
     const item = {
       name: group.name,
       factor_candidate_refs: [group.factor_ref],

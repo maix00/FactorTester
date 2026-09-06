@@ -33,7 +33,7 @@
   function headerActions(context, state, refresh) {
     const tasks = selectedTasks(state || {});
     const hasTasks = tasks.length > 0;
-    const runSpecButton = context.button(context.t("查看运行配置"), () => {
+    const runSpecButton = FTUI.iconButton(context, "doc.text", "查看运行配置", () => {
       const currentTasks = selectedTasks(state || {});
       if (!currentTasks.length) {
         showRunSpecError(context, new Error(missingScopeMessage(context, state)));
@@ -57,8 +57,8 @@
           ["freezing", "submitting"].includes(item.phase)
         ));
       });
-    }, context.t("查看各任务对应的冻结运行配置；尚未冻结时先生成运行配置"));
-    runSpecButton.className = "test-workbench-header-action";
+    });
+    runSpecButton.className = "icon-action-button test-workbench-header-action";
     // Keep this action clickable so a missing selection is explained in the
     // page notice instead of looking like a dead button.
     runSpecButton.disabled = false;
@@ -66,7 +66,7 @@
       ? context.t("查看各任务对应的冻结运行配置；尚未冻结时先生成运行配置")
       : missingScopeMessage(context, state);
 
-    const runButton = context.button(context.t("运行"), () => {
+    const runButton = FTUI.iconButton(context, "play.circle", "运行", () => {
       const currentTasks = selectedTasks(state || {});
       if (!currentTasks.length) {
         showRunError(context, new Error(missingScopeMessage(context, state)));
@@ -93,22 +93,22 @@
             ["freezing", "submitting"].includes(item.phase)
           ));
         });
-    }, context.t("运行当前测试配置下的全部任务"));
-    runButton.className = "test-workbench-header-action";
+    });
+    runButton.className = "icon-action-button test-workbench-header-action";
     runButton.disabled = !hasTasks || tasks.some(({item}) => (
       ["freezing", "submitting"].includes(item.phase)
     ));
     runButton.title = hasTasks
       ? context.t("运行当前测试配置下的全部任务")
       : missingScopeMessage(context, state);
-    const clearButton = context.button(context.t("清空"), () => {
+    const clearButton = FTUI.iconButton(context, "trash", "清空", () => {
       void Promise.resolve(
         window.FTTests?.clearDraft?.(context, state, refresh),
       ).catch(error => {
         context.showNotice?.(`${context.t("清空测试配置失败")}: ${error.message}`, true);
       });
-    }, context.t("清空当前测试配置，不删除模板、已提交任务或生成物"));
-    clearButton.className = "test-workbench-header-action";
+    });
+    clearButton.className = "icon-action-button test-workbench-header-action";
     return [runSpecButton, runButton, clearButton];
   }
 

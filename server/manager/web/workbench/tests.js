@@ -16,11 +16,11 @@
   }
 
   function placeholderRunActions(context) {
-    return ["查看运行配置", "运行", "清空"].map(label => {
-      const action = context.button(
-        context.t(label), () => {}, context.t("正在读取测试运行操作…"),
+    return [["查看运行配置", "doc.text"], ["运行", "play.circle"], ["清空", "trash"]].map(([label, symbol]) => {
+      const action = FTUI.iconButton(
+        context, symbol, label, () => {},
       );
-      action.className = "test-workbench-header-action";
+      action.className = "icon-action-button test-workbench-header-action";
       action.disabled = true;
       return action;
     });
