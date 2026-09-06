@@ -3,6 +3,8 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 
 global.window = {};
+vm.runInThisContext(fs.readFileSync("server/manager/web/core/shared-ui.js", "utf8"));
+global.FTUI = window.FTUI;
 let actionLoaded = false;
 const lazyGroups = [];
 const actionsSource = fs.readFileSync(
@@ -91,6 +93,7 @@ const context = {
     const button = {
     textContent: label, title: help, className: "", disabled: false,
     listeners: {click: action},
+    setAttribute: (name, value) => { button[name] = value; },
     addEventListener: (name, callback) => { button.listeners[name] = callback; },
     };
     return button;
@@ -253,7 +256,7 @@ const strategyScopedBacktest = {
   let cleared = 0;
   window.FTTests = {clearDraft: () => { cleared += 1; }};
   const header = batch.headerActions(context, state, () => {});
-  assert.deepEqual(header.map(item => item.textContent), ["查看运行配置", "运行", "清空"]);
+  assert.deepEqual(header.map(item => item["aria-label"]), ["查看运行配置", "运行", "清空"]);
   assert.equal(header[0].disabled, false);
   assert.equal(header[1].disabled, false);
   header[2].listeners.click();
@@ -478,7 +481,7 @@ const strategyScopedBacktest = {
   await batch.previewAll(context, backtest, () => {});
   const backtestHeader = batch.headerActions(context, backtest, () => {});
   assert.deepEqual(
-    backtestHeader.map(item => item.textContent),
+    backtestHeader.map(item => item["aria-label"]),
     ["查看运行配置", "运行", "清空"],
     "backtest must use the same shared header action component as IC",
   );
