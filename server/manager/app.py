@@ -120,6 +120,10 @@ def main(
     """
     runtime_module = runtime_module or _runtime_module()
     args = build_parser(runtime_module).parse_args(argv)
+    if args.server_id:
+        # Manager-owned source hydration and catalog writes use the same
+        # provider identity as its execution-service subprocesses.
+        os.environ['FACTORTESTER_SERVER_ID'] = str(args.server_id).strip()
     tls_paths = runtime_module.configured_tls_paths(
         args.tls_cert,
         args.tls_key,

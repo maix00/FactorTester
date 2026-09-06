@@ -228,6 +228,13 @@ def load_factor_source(source_kind: str, owner_username: str, factor_id: str) ->
     return _load_source(source_kind, owner_username, factor_id)
 
 
+def factor_source_revision(source_kind: str, owner_username: str, factor_id: str):
+    with connect_sqlite(Settings.CACHE_DB_PATH, readonly=True) as db:
+        row = db.execute('SELECT updated_at FROM factor_family_sources WHERE source_kind=? AND owner_username=? AND factor_id=?',
+                         (source_kind, owner_username or '', factor_id)).fetchone()
+    return row[0] if row else None
+
+
 def upsert_factor_source(
     source_kind: str,
     owner_username: str,
@@ -239,6 +246,7 @@ def upsert_factor_source(
     description: str | None = None,
     category: str | None = None,
     family_formula_fingerprint: str = "",
+    publish_family: bool = True,
 ) -> str:
     normalized_source_code = canonical_factor_source_code(source_code or "")
     metadata = {
@@ -281,6 +289,7 @@ def upsert_factor_source(
         normalized_source_code,
         metadata={**metadata, **summary},
         family_formula_fingerprint=summary.get("family_formula_fingerprint") or family_formula_fingerprint,
+        publish_family=publish_family,
     )
     return str(Settings.CACHE_DB_PATH)
 
@@ -414,17 +423,14 @@ def _enqueue_source_metadata(
     metadata: dict[str, str] | None = None,
     deleted: bool = False,
     family_formula_fingerprint: str = "",
+    publish_family: bool = True,
 ) -> None:
     """Sync a source manifest, never the source code itself."""
     try:
         from tools.data.sqlite.account_manager.domain_sync import enqueue_entity
 
         principal = str(owner_username or "").strip() or "__public__"
-        enqueue_entity(
-            principal,
-            "factor_source",
-            f"{source_kind}:{factor_id}@{str(os.environ.get('FACTORTESTER_SERVER_ID') or 'local').strip()}",
-            {
+        payload = {
                 "source_kind": source_kind,
                 "owner_username": owner_username or "",
                 "factor_id": factor_id,
@@ -448,9 +454,14 @@ def _enqueue_source_metadata(
                 "family_formula_fingerprint": str(
                     family_formula_fingerprint or ""
                 ).strip(),
-            },
+            }
+        enqueue_entity(
+            principal, "factor_source",
+            f"{source_kind}:{factor_id}@{str(os.environ.get('FACTORTESTER_SERVER_ID') or 'local').strip()}", payload,
             deleted=deleted,
         )
+        if publish_family:
+            enqueue_entity(principal, 'factor_family', f'{source_kind}:{factor_id}', payload, deleted=deleted)
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
         return
 

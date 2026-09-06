@@ -420,6 +420,11 @@ class CatalogRoutesMixin:
                     unquote(fingerprint)
                     if fingerprint is not None else None
                 )
+                if selected_version in (None, 'current'):
+                    from server.manager.services.factor_family_current import ensure_current_family
+                    if not ensure_current_family(self.state, kind, factor_id,
+                                                 principal=principal, owner=owner):
+                        raise FileNotFoundError('因子家族已删除或源码尚不可用')
 
                 def read_source_catalog():
                     if selected_version is not None:

@@ -54,6 +54,7 @@ _page_cache_lock = threading.Lock()
 
 # 自定义因子缓存（按 (username, factor_id) 缓存，自定义因子量少）
 _custom_factor_cache: dict = {}
+_custom_factor_cache_versions: dict = {}
 _custom_factor_cache_lock = threading.Lock()
 
 # 中文名缓存（从 SQLite 一次性加载，轻量，不实例化 FactorFamily）
@@ -514,14 +515,17 @@ def _build_custom_factor_family(username: str, factor_id: str) -> FactorFamily |
 
 
 def get_custom_factor_instance(username: str, factor_id: str) -> FactorFamily | None:
+    from tools.data.sqlite.factor_source_store import factor_source_revision
     cache_key = (username, factor_id)
+    revision = factor_source_revision('custom', username, factor_id)
     with _custom_factor_cache_lock:
-        if cache_key in _custom_factor_cache:
+        if cache_key in _custom_factor_cache and _custom_factor_cache_versions.get(cache_key) == revision:
             return _custom_factor_cache[cache_key]
     instance = _build_custom_factor_family(username, factor_id)
     if instance is not None:
         with _custom_factor_cache_lock:
             _custom_factor_cache[cache_key] = instance
+            _custom_factor_cache_versions[cache_key] = revision
     return instance
 
 
@@ -529,10 +533,12 @@ def invalidate_custom_factor_cache(username: str, factor_id: str | None = None):
     with _custom_factor_cache_lock:
         if factor_id is not None:
             _custom_factor_cache.pop((username, factor_id), None)
+            _custom_factor_cache_versions.pop((username, factor_id), None)
         else:
             keys_to_remove = [key for key in _custom_factor_cache if key[0] == username]
             for key in keys_to_remove:
                 _custom_factor_cache.pop(key, None)
+                _custom_factor_cache_versions.pop(key, None)
 
 
 def invalidate_factor_family_cache(factor_name: str | None = None, page_uuid: str | None = None):

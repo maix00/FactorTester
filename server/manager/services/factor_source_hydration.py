@@ -97,6 +97,7 @@ class FactorSourceHydrator:
                 description=str(metadata.get("description") or ""),
                 category=str(metadata.get("category") or ""),
                 family_formula_fingerprint=fingerprint,
+                publish_family=False,
             )
             # A hydrated source was fetched by its immutable fingerprint from
             # the authoritative storage Manager.  Record the formula version so
@@ -141,6 +142,15 @@ class FactorSourceHydrator:
         values = self._matching_payloads(
             rows, owner=owner, factor_id=factor_id,
         )
+        read_head = getattr(getattr(synchronizer, 'local', None), 'get_entity', None)
+        head = read_head(scope, 'factor_family',
+                    f"{'public' if owner == 'public' else 'custom'}:{factor_id}") if callable(read_head) else None
+        if head is not None:
+            if head.get('deleted'):
+                return []
+            current = head.get('payload') or {}
+            values = [current, *[value for value in values
+                      if value.get('source_sha256') == current.get('source_sha256')]]
         # Repair mirrors created while the account-domain cursor skipped a
         # full page. This is metadata-only and bounded; source bytes still use
         # the 7997 data plane.

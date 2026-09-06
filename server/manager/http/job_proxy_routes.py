@@ -134,6 +134,16 @@ class JobProxyRoutesMixin:
                 return True
             body = self.rfile.read(length) if length else b""
         try:
+            family_match = re.fullmatch(r'families/(custom|public)/([^/]+)', suffix)
+            if prefix == '/api/factor-library/' and family_match and method in {'GET', 'PUT', 'DELETE'}:
+                from server.manager.services.factor_family_current import ensure_current_family
+                if not ensure_current_family(
+                    self.state, family_match.group(1), unquote(family_match.group(2)),
+                    principal=str(session['username']),
+                    owner=str(query_values.get('owner_username', [''])[0]) if method == 'GET' else '',
+                ):
+                    json_response(self, {'success': False, 'error': '因子家族已删除或源码尚不可用'}, 404)
+                    return True
             route = self.state.route_for(server_id=self.state.server_id)
             response = self.state.route_request(
                 route,
@@ -143,6 +153,9 @@ class JobProxyRoutesMixin:
                 body=body,
                 content_type=content_type,
             )
+        except PermissionError as error:
+            json_response(self, {'success': False, 'error': str(error)}, 403)
+            return True
         except (ConnectionError, RuntimeError, ValueError):
             json_response(
                 self,
