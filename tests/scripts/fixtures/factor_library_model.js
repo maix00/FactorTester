@@ -9,6 +9,21 @@ vm.runInThisContext(
 );
 
 const model = window.FTFactorModel;
+assert.strictEqual(
+  model.factorExpression(
+    {math_expr: "TEMPLATE", resolved_math_expr: "BACKEND"},
+    {instance: true, resolvedOnly: true},
+  ),
+  "BACKEND",
+);
+assert.strictEqual(
+  model.factorExpression(
+    {math_expr: "TEMPLATE"},
+    {instance: true, resolvedOnly: true},
+  ),
+  "",
+  "view mode must not fall back to the editor template",
+);
 const group = {
   group_ref: "product-group:local-one",
   name: "本地组",

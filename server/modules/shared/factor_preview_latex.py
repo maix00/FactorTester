@@ -490,9 +490,16 @@ def render_preview_node(
         "1", "-1", "true", "t", "yes", "y", "rev", "reverse",
     }
     signal = r"\operatorname{Resample}_{\textcolor{red}{\$F}}"
-    reverse_signal = reversed_signal and signal in result
+    signal_prefix = r"\operatorname{Resample}_"
+    reverse_signal = reversed_signal and signal_prefix in result
     if reverse_signal:
-        result = result.replace(signal, r"\textcolor{red}{-}" + signal, 1)
+        if r"\textcolor{red}{-}" + signal in result:
+            pass
+        elif signal in result:
+            result = result.replace(signal, r"\textcolor{red}{-}" + signal, 1)
+        else:
+            position = result.find(signal_prefix)
+            result = result[:position] + r"\textcolor{red}{-}" + result[position:]
     for parameter in rows:
         alias = str(_get(parameter, "alias") or "").strip()
         if not alias:

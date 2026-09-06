@@ -143,6 +143,7 @@ def test_factor_sync_materializes_resolved_aliases(monkeypatch) -> None:
             "factor_family_name": "CA",
             "scope_key": "default",
             "params": [{"alias": "$F", "value": "1m"}],
+            "resolved_math_expr": r"\operatorname{Resample}_{\textcolor{red}{1m}}(C_t)",
             "owner_username": "alice",
         }],
     )
@@ -908,7 +909,9 @@ def test_unchanged_authoring_config_reuses_frozen_rows(monkeypatch):
     def freeze(*args):
         calls.append(1)
         return [freeze_factor_identity(owner_ref="alice", family_alias="F", factor_alias="F1",
-            family_formula_fingerprint="a" * 64, self_formula_fingerprint="b" * 64, params={"N": 1})]
+            family_formula_fingerprint="a" * 64, self_formula_fingerprint="b" * 64, params={"N": 1}) | {
+                "resolved_math_expr": r"\mathrm{F1}_t",
+            }]
     monkeypatch.setattr("server.modules.custom_factors.factor_library_service.build_factor_library_config_factors", freeze)
     first = materialized_factor_configs("alice")
     second = materialized_factor_configs("alice", existing=[{"entity_id": key, "payload": value} for key, value in first])
