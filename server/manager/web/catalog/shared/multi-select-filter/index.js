@@ -218,7 +218,10 @@
     }
     const selectedLabel = document.createElement("span");
     selectedLabel.className = "ft-multi-select-selection";
-    heading.append(selectedLabel);
+    // Multi-select state already appears in the closed summary and checked
+    // menu rows. Keep the heading value only for single-select callers so a
+    // multi-select never duplicates its selected items outside the control.
+    if (!multi) heading.append(selectedLabel);
     const headingActions = document.createElement("div");
     headingActions.className = "ft-multi-select-heading-actions";
     const declaredActions = [
@@ -376,8 +379,6 @@
     const loadStatus = remoteFactory ? Object.assign(document.createElement("div"), {
       className: "ft-multi-select-load-status", hidden: true,
     }) : null;
-    const note = document.createElement("div");
-    note.className = "ft-multi-select-selection-note";
     const actions = document.createElement("div");
     actions.className = "ft-multi-select-actions";
     menu.append(searchRow,
@@ -392,10 +393,6 @@
     } else {
       section.append(dropdown);
     }
-    const selectionPreview = document.createElement("div");
-    selectionPreview.className = "ft-multi-select-selection-preview";
-    if (options.compact === true && multi) section.append(selectionPreview);
-
     let applying = false;
     let menuPortaled = false;
     let menuResizeObserver = null;
@@ -537,18 +534,8 @@
       summaryText.textContent = summaryValue || translate(context, "未筛选");
       selectedLabel.textContent = labels.length ? labels.join("、")
         : translate(context, "未筛选");
-      if (multi) {
-        selectionPreview.textContent = labels.length
-          ? `${translate(context, "已选择", "已选择")}：${labels.join("、")}` : "";
-        selectionPreview.hidden = !labels.length;
-      }
       summary.title = controlDisabled && disabledReason
         ? disabledReason : labels.join("、");
-      if (multi) {
-        note.textContent = labels.length
-          ? `${translate(context, "已选择", "已选择")}：${labels.join("、")}`
-          : translate(context, "尚未选择");
-      }
       remote?.render();
       clear.hidden = !String(search.value || "");
       optionList.replaceChildren(...buildMenuSections());
