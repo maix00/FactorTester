@@ -209,10 +209,10 @@ class BarDistanceOp(OperandExpr):
         return _search_latex(
             scope=self.scope,
             select=self.select,
-            # The condition is a continuation in the same cell as X_t.  A
-            # second alignment marker moves it to a new column and visibly
-            # separates it from the value inside the search braces.
-            body=f"X_t &:= {value},\\\\{condition}",
+            # Keep the search body as a single-column continuation.  The
+            # surrounding aligned environment is only a line-break container;
+            # this formula must not contain alignment markers.
+            body=f"X_t:={value},\\\\{condition}",
             subst=subst,
         )
 
