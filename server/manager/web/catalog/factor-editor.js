@@ -385,16 +385,62 @@
     return result;
   }
 
-  async function materializeFamilyDrafts(context, values = {}) {
+  async function materializeFamilyDrafts(context, values = {}, sourceVersions = new Map()) {
+    const restoreDependency = async value => {
+      if (!value || typeof value !== "object") return value;
+      if (Array.isArray(value)) return Promise.all(value.map(restoreDependency));
+      let restored = {...value};
+      if (value.factor_dependencies?.length) {
+        restored.factor_dependencies = await Promise.all(
+          value.factor_dependencies.map(restoreDependency),
+        );
+      }
+      if (value.identity?.params) {
+        restored.identity = {...value.identity, params: Object.fromEntries(
+          await Promise.all(Object.entries(value.identity.params).map(
+            async ([key, child]) => [key, await restoreDependency(child)],
+          )),
+        )};
+      }
+      if (value.source_kind !== "transient" || value.source_code
+          || Number(value.schema_version) !== 2) return restored;
+      // Catalog metadata deliberately excludes source bytes. A legacy inline
+      // marker may survive registration, but can only be retired after the
+      // authorized catalog proves the exact immutable family version exists.
+      const identity = value.identity || {};
+      const owner = String(value.owner_ref || "").replace(/^principal:/, "");
+      const fingerprint = identity.family_formula_fingerprint;
+      const key = JSON.stringify([owner, identity.family_alias, fingerprint]);
+      if (!sourceVersions.has(key)) {
+        sourceVersions.set(key, window.FTFactorDetailShared.loadSourceVersion(
+          context, {...value, factor_family_alias: identity.family_alias,
+            factor_kind: ["public", "__public_jobs__"].includes(owner) ? "public" : "custom"},
+          fingerprint,
+        ));
+      }
+      const source = await sourceVersions.get(key);
+      if (!fingerprint || !source.source_code
+          || source.family_formula_fingerprint !== fingerprint) {
+        throw new Error(context.t("嵌套因子源码版本不匹配"));
+      }
+      restored = {...restored, source_kind: "factor_library",
+        source_origin: "factor_library", temporary: false};
+      delete restored.source_code;
+      delete restored.transient_factor_id;
+      return restored;
+    };
     const result = {...values};
     for (const [alias, raw] of Object.entries(result)) {
-      if (!raw || raw.__factor_family_draft !== true || !raw.__factor_family) continue;
+      if (!raw || raw.__factor_family_draft !== true || !raw.__factor_family) {
+        result[alias] = await restoreDependency(raw);
+        continue;
+      }
       const family = raw.__factor_family;
       const params = await materializeFamilyDrafts(
-        context, raw.parameter_values || {},
+        context, raw.parameter_values || {}, sourceVersions,
       );
       const transient = family.source_kind === "transient"
-        || family.temporary === true || Boolean(family.source_code);
+        || family.temporary === true;
       const body = transient ? {
         source_code: family.source_code || "",
         params,
