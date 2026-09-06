@@ -109,7 +109,7 @@ class AccountDomainSyncService:
         # lazily over the data plane; the fingerprint arrives via outbox).
         versioned = self.materialize_factor_source_versions(owner)
         return {
-            "status": "incomplete" if (flushed.get("pending") or flushed.get("offline")
+            "status": "incomplete" if (flushed.get("pending") or flushed.get("offline") or flushed.get("blocked") or flushed.get("conflicts")
                                         or pulled.get("offline") or pulled.get("has_more")
                                         or pulled.get("conflicts")) else "synced",
             "principal": owner,
@@ -469,7 +469,7 @@ class AccountDomainSyncService:
         existing_by_principal: dict[str, dict[str, dict[str, Any]]] = {}
         pending_by_principal: dict[str, dict[str, dict[str, Any]]] = {}
         for source_kind in ("custom", "public"):
-            for value in list_factor_summaries(source_kind, str(principal or "").strip() if source_kind == "custom" else ""):
+            for value in list_factor_summaries(source_kind, str(principal or "").strip() if source_kind == "custom" else "", include_heads=False):
                 owner = str(value.get("owner_username") or "").strip()
                 target = owner or "__public__"
                 if source_kind == "custom" and target != str(principal or "").strip():
