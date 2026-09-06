@@ -258,6 +258,11 @@
     const summaryText = document.createElement("span");
     summaryText.className = "ft-multi-select-summary-text";
     summary.append(summaryText);
+    const summaryOnsiteBadge = document.createElement("span");
+    summaryOnsiteBadge.className = "ft-multi-select-onsite-badge";
+    summaryOnsiteBadge.textContent = translate(context, "当场", "当场");
+    summaryOnsiteBadge.hidden = true;
+    summary.append(summaryOnsiteBadge);
     if (controlDisabled) {
       const lockIndicator = document.createElement("span");
       lockIndicator.className = "ft-multi-select-lock-indicator";
@@ -535,6 +540,9 @@
         ? (labels.length === 1 ? labels[0] : countLabel(context, labels.length))
         : "";
       summaryText.textContent = summaryValue || translate(context, "未筛选");
+      summaryOnsiteBadge.hidden = multi || selected.length !== 1 || !items.some(
+        item => item.value === selected[0] && (item.onsite || item.temporary === true),
+      );
       selectedLabel.textContent = labels.length ? labels.join("、")
         : translate(context, "未筛选");
       if (multi) {
