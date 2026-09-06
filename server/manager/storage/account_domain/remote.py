@@ -36,6 +36,19 @@ def _can_repair_factor_source_provider(
     )
 
 
+def _same_factor_config(incoming: Mapping[str, Any], current: Mapping[str, Any]) -> bool:
+    """Derived renderer output is not an authoring edit; never cross identities."""
+    if not incoming.get("params_list") or not current.get("params_list"):
+        return False
+    authored = lambda value: {k: v for k, v in value.items() if k != "resolved_factors"}
+    if authored(incoming) != authored(current):
+        return False
+    def identities(value):
+        return [row.get("identity") for row in value.get("resolved_factors", [])]
+    left, right = identities(incoming), identities(current)
+    return bool(left) and all(left) and left == right
+
+
 class AccountDomainControlMixin:
     """Methods mixed into the existing PostgreSQL control repository."""
 
@@ -105,7 +118,20 @@ class AccountDomainControlMixin:
                         "idempotent": True,
                         "operation_id": str(operation_id or ""),
                     }
-                repair_provider = _can_repair_factor_source_provider(
+                # Concurrent cache materializations do not change authoring.
+                # Keep the authority's projection when it is already as new.
+                same_config = (kind == "factor_param_config"
+                               and not deleted and not current_deleted
+                               and _same_factor_config(payload, current_payload))
+                if same_config:
+                    incoming_version = min(int(x.get("resolved_math_expr_version") or 0)
+                                           for x in payload["resolved_factors"])
+                    current_version = min(int(x.get("resolved_math_expr_version") or 0)
+                                          for x in current_payload["resolved_factors"])
+                    if current_version >= incoming_version:
+                        return {"status": "synced", "revision": current_revision,
+                                "idempotent": True, "operation_id": str(operation_id or "")}
+                repair_provider = same_config or _can_repair_factor_source_provider(
                     entity_type=kind,
                     entity_id=identifier,
                     incoming_payload=dict(payload or {}),

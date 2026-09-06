@@ -16,7 +16,7 @@ vm.runInThisContext(
   window.FTFactorCatalog = {
     async load(_context, options) {
       loads += 1;
-      assert.deepEqual(options, {refresh: true, library: true});
+      assert.deepEqual(options, {refresh: true, library: true, sync: false});
       return {factors: [factor]};
     },
   };

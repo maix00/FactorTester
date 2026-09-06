@@ -1001,8 +1001,11 @@
 
   async function refreshPersistedObject(context, state, result) {
     if (context.testObjectTemporary) return result;
+    // The write has committed. Read its local registration without waiting
+    // for unrelated account-domain conflicts to clear. Catalog GETs already
+    // schedule asynchronous sync; explicit header refresh keeps its barrier.
     const data = await window.FTFactorCatalog.load(context, {
-      refresh: true, library: true,
+      refresh: true, library: true, sync: false,
     });
     if (state.familyMode) return result;
     const targetRef = String(result?.factor_ref || result?.ref || "").trim();
