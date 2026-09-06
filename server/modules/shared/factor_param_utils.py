@@ -14,6 +14,7 @@ from tools.cli.release.research_reporting.references.factor_formula import (
 from tools.factors.formula_identity import freeze_factor_identity
 from tools.factors.formula_identity import require_frozen_factor
 from tools.parameters import FactorParam, TypeParam
+from server.modules.shared.factor_preview_latex import RESOLVED_MATH_EXPR_VERSION
 
 
 def _coerce_transport_value(param, value):
@@ -456,6 +457,7 @@ def build_factor_param_item(
         'math_expr': meta.get('math_expr')
         or getattr(factor_family, 'math_expr', '') or '',
         'resolved_math_expr': instance_metadata['resolved_math_expr'],
+        'resolved_math_expr_version': RESOLVED_MATH_EXPR_VERSION,
         'category': row_category or family_category,
         'source': source,
         'source_label': '公共因子' if source == 'public' else ('自定义因子' if source == 'custom' else '未知来源'),

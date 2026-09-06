@@ -31,6 +31,14 @@ import re
 from typing import Any
 
 
+# Version of the backend renderer that materializes ``resolved_math_expr``.
+# Account-domain mirrors compare this marker before reusing a frozen formula;
+# bump it whenever the resolved-formula semantics change.  The view page must
+# continue to render the persisted resolved value instead of repairing it in
+# JavaScript.
+RESOLVED_MATH_EXPR_VERSION = 2
+
+
 # Sentinel used to distinguish "attribute present with value None" from
 # "attribute absent" (JavaScript's ``undefined``).
 _UNDEF = object()
