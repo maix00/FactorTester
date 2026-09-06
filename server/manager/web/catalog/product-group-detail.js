@@ -274,6 +274,7 @@
       onDelete: globalHeader ? undefined : deleteGroup,
     });
     const header = headerValue.root;
+    save = save || headerValue.save;
     if (save) save.dataset.productGroupSave = "true";
     surface.append(header, helpers.sourceSummary(context));
 
@@ -347,7 +348,6 @@
           status.textContent = context.t("正路径至少需要一个产品路径");
           return;
         }
-        const save = surface.querySelector("[data-product-group-save]");
         save.disabled = true;
         status.textContent = "";
         try {
