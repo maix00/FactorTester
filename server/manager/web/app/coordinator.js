@@ -539,9 +539,7 @@
           try { parentResearchID = decodeURIComponent(researchMatch[1]); }
           catch (_) { parentResearchID = researchMatch[1]; }
         }
-        const restored = state.tabs.find(tab => (
-          tab.id === id || (tab.closable && tab.path === initial)
-        ));
+        const restored = tabs.restoredTabForPath(initial);
         if (restored) {
           if (parentResearchID) {
             restored.parentFolder = "research";
