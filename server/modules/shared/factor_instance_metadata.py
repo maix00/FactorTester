@@ -175,13 +175,8 @@ def _display_value(
         return "" if value is None else str(value)
 
 def _template_formula(family: Any) -> str:
-    expression = getattr(family, "expr", None)
-    if expression is not None:
-        try:
-            return str(expression.to_latex() or "")
-        except Exception:
-            pass
-    return str(getattr(family, "math_expr", "") or "")
+    from server.services.run_input_inspection import family_template_latex
+    return family_template_latex(family)
 
 def _family_symbol(family: Any) -> str:
     return str(getattr(family, "alias", "") or "Factor")
