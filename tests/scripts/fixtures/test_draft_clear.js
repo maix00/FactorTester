@@ -11,6 +11,23 @@ vm.runInThisContext(
 );
 
 const factorRef = `factor:v2:${"a".repeat(43)}`;
+vm.runInThisContext(fs.readFileSync("server/manager/web/core/page-state.js", "utf8"));
+for (const kind of ["ic", "backtest", "factor_evaluation"]) {
+  const durable = {};
+  const pageState = window.FTPageState.create({durable});
+  const live = {kind, values: {}, factors: [], groups: []};
+  window.FTTestState.bindDraftCheckpoint({tabSession:{durable},pageState}, live);
+  // Change an inner editor after the parent page's last render.
+  live.icConfigurationGroupEditor = {mode:"create",draft:{factor_ref:factorRef}};
+  live.backtestGroupEditor = {mode:"group",draft:{factor_candidate_refs:[factorRef]}};
+  live.values.category_candidates = [{id:"inline-category",temporary:true}];
+  pageState.capture();
+  const restored = {kind, factors:[], groups:[]};
+  assert.equal(window.FTTestState.restoreDraft(restored, durable.testDrafts[kind]), true);
+  assert.deepEqual(restored.icConfigurationGroupEditor, live.icConfigurationGroupEditor);
+  assert.deepEqual(restored.backtestGroupEditor, live.backtestGroupEditor);
+  assert.deepEqual(restored.values.category_candidates, live.values.category_candidates);
+}
 const frozenFactor = {
   schema_version: 2, ref: factorRef, alias: "Factor A",
   owner_ref: "owner:alice", identity: {family_ref: "family:a"},
