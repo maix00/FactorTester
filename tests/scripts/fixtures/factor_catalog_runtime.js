@@ -22,6 +22,18 @@ function deferred() {
 }
 
 async function main() {
+  const postSaveCalls = [];
+  await window.FTFactorCatalog.load({
+    session: {username: "saved-owner"},
+    async api(path) {
+      postSaveCalls.push(path);
+      if (path === "/api/catalog/refresh") throw new Error("HTTP 503");
+      return {factors: [{factor_ref: "factor:v2:committed"}], families: []};
+    },
+  }, {refresh: true, library: true, sync: false});
+  assert.ok(!postSaveCalls.includes("/api/catalog/refresh"),
+    "a committed save must not wait for unrelated account sync conflicts");
+  assert.ok(postSaveCalls.includes("/api/factor-library/factors?refresh=1"));
   const calls = [];
   const pending = new Map();
   const context = {
