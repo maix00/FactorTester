@@ -88,22 +88,28 @@ const compactChild = {
   alias: "SgChgPct|P:[CA]|M:0.6|B:1|N:200d|$F:1d",
   factor_alias: "SgChgPct|P:[CA]|M:0.6|B:1|N:200d|$F:1d",
   factor_family_alias: "SgChgPct",
-  identity: {family_alias: "SgChgPct", params: {P: "CA", M: 0.6, B: "1", N: "200d"}},
+  identity: {family_alias: "SgChgPct", params: {
+    P: "CA", M: 0.6, B: "1", N: "200d", $F: "1d", $Rev: 0,
+  }},
   params: [
     {alias: "P", value: "CA"},
     {alias: "M", value: 0.6},
     {alias: "B", value: "1"},
     {alias: "N", value: "200d"},
+    {alias: "$F", value: "1d"},
+    {alias: "$Rev", value: 0},
   ],
 };
 const childFamily = {
   factor_family_alias: "SgChgPct",
-  math_expr: String.raw`R_{\textcolor{red}{N}}Q_{\textcolor{red}{M}}(\textcolor{red}{P}_t-\textcolor{red}{P}_{t-\textcolor{red}{B}})`,
+  math_expr: String.raw`\operatorname{Resample}_{\textcolor{red}{\$F}}(R_{\textcolor{red}{N}}Q_{\textcolor{red}{M}}(\textcolor{red}{P}_t-\textcolor{red}{P}_{t-\textcolor{red}{B}}))`,
   parameter_definitions: [
     {alias: "P", type: "FactorParam", default_value: "CA"},
     {alias: "M", type: "FactorParam", default_value: 0.9},
     {alias: "B", type: "WindowParam", default_value: "5m"},
     {alias: "N", type: "WindowParam", default_value: "20d"},
+    {alias: "$F", type: "FactorFrequencyParam", default_value: "1d"},
+    {alias: "$Rev", type: "ReverseSignalParam", default_value: 0},
   ],
 };
 const outerFamily = {
@@ -186,6 +192,30 @@ assert.ok(valuePicker.options.onAddCandidateForType, "FactorParam supports on-th
     "changed parameters reuse the existing save-time freezer");
   assert.equal(latestValues.Th.parameter_values.M, 0.6, "untouched values survive");
   assert.equal(compactChild.identity.params.N, "200d", "library identity remains immutable");
+
+  // Editing a nested reverse flag refreshes the already-mounted local formula
+  // in place.  This is the regression for `$Rev=1` missing the red minus in
+  // edit mode; the outer onChange callback alone does not redraw this section.
+  const nestedFormula = descendants(editor.root).find(item => (
+    item.className?.includes("factor-detail-local-formula")
+  ));
+  assert.ok(nestedFormula, "nested factor keeps its local formula mount");
+  const reverseInput = descendants(editor.root).find(item => (
+    item.tagName === "INPUT" && String(item.value) === "0"
+  ));
+  assert.ok(reverseInput, "editable nested table exposes the $Rev input");
+  const valueToggle = descendants(nestedFormula).find(item => (
+    item.tagName === "BUTTON" && item.textContent === "值"
+  ));
+  assert.ok(valueToggle, "nested formula exposes the values mode");
+  valueToggle.listeners.click();
+  reverseInput.value = "1";
+  reverseInput.listeners.input();
+  assert.match(
+    nestedFormula.children[1].textContent,
+    /\\textcolor\{red\}\{-\}\\operatorname\{Resample\}/,
+    "nested formula redraws with the red reverse sign",
+  );
 
   // Reopening a frozen factor value renders its read-only nested table (and the
   // value picker shows the frozen factor selected), without degrading to manual.

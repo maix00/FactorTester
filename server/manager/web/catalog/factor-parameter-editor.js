@@ -579,6 +579,13 @@
             edit.value = initVal;
             edit.addEventListener("input", () => {
               editingParams[param.alias] = edit.value;
+              // Keep the nested section's local formula in lockstep with the
+              // typed values.  The outer editor callback updates the selected
+              // factor, but it must not be the only refresh path: the nested
+              // preview is already mounted and should update in place without
+              // reloading the page.  `vals` also preserves defaults for
+              // parameters that were not part of the frozen identity.
+              vals[param.alias] = edit.value;
               if (!onTheFlyFactor) {
                 // First real edit: materialise an independent on-the-fly factor
                 // (only now does it cease to be the library / alias factor).
@@ -641,6 +648,7 @@
                 if (idx >= 0 && candidateItems[idx]) candidateItems[idx].label = newAlias;
                 valuePicker?.setItems?.(candidateItems, true);
               }
+              section?.update?.({...vals, ...editingParams});
               options.onChange?.(values, alias);
             });
             cell.append(edit);

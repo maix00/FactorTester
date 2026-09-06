@@ -1113,6 +1113,11 @@ def test_factor_editor_family_picker_uses_the_shared_source_control() -> None:
     assert "FTUI.codeEditor" in source
     assert 'loadSourceVersion(\n              context, state.family, "current"' in source
     assert 'loadSourceVersion(\n          context, selectedFamily, "current"' in source
+    # A failed eager history lookup must leave loading state and surface a
+    # retryable error; otherwise every redraw can re-enter the request and the
+    # editor stays stuck at “正在读取源码版本…”.
+    assert "sourceVersionLoadFailed" in source
+    assert "state.sourceVersionError = window.FTFactorDetailShared.sourceUnavailableText" in source
     assert "factor-editor-upload-action" not in source
     assert "const title = document.createElement(\"h2\")" not in source
     assert "test-factor-family-row" not in source

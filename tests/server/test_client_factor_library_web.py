@@ -798,6 +798,9 @@ def test_validate_transient_duration_factor_supports_bar_distance_source() -> No
     assert payload["math_expr"].count(":=") == 4
     assert r"\mathrm{差持续期}_t" in payload["math_expr"]
     assert "X_t &:= " in payload["math_expr"]
+    # Every row in the embedded aligned condition needs its own alignment
+    # marker; otherwise KaTeX places the condition at the far right edge.
+    assert r"\\&" in payload["math_expr"]
 
 
 def test_factor_operator_catalog_exposes_bar_search_operators() -> None:
