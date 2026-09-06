@@ -5,6 +5,8 @@ from server.manager.storage.account_domain.remote import AccountDomainControlMix
 class Store(AccountDomainControlMixin):
     def __init__(self, payload, deleted=False):
         self.payload, self.deleted, self.writes = payload, deleted, 0
+    def ensure_schema(self):
+        pass
     @contextmanager
     def _connection(self):
         yield self
