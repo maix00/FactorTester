@@ -3053,3 +3053,9 @@ def test_factor_set_candidate_expansion_is_atomic_and_reports_failed_reads():
     fixture = ROOT / "tests/scripts/fixtures/factor_set_candidates.js"
     result = subprocess.run(["node", str(fixture)], cwd=ROOT, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_temporary_candidates_are_owned_by_the_authoring_state():
+    fixture = ROOT / "tests/scripts/fixtures/temporary_candidate_owner.js"
+    result = subprocess.run(["node", str(fixture)], cwd=ROOT, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr

@@ -54,6 +54,8 @@
       label: factorLabel(factor),
       description: FTTestFactorCandidates.sourceDescription(context, state, factor),
       factor,
+      temporary: factor.temporary === true,
+      onsite: factor.temporary === true,
       view: window.FTFactorDetailShared?.factorRowView?.(factor)
         || {kind: "factor", ref: factorID(factor)},
     })).filter(item => item.value);
@@ -193,6 +195,8 @@
       type: "factor_set",
       typeLabel: context.t("因子集合"),
       factorSet: item,
+      temporary: item.temporary === true,
+      onsite: item.temporary === true,
       view: window.FTFactorDetailShared?.factorSetRowView?.(item)
         || {kind: "factor_set", ref: item.target_ref},
     })).filter(item => item.value);
@@ -208,6 +212,25 @@
       ...currentSetSelections().map(item => item.target_ref).filter(Boolean),
     ];
     let items = combinedPickerItems(context, state);
+    const syncPicker = () => {
+      items = combinedPickerItems(context, state);
+      picker.setItems(items);
+      picker.setValues(currentSelected());
+      refresh?.();
+    };
+    const saveCandidate = (value, previous = null) => {
+      if (!value) return;
+      if (previous?.type === "factor_set" || value.target_ref) {
+        void FTTestFactorSets.addInlineSet(context, state, value, syncPicker);
+        return;
+      }
+      if (previous && previous.value !== factorID(value)) {
+        syncCandidates(state, selections(state).filter(row => (
+          factorID(row) !== previous.value
+        )));
+      }
+      saveFactor(context, state, syncPicker, null, value);
+    };
     const picker = FTTestObjectPicker.create(context, {
       title: context.t("因子候选"),
       note: context.t("因子与冻结集合均作为候选，可跨类型多选"),
@@ -231,33 +254,16 @@
       },
       // Per-type on-the-fly entry: the 「候选（因子）」/「候选（因子集合）」 heading "+"
       // creates the matching object type and lands it in that type's group.
-      onAddCandidateForType: (type, _context, {add}) => {
+      onAddCandidateForType: type => {
         if (type === "factor_set") {
           void FTTestLazyCode.openObjectEditor(context, {
             kind: "factor_set", mode: "create", ref: "new",
             temporary: true, testState: state,
-            onSaved: value => {
-              if (!value) return;
-              add({
-                value: value.target_ref,
-                label: value.title_zh || value.set_id || value.target_ref,
-                factorSet: value,
-                view: {kind: "factor_set", ref: value.target_ref},
-              });
-            },
+            onSaved: saveCandidate,
           });
           return;
         }
-        const onSaved = value => {
-          if (!value) return;
-          add({
-            value: factorID(value),
-            label: factorLabel(value),
-            factor: value,
-            view: window.FTFactorDetailShared?.factorRowView?.(value)
-              || {kind: "factor", ref: factorID(value)},
-          });
-        };
+        const onSaved = saveCandidate;
         void (window.FTStrategyEditorFactorOverlay?.open
           ? FTStrategyEditorFactorOverlay.open(context, state, onSaved)
           : FTTestLazyCode.openObjectEditor(context, {
@@ -268,7 +274,7 @@
       onCreate: context.session ? () => void (
         window.FTStrategyEditorFactorOverlay?.open
           ? FTStrategyEditorFactorOverlay.open(
-            context, state, value => saveFactor(context, state, refresh, picker, value),
+            context, state, saveCandidate,
           ) : null
       ) : null,
       createLabel: context.t("新建因子"),
@@ -276,9 +282,20 @@
         || item.factor?.source_kind === "transient",
       onEdit: (_event, item) => void FTStrategyEditorFactorOverlay.open(
         context, state,
-        value => saveFactor(context, state, refresh, picker, value), item.factor,
+        value => saveCandidate(value, item), item.factor,
       ),
       editLabel: context.t("编辑因子"),
+      onTemporaryCandidateUpdated: (previous, _next, saved) => saveCandidate(saved, previous),
+      onTemporaryCandidateRemoved: item => {
+        if (item.type === "factor_set") {
+          state.factorSetCatalog.items = state.factorSetCatalog.items.filter(row => (
+            row.target_ref !== item.value
+          ));
+        } else {
+          state.factors = (state.factors || []).filter(row => factorID(row) !== item.value);
+        }
+        items = combinedPickerItems(context, state);
+      },
       onChange: values => updateCombined(context, state, items, values, refresh).finally(() => {
         picker.setValues(currentSelected());
       }),
