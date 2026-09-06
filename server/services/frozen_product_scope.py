@@ -116,11 +116,49 @@ def freeze_product_scope(
             raise ValueError("temporary factor collection must be a list")
         shared["factors"] = unique_frozen_factor_records([
             *(shared.get("factors") or []),
-            *temporary_factors,
+            *_referenced_temporary_factors(shared.get("factors") or [], temporary_factors),
         ])
     _compact_execution_projections(shared, analysis_map, payload.get("ui"))
     _strip_ui_catalogs(payload.get("ui"))
     return frozen
+
+
+def _referenced_temporary_factors(roots: list[dict], candidates: list) -> list[dict]:
+    """Select the execution dependency closure from the editable candidate pool.
+
+    Unselected drafts may be incomplete. They remain in the authoring workspace
+    but must neither become execution subjects nor block unrelated runs.
+    """
+    by_ref: dict[str, list[dict]] = {}
+    for item in candidates:
+        if isinstance(item, dict) and item.get("ref"):
+            by_ref.setdefault(item["ref"], []).append(item)
+    pending = list(roots)
+    seen: set[str] = set()
+    selected: list[dict] = []
+
+    def references(value):
+        if isinstance(value, str) and value.startswith("factor:v2:"):
+            yield value
+        elif isinstance(value, dict):
+            for child in value.values():
+                yield from references(child)
+        elif isinstance(value, list):
+            for child in value:
+                yield from references(child)
+
+    while pending:
+        record = pending.pop()
+        refs = [record.get("ref"), *references(record.get("identity", {}).get("params"))]
+        pending.extend(record.get("factor_dependencies") or [])
+        for ref in refs:
+            if not ref or ref in seen:
+                continue
+            seen.add(ref)
+            matches = by_ref.get(ref, [])
+            selected.extend(matches)
+            pending.extend(matches)
+    return selected
 
 
 def _compact_execution_projections(

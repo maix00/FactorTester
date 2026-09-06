@@ -492,3 +492,33 @@ def test_frozen_shared_selection_reaches_backtest_runtime(monkeypatch) -> None:
 
     assert selection.selected_paths == ["Product/A"]
     assert selection.products == [product]
+
+
+def test_execution_excludes_unselected_incomplete_temporary_factor():
+    from tools.factors.formula_identity import freeze_factor_identity
+    def factor(name, params=None):
+        return freeze_factor_identity(
+            owner_ref='principal:alice', family_alias=name, factor_alias=name,
+            family_formula_fingerprint='a' * 64,
+            self_formula_fingerprint=('b' if name == 'Parent' else 'c') * 64,
+            params=params or {},
+        )
+    child = {**factor('Child'), 'temporary': True, 'source_kind': 'transient',
+             'source_code': 'class Child: pass'}
+    parent = factor('Parent', {'P': child['ref']})
+    unused = {**factor('Unused'), 'ref': 'factor:v2:unused',
+              'temporary': True, 'source_kind': 'transient'}
+    configuration = {'payload': {'shared': {
+        'factors': [parent], 'temporary_objects': {'factors': [unused, child]},
+    }, 'analyses': {'ic': {}}, 'ui': {}}}
+    frozen = freeze_product_scope(configuration, owner='alice', analyses=['ic'])
+    records = frozen['payload']['shared']['factors']
+    assert {record['ref'] for record in records} == {parent['ref'], child['ref']}
+    assert next(item for item in records if item['ref'] == child['ref'])['source_code']
+    assert len(configuration['payload']['shared']['temporary_objects']['factors']) == 2
+
+    # Missing source on a dependency is still an error, never silently skipped.
+    import pytest
+    child.pop('source_code')
+    with pytest.raises(ValueError, match='缺少冻结源码'):
+        freeze_product_scope(configuration, owner='alice', analyses=['ic'])
