@@ -36,7 +36,7 @@ from typing import Any
 # bump it whenever the resolved-formula semantics change.  The view page must
 # continue to render the persisted resolved value instead of repairing it in
 # JavaScript.
-RESOLVED_MATH_EXPR_VERSION = 2
+RESOLVED_MATH_EXPR_VERSION = 3
 
 
 # Sentinel used to distinguish "attribute present with value None" from
@@ -444,6 +444,8 @@ def child_definition(symbol: str, line: Any, align: bool, punctuation: str = "")
     clean = str(line).strip()
     clean = re.sub(r"[.;]\s*$", "", clean)
     output = re.match(r"^(?:X|\\mathrm{X})_t\s*&?\s*:=\s*(.+)$", clean)
+    if output:
+        return f"{symbol}_t &:= {output.group(1)}{punctuation}"
     prefix = "" if (output or "&" in clean) else ("& " if align else "")
     return f"{prefix}{symbol}_t := {output.group(1) if output else clean}{punctuation}"
 
@@ -488,7 +490,9 @@ def render_preview_node(
     result_value = expression(item)
     if not result_value:
         return {"body": "", "lines": []}
-    result = result_value
+    # The template's symbolic direction switch is resolved below, not a
+    # numeric multiplier: $Rev=0 must not turn the signal into zero.
+    result = result_value.replace(r"\textcolor{red}{\$Rev}\cdot ", "")
     lines: list[str] = []
     rows = parameter_rows(item)
     reverse_value = parameter_values.get("$Rev", next(
