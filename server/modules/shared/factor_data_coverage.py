@@ -102,10 +102,13 @@ def require_factor_data_coverage(
             )
             continue
         if warmup > pd.Timedelta(0) and available_start > required_start:
-            failures.append(
-                f"{name}: 预热需要从 {required_start.date()} 开始，"
-                f"可用数据从 {available_start.date()} 开始"
-            )
+            eligible -= 1
+            skipped.append({
+                "product": name,
+                "reason": "insufficient_warmup",
+                "required_data_start": str(required_start.date()),
+                "available_start": str(available_start.date()),
+            })
         elif available_start > requested_start:
             # With no warm-up, the expression is allowed to produce NaN until
             # enough in-window observations have accumulated.
@@ -140,3 +143,24 @@ def require_factor_data_coverage(
 
 
 __all__ = ["FactorDataCoverageError", "require_factor_data_coverage"]
+
+
+def apply_factor_data_coverage(tester: Any, coverage: dict[str, Any]) -> list[dict[str, Any]]:
+    """Remove ineligible products only from this run; retain an auditable summary."""
+    skipped = coverage.get("skipped_products", [])
+    excluded = {item["product"] for item in skipped}
+    tester.products = type(tester.products)(p for p in tester.products if str(getattr(p, "name", p)) not in excluded)
+    reasons = {
+        "insufficient_warmup": "预热数据不足",
+        "no_data_in_formal_window": "测试时间范围内无数据",
+        "no_compatible_source": "无兼容数据源",
+        "empty_source": "数据源为空",
+    }
+    return [{
+        "type": "产品路径", "status": "已移除", "level": "warning",
+        "code": "factor_data_product_removed",
+        "detail": item["product"] + "：" + reasons.get(item["reason"], item["reason"])
+        + (f"（预热需要从 {item['required_data_start']} 开始，可用数据从 {item['available_start']} 开始）"
+           if item["reason"] == "insufficient_warmup" else ""),
+        "details": item,
+    } for item in skipped]
