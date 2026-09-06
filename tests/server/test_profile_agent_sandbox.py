@@ -121,3 +121,20 @@ def test_sandbox_process_cannot_see_host_tmp_or_user_storage(tmp_path: Path) -> 
         assert completed.returncode == 0, completed.stderr
     finally:
         host_tmp_marker.unlink(missing_ok=True)
+
+
+def test_app_server_requests_use_the_mounted_workspace(tmp_path):
+    from types import SimpleNamespace
+    from server.manager.services.agent_app_server_policy import AgentAppServerPolicy
+    from server.manager.services.agent_app_server_errors import AgentAppServerError
+    from server.manager.services.agent_skill_protocol import AgentSkillProtocol
+
+    runtime = SimpleNamespace(workspace_root=tmp_path / 'profile', selected_bindings=lambda: {})
+    protocol = AgentSkillProtocol(runtime, sandboxed=True)
+    policy = AgentAppServerPolicy(runtime, protocol)
+    assert protocol.skills_list_params()['cwds'] == ['/workspace']
+    for method in ['thread/start', 'thread/resume', 'thread/list', 'turn/start']:
+        params = {'cwd': str(runtime.workspace_root), 'prompt': 'check page'}
+        assert policy.prepare(method, params)['cwd'] == '/workspace'
+    with pytest.raises(AgentAppServerError, match='Profile workspace'):
+        policy.prepare('thread/start', {'cwd': str(tmp_path / 'other-profile')})

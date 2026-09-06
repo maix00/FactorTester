@@ -132,6 +132,11 @@ class PageAssistanceStore:
         }
         with self._condition:
             self._prune()
+            previous = self._contexts.get((principal, profile_id, tab_id)) or {}
+            item["activated_at"] = (
+                item["updated_at"] if value.get("activate") is True
+                else previous.get("activated_at", 0)
+            )
             self._contexts[(principal, profile_id, tab_id)] = item
         return deepcopy(item)
 
@@ -144,7 +149,10 @@ class PageAssistanceStore:
                 if key[:2] == (principal, profile_id)
             ]
             return (
-                deepcopy(max(values, key=lambda item: item["updated_at"]))
+                deepcopy(max(values, key=lambda item: (
+                    bool(item.get("activated_at")),
+                    item.get("activated_at") or item["updated_at"],
+                )))
                 if values
                 else None
             )
