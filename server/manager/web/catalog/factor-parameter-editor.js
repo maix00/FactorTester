@@ -591,7 +591,7 @@
                 const base = baseFactor && typeof baseFactor === "object"
                   ? baseFactor : {identity: {}, params: {}};
                 const saved = base.identity?.params || base.parameter_values || {};
-                const familyMeta = base.family
+                const familyMeta = currentTemplate || base.family
                   || {factor_family_alias: base.identity?.family_alias || base.factor_family_alias};
                 const identity = {...(base.identity || {}), params: {...editingParams}};
                 onTheFlyFactor = {
