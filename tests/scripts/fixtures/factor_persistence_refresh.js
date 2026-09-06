@@ -75,6 +75,27 @@ vm.runInThisContext(
     ["navigate", "/factors/factor/Probe%7CN%3A5d"],
   ]);
 
+  // A registered factor edits its frozen source, even when current source
+  // is unavailable or belongs to a newer revision. Stop at the real API seam.
+  vm.runInThisContext(fs.readFileSync(
+    "server/manager/web/catalog/factor-detail-shared.js", "utf8"));
+  const stop = new Error("source request captured");
+  for (const row of [
+    {factor_ref: "factor:v2:edited", factor_alias: "Probe|N:5d"},
+    {ref: "factor:v2:edited", alias: "Probe|N:5d"},
+  ]) {
+    let requested;
+    await assert.rejects(window.FTFactorEditor.render({
+      session: {username: "parent"}, t: x => x,
+      api: async path => { requested = path; throw stop; },
+    }, {factors: [{...row, factor_family_alias: "Probe", owner_ref: "child",
+      identity: {family_formula_fingerprint: "a".repeat(64)}}]},
+    "factor:v2:edited", "edit"), error => error === stop);
+    assert.equal(requested,
+      "/api/factor-library/family-sources/custom/Probe/versions/"
+      + "a".repeat(64) + "?owner_username=child");
+  }
+
   const requests = [];
   const field = value => ({querySelector() { return {value}; }});
   const edited = await window.FTFactorEditor.saveSourceFactor({

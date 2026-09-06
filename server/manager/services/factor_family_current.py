@@ -20,5 +20,4 @@ def ensure_current_family(state, kind, factor_id, *, principal, owner=''):
         return True
     return FactorSourceHydrator(state).hydrate(
         f"{'public' if kind == 'public' else owner}:{factor_id}", principal=principal,
-        fingerprint=(head or {}).get('payload', {}).get('family_formula_fingerprint', ''),
     )
