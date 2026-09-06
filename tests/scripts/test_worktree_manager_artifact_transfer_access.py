@@ -18,6 +18,7 @@ from server.manager import runtime as manager
 from server.manager.data_plane.context import DataPlaneRuntime
 from server.manager.data_plane.server import ClientDataPlaneHTTPServer
 from server.manager.domain.federation import ServiceRoute
+from server.manager.http.gateway import GatewayResponse
 
 
 @pytest.fixture(autouse=True)
@@ -306,9 +307,12 @@ def test_job_detail_response_preserves_federated_origin_for_later_artifact_reads
     monkeypatch.setattr(
         state,
         "route_request",
-        lambda *_args, **_kwargs: manager.GatewayResponse(
+        lambda *_args, **_kwargs: GatewayResponse(
             status=200,
-            body=b'{"success":true,"task_detail":{"job":{"job_id":"job-1"}}}',
+            body=(
+                b'{"success":true,"owner":"bob","task_detail":'
+                b'{"job":{"job_id":"job-1"}}}'
+            ),
             content_type="application/json",
         ),
     )
@@ -327,6 +331,10 @@ def test_job_detail_response_preserves_federated_origin_for_later_artifact_reads
     assert value["execution_server_id"] == "remote-main"
     assert value["execution_port"] == 8000
     assert value["storage_server_id"] == "remote-main"
+    indexed = state.job_index.list("alice")
+    assert indexed[0]["job_id"] == "job-1"
+    assert indexed[0]["owner"] == "bob"
+    assert indexed[0]["storage_server_id"] == "remote-main"
 
 
 def test_artifact_route_uses_indexed_storage_server_without_execution_port(
