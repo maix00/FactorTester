@@ -870,7 +870,7 @@
       parameter_values: Object.fromEntries(
         familyParameters(family).map(parameter => [
           parameter.alias || parameter.name,
-          parameter.value ?? parameter.default_value ?? "",
+          parameter.default_value ?? parameter.value ?? "",
         ]).filter(([alias]) => alias),
       ),
     };
