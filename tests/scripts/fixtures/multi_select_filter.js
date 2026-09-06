@@ -125,6 +125,11 @@ const filter = window.FTMultiSelectFilter.create({t: value => value}, {
 });
 assert.deepEqual(filter.values, ["day", "industry"]);
 assert.equal(filter.summary.children[0].textContent, "已选 2 项");
+assert.equal(descendants(filter.element).some(item => (
+  item.className === "ft-multi-select-selection"
+    || item.className === "ft-multi-select-selection-note"
+    || item.className === "ft-multi-select-selection-preview"
+)), false, "multi-select must keep selected items inside the control");
 filter.setValues(["day", "none"]);
 assert.deepEqual(filter.values, ["none"]);
 assert.equal(filter.summary.children[0].textContent, "未绑定");
@@ -276,9 +281,14 @@ assert.equal(locked.dropdown.open, false);
   const multiChanges = [];
   const multiSave = window.FTMultiSelectFilter.create({t: value => value}, {
     items: [{value: "a", label: "A"}, {value: "b", label: "B"}, {value: "c", label: "C"}],
-    selected: ["a"], multi: true,
+    selected: ["a"], multi: true, compact: true,
     onChange: values => multiChanges.push(values),
   });
+  assert.equal(descendants(multiSave.element).some(item => (
+    item.className === "ft-multi-select-selection"
+      || item.className === "ft-multi-select-selection-note"
+      || item.className === "ft-multi-select-selection-preview"
+  )), false, "compact multi-select must not duplicate selected items outside the control");
   assert.equal(descendants(multiSave.element).some(item => (
     item.className === "primary ft-multi-select-apply"
   )), false, "multi-select must not render a save action");
