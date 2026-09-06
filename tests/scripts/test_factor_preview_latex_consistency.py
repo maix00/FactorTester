@@ -194,6 +194,7 @@ def test_signal_alignment_intermediates_and_reverse_match_real_metadata():
                 family, SimpleNamespace(alias="Probe"), {"$F": frequency, "$Rev": reverse},
             )
             assert node["math_expr"] == template
+            assert node["resolved_math_expr_version"] == fpl.RESOLVED_MATH_EXPR_VERSION
             cases.append(node)
     for node, result in zip(cases, _node_previews(cases, [{}] * len(cases))):
         assert node["resolved_math_expr"] == result["expression"]

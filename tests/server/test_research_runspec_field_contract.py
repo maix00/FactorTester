@@ -6,6 +6,7 @@ import pytest
 import settings as Settings
 from server.modules.single_factor_test import research_jobs, sft_bp
 import server.modules.shared.submission_helpers  # noqa: F401 - product resolver
+from server.modules.shared.factor_preview_latex import RESOLVED_MATH_EXPR_VERSION
 from server.services import factor_registry
 from tools.factors.formula_identity import freeze_factor_identity
 from tools.factors import FactorFamily
@@ -94,6 +95,7 @@ def test_factor_metadata_uses_template_latex_and_keeps_resolved_formula_separate
     assert r"\mathrm{Bars}\left(\textcolor{red}{N}\right)" in metadata["math_expr"]
     assert "25 days 00:00:00" not in metadata["math_expr"]
     assert r"25\,\mathrm{d}" in metadata["resolved_math_expr"]
+    assert metadata["resolved_math_expr_version"] == RESOLVED_MATH_EXPR_VERSION
 
 
 def _update(client, workspace) -> None:
