@@ -26,4 +26,19 @@ assert.deepEqual(calls, [
   ["heading", "数据源一", "数据源族"],
   ["tab", "数据源一"],
 ]);
+let activeTab = "factors";
+const lifetimes = window.FTRoutePresentation.createLifetimes(() => activeTab);
+lifetimes.begin(1);
+const listIsCurrent = () => lifetimes.isCurrent(1);
+assert.equal(listIsCurrent(), true);
+activeTab = "factor-edit";
+lifetimes.begin(2);
+assert.equal(listIsCurrent(), false, "hidden lists cannot overwrite the editor");
+activeTab = "factors"; // live DOM restoration does not re-run the route renderer
+assert.equal(listIsCurrent(), true, "a restored list's refresh handler can redraw its page");
+lifetimes.begin(3);
+assert.equal(listIsCurrent(), false, "re-rendering invalidates earlier requests in the same tab");
+assert.equal(lifetimes.isCurrent(3), true);
+lifetimes.discard("factors");
+assert.equal(lifetimes.isCurrent(3), false, "closed or evicted views release their lifetime");
 console.log("ok");
