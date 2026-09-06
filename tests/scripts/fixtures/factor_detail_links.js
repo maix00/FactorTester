@@ -200,6 +200,7 @@ const data = {
     factor_family_name: "MmRateOfChg",
     factor_family_alias: "MmRateOfChg",
     math_expr: "\\frac{P_t-P_{t-N}}{P_{t-N}}",
+    resolved_math_expr: String.raw`\textcolor{red}{-}\operatorname{Resample}_{\textcolor{red}{20\,\mathrm{m}}}(P_t)`,
     description: "端点变化率",
     owner_alias: "MaxA",
     params: [{alias: "N", value: "20d"}],
@@ -297,6 +298,10 @@ assert.ok(
     },
   );
   assert.strictEqual(context.heading.name, alias);
+  assert.ok(
+    rendered.some(item => item.expression === String.raw`\textcolor{red}{-}\operatorname{Resample}_{\textcolor{red}{20\,\mathrm{m}}}(P_t)`),
+    "view mode must render the backend resolved_math_expr",
+  );
   assert.strictEqual(rendered.at(-1).expression, "\\frac{P_t-P_{t-N}}{P_{t-N}}");
   assert.strictEqual(toolbar.children[0].textContent, "查看因子序列");
   toolbar.children[0].listeners.click();
@@ -344,6 +349,7 @@ assert.ok(
     factor_family_alias: "MmThreshold",
     identity: {family_alias: "MmThreshold", params: {N: "5d"}},
     params: [{alias: "N", value: "5d"}],
+    resolved_math_expr: String.raw`\textcolor{red}{5\,\mathrm{d}}`,
     // Server-provided nested projections carry the typed family definitions;
     // the overlay must render those types instead of falling back to
     // Parameter for every row.
@@ -359,6 +365,7 @@ assert.ok(
     factor_family_alias: "MmOuter",
     identity: {family_alias: "MmOuter", params: {Th: nestedLeaf}},
     params: [{alias: "Th", value: nestedLeaf}],
+    resolved_math_expr: String.raw`\textcolor{blue}{\mathrm{MmThreshold}}_t`,
   };
   const nestedViewContext = {
     ...context,

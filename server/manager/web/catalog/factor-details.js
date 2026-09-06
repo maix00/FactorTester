@@ -53,16 +53,9 @@
     // 查看模式：factor 携带的两类公式字段
     //   math_expr        = 因子家族_LATEX模板_（\textcolor{red}{alias} 占位，未叠加）
     //   resolved_math_expr = 后端_叠加后_的完整公式（参数替换+嵌套因子展开）
-    // 后端在序列化时已算好 resolved_math_expr，查看模式直接渲染它；仅当后端未水合该对象
-    // （瞬态/内联）时才回退到前端 previewExpression 现场叠加。编辑/新建模式仍在 factor-editor
-    // 里用 math_expr(模板)+参数列表现场叠加，两处勿混用。
-    if (!String(factor.resolved_math_expr || "").trim()) {
-      const instanceValues = window.FTFactorDetailShared.parameterValues(factor);
-      const resolvedExpression = window.FTFactorDetailShared.previewExpression(
-        factor, instanceValues,
-      );
-      if (resolvedExpression) factor.resolved_math_expr = resolvedExpression;
-    }
+    // 查看模式只渲染后端生成的 resolved_math_expr。math_expr 是编辑器的
+    // 参数模板；查看页绝不能用 JS previewExpression 补算，否则不同服务端的
+    // 参数组合、Resample 和 $Rev 会出现不一致。
     factor.factor_source_version = factor.family_formula_fingerprint
       ? `公式版本 · ${factor.family_formula_fingerprint.slice(0, 12)}`
       : "未固定公式版本";
@@ -91,7 +84,7 @@
     const top = document.createElement("div");
     top.className = "factor-detail-top";
     top.append(window.FTFactorDetailShared.summary(
-      context, factor, {instance: true},
+      context, factor, {instance: true, resolvedOnly: true},
     ));
     root.append(top);
     const provenance = window.FTFactorDetailShared.provenance(context, factor);

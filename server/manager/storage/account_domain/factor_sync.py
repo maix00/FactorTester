@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from server.modules.shared.factor_preview_latex import RESOLVED_MATH_EXPR_VERSION
+
 
 _FACTOR_KEYS = (
     "schema_version", "ref", "alias", "owner_ref", "identity",
@@ -12,7 +14,8 @@ _FACTOR_KEYS = (
     "factor_owner_ref", "family_formula_fingerprint",
     "self_formula_fingerprint",
     "params", "factor_params", "parameter_definitions", "chinese_name",
-    "description", "math_expr", "resolved_math_expr", "factor_dependencies",
+    "description", "math_expr", "resolved_math_expr",
+    "resolved_math_expr_version", "factor_dependencies",
     "category", "factor_kind", "source", "owner_username", "owner_alias",
     "owner_organization_id", "owner_organization_name", "updated_at",
     "scope_key", "product_group",
@@ -37,8 +40,19 @@ def materialized_factor_configs(owner: str, *, existing: list[dict[str, Any]] | 
             if previous_row and previous_row.get("deleted"):
                 # An old authored copy is not a request to resurrect a deletion.
                 continue
-            if (isinstance(previous.get("resolved_factors"), list)
-                    and len(previous["resolved_factors"]) >= len(previous.get("params_list") or [])):
+            previous_factors = previous.get("resolved_factors")
+            has_resolved_formulas = (
+                isinstance(previous_factors, list)
+                and all(
+                    isinstance(item, dict)
+                    and str(item.get("resolved_math_expr") or "").strip()
+                    and item.get("resolved_math_expr_version")
+                    == RESOLVED_MATH_EXPR_VERSION
+                    for item in previous_factors
+                )
+            )
+            if (has_resolved_formulas
+                    and len(previous_factors) >= len(previous.get("params_list") or [])):
                 # The write hook replaces this payload with a raw draft before
                 # a real authoring edit. On restart, the durable frozen mirror
                 # wins over a stale authored copy from another Manager.
@@ -46,14 +60,20 @@ def materialized_factor_configs(owner: str, *, existing: list[dict[str, Any]] | 
                 continue
             config = load_factor_param_config(owner, family, scope)
             if not isinstance(config, dict):
+                if previous_factors:
+                    result.append((identifier, previous))
                 continue
             try:
                 factors = build_factor_library_config_factors(owner, account, family, config)
             except (ImportError, AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
                 # Missing source/dependency is a deferred materialization, not
                 # a deletion or an empty authoritative factor registration.
+                if previous_factors:
+                    result.append((identifier, previous))
                 continue
             if len(factors) < len(config.get("params_list") or []):
+                if previous_factors:
+                    result.append((identifier, previous))
                 continue
             resolved = [{key: item[key] for key in _FACTOR_KEYS if item.get(key) not in (None, "")}
                         for item in factors if isinstance(item, dict)]

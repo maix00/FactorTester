@@ -96,6 +96,9 @@ def instantiate_factor_metadata(
         "resolved_math_expr": str(
             instance.get("resolved_math_expr") or resolved_formula or ""
         ),
+        "resolved_math_expr_version": instance.get(
+            "resolved_math_expr_version"
+        ),
         "parameter_definitions": instance.get("parameter_definitions") or [],
     }
 

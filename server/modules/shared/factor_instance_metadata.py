@@ -8,10 +8,12 @@ from typing import Any
 from server.modules.shared.factor_param_utils import (
     unique_frozen_factor_records,
 )
+from server.modules.shared.factor_preview_latex import RESOLVED_MATH_EXPR_VERSION
 from server.modules.shared.param_meta import serialize_param_meta
 from tools.factors.FactorExpr import ConstExpr
 from tools.factors.formula_identity import require_frozen_factor
 from tools.parameters import FactorParam
+
 
 def build_factor_instance_metadata(
     family: Any,
@@ -79,6 +81,7 @@ def _instance_node(
         # 得到的完整公式，前端查看模式直接渲染它。两者为"输入/输出"，勿互换。
         "math_expr": template,
         "resolved_math_expr": "",
+        "resolved_math_expr_version": RESOLVED_MATH_EXPR_VERSION,
         "parameter_definitions": rows,
     }
     from server.modules.shared.factor_preview_latex import preview_expression

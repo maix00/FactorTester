@@ -409,7 +409,12 @@ class SignalAlign(CompositeExpr):
         sk = self._structural_key()
         if subst is not None and sk in subst:
             return f"{subst[sk]}_t"
-        inner = self.operands[0]._to_latex(subst)
+        operand = self.operands[0]
+        operand_key = operand._structural_key()
+        if subst is not None and operand_key in subst:
+            inner = f"{subst[operand_key]}_t"
+        else:
+            inner = operand._to_latex(subst)
         frequency = str(self.signal_freq if self.signal_freq is not None else '$F')
         frequency = frequency.replace('$', r'\$')
         return (r'\operatorname{Resample}_{\textcolor{red}{' + frequency

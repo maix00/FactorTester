@@ -13,6 +13,7 @@ from server.manager.storage.account_domain.remote import (
     _can_repair_factor_source_provider,
 )
 from server.manager.storage.account_domain.factor_sync import materialized_factor_configs
+from server.modules.shared.factor_preview_latex import RESOLVED_MATH_EXPR_VERSION
 from tools.cli.release.research_reporting.public_research.library import PublicResearchLibrary
 from tools.factors.formula_identity import freeze_factor_identity
 
@@ -143,6 +144,8 @@ def test_factor_sync_materializes_resolved_aliases(monkeypatch) -> None:
             "factor_family_name": "CA",
             "scope_key": "default",
             "params": [{"alias": "$F", "value": "1m"}],
+            "resolved_math_expr": r"\operatorname{Resample}_{\textcolor{red}{1m}}(C_t)",
+            "resolved_math_expr_version": RESOLVED_MATH_EXPR_VERSION,
             "owner_username": "alice",
         }],
     )
@@ -907,23 +910,53 @@ def test_unchanged_authoring_config_reuses_frozen_rows(monkeypatch):
     calls = []
     def freeze(*args):
         calls.append(1)
-        return [freeze_factor_identity(owner_ref="alice", family_alias="F", factor_alias="F1",
-            family_formula_fingerprint="a" * 64, self_formula_fingerprint="b" * 64, params={"N": 1})]
+        return [freeze_factor_identity(
+            owner_ref="alice", family_alias="F", factor_alias="F1",
+            family_formula_fingerprint="a" * 64,
+            self_formula_fingerprint="b" * 64, params={"N": 1},
+        ) | {
+            "resolved_math_expr": r"\mathrm{F1}_t",
+            "resolved_math_expr_version": RESOLVED_MATH_EXPR_VERSION,
+        }]
     monkeypatch.setattr("server.modules.custom_factors.factor_library_service.build_factor_library_config_factors", freeze)
     first = materialized_factor_configs("alice")
     second = materialized_factor_configs("alice", existing=[{"entity_id": key, "payload": value} for key, value in first])
     assert first == second
     assert calls == [1]
+    legacy_payload = dict(first[0][1])
+    legacy_payload["resolved_factors"] = [
+        {key: value for key, value in item.items()
+         if key != "resolved_math_expr_version"}
+        for item in legacy_payload["resolved_factors"]
+    ]
+    rebuilt = materialized_factor_configs(
+        "alice", existing=[{"entity_id": "default:F", "payload": legacy_payload}],
+    )
+    assert rebuilt == first
+    assert rebuilt[0][1]["resolved_factors"][0][
+        "resolved_math_expr_version"
+    ] == RESOLVED_MATH_EXPR_VERSION
+    assert calls == [1, 1]
+    monkeypatch.setattr(
+        "tools.data.account_manage.load_factor_param_config",
+        lambda *args: None,
+    )
+    preserved = materialized_factor_configs(
+        "alice", existing=[{"entity_id": "default:F", "payload": legacy_payload}],
+    )
+    assert preserved == [("default:F", legacy_payload)]
+    assert calls == [1, 1]
+    monkeypatch.setattr("tools.data.account_manage.load_factor_param_config", lambda *args: config)
     config["params_list"] = [{"N": 2}]
     # A stale authored copy after a restart is not a new edit.
     assert materialized_factor_configs("alice", existing=[{"entity_id": key, "payload": value} for key, value in first]) == first
-    assert calls == [1]
+    assert calls == [1, 1]
     # Real save hooks replace the mirror with the raw pending draft.
     materialized_factor_configs("alice", existing=[{"entity_id": "default:F", "payload": config}])
-    assert calls == [1, 1]
+    assert calls == [1, 1, 1]
     # A retained authored copy must never resurrect an authority tombstone.
     assert materialized_factor_configs("alice", existing=[{"entity_id": "default:F", "payload": {}, "deleted": True}]) == []
-    assert calls == [1, 1]
+    assert calls == [1, 1, 1]
 
 
 def test_v2_set_reconcile_publishes_actual_ref(monkeypatch, tmp_path):
