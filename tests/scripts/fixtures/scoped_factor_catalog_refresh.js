@@ -17,19 +17,25 @@ global.document = {
 
 let pickerOptions;
 let pickerItems = [];
+let pickerElement = null;
 global.FTTestObjectPicker = {
   create(_context, options) {
     pickerOptions = options;
     pickerItems = options.items;
+    pickerElement = {classList: {add() {}}};
     return {
-      element: {classList: {add() {}}},
+      element: pickerElement,
       setItems(items) { pickerItems = items; },
       setValues() {},
     };
   },
   lazyLoading() { return true; },
 };
-global.FTTestFieldRow = {create(_label, control) { return control; }};
+let candidateFieldControl = null;
+global.FTTestFieldRow = {create(label, control) {
+  if (label === "因子候选") candidateFieldControl = control;
+  return control;
+}};
 global.FTTestFieldHelp = {forField() { return ""; }};
 global.FTTestFactorSets = {
   control() { return null; }, selections(state) { return state.values.factor_set_selections || []; },
@@ -46,10 +52,10 @@ global.FTTestFactorSelection = {
   factorAlias(value) { return value?.alias || ""; },
   syncSelection() {},
 };
-let renderedCandidateCount = 0;
+let summaryRenderCount = 0;
 global.FTTestFactorCandidates = {
   sourceDescription() { return ""; },
-  summaryControl(_context,state) { renderedCandidateCount=(state.values.factor_candidates || []).length; return {classList: {add() {}}}; },
+  summaryControl() { summaryRenderCount += 1; return {classList: {add() {}}}; },
 };
 global.FTSettingRules = {
   storageKey(key) { return key; },
@@ -77,6 +83,10 @@ const parent = {
 const local = FTTestFactorCandidateSources.scopedSourceState(parent, {}, {});
 FTTestFactorCandidateSources.panel({t: value => value, session: null}, local, () => {});
 assert.deepStrictEqual(pickerOptions.items.map(item => item.label), ["A", "Set"]);
+assert.strictEqual(candidateFieldControl, pickerElement,
+  "factor candidate field directly owns the shared multi-select");
+assert.strictEqual(summaryRenderCount, 0,
+  "factor candidate field does not render a second selected-object summary");
 
 parent.factors = [
   {ref: "factor:a", alias: "A"},
@@ -89,7 +99,8 @@ setImmediate(async () => {
   assert.deepStrictEqual(pickerItems.map(item => item.label), ["A", "B", "C", "Set"]);
   await pickerOptions.onChange(["set:s"]);
   assert.strictEqual(local.values.factor_candidates.length, 8);
-  assert.strictEqual(renderedCandidateCount, 8, "mounted summary refreshes after asynchronous set expansion");
+  assert.strictEqual(summaryRenderCount, 0,
+    "asynchronous set expansion stays represented only by the multi-select");
   assert.strictEqual(parent.values.factor_candidates.length, 0, "nested selection stays isolated");
   process.stdout.write("ok\n");
 });

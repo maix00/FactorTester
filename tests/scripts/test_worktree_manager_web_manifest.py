@@ -1293,7 +1293,9 @@ def test_factor_candidate_sources_do_not_nest_field_rows_in_the_control_column()
     assert "FTTestFactorSets.control" not in source
     assert source.index("function candidateHeading") < source.index("FTTestFactorRoles.section")
     assert 'className: "factor-candidate-child-row"' in source
-    assert 'direct.classList.add("factor-candidate-child-row")' in source
+    assert "root.append(candidateHeading(context, state, direct), error)" in source
+    panel_source = source[source.index("function panel("):source.index("function scopedSourceState(")]
+    assert "summaryControl" not in panel_source
     assert "factor-candidate-child-section" in roles
     assert ".factor-candidate-child-row > span:first-child" in styles
     assert ".factor-candidate-child-section > .factor-role-section-heading" in styles
