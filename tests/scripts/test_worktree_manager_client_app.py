@@ -2893,6 +2893,9 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
     assert "job.execution_port" in jobs
     assert "function executionTarget" in job_detail
     assert 'const artifactQuery = routeQuery(null, "")' in job_detail
+    assert "_index_job_detail_response" in (
+        ROOT / "server" / "manager" / "http" / "job_proxy_routes.py"
+    ).read_text(encoding="utf-8")
     assert "context.showNotice?.(" in artifacts
     assert "routePresentation(routeToken)" in coordinator
     assert "priceChart" in viewers
