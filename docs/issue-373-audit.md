@@ -53,3 +53,28 @@
 保留其他行的原始冻结版本。策略并发版本、旧表迁移、权限与字节 hash 校验有隔离回归。
 最新临时对象快照修改仍待后续回归。
 尚未完成全量聚焦回归、真实浏览器闭环、部署、数据恢复和清理。
+
+## 公网近期失败任务补充
+
+通过本机 Manager 的已授权管理主体读取跨服务器任务详情（没有复制浏览器会话）：
+
+- `25e0161893614022ae472c236c2ae7d4`，公网源码 revision `46f179247070efd6e587823f813acf8222ee2ef0`：
+  `factor_data_source_unavailable`，覆盖检查把输出 MIN5 当作输入频率。
+  将频率判断抽为执行器与覆盖检查共同函数；红测试复现、绿测试通过。
+- `3bb11916172448ee818d3f6bb5bfd50e`、`2dd5ed15a9ba4c45bb91d45c4c53a3b9`、
+  `550801fd3ca045c7b7a833d1baa168c1`：嵌套 SgChgPct alias 查找失败。
+  详情的 shared.factors 已有父子冻结记录，不能归因于用户漏填；FactorEvaluation
+  忽略了冻结图并按 alias 重新解析。增加按原 ref 解析完整冻结图的执行路径。
+- `0a5d8e5e15e74446a9529c854ca6b6a6` 为 scheduler_restarted；不能当作参数错误。
+
+运行相关聚焦测试 97 项通过；真实旧任务修复后的重跑尚未完成。
+
+## 公共下拉框浏览器验收
+
+Chrome，隔离 localhost:8765 页面，直接加载任务分支真实组件与 app.css，不接数据库。
+在 overflow:hidden + transform 容器里打开菜单；滚动 195px 后菜单保持上方 4px 间距。
+过滤后高度变为 176.84px，间距仍为 4px。模态框内菜单处于 popover top layer，
+留在 dialog 子树，可选择候选；关闭模态后 open popover/portaled 数量均为 0。
+控制台无相关 error/warn。一次 Playwright radio 点击超时，使用可见 AX 控件点击成功；
+不能把该单次自动化超时当作用户交互缺陷。截图已在会话中展示。
+尚未完成移动视口、各个真实配置页面与所有临时对象类型的完整闭环。

@@ -230,7 +230,7 @@
     const values = {};
     for (const key of draftKeys) values[key] = structuredClone(state[key]);
     if (window.FTTestConfiguration?.temporaryObjects) {
-      values.savedTemporaryObjects = FTTestConfiguration.temporaryObjects(state);
+      values.savedTemporaryObjects = window.FTTestConfiguration.temporaryObjects(state);
     }
     return {
       schemaVersion: 2,
