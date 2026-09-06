@@ -80,8 +80,11 @@
       renderActions(key);
       const entry = entries.get(key);
       if (entry && !entry.loaded) {
-        const content = typeof entry.item.render === "function"
+        let content = typeof entry.item.render === "function"
           ? entry.item.render() : entry.item.content;
+        if (content && typeof options.wrapContent === "function") {
+          content = options.wrapContent(content, entry.item) || content;
+        }
         if (content) entry.panel.append(content);
         entry.loaded = true;
       }
@@ -136,6 +139,10 @@
       ...options,
       barClass: options.barClass || "backend-settings-tab-bar",
       hostClass: options.hostClass || "backend-settings-host",
+      wrapContent: options.wrapContent || ((content, item) => (
+        item?.fieldTable === false || !window.FTTestFieldRow?.table
+          ? content : FTTestFieldRow.table(content)
+      )),
     });
     let current = null;
 

@@ -1088,6 +1088,20 @@ def test_test_settings_mount_live_chips_between_tabs_and_panel() -> None:
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
+    field_rows = (WEB_ROOT / "workbench" / "test-field-row.js").read_text(
+        encoding="utf-8",
+    )
+    tabs = (WEB_ROOT / "workbench" / "tab-chip-content.js").read_text(
+        encoding="utf-8",
+    )
+    styles = (WEB_ROOT / "styles" / "workbench-settings.css").read_text(
+        encoding="utf-8",
+    )
+    assert "function table(content" in field_rows
+    assert 'root.setAttribute("role", "table")' in field_rows
+    assert "FTTestFieldRow.table(content)" in tabs
+    assert "--test-field-label-width" in styles
+    assert "minmax(0, var(--test-field-label-width, 160px)) minmax(0, 1fr)" in styles
 
 
 def test_factor_editor_family_picker_uses_the_shared_source_control() -> None:
@@ -2154,6 +2168,8 @@ def test_inline_strategy_creation_uses_shared_nested_object_overlay() -> None:
     assert 'load: "strategy-library-editor-core"' in overlay
     assert 'submitLabel || "保存"' in overlay
     assert "strategy-inline-dialog" not in styles
+    assert ".strategy-binding-row {" not in styles
+    assert "FTTestFieldRow.create(" in panel
     manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text())
     assert "strategy-library-editor-core" not in manifest["group_dependencies"][
         "workbench-strategy-bindings"

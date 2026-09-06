@@ -102,13 +102,6 @@
   gap: .75rem;
 }
 
-.strategy-binding-row {
-  align-items: center;
-  display: grid;
-  gap: .75rem;
-  grid-template-columns: minmax(10rem, 18rem) minmax(0, 1fr);
-}
-
 .strategy-source-viewer,
 .strategy-library-detail .code-viewer {
   max-height: 42rem;
@@ -117,7 +110,6 @@
 
 @media (max-width: 48rem) {
   .strategy-editor-row,
-  .strategy-binding-row,
   .strategy-binding-field {
     grid-template-columns: 1fr;
   }
