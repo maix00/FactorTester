@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import pytest
 
 from flask import Flask
 
@@ -13,6 +14,34 @@ from server.modules.custom_factors import (
 ROOT = Path(__file__).parents[2]
 
 
+def test_single_factor_writes_preserve_siblings_and_reject_stale_edits(monkeypatch):
+    stored = {"params_list": [], "metadata": {"note": "keep"}}
+
+    def factors(_user, _account, _family, config):
+        return [{"factor_ref": f"ref:{row['N']}", "params": row}
+                for row in config["params_list"]]
+
+    def save(_user, _family, rows, **kwargs):
+        stored.update(params_list=list(rows))
+        return dict(stored), factors(None, None, None, stored)
+
+    monkeypatch.setattr(factor_library_service, "load_factor_param_config",
+                        lambda *args, **kwargs: dict(stored))
+    monkeypatch.setattr(factor_library_service, "get_account", lambda _: {})
+    monkeypatch.setattr(factor_library_service, "build_factor_library_config_factors", factors)
+    monkeypatch.setattr(factor_library_service, "save_current_user_library_config", save)
+    write = factor_library_service.save_single_library_factor
+    write("alice", "Family", {"N": 1})
+    write("alice", "Family", {"N": 5})
+    assert stored["params_list"] == [{"N": 1}, {"N": 5}]
+    _, selected = write("alice", "Family", {"N": 2}, replace_factor_ref="ref:1")
+    assert selected["factor_ref"] == "ref:2"
+    assert stored["params_list"] == [{"N": 2}, {"N": 5}]
+    with pytest.raises(ValueError, match="刷新"):
+        write("alice", "Family", {"N": 3}, replace_factor_ref="ref:1")
+    assert stored["params_list"] == [{"N": 2}, {"N": 5}]
+
+
 def _app() -> Flask:
     app = Flask(
         __name__,
@@ -22,6 +51,35 @@ def _app() -> Flask:
     app.secret_key = "factor-library-mutations-test"
     app.register_blueprint(factor_library_internal_bp)
     return app
+
+
+def test_single_factor_freezes_only_changed_row_and_preserves_old_versions(monkeypatch):
+    from contextlib import nullcontext
+    old = [{'factor_ref': f'old:{index}', 'family_formula_fingerprint': 'old-version',
+            'params': {'N': index}} for index in range(100)]
+    config = {'params_list': [{'N': index} for index in range(100)],
+              'resolved_factors': old}
+    compiled = []
+    monkeypatch.setattr(factor_library_service, 'load_factor_param_config', lambda *args: config)
+    monkeypatch.setattr(factor_library_service, 'get_account', lambda _: {})
+    monkeypatch.setattr(factor_library_service, 'get_factor_family_instance', lambda *args, **kwargs: object())
+    monkeypatch.setattr(factor_library_service, '_merged_library_metadata', lambda *args: {})
+    monkeypatch.setattr(factor_library_service, '_configuration_factor_resolver', lambda *args, **kwargs: nullcontext())
+    monkeypatch.setattr(factor_library_service, 'serialize_factor_param_rows', lambda _family, rows: rows)
+    def freeze(_user, _account, _family, value):
+        compiled.extend(value['params_list'])
+        return [{'factor_ref': 'new:changed', 'family_formula_fingerprint': 'new-version',
+                 'params': row} for row in value['params_list']]
+    monkeypatch.setattr(factor_library_service, 'build_factor_library_config_factors', freeze)
+    monkeypatch.setattr(factor_library_service, 'save_factor_param_config',
+                        lambda user, family, rows, scope, **kwargs: {'params_list': rows, **kwargs})
+    saved, changed = factor_library_service.save_single_library_factor(
+        'alice', 'Family', {'N': 999}, replace_factor_ref='old:50')
+    assert compiled == [{'N': 999}]
+    assert changed['factor_ref'] == 'new:changed'
+    for index, row in enumerate(saved['resolved_factors']):
+        if index != 50:
+            assert row == old[index]
 
 
 def _login(client, username: str = "alice") -> None:
@@ -158,7 +216,7 @@ def test_deleting_one_registered_factor_preserves_other_rows(monkeypatch) -> Non
     saved = []
     monkeypatch.setattr(
         factor_library_service,
-        "save_factor_param_config",
+        "save_current_user_library_config",
         lambda *args, **kwargs: saved.append((args, kwargs)),
     )
     assert factor_library_service.delete_factor_library_factor(

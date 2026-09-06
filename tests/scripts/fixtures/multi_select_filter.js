@@ -242,8 +242,15 @@ assert.equal(locked.dropdown.open, false);
   redrawOwner.append(redrawSingle.element);
   redrawSingle.dropdown.open = true;
   redrawSingle.dropdown.listeners.toggle();
-  assert.equal(redrawSingle.menu.parentNode, redrawSingle.dropdown,
-    "menu stays in-flow inside the dropdown");
+  assert.equal(redrawSingle.menu.parentNode, body,
+    "menu escapes page clipping containers");
+  redrawSingle.summary.getBoundingClientRect = () => ({top: 400, bottom: 430, left: 40, width: 300});
+  redrawSingle.menu.getBoundingClientRect = () => ({height: 120});
+  window.listeners.scroll();
+  assert.equal(redrawSingle.menu.style.top, "276px", "menu prefers the space above its trigger");
+  redrawSingle.summary.getBoundingClientRect = () => ({top: 350, bottom: 380, left: 40, width: 300});
+  window.listeners.scroll();
+  assert.equal(redrawSingle.menu.style.top, "226px", "scroll follows the same trigger without accumulating offset");
   const sourceInput = inputOf(redrawSingle, "source");
   sourceInput.checked = true;
   await sourceInput.listeners.change();

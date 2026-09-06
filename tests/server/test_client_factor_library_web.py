@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import pytest
 
 from flask import Flask
 
@@ -22,6 +23,12 @@ from tools.cli.release.research_reporting.references.factor_formula import (
     build_factor_reference,
 )
 from tools.factors.formula_identity import freeze_factor_identity
+
+
+@pytest.fixture(autouse=True)
+def isolated_catalog_database(tmp_path, monkeypatch):
+    import settings as Settings
+    monkeypatch.setattr(Settings, 'CACHE_DB_PATH', tmp_path / 'catalog.sqlite')
 
 
 def _frozen_factor(
@@ -838,7 +845,7 @@ def test_validate_factor_alias_accepts_unregistered_canonical_member(monkeypatch
     )
     monkeypatch.setattr(
         editor_routes, "instantiate_factor_metadata",
-        lambda *_args: {
+        lambda *_args, **_kwargs: {
             "factor_alias": "Momentum|N:20d",
             "family_formula_fingerprint": "a" * 64,
             "self_formula_fingerprint": "b" * 64,

@@ -7,6 +7,7 @@ import hashlib
 import sqlite3
 import time
 import uuid
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -25,6 +26,8 @@ ENTITY_TYPES = {
     "product_category",
     "product_group",
     "research_publication",
+    "strategy",
+    "strategy_revision",
 }
 
 
@@ -115,12 +118,14 @@ class LocalAccountDomainStore:
         payload: dict[str, Any],
         manager_id: str,
         deleted: bool = False,
+        connection: sqlite3.Connection | None = None,
     ) -> str:
         now = time.time()
         operation_id = uuid.uuid4().hex
         encoded = _encode(payload)
-        with connect_sqlite(self.path) as conn:
-            conn.execute("BEGIN IMMEDIATE")
+        with (nullcontext(connection) if connection is not None else connect_sqlite(self.path)) as conn:
+            if connection is None:
+                conn.execute("BEGIN IMMEDIATE")
             current = conn.execute(
                 """
                 SELECT remote_revision, payload_json, deleted FROM account_domain_entities
@@ -476,6 +481,15 @@ class LocalAccountDomainStore:
                 """,
                 (scope_key, int(revision), time.time()),
             )
+
+    def get_entity(self, principal: str, entity_type: str, entity_id: str) -> dict[str, Any] | None:
+        """Read a single identity, including tombstones, through the primary key."""
+        with connect_sqlite(self.path) as conn:
+            row = conn.execute(
+                "SELECT * FROM account_domain_entities WHERE principal=? AND entity_type=? AND entity_id=?",
+                (principal, entity_type, entity_id),
+            ).fetchone()
+        return _entity_row(row) if row is not None else None
 
     def list_entities(
         self,

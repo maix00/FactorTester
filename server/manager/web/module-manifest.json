@@ -153,7 +153,7 @@
   ],
   "research-graph": [
    "core",
-   "catalog-core"
+   "catalog-selection-core"
   ],
   "research": [
    "research-graph"
@@ -230,6 +230,7 @@
   ],
   "factor-catalog-core": [
    "core",
+   "factor-model",
    "catalog-selection-core",
    "catalog-detail-tabs",
    "factor-catalog-runtime"
@@ -242,6 +243,7 @@
   ],
   "factor-catalog-detail": [
    "factor-catalog-core",
+   "factor-detail-widgets",
    "factor-catalog-enrichment"
   ],
   "factor-catalog-detail-rendering": [
@@ -249,6 +251,7 @@
   ],
   "factor-catalog-editor": [
    "factor-catalog-core",
+   "factor-detail-widgets",
    "factor-catalog-enrichment",
    "object-overlay"
   ],
@@ -340,13 +343,13 @@
   ],
   "workbench-factors": [
    "workbench-core",
-   "catalog-core",
+   "factor-model",
+   "factor-catalog-runtime",
    "workbench-source-inputs",
    "workbench-object-picker"
   ],
   "workbench-products": [
    "workbench-core",
-   "catalog-core",
    "workbench-object-picker"
   ],
   "workbench-test-ui": [
@@ -564,7 +567,7 @@
    "core/module-loader.js",
    "core/i18n.js",
    "core/icons.js",
-   "core/help-popover.js",
+   "core/help-launcher.js",
    "core/page-state.js",
    "core/test-type-registry.js",
    "core/factor-param-contract.js",
@@ -601,14 +604,21 @@
    "catalog/product-list-table.js",
    "catalog/product-tree.js"
   ],
+  "help-popover": [
+   "core/help-popover.js"
+  ],
   "catalog-core": [],
+  "factor-model": [
+   "catalog/factor-model.js"
+  ],
   "factor-catalog-core": [
-   "catalog/factor-model.js",
    "catalog/factor-detail-shared.js",
-   "catalog/shared/factor-parameter-section.js",
    "catalog/shared/object-mode-actions.js",
-   "catalog/shared/object-job-table.js",
    "catalog/factors.js"
+  ],
+  "factor-detail-widgets": [
+   "catalog/shared/factor-parameter-section.js",
+   "catalog/shared/object-job-table.js"
   ],
   "factor-catalog-list": [
    "catalog/factor-group-filter.js",
@@ -788,8 +798,10 @@
    "catalog/details.js"
   ],
   "catalog": [],
+  "workbench-assistance": [
+   "workbench/test-page-assistance.js"
+  ],
   "workbench-core": [
-   "workbench/test-page-assistance.js",
    "workbench/setting-rules.js",
    "workbench/test-lazy-code.js",
    "workbench/templates/actions.js",
@@ -977,6 +989,7 @@
   "core/i18n.js",
   "core/icons.js",
   "core/help-popover.js",
+  "core/help-launcher.js",
   "core/page-state.js",
   "core/test-type-registry.js",
   "core/factor-param-contract.js",

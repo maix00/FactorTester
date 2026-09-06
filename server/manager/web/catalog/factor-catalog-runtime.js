@@ -176,6 +176,9 @@
     const includeLibrary = options === true || options.library === true;
     const includeSets = options === true || options.sets === true;
     const includeGroups = options === true || options.groups === true;
+    if (refresh && context.session) {
+      await context.api("/api/catalog/refresh", {method: "POST"});
+    }
     const key = `${globalThis.location?.origin || ""}:${context.session?.username || ""}:${context.session?.role || ""}`;
     if (refresh || key !== accessKey) {
       reset();

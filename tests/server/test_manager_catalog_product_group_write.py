@@ -23,6 +23,10 @@ def test_manager_product_group_put_uses_module_unquote_without_crashing(monkeypa
     updates: list[tuple] = []
 
     class ClientState:
+        def _refresh_account_domain_async(self, principal, *, force=False):
+            assert principal == "alice"
+            assert force is True
+
         def update_product_group(self, *args):
             updates.append(args)
             return {

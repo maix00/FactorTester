@@ -125,23 +125,7 @@
                 : (item.factor || item.family || item.factorSet || item),
               temporary: view.temporary !== true ? true : view.temporary,
               onSaved: typeof view.onSaved === "function" ? view.onSaved : saved => {
-                if (!saved) return;
-                const idx = items.indexOf(item);
-                if (idx < 0) return;
-                const label = String(
-                  saved?.alias || saved?.factor_alias || saved?.factor_family_alias
-                  || saved?.title_zh || saved?.set_id || item.label || "",
-                ).trim() || item.label;
-                const next = {
-                  ...item,
-                  label,
-                  view: {...(item.view || {}), initialValue: saved},
-                };
-                if (item.factor !== undefined) next.factor = saved;
-                if (item.family !== undefined) next.family = saved;
-                if (item.factorSet !== undefined) next.factorSet = saved;
-                items[idx] = next;
-                render();
+                options.updateTemporaryCandidate?.(item, saved);
               },
             }
           : view;
@@ -216,15 +200,6 @@
     let committedSelected = [...selected];
     const remoteFactory = typeof options.loadItems === "function"
       && window.FTMultiSelectRemote?.create;
-
-    // CSS Anchor Positioning → single native path when available: fixed under
-    // the summary anchor, pinned on pinch-zoom, immune to host overflow, no
-    // manual coordinates / portal.  Otherwise fall back to the dual mode.
-    const supportsAnchor = typeof CSS !== "undefined"
-      && typeof CSS.supports === "function"
-      && CSS.supports("anchor-name", "--x")
-      && CSS.supports("top", "anchor(--x bottom)");
-    const anchorName = supportsAnchor ? `--ft-picker-${++pickerSequence}` : "";
 
     const section = document.createElement("section");
     section.className = ["ft-multi-select-filter", options.className || ""]
@@ -408,13 +383,6 @@
     menu.append(searchRow,
       ...(loadStatus ? [loadStatus] : []), optionList);
     dropdown.append(summary, menu);
-    if (supportsAnchor) {
-      dropdown.style.setProperty("anchor-name", anchorName);
-      menu.style.position = "fixed";
-      menu.style.top = `anchor(${anchorName} bottom)`;
-      menu.style.left = `anchor(${anchorName} left)`;
-      menu.classList.add("ft-anchor-positioning");
-    }
     if (trailingActions) {
       const controlRow = document.createElement("div");
       controlRow.className = "ft-multi-select-control-row";
@@ -430,6 +398,7 @@
 
     let applying = false;
     let menuPortaled = false;
+    let menuResizeObserver = null;
 
     function canPortalMenu() {
       return Boolean(document?.body?.append
@@ -448,48 +417,25 @@
     function positionPortaledMenu() {
       if (!menuPortaled) return;
       const rect = summary.getBoundingClientRect();
-      const viewportWidth = Number(window.innerWidth || document.documentElement?.clientWidth || 0);
-      const viewportHeight = Number(window.innerHeight || document.documentElement?.clientHeight || 0);
+      const viewport = window.visualViewport;
+      const viewportWidth = Number(viewport?.width || window.innerWidth || document.documentElement?.clientWidth || 0);
+      const viewportHeight = Number(viewport?.height || window.innerHeight || document.documentElement?.clientHeight || 0);
+      const viewportLeft = Number(viewport?.offsetLeft || 0);
+      const viewportTop = Number(viewport?.offsetTop || 0);
       const margin = 8;
-      const width = Math.max(240, Math.min(rect.width || 300, viewportWidth - margin * 2));
-      const left = Math.max(margin, Math.min(rect.left, viewportWidth - width - margin));
+      const width = Math.min(Math.max(240, rect.width || 300), 560, Math.max(0, viewportWidth - margin * 2));
+      const left = Math.max(viewportLeft + margin, Math.min(rect.left, viewportLeft + viewportWidth - width - margin));
+      const above = Math.max(0, rect.top - viewportTop - margin - 4);
+      const below = Math.max(0, viewportTop + viewportHeight - rect.bottom - margin - 4);
+      const openAbove = above >= 120 || above >= below;
+      menu.style.position = "fixed";
+      menu.style.minWidth = "0px";
       menu.style.width = `${width}px`;
       menu.style.left = `${left}px`;
-      menu.style.top = `${Math.min(rect.bottom + 4, viewportHeight - margin)}px`;
+      menu.style.maxHeight = `${Math.min(680, openAbove ? above : below)}px`;
       const menuRect = menu.getBoundingClientRect?.();
-      if (menuRect && menuRect.bottom > viewportHeight - margin) {
-        const above = rect.top - menuRect.height - 4;
-        menu.style.top = `${Math.max(margin, above)}px`;
-      }
-    }
-
-    // Host containers vary: only portal when an ancestor would clip the
-    // in-flow menu (overflow != visible) — otherwise stay anchored in-flow so
-    // pinch-zoom keeps it in place.
-    function menuNeedsPortal() {
-      if (!section.parentElement || typeof window.getComputedStyle !== "function") {
-        return false;
-      }
-      let node = section.parentElement;
-      while (node && node !== document.body && node.nodeType === 1) {
-        const style = window.getComputedStyle(node);
-        if (style) {
-          // Any non-visible overflow clips the in-flow menu — including `clip`
-          // (hard clipping, no scrollbar).
-          if (style.overflow !== "visible") return true;
-          // Ancestors that turn a fixed/anchored descendant into an absolutely
-          // positioned descendant relative to THEMSELVES (transform / filter /
-          // perspective / contain / will-change) would clip the anchored menu,
-          // so portal to the body (viewport-relative) instead.
-          if (style.transform && style.transform !== "none") return true;
-          if (style.perspective && style.perspective !== "none") return true;
-          if (style.filter && style.filter !== "none") return true;
-          if ((style.willChange || "").includes("transform")) return true;
-          if (style.contain && style.contain !== "none" && style.contain !== "style") return true;
-        }
-        node = node.parentElement;
-      }
-      return false;
+      const height = Math.min(menuRect?.height || 0, openAbove ? above : below);
+      menu.style.top = `${openAbove ? Math.max(viewportTop + margin, rect.top - height - 4) : rect.bottom + 4}px`;
     }
 
     function portalMenu() {
@@ -502,6 +448,11 @@
       }
       menuPortaled = true;
       positionPortaledMenu();
+      if (typeof ResizeObserver === "function") {
+        menuResizeObserver = new ResizeObserver(positionPortaledMenu);
+        menuResizeObserver.observe(summary);
+        menuResizeObserver.observe(menu);
+      }
       window.addEventListener?.("resize", positionPortaledMenu);
       window.addEventListener?.("scroll", positionPortaledMenu, true);
       // Pinch-zoom changes the visual viewport without firing window resize;
@@ -516,6 +467,8 @@
 
     function restoreMenu() {
       if (!menuPortaled) return;
+      menuResizeObserver?.disconnect();
+      menuResizeObserver = null;
       window.removeEventListener?.("resize", positionPortaledMenu);
       window.removeEventListener?.("scroll", positionPortaledMenu, true);
       window.visualViewport?.removeEventListener?.("resize", positionPortaledMenu);
@@ -665,7 +618,7 @@
         const label = document.createElement("span");
         label.className = "ft-multi-select-option-label";
         label.textContent = item.label;
-        const info = optionHelp(context, item, options);
+        const info = optionHelp(context, item, {...options, updateTemporaryCandidate});
         info.classList.add("ft-multi-select-option-info");
         row.append(input, label, " ");
         if (item.onsite === true) {
@@ -1014,6 +967,26 @@
       committedSelected = committedSelected.filter(value => value !== item.value);
       render();
       options.onTemporaryCandidateRemoved?.(item);
+      options.onChange?.([...committedSelected]);
+    }
+
+    function updateTemporaryCandidate(item, saved) {
+      const index = items.indexOf(item);
+      if (index < 0 || !saved) return;
+      const value = String(saved.factor_ref || saved.ref || saved.family_ref
+        || saved.group_ref || saved.strategy_ref || saved.id || item.value);
+      const next = {...item, value,
+        label: saved.alias || saved.factor_alias || saved.name || saved.title_zh || item.label,
+        view: {...item.view, ref: value, initialValue: saved}};
+      for (const key of ["factor", "family", "factorSet", "group", "category", "strategy"]) {
+        if (item[key] !== undefined) next[key] = saved;
+      }
+      items[index] = next;
+      selected = selected.map(ref => ref === item.value ? value : ref);
+      committedSelected = committedSelected.map(ref => ref === item.value ? value : ref);
+      options.onTemporaryCandidateUpdated?.(item, next, saved);
+      options.onChange?.([...committedSelected]);
+      render();
     }
 
     // On-the-fly object lifecycle is fully managed by the row's delete ("×")
@@ -1038,25 +1011,12 @@
           try { activeMultiSelect(); } catch (_error) { /* already closed */ }
         }
         activeMultiSelect = holdOpen;
-        // Menu width: min-width = max(240px, trigger/dropdown width) and
-        // max-width = min(560px, viewport) so it never falls below the trigger
-        // (too narrow) nor overflows the outer container.  Set inline so it
-        // wins over the viewport-relative stylesheet rule in portal / anchor
-        // modes where a percentage would resolve against the body.
-        const triggerWidth = summary.getBoundingClientRect?.().width || 0;
-        menu.style.minWidth = `${Math.max(240, triggerWidth)}px`;
-        // Any ancestor that would clip the in-flow OR the anchored menu
-        // (non-visible overflow, or a transform/filter/contain/perspective
-        // establishing a containing block) → portal to the body so the menu is
-        // never truncated.  This also covers parameter-table nested containers
-        // whose transform turns a fixed/anchored menu into a clipped child.
-        if (menuNeedsPortal()) {
+        // One viewport-relative positioning path for every host. Popover
+        // supplies the top layer; the portal is the older-browser fallback.
+        if (canPortalMenu()) {
           if (!menuPortaled) portalMenu();
           return;
         }
-        // No clipping ancestor: anchor-positioning (fixed) is viewport-stable
-        // on pinch-zoom and immune to host clipping — ideal for clean hosts.
-        if (supportsAnchor) return;
         return;
       }
       restoreMenu();

@@ -152,12 +152,14 @@ class WorktreeStateMixin:
                 else:
                     port = 0  # no port — should be cleaned up
 
-            # A deployed Manager runs from a detached immutable release
-            # checkout.  When it owns a fixed service, that checkout is the
-            # fixed service rather than a disposable no-port worktree.
-            if path == self.repo and self.fixed_port and port == 0:
+            # The declared release owns the fixed service even when another
+            # checkout's branch convention would assign it the same port.
+            # Otherwise a main Manager can silently launch stale feat writers.
+            if path == self.repo and self.fixed_port:
                 branch = self.fixed_branch or self.server_role
                 port = self.fixed_port
+            elif self.fixed_port and port == self.fixed_port:
+                port = 0
 
             result.append(Worktree(
                 path=path, branch=branch, head=head,

@@ -549,6 +549,10 @@
         window.FTTestRunBatch?.submittedItems?.(state) || [],
       );
     };
+    if (!window.FTTestPageAssistance && state.assistanceCode?.status !== "error") {
+      FTTestLazyCode.ensureGroupCode(state, "assistanceCode", "workbench-assistance", null,
+        () => render(context, state));
+    }
     window.FTTestPageAssistance?.register?.(
       context, state, () => render(context, state),
     );

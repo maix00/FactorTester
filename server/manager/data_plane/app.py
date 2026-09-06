@@ -43,6 +43,7 @@ from server.manager.objects.adapters.public_research_destination import (
 )
 from server.manager.objects.destination import ObjectDestinationRegistry
 from server.manager.objects.models import TransferObjectKind
+from server.manager.objects.adapters.strategy_revision import StrategyRevisionOriginAdapter
 from server.manager.objects.origin import ObjectOriginRegistry
 from server.manager.transfers.node_keys import NodeKey
 from server.manager.transfers.peer_gateway import TransferPeerGateway
@@ -115,6 +116,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             evidence_root,
         )
     if args.factor_source_database:
+        adapters[TransferObjectKind.STRATEGY_REVISION.value] = StrategyRevisionOriginAdapter(
+            database=args.factor_source_database,
+            cache_root=args.origin_cache_root or args.submission_root,
+        )
         adapters[TransferObjectKind.FACTOR_SOURCE.value] = FactorSourceOriginAdapter(
             database=args.factor_source_database,
             cache_root=args.origin_cache_root or args.submission_root,

@@ -8,30 +8,6 @@
     const actions = [
       ...(Array.isArray(options.actions) ? options.actions : []),
     ];
-    const selectedValues = Array.isArray(options.selected)
-      ? options.selected : [options.selected].filter(Boolean);
-    const selectedItem = (options.items || []).find(item => (
-      selectedValues.includes(String(item.value ?? item.id ?? item.ref ?? ""))
-    ));
-    const editSelected = Boolean(
-      selectedItem && options.onEdit
-      && (typeof options.editSelected === "function"
-        ? options.editSelected(selectedItem) : options.editSelected === true),
-    );
-    if (editSelected || options.onCreate) {
-      actions.push({
-        label: editSelected
-          ? options.editLabel || context.t("编辑")
-          : options.createLabel || context.t("新建"),
-        title: editSelected
-          ? options.editTitle || context.t("编辑当前选中的当场对象")
-          : options.createTitle || context.t("新建并在当前浮层编辑"),
-        buttonClass: "primary",
-        onClick: editSelected
-          ? event => options.onEdit(event, selectedItem)
-          : options.onCreate,
-      });
-    }
     const kindLabelOf = options.typeLabelOf || ((key, item) => {
       const kind = String(item?.type || item?.kind || key || "").trim();
       const known = {
@@ -52,6 +28,17 @@
         label: item.label || item.title || item.name || item.value || item.id,
       })),
       selected: options.selected || [],
+      onAddCandidate: options.onAddCandidate || (options.onCreate
+        ? () => options.onCreate() : undefined),
+      itemActions: item => {
+        const rows = options.itemActions?.(item) || [];
+        const editable = options.onEdit && (typeof options.editSelected === "function"
+          ? options.editSelected(item) : options.editSelected === true);
+        return editable ? [...rows, {
+          label: options.editLabel || context.t("编辑"),
+          onClick: event => options.onEdit(event, item),
+        }] : rows;
+      },
       actions,
       actionsPlacement: options.actionsPlacement
         || (actions.length ? "trailing" : undefined),

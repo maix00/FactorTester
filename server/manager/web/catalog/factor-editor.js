@@ -787,6 +787,7 @@
           owner_username: owner,
           is_public: isPublic,
           params: state.parameterValues || {},
+          mode: state.mode,
         }),
       });
       if (!value.valid || !value.factor) {
@@ -805,11 +806,14 @@
       };
     }
     const value = await context.api(
-      `/api/factor-library/configurations/${encodeURIComponent(alias)}`,
+      `/api/factor-library/configurations/${encodeURIComponent(alias)}/factors`,
       {
-        method: "PUT",
+        method: "POST",
         body: JSON.stringify({
-          params_list: [state.parameterValues || {}],
+          params: state.parameterValues || {},
+          scope_key: state.loaded?.scope_key || state.loaded?.product_group,
+          replace_factor_ref: state.mode === "edit"
+            ? state.loaded?.factor_ref || state.loaded?.ref : undefined,
           metadata: {
             family_formula_fingerprint:
               state.inspection?.family_formula_fingerprint
@@ -908,11 +912,15 @@
     let registered = null;
     if (!state.familyMode) {
       const libraryValue = await context.api(
-        `/api/factor-library/configurations/${encodeURIComponent(alias)}`,
+        `/api/factor-library/configurations/${encodeURIComponent(alias)}/factors`,
         {
-          method: "PUT",
+          method: "POST",
           body: JSON.stringify({
-            params_list: [state.parameterValues],
+            params: state.parameterValues,
+            mode: state.mode,
+            scope_key: state.loaded?.scope_key || state.loaded?.product_group,
+            replace_factor_ref: state.mode === "edit"
+              ? state.loaded?.factor_ref || state.loaded?.ref : undefined,
             metadata: {
               factor_dependencies: parameterDependencies(state.parameterValues),
             },
@@ -1419,8 +1427,10 @@
         void validateSourceDraft();
       }
     });
-    if (mode === "create") {
-      const stateKey = `factor-create:${state.familyMode ? "family" : "factor"}`;
+    if (mode === "create" || mode === "edit") {
+      const stateKey = mode === "create"
+        ? `factor-create:${state.familyMode ? "family" : "factor"}`
+        : `factor-edit:${state.familyMode ? "family" : "factor"}:${targetRef}`;
       context.pageState?.register?.(stateKey, {
         capture: () => ({
           active_tab: tabs.current(),
@@ -1434,6 +1444,7 @@
           inspection: state.inspection,
           source_code: state.sourceCode,
           parameter_values: state.parameterValues,
+          onsite_families: state.onsiteFamilies,
         }),
         restore: value => {
           name.value = value?.name || "";
@@ -1446,6 +1457,8 @@
           state.inspection = value?.inspection || state.inspection;
           state.sourceCode = value?.source_code || "";
           state.parameterValues = value?.parameter_values || state.parameterValues;
+          state.onsiteFamilies = Array.isArray(value?.onsite_families)
+            ? value.onsite_families : [];
           tabs.select(value?.active_tab || tabs.current(), false);
         },
       });
@@ -1532,6 +1545,8 @@
       const key = typeof eventOrKey === "string"
         ? eventOrKey : panel?.dataset?.tabKey;
       if (key) tabs.setDirty(key, key === "source");
+      context.pageState?.capture?.();
+      context.checkpointTabSession?.();
     }
   }
 

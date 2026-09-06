@@ -21,6 +21,15 @@ class StrategyLibraryService:
     ) -> None:
         self.store = StrategyLibraryStore(db_path)
         self.account_provider = account_provider
+        self.source_loader = None
+
+    def _read_revision(self, revision_ref, *, principal, include_source=True):
+        revision = self.store.get_revision(revision_ref, include_source=include_source)
+        if include_source and revision is not None and not revision.get('source_code'):
+            if self.source_loader is None:
+                raise RuntimeError('strategy revision source is unavailable')
+            revision = self.source_loader(revision_ref, principal=principal)
+        return revision
 
     def _access(
         self,
@@ -117,8 +126,8 @@ class StrategyLibraryService:
         access = self._access(entry, principal)
         if not access["can_view"]:
             raise PermissionError("无权查看该策略")
-        revision = self.store.get_revision(
-            str(entry["current_revision_ref"]), include_source=include_source,
+        revision = self._read_revision(
+            str(entry["current_revision_ref"]), principal=principal, include_source=include_source,
         )
         if revision is None:
             raise RuntimeError("strategy current revision is missing")
@@ -138,8 +147,8 @@ class StrategyLibraryService:
             raise KeyError("strategy not found")
         if not self._access(entry, principal)["can_view"]:
             raise PermissionError("无权查看该策略版本")
-        revision = self.store.get_revision(
-            revision_ref, include_source=include_source,
+        revision = self._read_revision(
+            revision_ref, principal=principal, include_source=include_source,
         )
         if revision is None or revision["strategy_ref"] != strategy_ref:
             raise KeyError("strategy revision not found")
@@ -199,7 +208,7 @@ class StrategyLibraryService:
             raise KeyError("strategy not found")
         if not self._access(entry, principal)["can_edit"]:
             raise PermissionError("无权编辑该策略")
-        current = self.store.get_revision(str(entry["current_revision_ref"]))
+        current = self._read_revision(str(entry["current_revision_ref"]), principal=principal)
         if current is None:
             raise RuntimeError("strategy current revision is missing")
         name = normalize_text(payload.get("name", entry["name"]), field="strategy name", limit=160)

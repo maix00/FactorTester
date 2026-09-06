@@ -279,7 +279,10 @@
     search.className = "toolbar-search";
     search.placeholder = page === "groups"
       ? context.t("搜索产品组") : context.t("搜索产品或代码");
-    const refresh = FTUI.refreshButton(context, () => {
+    const refresh = FTUI.refreshButton(context, async () => {
+      if (source !== "local" && context.session) {
+        await context.api("/api/catalog/refresh", {method: "POST"});
+      }
       [...cache.keys()].filter(key => key.startsWith(`${source}:`))
         .forEach(key => cache.delete(key));
       categoryCache.delete(source);

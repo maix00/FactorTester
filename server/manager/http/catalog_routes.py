@@ -701,9 +701,10 @@ class CatalogRoutesMixin:
                 ).strip()
                 if not target_ref:
                     raise ValueError("target_ref 不能为空")
-                json_response(self, {
-                    "success": unregister_factor_set(principal, target_ref),
-                })
+                removed = unregister_factor_set(principal, target_ref)
+                if removed:
+                    self.state.client_state._refresh_account_domain_async(principal, force=True)
+                json_response(self, {"success": removed})
                 return True
             if method != "POST":
                 return False
@@ -733,6 +734,8 @@ class CatalogRoutesMixin:
                 "success": False, "error": str(exc),
             }, 503)
             return True
+        if payload.get("persist") is not False:
+            self.state.client_state._refresh_account_domain_async(principal, force=True)
         json_response(self, {"success": True, "factor_set": value})
         return True
 
@@ -987,6 +990,7 @@ class CatalogRoutesMixin:
         except (OSError, RuntimeError, ImportError, TypeError, KeyError) as exc:
             json_response(self, {"success": False, "error": str(exc)}, 503)
             return True
+        self.state.client_state._refresh_account_domain_async(principal, force=True)
         json_response(self, value)
         return True
 

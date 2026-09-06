@@ -54,6 +54,15 @@ class WriteRoutesMixin:
             return
         if not self._public_login_gate(parsed, method="POST"):
             return
+        if parsed.path == "/api/catalog/refresh":
+            session = self._session()
+            if session is None:
+                json_response(self, {"success": False, "error": "login required"}, 401)
+                return
+            result = self.state.client_state.refresh_account_catalog(str(session["username"]))
+            json_response(self, {"success": result.get("status") == "synced", "sync": result},
+                          200 if result.get("status") == "synced" else 503)
+            return
         if self._mihomo_write(parsed, "POST"):
             return
         if self._post_agent_app_routes(parsed):

@@ -663,10 +663,12 @@ def save_factor_param_config(
     scope_key: str = DEFAULT_SCOPE_KEY,
     *,
     metadata: dict | None = None,
+    resolved_factors: list[dict] | None = None,
 ) -> dict:
     ensure_account_manager_sqlite_store()
     result = _save_factor_param_config(
         username, ff_alias, params_list, scope_key, metadata=metadata,
+        **({'resolved_factors': resolved_factors} if resolved_factors is not None else {}),
     )
     _enqueue_domain_entity(
         username,
