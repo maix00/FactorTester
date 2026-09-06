@@ -18,7 +18,7 @@ from server.modules.single_factor_test.signal_schedule_diagnostics import (
     policy_for_factor,
     summarize_signal_schedule,
 )
-from server.modules.shared.factor_data_coverage import require_factor_data_coverage
+from server.modules.shared.factor_data_coverage import require_factor_data_coverage, apply_factor_data_coverage
 from server.modules.shared.factor_warmup import resolve_factor_warmup_policy
 from server.modules.shared.factor_tester_runtime import (
     create_factor_tester_for_run,
@@ -185,6 +185,8 @@ class FactorEvaluation:
             warmup_window=warmup.evaluation_window(),
         )
 
+        runtime_rows = apply_factor_data_coverage(tester, coverage)
+
         from tools.factors.FactorTester import _active_tester
 
         token = _active_tester.set(tester)
@@ -211,7 +213,7 @@ class FactorEvaluation:
         if table.empty:
             raise ValueError("因子 evaluate 未返回可显示序列")
 
-        selected_products = sorted(self.selection.products, key=lambda item: getattr(item, "name", str(item)))
+        selected_products = sorted(tester.products, key=lambda item: getattr(item, "name", str(item)))
         series_items = []
         for product in selected_products:
             name = str(getattr(product, "name", product))
@@ -275,6 +277,7 @@ class FactorEvaluation:
                 "warmup": warmup.as_dict(),
                 "data_coverage": coverage,
             },
+            "runtime_info_rows": runtime_rows,
             "external_factor_artifacts": result_metadata(
                 self.external_factor_artifacts
             ),

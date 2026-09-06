@@ -12,7 +12,7 @@ from server.modules.shared.factor_tester_runtime import (
     create_isolated_factor_tester_for_run,
     selection_from_request,
 )
-from server.modules.shared.factor_data_coverage import require_factor_data_coverage
+from server.modules.shared.factor_data_coverage import require_factor_data_coverage, apply_factor_data_coverage
 from server.modules.shared.factor_warmup import resolve_factor_warmup_policy
 from server.modules.single_factor_test.ic_params import (
     SCALE_AWARE_HORIZON_BASE,
@@ -903,6 +903,7 @@ def _run_ic_compute_to_sink(
                 )
             ),
         }
+        response["runtime_info_rows"] = data.get("runtime_info_rows", [])
         sink.emit_result(response)
     except _ICCancelled as exc:
         sink.emit_error(str(exc), code="job_cancelled", cancelled=True)
@@ -955,11 +956,12 @@ def execute_ic_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any) -
         resolved.append(
             external.get(alias) or factor_from_alias(alias, username=factor_owner)
         )
+    runtime_rows = []
     for factor in resolved:
         warmup = resolve_factor_warmup_policy(
             data, factor, default_mode="auto",
         )
-        require_factor_data_coverage(
+        coverage = require_factor_data_coverage(
             tester.products,
             factor,
             start_dt=start_dt,
@@ -967,6 +969,9 @@ def execute_ic_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any) -
             data_source=str(data.get("data_source") or ""),
             warmup_window=warmup.evaluation_window(),
         )
+        if coverage:
+            runtime_rows.extend(apply_factor_data_coverage(tester, coverage))
+    data = {**data, "runtime_info_rows": runtime_rows}
 
     class _ResolvedFactorCollection:
         """Run-local lookup for independently resolved FactorExpr instances."""

@@ -332,6 +332,15 @@
       taskDetail.output_declarations || [], outputArtifacts, context,
     );
     const results = taskDetail.results || payload.result_summary || payload.result;
+    const runtimeRows = results?.runtime_info_rows || [];
+    if (job.kind !== "backtest" && runtimeRows.length) {
+      const heading = document.createElement("h3");
+      heading.textContent = context.t("运行摘要");
+      resultsPanel.append(heading, FTUI.table(
+        [context.t("类型"), context.t("状态"), context.t("说明")],
+        runtimeRows.map(row => [row.type, row.status, row.detail || row.message || ""]),
+      ).shell);
+    }
     const activeArtifacts = localRun
       ? [] : outputArtifacts.filter(item => item.state === "active");
     const resultGroupName = FTJobResultViewers.group(

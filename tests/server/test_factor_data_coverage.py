@@ -8,6 +8,7 @@ import pytest
 from server.modules.shared.factor_data_coverage import (
     FactorDataCoverageError,
     require_factor_data_coverage,
+    apply_factor_data_coverage,
 )
 from tools.data.types import DataTime, DataFreq
 
@@ -101,7 +102,8 @@ def test_fixed_warmup_requires_earlier_source_data() -> None:
             warmup_window=pd.Timedelta("2D"),
         )
 
-    assert caught.value.code == "factor_data_coverage_unavailable"
+    assert caught.value.code == "factor_data_source_unavailable"
+    assert caught.value.details["skipped_products"][0]["reason"] == "insufficient_warmup"
     assert caught.value.details["formal_start"] == "2024-01-03"
     assert caught.value.details["required_data_start"] == "2024-01-01"
 
@@ -120,3 +122,22 @@ def test_source_starting_after_formal_end_is_not_eligible() -> None:
         "product": "AP.CZC",
         "reason": "no_data_in_formal_window",
     }]
+
+
+def test_warmup_excludes_only_short_product_and_records_summary():
+    short = _product("2024-12-26", "2025-02-03")
+    short.name = "PS.GFE"
+    covered = _product("2024-01-01", "2025-02-03")
+    tester = SimpleNamespace(products=[short, covered])
+    coverage = require_factor_data_coverage(
+        tester.products, _factor(), start_dt=_time("2025-01-03"),
+        end_dt=_time("2025-02-03"), warmup_window=pd.Timedelta("20D31min"),
+    )
+    rows = apply_factor_data_coverage(tester, coverage)
+    assert tester.products == [covered]
+    assert coverage["eligible_product_count"] == 1
+    assert rows[0]["status"] == "已移除"
+    assert "PS.GFE" in rows[0]["detail"]
+    assert "2024-12-13" in rows[0]["detail"]
+    from server.jobs.scheduling.result_projection import persisted_result_summary
+    assert persisted_result_summary({"success": True, "runtime_info_rows": rows})["runtime_info_rows"] == rows
