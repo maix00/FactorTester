@@ -11,6 +11,7 @@ from server.manager.services.agent_app_server_errors import (
 )
 from server.manager.services.agent_skill_protocol import AgentSkillProtocol
 from server.manager.services.agent_skill_runtime import AgentSkillRuntime
+from server.manager.services.profile_agent_sandbox import SANDBOX_WORKSPACE
 
 
 _POLICY_OVERRIDE_KEYS = frozenset({
@@ -63,9 +64,9 @@ class AgentAppServerPolicy:
         self._validate_cwd(payload)
 
         if method == "thread/list":
-            payload["cwd"] = str(self.runtime.workspace_root)
+            payload["cwd"] = str(SANDBOX_WORKSPACE)
         elif method in {"thread/start", "thread/resume", "turn/start"}:
-            payload["cwd"] = str(self.runtime.workspace_root)
+            payload["cwd"] = str(SANDBOX_WORKSPACE)
 
         if method in {"turn/start", "turn/steer"}:
             payload["input"] = self._text_inputs(payload)

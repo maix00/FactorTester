@@ -86,7 +86,10 @@
         }
       },
       connect: async () => {
-        if (bridge) return bridge;
+        if (bridge) {
+          await bridge.activate?.();
+          return bridge;
+        }
         if (!connection) {
           const generation = connectionGeneration;
           connection = (async () => {

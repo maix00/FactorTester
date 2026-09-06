@@ -46,7 +46,7 @@ class AgentAppServerSession:
             factor_tester_auth=factor_tester_auth,
             proxy_url=proxy_url,
         )
-        self.protocol = AgentSkillProtocol(runtime)
+        self.protocol = AgentSkillProtocol(runtime, sandboxed=True)
         self.policy = AgentAppServerPolicy(runtime, self.protocol)
         self.read_only = bool(read_only)
         self.event_observer = event_observer

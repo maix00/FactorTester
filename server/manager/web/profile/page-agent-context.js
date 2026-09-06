@@ -28,15 +28,15 @@
       25, Number(options.waitSeconds) || 20,
     ));
 
-    async function publish() {
+    async function publish(activate = false) {
       if (context.isRouteCurrent?.() === false) return;
       const value = assistance.snapshot();
       const serialized = JSON.stringify(value);
-      if (serialized === lastPublished && now() - lastPublishedAt < heartbeatMs) return;
+      if (!activate && serialized === lastPublished && now() - lastPublishedAt < heartbeatMs) return;
       await context.api("/api/client/profile-agent/assistance/publish", {
         method: "POST",
         body: JSON.stringify({
-          profile_id: profileID, tab_id: context.tabID, assistance: value,
+          profile_id: profileID, tab_id: context.tabID, assistance: value, activate,
         }),
       });
       lastPublished = serialized;
@@ -106,7 +106,7 @@
       // it, but waiting for the applications long-poll can block drawer mount
       // for the complete server wait window (normally 20 seconds). Keep that
       // receive loop entirely off the interactive drawer-open path.
-      if (context.isRouteCurrent?.() !== false) await publish();
+      if (context.isRouteCurrent?.() !== false) await publish(true);
       schedule(0);
     }
 
@@ -121,7 +121,7 @@
       timer = null;
     }
 
-    return Object.freeze({dispose, start, syncOnce});
+    return Object.freeze({dispose, start, syncOnce, activate: () => publish(true)});
   }
 
   window.FTPageAgentContext = Object.freeze({create});

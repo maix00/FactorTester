@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from server.manager.services.agent_skill_runtime import AgentSkillRuntime
+from server.manager.services.profile_agent_sandbox import ProfileAgentSandbox
 
 
 class AgentSkillProtocolError(ValueError):
@@ -15,12 +16,16 @@ class AgentSkillProtocolError(ValueError):
 class AgentSkillProtocol:
     """Build the internal app-server requests for one prepared Profile."""
 
-    def __init__(self, runtime: AgentSkillRuntime) -> None:
+    def __init__(self, runtime: AgentSkillRuntime, *, sandboxed: bool = False) -> None:
         self.runtime = runtime
+        self.sandbox = ProfileAgentSandbox(workspace_root=runtime.workspace_root) if sandboxed else None
+
+    def execution_path(self, path: Path) -> str:
+        return self.sandbox.inside(path) if self.sandbox else str(path)
 
     def skills_list_params(self) -> dict[str, Any]:
         return {
-            "cwds": [str(self.runtime.workspace_root)],
+            "cwds": [self.execution_path(self.runtime.workspace_root)],
             "forceReload": True,
         }
 
@@ -63,6 +68,7 @@ class AgentSkillProtocol:
             projection = self.runtime.projected_skill_path(skill_id)
             result.add(projection.resolve())
             result.add(projection)
+            result.add(Path(self.execution_path(projection)))
         return result
 
     def disable_unselected_requests(
@@ -153,5 +159,5 @@ class AgentSkillProtocol:
         return {
             "type": "skill",
             "name": binding["name"],
-            "path": str(path),
+            "path": self.execution_path(path),
         }
