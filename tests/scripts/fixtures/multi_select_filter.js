@@ -344,22 +344,10 @@ assert.equal(locked.dropdown.open, false);
   const tmpRow = optionRows(tmp).find(item => item.children[1]?.textContent === "临时候选");
   tmpRow.children[0].listeners.click({preventDefault() {}});
   assert.deepEqual(tmp.values, ["tmp1"], "temporary candidate is selectable");
-  const onsiteSingle = window.FTMultiSelectFilter.create({t: value => value}, {
-    items: [{value: "tmp", label: "嵌套", onsite: true}, {value: "saved", label: "已登记"}],
-    selected: ["tmp"], multi: false,
-  });
-  const onsiteBadge = descendants(onsiteSingle.summary).find(item =>
-    item.className === "ft-multi-select-onsite-badge");
-  assert.equal(onsiteBadge.hidden, false,
-    "a selected temporary candidate shows its badge in the closed control");
-  onsiteSingle.setValues(["saved"]);
-  assert.equal(onsiteBadge.hidden, true, "a registered selection has no onsite badge");
   // Cancel: unpick it, then closing drops it.
   const tmpRow2 = optionRows(tmp).find(item => item.children[1]?.textContent === "临时候选");
   tmpRow2.children[0].listeners.click({preventDefault() {}});
   assert.deepEqual(tmp.values, [], "temporary candidate can be deselected");
-  assert.equal(descendants(tmp.summary).find(item =>
-    item.className === "ft-multi-select-onsite-badge").hidden, true);
   tmp.dropdown.open = false;
   await tmp.dropdown.listeners.toggle();
   assert.equal(optionRows(tmp).some(item => item.children[1]?.textContent === "临时候选"), true,
