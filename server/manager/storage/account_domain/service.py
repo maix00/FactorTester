@@ -91,9 +91,17 @@ class AccountDomainSyncService:
         # Reconcile them at the same lazy boundary used by Web, Swift, and CLI
         # reads so source-provider manifests are available before peers need
         # to hydrate immutable factor source bytes over the data plane.
-        reconciled = self.reconcile_principal(owner)
+        reconciled = self.reconcile_principal(owner, force=True) if force else self.reconcile_principal(owner)
         flushed = self.flush(principal=owner, limit=limit)
         pulled = self.pull(principal=owner, limit=limit)
+        if force:
+            for _ in range(31):
+                if not pulled.get('has_more') or pulled.get('offline'):
+                    break
+                page = self.pull(principal=owner, limit=limit)
+                pulled = {**page,
+                          'applied': pulled.get('applied', 0) + page.get('applied', 0),
+                          'conflicts': pulled.get('conflicts', 0) + page.get('conflicts', 0)}
         # After pulling factor_source manifests, localize version history for any
         # source whose bytes are already present locally.  A receiver that never
         # authored the source still records its formula versions, so
@@ -101,7 +109,9 @@ class AccountDomainSyncService:
         # lazily over the data plane; the fingerprint arrives via outbox).
         versioned = self.materialize_factor_source_versions(owner)
         return {
-            "status": "incomplete" if (flushed.get("pending") or flushed.get("offline") or pulled.get("offline")) else "synced",
+            "status": "incomplete" if (flushed.get("pending") or flushed.get("offline")
+                                        or pulled.get("offline") or pulled.get("has_more")
+                                        or pulled.get("conflicts")) else "synced",
             "principal": owner,
             "reconciled": reconciled,
             "flushed": flushed,
@@ -192,7 +202,13 @@ class AccountDomainSyncService:
                     item["operation_id"], revision=int(receipt.get("revision") or 0), sent_item=item,
                 )
                 sent += 1
-            except (AttributeError, ControlDatabaseError, ConnectionError, OSError, RuntimeError, TypeError, ValueError) as exc:
+            except (TypeError, ValueError) as exc:
+                # A malformed entity must not starve unrelated valid writes.
+                # Preserve the rejected operation for repair and keep sending
+                # the remainder of this bounded batch.
+                self.local.mark_attempt(item["operation_id"], str(exc))
+                continue
+            except (AttributeError, ControlDatabaseError, ConnectionError, OSError, RuntimeError) as exc:
                 self.local.mark_attempt(item["operation_id"], str(exc))
                 return {
                     "sent": sent,
@@ -222,12 +238,18 @@ class AccountDomainSyncService:
                 continue
             maximum = max(maximum, int(row.get("revision") or 0))
             state = self.local.apply_remote(row)
+            if row.get('entity_type') in {'strategy', 'strategy_revision'} and state != 'conflict':
+                from .strategy_sync import materialize_strategy
+                current = self.local.get_entity(row['principal'], row['entity_type'], row['entity_id'])
+                if current is not None:
+                    materialize_strategy(self.local.path, current)
             if state == "applied":
                 applied += 1
             elif state == "conflict":
                 conflicts += 1
         self.local.advance_cursor(scope, max(maximum, int(response.get("next_revision") or maximum)))
-        return {"applied": applied, "conflicts": conflicts, "next_revision": maximum}
+        return {"applied": applied, "conflicts": conflicts, "next_revision": maximum,
+                "has_more": len(response.get("entities") or []) >= limit}
 
     def entities(
         self,
@@ -315,13 +337,13 @@ class AccountDomainSyncService:
             self.flush()
         return count
 
-    def reconcile_principal(self, principal: str) -> int:
+    def reconcile_principal(self, principal: str, *, force: bool = False) -> int:
         """Backfill existing local factor/catalog rows into the outbox."""
         owner = str(principal or "").strip()
         if not owner:
             return 0
         now = time.monotonic()
-        if now - self._last_reconcile.get(owner, 0.0) < self.access_cooldown:
+        if not force and now - self._last_reconcile.get(owner, 0.0) < self.access_cooldown:
             return 0
         self._last_reconcile[owner] = now
         count = 0
@@ -352,6 +374,8 @@ class AccountDomainSyncService:
         except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
             pass
         count += self.reconcile_factor_sources(owner)
+        from .strategy_sync import backfill_strategies
+        count += backfill_strategies(self, owner)
         if count:
             self.flush(principal=owner)
         return count
@@ -532,6 +556,11 @@ class AccountDomainSyncService:
             return False
         identifier = str(value.get(id_key) or "").strip()
         if not identifier:
+            return False
+        # Legacy authoring tables on a receiver can lag behind a peer edit or
+        # deletion. Only backfill an absent entity; actual CRUD enqueues its
+        # own new value. Replaying a stale local table is not a user edit.
+        if self.local.get_entity(principal, entity_type, identifier) is not None:
             return False
         self.upsert(principal, entity_type, identifier, value, flush=False)
         return True

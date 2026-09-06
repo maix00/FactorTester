@@ -90,7 +90,12 @@
         ));
       }
     };
-    refresh = FTUI.refreshButton(context, loadIntoMount);
+    refresh = FTUI.refreshButton(context, async () => {
+      if (source !== "local" && context.session) {
+        await context.api("/api/catalog/refresh", {method: "POST"});
+      }
+      await loadIntoMount();
+    });
     toolbar.append(refresh);
     void loadIntoMount();
   }

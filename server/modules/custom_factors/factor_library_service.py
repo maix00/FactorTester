@@ -415,6 +415,8 @@ def save_current_user_library_config(
     params_list: list,
     product_group: str = DEFAULT_SCOPE_KEY,
     metadata: dict | None = None,
+    *,
+    _preserved_factors: dict[int, dict] | None = None,
 ) -> tuple[dict, list]:
     product_group = normalize_product_group(product_group)
     factor_family = get_factor_family_instance(ff_alias, username=current_username)
@@ -430,7 +432,10 @@ def save_current_user_library_config(
     with _configuration_factor_resolver(
         {'metadata': config_metadata}, current_username, values=params_list,
     ):
-        serialized_rows = serialize_factor_param_rows(factor_family, params_list)
+        preserved = _preserved_factors or {}
+        serialized_rows = [row if index in preserved else
+                           serialize_factor_param_rows(factor_family, [row])[0]
+                           for index, row in enumerate(params_list)]
     candidate_config = {
         'params_list': serialized_rows,
         'metadata': config_metadata,
@@ -438,28 +443,76 @@ def save_current_user_library_config(
         'product_group': product_group,
     }
     account = get_account(current_username) or {'username': current_username}
-    candidate_factors = build_factor_library_config_factors(
-        current_username, account, ff_alias, candidate_config,
-    )
-    if serialized_rows and len(candidate_factors) != len(serialized_rows):
+    changed_rows = [row for index, row in enumerate(serialized_rows) if index not in preserved]
+    changed = iter(build_factor_library_config_factors(
+        current_username, account, ff_alias, {**candidate_config, 'params_list': changed_rows},
+    )) if changed_rows else iter(())
+    candidate_factors = [dict(preserved[index]) if index in preserved else next(changed, {})
+                         for index in range(len(serialized_rows))]
+    if serialized_rows and (len(candidate_factors) != len(serialized_rows) or not all(candidate_factors)):
         raise ValueError(
             f'因子配置无法按冻结依赖恢复: {ff_alias} '
             f'({len(candidate_factors)}/{len(serialized_rows)})'
         )
+    # Freeze once. Authored configuration, catalog mirror and outbox commit
+    # together, so a crash cannot leave a successful write unpublished.
+    from server.manager.storage.account_domain.factor_sync import _FACTOR_KEYS
+    resolved = [{key: item[key] for key in _FACTOR_KEYS if item.get(key) not in (None, '')}
+                for item in candidate_factors]
     config = save_factor_param_config(
         current_username,
         ff_alias,
         serialized_rows,
         product_group,
         metadata=config_metadata,
+        resolved_factors=resolved,
     )
-    factors = build_factor_library_config_factors(current_username, account, ff_alias, config)
-    if serialized_rows and len(factors) != len(serialized_rows):
-        raise ValueError(
-            f'因子配置保存后无法按冻结依赖恢复: {ff_alias} '
-            f'({len(factors)}/{len(serialized_rows)})'
-        )
-    return config, factors
+    return config, candidate_factors
+
+
+def save_single_library_factor(
+    current_username: str,
+    ff_alias: str,
+    params: dict,
+    *,
+    product_group: str = DEFAULT_SCOPE_KEY,
+    metadata: dict | None = None,
+    replace_factor_ref: str = "",
+) -> tuple[dict, dict]:
+    """Append a registration, or replace exactly the frozen identity edited.
+
+    The caller holds the user's write lock across this read/modify/write.
+    A missing edit target is a stale edit, never permission to append or
+    replace a different registration in the same family.
+    """
+    if not isinstance(params, dict):
+        raise ValueError('因子参数格式无效')
+    scope = normalize_product_group(product_group)
+    existing = load_factor_param_config(current_username, ff_alias, scope) or {}
+    rows = list(existing.get('params_list') or [])
+    factors = existing.get('resolved_factors')
+    if not isinstance(factors, list) or len(factors) != len(rows):
+        account = get_account(current_username) or {'username': current_username}
+        factors = build_factor_library_config_factors(
+            current_username, account, ff_alias, existing,
+        ) if rows else []
+    if len(factors) != len(rows):
+        raise ValueError('原有因子无法恢复，请刷新后重试')
+    index = len(rows)
+    if replace_factor_ref:
+        matches = [i for i, factor in enumerate(factors)
+                   if (factor.get('factor_ref') or factor.get('ref')) == replace_factor_ref]
+        if len(matches) != 1:
+            raise ValueError('因子已变更或不存在，请刷新后重新编辑')
+        index = matches[0]
+        rows[index] = params
+    else:
+        rows.append(params)
+    config, factors = save_current_user_library_config(
+        current_username, ff_alias, rows, product_group=scope, metadata=metadata,
+        _preserved_factors={i: factor for i, factor in enumerate(factors) if i != index},
+    )
+    return config, factors[index]
 
 
 def delete_factor_library_factor(
@@ -505,7 +558,7 @@ def delete_factor_library_factor(
     if not removed:
         return False
     if remaining:
-        save_factor_param_config(
+        save_current_user_library_config(
             current_username,
             ff_alias,
             remaining,

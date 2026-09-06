@@ -104,7 +104,7 @@ vm.runInThisContext(
   });
   assert.deepEqual(requests, [
     ["/api/factor-library/families/custom/SgChgDur", "PUT"],
-    ["/api/factor-library/configurations/SgChgDur", "PUT"],
+    ["/api/factor-library/configurations/SgChgDur/factors", "POST"],
   ]);
   assert.equal(edited.factor_ref, "factor:v2:changed");
   console.log("ok");

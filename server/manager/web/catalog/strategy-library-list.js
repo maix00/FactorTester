@@ -44,6 +44,10 @@
     search.placeholder = context.t("搜索策略名称或引用");
     search.setAttribute("aria-label", search.placeholder);
     controls.append(search);
+    controls.append(FTUI.refreshButton(context, async () => {
+      await context.api('/api/catalog/refresh', {method: 'POST'});
+      await render(context, scope);
+    }));
     root.append(controls);
     const mount = document.createElement("div");
     mount.className = "strategy-library-results";

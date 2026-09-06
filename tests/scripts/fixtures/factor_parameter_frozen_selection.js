@@ -145,6 +145,16 @@ const descendants = root => [root, ...(root.children || []).flatMap(descendants)
   assert.equal(editor.values.P, "", "clearing the value releases it");
   assert.equal(parameterChanges, 2);
 
+  const edited = {...frozen, ref: `factor:v2:${"e".repeat(43)}`,
+    alias: "Nested|N:10d", identity: {...frozen.identity, params: {N: "10d"}}};
+  const editedItem = {...factorItem, value: edited.ref, label: edited.alias, factor: edited};
+  valuePicker.options.onTemporaryCandidateUpdated(factorItem, editedItem, edited);
+  await valuePicker.options.onChange([edited.ref]);
+  assert.equal(editor.values.P, edited, "edited candidate updates the owner's frozen configuration");
+  valuePicker.options.onTemporaryCandidateRemoved(editedItem);
+  await valuePicker.options.onChange([]);
+  assert.equal(editor.values.P, "", "deleting the selected candidate releases its frozen reference");
+
   await valuePicker.options.onChange(["0"]);
   assert.equal(editor.values.P, 0, "a numeric constant remains a value (ConstExpr)");
   await valuePicker.options.onChange(["Nested|N:5d"]);

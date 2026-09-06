@@ -155,6 +155,7 @@
       openObject: callbacks.openObject,
       closeTab: callbacks.closeFrame || (() => closeOverlay()),
       onSaved,
+      pageState: callbacks.pageState || context.pageState,
       testState: options.testState || null,
       testObjectTemporary: options.temporary === true,
       testObjectSnapshot: options.snapshot === true,
@@ -175,6 +176,15 @@
     if (!definition) throw new Error(`unsupported test object: ${options.kind}`);
     const mode = ["create", "edit", "view"].includes(options.mode)
       ? options.mode : "create";
+    const durable = context.tabSession?.durable;
+    const drafts = durable ? (durable.objectOverlays ||= {}) : {};
+    const draftKey = options.draftKey || `${options.kind}:${mode}:${options.ref || "new"}`;
+    const draft = drafts[draftKey] ||= {frames: {}};
+    const checkpoint = () => {
+      for (const frame of frames) frame.pageState?.capture?.();
+      context.checkpointTabSession?.();
+    };
+    window.addEventListener?.("pagehide", checkpoint);
     const dialog = document.createElement("dialog");
     dialog.className = "ft-object-overlay-dialog";
     dialog.dataset.ftTabID = context.tabID || "";
@@ -216,9 +226,13 @@
       resolve: null,
       cleanup: () => {
         for (const frame of frames || []) {
+          frame.pageState?.dispose?.();
           frame.mount?.__ftProductGroupCleanup?.();
           frame.mount?.__ftProductCategoryCleanup?.();
         }
+        window.removeEventListener?.("pagehide", checkpoint);
+        delete drafts[draftKey];
+        context.checkpointTabSession?.();
       },
     };
     const finish = value => close(dialog, state, value);
@@ -325,6 +339,10 @@
       ));
       const removesActive = removed.includes(activeFrame);
       for (const candidate of removed) candidate.resolve?.(null);
+      for (const candidate of removed) {
+        candidate.pageState?.dispose?.();
+        delete draft.frames[candidate.draftKey];
+      }
       for (let cursor = frames.length - 1; cursor >= 0; cursor -= 1) {
         if (removed.includes(frames[cursor])) frames.splice(cursor, 1);
       }
@@ -345,6 +363,8 @@
       }
       frame.onSaved?.(normalized);
       frame.resolve?.(normalized);
+      frame.pageState?.dispose?.();
+      delete draft.frames[frame.draftKey];
       const index = frames.indexOf(frame);
       if (index >= 0) frames.splice(index, 1);
       void renderFrame(frame.parent || frames.at(-1) || frames[0]);
@@ -382,6 +402,10 @@
       frame.mount ||= document.createElement("div");
       frame.mount.className = "ft-object-overlay-frame";
       frame.toolbar ||= document.createElement("div");
+      frame.draftKey ||= `${frame.parent?.draftKey || "root"}/${frame.kind}:${frame.mode}:${frame.ref}`;
+      frame.pageState ||= window.FTPageState?.create?.({
+        durable: draft.frames[frame.draftKey] ||= {},
+      });
       frame.toolbar.className = "toolbar ft-object-overlay-frame-toolbar";
       frameActions.replaceChildren(frame.toolbar);
       mount.replaceChildren(frame.mount);
@@ -409,6 +433,7 @@
           openObject,
           closeFrame: () => closeFrame(frame),
           toolbar: frame.toolbar,
+          pageState: frame.pageState,
           setHeading: (name, scope) => {
             updateFrameHeading(frame, name, scope);
           },

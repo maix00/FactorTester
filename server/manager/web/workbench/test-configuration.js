@@ -104,15 +104,16 @@
     const temporaryFactors = [];
     const seenFactorRefs = new Set();
     const visitTemporaryFactor = factor => {
+      const ref = factorRef(factor);
+      if (!ref || seenFactorRefs.has(ref)) return;
+      seenFactorRefs.add(ref);
       for (const dependency of factor?.factor_dependencies || []) {
         visitTemporaryFactor(dependency);
       }
-      const ref = factorRef(factor);
-      if (!temporary(factor) || !ref || seenFactorRefs.has(ref)) return;
-      seenFactorRefs.add(ref);
+      if (!temporary(factor)) return;
       temporaryFactors.push(structuredClone(factor));
     };
-    for (const factor of state.values?.factor_candidates || []) {
+    for (const factor of [...(state.values?.factor_candidates || []), ...(state.factors || [])]) {
       visitTemporaryFactor(factor);
     }
     return {
@@ -378,6 +379,6 @@
   }
 
   window.FTTestConfiguration = Object.freeze({
-    ensureWorkspace, save, buildAnalysis, configurationPayload, executionFactors,
+    ensureWorkspace, save, buildAnalysis, configurationPayload, executionFactors, temporaryObjects,
   });
 })();

@@ -67,6 +67,47 @@ class MemoryControlStore:
         }
 
 
+def test_legacy_product_backfill_cannot_overwrite_peer_edit_or_resurrect_delete(tmp_path):
+    service = AccountDomainSyncService(
+        sqlite_path=tmp_path / "mirror.sqlite", control_store=None, manager_id="receiver",
+    )
+    for kind in ("product_group", "product_category"):
+        service.local.apply_remote({
+            "principal": "alice", "entity_type": kind, "entity_id": "group-1",
+            "payload": {"id": "group-1", "name": "peer edit"},
+            "deleted": False, "revision": 1, "origin_manager_id": "peer",
+        })
+        assert not service._reconcile_value("alice", kind, {"id": "group-1", "name": "old"}, "id")
+        assert service.local.get_entity("alice", kind, "group-1")["payload"]["name"] == "peer edit"
+        service.local.apply_remote({
+            "principal": "alice", "entity_type": kind, "entity_id": "group-1",
+            "payload": {}, "deleted": True, "revision": 2, "origin_manager_id": "peer",
+        })
+        assert not service._reconcile_value("alice", kind, {"id": "group-1", "name": "old"}, "id")
+        assert service.local.get_entity("alice", kind, "group-1")["deleted"]
+    assert service.local.pending(principal="alice") == []
+
+
+def test_invalid_outbox_entity_does_not_starve_other_writes(tmp_path):
+    class Control(MemoryControlStore):
+        def push_account_domain_entity(self, **value):
+            if value['entity_id'] == 'bad':
+                raise ValueError('provider identity is inconsistent')
+            return super().push_account_domain_entity(**value)
+
+    control = Control()
+    service = AccountDomainSyncService(
+        sqlite_path=tmp_path / 'mirror.sqlite', control_store=control, manager_id='local',
+    )
+    service.upsert('alice', 'product_group', 'bad', {'id': 'bad'}, flush=False)
+    service.upsert('alice', 'product_group', 'valid', {'id': 'valid'}, flush=False)
+    receipt = service.flush(principal='alice')
+    assert receipt['sent'] == 1
+    assert receipt['pending'] == 1
+    assert ('alice', 'product_group', 'valid') in control.rows
+    assert service.local.pending(principal='alice')[0]['entity_id'] == 'bad'
+
+
 def test_factor_sync_materializes_resolved_aliases(monkeypatch) -> None:
     frozen = freeze_factor_identity(
         owner_ref="alice",

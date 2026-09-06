@@ -29,14 +29,6 @@ class FactorDataCoverageError(ValueError):
         self.details = details
 
 
-def _source_frequency(factor: Any) -> DataFreq:
-    family = getattr(factor, "family", None)
-    value = getattr(family, "source_freq", None) or getattr(factor, "freq", None)
-    if value is None:
-        raise ValueError("因子没有声明计算数据频率")
-    return DataFreq(value)
-
-
 def require_factor_data_coverage(
     products: Iterable[Any],
     factor: Any,
@@ -47,7 +39,9 @@ def require_factor_data_coverage(
     warmup_window: pd.Timedelta | None = None,
 ) -> dict[str, Any]:
     """Check eligible sources while keeping output and warm-up ranges distinct."""
-    frequency = _source_frequency(factor)
+    from tools.factors.evaluation.source_frequency import resolve_source_frequency
+    products = list(products)
+    frequency = resolve_source_frequency(factor, products)
     source = None
     source_key = str(data_source or "").strip()
     if source_key:

@@ -53,6 +53,8 @@ class FactorEvaluation:
     run_id: str = ""
     isolated: bool = False
     external_factor_artifacts: list[dict[str, Any]] | None = None
+    frozen_factors: list[dict[str, Any]] | None = None
+    factor_ref: str = ""
 
     @classmethod
     def from_request(cls, data: dict[str, Any], *, page_uuid: str) -> "FactorEvaluation":
@@ -106,7 +108,27 @@ class FactorEvaluation:
             run_id=run_id,
             isolated=True,
             external_factor_artifacts=list(data.get("external_factor_artifacts") or []),
+            frozen_factors=list(data.get('factors') or
+                ((data.get('run_spec') or {}).get('configuration') or {}).get('shared', {}).get('factors') or []),
+            factor_ref=str(data.get('factor_ref') or ''),
         )
+
+    def _resolve_run_factor(self):
+        from server.services.external_factor_artifacts import factor_by_alias
+        external = factor_by_alias(self.external_factor_artifacts, self.factor_alias)
+        if external is not None:
+            return external
+        if self.frozen_factors:
+            from server.modules.shared.factor_param_resolver import resolve_factor_param_value
+            from server.modules.shared.factor_param_utils import unique_frozen_factor_records
+            records = unique_frozen_factor_records(self.frozen_factors)
+            matches = [row for row in records if
+                       (row['ref'] == self.factor_ref if self.factor_ref else row['alias'] == self.factor_alias)]
+            if len(matches) != 1:
+                raise ValueError('运行配置不能唯一确定冻结因子')
+            return resolve_factor_param_value(matches[0], username=self.owner,
+                                              frozen_by_ref={row['ref']: row for row in records})
+        return factor_from_alias(self.factor_alias, username=self.owner)
 
     def run(self) -> dict[str, Any]:
         started_at = time.time()
@@ -129,11 +151,7 @@ class FactorEvaluation:
             )
         )
         if self.isolated:
-            from server.services.external_factor_artifacts import factor_by_alias
-
-            factor = factor_by_alias(
-                self.external_factor_artifacts, self.factor_alias,
-            ) or factor_from_alias(self.factor_alias, username=self.owner)
+            factor = self._resolve_run_factor()
         else:
             factor = None
         if factor is None:
