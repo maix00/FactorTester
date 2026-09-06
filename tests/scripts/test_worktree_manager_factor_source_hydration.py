@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import hashlib
 
+import pytest
+
 from server.manager.http.service_selection import ServiceSelectionRoutesMixin
 from server.manager.services import data_plane_client, factor_source_hydration
 from server.manager.services.test_authoring import TestAuthoringError as AuthoringError
 
 
-def test_historical_hydration_keeps_current_head_and_source(monkeypatch):
+@pytest.mark.parametrize("current_fingerprint", ["a" * 64, "b" * 64])
+def test_historical_hydration_keeps_current_head_and_source(monkeypatch, current_fingerprint):
     from types import SimpleNamespace
     from server.modules.custom_factors import catalog
     source = b'class Historical:\n    pass\n'
@@ -15,7 +18,7 @@ def test_historical_hydration_keeps_current_head_and_source(monkeypatch):
     metadata = {'source_kind':'custom', 'owner_username':'alice', 'factor_id':'Historical',
                 'source_sha256':hashlib.sha256(source).hexdigest(), 'source_bytes':len(source),
                 'storage_server_id':'origin', 'family_formula_fingerprint':fingerprint}
-    local = SimpleNamespace(get_entity=lambda *args: {'payload':{'family_formula_fingerprint':'b'*64}})
+    local = SimpleNamespace(get_entity=lambda *args: {'payload':{'family_formula_fingerprint':current_fingerprint, 'source_sha256':'c'*64}})
     sync = SimpleNamespace(local=local, entities=lambda *args, **kwargs:
                            [{'payload':metadata}] if kwargs['entity_type']=='factor_source_version' else [])
     state = SimpleNamespace(server_id='peer', account_domain_sync=sync,
