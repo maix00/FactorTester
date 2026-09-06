@@ -191,6 +191,8 @@ assert.ok(valuePicker.options.onAddCandidateForType, "FactorParam supports on-th
   assert.equal(latestValues.Th.__factor_family_draft, true,
     "changed parameters reuse the existing save-time freezer");
   assert.equal(latestValues.Th.parameter_values.M, 0.6, "untouched values survive");
+  assert.equal(latestValues.Th.__factor_family.math_expr, childFamily.math_expr,
+    "first nested edit retains the loaded source template for the outer preview");
   assert.equal(compactChild.identity.params.N, "200d", "library identity remains immutable");
 
   // Editing a nested reverse flag refreshes the already-mounted local formula
