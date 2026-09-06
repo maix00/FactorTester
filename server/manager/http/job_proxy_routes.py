@@ -429,6 +429,47 @@ class JobProxyRoutesMixin:
         self.end_headers()
         self.wfile.write(body)
 
+    def _index_job_detail_response(
+        self, response: GatewayResponse, *, route: ServiceRoute, principal: str,
+    ) -> None:
+        """Remember routing exposed by a permitted detail read.
+
+        A copied Job URL can be opened immediately after Manager restart,
+        before a task-list request has rebuilt the local routing index.
+        Artifact lookup still needs the Job owner and storage server, so seed
+        the same bounded index from the already-authorized detail response.
+        """
+        if response.status != 200 or response.content_type != "application/json":
+            return
+        try:
+            payload = response.json_object()
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+            return
+        detail = payload.get("task_detail") if isinstance(payload, dict) else None
+        job = detail.get("job") if isinstance(detail, dict) else None
+        source = job if isinstance(job, dict) else payload
+        if not isinstance(source, dict):
+            return
+        job_id = str(source.get("job_id") or payload.get("job_id") or "").strip()
+        if not job_id:
+            return
+        indexed = {
+            **source,
+            "job_id": job_id,
+            "port": int(source.get("port") or route.port),
+            "owner": str(source.get("owner") or payload.get("owner") or principal),
+            "server_id": str(payload.get("server_id") or route.server_id),
+            "execution_server_id": str(
+                payload.get("execution_server_id") or route.server_id
+            ),
+            "storage_server_id": str(
+                payload.get("storage_server_id") or route.server_id
+            ),
+        }
+        for owner in {principal, str(indexed["owner"]), "__public_jobs__"}:
+            if owner:
+                self.state.job_index.upsert(owner, [indexed], emit_events=False)
+
     def _job_routes(
         self,
         parsed,
@@ -787,6 +828,10 @@ class JobProxyRoutesMixin:
                 last_response = (route, response)
                 if response.status == 404:
                     continue
+                if method == "GET" and suffix == "":
+                    self._index_job_detail_response(
+                        response, route=route, principal=principal,
+                    )
                 self._send_gateway_response(
                     response,
                     route=route,
