@@ -25,6 +25,11 @@ PROBE_JS = ROOT / "tests" / "scripts" / "fixtures" / "factor_preview_latex_probe
 from server.modules.shared import factor_preview_latex as fpl  # noqa: E402
 
 
+def test_resolved_formula_version_covers_bar_distance_alignment_semantics():
+    """Changing persisted LaTeX layout must invalidate old resolved formulas."""
+    assert fpl.RESOLVED_MATH_EXPR_VERSION == 4
+
+
 def _rows(params):
     rows = []
     for p in params:
