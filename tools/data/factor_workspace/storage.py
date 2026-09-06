@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import logging
 from pathlib import Path
 
 from scripts.data_dir import DATA_DIR
@@ -156,9 +157,18 @@ def save_factor_source(
     root = existing_factor_workspace_root(username)
     if root:
         path = os.path.join(root, "custom_factors", f"{factor_id}.py")
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as file:
-            file.write(canonical_factor_source_code(source_code))
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as file:
+                file.write(canonical_factor_source_code(source_code))
+        except OSError as error:
+            # SQLite is authoritative. A configured desktop workspace may be
+            # absent/read-only inside a server container; do not report a
+            # failed save after committing the source or skip version/sync work.
+            logging.getLogger(__name__).warning(
+                "Factor source saved; optional workspace mirror unavailable (%s)",
+                type(error).__name__,
+            )
 
 
 def save_public_factor_source(
