@@ -1195,6 +1195,12 @@
     // including factors nested inside factors) to its family template, so
     // the top formula preview can render each nested definition line.
     const nestedTemplates = new Map();
+    const nestedTemplateKey = record => JSON.stringify([
+      record.owner_ref || record.factor_owner_ref || "",
+      record.identity?.family_ref || record.family_ref || "",
+      record.identity?.family_alias || record.factor_family_alias || "",
+      record.identity?.family_formula_fingerprint || record.family_formula_fingerprint || "",
+    ]);
     const resolveNestedTemplates = async values => {
       const records = [];
       const seen = new Set();
@@ -1218,19 +1224,14 @@
         const alias = String(
           record.identity?.family_alias || record.factor_family_alias || "",
         ).trim();
-        if (!alias || nestedTemplates.has(alias)
-          || loads.some(item => item.alias === alias)) continue;
-        const row = (data.families || []).find(item => (
-          familyAlias(item) === alias || (item.family || item)?.family_alias === alias
-        ));
-        const family = row ? (row.family || row) : null;
-        if (family && (family.math_expr || family.formula || family.parameter_definitions?.length)) {
-          nestedTemplates.set(alias, family);
-          continue;
-        }
-        loads.push({alias, record});
+        const key = nestedTemplateKey(record);
+        if (!alias || nestedTemplates.has(key)
+          || loads.some(item => item.key === key)) continue;
+        // Catalog summaries can predate the renderer and are not a source
+        // template for a frozen version. Load the selected dependency only.
+        loads.push({alias, record, key});
       }
-      await Promise.all(loads.map(async ({alias, record}) => {
+      await Promise.all(loads.map(async ({alias, record, key}) => {
         try {
           const ownerRef = String(record.owner_ref || "").trim().replace(/^principal:/, "");
           const isPublic = ["public", "__public_jobs__"].includes(ownerRef);
@@ -1239,13 +1240,14 @@
               factor_family_alias: alias,
               factor_family_name: alias,
               family_ref: record.identity?.family_ref || record.family_ref || "",
-            }, "current", {
+            }, record.identity?.family_formula_fingerprint
+              || record.family_formula_fingerprint || "current", {
               familyID: alias,
               sourceKind: isPublic ? "public" : undefined,
               ownerUsername: isPublic ? "" : ownerRef,
             },
           );
-          if (loaded) nestedTemplates.set(alias, {...loaded, factor_family_alias: alias});
+          if (loaded) nestedTemplates.set(key, {...loaded, factor_family_alias: alias});
         } catch (_) {
           // Nested template unavailable: the preview just omits that line.
         }
@@ -1265,7 +1267,7 @@
           const alias = String(
             value.identity?.family_alias || value.factor_family_alias || "",
           ).trim();
-          const family = nestedTemplates.get(alias);
+          const family = nestedTemplates.get(nestedTemplateKey(value));
           const params = value.identity?.params || {};
           let paramsChanged = false;
           const nextParams = {};
@@ -1278,7 +1280,7 @@
           if (paramsChanged) {
             next = {...next, identity: {...next.identity, params: nextParams}};
           }
-          if (family && !value.math_expr) {
+          if (family) {
             next = {
               ...next,
               math_expr: family.math_expr || family.formula || family.latex || "",
@@ -1389,9 +1391,9 @@
         markDirty: name => markDirty(name),
         refreshComposition: values => refreshParameterComposition(values),
         refreshFormula: () => refreshFormulaPreview(),
-        onNestedFamilyTemplate: (alias, family) => {
+        onNestedFamilyTemplate: (alias, family, record) => {
           if (!alias || !family) return;
-          if (!nestedTemplates.has(alias)) nestedTemplates.set(alias, family);
+          if (record) nestedTemplates.set(nestedTemplateKey(record), family);
           refreshFormulaPreview();
         },
       });
