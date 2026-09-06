@@ -161,6 +161,42 @@ def test_factor_sync_materializes_resolved_aliases(monkeypatch) -> None:
     assert resolved["identity"] == frozen["identity"]
 
 
+def test_factor_sync_refreshes_retained_frozen_rows_after_renderer_change(monkeypatch):
+    previous = {
+        "factor_family_alias": "Retained",
+        "scope_key": "default",
+        "params_list": [{"N": "20d"}],
+        "resolved_factors": [{
+            "factor_alias": "Retained|N:20d",
+            "resolved_math_expr": r"old",
+            "resolved_math_expr_version": RESOLVED_MATH_EXPR_VERSION - 1,
+        }],
+    }
+    calls = []
+
+    monkeypatch.setattr("tools.data.account_manage.get_account", lambda owner: {"username": owner})
+    monkeypatch.setattr("tools.data.account_manage.list_factor_param_config_scopes", lambda owner: [])
+    monkeypatch.setattr(
+        "server.modules.custom_factors.factor_library_service.build_factor_library_config_factors",
+        lambda owner, account, family, config: calls.append((family, config)) or [{
+            "factor_alias": "Retained|N:20d",
+            "resolved_math_expr": r"new",
+            "resolved_math_expr_version": RESOLVED_MATH_EXPR_VERSION,
+        }],
+    )
+
+    values = materialized_factor_configs("alice", existing=[{
+        "entity_id": "default:Retained",
+        "payload": previous,
+        "deleted": False,
+    }])
+
+    assert values[0][0] == "default:Retained"
+    assert values[0][1]["resolved_factors"][0]["resolved_math_expr"] == "new"
+    assert values[0][1]["resolved_factors"][0]["resolved_math_expr_version"] == RESOLVED_MATH_EXPR_VERSION
+    assert calls[0][0] == "Retained"
+
+
 def test_factor_catalog_reconcile_preserves_absent_rows_until_explicit_delete(
     monkeypatch, tmp_path: Path,
 ) -> None:
@@ -941,11 +977,19 @@ def test_unchanged_authoring_config_reuses_frozen_rows(monkeypatch):
         "tools.data.account_manage.load_factor_param_config",
         lambda *args: None,
     )
+    monkeypatch.setattr(
+        "server.modules.custom_factors.factor_library_service.build_factor_library_config_factors",
+        lambda *args: (_ for _ in ()).throw(ValueError("source unavailable")),
+    )
     preserved = materialized_factor_configs(
         "alice", existing=[{"entity_id": "default:F", "payload": legacy_payload}],
     )
     assert preserved == [("default:F", legacy_payload)]
     assert calls == [1, 1]
+    monkeypatch.setattr(
+        "server.modules.custom_factors.factor_library_service.build_factor_library_config_factors",
+        freeze,
+    )
     monkeypatch.setattr("tools.data.account_manage.load_factor_param_config", lambda *args: config)
     config["params_list"] = [{"N": 2}]
     # A stale authored copy after a restart is not a new edit.
