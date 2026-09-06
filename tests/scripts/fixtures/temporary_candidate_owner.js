@@ -20,6 +20,8 @@ const state={kind:'ic',values:{},factors:[],manifest:{defaults:{
  factor_source_selections:{serialization:{kind:'factor_source_selection_list'}},
  factor_set_selections:{serialization:{kind:'factor_set_selection_list'}},
 }}};
+// Nested IC/strategy editors use a shared catalog plus their own draft rows.
+state.catalogSourceState = {factors: [], savedFactors: []};
 FTTestFactorSets.prepare(state);
 const factor=(ref)=>({schema_version:2,ref,alias:ref,identity:{},temporary:true});
 (async()=>{

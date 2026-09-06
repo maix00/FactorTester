@@ -43,6 +43,10 @@
     };
     (catalog.factors || []).forEach(add);
     (catalog.savedFactors || []).forEach(add);
+    if (catalog !== state) {
+      (state.factors || []).forEach(add);
+      (state.savedFactors || []).forEach(add);
+    }
     FTTestFactorSelection.candidates(state).forEach(add);
     selections(state).forEach(add);
     return [...byID.values()];
