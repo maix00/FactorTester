@@ -1,6 +1,45 @@
 from threading import Event
+from io import BytesIO
+from types import SimpleNamespace
+
+import pytest
 
 from server.manager.services.client_state import ClientStateService
+
+
+@pytest.mark.parametrize('body', [b'', b'{}'])
+def test_refresh_consumes_request_before_sending_response(body, monkeypatch):
+    from server.manager.http.auth_routes import AuthenticationRoutesMixin
+    from server.manager.http.write_routes import WriteRoutesMixin
+
+    class Handler(WriteRoutesMixin, AuthenticationRoutesMixin):
+        path = '/api/catalog/refresh'
+        headers = {'Content-Length': str(len(body))}
+        rfile = BytesIO(body)
+
+        def _redirect_plain_http_to_https(self):
+            return False
+
+        def _public_login_gate(self, *args, **kwargs):
+            return True
+
+        def _session(self):
+            return {'username': 'alice'}
+
+    handler = Handler()
+    handler.state = SimpleNamespace(client_state=SimpleNamespace(
+        refresh_account_catalog=lambda _: {'status': 'synced'},
+    ))
+    responses = []
+
+    def respond(handler, payload, status):
+        # Unread TLS application data can reset a closing HTTP/1.0 response.
+        assert handler.rfile.read() == b''
+        responses.append((payload, status))
+
+    monkeypatch.setattr('server.manager.http.write_routes.json_response', respond)
+    handler.do_POST()
+    assert responses == [({'success': True, 'sync': {'status': 'synced'}}, 200)]
 
 
 def test_refresh_waits_for_read_after_write_and_bypasses_cooldown(tmp_path, monkeypatch):
