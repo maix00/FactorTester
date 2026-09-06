@@ -45,7 +45,8 @@ def load_product_categories(username: str) -> list[dict[str, Any]]:
             continue
         if isinstance(value, dict):
             result.append(value)
-    return result
+    from tools.data.sqlite.account_manager.domain_sync import overlay_entities
+    return overlay_entities(username, 'product_category', result, id_key='id')
 
 
 def save_product_categories(
