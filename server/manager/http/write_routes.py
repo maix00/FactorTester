@@ -59,6 +59,14 @@ class WriteRoutesMixin:
             if session is None:
                 json_response(self, {"success": False, "error": "login required"}, 401)
                 return
+            try:
+                # Drain an optional JSON body before closing the TLS response.
+                # Leaving even '{}' unread can truncate the response on HTTPS.
+                if int(self.headers.get("Content-Length", "0")):
+                    self._json_body(4096)
+            except (ValueError, UnicodeError):
+                json_response(self, {"success": False, "error": "invalid refresh request"}, 400)
+                return
             result = self.state.client_state.refresh_account_catalog(str(session["username"]))
             json_response(self, {"success": result.get("status") == "synced", "sync": result},
                           200 if result.get("status") == "synced" else 503)
