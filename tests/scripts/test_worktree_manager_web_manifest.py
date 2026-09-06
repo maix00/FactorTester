@@ -3039,6 +3039,12 @@ def test_factor_catalog_runtime_loads_only_requested_sources() -> None:
     assert result.stdout.strip() == "ok"
 
 
+def test_product_group_save_uses_header_button_in_pages_and_overlays() -> None:
+    fixture = ROOT / "tests/scripts/fixtures/product_group_save.js"
+    result = subprocess.run(["node", str(fixture)], cwd=ROOT, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_product_group_detail_never_uses_retired_business_route() -> None:
     detail = (
         WEB_ROOT / "catalog" / "product-group-detail.js"
