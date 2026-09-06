@@ -504,8 +504,11 @@ def render_preview_node(
             append_preview_definition(lines, nested, state)
         else:
             # JS: latexValue(raw === "" || raw == null ? alias : previewScalarValue(raw))
-            shown = latex_value(
-                alias if (raw == "" or raw is None) else preview_scalar_value(raw),
+            shown = (
+                r"\$F" if alias == "$F" and (raw == "" or raw is None)
+                else latex_value(
+                    alias if (raw == "" or raw is None) else preview_scalar_value(raw),
+                )
             )
         for spelling in {alias, alias.replace("$", r"\$")}:
             token = "\\textcolor{red}{" + spelling + "}"

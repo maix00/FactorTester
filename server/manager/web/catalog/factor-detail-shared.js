@@ -89,7 +89,9 @@
         shown = blue(familySymbol(nested.value));
         appendPreviewDefinition(lines, nested, state);
       } else {
-        shown = latexValue(raw === "" || raw == null ? alias : previewScalarValue(raw));
+        shown = alias === "$F" && (raw === "" || raw == null)
+          ? "\\$F"
+          : latexValue(raw === "" || raw == null ? alias : previewScalarValue(raw));
       }
       for (const spelling of new Set([alias, alias.replace(/\$/g, "\\$")])) {
         const token = "\\textcolor{red}{" + spelling + "}";
