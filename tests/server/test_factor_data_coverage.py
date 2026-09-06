@@ -45,12 +45,14 @@ def _time(value: str) -> DataTime:
     return DataTime(ts=pd.Timestamp(value, tz="Asia/Shanghai"))
 
 
-def test_factor_data_coverage_accepts_source_covering_requested_dates() -> None:
+@pytest.mark.parametrize("source", ["", "auto"])
+def test_factor_data_coverage_accepts_source_covering_requested_dates(source) -> None:
     require_factor_data_coverage(
         [_product("2024-01-01 09:00", "2025-06-02 15:00")],
         _factor(),
         start_dt=_time("2024-01-02 09:00"),
         end_dt=_time("2025-05-30 15:00"),
+        data_source=source,
     )
 
 

@@ -44,7 +44,9 @@ def require_factor_data_coverage(
     frequency = resolve_source_frequency(factor, products)
     source = None
     source_key = str(data_source or "").strip()
-    if source_key:
+    # Typed IC configurations persist "auto"; it means the same per-product
+    # source selection as an omitted source, not a provider registry key.
+    if source_key and source_key != "auto":
         try:
             source = DataProviderProductTS[source_key]
         except Exception as exc:
