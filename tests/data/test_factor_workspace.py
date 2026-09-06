@@ -19,6 +19,19 @@ from tools.data.factor_workspace.repository import FactorWorkspaceRepository
 from tools.data.factor_workspace.sdk import author_sdk_paths
 
 
+def test_source_save_survives_unavailable_optional_workspace(monkeypatch, tmp_path, caplog):
+    import settings
+    monkeypatch.setattr(settings, 'CACHE_DB_PATH', tmp_path / 'sources.sqlite')
+    unavailable = tmp_path / 'not-a-directory'
+    unavailable.write_text('occupied')
+    monkeypatch.setattr(factor_workspace_storage, 'existing_factor_workspace_root',
+                        lambda _: str(unavailable))
+    for source in ('class Probe:\n    pass\n', 'class Probe:\n    value = 2\n'):
+        factor_workspace_storage.save_factor_source('alice', 'Probe', source)
+        assert factor_workspace_storage.load_factor_source('alice', 'Probe').strip() == source.strip()
+    assert 'optional workspace mirror unavailable' in caplog.text
+
+
 def test_factor_workspace_build_refreshes_and_prunes_stale_files(monkeypatch, tmp_path):
     workspace_root = tmp_path / "factor-root"
     custom_dir = workspace_root / "custom_factors"
