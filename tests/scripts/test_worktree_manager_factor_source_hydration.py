@@ -7,6 +7,30 @@ from server.manager.services import data_plane_client, factor_source_hydration
 from server.manager.services.test_authoring import TestAuthoringError as AuthoringError
 
 
+def test_historical_hydration_keeps_current_head_and_source(monkeypatch):
+    from types import SimpleNamespace
+    from server.modules.custom_factors import catalog
+    source = b'class Historical:\n    pass\n'
+    fingerprint = 'a' * 64
+    metadata = {'source_kind':'custom', 'owner_username':'alice', 'factor_id':'Historical',
+                'source_sha256':hashlib.sha256(source).hexdigest(), 'source_bytes':len(source),
+                'storage_server_id':'origin', 'family_formula_fingerprint':fingerprint}
+    local = SimpleNamespace(get_entity=lambda *args: {'payload':{'family_formula_fingerprint':'b'*64}})
+    sync = SimpleNamespace(local=local, entities=lambda *args, **kwargs:
+                           [{'payload':metadata}] if kwargs['entity_type']=='factor_source_version' else [])
+    state = SimpleNamespace(server_id='peer', account_domain_sync=sync,
+                            prepare_object_download=lambda **kwargs:{'url':'http://example.test/source','bearer':'ticket'})
+    family = SimpleNamespace(expr=SimpleNamespace(semantic_fingerprint=lambda:fingerprint))
+    monkeypatch.setattr(catalog, '_load_factor_family_from_source', lambda *args:(lambda:family, None))
+    monkeypatch.setattr(factor_source_hydration, 'urlopen', lambda *args, **kwargs:_Response(source))
+    writes, versions = [], []
+    monkeypatch.setattr(factor_source_hydration, 'upsert_factor_source', lambda *args, **kwargs:writes.append(args))
+    monkeypatch.setattr(factor_source_hydration, 'record_factor_formula_version', lambda *args, **kwargs:versions.append(args))
+    assert factor_source_hydration.FactorSourceHydrator(state).hydrate('alice:Historical', principal='alice', fingerprint=fingerprint)
+    assert writes == []
+    assert len(versions) == 1
+
+
 def test_hydrates_referenced_factor_source_from_provider(monkeypatch) -> None:
     source = "class DemoFactor:\n    pass\n"
     raw = source.encode()

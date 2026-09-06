@@ -8,7 +8,7 @@ from typing import Any
 
 
 def _factor_source_provider(entity_type: str, entity_id: str) -> str:
-    if entity_type != "factor_source" or "@" not in entity_id:
+    if entity_type not in {"factor_source", "factor_source_version"} or "@" not in entity_id:
         return ""
     return entity_id.rsplit("@", 1)[1].strip()
 
@@ -164,14 +164,16 @@ class AccountDomainControlMixin:
             "revision": revision,
             "operation_id": str(operation_id or ""),
         }
-    def find_factor_source_manifests(self, *, principal: str, factor_id: str, source_kind: str) -> list[dict[str, Any]]:
+    def find_factor_source_manifests(self, *, principal: str, factor_id: str, source_kind: str, fingerprint: str = "") -> list[dict[str, Any]]:
         """Targeted metadata lookup for one already-authorized source request."""
         with self._connection() as connection:
             rows = connection.execute(
                 "SELECT principal, entity_type, entity_id, payload, deleted, revision, origin_manager_id "
-                "FROM control_account_domain_entities WHERE principal=%s AND entity_type='factor_source' AND NOT deleted "
-                "AND payload->>'factor_id'=%s AND payload->>'source_kind'=%s ORDER BY revision DESC LIMIT 100",
-                (principal, factor_id, source_kind),
+                "FROM control_account_domain_entities WHERE principal=%s AND entity_type IN ('factor_source','factor_source_version') AND NOT deleted "
+                "AND payload->>'factor_id'=%s AND payload->>'source_kind'=%s "
+                + ("AND payload->>'family_formula_fingerprint'=%s " if fingerprint else "")
+                + "ORDER BY revision DESC LIMIT 100",
+                (principal, factor_id, source_kind, fingerprint) if fingerprint else (principal, factor_id, source_kind),
             ).fetchall()
         keys = ("principal", "entity_type", "entity_id", "payload", "deleted", "revision", "origin_manager_id")
         return [{key: _row_value(row, key, index, None) for index, key in enumerate(keys)} for row in rows]

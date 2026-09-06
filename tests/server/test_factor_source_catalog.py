@@ -28,6 +28,19 @@ def _detail(_source: str, _factor_id: str, _metadata: dict) -> dict:
     }
 
 
+def test_historical_version_does_not_need_current_body_or_display_metadata(monkeypatch):
+    def unavailable(*args):
+        raise factor_source_catalog.FactorSourceMetadataUnavailable('cold peer')
+    monkeypatch.setattr(factor_source_catalog, 'load_factor_source', unavailable)
+    monkeypatch.setattr(factor_source_catalog, 'get_factor_source_metadata', unavailable)
+    monkeypatch.setattr(factor_source_catalog, 'load_factor_formula_version', lambda *args:{'source_code':'source'})
+    monkeypatch.setattr(FactorSourceCatalog, '_detail', staticmethod(_detail))
+    assert FactorSourceCatalog().version('alice','custom','History','a'*64)['success']
+    monkeypatch.setattr(factor_source_catalog, 'can_view_user_scope', lambda *args:False)
+    with pytest.raises(PermissionError):
+        FactorSourceCatalog().version('bob','custom','History','a'*64,owner_username='alice')
+
+
 def test_custom_source_versions_enforce_scope_and_bound_limit(monkeypatch) -> None:
     calls = []
     monkeypatch.setattr(
