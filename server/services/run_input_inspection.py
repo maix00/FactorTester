@@ -18,6 +18,9 @@ from server.services.transient_strategy_sources import validate_entries
 
 def family_template_latex(family: Any) -> str:
     """Render the configurable family expression, preserving ParamRef nodes."""
+    template = str(getattr(family, "math_expr", "") or "")
+    if template:
+        return template
     expression = getattr(family, "expr", None)
     if expression is not None:
         try:

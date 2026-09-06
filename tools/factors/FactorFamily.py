@@ -25,6 +25,7 @@ from tools.factors.Factors import Factor
 from tools.factors.FactorExpr import (
     FactorExpr,
     CompositeExpr,
+    SignalAlign,
 )
 from tools.data.types import DataFreq
 from tools.factors.Parameters import FactorFreqParam, ReverseParam
@@ -148,6 +149,7 @@ class FactorFamily(UniqueNameObject, FactorExpr):
             # 例：MmMADevRat 定义 return -P.rolling_mean(N)/(P+1e-10)
             #     → 剥离后 _expr = P.rolling_mean(N)/(P+1e-10)，$Rev 默认=1
             _has_natural_neg = False
+            declared_intermediate = _expr if getattr(_expr, '_is_intermediate', False) else None
             if _from_factor_expr and _expr is not None:
                 if isinstance(_expr, CompositeExpr) and _expr.op == 'neg':
                     # 情况 1：最外层即 neg
@@ -165,6 +167,9 @@ class FactorFamily(UniqueNameObject, FactorExpr):
                                 *_expr.operands[1:],
                             )
                             _has_natural_neg = True
+
+            if _has_natural_neg and declared_intermediate is not None:
+                _expr = _expr.as_intermediate(declared_intermediate._intermediate_name)
 
             cls.params = list(_expr.ordered_param_deps) if _expr is not None else []
             _source_freq = source_freq if source_freq is not None else getattr(cls, 'source_freq', None)
@@ -200,7 +205,7 @@ class FactorFamily(UniqueNameObject, FactorExpr):
 
             instance.desc = desc if desc is not None else getattr(cls, 'desc', '')
             instance.description = description if description is not None else getattr(cls, 'description', '')
-            instance.math_expr = _math or (_expr.to_latex() if _expr is not None else '')
+            instance.math_expr = _math or (SignalAlign(_expr, '$F').to_latex() if _expr is not None else '')
 
             # 信号对齐参数（None 则从类属性取默认值）
             instance.basepoint = basepoint if basepoint is not None else getattr(cls, 'basepoint', 'last')

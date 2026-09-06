@@ -25,7 +25,7 @@
     formulaMount.className = "factor-detail-parameter-formula display-math";
     let mode = "parameters";
     const render = () => {
-      const source = mode === "parameters" ? expression(value) : valueFormula(value, values);
+      const source = mode === "parameters" ? expression(value) : previewExpression(value, values);
       formulaMount.replaceChildren?.();
       if (window.katex) window.katex.render(source || "", formulaMount, {
         displayMode: true, throwOnError: false,
@@ -41,21 +41,6 @@
     });
     root.append(controls, formulaMount); render();
     return {root, update: next => { values = next || {}; render(); }};
-  }
-
-  function valueFormula(value, values) {
-    let result = expression(value);
-    for (const parameter of parameterRows(value)) {
-      const alias = String(parameter.alias || "").trim();
-      if (!alias) continue;
-      const raw = Object.prototype.hasOwnProperty.call(values, alias)
-        ? values[alias] : parameter.value ?? parameter.default_value;
-      const nested = nestedPreviewValue(raw, parameter);
-      const shown = nested ? familySymbol(nested.value) : latexValue(previewScalarValue(raw ?? alias));
-      const token = new RegExp("\\\\textcolor\\{red\\}\\{" + escapeRegExp(alias) + "\\}", "g");
-      result = result.replace(token, "\\textcolor{red}{" + shown + "}");
-    }
-    return result;
   }
 
   function previewExpression(value, parameterValues = {}) {
@@ -85,7 +70,15 @@
     if (!resultValue) return {body: "", lines: []};
     let result = resultValue;
     const lines = [];
-    for (const parameter of parameterRows(item)) {
+    const rows = parameterRows(item);
+    const reverseValue = Object.prototype.hasOwnProperty.call(parameterValues, "$Rev")
+      ? parameterValues.$Rev : rows.find(row => row.alias === "$Rev")?.value;
+    const reversed = ["1", "-1", "true", "t", "yes", "y", "rev", "reverse"]
+      .includes(String(reverseValue).trim().toLowerCase());
+    const signal = "\\operatorname{Resample}_{\\textcolor{red}{\\$F}}";
+    const reverseSignal = reversed && result.includes(signal);
+    if (reverseSignal) result = result.replace(signal, "\\textcolor{red}{-}" + signal);
+    for (const parameter of rows) {
       const alias = String(parameter.alias || "").trim();
       if (!alias) continue;
       const raw = Object.prototype.hasOwnProperty.call(parameterValues || {}, alias)
@@ -98,10 +91,26 @@
       } else {
         shown = latexValue(raw === "" || raw == null ? alias : previewScalarValue(raw));
       }
-      const token = new RegExp(
-        "\\\\textcolor\\{red\\}\\{" + escapeRegExp(alias) + "\\}", "g",
-      );
-      result = result.replace(token, nested ? shown : "\\textcolor{red}{" + shown + "}");
+      for (const spelling of new Set([alias, alias.replace(/\$/g, "\\$")])) {
+        const token = "\\textcolor{red}{" + spelling + "}";
+        result = result.split(token).join(nested ? shown : "\\textcolor{red}{" + shown + "}");
+      }
+    }
+    if (reversed && !reverseSignal) {
+      const body = stripFormulaEnvironment(result);
+      const parts = body.split(/\\\\/);
+      const last = parts.pop().trim();
+      const assignment = last.indexOf(":=");
+      const prefix = assignment < 0 ? "" : last.slice(0, assignment + 2) + " ";
+      const operand = (assignment < 0 ? last : last.slice(assignment + 2)).trim();
+      const punctuation = /[.,;]$/.test(operand) ? operand.slice(-1) : "";
+      parts.push(prefix + "\\textcolor{red}{-}\\left("
+        + (punctuation ? operand.slice(0, -1) : operand) + "\\right)" + punctuation);
+      const aligned = body !== result.trim() || parts.length > 1;
+      result = parts.join(" \\\\ ");
+      if (aligned) {
+        result = "\\begin{aligned}\n" + result + "\n\\end{aligned}";
+      }
     }
     return {body: result, lines};
   }
@@ -222,10 +231,6 @@
     return result;
   }
 
-  function escapeRegExp(value) {
-    return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  }
-
   function familySymbol(value) {
     const item = unwrapFamilyDraft(value);
     const alias = String(
@@ -245,7 +250,7 @@
     const duration = /^([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*(ns|us|ms|s|min|m|h|d|w)$/i
       .exec(text);
     if (duration) return String.raw`${duration[1]}\,\mathrm{${duration[2]}}`;
-    return String.raw`\mathrm{${text.replace(/([_{}%&#])/g, "\\$1")}}`;
+    return String.raw`\mathrm{${text.replace(/([_{}%&#$])/g, "\\$1")}}`;
   }
 
   function summary(context, value, options = {}) {

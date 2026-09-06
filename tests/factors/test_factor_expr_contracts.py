@@ -108,6 +108,17 @@ def test_to_latex_does_not_repeat_a_named_root_intermediate():
     assert "X_t" not in latex
 
 
+def test_signal_latex_keeps_return_intermediate_and_colors_only_signal_reverse():
+    raw = (ColumnRef(DataColumn.CLOSE) + ConstExpr(1)).as_intermediate()
+    aligned = SignalAlign(raw, None)
+    latex = aligned.to_latex()
+    assert r"\mathrm{I1}_t &:=" in latex
+    assert r"\operatorname{Resample}_{\textcolor{red}{\$F}}" in latex
+    assert r"\left(\mathrm{I1}_t\right)" in latex
+    assert r"\textcolor{red}{-}" in CompositeExpr("neg", aligned).to_latex()
+    assert r"\textcolor{red}{-}" not in CompositeExpr("neg", raw).to_latex()
+
+
 class _FrameExpr(FactorExpr):
     def __init__(self, frame: pd.DataFrame):
         self.frame = frame

@@ -24,6 +24,8 @@ const code = fs.readFileSync(sharedPath, "utf8");
 vm.runInThisContext(code, { filename: sharedPath });
 
 const shared = global.window.FTFactorDetailShared;
+const katex = require(path.resolve(path.dirname(sharedPath),
+  "../../../../apple/Resources/ThirdParty/KaTeX/katex.min.js"));
 if (!shared || typeof shared.previewExpression !== "function") {
   process.stderr.write("FTFactorDetailShared.previewExpression not found\n");
   process.exit(3);
@@ -33,6 +35,18 @@ const results = input.map(entry => {
   const factor = entry.factor;
   const values = entry.values || {};
   const expression = shared.previewExpression(factor, values);
+  katex.renderToString(expression, {throwOnError: true, strict: "ignore", displayMode: true});
+  // Exercise the nested parameter table's actual "values" toggle too.
+  global.document = {createElement: () => ({
+    children: [], handlers: {}, append(...nodes) { this.children.push(...nodes); },
+    addEventListener(type, handler) { this.handlers[type] = handler; },
+    replaceChildren() {},
+  })};
+  let localExpression;
+  window.katex = {render(source) { localExpression = source; }};
+  const local = shared.localFormula({t: x => x}, factor, values);
+  local.root.children[0].children[1].handlers.click();
+  require("node:assert/strict").equal(localExpression, expression);
   return { expression };
 });
 

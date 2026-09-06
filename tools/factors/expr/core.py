@@ -388,12 +388,6 @@ class FactorExpr:
         sk_to_sym: Dict[tuple, str] = {}   # structural_key → symbol
         lines: List[str] = []
         unnamed_idx = 1
-        def _has_intermediate_child(node):
-            for operand in getattr(node, '_operands', ()):
-                if getattr(operand, '_is_intermediate', False) or _has_intermediate_child(operand):
-                    return True
-            return False
-
         for node in nodes:
             if node._intermediate_name:
                 sk = node._structural_key()
@@ -405,15 +399,11 @@ class FactorExpr:
                 name_to_sk[node._intermediate_name] = sk
                 raw = ''.join(ch if (ch.isalnum() or ch == '_') else '_' for ch in str(node._intermediate_name)).strip('_')
                 base = raw or 'I'
-            elif node is not self and _has_intermediate_child(node):
-                # 非最终的、无名但嵌套了更低层的 intermediate（多层）→ 自动 I+序号。
+            else:
+                # An explicit anonymous intermediate is still a definition,
+                # including a family return value below SignalAlign.
                 base = f"I{unnamed_idx}"
                 unnamed_idx += 1
-            else:
-                # 最终 return 的无名 as_intermediate（根），或叶子级无名的
-                # intermediate：它就是最终表达式（如 CA=CLOSE → \tilde{C}_t），
-                # 不需要自动生成 I{序号} 指代。
-                continue
             sym = base
             i = 2
             while sym in used:
