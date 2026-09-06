@@ -219,7 +219,12 @@ class CompositeExpr(OperandExpr):
         if self.op in self._Ops:
             if self._Ops[self.op]['nop'] == 1:
                 operand_latex = operands_latex[0]
-                return f"{self._Ops[self.op]['latex']}\\left({operand_latex}\\right)"
+                operator = self._Ops[self.op]['latex']
+                # Factor construction represents $Rev as neg(SignalAlign).
+                # Natural negation inside the source expression stays black.
+                if self.op == 'neg' and getattr(self.operands[0], 'op', None) == 'SIGNAL_ALIGN':
+                    operator = r'\textcolor{red}{-}'
+                return f"{operator}\\left({operand_latex}\\right)"
             elif self._Ops[self.op]['nop'] == 2:
                 left_latex = self._binary_operand_latex(self.operands[0], operands_latex[0], side='left', subst=subst)
                 right_latex = self._binary_operand_latex(self.operands[1], operands_latex[1], side='right', subst=subst)

@@ -40,7 +40,7 @@ _DURATION_RE = re.compile(
     re.IGNORECASE,
 )
 # Characters that a ``latex_value`` body must backslash-escape.
-_LATEX_ESCAPE_CHARS = set("_{}%&#")
+_LATEX_ESCAPE_CHARS = set("_{}%&#$")
 
 
 def _get(value: Any, key: str, default: Any = None) -> Any:
@@ -482,7 +482,18 @@ def render_preview_node(
         return {"body": "", "lines": []}
     result = result_value
     lines: list[str] = []
-    for parameter in parameter_rows(item):
+    rows = parameter_rows(item)
+    reverse_value = parameter_values.get("$Rev", next(
+        (row.get("value") for row in rows if row.get("alias") == "$Rev"), None,
+    ))
+    reversed_signal = str(reverse_value).strip().lower() in {
+        "1", "-1", "true", "t", "yes", "y", "rev", "reverse",
+    }
+    signal = r"\operatorname{Resample}_{\textcolor{red}{\$F}}"
+    reverse_signal = reversed_signal and signal in result
+    if reverse_signal:
+        result = result.replace(signal, r"\textcolor{red}{-}" + signal, 1)
+    for parameter in rows:
         alias = str(_get(parameter, "alias") or "").strip()
         if not alias:
             continue
@@ -496,10 +507,23 @@ def render_preview_node(
             shown = latex_value(
                 alias if (raw == "" or raw is None) else preview_scalar_value(raw),
             )
-        token = "\\textcolor{red}{" + alias + "}"
-        result = result.replace(
-            token, shown if nested else _red(shown),
-        )
+        for spelling in {alias, alias.replace("$", r"\$")}:
+            token = "\\textcolor{red}{" + spelling + "}"
+            result = result.replace(token, shown if nested else _red(shown))
+    if reversed_signal and not reverse_signal:
+        body = strip_formula_environment(result)
+        parts = body.split(r"\\")
+        last = parts.pop().strip()
+        assignment = last.find(":=")
+        prefix = "" if assignment < 0 else last[:assignment + 2] + " "
+        operand = (last if assignment < 0 else last[assignment + 2:]).strip()
+        punctuation = operand[-1:] if operand[-1:] in {".", ",", ";"} else ""
+        parts.append(prefix + r"\textcolor{red}{-}\left("
+                     + (operand[:-1] if punctuation else operand) + r"\right)" + punctuation)
+        aligned = body != result.strip() or len(parts) > 1
+        result = r" \\ ".join(parts)
+        if aligned:
+            result = "\\begin{aligned}\n" + result + "\n\\end{aligned}"
     return {"body": result, "lines": lines}
 
 

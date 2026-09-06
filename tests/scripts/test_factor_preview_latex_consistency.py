@@ -169,3 +169,72 @@ def test_parameter_values_round_trip():
     """The exported parameter_values helper mirrors the frontend map."""
     factor = _factor("Mom", r"\textcolor{red}{N}", [("N", "WindowParam", "20d")])
     assert fpl.parameter_values(factor) == {"N": "20d"}
+
+
+def test_signal_alignment_intermediates_and_reverse_match_real_metadata():
+    from types import SimpleNamespace
+    from tools.factors import FactorFamily
+    from tools.factors.FactorExpr import ColumnRef, SignalAlign
+    from tools.data.types import DataColumn
+    from server.modules.shared.factor_instance_metadata import build_factor_instance_metadata
+    from server.services.run_input_inspection import family_template_latex
+
+    root = ColumnRef(DataColumn.CLOSE).as_intermediate()
+    family = FactorFamily(alias="LatexSignalAlignmentProbe", expr=root)
+    template = family.math_expr
+    assert template == family_template_latex(family)
+    assert r"\operatorname{Resample}_{\textcolor{red}{\$F}}" in template
+    assert r"\mathrm{I1}_t &:=" in template
+    assert r"\left(\mathrm{I1}_t\right)" in template
+    assert r"\textcolor{red}{5m}" in SignalAlign(root, "5m").to_latex()
+    cases = []
+    for frequency in ["", "5m", "1d"]:
+        for reverse in [False, True, "0", "1", "-1", "reverse"]:
+            node = build_factor_instance_metadata(
+                family, SimpleNamespace(alias="Probe"), {"$F": frequency, "$Rev": reverse},
+            )
+            assert node["math_expr"] == template
+            cases.append(node)
+    for node, result in zip(cases, _node_previews(cases, [{}] * len(cases))):
+        assert node["resolved_math_expr"] == result["expression"]
+        values = fpl.parameter_values(node)
+        assert (r"\textcolor{red}{-}" in result["expression"]) == (
+            str(values["$Rev"]).lower() in {"true", "1", "-1", "reverse"}
+        )
+        assert (r"\$F" in result["expression"]) == (values.get("$F", "") == "")
+
+    leaf = _factor("Leaf", template, [("$F", "FactorFrequencyParam", "1m"),
+                                    ("$Rev", "ReverseSignalParam", True)])
+    middle = _factor("Middle", template.replace("C_t", r"\textcolor{red}{P}"),
+                     [("$F", "FactorFrequencyParam", "5m"),
+                      ("$Rev", "ReverseSignalParam", False),
+                      ("P", "FactorParam", leaf, leaf)])
+    outer = _factor("Outer", r"\operatorname{Resample}_{\textcolor{red}{\$F}}\left(\textcolor{red}{P}\right)",
+                    [("$F", "FactorFrequencyParam", "1d"),
+                     ("$Rev", "ReverseSignalParam", True),
+                     ("P", "FactorParam", middle, middle)])
+    result = _node_previews([outer], [{}])[0]["expression"]
+    assert result == fpl.preview_expression(outer)
+    assert result.count(r"\operatorname{Resample}") == 3
+    assert result.count(r"\textcolor{red}{-}") == 2
+
+    # A signal operand may itself contain line breaks (e.g. BarSearch).
+    # Reversal belongs outside Resample, never inside that inner alignment.
+    complex_node = _factor("Search",
+        r"\operatorname{Resample}_{\textcolor{red}{\$F}}\left("
+        r"\left\{k\middle|\begin{aligned}X_t&:=C_t\\X_t-X_{t-k}&>0\end{aligned}\right\}"
+        r"\right)", [("$F", "FactorFrequencyParam", ""),
+                      ("$Rev", "ReverseSignalParam", False)])
+    overrides = {"$F": "30m", "$Rev": True}
+    result = _node_previews([complex_node], [overrides])[0]["expression"]
+    assert result == fpl.preview_expression(complex_node, overrides)
+    assert result.startswith(r"\textcolor{red}{-}\operatorname{Resample}")
+
+    class ReversedReturn(FactorFamily):
+        @staticmethod
+        def factor_expr():
+            return (-ColumnRef(DataColumn.OPEN)).as_intermediate("Returned")
+
+    reversed_family = ReversedReturn()
+    assert r"\mathrm{Returned}_t &:=" in reversed_family.math_expr
+    assert r"\left(\mathrm{Returned}_t\right)" in reversed_family.math_expr
