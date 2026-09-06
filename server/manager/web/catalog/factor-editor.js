@@ -192,6 +192,7 @@
             state.sourceVersionFingerprint =
               family.family_formula_fingerprint || "";
             state.sourceVersions = null;
+            state.sourceVersionLoadFailed = false;
             state.sourceVersionError = "";
             state.onFamilyChanged?.(family);
             redraw();
@@ -212,6 +213,10 @@
         state.family = familyPickerItems(data, state)
           .find(item => item.value === values[0])?.family || null;
         state.sourceMode = "family";
+        state.sourceVersionFingerprint = "";
+        state.sourceVersions = null;
+        state.sourceVersionLoadFailed = false;
+        state.sourceVersionError = "";
         if (state.family && !parameterDefinitions(state.family).length) {
           try {
             const loaded = await window.FTFactorDetailShared.loadSourceVersion(
@@ -230,9 +235,6 @@
         }
         state.latestFamily = state.family;
         state.parameterValues = defaults(parameterDefinitions(state.family));
-        state.sourceVersionFingerprint = "";
-        state.sourceVersions = null;
-        state.sourceVersionError = "";
         state.inspection = null;
         state.validationError = "";
         state.validationMessage = "";
@@ -254,9 +256,12 @@
         selected: state.sourceVersionFingerprint || "__current__",
         onLoaded: payload => {
           state.sourceVersions = payload;
+          state.sourceVersionLoadFailed = false;
+          state.sourceVersionError = "";
           redraw();
         },
-        onError: () => {
+        onError: error => {
+          state.sourceVersionLoadFailed = true;
           state.sourceVersionError = window.FTFactorDetailShared.sourceUnavailableText(
             context,
           );
@@ -271,6 +276,7 @@
     // eagerly load the version list so the frozen fingerprint matches a real
     // version item (onOpen above only lazily loads it on user interaction).
     if (!state.sourceVersions && !state.sourceVersionLoading
+      && !state.sourceVersionLoadFailed
       && state.sourceVersionFingerprint) {
       state.sourceVersionLoading = true;
       void window.FTFactorDetailShared.loadSourceVersions(
@@ -281,6 +287,11 @@
         redraw();
       }).catch(() => {
         state.sourceVersionLoading = false;
+        state.sourceVersionLoadFailed = true;
+        state.sourceVersionError = window.FTFactorDetailShared.sourceUnavailableText(
+          context,
+        );
+        redraw();
       });
     }
     return field(context.t("源码版本"), picker.element);
@@ -289,6 +300,7 @@
   async function selectSourceVersion(context, state, selected, redraw) {
     const fingerprint = selected === "__current__" ? "" : String(selected || "");
     state.sourceVersionFingerprint = fingerprint;
+    state.sourceVersionLoadFailed = false;
     state.sourceVersionError = "";
     state.sourceVersionLoading = Boolean(fingerprint);
     redraw();
@@ -319,6 +331,7 @@
         return [alias, previous[alias] ?? parameter.value ?? parameter.default_value ?? ""];
       }).filter(([alias]) => alias));
     } catch (_) {
+      state.sourceVersionLoadFailed = true;
       state.sourceVersionError = window.FTFactorDetailShared.sourceUnavailableText(
         context,
       );
@@ -1126,6 +1139,7 @@
       sourceVersions: null,
       sourceVersionError: "",
       sourceVersionLoading: false,
+      sourceVersionLoadFailed: false,
       // On-the-fly factor families created through the picker "+" this session.
       // They are NOT pushed into data.families (never persist), but must survive
       // a redraw so the 当场 section + selection survive a picker rebuild.
