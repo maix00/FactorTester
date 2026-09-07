@@ -150,6 +150,10 @@
       horizon: normalizeHorizon(value.horizon),
       methods,
       return_price_basis: basis,
+      ...(Object.prototype.hasOwnProperty.call(value, "warmup_mode")
+        ? {warmup_mode: String(value.warmup_mode || "auto")} : {}),
+      ...(Object.prototype.hasOwnProperty.call(value, "warmup_window")
+        ? {warmup_window: structuredClone(value.warmup_window)} : {}),
       analysis_attachments: Array.isArray(value.analysis_attachments)
         ? structuredClone(value.analysis_attachments) : [],
       editor_mounted_tabs: window.FTTestConfigurationCompiler?.authoringItemMountedTabs

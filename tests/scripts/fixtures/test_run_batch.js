@@ -455,6 +455,16 @@ const strategyScopedBacktest = {
     .map(item => item.body);
   await batch.runAll(context, state, () => {});
   assert.deepEqual(state.testRunBatch.map(item => item.jobID), ["job-1"]);
+  assert.equal(state.activeResultJobID, "job-1",
+    "a rerun must activate the Job accepted by the current submission");
+  const restoredAfterReload = {
+    ...state, testRunBatch: [], activeResultJobID: "",
+    lastSubmittedJobs: structuredClone(state.lastSubmittedJobs),
+  };
+  assert.deepEqual(
+    batch.synchronize(restoredAfterReload).map(item => item.jobID), ["job-1"],
+    "a matching configuration draft must restore its last submitted Job after reload",
+  );
   assert.deepEqual(
     requests.at(-1).body,
     icPreviewBodies[0],
@@ -471,6 +481,20 @@ const strategyScopedBacktest = {
   assert.deepEqual(state.testRunBatch.map(item => item.port), [8141]);
   assert.equal(batch.jobPath(state.testRunBatch[0]), "/jobs/8141/job-1?server_id=public-1");
   assert.match(batch.runSpecPath(state.testRunBatch[0]), /^\/reference\?kind=run-spec/);
+
+  const splitState = {...state, testRunBatch: []};
+  const splitItem = window.FTTestRunBatchModel.synchronize(splitState)[0];
+  splitItem.previewRunSpecHash = "d".repeat(64);
+  window.FTTestRunBatchModel.recordSubmission(splitItem, {
+    run_spec_hash: "d".repeat(64), run: {run_id: "run-split"},
+    port: 8141, server_id: "public-1",
+    jobs: [{job_id: "job-split-1"}, {job_id: "job-split-2"}],
+  });
+  assert.deepEqual(
+    window.FTTestRunBatchModel.resultEntries(splitState).map(item => item.jobID),
+    ["job-split-1", "job-split-2"],
+    "one page submission may expose every Job produced by server-side splitting",
+  );
 
   assert.deepEqual(batch.synchronize(backtest).map(item => item.groupID), ["__backtest__"]);
   const stableBacktestItem = backtest.testRunBatch[0];

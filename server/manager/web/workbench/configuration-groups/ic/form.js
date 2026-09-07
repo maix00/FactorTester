@@ -88,6 +88,17 @@
       field(context.t("Pearson IC"), pearson),
       field(context.t("收益率定义"), basis),
     );
+    const inheritedValues = {...state.values};
+    const initialOverrides = Object.fromEntries(
+      ["warmup_mode", "warmup_window"]
+        .filter(key => current && Object.prototype.hasOwnProperty.call(current, key))
+        .map(key => [key, structuredClone(current[key])]),
+    );
+    const overrideEditor = window.FTStrategyEditorOverrides?.create?.({
+      context, state, inheritedValues, initial: initialOverrides,
+      mountedTabs: current?.editor_mounted_tabs || [],
+      onChange: () => editorTabs?.refreshChips(),
+    });
 
     const factor = FTTestFactorCandidateSources.candidatePicker(context, state, {
       items: factorItems,
@@ -114,20 +125,22 @@
       return snapshot;
     };
     const renderFactor = () => {
+      const panelOptions = {
+        candidateControl: factor,
+        candidateLabel: context.t("因子候选"),
+        candidateHelp: context.t("从外层因子候选中选择一个冻结因子"),
+        combinationVisible: false,
+        overrideContent: overrideEditor?.panel({key: "factor"}),
+      };
       if (!factorSourceState) return FTTestFactorCandidateSources.innerPanel?.(
-        context, state, () => {}, {
-          candidateControl: factor,
-          candidateLabel: context.t("因子候选"),
-          candidateHelp: context.t("从外层因子候选中选择一个冻结因子"),
-          combinationVisible: false,
-        },
+        context, state, () => {}, panelOptions,
       ) || field(context.t("因子候选"), factor);
       syncFactorSources();
       return FTTestFactorCandidateSources.scopedSourcePanel(
         context, factorSourceState, () => {
           syncFactorSources();
           editorTabs?.refreshChips();
-        }, {combinationVisible: false},
+        }, panelOptions,
       );
     };
     const renderProduct = () => {
@@ -162,6 +175,7 @@
       mountedTabs: current?.editor_mounted_tabs || [],
       chipValues: () => ({
         ...state.values,
+        ...(overrideEditor?.value?.() || {}),
         ic_lags: [delayValue],
         factor_candidates: factorSourceState
           ? FTTestFactorCandidateSources.scopedSourceSnapshot(
@@ -181,11 +195,13 @@
       renderFactor,
       renderProduct,
       renderOverrides: ({tab}) => {
-        if (tab.field !== "ic_lags") return document.createElement("div");
-        delay.value = delayValue;
-        delay.onchange = () => { delayValue = Number(delay.value); };
-        return field(context.t(tab.label || "Delay"), delay,
-          context.t("每个配置组只允许一个非负 Delay"));
+        if (tab.field === "ic_lags") {
+          delay.value = delayValue;
+          delay.onchange = () => { delayValue = Number(delay.value); };
+          return field(context.t(tab.label || "Delay"), delay,
+            context.t("每个配置组只允许一个非负 Delay"));
+        }
+        return overrideEditor?.panel(tab) || document.createElement("div");
       },
     }) : null;
     form.append(editorTabs || structure);
@@ -219,6 +235,7 @@
           product_scope_ref: productScopeRef,
           entry_delay_bars: Number(delayValue), horizon, methods,
           return_price_basis: basis.value.trim(),
+          ...(overrideEditor?.value?.() || {}),
           ...(sourceSnapshot ? {
             factor_source_selections: sourceSnapshot.factor_source_selections,
             factor_set_selections: sourceSnapshot.factor_set_selections,

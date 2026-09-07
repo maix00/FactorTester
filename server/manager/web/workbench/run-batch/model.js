@@ -178,7 +178,7 @@
         existing.groupLabel = groupLabel(group);
         return existing;
       }
-      return {
+      const item = {
         phase: "idle", lifecycleStatus: "idle", runSpecHash: "", runSpecRecord: null,
         previewRunSpecHash: "", previewRequest: null, previewFingerprint: "",
         runID: "", jobID: "", port: 0,
@@ -186,6 +186,29 @@
         error: "", groupID,
         groupLabel: groupLabel(group),
       };
+      const restored = state.lastSubmittedJobs?.[groupID];
+      if (restored?.jobID
+          && restored.workspaceID === String(state.workspace?.workspace_id || "")
+          && restored.inputFingerprint === inputFingerprint(state, group)) {
+        Object.assign(item, {
+          phase: String(restored.phase || "submitted"),
+          lifecycleStatus: String(restored.lifecycleStatus || restored.phase || "submitted"),
+          runSpecHash: String(restored.runSpecHash || ""),
+          runID: String(restored.runID || ""), jobID: String(restored.jobID),
+          port: Number(restored.port || 0), serverID: String(restored.serverID || ""),
+          portQuery: routeQuery(restored),
+          artifactQuery: restored.serverID
+            ? `?server_id=${encodeURIComponent(restored.serverID)}` : "",
+        });
+        item.jobCandidates = (restored.jobs || []).map((job, index) => ({
+          ...item, ...clone(job), jobCandidates: undefined,
+          groupLabel: job.label || `${item.groupLabel} · Job ${index + 1}`,
+          portQuery: routeQuery(job),
+          artifactQuery: job.serverID
+            ? `?server_id=${encodeURIComponent(job.serverID)}` : "",
+        }));
+      }
+      return item;
     });
     if (!state.testRunBatch.some(item => item.groupID === state.activeRunGroupID)) {
       state.activeRunGroupID = state.testRunBatch[0]?.groupID || "";
@@ -226,11 +249,11 @@
   }
 
   function resultEntries(state) {
-    return taskEntries(state, {submittedOnly: true}).map(entry => ({
-      jobID: entry.item.jobID,
-      label: entry.item.groupLabel,
-      item: entry.item,
-    }));
+    return taskEntries(state, {submittedOnly: true}).flatMap(entry => {
+      const items = entry.item.jobCandidates?.length
+        ? entry.item.jobCandidates : [entry.item];
+      return items.map(item => ({jobID: item.jobID, label: item.groupLabel, item}));
+    });
   }
 
   function activeResultEntry(state, entries) {
@@ -351,24 +374,30 @@
   }
 
   function recordSubmission(item, value) {
-    const job = value.jobs?.[0];
-    if (!job?.job_id) throw new Error("任务提交响应缺少 Job ID");
+    const jobs = Array.isArray(value.jobs) ? value.jobs : [];
+    if (!jobs.length || jobs.some(job => !job?.job_id)) {
+      throw new Error("任务提交响应缺少 Job ID");
+    }
     const submittedHash = assertPreviewMatch(item, value);
-    item.phase = "submitted";
-    item.lifecycleStatus = "submitted";
-    item.progressStreamClosed = false;
-    item.jobID = String(job.job_id);
-    item.runID = String(value.run?.run_id || value.run_id || job.run_id || "");
-    item.runSpecHash = submittedHash || String(
-      value.run?.run_spec_hash || job.run_spec_hash || item.runSpecHash || "",
-    ).replace(/^sha256:/, "");
-    item.port = Number(value.port || job.server_context?.port || job.port || 0);
-    item.serverID = String(
-      value.server_id || value.execution_server_id
+    const runID = String(value.run?.run_id || value.run_id || jobs[0].run_id || "");
+    const candidates = jobs.map((job, index) => ({
+      phase: "submitted", lifecycleStatus: "submitted", progressStreamClosed: false,
+      jobID: String(job.job_id), runID,
+      runSpecHash: submittedHash,
+      port: Number(value.port || job.server_context?.port || job.port || 0),
+      serverID: String(value.server_id || value.execution_server_id
         || job.server_id || job.execution_server_id
-        || job.server_context?.server_id || "",
-    ).trim();
-    item.portQuery = routeQuery(item);
+        || job.server_context?.server_id || "").trim(),
+      groupID: item.groupID,
+      groupLabel: jobs.length === 1 ? item.groupLabel : `${item.groupLabel} · Job ${index + 1}`,
+      error: "", artifactQuery: "",
+    }));
+    candidates.forEach(candidate => { candidate.portQuery = routeQuery(candidate); });
+    item.jobCandidates = candidates;
+    Object.assign(item, candidates[0]);
+    item.runSpecHash = submittedHash || String(
+      value.run?.run_spec_hash || jobs[0].run_spec_hash || item.runSpecHash || "",
+    ).replace(/^sha256:/, "");
     item.detailPayload = null;
     item.taskDetail = null;
     item.job = null;

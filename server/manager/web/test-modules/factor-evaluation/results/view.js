@@ -52,25 +52,31 @@
     const customTabs = options.customAnalyses?.tabs({
       onDeleted: () => { state.activeTab = "series"; render(context, target, state); },
     }) || [];
+    const tabs = FTJobResultTabs.compose({
+      tabs: [{key: "series", label: "因子序列"}],
+      resultSummary: options.resultSummary, customTabs,
+    });
+    state.activeTab = FTJobResultTabs.active(tabs, state.activeTab, "series");
     const header = window.FTJobResultTabs.create(context, {
       className: "factor-series-result-header",
-      tabs: [{key: "series", label: "因子序列"}, ...customTabs],
+      tabs,
       active: state.activeTab,
-      onChange: async key => {
-        if (key === "custom-analysis:new") {
-          try {
-            const analysis = await options.customAnalyses.add();
-            state.activeTab = options.customAnalyses.keyFor(analysis.tab_id);
-          } catch (error) {
-            context.showNotice?.(error.message || String(error), true);
-          }
-        } else state.activeTab = key;
-        render(context, target, state);
-      },
+      onChange: key => void FTJobResultTabs.activate(context, key, {
+        customAnalyses: options.customAnalyses,
+        onActive: next => { state.activeTab = next; render(context, target, state); },
+      }),
     }).header;
     const content = document.createElement("div");
     content.className = "factor-series-result-content";
     const customID = options.customAnalyses?.tabIDFor(state.activeTab);
+    const standard = FTJobResultTabs.standardContent(
+      context, state.activeTab, options.resultSummary,
+    );
+    if (standard) {
+      content.append(standard);
+      target.replaceChildren(header, content);
+      return;
+    }
     if (customID) {
       options.customAnalyses.render(customID, content, {
         onTabsChanged: () => render(context, target, state),

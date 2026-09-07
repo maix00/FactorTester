@@ -22,12 +22,16 @@ const created = model.add(state, {
   horizon: {sampling: "explicit", bases: ["signal"], multipliers: [1, 5]},
   methods: ["rank"],
   return_price_basis: "next_open_to_open_adjusted",
+  warmup_mode: "fixed",
+  warmup_window: "10d",
 });
 assert.match(created.config_group_id, /^icg_/);
 assert.match(created.batch_id, /^icb_/);
 assert.equal(created.factor_ref, factorRef);
 assert.equal(created.product_scope_ref, "product-group:pg-day");
 assert.equal(created.entry_delay_bars, 1);
+assert.equal(created.warmup_mode, "fixed");
+assert.equal(created.warmup_window, "10d");
 assert.deepEqual(created.editor_mounted_tabs, [
   "__configuration__", "factor", "product_path_selection",
 ]);

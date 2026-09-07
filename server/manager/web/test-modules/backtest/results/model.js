@@ -383,8 +383,7 @@
     const availableArtifacts = new Set(artifactNames.map(String));
     const hasPayload = name => Boolean(payloads[name]) || availableArtifacts.has(name);
     const result = [];
-    if (window.FTBacktestRuntimeModel?.rows?.(summary).length
-      || summaryRows(payloads, summary).length) result.push("overview");
+    if (summaryRows(payloads, summary).length) result.push("overview");
     if (metricMatrix(summary).entries.length) result.push("strategy_stats");
     const surfaces = new Set();
     for (const [artifact, definition] of resultViews(declarations)) {

@@ -734,6 +734,7 @@
   ],
   "job-detail-previews": [
    "core/market-data.js",
+   "test-modules/shared/results/runtime-summary.js",
    "jobs/highcharts-timeline.js",
    "jobs/highcharts-viewers.js",
    "jobs/job-artifact-viewers.js"
@@ -750,7 +751,6 @@
    "jobs/ic-result-view.js"
   ],
   "job-detail-backtest": [
-   "test-modules/backtest/results/runtime-model.js",
    "test-modules/backtest/results/model.js",
    "test-modules/backtest/results/strategy-selection.js",
    "test-modules/backtest/results/analysis/api.js",
@@ -1018,7 +1018,7 @@
   "jobs/ic-result-model.js",
   "jobs/ic-portfolio-view.js",
   "jobs/ic-result-charts.js",
-  "test-modules/backtest/results/runtime-model.js",
+  "test-modules/shared/results/runtime-summary.js",
   "test-modules/backtest/results/model.js",
   "test-modules/backtest/results/strategy-selection.js",
   "test-modules/backtest/results/event-flow.js",

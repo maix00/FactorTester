@@ -36,6 +36,7 @@
       portQuery: options.executionQuery,
       configuration: options.taskDetail.configuration || {},
       resultDeclarations: options.taskDetail.output_declarations || [],
+      resultSummary: options.results || options.payload.result_summary || {},
       customAnalyses: options.customAnalyses,
     };
     const factorSeries = window.FTFactorSeriesResults?.section(context, {
@@ -66,25 +67,27 @@
       const customTabs = options.customAnalyses?.tabs({
         onDeleted: () => { state.activeTab = "result"; render(); },
       }) || [];
+      const tabs = FTJobResultTabs.compose({
+        tabs: [{key: "result", label: "结果"}],
+        resultSummary: options.results, customTabs,
+      });
+      state.activeTab = FTJobResultTabs.active(tabs, state.activeTab, "result");
       const header = FTJobResultTabs.create(context, {
-        tabs: [{key: "result", label: "结果"}, ...customTabs],
+        tabs,
         active: state.activeTab,
-        onChange: async key => {
-          if (key === "custom-analysis:new") {
-            try {
-              const analysis = await options.customAnalyses.add();
-              state.activeTab = options.customAnalyses.keyFor(analysis.tab_id);
-            } catch (error) {
-              context.showNotice?.(error.message || String(error), true);
-            }
-          } else state.activeTab = key;
-          render();
-        },
+        onChange: key => void FTJobResultTabs.activate(context, key, {
+          customAnalyses: options.customAnalyses,
+          onActive: next => { state.activeTab = next; render(); },
+        }),
       }).header;
       const content = document.createElement("div");
       content.className = "generic-job-result-content";
       const customID = options.customAnalyses?.tabIDFor(state.activeTab);
-      if (customID) {
+      const standard = FTJobResultTabs.standardContent(
+        context, state.activeTab, options.results,
+      );
+      if (standard) content.append(standard);
+      else if (customID) {
         options.customAnalyses.render(customID, content, {
           onTabsChanged: render,
           onDeleted: () => { state.activeTab = "result"; render(); },

@@ -2,6 +2,7 @@
   const tabLabels = Object.freeze({
     overview: "概览", strategy_stats: "策略统计", time_series: "时变指标",
     execution_account: "交易与账户", return_analysis: "收益与风险",
+    runtime_summary: "运行摘要",
   });
 
   function relevantArtifacts(artifacts) {
@@ -14,7 +15,7 @@
   function supports(artifacts, summary = {}) {
     return relevantArtifacts(artifacts).length > 0
       || Boolean(summary?.metrics && Object.keys(summary.metrics).length)
-      || Boolean(window.FTBacktestRuntimeModel?.rows?.(summary).length);
+      || Boolean(window.FTRuntimeSummary?.rows?.(summary).length);
   }
 
   function artifactPath(jobID, artifact, artifactQuery) {
@@ -125,44 +126,6 @@
       },
       values: row => columns.map(item => row[item[0]]),
     });
-  }
-
-  function runtimeTable(context, state) {
-    const rows = state.strategyScope.filterRows(
-      window.FTBacktestRuntimeModel.rows(state.model.summary),
-    );
-    if (!rows.length) return null;
-    const section = document.createElement("section");
-    section.className = "backtest-runtime-summary";
-    const heading = document.createElement("h3");
-    heading.textContent = context.t("策略运行摘要");
-    const page = Number(state.tablePages.runtime || 1);
-    const table = window.FTUI.pagedTable(
-      [context.t("类型"), context.t("状态"), context.t("说明")],
-      rows.map(row => [row.type, row.status, row.detail].map(value => (
-        window.FTRichText.inline(String(value ?? ""), context)
-      ))),
-      {
-        page, pageSize: 20,
-        previousLabel: context.t("上一页"), nextLabel: context.t("下一页"),
-        pageLabel: (current, total) => `${current} / ${total}`,
-        totalLabel: total => `${context.t("共")} ${total} ${context.t("行")}`,
-        onPageChange: next => {
-          state.tablePages.runtime = next;
-          renderLoaded(context, state.target, state);
-        },
-      },
-    );
-    table.shell.classList.add(
-      "backtest-domain-table", "backtest-runtime-table",
-    );
-    const visibleRows = rows.slice(table.start, table.start + table.pageSize);
-    Array.from(table.body.rows).forEach((row, index) => {
-      const level = String(visibleRows[index]?.level || "info");
-      row.dataset.level = level;
-    });
-    section.append(heading, table.shell);
-    return section;
   }
 
   function groupMetricsTable(context, state) {
@@ -311,8 +274,6 @@
       const root = document.createElement("div");
       root.className = "backtest-overview-surface";
       root.append(window.FTBacktestResultSurfaces.toolbar(context, state));
-      const runtime = runtimeTable(context, state);
-      if (runtime) root.append(runtime);
       if (state.model.summaryRows.length) root.append(summaryTable(context, state));
       if (window.FTBacktestResultModel.initialSnapshot(state.model.summary)) {
         const actions = document.createElement("div");
@@ -324,6 +285,14 @@
       }
       return root.childElementCount ? root : message(context, "暂无回测汇总");
     }
+    const standard = FTJobResultTabs.standardContent(
+      context, state.activeTab, state.model.summary, {
+        filterRows: rows => state.strategyScope.filterRows(rows),
+        page: state.tablePages.runtime,
+        onPageChange: next => { state.tablePages.runtime = next; renderLoaded(context, state.target, state); },
+      },
+    );
+    if (standard) return standard;
     if (state.activeTab === "strategy_stats") {
       const root = document.createElement("div");
       root.className = "backtest-overview-surface";
@@ -437,27 +406,19 @@
         renderLoaded(context, target, state);
       },
     }) || [];
+    const tabs = FTJobResultTabs.compose({
+      tabs: state.model.tabs.map(key => ({key, label: tabLabels[key]})),
+      resultSummary: state.model.summary, customTabs,
+    });
+    state.activeTab = FTJobResultTabs.active(tabs, state.activeTab, "overview");
     const header = window.FTJobResultTabs.create(context, {
       className: "backtest-domain-header",
-      tabs: [
-        ...state.model.tabs.map(key => ({key, label: tabLabels[key]})),
-        ...customTabs,
-      ],
+      tabs,
       active: state.activeTab,
-      onChange: async key => {
-        if (key === "custom-analysis:new") {
-          try {
-            const analysis = await state.customAnalyses.add();
-            state.activeTab = state.customAnalyses.keyFor(analysis.tab_id);
-          } catch (error) {
-            context.showNotice?.(error.message || String(error), true);
-          }
-          renderLoaded(context, target, state);
-          return;
-        }
-        state.activeTab = key;
-        renderLoaded(context, target, state);
-      },
+      onChange: key => void FTJobResultTabs.activate(context, key, {
+        customAnalyses: state.customAnalyses,
+        onActive: next => { state.activeTab = next; renderLoaded(context, target, state); },
+      }),
     }).header;
     const content = document.createElement("div"); content.className = "backtest-domain-content";
     content.append(tabContent(context, state));

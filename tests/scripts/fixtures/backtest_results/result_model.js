@@ -149,7 +149,8 @@ const runtimeSummary = {
 };
 const runtimeModel = window.FTBacktestResultModel.build({}, runtimeSummary);
 assert.equal(runtimeModel.payloads.result, undefined, "the retained result blob is not a viewer payload");
-assert.equal(runtimeModel.tabs[0], "overview", "runtime summary belongs to the consolidated overview");
+assert.ok(!runtimeModel.tabs.includes("runtime_summary"),
+  "the module model leaves standard result tabs to the shared registry");
 assert.deepEqual(window.FTBacktestRuntimeModel.rows(runtimeModel.summary), [
   {type: "当前运行配置", status: "默认", detail: "资金分配: 等权"},
   {type: "默认值替换", status: "已使用默认值", detail: "一个设置被执行引擎替换；fee_mode: auto → fixed"},

@@ -140,6 +140,11 @@ def _typed_ic_execution_payload(payload: dict[str, Any]) -> dict[str, Any]:
     execution["return_price_basis"] = str(
         core.get("return_price_basis") or "next_open_to_open_adjusted"
     )
+    group_settings = (typed.get("group_execution_settings") or {}).get(
+        str(core.get("request_ref") or ""), {}
+    )
+    execution["warmup_mode"] = str(group_settings.get("warmup_mode") or "auto")
+    execution["warmup_window"] = group_settings.get("warmup_window", "30d")
     resolved_by_factor = (
         (typed.get("resolved_horizons_by_request") or {})
         .get(str(core.get("request_ref") or ""), {})

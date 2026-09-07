@@ -28,6 +28,7 @@ def register_factor_execution_base(
     *,
     tab: str = "factor",
     warmup_mode_default: str = "auto",
+    scope_policy: ScopePolicy = ScopePolicy.LOCAL_ONLY,
 ) -> None:
     warmup_default_if = (
         {
@@ -47,7 +48,7 @@ def register_factor_execution_base(
         tab,
         "select",
         "auto",
-        ScopePolicy.LOCAL_ONLY,
+        scope_policy,
         module="factor_execution",
         options=(
             SettingOption("auto", "自动选择"),
@@ -62,7 +63,7 @@ def register_factor_execution_base(
         tab,
         "select",
         warmup_mode_default,
-        ScopePolicy.LOCAL_ONLY,
+        scope_policy,
         module="factor_execution",
         options=(
             SettingOption("none", "不使用"),
@@ -83,7 +84,7 @@ def register_factor_execution_base(
         tab,
         "text",
         "30d",
-        ScopePolicy.LOCAL_ONLY,
+        scope_policy,
         module="factor_execution",
         chip_template="前摇时长: {value}",
         visible_if={"warmup_mode": ("fixed",)},
