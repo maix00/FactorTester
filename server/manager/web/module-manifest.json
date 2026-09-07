@@ -882,7 +882,7 @@
   "workbench-configuration-groups": [
    "workbench/tab-list-chip.js",
    "workbench/configuration-groups/common/surface.js",
-   "workbench/strategy-editor-scope.js",
+   "workbench/shared/strategy-editor-scope.js",
    "workbench/strategy-editor-tabs.js",
    "workbench/strategy-editor-pickers.js",
    "workbench/strategy-list.js"
@@ -1144,7 +1144,7 @@
   "workbench/test-settings.js",
   "workbench/test-settings-schema.js",
   "workbench/backtest-group-overrides.js",
-  "workbench/strategy-editor-scope.js",
+  "workbench/shared/strategy-editor-scope.js",
   "workbench/strategy-editor-tabs.js",
   "workbench/strategy-editor-overrides.js",
   "workbench/strategy-editor-pickers.js",
