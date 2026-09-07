@@ -112,17 +112,25 @@ def _typed_ic_execution_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "paths": paths,
     }
     execution["paths"] = paths
-    factors = []
-    for item in execution.get("factors") or []:
+    frozen_factors = (
+        (run_spec.get("configuration") or {}).get("shared", {}).get("factors")
+        or execution.get("factors") or []
+    )
+    matches = []
+    for item in frozen_factors:
         try:
             frozen_factor = require_frozen_factor(item)
         except (TypeError, ValueError):
             continue
         if frozen_factor["ref"] == factor_ref:
-            factors.append(deepcopy(frozen_factor))
-    if len(factors) != 1:
+            matches.append(frozen_factor)
+    if len(matches) != 1:
         raise ValueError(f"typed IC factor descriptor is not frozen: {factor_ref}")
-    execution["factors"] = factors
+    # Preserve the complete records and dependency graph.  Normalizing through
+    # require_frozen_factor here would retain identity only and strand nested
+    # FactorParam refs in the worker.
+    execution["factors"] = deepcopy(frozen_factors)
+    execution["factor_ref"] = factor_ref
     execution["ic_lags"] = list(core.get("entry_delay_bars") or [0])
     methods = [str(value) for value in core.get("methods") or []]
     execution["ic_correlation"] = (

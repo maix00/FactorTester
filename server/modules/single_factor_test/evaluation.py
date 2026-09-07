@@ -28,7 +28,7 @@ from server.modules.shared.factor_tester_runtime import (
 )
 from server.modules.shared.submission_helpers import product_attrs
 from tools.products.product_path_selection import ProductPathSelection
-from server.services.factor_registry import factor_from_alias, get_factor_family_instance
+from server.services.factor_registry import get_factor_family_instance
 from server.services.session_runtime import current_user_obj, user_obj_for_name
 from tools.data.types import DataTime
 from tools.data.types import finest_index
@@ -114,21 +114,13 @@ class FactorEvaluation:
         )
 
     def _resolve_run_factor(self):
-        from server.services.external_factor_artifacts import factor_by_alias
-        external = factor_by_alias(self.external_factor_artifacts, self.factor_alias)
-        if external is not None:
-            return external
-        if self.frozen_factors:
-            from server.modules.shared.factor_param_resolver import resolve_factor_param_value
-            from server.modules.shared.factor_param_utils import unique_frozen_factor_records
-            records = unique_frozen_factor_records(self.frozen_factors)
-            matches = [row for row in records if
-                       (row['ref'] == self.factor_ref if self.factor_ref else row['alias'] == self.factor_alias)]
-            if len(matches) != 1:
-                raise ValueError('运行配置不能唯一确定冻结因子')
-            return resolve_factor_param_value(matches[0], username=self.owner,
-                                              frozen_by_ref={row['ref']: row for row in records})
-        return factor_from_alias(self.factor_alias, username=self.owner)
+        from server.modules.shared.run_spec_resolution.factors import RunFactorResolver
+
+        return RunFactorResolver(
+            owner=self.owner,
+            frozen_factors=self.frozen_factors,
+            external_factor_artifacts=self.external_factor_artifacts,
+        ).resolve(factor_ref=self.factor_ref, alias=self.factor_alias)
 
     def run(self) -> dict[str, Any]:
         started_at = time.time()

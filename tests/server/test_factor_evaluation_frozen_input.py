@@ -17,7 +17,7 @@ def test_evaluation_resolves_primary_and_nested_factor_from_run_snapshot(monkeyp
     calls = []
     monkeypatch.setattr(factor_param_resolver, 'resolve_factor_param_value',
                         lambda value, **kwargs: calls.append((value, kwargs)) or 'resolved')
-    monkeypatch.setattr('server.modules.single_factor_test.evaluation.factor_from_alias',
+    monkeypatch.setattr('server.services.factor_registry.factor_from_alias',
                         lambda *args, **kwargs: pytest.fail('must not consult the mutable catalog'))
     evaluation = FactorEvaluation(selection=None, factor_family_alias='Parent',
                                   factor_alias=parent['alias'], page_uuid='', owner='alice',
