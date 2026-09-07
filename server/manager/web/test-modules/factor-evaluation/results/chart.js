@@ -48,6 +48,7 @@
     }
     target?.__ftFactorSeriesObserver?.disconnect?.();
     if (target) {
+      if (target._ftChart === chart) target._ftChart = null;
       target.__ftFactorSeriesChart = null;
       target.__ftFactorSeriesObserver = null;
     }

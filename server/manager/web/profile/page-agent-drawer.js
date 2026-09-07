@@ -1,5 +1,94 @@
 (() => {
+  const drawers = new Map();
+  let activeContext = null;
+  let globalToggle = null;
+  let suppressClick = false;
+
+  function positionKey(context) {
+    return `ft-page-agent-toggle-y:${String(context?.tabID || location.pathname)}`;
+  }
+
+  function applyPosition(context) {
+    if (!globalToggle) return;
+    const value = Number(localStorage.getItem(positionKey(context)));
+    const top = Number.isFinite(value) ? value : window.innerHeight / 2;
+    globalToggle.style.top = `${Math.max(28, Math.min(window.innerHeight - 28, top))}px`;
+  }
+
+  function ensureToggle(context) {
+    activeContext = context || activeContext;
+    if (globalToggle?.isConnected) {
+      applyPosition(activeContext);
+      return globalToggle;
+    }
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "page-agent-drawer-toggle";
+    toggle.replaceChildren(FTIcons.node("person.crop.rectangle.stack"));
+    toggle.title = context.t("智能体助手");
+    toggle.setAttribute("aria-label", toggle.title);
+    toggle.setAttribute("aria-expanded", "false");
+    document.body.append(toggle);
+    let pointerID = null;
+    let startY = 0;
+    let moved = false;
+    toggle.addEventListener("pointerdown", event => {
+      pointerID = event.pointerId; startY = event.clientY; moved = false;
+      toggle.setPointerCapture?.(pointerID);
+    });
+    toggle.addEventListener("pointermove", event => {
+      if (event.pointerId !== pointerID) return;
+      if (Math.abs(event.clientY - startY) > 3) moved = true;
+      if (!moved) return;
+      const top = Math.max(28, Math.min(window.innerHeight - 28, event.clientY));
+      toggle.style.top = `${top}px`;
+    });
+    const finishDrag = event => {
+      if (event.pointerId !== pointerID) return;
+      if (moved) {
+        localStorage.setItem(positionKey(activeContext), String(event.clientY));
+        suppressClick = true;
+      }
+      pointerID = null;
+    };
+    toggle.addEventListener("pointerup", finishDrag);
+    toggle.addEventListener("pointercancel", finishDrag);
+    toggle.addEventListener("click", () => {
+      if (suppressClick) { suppressClick = false; return; }
+      const tabID = String(activeContext?.tabID || "");
+      let drawer = drawers.get(tabID);
+      if (!drawer && activeContext) {
+        drawer = attach(activeContext, {
+          resolveProfile: () => window.FTPageAgentProfiles.self(activeContext),
+          assistanceEnabled: false,
+        });
+      }
+      void drawer?.open();
+    });
+    globalToggle = toggle;
+    applyPosition(activeContext);
+    return toggle;
+  }
+
+  function activate(context) {
+    activeContext = context;
+    const toggle = ensureToggle(context);
+    const tabID = String(context?.tabID || "");
+    drawers.forEach((drawer, key) => {
+      if (key !== tabID) drawer.shell.hidden = true;
+    });
+    const current = drawers.get(tabID);
+    const open = current?.shell?.dataset.ftPageAgentDesiredOpen === "true";
+    if (current) current.shell.hidden = !open;
+    toggle.hidden = Boolean(open);
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    applyPosition(context);
+  }
+
   function attach(context, options = {}) {
+    const tabID = String(context.tabID || "");
+    const previous = drawers.get(tabID);
+    if (previous) previous.shell.remove();
     const shell = document.createElement("aside");
     shell.className = "page-agent-drawer";
     shell.dataset.ftPageAgentTab = context.tabID;
@@ -37,15 +126,7 @@
     shell.append(header, body);
     (options.host || document.body).append(shell);
 
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "page-agent-drawer-toggle";
-    toggle.replaceChildren(FTIcons.node("person.crop.rectangle.stack"));
-    toggle.title = options.buttonLabel || context.t("智能体助手");
-    toggle.setAttribute("aria-label", toggle.title);
-    toggle.dataset.ftPageAgentTab = context.tabID;
-    toggle.dataset.ftPageAgentRole = "toggle";
-    document.body.append(toggle);
+    const toggle = ensureToggle(context);
 
     let mounted = false;
     let opening = null;
@@ -96,7 +177,7 @@
       const nextID = String(profile?.profile_id || "").trim();
       if (!nextID || nextID === profileID) return;
       if (profileID) context.pageAgentLifecycle.hide(profileID, context.tabID);
-      options.assistance.disconnect?.();
+      options.assistance?.disconnect?.();
       options.onProfileChange?.(profile);
       profileID = nextID;
       activeProfile = profile;
@@ -125,7 +206,7 @@
       }),
       dispose: () => {
         shell.remove();
-        toggle.remove();
+        if (drawers.get(tabID)?.shell === shell) drawers.delete(tabID);
       },
     });
 
@@ -152,9 +233,10 @@
           }
           const lifecycle = await context.pageAgentLifecycle.open(profileID, context.tabID);
           body.classList.add("page-agent-drawer-body-conversation-only");
-          const assistanceReady = options.assistance.connect
+          const assistanceReady = options.assistanceEnabled !== false
+            && options.assistance?.connect
             ? options.assistance.connect()
-            : Promise.resolve(options.assistance.prepare?.());
+            : Promise.resolve(options.assistance?.prepare?.());
           const chatReady = window.FTAgentChat.render(context, profile, {
             conversationOnly: true,
             lifecycleManaged: true,
@@ -200,14 +282,16 @@
       desiredOpen ? void open() : restoreClosed()
     );
 
-    toggle.addEventListener("click", () => shell.hidden ? void open() : hide());
     close.addEventListener("click", hide);
     profileButton.addEventListener("click", profileDetails);
     profileMenuButton.addEventListener("click", () => {
       profileMenu.hidden = !profileMenu.hidden;
     });
-    return Object.freeze({hide, open, registration, shell, toggle});
+    const api = Object.freeze({hide, open, registration, shell, toggle});
+    drawers.set(tabID, api);
+    if (activeContext?.tabID === context.tabID) activate(context);
+    return api;
   }
 
-  window.FTPageAgentDrawer = Object.freeze({attach});
+  window.FTPageAgentDrawer = Object.freeze({activate, attach, ensureGlobal: activate});
 })();

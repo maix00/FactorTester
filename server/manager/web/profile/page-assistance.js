@@ -128,11 +128,12 @@
       },
     });
     context.pageState?.register?.("page-assistance-connection", {
-      restore: () => { void controller.connect().catch(() => {}); },
+      // The global trigger owns activation. Restoring a parked tab must not
+      // load the assistance bridge until the user opens the drawer.
+      restore: () => {},
       dispose: controller.disconnect,
     });
     if (context.isRouteCurrent?.() !== false) {
-      void controller.connect().catch(() => {});
       window.FTPageAgentDrawer.attach(
         context, {
           ...options,
