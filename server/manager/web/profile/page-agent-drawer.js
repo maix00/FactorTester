@@ -76,8 +76,10 @@
       const tabID = String(activeContext?.tabID || "");
       let drawer = drawers.get(tabID);
       if (!drawer && activeContext) {
-        drawer = attach(activeContext, {
-          resolveProfile: () => window.FTPageAgentProfiles.self(activeContext),
+        const context = activeContext;
+        drawer = attach(context, {
+          resolveProfiles: () => window.FTPageAgentProfiles.forPage(context),
+          resolveProfile: () => window.FTPageAgentProfiles.self(context),
           assistanceEnabled: false,
         });
       }

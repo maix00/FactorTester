@@ -372,7 +372,8 @@ def test_page_agent_trigger_is_global_lazy_and_draggable() -> None:
     assert 'toggle.addEventListener("pointermove"' in drawer
     assert "localStorage.setItem(positionKey(activeContext)" in drawer
     assert "assistanceEnabled: false" in drawer
-    assert "FTPageAgentProfiles.self(activeContext)" in drawer
+    assert "FTPageAgentProfiles.forPage(context)" in drawer
+    assert "const context = activeContext" in drawer
     assert "void controller.connect()" not in assistance
     assert "FTPageAgentDrawer?.activate?.(appContext" in coordinator
     assert 'document.querySelector(".topbar")' in drawer
