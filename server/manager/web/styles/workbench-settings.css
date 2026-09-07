@@ -79,7 +79,6 @@ button.backend-setting-chip:hover { border-color: color-mix(in srgb, var(--accen
 .tab-chip-content-panel { min-width: 0; }
 .test-field-table { --test-field-label-width: 160px; display: grid; min-width: 0; }
 .tab-chip-content-panel .ft-multi-select-filter { width: 100%; max-width: none; }
-.ft-test-object-picker-loading { display: block; margin-top: 4px; color: var(--muted); }
 .shared-field-value-selector { min-width: 0; }
 .test-settings-manager { display: grid; gap: 4px; padding: 7px 0 9px; }
 .test-settings-manager-list { display: grid; width: 100%; max-width: 100%; min-width: 0; overflow: hidden; }
@@ -104,6 +103,14 @@ button.backend-setting-chip:hover { border-color: color-mix(in srgb, var(--accen
 .test-factor-candidate-sources > .test-setting-row { min-width: 0; }
 .test-factor-candidate-heading-row .test-field-row-control { min-width: 0; }
 .test-setting-row { min-height: 44px; display: grid; grid-template-columns: minmax(0, var(--test-field-label-width, 160px)) minmax(0, 1fr); gap: 12px; align-items: center; border-bottom: 1px solid var(--line); }
+.tab-chip-content-panel .test-field-table > .test-setting-row:first-child,
+.tab-chip-content-panel .test-field-table > :first-child .test-setting-row:first-child {
+  border-top: 0;
+}
+.tab-chip-content-panel .test-field-table > .test-setting-row:last-child,
+.tab-chip-content-panel .test-field-table > :last-child .test-setting-row:last-child {
+  border-bottom: 0;
+}
 .test-setting-row.is-locked { background: color-mix(in srgb, var(--panel) 72%, var(--line)); }
 .test-setting-row.is-locked .test-field-row-control { opacity: .72; }
 .test-field-row-lock { color: var(--muted); font-size: 12px; line-height: 1.35; }

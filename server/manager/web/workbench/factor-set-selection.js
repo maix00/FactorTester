@@ -114,6 +114,7 @@
       selected: selections(state).map(item => item.target_ref),
       loading: FTTestObjectPicker.lazyLoading(state, "factors") && !items.length,
       loadingText: context.t("正在读取因子集合…"),
+      errorText: state.factorSetCatalog?.error || "",
       onCreate: context.session ? () => {
         void FTTestLazyCode.openObjectEditor(context, {
           kind: "factor_set",
@@ -138,11 +139,6 @@
       onChange: values => { void updateSelection(values); },
     });
     root.append(picker.element);
-    if (state.factorSetCatalog?.error) {
-      const error = document.createElement("p");
-      error.className = "form-error"; error.textContent = state.factorSetCatalog.error;
-      root.append(error);
-    }
     return root;
   }
 

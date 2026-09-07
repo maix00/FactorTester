@@ -206,6 +206,18 @@ locked.dropdown.open = true;
 locked.summary.listeners.click({preventDefault() {}});
 assert.equal(locked.dropdown.open, false);
 
+const loading = window.FTMultiSelectFilter.create({t: value => value}, {
+  items: [], loading: true, loadingText: "正在读取产品组候选…",
+});
+assert.equal(loading.summary.children[0].textContent, "正在读取产品组候选…");
+assert.equal(descendants(loading.element).some(item => (
+  item.className === "ft-test-object-picker-loading"
+)), false, "library loading state belongs to the dropdown summary");
+const failed = window.FTMultiSelectFilter.create({t: value => value}, {
+  items: [], errorText: "产品组候选读取失败: timeout",
+});
+assert.equal(failed.summary.children[0].textContent, "产品组候选读取失败: timeout");
+
 (async () => {
   await inputOf(multi, "b").listeners.click({preventDefault() {}});
   assert.deepEqual(multi.values, ["b"]);

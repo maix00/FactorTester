@@ -136,6 +136,7 @@
       multi: true,
       loading: FTTestObjectPicker.lazyLoading(state, "factors"),
       loadingText: context.t("正在读取因子候选…"),
+      errorText: state.lazy?.factors?.error || "",
       onCreate: context.session ? () => void (
         window.FTStrategyEditorFactorOverlay?.open
           ? FTStrategyEditorFactorOverlay.open(
@@ -246,6 +247,7 @@
       multi: true,
       loading: FTTestObjectPicker.lazyLoading(state, "factors"),
       loadingText: context.t("正在读取因子候选…"),
+      errorText: state.lazy?.factors?.error || state.factorSetCatalog?.error || "",
       // Lazily load factor-set candidates so the 因子集合 group is populated.
       onOpen: async () => {
         if (!(state.factorSetCatalog?.items || []).length
@@ -315,7 +317,7 @@
         picker?.setValues(currentSelected());
       }).catch(() => {});
     }
-    return picker.element;
+    return picker;
   }
 
   async function updateCombined(context, state, items, values, refresh) {
@@ -404,6 +406,7 @@
       name: options.name || "test-factor-candidates",
       loading: options.loading === true,
       loadingText: context.t(options.loadingText || "正在读取因子候选…"),
+      errorText: options.errorText || state.lazy?.factors?.error || "",
       onCreate: context.session && options.canCreate !== false ? () => void (
         window.FTStrategyEditorFactorOverlay?.open
           ? FTStrategyEditorFactorOverlay.open(context, state, saved)
@@ -501,20 +504,16 @@
   function panel(context, state, refresh, options = {}) {
     const root = document.createElement("div");
     root.className = "test-factor-candidate-sources";
-    const error = document.createElement("p");
-    error.className = "form-error";
+    let direct = null;
     const refreshPanel = () => {
-      error.textContent = state.factorSetCatalog?.error || "";
-      error.hidden = !error.textContent;
+      direct?.setStatus?.({errorText: state.factorSetCatalog?.error || ""});
       refresh?.();
     };
-    error.textContent = state.factorSetCatalog?.error || "";
-    error.hidden = !error.textContent;
     // The candidate field is the shared multi-select itself. Its closed
     // summary and checked menu rows are the only selected-object rendering in
     // Factor Execution; callers must not duplicate that state beside it.
-    const direct = combinedControl(context, state, refreshPanel);
-    root.append(candidateHeading(context, state, direct), error);
+    direct = combinedControl(context, state, refreshPanel);
+    root.append(candidateHeading(context, state, direct));
     const roleField = options.includeRoles === false
       ? null : state.manifest?.defaults?.factor_role_bindings;
     if (roleField && FTSettingRules.isVisible(roleField, state.values)

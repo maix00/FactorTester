@@ -9,7 +9,7 @@
   }
 
   function create({
-    context, options, controlDisabled, search, loadStatus,
+    context, options, controlDisabled, search,
     setItems, refresh,
   }) {
     const loadItems = options.loadItems;
@@ -21,14 +21,7 @@
     let timer = null;
 
     function render() {
-      loadStatus.hidden = !loading && !errorText
-        && !(loadedQuery !== null && resultCount === 0);
-      loadStatus.textContent = loading
-        ? (options.loadingText || translate(context, "正在读取候选…"))
-        : errorText
-        ? errorText
-        : translate(context, "没有匹配的候选");
-      loadStatus.classList.toggle?.("is-error", Boolean(errorText));
+      return undefined;
     }
 
     async function load(query = search.value) {
@@ -75,7 +68,13 @@
       }, Math.max(0, Number(delay) || 0));
     }
 
-    return Object.freeze({load, render, schedule});
+    return Object.freeze({
+      load, render, schedule,
+      status: () => ({
+        loading, errorText,
+        empty: loadedQuery !== null && resultCount === 0,
+      }),
+    });
   }
 
   window.FTMultiSelectRemote = Object.freeze({create});

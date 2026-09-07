@@ -1131,7 +1131,6 @@ button.reference-item { cursor: pointer; }
 .test-product-group-list span { display: grid; gap: 2px; min-width: 0; }
 .test-product-group-list b, .test-product-group-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .test-product-group-list small { color: var(--muted); }
-.test-product-warning { color: var(--danger) !important; }
 .test-product-manager { display: grid; gap: 10px; padding: 12px 0; }
 .test-product-manager-actions { display: flex; justify-content: flex-end; }
 .test-category-selector { min-width: 0; margin: 0; padding: 0; border: 0; }

@@ -198,6 +198,8 @@
     let selected = normalizeSelected(options.selected ?? [], items);
     if (!multi && selected.length > 1) selected = [selected[selected.length - 1]];
     let committedSelected = [...selected];
+    let manualStatusText = String(options.statusText || "").trim();
+    let manualErrorText = String(options.errorText || "").trim();
     const remoteFactory = typeof options.loadItems === "function"
       && window.FTMultiSelectRemote?.create;
 
@@ -261,7 +263,7 @@
     const summaryText = document.createElement("span");
     summaryText.className = "ft-multi-select-summary-text";
     summary.append(summaryText);
-    if (controlDisabled) {
+    if (controlDisabled && !options.loading) {
       const lockIndicator = document.createElement("span");
       lockIndicator.className = "ft-multi-select-lock-indicator";
       lockIndicator.textContent = translate(context, "自动确定", "自动确定");
@@ -376,13 +378,9 @@
     const optionList = document.createElement("div");
     optionList.className = "ft-multi-select-options";
     optionList.setAttribute("role", "group");
-    const loadStatus = remoteFactory ? Object.assign(document.createElement("div"), {
-      className: "ft-multi-select-load-status", hidden: true,
-    }) : null;
     const actions = document.createElement("div");
     actions.className = "ft-multi-select-actions";
-    menu.append(searchRow,
-      ...(loadStatus ? [loadStatus] : []), optionList);
+    menu.append(searchRow, optionList);
     dropdown.append(summary, menu);
     if (trailingActions) {
       const controlRow = document.createElement("div");
@@ -522,20 +520,30 @@
     }
 
     const remote = remoteFactory ? remoteFactory({
-      context, options, controlDisabled, search, loadStatus, setItems,
+      context, options, controlDisabled, search, setItems,
       refresh: () => render(),
     }) : null;
 
     function render() {
+      const remoteStatus = remote?.status?.() || {};
+      const loading = Boolean(options.loading || remoteStatus.loading);
+      const errorText = manualErrorText || String(remoteStatus.errorText || "").trim();
+      const statusText = manualStatusText;
+      const emptyText = remoteStatus.empty
+        ? translate(context, "没有匹配的候选") : "";
       const labels = labelsFor();
       const summaryValue = labels.length
         ? (labels.length === 1 ? labels[0] : countLabel(context, labels.length))
         : "";
-      summaryText.textContent = summaryValue || translate(context, "未筛选");
+      summaryText.textContent = loading
+        ? (options.loadingText || translate(context, "正在读取候选…"))
+        : errorText || statusText || emptyText || summaryValue || translate(context, "未筛选");
+      summary.classList.toggle?.("is-loading", loading);
+      summary.classList.toggle?.("is-error", Boolean(errorText));
       selectedLabel.textContent = labels.length ? labels.join("、")
         : translate(context, "未筛选");
       summary.title = controlDisabled && disabledReason
-        ? disabledReason : labels.join("、");
+        ? disabledReason : errorText || labels.join("、");
       remote?.render();
       clear.hidden = !String(search.value || "");
       optionList.replaceChildren(...buildMenuSections());
@@ -1037,6 +1045,11 @@
         render();
       },
       setItems,
+      setStatus(next = {}) {
+        manualStatusText = String(next.text || "").trim();
+        manualErrorText = String(next.errorText || "").trim();
+        render();
+      },
     });
   }
 

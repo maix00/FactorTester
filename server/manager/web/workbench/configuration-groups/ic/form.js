@@ -21,15 +21,12 @@
     const factorScopeBlocked = factorScope.required && !factorScope.ready;
     const factorItems = factorScopeBlocked ? []
       : (Array.isArray(factorScope.items) ? factorScope.items : []);
-    const productScope = window.FTStrategyEditorScope?.scope?.(
+    const currentProductScope = () => window.FTStrategyEditorScope?.scope?.(
       state, "product_path_selection",
     ) || {
       items: Array.isArray(state.groups) ? state.groups : [],
       required: false, ready: true, source: "visible",
     };
-    const productScopeBlocked = productScope.required && !productScope.ready;
-    const productItems = productScopeBlocked ? []
-      : (Array.isArray(productScope.items) ? productScope.items : []);
     const draft = editor.draft || (editor.draft = {});
     let factorRef = draft.factor_ref ?? current?.factor_ref ?? "";
     let productScopeRef = draft.product_scope_ref ?? current?.product_scope_ref ?? "";
@@ -133,23 +130,30 @@
         }, {combinationVisible: false},
       );
     };
-    const renderProduct = () => FTTestProducts.selectionPanel(
-      context, state, () => editorTabs?.refreshChips(), {
-        groups: productItems,
-        constrain: false,
-        loading: !productScopeBlocked && FTTestObjectPicker.lazyLoading(state, "products"),
-        selectedRefs: productScopeRef ? [productScopeRef] : [],
-        multi: false,
-        canCreate: !productScopeBlocked && inlineCreateAllowed(
-          state, "product_path_candidates", productScope,
-        ),
-        onChange: values => {
-          productScopeRef = values[0] || "";
-          draft.product_scope_ref = productScopeRef;
-          editorTabs?.refreshChips();
+    const renderProduct = () => {
+      const productScope = currentProductScope();
+      const productScopeBlocked = productScope.required && !productScope.ready;
+      const productItems = productScopeBlocked ? []
+        : (Array.isArray(productScope.items) ? productScope.items : []);
+      return FTTestProducts.selectionPanel(
+        context, state, () => editorTabs?.refreshChips(), {
+          groups: productItems,
+          constrain: false,
+          loading: !productScopeBlocked
+            && FTTestObjectPicker.lazyLoading(state, "products"),
+          selectedRefs: productScopeRef ? [productScopeRef] : [],
+          multi: false,
+          canCreate: !productScopeBlocked && inlineCreateAllowed(
+            state, "product_path_candidates", productScope,
+          ),
+          onChange: values => {
+            productScopeRef = values[0] || "";
+            draft.product_scope_ref = productScopeRef;
+            editorTabs?.refreshChips();
+          },
         },
-      },
-    );
+      );
+    };
     let editorTabs = window.FTStrategyEditorTabs?.create ? FTStrategyEditorTabs.create({
       context, state,
       activeKey: editor.activeTabKey || "",
@@ -194,6 +198,9 @@
         if (!availableFactors.some(item => factorIdentity(item) === factorRef)) {
           throw new Error(context.t("请选择一个当前范围内的因子"));
         }
+        const productScope = currentProductScope();
+        const productItems = productScope.required && !productScope.ready
+          ? [] : (Array.isArray(productScope.items) ? productScope.items : []);
         if (!productItems.some(item => productIdentity(item) === productScopeRef)) {
           throw new Error(context.t("请选择一个当前范围内的产品组"));
         }
