@@ -71,7 +71,11 @@ def execute_group_run_spec(
         compute_checksum=needs_execution_checksum,
         retain_records=retain_execution_records,
     )
-    strategy_book = strategy_book_from_payload(payload.get("strategy_book"))
+    from server.modules.shared.run_spec_resolution.strategies import (
+        strategy_book_from_run_spec,
+    )
+
+    strategy_book = strategy_book_from_run_spec(payload.get("strategy_book"))
     strategy_plan = strategy_plan_from_payload(payload)
     available_aliases = list(prepared["resolved_settings_by_alias"])
     aliases = strategy_aliases_for_plan(strategy_plan, available_aliases)
@@ -130,14 +134,6 @@ def execute_group_run_spec(
         )
     finally:
         account.order_flow_store.cleanup_streaming()
-
-
-def strategy_book_from_payload(value):
-    if not isinstance(value, dict) or not value:
-        return None
-    from tools.testers.backtest.modules.strategy_book import StrategyBook
-
-    return StrategyBook.from_dict(value)
 
 
 def _result_retention_mode(payload: dict[str, Any]) -> str:
