@@ -28,6 +28,7 @@ ENTITY_TYPES = {
     "product_category",
     "product_group",
     "research_publication",
+    "research_catalog",
     "strategy",
     "strategy_revision",
 }

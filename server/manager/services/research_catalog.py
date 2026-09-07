@@ -14,6 +14,7 @@ import secrets
 import time
 from pathlib import Path
 from collections.abc import Callable
+from contextlib import contextmanager
 from typing import Any
 
 from tools.data.sqlite.db import connect_sqlite
@@ -36,7 +37,29 @@ class ResearchCatalog:
     ) -> None:
         self.db_path = Path(db_path).expanduser().resolve()
         self._account_provider = account_provider
+        self._synchronizer = None
+        self._schedule_refresh = None
         self.ensure_schema()
+
+    def set_synchronizer(self, synchronizer, schedule_refresh=None) -> None:
+        if synchronizer.local.path.resolve() != self.db_path:
+            raise ValueError("research catalog and outbox must share one database")
+        self._synchronizer = synchronizer
+        self._schedule_refresh = schedule_refresh
+
+    @contextmanager
+    def _write(self, research_id: str):
+        owner = ""
+        with connect_sqlite(self.db_path) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            yield conn
+            if self._synchronizer is not None:
+                from server.manager.storage.account_domain.research_sync import publish_research
+                publish_research(self._synchronizer, conn, research_id)
+                row = conn.execute("SELECT owner_ref FROM research_catalog_researches WHERE research_id=?", (research_id,)).fetchone()
+                owner = str(row["owner_ref"]) if row else ""
+        if owner and self._schedule_refresh is not None:
+            self._schedule_refresh(owner)
 
     def set_account_provider(
         self, provider: Callable[[], list[dict[str, Any]]] | None,
@@ -73,6 +96,10 @@ class ResearchCatalog:
                     migration_source TEXT NOT NULL,
                     created_at REAL NOT NULL,
                     updated_at REAL NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS research_catalog_replication (
+                    research_id TEXT PRIMARY KEY,
+                    remote_revision INTEGER NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS research_catalog_memberships (
                     research_id TEXT NOT NULL,
@@ -264,7 +291,7 @@ class ResearchCatalog:
         research_id = "research:v1:" + secrets.token_urlsafe(18)
         now = time.time()
         initial_workspace = None
-        with connect_sqlite(self.db_path) as conn:
+        with self._write(research_id) as conn:
             conn.execute(
                 """INSERT INTO research_catalog_researches
                    (research_id, owner_ref, title, description, status,
@@ -682,7 +709,7 @@ class ResearchCatalog:
             return self._research_value(row, viewer=actor, access=access)
         values["updated_at"] = time.time()
         assignments = ", ".join(f"{key}=?" for key in values)
-        with connect_sqlite(self.db_path) as conn:
+        with self._write(research_id) as conn:
             conn.execute(
                 f"UPDATE research_catalog_researches SET {assignments} WHERE research_id=?",
                 (*values.values(), research_id),
@@ -700,7 +727,7 @@ class ResearchCatalog:
             raise PermissionError("research management is not authorized")
         if str(row["migration_source"]):
             raise PermissionError("research can only be deleted on its source server")
-        with connect_sqlite(self.db_path) as conn:
+        with self._write(research_id) as conn:
             conn.execute(
                 """UPDATE research_catalog_researches
                    SET status='archived', updated_at=? WHERE research_id=?""",
@@ -730,7 +757,7 @@ class ResearchCatalog:
         clean_role = _choice(role, MEMBER_ROLES, "member role")
         clean_status = _choice(status, MEMBER_STATUSES, "member status")
         now = time.time()
-        with connect_sqlite(self.db_path) as conn:
+        with self._write(research_id) as conn:
             self._upsert_membership(
                 conn,
                 research_id=research_id,
@@ -760,7 +787,7 @@ class ResearchCatalog:
                 "the Research owner's self Profile is a required member"
             )
         now = time.time()
-        with connect_sqlite(self.db_path) as conn:
+        with self._write(research_id) as conn:
             value = conn.execute(
                 """SELECT * FROM research_catalog_memberships
                    WHERE research_id=? AND profile_ref=?""",
@@ -806,7 +833,7 @@ class ResearchCatalog:
         )
         workspace_id = "research-workspace:v1:" + secrets.token_urlsafe(18)
         now = time.time()
-        with connect_sqlite(self.db_path) as conn:
+        with self._write(research_id) as conn:
             membership = conn.execute(
                 """SELECT status FROM research_catalog_memberships
                    WHERE research_id=? AND profile_ref=?""",
@@ -875,7 +902,7 @@ class ResearchCatalog:
         clean_profile = _optional_profile(profile_ref)
         clean_workspace = str(workspace_id or "").strip()
         now = time.time()
-        with connect_sqlite(self.db_path) as conn:
+        with self._write(research_id) as conn:
             if clean_workspace:
                 workspace = conn.execute(
                     """SELECT workspace_id, research_id, profile_ref, status
@@ -1006,7 +1033,7 @@ class ResearchCatalog:
             return self._report_value(row, viewer=actor)
         values["updated_at"] = time.time()
         assignments = ", ".join(f"{key}=?" for key in values)
-        with connect_sqlite(self.db_path) as conn:
+        with self._write(research_id) as conn:
             conn.execute(
                 f"UPDATE research_catalog_reports SET {assignments} WHERE report_id=?",
                 (*values.values(), report_id),
@@ -1030,7 +1057,7 @@ class ResearchCatalog:
             raise PermissionError(
                 "research report can only be deleted on its source server"
             )
-        with connect_sqlite(self.db_path) as conn:
+        with self._write(research_id) as conn:
             conn.execute(
                 """UPDATE research_catalog_reports
                    SET status='archived', updated_at=? WHERE report_id=?""",
@@ -1133,6 +1160,15 @@ class ResearchCatalog:
         digest = hashlib.sha256(clean_token.encode("utf-8")).hexdigest()
         now = time.time()
         with connect_sqlite(self.db_path) as conn:
+            reference = conn.execute(
+                "SELECT research_id FROM research_catalog_share_links WHERE token_hash=?",
+                (digest,),
+            ).fetchone()
+        if reference is None:
+            raise KeyError("share link not found")
+        # Revalidate the token under the same transaction that persists the
+        # granted access and its outbox snapshot. The secret stays local.
+        with self._write(str(reference["research_id"])) as conn:
             row = conn.execute(
                 "SELECT * FROM research_catalog_share_links WHERE token_hash=?",
                 (digest,),
@@ -1241,7 +1277,7 @@ class ResearchCatalog:
             _json(values).encode("utf-8")
         ).hexdigest()
         now = time.time()
-        with connect_sqlite(self.db_path) as conn:
+        with self._write(research_id) as conn:
             existing_owner = conn.execute(
                 """SELECT DISTINCT evidence_owner_ref
                    FROM research_catalog_report_evidence_links

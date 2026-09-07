@@ -445,6 +445,10 @@ class ManagerState(
             profile_cache_root=self.state_root / "profile-cache",
             account_domain_sync=self.account_domain_sync,
         )
+        self.research_catalog.set_synchronizer(
+            self.account_domain_sync,
+            lambda owner: self.client_state._refresh_account_domain_async(owner, force=True),
+        )
         self.agent_profiles = AgentProfileService(
             db_path=self.sessions_db_path,
             provider_key_path=self.state_root / "agent-provider.key",
