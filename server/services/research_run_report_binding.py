@@ -7,6 +7,9 @@ from typing import Any
 
 
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+# A report is a logical catalog identity, not a package/branch path component.
+# Keep legacy report IDs and the report:v1 IDs returned by research report-create.
+_REPORT_IDENTIFIER = re.compile(r"^(?:report:v1:)?[A-Za-z0-9._-]{1,128}$")
 _PROFILE_REF = re.compile(r"^profile:[A-Za-z0-9._-]{1,128}$")
 _WORK_PACKAGE_REF = re.compile(r"^work-package:[A-Za-z0-9._-]{1,128}$")
 _HASH = re.compile(r"^[0-9a-f]{64}$")
@@ -48,9 +51,11 @@ def normalize_report_binding(
         raise ValueError(
             "report_binding must contain the complete frozen report identity"
         )
-    for field in ("instance_id", "branch_id", "report_id"):
+    for field in ("instance_id", "branch_id"):
         if not _IDENTIFIER.fullmatch(str(value.get(field) or "")):
             raise ValueError(f"report_binding.{field} is invalid")
+    if not _REPORT_IDENTIFIER.fullmatch(str(value.get("report_id") or "")):
+        raise ValueError("report_binding.report_id is invalid")
     if not _PROFILE_REF.fullmatch(str(value.get("profile_ref") or "")):
         raise ValueError("report_binding.profile_ref is invalid")
     if not _WORK_PACKAGE_REF.fullmatch(
@@ -96,9 +101,11 @@ def _normalize_direct_report_binding(
         raise ValueError("direct report_binding origin must be agent_direct")
     if str(trial_binding.get("binding_origin") or "") != "agent_direct":
         raise ValueError("direct report_binding requires an agent_direct TrialPlan")
-    for field in ("branch_id", "report_id", "report_parent_id"):
+    for field in ("branch_id", "report_parent_id"):
         if not _IDENTIFIER.fullmatch(str(value.get(field) or "")):
             raise ValueError(f"report_binding.{field} is invalid")
+    if not _REPORT_IDENTIFIER.fullmatch(str(value.get("report_id") or "")):
+        raise ValueError("report_binding.report_id is invalid")
     if not _PROFILE_REF.fullmatch(str(value.get("profile_ref") or "")):
         raise ValueError("report_binding.profile_ref is invalid")
     if not _WORK_PACKAGE_REF.fullmatch(
