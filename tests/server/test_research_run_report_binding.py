@@ -82,14 +82,15 @@ def test_report_binding_cannot_exist_without_trial_binding() -> None:
         )
 
 
-def test_direct_report_binding_freezes_an_explicit_parent_without_graph_node() -> None:
+@pytest.mark.parametrize("report_id", ["report-package-1-branch-1", "report:v1:m0zMIM6zzugveWCEt5CG0Rvl"])
+def test_direct_report_binding_freezes_an_explicit_parent_without_graph_node(report_id) -> None:
     value = normalize_report_binding(
         {
             "binding_origin": "agent_direct",
             "profile_ref": "profile:maxa",
             "work_package_ref": "work-package:package-1",
             "branch_id": "branch-1",
-            "report_id": "report-package-1-branch-1",
+            "report_id": report_id,
             "report_generation": 7,
             "report_head_hash": "b" * 64,
             "report_parent_id": "direct-trials",
@@ -98,13 +99,15 @@ def test_direct_report_binding_freezes_an_explicit_parent_without_graph_node() -
         branch_snapshot={},
     )
 
+    assert value["report_id"] == report_id
     assert value["binding_origin"] == "agent_direct"
     assert value["report_parent_id"] == "direct-trials"
     assert value["execution_node"] == ""
 
 
+@pytest.mark.parametrize("report_id", ["report-package-1-branch-1", "report:v1:m0zMIM6zzugveWCEt5CG0Rvl"])
 def test_research_run_and_job_detail_retain_frozen_report_identity(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, report_id,
 ) -> None:
     path = tmp_path / "report-binding.sqlite"
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
@@ -113,6 +116,7 @@ def test_research_run_and_job_detail_retain_frozen_report_identity(
     initialize_branch(path, trial_plan_hash(plan))
     report_binding = {
         **_binding(),
+        "report_id": report_id,
         "work_package_ref": "work-package:instance-1",
     }
 
@@ -162,3 +166,10 @@ def test_graph_run_workspace_is_execution_provenance_not_branch_authority(
 
     assert run["workspace_id"] == "workspace-used-for-this-run"
     assert run["graph_branch_id"] == "branch-1"
+
+
+@pytest.mark.parametrize("report_id", ["report:v1:", "report:v2:id", "report:v1:../escape", "report:v1:%2Fescape", "report:v1:id/child"])
+def test_report_catalog_identity_does_not_accept_other_namespaces_or_paths(report_id):
+    binding = {**_binding(), "report_id": report_id}
+    with pytest.raises(ValueError, match="report_binding.report_id"):
+        normalize_report_binding(binding, trial_binding={"instance_id": "instance-1", "branch_id": "branch-1"}, branch_snapshot={"work_package_ref": "work-package:package-1"})

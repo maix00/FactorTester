@@ -32,6 +32,7 @@ from server.services.factor_registry import get_factor_family_instance
 from server.services.session_runtime import current_user_obj, user_obj_for_name
 from tools.data.types import DataTime
 from tools.data.types import finest_index
+from tools.factors.formula_identity import require_frozen_factor
 
 
 @dataclass(slots=True)
@@ -399,6 +400,22 @@ def factor_series_for_run_spec(data: dict[str, Any]) -> dict[str, Any]:
     factors: list[dict[str, str]] = []
     seen: set[str] = set()
     requested_refs = _requested_factor_refs(data)
+    series_scope = {}
+    if not any(data.get(key) for key in (
+        "product_path_selection", "product_path_selection_id", "selection_id",
+        "selected_paths", "paths",
+    )):
+        # Backtest stores scopes on its groups, not as one top-level selection.
+        # These are already the used, exact members frozen at submission.
+        # Merge them for the shared series viewer without rereading the library.
+        selections = data.get("product_selections") or (
+            ((data.get("run_spec") or {}).get("configuration") or {})
+            .get("shared", {}).get("product_selections") or {}
+        )
+        paths = sorted({path for value in selections.values()
+                        for path in value.get("paths", [])})
+        if paths:
+            series_scope = {"selected_paths": paths, "label": "运行涉及产品"}
     for raw in records:
         try:
             record = require_frozen_factor(raw)
@@ -413,6 +430,7 @@ def factor_series_for_run_spec(data: dict[str, Any]) -> dict[str, Any]:
         identity = record.get("identity") or {}
         request = {
             **data,
+            **series_scope,
             "factor_ref": ref,
             "factor_alias": str(record.get("alias") or ""),
             "factor_family_alias": str(identity.get("family_alias") or ""),
@@ -514,7 +532,7 @@ def _requested_factor_refs(data: dict[str, Any]) -> set[str]:
             for child_key, child in value.items():
                 if child_key == "factor_ref" and isinstance(child, str):
                     refs.add(child)
-                elif child_key == "factor_refs" and isinstance(child, list):
+                elif child_key in {"factor_refs", "factor_candidate_refs"} and isinstance(child, list):
                     refs.update(str(item) for item in child if str(item).startswith("factor:"))
                 else:
                     visit(child, child_key)

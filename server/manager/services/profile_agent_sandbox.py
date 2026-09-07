@@ -112,6 +112,16 @@ class ProfileAgentSandbox:
             str(self.workspace_root),
             "/workspace",
         ]
+        # Persisted Profile/report metadata uses the host workspace path.
+        # Resolve that spelling to the same isolated mount; otherwise CLI
+        # writes can land in Bubblewrap's temporary root instead of /workspace.
+        # Empty parent directories expose no host siblings or parent contents.
+        if self.workspace_root != SANDBOX_WORKSPACE:
+            for parent in _parents(self.workspace_root):
+                command.extend(["--dir", str(parent)])
+            command.extend([
+                "--symlink", str(SANDBOX_WORKSPACE), str(self.workspace_root),
+            ])
         for path in ("/usr",):
             if Path(path).exists():
                 command.extend(["--ro-bind", path, path])

@@ -51,12 +51,16 @@ def test_cli_generates_owner_only_keys_without_printing_private_material(
 
 
 def test_deployment_cli_import_does_not_load_runtime_settings() -> None:
+    # Inspect deployment imports in a clean interpreter, without the suite's
+    # child-worker database bootstrap preloading scripts.data_dir.
     result = subprocess.run(
         [
             sys.executable,
+            "-I",
             "-c",
             (
                 "import sys; "
+                f"sys.path.insert(0, {str(ROOT)!r}); "
                 "import server.deployment.wireguard; "
                 "assert 'scripts.data_dir' not in sys.modules"
             ),

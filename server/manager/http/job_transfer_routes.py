@@ -229,6 +229,15 @@ class JobTransferRoutesMixin:
                 self, {"success": False, "error": "login required"}, 401,
             )
             return True
+        # CLI clients send an empty JSON object. Drain it before replying:
+        # closing HTTPS with unread request bytes can truncate the capability
+        # response even though its Content-Length was already sent.
+        try:
+            if int(self.headers.get("Content-Length", "0")):
+                self._json_body(4096)
+        except (ValueError, UnicodeError):
+            json_response(self, {"success": False, "error": "invalid artifact access request"}, 400)
+            return True
         job_id = unquote(match.group(1))
         name = unquote(match.group(2))
         if not name or name in {".", ".."} or "\\" in name:
