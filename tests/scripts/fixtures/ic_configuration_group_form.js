@@ -42,6 +42,10 @@ assert.equal(factorOptions.canCreate,false,"a blocked outer factor scope blocks 
 tabOptions.renderProduct();
 assert.deepEqual(productOptions.groups,[],"an empty mounted outer product scope blocks IC candidates");
 assert.equal(productOptions.canCreate,false,"a blocked outer product scope blocks inline creation");
+productScope={items:[{id:"product-group:loaded",name:"Loaded"}],required:true,ready:true,source:"outer"};
+tabOptions.renderProduct();
+assert.deepEqual(productOptions.groups,productScope.items,
+  "a lazily rendered IC product tab must read the latest product-group scope");
 factorScope={items:[{ref:"factor:v2:outer"}],required:true,ready:true,source:"outer"};
 productScope={items:[{id:"product-group:outer",name:"Outer"}],required:true,ready:true,source:"outer"};
 window.FTICConfigurationGroupForm.render({t:x=>x,button:()=>new E("button")},state,{mode:"create"},()=>{});

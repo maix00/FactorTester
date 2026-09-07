@@ -53,12 +53,6 @@
       if (anchor?.parentElement) anchor.parentElement.insertBefore(node, anchor);
       else filter.element.append(node);
     };
-    if (options.loading) {
-      const loading = document.createElement("small");
-      loading.className = "ft-test-object-picker-loading";
-      loading.textContent = options.loadingText || context.t("正在读取候选…");
-      insertBeforeDropdown(loading);
-    }
     if (options.note && options.compact !== true) {
       const note = document.createElement("small");
       note.className = "ft-test-object-picker-note";

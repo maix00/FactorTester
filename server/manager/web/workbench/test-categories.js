@@ -125,6 +125,11 @@
       multi: false,
       loading: FTTestObjectPicker.lazyLoading(state, "categories"),
       loadingText: context.t("正在读取产品分类候选…"),
+      errorText: state.categoryError || "",
+      statusText: !items.length
+        ? context.t("当前数据源没有声明分类")
+        : state.values.category && !items.some(item => item.value === state.values.category)
+          ? context.t("当前产品分类不受已选数据源完整支持，请重新选择") : "",
       compact: true,
       name: "ic-category",
       onCreate: context.session
@@ -168,22 +173,6 @@
       window.FTTestFieldHelp?.forField?.(state.manifest, "category", context) || "",
       {className: "test-category-selector"},
     );
-    const control = root.querySelector(".test-field-row-control");
-    if (!items.length) control.append(FTUI.empty(
-      context.t("暂无分类"), context.t("当前数据源没有声明分类"),
-    ));
-    if (state.categoryError) {
-      const error = document.createElement("small");
-      error.className = "test-product-warning";
-      error.textContent = state.categoryError;
-      control.append(error);
-    }
-    if (state.values.category && !items.some(item => item.value === state.values.category)) {
-      const warning = document.createElement("small");
-      warning.className = "test-product-warning";
-      warning.textContent = context.t("当前产品分类不受已选数据源完整支持，请重新选择");
-      control.append(warning);
-    }
     return root;
   }
 

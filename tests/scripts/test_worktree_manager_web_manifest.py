@@ -1307,7 +1307,13 @@ def test_factor_candidate_sources_do_not_nest_field_rows_in_the_control_column()
     assert "FTTestFactorSets.control" not in source
     assert source.index("function candidateHeading") < source.index("FTTestFactorRoles.section")
     assert 'className: "factor-candidate-child-row"' in source
-    assert "root.append(candidateHeading(context, state, direct), error)" in source
+    assert "root.append(candidateHeading(context, state, direct))" in source
+    assert 'error.className = "form-error"' not in source
+    factor_sets = (WEB_ROOT / "workbench" / "factor-set-selection.js").read_text(
+        encoding="utf-8",
+    )
+    assert 'errorText: state.factorSetCatalog?.error || ""' in factor_sets
+    assert 'error.className = "form-error"' not in factor_sets
     panel_source = source[source.index("function panel("):source.index("function scopedSourceState(")]
     assert "summaryControl" not in panel_source
     assert "factor-candidate-child-section" in roles
@@ -2142,6 +2148,13 @@ def test_multi_select_object_rows_open_matching_view_overlays() -> None:
         text = (WEB_ROOT / candidate).read_text(encoding="utf-8")
         assert "factorRowView" in text or "productGroupRowView" in text \
             or "categoryRowView" in text or "factorSetRowView" in text, candidate
+    products = (WEB_ROOT / "workbench" / "test-products.js").read_text(
+        encoding="utf-8",
+    )
+    assert "editSelected:" not in products
+    assert "itemActions:" not in products
+    assert "view: {...view, onSaved: savedGroup}" in products
+    assert "testState: state" in products
     assert "familyRowView" in factor_editor
     assert "factorRowView" in factor_editor
     assert "factor_set_only === true" in shared.read_text(encoding="utf-8")
