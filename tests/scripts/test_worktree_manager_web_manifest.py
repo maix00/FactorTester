@@ -358,6 +358,25 @@ def test_page_agent_drawer_uses_the_published_group_loader_api() -> None:
     assert "FTStaticLoader?.ensureGroup" not in source
 
 
+def test_page_agent_trigger_is_global_lazy_and_draggable() -> None:
+    drawer = (WEB_ROOT / "profile" / "page-agent-drawer.js").read_text(
+        encoding="utf-8",
+    )
+    assistance = (WEB_ROOT / "profile" / "page-assistance.js").read_text(
+        encoding="utf-8",
+    )
+    coordinator = (WEB_ROOT / "app" / "coordinator.js").read_text(
+        encoding="utf-8",
+    )
+    assert "let globalToggle = null" in drawer
+    assert 'toggle.addEventListener("pointermove"' in drawer
+    assert "localStorage.setItem(positionKey(activeContext)" in drawer
+    assert "assistanceEnabled: false" in drawer
+    assert "FTPageAgentProfiles.self(activeContext)" in drawer
+    assert "void controller.connect()" not in assistance
+    assert "FTPageAgentDrawer?.activate?.(appContext" in coordinator
+
+
 def test_tab_view_restore_keeps_the_page_agent_trigger_visible() -> None:
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "tab_view_state.js"
     result = subprocess.run(
@@ -1824,7 +1843,7 @@ def test_nested_strategy_editor_respects_outer_scope_and_inner_mount_contract() 
     import subprocess
 
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "strategy_editor_scope.js"
-    source = WEB_ROOT / "workbench" / "strategy-editor-scope.js"
+    source = WEB_ROOT / "workbench" / "shared" / "strategy-editor-scope.js"
     result = subprocess.run(
         ["node", str(fixture), str(source)], cwd=ROOT,
         capture_output=True, text=True, check=False,
@@ -1845,7 +1864,7 @@ def test_backend_nested_scope_contract_is_renderable_by_web_resolver(tmp_path) -
         encoding="utf-8",
     )
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "strategy_editor_scope.js"
-    source = WEB_ROOT / "workbench" / "strategy-editor-scope.js"
+    source = WEB_ROOT / "workbench" / "shared" / "strategy-editor-scope.js"
     result = subprocess.run(
         ["node", str(fixture), str(source), str(manifest_path)],
         cwd=ROOT, capture_output=True, text=True, check=False,

@@ -90,26 +90,51 @@
     return sourceIDs(value?.source_ids || value?.data_source_ids || value?.data_sources);
   }
 
+  function outerCategoryIDs(state) {
+    const rule = contract(state).outer_scope_tabs?.category || {};
+    if (!mounted(state, rule.mounted_tab || "category")) return [];
+    return fieldValues(state, rule.selection_fields || ["category"])
+      .map(categoryID).filter(Boolean);
+  }
+
+  function candidateCategoryIDs(value) {
+    return arrayValue(value?.category_ids || value?.categories)
+      .map(categoryID).filter(Boolean);
+  }
+
   function candidateCompatible(state, fieldKey, candidate) {
     const rule = contract(state).candidate_constraints?.[fieldKey];
     if (!rule) return true;
     const values = state?.values || {};
+    const automaticMode = String(rule.automatic_mode || "auto");
     const selected = new Set(sourceIDs(values[rule.source_field]));
-    const mode = String(values[rule.mode_field] || (selected.size ? "list" : rule.automatic_mode));
-    if (mode === String(rule.automatic_mode || "auto")) return true;
-    if (!selected.size) return false;
-    const overlaps = value => {
-      const ids = candidateSourceIDs(value);
-      return ids.length > 0 && ids.some(id => selected.has(id));
+    const mode = String(values[rule.mode_field] || (selected.size ? "list" : automaticMode));
+    const sourceCompatible = () => {
+      if (!mounted(state, rule.source_tab || "data_source")) return true;
+      if (mode === automaticMode) return true;
+      if (!selected.size) return false;
+      const overlaps = value => {
+        const ids = candidateSourceIDs(value);
+        return ids.length > 0 && ids.some(id => selected.has(id));
+      };
+      const firstPopulated = values => values.find(value => Array.isArray(value) && value.length) || [];
+      const pathSources = candidate?.path_sources || [];
+      const members = rule.coverage === "complete_product_coverage"
+        ? firstPopulated([candidate?.products, candidate?.product_records, pathSources])
+        : firstPopulated([candidate?.path_sources, candidate?.items]);
+      const comparable = members.filter(value => candidateSourceIDs(value).length > 0);
+      if (members.length && comparable.length !== members.length) return false;
+      return members.length ? members.every(overlaps) : overlaps(candidate);
     };
-    const firstPopulated = values => values.find(value => Array.isArray(value) && value.length) || [];
-    const pathSources = candidate?.path_sources || [];
-    const members = rule.coverage === "complete_product_coverage"
-      ? firstPopulated([candidate?.products, candidate?.product_records, pathSources])
-      : firstPopulated([candidate?.path_sources, candidate?.items]);
-    const comparable = members.filter(value => candidateSourceIDs(value).length > 0);
-    if (members.length && comparable.length !== members.length) return false;
-    return members.length ? members.every(overlaps) : overlaps(candidate);
+    if (!sourceCompatible()) return false;
+    if (fieldKey !== "product_path_candidates") return true;
+    const selectedCategories = outerCategoryIDs(state);
+    if (!selectedCategories.length) {
+      const categoryRule = contract(state).outer_scope_tabs?.category || {};
+      return !mounted(state, categoryRule.mounted_tab || "category");
+    }
+    const categories = new Set(candidateCategoryIDs(candidate));
+    return selectedCategories.some(id => categories.has(id));
   }
 
   function constrainedCandidates(state, fieldKey, values) {

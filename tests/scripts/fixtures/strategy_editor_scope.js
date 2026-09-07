@@ -65,6 +65,7 @@ const state = {
 };
 
 const sourceState = {
+  settingsMountedTabs: ["data_source"],
   values: {data_source_mode: "list", data_source: ["source-a"]},
   manifest: {strategy_editor: {candidate_constraints: {
     category_candidates: {
@@ -117,6 +118,30 @@ assert.equal(window.FTStrategyEditorScope.candidateCompatible(
     path_sources: [{path: "Product/Futures", source_ids: ["source-a"]}],
   },
 ), true, "an inline group remains visible after the editor redraws");
+
+sourceState.settingsMountedTabs = [];
+sourceState.values.data_source = ["unrelated-source"];
+assert.equal(window.FTStrategyEditorScope.candidateCompatible(
+  sourceState, "product_path_candidates", compatibleGroup,
+), true, "an unmounted outer data-source tab does not constrain either product picker");
+sourceState.settingsMountedTabs = ["data_source"];
+sourceState.values.data_source = ["source-a"];
+
+sourceState.manifest.strategy_editor.outer_scope_tabs = {
+  category: {mounted_tab: "category", selection_fields: ["category"]},
+};
+sourceState.settingsMountedTabs.push("category");
+sourceState.values.category = "metals";
+assert.equal(window.FTStrategyEditorScope.candidateCompatible(
+  sourceState, "product_path_candidates", {...compatibleGroup, category_ids: ["metals"]},
+), true);
+assert.equal(window.FTStrategyEditorScope.candidateCompatible(
+  sourceState, "product_path_candidates", {...compatibleGroup, category_ids: ["energy"]},
+), false, "the mounted outer category further narrows both product pickers");
+sourceState.values.category = "";
+assert.equal(window.FTStrategyEditorScope.candidateCompatible(
+  sourceState, "product_path_candidates", {...compatibleGroup, category_ids: ["metals"]},
+), false, "a mounted outer category without a selection leaves product scope unresolved");
 
 if (process.argv[3]) {
   state.manifest = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
@@ -212,6 +237,16 @@ assert.deepEqual(
   "an unmounted outer factor tab must not leak its derived pool into an inner editor",
 );
 assert.equal(window.FTStrategyEditorScope.scope(state, "factor").required, false);
+state.values.data_source_mode = "list";
+state.values.data_source = ["unrelated-source"];
+assert.deepEqual(
+  window.FTStrategyEditorScope.scope(state, "product_path_selection")
+    .items.map(item => item.group_ref),
+  ["visible-group"],
+  "an unmounted inner product scope uses the complete visible group catalog",
+);
+state.values.data_source_mode = "auto";
+state.values.data_source = [];
 state.values.factor_candidates = [{ref: "sibling-factor", alias: "Sibling"}];
 assert.deepEqual(
   window.FTStrategyEditorScope.scope(state, "factor").items.map(item => item.ref),

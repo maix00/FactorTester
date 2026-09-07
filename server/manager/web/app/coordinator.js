@@ -337,7 +337,10 @@
         // routeDispatch applies the same existing auth guard and updates the
         // heading/content.  No feature module is needed for this branch.
         const result = await routeDispatch.render(route, routeToken);
-        if (routeToken === activeRouteToken) tabs?.markActiveViewReady?.();
+        if (routeToken === activeRouteToken) {
+          tabs?.markActiveViewReady?.();
+          window.FTPageAgentDrawer?.activate?.(appContext(routeToken));
+        }
         return result;
       }
       if (window.FTStaticLoader?.ensureRoute) {
@@ -346,7 +349,10 @@
         if (routeToken !== activeRouteToken) return;
       }
       const result = await routeDispatch.render(route, routeToken);
-      if (routeToken === activeRouteToken) tabs?.markActiveViewReady?.();
+      if (routeToken === activeRouteToken) {
+        tabs?.markActiveViewReady?.();
+        window.FTPageAgentDrawer?.activate?.(appContext(routeToken));
+      }
       return result;
     } catch (error) {
       if (routeToken !== activeRouteToken) return;
@@ -354,6 +360,7 @@
       content.querySelector("h2").textContent = t("无法读取");
       content.querySelector("p").textContent = error.message;
       tabs?.markActiveViewReady?.();
+      window.FTPageAgentDrawer?.activate?.(appContext(routeToken));
     }
   }
 
@@ -366,6 +373,7 @@
     state, embeddedPresentation, t, renderRoute,
     content, title, eyebrow, toolbar, notice,
     beforeTabChange: () => { activeRouteToken += 1; },
+    onTabActivated: () => window.FTPageAgentDrawer?.activate?.(appContext()),
     onTabEvicted: tabID => {
       routeLifetimes.discard(tabID);
       pageAgentLifecycle.evict(tabID);
