@@ -43,8 +43,8 @@
       executionQuery: options.executionQuery,
       onGenerated: options.onGenerated,
     };
-    const factorSeriesStandalone = String(options.job.kind || "").toLowerCase()
-      === "factor_evaluation";
+    const kind = String(options.job.kind || "").toLowerCase();
+    const factorSeriesStandalone = kind === "factor_evaluation";
     const factorSeries = window.FTFactorSeriesResults?.section(context, {
       ...common,
       jobKind: options.job.kind,
@@ -53,16 +53,17 @@
       customAnalyses: factorSeriesStandalone ? options.customAnalyses : null,
     });
     if (factorSeries) content.append(factorSeries);
-    const icResults = window.FTICResults?.section(context, common);
+    const icResults = kind === "ic"
+      ? window.FTICResults?.section(context, common) : null;
     if (icResults) content.append(icResults);
-    const backtestResults = window.FTBacktestResults?.section(context, {
+    const backtestResults = kind === "backtest" ? window.FTBacktestResults?.section(context, {
       ...common,
       resultSummary: options.payload.result_summary
         || options.taskDetail.results?.summary || {},
       job: options.job,
       supplementalRequest:
         options.customAnalyses?.state?.requestedSupplemental || null,
-    });
+    }) : null;
     if (backtestResults) content.append(backtestResults);
     return content;
   }

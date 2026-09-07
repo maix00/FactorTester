@@ -52,6 +52,23 @@
     return root;
   }
 
+  function embedded(context, options) {
+    const target = document.createElement("div");
+    target.className = "factor-series-result-content";
+    target.append(FTUI.loading(context.t("正在读取因子序列…")));
+    queueMicrotask(async () => {
+      try {
+        const model = await loadResult(context, options);
+        renderSeriesContent(context, target, {model, options});
+      } catch (error) {
+        target.replaceChildren(FTJobResultTabs.missingOutput(context, {
+          message: error?.message || "本次运行没有生成因子序列",
+        }));
+      }
+    });
+    return target;
+  }
+
   function render(context, target, state) {
     const {model, options} = state;
     const customTabs = options.customAnalyses?.tabs({
@@ -90,9 +107,15 @@
       target.replaceChildren(header, content);
       return;
     }
+    renderSeriesContent(context, content, state);
+    target.replaceChildren(header, content);
+  }
+
+  function renderSeriesContent(context, target, state) {
+    const {model, options} = state;
+    target.replaceChildren();
     if (!model.series.length) {
-      content.append(FTUI.empty(context.t("暂无因子序列"), ""));
-      target.replaceChildren(header, content);
+      target.append(FTUI.empty(context.t("暂无因子序列"), ""));
       return;
     }
     const root = document.createElement("div");
@@ -118,8 +141,7 @@
     const contracts = document.createElement("div");
     contracts.className = "factor-series-contracts";
     root.append(controls, chart, contracts);
-    content.append(root);
-    target.replaceChildren(header, content);
+    target.append(root);
     const show = () => loadProduct(
       context, model, options, selectedProduct, selectedFactor, chart, contracts, source,
       adjustmentField, adjustmentState,
@@ -147,7 +169,7 @@
         selectedFactor = values[0] || selectedFactor;
         selectedProduct = productItems()[0]?.value || selectedProduct;
         state.selectedFactor = selectedFactor; state.selectedProduct = selectedProduct;
-        render(context, target, state);
+        renderSeriesContent(context, target, state);
       },
     });
     const picker = window.FTMultiSelectFilter.create(context, {
@@ -280,6 +302,6 @@
   }
 
   window.FTFactorSeriesResults = Object.freeze({
-    artifactOf, section, supports, supportsPriceAdjustment,
+    artifactOf, embedded, section, supports, supportsPriceAdjustment,
   });
 })();
