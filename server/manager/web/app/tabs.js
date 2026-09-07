@@ -7,6 +7,7 @@
       liveViewLimit,
       onTabClosed,
       onTabEvicted,
+      onTabActivated,
       pageAgentLifecycle,
     } = options;
     let workspace = null;
@@ -475,6 +476,7 @@
         (options.beforeTabChange || beforeTabChange)?.();
       }
       state.activeTabID = tabID;
+      onTabActivated?.(tabID);
       history.pushState({}, "", tab.path);
       renderOpenedTabs();
       checkpointWorkspace();

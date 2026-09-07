@@ -190,9 +190,12 @@
         ...(state?.categoryCatalog || []),
       ]));
     }
-    return constrainedCandidates(state, "product_path_candidates", mergeByID("product_group", [
+    // The visible product-group catalog is already permission-scoped by the
+    // server. Data-source compatibility belongs to the outer picker itself;
+    // applying it here can reduce an unmounted inner scope to an empty list.
+    return mergeByID("product_group", [
       ...(state?.groups || []),
-    ]));
+    ]);
   }
 
   function inlineCreateAllowed(state, fieldKey, currentScope) {

@@ -212,6 +212,16 @@ assert.deepEqual(
   "an unmounted outer factor tab must not leak its derived pool into an inner editor",
 );
 assert.equal(window.FTStrategyEditorScope.scope(state, "factor").required, false);
+state.values.data_source_mode = "list";
+state.values.data_source = ["unrelated-source"];
+assert.deepEqual(
+  window.FTStrategyEditorScope.scope(state, "product_path_selection")
+    .items.map(item => item.group_ref),
+  ["visible-group"],
+  "an unmounted inner product scope uses the complete visible group catalog",
+);
+state.values.data_source_mode = "auto";
+state.values.data_source = [];
 state.values.factor_candidates = [{ref: "sibling-factor", alias: "Sibling"}];
 assert.deepEqual(
   window.FTStrategyEditorScope.scope(state, "factor").items.map(item => item.ref),

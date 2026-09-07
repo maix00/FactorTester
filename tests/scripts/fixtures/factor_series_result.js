@@ -133,7 +133,10 @@ assert.strictEqual(context.FTFactorSeriesResults.supportsPriceAdjustment({
 assert.strictEqual(context.FTFactorSeriesResults.artifactOf([
   {name: "result", state: "superseded"}, {name: "result", state: "active"},
 ]).state, "active");
+target._ftChart = chart;
 context.FTFactorSeriesChart.dispose(target);
 assert.strictEqual(target.__ftFactorSeriesChart, null);
+assert.strictEqual(target._ftChart, null,
+  "disposing a factor chart clears the shared Highcharts mount reference");
 assert.strictEqual(chart.destroyed, true);
 console.log("ok");

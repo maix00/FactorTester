@@ -358,6 +358,25 @@ def test_page_agent_drawer_uses_the_published_group_loader_api() -> None:
     assert "FTStaticLoader?.ensureGroup" not in source
 
 
+def test_page_agent_trigger_is_global_lazy_and_draggable() -> None:
+    drawer = (WEB_ROOT / "profile" / "page-agent-drawer.js").read_text(
+        encoding="utf-8",
+    )
+    assistance = (WEB_ROOT / "profile" / "page-assistance.js").read_text(
+        encoding="utf-8",
+    )
+    coordinator = (WEB_ROOT / "app" / "coordinator.js").read_text(
+        encoding="utf-8",
+    )
+    assert "let globalToggle = null" in drawer
+    assert 'toggle.addEventListener("pointermove"' in drawer
+    assert "localStorage.setItem(positionKey(activeContext)" in drawer
+    assert "assistanceEnabled: false" in drawer
+    assert "FTPageAgentProfiles.self(activeContext)" in drawer
+    assert "void controller.connect()" not in assistance
+    assert "FTPageAgentDrawer?.activate?.(appContext" in coordinator
+
+
 def test_tab_view_restore_keeps_the_page_agent_trigger_visible() -> None:
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "tab_view_state.js"
     result = subprocess.run(

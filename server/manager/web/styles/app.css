@@ -1292,6 +1292,7 @@ button.reference-item { cursor: pointer; }
   height: 3.5rem;
   padding: 0;
   transform: translateY(-50%);
+  touch-action: none;
   border: 1px solid color-mix(in srgb, var(--accent, #356df3) 24%, transparent);
   border-right: 0;
   border-radius: 1rem 0 0 1rem;
