@@ -133,11 +133,12 @@
     const renderProduct = () => {
       const productScope = currentProductScope();
       const productScopeBlocked = productScope.required && !productScope.ready;
-      const productItems = productScopeBlocked ? []
-        : (Array.isArray(productScope.items) ? productScope.items : []);
       return FTTestProducts.selectionPanel(
         context, state, () => editorTabs?.refreshChips(), {
-          groups: productItems,
+          groups: () => {
+            const current = currentProductScope();
+            return current.required && !current.ready ? [] : current.items;
+          },
           constrain: false,
           loading: !productScopeBlocked
             && FTTestObjectPicker.lazyLoading(state, "products"),

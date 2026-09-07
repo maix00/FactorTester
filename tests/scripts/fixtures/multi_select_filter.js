@@ -213,6 +213,11 @@ assert.equal(loading.summary.children[0].textContent, "正在读取产品组候�
 assert.equal(descendants(loading.element).some(item => (
   item.className === "ft-test-object-picker-loading"
 )), false, "library loading state belongs to the dropdown summary");
+loading.setStatus({loading: false});
+loading.setItems([{value: "loaded", label: "Loaded group"}]);
+assert.equal(loading.summary.children[0].textContent, "未筛选");
+assert.equal(loading.summary["aria-disabled"], undefined,
+  "a mounted picker becomes interactive when its lazy catalog resolves");
 const failed = window.FTMultiSelectFilter.create({t: value => value}, {
   items: [], errorText: "产品组候选读取失败: timeout",
 });

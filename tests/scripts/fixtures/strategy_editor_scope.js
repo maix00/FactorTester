@@ -124,6 +124,13 @@ if (process.argv[3]) {
 
 assert.equal(window.FTStrategyEditorScope.scope(state, "factor").items[0].ref, "outer-factor");
 assert.equal(window.FTStrategyEditorScope.scope(state, "product_path_selection").items[0].group_ref, "outer-group");
+state.values.product_path_candidates.push({group_ref: "unselected-group", title_zh: "Unselected"});
+assert.deepEqual(
+  window.FTStrategyEditorScope.scope(state, "product_path_selection")
+    .items.map(item => item.group_ref),
+  ["outer-group"],
+  "nested product selectors inherit the outer multi-selection, not its full catalog",
+);
 assert.deepEqual(window.FTStrategyEditorScope.validate(state), []);
 const innerCandidates = window.FTStrategyEditorScope.scopedField(
   state, "factor_candidates", "inner",
@@ -192,9 +199,10 @@ if (process.argv[3]) {
 }
 state.values.factor = "";
 state.values.product_path_selection = "";
-assert.equal(window.FTStrategyEditorScope.validate(state).length, 0);
+assert.equal(window.FTStrategyEditorScope.validate(state).length, 1,
+  "a mounted outer product tab requires an explicit multi-selection");
 state.values.factor_candidates = [];
-assert.equal(window.FTStrategyEditorScope.validate(state).length, 1);
+assert.equal(window.FTStrategyEditorScope.validate(state).length, 2);
 state.values.product_path_candidates = [];
 assert.equal(window.FTStrategyEditorScope.validate(state).length, 2);
 state.settingsMountedTabs = [];

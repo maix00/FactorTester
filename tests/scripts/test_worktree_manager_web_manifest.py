@@ -1102,6 +1102,10 @@ def test_test_settings_mount_live_chips_between_tabs_and_panel() -> None:
     assert "FTTestFieldRow.table(content)" in tabs
     assert "--test-field-label-width" in styles
     assert "minmax(0, var(--test-field-label-width, 160px)) minmax(0, 1fr)" in styles
+    assert 'entry.panel.classList.toggle("has-field-table"' in tabs
+    assert ".tab-chip-content-panel.has-field-table" in styles
+    assert ".test-field-table > .test-setting-row:first-child" in styles
+    assert ".test-field-table > .test-setting-row:last-child" in styles
 
 
 def test_factor_editor_family_picker_uses_the_shared_source_control() -> None:
@@ -2155,6 +2159,7 @@ def test_multi_select_object_rows_open_matching_view_overlays() -> None:
     assert "itemActions:" not in products
     assert "view: {...view, onSaved: savedGroup}" in products
     assert "testState: state" in products
+    assert "refreshProductsForExecution" in products
     assert "familyRowView" in factor_editor
     assert "factorRowView" in factor_editor
     assert "factor_set_only === true" in shared.read_text(encoding="utf-8")
