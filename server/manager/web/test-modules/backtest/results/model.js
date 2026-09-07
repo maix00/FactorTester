@@ -388,7 +388,9 @@
     if (metricMatrix(summary).entries.length) result.push("strategy_stats");
     const surfaces = new Set();
     for (const [artifact, definition] of resultViews(declarations)) {
-      if (hasPayload(artifact)) surfaces.add(definition.surface);
+      if (hasPayload(artifact) || (declarations || []).some(item => (
+        String(item?.canonical_artifact || "") === artifact
+      ))) surfaces.add(definition.surface);
     }
     ["time_series", "execution_account", "return_analysis"].forEach(surface => {
       if (surfaces.has(surface)) result.push(surface);

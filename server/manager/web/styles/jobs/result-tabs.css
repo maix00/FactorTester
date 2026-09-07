@@ -44,20 +44,32 @@
   width: 100%; box-sizing: border-box; margin: 0 0 16px;
   border: 1px solid var(--line); border-radius: 10px; background: var(--card);
 }
+.job-result-tabs-header { width: 100%; min-width: 0; box-sizing: border-box; }
+.job-result-tabs-header > .job-result-tabs-controls {
+  width: 100%; min-width: 0; margin-left: 0;
+}
+.job-result-tabs-header > .job-result-tabs-controls > * { width: 100%; min-width: 0; }
 .job-result-filter-panel > summary {
   cursor: pointer; padding: 10px 14px; font-weight: 650;
 }
-.job-result-filter-rows { border-top: 1px solid var(--line); }
+.job-result-filter-rows {
+  display: table; width: 100%; border-collapse: collapse;
+  border-top: 1px solid var(--line);
+}
 .job-result-filter-row {
-  display: grid; grid-template-columns: max-content minmax(0, 1fr);
-  gap: 14px; align-items: center; padding: 10px 14px;
+  display: table-row;
 }
 .job-result-filter-row + .job-result-filter-row { border-top: 1px solid var(--line); }
-.job-result-filter-label { font-weight: 600; white-space: nowrap; }
+.job-result-filter-label,
+.job-result-filter-value { display: table-cell; vertical-align: middle; padding: 10px 14px; }
+.job-result-filter-label { width: 1%; font-weight: 600; white-space: nowrap; }
 .job-result-filter-value,
 .job-result-filter-value > * { min-width: 0; width: 100%; max-width: none; }
 @media (max-width: 640px) {
-  .job-result-filter-row { grid-template-columns: 1fr; gap: 6px; }
+  .job-result-filter-rows, .job-result-filter-row,
+  .job-result-filter-label, .job-result-filter-value { display: block; width: 100%; }
+  .job-result-filter-label { padding-bottom: 4px; }
+  .job-result-filter-value { padding-top: 4px; }
 }
 .job-result-tab-rename {
   width: 150px;
@@ -68,4 +80,10 @@
   padding: 4px 8px;
   background: var(--panel);
   color: inherit;
+}
+.job-result-not-computed { padding: 24px; text-align: center; color: var(--muted); }
+.job-result-not-computed h3 { margin: 0 0 6px; color: var(--text); }
+.job-result-not-computed p { margin: 0; }
+.job-result-not-computed-actions {
+  display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 14px;
 }

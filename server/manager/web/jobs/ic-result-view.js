@@ -24,19 +24,7 @@
 
   function tabsForArtifacts(resultDeclarations, artifacts) {
     const declared = declaredTabs(resultDeclarations);
-    const candidates = declared;
-    const active = new Set((artifacts || [])
-      .filter(item => item.state === "active")
-      .map(item => String(item.name || "")));
-    return candidates.filter(tab => {
-      const sources = Array.isArray(tab.source_artifacts)
-        ? tab.source_artifacts.map(String) : [];
-      if (!sources.length) return false;
-      const matches = tab.source_policy === "all"
-        ? sources.every(source => active.has(source))
-        : sources.some(source => active.has(source));
-      return matches;
-    });
+    return declared;
   }
 
   function relevantArtifacts(artifacts, resultDeclarations = []) {
@@ -170,6 +158,26 @@
     return empty(context, tab?.empty_state || fallback);
   }
 
+  function missingTab(context, state, tab) {
+    const requests = Array.isArray(tab?.output_requests)
+      ? tab.output_requests.map(String) : [];
+    const declarations = new Map((state.resultDeclarations || []).map(item => [
+      String(item.name || ""), item,
+    ]));
+    const canGenerate = requests.length > 0 && requests.every(name => (
+      declarations.get(name)?.after_run === true
+    ));
+    return FTJobResultTabs.missingOutput(context, {
+      canGenerate,
+      onGenerate: canGenerate ? () => FTJobGeneration.generate(context, {
+        jobID: state.jobID,
+        artifactQuery: state.artifactQuery,
+        executionQuery: state.executionQuery,
+        onGenerated: state.onGenerated,
+      }, requests) : null,
+    });
+  }
+
   function number(value) {
     if (value == null) return "—";
     if (!Number.isFinite(Number(value))) return String(value);
@@ -301,7 +309,7 @@
       title, items: items.map(item => ({
         value: String(item.value), label: String(item.label), description: String(item.label),
       })),
-      selected: selected.map(String), multi, compact: false,
+      selected: selected.map(String), multi, compact: true,
       onChange, onApply: onChange,
     }).element;
   }
@@ -398,6 +406,18 @@
         });
         return target;
       }
+    }
+    const tab = state.tabs.find(item => item.key === state.activeTab);
+    const activeArtifacts = new Set((state.artifacts || [])
+      .filter(item => item.state === "active")
+      .map(item => String(item.name || "")));
+    const sources = Array.isArray(tab?.source_artifacts)
+      ? tab.source_artifacts.map(String) : [];
+    const available = tab?.source_policy === "all"
+      ? sources.every(name => activeArtifacts.has(name))
+      : sources.some(name => activeArtifacts.has(name));
+    if (sources.length && !available) {
+      return missingTab(context, state, tab);
     }
     const factor = activeFactor(state);
     const descriptor = activeDescriptor(state);
@@ -617,6 +637,8 @@
           ),
           artifacts: options.artifacts, jobID: options.jobID,
           artifactQuery: options.artifactQuery || "",
+          executionQuery: options.executionQuery || "",
+          onGenerated: options.onGenerated,
           resultDeclarations: options.resultDeclarations || [],
           resultSummary: options.resultSummary || {},
           payloads: {}, sources: new Map(), loadToken: 0,
