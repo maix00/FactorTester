@@ -225,6 +225,7 @@
     "selectedBacktestLongShortIDs", "backtestExpandedBatches",
     "selectedICConfigurationGroupIDs", "icConfigurationGroupSurfaceKey",
     "icConfigurationGroupEditor", "icConfigurationGroupsOpen",
+    "lastSubmittedJobs",
   ]);
 
   function draftSnapshot(state) {

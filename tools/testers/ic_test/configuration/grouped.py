@@ -18,6 +18,13 @@ def compile_ic_grouped_configuration(value: dict[str, Any], *, factor_frequencie
     ordered = sorted(groups, key=lambda item: str(item.get("config_group_id") or ""))
     provenance = [{"config_group_id": str(item["config_group_id"]), "product_scope_ref": str(item["product_scope_ref"]), "factor_ref": str(item["factor_ref"]), "core_ref": authoring.core_tests[index].request_ref} for index, item in enumerate(ordered)]
     encoded["group_provenance"] = provenance
+    encoded["group_execution_settings"] = {
+        provenance[index]["core_ref"]: {
+            "warmup_mode": str(item.get("warmup_mode") or "auto"),
+            "warmup_window": item.get("warmup_window", "30d"),
+        }
+        for index, item in enumerate(ordered)
+    }
     encoded["compiled_config_hash"] = hashlib.sha256(json.dumps(encoded, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
     encoded["provenance"] = provenance[0] if len(provenance) == 1 else {"groups": provenance}
     return {"groups": provenance, **encoded}

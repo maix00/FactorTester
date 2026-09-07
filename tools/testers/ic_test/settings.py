@@ -36,6 +36,8 @@ def register_ic_test_settings(app: ApplicationSettings) -> None:
             "horizon": {"sampling": "scale_aware"},
             "methods": ["rank"],
             "return_price_basis": "next_open_to_open_adjusted",
+            "warmup_mode": "auto",
+            "warmup_window": "30d",
             "analysis_attachments": [],
             "editor_mounted_tabs": [
                 "__configuration__", "factor", "product_path_selection",

@@ -1904,7 +1904,7 @@ def test_backtest_result_model_reconstructs_persisted_domain_outputs() -> None:
 
     fixture = ROOT / "tests" / "scripts" / "fixtures" / "backtest_results" / "result_model.js"
     model = WEB_ROOT / "test-modules" / "backtest" / "results" / "model.js"
-    runtime = WEB_ROOT / "test-modules" / "backtest" / "results" / "runtime-model.js"
+    runtime = WEB_ROOT / "test-modules" / "shared" / "results" / "runtime-summary.js"
     result = subprocess.run(
         ["node", str(fixture), str(model), str(runtime)], cwd=ROOT,
         capture_output=True, text=True, check=False,
@@ -2410,12 +2410,14 @@ def test_custom_analysis_tabs_are_shared_by_all_job_result_viewers() -> None:
     factor = (WEB_ROOT / "test-modules" / "factor-evaluation" / "results" / "view.js").read_text(
         encoding="utf-8"
     )
+    tabs = (WEB_ROOT / "jobs" / "result-tabs.js").read_text(encoding="utf-8")
 
     assert "if (context.session)" in custom
     for source in (backtest, ic, factor):
         assert "customAnalyses?.tabs" in source
-        assert 'key === "custom-analysis:new"' in source
+        assert "FTJobResultTabs.activate" in source
         assert "customAnalyses.render" in source
+    assert 'key !== "custom-analysis:new"' in tabs
 
 
 def test_custom_analysis_tab_edit_and_close_do_not_compete_with_activation() -> None:

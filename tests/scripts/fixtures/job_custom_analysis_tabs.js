@@ -27,6 +27,11 @@ class Element {
 }
 
 global.window = {};
+global.FTRuntimeSummary = {
+  rows: summary => summary?.runtime_info_rows || [],
+  render: () => new Element("table"),
+};
+window.FTRuntimeSummary = global.FTRuntimeSummary;
 global.document = {createElement: tag => new Element(tag)};
 global.confirm = () => true;
 vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), {
@@ -50,6 +55,22 @@ const custom = view.tabs.children[1];
 const [select, edit, close] = custom.children;
 
 (async () => {
+  const composed = window.FTJobResultTabs.compose({
+    tabs: [tabs[0]], resultSummary: {runtime_info_rows: [{detail: "ok"}]},
+    customTabs: [tabs[1]],
+  });
+  assert.deepEqual(composed.map(item => item.key), [
+    "builtin", "runtime_summary", "custom-analysis:one",
+  ]);
+  let activated = "";
+  await window.FTJobResultTabs.activate(context, "custom-analysis:new", {
+    customAnalyses: {
+      add: async () => ({tab_id: "two"}),
+      keyFor: id => `custom-analysis:${id}`,
+    },
+    onActive: key => { activated = key; },
+  });
+  assert.equal(activated, "custom-analysis:two");
   await edit.fire("click");
   assert.deepEqual(changes, [], "edit must not activate the tab");
   const input = custom.children[0]; input.value = "新名字";

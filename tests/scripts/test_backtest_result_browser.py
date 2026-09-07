@@ -35,7 +35,7 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
             "server/manager/web/jobs/artifact-query.js",
             "server/manager/web/jobs/highcharts-timeline.js",
             "server/manager/web/report/table-view.js",
-            "server/manager/web/test-modules/backtest/results/runtime-model.js",
+            "server/manager/web/test-modules/shared/results/runtime-summary.js",
             "server/manager/web/test-modules/backtest/results/model.js",
             "server/manager/web/test-modules/backtest/results/strategy-selection.js",
             "server/manager/web/test-modules/backtest/results/analysis/ui.js",

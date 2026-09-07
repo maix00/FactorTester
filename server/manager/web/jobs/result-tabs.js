@@ -1,4 +1,42 @@
 (() => {
+  const RUNTIME_KEY = "runtime_summary";
+
+  function compose(options = {}) {
+    const tabs = [...(options.tabs || [])];
+    if (window.FTRuntimeSummary?.rows?.(options.resultSummary || {}).length
+        && !tabs.some(tab => tab.key === RUNTIME_KEY)) {
+      tabs.push({key: RUNTIME_KEY, label: "运行摘要", standard: true});
+    }
+    return [...tabs, ...(options.customTabs || [])];
+  }
+
+  function active(tabs, requested, fallback = "") {
+    return tabs.some(tab => tab.key === requested)
+      ? requested : (fallback && tabs.some(tab => tab.key === fallback)
+        ? fallback : tabs[0]?.key || "");
+  }
+
+  function standardContent(context, key, resultSummary, options = {}) {
+    return key === RUNTIME_KEY
+      ? FTRuntimeSummary.render(context, resultSummary || {}, options) : null;
+  }
+
+  async function activate(context, key, options = {}) {
+    if (key !== "custom-analysis:new") {
+      options.onActive?.(key);
+      return key;
+    }
+    try {
+      const analysis = await options.customAnalyses?.add?.();
+      const next = options.customAnalyses?.keyFor?.(analysis?.tab_id) || "";
+      if (next) options.onActive?.(next);
+      return next;
+    } catch (error) {
+      context.showNotice?.(error.message || String(error), true);
+      return "";
+    }
+  }
+
   function create(context, options = {}) {
     const header = document.createElement("div");
     header.className = ["job-result-tabs-header", options.className || ""]
@@ -73,5 +111,7 @@
     return Object.freeze({header, tabs, controls});
   }
 
-  window.FTJobResultTabs = Object.freeze({create});
+  window.FTJobResultTabs = Object.freeze({
+    activate, active, compose, create, standardContent,
+  });
 })();

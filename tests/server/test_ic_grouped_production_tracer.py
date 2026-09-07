@@ -18,6 +18,8 @@ def test_grouped_ic_run_spec_compiles_typed_groups_with_provenance():
             "entry_delay_bars": 1,
             "methods": ["rank"],
             "return_price_basis": "next_open_to_open_adjusted",
+            "warmup_mode": "fixed",
+            "warmup_window": "10d",
         }],
     }
     compiled = compile_ic_grouped_configuration(frozen, factor_frequencies={"factor:v2:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": "MIN5"})
@@ -25,6 +27,10 @@ def test_grouped_ic_run_spec_compiles_typed_groups_with_provenance():
     assert compiled["groups"][0]["product_scope_ref"] == "product-scope:core8"
     assert compiled["groups"][0]["core_ref"].startswith("ic-core-request:v1:")
     assert compiled["provenance"]["config_group_id"] == "cg-alpha"
+    core_ref = compiled["groups"][0]["core_ref"]
+    assert compiled["group_execution_settings"][core_ref] == {
+        "warmup_mode": "fixed", "warmup_window": "10d",
+    }
     assert len(compiled["compiled_config_hash"]) == 64
 
 
@@ -64,6 +70,7 @@ def test_run_ic_invokes_worker_once_with_frozen_grouped_execution_view(monkeypat
             "entry_delay_bars": 1,
             "methods": ["rank"],
             "return_price_basis": "next_open_to_open_adjusted",
+            "warmup_mode": "none",
         }],
     }
     typed = compile_ic_grouped_configuration(
@@ -100,6 +107,7 @@ def test_run_ic_invokes_worker_once_with_frozen_grouped_execution_view(monkeypat
     assert execution["product_path_selection_id"] == "product-scope:core8"
     assert execution["paths"] == ["/canonical/products/core8"]
     assert execution["ic_lags"] == [1]
+    assert execution["warmup_mode"] == "none"
     assert execution["forward_return_horizons"] == {
         "sampling": "explicit", "bases": ["MIN10"], "multipliers": [1],
     }
