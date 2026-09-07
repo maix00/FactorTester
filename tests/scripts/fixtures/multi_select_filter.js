@@ -133,6 +133,23 @@ assert.equal(descendants(filter.element).some(item => (
 filter.setValues(["day", "none"]);
 assert.deepEqual(filter.values, ["none"]);
 assert.equal(filter.summary.children[0].textContent, "未绑定");
+
+let openCount = 0;
+let refreshCount = 0;
+const lazy = window.FTMultiSelectFilter.create({t: value => value}, {
+  items: [{value: "loading", label: "加载中", disabled: true}],
+  onOpen: () => { openCount += 1; },
+  onRefresh: () => { refreshCount += 1; },
+});
+lazy.dropdown.open = true;
+lazy.dropdown.listeners.toggle();
+assert.equal(openCount, 1, "opening a shared picker invokes its lazy catalog loader");
+const lazyRefresh = createdElements.filter(item => (
+  String(item.className || "").includes("ft-multi-select-sync-toggle")
+)).at(-1);
+assert.ok(lazyRefresh, "shared picker exposes an internal refresh action");
+lazyRefresh.listeners.click({stopPropagation() {}});
+assert.equal(refreshCount, 1, "internal refresh invokes the catalog owner's reload");
 // Rows now live inside menu sections; locate by the row input value.
 function optionRows(picker) {
   return descendants(picker.optionList).filter(item => (

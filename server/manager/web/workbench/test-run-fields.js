@@ -143,6 +143,9 @@
         choiceOnOpen: () => window.FTTests?.ensureOutputCapabilities?.(
           context, state, refresh,
         ),
+        choiceOnRefresh: () => window.FTTests?.ensureOutputCapabilities?.(
+          context, state, refresh, {force: true},
+        ),
       };
     }
     if (editor === "profile") {
