@@ -108,6 +108,8 @@ class AccountDomainSyncService:
         # factor_family_formula_versions converges across servers (body is pulled
         # lazily over the data plane; the fingerprint arrives via outbox).
         versioned = self.materialize_factor_source_versions(owner)
+        from .research_sync import materialize_pending_researches
+        research_materialized = materialize_pending_researches(self)
         return {
             "status": "incomplete" if (flushed.get("pending") or flushed.get("offline") or flushed.get("blocked") or flushed.get("conflicts")
                                         or pulled.get("offline") or pulled.get("has_more")
@@ -117,6 +119,7 @@ class AccountDomainSyncService:
             "flushed": flushed,
             "pulled": pulled,
             "versioned": versioned,
+            "research_materialized": research_materialized,
         }
 
     def materialize_factor_source_versions(self, principal: str = "") -> int:
@@ -238,6 +241,11 @@ class AccountDomainSyncService:
                 continue
             maximum = max(maximum, int(row.get("revision") or 0))
             state = self.local.apply_remote(row)
+            if row.get('entity_type') == 'research_catalog' and state == 'applied':
+                from .research_sync import materialize_research
+                current = self.local.get_entity(row['principal'], row['entity_type'], row['entity_id'])
+                if current is not None:
+                    materialize_research(self.local.path, current)
             if row.get('entity_type') in {'strategy', 'strategy_revision'} and state != 'conflict':
                 from .strategy_sync import materialize_strategy
                 current = self.local.get_entity(row['principal'], row['entity_type'], row['entity_id'])
@@ -378,6 +386,8 @@ class AccountDomainSyncService:
         count += backfill_factor_versions(self, owner)
         from .strategy_sync import backfill_strategies
         count += backfill_strategies(self, owner)
+        from .research_sync import backfill_researches
+        count += backfill_researches(self, owner)
         if count:
             self.flush(principal=owner)
         return count

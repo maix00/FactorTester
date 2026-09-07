@@ -645,6 +645,10 @@
         parentResearchID: id,
       });
       context.setHeading(value.title || id, context.t("研究"));
+      context.toolbar?.append(FTUI.refreshButton(context, async () => {
+        await context.api("/api/catalog/refresh", {method: "POST"});
+        if (current(context)) await renderDetail(context, mount, id);
+      }));
       const root = document.createElement("div");
       root.className = "research-root-detail research-detail-page";
       root.__researchValue = value;

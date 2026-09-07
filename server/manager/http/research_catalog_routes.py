@@ -17,6 +17,11 @@ class ResearchCatalogRoutesMixin:
             raise RuntimeError("Research catalog is unavailable")
         return service
 
+    def _refresh_research_catalog(self, principal: str) -> None:
+        client = getattr(self.state, "client_state", None)
+        if client is not None:
+            client._refresh_account_domain_async(principal)
+
     def _research_catalog_session(self):
         session = self._session()
         if session is None:
@@ -48,6 +53,7 @@ class ResearchCatalogRoutesMixin:
         if session is None:
             return True
         viewer = str(session["username"])
+        self._refresh_research_catalog(viewer)
         service = self._research_catalog_service()
         query = parse_qs(parsed.query, keep_blank_values=True)
         try:
