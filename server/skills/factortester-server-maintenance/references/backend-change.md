@@ -1,41 +1,20 @@
-# Backend anomaly and capability change
+# 后端异常与能力修改
 
-## Diagnose
+## 诊断
 
-1. Bind the case to its anomaly code, affected refs, backend build/config
-   receipt and immutable research inputs.
-2. Trace the real runtime route from public request or scheduler entry through
-   the semantic owner to the persisted result. Existing code that is not on
-   this route is not evidence of working capability.
-3. Reproduce with a focused command or test. Compare trusted invariants before
-   reading broad source areas.
-4. Prefer deterministic receipt checks. Start a Backend Verifier only when a
-   concrete contradiction, impossible invariant, reproducible anomaly or
-   material result discrepancy remains.
+1. 将案例关联到异常码、受影响 ref、后端构建与配置回执、不可变研究输入。
+2. 从公开请求或调度入口沿实际执行路径追踪到语义所属模块及持久化结果。未进入该路径的现存代码不能证明功能有效。
+3. 用聚焦命令或测试复现，优先核对可信不变量，再扩大源码检查范围。
+4. 优先使用确定性回执。只有仍存在明确矛盾、不可成立的不变量、可复现异常或实质结果差异时才启动 Backend Verifier。
 
-## Decide
+## 判定
 
-- `confirmed_reliable`: the backend receipt and invariants pass; resume the
-  research ref without code work.
-- `research_input_issue`: configuration, data, factor source or unsupported
-  scope caused the observation; report the exact bounded correction.
-- `backend_change_proposed`: source behavior is reproducibly wrong or a
-  required approved capability is absent. Bind the proposal to expected
-  semantics, files/owner, tests, cost, compatibility and rollback.
+- `confirmed_reliable`：回执和不变量通过，可恢复对应研究，不需要代码修改。
+- `research_input_issue`：配置、数据、因子源码或不支持的范围导致问题，指出具体修正。
+- `backend_change_proposed`：源码行为可复现地错误，或缺少已批准的必要能力。方案说明预期语义、文件与所有者、测试、成本、兼容性及回退。
 
-Do not turn a weak result into a backend anomaly. Do not let a backend fix
-strengthen a factor Claim; it only changes evidence eligibility and may require
-new runs.
+较弱的研究结果不等于后端异常。后端修复不能增强因子 Claim，只影响证据是否可用，可能需要重新运行。
 
-## Implement and return
+## 实现与交付
 
-Implement at the deepest semantic owner rather than a presentation caller.
-Preserve the failing fixture and old receipt. Return a source-free result with:
-
-- case/task ID and disposition;
-- old/new build or protocol hashes;
-- affected and unaffected refs;
-- tests and invariant outcomes;
-- whether old Evidence is eligible, limited or reference-only;
-- whether a new Job/Run is mandatory;
-- rollout and rollback refs.
+在语义所属层修复，保留失败用例与旧回执。面向运行时的结果不包含源码，列明案例及判定、旧新构建或协议 hash、影响范围、测试与不变量结果、旧 Evidence 的可用性、是否必须新建 Job/Run、发布与回退 ref。

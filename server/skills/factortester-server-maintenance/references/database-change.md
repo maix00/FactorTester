@@ -1,30 +1,19 @@
-# Database maintenance
+# 数据库维护
 
-Use this reference for schema changes, canonical-owner migrations, retention
-cleanup and orphan repair.
+适用于 schema 修改、权威所有者迁移、保留期清理和孤立记录修复。
 
-## Before mutation
+## 修改前
 
-- Obtain explicit authority for the exact case and database identity.
-- Create a backup and run an integrity check.
-- Produce a deterministic dry-run manifest with exact rows, refs, artifact
-  paths, expected statement count, plan hash and rollback invariant.
-- Reject cross-workspace, pinned, unknown or out-of-root references. Never
-  discover deletion targets by guessing IDs or scanning arbitrary paths.
+- 确认具体案例及数据库身份的授权，创建备份并做完整性检查。
+- 生成确定性 dry-run 清单：精确记录、ref、生成物路径、预期语句数量、方案 hash 和回退不变量。
+- 拒绝跨工作区、已固定、未知或根目录之外的引用。不得通过猜测 ID 或扫描任意路径寻找删除对象。
 
-## Apply
+## 执行
 
-- Revalidate database identity, revision and manifest hash immediately before
-  applying.
-- Use one bounded transaction for metadata changes.
-- Delete artifacts only below the authorized root and exact relative paths.
-  Record missing files as `missing_already`.
-- Do not write per-read telemetry or add a table when an existing canonical
-  owner, event or receipt can express the fact.
+- 执行前重新核对数据库身份、revision 和清单 hash。
+- 元数据变更使用有界事务；文件删除限于授权根目录及精确相对路径，已缺失文件记为 `missing_already`。
+- 能用现有权威记录、事件或回执表达事实时，不新增表或每次读取都写入遥测。
 
-## Verify
+## 验证
 
-Run foreign-key/reference checks, integrity check, row-count invariants and
-hot-path SQL statement benchmarks. Persist one minimal purge/migration receipt
-with plan hash, counts, actor, time and rollback/result status. Do not retain
-complete database dumps or server paths in client-visible evidence.
+核查外键与引用、数据库完整性、行数不变量和热点 SQL 语句预算。保留最小迁移或清理回执，包含方案 hash、计数、执行主体、时间及回退或结果状态。客户端可见证据不得包含完整数据库转储或服务器路径。

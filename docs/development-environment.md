@@ -14,6 +14,7 @@ conda activate GTHT
 | 包 | 版本 |
 |---|---:|
 | Python | 3.14.0 |
+| SQLite | 3.53.2 |
 | numpy | 2.3.4 |
 | pandas | 3.0.2 |
 | pytest | 9.0.3 |
@@ -23,6 +24,12 @@ conda activate GTHT
 | matplotlib | 3.10.7 |
 | tqdm | 4.67.1 |
 | pyarrow | 22.0.0 |
+
+## SQLite 并发版本
+
+GTHT 固定 SQLite 3.53.2。3.51.0/3.51.1 在 Unix 上并发打开与关闭 WAL 数据库时可能死锁，表现为测试 HTTP 请求永久等待、后台同步线程卡在原生锁中。
+该问题已有 [SQLite 官方修复说明](https://www.sqlite.org/releaselog/3_51_2.html)。不要通过禁用同步或增加业务锁绕过旧运行库问题。
+更新使用 `environment.yml`；单独维护现有环境时先做 Conda dry-run，检查只改变所需包。`scripts/test.sh` 提前拒绝受影响的两个版本。
 
 ## 测试
 
