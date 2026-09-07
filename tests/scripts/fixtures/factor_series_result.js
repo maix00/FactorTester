@@ -90,6 +90,11 @@ assert.strictEqual(captured.options.navigator.enabled, true);
 assert.strictEqual(captured.options.navigator.series.type, "line");
 assert.strictEqual(captured.options.navigator.series.data.length, 2);
 assert.strictEqual(captured.options.navigator.series.dataGrouping.enabled, false);
+assert.strictEqual(captured.options.title.text, `SI.GFE · ${result.factor.alias}`);
+assert.strictEqual(captured.options.series[1].name, "因子值");
+const factorValueTooltip = captured.options.series[1].tooltip.pointFormatter.call({y: 0.1});
+assert.ok(factorValueTooltip.startsWith("<br/>因子值:"));
+assert.ok(!factorValueTooltip.includes(result.factor.alias));
 captured.options.series.forEach(item => {
   assert.strictEqual(item.dataGrouping.enabled, false);
 });
@@ -116,6 +121,15 @@ assert.strictEqual(context.FTFactorSeriesResults.supports({
   jobKind: "factor_evaluation",
 }), true);
 assert.strictEqual(context.FTFactorSeriesResults.supports({jobKind: "ic"}), false);
+assert.strictEqual(context.FTFactorSeriesResults.supportsPriceAdjustment({
+  supports_term_structure: true,
+}), true);
+assert.strictEqual(context.FTFactorSeriesResults.supportsPriceAdjustment({
+  supports_term_structure: false,
+}), false);
+assert.strictEqual(context.FTFactorSeriesResults.supportsPriceAdjustment({
+  contracts: [{contract: "SI2501"}],
+}), false);
 assert.strictEqual(context.FTFactorSeriesResults.artifactOf([
   {name: "result", state: "superseded"}, {name: "result", state: "active"},
 ]).state, "active");

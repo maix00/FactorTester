@@ -9,6 +9,10 @@
     ));
   }
 
+  function supportsPriceAdjustment(contractPayload) {
+    return contractPayload?.supports_term_structure === true;
+  }
+
   async function loadResult(context, options) {
     const summary = window.FTFactorSeriesModel.build(options.resultSummary || {});
     if (summary.series.length) return summary;
@@ -89,6 +93,25 @@
     const label = document.createElement("b"); label.textContent = context.t("产品");
     let selectedProduct = window.FTFactorSeriesModel.identity(model.series[0]);
     const source = document.createElement("small");
+    const adjustmentField = document.createElement("label");
+    adjustmentField.className = "factor-series-adjustment-control";
+    adjustmentField.hidden = true;
+    const adjustmentLabel = document.createElement("b");
+    adjustmentLabel.textContent = context.t("复权方式");
+    const adjustmentSelect = document.createElement("select");
+    adjustmentSelect.setAttribute("aria-label", context.t("复权方式"));
+    [["raw", "原始价格"], ["adjusted", "复权价格"]].forEach(([value, text]) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = context.t(text);
+      adjustmentSelect.append(option);
+    });
+    adjustmentField.append(adjustmentLabel, adjustmentSelect);
+    const initialRequest = window.FTFactorSeriesModel.priceRequest(
+      options.configuration, selectedProduct, model.factor.freq,
+    );
+    const adjustmentState = {adjusted: initialRequest.adjusted};
+    adjustmentSelect.value = adjustmentState.adjusted ? "adjusted" : "raw";
     const chart = document.createElement("div");
     chart.className = "factor-series-chart-mount";
     const contracts = document.createElement("div");
@@ -98,6 +121,7 @@
     target.replaceChildren(header, content);
     const show = () => loadProduct(
       context, model, options, selectedProduct, chart, contracts, source,
+      adjustmentField, adjustmentState,
     ).catch(error => {
       chart.replaceChildren(FTUI.empty(
         context.t("曲线暂不可用"), error.message || String(error),
@@ -119,11 +143,18 @@
       },
     });
     field.append(label, picker.element);
-    controls.append(field, source);
+    adjustmentSelect.addEventListener("change", () => {
+      adjustmentState.adjusted = adjustmentSelect.value === "adjusted";
+      show();
+    });
+    controls.append(field, adjustmentField, source);
     show();
   }
 
-  async function loadProduct(context, model, options, product, chart, tableMount, note) {
+  async function loadProduct(
+    context, model, options, product, chart, tableMount, note,
+    adjustmentField, adjustmentState,
+  ) {
     const item = model.series.find(value => (
       window.FTFactorSeriesModel.identity(value) === product
     )) || model.series[0];
@@ -133,6 +164,7 @@
     const request = window.FTFactorSeriesModel.priceRequest(
       options.configuration, product, model.factor.freq,
     );
+    request.adjusted = Boolean(adjustmentState.adjusted);
     const [priceResult, contractResult] = await Promise.allSettled([
       window.FTMarketData.prices(context, request),
       window.FTMarketData.contracts(context, product),
@@ -144,6 +176,7 @@
       ? contractResult.value.payload : {};
     const rows = Array.isArray(contractPayload.contracts)
       ? contractPayload.contracts : [];
+    adjustmentField.hidden = !supportsPriceAdjustment(contractPayload);
     try {
       const chartInstance = window.FTFactorSeriesChart.mount(context, chart, {
         product,
@@ -202,5 +235,7 @@
     target.replaceChildren(title, view.shell);
   }
 
-  window.FTFactorSeriesResults = Object.freeze({artifactOf, section, supports});
+  window.FTFactorSeriesResults = Object.freeze({
+    artifactOf, section, supports, supportsPriceAdjustment,
+  });
 })();
