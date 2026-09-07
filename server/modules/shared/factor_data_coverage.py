@@ -37,6 +37,7 @@ def require_factor_data_coverage(
     end_dt: DataTime,
     data_source: str = "",
     warmup_window: pd.Timedelta | None = None,
+    allow_all_warmup_fallback: bool = False,
 ) -> dict[str, Any]:
     """Check eligible sources while keeping output and warm-up ranges distinct."""
     from tools.factors.evaluation.source_frequency import resolve_source_frequency
@@ -69,6 +70,7 @@ def require_factor_data_coverage(
     failures: list[str] = []
     skipped: list[dict[str, str]] = []
     leading_gaps: list[dict[str, str]] = []
+    warmup_fallbacks: list[dict[str, str]] = []
     eligible = 0
     for product in products:
         name = str(getattr(product, "name", product))
@@ -103,12 +105,14 @@ def require_factor_data_coverage(
             continue
         if warmup > pd.Timedelta(0) and available_start > required_start:
             eligible -= 1
-            skipped.append({
+            shortfall = {
                 "product": name,
                 "reason": "insufficient_warmup",
                 "required_data_start": str(required_start.date()),
                 "available_start": str(available_start.date()),
-            })
+            }
+            skipped.append(shortfall)
+            warmup_fallbacks.append(shortfall)
         elif available_start > requested_start:
             # With no warm-up, the expression is allowed to produce NaN until
             # enough in-window observations have accumulated.
@@ -116,6 +120,14 @@ def require_factor_data_coverage(
                 "product": name,
                 "available_start": str(available_start.date()),
             })
+    if eligible == 0 and allow_all_warmup_fallback and warmup_fallbacks:
+        # Automatic warm-up is best effort when its strict interpretation
+        # would discard every otherwise usable product. Keep the formal run
+        # executable and expose the leading NaN trade-off in the result.
+        skipped = [item for item in skipped if item not in warmup_fallbacks]
+        eligible = len(warmup_fallbacks)
+    else:
+        warmup_fallbacks = []
     details = {
         "formal_start": str(requested_start.date()),
         "formal_end": str(requested_end.date()),
@@ -124,6 +136,7 @@ def require_factor_data_coverage(
         "eligible_product_count": eligible,
         "skipped_products": skipped,
         "leading_gaps": leading_gaps,
+        "warmup_fallbacks": warmup_fallbacks,
     }
     if eligible == 0:
         raise FactorDataCoverageError(
@@ -156,7 +169,7 @@ def apply_factor_data_coverage(tester: Any, coverage: dict[str, Any]) -> list[di
         "no_compatible_source": "无兼容数据源",
         "empty_source": "数据源为空",
     }
-    return [{
+    rows = [{
         "type": "产品路径", "status": "已移除", "level": "warning",
         "code": "factor_data_product_removed",
         "detail": item["product"] + "：" + reasons.get(item["reason"], item["reason"])
@@ -164,3 +177,13 @@ def apply_factor_data_coverage(tester: Any, coverage: dict[str, Any]) -> list[di
            if item["reason"] == "insufficient_warmup" else ""),
         "details": item,
     } for item in skipped]
+    rows.extend({
+        "type": "产品路径", "status": "自动预热降级", "level": "warning",
+        "code": "factor_data_warmup_fallback",
+        "detail": (
+            item["product"] + "：没有足够的自动预热数据，已从正式开始日计算；"
+            "起始段可能产生 NaN"
+        ),
+        "details": item,
+    } for item in coverage.get("warmup_fallbacks", []))
+    return rows

@@ -108,6 +108,49 @@ def test_fixed_warmup_requires_earlier_source_data() -> None:
     assert caught.value.details["required_data_start"] == "2024-01-01"
 
 
+def test_auto_warmup_falls_back_when_every_usable_product_is_short() -> None:
+    first = _product("2024-01-02 09:00", "2025-01-03 15:00")
+    second = _product("2024-01-02 09:00", "2025-01-03 15:00")
+    second.name = "LH.DCE"
+    tester = SimpleNamespace(products=[first, second])
+
+    coverage = require_factor_data_coverage(
+        tester.products,
+        _factor(),
+        start_dt=_time("2024-01-02 00:00"),
+        end_dt=_time("2025-01-03 15:00"),
+        warmup_window=pd.Timedelta("20D31min"),
+        allow_all_warmup_fallback=True,
+    )
+    rows = apply_factor_data_coverage(tester, coverage)
+
+    assert coverage["eligible_product_count"] == 2
+    assert coverage["skipped_products"] == []
+    assert len(coverage["warmup_fallbacks"]) == 2
+    assert tester.products == [first, second]
+    assert {row["code"] for row in rows} == {"factor_data_warmup_fallback"}
+    assert all("起始段可能产生 NaN" in row["detail"] for row in rows)
+
+
+def test_auto_warmup_still_excludes_short_product_when_another_is_covered() -> None:
+    short = _product("2024-01-02 09:00", "2025-01-03 15:00")
+    covered = _product("2023-12-01 09:00", "2025-01-03 15:00")
+    covered.name = "LH.DCE"
+
+    coverage = require_factor_data_coverage(
+        [short, covered],
+        _factor(),
+        start_dt=_time("2024-01-02 00:00"),
+        end_dt=_time("2025-01-03 15:00"),
+        warmup_window=pd.Timedelta("20D31min"),
+        allow_all_warmup_fallback=True,
+    )
+
+    assert coverage["eligible_product_count"] == 1
+    assert coverage["warmup_fallbacks"] == []
+    assert coverage["skipped_products"][0]["product"] == "AP.CZC"
+
+
 def test_source_starting_after_formal_end_is_not_eligible() -> None:
     with pytest.raises(FactorDataCoverageError) as caught:
         require_factor_data_coverage(
