@@ -63,6 +63,8 @@ class FactorRunResult:
         "_returns",
         "ic_series",
         "ic_stats",
+        "factor_cs_rank",
+        "return_cs_rank",
     )
 
     def __init__(self, factor: Optional[Factor] = None) -> None:
@@ -79,6 +81,10 @@ class FactorRunResult:
         self._returns: pd.DataFrame = pd.DataFrame()
         self.ic_series: pd.Series = pd.Series(dtype=float)
         self.ic_stats: pd.Series = pd.Series(dtype=float)
+        # Optional panels captured by the IC rank operator; never recomputed
+        # just to serialize factor-series artifacts.
+        self.factor_cs_rank: pd.DataFrame = pd.DataFrame()
+        self.return_cs_rank: pd.DataFrame = pd.DataFrame()
 
     # ── 内部工具：判断 _func_expr 是否含外层 neg ──
 
@@ -167,3 +173,5 @@ class FactorRunResult:
         self.returns = pd.DataFrame()
         self.ic_series = pd.Series(dtype=float)
         self.ic_stats = pd.Series(dtype=float)
+        self.factor_cs_rank = pd.DataFrame()
+        self.return_cs_rank = pd.DataFrame()

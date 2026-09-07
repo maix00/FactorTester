@@ -44,7 +44,11 @@ def test_sandbox_maps_only_profile_workspace_and_private_tmp(
         executable,
         "/proc/self/exe",
     ]
-    assert str(workspace.parent) not in command
+    alias = command.index(str(workspace), command.index("--bind") + 3)
+    assert command[alias - 2:alias + 1] == ["--symlink", "/workspace", str(workspace)]
+    mounts = [command[index + 1] for index, value in enumerate(command)
+              if value in {"--bind", "--ro-bind"}]
+    assert str(workspace.parent) not in mounts
     assert "/opt/factortester/app" not in command
     assert command[-5:] == [
         "--chdir",
@@ -101,6 +105,9 @@ def test_sandbox_process_cannot_see_host_tmp_or_user_storage(tmp_path: Path) -> 
     workspace = tmp_path / "profile"
     workspace.mkdir()
     (workspace / "owned.txt").write_text("owned", encoding="utf-8")
+    sibling = tmp_path / "other-profile"
+    sibling.mkdir()
+    (sibling / "private.txt").write_text("hidden", encoding="utf-8")
     host_tmp_marker = Path("/tmp/factortester-profile-agent-host-marker")
     host_tmp_marker.write_text("hidden", encoding="utf-8")
     try:
@@ -110,6 +117,9 @@ def test_sandbox_process_cannot_see_host_tmp_or_user_storage(tmp_path: Path) -> 
             shell, "-c",
             (
                 "test -f /workspace/owned.txt && "
+                f'test -f "{workspace}/owned.txt" && '
+                f'printf persistent > "{workspace}/report-check.txt" && '
+                f'test ! -e "{sibling}/private.txt" && '
                 "test ! -e /tmp/factortester-profile-agent-host-marker && "
                 "test ! -e /data/users && "
                 "test ! -e /opt/factortester/app && "
@@ -119,6 +129,7 @@ def test_sandbox_process_cannot_see_host_tmp_or_user_storage(tmp_path: Path) -> 
         ])
         completed = subprocess.run(command, check=False, capture_output=True, text=True)
         assert completed.returncode == 0, completed.stderr
+        assert (workspace / "report-check.txt").read_text() == "persistent"
     finally:
         host_tmp_marker.unlink(missing_ok=True)
 
