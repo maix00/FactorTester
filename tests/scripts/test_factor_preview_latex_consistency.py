@@ -170,6 +170,23 @@ def test_backend_preview_matches_frontend_for_every_case():
         assert python_expr.strip(), f"case '{name}' produced an empty preview"
 
 
+def test_parameter_header_values_do_not_expand_nested_factor_definitions():
+    cases = _cases()
+    factors = [case[1] for case in cases]
+    values = [case[2] for case in cases]
+    results = _node_previews(factors, values)
+    by_name = {name: result for (name, *_), result in zip(cases, results)}
+
+    nested = by_name["nested single"]
+    assert nested["localExpression"] != nested["expression"]
+    assert r"\textcolor{red}{\mathrm{Child}}" in nested["localExpression"]
+    assert r"\textcolor{blue}{\mathrm{Child}}" not in nested["localExpression"]
+    assert r"\textcolor{blue}{\mathrm{Child}}_t :=" not in nested["localExpression"]
+
+    scalar = by_name["scalar duration"]
+    assert scalar["localExpression"] == scalar["expression"]
+
+
 def test_parameter_values_round_trip():
     """The exported parameter_values helper mirrors the frontend map."""
     factor = _factor("Mom", r"\textcolor{red}{N}", [("N", "WindowParam", "20d")])
