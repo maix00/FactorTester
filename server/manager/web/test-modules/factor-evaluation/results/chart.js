@@ -59,9 +59,10 @@
         },
       },
       {
-        type: "line", name: options.factorLabel || t("因子"), yAxis: 1,
+        type: "line", name: t("因子值"), yAxis: 1,
         data: factorPoints, color: palette.factor, lineWidth: 1.6,
         dataGrouping: {enabled: false},
+        tooltip: {pointFormatter: factorPointFormatter(context)},
       },
       {
         type: "column", name: t("成交量"), yAxis: 2,
@@ -113,6 +114,15 @@
       tooltip: {shared: true, split: false, valueDecimals: 4},
       plotOptions: {series: {animation: false, turboThreshold: 0}},
       credits: {enabled: false}, series,
+    };
+  }
+
+  function factorPointFormatter(context) {
+    const scalar = window.FTPriceChart.scalarPointFormatter(context, "因子值");
+    return function() {
+      // The OHLC formatter has no trailing break. Prefixing one keeps the
+      // factor value on its own line in Highcharts' shared tooltip.
+      return `<br/>${scalar.call(this)}`;
     };
   }
 
