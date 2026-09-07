@@ -41,6 +41,7 @@ from server.jobs.run_input_dependencies import (
 )
 from server.jobs.states import JobStatus
 from server.modules.single_factor_test import sft_bp
+from server.modules.shared.factor_tester_runtime import require_run_window
 from server.services import (
     external_factor_artifacts,
     factor_subject_descriptors,
@@ -653,11 +654,47 @@ def prepare_manager_run_context(
     )
 
 
+def _validate_mounted_run_windows(prepared: dict) -> None:
+    """Reject an incomplete mounted time tab before preview or Job creation.
+
+    Legacy/API-authored configurations may intentionally omit the optional
+    time tab. Once the authoring UI mounts it, however, its explicit values are
+    the run contract and every selected analysis must carry a valid window.
+    """
+    configuration = prepared.get("frozen_configuration") or {}
+    payload = configuration.get("payload") if isinstance(configuration, dict) else None
+    ui = payload.get("ui") if isinstance(payload, dict) else None
+    for kind in prepared.get("analyses") or []:
+        analysis_ui = ui.get(str(kind)) if isinstance(ui, dict) else None
+        mounted_tabs = (
+            analysis_ui.get("mounted_tabs")
+            if isinstance(analysis_ui, dict)
+            else None
+        )
+        if "time" not in (mounted_tabs or []):
+            continue
+        try:
+            execution = _execution_payload(configuration, str(kind))
+            require_run_window(
+                execution.get("start_date") or None,
+                execution.get("end_date") or None,
+            )
+        except ValueError as exc:
+            raise _RunRequestError(
+                f"{kind}: {exc}",
+                status_code=422,
+                details={"code": "invalid_run_window"},
+            ) from exc
+
+
 def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
     context = data.get(MANAGER_RUN_CONTEXT_KEY)
     if context is not None:
-        return load_manager_run_context(context, owner=owner)
-    return _prepare_local_research_run_request(data, owner=owner)
+        prepared = load_manager_run_context(context, owner=owner)
+    else:
+        prepared = _prepare_local_research_run_request(data, owner=owner)
+    _validate_mounted_run_windows(prepared)
+    return prepared
 
 
 def _run_request_error_response(exc: _RunRequestError):
