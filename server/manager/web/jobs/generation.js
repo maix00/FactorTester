@@ -43,6 +43,21 @@
     }
   }
 
+  async function generate(context, options, selected) {
+    const executionQuery = options.artifactQuery
+      || options.executionQuery || options.portQuery || "";
+    const created = await context.api(
+      `/api/jobs/${encodeURIComponent(options.jobID)}/supplementals${executionQuery}`,
+      {method: "POST", body: JSON.stringify({
+        kind: "report_output_generation",
+        params: {output_requests: [...selected]},
+      })},
+    );
+    if (created.job) await waitForGeneration(context, options, created.job);
+    await options.onGenerated?.();
+    return created;
+  }
+
   function panel(context, options) {
     const section = document.createElement("section");
     section.className = "job-section job-output-generation";
@@ -83,19 +98,11 @@
       generate.disabled = true;
       status.textContent = context.t("正在生成…");
       try {
-        const created = await context.api(
-          `/api/jobs/${encodeURIComponent(options.jobID)}/supplementals${executionQuery}`,
-          {method: "POST", body: JSON.stringify({
-            kind: "report_output_generation",
-            params: {output_requests: selected},
-          })},
-        );
+        const created = await generate(context, options, selected);
         if (created.job) {
-          status.textContent = context.t("已加入补充任务队列…");
-          await waitForGeneration(context, options, created.job);
+          status.textContent = context.t("补充任务已完成");
         }
         status.textContent = context.t("已生成，正在刷新任务详情…");
-        await options.onGenerated();
       } catch (error) {
         status.textContent = error.message;
         generate.disabled = false;
@@ -120,5 +127,5 @@
     return section;
   }
 
-  window.FTJobGeneration = Object.freeze({analysisOf, batchCount, capabilities, panel});
+  window.FTJobGeneration = Object.freeze({analysisOf, batchCount, capabilities, generate, panel});
 })();

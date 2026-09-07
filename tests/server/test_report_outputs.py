@@ -65,6 +65,7 @@ def test_output_capabilities_and_aliases_are_declared() -> None:
     assert normalize_output_requests(["holding_half_life"]) == ["ic_holding_half_life"]
     capabilities = {item["name"]: item for item in output_capabilities()}
     assert capabilities["factor_series"]["before_run"] is True
+    assert capabilities["factor_series"]["after_run"] is False
     assert set(capabilities["factor_series"]["analyses"]) == {
         "factor_evaluation", "ic", "backtest",
     }

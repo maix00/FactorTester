@@ -36,4 +36,7 @@ assert.equal(window.FTBacktestResults.supports([], {
 assert.equal(window.FTBacktestResults.supports([], {
   groups: [{timestamps: [1], total_equity: [100]}],
 }), false, "dense summary curves are not an alternate result transport");
+assert.equal(window.FTBacktestResults.supports([], {}, [{
+  name: "period_returns", result_surface: "return_analysis",
+}]), true, "declared missing outputs keep the result surface mounted");
 console.log("ok");

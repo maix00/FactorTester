@@ -435,6 +435,7 @@
             context, {
               job, taskDetail, payload, activeArtifacts, results, jobID,
               artifactQuery, executionQuery, customAnalyses,
+              onGenerated: detailPage,
             },
           ));
         } else {

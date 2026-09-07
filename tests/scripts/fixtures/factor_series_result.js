@@ -121,6 +121,10 @@ assert.strictEqual(context.FTFactorSeriesResults.supports({
   jobKind: "factor_evaluation",
 }), true);
 assert.strictEqual(context.FTFactorSeriesResults.supports({jobKind: "ic"}), false);
+assert.strictEqual(context.FTFactorSeriesResults.supports({
+  jobKind: "ic",
+  artifacts: [{name: "factor_series_data", state: "active"}],
+}), true, "a supplemental factor-series artifact mounts its result tab");
 assert.strictEqual(context.FTFactorSeriesResults.supportsPriceAdjustment({
   supports_term_structure: true,
 }), true);

@@ -12,10 +12,11 @@
     ));
   }
 
-  function supports(artifacts, summary = {}) {
+  function supports(artifacts, summary = {}, declarations = []) {
     return relevantArtifacts(artifacts).length > 0
       || Boolean(summary?.metrics && Object.keys(summary.metrics).length)
-      || Boolean(window.FTRuntimeSummary?.rows?.(summary).length);
+      || Boolean(window.FTRuntimeSummary?.rows?.(summary).length)
+      || declarations.some(item => item?.result_surface);
   }
 
   function artifactPath(jobID, artifact, artifactQuery) {
@@ -293,6 +294,28 @@
       },
     );
     if (standard) return standard;
+    if (["time_series", "execution_account", "return_analysis"].includes(state.activeTab)) {
+      const declarations = (state.options.resultDeclarations || []).filter(item => (
+        String(item?.result_surface || "") === state.activeTab
+      ));
+      const available = declarations.some(item => (
+        state.artifactsByName.has(String(item?.canonical_artifact || ""))
+      ));
+      if (declarations.length && !available) {
+        const requests = declarations.map(item => String(item.name || "")).filter(Boolean);
+        const canGenerate = requests.length > 0
+          && declarations.every(item => item.after_run === true);
+        return FTJobResultTabs.missingOutput(context, {
+          canGenerate,
+          onGenerate: canGenerate ? () => FTJobGeneration.generate(context, {
+            jobID: state.options.jobID,
+            artifactQuery: state.options.artifactQuery,
+            executionQuery: state.options.executionQuery,
+            onGenerated: state.options.onGenerated,
+          }, requests) : null,
+        });
+      }
+    }
     if (state.activeTab === "strategy_stats") {
       const root = document.createElement("div");
       root.className = "backtest-overview-surface";
@@ -441,7 +464,9 @@
   }
 
   function section(context, options) {
-    if (!supports(options.artifacts, options.resultSummary)) return null;
+    if (!supports(
+      options.artifacts, options.resultSummary, options.resultDeclarations || [],
+    )) return null;
     const root = document.createElement("section");
     root.className = "job-section backtest-domain-results";
     const heading = document.createElement("h2"); heading.textContent = context.t("回测结果");

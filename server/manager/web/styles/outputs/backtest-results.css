@@ -337,12 +337,12 @@
 .snapshot-pending_exit, .snapshot-selected { color: #9a6700; }
 
 .factor-series-viewer { display: grid; gap: 14px; min-width: 0; }
-.factor-series-controls { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; }
+.factor-series-controls { display: grid; gap: 12px; width: 100%; min-width: 0; }
 .factor-series-product-control { display: grid; gap: 5px; min-width: min(360px, 100%); }
 .factor-series-product-filter { min-width: min(360px, 100%); }
 .factor-series-adjustment-control { display: grid; gap: 5px; }
 .factor-series-adjustment-filter { min-width: 150px; }
-.factor-series-controls small { color: var(--muted); padding-bottom: 7px; }
+.factor-series-controls small { display: block; color: var(--muted); }
 
 .factor-series-chart-mount {
   width: 100%;
