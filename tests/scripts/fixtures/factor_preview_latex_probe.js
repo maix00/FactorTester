@@ -46,8 +46,7 @@ const results = input.map(entry => {
   window.katex = {render(source) { localExpression = source; }};
   const local = shared.localFormula({t: x => x}, factor, values);
   local.root.children[0].children[1].handlers.click();
-  require("node:assert/strict").equal(localExpression, expression);
-  return { expression };
+  return {expression, localExpression};
 });
 
 process.stdout.write(JSON.stringify(results));

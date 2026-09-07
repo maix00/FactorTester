@@ -27,7 +27,9 @@
     formulaMount.className = "factor-detail-parameter-formula display-math";
     let mode = "parameters";
     const render = () => {
-      const source = mode === "parameters" ? expression(value) : previewExpression(value, values);
+      const source = mode === "parameters"
+        ? expression(value)
+        : previewExpression(value, values, {includeNestedDefinitions: false});
       formulaMount.replaceChildren?.();
       if (window.katex) window.katex.render(source || "", formulaMount, {
         displayMode: true, throwOnError: false,
@@ -45,8 +47,11 @@
     return {root, update: next => { values = next || {}; render(); }};
   }
 
-  function previewExpression(value, parameterValues = {}) {
-    const state = {active: new Set(), emitted: new Set()};
+  function previewExpression(value, parameterValues = {}, options = {}) {
+    const state = {
+      active: new Set(), emitted: new Set(),
+      includeNestedDefinitions: options.includeNestedDefinitions !== false,
+    };
     const root = unwrapFamilyDraft(value);
     const rootKey = previewNodeKey(root, parameterValues);
     if (rootKey) state.active.add(rootKey);
@@ -95,8 +100,12 @@
       const nested = nestedPreviewValue(raw, parameter);
       let shown;
       if (nested) {
-        shown = blue(familySymbol(nested.value));
-        appendPreviewDefinition(lines, nested, state);
+        shown = state.includeNestedDefinitions
+          ? blue(familySymbol(nested.value))
+          : `\\textcolor{red}{${familySymbol(nested.value)}}`;
+        if (state.includeNestedDefinitions) {
+          appendPreviewDefinition(lines, nested, state);
+        }
       } else {
         shown = alias === "$F" && (raw === "" || raw == null)
           ? "\\$F"
