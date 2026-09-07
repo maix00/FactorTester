@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import ssl
 import tempfile
 from collections.abc import Mapping
 from pathlib import Path
@@ -51,6 +52,7 @@ class AgentAppServerLaunch:
         codex_home = Path(getattr(self.runtime, "codex_home", "."))
         self.factor_tester_config_path = codex_home / "factor-tester-cli.json"
         self.factor_tester_capability_path = codex_home / "factor-tester-agent.json"
+        self.factor_tester_ca_path = codex_home / "factor-tester-ca.pem"
         self.proxy_url = str(proxy_url or "").strip()
 
     @staticmethod
@@ -193,6 +195,29 @@ class AgentAppServerLaunch:
             },
         )
         self._ensure_local_profile(profile_id, principal)
+        self._write_factor_tester_ca()
+
+    def _write_factor_tester_ca(self) -> None:
+        """Trust the configured local data listener, retaining system roots.
+
+        Only public certificates enter the isolated workspace. The private
+        server key and the host's global trust configuration remain untouched.
+        """
+        certificate = (os.environ.get("FACTORTESTER_ARTIFACT_TLS_CERT")
+                       or os.environ.get("FACTORTESTER_MANAGER_TLS_CERT"))
+        if not certificate:
+            self.factor_tester_ca_path.unlink(missing_ok=True)
+            return
+        pem = Path(certificate).read_text(encoding="ascii")
+        trust = ssl.create_default_context()
+        roots = "".join(ssl.DER_cert_to_PEM_cert(cert)
+                        for cert in trust.get_ca_certs(binary_form=True))
+        # Validate before replacing the previous file; never suppress TLS
+        # verification or silently proceed with malformed deployment material.
+        trust.load_verify_locations(cadata=pem)
+        self.factor_tester_ca_path.parent.mkdir(parents=True, exist_ok=True)
+        self.factor_tester_ca_path.write_text(roots + "\n" + pem, encoding="ascii")
+        self.factor_tester_ca_path.chmod(0o600)
 
     def _ensure_local_profile(self, profile_id: str, principal: str) -> None:
         """Project the current server Profile into its isolated client root."""
@@ -245,6 +270,7 @@ class AgentAppServerLaunch:
             return
         self.factor_tester_capability_path.unlink(missing_ok=True)
         self.factor_tester_config_path.unlink(missing_ok=True)
+        self.factor_tester_ca_path.unlink(missing_ok=True)
 
     def environment(self) -> dict[str, str]:
         secret = str(self.provider.get("secret") or "")
@@ -274,6 +300,8 @@ class AgentAppServerLaunch:
                 ).rstrip(os.pathsep)
             environment["FACTORTESTER_CLI"] = cli
         if self.factor_tester_auth:
+            if self.factor_tester_ca_path.is_file():
+                environment["SSL_CERT_FILE"] = str(self.factor_tester_ca_path)
             environment["FACTORTESTER_CONFIG"] = str(self.factor_tester_config_path)
             environment["FACTORTESTER_HOME"] = str(
                 self.runtime.home_root / "factortester"
