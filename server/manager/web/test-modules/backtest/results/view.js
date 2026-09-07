@@ -469,10 +469,9 @@
     )) return null;
     const root = document.createElement("section");
     root.className = "job-section backtest-domain-results";
-    const heading = document.createElement("h2"); heading.textContent = context.t("回测结果");
     const target = document.createElement("div");
     target.append(window.FTUI.loading(context.t("正在准备回测结果选项卡…")));
-    root.append(heading, target);
+    root.append(target);
     queueMicrotask(() => {
       try {
         const relevant = relevantArtifacts(options.artifacts);

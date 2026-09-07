@@ -961,6 +961,13 @@ def test_factor_series_result_restores_the_old_multi_panel_viewer() -> None:
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
 
+    ic_view = (WEB_ROOT / "jobs" / "ic-result-view.js").read_text(encoding="utf-8")
+    viewers = (WEB_ROOT / "jobs" / "result-viewers.js").read_text(encoding="utf-8")
+    assert 'key: "factor_series", label: "因子序列"' in ic_view
+    assert 'context.t("查看因子序列")' not in ic_view
+    assert 'kind === "ic"' in viewers
+    assert 'kind === "backtest"' in viewers
+
 
 def test_job_result_charts_use_interactive_highcharts_data() -> None:
     import subprocess

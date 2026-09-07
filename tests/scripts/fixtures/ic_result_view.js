@@ -26,7 +26,7 @@ assert.equal(window.FTICResults.supports([
 assert.equal(window.FTICResults.supports([
   {name: "ic_quantile_portfolio_statistics_data", state: "active"},
 ]), false);
-const declarations = [{result_tabs: [
+const declarations = [{name: "factor_series"}, {result_tabs: [
   {key: "summary", label: "IC 汇总", order: 10,
     source_artifacts: ["ic_statistics_summary_data"], source_policy: "any"},
   {key: "series", label: "IC 序列", order: 20,
@@ -43,7 +43,7 @@ const declaredArtifacts = [
 assert.deepEqual(
   window.FTICResults.tabsForArtifacts(declarations, declaredArtifacts)
     .map(item => item.key),
-  ["summary", "series", "rolling"],
+  ["factor_series", "summary", "series", "rolling"],
   "declared result tabs remain visible when their artifact was not calculated",
 );
 assert.deepEqual(

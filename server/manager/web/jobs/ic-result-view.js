@@ -24,6 +24,14 @@
 
   function tabsForArtifacts(resultDeclarations, artifacts) {
     const declared = declaredTabs(resultDeclarations);
+    if ((resultDeclarations || []).some(item => item?.name === "factor_series")) {
+      declared.push({
+        key: "factor_series", label: "因子序列", order: 5,
+        source_artifacts: ["factor_series_data"], source_policy: "any",
+        output_requests: ["factor_series"],
+      });
+      declared.sort((left, right) => Number(left.order || 0) - Number(right.order || 0));
+    }
     return declared;
   }
 
@@ -110,7 +118,7 @@
   }
 
   async function ensureTabLoaded(context, state, key, rerender) {
-    if (key === "runtime_summary") return;
+    if (["runtime_summary", "factor_series"].includes(key)) return;
     const tab = state.tabs.find(item => item.key === key);
     if (!tab) return;
     const activeNames = new Set((state.artifacts || [])
@@ -353,14 +361,6 @@
       capability.multi ? state.selectedDelays : [state.activeDelay],
       capability.multi, values => commit("delay", values),
     )});
-    const factor = activeFactor(state);
-    if (factor?.factorRef) {
-      const inspect = context.button(context.t("查看因子序列"), () => {
-        context.navigate(factorSeriesPath(factor.factorRef, state.productGroupRef));
-      }, context.t("将当前冻结因子与产品价格、成交量和持仓量对照"));
-      inspect.classList.add("ic-factor-series-link");
-      root.append(inspect);
-    }
     root.prepend(FTJobResultTabs.filterPanel(context, {title: "筛选", rows}).element);
     return root;
   }
@@ -394,6 +394,15 @@
       context, state.activeTab, state.resultSummary,
     );
     if (standard) return standard;
+    if (state.activeTab === "factor_series") {
+      return window.FTFactorSeriesResults.embedded(context, {
+        artifacts: state.artifacts,
+        jobID: state.jobID,
+        artifactQuery: state.artifactQuery,
+        configuration: state.configuration,
+        resultSummary: {},
+      });
+    }
     if (state.customAnalyses) {
       const customID = state.customAnalyses.tabIDFor(state.activeTab);
       if (customID) {
@@ -616,10 +625,9 @@
       return null;
     }
     const root = document.createElement("section"); root.className = "job-section ic-domain-results";
-    const heading = document.createElement("h2"); heading.textContent = context.t("IC 测试结果");
     const target = document.createElement("div");
     target.append(window.FTUI.loading(context.t("正在读取 IC 结果…")));
-    root.append(heading, target);
+    root.append(target);
     queueMicrotask(async () => {
       try {
         const requested = options.customAnalyses?.state?.requestedKey || "";
@@ -635,6 +643,7 @@
           productGroupRef: productGroupRef(
             options.configuration, options.productGroupRef,
           ),
+          configuration: options.configuration || {},
           artifacts: options.artifacts, jobID: options.jobID,
           artifactQuery: options.artifactQuery || "",
           executionQuery: options.executionQuery || "",
@@ -642,7 +651,7 @@
           resultDeclarations: options.resultDeclarations || [],
           resultSummary: options.resultSummary || {},
           payloads: {}, sources: new Map(), loadToken: 0,
-          loadingTab: resultTabs.some(tab => tab.key === activeTab) ? activeTab : "",
+          loadingTab: "",
           loadError: "",
         };
         const rerender = () => renderLoaded(context, target, state);
