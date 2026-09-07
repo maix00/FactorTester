@@ -6,12 +6,14 @@ class Element {
   constructor(tag) {
     this.tag = tag; this.children = []; this.dataset = {}; this.hidden = false;
     this.attributes = {}; this.listeners = {}; this.textContent = ""; this.className = "";
+    this.style = {};
     this.classes = new Set();
     this.classList = {
       add: value => this.classes.add(value),
       remove: value => this.classes.delete(value),
     };
   }
+  get isConnected() { return !this.removed; }
   append(...values) { this.children.push(...values); }
   replaceChildren(...values) { this.children = values; }
   contains(value) { return this.children.includes(value); }
@@ -21,8 +23,19 @@ class Element {
 }
 
 const body = new Element("body");
-global.document = {body, createElement: tag => new Element(tag)};
+global.document = {
+  body,
+  createElement: tag => new Element(tag),
+  querySelector: selector => selector === ".topbar"
+    ? {getBoundingClientRect: () => ({bottom: 88})} : null,
+};
 global.window = globalThis;
+global.addEventListener = () => {};
+const positions = new Map();
+global.localStorage = {
+  getItem: key => positions.get(key) ?? null,
+  setItem: (key, value) => positions.set(key, String(value)),
+};
 global.FTIcons = {node: () => new Element("svg")};
 let resolveProfile;
 const profilePromise = new Promise(resolve => { resolveProfile = resolve; });
@@ -71,6 +84,9 @@ assert(fixedHeight >= 0 && drawerHeight > fixedHeight,
       await assistancePromise;
     }},
   });
+  assert.equal(drawer.shell.style.top, "96px",
+    "the floating window starts below the sticky page header");
+  assert.equal(drawer.shell.style.bottom, "16px");
   assert.equal(body.children.length, 2, "registration only mounts shell and trigger");
   assert.equal(events.length, 0, "registration performs no deferred work");
   stateHooks.restore({open: false, profile_id: "self"});
