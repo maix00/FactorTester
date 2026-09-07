@@ -16,6 +16,12 @@ from server.services.run_input_inspection import instantiate_factor_metadata
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
+    # These lifecycle fixtures use synthetic product identities. Real category
+    # expansion and membership drift are covered by test_product_scope_snapshot.
+    monkeypatch.setattr(
+        "server.modules.products.product_category_paths.resolve_product_scope_paths",
+        lambda paths, **kwargs: sorted(set(paths)),
+    )
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "research-jobs.sqlite")
     factor_sources = {
         family: f"""

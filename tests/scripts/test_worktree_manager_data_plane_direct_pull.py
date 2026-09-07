@@ -133,9 +133,16 @@ def _direct_download(
             yield requester_endpoint, access, requester_runtime
 
 
-def test_direct_pull_streams_range_and_head_without_relay_copy(tmp_path) -> None:
+def test_direct_pull_streams_range_and_head_without_relay_copy(tmp_path, monkeypatch) -> None:
     raw = b"wireguard-direct-artifact"
     with _direct_download(tmp_path, raw) as (endpoint, access, runtime):
+        handles = []
+        begin = runtime.begin_transfer_telemetry
+        def track_begin(*args, **kwargs):
+            handle = begin(*args, **kwargs)
+            handles.append(handle)
+            return handle
+        monkeypatch.setattr(runtime, "begin_transfer_telemetry", track_begin)
         headers = {"Authorization": f"Bearer {access.bearer}"}
         with urlopen(Request(
             endpoint + access.path,
@@ -153,6 +160,7 @@ def test_direct_pull_streams_range_and_head_without_relay_copy(tmp_path) -> None
             assert response.headers["Content-Length"] == str(len(raw))
             assert response.read() == b""
 
+        assert len(handles) == 1, "HEAD must not overwrite GET telemetry"
         summary = None
         for _ in range(20):
             summary = runtime.telemetry.summary(

@@ -12,6 +12,7 @@ import orjson
 from flask import Response, jsonify, request, session, stream_with_context
 
 from server.jobs.artifacts import default_user_quota_bytes
+from server.jobs.product_scope_inputs import product_scope_snapshot
 from server.jobs.input_artifacts import FACTOR_SOURCE_PREFIX, artifact_role
 from server.jobs.ipc import DaemonUnavailable
 from server.jobs.ports import detect_port
@@ -396,6 +397,7 @@ def _task_detail(
         "report_binding": report_binding,
         "caller": caller,
         "configuration": configuration,
+        "product_scope_snapshot": product_scope_snapshot(job.job_spec),
         "output_requests": list(job.job_spec.get("output_requests") or ()),
         "generated_output_requests": generated_output_requests,
         "results": {

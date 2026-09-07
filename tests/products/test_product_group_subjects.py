@@ -110,8 +110,9 @@ def test_product_group_creation_freezes_creator_and_research_metadata(
     assert group["creator_kind"] == "profile"
     assert group["creator_ref"] == "profile:maxa"
     assert group["research_refs"] == ["work-package:research-one"]
-    assert group["product_names"] == ["SI.GFE"]
-    assert state == [group]
+    assert "product_names" not in group  # Membership is frozen at submission.
+    assert state == [{key: value for key, value in group.items()
+                      if key not in {"selection_paths", "path_bindings", "path_count"}}]
 
 
 def test_product_group_creation_defaults_to_logged_in_user(monkeypatch) -> None:

@@ -662,3 +662,25 @@ def test_drain_finishes_active_work_without_starting_queued_jobs(tmp_path) -> No
 
     assert finished.status is JobStatus.SUCCEEDED
     assert repository.require("held").status is JobStatus.QUEUED
+
+
+def test_forced_worker_loss_preserves_cancel_receipt_without_worker_timing(tmp_path):
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    with ResearchJobScheduler(repository=repository, deployment_id="test") as scheduler:
+        job = repository.create(_record("cancel"))
+        repository.transition(job.job_id, JobStatus.PLANNING)
+        repository.set_execution_plan(
+            job.job_id, plan={"runner": job.runner_path}, notices=[],
+            requires_confirmation=False,
+        )
+        repository.transition(job.job_id, JobStatus.RUNNING)
+        repository.request_cancel(job.job_id, owner="alice", reason="explicit_cancel")
+        scheduler._handle_worker_loss(
+            job.job_id, {"worker_exitcode": -15}, stage="execution",
+        )
+        terminal = repository.require(job.job_id)
+        assert terminal.status is JobStatus.CANCELLED
+        assert terminal.cancel_reason == "explicit_cancel"
+        assert terminal.error["cancelled"] is True
+        assert terminal.error["code"] == "worker_terminated"
+        assert terminal.terminal_assurance.disposition == "not_usable"

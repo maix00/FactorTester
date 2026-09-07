@@ -32,83 +32,35 @@ def _resolve_group_products(paths: list) -> list:
     return [getattr(product, "name", str(product)) for product in products]
 
 
+def product_group_definition(group: dict, username: str) -> dict:
+    """Read legacy editor paths as the definition; never expand on a list read.
+
+    Older rows stored expanded paths alongside selection_paths. The latter
+    retains the authored category references and takes precedence. This is a
+    read projection; only an explicit edit persists its normalized definition.
+    """
+    value = dict(group)
+    value.setdefault("id", _legacy_group_id(value.get("name")))
+    raw = value.get("selection_paths")
+    if not isinstance(raw, list):
+        raw = value.get("paths") or []
+    paths = [migrate_owned_category_path(username, item) for item in raw]
+    # No category-tree construction or membership resolution during lists.
+    # Explicit create/edit normalizes references; submission resolves them.
+    value["paths"] = paths
+    value["selection_paths"] = list(paths)  # Existing editor API projection.
+    value["category_ids"] = [
+        migrate_owned_category_id(username, item)
+        for item in _category_ids(value.get("category_ids"))
+    ]
+    for key in ("product_names", "product_count", "products"):
+        value.pop(key, None)
+    return _enrich_group(value)
+
+
 def load_product_groups(username: str) -> list:
-    groups = _load_product_groups(username)
-    dirty = False
-    for group in groups:
-        if "id" not in group:
-            group["id"] = _legacy_group_id(group.get("name"))
-            dirty = True
-        category_ids = [
-            migrate_owned_category_id(username, value)
-            for value in _category_ids(group.get("category_ids"))
-        ]
-        raw_paths = [
-            migrate_owned_category_path(username, value)
-            for value in group.get("paths", [])
-            if isinstance(value, str) and value.strip()
-        ]
-        raw_selection_paths = [
-            str(value).strip()
-            for value in (
-                group.get("selection_paths")
-                if isinstance(group.get("selection_paths"), list)
-                else raw_paths
-            )
-            if isinstance(value, str) and value.strip()
-        ]
-        try:
-            selection_paths = normalize_category_selection_paths(
-                raw_selection_paths, username=username,
-            )
-        except ValueError:
-            # Preserve an old row long enough for the editor to show it; new
-            # writes use the strict ID/title resolver and fail clearly.
-            selection_paths = raw_selection_paths
-        if not category_ids:
-            inferred = infer_category_ids(raw_paths, username=username)
-            if inferred:
-                category_ids = inferred
-        try:
-            canonical_paths = canonicalize_product_paths(
-                raw_paths,
-                category_ids=category_ids,
-                username=username,
-            )
-        except ValueError:
-            # Keep a legacy row readable while reporting its unresolved paths;
-            # new writes fail instead of silently storing a category path.
-            canonical_paths = [
-                str(path).strip() for path in raw_paths
-                if isinstance(path, str) and path.strip()
-            ]
-        paths_changed = group.get("paths") != canonical_paths
-        if paths_changed:
-            group["paths"] = canonical_paths
-            dirty = True
-        if group.get("category_ids") != category_ids:
-            group["category_ids"] = category_ids
-            dirty = True
-        if group.get("selection_paths") != selection_paths:
-            group["selection_paths"] = selection_paths
-            dirty = True
-        if (
-            paths_changed
-            or "product_names" not in group
-            or group.get("path_bindings") != product_group_path_bindings(
-                selection_paths,
-            )
-        ):
-            _enrich_group(group)
-            dirty = True
-        for key in ("factor_refs", "factor_set_refs"):
-            normalized = _subject_refs(group.get(key), key=key)
-            if group.get(key) != normalized:
-                group[key] = normalized
-                dirty = True
-    if dirty:
-        save_product_groups(username, groups)
-    return groups
+    return [product_group_definition(group, username)
+            for group in _load_product_groups(username)]
 
 
 def load_account_domain_product_groups(username: str) -> list[dict]:
@@ -157,6 +109,7 @@ def load_authoritative_product_groups(
             include_shared=False,
             include_deleted=True,
         )
+    owners: dict[str, str] = {}
     for row in domain_rows:
         if not isinstance(row, dict):
             continue
@@ -170,11 +123,22 @@ def load_authoritative_product_groups(
             merged.pop(key, None)
         elif isinstance(payload, dict):
             merged[key] = dict(payload)
-    return list(merged.values())
+            owners[key] = str(row.get("principal") or username)
+    return [product_group_definition(group, owners.get(key, username))
+            for key, group in merged.items()]
 
 
 def save_product_groups(username: str, groups: list) -> None:
-    _save_product_groups(username, groups)
+    # Only authored rules cross servers. Membership is a submission-time fact.
+    definitions = []
+    for group in groups:
+        value = dict(group)
+        value["paths"] = list(value.get("selection_paths") or value.get("paths") or [])
+        for key in ("selection_paths", "path_bindings", "path_count", "product_names",
+                    "product_count", "products", "definition_error"):
+            value.pop(key, None)
+        definitions.append(value)
+    _save_product_groups(username, definitions)
 
 
 def find_group_by_name(groups: list, name: str) -> int:
@@ -216,12 +180,6 @@ def _enrich_group(group: dict) -> dict:
     selection_paths = group.get("selection_paths") or paths
     group["selection_paths"] = list(selection_paths)
     group["path_bindings"] = product_group_path_bindings(selection_paths)
-    try:
-        group["product_names"] = _resolve_group_products(paths)
-        group["product_count"] = len(group["product_names"])
-    except Exception:
-        group["product_names"] = []
-        group["product_count"] = 0
     return group
 
 
@@ -268,17 +226,7 @@ def create_product_group(
         return None
     normalized_category_ids = _validate_category_ids(username, category_ids)
     selection_paths = normalize_category_selection_paths(
-        paths, username=username,
-    )
-    normalized_paths = canonicalize_product_paths(
-        paths,
-        category_ids=normalized_category_ids,
-        username=username,
-        # Product groups may reference a provider path that is not present in
-        # this Manager's current catalog. Preserve such category-free paths,
-        # but canonicalize/reject recognizable category-qualified paths.
-        allow_unresolved=True,
-        infer_legacy_categories=False,
+        paths, username=username, category_ids=normalized_category_ids,
     )
     creator = _creator_metadata(
         username,
@@ -288,7 +236,7 @@ def create_product_group(
     group = {
         "id": f"pg_{uuid.uuid4().hex[:12]}",
         "name": name,
-        "paths": normalized_paths,
+        "paths": selection_paths,
         "selection_paths": selection_paths,
         "category_ids": normalized_category_ids,
         **creator,
@@ -330,15 +278,9 @@ def update_product_group(
     )
     if paths is not None:
         group["selection_paths"] = normalize_category_selection_paths(
-            paths, username=username,
+            paths, username=username, category_ids=next_category_ids,
         )
-        group["paths"] = canonicalize_product_paths(
-            paths,
-            category_ids=next_category_ids,
-            username=username,
-            allow_unresolved=True,
-            infer_legacy_categories=False,
-        )
+        group["paths"] = list(group["selection_paths"])
     group["category_ids"] = next_category_ids
     if paths is not None or category_ids is not None:
         groups[idx] = _enrich_group(group)

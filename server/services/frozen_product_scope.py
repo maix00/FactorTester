@@ -73,6 +73,7 @@ def freeze_product_scope(
     product_groups = (
         _product_group_index(owner) if any(catalog_refs.values()) else {}
     )
+    temporary_categories = _object_index(temporary.get("product_categories"))
     unresolved: set[str] = set()
     canonical_selections: dict[str, dict[str, Any]] = {}
     for selection_id in sorted(referenced_ids):
@@ -88,7 +89,8 @@ def freeze_product_scope(
             unresolved.add(selection_id)
             continue
         canonical_selections[selection_id] = _canonical_selection(
-            selection_id, raw, group
+            selection_id, raw, group, owner=owner,
+            category_definitions=temporary_categories if not group else {},
         )
     if unresolved:
         raise ValueError(
@@ -101,7 +103,6 @@ def freeze_product_scope(
         for selection in canonical_selections.values()
         for category_id in selection.get("category_ids") or []
     }
-    temporary_categories = _object_index(temporary.get("product_categories"))
     categories = _freeze_categories(
         owner=owner,
         category_ids=category_ids,
@@ -348,13 +349,15 @@ def _canonical_selection(
     selection_id: str,
     raw: dict[str, Any],
     stored_group: dict[str, Any] | None,
+    *, owner: str, category_definitions=None,
 ) -> dict[str, Any]:
     # Once a catalog group is resolved, every execution-semantic field comes
     # from that owner-controlled row. Client projections remain input/display
     # hints only and cannot override paths or category bindings.
     source = dict(stored_group) if stored_group else dict(raw)
     paths = (
-        source.get("paths")
+        source.get("selection_paths")
+        or source.get("paths")
         or source.get("selected_paths")
         or (stored_group or {}).get("paths")
         or (stored_group or {}).get("selected_paths")
@@ -362,6 +365,13 @@ def _canonical_selection(
     )
     if not isinstance(paths, list) or not paths:
         raise ValueError(f"product selection has no paths: {selection_id}")
+    from server.modules.products.product_category_paths import resolve_product_scope_paths
+
+    definition_paths = list(dict.fromkeys(str(path).strip() for path in paths if str(path).strip()))
+    resolved_paths = resolve_product_scope_paths(
+        definition_paths, username=owner, category_ids=source.get("category_ids"),
+        category_definitions=category_definitions,
+    )
     result = {
         "id": selection_id,
         "label": str(
@@ -370,9 +380,11 @@ def _canonical_selection(
             or source.get("product_group")
             or selection_id
         ),
-        "paths": list(dict.fromkeys(
-            str(path).strip() for path in paths if str(path).strip()
-        )),
+        "paths": resolved_paths,
+        "definition_paths": definition_paths,
+        "resolution_sha256": hashlib.sha256(json.dumps(
+            resolved_paths, ensure_ascii=False, separators=(",", ":"),
+        ).encode()).hexdigest(),
     }
     category_ids = list(dict.fromkeys(
         str(value).strip()

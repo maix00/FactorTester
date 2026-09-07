@@ -372,6 +372,12 @@ def test_factor_family_source_detail_uses_manager_catalog_without_gateway(
         calls.append((principal, kind, factor_id, args, kwargs))
         return {"success": True, "source_code": "available", "versions": []}
 
+    # This is the HTTP/catalog wiring test. Current-family authorization and
+    # tombstone/byte resolution are covered by test_factor_family_current.
+    monkeypatch.setattr(
+        "server.manager.services.factor_family_current.ensure_current_family",
+        lambda *_args, **_kwargs: True,
+    )
     monkeypatch.setattr(FactorSourceCatalog, method_name, read)
     state.application_request_lock = RejectGlobalApplicationLock()
     monkeypatch.setattr(
@@ -422,10 +428,15 @@ def test_missing_factor_source_is_hydrated_once_before_detail_retry(
             raise FileNotFoundError("missing")
         return {"success": True, "source_code": "available"}
 
-    def hydrate(_hydrator, factor_ref, *, principal):
+    def hydrate(_hydrator, factor_ref, *, principal, fingerprint=""):
+        assert fingerprint == "", "current source fallback must not pin a historical version"
         hydrated.append((factor_ref, principal))
         return True
 
+    monkeypatch.setattr(
+        "server.manager.services.factor_family_current.ensure_current_family",
+        lambda *_args, **_kwargs: True,
+    )
     monkeypatch.setattr(FactorSourceCatalog, "version", read)
     monkeypatch.setattr(FactorSourceHydrator, "hydrate", hydrate)
     with running_manager(state) as base_url:
@@ -3002,7 +3013,7 @@ def test_test_workbench_reads_factor_candidates_from_manager_catalog(
                 scripts[name] = response.read().decode("utf-8")
 
     script = scripts["tests"]
-    assert 'context.api("/api/factor-library/factors")' in script
+    assert 'window.FTFactorCatalog.load(context, {library: true})' in script
     assert (
         'context.api("/api/product-library/product-groups?view=summary"' in script
     )
@@ -3041,7 +3052,7 @@ const before = FTTestProducts.selectedProjections(state);
 FTTestProducts.setSelected(state, state.groups[1], false);
 console.log(JSON.stringify({{
   restored: before.map(item => item.product_path_selection_id),
-  paths: before.map(item => item.selected_paths),
+  paths: before.map(item => item.paths),
   remaining: state.values.product_path_selections.map(
     item => item.product_path_selection_id,
   ),
@@ -3689,7 +3700,8 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert "runtime_bound_here: false" in page_agent_profiles
     assert "未绑定当前服务器/客户端" in page_agent_drawer
     assert "if (profile?.runtime_bound_here === false)" in page_agent_drawer
-    assert 'const title = await conversationTitle(context, profile)' in agent_chat
+    assert 'conversationTitle(context, profile, selectedConversation || {})' in agent_chat
+    assert 'conversationModel(profile, conversation)' in agent_chat
     assert 'text: title' in agent_chat
     assert 'match?.label || match?.display_name' in agent_chat
     assert 'context.t("研究身份 Agent")' not in agent_chat

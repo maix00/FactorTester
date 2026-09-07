@@ -1,5 +1,6 @@
 (() => {
   let activePoll = null;
+  let workspaceBridge = null;
 
   function claimPoll(owner, controller) {
     if (activePoll?.owner !== owner) activePoll?.controller?.abort();
@@ -29,14 +30,15 @@
     ));
 
     async function publish(activate = false) {
-      if (context.isRouteCurrent?.() === false) return;
+      if (!context.assistanceWorkspace && context.isRouteCurrent?.() === false) return;
+      const workspace = await window.FTPageAssistance?.workspace?.(context);
       const value = assistance.snapshot();
-      const serialized = JSON.stringify(value);
+      const serialized = JSON.stringify({value, workspace});
       if (!activate && serialized === lastPublished && now() - lastPublishedAt < heartbeatMs) return;
       await context.api("/api/client/profile-agent/assistance/publish", {
         method: "POST",
         body: JSON.stringify({
-          profile_id: profileID, tab_id: context.tabID, assistance: value, activate,
+          profile_id: profileID, tab_id: context.tabID, assistance: value, activate, workspace,
         }),
       });
       lastPublished = serialized;
@@ -45,17 +47,17 @@
 
     async function syncOnce() {
       if (disposed) return;
-      if (context.isRouteCurrent?.() === false) return;
+      if (!context.assistanceWorkspace && context.isRouteCurrent?.() === false) return;
       await publish();
       const controller = new AbortController();
       requestController = controller;
       claimPoll(owner, controller);
       routeGuard = setInterval(() => {
-        if (context.isRouteCurrent?.() === false) controller.abort();
+        if (!context.assistanceWorkspace && context.isRouteCurrent?.() === false) controller.abort();
       }, 100);
       const payload = await context.api(
         `/api/client/profile-agent/assistance/applications?profile_id=${encodeURIComponent(profileID)}`
-        + `&tab_id=${encodeURIComponent(context.tabID)}&after=${sequence}`
+        + `&tab_id=${encodeURIComponent(context.assistanceWorkspace ? "" : context.tabID)}&after=${sequence}`
         + `&wait=${waitSeconds}`,
         {signal: controller.signal},
       ).finally(() => {
@@ -64,18 +66,26 @@
         releasePoll(owner, controller);
         if (requestController === controller) requestController = null;
       });
-      if (disposed || context.isRouteCurrent?.() === false) return;
+      if (disposed || (!context.assistanceWorkspace && context.isRouteCurrent?.() === false)) return;
       for (const item of payload.applications || []) {
         sequence = Math.max(sequence, Number(item.sequence || 0));
         let result;
+        let target = assistance;
         try {
           if (Number(item.expires_at || 0) > 0
               && Number(item.expires_at) * 1000 < Date.now()) {
             throw new Error("page assistance application expired before it reached the page");
           }
-          const revision = item.kind === "replace_document"
-            ? await assistance.apply(item) : assistance.snapshot().revision;
-          result = {success: true, revision};
+          if (context.assistanceWorkspace && window.FTPageAssistance?.stage) {
+            const applied = await window.FTPageAssistance.stage(context, profileID, item);
+            if (applied.deferred) continue;
+            target = applied.target;
+            result = {success: true, revision: applied.revision};
+          } else {
+            const revision = item.kind === "replace_document"
+              ? await assistance.apply(item) : assistance.snapshot().revision;
+            result = {success: true, revision};
+          }
         } catch (error) {
           result = {success: false, error: String(error?.message || error)};
         }
@@ -83,7 +93,7 @@
           method: "POST",
           body: JSON.stringify({profile_id: profileID, sequence: item.sequence, ...result}),
         });
-        await assistance.afterAcknowledge?.({item, result});
+        await target.afterAcknowledge?.({item, result});
       }
       if ((payload.applications || []).length) {
         lastPublished = "";
@@ -106,7 +116,11 @@
       // it, but waiting for the applications long-poll can block drawer mount
       // for the complete server wait window (normally 20 seconds). Keep that
       // receive loop entirely off the interactive drawer-open path.
-      if (context.isRouteCurrent?.() !== false) await publish(true);
+      if (context.assistanceWorkspace) {
+        workspaceBridge?.dispose();
+        workspaceBridge = {dispose};
+      }
+      if (context.assistanceWorkspace || context.isRouteCurrent?.() !== false) await publish(true);
       schedule(0);
     }
 
@@ -121,7 +135,7 @@
       timer = null;
     }
 
-    return Object.freeze({dispose, start, syncOnce, activate: () => publish(true)});
+    return Object.freeze({dispose, start, syncOnce, isDisposed: () => disposed, activate: () => publish(true)});
   }
 
   window.FTPageAgentContext = Object.freeze({create});

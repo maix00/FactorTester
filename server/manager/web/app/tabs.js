@@ -992,6 +992,23 @@
         tabSession: viewCache.tabSession(state.activeTabID),
         pageState: viewCache.pageState(state.activeTabID),
         pageAgentLifecycle,
+        assistanceWorkspace: () => ({
+          active_tab_id: state.activeTabID,
+          tabs: state.tabs.map(tab => ({
+            tab_id: tab.id, title: String(tab.title || ""), path: String(tab.path || ""),
+            kind: isResearchDetailTab(tab) ? "research_folder" : "page",
+            research_id: researchIDForTab(tab), parent_tab_id: String(tab.parentTabID || ""),
+            session: viewCache.tabSession(tab.id),
+          })),
+        }),
+        persistAssistanceTab: tabID => {
+          const tab = state.tabs.find(item => item.id === tabID);
+          if (!tab) throw new Error("目标页面已关闭");
+          const session = viewCache.tabSession(tabID);
+          const saved = workspace?.restoreSession?.(tabID) || {};
+          workspace?.saveSession?.(tabID, {...saved, path: tab.path,
+            durable: session.durable || {}, updatedAt: Date.now()});
+        },
       };
     }
 
