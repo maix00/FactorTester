@@ -143,7 +143,6 @@
 .test-run-artifact-previews, .test-run-output-artifacts { display: grid; gap: 7px; min-width: 0; }
 .test-run-artifact-previews h3, .test-run-output-artifacts h3 { margin: 0; font-size: 14px; }
 .test-run-options { padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
-.test-product-selection-summary { color: var(--text) !important; font-weight: 650; }
 .ft-object-overlay-dialog { width: min(1080px, calc(100vw - 32px)); max-width: none; }
 .ft-object-overlay-dialog > .object-overlay-card { width: 100%; height: calc(100dvh - 32px); max-width: none; max-height: calc(100dvh - 32px); box-sizing: border-box; }
 .object-overlay-card { display: grid; grid-template-rows: auto minmax(0, 1fr); width: auto; gap: 6px; overflow: hidden; padding: 14px 16px 18px; }

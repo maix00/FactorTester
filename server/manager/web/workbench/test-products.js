@@ -171,21 +171,6 @@
     return saved;
   }
 
-  function editAction(context, group, onSaved, state = null) {
-    if (!context.session || !group) return null;
-    const id = groupID(group);
-    if (!id || group.source_managed) return null;
-    return {
-      label: context.t("编辑"),
-      title: context.t("在当前浮层编辑产品组"),
-      buttonClass: "secondary",
-      onClick: event => {
-        event?.preventDefault();
-        void openEditor(context, "edit", id, onSaved, group.temporary ? state : null, group);
-      },
-    };
-  }
-
   function panel(context, state, refresh) {
     const root = document.createElement("div");
     root.className = "test-product-manager";
@@ -204,23 +189,10 @@
     const selectedRefs = Array.isArray(options.selectedRefs)
       ? uniqueReferences(options.selectedRefs)
       : (state.kind === "ic" ? state.groupRefs : [state.groupRef]).filter(Boolean);
-    const selectedSet = new Set(selectedRefs);
-    const selected = groups.filter(group => selectedSet.has(groupID(group)));
-    const pathCount = selected.reduce((total, group) => (
-      total + (group.path_count ?? group.paths?.length ?? group.selected_paths?.length ?? 0)
-    ), 0);
-    const pickerItems = () => groups.map(group => ({
-      value: groupID(group),
-      label: groupLabel(group),
-      description: [
-        group.description || group.desc || "",
-        `${group.path_count ?? group.paths?.length ?? group.selected_paths?.length ?? 0} ${context.t("条产品路径")}`,
-      ].filter(Boolean).join(" · "),
-      source_managed: group.source_managed === true,
-      group,
-      view: window.FTFactorDetailShared?.productGroupRowView?.(group)
-        || {kind: "product_group", ref: groupID(group)},
-    })).filter(item => item.value);
+    const catalogError = String(state.lazy?.products?.error || "").trim();
+    const unavailable = selectedRefs.filter(ref => (
+      !groups.some(group => groupID(group) === ref)
+    ));
     let picker = null;
     const savedGroup = value => {
       const group = upsertGroup(state, value);
@@ -239,6 +211,21 @@
       picker?.setValues([groupID(group)]);
       refresh?.();
     };
+    const pickerItems = () => groups.map(group => {
+      const view = window.FTFactorDetailShared?.productGroupRowView?.(group)
+        || {kind: "product_group", ref: groupID(group)};
+      return {
+        value: groupID(group),
+        label: groupLabel(group),
+        description: [
+          group.description || group.desc || "",
+          `${group.path_count ?? group.paths?.length ?? group.selected_paths?.length ?? 0} ${context.t("条产品路径")}`,
+        ].filter(Boolean).join(" · "),
+        source_managed: group.source_managed === true,
+        group,
+        view: {...view, onSaved: savedGroup},
+      };
+    }).filter(item => item.value);
     picker = FTTestObjectPicker.create(context, {
       title: context.t("产品路径候选"),
       note: context.t(state.kind === "ic"
@@ -249,26 +236,17 @@
       multi: options.multi ?? (state.kind === "ic"),
       loading: options.loading ?? FTTestObjectPicker.lazyLoading(state, "products"),
       loadingText: context.t("正在读取产品组候选…"),
+      errorText: catalogError
+        ? `${context.t("产品组候选读取失败")}: ${catalogError}` : "",
+      statusText: unavailable.length
+        ? `${context.t("当前不可用的产品组")}: ${unavailable.join("、")}` : "",
       compact: true,
       name: `test-product-groups-${state.kind}`,
       onCreate: context.session && options.canCreate !== false
         ? () => void openEditor(context, "create", "new", savedGroup, state)
         : null,
       createLabel: context.t("新建产品组"),
-      editSelected: item => item.group?.temporary === true
-        || item.group?.source_origin === "test_inline",
-      onEdit: (_event, item) => void openEditor(
-        context, "edit", groupID(item.group), savedGroup, state, item.group,
-      ),
-      editLabel: context.t("编辑产品组"),
-      itemActions: item => {
-        const action = editAction(
-          context,
-          groups.find(group => groupID(group) === item.value),
-          savedGroup, state,
-        );
-        return action ? [action] : [];
-      },
+      testState: state,
       onChange: values => {
         const refs = uniqueReferences(values);
         if (typeof options.onChange === "function") {
@@ -284,7 +262,6 @@
         refresh?.();
       },
     });
-    const summary = `${context.t("已选")} ${selected.length} ${context.t("个候选")} · ${pathCount} ${context.t("条产品路径")}`;
     const help = window.FTTestFieldHelp?.forField?.(
       state.manifest,
       state.kind === "ic"
@@ -296,26 +273,6 @@
       context.t("产品组"), picker.element, help,
       {className: "test-product-selector"},
     );
-    const summaryNote = document.createElement("small");
-    summaryNote.className = "test-product-selection-summary";
-    summaryNote.textContent = summary;
-    root.querySelector(".test-field-row-control")?.append(summaryNote);
-    const catalogError = String(state.lazy?.products?.error || "").trim();
-    if (catalogError) {
-      const error = document.createElement("small");
-      error.className = "test-product-warning";
-      error.textContent = `${context.t("产品组候选读取失败")}: ${catalogError}`;
-      root.querySelector(".test-field-row-control")?.append(error);
-    }
-    const unavailable = selectedRefs.filter(ref => (
-      !groups.some(group => groupID(group) === ref)
-    ));
-    if (unavailable.length) {
-      const warning = document.createElement("small");
-      warning.className = "test-product-warning";
-      warning.textContent = `${context.t("当前不可用的产品组")}: ${unavailable.join("、")}`;
-      root.querySelector(".test-field-row-control").append(warning);
-    }
     return root;
   }
 
