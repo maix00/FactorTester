@@ -71,13 +71,17 @@
   function toolbar(context, state, additions = []) {
     const root = document.createElement("div");
     root.className = "backtest-surface-toolbar";
+    const rows = [];
     const strategy = strategyControl(context, state);
-    if (strategy) root.append(filterRow(context, "策略", strategy));
+    if (strategy) rows.push({label: "策略", element: strategy});
     additions.filter(Boolean).forEach(item => {
       if (item.element && item.label) {
-        root.append(filterRow(context, item.label, item.element));
-      } else root.append(item);
+        rows.push({label: item.label, element: item.element});
+      } else if (item) root.append(item);
     });
+    if (rows.length) root.prepend(
+      FTJobResultTabs.filterPanel(context, {title: "筛选", rows}).element,
+    );
     return root;
   }
 

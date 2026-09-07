@@ -8,6 +8,18 @@ from typing import Any
 from .backtest_tables import BACKTEST_TABLE_DEFINITIONS, BACKTEST_TABLE_DESCRIPTIONS
 
 OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
+    "factor_series": {
+        "label": "因子序列", "formats": ["json"],
+        "presentation": "chart", "viewer": "factor_series",
+        "artifacts": ["factor_series_data", "factor_series_receipt"],
+        "canonical_artifact": "factor_series_data",
+        "rendition_artifacts": [],
+        "receipt_artifact": "factor_series_receipt",
+        "before_run": True, "after_run": True, "requires": [],
+        "analyses": ["factor_evaluation", "ic", "backtest"],
+        "result_surface": "factor_series", "result_view": "factor_series",
+        "result_order": 5,
+    },
     "equity_curve": {
         "label": "净值曲线与回撤", "formats": ["svg", "json"],
         "presentation": "chart", "viewer": "equity_curve",
@@ -252,6 +264,8 @@ _ALIASES = {
 }
 
 _ARTIFACT_DESCRIPTIONS = {
+    "factor_series_data": "各因子在涉及产品上的因子值序列（JSON）",
+    "factor_series_receipt": "因子序列生成说明（JSON）",
     "result": "回测结果摘要（运行完成后由服务器保留）",
     "group_execution": "分组执行明细与组合曲线的原始数据",
     "strategy_analysis_source": "按需计算策略分析所需的基础数据",

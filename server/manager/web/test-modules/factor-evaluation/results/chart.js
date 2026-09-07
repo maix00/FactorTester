@@ -58,7 +58,13 @@
   function chartOptions(context, options, bars, factorPoints) {
     const t = value => context.t(value);
     const hasOI = bars.some(item => item.openInterest != null);
-    const axes = axisLayout(hasOI, t);
+    const extra = [
+      ["cs_rank", "因子 cs_rank", options.factorSeries?.cs_rank],
+      ["returns", "收益率", options.factorSeries?.returns],
+      ["returns_cs_rank", "收益率 cs_rank", options.factorSeries?.returns_cs_rank],
+    ].filter(([, , value]) => value && Array.isArray(value.values));
+    const axes = axisLayout(hasOI, t, extra.map(([, label]) => label));
+    const volumeAxis = 2 + extra.length;
     const series = [
       {
         type: "candlestick", name: options.product || t("价格"), yAxis: 0,
@@ -79,7 +85,7 @@
         tooltip: {pointFormatter: factorPointFormatter(context)},
       },
       {
-        type: "column", name: t("成交量"), yAxis: 2,
+        type: "column", name: t("成交量"), yAxis: volumeAxis,
         data: bars.map(item => [item.timestamp, item.volume]),
         color: palette.volume,
         dataGrouping: {enabled: false},
@@ -88,8 +94,14 @@
         },
       },
     ];
+    extra.forEach(([, label, value], index) => series.splice(2 + index, 0, {
+      type: "line", name: t(label), yAxis: 2 + index,
+      data: window.FTFactorSeriesModel.points(value),
+      lineWidth: 1.35, dataGrouping: {enabled: false},
+      tooltip: {pointFormatter: window.FTPriceChart.scalarPointFormatter(context, label)},
+    }));
     if (hasOI) series.push({
-      type: "line", name: t("持仓量"), yAxis: 3,
+      type: "line", name: t("持仓量"), yAxis: volumeAxis + 1,
       data: bars.map(item => [item.timestamp, item.openInterest]),
       color: palette.openInterest, lineWidth: 1.2,
       dataGrouping: {enabled: false},
@@ -140,17 +152,24 @@
     };
   }
 
-  function axisLayout(hasOI, t) {
-    const values = hasOI
-      ? [["42%", "0%"], ["18%", "45%"], ["13%", "66%"], ["13%", "82%"]]
-      : [["48%", "0%"], ["22%", "51%"], ["20%", "77%"]];
-    const labels = [t("价格"), t("因子"), t("成交量"), t("持仓量")];
-    return values.map(([height, top], index) => ({
-      height, top, offset: 0, lineWidth: 1,
-      title: {text: labels[index]},
+  function axisLayout(hasOI, t, extraLabels = []) {
+    const labels = ["价格", "因子值", ...extraLabels, "成交量", ...(hasOI ? ["持仓量"] : [])];
+    const weights = labels.map((_, index) => index === 0 ? 3 : (index === 1 ? 1.6 : 1));
+    const gap = 2;
+    const available = 100 - gap * (labels.length - 1);
+    const total = weights.reduce((sum, value) => sum + value, 0);
+    let top = 0;
+    return labels.map((label, index) => {
+      const height = available * weights[index] / total;
+      const axis = {
+      height: `${height}%`, top: `${top}%`, offset: 0, lineWidth: 1,
+      title: {text: t(label)},
       labels: {align: "right", x: -3},
-      resize: {enabled: index < values.length - 1},
-    }));
+      resize: {enabled: index < labels.length - 1},
+      };
+      top += height + gap;
+      return axis;
+    });
   }
 
   function contractBands(contracts) {

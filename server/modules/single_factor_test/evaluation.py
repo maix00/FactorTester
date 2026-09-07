@@ -276,6 +276,7 @@ class FactorEvaluation:
             ),
         }
 
+
     def _run_window_datetimes(self) -> tuple[DataTime, DataTime]:
         settings = self.settings or {}
         start_date = str(settings.get("start_date") or "").strip()
@@ -381,3 +382,145 @@ class FactorEvaluation:
             scheduled,
             policy=policy_for_factor(factor),
         )
+
+def factor_series_for_run_spec(data: dict[str, Any]) -> dict[str, Any]:
+    """Evaluate the frozen root factors through the factor-series runtime.
+
+    IC and backtest call this only when ``factor_series`` was requested.  This
+    keeps factor reconstruction, coverage, warm-up and value serialization on
+    the same path as the dedicated 查看因子序列 test instead of growing a third
+    module-specific evaluator.
+    """
+    records = list(data.get("factors") or (
+        ((data.get("run_spec") or {}).get("configuration") or {})
+        .get("shared", {}).get("factors") or []
+    ))
+    combined: list[dict[str, Any]] = []
+    factors: list[dict[str, str]] = []
+    seen: set[str] = set()
+    requested_refs = _requested_factor_refs(data)
+    for raw in records:
+        try:
+            record = require_frozen_factor(raw)
+        except (TypeError, ValueError):
+            continue
+        ref = str(record["ref"])
+        if requested_refs and ref not in requested_refs:
+            continue
+        if ref in seen:
+            continue
+        seen.add(ref)
+        identity = record.get("identity") or {}
+        request = {
+            **data,
+            "factor_ref": ref,
+            "factor_alias": str(record.get("alias") or ""),
+            "factor_family_alias": str(identity.get("family_alias") or ""),
+        }
+        result = FactorEvaluation.from_run_spec(request).run()
+        descriptor = {
+            "ref": ref, "alias": str(record.get("alias") or ""),
+            "family_alias": str(identity.get("family_alias") or ""),
+            "freq": str((result.get("factor") or {}).get("freq") or ""),
+        }
+        factors.append(descriptor)
+        for item in result.get("series") or ():
+            combined.append({
+                **item, "factor_ref": ref,
+                "factor_alias": descriptor["alias"], "factor": descriptor,
+            })
+    if not combined:
+        raise ValueError("所选运行配置没有可生成的因子序列")
+    return {"schema_version": 1, "factors": factors, "series": combined}
+
+
+def factor_series_from_tester(
+    tester: Any, factors: list[Any], *, start_dt: DataTime | None = None,
+    end_dt: DataTime | None = None,
+    factor_refs: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Serialize tables already computed by IC without evaluating factors again."""
+    descriptors: list[dict[str, str]] = []
+    items: list[dict[str, Any]] = []
+    for factor in dict.fromkeys(factors):
+        result = tester.results.get(factor)
+        table = getattr(result, "func_table", pd.DataFrame())
+        if not isinstance(table, pd.DataFrame) or table.empty:
+            table = getattr(result, "table", pd.DataFrame())
+        if not isinstance(table, pd.DataFrame) or table.empty:
+            continue
+        descriptor = {
+            "ref": str((factor_refs or {}).get(str(getattr(factor, "alias", "")))
+                or getattr(factor, "frozen_ref", "") or getattr(factor, "ref", "")),
+            "alias": str(getattr(factor, "alias", "") or getattr(factor, "name", "因子")),
+            "family_alias": str(getattr(getattr(factor, "family", None), "alias", "")),
+            "freq": str(getattr(getattr(factor, "freq", None), "name", "")),
+        }
+        descriptors.append(descriptor)
+        for product in sorted(tester.products, key=lambda value: getattr(value, "name", str(value))):
+            column = _match_product_column(table, product)
+            if column is None:
+                continue
+            series = FactorEvaluation._clip_series_by_run_window(
+                clip_series_by_tester_range(table[column].dropna(), tester),
+                start_dt, end_dt,
+            )
+            if series.empty:
+                continue
+            dates, values = series_to_frontend(
+                series, bool(getattr(factor, "freq", None)
+                    and factor.freq.is_day_multiple()),
+            )
+            meta = product_attrs(product, "name", "desc")
+            item = {
+                "product": str(getattr(product, "name", product)),
+                "desc": meta.get("desc") or str(getattr(product, "name", product)),
+                "dates": dates, "values": values,
+                "factor_ref": descriptor["ref"],
+                "factor_alias": descriptor["alias"], "factor": descriptor,
+            }
+            returns = FactorEvaluation._returns_payload(result, product, factor, tester)
+            if returns is not None:
+                item["returns"] = returns
+            for attr, key in (
+                ("factor_cs_rank", "cs_rank"),
+                ("return_cs_rank", "returns_cs_rank"),
+            ):
+                panel = getattr(result, attr, None)
+                rank_column = _match_product_column(panel, product) \
+                    if isinstance(panel, pd.DataFrame) else None
+                if rank_column is None:
+                    continue
+                ranked = FactorEvaluation._clip_series_by_run_window(
+                    clip_series_by_tester_range(panel[rank_column].dropna(), tester),
+                    start_dt, end_dt,
+                )
+                rank_dates, rank_values = series_to_frontend(
+                    ranked, bool(getattr(factor, "freq", None)
+                        and factor.freq.is_day_multiple()),
+                )
+                item[key] = {"dates": rank_dates, "values": rank_values}
+            items.append(item)
+    return {"schema_version": 1, "factors": descriptors, "series": items}
+
+
+def _requested_factor_refs(data: dict[str, Any]) -> set[str]:
+    refs: set[str] = set()
+
+    def visit(value: Any, key: str = "") -> None:
+        if key in {"factors", "external_factor_artifacts"}:
+            return
+        if isinstance(value, dict):
+            for child_key, child in value.items():
+                if child_key == "factor_ref" and isinstance(child, str):
+                    refs.add(child)
+                elif child_key == "factor_refs" and isinstance(child, list):
+                    refs.update(str(item) for item in child if str(item).startswith("factor:"))
+                else:
+                    visit(child, child_key)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child, key)
+
+    visit(data)
+    return refs

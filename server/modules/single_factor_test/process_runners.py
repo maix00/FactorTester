@@ -36,7 +36,29 @@ def run_group(payload: dict[str, Any], sink: Any, cancel_event: Any) -> None:
     scope = _factor_runtime_scope(payload)
     with scope:
         verify_execution_plan("backtest", payload)
-        execute_group_run_spec(payload, sink=sink, cancel_event=cancel_event)
+        execute_group_run_spec(
+            payload, sink=_factor_series_sink(payload, sink),
+            cancel_event=cancel_event,
+        )
+
+
+def _factor_series_sink(payload: dict[str, Any], sink: Any) -> Any:
+    if "factor_series" not in set(payload.get("output_requests") or ()):
+        return sink
+
+    class Sink:
+        def __getattr__(self, name: str) -> Any:
+            return getattr(sink, name)
+
+        def emit_result(self, data: dict[str, Any], **kwargs: Any) -> None:
+            from server.modules.single_factor_test.evaluation import (
+                factor_series_for_run_spec,
+            )
+            sink.emit_result({
+                **data, "factor_series": factor_series_for_run_spec(payload),
+            }, **kwargs)
+
+    return Sink()
 
 
 def _run_analysis(payload: dict[str, Any], sink: Any, cancel_event: Any, *, kind: str) -> None:
@@ -173,8 +195,9 @@ def run_ic(payload: dict[str, Any], sink: Any, cancel_event: Any) -> None:
     scope = _factor_runtime_scope(payload)
     with scope:
         verify_execution_plan("ic", payload)
+        execution = _typed_ic_execution_payload(payload)
         execute_ic_run_spec(
-            _typed_ic_execution_payload(payload),
+            execution,
             sink=sink,
             cancel_event=cancel_event,
         )

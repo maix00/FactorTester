@@ -1,8 +1,21 @@
 """Cross-sectional IC statistics kept separate from expression-tree dispatch."""
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 import numpy as np
 import pandas as pd
+
+_capture_spearman_ranks = ContextVar("capture_spearman_ranks", default=False)
+
+
+@contextmanager
+def capture_spearman_rank_panels(enabled: bool = True):
+    token = _capture_spearman_ranks.set(bool(enabled))
+    try:
+        yield
+    finally:
+        _capture_spearman_ranks.reset(token)
 
 
 def _empty(index: pd.Index) -> pd.DataFrame:
@@ -117,6 +130,14 @@ def correlation(left: pd.DataFrame, right: pd.DataFrame, *, spearman: bool) -> p
     else:
         x, y = l_df.to_numpy(dtype=float), r_df.to_numpy(dtype=float)
     mask = ~np.isnan(x) & ~np.isnan(y)
+    captured = None
+    if spearman and _capture_spearman_ranks.get():
+        counts = mask.sum(axis=1).astype(float)
+        denominator_rank = np.where(counts > 0, counts, np.nan)[:, None]
+        captured = (
+            pd.DataFrame(x / denominator_rank - 0.5, index=idx, columns=l_df.columns),
+            pd.DataFrame(y / denominator_rank - 0.5, index=idx, columns=r_df.columns),
+        )
     x, y = np.where(mask, x, 0.0), np.where(mask, y, 0.0)
     n = mask.sum(axis=1).astype(float)
     sx, sy, sx2, sy2, sxy = x.sum(1), y.sum(1), (x*x).sum(1), (y*y).sum(1), (x*y).sum(1)
@@ -125,4 +146,8 @@ def correlation(left: pd.DataFrame, right: pd.DataFrame, *, spearman: bool) -> p
     with np.errstate(divide="ignore", invalid="ignore"):
         ic = numerator / denominator
     ic[(n <= 1) | (denominator <= 0)] = np.nan
-    return _restore(pd.DataFrame({"IC": ic}, index=idx), left.index)
+    result = _restore(pd.DataFrame({"IC": ic}, index=idx), left.index)
+    if captured is not None:
+        result.attrs["factor_cs_rank"] = _restore(captured[0], left.index)
+        result.attrs["return_cs_rank"] = _restore(captured[1], right.index)
+    return result

@@ -179,10 +179,10 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
             "document.querySelector('[data-mounted-viewer=\"equity_curve\"]') !== null"
         )
         assert page.locator(
-            ".backtest-time-series-surface .backtest-surface-filter-row"
+            ".backtest-time-series-surface .job-result-filter-row"
         ).count() == 2
         assert page.locator(
-            ".backtest-time-series-surface .backtest-surface-filter-label"
+            ".backtest-time-series-surface .job-result-filter-label"
         ).all_text_contents() == ["策略", "曲线"]
         page.wait_for_function(
             "window.__artifactQueries.some(item => item.name === 'metrics_over_time_data')"
