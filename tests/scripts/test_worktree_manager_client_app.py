@@ -3052,7 +3052,7 @@ const before = FTTestProducts.selectedProjections(state);
 FTTestProducts.setSelected(state, state.groups[1], false);
 console.log(JSON.stringify({{
   restored: before.map(item => item.product_path_selection_id),
-  paths: before.map(item => item.selected_paths),
+  paths: before.map(item => item.paths),
   remaining: state.values.product_path_selections.map(
     item => item.product_path_selection_id,
   ),

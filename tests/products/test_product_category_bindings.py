@@ -409,7 +409,9 @@ def test_product_group_persists_explicit_category_binding(monkeypatch) -> None:
 
     assert group is not None
     assert group["category_ids"] == [DAY_NIGHT_ID]
-    assert all("/日夜盘/" not in path for path in group["paths"])
+    assert group["paths"] == [f"ProductCategory/{DAY_NIGHT_ID}/Product/Futures/CNFutures/日夜盘/日盘"]
+    assert saved[0]["paths"] == group["paths"]
+    assert "product_names" not in saved[0]
     assert saved[0]["category_ids"] == [DAY_NIGHT_ID]
 
 

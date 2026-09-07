@@ -143,6 +143,12 @@ def test_grouped_ic_scale_aware_horizon_uses_omitted_default_signal_frequency(
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
+    # These lifecycle fixtures use synthetic product identities. Real category
+    # expansion and membership drift are covered by test_product_scope_snapshot.
+    monkeypatch.setattr(
+        "server.modules.products.product_category_paths.resolve_product_scope_paths",
+        lambda paths, **kwargs: sorted(set(paths)),
+    )
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "research-jobs.sqlite")
     factor_sources = {
         family: f"""
@@ -1206,8 +1212,8 @@ class ProfileScreen(FactorFamily):
     detail = client.get(f"/api/jobs/{job.job_id}")
     assert detail.status_code == 200
     task_detail = detail.get_json()["task_detail"]
-    assert len(task_detail["input_artifacts"]) == 1
-    retained_input = task_detail["input_artifacts"][0]
+    assert {item["artifact_kind"] for item in task_detail["input_artifacts"]} == {"factor_source", "product_scope"}
+    retained_input = next(item for item in task_detail["input_artifacts"] if item["artifact_kind"] == "factor_source")
     assert retained_input["name"] == "factor_source__ProfileScreen"
     assert retained_input["role"] == "input"
     assert retained_input["artifact_kind"] == "factor_source"
@@ -1220,7 +1226,7 @@ class ProfileScreen(FactorFamily):
 
     cleared = client.delete(f"/api/jobs/{job.job_id}/artifacts")
     assert cleared.status_code == 200
-    assert cleared.get_json()["deleted_files"] == 1
+    assert cleared.get_json()["deleted_files"] == 2
     assert not (
         tmp_path / "artifacts" / source_artifact["relative_path"]
     ).exists()
@@ -1547,7 +1553,7 @@ def test_run_dependency_is_frozen_retained_and_copied_on_retry(
 
     cleared = client.delete(f"/api/jobs/{original.job_id}/artifacts")
     assert cleared.status_code == 200
-    assert cleared.get_json()["deleted_files"] == 1
+    assert cleared.get_json()["deleted_files"] == 2
     assert repository.load_artifact(
         job_id=original.job_id,
         name=retained["name"],

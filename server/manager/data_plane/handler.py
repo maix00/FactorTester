@@ -45,11 +45,14 @@ class _DataPlaneHandler(BaseHTTPRequestHandler):
         try:
             runtime = self.server.runtime
             context = runtime.context(route.attempt_id)
-            telemetry_handle = runtime.begin_transfer_telemetry(
-                context,
-                surface=self.surface.value,
-                action=route.action,
-            )
+            # HEAD probes metadata for the same attempt. A zero-byte completion
+            # must not overwrite the GET's persisted transfer statistics.
+            if self.command != "HEAD":
+                telemetry_handle = runtime.begin_transfer_telemetry(
+                    context,
+                    surface=self.surface.value,
+                    action=route.action,
+                )
             self._ft_transfer_telemetry = telemetry_handle
             self._handler(route.action, context)(
                 self, runtime, context,

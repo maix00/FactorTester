@@ -1,9 +1,7 @@
 """Canonicalize category-qualified product paths.
 
-Product groups persist only classifier paths.  A category-qualified selection
-is resolved once against its explicit category tree and expanded to the exact
-category-free object paths; no category is inferred at runtime for a new
-group.
+Product groups persist category references. Submission resolves these rules
+against the current tree and freezes exact category-free product identities.
 """
 
 from __future__ import annotations
@@ -26,11 +24,13 @@ def canonicalize_product_paths(
     username: str = "",
     allow_unresolved: bool = False,
     infer_legacy_categories: bool = True,
+    category_definitions: dict[str, dict] | None = None,
 ) -> list[str]:
     """Return minimal signed paths in the category-free classifier namespace."""
+    definitions = category_definitions or {}
     requested_categories = _normalize_category_ids(category_ids, username)
     category_trees = [
-        (category_id, _category_tree(category_id, username))
+        (category_id, _category_tree(category_id, username, definitions=definitions))
         for category_id in requested_categories
     ]
     # Legacy rows may contain a category-qualified path but no saved binding.
@@ -38,7 +38,7 @@ def canonicalize_product_paths(
     # pass an explicit category and reject unresolved category paths.
     if not requested_categories and infer_legacy_categories:
         category_trees = [
-            (category_id, _category_tree(category_id, username))
+            (category_id, _category_tree(category_id, username, definitions=definitions))
             for category_id in _known_source_category_ids()
         ]
 
@@ -53,10 +53,10 @@ def canonicalize_product_paths(
         view = _category_view_components(path)
         if view is not None:
             class_path, view_category_ref, view_label_ref = view
-            view_category_id, view_label = _resolve_category_label_reference(
-                view_category_ref, view_label_ref, username,
+            view_category_id, _label_id, view_label = _resolve_category_label_identity(
+                view_category_ref, view_label_ref, username, definitions=definitions,
             )
-            if not _is_stable_category_id(view_category_id, username):
+            if view_category_id not in definitions and not _is_stable_category_id(view_category_id, username):
                 raise ValueError(
                     "带分类的产品路径必须使用已登记的产品分类 ID: "
                     + view_category_id
@@ -65,7 +65,7 @@ def canonicalize_product_paths(
                 raise ValueError(
                     f"产品路径引用的分类 {view_category_id} 未绑定到当前定义"
                 )
-            members = _category_members(view_category_id, username)
+            members = _category_members(view_category_id, username, definitions=definitions)
             prefix = class_path.rstrip("/") + "/"
             canonical = [
                 product_path
@@ -81,12 +81,12 @@ def canonicalize_product_paths(
             continue
         qualified_ref, path = _split_category_qualified_path(path)
         qualified_id = (
-            _resolve_category_reference(qualified_ref, username)
+            (qualified_ref if qualified_ref in definitions else _resolve_category_reference(qualified_ref, username))
             if qualified_ref else ""
         )
         candidate_trees = category_trees
         if qualified_id:
-            if not _is_stable_category_id(qualified_id, username):
+            if qualified_id not in definitions and not _is_stable_category_id(qualified_id, username):
                 raise ValueError(
                     "带分类的产品路径必须使用已登记的产品分类 ID: "
                     + qualified_id
@@ -97,7 +97,7 @@ def canonicalize_product_paths(
                 )
             if not requested_categories:
                 candidate_trees = [
-                    (qualified_id, _category_tree(qualified_id, username)),
+                    (qualified_id, _category_tree(qualified_id, username, definitions=definitions)),
                 ]
             else:
                 candidate_trees = [
@@ -125,15 +125,16 @@ def normalize_category_selection_paths(
     raw_paths: Iterable[str] | None,
     *,
     username: str = "",
+    category_ids: Iterable[str] | None = None,
 ) -> list[str]:
     """Normalize category-mounted selections to stable ID-based references.
 
-    This editor representation is kept beside the legacy concrete ``paths``
-    column. Ordinary classifier paths are unchanged; a mounted category view
+    This is the persisted definition. Ordinary classifier paths are unchanged; a mounted category view
     is rewritten from category/label titles to
     ``ProductCategory/<category_id>/<label_id>`` while preserving its owning
     classifier prefix and sign.
     """
+    requested_categories = _normalize_category_ids(category_ids, username)
     result: list[str] = []
     for raw in raw_paths or []:
         if not isinstance(raw, str) or not raw.strip():
@@ -141,12 +142,14 @@ def normalize_category_selection_paths(
         signed = raw.strip()
         negative = signed.startswith("-")
         path = signed[1:].strip() if negative else signed
+        referenced_category = ""
         parsed = _category_view_components(path)
         if parsed is not None:
             class_path, category_ref, label_ref = parsed
             category_id, label_id, _label = _resolve_category_label_identity(
                 category_ref, label_ref, username,
             )
+            referenced_category = category_id
             normalized = (
                 f"{class_path}/{_CATEGORY_PATH_PREFIX}/"
                 f"{category_id}/{label_id}"
@@ -154,6 +157,7 @@ def normalize_category_selection_paths(
         else:
             qualified_ref, relative = _split_category_qualified_path(path)
             if qualified_ref:
+                referenced_category = _resolve_category_reference(qualified_ref, username)
                 normalized = (
                     f"{_CATEGORY_PATH_PREFIX}/"
                     f"{_resolve_category_reference(qualified_ref, username)}/"
@@ -161,8 +165,37 @@ def normalize_category_selection_paths(
                 )
             else:
                 normalized = path.strip("/")
+                # Legacy authored category paths had no explicit namespace.
+                # Qualify an unambiguous bound category without expanding it.
+                matches = [category_id for category_id in requested_categories
+                           if _node_products(normalized, _category_tree(category_id, username))]
+                if len(matches) == 1:
+                    from server.modules.shared.price_services import cached_product_tree
+                    if not _node_exists(normalized, cached_product_tree().tree):
+                        normalized = f"{_CATEGORY_PATH_PREFIX}/{matches[0]}/{normalized}"
+        if requested_categories and referenced_category and referenced_category not in requested_categories:
+            raise ValueError(f"产品路径引用的分类 {referenced_category} 未绑定到当前定义")
         result.append(f"-{normalized}" if negative else normalized)
     return list(dict.fromkeys(result))
+
+
+def resolve_product_scope_paths(paths, *, username="", category_ids=None, category_definitions=None):
+    """Resolve authored rules once to exact leaves, including signed exclusions.
+
+    Never minimize the returned paths to a classifier parent: its membership
+    can grow after this submission. Workers consume only these frozen leaves.
+    """
+    from server.modules.products.product_path_selection import resolve_selection_products
+    from server.modules.shared.price_services import cached_product_tree
+
+    canonical = canonicalize_product_paths(
+        paths, username=username, category_ids=category_ids,
+        infer_legacy_categories=False, category_definitions=category_definitions,
+    )
+    _, products = resolve_selection_products(canonical, cached_product_tree().tree)
+    if not products:
+        raise ValueError("产品范围未解析到任何产品")
+    return sorted({classifier_object_path(product) for product in products})
 
 
 def infer_category_ids(
@@ -218,7 +251,7 @@ def _source_category_tree(category_id: str) -> Any:
     return cached_product_tree_for_category(category_id).tree
 
 
-def _category_tree(category_id: str, username: str) -> Any:
+def _category_tree(category_id: str, username: str, *, definitions=None) -> Any:
     from server.modules.shared.price_services import (
         cached_product_tree,
         normalize_product_category_id,
@@ -226,6 +259,8 @@ def _category_tree(category_id: str, username: str) -> Any:
 
     from server.modules.products.product_category_store import get_product_category
 
+    if category_id in (definitions or {}):
+        return _custom_category_tree(definitions[category_id], cached_product_tree().tree)
     definition = get_product_category(username, category_id) if username else None
     # A user-owned composite is a normal stored category.  Its parent IDs are
     # provenance only; the label/path snapshot created at registration is the
@@ -355,9 +390,10 @@ def _resolve_category_label_identity(
     category_ref: str,
     label_ref: str,
     username: str,
+    *, definitions=None,
 ) -> tuple[str, str, str]:
     """Resolve category and label references and return both stable IDs."""
-    category_id = _resolve_category_reference(category_ref, username)
+    category_id = category_ref if category_ref in (definitions or {}) else _resolve_category_reference(category_ref, username)
     label_reference = str(label_ref or "").strip()
     if not label_reference:
         raise ValueError("产品分类 Label 引用不能为空")
@@ -366,7 +402,7 @@ def _resolve_category_label_identity(
         list_product_categories,
     )
 
-    category = get_product_category(username, category_id)
+    category = (definitions or {}).get(category_id) or get_product_category(username, category_id)
     if category is None:
         category = next(
             (
@@ -408,7 +444,7 @@ def _split_category_view_path(path: str) -> tuple[str, str]:
         Product/Futures/CNFutures/ProductCategory/cnfutures_sector/行业
 
     This is a selection path for a product group, not a persisted product
-    path.  It is expanded to concrete classifier paths before persistence.
+    path.  It is expanded to concrete classifier paths only when freezing a submission.
     """
     parsed = _category_view_components(path)
     if parsed is None:
@@ -481,7 +517,7 @@ def _custom_category_tree(definition: dict[str, Any], base_tree: Any) -> dict[An
     return root
 
 
-def _category_members(category_id: str, username: str) -> dict[str, list[Any]]:
+def _category_members(category_id: str, username: str, *, definitions=None) -> dict[str, list[Any]]:
     """Return one category's labels and concrete objects for composition."""
     from server.modules.shared.price_services import normalize_product_category_id
 
@@ -489,13 +525,15 @@ def _category_members(category_id: str, username: str) -> dict[str, list[Any]]:
         normalized = normalize_product_category_id(category_id)
     except ValueError:
         normalized = ""
-    if normalized:
+    if normalized and category_id not in (definitions or {}):
         return _source_category_members(normalized)
 
     from server.modules.products.product_category_store import get_product_category
     from server.modules.shared.price_services import cached_product_tree
 
-    definition = get_product_category(username, category_id) if username else None
+    definition = (definitions or {}).get(category_id)
+    if definition is None:
+        definition = get_product_category(username, category_id) if username else None
     if definition is None:
         raise ValueError(f"产品分类不存在: {category_id}")
     result = {}

@@ -11,6 +11,7 @@ from flask import jsonify, request
 
 from server.jobs.ipc import DaemonUnavailable
 from server.jobs.artifacts import artifact_root, default_user_quota_bytes
+from server.jobs.product_scope_inputs import retain_product_scope, product_scope_content
 from server.jobs.input_artifacts import (
     load_retained_factor_sources,
     load_retained_run_dependencies,
@@ -305,7 +306,7 @@ def retry_test_job(job_id: str):
         }), 409
     if (
         factor_sources or strategy_sources or strategy_specs
-        or run_input_dependencies
+        or run_input_dependencies or old.job_spec.get("product_selections")
     ):
         job_repository = repository()
         additional_bytes = sum(
@@ -317,6 +318,7 @@ def retry_test_job(job_id: str):
         )
         additional_bytes += strategy_spec_input_bytes(strategy_specs)
         additional_bytes += dependency_input_bytes(run_input_dependencies)
+        additional_bytes += len(product_scope_content(old.job_spec))
         quota = job_repository.storage_quota(
             owner=old.owner, default_bytes=default_user_quota_bytes(),
         )
@@ -418,6 +420,8 @@ def retry_test_job(job_id: str):
             entitlement=old.entitlement,
             created_at=time.time(),
         ))
+        retain_product_scope(job_repository, job_id=job.job_id, owner=job.owner,
+                             job_spec=job_spec)
         retain_factor_sources(
             job_repository,
             job_id=job.job_id,

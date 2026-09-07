@@ -148,6 +148,7 @@
       const productScopeBlocked = productScope.required && !productScope.ready;
       return FTTestProducts.selectionPanel(
         context, state, () => editorTabs?.refreshChips(), {
+          sourceState: editor,
           groups: () => {
             const current = currentProductScope();
             return current.required && !current.ready ? [] : current.items;

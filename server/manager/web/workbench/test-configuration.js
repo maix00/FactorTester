@@ -321,7 +321,6 @@
         ...prior, ...settings,
         product_path_selection_id: selection.product_path_selection_id,
         product_path_selection: selection,
-        paths: selection.selected_paths,
         factor_family_alias: family,
         factor_alias: alias,
         factor_ref: factor.ref,

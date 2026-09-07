@@ -1,3 +1,25 @@
+import hashlib
+import json
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def isolate_product_resolver(monkeypatch):
+    # These tests exercise shared configuration wiring with synthetic Product/A
+    # paths. Actual category expansion and drift are tested in products/.
+    monkeypatch.setattr(
+        "server.modules.products.product_category_paths.resolve_product_scope_paths",
+        lambda paths, **_: sorted(set(paths)),
+    )
+
+
+def scope_metadata(paths):
+    return {"definition_paths": paths,
+            "resolution_sha256": hashlib.sha256(json.dumps(
+                sorted(set(paths)), ensure_ascii=False, separators=(",", ":"),
+            ).encode()).hexdigest()}
+
+
 from server.modules.shared.factor_tester_runtime import (
     selection_for_product_path_selection,
     selection_from_request,
@@ -58,6 +80,7 @@ def test_freeze_product_scope_moves_reusable_objects_to_shared() -> None:
 
     assert payload["shared"]["product_selections"] == {
         "inline:selection": {
+            **scope_metadata(["Product/A"]),
             "id": "inline:selection",
             "label": "日盘组合",
             "paths": ["Product/A"],
@@ -224,7 +247,7 @@ def test_product_group_index_includes_authoritative_domain_mirror(
         "server.services.frozen_product_scope", fromlist=["_product_group_index"]
     )._product_group_index("alice")
 
-    assert groups["product-group:pg-day"] == authoritative
+    assert {key: groups["product-group:pg-day"][key] for key in authoritative} == authoritative
 
 
 def test_load_account_domain_product_groups_excludes_tombstones(
@@ -269,9 +292,8 @@ def test_load_account_domain_product_groups_excludes_tombstones(
             {"id": "pg-live", "paths": ["Product/StaleLive"]},
         ],
     )
-    assert product_group_store.load_authoritative_product_groups("alice") == [
-        {"id": "pg-live", "paths": ["Product/A"]},
-    ]
+    rows = product_group_store.load_authoritative_product_groups("alice")
+    assert [(row["id"], row["paths"]) for row in rows] == [("pg-live", ["Product/A"])]
 
 
 def test_grouped_ic_scope_is_resolved_to_shared_owner_authority(monkeypatch) -> None:
@@ -321,6 +343,7 @@ def test_grouped_ic_scope_is_resolved_to_shared_owner_authority(monkeypatch) -> 
     assert "product_selections" not in payload["analyses"]["ic"]
     assert payload["shared"]["product_selections"] == {
         "product-group:pg-day": {
+            **scope_metadata(["Product/Futures/CNFutures/_products/AP.CZC"]),
             "id": "product-group:pg-day",
             "label": "CNFuturesDay",
             "paths": ["Product/Futures/CNFutures/_products/AP.CZC"],
@@ -522,3 +545,13 @@ def test_execution_excludes_unselected_incomplete_temporary_factor():
     child.pop('source_code')
     with pytest.raises(ValueError, match='缺少冻结源码'):
         freeze_product_scope(configuration, owner='alice', analyses=['ic'])
+
+
+def test_shared_group_legacy_category_identity_uses_author_not_viewer(monkeypatch):
+    from server.modules.products import product_group_store as store
+    monkeypatch.setattr(store, "load_product_groups", lambda owner: [])
+    values = store.load_authoritative_product_groups("viewer", domain_rows=[{
+        "principal": "author", "entity_id": "group-one", "deleted": False,
+        "payload": {"id": "group-one", "name": "Shared", "paths": [], "category_ids": ["metals"]},
+    }])
+    assert values[0]["category_ids"] == ["author:metals"]
