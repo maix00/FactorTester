@@ -422,6 +422,13 @@ def _merge_ic_result(
                 r.returns = re_table
             if not fe_table.empty:
                 r.func_table = fe_table
+            for attr, key in (
+                ("factor_cs_rank", "factor_cs_rank"),
+                ("return_cs_rank", "return_cs_rank"),
+            ):
+                panel = stats.attrs.get(key)
+                if isinstance(panel, pd.DataFrame):
+                    setattr(r, attr, panel)
             if not data_present_mask.empty:
                 r.data_present_mask = data_present_mask.copy(deep=False)
                 r.data_present_all = bool(data_present_mask.to_numpy(dtype=bool).all())
@@ -855,19 +862,25 @@ def _run_ic_compute_to_sink(
             fixed_warmup = resolve_factor_warmup_policy(
                 data, param_items[0][1][0], default_mode="auto",
             ).evaluation_window()
-        compute = _compute_ic_groups(
-            tester, param_items, param_payloads, primary_ic_lag, primary_horizons,
-            emitter=sink,
-            cancel_event=cancel_event,
-            all_products=all_products,
-            quantile_portfolio_config=(
-                data.get('quantile_portfolio_statistics')
-                or data.get('quantile_portfolio')
-                or {}
-            ),
-            warmup_mode=warmup_mode,
-            fixed_warmup_window=fixed_warmup,
+        from tools.factors.expr.cross_sectional_statistics import (
+            capture_spearman_rank_panels,
         )
+        with capture_spearman_rank_panels(
+            "factor_series" in set(data.get("output_requests") or ())
+        ):
+            compute = _compute_ic_groups(
+                tester, param_items, param_payloads, primary_ic_lag, primary_horizons,
+                emitter=sink,
+                cancel_event=cancel_event,
+                all_products=all_products,
+                quantile_portfolio_config=(
+                    data.get('quantile_portfolio_statistics')
+                    or data.get('quantile_portfolio')
+                    or {}
+                ),
+                warmup_mode=warmup_mode,
+                fixed_warmup_window=fixed_warmup,
+            )
         if cancel_event is not None and cancel_event.is_set():
             raise _ICCancelled("IC test job cancelled")
         response = _build_ic_response(
@@ -904,6 +917,23 @@ def _run_ic_compute_to_sink(
             ),
         }
         response["runtime_info_rows"] = data.get("runtime_info_rows", [])
+        if "factor_series" in set(data.get("output_requests") or ()):
+            from server.modules.single_factor_test.evaluation import (
+                factor_series_from_tester,
+            )
+            from tools.factors.formula_identity import require_frozen_factor
+            factor_refs = {}
+            for raw in data.get("factors") or ():
+                try:
+                    frozen = require_frozen_factor(raw)
+                except (TypeError, ValueError):
+                    continue
+                factor_refs[str(frozen.get("alias") or "")] = str(frozen["ref"])
+            response["factor_series"] = factor_series_from_tester(
+                tester, list(compute.factor_by_column.values()),
+                start_dt=tester.start_dt, end_dt=tester.end_dt,
+                factor_refs=factor_refs,
+            )
         sink.emit_result(response)
     except _ICCancelled as exc:
         sink.emit_error(str(exc), code="job_cancelled", cancelled=True)

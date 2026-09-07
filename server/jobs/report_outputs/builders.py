@@ -65,6 +65,35 @@ def build_report_artifacts(
         "ratio_detail", "drawdown_detail", "period_returns",
     } else []
     output = []
+    if "factor_series" in names:
+        payload = result.get("factor_series")
+        if not isinstance(payload, dict) and isinstance(result.get("series"), list):
+            payload = result
+        if not isinstance(payload, dict) or not isinstance(payload.get("series"), list):
+            payload = {"schema_version": 1, "factors": [], "series": []}
+        if isinstance(payload, dict):
+            receipt = {
+                "schema_version": 1, "artifact_kind": "factor_series",
+                "factor_count": len({
+                    str(item.get("factor_ref") or item.get("factor_alias") or "")
+                    for item in payload["series"] if isinstance(item, dict)
+                }),
+                "product_count": len({
+                    str(item.get("product") or "")
+                    for item in payload["series"] if isinstance(item, dict)
+                }),
+            }
+            output.extend([
+                GeneratedReport(
+                    "factor_series_data", json_bytes(payload), "json",
+                    "application/json", receipt,
+                ),
+                GeneratedReport(
+                    "factor_series_receipt", json_bytes(receipt), "json",
+                    "application/json", receipt,
+                ),
+            ])
+        done("factor_series")
     if "equity_curve" in names and series:
         output.extend(series_reports("equity_curve", series, "净值曲线与回撤"))
     if "equity_curve" in names:

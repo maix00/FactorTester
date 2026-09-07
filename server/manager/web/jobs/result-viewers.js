@@ -39,10 +39,14 @@
       resultSummary: options.results || options.payload.result_summary || {},
       customAnalyses: options.customAnalyses,
     };
+    const factorSeriesStandalone = String(options.job.kind || "").toLowerCase()
+      === "factor_evaluation";
     const factorSeries = window.FTFactorSeriesResults?.section(context, {
       ...common,
       jobKind: options.job.kind,
-      resultSummary: options.results || options.payload.result_summary || {},
+      resultSummary: factorSeriesStandalone
+        ? (options.results || options.payload.result_summary || {}) : {},
+      customAnalyses: factorSeriesStandalone ? options.customAnalyses : null,
     });
     if (factorSeries) content.append(factorSeries);
     const icResults = window.FTICResults?.section(context, common);

@@ -17,6 +17,7 @@
   });
   const payloadNames = Object.freeze(Object.values(tabPayloads));
   const fallbackResultViews = Object.freeze({
+    factor_series_data: {surface: "factor_series", view: "factor_series", label: "因子序列", order: 5},
     equity_curve_data: {surface: "time_series", view: "equity", label: "净值与回撤", order: 10},
     returns_over_time_data: {surface: "time_series", view: "returns", label: "收益率", order: 20},
     metrics_over_time_data: {surface: "time_series", view: "metrics", label: "滚动指标", order: 30},

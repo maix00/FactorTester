@@ -5,7 +5,7 @@
     const tabs = [...(options.tabs || [])];
     if (window.FTRuntimeSummary?.rows?.(options.resultSummary || {}).length
         && !tabs.some(tab => tab.key === RUNTIME_KEY)) {
-      tabs.push({key: RUNTIME_KEY, label: "运行摘要", standard: true});
+      tabs.unshift({key: RUNTIME_KEY, label: "运行摘要", standard: true});
     }
     return [...tabs, ...(options.customTabs || [])];
   }
@@ -111,7 +111,32 @@
     return Object.freeze({header, tabs, controls});
   }
 
+  function filterPanel(context, options = {}) {
+    const root = document.createElement("details");
+    root.className = ["job-result-filter-panel", options.className || ""]
+      .filter(Boolean).join(" ");
+    root.open = options.open !== false;
+    const summary = document.createElement("summary");
+    summary.textContent = context.t(options.title || "筛选");
+    const body = document.createElement("div");
+    body.className = "job-result-filter-rows";
+    for (const row of options.rows || []) {
+      if (!row?.element) continue;
+      const field = document.createElement("div");
+      field.className = "job-result-filter-row";
+      const label = document.createElement("span");
+      label.className = "job-result-filter-label";
+      label.textContent = context.t(row.label || "");
+      const value = document.createElement("div");
+      value.className = "job-result-filter-value";
+      value.append(row.element);
+      field.append(label, value); body.append(field);
+    }
+    root.append(summary, body);
+    return Object.freeze({element: root, body});
+  }
+
   window.FTJobResultTabs = Object.freeze({
-    activate, active, compose, create, standardContent,
+    activate, active, compose, create, filterPanel, standardContent,
   });
 })();
