@@ -940,9 +940,15 @@ def execute_ic_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any) -
         end_dt=end_dt,
         user=user_obj_for_name(owner),
     )
-    factor_descriptors = [
-        require_frozen_factor(item) for item in (data.get("factors") or [])
-    ]
+    from server.modules.shared.factor_param_utils import unique_frozen_factor_records
+    from server.modules.shared.factor_param_resolver import resolve_factor_param_value
+
+    # Keep the complete frozen records here. ``require_frozen_factor`` returns
+    # only the identity envelope and intentionally strips factor_dependencies;
+    # resolving that reduced envelope makes nested FactorParam values fall back
+    # to the mutable visible library during execution.
+    factor_records = unique_frozen_factor_records(data.get("factors") or [])
+    frozen_by_ref = {item["ref"]: item for item in factor_records}
     from server.services.external_factor_artifacts import load_frozen_artifacts
 
     external = {
@@ -950,11 +956,14 @@ def execute_ic_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any) -
         for factor in load_frozen_artifacts(data.get("external_factor_artifacts"))
     }
     resolved = []
-    for descriptor in factor_descriptors:
+    for record in factor_records:
+        descriptor = require_frozen_factor(record)
         alias = str(descriptor.get("alias") or "").strip()
         factor_owner = str(descriptor.get("owner_ref") or owner).strip()
         resolved.append(
-            external.get(alias) or factor_from_alias(alias, username=factor_owner)
+            external.get(alias) or resolve_factor_param_value(
+                record, username=factor_owner, frozen_by_ref=frozen_by_ref,
+            )
         )
     runtime_rows = []
     for factor in resolved:
