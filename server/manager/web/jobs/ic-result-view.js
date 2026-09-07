@@ -122,6 +122,7 @@
   }
 
   async function ensureTabLoaded(context, state, key, rerender) {
+    if (key === "runtime_summary") return;
     const tab = state.tabs.find(item => item.key === key);
     if (!tab) return;
     const activeNames = new Set((state.artifacts || [])
@@ -380,6 +381,10 @@
   }
 
   function tabContent(context, state, rerender) {
+    const standard = FTJobResultTabs.standardContent(
+      context, state.activeTab, state.resultSummary,
+    );
+    if (standard) return standard;
     if (state.customAnalyses) {
       const customID = state.customAnalyses.tabIDFor(state.activeTab);
       if (customID) {
@@ -500,7 +505,9 @@
   }
 
   function renderLoaded(context, target, state) {
-    const standardTabs = state.tabs || [];
+    const standardTabs = FTJobResultTabs.compose({
+      tabs: state.tabs || [], resultSummary: state.resultSummary,
+    });
     const customKey = state.customAnalyses?.tabIDFor(state.activeTab);
     if (!customKey && !standardTabs.some(tab => tab.key === state.activeTab)) {
       state.activeTab = standardTabs[0]?.key || "summary";
@@ -555,23 +562,17 @@
       ],
       active: state.activeTab,
       controls: [sliceControl(context, state, rerender)],
-      onChange: async key => {
+      onChange: key => void FTJobResultTabs.activate(context, key, {
+        customAnalyses: state.customAnalyses,
+        onActive: async next => {
         state.loadToken += 1;
         state.loadingTab = "";
         state.loadError = "";
-        if (key === "custom-analysis:new") {
-          try {
-            const analysis = await state.customAnalyses.add();
-            state.activeTab = state.customAnalyses.keyFor(analysis.tab_id);
-          } catch (error) {
-            context.showNotice?.(error.message || String(error), true);
-          }
-        } else state.activeTab = key;
+        state.activeTab = next;
         rerender();
-        if (key !== "custom-analysis:new") {
-          await ensureTabLoaded(context, state, key, rerender);
-        }
-      },
+        await ensureTabLoaded(context, state, next, rerender);
+        },
+      }),
     }).header;
     if (state.loadError) {
       content.append(empty(context, state.loadError));
@@ -584,10 +585,13 @@
   }
 
   function section(context, options) {
-    const resultTabs = tabsForArtifacts(
+    const artifactTabs = tabsForArtifacts(
       options.resultDeclarations, options.artifacts,
     );
-    if (!resultTabs.length || !supports(options.artifacts, options.resultDeclarations)) {
+    const resultTabs = FTJobResultTabs.compose({
+      tabs: artifactTabs, resultSummary: options.resultSummary,
+    });
+    if (!resultTabs.length) {
       return null;
     }
     const root = document.createElement("section"); root.className = "job-section ic-domain-results";
@@ -613,6 +617,7 @@
           artifacts: options.artifacts, jobID: options.jobID,
           artifactQuery: options.artifactQuery || "",
           resultDeclarations: options.resultDeclarations || [],
+          resultSummary: options.resultSummary || {},
           payloads: {}, sources: new Map(), loadToken: 0,
           loadingTab: resultTabs.some(tab => tab.key === activeTab) ? activeTab : "",
           loadError: "",

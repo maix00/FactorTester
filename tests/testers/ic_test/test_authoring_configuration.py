@@ -124,6 +124,8 @@ def test_schema2_grouped_payload_maps_each_group_to_one_typed_core() -> None:
             "horizon": {"sampling": "scale_aware"},
             "methods": ["rank"],
             "return_price_basis": "next_open_to_open_adjusted",
+            "warmup_mode": "none",
+            "warmup_window": "10d",
         }],
     }
     authoring = ICRunAuthoringConfiguration.from_dict(payload)

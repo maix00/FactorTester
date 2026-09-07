@@ -194,6 +194,26 @@
       const record = target => {
         if (usesLocalRuntime(state)) model().recordLocalSubmission(target, value);
         else model().recordSubmission(target, value);
+        // A configuration tab may still point at the preceding Job after a
+        // rerun. Bind its result surface to the Job accepted by this exact
+        // submission before any repaint or progress subscription starts.
+        state.activeResultJobID = target.jobID || "";
+        if (target.jobID) {
+          const saved = state.lastSubmittedJobs ||= {};
+          saved[target.groupID] = {
+            workspaceID: String(state.workspace?.workspace_id || ""),
+            groupID: target.groupID,
+            inputFingerprint: model().inputFingerprint(state, group),
+            phase: target.phase, lifecycleStatus: target.lifecycleStatus,
+            runSpecHash: target.runSpecHash, runID: target.runID,
+            jobID: target.jobID, port: target.port, serverID: target.serverID,
+            jobs: (target.jobCandidates || [target]).map(job => ({
+              jobID: job.jobID, runID: job.runID, runSpecHash: job.runSpecHash,
+              port: job.port, serverID: job.serverID, phase: job.phase,
+              lifecycleStatus: job.lifecycleStatus, label: job.groupLabel,
+            })),
+          };
+        }
         return target;
       };
       record(item);

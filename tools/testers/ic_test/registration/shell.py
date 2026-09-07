@@ -29,6 +29,7 @@ from tools.testers._shared import (
 )
 from tools.testers.settings.contracts import (
     ChipDefinition,
+    ScopePolicy,
     SettingModule,
     SettingsSection,
     SettingTab,
@@ -181,7 +182,7 @@ def _register_chips(app: ApplicationSettings) -> None:
 
 
 def _register_shared_inputs(app: ApplicationSettings) -> None:
-    register_factor_execution_base(app)
+    register_factor_execution_base(app, scope_policy=ScopePolicy.OVERRIDABLE)
     register_factor_candidate_list_base(app)
     register_factor_selections_base(app)
     register_factor_set_selections_base(app)

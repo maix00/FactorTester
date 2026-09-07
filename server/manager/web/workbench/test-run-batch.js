@@ -285,26 +285,21 @@
     if (cancel) actions.append(cancel);
     heading.append(title, actions);
     root.append(heading);
-    if (items.length > 1) {
-      const tabs = document.createElement("div");
-      tabs.className = "test-run-tabs";
-      items.forEach(item => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.classList.toggle("active", item.jobID === active.jobID);
-        const name = document.createElement("span");
-        name.textContent = item.groupLabel;
-        const status = document.createElement("small");
-        status.textContent = context.t(model().PHASE_LABELS[item.phase] || item.phase);
-        button.append(name, status);
-        button.addEventListener("click", () => {
-          state.activeResultJobID = item.jobID;
-          refresh?.();
-        });
-        tabs.append(button);
-      });
-      root.append(tabs);
-    }
+    const picker = FTMultiSelectFilter.create(context, {
+      title: context.t("测试任务"), compact: true, multi: false,
+      className: "test-run-job-filter",
+      items: items.map((item, index) => ({
+        value: item.jobID,
+        label: item.groupLabel || `${context.t("测试任务")} ${index + 1}`,
+        description: context.t(model().PHASE_LABELS[item.phase] || item.phase),
+      })),
+      selected: [active.jobID],
+      onChange: values => {
+        state.activeResultJobID = values[0] || active.jobID;
+        refresh?.();
+      },
+    });
+    root.append(picker.element);
     if (active.error) {
       const error = document.createElement("p");
       error.className = "test-run-error";
