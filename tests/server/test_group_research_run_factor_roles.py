@@ -23,14 +23,17 @@ def test_delegated_factor_alias_uses_frozen_source_owner(monkeypatch) -> None:
         "server.modules.shared.factor_tester_runtime.selection_for_product_path_selection",
         lambda *args, **kwargs: selected,
     )
-    captured: list[str] = []
+    captured: list[tuple[str, str]] = []
     factor = object()
 
-    def resolve(alias, **kwargs):
-        captured.append(alias)
+    def resolve(record, **kwargs):
+        captured.append((record["alias"], kwargs["username"]))
         return factor
 
-    monkeypatch.setattr("server.services.factor_registry.factor_from_alias", resolve)
+    monkeypatch.setattr(
+        "server.modules.shared.factor_param_resolver.resolve_factor_param_value",
+        resolve,
+    )
 
     frozen = _factor(
         "CA|$F:1m", owner="GTHT@MaxJJW@392452984564",
@@ -54,7 +57,7 @@ def test_delegated_factor_alias_uses_frozen_source_owner(monkeypatch) -> None:
         username="GTHT@testA@545963541963",
     )
 
-    assert captured == ["GTHT@MaxJJW@392452984564:CA|$F:1m"]
+    assert captured == [("CA|$F:1m", "GTHT@MaxJJW@392452984564")]
 
 
 def test_unowned_factor_alias_keeps_short_public_resolution(monkeypatch) -> None:
@@ -63,11 +66,13 @@ def test_unowned_factor_alias_keeps_short_public_resolution(monkeypatch) -> None
         "server.modules.shared.factor_tester_runtime.selection_for_product_path_selection",
         lambda *args, **kwargs: selected,
     )
-    captured: list[str] = []
+    captured: list[tuple[str, str]] = []
 
     monkeypatch.setattr(
-        "server.services.factor_registry.factor_from_alias",
-        lambda alias, **kwargs: captured.append(alias) or object(),
+        "server.modules.shared.factor_param_resolver.resolve_factor_param_value",
+        lambda record, **kwargs: captured.append(
+            (record["alias"], kwargs["username"]),
+        ) or object(),
     )
 
     frozen = _factor("MmRet|P:CA|N:10d|$F:1d", owner="public")
@@ -88,4 +93,4 @@ def test_unowned_factor_alias_keeps_short_public_resolution(monkeypatch) -> None
         username="GTHT@testA@545963541963",
     )
 
-    assert captured == ["MmRet|P:CA|N:10d|$F:1d"]
+    assert captured == [("MmRet|P:CA|N:10d|$F:1d", "public")]

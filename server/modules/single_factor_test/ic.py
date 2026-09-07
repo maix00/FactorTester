@@ -941,30 +941,25 @@ def execute_ic_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any) -
         user=user_obj_for_name(owner),
     )
     from server.modules.shared.factor_param_utils import unique_frozen_factor_records
-    from server.modules.shared.factor_param_resolver import resolve_factor_param_value
+    from server.modules.shared.run_spec_resolution.factors import RunFactorResolver
 
-    # Keep the complete frozen records here. ``require_frozen_factor`` returns
-    # only the identity envelope and intentionally strips factor_dependencies;
-    # resolving that reduced envelope makes nested FactorParam values fall back
-    # to the mutable visible library during execution.
     factor_records = unique_frozen_factor_records(data.get("factors") or [])
-    frozen_by_ref = {item["ref"]: item for item in factor_records}
-    from server.services.external_factor_artifacts import load_frozen_artifacts
-
-    external = {
-        factor.alias: factor
-        for factor in load_frozen_artifacts(data.get("external_factor_artifacts"))
-    }
-    resolved = []
-    for record in factor_records:
-        descriptor = require_frozen_factor(record)
-        alias = str(descriptor.get("alias") or "").strip()
-        factor_owner = str(descriptor.get("owner_ref") or owner).strip()
-        resolved.append(
-            external.get(alias) or resolve_factor_param_value(
-                record, username=factor_owner, frozen_by_ref=frozen_by_ref,
-            )
-        )
+    resolver = RunFactorResolver(
+        owner=owner,
+        frozen_factors=factor_records,
+        external_factor_artifacts=data.get("external_factor_artifacts"),
+    )
+    target_ref = str(data.get("factor_ref") or "").strip()
+    target_records = (
+        [resolver.frozen_by_ref[target_ref]]
+        if target_ref in resolver.frozen_by_ref else factor_records
+    )
+    if target_ref and target_ref not in resolver.frozen_by_ref:
+        raise ValueError(f"运行配置不能唯一确定冻结因子: {target_ref}")
+    resolved = [
+        resolver.resolve(factor_ref=record["ref"])
+        for record in target_records
+    ]
     runtime_rows = []
     for factor in resolved:
         warmup = resolve_factor_warmup_policy(
