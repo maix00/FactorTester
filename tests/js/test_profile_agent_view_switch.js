@@ -77,6 +77,15 @@ vm.runInThisContext(
   {filename: "agent-chat.js"},
 );
 
+assert.equal(window.FTAgentChat.conversationModel({
+  active_claim: {provider_model: "provider-default"},
+}, {model_id: "conversation-model"}), "conversation-model",
+"the conversation header follows the persisted conversation setting");
+assert.equal(window.FTAgentChat.conversationModel({
+  active_claim: {provider_model: "provider-default"},
+}, {model_id: "conversation-model", actual_model: "runtime-model"}), "runtime-model",
+"a runtime-confirmed model takes precedence in the conversation header");
+
 (async () => {
   const context = {
     t: value => value,

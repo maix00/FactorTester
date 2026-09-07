@@ -4,6 +4,18 @@
   let globalToggle = null;
   let suppressClick = false;
 
+  function headerBoundary() {
+    const bottom = Number(document.querySelector(".topbar")?.getBoundingClientRect?.().bottom);
+    return Number.isFinite(bottom) ? Math.max(0, bottom) : 0;
+  }
+
+  function applyDrawerBoundary(shell) {
+    if (!shell) return;
+    const top = Math.max(16, headerBoundary() + 8);
+    shell.style.top = `${top}px`;
+    shell.style.bottom = "16px";
+  }
+
   function positionKey(context) {
     return `ft-page-agent-toggle-y:${String(context?.tabID || location.pathname)}`;
   }
@@ -79,7 +91,10 @@
     });
     const current = drawers.get(tabID);
     const open = current?.shell?.dataset.ftPageAgentDesiredOpen === "true";
-    if (current) current.shell.hidden = !open;
+    if (current) {
+      applyDrawerBoundary(current.shell);
+      current.shell.hidden = !open;
+    }
     toggle.hidden = Boolean(open);
     toggle.setAttribute("aria-expanded", open ? "true" : "false");
     applyPosition(context);
@@ -96,6 +111,7 @@
     shell.hidden = true;
     shell.setAttribute("role", "dialog");
     shell.setAttribute("aria-label", context.t("页面智能体助手"));
+    applyDrawerBoundary(shell);
     const header = document.createElement("header");
     const title = document.createElement("div");
     title.className = "page-agent-drawer-title";
@@ -258,6 +274,7 @@
 
     async function open() {
       setDesiredOpen(true);
+      applyDrawerBoundary(shell);
       shell.hidden = false;
       toggle.hidden = true;
       toggle.setAttribute("aria-expanded", "true");
@@ -293,5 +310,11 @@
     return api;
   }
 
-  window.FTPageAgentDrawer = Object.freeze({activate, attach, ensureGlobal: activate});
+  window.addEventListener("resize", () => {
+    drawers.forEach(drawer => applyDrawerBoundary(drawer.shell));
+  });
+
+  window.FTPageAgentDrawer = Object.freeze({
+    activate, applyDrawerBoundary, attach, ensureGlobal: activate, headerBoundary,
+  });
 })();

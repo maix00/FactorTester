@@ -375,6 +375,8 @@ def test_page_agent_trigger_is_global_lazy_and_draggable() -> None:
     assert "FTPageAgentProfiles.self(activeContext)" in drawer
     assert "void controller.connect()" not in assistance
     assert "FTPageAgentDrawer?.activate?.(appContext" in coordinator
+    assert 'document.querySelector(".topbar")' in drawer
+    assert "applyDrawerBoundary(shell)" in drawer
 
 
 def test_tab_view_restore_keeps_the_page_agent_trigger_visible() -> None:
