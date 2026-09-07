@@ -35,14 +35,25 @@ class ClientProductCatalogMixin:
             domain_rows=self._account_catalog_entities(
                 principal,
                 entity_type="product_group",
-                include_shared=False,
+                include_shared=True,
                 include_deleted=True,
             ),
         )
 
     def product_group_summaries(self, principal: str) -> list[dict[str, Any]]:
         """Return bounded list rows without expanding product memberships."""
+        from server.services.product_catalog_projection import (
+            source_ids_by_product_path,
+        )
+
         groups = self._authoritative_product_groups(principal)
+        group_paths = {
+            str(path or "").strip()
+            for group in groups
+            for path in group.get("paths") or []
+            if str(path or "").strip() and not str(path).strip().startswith("-")
+        }
+        path_sources = source_ids_by_product_path(group_paths)
         summaries = []
         for group in groups:
             group_id = str(group.get("id") or "").strip()
@@ -56,6 +67,15 @@ class ClientProductCatalogMixin:
                 "product_count": (
                     len(products) if isinstance(products, list) else 0
                 ),
+                "category_ids": list(group.get("category_ids") or []),
+                # Compact coverage metadata lets every test editor apply the
+                # shared data-source scope without expanding product members.
+                "path_sources": [
+                    {"source_ids": list(path_sources.get(str(path), ()))}
+                    for path in paths
+                    if str(path or "").strip()
+                    and not str(path).strip().startswith("-")
+                ],
                 "owner_ref": str(
                     group.get("owner_ref") or f"user:{principal}"
                 ),
@@ -301,7 +321,7 @@ class ClientProductCatalogMixin:
         rows = self._account_catalog_entities(
             principal,
             entity_type="product_category",
-            include_shared=False,
+            include_shared=True,
         )
         known = {str(item.get("id") or "") for item in values}
         for row in rows:
