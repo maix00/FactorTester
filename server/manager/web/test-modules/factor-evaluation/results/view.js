@@ -93,25 +93,15 @@
     const label = document.createElement("b"); label.textContent = context.t("产品");
     let selectedProduct = window.FTFactorSeriesModel.identity(model.series[0]);
     const source = document.createElement("small");
-    const adjustmentField = document.createElement("label");
+    const adjustmentField = document.createElement("div");
     adjustmentField.className = "factor-series-adjustment-control";
     adjustmentField.hidden = true;
     const adjustmentLabel = document.createElement("b");
     adjustmentLabel.textContent = context.t("复权方式");
-    const adjustmentSelect = document.createElement("select");
-    adjustmentSelect.setAttribute("aria-label", context.t("复权方式"));
-    [["raw", "原始价格"], ["adjusted", "复权价格"]].forEach(([value, text]) => {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = context.t(text);
-      adjustmentSelect.append(option);
-    });
-    adjustmentField.append(adjustmentLabel, adjustmentSelect);
     const initialRequest = window.FTFactorSeriesModel.priceRequest(
       options.configuration, selectedProduct, model.factor.freq,
     );
-    const adjustmentState = {adjusted: initialRequest.adjusted};
-    adjustmentSelect.value = adjustmentState.adjusted ? "adjusted" : "raw";
+    const adjustmentState = {adjusted: initialRequest.adjusted, generation: 0};
     const chart = document.createElement("div");
     chart.className = "factor-series-chart-mount";
     const contracts = document.createElement("div");
@@ -143,10 +133,20 @@
       },
     });
     field.append(label, picker.element);
-    adjustmentSelect.addEventListener("change", () => {
-      adjustmentState.adjusted = adjustmentSelect.value === "adjusted";
-      show();
+    const adjustmentPicker = window.FTMultiSelectFilter.create(context, {
+      title: context.t("复权方式"), compact: true, multi: false,
+      className: "factor-series-adjustment-filter",
+      items: [
+        {value: "raw", label: context.t("原始价格")},
+        {value: "adjusted", label: context.t("复权价格")},
+      ],
+      selected: [adjustmentState.adjusted ? "adjusted" : "raw"],
+      onChange: async values => {
+        adjustmentState.adjusted = values[0] === "adjusted";
+        await show();
+      },
     });
+    adjustmentField.append(adjustmentLabel, adjustmentPicker.element);
     controls.append(field, adjustmentField, source);
     show();
   }
@@ -155,6 +155,8 @@
     context, model, options, product, chart, tableMount, note,
     adjustmentField, adjustmentState,
   ) {
+    const generation = ++adjustmentState.generation;
+    window.FTFactorSeriesChart.dispose(chart);
     const item = model.series.find(value => (
       window.FTFactorSeriesModel.identity(value) === product
     )) || model.series[0];
@@ -169,6 +171,7 @@
       window.FTMarketData.prices(context, request),
       window.FTMarketData.contracts(context, product),
     ]);
+    if (generation !== adjustmentState.generation) return;
     const price = priceResult.status === "fulfilled" ? priceResult.value : {
       payload: {data: []}, source: "",
     };
