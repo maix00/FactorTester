@@ -136,7 +136,35 @@
     return Object.freeze({element: root, body});
   }
 
+  function missingOutput(context, options = {}) {
+    const root = document.createElement("div");
+    root.className = "job-result-not-computed";
+    const title = document.createElement("h3");
+    title.textContent = context.t("未计算");
+    const detail = document.createElement("p");
+    detail.textContent = context.t(options.message || "本次运行没有生成此结果所需的生成物");
+    root.append(title, detail);
+    if (options.canGenerate && typeof options.onGenerate === "function") {
+      const status = document.createElement("span");
+      const button = context.button(context.t("补充计算"), async () => {
+        button.disabled = true; status.textContent = context.t("正在提交补充任务…");
+        try {
+          await options.onGenerate();
+          status.textContent = context.t("补充计算完成，正在刷新…");
+        } catch (error) {
+          status.textContent = error?.message || String(error);
+          button.disabled = false;
+        }
+      }, context.t("使用当前任务保留的数据补充生成此结果"));
+      button.className = "primary";
+      const actions = document.createElement("div");
+      actions.className = "job-result-not-computed-actions";
+      actions.append(button, status); root.append(actions);
+    }
+    return root;
+  }
+
   window.FTJobResultTabs = Object.freeze({
-    activate, active, compose, create, filterPanel, standardContent,
+    activate, active, compose, create, filterPanel, missingOutput, standardContent,
   });
 })();

@@ -15,7 +15,9 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "canonical_artifact": "factor_series_data",
         "rendition_artifacts": [],
         "receipt_artifact": "factor_series_receipt",
-        "before_run": True, "after_run": True, "requires": [],
+        # IC/backtest only retain these values when the primary run requests
+        # them; the report supplemental builder cannot recreate tester state.
+        "before_run": True, "after_run": False, "requires": [],
         "analyses": ["factor_evaluation", "ic", "backtest"],
         "result_surface": "factor_series", "result_view": "factor_series",
         "result_order": 5,

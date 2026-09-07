@@ -3,7 +3,7 @@
     const kind = String(options.jobKind || "").toLowerCase();
     return kind === "factor_evaluation" || (options.resultDeclarations || []).some(
       item => item.name === "factor_series",
-    );
+    ) || Boolean(artifactOf(options.artifacts));
   }
 
   function artifactOf(artifacts) {
@@ -22,7 +22,7 @@
     const summary = window.FTFactorSeriesModel.build(options.resultSummary || {});
     if (summary.series.length) return summary;
     const artifact = artifactOf(options.artifacts);
-    if (!artifact) throw new Error(context.t("因子序列结果未被完整保留"));
+    if (!artifact) throw new Error(context.t("未计算"));
     const path = `/api/jobs/${encodeURIComponent(options.jobID)}`
       + `/artifacts/${encodeURIComponent(artifact.name)}${options.artifactQuery || ""}`;
     const response = await FTJobArtifacts.fetch(context, path);

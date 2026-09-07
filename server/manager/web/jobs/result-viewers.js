@@ -38,6 +38,10 @@
       resultDeclarations: options.taskDetail.output_declarations || [],
       resultSummary: options.results || options.payload.result_summary || {},
       customAnalyses: options.customAnalyses,
+      taskDetail: options.taskDetail,
+      payload: options.payload,
+      executionQuery: options.executionQuery,
+      onGenerated: options.onGenerated,
     };
     const factorSeriesStandalone = String(options.job.kind || "").toLowerCase()
       === "factor_evaluation";

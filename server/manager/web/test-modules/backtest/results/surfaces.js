@@ -27,11 +27,31 @@
   });
 
   function available(state, definitions) {
+    const declared = new Set((state.options.resultDeclarations || [])
+      .map(item => String(item?.canonical_artifact || "")).filter(Boolean));
     return [...state.model.resultViews.entries()].flatMap(([artifact, registered]) => {
       const renderer = definitions[artifact];
-      if (!renderer || !state.artifactsByName.has(artifact)) return [];
+      if (!renderer || (!state.artifactsByName.has(artifact) && !declared.has(artifact))) return [];
       return [[artifact, {...renderer, ...registered}]];
     }).sort((left, right) => left[1].order - right[1].order);
+  }
+
+  function missingArtifact(context, state, artifact) {
+    const declarations = (state.options.resultDeclarations || []).filter(item => (
+      String(item?.canonical_artifact || "") === artifact
+    ));
+    const requests = declarations.map(item => String(item.name || "")).filter(Boolean);
+    const canGenerate = requests.length > 0
+      && declarations.every(item => item.after_run === true);
+    return FTJobResultTabs.missingOutput(context, {
+      canGenerate,
+      onGenerate: canGenerate ? () => FTJobGeneration.generate(context, {
+        jobID: state.options.jobID,
+        artifactQuery: state.options.artifactQuery,
+        executionQuery: state.options.executionQuery,
+        onGenerated: state.options.onGenerated,
+      }, requests) : null,
+    });
   }
 
   function strategyControl(context, state) {
@@ -307,6 +327,11 @@
     heading.textContent = context.t(definition.label);
     const content = document.createElement("div");
     content.className = "backtest-result-lazy-target";
+    if (!state.artifactsByName.has(artifact)) {
+      content.append(missingArtifact(context, state, artifact));
+      section.append(heading, content);
+      return section;
+    }
     const payload = state.chartPayloads[artifact];
     const loadError = state.chartErrors[artifact];
     if (loadError) content.append(state.helpers.message(context, loadError.message));
@@ -440,18 +465,19 @@
   }
 
   function registeredViews(state, surface) {
+    const declared = new Set((state.options.resultDeclarations || [])
+      .map(item => String(item?.canonical_artifact || "")).filter(Boolean));
     return [...state.model.resultViews.entries()]
       .filter(([artifact, item]) => (
-        item.surface === surface && state.artifactsByName.has(artifact)
+        item.surface === surface
+          && (state.artifactsByName.has(artifact) || declared.has(artifact))
       ))
       .sort((left, right) => left[1].order - right[1].order)
       .map(([artifact, item]) => [item.view, item.label, artifact]);
   }
 
   function innerSurface(context, state, definitions, stateKey) {
-    const availableViews = definitions.filter(([, , artifact]) => (
-      !artifact || state.artifactsByName.has(artifact)
-    ));
+    const availableViews = definitions;
     const active = availableViews.some(([key]) => key === state[stateKey])
       ? state[stateKey] : availableViews[0]?.[0];
     state[stateKey] = active;
@@ -500,6 +526,11 @@
         );
       }
     } else if (selected?.[2]) {
+      if (!state.artifactsByName.has(selected[2])) {
+        content.append(missingArtifact(context, state, selected[2]));
+        root.append(content);
+        return root;
+      }
       const key = `${stateKey}:${selected[0]}`;
       const table = state.helpers.remoteDataTable(
         context, state, selected[2], key, tableQueryRequest(state, key),

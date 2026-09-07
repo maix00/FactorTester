@@ -43,7 +43,8 @@ const declaredArtifacts = [
 assert.deepEqual(
   window.FTICResults.tabsForArtifacts(declarations, declaredArtifacts)
     .map(item => item.key),
-  ["summary", "series"],
+  ["summary", "series", "rolling"],
+  "declared result tabs remain visible when their artifact was not calculated",
 );
 assert.deepEqual(
   window.FTICResults.relevantArtifacts(declaredArtifacts, declarations)
@@ -52,7 +53,7 @@ assert.deepEqual(
 );
 assert.equal(window.FTICResults.supports(
   [{name: "ic_statistics_data", state: "active"}], declarations,
-), false);
+), true, "the declaration keeps missing result tabs visible as 未计算");
 assert.equal(window.FTICResults.productGroupRef({
   payload: {
     analyses: {ic: {configuration_groups: [{
