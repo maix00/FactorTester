@@ -381,7 +381,10 @@ class RequestSecurityMixin:
             return configured
         try:
             return client_endpoint_for_port(
-                requested,
+                # Local Agent control may use HTTP while the shared 7997
+                # listener uses TLS. Only inherit the permitted host, never
+                # downgrade the data listener to the control request scheme.
+                urlsplit(requested)._replace(scheme=urlsplit(configured).scheme).geturl(),
                 int(config.client_port),
                 name="client data endpoint",
             )
