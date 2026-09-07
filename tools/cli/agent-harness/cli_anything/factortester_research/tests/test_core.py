@@ -2030,16 +2030,16 @@ def test_installed_skill_uses_local_discovery_identity_and_hides_derived_fields(
         HARNESS_ROOT / "cli_anything/factortester_research/skills/SKILL.md"
     ).read_text(encoding="utf-8")
     assert "name: factortester-research-skill" in skill
-    assert "Do not copy a command from a server `next_actions` field" in skill
-    assert "The Agent never writes `expected_base_hash`" in skill
-    assert "complete\n`obligation_coverage_submission`" in skill
-    assert "stop and report" in skill
-    assert "platform-contract defect" in skill
+    assert "不复制服务端 `next_actions` 命令" in skill
+    assert "`expected_base_hash`、`obligation_coverage_submission`" in skill
+    assert "冻结 availability hash 等由 CLI 推导" in skill
+    assert "应报告契约缺陷" in skill
+    assert "服务器若要求手抄这些动作或字段" in skill
     normalized = " ".join(skill.split())
-    assert "Apply typed-reference rules to every Markdown-bearing location" in normalized
-    assert "do not use inline code as a fallback" in normalized
-    assert "A mathematical variable, relation, or formula uses inline" in normalized
-    assert "A literal field, function, CLI parameter" in normalized
+    assert "所有 Markdown 字段（包括标题、列表、表格、caption 和嵌套内容）都遵循" in normalized
+    assert "不能用 alias、短 hash、旧 revision 或行内代码代替" in normalized
+    assert "数学变量、关系和公式用" in normalized
+    assert "字段、函数、参数、枚举、可执行语法用行内代码或代码块" in normalized
 
 
 def test_installed_skill_discloses_job_output_workflow() -> None:
@@ -2049,9 +2049,9 @@ def test_installed_skill_discloses_job_output_workflow() -> None:
     normalized = " ".join(skill.split())
 
     assert "factortester job output-capabilities --json" in skill
-    assert "IC sequence and statistics" in normalized
-    assert "factortester job generate <job-id>" in skill
-    assert "do not replace Job artifacts with terminal summaries" in normalized
+    assert "IC 的报告用序列和统计为 `ic_series`、`ic_statistics`" in normalized
+    assert "job generate <job-id> --output <name>" in skill
+    assert "不以终端摘要或智能体编写的表格替代真实结果" in normalized
 
 
 def test_canonical_and_packaged_skill_copies_match() -> None:
@@ -2083,12 +2083,12 @@ def test_installed_skill_distinguishes_structure_nodes_from_content() -> None:
     ).read_text(encoding="utf-8")
     normalized = " ".join(skill.split())
 
-    assert "Structure nodes organize and nest the report" in normalized
-    assert "require a meaningful `--title`" in normalized
-    assert "Content components carry the report material" in normalized
-    assert "never carry `--title`" in normalized
-    assert "never use `正文`, `表格`, or `列表` as a structure title" in normalized
-    assert "English placeholders `Body`, `Table`, and `List`" in normalized
+    assert "章节和小节结构使用 `chapter`、`section`、`subsection`、`special`" in normalized
+    assert "必须有具体主题标题" in normalized
+    assert "内容使用 `entry`、`list`、`table`、`image`、`code`、`math`、`result`" in normalized
+    assert "这些组件不带 `--title`" in normalized
+    assert "不能用“正文”“表格”“列表”" in normalized
+    assert "`Body`、`Table`、`List` 占位" in normalized
 
 
 def test_installed_skill_keeps_typed_reference_authoring_with_the_agent() -> None:
@@ -2098,11 +2098,11 @@ def test_installed_skill_keeps_typed_reference_authoring_with_the_agent() -> Non
     ).read_text(encoding="utf-8")
     normalized = " ".join(skill.split())
 
-    assert "Agent alone decides whether prose denotes a domain object" in normalized
-    assert "complete typed Markdown link" in normalized
-    assert "`kind`, exact `target_ref`, and display label" in normalized
-    assert "CLI never generates or rewrites these links" in normalized
-    assert "never scans surrounding prose to infer an object" in normalized
+    assert "智能体决定文字是否指向对象" in normalized
+    assert "[中文短标题](factortester://kind/<percent-encoded-target_ref>)" in normalized
+    assert "从对象所有者复制精确 ref" in normalized
+    assert "CLI 只验证显式链接" in normalized
+    assert "不从上下文猜测或重写链接" in normalized
     assert (
         "[工业硅](factortester://product/"
         "Product%2FFutures%2FCNFutures%2F_products%2FSI.GFE)"
@@ -2112,11 +2112,11 @@ def test_installed_skill_keeps_typed_reference_authoring_with_the_agent() -> Non
     assert "1111111111111111111111111111111111111111" not in skill
     assert "--submission-sequence <sequence>" in normalized
     assert (
-        "Do not submit a different report change while it is pending"
+        "不插入另一项修改"
         in normalized
     )
-    assert "report show --json" in normalized
-    assert "next target report generation" in normalized
+    assert "reports show --json" in normalized
+    assert "sequence 是下一目标 generation" in normalized
     assert "report reference" not in skill
 
 
@@ -2127,11 +2127,11 @@ def test_installed_skill_defines_non_nested_continuation_order() -> None:
     normalized = " ".join(skill.split())
     lower = normalized.lower()
 
-    assert "Graph version changes and local continuation" in skill
-    assert "download it explicitly and inspect its local topology" in normalized
-    assert "there is no server-side continuation preview" in lower
-    assert "local continuation event" in normalized
-    assert "do not ask a manager to manufacture the next edge" in lower
+    assert "更新 Graph 版本前" in skill
+    assert "显式下载并查看本地拓扑" in normalized
+    assert "不要求 Manager 制造迁移计划" in normalized
+    assert "在 session 记录版本与 continuation" in normalized
+    assert "不要求 manager 制造迁移计划、下一边或报告 parent" in lower
 
 
 def test_installed_skill_keeps_entry_resolution_and_reporting_orthogonal() -> None:
@@ -2140,16 +2140,13 @@ def test_installed_skill_keeps_entry_resolution_and_reporting_orthogonal() -> No
     ).read_text(encoding="utf-8")
     normalized = " ".join(skill.split())
 
-    assert "Entry Requirement, obligation, and report invariants" in skill
-    assert "stable, coarse Verification Obligation category" in normalized
-    assert "versioned Entry Requirement subclass" in normalized
-    assert "branch-local Verification Obligation" in normalized
-    assert "server issues an eligible or limited receipt" in normalized
-    assert "Report Requirement is an independent output contract" in normalized
-    assert (
-        "completed report item" not in normalized
-        or "does not infer obligation coverage" in normalized
-    )
+    assert "Graph 覆盖与退出契约" in skill
+    assert "`category_id` 是粗粒度 Verification Obligation 分类" in normalized
+    assert "`requirement_id` 是其中的版本化 Entry Requirement 子类" in normalized
+    assert "分支 obligation 是经 Research Cycle 接受的具体研究状态" in normalized
+    assert "eligible/limited receipt 必须由实际校验产生" in normalized
+    assert "Report Requirement 是独立输出契约" in normalized
+    assert "不从标题、正文或完成状态推断覆盖" in normalized
 
 
 def test_harness_production_modules_stay_below_500_lines() -> None:

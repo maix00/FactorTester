@@ -9,7 +9,7 @@ def test_server_maintenance_skill_routes_all_supported_case_types() -> None:
     skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
 
     assert "name: factortester-server-maintenance" in skill
-    assert "Docker/WireGuard/SSH deployment" in skill
+    assert "容器、网络与发布" in skill
     for reference in (
         "backend-change.md",
         "database-change.md",
@@ -25,19 +25,16 @@ def test_infrastructure_reference_is_progressively_disclosed_and_cli_first() -> 
         encoding="utf-8"
     )
 
-    assert len(reference.splitlines()) > 100
-    assert "## Contents" in reference
+    # Verify semantic boundaries, not English wording or document length.
+    assert "## 入口与目标" in reference
     for required in (
-        "TCP 7998",
-        "TCP 7997",
-        "TCP 17998",
-        "TCP 17997",
-        "UDP 51820",
-        "UDP 51821",
+        "现成部署脚本",
+        "management_access",
+        "控制面",
+        "数据面",
+        "PostgreSQL",
         "docker system prune",
-        "local `2222`",
         "--json",
-        "real Docker, Git, SSH",
         "cli-anything-factortester-server",
         "node_unreachable",
     ):
@@ -47,12 +44,13 @@ def test_infrastructure_reference_is_progressively_disclosed_and_cli_first() -> 
 def test_server_maintenance_ui_metadata_matches_skill_contract() -> None:
     metadata = (SKILL_ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8")
 
-    assert 'display_name: "Server Maintenance"' in metadata
+    assert 'display_name: "FactorTester 服务器维护"' in metadata
     assert (
-        'short_description: "审计并维护私有 FactorTester 服务器、容器与网络部署"'
+        'short_description: "审计并维护已授权的 FactorTester 服务器、容器与网络部署"'
         in metadata
     )
-    assert 'default_prompt: "Use $factortester-server-maintenance ' in metadata
+    assert 'default_prompt: |\n' in metadata
+    assert '使用 $factortester-server-maintenance' in metadata
 
 
 def test_research_skill_points_to_registered_server_maintenance_skill() -> None:
@@ -60,5 +58,5 @@ def test_research_skill_points_to_registered_server_maintenance_skill() -> None:
         ROOT / "skills" / "cli-anything-factortester-research" / "SKILL.md"
     ).read_text(encoding="utf-8")
 
-    assert "registered `$factortester-server-maintenance` Skill" in research
+    assert "`$factortester-server-maintenance`" in research
     assert "references/infrastructure.md" in research

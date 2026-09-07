@@ -1,4 +1,7 @@
 interface:
-  display_name: "Server Maintenance"
-short_description: "审计并维护私有 FactorTester 服务器、容器与网络部署"
-default_prompt: "Use $factortester-server-maintenance to diagnose and safely resolve this FactorTester server maintenance case using the target server's advertised access contract."
+  display_name: "FactorTester 服务器维护"
+short_description: "审计并维护已授权的 FactorTester 服务器、容器与网络部署"
+default_prompt: |
+  使用 $factortester-server-maintenance 诊断并修复当前已授权的服务器维护问题。
+  先确认目标与实际请求链路，复用现有实现和部署脚本，记录测试、部署与回退结果。
+  Manager CLI 登录由用户完成；未登录不阻塞本地实现或独立授权的脚本部署。
