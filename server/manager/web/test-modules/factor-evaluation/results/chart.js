@@ -13,8 +13,7 @@
     if (!bars.length && !factorPoints.length) {
       throw new Error(context.t("没有可绘制的价格或因子序列"));
     }
-    target.__ftFactorSeriesChart?.destroy?.();
-    target.__ftFactorSeriesObserver?.disconnect?.();
+    dispose(target);
     target.replaceChildren();
     target.classList.add("factor-series-chart");
     const chart = window.FTJobHighcharts.mountOptions(
@@ -39,6 +38,17 @@
       target.__ftFactorSeriesObserver = observer;
     }
     return chart;
+  }
+
+  function dispose(target) {
+    const chart = target?.__ftFactorSeriesChart;
+    window.FTHighchartsRangeLoader?.cancel?.(chart);
+    target?.__ftFactorSeriesObserver?.disconnect?.();
+    if (target) {
+      target.__ftFactorSeriesChart = null;
+      target.__ftFactorSeriesObserver = null;
+    }
+    chart?.destroy?.();
   }
 
   function chartOptions(context, options, bars, factorPoints) {
@@ -151,5 +161,5 @@
     });
   }
 
-  window.FTFactorSeriesChart = Object.freeze({contractBands, mount});
+  window.FTFactorSeriesChart = Object.freeze({contractBands, dispose, mount});
 })();
