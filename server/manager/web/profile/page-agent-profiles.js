@@ -90,5 +90,12 @@
     });
   }
 
-  window.FTPageAgentProfiles = Object.freeze({bound, forResearch, profiles, self});
+  async function forPage(context) {
+    const own = await self(context);
+    if (!context.parentResearchID) return [own];
+    const members = await forResearch(context, context.parentResearchID);
+    return [own, ...members.filter(profile => profile.profile_id !== own.profile_id)];
+  }
+
+  window.FTPageAgentProfiles = Object.freeze({bound, forPage, forResearch, profiles, self});
 })();
