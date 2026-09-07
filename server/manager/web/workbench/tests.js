@@ -369,19 +369,20 @@
     return FTTestControlLoader.ensure(state, descriptor.group, refresh);
   }
 
-  function ensureLazyKey(context, state, key, refresh) {
-    if (!key || lazyReady(state, key)) return Promise.resolve();
+  function ensureLazyKey(context, state, key, refresh, options = {}) {
+    if (!key || (lazyReady(state, key) && options.force !== true)) return Promise.resolve();
     const record = state.lazy[key];
     if (!record) return Promise.resolve();
     if (record.status === "loading" && record.promise) return record.promise;
-    if (record.status === "error") return Promise.resolve();
+    if (record.status === "error" && options.force !== true) return Promise.resolve();
     record.status = "loading";
     record.error = "";
     // Repaint immediately so the already-rendered field row can expose the
     // picker-local loading state while the catalog request is in flight.
     // The field layout never waits for this promise.
     refresh?.();
-    record.promise = loadLazyState(context, state, key)
+    record.promise = Promise.resolve(options.beforeLoad?.())
+      .then(() => loadLazyState(context, state, key))
       .then(() => { record.status = "ready"; refresh?.(); })
       .catch(error => {
         record.status = "error";
@@ -465,6 +466,15 @@
   async function ensureProductsForExecution(context, state) {
     if (lazyReady(state, "products")) return;
     await ensureLazyKey(context, state, "products");
+  }
+
+  async function refreshProductsForExecution(context, state, refresh) {
+    await ensureLazyKey(context, state, "products", refresh, {
+      force: true,
+      beforeLoad: () => context.session
+        ? context.api("/api/catalog/refresh", {method: "POST"})
+        : Promise.resolve(),
+    });
   }
 
   async function ensureFactorsForExecution(context, state) {
@@ -727,7 +737,8 @@
       return ensureLazyKey(context, state, "outputs", refresh);
     },
     ensureProfiles: (context, state, refresh) => ensureLazyKey(context, state, "profiles", refresh),
-    ensureFactorsForExecution, ensureProductsForExecution, show,
+    ensureFactorsForExecution, ensureProductsForExecution,
+    refreshProductsForExecution, show,
     ensureProductReferenceLabels,
     ensureRunCode,
     ensureRunBatchCode,

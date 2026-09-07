@@ -40,18 +40,19 @@ const form=window.FTICConfigurationGroupForm.render({t:x=>x,button:()=>new E("bu
 assert.deepEqual(factorOptions.items,[],"an empty mounted outer factor scope blocks IC candidates");
 assert.equal(factorOptions.canCreate,false,"a blocked outer factor scope blocks inline creation");
 tabOptions.renderProduct();
-assert.deepEqual(productOptions.groups,[],"an empty mounted outer product scope blocks IC candidates");
+assert.deepEqual(productOptions.groups(),[],"an empty mounted outer product scope blocks IC candidates");
 assert.equal(productOptions.canCreate,false,"a blocked outer product scope blocks inline creation");
 productScope={items:[{id:"product-group:loaded",name:"Loaded"}],required:true,ready:true,source:"outer"};
 tabOptions.renderProduct();
-assert.deepEqual(productOptions.groups,productScope.items,
+assert.deepEqual(productOptions.groups(),productScope.items,
   "a lazily rendered IC product tab must read the latest product-group scope");
 factorScope={items:[{ref:"factor:v2:outer"}],required:true,ready:true,source:"outer"};
 productScope={items:[{id:"product-group:outer",name:"Outer"}],required:true,ready:true,source:"outer"};
 window.FTICConfigurationGroupForm.render({t:x=>x,button:()=>new E("button")},state,{mode:"create"},()=>{});
 assert.deepEqual(factorOptions.items,factorScope.items,"IC must reuse the shared outer factor scope");
 tabOptions.renderProduct();
-assert.deepEqual(productOptions.groups,productScope.items,"IC must reuse the shared outer product scope");
+assert.deepEqual(productOptions.groups(),productScope.items,"IC must reuse the shared outer product scope");
+assert.equal(productOptions.multi,false,"each IC configuration group selects one product group");
 assert.equal(productOptions.canCreate,false,"outer product pools cannot be widened inline");
 factorScope={items:state.factors,required:false,ready:true,source:"visible"};
 productScope={items:state.groups,required:false,ready:true,source:"visible"};
@@ -65,7 +66,7 @@ const basis=selects.at(-1); assert.deepEqual(basis.children.map(x=>x.value),["ne
 const delay=tabOptions.renderOverrides({tab:{key:"delay",field:"ic_lags",label:"Delay"}}); assert.ok(delay,"registered Delay renders independently");
 const unrelated=tabOptions.renderOverrides({tab:{key:"category",field:"productMask"}}); assert.equal(unrelated.children.length,0,"backtest-only blank tab has no IC form field");
 tabOptions.renderProduct();
-assert.deepEqual(productOptions.groups,state.groups,"without an outer product tab IC uses the visible catalog");
+assert.deepEqual(productOptions.groups(),state.groups,"without an outer product tab IC uses the visible catalog");
 assert.equal(productOptions.constrain,false,"group-owned picker must bypass legacy outer candidate constraints");
 assert.equal(productOptions.canCreate,true,"an unmounted product scope permits local inline creation");
 const editor={mode:"create"};
