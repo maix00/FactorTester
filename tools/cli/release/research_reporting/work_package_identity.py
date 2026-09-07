@@ -171,7 +171,13 @@ def _validate(value: Any) -> dict[str, Any]:
     if value.get("schema_version") != SCHEMA_VERSION:
         raise ValueError("Work Package identity schema is unsupported")
     safe_package_component(value.get("work_package_id"), field="work_package_id")
-    safe_package_component(value.get("report_id"), field="report_id")
+    # report_id is a logical catalog identity, never a filesystem component.
+    # Catalog reports use report:v1:<id>; package and branch paths remain strict.
+    report_id = value.get("report_id")
+    if isinstance(report_id, str) and report_id.startswith("report:v1:"):
+        safe_package_component(report_id.removeprefix("report:v1:"), field="report_id")
+    else:
+        safe_package_component(report_id, field="report_id")
     return dict(value)
 
 

@@ -264,6 +264,10 @@ class ServerResearchService:
         value["source"] = "server"
         value["server_ref"] = location["server_ref"]
         value["profile_id"] = location["profile_id"]
+        # Authoring scope is public identity metadata, not a filesystem path.
+        # Page assistants must not infer it by splitting a presentation URL.
+        value["work_package_id"] = location["package_id"]
+        value["branch_id"] = location["branch_id"]
         value["source_server_id"] = self.server_id
         value["branches"] = [
             {

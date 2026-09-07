@@ -441,3 +441,55 @@ def test_background_heartbeat_does_not_steal_the_assisted_page(monkeypatch):
     clock[0] += 1
     publish('old', True)
     assert store.current('owner', 'self')['tab_id'] == 'old'
+
+
+def test_workspace_targets_are_explicit_and_close_removes_pending():
+    store = PageAssistanceStore()
+    assistance = {"schema_version": 1, "page_kind": "example", "revision": 2,
+                  "navigation": _navigation(), "document": {"name": "old"},
+                  "document_schema": {"type": "object"}}
+    workspace = {"active_tab_id": "a", "tabs": [
+        {"tab_id": "a", "kind": "page", "assistance": assistance},
+        {"tab_id": "b", "kind": "page", "assistance": assistance},
+    ]}
+    store.publish_workspace("owner", "self", workspace)
+    target = store.resolve_target("owner", "self", page_kind="example",
+                                  schema_version=1, document={"name": "new"}, tab_id="b")
+    assert target["tab_id"] == "b"
+    application = store.enqueue("owner", "self", {"tab_id": "b", "expected_revision": 2,
+                                                   "document": {"name": "new"}})
+    assert store.applications("owner", "self", "", 0) == [application]
+    assert store.applications("other", "self", "", 0) == []
+    store.publish_workspace("owner", "self", {"active_tab_id": "a", "tabs": workspace["tabs"][:1]})
+    assert store.page("owner", "self", "b") is None
+    assert store.applications("owner", "self", "", 0) == []
+    with pytest.raises(ValueError):
+        store.resolve_target("owner", "self", page_kind="example", schema_version=1,
+                             document={}, tab_id="b")
+
+
+def test_research_profile_workspace_scope_uses_membership():
+    from server.manager.http.page_assistance_routes import PageAssistanceRoutesMixin
+
+    class Routes(PageAssistanceRoutesMixin):
+        def _profile(self, principal, profile_id):
+            return {"profile_kind": "self" if profile_id == "self" else "research"}
+
+        def _research_catalog_service(self):
+            return self
+
+        def list_members(self, research_id, *, viewer):
+            assert viewer == "owner"
+            return [{"profile_ref": "profile:bound"}] if research_id == "r1" else []
+
+    routes = Routes()
+    workspace = {"active_tab_id": "outside", "tabs": [
+        {"tab_id": "folder", "kind": "research_folder", "research_id": "r1"},
+        {"tab_id": "child", "parent_tab_id": "folder", "research_id": "r1"},
+        {"tab_id": "outside", "research_id": ""},
+        {"tab_id": "other", "research_id": "r2"},
+    ]}
+    assert routes._assistance_visible_workspace("owner", "self", workspace) == workspace
+    scoped = routes._assistance_visible_workspace("owner", "bound", workspace)
+    assert [tab["tab_id"] for tab in scoped["tabs"]] == ["folder", "child"]
+    assert routes._assistance_visible_workspace("owner", "unbound", workspace)["tabs"] == []

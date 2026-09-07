@@ -88,7 +88,7 @@ ADR-143。
 一次 Run 使用的产品选择属于 configuration 的共享不可变对象。分析与策略只引用
 selection ID；`shared.product_selections` 保存唯一的规范路径，现场产品分类保存完整
 定义，已有分类保存稳定元数据与定义哈希。数据源由配置中的稳定 ID 引用；字段映射、
-命名方案、能力声明和在线状态属于执行版本的数据源注册表，不复制进 RunSpec。完整决策见 ADR-116。
+命名方案、能力声明和在线状态属于执行版本的数据源注册表，不复制进 RunSpec。完整决策见 ADR-116。产品定义与提交时精确成员快照见 [ADR-148](docs/adr/148-product-definitions-and-submission-snapshots.md)。
 
 ### 行情数据源声明 (Market Data Source Declaration)
 

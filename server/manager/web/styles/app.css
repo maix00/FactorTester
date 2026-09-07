@@ -139,7 +139,7 @@ body.sidebar-collapsed .opened-tab .tab-label { display: none !important; }
 .sidebar-spacer { flex: 1; }
 .account-button { border-top: 1px solid var(--line); border-radius: 0; padding-top: 13px; }
 main { min-width: 0; }
-.topbar { position: sticky; top: 0; z-index: 10; height: 88px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px 28px; background: color-mix(in srgb, var(--panel) 92%, transparent); backdrop-filter: blur(18px); border-bottom: 1px solid var(--line); }
+:is(.topbar, .ft-page-header) { position: sticky; top: 0; z-index: 10; height: 88px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px 28px; background: color-mix(in srgb, var(--panel) 92%, transparent); backdrop-filter: blur(18px); border-bottom: 1px solid var(--line); }
 /* Object-page authoring mode: view keeps the quiet header; edit and create
    tint the header and show a small mode badge (page-mode.js drives the
    documentElement data attribute from the active tab path). */
@@ -148,37 +148,37 @@ main { min-width: 0; }
   font-size: 11px; line-height: 1; padding: 3px 8px; border-radius: 999px;
   border: 1px solid transparent; white-space: nowrap;
 }
-html[data-page-mode="edit"] .topbar {
+:is(html[data-page-mode="edit"] .topbar, .ft-page-header[data-page-mode="edit"]) {
   background: color-mix(in srgb, var(--accent, #4a90d9) 12%, var(--panel));
   border-bottom-color: color-mix(in srgb, var(--accent, #4a90d9) 45%, var(--line));
 }
-html[data-page-mode="edit"] .page-mode-badge {
+:is(html[data-page-mode="edit"] .topbar, .ft-page-header[data-page-mode="edit"]) .page-mode-badge {
   color: color-mix(in srgb, var(--accent, #4a90d9) 85%, #000);
   border-color: color-mix(in srgb, var(--accent, #4a90d9) 55%, transparent);
   background: color-mix(in srgb, var(--accent, #4a90d9) 14%, transparent);
 }
-html[data-page-mode="create"] .topbar {
+:is(html[data-page-mode="create"] .topbar, .ft-page-header[data-page-mode="create"]) {
   background: color-mix(in srgb, #3aa05a 14%, var(--panel));
   border-bottom-color: color-mix(in srgb, #3aa05a 48%, var(--line));
 }
-html[data-page-mode="create"] .page-mode-badge {
+:is(html[data-page-mode="create"] .topbar, .ft-page-header[data-page-mode="create"]) .page-mode-badge {
   color: #2b7a45;
   border-color: color-mix(in srgb, #3aa05a 55%, transparent);
   background: color-mix(in srgb, #3aa05a 16%, transparent);
 }
-.topbar h1 { margin: 2px 0 0; font-size: 20px; }
+:is(.topbar, .ft-page-header) h1 { margin: 2px 0 0; font-size: 20px; }
 .eyebrow { font-size: 12px; color: var(--muted); }
 .toolbar { display: flex; align-items: center; gap: 8px; }
 .toolbar button, .toolbar select, .section-heading button { border: 0; border-radius: 8px; padding: 8px 11px; background: #e9e9ed; color: inherit; }
 /* Header actions are icon-only controls.  Keep them transparent so they
    inherit the topbar surface, including the distinct edit/create tints. */
-.topbar .toolbar .icon-action-button {
+:is(.topbar, .ft-page-header) .toolbar .icon-action-button {
   border: 0;
   border-radius: 0;
   padding: 0;
   background: transparent;
 }
-.topbar .toolbar .icon-action-button:hover:not(:disabled) {
+:is(.topbar, .ft-page-header) .toolbar .icon-action-button:hover:not(:disabled) {
   background: transparent;
 }
 .toolbar .danger-action { color: var(--danger); }

@@ -12,6 +12,7 @@ from flask import jsonify, request, session
 import settings as Settings
 from server.jobs.artifacts import default_user_quota_bytes
 from server.jobs.entitlements import entitlement_for_owner
+from server.jobs.product_scope_inputs import retain_product_scope, product_scope_content
 from server.jobs.input_artifacts import (
     retain_factor_sources,
     retain_run_dependencies,
@@ -892,6 +893,8 @@ def _submit_kind(
         entitlement=entitlement_for_owner(str(payload["_owner"])),
     ))
     try:
+        retain_product_scope(repository, job_id=job.job_id, owner=job.owner,
+                             job_spec=payload)
         retain_factor_sources(
             repository,
             job_id=job.job_id,
@@ -1195,6 +1198,9 @@ def submit_research_run():
     )
     strategy_specs = list(prepared.get("strategy_specs") or [])
     retained_input_bytes = factor_input_bytes * len(analyses)
+    retained_input_bytes += len(product_scope_content(
+        frozen_configuration["payload"]["shared"],
+    )) * len(analyses)
     if "backtest" in analyses:
         retained_input_bytes += strategy_source_bytes
         retained_input_bytes += strategy_spec_input_bytes(strategy_specs)

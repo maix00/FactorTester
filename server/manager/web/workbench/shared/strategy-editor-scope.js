@@ -345,7 +345,7 @@
     candidateCompatible, constrainedCandidates,
     inlineCreateAllowed,
     itemID, itemLabel, mounted, scope, scopedField, scopedFields,
-    selectedSourceIDs,
+    selectedSourceIDs, outerCategoryIDs,
     fieldVisible, fieldRequired, fieldEditable, summary, validate, visibleCatalog,
   });
 })();

@@ -1,154 +1,43 @@
-# FactorTester infrastructure maintenance
+# FactorTester 基础设施维护
 
-Load this reference only for an authorized container, tunnel, peer-key, or
-server-release case. It describes invariants and verification boundaries; it
-does not publish a transport address or grant permission to change a server.
+仅用于已授权的容器、隧道、密钥或服务器发布任务。本说明规定验证边界，不规定具体部署脚本、主机、端口或传输地址。
 
-## Contents
+## 入口与目标
 
-- [Discover the server contract](#discover-the-server-contract)
-- [FactorTester application planes](#factortester-application-planes)
-- [Node and database identity](#node-and-database-identity)
-- [Host and container lifecycle](#host-and-container-lifecycle)
-- [Release and rollback](#release-and-rollback)
-- [Failure and security boundaries](#failure-and-security-boundaries)
+有现成部署脚本就使用脚本。检查脚本的目标配置、作用范围、状态或预检方式，再执行明确授权的修改。可以通过 `server inspect --json` 和 `server access --json` 核对应用声明；`management_access` 为空或过时不阻塞用户指定的现有脚本。只有目标仍有歧义时才请求补充信息，不猜测传输通道。
 
-## Discover the server contract
+Manager CLI 是应用客户端，`jobs`、`artifacts`、`storage`、`research-graph`、`services` 操作应用 API，不承担主机、容器或仓库传输。复用已有 Docker、Git、SSH 等工具，不再建立 `cli-anything-factortester-server` 这样的重复封装。CLI 登录交给用户，缺少登录不阻塞本地实现或独立授权的脚本部署。
 
-Target-specific connection metadata belongs to the target server's colocated
-`.settings` file. Read it through the authenticated Manager projection:
+## 应用通道
 
-```bash
-factortester-manager server inspect --json
-factortester-manager server access --json
-```
+区分控制面、数据面和执行服务：控制面负责认证、UI 元数据、调度与短期传输授权；数据面传输 capability 授权的对象字节；执行服务由控制面选择。
 
-Use the returned `management_access` entries to select an already approved
-operator tool. The entries are opaque declarations: they may expose a method
-kind, profile, endpoint, port, and bounded capabilities, but never credentials
-or executable commands. Do not hardcode a host, port, SSH alias, container
-context, tunnel endpoint, or fallback route in this reference. An empty or
-stale declaration is a blocker, not an invitation to guess.
+服务器身份响应确定客户端端点。服务正在运行不等于可以公开暴露；已提供数据 capability 时不得通过控制请求传输生成物字节。核对服务器、Job、生成物名、大小、有效期、内容 hash 和传输结果。服务器间端点保持私有，不因声明存在就开放防火墙。
 
-The Manager CLI remains an application client. Its `jobs`, `artifacts`,
-`storage`, `research-graph`, and `services` commands operate through the
-FactorTester API. They do not operate the host or choose an infrastructure
-transport.
+## 节点与数据库身份
 
-The operator wrapper validates real Docker, Git, SSH, and FactorTester
-backends; it is not a mock implementation. Do not create a duplicate
-`cli-anything-factortester-server` harness merely to wrap those existing
-commands.
+节点和控制数据库身份及生命周期独立。部署方维护签名公开清单并决定可建立认证关系的节点。PostgreSQL 是其声明领域的权威数据库，不是字节传输队列。
 
-## FactorTester application planes
+每个节点保留自己的私钥，仅公开密钥与必要身份元数据可离开节点。轮换时先准备新密钥、验证私有健康检查和握手，再撤销旧声明。私钥、注册 bearer、数据库密码和 Manager 会话不得写入 Git、公开 settings、镜像、日志或客户端包。
 
-The server identity response is authoritative for the client-visible
-FactorTester control and data endpoints. Keep these planes separate:
+节点发现不是认证。只有 Job、数据源、生成物、提交物或执行能力选择某节点时才建立所需关系，不为所有已知节点常驻连接。`kind=wireguard` 不授权创建 peer、路由或隧道配置；分别验证握手、控制面与数据面。
 
-- control plane: authentication, UI metadata, Job scheduling, service
-  selection, and short-lived transfer authorization;
-- data plane: capability-authorized artifact and submission bytes;
-- execution services: Manager-owned worker instances selected through the
-  control plane.
+## 生命周期
 
-Do not expose an execution service merely because it is running. Do not send
-artifact bytes through a control request when the server has issued a data
-capability. Validate the selected server, Job, artifact name, size, expiry,
-content hash, and transfer result.
+状态检查不得构建、拉取、发布、清理卷或重启服务。修改操作应明确、尽可能幂等，并保留上一已验证版本的恢复能力。隔离各节点的 settings、状态、数据、仓库及身份，不向应用挂载宽泛主机目录或无约束控制 socket。
 
-The deployment declaration may advertise these protocol surfaces explicitly;
-the labels are not permission to open a host firewall or to guess an endpoint:
+应用服务重启与主机或容器重启不同，使用对应层已有入口。不得擅自执行 `docker system prune`、删除 PostgreSQL 命名卷或超出授权保留策略删除镜像和 worktree。
 
-| Surface | Declared transport | Boundary |
-|---|---|---|
-| client control | TCP 7998 | Web, Swift, and CLI Manager access |
-| client data | TCP 7997 | capability-authorized object bytes |
-| peer control | TCP 17998 | WireGuard-only Manager federation |
-| peer data | TCP 17997 | WireGuard-only peer byte stream |
-| FactorTester tunnel | UDP 51820 | deployment-owned WireGuard identity |
-| PostgreSQL tunnel | UDP 51821 | separate database WireGuard identity |
+## 发布与回退
 
-The public client needs only 7998 and 7997. The peer surfaces remain private
-to the overlay and must not be security-group ingress. The local operator SSH
-forward may use local `2222`; it is not a public FactorTester port.
+分支顺序和授权遵循仓库 `AGENTS.md`。按已授权范围完成集成、推送、精确版本传输与发布，不能把 Git push 当成部署成功。使用干净、确定的 revision；构建及依赖修改需要显式构建，源码重载不能暗中构建或拉取。
 
-## Node and database identity
+激活前记录源码版本、当前发布、服务身份、所需数据库备份与恢复目标及预期端点。激活后验证实际文件或 tree、应用控制面与数据面健康、数据库连通性、节点身份及端口暴露范围。失败时恢复旧版本，保留数据库卷和外部备份。
 
-FactorTester nodes and the control database have independent identities and
-lifecycles. A deployment coordinator owns the signed public inventory and
-decides which nodes are eligible for an authenticated relation. PostgreSQL is
-authority for its declared data domain; it is not a byte-transfer queue.
+## 失败与凭据边界
 
-Each node retains its own private key with owner-only permissions. Only public
-key material and bounded identity metadata may leave that node. Rotate a key
-by staging the replacement, verifying the private health check and handshake,
-then revoking the old declaration before removing old local material. Never
-place private keys, registration bearers, database passwords, or Manager
-sessions in Git, settings returned by the API, images, logs, or client bundles.
-
-Peer discovery is not authentication. Establish a direct relation only when a
-Job, data source, artifact, submission, or execution capability selects the
-peer. Do not create one listener or one permanent request channel for every
-known server.
-
-When `management_access` declares `kind=wireguard`, it discloses an already
-authorized server-to-server transport capability to the operator workflow. It
-does not disclose private keys or authorize peer changes. The operator must
-use the deployment's signed public inventory and verify the WireGuard
-handshake, the FactorTester 7998 control plane, and the 7997 data plane as
-separate checks. The Manager CLI and this Skill must not manufacture peers,
-routes, endpoints, or tunnel configuration from a generic WireGuard label.
-
-## Host and container lifecycle
-
-Use only the operator tool selected from the target server's
-`management_access` declaration. Its `--help` and status/plan operations
-must be read before a mutation. Prefer a native, machine-readable receipt and
-verify the resulting revision, identities, health checks, data roots, and
-running services.
-
-A status operation must not build, pull, publish, prune, delete a volume, or
-restart a service. A mutating operation must be explicit, idempotent where
-possible, and leave the last verified release recoverable. Keep server
-settings, state roots, data roots, repositories, and node identities isolated
-between nodes. Never mount a broad host parent or an unrestricted host
-control socket into the application.
-
-A FactorTester service restart is distinct from a host/container restart. Use
-the Manager's application-level `services` command for the former. Use the
-declared operator workflow for the latter, with explicit authorization and a
-rollback plan.
-
-Never use `docker system prune`, delete named PostgreSQL volumes, or remove a
-release image/worktree outside the declared retention operation.
-
-## Release and rollback
-
-The public server must not fetch source from an unapproved remote. An
-authorized publisher transfers a clean, exact revision through the declared
-operator transport, verifies the remote revision, and activates an immutable
-release. Build and dependency changes require an explicit build step; a
-source-only reload must not silently rebuild or pull.
-
-Before activation, record the source revision, current release, service
-identity, database backup/restore target, and expected endpoint projection.
-After activation, verify the revision, application control/data health,
-private database reachability, distinct node identities, and absence of
-unapproved public surfaces. If activation or verification fails, restore the
-previous release and retain the database volume and external backup.
-
-## Failure and security boundaries
-
-- A healthy tunnel process does not prove a peer handshake or application
-  health; verify each layer independently.
-- Missing or expired peer metadata returns an explicit node-unavailable result.
-  The application error is `node_unreachable`; never fall back to a guessed
-  endpoint or unrelated application port.
-- A PostgreSQL outage must not turn PostgreSQL into the artifact transfer
-  queue or stop already-authorized local application behavior.
-- Manager sessions, browser sessions, short-lived data capabilities, and peer
-  tickets are separate credentials with separate expiry and scope.
-- Never print private keys, bearer values, database URLs, source paths,
-  proprietary data, or complete artifacts.
-- Stop before mutation when the target, revision, identity, backup, rollback
-  target, or authorization is ambiguous.
+- 隧道进程存活不能代替握手或应用健康证明。
+- 节点不可达应明确返回 `node_unreachable`，不回退到猜测端点。
+- PostgreSQL 故障不能使其变成生成物队列，也不应阻断已授权的本地应用能力。
+- Manager、浏览器、短期数据 capability 和 peer ticket 各有作用域与有效期，不得互相代用。
+- 不输出秘密、数据库 URL、私有数据或完整生成物；修改前核实目标、版本、授权及必要回退信息。

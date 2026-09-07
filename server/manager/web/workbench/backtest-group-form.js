@@ -96,6 +96,7 @@
     innerScopeValues.factor_candidates = selectedCandidateValues();
     const renderProductPanel = () => FTTestProducts.selectionPanel(
       context, state, () => editorTabs?.refreshChips(), {
+        sourceState: editor,
         groups: () => {
           const current = currentProductScope();
           return current.required && !current.ready ? [] : current.items;

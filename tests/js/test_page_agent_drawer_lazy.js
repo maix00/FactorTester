@@ -30,7 +30,9 @@ global.document = {
     ? {getBoundingClientRect: () => ({bottom: 88})} : null,
 };
 global.window = globalThis;
-global.addEventListener = () => {};
+const windowEvents = {};
+global.innerHeight = 800;
+global.addEventListener = (name, callback) => { windowEvents[name] = callback; };
 const positions = new Map();
 global.localStorage = {
   getItem: key => positions.get(key) ?? null,
@@ -77,6 +79,12 @@ assert(fixedHeight >= 0 && drawerHeight > fixedHeight,
       hide: () => {},
     },
   };
+  const icon = FTPageAgentDrawer.ensureGlobal(context);
+  const toggle = body.children.find(item => item.className === "page-agent-drawer-toggle");
+  assert.equal(toggle.style.top, "124px", "absent saved position defaults entirely below the header");
+  positions.set("ft-page-agent-toggle-y:tab", "5");
+  windowEvents.resize();
+  assert.equal(toggle.style.top, "124px", "old positions cannot overlap the header");
   const drawer = FTPageAgentDrawer.attach(context, {
     resolveProfile: () => profilePromise,
     assistance: {connect: async () => {

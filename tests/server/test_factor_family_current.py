@@ -105,3 +105,15 @@ def test_factor_set_peer_delete_shadows_stale_authoring_row(tmp_path, monkeypatc
     monkeypatch.setattr(settings, 'CACHE_DB_PATH', left.local.path)
     assert get_factor_set('alice', ref) is None
     assert list_factor_sets('alice') == []
+
+
+def test_current_family_rejects_invisible_owner_before_storage_or_hydration(monkeypatch):
+    import pytest
+    from server.manager.services import factor_family_current
+
+    monkeypatch.setattr(factor_family_current, "can_view_user_scope", lambda *_: False)
+    monkeypatch.setattr(factor_family_current, "family_head",
+                        lambda *_: pytest.fail("unauthorized request reached storage"))
+    with pytest.raises(PermissionError, match="outside your visible scope"):
+        ensure_current_family(SimpleNamespace(), "custom", "Probe",
+                              principal="alice", owner="other")

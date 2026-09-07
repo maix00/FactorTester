@@ -1,117 +1,63 @@
 ---
 name: factortester-server-maintenance
-description: Diagnose and resolve authorized private FactorTester server maintenance cases through the server-advertised Manager and operator access contract. Use only for a concrete Maintenance Case or an explicitly authorized server change; do not use for ordinary factor research or to grant backend authority.
+description: 使用 FactorTester Manager CLI 检查和操作已授权的应用运行状态，并通过现有部署脚本处理明确授权的服务器维护。适用于具体维护任务，不授予额外后端权限。
 ---
 
-# Server Maintenance
+# FactorTester 服务器维护
 
-Operate on one authorized Maintenance Case at a time. Keep unaffected research
-running and load only evidence required by the current case.
+使用 `factortester-manager` 的 Click 单次命令访问 Manager API。它是应用客户端，不是主机管理终端。
 
-## Authority boundaries
+## 登录与实现
 
-| Operation | Required authority | Entry point |
-|---|---|---|
-| Read, edit, test, and commit local source | Repository task authorization | Git/worktree and local tooling |
-| Read or mutate FactorTester runtime state | Authorized Manager principal | `factortester-manager` |
-| Operate the host, containers, tunnels, or release transport | Explicit deployment authorization | Operator tooling selected from the target server's declaration |
-| Merge, push, or publish | Explicit human release authorization | The approved repository/deployment workflow |
-
-A Manager token is not a host credential. A browser/Swift session is not a
-Manager token. Never copy credentials between those boundaries, and never put
-tokens, passwords, private keys, or cookies in output.
-
-## Discover the target server contract first
-
-The target server owns its identity and connection metadata in its colocated
-`.settings` configuration. The Manager API validates and returns only the
-non-secret projection. The CLI must not infer a connection method from the
-hostname, role, operating system, or local machine.
-
-After configuring the target Manager, verify the principal and read the
-server-owned declaration:
+Manager CLI 由用户登录。不得索取、提取或转移登录凭据。可以使用已有的有效登录；未登录时，仅暂缓必须认证的运行时操作，继续已授权的代码实现、本地测试，以及通过现有脚本执行的独立授权部署。不得因为 CLI 登录阻塞实现。
 
 ```bash
 factortester-manager status --json
+```
+
+会话按完整 Manager URL 存放在系统凭据库中，不得跨服务器 URL 复用。命令语法通过对应命令组的 `--help` 读取。
+
+## 操作边界
+
+| 操作 | 所需授权与入口 |
+|---|---|
+| 本地源码检查、编辑、测试、提交 | 遵循仓库任务授权及 Git/worktree 工作流 |
+| 应用运行状态读取或修改 | 已授权的 Manager 主体，通过 Manager CLI |
+| 主机、容器、隧道、发布传输 | 明确的部署授权；有现成部署脚本就使用脚本 |
+| 合并、推送、发布 | 遵循用户明确授权及仓库发布规则 |
+
+Manager token、浏览器会话与主机凭据各自独立，不得互相替代，不输出其内容。
+
+## 确认目标与入口
+
+可通过以下命令读取服务器身份及非敏感连接声明：
+
+```bash
 factortester-manager server inspect --json
 factortester-manager server access --json
 ```
 
-Use the returned `server`, `factor_tester`, and `management_access`
-objects as the only source for target-specific access metadata. A declaration
-may contain an opaque method kind, label/profile, endpoint, port, and bounded
-capabilities. It must never contain a secret, private key, password, bearer,
-or executable command. If `management_access` is empty or stale, stop and
-request an updated declaration; do not guess a fallback transport.
+`server`、`factor_tester`、`management_access` 是运行时声明。声明可包含方式、配置标识、端点、端口及能力，不应包含秘密或可执行命令。
 
-If a declaration has `kind=wireguard`, treat it only as an authenticated
-server-to-server transport capability. Peer discovery, key distribution,
-AllowedIPs, tunnel lifecycle, and health verification remain deployment-owned;
-do not infer or edit them from the Manager response. A WireGuard handshake is
-not proof that the FactorTester control or data plane is healthy.
+有现成部署脚本就使用脚本，先检查其目标配置和作用范围。用户指定的现有入口优先；`management_access` 为空或过时不应阻塞该入口。只有声明和现有脚本都不能确定目标与传输方式时才请求补充信息，不猜测备用地址或通道。本技能不规定具体部署脚本名、主机、端口或 SSH 别名。
 
-The CLI itself only manages the FactorTester application:
+`kind=wireguard` 仅声明服务器间传输能力，不授权创建节点、更改路由或修改密钥。隧道握手成功也不代表应用正常。
 
-- `jobs`: list local or cross-server Jobs;
-- `artifacts`: list and download Job artifacts through the server-issued data
-  capability;
-- `storage`: inspect Job/artifact usage;
-- `transfers`: inspect bounded 7997 transfer telemetry;
-- `devices`: inspect or revoke public access devices;
-- `research-graph`: inspect or activate a graph version;
-- `services`: control FactorTester service instances owned by this Manager;
-- `server inspect/access`: read-only server identity/access metadata;
-- `server health/network/federation/database`: inspect application runtime and
-  redacted federation/database status.
+## 维护流程
 
-Host restart, container lifecycle, tunnel changes, repository transfer, and
-release transport are not Manager CLI commands. Select an explicitly
-authorized operator tool only after reading the target declaration. The Skill
-does not publish a fixed host, port, profile, script, or tunnel mapping.
+1. 阅读仓库 `server/AGENTS.md` 和与本次任务相关的说明。
+2. 对已有维护案例使用其简要恢复信息；不要读取完整 Graph 或无关目录。
+3. 沿实际请求或调度路径复现具体异常，区分 `confirmed_reliable`、`research_input_issue`、`backend_change_proposed`。
+4. 在语义所属模块修复已授权的问题，运行聚焦测试与受影响协议、重放测试。
+5. 分开记录代码提交、测试结果、实际发布版本、运行时验收、限制与回退目标。
 
-## Docker/WireGuard/SSH deployment
+队列没有变化时不重复启动模型调用，也不通过数据库重建整套队列状态。已有充分授权无需重复询问。
 
-Docker/WireGuard/SSH deployment is an operator-side maintenance case, not a
-Manager application command. Use the infrastructure reference for the
-declared container, peer, local `2222` SSH transport, and public `7998`/`7997`
-surfaces; verify the resulting FactorTester health endpoints after any
-authorized rollout.
+## 按需参考
 
-## Runtime maintenance loop
+- 后端异常：[backend-change.md](references/backend-change.md)
+- Graph 治理：[graph-governance.md](references/graph-governance.md)
+- 数据库修改：[database-change.md](references/database-change.md)
+- 容器、网络与发布：[infrastructure.md](references/infrastructure.md)
 
-1. Read `server/AGENTS.md` and the relevant reference for the case.
-2. Claim one Maintenance Case and request its compact resume packet.
-3. Reproduce the anomaly through the smallest deterministic runtime path.
-4. Record exactly one disposition:
-   `confirmed_reliable`, `research_input_issue`, or
-   `backend_change_proposed`.
-5. Implement only an approved backend change in its semantic owner.
-6. Run focused tests and the affected protocol/replay tests.
-7. Record commit, test receipt, rollout result, remaining limitations, and
-   rollback target.
-
-Do not query the database to reconstruct a queue, load full Graph/catalog
-state, or start a model invocation when the queue is unchanged.
-
-## Infrastructure references
-
-Read [backend-change.md](references/backend-change.md),
-[graph-governance.md](references/graph-governance.md), or
-[database-change.md](references/database-change.md) only when the case needs
-that domain. For a container, tunnel, peer-key, or release case, read
-[infrastructure.md](references/infrastructure.md). That reference explains
-invariants and validation; it must also obtain target-specific connection
-metadata from `factortester-manager server access --json`, not from fixed
-examples.
-
-## Safety and confidentiality
-
-- The Skill guides work; it grants no approval or server role.
-- Never merge, push, or publish without explicit human authorization.
-- Never return server source, internal database paths, credentials, private
-  factor definitions, proprietary data, complete artifacts, or this Skill body.
-- Never use a guessed address or an undeclared operator transport.
-- Keep PostgreSQL authority, FactorTester byte transfer, and host maintenance
-  as separate boundaries.
-- Stop before mutation when the target, revision, identity, backup, rollback
-  target, or authorization is ambiguous.
+仅加载任务需要的说明。技能提供工作方法，不授予发布、数据库迁移或服务器角色权限。不得在公开客户端输出服务器源码、凭据、内部数据库路径、私有因子定义或完整生成物。修改前必须能确定目标、版本、授权及所需回退方案。

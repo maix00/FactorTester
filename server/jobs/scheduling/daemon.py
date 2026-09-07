@@ -339,7 +339,7 @@ class ResearchJobScheduler:
                 target,
                 expected=job.status,
                 cancel_reason=job.cancel_reason if cancelled else "",
-                error=data,
+                error={**data, "cancelled": True} if cancelled else data,
             )
             if completed.job_role == "primary":
                 self._register_terminal_evidence(completed)
@@ -394,6 +394,7 @@ class ResearchJobScheduler:
             worker_exitcode=message.get("worker_exitcode"),
             cancel_reason=job.cancel_reason if cancelled else "",
             error={
+                "cancelled": cancelled,
                 "code": "worker_terminated" if cancelled else "worker_crashed",
                 "message": "worker stopped before producing a terminal result",
                 "stage": stage,

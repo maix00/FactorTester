@@ -62,6 +62,13 @@ def ic_configuration_group_schema() -> dict:
                     "next_open_to_open_adjusted", "next_close_to_close_adjusted",
                 ],
             },
+            "warmup_mode": {
+                "type": "string", "title": "前摇窗口",
+                "enum": ["none", "fixed", "auto"],
+            },
+            "warmup_window": {
+                "type": "string", "minLength": 1, "title": "前摇时长",
+            },
             "analysis_attachments": {
                 "type": "array", "maxItems": 0, "title": "附加分析（当前禁用）",
             },

@@ -101,6 +101,11 @@ def test_ic_configuration_group_contract_teaches_canonical_creation() -> None:
         "product_scope_ref": "product-group:agent-1",
     }
     validate_document(contract["schema"], item)
+    for mode in ("none", "fixed", "auto"):
+        validate_document(contract["schema"], {**item, "warmup_mode": mode})
+    with pytest.raises(ValueError, match="not an allowed value"):
+        validate_document(contract["schema"], {**item, "warmup_mode": "unknown"})
+
 
 
 def test_run_fields_are_backend_registered_outside_reusable_templates() -> None:

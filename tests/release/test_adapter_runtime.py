@@ -28,6 +28,8 @@ def _write_executable(
 
 
 def _adapter_archive(path: Path) -> bytes:
+    # Lifecycle checks include process startup; timeout enforcement has its own
+    # blocking-child test rather than a 2-second interpreter startup benchmark.
     contract = {
         "schema_version": 1,
         "adapter_id": "synthetic-ui",
@@ -38,22 +40,22 @@ def _adapter_archive(path: Path) -> bytes:
             "health": {
                 "argv": ["bin/health"],
                 "mode": "foreground",
-                "timeout_seconds": 2,
+                "timeout_seconds": 10,
             },
             "start": {
                 "argv": ["bin/start"],
                 "mode": "background",
-                "timeout_seconds": 2,
+                "timeout_seconds": 10,
             },
             "stop": {
                 "argv": ["bin/stop"],
                 "mode": "foreground",
-                "timeout_seconds": 2,
+                "timeout_seconds": 10,
             },
             "open": {
                 "argv": ["bin/open"],
                 "mode": "foreground",
-                "timeout_seconds": 2,
+                "timeout_seconds": 10,
             },
         },
     }
@@ -180,3 +182,15 @@ def test_adapter_hot_path_has_no_database_llm_or_shell_execution() -> None:
     assert "openai" not in source
     assert "anthropic" not in source
     assert "shell=true" not in source
+
+
+def test_foreground_adapter_terminates_blocked_child_at_declared_timeout(tmp_path):
+    from tools.cli.release.adapters.contracts import AdapterAction
+    from tools.cli.release.adapters.execution import AdapterActionRunner
+    script = tmp_path / "blocked"
+    script.write_text("#!/bin/sh\nexec sleep 30\n")
+    script.chmod(0o700)
+    runner = AdapterActionRunner(adapter_root=tmp_path, adapter_id="blocked")
+    with pytest.raises(subprocess.TimeoutExpired) as error:
+        runner.foreground(AdapterAction(("blocked",), "foreground", 1), check=True)
+    assert error.value.timeout == 1

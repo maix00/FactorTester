@@ -196,6 +196,14 @@ class CatalogRoutesMixin:
                 else:
                     source_ids = product_library_source_ids(query)
                     products = self.state.client_state.product_names(source_ids)
+                    if query.get("category_id") or query.get("group_ref") or query.get("product_path"):
+                        from server.modules.products.product_candidate_scope import constrain_product_records
+                        products = constrain_product_records(
+                            products, username=principal,
+                            category_ids=query.get("category_id", []),
+                            group_refs=query.get("group_ref", []),
+                            product_paths=query.get("product_path", []),
+                        )
                 value = {
                     "success": True,
                     "origin": "server",

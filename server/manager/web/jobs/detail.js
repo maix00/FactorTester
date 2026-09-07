@@ -11,6 +11,36 @@
     return section;
   }
 
+  function productScopeSection(context, snapshot) {
+    if (snapshot?.legacy_unfrozen) return fieldSection(context, context.t("涉及产品"), {
+      [context.t("状态")]: context.t("历史任务未保留精确产品快照，不能用当前产品库替代"),
+    });
+    const selections = snapshot?.product_selections;
+    if (!selections || !Object.keys(selections).length) return null;
+    const memberships = new Map();
+    Object.entries(selections).forEach(([id, selection]) => {
+      (selection.paths || []).forEach(path => {
+        if (!memberships.has(path)) memberships.set(path, new Set());
+        memberships.get(path).add(selection.label || id);
+      });
+    });
+    const rows = [...memberships].sort(([a], [b]) => a.localeCompare(b)).map(([path, scopes]) => [
+      path.split("/_products/").pop(), path, [...scopes].join("、"),
+    ]);
+    const section = document.createElement("section");
+    section.className = "job-section";
+    const title = document.createElement("h2");
+    title.textContent = context.t("涉及产品（提交时快照）");
+    const content = document.createElement("div");
+    const render = page => content.replaceChildren(FTUI.pagedTable(
+      [context.t("产品"), context.t("产品路径"), context.t("产品范围")], rows,
+      {page, pageSize: 20, onPageChange: render},
+    ).shell);
+    render(1);
+    section.append(title, content);
+    return section;
+  }
+
   function fieldContent(context, value) {
     const content = document.createDocumentFragment();
     const entries = Object.entries(value || {}).filter(([, item]) => scalar(item));
@@ -271,6 +301,8 @@
     overview.append(fieldSection(context, context.t("任务字段"), {
       ...job, port: resolvedPort || port,
     }));
+    const productScope = productScopeSection(context, taskDetail.product_scope_snapshot);
+    if (productScope) overview.append(productScope);
     const storage = taskDetail.storage || {};
     overview.append(fieldSection(context, context.t("文件占用"), {
       [context.t("生成物数量")]: storage.output_artifact_count || 0,

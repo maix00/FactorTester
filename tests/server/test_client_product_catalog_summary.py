@@ -40,7 +40,7 @@ def test_product_group_summary_carries_bounded_scope_metadata(monkeypatch) -> No
         "include_shared": True,
         "include_deleted": True,
     }]
-    assert rows[0]["category_ids"] == ["metals"]
+    assert rows[0]["category_ids"] == ["alice:metals"]
     assert rows[0]["path_sources"] == [
         {"source_ids": ["source-a"]},
         {"source_ids": ["source-a", "source-b"]},
