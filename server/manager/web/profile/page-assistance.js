@@ -28,13 +28,7 @@
     let profilePromise = null;
     let selectedProfile = null;
     const resolveProfiles = options.resolveProfiles || (context.parentResearchID
-      ? async () => {
-        const [self, members] = await Promise.all([
-          window.FTPageAgentProfiles.self(context),
-          window.FTPageAgentProfiles.forResearch(context, context.parentResearchID),
-        ]);
-        return [self, ...members.filter(profile => profile.profile_id !== self.profile_id)];
-      } : null);
+      ? () => window.FTPageAgentProfiles.forPage(context) : null);
     const resolveProfile = () => {
       if (!profilePromise) {
         profilePromise = Promise.resolve(selectedProfile || (options.resolveProfile

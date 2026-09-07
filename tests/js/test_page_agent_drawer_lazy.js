@@ -189,5 +189,23 @@ assert(fixedHeight >= 0 && drawerHeight > fixedHeight,
   assert(events.some(item => item[0] === "selected" && item[1] === "beta"));
   assert.equal(switcherProfile.textContent, "Beta",
     "selecting a bound Profile remounts the conversation under that Profile");
+  const researchChild = {...context, tabID: "read-only-report", parentResearchID: "research:one"};
+  const profileRequests = [];
+  global.FTPageAgentProfiles = {
+    self: async () => ({profile_id: "self"}),
+    forPage: async page => {
+      profileRequests.push(page.parentResearchID);
+      return [{profile_id: "self"}, {profile_id: "research-member"}];
+    },
+  };
+  FTPageAgentDrawer.activate(researchChild);
+  toggle.listeners.click();
+  // Opening is lazy; switching pages must not retarget its captured context.
+  FTPageAgentDrawer.activate({...context, tabID: "another-page"});
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(profileRequests, ["research:one"]);
+  const childShell = body.children.find(item => item.dataset.ftPageAgentTab === "read-only-report");
+  assert.equal(childShell.children[0].children[0].children[2].hidden, false,
+    "a read-only research child exposes the same member selector without a filling adapter");
   console.log("PASS: page Agent drawer reuses its page-owned assistance receiver");
 })().catch(error => { console.error(error); process.exitCode = 1; });

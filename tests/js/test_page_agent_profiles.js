@@ -79,8 +79,18 @@ vm.runInThisContext(
   assert.deepEqual(
     (await window.FTPageAgentProfiles.forResearch(researchContext, "research:one"))
       .map(item => item.profile_id),
-    ["research-profile"],
-    "Research assistants are the active bindings available on this host",
+    ["not-on-this-host", "research-profile"],
+    "Active research bindings include unavailable runtimes with an explicit badge",
+  );
+  assert.deepEqual(
+    (await window.FTPageAgentProfiles.forPage({...researchContext, parentResearchID: "research:one"}))
+      .map(item => item.profile_id),
+    ["self-profile", "not-on-this-host", "research-profile"],
+    "Read-only research children and editable pages share the same profile scope",
+  );
+  assert.deepEqual(
+    (await window.FTPageAgentProfiles.forPage(context)).map(item => item.profile_id),
+    ["self-profile"],
   );
 
   console.log("PASS: non-report assistance uses self and reports keep bound profiles");
