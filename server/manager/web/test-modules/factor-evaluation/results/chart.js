@@ -42,7 +42,10 @@
 
   function dispose(target) {
     const chart = target?.__ftFactorSeriesChart;
-    window.FTHighchartsRangeLoader?.cancel?.(chart);
+    if (chart) {
+      window.clearTimeout?.(chart._ftRangeLoadTimer);
+      chart._ftRangeLoadGeneration = (chart._ftRangeLoadGeneration || 0) + 1;
+    }
     target?.__ftFactorSeriesObserver?.disconnect?.();
     if (target) {
       target.__ftFactorSeriesChart = null;

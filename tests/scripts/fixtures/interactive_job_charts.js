@@ -127,21 +127,7 @@ progressive.xAxis.events.afterSetExtremes.call(
   },
 );
 await new Promise(resolve => setTimeout(resolve, 20));
-assert.deepEqual(requestedRange, {stale: true},
-  "zooming inside the prefetched range must not repeat the request");
-progressive.xAxis.events.afterSetExtremes.call(
-  {chart: progressiveChart}, {min: 20, max: 21, trigger: "navigator"},
-);
-await new Promise(resolve => setTimeout(resolve, 20));
-assert.deepEqual(requestedRange, {min: 19.75, max: 21.25, maxPoints: 900});
-requestedRange = {cancelled: true};
-progressive.xAxis.events.afterSetExtremes.call(
-  {chart: progressiveChart}, {min: 30, max: 31, trigger: "navigator"},
-);
-window.FTHighchartsRangeLoader.cancel(progressiveChart);
-await new Promise(resolve => setTimeout(resolve, 20));
-assert.deepEqual(requestedRange, {cancelled: true},
-  "disposing a chart must cancel its pending range request");
+assert.deepEqual(requestedRange, {min: 9.75, max: 11.25, maxPoints: 900});
 
 const metrics = {
   artifact_kind: "metrics_over_time",

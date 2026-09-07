@@ -1,6 +1,5 @@
 (() => {
   function replaceVisibleSeries(chart, nextOptions, minimum, maximum) {
-    if (chart?._ftRangeLoadDisposed === true) return;
     const definitions = Array.isArray(nextOptions?.series) ? nextOptions.series : [];
     const visible = chart.series.filter(series => !series.options?.isInternal);
     const remaining = new Set(visible);
@@ -25,13 +24,6 @@
     chart.redraw(false);
   }
 
-  function cancel(chart) {
-    if (!chart) return;
-    clearTimeout(chart._ftRangeLoadTimer);
-    chart._ftRangeLoadGeneration = (chart._ftRangeLoadGeneration || 0) + 1;
-    chart._ftRangeLoadDisposed = true;
-  }
-
   function attach(options, displayOptions = {}) {
     if (typeof displayOptions.loadRange !== "function"
         || typeof displayOptions.rangeOptions !== "function") return options;
@@ -53,15 +45,10 @@
           || !Number.isFinite(Number(event?.min))
           || !Number.isFinite(Number(event?.max))) return;
       const chart = this.chart;
-      if (chart._ftRangeLoadDisposed) return;
-      const loaded = chart._ftLoadedRange;
-      if (loaded && Number(event.min) >= loaded.minimum
-          && Number(event.max) <= loaded.maximum) return;
       clearTimeout(chart._ftRangeLoadTimer);
       const generation = (chart._ftRangeLoadGeneration || 0) + 1;
       chart._ftRangeLoadGeneration = generation;
       chart._ftRangeLoadTimer = setTimeout(async () => {
-        if (chart._ftRangeLoadDisposed) return;
         chart.showLoading?.(displayOptions.loadingText || "Loading…");
         try {
           const minimum = Number(event.min);
@@ -92,12 +79,7 @@
               visibleMaximum: maximum,
             },
           );
-          if (!payload || chart._ftRangeLoadDisposed
-              || chart._ftRangeLoadGeneration !== generation) return;
-          chart._ftLoadedRange = {
-            minimum: minimum - beforePadding,
-            maximum: maximum + afterPadding,
-          };
+          if (!payload || chart._ftRangeLoadGeneration !== generation) return;
           replaceVisibleSeries(
             chart, displayOptions.rangeOptions(payload),
             minimum, maximum,
@@ -105,13 +87,12 @@
         } catch (error) {
           if (error?.name !== "AbortError") displayOptions.onRangeError?.(error);
         } finally {
-          if (!chart._ftRangeLoadDisposed
-              && chart._ftRangeLoadGeneration === generation) chart.hideLoading?.();
+          if (chart._ftRangeLoadGeneration === generation) chart.hideLoading?.();
         }
       }, Math.max(0, Number(displayOptions.rangeDebounceMs) || 120));
     }};
     return options;
   }
 
-  window.FTHighchartsRangeLoader = Object.freeze({attach, cancel, replaceVisibleSeries});
+  window.FTHighchartsRangeLoader = Object.freeze({attach, replaceVisibleSeries});
 })();

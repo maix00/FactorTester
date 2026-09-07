@@ -189,6 +189,7 @@
         contracts: rows,
       }, {
         loadingText: context.t("正在读取当前时间范围…"),
+        rangeOverscanBeforeMs: window.FTMarketData.rangeContextMs(request.freq),
         loadRange: async (minimum, maximum, range = {}) => {
           const ranged = window.FTMarketData.rangeRequest(
             request, minimum, maximum, range.maxPoints,
