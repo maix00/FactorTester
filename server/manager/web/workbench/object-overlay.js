@@ -191,7 +191,7 @@
     const card = document.createElement("section");
     card.className = "dialog-card wide object-overlay-card";
     const heading = document.createElement("div");
-    heading.className = "section-heading";
+    heading.className = "ft-page-header ft-object-overlay-header";
     const copy = document.createElement("div");
     const title = document.createElement("h2");
     title.textContent = context.t(
@@ -204,12 +204,13 @@
     closeButton.className = "dialog-close icon-action-button ft-object-overlay-close";
     closeButton.replaceChildren?.(window.FTIcons?.node?.("xmark") || "×");
     closeButton.title = context.t("关闭");
+    closeButton.setAttribute("aria-label", closeButton.title);
     // The shared .dialog-close rule pins top:10px for absolute positioning;
     // this close lives in the header row, so neutralize top inline and keep
     // it as a normal header part (workbench.css also forces relative flow).
     closeButton.style.setProperty("top", "auto", "important");
     const frameActions = document.createElement("div");
-    frameActions.className = "ft-object-overlay-frame-actions";
+    frameActions.className = "toolbar ft-object-overlay-frame-actions";
     heading.append(copy, frameActions, closeButton);
     const body = document.createElement("div");
     body.className = "ft-object-overlay-body";
@@ -377,10 +378,10 @@
       const typeTitle = context.t(frameDefinition.title);
       // Mirror the regular tab header: title + eyebrow (object kind / mode).
       copy.replaceChildren();
-      const titleElement = document.createElement("b");
+      const titleElement = document.createElement("h1");
       titleElement.className = "ft-object-overlay-title";
       const eyebrow = document.createElement("small");
-      eyebrow.className = "ft-object-overlay-eyebrow";
+      eyebrow.className = "eyebrow";
       const modeText = `${prefix}${typeTitle}${scope ? ` · ${scope}` : ""}`;
       if (name) {
         titleElement.textContent = String(name);
@@ -388,7 +389,17 @@
       } else {
         titleElement.textContent = modeText;
       }
-      copy.append(titleElement, eyebrow);
+      heading.dataset.pageMode = frame.mode;
+      const eyebrowRow = document.createElement("div");
+      eyebrowRow.className = "eyebrow-row";
+      eyebrowRow.append(eyebrow);
+      if (frame.mode === "edit" || frame.mode === "create") {
+        const badge = document.createElement("span");
+        badge.className = "page-mode-badge";
+        badge.textContent = context.t(frame.mode === "edit" ? "编辑中" : "新建");
+        eyebrowRow.append(badge);
+      }
+      copy.append(eyebrowRow, titleElement);
       frame.label = name || modeText;
       renderTree();
     };

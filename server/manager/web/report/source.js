@@ -51,6 +51,7 @@
     let assetIndex = new Map();
     let localResourceIndex = new Map();
     let assetIDs = new Map();
+    let indexSignature = "";
 
     function rebuildIndexes() {
       assetIndex = indexItems(value?.assets, item => [
@@ -91,8 +92,44 @@
         value = normalize(await api(source.path));
         chapterLazy = false;
       }
+      indexSignature = JSON.stringify(value);
       rebuildIndexes();
       return value;
+    }
+
+    function watch({isCurrent, onChange, interval = 5000}) {
+      let disposed = false;
+      let timer = null;
+      let pending = false;
+      const check = async () => {
+        if (disposed || pending || !isCurrent() || document.hidden) return;
+        pending = true;
+        try {
+          // Read the bounded index; never prefetch report bodies or chapters.
+          const next = normalize(await api(`${source.path}/index`));
+          const signature = JSON.stringify(next);
+          if (!disposed && isCurrent() && signature !== indexSignature) {
+            indexSignature = signature;
+            value = next;
+            rebuildIndexes();
+            await onChange(next);
+          }
+        } catch (_) { /* Retry a temporary failure on the next visible check. */ }
+        finally { pending = false; }
+      };
+      const schedule = () => {
+        if (disposed) return;
+        timer = setTimeout(async () => { await check(); schedule(); }, interval);
+      };
+      window.addEventListener?.("focus", check);
+      document.addEventListener?.("visibilitychange", check);
+      schedule();
+      return () => {
+        disposed = true;
+        clearTimeout(timer);
+        window.removeEventListener?.("focus", check);
+        document.removeEventListener?.("visibilitychange", check);
+      };
     }
 
     async function loadChapter(chapterID, options = {}) {
@@ -152,6 +189,7 @@
     return Object.freeze({
       ...source,
       load,
+      watch,
       loadChapter,
       loadComponent,
       setChapterMetadata,

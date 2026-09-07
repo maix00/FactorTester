@@ -20,11 +20,17 @@
     return `ft-page-agent-toggle-y:${String(context?.tabID || location.pathname)}`;
   }
 
+  function clampPosition(value) {
+    const half = (globalToggle?.getBoundingClientRect?.().height || 56) / 2;
+    const minimum = headerBoundary() + 8 + half;
+    return Math.max(minimum, Math.min(window.innerHeight - half - 8, value));
+  }
+
   function applyPosition(context) {
     if (!globalToggle) return;
-    const value = Number(localStorage.getItem(positionKey(context)));
-    const top = Number.isFinite(value) ? value : window.innerHeight / 2;
-    globalToggle.style.top = `${Math.max(28, Math.min(window.innerHeight - 28, top))}px`;
+    const saved = localStorage.getItem(positionKey(context));
+    const value = saved === null ? NaN : Number(saved);
+    globalToggle.style.top = `${clampPosition(Number.isFinite(value) ? value : 0)}px`;
   }
 
   function ensureToggle(context) {
@@ -52,13 +58,13 @@
       if (event.pointerId !== pointerID) return;
       if (Math.abs(event.clientY - startY) > 3) moved = true;
       if (!moved) return;
-      const top = Math.max(28, Math.min(window.innerHeight - 28, event.clientY));
+      const top = clampPosition(event.clientY);
       toggle.style.top = `${top}px`;
     });
     const finishDrag = event => {
       if (event.pointerId !== pointerID) return;
       if (moved) {
-        localStorage.setItem(positionKey(activeContext), String(event.clientY));
+        localStorage.setItem(positionKey(activeContext), String(clampPosition(event.clientY)));
         suppressClick = true;
       }
       pointerID = null;
@@ -84,6 +90,7 @@
 
   function activate(context) {
     activeContext = context;
+    void window.FTPageAssistance?.resume?.(context);
     const toggle = ensureToggle(context);
     const tabID = String(context?.tabID || "");
     drawers.forEach((drawer, key) => {
@@ -144,6 +151,7 @@
 
     const toggle = ensureToggle(context);
 
+    let workspaceReceiver = null;
     let mounted = false;
     let opening = null;
     let profileID = "";
@@ -194,6 +202,8 @@
       if (!nextID || nextID === profileID) return;
       if (profileID) context.pageAgentLifecycle.hide(profileID, context.tabID);
       options.assistance?.disconnect?.();
+      workspaceReceiver?.dispose();
+      workspaceReceiver = null;
       options.onProfileChange?.(profile);
       profileID = nextID;
       activeProfile = profile;
@@ -221,6 +231,7 @@
         agent_profile_id: profileID,
       }),
       dispose: () => {
+        workspaceReceiver?.dispose();
         shell.remove();
         if (drawers.get(tabID)?.shell === shell) drawers.delete(tabID);
       },
@@ -252,7 +263,18 @@
           const assistanceReady = options.assistanceEnabled !== false
             && options.assistance?.connect
             ? options.assistance.connect()
-            : Promise.resolve(options.assistance?.prepare?.());
+            : (async () => {
+              if (!context.assistanceWorkspace) return;
+              workspaceReceiver?.dispose();
+              workspaceReceiver = window.FTPageAgentContext.create(context, profileID, {
+                snapshot: () => ({schema_version: 1, page_kind: "read-only",
+                  revision: 0, document: {}, document_schema: {type: "object", additionalProperties: false},
+                  navigation: {schema_version: 1, root_id: "page", nodes: {
+                    page: {id: "page", kind: "page", children: []},
+                  }}}),
+              });
+              await workspaceReceiver.start();
+            })();
           const chatReady = window.FTAgentChat.render(context, profile, {
             conversationOnly: true,
             lifecycleManaged: true,
@@ -312,6 +334,7 @@
 
   window.addEventListener("resize", () => {
     drawers.forEach(drawer => applyDrawerBoundary(drawer.shell));
+    applyPosition(activeContext);
   });
 
   window.FTPageAgentDrawer = Object.freeze({

@@ -67,10 +67,10 @@ vm.runInThisContext(
     },
   }, {pageKind: "factor-create"});
   await new Promise(resolve => setTimeout(resolve, 0));
-  assert.equal(profileReads, 1,
-    "an active assisted page resolves its Profile without waiting for the drawer");
-  assert.equal(bridgeStarts, 1,
-    "the document receiver starts before the Agent drawer is opened");
+  assert.equal(profileReads, 0, "page registration must not start an Agent runtime");
+  assert.equal(bridgeStarts, 0, "the receiver starts lazily on drawer open");
+  await controller.connect();
+  assert.equal(bridgeStarts, 1);
   assert.equal(bridgeOptions.profileID, "self");
   assert.equal(bridgeOptions.assistance, controller);
   assert.equal(typeof attached.resolveProfile, "function");

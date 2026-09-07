@@ -247,9 +247,11 @@
     });
   }
 
+  // Browser page visibility uses the signed-in UI session. This is not the
+  // server Agent runtime credential; CLI requests retain Profile capabilities.
   function reportContext(routeToken = routeLifetimes.current() ?? activeRouteToken) {
     return {
-      state, api, t, content, toolbar, button,
+      state, api, t, content, toolbar, button, session: state.session,
       ...currentTabContext(),
       tabID: state.activeTabID, tabSession,
       ...routePresentation(routeToken),

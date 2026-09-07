@@ -57,7 +57,7 @@ assert.equal(analysis.properties.factor_ref.minLength, undefined);
 for (const kind of ["ic", "backtest"]) {
   const draftSchema = window.FTTestPageAssistance.schemaFor({...state, kind});
   const fields = draftSchema.properties.configuration.properties.analyses.properties[kind].properties;
-  assert.equal(fields[kind === "ic" ? "configuration_groups" : "groups"].minItems, 0);
+  assert.equal(fields[kind === "ic" ? "configuration_groups" : "groups"].minItems, 1);
 }
 
 const navigation = window.FTTestPageAssistance.navigationFor(state);

@@ -49,7 +49,7 @@
     context.activeNav("research");
     content.innerHTML = '<div class="empty"><p></p></div>';
     content.querySelector("p").textContent = t("正在读取研究报告…");
-    const value = await source.load();
+    let value = await source.load();
     if (!isCurrent()) return;
     state.report = value;
     state.activePublicationID = publicationID;
@@ -147,7 +147,22 @@
             page: {
               id: "page", kind: "report", label: value.title || "研究报告",
               summary: "研究报告正文通过研究工作流修改",
-              children: ["field:selected_chapter"],
+              children: ["field:selected_chapter", "workflow:report-cli"],
+            },
+            "workflow:report-cli": {
+              id: "workflow:report-cli", kind: "field", label: "报告 CLI 编辑与测试绑定",
+              summary: "先读取 CLI --help，再按当前报告范围添加章节、小节或绑定测试；不要通过页面文档替换正文。",
+              value: {
+                scope: {publication_id: publicationID, research_id: researchID,
+                  profile_ref: boundProfileID, work_package_id: value.work_package_id || value.generation?.work_package_id || "",
+                  branch_id: value.branch_id || value.generation?.branch_id || ""},
+                help: ["factortester research reports --help",
+                  "factortester research reports show --help",
+                  "factortester research reports add --help",
+                  "factortester research run submit --help",
+                  "factortester research job watch-report --help"],
+                rule: "先 show 检查报告树及作用域。缺少身份时先用 CLI 查询，不能猜测 ID。章节/小节使用 add；测试绑定和结果收集遵循 submit/watch-report 帮助与既有研究工作流。",
+              }, children: [],
             },
             "field:selected_chapter": {
               id: "field:selected_chapter", kind: "field", label: "当前章节",
@@ -183,7 +198,8 @@
     const rail = document.createElement("nav"); rail.className = "chapter-rail";
     const mount = document.createElement("div"); mount.className = "report-mount";
     layout.append(mount); content.replaceChildren(infoLine, layout, rail);
-    FTReportRenderer.render(value, mount, {
+    let refreshScrollY = null;
+    const renderContent = () => FTReportRenderer.render(value, mount, {
       chapterRail: rail,
       loadChapter: source.chapterLazy ? source.loadChapter : null,
       loadComponent: source.loadComponent,
@@ -213,7 +229,7 @@
           resourceID,
         ),
       captureScrollPosition: context.captureScrollPosition,
-      restoreScrollY,
+      restoreScrollY: refreshScrollY ?? restoreScrollY,
       selectedChapterID: reading.selectedChapterID || "",
       setSelectedChapter: chapterID => { reading.selectedChapterID = chapterID; },
       disclosureState: reading.disclosures,
@@ -221,6 +237,10 @@
         reading.disclosures[componentID] = Boolean(open);
       },
       onInitialChapterReady: () => {
+        if (refreshScrollY !== null) {
+          if (isCurrent()) window.scrollTo({top: refreshScrollY, behavior: "auto"});
+          return;
+        }
         if (restoreScrollY != null || !isCurrent()) return;
         requestAnimationFrame(() => {
           if (isCurrent()) window.scrollTo({top: document.body.scrollHeight, behavior: "auto"});
@@ -229,6 +249,22 @@
       suppressAutoScroll: true,
       t,
     });
+    renderContent();
+    const stopWatching = source.watch({
+      isCurrent,
+      onChange: next => {
+        if (!isCurrent()) return;
+        refreshScrollY = window.scrollY;
+        mount.__ftLazyCleanup?.();
+        value = next;
+        state.report = next;
+        context.setHeading(next.title, t("研究报告"));
+        context.updateActiveTab({title: next.title});
+        reportTitle.textContent = next.title || t("研究报告");
+        renderContent();
+      },
+    });
+    context.pageState?.register?.("research-report-updates", {dispose: stopWatching});
     session.publicationID = publicationID;
     requestAnimationFrame(() => {
       if (!isCurrent()) return;

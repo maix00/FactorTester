@@ -41,7 +41,7 @@
       "x-forbidden-properties": FTTestConfigurationCompiler.derivedSettingsKeys(),
       properties: {
         groups: {
-          type: "array", minItems: 0,
+          type: "array", minItems: 1,
           items: structuredClone(itemSchema),
         },
       },
@@ -52,9 +52,8 @@
       properties: {
         configuration_groups: {
           type: "array",
-          // Assistance edits authoring drafts, including a freshly opened
-          // empty page. Run submission enforces the execution minimum.
-          minItems: 0,
+          // A writable IC draft always includes a configuration group.
+          minItems: 1,
           maxItems: Number(itemContract.max_items) || undefined,
           items: structuredClone(itemSchema),
         },
@@ -352,6 +351,12 @@
           throw new Error("测试配置文档与当前测试类型不兼容");
         }
         const analysis = document.configuration.analyses[state.kind];
+        if (state.kind === "backtest" && !analysis.groups?.length) {
+          throw new Error("回测草稿至少需要一个策略组");
+        }
+        if (state.kind === "ic" && !analysis.configuration_groups?.length) {
+          throw new Error("IC 草稿至少需要一个配置组");
+        }
         for (const key of FTTestConfigurationCompiler.derivedSettingsKeys()) {
           if (Object.prototype.hasOwnProperty.call(analysis, key)) {
             throw new Error(

@@ -103,6 +103,7 @@ class PageAssistanceStore:
         self._condition = Condition(self._lock)
         self._contexts: dict[tuple[str, str, str], dict] = {}
         self._applications: dict[tuple[str, str, str], list[dict]] = {}
+        self._workspaces: dict[tuple[str, str], dict] = {}
         self._sequence = 0
         self._results: dict[int, dict] = {}
 
@@ -113,9 +114,44 @@ class PageAssistanceStore:
             for key, value in self._contexts.items()
             if float(value.get("updated_at") or 0) < threshold
         ]
+        for key in list(self._workspaces):
+            if self._workspaces[key].get("updated_at", 0) < threshold:
+                self._workspaces.pop(key, None)
         for key in stale:
             self._contexts.pop(key, None)
             self._applications.pop(key, None)
+
+    def publish_workspace(self, principal: str, profile_id: str, workspace: dict) -> None:
+        tabs = workspace.get("tabs") or []
+        if len(tabs) > 1000:
+            raise ValueError("too many workspace tabs")
+        tab_ids = {str(tab["tab_id"]) for tab in tabs}
+        with self._condition:
+            for key in list(self._contexts):
+                if key[:2] == (principal, profile_id) and key[2] not in tab_ids:
+                    self._contexts.pop(key, None)
+                    self._applications.pop(key, None)
+            for tab in tabs:
+                if isinstance(tab.get("assistance"), dict):
+                    self.publish(principal, profile_id, {
+                        "tab_id": tab["tab_id"], "assistance": tab["assistance"],
+                        "activate": tab["tab_id"] == workspace.get("active_tab_id"),
+                    })
+            previous = self._workspaces.get((principal, profile_id), {})
+            self._workspaces[(principal, profile_id)] = {
+                "updated_at": time.time() if any("assistance" in tab for tab in tabs)
+                              else previous.get("updated_at", time.time()),
+                "active_tab_id": workspace.get("active_tab_id") if workspace.get("active_tab_id") in tab_ids else None,
+                "tabs": [{**{key: tab.get(key) for key in (
+                    "tab_id", "title", "path", "kind", "research_id", "parent_tab_id")},
+                    "writable": (bool(tab.get("assistance")) and not (tab["assistance"].get("document_schema") or {}).get("readOnly")) if "assistance" in tab else bool(tab.get("writable"))}
+                    for tab in tabs],
+            }
+
+    def workspace(self, principal: str, profile_id: str) -> dict:
+        with self._condition:
+            self._prune()
+            return deepcopy(self._workspaces.get((principal, profile_id), {}))
 
     def publish(self, principal: str, profile_id: str, value: dict) -> dict:
         tab_id = str(value.get("tab_id") or "").strip()
@@ -143,6 +179,10 @@ class PageAssistanceStore:
     def current(self, principal: str, profile_id: str) -> dict | None:
         with self._condition:
             self._prune()
+            workspace = self._workspaces.get((principal, profile_id))
+            if workspace is not None:
+                active = workspace.get("active_tab_id")
+                return deepcopy(self._contexts.get((principal, profile_id, active)))
             values = [
                 value
                 for key, value in self._contexts.items()
@@ -180,8 +220,9 @@ class PageAssistanceStore:
         page_kind: str,
         schema_version: int,
         document: object,
+        tab_id: str = "",
     ) -> dict:
-        page = self.current(principal, profile_id)
+        page = self.page(principal, profile_id, tab_id) if tab_id else self.current(principal, profile_id)
         expected_kind = str(page_kind or "").strip()
         if not page:
             raise ValueError(
@@ -271,14 +312,14 @@ class PageAssistanceStore:
                 now = time.time()
                 values = [
                     item
-                    for item in self._applications.get(
-                        (principal, profile_id, tab_id), []
-                    )
+                    for key, items in self._applications.items()
+                    if key[:2] == (principal, profile_id) and (not tab_id or key[2] == tab_id)
+                    for item in items
                     if item["sequence"] > after
                     and float(item.get("expires_at") or now) >= now
                 ]
                 if values:
-                    return deepcopy(values)
+                    return deepcopy(sorted(values, key=lambda item: item["sequence"]))
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     return []
@@ -331,7 +372,16 @@ class PageAssistanceStore:
 
 _STORE = PageAssistanceStore()
 
-_PAGE_ASSISTANCE_INSTRUCTION = """An active FactorTester page has published a
+_PAGE_ASSISTANCE_INSTRUCTION = """The FactorTester workspace exposes open tabs and research folder hierarchy via
+`factortester assist inspect`. Its workspace.active_tab_id identifies the active
+page. Self may access all published pages; other Profiles only their research
+scope. Use `assist inspect --tab-id ID` and `assist drafts create --from-current
+--tab-id ID` for a specific page. Drafts remain bound to that target even if the
+user switches tabs. Background applications remain queued until the target page
+loads and validates them; do not claim completion before an applied receipt.
+Each page declares its own schema; pages without an assistance document are
+read-only. Do not infer a writable schema from another page.
+An active FactorTester page has published a
 structured assistance document. First run `factortester assist inspect`; it
 lists only the page's registered tabs (including mounted and unmounted tabs).
 Read only the page-registered semantic node needed for this request with
@@ -379,7 +429,7 @@ def page_assistance_turn_params(
 ) -> dict:
     """Inject the built-in page protocol without requiring an optional Skill."""
     assistance_store = store or _STORE
-    if assistance_store.current(principal, profile_id) is None:
+    if assistance_store.current(principal, profile_id) is None and not assistance_store.workspace(principal, profile_id):
         return dict(params)
     result = deepcopy(params)
     inputs = result.get("input")
@@ -396,6 +446,30 @@ def page_assistance_turn_params(
 
 
 class PageAssistanceRoutesMixin:
+    def _assistance_is_self(self, principal: str, profile_id: str) -> bool:
+        profile = self._profile(principal, profile_id) or {}
+        return profile_id == "self" or profile.get("is_self_profile") is True or profile.get("profile_kind") == "self"
+
+    def _assistance_visible_workspace(self, principal: str, profile_id: str, workspace: dict) -> dict:
+        if self._assistance_is_self(principal, profile_id):
+            return workspace
+        visible = []
+        allowed = {}
+        for tab in workspace.get("tabs") or []:
+            research_id = str(tab.get("research_id") or "")
+            if research_id and research_id not in allowed:
+                try:
+                    members = self._research_catalog_service().list_members(research_id, viewer=principal)
+                    allowed[research_id] = any(
+                        str(member.get("profile_ref") or "").removeprefix("profile:") == profile_id
+                        for member in members
+                    )
+                except (KeyError, PermissionError):
+                    allowed[research_id] = False
+            if allowed.get(research_id):
+                visible.append(tab)
+        return {**workspace, "tabs": visible}
+
     def _get_page_assistance_routes(self, parsed) -> bool:
         if parsed.path not in {
             "/api/client/profile-agent/assistance",
@@ -408,6 +482,10 @@ class PageAssistanceRoutesMixin:
             principal, profile_id = self._agent_app_profile(
                 query.get("profile_id", [""])[0]
             )
+            workspace = _STORE.workspace(principal, profile_id)
+            if workspace:
+                _STORE.publish_workspace(principal, profile_id,
+                    self._assistance_visible_workspace(principal, profile_id, workspace))
             if parsed.path.endswith("/drafts"):
                 store = self._agent_service().assistance_drafts(principal, profile_id)
                 draft_id = query.get("draft_id", [""])[0]
@@ -428,7 +506,10 @@ class PageAssistanceRoutesMixin:
                     {
                         "success": True,
                         "profile_id": profile_id,
-                        "page": _STORE.current(principal, profile_id),
+                        "page": (_STORE.page(principal, profile_id, query["tab_id"][0])
+                                 if query.get("tab_id", [""])[0]
+                                 else _STORE.current(principal, profile_id)),
+                        "workspace": _STORE.workspace(principal, profile_id),
                     },
                 )
         except (AssistanceDraftError, TypeError, ValueError) as exc:
@@ -450,8 +531,13 @@ class PageAssistanceRoutesMixin:
             principal, profile_id = self._agent_app_profile(
                 str(payload.get("profile_id") or "")
             )
+            workspace = _STORE.workspace(principal, profile_id)
+            if workspace:
+                _STORE.publish_workspace(principal, profile_id,
+                    self._assistance_visible_workspace(principal, profile_id, workspace))
             if parsed.path.endswith("/drafts"):
-                page = _STORE.current(principal, profile_id)
+                page = (_STORE.page(principal, profile_id, str(payload["tab_id"]))
+                        if payload.get("tab_id") else _STORE.current(principal, profile_id))
                 if not page:
                     raise ValueError("no assisted page is currently open")
                 assistance = page["assistance"]
@@ -492,7 +578,17 @@ class PageAssistanceRoutesMixin:
                 )
                 json_response(self, {"success": True, "draft": item})
             elif parsed.path.endswith("/publish"):
-                item = _STORE.publish(principal, profile_id, payload)
+                workspace = payload.get("workspace")
+                if isinstance(workspace, dict):
+                    workspace = self._assistance_visible_workspace(principal, profile_id, workspace)
+                    _STORE.publish_workspace(principal, profile_id, workspace)
+                    item = _STORE.page(principal, profile_id, str(payload.get("tab_id") or ""))
+                else:
+                    # Legacy page-only publication is restricted to self. Research
+                    # scopes require explicit hierarchy to authorize the target.
+                    if not self._assistance_is_self(principal, profile_id):
+                        raise ValueError("research assistance requires workspace scope")
+                    item = _STORE.publish(principal, profile_id, payload)
                 json_response(self, {"success": True, "page": item})
             elif parsed.path.endswith("/validate"):
                 draft_id = str(payload.get("draft_id") or "")
@@ -518,6 +614,7 @@ class PageAssistanceRoutesMixin:
                             draft.get("document_schema_version") or 0
                         ),
                         document=draft.get("document"),
+                        tab_id=str(draft.get("source_tab_id") or ""),
                     )
                 except ValueError as exc:
                     drafts.set_status(draft_id, "rejected", error=str(exc))
@@ -568,6 +665,7 @@ class PageAssistanceRoutesMixin:
                             draft.get("document_schema_version") or 0
                         ),
                         document=draft.get("document"),
+                        tab_id=str(draft.get("source_tab_id") or ""),
                     )
                     item = _STORE.enqueue(
                         principal,

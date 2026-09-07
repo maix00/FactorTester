@@ -145,3 +145,12 @@ assert.equal(registrationCount, 2,
   "a newly restored PageState receives a fresh assistance lifecycle");
 assert.notEqual(nextController, firstController);
 console.log("PASS: assisted backtest documents preserve required strategy groups");
+
+const icState = {...state, kind: 'ic', pageAssistanceRegistration: null};
+FTTestPageAssistance.register({...context, pageState: {}}, icState, () => {});
+assert.equal(registration.schema().properties.configuration.properties.analyses
+  .properties.ic.properties.configuration_groups.minItems, 1);
+assert.throws(() => registration.validate({document_kind: 'research_configuration',
+  configuration: {schema_version: 3, analyses: {ic: {configuration_groups: []}}},
+}), /至少需要一个配置组/);
+console.log('PASS: assisted IC documents require a configuration group');

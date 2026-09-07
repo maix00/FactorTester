@@ -184,11 +184,11 @@ class AgentProfileClientMixin(ClientMixinBase):
             )
         )
 
-    def inspect_profile_agent_assistance(self, profile_id: str) -> dict[str, Any]:
+    def inspect_profile_agent_assistance(self, profile_id: str, *, tab_id: str = "") -> dict[str, Any]:
         return self._expect_success(
             self.session.get(
                 "/api/client/profile-agent/assistance",
-                query={"profile_id": profile_id},
+                query={"profile_id": profile_id, **({"tab_id": tab_id} if tab_id else {})},
             )
         )
 
@@ -226,6 +226,7 @@ class AgentProfileClientMixin(ClientMixinBase):
         document: dict[str, Any] | None = None,
         *,
         from_current: bool = False,
+        tab_id: str = "",
     ) -> dict[str, Any]:
         return self._expect_success(
             self.session.post(
@@ -234,6 +235,7 @@ class AgentProfileClientMixin(ClientMixinBase):
                     "profile_id": profile_id,
                     "document": document,
                     "from_current": from_current,
+                    **({"tab_id": tab_id} if tab_id else {}),
                 },
             )
         )

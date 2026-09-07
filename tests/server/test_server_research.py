@@ -50,6 +50,9 @@ def test_server_agent_report_is_listed_and_read_from_canonical_workspace(tmp_pat
     assert row["is_shared"] is False
 
     index = service.index(PRINCIPAL, row["server_ref"])
+    assert index["profile_id"] == profile_id
+    assert index["work_package_id"] == "report-one"
+    assert index["branch_id"] == "main"
     assert index["title"] == "服务器 Agent 报告"
     assert index["access"]["build_source"] == "server_agent"
     assert index["access"]["sharing_state"] == "not_shared"

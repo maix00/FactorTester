@@ -163,6 +163,7 @@ def assist(context: click.Context, profile_id: str) -> None:
 
 
 @assist.command("inspect")
+@click.option("--tab-id", default="", help="Inspect a specific accessible open tab.")
 @click.option(
     "--node",
     default="",
@@ -176,12 +177,14 @@ def assist(context: click.Context, profile_id: str) -> None:
 )
 @click.pass_obj
 @friendly_errors
-def inspect(profile_id: str, node: str, include_value: bool) -> None:
+def inspect(profile_id: str, node: str, include_value: bool, tab_id: str = "") -> None:
     profile_id = _profile_id(profile_id)
-    value = client_from_config().inspect_profile_agent_assistance(profile_id)
+    value = client_from_config().inspect_profile_agent_assistance(profile_id, **({"tab_id": tab_id} if tab_id else {}))
     page = value.get("page")
     if not node:
-        result = _inspect_summary(page)
+        result = _inspect_summary(page) or {}
+        if value.get("workspace"):
+            result["workspace"] = value["workspace"]
     else:
         _, nodes = _navigation(page)
         result = _node_view(nodes, node, include_value=include_value)
@@ -196,6 +199,7 @@ def drafts() -> None:
 @drafts.command("create")
 @_input_options
 @click.option("--from-current", is_flag=True)
+@click.option("--tab-id", default="", help="Target an accessible open tab, including a background tab.")
 @click.pass_obj
 @friendly_errors
 def create_draft(
@@ -203,6 +207,7 @@ def create_draft(
     file: Path | None,
     use_stdin: bool,
     from_current: bool,
+    tab_id: str = "",
 ) -> None:
     if sum((bool(file), use_stdin, from_current)) != 1:
         raise click.ClickException(
@@ -212,6 +217,7 @@ def create_draft(
         _profile_id(profile_id),
         None if from_current else _document(file, use_stdin),
         from_current=from_current,
+        **({"tab_id": tab_id} if tab_id else {}),
     )
     click.echo(json.dumps(_draft_receipt(value.get("draft")), ensure_ascii=False, indent=2))
 
