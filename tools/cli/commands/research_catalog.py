@@ -227,6 +227,7 @@ def register_research_catalog_commands(research: click.Group) -> None:
         show_default=True,
     )
     @click.option("--authorized-user", multiple=True, help="授权用户，可重复。")
+    @click.option("--report-id", default="", help="恢复同一研究中已创建的报告，不再新建目录记录。")
     @friendly_errors
     def create_report(
         research_id: str,
@@ -234,17 +235,39 @@ def register_research_catalog_commands(research: click.Group) -> None:
         profile_ref: str,
         visibility: str,
         authorized_user: tuple[str, ...],
+        report_id: str,
     ) -> None:
         """在 Research 中新建一个由 Profile 撰写的报告空间。"""
-        click.echo(_json(client_from_config().create_research_report(
-            research_id,
-            {
-                "title": title,
-                "profile_ref": profile_ref,
-                "visibility": visibility,
-                "authorized_users": list(authorized_user),
-            },
-        )))
+        from tools.cli.release.local_profile import LocalProfileStore
+        from tools.cli.release.research_reporting.report_space import initialize_report_space
+
+        client = client_from_config()
+        store = LocalProfileStore(default_client_root())
+        # Validate local Profile before creating a remote catalog record.
+        store.load(profile_ref)
+        if report_id:
+            report = next((item for item in client.research_manifest(research_id).get("reports", [])
+                           if item.get("report_id") == report_id), None)
+            if report is None:
+                raise click.ClickException("当前研究中找不到指定报告")
+        else:
+            report = client.create_research_report(research_id, {
+                "title": title, "profile_ref": profile_ref,
+                "visibility": visibility, "authorized_users": list(authorized_user),
+            })
+        initialized = initialize_report_space(store, profile_ref, report)
+        # The existing server report reader sees the Profile-owned tree; client
+        # reports continue to use the existing explicit publication workflow.
+        import os
+        if os.environ.get("FACTORTESTER_AGENT_CAPABILITY_FILE"):
+            client.register_research_report(research_id, {
+                "report_id": report["report_id"], "title": report["title"],
+                "profile_ref": profile_ref, "workspace_id": report["workspace_id"],
+                "build_source": "server_agent", "source_ref": initialized["source_ref"],
+                "visibility": report["visibility"], "authorized_users": report.get("authorized_users", []),
+            })
+        click.echo(_json(initialized))
+
 
     @research.command("report-update")
     @click.argument("research_id")

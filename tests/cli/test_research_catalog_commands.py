@@ -16,7 +16,8 @@ class FakeResearchClient:
 
     def create_research_report(self, research_id, payload):
         self.created = (research_id, payload)
-        return {"report_id": "report:v1:new", **payload}
+        return {"report_id": "report:v1:new", "research_id": research_id,
+                "workspace_id": "workspace-one", "owner_ref": "alice", **payload}
 
     def remove_research_report(self, research_id, report_id):
         self.removed_report = (research_id, report_id)
@@ -31,7 +32,13 @@ class FakeResearchClient:
         return {"research_id": research_id, "status": "archived"}
 
 
-def test_research_cli_exposes_report_spaces_without_link_command(monkeypatch):
+def test_research_cli_exposes_report_spaces_without_link_command(monkeypatch, tmp_path):
+    from tools.cli.release.local_profile import LocalProfileStore
+    from tools.cli.release.local_profile_contracts import new_local_profile
+    monkeypatch.setenv("FACTORTESTER_CLIENT_ROOT", str(tmp_path / "client"))
+    LocalProfileStore(tmp_path / "client").save(new_local_profile(
+        profile_id="self", display_name="self", workspace_root=tmp_path / "workspace", principal_ref="alice",
+    ))
     fake = FakeResearchClient()
     monkeypatch.setattr(
         "tools.cli.commands.research_catalog.client_from_config", lambda: fake,
@@ -69,3 +76,34 @@ def test_research_cli_exposes_report_spaces_without_link_command(monkeypatch):
     assert fake.removed_profile == ("research:v1:one", "self")
     assert research_removed.exit_code == 0, research_removed.output
     assert fake.removed_research == "research:v1:one"
+
+
+def test_report_space_is_editable_without_factor_worktree_and_retry_preserves_tree(tmp_path):
+    from tools.cli.release.local_profile import LocalProfileStore
+    from tools.cli.release.local_profile_contracts import new_local_profile
+    from tools.cli.release.research_reporting.report_space import initialize_report_space
+    from tools.cli.commands.research_report_scope_identity import resolve_branch_report_scope
+    from tools.cli.release.research_reporting.authoring.tree_model import add_component, load_snapshot
+    store = LocalProfileStore(tmp_path / "client")
+    store.save(new_local_profile(profile_id="self", display_name="self", workspace_root=tmp_path / "workspace", principal_ref="alice"))
+    report = {"report_id": "report:v1:test", "owner_ref": "alice", "profile_ref": "self",
+              "research_id": "research:v1:test", "workspace_id": "workspace-one", "title": "验收报告"}
+    initialized = initialize_report_space(store, "self", report)
+    scope = resolve_branch_report_scope(client_root=tmp_path / "client", profile_id="self",
+                                       work_package_id=initialized["work_package_id"], branch_id=initialized["branch_id"])
+    add_component(package_root=scope.package_root, branch_id=scope.branch_id,
+                  component_id="chapter-one", kind="chapter", title="验收", parent_id=None,
+                  body="", content=None, display_kind="")
+    before = load_snapshot(package_root=scope.package_root, branch_id=scope.branch_id)
+    assert initialize_report_space(store, "self", report) == initialized
+    after = load_snapshot(package_root=scope.package_root, branch_id=scope.branch_id)
+    assert after["head"] == before["head"]
+    assert len(store.load("self")["research_records"]) == 1
+
+
+def test_report_identity_rejects_path_traversal(tmp_path):
+    import pytest
+    from tools.cli.release.research_reporting.work_package_identity import ensure_work_package_identity
+    for report_id in ("report:v1:../escape", "report:v1:/absolute", "report:v1:"):
+        with pytest.raises(ValueError):
+            ensure_work_package_identity(tmp_path / "report", work_package_id="safe", report_id=report_id)
