@@ -43,7 +43,6 @@ from server.jobs.states import JobStatus
 from server.modules.single_factor_test import sft_bp
 from server.services import (
     external_factor_artifacts,
-    factor_revisions,
     factor_subject_descriptors,
     research_configuration_snapshots,
     research_configurations,
@@ -63,7 +62,6 @@ from server.services.federated_factor_sources import (
 from server.services.federated_factor_sources import (
     source_transfer_manifest as federated_source_transfer_manifest,
 )
-from server.services.frozen_product_scope import freeze_product_scope
 from server.services.research_graph.trial_plan.sample_identity import (
     derive_sample_identity,
 )
@@ -367,17 +365,12 @@ def _prepare_local_research_run_request(
             owner=owner,
             overrides=source_overrides,
         ):
-            frozen_configuration = freeze_product_scope(
-                configuration,
-                owner=owner,
-                analyses=analyses,
+            from server.modules.shared.run_spec_resolution.freezing import (
+                freeze_run_spec_inputs,
             )
-            frozen_configuration = _freeze_external_factor_artifacts(
-                frozen_configuration
-            )
-            frozen_configuration = factor_revisions.freeze_factor_revisions(
-                frozen_configuration,
-                owner=owner,
+
+            frozen_configuration = freeze_run_spec_inputs(
+                configuration, owner=owner, analyses=analyses,
             )
     except ValueError as exc:
         raise _RunRequestError(str(exc)) from exc
@@ -782,15 +775,6 @@ def _execution_plans_or_error(prepared: dict, *, owner: str):
             "code": "data_capability_preflight_unavailable",
             "details": str(exc),
         }), 503)
-
-
-def _freeze_external_factor_artifacts(configuration: dict) -> dict:
-    frozen = deepcopy(configuration)
-    shared = frozen["payload"]["shared"]
-    artifacts = external_factor_artifacts.freeze_configured_artifacts(shared)
-    if artifacts:
-        shared["external_factor_artifacts"] = artifacts
-    return frozen
 
 
 def _deployment_id() -> str:
