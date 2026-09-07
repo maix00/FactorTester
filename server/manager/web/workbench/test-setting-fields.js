@@ -68,6 +68,7 @@
       disabled,
       disabledReason: options.disabledReason,
       onOpen: options.choiceOnOpen,
+      onRefresh: options.choiceOnRefresh,
       onChange: next => commit(
         key, field, manifest, values, multi ? next : (next[0] ?? ""), options,
       ),

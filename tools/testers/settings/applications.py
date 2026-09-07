@@ -37,7 +37,9 @@ CATEGORY_CANDIDATE_KEYS = ("category_candidates",)
 MARKET_DATA_SELECTION_KEYS = ("data_source", "frequency")
 
 
-def register_run_fields(app: ApplicationSettings, *, backtest: bool) -> None:
+def register_run_fields(
+    app: ApplicationSettings, *, backtest: bool, output_picker: bool = True,
+) -> None:
     """Register per-run controls separately from reusable configuration fields."""
     app.register_manifest_extension(
         "run_settings",
@@ -121,11 +123,12 @@ def register_run_fields(app: ApplicationSettings, *, backtest: bool) -> None:
             "run_spec.step_mode", "run_options", order=30,
             help_text="逐个 flow 暂停并输出审计字段；仅支持单个回测分析",
         ))
-    app.register_run_field(RunFieldDefinition(
-        "output_requests", "结果与生成物", "artifact_output_picker", [], "body",
-        "run_spec.output_requests", "outputs", template_policy="include", order=40,
-        help_text="提交前选择的输出会冻结进 RunSpec，也可在任务完成后继续生成",
-    ))
+    if output_picker:
+        app.register_run_field(RunFieldDefinition(
+            "output_requests", "结果与生成物", "artifact_output_picker", [], "body",
+            "run_spec.output_requests", "outputs", template_policy="include", order=40,
+            help_text="提交前选择的输出会冻结进 RunSpec，也可在任务完成后继续生成",
+        ))
     if not backtest:
         return
     app.register_run_field(RunFieldDefinition(
@@ -492,7 +495,7 @@ def factor_type_analysis_settings() -> ApplicationSettings:
     app = ApplicationSettings("factor_type_analysis")
     from tools.testers.factor_type_analysis.settings import register_factor_type_analysis_settings
     register_factor_type_analysis_settings(app)
-    register_run_fields(app, backtest=False)
+    register_run_fields(app, backtest=False, output_picker=False)
     app.set_default_mounted_tabs(
         TabMountPoint.LOCAL_SETTINGS,
         ("product_path_selection", "time", "factor", "method"),

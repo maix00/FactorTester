@@ -732,9 +732,9 @@
   window.FTTests = {
     applyBacktestDerivedPrefill,
     applyPendingSelection,
-    ensureOutputCapabilities: async (context, state, refresh) => {
+    ensureOutputCapabilities: async (context, state, refresh, options = {}) => {
       await FTTestLazyCode.loadGroup("output-choice");
-      return ensureLazyKey(context, state, "outputs", refresh);
+      return ensureLazyKey(context, state, "outputs", refresh, options);
     },
     ensureProfiles: (context, state, refresh) => ensureLazyKey(context, state, "profiles", refresh),
     ensureFactorsForExecution, ensureProductsForExecution,

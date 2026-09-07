@@ -64,6 +64,10 @@ def test_output_capabilities_and_aliases_are_declared() -> None:
     ]
     assert normalize_output_requests(["holding_half_life"]) == ["ic_holding_half_life"]
     capabilities = {item["name"]: item for item in output_capabilities()}
+    assert capabilities["factor_series"]["before_run"] is True
+    assert set(capabilities["factor_series"]["analyses"]) == {
+        "factor_evaluation", "ic", "backtest",
+    }
     assert capabilities["ic_holding_half_life"]["formats"] == ["svg", "json"]
     assert "ic_holding_half_life_data" in capabilities["ic_holding_half_life"]["artifacts"]
     assert "ic_statistics_summary_data" in capabilities["ic_statistics"]["artifacts"]
@@ -101,6 +105,32 @@ def test_output_capabilities_and_aliases_are_declared() -> None:
     assert declarations[0]["supplemental_bundle"] == "time_series"
     assert "equity_curve_data_receipt" not in declarations[0]["artifacts"]
     assert "fee_detail_data" in declarations[1]["artifacts"]
+
+
+def test_every_test_page_output_picker_has_compatible_candidates() -> None:
+    from tools.testers.settings.applications import backtest_setting_registry
+
+    analysis_by_application = {
+        "group_test": "backtest",
+        "ic_test": "ic",
+        "factor_evaluation": "factor_evaluation",
+        "factor_type_analysis": "factor_type_analysis",
+    }
+    capabilities = output_capabilities()
+    for application, analysis in analysis_by_application.items():
+        manifest = backtest_setting_registry.get(application).manifest()
+        has_picker = any(
+            field["key"] == "output_requests"
+            for field in manifest["run_fields"]
+        )
+        candidates = [
+            item for item in capabilities
+            if item.get("before_run") is True
+            and analysis in (item.get("analyses") or [])
+        ]
+        assert has_picker == bool(candidates), (application, candidates)
+        for item in candidates:
+            assert validate_output_requests([item["name"]], [analysis]) == [item["name"]]
 
 
 def test_registered_backtest_result_tabs_have_one_canonical_builder_path() -> None:

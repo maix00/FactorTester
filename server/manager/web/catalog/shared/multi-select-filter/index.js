@@ -1011,6 +1011,12 @@
           try { activeMultiSelect(); } catch (_error) { /* already closed */ }
         }
         activeMultiSelect = holdOpen;
+        // Lazy catalog owners attach their loader here. Keep opening fast,
+        // then let their refresh callback rebuild the host with loaded items.
+        try {
+          const opened = options.onOpen?.(context);
+          if (opened && typeof opened.catch === "function") opened.catch(() => {});
+        } catch (_error) { /* the owner renders its own load error state */ }
         // One viewport-relative positioning path for every host. Popover
         // supplies the top layer; the portal is the older-browser fallback.
         if (canPortalMenu()) {
