@@ -175,6 +175,7 @@ class FactorEvaluation:
             end_dt=end_dt,
             data_source=str((self.settings or {}).get("data_source") or ""),
             warmup_window=warmup.evaluation_window(),
+            allow_all_warmup_fallback=warmup.mode == "auto",
         )
 
         runtime_rows = apply_factor_data_coverage(tester, coverage)

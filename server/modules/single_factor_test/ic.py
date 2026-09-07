@@ -972,6 +972,7 @@ def execute_ic_run_spec(data: dict[str, Any], *, sink: Any, cancel_event: Any) -
             end_dt=end_dt,
             data_source=str(data.get("data_source") or ""),
             warmup_window=warmup.evaluation_window(),
+            allow_all_warmup_fallback=warmup.mode == "auto",
         )
         if coverage:
             runtime_rows.extend(apply_factor_data_coverage(tester, coverage))
