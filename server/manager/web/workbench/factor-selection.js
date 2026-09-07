@@ -137,6 +137,10 @@
   function syncSelection(state) {
     const rows = candidates(state);
     if (state.factorRef && rows.some(item => factorID(item) === state.factorRef)) return;
+    // Direct links provide the stable reference before the lazy catalog has
+    // loaded. Keep that pending identity so restoreFrozenSelections can
+    // resolve and mount it when the catalog request completes.
+    if (state.factorRef && state.lazy?.factors?.status !== "ready") return;
     if (state.kind === "ic") {
       state.factorRef = factorID((state.values.factor_selections || [])[0] || {}) || "";
     } else {

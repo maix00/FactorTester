@@ -262,6 +262,31 @@ def _frozen_factor(alias: str) -> dict:
     )
 
 
+@pytest.mark.parametrize("route", ["/api/runs/preview", "/api/runs"])
+def test_mounted_time_tab_rejects_blank_window_before_run_creation(
+    client, route,
+) -> None:
+    workspace = _create_workspace(client)
+    payload = _payload(workspace)
+    payload["ui"]["ic"] = {"mounted_tabs": ["test_template", "time"]}
+    payload["analyses"]["ic"]["execution"]["settings"].update({
+        "start_date": "",
+        "end_date": "",
+    })
+    _update(client, workspace, payload)
+
+    response = client.post(route, json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic"],
+    })
+
+    assert response.status_code == 422
+    assert response.get_json()["code"] == "invalid_run_window"
+    assert "start_date, end_date" in response.get_json()["error"]
+    assert JobRepository().count_with_metadata(owner="alice") == 0
+
+
 def _factor_set_descriptor(*aliases: str) -> dict:
     manifest = freeze_factor_set_identity(
         owner_ref="profile:maxa",
