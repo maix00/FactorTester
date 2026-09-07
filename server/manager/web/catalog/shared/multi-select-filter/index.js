@@ -170,9 +170,11 @@
 
   function create(context, options = {}) {
     bindOutsideClose();
-    const controlDisabled = Boolean(options.loading) || (
+    const configuredDisabled = (
       typeof options.disabled === "function" ? false : Boolean(options.disabled)
     );
+    let manualLoading = Boolean(options.loading);
+    let controlDisabled = manualLoading || configuredDisabled;
     const disabledReason = String(
       options.disabledReason
       || (options.loading ? options.loadingText || translate(context, "正在读取候选…") : ""),
@@ -526,7 +528,7 @@
 
     function render() {
       const remoteStatus = remote?.status?.() || {};
-      const loading = Boolean(options.loading || remoteStatus.loading);
+      const loading = Boolean(manualLoading || remoteStatus.loading);
       const errorText = manualErrorText || String(remoteStatus.errorText || "").trim();
       const statusText = manualStatusText;
       const emptyText = remoteStatus.empty
@@ -538,6 +540,9 @@
       summaryText.textContent = loading
         ? (options.loadingText || translate(context, "正在读取候选…"))
         : errorText || statusText || emptyText || summaryValue || translate(context, "未筛选");
+      summary.classList.toggle?.("is-disabled", controlDisabled);
+      if (controlDisabled) summary.setAttribute("aria-disabled", "true");
+      else summary.removeAttribute?.("aria-disabled");
       summary.classList.toggle?.("is-loading", loading);
       summary.classList.toggle?.("is-error", Boolean(errorText));
       selectedLabel.textContent = labels.length ? labels.join("、")
@@ -1046,6 +1051,10 @@
       },
       setItems,
       setStatus(next = {}) {
+        if (Object.prototype.hasOwnProperty.call(next, "loading")) {
+          manualLoading = Boolean(next.loading);
+          controlDisabled = manualLoading || configuredDisabled;
+        }
         manualStatusText = String(next.text || "").trim();
         manualErrorText = String(next.errorText || "").trim();
         render();

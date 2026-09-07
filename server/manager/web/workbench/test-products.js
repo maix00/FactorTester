@@ -179,27 +179,43 @@
   }
 
   function selectionPanel(context, state, refresh, options = {}) {
-    const allGroups = Array.isArray(options.groups) ? options.groups : state.groups;
-    const groups = options.constrain !== false
+    if (state.lazy?.products?.status === "idle") {
+      void window.FTTests?.ensureProductsForExecution?.(context, state, refresh);
+    }
+    const allGroups = () => {
+      const current = typeof options.groups === "function"
+        ? options.groups() : (Array.isArray(options.groups) ? options.groups : state.groups);
+      return Array.isArray(current) ? current : [];
+    };
+    const groups = () => options.constrain !== false
       && window.FTStrategyEditorScope?.constrainedCandidates
       ? FTStrategyEditorScope.constrainedCandidates(
-          state, "product_path_candidates", allGroups,
+          state, "product_path_candidates", allGroups(),
         )
-      : allGroups;
+      : allGroups();
     const selectedRefs = Array.isArray(options.selectedRefs)
       ? uniqueReferences(options.selectedRefs)
       : (state.kind === "ic" ? state.groupRefs : [state.groupRef]).filter(Boolean);
-    const catalogError = String(state.lazy?.products?.error || "").trim();
-    const unavailable = selectedRefs.filter(ref => (
-      !groups.some(group => groupID(group) === ref)
-    ));
+    const catalogStatus = () => {
+      const catalogError = String(state.lazy?.products?.error || "").trim();
+      const unavailable = selectedRefs.filter(ref => (
+        !groups().some(group => groupID(group) === ref)
+      ));
+      return {
+        errorText: catalogError
+          ? `${context.t("产品组候选读取失败")}: ${catalogError}` : "",
+        statusText: unavailable.length
+          ? `${context.t("当前不可用的产品组")}: ${unavailable.join("、")}` : "",
+      };
+    };
     let picker = null;
     const savedGroup = value => {
       const group = upsertGroup(state, value);
       if (!group) return;
-      if (allGroups !== state.groups) {
-        const index = allGroups.findIndex(item => groupID(item) === groupID(group));
-        if (index >= 0) allGroups[index] = group; else allGroups.push(group);
+      const scopedGroups = allGroups();
+      if (scopedGroups !== state.groups) {
+        const index = scopedGroups.findIndex(item => groupID(item) === groupID(group));
+        if (index >= 0) scopedGroups[index] = group; else scopedGroups.push(group);
       }
       if (typeof options.onChange === "function") {
         options.onChange([groupID(group)]);
@@ -211,7 +227,7 @@
       picker?.setValues([groupID(group)]);
       refresh?.();
     };
-    const pickerItems = () => groups.map(group => {
+    const pickerItems = () => groups().map(group => {
       const view = window.FTFactorDetailShared?.productGroupRowView?.(group)
         || {kind: "product_group", ref: groupID(group)};
       return {
@@ -226,6 +242,10 @@
         view: {...view, onSaved: savedGroup},
       };
     }).filter(item => item.value);
+    const syncCatalog = () => {
+      picker?.setStatus({loading: false, ...catalogStatus()});
+      picker?.setItems(pickerItems());
+    };
     picker = FTTestObjectPicker.create(context, {
       title: context.t("产品路径候选"),
       note: context.t(state.kind === "ic"
@@ -236,10 +256,7 @@
       multi: options.multi ?? (state.kind === "ic"),
       loading: options.loading ?? FTTestObjectPicker.lazyLoading(state, "products"),
       loadingText: context.t("正在读取产品组候选…"),
-      errorText: catalogError
-        ? `${context.t("产品组候选读取失败")}: ${catalogError}` : "",
-      statusText: unavailable.length
-        ? `${context.t("当前不可用的产品组")}: ${unavailable.join("、")}` : "",
+      ...catalogStatus(),
       compact: true,
       name: `test-product-groups-${state.kind}`,
       onCreate: context.session && options.canCreate !== false
@@ -247,6 +264,11 @@
         : null,
       createLabel: context.t("新建产品组"),
       testState: state,
+      onRefresh: async () => {
+        picker?.setStatus({loading: true, text: "", errorText: ""});
+        await window.FTTests?.refreshProductsForExecution?.(context, state, refresh);
+        syncCatalog();
+      },
       onChange: values => {
         const refs = uniqueReferences(values);
         if (typeof options.onChange === "function") {
@@ -262,6 +284,10 @@
         refresh?.();
       },
     });
+    const catalogPromise = state.lazy?.products?.promise;
+    if (catalogPromise && typeof catalogPromise.then === "function") {
+      void catalogPromise.then(syncCatalog, syncCatalog);
+    }
     const help = window.FTTestFieldHelp?.forField?.(
       state.manifest,
       state.kind === "ic"

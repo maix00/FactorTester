@@ -85,7 +85,13 @@
         if (content && typeof options.wrapContent === "function") {
           content = options.wrapContent(content, entry.item) || content;
         }
-        if (content) entry.panel.append(content);
+        if (content) {
+          entry.panel.append(content);
+          entry.panel.classList.toggle("has-field-table", Boolean(
+            content.matches?.(".test-field-table")
+            || content.querySelector?.(".test-field-table"),
+          ));
+        }
         entry.loaded = true;
       }
       if (notify) options.onActivate?.(key);

@@ -204,11 +204,18 @@
 
   function outerValues(state, kind) {
     const rule = contract(state).outer_scope_tabs?.[kind] || {};
-    const sourceFields = rule.scope_fields || rule.candidate_fields;
-    const candidates = fieldValues(state, sourceFields);
-    const selected = candidates.length
-      ? candidates : fieldValues(state, rule.selection_fields);
-    const catalog = visibleCatalog(state, kind);
+    // The outer picker may expose a full candidate catalog and a smaller
+    // selected set. Nested editors inherit the selected set. Candidate fields
+    // are only a compatibility fallback for contracts without selection fields
+    // (factor candidates historically use the same field for both roles).
+    const selectionFields = rule.selection_fields || [];
+    const sourceFields = selectionFields.length
+      ? selectionFields : (rule.scope_fields || rule.candidate_fields);
+    const selected = fieldValues(state, sourceFields);
+    const catalog = mergeByID(kind, [
+      ...visibleCatalog(state, kind),
+      ...fieldValues(state, rule.scope_fields || rule.candidate_fields),
+    ]);
     const byID = new Map(catalog.map(item => [
       String(identity(kind, item)), item,
     ]));

@@ -54,9 +54,10 @@
     let productMask = productMaskValues(
       editor.productMask !== undefined ? editor.productMask : defaults.productMask,
     );
-    const productScope = window.FTStrategyEditorScope?.scope(
+    const currentProductScope = () => window.FTStrategyEditorScope?.scope(
       state, "product_path_selection",
     ) || {items: state.groups || [], ready: true, required: false};
+    const productScope = currentProductScope();
     const factorScope = window.FTStrategyEditorScope?.scope(state, "factor")
       || {items: state.factors || [], ready: true, required: false};
     const productScopeBlocked = productScope.required && !productScope.ready;
@@ -66,8 +67,11 @@
       || (!productScopeBlocked && productScope.ready && productScope.source === "outer"
         ? FTStrategyEditorScope.itemID("product_path_selection", productScope.items[0])
         : productScopeBlocked ? "" : state.groupRef || "");
-    const productItems = productScopeBlocked ? []
-      : (Array.isArray(productScope.items) ? productScope.items : state.groups || []);
+    const currentProductItems = () => {
+      const current = currentProductScope();
+      return current.required && !current.ready ? []
+        : (Array.isArray(current.items) ? current.items : state.groups || []);
+    };
     const factorItems = factorScopeBlocked ? []
       : (factorScope.items?.length ? factorScope.items : state.factors || []);
     const innerScopeValues = {...state.values};
@@ -92,7 +96,10 @@
     innerScopeValues.factor_candidates = selectedCandidateValues();
     const renderProductPanel = () => FTTestProducts.selectionPanel(
       context, state, () => editorTabs?.refreshChips(), {
-        groups: productItems,
+        groups: () => {
+          const current = currentProductScope();
+          return current.required && !current.ready ? [] : current.items;
+        },
         selectedRefs: productGroupRef ? [productGroupRef] : [],
         multi: false,
         canCreate: !productScopeBlocked && (
@@ -332,7 +339,9 @@
         }
         const parsedOverrides = overrideEditor?.value?.() || fallbackOverrides.value();
         if (editor.mode === "base") {
-          const group = productItems.find(item => productGroupID(item) === productGroupRef);
+          const group = currentProductItems().find(
+            item => productGroupID(item) === productGroupRef,
+          );
           if (!group) throw new Error(context.t("所选产品组不受当前数据源完整支持"));
           model().addBaseBatch(state, {
             name: name.value.trim(), product_path_selection: group,
@@ -351,7 +360,9 @@
             ...cleared, ...parsedOverrides, name: name.value.trim() || current.name,
             productMask,
           };
-          const group = productItems.find(item => productGroupID(item) === productGroupRef);
+          const group = currentProductItems().find(
+            item => productGroupID(item) === productGroupRef,
+          );
           if (!group) throw new Error(context.t("所选产品组不受当前数据源完整支持"));
           Object.assign(patch, {
             product_path_selection: productProjection(group || productGroupRef),
@@ -365,7 +376,9 @@
           });
           model().updateGroup(state, current.id, patch);
         } else {
-          const selectedGroup = productItems.find(item => productGroupID(item) === productGroupRef);
+          const selectedGroup = currentProductItems().find(
+            item => productGroupID(item) === productGroupRef,
+          );
           if (productGroupRef && !selectedGroup) {
             throw new Error(context.t("所选产品组不受当前数据源完整支持"));
           }
