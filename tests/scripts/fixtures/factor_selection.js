@@ -70,6 +70,23 @@ assert.equal(backtestState.values.factor, "One",
 selection.removeCandidate(backtestState, first);
 assert.equal(backtestState.values.factor, "Two");
 
+const pendingRefState = {
+  kind: "factor_evaluation", factorRef: first.ref, factors: [],
+  lazy: {factors: {status: "idle"}},
+  values: {factor_candidates: [], factor_selections: [], factor: ""},
+};
+selection.syncSelection(pendingRefState);
+assert.equal(
+  pendingRefState.factorRef, first.ref,
+  "a direct-link factor reference survives the empty pre-catalog render",
+);
+pendingRefState.factors = [first];
+pendingRefState.lazy.factors.status = "loading";
+selection.restoreFrozenSelections(pendingRefState);
+assert.equal(pendingRefState.values.factor, first.alias);
+assert.deepEqual(selection.selectedIDs(pendingRefState), []);
+assert.equal(selection.candidates(pendingRefState)[0].ref, first.ref);
+
 // The factor editor returns a canonical v2 record after saving a parameter
 // row.  This is the exact shape that used to be lost by normalizeSaved().
 const inlineSaved = {
