@@ -118,3 +118,59 @@ def test_agent_profiles_have_distinct_writable_client_roots(tmp_path: Path) -> N
     assert first.factor_tester_client_root != second.factor_tester_client_root
     assert first.factor_tester_client_root.is_dir()
     assert second.factor_tester_client_root.is_dir()
+
+
+def test_agent_ca_bundle_verifies_local_tls_without_disabling_system_trust(tmp_path, monkeypatch):
+    import ssl
+    import subprocess
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from urllib.request import urlopen
+
+    certificate, key = tmp_path / 'server.pem', tmp_path / 'server.key'
+    subprocess.run([
+        'openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+        '-keyout', str(key), '-out', str(certificate), '-days', '1',
+        '-subj', '/CN=localhost', '-addext', 'subjectAltName=IP:127.0.0.1,DNS:localhost',
+    ], check=True, capture_output=True)
+    monkeypatch.setenv('FACTORTESTER_ARTIFACT_TLS_CERT', str(certificate))
+    runtime = AgentSkillRuntime(tmp_path / 'workspace')
+    launch = AgentAppServerLaunch(
+        runtime=runtime, provider={'secret': 'test-provider'}, codex_binary='codex',
+        factor_tester_auth={'base_url': 'http://127.0.0.1:17998', 'token': 'test-token',
+                            'profile_id': 'self', 'claim_id': 'test-claim', 'principal': 'test-owner'},
+    )
+    launch.write_factor_tester_config()
+    bundle = launch.factor_tester_ca_path.read_text()
+    assert certificate.read_text().strip() in bundle
+    assert 'PRIVATE KEY' not in bundle
+    assert launch.factor_tester_ca_path.stat().st_mode & 0o077 == 0
+    assert launch.environment()['SSL_CERT_FILE'] == '/workspace/.codex/factor-tester-ca.pem'
+    trust = ssl.create_default_context(cafile=str(launch.factor_tester_ca_path))
+    assert trust.check_hostname and trust.verify_mode == ssl.CERT_REQUIRED
+    assert set(ssl.create_default_context().get_ca_certs(binary_form=True)) <= set(trust.get_ca_certs(binary_form=True))
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header('Content-Length', '2')
+            self.end_headers()
+            self.wfile.write(b'ok')
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    server_trust = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    server_trust.load_cert_chain(certificate, key)
+    server.socket = server_trust.wrap_socket(server.socket, server_side=True)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        with urlopen(f'https://127.0.0.1:{server.server_port}/', context=trust, timeout=5) as response:
+            assert response.read() == b'ok'
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=2)
+    launch.cleanup_factor_tester_config()
+    assert not launch.factor_tester_ca_path.exists()
