@@ -39,8 +39,9 @@ def _running(server):
         thread.join(timeout=2)
 
 
+@pytest.mark.parametrize("request_body", [b"", b"{}"])
 def test_manager_issues_public_7997_capability_for_local_artifact(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, request_body,
 ) -> None:
     raw = b'<svg xmlns="http://www.w3.org/2000/svg"><title>curve</title></svg>'
     digest = hashlib.sha256(raw).hexdigest()
@@ -96,12 +97,22 @@ def test_manager_issues_public_7997_capability_for_local_artifact(
         ("127.0.0.1", 0), manager.Handler,
     )
 
+    request_bodies = []
+    original_json_body = manager.Handler._json_body
+
+    def track_request_body(handler, *args, **kwargs):
+        value = original_json_body(handler, *args, **kwargs)
+        request_bodies.append(value)
+        return value
+
+    monkeypatch.setattr(manager.Handler, "_json_body", track_request_body)
+
     with _running(data_server), _running(manager_server) as manager_endpoint:
         access_request = Request(
             manager_endpoint
             # The stale worker port must not affect retained-artifact access.
             + "/api/jobs/job-1/artifacts/result.bin/access?port=9999",
-            data=b"",
+            data=request_body,
             method="POST",
             headers={
                 "Authorization": "Bearer user-token",
@@ -111,6 +122,7 @@ def test_manager_issues_public_7997_capability_for_local_artifact(
         with urlopen(access_request) as response:
             value = json.loads(response.read())
 
+        assert request_bodies == ([{}] if request_body else [])
         assert value["access"]["url"].startswith(data_endpoint + "/")
         with pytest.raises(HTTPError) as session_rejected:
             urlopen(Request(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 import sqlite3
+import pytest
 
 from server.modules.shared import price_services
 from sources.LocalCNFutures import FeeData
@@ -54,14 +55,21 @@ def test_clean_instrument_rows_maps_openctp_fields():
     assert row["NormalizedInstrumentID"] == "IF2606"
 
 
-def test_product_trading_spec_field_prefers_local_product_value(monkeypatch):
+@pytest.mark.parametrize("field", ["multiplier", "point_value", "volume_multiple", "VolumeMultiple"])
+def test_product_trading_spec_field_prefers_local_product_value(monkeypatch, field):
     openctp_fields._online_contract_specs.cache_clear()
     openctp_fields._online_product_specs.cache_clear()
-    monkeypatch.setattr(openctp_fields, "fetch_instruments", lambda **kwargs: [_instrument_row(VolumeMultiple=999)])
+    def unexpected_lookup(*_args, **_kwargs):
+        raise AssertionError("an explicit local value must not query snapshots or network")
 
-    future = Futures("IF.CFE", point_value=300, _local_only=True)
+    monkeypatch.setattr(openctp_fields, "local_snapshot_field", unexpected_lookup)
+    monkeypatch.setattr(openctp_fields, "fetch_instruments", unexpected_lookup)
 
-    assert future.get_trading_spec_field("multiplier") == 300
+    # Use an isolated identity: IF.CFE may already be a catalog singleton,
+    # whose constructor correctly does not replace its original point value.
+    future = Futures("LOCAL_SPEC.CFE", point_value=300, _local_only=True)
+
+    assert future.get_trading_spec_field(field) == 300
 
 
 def test_product_trading_spec_field_falls_back_to_openctp_contract(monkeypatch):

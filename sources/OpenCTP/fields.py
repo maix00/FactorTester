@@ -79,9 +79,9 @@ def local_product_field(product: Any, field: str) -> Any:
     """Return a field already present on a local product object, if any."""
     key = canonical_field(field)
     attrs = {
-        "multiplier": ("point_value", "multiplier"),
-        "min_tick": ("min_tick", "price_tick"),
-        "min_trade_quantity": ("min_trade_quantity", "lot_size"),
+        "VolumeMultiple": ("point_value", "multiplier", "VolumeMultiple"),
+        "PriceTick": ("min_tick", "price_tick", "PriceTick"),
+        "MinLimitOrderVolume": ("min_trade_quantity", "lot_size", "MinLimitOrderVolume"),
     }.get(key, (key,))
     for attr in attrs:
         if hasattr(product, attr):

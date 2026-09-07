@@ -98,3 +98,51 @@ def test_ic_merge_publishes_intermediate_source_mask_for_group_use(monkeypatch):
 
     pd.testing.assert_frame_equal(stored.data_present_mask, expected)
     assert stored.data_present_all is False
+
+
+def test_ic_rank_panels_survive_real_result_merge_and_artifact_serialization():
+    from server.modules.single_factor_test.ic import _ICComputeResult, _merge_ic_result
+    from server.modules.single_factor_test.evaluation import factor_series_from_tester
+
+    class _Factor:
+        alias = "CAPTURED_RANK"
+        freq = DataFreq.MIN1
+
+        def evaluate(self, *_args, **_kwargs):
+            raise AssertionError("artifact serialization must reuse computed panels")
+
+    factor = _Factor()
+    product = _product("CAPTURED_RANK_PRODUCT")
+    index = pd.date_range("2026-05-25 09:00", periods=2, freq="min")
+    stored = FactorRunResult()
+    factor_rank = pd.DataFrame({product: [1.0, 1.0]}, index=index)
+    return_rank = pd.DataFrame({product: [1.0, 1.0]}, index=index)
+    stats = pd.Series({"mean": 0.1}, dtype=float)
+    stats.attrs.update(factor_cs_rank=factor_rank, return_cs_rank=return_rank)
+
+    class _Tester:
+        start_date = end_date = None
+        products = [product]
+        results = {factor: stored}
+
+        def _get_result(self, requested):
+            assert requested is factor
+            return stored
+
+    tester = _Tester()
+    _merge_ic_result(
+        _ICComputeResult(), ("horizon", 0, "rank", factor.alias),
+        ([factor], pd.Series([0.1, 0.2], index=index), stats,
+         pd.DataFrame({product: [0.01, 0.02]}, index=index),
+         pd.DataFrame({product: [10.0, 20.0]}, index=index), pd.DataFrame()),
+        tester, primary_ic_lag=0, primary_horizons={factor.alias: "horizon"},
+    )
+    assert stored.factor_cs_rank is factor_rank
+    assert stored.return_cs_rank is return_rank
+    series = factor_series_from_tester(tester, [factor])["series"][0]
+    assert series["values"] == [10.0, 20.0]
+    assert series["returns"]["values"] == [0.01, 0.02]
+    assert series["cs_rank"]["values"] == [1.0, 1.0]
+    assert series["returns_cs_rank"]["values"] == [1.0, 1.0]
+    stored.clear_caches()
+    assert stored.factor_cs_rank.empty and stored.return_cs_rank.empty
