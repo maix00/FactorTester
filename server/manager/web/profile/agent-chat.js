@@ -36,7 +36,14 @@
     );
   }
 
-  async function conversationTitle(context, profile) {
+  function conversationModel(profile, conversation = {}) {
+    return String(
+      conversation?.actual_model || conversation?.model_id
+      || profile?.active_claim?.provider_model || "",
+    ).trim();
+  }
+
+  async function conversationTitle(context, profile, conversation = {}) {
     const claim = profile?.active_claim || {};
     let provider = String(
       claim.provider_name || claim.provider_label || claim.display_name || "",
@@ -56,7 +63,7 @@
         // A missing Provider catalog must not expose an internal provider id.
       }
     }
-    const model = String(claim.provider_model || "").trim();
+    const model = conversationModel(profile, conversation);
     if (provider && model) return `${provider} · ${model}`;
     if (provider) return provider;
     return context.t("智能体助手");
@@ -83,6 +90,22 @@
       options.settingsHost?.replaceChildren(runtimeControls.element);
     }
     let selectedConversationID = "";
+    let selectedConversation = null;
+    let target = null;
+    let chatOptions = null;
+    let titleRevision = 0;
+    const refreshTitle = async conversation => {
+      selectedConversation = conversation || selectedConversation;
+      if (!target || !chatOptions) return;
+      const revision = ++titleRevision;
+      const title = await conversationTitle(context, profile, selectedConversation || {});
+      if (revision !== titleRevision || !target || !chatOptions) return;
+      chatOptions = {
+        ...chatOptions,
+        header: {enabled: true, title: {enabled: true, text: title}},
+      };
+      target.setOptions(chatOptions);
+    };
     const adapter = window.FTProfileChatKit.create(profile, context, {
       skills,
       readOnly: Boolean(options.readOnly),
@@ -95,14 +118,16 @@
           || conversation?.conversation?.conversation_id
           || "",
         ).trim();
+        selectedConversation = conversation?.conversation || null;
         runtimeControls.setConversation(conversation);
+        void refreshTitle(selectedConversation);
       },
       onRuntimeEvent: runtimeControls.observeEvent,
     });
     selectedConversationID = String(adapter.initialThread || "").trim();
     const chatStage = document.createElement("div");
     chatStage.className = "profile-chatkit-stage";
-    const target = document.createElement("openai-chatkit");
+    target = document.createElement("openai-chatkit");
     target.className = "profile-chatkit";
     let updateTimer = null;
     let disposed = false;
@@ -135,8 +160,8 @@
         }
       }
     }
-    const title = await conversationTitle(context, profile);
-    target.setOptions({
+    const title = await conversationTitle(context, profile, selectedConversation || {});
+    chatOptions = {
       api: {
         // ChatKit is the UI protocol only. The Manager adapter owns the
         // Profile-scoped thread catalog and provider-thread mapping.
@@ -164,7 +189,8 @@
         placeholder: context.t("输入要交给 Agent 的研究问题…"),
         attachments: {enabled: false},
       },
-    });
+    };
+    target.setOptions(chatOptions);
     target.addEventListener("chatkit.ready", () => {
       status.textContent = context.t("Agent 对话已连接");
       void refreshProcessingTurn();
@@ -351,5 +377,5 @@
     return root;
   }
 
-  window.FTAgentChat = {render};
+  window.FTAgentChat = {conversationModel, conversationTitle, render};
 })();

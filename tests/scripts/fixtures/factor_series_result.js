@@ -125,6 +125,8 @@ assert.strictEqual(context.FTFactorSeriesResults.supports({
   jobKind: "ic",
   artifacts: [{name: "factor_series_data", state: "active"}],
 }), true, "a supplemental factor-series artifact mounts its result tab");
+assert.strictEqual(typeof context.FTFactorSeriesResults.embedded, "function",
+  "IC and backtest can embed the shared factor-series viewer in their result tabs");
 assert.strictEqual(context.FTFactorSeriesResults.supportsPriceAdjustment({
   supports_term_structure: true,
 }), true);

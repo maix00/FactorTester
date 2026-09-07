@@ -375,6 +375,8 @@ def test_page_agent_trigger_is_global_lazy_and_draggable() -> None:
     assert "FTPageAgentProfiles.self(activeContext)" in drawer
     assert "void controller.connect()" not in assistance
     assert "FTPageAgentDrawer?.activate?.(appContext" in coordinator
+    assert 'document.querySelector(".topbar")' in drawer
+    assert "applyDrawerBoundary(shell)" in drawer
 
 
 def test_tab_view_restore_keeps_the_page_agent_trigger_visible() -> None:
@@ -958,6 +960,13 @@ def test_factor_series_result_restores_the_old_multi_panel_viewer() -> None:
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
+
+    ic_view = (WEB_ROOT / "jobs" / "ic-result-view.js").read_text(encoding="utf-8")
+    viewers = (WEB_ROOT / "jobs" / "result-viewers.js").read_text(encoding="utf-8")
+    assert 'key: "factor_series", label: "因子序列"' in ic_view
+    assert 'context.t("查看因子序列")' not in ic_view
+    assert 'kind === "ic"' in viewers
+    assert 'kind === "backtest"' in viewers
 
 
 def test_job_result_charts_use_interactive_highcharts_data() -> None:
