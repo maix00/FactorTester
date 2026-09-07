@@ -1,11 +1,16 @@
 (() => {
   function supports(options) {
-    return String(options.jobKind || "").toLowerCase() === "factor_evaluation";
+    const kind = String(options.jobKind || "").toLowerCase();
+    return kind === "factor_evaluation" || (options.resultDeclarations || []).some(
+      item => item.name === "factor_series",
+    );
   }
 
   function artifactOf(artifacts) {
     return (artifacts || []).find(item => (
-      item.state === "active" && String(item.name || "") === "result"
+      item.state === "active" && ["factor_series_data", "result"].includes(
+        String(item.name || ""),
+      )
     ));
   }
 
@@ -94,16 +99,16 @@
     root.className = "factor-series-viewer";
     const controls = document.createElement("div");
     controls.className = "factor-series-controls";
-    const field = document.createElement("div");
-    field.className = "factor-series-product-control";
-    const label = document.createElement("b"); label.textContent = context.t("产品");
-    let selectedProduct = window.FTFactorSeriesModel.identity(model.series[0]);
+    let selectedFactor = state.selectedFactor
+      || window.FTFactorSeriesModel.factorIdentity(model.series[0], model);
+    let selectedProduct = state.selectedProduct
+      || window.FTFactorSeriesModel.identity(model.series.find(item => (
+        window.FTFactorSeriesModel.factorIdentity(item, model) === selectedFactor
+      )) || model.series[0]);
     const source = document.createElement("small");
     const adjustmentField = document.createElement("div");
     adjustmentField.className = "factor-series-adjustment-control";
     adjustmentField.hidden = true;
-    const adjustmentLabel = document.createElement("b");
-    adjustmentLabel.textContent = context.t("复权方式");
     const initialRequest = window.FTFactorSeriesModel.priceRequest(
       options.configuration, selectedProduct, model.factor.freq,
     );
@@ -116,29 +121,50 @@
     content.append(root);
     target.replaceChildren(header, content);
     const show = () => loadProduct(
-      context, model, options, selectedProduct, chart, contracts, source,
+      context, model, options, selectedProduct, selectedFactor, chart, contracts, source,
       adjustmentField, adjustmentState,
     ).catch(error => {
       chart.replaceChildren(FTUI.empty(
         context.t("曲线暂不可用"), error.message || String(error),
       ));
     });
+    const factorItems = [...new Map(model.series.map(item => [
+      window.FTFactorSeriesModel.factorIdentity(item, model),
+      {value: window.FTFactorSeriesModel.factorIdentity(item, model),
+        label: window.FTFactorSeriesModel.factorLabel(item, model)},
+    ])).values()];
+    const productItems = () => [...new Map(model.series
+      .filter(item => window.FTFactorSeriesModel.factorIdentity(item, model) === selectedFactor)
+      .map(item => [window.FTFactorSeriesModel.identity(item), {
+        value: window.FTFactorSeriesModel.identity(item),
+        label: window.FTFactorSeriesModel.label(item),
+      }])).values()];
+    const factorPicker = window.FTMultiSelectFilter.create(context, {
+      title: context.t("因子"), compact: true, multi: false,
+      items: factorItems, selected: [selectedFactor],
+      searchPlaceholder: context.t("搜索因子…"),
+      onChange: async values => {
+        selectedFactor = values[0] || selectedFactor;
+        selectedProduct = productItems()[0]?.value || selectedProduct;
+        state.selectedFactor = selectedFactor; state.selectedProduct = selectedProduct;
+        render(context, target, state);
+      },
+    });
     const picker = window.FTMultiSelectFilter.create(context, {
       title: context.t("产品"), compact: true, multi: false,
       className: "factor-series-product-filter",
-      items: model.series.map(item => ({
-        value: window.FTFactorSeriesModel.identity(item),
-        label: window.FTFactorSeriesModel.label(item),
+      items: productItems().map(item => ({
+        ...item,
         description: context.t("切换要展示的产品价格、因子序列与期限结构"),
       })),
       selected: [selectedProduct],
       searchPlaceholder: context.t("搜索产品…"),
       onChange: async values => {
         selectedProduct = values[0] || selectedProduct;
+        state.selectedProduct = selectedProduct;
         await show();
       },
     });
-    field.append(label, picker.element);
     const adjustmentPicker = window.FTMultiSelectFilter.create(context, {
       title: context.t("复权方式"), compact: true, multi: false,
       className: "factor-series-adjustment-filter",
@@ -152,19 +178,28 @@
         await show();
       },
     });
-    adjustmentField.append(adjustmentLabel, adjustmentPicker.element);
-    controls.append(field, adjustmentField, source);
+    adjustmentField.append(adjustmentPicker.element);
+    const panel = FTJobResultTabs.filterPanel(context, {
+      title: "筛选",
+      rows: [
+        ...(factorItems.length > 1 ? [{label: "因子", element: factorPicker.element}] : []),
+        {label: "产品", element: picker.element},
+        {label: "复权方式", element: adjustmentField},
+      ],
+    });
+    controls.append(panel.element, source);
     show();
   }
 
   async function loadProduct(
-    context, model, options, product, chart, tableMount, note,
+    context, model, options, product, factor, chart, tableMount, note,
     adjustmentField, adjustmentState,
   ) {
     const generation = ++adjustmentState.generation;
     window.FTFactorSeriesChart.dispose(chart);
     const item = model.series.find(value => (
       window.FTFactorSeriesModel.identity(value) === product
+      && window.FTFactorSeriesModel.factorIdentity(value, model) === factor
     )) || model.series[0];
     chart.replaceChildren(FTUI.loading(context.t("正在读取价格与因子曲线…")));
     tableMount.replaceChildren();
@@ -189,7 +224,7 @@
     try {
       const chartInstance = window.FTFactorSeriesChart.mount(context, chart, {
         product,
-        factorLabel: model.factor.alias || model.factor.name || context.t("因子"),
+        factorLabel: window.FTFactorSeriesModel.factorLabel(item, model),
         factorSeries: item,
         price: price.payload,
         contracts: rows,

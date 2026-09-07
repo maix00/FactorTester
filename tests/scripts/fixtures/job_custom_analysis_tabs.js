@@ -60,7 +60,7 @@ const [select, edit, close] = custom.children;
     customTabs: [tabs[1]],
   });
   assert.deepEqual(composed.map(item => item.key), [
-    "builtin", "runtime_summary", "custom-analysis:one",
+    "runtime_summary", "builtin", "custom-analysis:one",
   ]);
   let activated = "";
   await window.FTJobResultTabs.activate(context, "custom-analysis:new", {

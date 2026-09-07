@@ -220,6 +220,10 @@ def collect_ic_result(
         expected_sign_source=expected_sign_source,
         temporal_support=temporal_support,
     )
+    rank_panels = {
+        key: getattr(ic_factor, "table", pd.DataFrame()).attrs.get(key)
+        for key in ("factor_cs_rank", "return_cs_rank")
+    }
     stats = annotate_ic_temporal_support(
         tester,
         ic_factor,
@@ -230,6 +234,9 @@ def collect_ic_result(
         expected_sign=expected_sign,
         expected_sign_source=expected_sign_source,
     )
+    for key, panel in rank_panels.items():
+        if isinstance(panel, pd.DataFrame):
+            stats.attrs[key] = panel
 
     re_table = re_table.copy() if re_table is not None else pd.DataFrame()
     fe_table = fe_table.copy() if fe_table is not None else pd.DataFrame()

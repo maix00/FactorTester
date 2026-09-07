@@ -39,6 +39,26 @@
 }
 .job-result-tabs .job-result-tab-item > :last-child { border-radius: 0 7px 7px 0; }
 .job-result-tabs .job-result-tab-close { color: var(--danger); }
+
+.job-result-filter-panel {
+  width: 100%; box-sizing: border-box; margin: 0 0 16px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--card);
+}
+.job-result-filter-panel > summary {
+  cursor: pointer; padding: 10px 14px; font-weight: 650;
+}
+.job-result-filter-rows { border-top: 1px solid var(--line); }
+.job-result-filter-row {
+  display: grid; grid-template-columns: max-content minmax(0, 1fr);
+  gap: 14px; align-items: center; padding: 10px 14px;
+}
+.job-result-filter-row + .job-result-filter-row { border-top: 1px solid var(--line); }
+.job-result-filter-label { font-weight: 600; white-space: nowrap; }
+.job-result-filter-value,
+.job-result-filter-value > * { min-width: 0; width: 100%; max-width: none; }
+@media (max-width: 640px) {
+  .job-result-filter-row { grid-template-columns: 1fr; gap: 6px; }
+}
 .job-result-tab-rename {
   width: 150px;
   min-height: 30px;

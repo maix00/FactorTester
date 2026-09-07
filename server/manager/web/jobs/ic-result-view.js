@@ -308,7 +308,7 @@
 
   function sliceControl(context, state, rerender) {
     const root = document.createElement("div"); root.className = "ic-domain-slice";
-    const fields = document.createElement("div"); fields.className = "ic-domain-slice-fields";
+    const rows = [];
     const capability = filterCapabilities(state.activeTab);
     const methods = state.rawModel.methods;
     const horizons = [...new Set(state.descriptors.map(item => item.horizon))];
@@ -327,24 +327,24 @@
       }
       rerender();
     };
-    fields.append(filterControl(
+    rows.push({label: "IC 类型", element: filterControl(
       context, context.t("IC 类型"),
       methods.map(value => ({value, label: methodLabel(context, value)})),
       capability.multi ? state.selectedMethods : [state.activeMethod],
       capability.multi, values => commit("method", values),
-    ));
-    if (capability.horizon) fields.append(filterControl(
+    )});
+    if (capability.horizon) rows.push({label: "前瞻收益期", element: filterControl(
       context, context.t("前瞻收益期"),
       horizons.map(value => ({value, label: value})),
       capability.multi ? state.selectedHorizons : [state.activeHorizon],
       capability.multi, values => commit("horizon", values),
-    ));
-    if (capability.delay) fields.append(filterControl(
+    )});
+    if (capability.delay) rows.push({label: "入场延迟", element: filterControl(
       context, context.t("入场延迟"),
       delays.map(value => ({value, label: `d${value}`})),
       capability.multi ? state.selectedDelays : [state.activeDelay],
       capability.multi, values => commit("delay", values),
-    ));
+    )});
     const factor = activeFactor(state);
     if (factor?.factorRef) {
       const inspect = context.button(context.t("查看因子序列"), () => {
@@ -353,7 +353,8 @@
       inspect.classList.add("ic-factor-series-link");
       root.append(inspect);
     }
-    root.prepend(fields); return root;
+    root.prepend(FTJobResultTabs.filterPanel(context, {title: "筛选", rows}).element);
+    return root;
   }
 
   function dataTable(context, rows) {

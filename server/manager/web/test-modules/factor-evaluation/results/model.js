@@ -32,6 +32,17 @@
     return desc && desc !== name ? `${name} · ${desc}` : name;
   }
 
+  function factorIdentity(item, model = {}) {
+    return String(item?.factor_ref || item?.factor_alias || item?.factor?.ref
+      || item?.factor?.alias || model.factor?.ref || model.factor?.alias
+      || model.factor?.name || "factor");
+  }
+
+  function factorLabel(item, model = {}) {
+    return String(item?.factor_label || item?.factor_alias || item?.factor?.alias
+      || model.factor?.alias || model.factor?.name || factorIdentity(item, model));
+  }
+
   function points(item, minimum, maximum) {
     const dates = Array.isArray(item?.dates) ? item.dates : [];
     const values = Array.isArray(item?.values) ? item.values : [];
@@ -64,5 +75,7 @@
     };
   }
 
-  window.FTFactorSeriesModel = Object.freeze({build, identity, label, points, priceRequest});
+  window.FTFactorSeriesModel = Object.freeze({
+    build, factorIdentity, factorLabel, identity, label, points, priceRequest,
+  });
 })();
