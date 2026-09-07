@@ -92,8 +92,14 @@ def materialize_research(database, envelope: dict) -> None:
     if (payload.get('schema_version') != 1 or research.get('research_id') != identifier
             or research.get('owner_ref') != envelope['principal']):
         raise ValueError('invalid research synchronization identity')
+    if any(not isinstance(payload.get(key), list) for key in TABLES if key != 'research'):
+        raise ValueError('incomplete research relationship snapshot')
     with connect_sqlite(database) as conn:
         # Schema is owned by ResearchCatalog and initialized before sync.
+        # An accepted snapshot replaces the relationship projection, including
+        # an explicit conflict choice. Otherwise local-only grants survive and
+        # concurrent workspace IDs can violate the logical uniqueness key.
+        _prune_removed_relationships(conn, identifier, payload)
         reports = {item['report_id'] for item in payload.get('reports', [])}
         for key, (table, primary) in TABLES.items():
             records = [research] if key == 'research' else payload.get(key, [])
@@ -125,6 +131,25 @@ def materialize_research(database, envelope: dict) -> None:
                     tuple(record[name] for name in columns),
                 )
         _record_revision(conn, identifier, revision)
+
+
+def _prune_removed_relationships(conn, identifier: str, payload: dict) -> None:
+    for key, (table, primary) in reversed(tuple(TABLES.items())):
+        if key == 'research':
+            continue
+        retained = {tuple(item[name] for name in primary) for item in payload[key]}
+        where = ('report_id IN (SELECT report_id FROM research_catalog_reports WHERE research_id=?)'
+                 if key == 'evidence_links' else 'research_id=?')
+        existing = conn.execute(
+            f'SELECT {", ".join(primary)} FROM {table} WHERE {where}', (identifier,),
+        ).fetchall()
+        for row in existing:
+            identity = tuple(row[name] for name in primary)
+            if identity not in retained:
+                conn.execute(
+                    f'DELETE FROM {table} WHERE ' + ' AND '.join(f'{name}=?' for name in primary),
+                    identity,
+                )
 
 
 def _record_revision(conn, identifier: str, revision: int) -> None:

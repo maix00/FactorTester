@@ -84,6 +84,19 @@ def test_replication_cannot_reassign_an_existing_research_owner(tmp_path):
     assert mirror.get_research_summary(rid, viewer='alice')['owner_ref'] == 'alice'
 
 
+def test_incomplete_snapshot_cannot_remove_memberships(tmp_path):
+    from server.manager.storage.account_domain.research_sync import materialize_research
+    ((author, outgoing), (mirror, incoming)), _ = replicas(tmp_path)
+    rid = author.create_research(owner_ref='alice', title='owned')['research_id']
+    author.add_membership(rid, actor='alice', principal_ref='bob', profile_ref='bob')
+    outgoing.flush(principal='alice'); incoming.pull(principal='alice')
+    envelope = outgoing.local.get_entity('alice', 'research_catalog', rid)
+    del envelope['payload']['members']
+    with pytest.raises(ValueError, match='incomplete'):
+        materialize_research(incoming.local.path, envelope)
+    assert mirror.get_research_summary(rid, viewer='bob')['research_id'] == rid
+
+
 def test_offline_and_conflicting_research_edits_preserve_local_work(tmp_path):
     ((author, outgoing), (mirror, incoming)), control = replicas(tmp_path)
     rid = author.create_research(owner_ref='alice', title='initial')['research_id']
@@ -112,3 +125,28 @@ def test_offline_and_conflicting_research_edits_preserve_local_work(tmp_path):
     assert materialize_pending_researches(outgoing) == 1
     assert author.get_research_summary(rid, viewer='alice')['title'] == 'peer edit'
     assert materialize_pending_researches(outgoing) == 0
+
+
+def test_selected_remote_snapshot_removes_local_only_grants_and_workspace_collision(tmp_path):
+    from server.manager.storage.account_domain.research_sync import materialize_pending_researches
+    ((author, outgoing), (mirror, incoming)), control = replicas(tmp_path)
+    rid = author.create_research(owner_ref='alice', title='initial')['research_id']
+    author.add_membership(rid, actor='alice', principal_ref='alice', profile_ref='analysis')
+    outgoing.flush(principal='alice'); incoming.pull(principal='alice')
+    author.add_membership(rid, actor='alice', principal_ref='bob', profile_ref='bob')
+    local_workspace = author.create_workspace(rid, actor='alice', principal_ref='alice', profile_ref='analysis')
+    remote_workspace = mirror.create_workspace(rid, actor='alice', principal_ref='alice', profile_ref='analysis')
+    assert local_workspace['workspace_id'] != remote_workspace['workspace_id']
+    incoming.flush(principal='alice')
+    assert outgoing.flush(principal='alice')['conflicts'] == 1
+    remote = control.rows[('alice', 'research_catalog', rid)]
+    local = outgoing.local.get_entity('alice', 'research_catalog', rid)
+    outgoing.local.resolve_conflict(
+        principal='alice', entity_type='research_catalog', entity_id=rid,
+        expected_payload=local['payload'], remote_revision=remote['revision'],
+        payload=remote['payload'], manager_id='public',
+    )
+    outgoing.flush(principal='alice')
+    assert materialize_pending_researches(outgoing) == 1
+    assert author.list_researches(viewer='bob') == []
+    assert author.create_workspace(rid, actor='alice', principal_ref='alice', profile_ref='analysis')['workspace_id'] == remote_workspace['workspace_id']
