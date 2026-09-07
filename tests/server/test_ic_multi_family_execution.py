@@ -71,10 +71,10 @@ def test_ic_run_spec_resolves_factors_across_families(monkeypatch) -> None:
     )
     monkeypatch.setattr(ic, "user_obj_for_name", lambda _owner: object())
     monkeypatch.setattr(
-        ic,
-        "factor_from_alias",
-        lambda alias, **kwargs: (
-            resolved_owners.append(kwargs["username"]) or factors[alias]
+        "server.modules.shared.factor_param_resolver.resolve_factor_param_value",
+        lambda record, **kwargs: (
+            resolved_owners.append(kwargs["username"])
+            or factors[record["alias"]]
         ),
     )
     monkeypatch.setattr(
@@ -116,6 +116,52 @@ def test_ic_run_spec_resolves_factors_across_families(monkeypatch) -> None:
 
     assert captured == {"aliases": aliases, "resolved": aliases}
     assert resolved_owners == ["GTHT@owner-a@1", "GTHT@owner-b@2"]
+
+
+def test_ic_run_spec_resolves_nested_factor_from_frozen_dependency(
+    monkeypatch,
+) -> None:
+    child = _factor("NestedSignal|N:20d|$F:10m")
+    outer = {
+        **_factor("OuterSignal|P:[NestedSignal|N:20d|$F:10m]|$F:2m"),
+        "factor_dependencies": [child],
+    }
+    captured: dict[str, object] = {}
+    resolved = SimpleNamespace(alias=outer["alias"])
+    monkeypatch.setattr(ic, "selection_from_request", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(
+        ic, "create_isolated_factor_tester_for_run",
+        lambda *_args, **_kwargs: SimpleNamespace(products=[]),
+    )
+    monkeypatch.setattr(ic, "user_obj_for_name", lambda _owner: object())
+    monkeypatch.setattr(
+        "server.services.external_factor_artifacts.load_frozen_artifacts",
+        lambda _raw: [],
+    )
+
+    def resolve(record, **kwargs):
+        captured["record"] = record
+        captured["frozen_by_ref"] = kwargs["frozen_by_ref"]
+        return resolved
+
+    monkeypatch.setattr(
+        "server.modules.shared.factor_param_resolver.resolve_factor_param_value",
+        resolve,
+    )
+    monkeypatch.setattr(ic, "require_factor_data_coverage", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(ic, "_run_ic_compute_to_sink", lambda *_args, **_kwargs: None)
+
+    ic.execute_ic_run_spec({
+        "_owner": "alice",
+        "run_id": "nested-factor-ic",
+        "product_path_selection_id": "strict-day",
+        "factors": [outer, child],
+        "start_date": "2024-01-01",
+        "end_date": "2024-01-31",
+    }, sink=object(), cancel_event=object())
+
+    assert captured["record"]["factor_dependencies"] == [child]
+    assert captured["frozen_by_ref"][child["ref"]] == child
 
 
 def test_ic_run_spec_uses_frozen_top_level_window(monkeypatch) -> None:
