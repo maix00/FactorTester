@@ -146,12 +146,18 @@ class WriteRoutesMixin:
         if self._proxy_job_request(parsed, method="POST"):
             return
         if self.path == "/api/research-publications/sync":
-            client_session = None if self._is_local_ftclient() else self._session()
+            client_session = self._session()
             if not self._is_local_ftclient() and client_session is None:
                 json_response(self, {"success": False, "error": "authenticated FTClient required"}, 403)
                 return
             try:
-                value = self.state.public_research.sync(self._json_body(32 * 1024 * 1024))
+                payload = self._json_body(32 * 1024 * 1024)
+                if client_session is not None:
+                    owner = str(client_session["username"])
+                    if payload.get("owner_ref") not in (None, "", owner):
+                        raise PermissionError("report owner does not match the authenticated principal")
+                    payload["owner_ref"] = owner
+                value = self.state.public_research.sync(payload)
                 if value.get("publication_id"):
                     self._sync_research_metadata(str(value["publication_id"]))
                 self._invalidate_federated_public_research()
