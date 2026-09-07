@@ -431,17 +431,27 @@ def _prepare_local_research_run_request(
             frequency = str(
                 item.get("frequency")
                 or item.get("freq")
+                or frozen_factor.get("identity", {}).get("params", {}).get("$F")
                 or ""
             ).strip()
             if not frequency:
                 alias = frozen_factor["alias"]
                 match = re.search(r"(?:^|\|)\$F:([^|]+)", alias)
                 frequency = match.group(1).strip() if match else ""
-            if frequency:
-                frequencies[frozen_factor["ref"]] = frequency
-        run_spec["typed_ic"] = compile_ic_grouped_configuration(
-            ic_payload, factor_frequencies=frequencies,
-        )
+            # FactorFamily's canonical signal-frequency default is 1d.  The
+            # compact alias deliberately omits parameters that retain their
+            # default, so an alias without ``$F`` still has a defined daily
+            # signal frequency and must remain eligible for scale-aware IC.
+            frequencies[frozen_factor["ref"]] = frequency or "1d"
+        try:
+            run_spec["typed_ic"] = compile_ic_grouped_configuration(
+                ic_payload, factor_frequencies=frequencies,
+            )
+        except (TypeError, ValueError) as exc:
+            # This function also runs inside the Manager proxy before a request
+            # is forwarded.  Keep validation failures in its structured error
+            # contract instead of letting the HTTP handler drop the socket.
+            raise _RunRequestError(str(exc)) from exc
     # ``step_mode`` is a backtest-only run field.  Do not put a synthetic
     # false value into IC/evaluation RunSpecs: the registry is the closed
     # contract for which submitted fields become executable RunSpec fields.

@@ -102,6 +102,45 @@ def test_grouped_ic_http_run_lifecycle_preserves_typed_provenance_and_hash(
     assert called == []
 
 
+def test_grouped_ic_scale_aware_horizon_uses_omitted_default_signal_frequency(
+    client,
+) -> None:
+    workspace = _create_workspace(client)
+    payload = _payload(workspace)
+    factor = _frozen_factor("MmRet")
+    payload["shared"]["factors"] = [factor]
+    payload["shared"]["temporary_objects"] = {
+        "product_selections": [{
+            "id": "product-scope:daily",
+            "selected_paths": ["/canonical/products/daily"],
+            "products": ["daily"],
+        }],
+    }
+    payload["analyses"]["ic"] = {
+        "schema_version": 2,
+        "execution": {"settings": {}},
+        "configuration_groups": [{
+            "config_group_id": "cg-daily",
+            "product_scope_ref": "product-scope:daily",
+            "factor_ref": factor["ref"],
+            "horizon": {"sampling": "scale_aware"},
+            "entry_delay_bars": 1,
+            "methods": ["rank"],
+            "return_price_basis": "next_open_to_open_adjusted",
+        }],
+    }
+    _update(client, workspace, payload)
+
+    response = client.post("/api/runs/preview", json={
+        "workspace_id": workspace["workspace_id"],
+        "configuration_revision": workspace["configuration"]["revision"],
+        "analyses": ["ic"],
+    })
+
+    assert response.status_code == 200, response.get_data(as_text=True)
+    assert response.get_json()["run_spec_hash"]
+
+
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "research-jobs.sqlite")
