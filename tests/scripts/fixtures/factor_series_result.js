@@ -6,7 +6,7 @@ const vm = require("vm");
 const root = path.resolve(__dirname, "../../..");
 let captured = null;
 let capturedDisplayOptions = null;
-const chart = {xAxis: [{}], destroy() {}};
+const chart = {xAxis: [{}], destroyed: false, destroy() { this.destroyed = true; }};
 const context = {
   window: {}, console,
   Highcharts: {
@@ -133,4 +133,7 @@ assert.strictEqual(context.FTFactorSeriesResults.supportsPriceAdjustment({
 assert.strictEqual(context.FTFactorSeriesResults.artifactOf([
   {name: "result", state: "superseded"}, {name: "result", state: "active"},
 ]).state, "active");
+context.FTFactorSeriesChart.dispose(target);
+assert.strictEqual(target.__ftFactorSeriesChart, null);
+assert.strictEqual(chart.destroyed, true);
 console.log("ok");
