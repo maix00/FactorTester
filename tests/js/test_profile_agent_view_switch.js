@@ -111,7 +111,10 @@ assert.equal(window.FTAgentChat.conversationModel({
   await flush();
   const identitySlot = new Element('div');
   hostOptions.mountControls('profile', identitySlot);
-  assert.equal(identitySlot.children[0].children[0].tagName, 'strong', 'dedicated sessions keep a fixed Profile');
+  assert.equal(identitySlot.children[0].children[0].children[0].textContent, '智能体助手');
+  assert.equal(findAll(identitySlot, item => item.tagName === 'a').length, 1);
+  assert.equal(findAll(identitySlot, item => item.tagName === 'select').length, 0,
+    'dedicated sessions keep a fixed Profile');
   const buttons = findAll(root, item => item.tagName === "button");
   assert.equal(buttons.some(item => [
     "结果", "过程", "启动 Agent", "停止 Agent",

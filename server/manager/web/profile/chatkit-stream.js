@@ -311,6 +311,8 @@
     state.items = history;
     state.itemPage = page;
     state.restored = true;
+    writeEvent(controller, {type: "thread.items.replaced", items: history,
+      has_more: page.has_more});
     return history;
   }
 
@@ -523,6 +525,23 @@
       const method = P.rawMethod(payload);
       const delta = P.agentMessageDelta(payload);
       const structuredItem = payload?.chatkit_item;
+      if (structuredItem?.type === "user_message") {
+        state.seenUserEvents ||= new Set();
+        if (!state.seenUserEvents.has(structuredItem.id)) {
+          state.seenUserEvents.add(structuredItem.id);
+          if (state.optimisticUserID) {
+            const oldID = state.optimisticUserID;
+            state.items = state.items.filter(item => item.id !== oldID);
+            writeEvent(controller, {type: "thread.item.removed", item_id: oldID});
+            state.optimisticUserID = null;
+          }
+          // A steer boundary belongs to this turn but separates messages.
+          // Subsequent assistant deltas must start their own item after it.
+          state.assistant = null;
+          state.finalResponseComplete = false;
+          emitProcessReplacement(state, controller, {...structuredItem, turn_id: state.turnID});
+        }
+      }
       if (structuredItem && ![
         "user_message", "assistant_message",
       ].includes(String(structuredItem.type || ""))) {
@@ -546,6 +565,15 @@
           });
         }
       }
+      if (structuredItem?.type === "workflow" && /item[/:._-]completed/i.test(method)
+          && P.completedText(payload) && state.assistant) {
+        // A streamed commentary paragraph becomes its recorded process item,
+        // rather than surviving as an extra final-answer bubble/copy action.
+        const temporaryID = state.assistant.id;
+        state.items = state.items.filter(item => item.id !== temporaryID);
+        writeEvent(controller, {type: "thread.item.removed", item_id: temporaryID});
+        state.assistant = null;
+      }
       appendDisplayableProcessDelta(state, controller, payload);
       if (method === "app_server_exit" || payload?.type === "app_server_exit") {
         // The isolated app-server is a replaceable transport process.  Its
@@ -561,7 +589,8 @@
         finish("error");
         return;
       }
-      const completed = structuredItem?.type === "workflow" ? "" : P.completedText(payload);
+      const completed = structuredItem && structuredItem.type !== "assistant_message"
+        ? "" : P.completedText(payload);
       if (completed) {
         const assistant = ensureAssistant(state);
         assistant.text = completed;
@@ -656,6 +685,8 @@
     state.finalResponseComplete = false;
     state.turnID = "";
     state.processDeltaText = new Map();
+    state.seenUserEvents = new Set();
+    state.optimisticUserID = null;
     const priorAssistantIDs = new Set(state.items
       .filter(isAssistantMessage)
       .map(item => String(item.id || "")));
@@ -666,6 +697,7 @@
           type: "thread.created", thread: P.threadObject(state),
         });
         const user = P.userItem(state, text);
+        state.optimisticUserID = user.id;
         state.items.push(user);
         writeEvent(controller, {type: "thread.item.added", item: user});
         writeEvent(controller, {type: "thread.item.done", item: user});

@@ -7,6 +7,7 @@ vm.runInThisContext(fs.readFileSync('server/manager/web/profile/xpert-transport.
  const calls=[]; let output;
  const items=[{id:'u',type:'user_message',content:[{text:'question'}]},
   ...['p1','p2'].map(id=>({id,thread_id:'c',turn_id:'t1',type:'workflow',details_deferred:true,workflow:{tasks:[{title:'command'}]}})),
+  {id:'steer',type:'user_message',turn_id:'t1',content:[{text:'again'}]},
   {id:'a1',type:'assistant_message',turn_id:'t1',content:[{text:'ok'}]},
   {id:'a2',type:'assistant_message',turn_id:'t2',content:[{text:'ok'}]}];
  const bridge=FTXpertTransport.create({endpoint:'/api',fetch:async(_,init)=>{
@@ -16,7 +17,10 @@ vm.runInThisContext(fs.readFileSync('server/manager/web/profile/xpert-transport.
  }},{upload:async f=>({name:f.name,path:'uploads/'+f.name,size_bytes:f.size}),capabilities:async()=>({skills:[{id:'one'}]})});
  const req=(path,body)=>FTXpertTransport.fetch(bridge.key,location.origin+'/ft-profile-bridge/'+path,{method:'POST',body:typeof body?.get==='function'?body:JSON.stringify(body||{})});
  const history=await (await req('conversations/c/messages')).json();
- assert.equal(history.items.length,4);
+ assert.equal(history.items.length,5);
+ assert.equal(history.items[2].role,"human");
+ assert.equal(history.items[2].content,"again");
+ assert.equal(history.items[3].role,"ai");
  assert.equal(history.items[1].content[0].data.items.length,2);
  assert.equal(history.items.filter(i=>i.content==='ok').length,2,'identical replies in different turns survive');
  assert(!calls.some(q=>q.type==='items.detail'));
