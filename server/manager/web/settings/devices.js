@@ -35,47 +35,46 @@
   function deviceListSection(context, payload, refresh) {
     const section = document.createElement("section"); section.className = "settings-section";
     const heading = document.createElement("h3"); heading.textContent = context.t("已登记设备"); section.append(heading);
-    const list = document.createElement("div"); list.className = "settings-rows";
-    const records = Array.isArray(payload.devices) ? payload.devices : [];
-    if (!records.length) {
-      const empty = document.createElement("p"); empty.textContent = context.t("尚未登记设备"); section.append(empty); return section;
-    }
-    records.forEach(record => {
-      const value = document.createElement("div"); value.style.display = "grid"; value.style.gap = "4px";
-      const title = document.createElement("strong"); title.textContent =
-        record.device_name || context.t("白名单设备");
-      const detail = document.createElement("small");
-      const state = record.enabled ? context.t("启用") : context.t("已撤销");
-      detail.textContent = `${record.username || ""} · ${state} · ${context.t("公钥指纹")} ${record.public_key_fingerprint || ""} · ${record.source_server_id || ""}`;
-      const client = document.createElement("small");
-      const clientType = {
-        browser: context.t("浏览器"),
-        swift: context.t("Swift 客户端"),
-      }[record.client_type] || context.t("未知客户端");
-      client.textContent = `${context.t("客户端")}：${record.client_name || clientType} · ${context.t("登记 IP")}：${record.enrollment_ip || context.t("未记录")} · ${context.t("最近访问 IP")}：${record.last_seen_ip || context.t("未记录")}`;
-      value.append(title, detail, client);
-      let revoke;
-      if (record.enabled) {
-        revoke = document.createElement("button"); revoke.className = "secondary";
-        revoke.textContent = context.t("撤销");
-        revoke.onclick = async () => {
-          revoke.disabled = true;
-          try {
-            await context.api("/api/devices/revoke", {
-              method: "POST", body: JSON.stringify({device_id: record.device_id}),
-            });
-            context.showNotice(context.t("设备已撤销")); await refresh();
-          } catch (error) {
-            context.showNotice(error.message, true); revoke.disabled = false;
-          }
-        };
-      }
-      const rowRoot = document.createElement("div"); rowRoot.className = "settings-row";
-      rowRoot.append(value);
-      if (revoke) rowRoot.append(revoke);
-      list.append(rowRoot);
+    const table = FTManagerAccessTable.create(context, {
+      headers: ["设备", "客户端", "登记 IP", "最近访问 IP", "状态", "操作"],
+      searchPlaceholder: "搜索我的设备",
+      empty: "尚未登记设备",
+      refresh,
+      searchText: record => [record.device_name, record.device_id, record.client_name,
+        record.client_type, record.enrollment_ip, record.last_seen_ip].join(" "),
+      cells: record => [
+        () => {
+          const value = document.createElement("span");
+          value.textContent = record.device_name || context.t("白名单设备");
+          value.title = `${record.device_id || ""} · ${context.t("公钥指纹")} ${record.public_key_fingerprint || ""} · ${record.source_server_id || ""}`;
+          return value;
+        },
+        record.client_name || ({browser: context.t("浏览器"), swift: context.t("Swift 客户端")})[record.client_type] || context.t("未知客户端"),
+        record.enrollment_ip || context.t("未记录"),
+        record.last_seen_ip || context.t("未记录"),
+        record.enabled ? context.t("启用") : context.t("已撤销"),
+        () => {
+          if (!record.enabled) return "";
+          const revoke = FTUI.iconButton(context, "xmark", "撤销设备", async () => {
+            if (revoke.disabled) return;
+            revoke.disabled = true;
+            try {
+              await context.api("/api/devices/revoke", {
+                method: "POST", body: JSON.stringify({device_id: record.device_id}),
+              });
+              context.showNotice(context.t("设备已撤销")); await refresh();
+            } catch (error) {
+              context.showNotice(error.message, true); revoke.disabled = false;
+            }
+          });
+          return revoke;
+        },
+      ],
     });
-    section.append(list); return section;
+    section.update = latest => table.setRows(latest.devices || []);
+    section.update(payload);
+    section.append(table.root);
+    return section;
   }
 
   async function devices(context, body) {
@@ -103,7 +102,7 @@
     const refresh = async () => {
       const latest = await context.api("/api/devices");
       if (!current(context)) return;
-      content.replaceChildren(deviceListSection(context, latest, refresh));
+      list.update(latest);
     };
     const totalCount = Number(payload.public_device_total_count ?? payload.public_device_count ?? 0);
     body.append(card(context, "白名单设备自动登记", [
@@ -113,7 +112,8 @@
       ["公网设备总数", "包括当前服务器已登记且启用的白名单设备", totalCount],
       ["私钥存储", "服务器只保存随机设备编号和公钥；私钥保存在当前浏览器的不可导出存储中", payload.backend || ""],
     ]));
-    content.append(deviceListSection(context, payload, refresh)); body.append(content);
+    const list = deviceListSection(context, payload, refresh);
+    content.append(list); body.append(content);
   }
 
   window.FTSettingsDevices = {show: devices};

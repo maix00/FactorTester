@@ -21,8 +21,7 @@
   function accountLabel(context, account) {
     const alias = String(account?.alias || account?.username || "");
     const username = String(account?.username || "");
-    const organization = String(account?.organization_id || "");
-    return organization ? `${alias} · ${organization} · ${username}` : `${alias} · ${username}`;
+    return alias && alias !== username ? `${alias} · ${username}` : username;
   }
 
   function allowlistView(context, payload, reload) {
@@ -31,51 +30,44 @@
       "公网访客白名单",
       "白名单按当前服务器保存；共享同一 PostgreSQL 的 Manager 会读取同一条记录。",
     );
-    const entries = Array.isArray(payload.visitor_allowlist)
-      ? payload.visitor_allowlist : [];
-    const users = Array.isArray(payload.users) ? payload.users : [];
-    const enabled = new Set(
-      entries.filter(item => item.enabled).map(item => item.username),
-    );
-    const candidates = users.filter(item => item.active && !enabled.has(item.username));
-    const controls = document.createElement("div");
-    controls.className = "settings-inline-actions";
-    const select = document.createElement("select");
-    select.className = "inline-setting";
-    const placeholder = document.createElement("option");
-    placeholder.value = "";
-    placeholder.textContent = context.t("选择账户");
-    select.append(placeholder);
-    candidates.forEach(account => {
-      const option = document.createElement("option");
-      option.value = account.username || "";
-      option.textContent = accountLabel(context, account);
-      select.append(option);
-    });
-    const add = document.createElement("button");
-    add.className = "primary";
-    add.textContent = context.t("添加到白名单");
-    add.disabled = !candidates.length;
-    add.onclick = async () => {
-      if (!select.value) return;
-      add.disabled = true;
+    const enabled = new Set();
+    const mutate = async (method, username, button) => {
+      if (button.disabled) return;
+      button.disabled = true;
       try {
         await context.api("/api/admin/public-visitor-allowlist", {
-          method: "POST", body: JSON.stringify({username: select.value}),
+          method, body: JSON.stringify({username}),
         });
         context.showNotice(context.t("白名单已更新"));
         await reload();
       } catch (error) {
         context.showNotice(error.message, true);
-        add.disabled = false;
+        button.disabled = false;
       }
     };
-    controls.append(select, add);
-    root.append(controls);
-
+    const candidates = FTManagerAccessTable.create(context, {
+      headers: ["账户", "机构", "角色", "状态", "操作"],
+      searchPlaceholder: "搜索用户（用户名、别名、机构）",
+      empty: "没有符合条件的用户",
+      searchText: item => [item.username, item.alias, item.organization_id].join(" "),
+      cells: item => [
+        accountLabel(context, item), item.organization_id || "",
+        item.role === "super_admin" ? context.t("超级管理员") : context.t("普通用户"),
+        enabled.has(item.username) ? context.t("已加入白名单") : context.t("未加入白名单"),
+        () => {
+          const button = FTUI.iconButton(context, "plus", "添加到白名单", () => mutate("POST", item.username, button));
+          button.disabled = enabled.has(item.username);
+          return button;
+        },
+      ],
+    });
+    const candidateTitle = document.createElement("h4");
+    candidateTitle.textContent = context.t("添加用户");
+    root.append(candidateTitle, candidates.root);
     const table = FTManagerAccessTable.create(context, {
       headers: ["账户", "机构", "角色", "状态", "操作"],
       searchPlaceholder: "搜索白名单用户",
+      refresh: reload,
       empty: "当前服务器没有白名单用户",
       searchText: item => [
         item.alias, item.username, item.organization_id, item.role,
@@ -87,29 +79,20 @@
         item.enabled && item.account_active
           ? context.t("已启用") : context.t("已停用或账户不可用"),
         (ctx, entry) => {
-          const button = document.createElement("button");
-          button.className = "secondary";
-          button.textContent = ctx.t("从白名单移除");
+          const button = FTUI.iconButton(ctx, "xmark", "从白名单移除", () => mutate("DELETE", entry.username, button));
           button.disabled = !entry.enabled;
-          button.onclick = async () => {
-            button.disabled = true;
-            try {
-              await ctx.api("/api/admin/public-visitor-allowlist", {
-                method: "DELETE",
-                body: JSON.stringify({username: entry.username}),
-              });
-              ctx.showNotice(ctx.t("白名单已更新"));
-              await reload();
-            } catch (error) {
-              ctx.showNotice(error.message, true);
-              button.disabled = false;
-            }
-          };
           return button;
         },
       ],
     });
-    table.setRows(entries);
+    root.update = latest => {
+      const entries = Array.isArray(latest.visitor_allowlist) ? latest.visitor_allowlist : [];
+      enabled.clear();
+      entries.filter(item => item.enabled).forEach(item => enabled.add(item.username));
+      candidates.setRows((latest.users || []).filter(item => item.active));
+      table.setRows(entries);
+    };
+    root.update(payload);
     root.append(table.root);
     return root;
   }
@@ -120,10 +103,10 @@
       "已认证设备",
       "设备记录来自 control_devices；撤销会立即对共享 PostgreSQL 的所有 Manager 生效。",
     );
-    const records = Array.isArray(payload.devices) ? payload.devices : [];
     const table = FTManagerAccessTable.create(context, {
       headers: ["设备", "用户", "客户端", "网络记录", "状态", "操作"],
       searchPlaceholder: "搜索认证设备",
+      refresh: reload,
       empty: "当前没有已认证设备",
       searchText: item => [
         item.device_name, item.device_id, item.username, item.client_name,
@@ -137,10 +120,7 @@
         item.enabled ? context.t("已启用") : context.t("已撤销"),
         (ctx, entry) => {
           if (!entry.enabled) return "";
-          const button = document.createElement("button");
-          button.className = "secondary";
-          button.textContent = ctx.t("撤销设备");
-          button.onclick = async () => {
+          const button = FTUI.iconButton(ctx, "xmark", "撤销设备", async () => {
             button.disabled = true;
             try {
               await ctx.api("/api/admin/access-control/devices/revoke", {
@@ -152,12 +132,13 @@
               ctx.showNotice(error.message, true);
               button.disabled = false;
             }
-          };
+          });
           return button;
         },
       ],
     });
-    table.setRows(records);
+    root.update = latest => table.setRows(latest.devices || []);
+    root.update(payload);
     root.append(table.root);
     return root;
   }
@@ -190,17 +171,12 @@
     const refresh = async () => {
       const latest = await context.api("/api/admin/access-control");
       if (!current(context)) return;
-      body.replaceChildren(
-        selected === "devices"
-          ? deviceView(context, latest, refresh)
-          : allowlistView(context, latest, refresh),
-      );
+      view.update(latest);
     };
-    body.append(
-      selected === "devices"
-        ? deviceView(context, payload, refresh)
-        : allowlistView(context, payload, refresh),
-    );
+    const view = selected === "devices"
+      ? deviceView(context, payload, refresh)
+      : allowlistView(context, payload, refresh);
+    body.append(view);
   }
 
   window.FTManagerAccessControl = Object.freeze({show});

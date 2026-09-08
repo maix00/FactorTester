@@ -567,10 +567,11 @@ class WriteRoutesMixin:
             return
         if self._proxy_service_write(parsed, method="DELETE"):
             return
-        if self._proxy_authenticated_local_service(parsed, method="DELETE"):
-            return
+        # Manager-owned policy must be handled before the broad /api/admin/ proxy.
         if parsed.path == "/api/admin/public-visitor-allowlist":
             self._admin_remove_visitor_allowlist()
+            return
+        if self._proxy_authenticated_local_service(parsed, method="DELETE"):
             return
         self.send_error(404)
 
