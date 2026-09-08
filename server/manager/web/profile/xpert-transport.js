@@ -33,7 +33,7 @@
           part.data.items.push(item);
           continue;
         }
-      } else if (role === "ai" && item.turn_id && previous?.executionId === item.turn_id
+      } else if (role === "ai" && previous?.role === "ai" && item.turn_id && previous?.executionId === item.turn_id
           && typeof previous.content === "string") {
         previous.content += "\n\n" + content(item);
         continue;
@@ -130,6 +130,17 @@
                   emit("events", {type: "event", event: "on_message_start", data: {executionId: event.turn_id}});
                 }
                 if (event.type === "error") { emit("error", event.message); continue; }
+                if (event.type === "thread.items.replaced") {
+                  const canonical = event.items || [];
+                  const turns = new Set(canonical.map(item => item.turn_id).filter(Boolean));
+                  const older = event.has_more ? [...items.values()].filter(item => (
+                    item.turn_id && !turns.has(item.turn_id)
+                  )) : [];
+                  items.clear();
+                  for (const item of [...older, ...canonical]) items.set(item.id, item);
+                  emit("values", {ft_authoritative: true, messages: messages([...items.values()])});
+                  continue;
+                }
                 if (event.type === "thread.item.removed") items.delete(event.item_id);
                 if (event.item || event.type === "thread.item.removed") {
                   if (event.item) items.set(event.item.id, {...event.item,
@@ -209,9 +220,8 @@
           if (typeof text !== "string" || !text.trim()) return json({error: "消息不能为空"}, 400);
           const result = await data("threads.steer", {thread_id: id, turn_id: turn,
             input: {content: [{type: "input_text", text}]}});
-          const messageID = input.message.clientMessageId || crypto.randomUUID();
-          liveItems.get(id)?.set(messageID, {id: messageID, type: "user_message",
-            content: [{text}], created_at: new Date().toISOString()});
+          // Acceptance is not the application position. The provider's user
+          // item event inserts the steer instruction in the current turn.
           return json(result);
         }
         if (run === "stream") return stream(id, body.input, false, init.signal);

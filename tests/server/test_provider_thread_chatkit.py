@@ -250,3 +250,25 @@ def test_outline_defers_large_process_details_with_stable_turn_cursor():
     assert {item["turn_id"] for item in details["items"]} == {"turn-1"}
     assert "large-output" in repr(details)
     assert len([item for item in outline["items"] if item["type"] == "assistant_message"]) == 2
+
+
+def test_steer_preserves_full_turn_and_detail_cursor_after_new_turn():
+    items = [
+        {"id": "u", "type": "userMessage", "content": "question"},
+        {"id": "r", "type": "reasoning", "summary": ["inspect"]},
+        {"id": "c", "type": "commandExecution", "command": "pwd", "aggregatedOutput": "FULL_OUTPUT"},
+        {"id": "s", "type": "userMessage", "content": "steer"},
+        {"id": "p", "type": "agentMessage", "phase": "commentary", "text": "apply steer"},
+        {"id": "a", "type": "agentMessage", "phase": "final_answer", "text": "done"},
+    ]
+    thread = {"turns": [{"id": "one", "items": items}]}
+    outline = provider_thread_page(thread, "conversation", view="outline", order="asc")
+    assert [item["id"] for item in outline["items"]] == ["u", "r", "c", "s", "p", "a"]
+    assert {item["turn_id"] for item in outline["items"]} == {"one"}
+    command = next(item for item in outline["items"] if item["id"] == "c")
+    assert "FULL_OUTPUT" not in str(command)
+    thread["turns"].append({"id": "two", "items": [{"id": "a2", "type": "agentMessage", "text": "new"}]})
+    detail = provider_thread_page(thread, "conversation", view="timeline", limit=1, after=command["detail_after"])
+    assert {item["id"] for item in detail["items"]} == {"u", "r", "c", "s", "p", "a"}
+    assert "FULL_OUTPUT" in str(detail)
+    assert "apply steer" in str(detail)

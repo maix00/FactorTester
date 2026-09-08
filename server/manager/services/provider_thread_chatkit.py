@@ -320,6 +320,10 @@ def _project_item(
     agent_phase: str = "",
 ) -> dict[str, Any] | None:
     kind = _kind(item.get("type") or item.get("kind"))
+    if kind == "message":
+        kind = {"user": "usermessage", "assistant": "assistantmessage"}.get(
+            str(item.get("role") or "").lower(), kind,
+        )
     if kind in {"usermessage", "inputmessage", "user"}:
         text = _text(item.get("content") or item.get("text")).strip()
         return ({
@@ -491,7 +495,10 @@ def provider_thread_page(
     selected_order = str(order or "desc").strip().casefold()
     if selected_order not in {"asc", "desc"}:
         raise ValueError("conversation item order is invalid")
-    anchor_turn_id = _cursor_turn_id(turns, after, selected_order)
+    detail_cursor = str(after or "").startswith("detail:")
+    anchor_turn_id = _cursor_turn_id(
+        turns, str(after)[7:] if detail_cursor else after, selected_order,
+    )
     anchor_index = None
     if anchor_turn_id:
         matches = [
@@ -501,7 +508,13 @@ def provider_thread_page(
         if not matches:
             raise ValueError("conversation cursor no longer matches this thread")
         anchor_index = matches[0]
-    if selected_order == "desc":
+    if detail_cursor:
+        # Details address the recorded turn itself, including when it was the
+        # newest turn at outline load time and newer turns have since arrived.
+        if anchor_index is None:
+            raise ValueError("conversation detail cursor is invalid")
+        start, end, has_more = anchor_index, anchor_index + 1, False
+    elif selected_order == "desc":
         end = anchor_index if anchor_index is not None else len(turns)
         start = max(0, end - size)
         has_more = start > 0
@@ -532,9 +545,8 @@ def provider_thread_page(
             if item.get("type") not in {"workflow", "client_tool_call"}:
                 continue
             index = turn_indexes.get(item.get("turn_id"), len(turns) - 1)
-            item["detail_after"] = (
-                _encode_cursor(_turn_id(turns[index + 1], index + 1), "desc")
-                if index + 1 < len(turns) else ""
+            item["detail_after"] = "detail:" + _encode_cursor(
+                _turn_id(turns[index], index), "desc",
             )
             item["details_deferred"] = True
             if item.get("type") == "client_tool_call":

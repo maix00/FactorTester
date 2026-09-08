@@ -264,7 +264,10 @@ const state = {
   assert.match(output, /第一句/);
   assert.match(output, /第二句/);
   assert.doesNotMatch(output, /agent_process_exited|exited before producing/);
-  assert.doesNotMatch(output, /旧回答不应覆盖/);
+  const finalEvents = output.split('\n\n').filter(Boolean).map(frame => JSON.parse(frame.slice(6)));
+  assert.match(finalEvents.findLast(event => event.type === 'thread.item.done').item.content[0].text, /第一句\n第二句/);
+  assert(finalEvents.some(event => event.type === 'thread.items.replaced'),
+    'durable history replaces transient items without dropping intermediate steps');
   assert.doesNotMatch(output, /PRIVATE_REASONING/);
   assert.match(output, /正在核对可展示的过程信息/);
   assert.match(output, /TOOL_STDOUT/);
