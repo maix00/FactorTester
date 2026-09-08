@@ -447,7 +447,8 @@ class AgentAppServerSupervisor:
             expected_conversation = str(processing.get("conversation_id") or "")
             expected_turn = str(processing.get("turn_id") or "")
             requested_turn = str(
-                request_params.get("turnId")
+                request_params.get("expectedTurnId")
+                or request_params.get("turnId")
                 or request_params.get("turn_id")
                 or ""
             )
@@ -460,6 +461,12 @@ class AgentAppServerSupervisor:
                     raise AgentAppServerError("Steer target turn has ended")
                 method = "turn/start"
                 converted_steer = True
+                request_params.pop("turnId", None)
+                request_params.pop("turn_id", None)
+                request_params.pop("expectedTurnId", None)
+            else:
+                # Codex app-server wire contract differs from the Manager turn handle.
+                request_params["expectedTurnId"] = expected_turn
                 request_params.pop("turnId", None)
                 request_params.pop("turn_id", None)
         if method == "turn/start" and conversation is not None:
@@ -509,7 +516,7 @@ class AgentAppServerSupervisor:
                     with self._lock:
                         active = self._processing_turns.get(key) or {}
                         if (active.get("conversation_id") == identifier
-                                and active.get("turn_id") == request_params.get("turnId")):
+                                and active.get("turn_id") == request_params.get("expectedTurnId")):
                             self._processing_turns.pop(key, None)
                     raise AgentAppServerError("Steer target turn has ended") from exc
                 if inactive_steer:
@@ -518,13 +525,14 @@ class AgentAppServerSupervisor:
                         if (
                             str(active.get("conversation_id") or "") == identifier
                             and str(active.get("turn_id") or "")
-                            == str(request_params.get("turnId") or "")
+                            == str(request_params.get("expectedTurnId") or "")
                         ):
                             self._processing_turns.pop(key, None)
                     method = "turn/start"
                     converted_steer = True
                     request_params.pop("turnId", None)
                     request_params.pop("turn_id", None)
+                    request_params.pop("expectedTurnId", None)
                     for field in ("model", "effort", "serviceTier"):
                         request_params.pop(field, None)
                     if conversation is not None:

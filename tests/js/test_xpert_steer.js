@@ -25,7 +25,15 @@ vm.runInThisContext(fs.readFileSync('server/manager/web/profile/xpert-transport.
  assert.equal(calls.at(-1).params.turn_id,'turn1');
  output.enqueue(new TextEncoder().encode('data: {"type":"thread.item.replaced","item":{"id":"answer","type":"assistant_message","content":[{"text":"continues"}]}}\n\n'));
  const text=new TextDecoder().decode((await reader.read()).value);
- assert.match(text,/adjust/);assert.match(text,/continues/);
+ assert.doesNotMatch(text,/adjust/, 'accepted steer waits for its application event');
+ assert.match(text,/continues/);
+ output.enqueue(new TextEncoder().encode('data: '+JSON.stringify({type:'thread.item.added',item:{id:'applied-steer',type:'user_message',content:[{text:'adjust'}]}})+'\n\n'));
+ await reader.read();
+ output.enqueue(new TextEncoder().encode('data: '+JSON.stringify({type:'thread.item.added',item:{id:'after-steer',type:'assistant_message',content:[{text:'applied'}]}})+'\n\n'));
+ const applied = JSON.parse(new TextDecoder().decode((await reader.read()).value).split('data: ')[1]);
+ assert.deepEqual(applied.messages.map(x=>[x.role,x.content]), [['ai','continues'],['human','adjust'],['ai','applied']]);
+ assert(applied.messages.every(x=>x.executionId==='turn1'));
+
  output.close();await reader.read();
  assert.equal((await request('threads/a/runs',follow)).status,409,'ended run cannot restart');
  assert.equal(calls.filter(x=>x.type==='threads.add_user_message').length,1);

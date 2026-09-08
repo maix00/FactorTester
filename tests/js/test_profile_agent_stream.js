@@ -21,6 +21,10 @@ global.EventSource = class {
       if (this.closed) return;
       this.onopen?.();
       const events = [
+        {method: 'item/completed', params: {turnId: 'turn-1',
+          item: {id: 'user-wire-1', type: 'message', role: 'user',
+            content: [{type: 'input_text', text: 'USER_INPUT_MUST_NOT_BECOME_REPLY'}]}},
+          chatkit_item: {id: 'user-wire-1', type: 'user_message'}},
         {
           method: 'thread/tokenUsage/updated',
           params: {
@@ -255,10 +259,15 @@ const state = {
     async () => {},
   );
   const output = chunks.join('');
+  assert.doesNotMatch(output, /USER_INPUT_MUST_NOT_BECOME_REPLY/);
+  assert.notEqual(state.assistant?.id, 'user-wire-1');
   assert.match(output, /第一句/);
   assert.match(output, /第二句/);
   assert.doesNotMatch(output, /agent_process_exited|exited before producing/);
-  assert.doesNotMatch(output, /旧回答不应覆盖/);
+  const finalEvents = output.split('\n\n').filter(Boolean).map(frame => JSON.parse(frame.slice(6)));
+  assert.match(finalEvents.findLast(event => event.type === 'thread.item.done').item.content[0].text, /第一句\n第二句/);
+  assert(finalEvents.some(event => event.type === 'thread.items.replaced'),
+    'durable history replaces transient items without dropping intermediate steps');
   assert.doesNotMatch(output, /PRIVATE_REASONING/);
   assert.match(output, /正在核对可展示的过程信息/);
   assert.match(output, /TOOL_STDOUT/);
@@ -328,3 +337,12 @@ const state = {
   console.error(error);
   process.exitCode = 1;
 });
+
+for (const role of ['user', 'tool', 'system']) {
+  assert.equal(window.FTProfileChatKitProtocol.completedText({params: {
+    item: {type: 'message', role, content: 'never assistant output'},
+  }}), '');
+}
+assert.equal(window.FTProfileChatKitProtocol.completedText({params: {
+  item: {type: 'message', role: 'assistant', content: 'final answer'},
+}}), 'final answer');

@@ -154,7 +154,12 @@
 
   function isAssistantItem(item) {
     const type = String(item?.type || item?.kind || "").replace(/[-_]/g, "");
-    return /^(agentmessage|assistantmessage|assistant|outputtext|message)$/i.test(type);
+    const role = String(item?.role || "").toLowerCase();
+    if (role && role !== "assistant") return false;
+    // Generic provider messages also represent user/tool input. Their text
+    // must never seed the live assistant accumulator or its stable item ID.
+    if (/^message$/i.test(type)) return role === "assistant";
+    return /^(agentmessage|assistantmessage|assistant|outputtext)$/i.test(type);
   }
 
   function completedText(payload) {

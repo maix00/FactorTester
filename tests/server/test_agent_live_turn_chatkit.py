@@ -41,8 +41,9 @@ def test_active_turn_is_visible_before_provider_thread_finishes():
     assert [item["id"] for item in page["items"]] == [
         "answer-live", "reasoning-1", "user-1",
     ]
-    assert page["items"][0]["content"][0]["text"] == "当前检查到以下内容"
-    assert "workflow" not in page["items"][0]
+    # Commentary is visible as a collapsible process item, not a final answer.
+    assert page["items"][0]["type"] == "workflow"
+    assert "当前检查到以下内容" in str(page["items"][0]["workflow"])
 
 
 def test_active_turn_ignores_events_from_another_thread():

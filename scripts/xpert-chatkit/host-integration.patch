@@ -1,5 +1,5 @@
 diff --git a/packages/chatkit-ui/src/components/chat.tsx b/packages/chatkit-ui/src/components/chat.tsx
-index 2c6757d..80a87fe 100644
+index 2c6757d..c431b04 100644
 --- a/packages/chatkit-ui/src/components/chat.tsx
 +++ b/packages/chatkit-ui/src/components/chat.tsx
 @@ -1326,8 +1326,7 @@ export function Chat({
@@ -44,18 +44,30 @@ index 2c6757d..80a87fe 100644
              <div className="flex items-center gap-1">
                {taskSummaryAvailable && (
                  <TaskSummaryTrigger
-@@ -3470,6 +3446,10 @@ export function Chat({
+@@ -3470,6 +3446,22 @@ export function Chat({
                  </Tooltip>
                )}
  
 +              {new URLSearchParams(window.location.search).get('ft_drawer') === '1' && (
-+                <button type="button" aria-label="收起" className="inline-flex h-8 w-8 items-center justify-center text-muted-foreground"
-+                  onClick={() => window.dispatchEvent(new Event('ft-drawer-close'))}><X size={16} /></button>
++                <Tooltip>
++                  <TooltipTrigger asChild>
++                    <span className="inline-flex h-8 w-8">
++                      <button type="button" aria-label="收起" className={cn(
++                        'flex h-8 w-8 cursor-pointer items-center justify-center rounded-md',
++                        'text-muted-foreground hover:text-foreground hover:bg-muted',
++                        'transition-colors duration-150',
++                      )} onClick={() => window.dispatchEvent(new Event('ft-drawer-close'))}>
++                        <X size={16} />
++                      </button>
++                    </span>
++                  </TooltipTrigger>
++                  <TooltipContent side="bottom">收起</TooltipContent>
++                </Tooltip>
 +              )}
                <Tooltip>
                  <TooltipTrigger asChild>
                    <span className="inline-flex h-8 w-8">
-@@ -3692,6 +3672,7 @@ export function Chat({
+@@ -3692,6 +3684,7 @@ export function Chat({
                        setMessageNavigationAnchor(messageNavigationId, node)
                      }
                      data-message-navigation-id={messageNavigationId}
@@ -63,7 +75,7 @@ index 2c6757d..80a87fe 100644
                      className={cn(
                        'group flex gap-3',
                        message.type === 'human'
-@@ -3715,7 +3696,7 @@ export function Chat({
+@@ -3715,7 +3708,7 @@ export function Chat({
                          className={cn(
                            'max-w-full rounded-2xl',
                            message.type === 'human'
@@ -72,7 +84,7 @@ index 2c6757d..80a87fe 100644
                              : message.type === 'system'
                                ? 'bg-muted text-muted-foreground text-xs px-4 py-2.5'
                                : 'py-1 text-chat-foreground', // AI messages: use chat-specific foreground color
-@@ -3800,7 +3781,7 @@ export function Chat({
+@@ -3800,7 +3793,7 @@ export function Chat({
                          )}
                        </div>
                        {/* Message actions - hidden during streaming, retry only for last AI message */}
@@ -81,7 +93,7 @@ index 2c6757d..80a87fe 100644
                          content={messageContent}
                          isAssistant={isAssistantMessage}
                          isStreaming={isStreamingMessage}
-@@ -3811,7 +3792,7 @@ export function Chat({
+@@ -3811,7 +3804,7 @@ export function Chat({
                              ? () => handleRetry(index)
                              : undefined
                          }
@@ -90,7 +102,7 @@ index 2c6757d..80a87fe 100644
                      </div>
                    </div>
                  );
-@@ -4250,7 +4231,7 @@ export function Chat({
+@@ -4250,7 +4243,7 @@ export function Chat({
              />
            )}
  
@@ -447,10 +459,10 @@ index bbc6a97..05a87a2 100644
      </Sheet>
    );
 diff --git a/packages/chatkit-ui/src/components/thread/messages/ai.tsx b/packages/chatkit-ui/src/components/thread/messages/ai.tsx
-index 0e5a3cd..0e30f23 100644
+index 0e5a3cd..01b5f15 100644
 --- a/packages/chatkit-ui/src/components/thread/messages/ai.tsx
 +++ b/packages/chatkit-ui/src/components/thread/messages/ai.tsx
-@@ -143,6 +143,61 @@ function getInlinePetState(
+@@ -143,6 +143,64 @@ function getInlinePetState(
    return status === 'loading' ? 'running' : 'review';
  }
  
@@ -466,7 +478,9 @@ index 0e5a3cd..0e30f23 100644
 +  const expand = async (expanded: boolean) => {
 +    setOpen(expanded);
 +    if (!expanded || pending.current) return;
-+    const missing = items.filter(item => item.details_deferred && !loaded[item.id]);
++    const missing = items.filter(item => item.details_deferred && (!loaded[item.id]
++      || JSON.stringify(loaded[item.id].workflow?.tasks?.map((task: any) => task.status_indicator))
++        !== JSON.stringify(item.workflow?.tasks?.map((task: any) => task.status_indicator))));
 +    if (!missing.length) return;
 +    pending.current = true; setLoading(true); setError('');
 +    try {
@@ -482,6 +496,7 @@ index 0e5a3cd..0e30f23 100644
 +    } catch (error) { setError(error instanceof Error ? error.message : String(error)); }
 +    finally { pending.current = false; setLoading(false); }
 +  };
++  React.useEffect(() => { if (open) void expand(true); }, [data.items]);
 +  const failed = items.some(item => item.workflow?.tasks?.some((task: any) => /error|failed/.test(task.status_indicator || '')));
 +  return <details className="w-full text-sm text-muted-foreground" open={open}
 +    onToggle={event => { void expand(event.currentTarget.open); }}>
@@ -491,7 +506,7 @@ index 0e5a3cd..0e30f23 100644
 +      {error && <button onClick={() => void expand(true)}>重试：{error}</button>}
 +      {items.map(item => <details key={item.id} className="py-1">
 +        <summary className="cursor-pointer">{(item.workflow?.tasks || []).map((task: any) => task.title).join(' · ') || '执行步骤'}</summary>
-+        <FTProcessDetail item={loaded[item.id] || item} />
++        <FTProcessDetail item={item.details_deferred ? loaded[item.id] || item : item} />
 +      </details>)}
 +    </div>}
 +  </details>;
@@ -512,7 +527,7 @@ index 0e5a3cd..0e30f23 100644
  function ReasoningBlock({
    reasoning,
  }: {
-@@ -478,6 +533,9 @@ function renderContentItem(
+@@ -478,6 +536,9 @@ function renderContentItem(
    }
  
    if (isComponentContent(content)) {
@@ -522,7 +537,7 @@ index 0e5a3cd..0e30f23 100644
      if (isContextCompressionComponent(content)) {
        return (
          <div
-@@ -612,7 +670,7 @@ function renderEntryBatch(
+@@ -612,7 +673,7 @@ function renderEntryBatch(
      {
        shouldGroupComponent: (item) =>
          getRequestUserInputResultCardData(item, lookupMessages) === null &&
@@ -531,7 +546,7 @@ index 0e5a3cd..0e30f23 100644
      },
    );
  
-@@ -716,7 +774,7 @@ function renderContent(
+@@ -716,7 +777,7 @@ function renderContent(
    const renderUnits = buildToolComponentRenderUnits(content, {
      shouldGroupComponent: (item) =>
        getRequestUserInputResultCardData(item, lookupMessages) === null &&
