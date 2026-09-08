@@ -598,7 +598,8 @@ def test_profile_module_loads_skill_selector_after_manifest_entry():
         encoding="utf-8"
     )
     assert "/api/client/profile-agent/start" in chat_source
-    assert "openai-chatkit" in chat_source
+    assert "xpertai-chatkit" in chat_source
+    assert "openai-chatkit" not in chat_source
     assert "FTProfileChatKit" in chat_source
     assert "disabled: Boolean(options.readOnly)" not in chat_source
     assert "profile-chatkit-readonly-composer" in chat_source
@@ -614,7 +615,7 @@ def test_profile_module_loads_skill_selector_after_manifest_entry():
     assert 'context.t("过程")' not in chat_source
     assert 'context.t("启动 Agent")' not in chat_source
     assert 'context.t("停止 Agent")' not in chat_source
-    assert "fetch: adapter.fetch" in chat_source
+    assert "FTXpertTransport.create" in chat_source
     drawer_source = (
         REPO_ROOT / "server/manager/web/profile/page-agent-drawer.js"
     ).read_text(encoding="utf-8")
@@ -627,7 +628,7 @@ def test_profile_module_loads_skill_selector_after_manifest_entry():
         REPO_ROOT / "server/manager/web/profile/chatkit-adapter.js"
     ).read_text(encoding="utf-8")
     assert (
-        "https://cdn.platform.openai.com/deployments/chatkit/chatkit.js"
+        "/research-static/vendor/xpert-chatkit/xpert-chatkit.js"
         in adapter_source
     )
     assert "FTProfileChatKitProtocol" in adapter_source

@@ -38,6 +38,8 @@ async function flush() {
 }
 
 global.window = {};
+global.location = {origin: "http://test.local"};
+window.FTXpertTransport = {create: () => ({key: "test", dispose() {}})};
 global.navigator = {language: "zh-CN"};
 global.document = {
   documentElement: {lang: "zh-Hans"},
@@ -110,9 +112,9 @@ assert.equal(window.FTAgentChat.conversationModel({
   assert.equal(buttons.some(item => [
     "结果", "过程", "启动 Agent", "停止 Agent",
   ].includes(item.textContent)), false);
-  const initialChats = findAll(root, item => item.tagName === "openai-chatkit");
+  const initialChats = findAll(root, item => item.tagName === "xpertai-chatkit");
   assert.equal(initialChats.length, 1, "one timeline uses one ChatKit element");
-  assert.equal(initialChats[0].options.api.fetch, adapters[0].fetch);
+  assert.equal(initialChats[0].options.api.apiUrl, "http://test.local/ft-profile-bridge/");
   assert.equal(initialChats[0].options.initialThread, "conversation-live");
   initialChats[0].dispatch("chatkit.ready");
   await flush();

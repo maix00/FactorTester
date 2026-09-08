@@ -564,6 +564,9 @@
           `${state.assistant?.text || ""}${delta}`,
         );
       }
+      if (delta || completed) {
+        emitProcessReplacement(state, controller, P.assistantItem(state, state.assistant.text));
+      }
       if (/turn[/:._-](completed|complete|failed|error|aborted|interrupted)/i.test(method)) {
         const completion = P.turnCompletion(payload);
         if (completion.error || /failed|error|aborted|interrupted/i.test(completion.status)) {
@@ -620,10 +623,11 @@
     updateConversation,
   ) {
     const text = P.extractInputText(params);
-    if (!text) throw new Error("A non-empty text message is required");
+    const resuming = params.resume === true;
+    if (!text && !resuming) throw new Error("A non-empty text message is required");
     let response = null;
     let transitionedSteer = false;
-    if (state.active) {
+    if (state.active && !resuming) {
       response = await recoverStaleActiveTurn(
         controller, state, profileState, text, updateConversation,
       );
@@ -642,7 +646,7 @@
       .filter(isAssistantMessage)
       .map(item => String(item.id || "")));
     try {
-      if (!transitionedSteer) {
+      if (!transitionedSteer && !resuming) {
         await ensureThread(state);
         if (!hadThread) writeEvent(controller, {
           type: "thread.created", thread: P.threadObject(state),
@@ -656,7 +660,15 @@
         type: "stream_options", stream_options: {allow_cancel: true},
       });
       let request = {method: "turn/start", turnID: ""};
-      if (!transitionedSteer) {
+      if (resuming) {
+        await ensureThread(state);
+        const status = await runtimeStatus(state);
+        if (String(status.processing_conversation_id || "") !== state.conversationID
+            || !status.processing_turn_id) return;
+        state.turnID = String(status.processing_turn_id);
+        state.cursor = Number(status.processing_event_after) || 0;
+        request = {method: "resume", turnID: state.turnID};
+      } else if (!transitionedSteer) {
         const runtimeStatus = await alignEventCursor(state);
         request = turnRequest(state, runtimeStatus, text);
         response = await rpc(state, request.method, request.params);
@@ -672,6 +684,7 @@
           state.cursor = eventAfter;
         }
       }
+      writeEvent(controller, {type: "turn.started", turn_id: state.turnID});
       // The app-server event buffer is replayable from the cursor captured
       // immediately before turn/start.  Opening SSE after the turn exists
       // avoids racing the lifecycle process startup without losing early
@@ -714,7 +727,7 @@
           state.items.push(item);
         }
       }
-      await updateConversation(profileState, state, {
+      if (!resuming) await updateConversation(profileState, state, {
         title: state.threadTitle || text.slice(0, 80),
         preview: text,
       }).catch(() => {});

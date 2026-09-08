@@ -571,6 +571,14 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
         conversation_id=conversation["conversation_id"],
     )
     assert steered["result"]["accepted"] == "turn/steer"
+    with pytest.raises(AgentAppServerError, match="Steer target turn has ended"):
+        supervisor.request(
+            PRINCIPAL, PROFILE_ID, "turn/steer",
+            {"threadId": "provider-thread-1", "turnId": "turn-active",
+             "requireActiveTurn": True,
+             "input": [{"type": "text", "text": "stale turn"}]},
+            conversation_id=conversation["conversation_id"],
+        )
     promoted = supervisor.request(
         PRINCIPAL,
         PROFILE_ID,

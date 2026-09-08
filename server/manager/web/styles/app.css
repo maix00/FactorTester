@@ -863,7 +863,7 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .profile-agent-chat-conversation-only,
 .profile-agent-chat-conversation-only .profile-chatkit-host,
 .profile-agent-chat-conversation-only .profile-chatkit-stage,
-.profile-agent-chat-conversation-only openai-chatkit { height: 100%; min-height: 0; }
+.profile-agent-chat-conversation-only xpertai-chatkit { height: 100%; min-height: 0; }
 .profile-agent-chat-conversation-only,
 .profile-agent-chat-conversation-only .profile-chatkit-host,
 .profile-agent-chat-conversation-only .profile-chatkit-stage {
@@ -888,8 +888,8 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .profile-agent-runtime-notice[data-kind="error"] { color: var(--danger, #b42318); }
 .profile-agent-status { min-height: 1.25em; margin: 0; }
 .profile-chatkit-host { width: 100%; min-width: 0; min-height: 600px; margin-top: 16px; }
-.profile-chatkit-stage, .profile-chatkit-host openai-chatkit { display: block; width: 100%; min-width: 0; }
-.profile-chatkit-host openai-chatkit { height: 600px; }
+.profile-chatkit-stage, .profile-chatkit-host xpertai-chatkit { display: block; width: 100%; min-width: 0; }
+.profile-chatkit-host xpertai-chatkit { height: 600px; }
 .profile-directory { width: 100%; max-width: none; min-width: 0; }
 .profile-directory-section { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
 .profile-directory-section-heading { display: grid; gap: 4px; }
@@ -908,7 +908,7 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .profile-directory-note { white-space: pre-line; }
 .profile-chatkit-readonly { position: relative; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; padding: 8px; background: var(--panel); }
 .profile-chatkit-readonly-composer { position: absolute; z-index: 2; right: 0; bottom: 0; left: 0; min-height: 78px; display: flex; align-items: center; justify-content: center; padding: 12px 18px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 96%, var(--soft)); color: var(--muted); text-align: center; pointer-events: auto; }
-@media (max-width: 560px) { .profile-chatkit-host { min-height: 500px; } .profile-chatkit-host openai-chatkit { height: 500px; } }
+@media (max-width: 560px) { .profile-chatkit-host { min-height: 500px; } .profile-chatkit-host xpertai-chatkit { height: 500px; } }
 @media (max-width: 720px) { .profile-agent-runtime-field { grid-template-columns: 1fr; gap: 5px; } .profile-agent-context-usage { align-items: flex-start; flex-direction: column; } .profile-agent-context-usage progress { width: 100%; } }
 .topbar .research-section-tabs { width: auto; max-width: min(520px, 48vw); flex: 0 1 auto; scrollbar-width: none; }
 .topbar .research-section-tabs::-webkit-scrollbar { display: none; }
@@ -1276,7 +1276,7 @@ button.reference-item { cursor: pointer; }
 .page-agent-drawer .profile-agent-chat-conversation-only,
 .page-agent-drawer .profile-agent-chat-conversation-only .profile-chatkit-host,
 .page-agent-drawer .profile-agent-chat-conversation-only .profile-chatkit-stage,
-.page-agent-drawer .profile-agent-chat-conversation-only openai-chatkit {
+.page-agent-drawer .profile-agent-chat-conversation-only xpertai-chatkit {
   height: 100%;
   min-height: 0;
 }
