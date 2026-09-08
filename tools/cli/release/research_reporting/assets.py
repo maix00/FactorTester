@@ -86,6 +86,34 @@ def stage_report_asset(
     return {"asset": asset, "changed": bool(changed)}
 
 
+def stage_branch_image(*, package_root: Path, branch_id: str, source_path: Path,
+                       caption: str = "", alt_text: str = "") -> dict[str, Any]:
+    """复制图片到指定分支；上传原文件保留，描述使用当前报告树格式。"""
+    from .authoring.tree_paths import report_tree_paths
+    extension = source_path.suffix.lower()
+    media_type = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                  ".webp": "image/webp", ".svg": "image/svg+xml"}.get(extension)
+    if media_type is None:
+        raise ValueError("仅支持 PNG、JPEG、WebP、SVG 图片")
+    raw = _read_regular_file(source_path)
+    if not raw:
+        raise ValueError("图片不能为空")
+    if media_type == "image/svg+xml":
+        _validate_passive_svg(raw)
+    digest = hashlib.sha256(raw).hexdigest()
+    filename = digest + _MEDIA_EXTENSIONS[media_type]
+    target = report_tree_paths(package_root, branch_id)["root"].parent / "assets" / filename
+    if target.exists():
+        if target.is_symlink() or target.read_bytes() != raw:
+            raise ValueError("content-addressed report asset conflicts")
+    else:
+        publish_generation([("report_asset", target, raw)])
+    return {"asset_ref": f"report-asset:sha256:{digest}", "content_hash": digest,
+            "media_type": media_type, "filename": filename,
+            "caption": _bounded_text(caption, "caption", allow_empty=True),
+            "alt_text": _bounded_text(alt_text, "alt_text", allow_empty=True)}
+
+
 def canonical_asset_descriptor(value: Any) -> dict[str, Any]:
     """Validate the source-free descriptor embedded in a figure block."""
     fields = {

@@ -60,16 +60,27 @@ def create_report(
 
 @click.command("asset")
 @scope_options
-@click.option("--asset-file", required=True, type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--asset-file", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--input", "source_path", type=click.Path(exists=True, dir_okay=False, path_type=Path), help="复制工作区图片到指定分支，保留原文件。")
+@click.option("--caption", default="")
+@click.option("--alt-text", default="")
 @click.option("--json", "as_json", is_flag=True)
 def add_report_asset(
     profile_id: str, work_package_id: str, branch_id: str,
-    release_profile: Path | None, asset_file: Path, as_json: bool,
+    release_profile: Path | None, asset_file: Path | None, as_json: bool,
+    source_path: Path | None = None, caption: str = "", alt_text: str = "",
 ) -> None:
-    """Register an existing Work Package asset in the branch report source."""
+    """向指定分支登记图片；随后用 image 部件引用返回的 asset_ref。"""
+    if (asset_file is None) == (source_path is None):
+        raise click.UsageError("--input 与 --asset-file 必须且只能提供一个")
     scope = _scope(profile_id, work_package_id, branch_id, release_profile)
     ensure_authoring(scope, materialize=False, persist=False)
-    asset = read_json(asset_file)
+    if source_path is not None:
+        from tools.cli.release.research_reporting.assets import stage_branch_image
+        asset = stage_branch_image(package_root=scope.package_root, branch_id=branch_id,
+                                   source_path=source_path, caption=caption, alt_text=alt_text)
+    else:
+        asset = read_json(asset_file)
     if not isinstance(asset, dict):
         raise click.ClickException("--asset-file must contain a JSON object")
     try:
