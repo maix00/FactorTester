@@ -13,6 +13,25 @@
     return `/api/client/profile-workspace?${query.toString()}`;
   }
 
+  // A bare icon button (no surrounding pill/ring), fixed height, so rows stay
+  // the same height whether or not an action column is present.
+  function iconButton(symbol, label, action) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "icon-action-button";
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    const icon = window.FTIcons?.node?.(symbol);
+    if (icon && typeof button.replaceChildren === "function") {
+      button.replaceChildren(icon);
+    }
+    button.addEventListener("click", event => {
+      event?.stopPropagation?.();
+      action();
+    });
+    return button;
+  }
+
   async function download(context, profileID, path, filename) {
     const issued = await context.api("/api/transfers/objects/download-access", {
       method: "POST",
@@ -24,7 +43,7 @@
     });
     const access = issued?.access || {};
     if (!access.url || !access.bearer) {
-      throw new Error(context.t("工作区下载授权无效"));
+      throw new Error(context.t("下载授权无效"));
     }
     const response = await fetch(access.url, {
       credentials: "omit",
@@ -33,7 +52,7 @@
     });
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}));
-      throw new Error(payload.error || context.t("工作区文件下载失败"));
+      throw new Error(payload.error || context.t("文件下载失败"));
     }
     const url = URL.createObjectURL(await response.blob());
     const anchor = document.createElement("a");
@@ -45,18 +64,53 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  async function upload(context, profileID) {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.multiple = true;
+    input.addEventListener("change", async () => {
+      const files = Array.from(input.files || []);
+      if (!files.length) return;
+      try {
+        for (const file of files) {
+          const query = new URLSearchParams({
+            profile_id: profileID,
+            path: "uploads",
+            filename: file.name,
+          });
+          await context.api(`/api/client/profile-workspace/upload?${query}`, {
+            method: "POST",
+            body: file,
+            headers: {"Content-Type": "application/octet-stream"},
+          });
+        }
+        context.showNotice?.(context.t("已上传"), false);
+      } catch (error) {
+        context.showNotice?.(error.message || String(error), true);
+      } finally {
+        if (context.__workspaceReload) await context.__workspaceReload();
+      }
+    });
+    input.click();
+  }
+
   function render(context, profile) {
     const root = document.createElement("section");
     root.className = "job-section profile-workspace-browser";
+    const header = document.createElement("div");
+    header.className = "profile-workspace-header";
     const heading = document.createElement("h2");
-    heading.textContent = context.t("服务器工作区");
-    const note = document.createElement("p");
-    note.className = "settings-muted";
-    note.textContent = context.t(
-      "敏感文件不会显示；文件通过 7997 数据通道下载，可由用户显式删除。",
-    );
+    heading.textContent = context.t("工作区文件");
+    header.append(heading);
+    const uploadButton = iconButton("arrow.up.circle", context.t("上传到 uploads"), () => {
+      void upload(context, profile.profile_id);
+    });
+    uploadButton.classList.add("workspace-upload-btn");
+    header.append(uploadButton);
+    root.append(header);
+
     const body = document.createElement("div");
-    root.append(heading, note, body);
+    root.append(body);
 
     const runtime = profile.runtime || {};
     if (runtime.runtime_kind !== "server" || runtime.configured === false) {
@@ -69,6 +123,7 @@
 
     let currentPath = "";
     const load = async () => {
+      context.__workspaceReload = load;
       body.replaceChildren(FTUI.loading(context.t("正在读取工作区…")));
       try {
         const payload = await context.api(pathQuery(profile.profile_id, currentPath));
@@ -78,58 +133,40 @@
         if (currentPath) {
           const parent = currentPath.split("/").slice(0, -1).join("/");
           const row = shell.body.insertRow();
+          row.className = "workspace-row";
           row.insertCell().textContent = "..";
           row.insertCell().textContent = context.t("上级目录");
           row.insertCell();
           const action = row.insertCell();
-          const button = document.createElement("button");
-          button.type = "button";
-          button.className = "secondary";
-          button.textContent = context.t("返回");
-          button.onclick = () => { currentPath = parent; load(); };
-          action.append(button);
+          action.append(iconButton("arrow.left.arrow.right", context.t("返回"), () => {
+            currentPath = parent; load();
+          }));
         }
         (payload.entries || []).forEach(item => {
           const row = shell.body.insertRow();
+          row.className = "workspace-row";
+          const isDir = item.kind === "directory";
           const name = row.insertCell();
-          const link = document.createElement("button");
-          link.type = "button";
-          link.className = "table-link";
-          link.textContent = item.name;
-          if (item.kind === "directory") {
-            link.onclick = () => { currentPath = item.path; load(); };
-          } else {
-            link.onclick = async () => {
-              link.disabled = true;
-              try {
-                await download(context, profile.profile_id, item.path, item.name);
-              } catch (error) {
-                context.showNotice(error.message || String(error), true);
-              } finally {
-                link.disabled = false;
-              }
-            };
-          }
-          name.append(link);
-          row.insertCell().textContent = item.kind === "directory"
-            ? context.t("文件夹") : context.t("文件");
-          row.insertCell().textContent = item.kind === "directory"
-            ? "—" : formatBytes(item.size_bytes);
+          const icon = window.FTIcons?.node?.(isDir ? "folder.fill" : "doc.text");
+          if (icon) name.append(icon);
+          const nameSpan = document.createElement("span");
+          nameSpan.textContent = item.name;
+          name.append(nameSpan);
+          row.insertCell().textContent = isDir ? context.t("文件夹") : context.t("文件");
+          row.insertCell().textContent = isDir ? "—" : formatBytes(item.size_bytes);
           const action = row.insertCell();
-          if (item.kind === "file") {
-            const actionButton = document.createElement("button");
-            actionButton.type = "button";
-            actionButton.className = "secondary";
-            actionButton.textContent = context.t("下载");
-            actionButton.onclick = () => link.click();
-            action.append(actionButton);
-            const deleteButton = document.createElement("button");
-            deleteButton.type = "button";
-            deleteButton.className = "danger";
-            deleteButton.textContent = context.t("删除");
-            deleteButton.onclick = async () => {
+          if (isDir) {
+            const openBtn = iconButton("arrow.clockwise", context.t("打开"), () => {
+              currentPath = item.path; load();
+            });
+            action.append(openBtn);
+          } else {
+            const downloadBtn = iconButton("arrow.down.circle", context.t("下载"), () => {
+              void download(context, profile.profile_id, item.path, item.name);
+            });
+            action.append(downloadBtn);
+            const deleteButton = iconButton("trash", context.t("删除"), async () => {
               if (!window.confirm(context.t(`确定删除 ${item.name}？此操作无法恢复。`))) return;
-              deleteButton.disabled = true;
               try {
                 await context.api("/api/client/profile-workspace", {
                   method: "DELETE",
@@ -138,12 +175,9 @@
                 await load();
               } catch (error) {
                 context.showNotice(error.message || String(error), true);
-                deleteButton.disabled = false;
               }
-            };
+            });
             action.append(deleteButton);
-          } else {
-            action.textContent = context.t("打开");
           }
         });
         body.replaceChildren(shell.shell);
