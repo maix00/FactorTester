@@ -166,10 +166,10 @@
     {id: "factors", title: "因子库", title_key: "因子库", description_key: "浏览 canonical 与自定义因子", sfSymbol: "function", path: "/factors", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: true},
     {id: "products", title: "产品库", title_key: "产品库", description_key: "查询产品、合约与市场资料", sfSymbol: "shippingbox", path: "/products", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: true},
     {id: "strategies", title: "策略库", title_key: "策略库", description_key: "管理可复用策略、源码版本与共享范围", sfSymbol: "arrow.triangle.branch", path: "/strategies?scope=mine", requiresAuth: true, sidebarVisible: true, homeVisible: true, pinned: true},
-    {id: "manager", title: "服务器管理", title_key: "服务器管理", description_key: "查看端口状态并控制本机服务", sfSymbol: "server.rack", path: "/manager", requiresAuth: true, roles: ["super_admin"], sidebarVisible: false, homeVisible: true, pinned: false, tab_behavior: "new"},
-    {id: "mihomo", title: "Mihomo Dashboard", title_key: "Mihomo Dashboard", description_key: "打开官方 Mihomo Dashboard", sfSymbol: "network", path: "/mihomo", requiresAuth: true, roles: ["super_admin"], sidebarVisible: false, homeVisible: true, pinned: false, tab_behavior: "new"},
-    {id: "sqlite_web", title: "数据库", title_key: "数据库", description_key: "浏览统一 SQLite 数据库", sfSymbol: "cylinder.split.1x2", path: "/sqlite-web/", requiresAuth: true, roles: ["super_admin"], sidebarVisible: false, homeVisible: true, pinned: false, tab_behavior: "new"},
-    {id: "docs", title: "技术文档", title_key: "技术文档", description_key: "阅读 FactorTester 技术文档", sfSymbol: "book", path: "/docs", requiresAuth: false, sidebarVisible: false, homeVisible: true, pinned: false, tab_behavior: "new"},
+    {id: "manager", title: "服务器管理", title_key: "服务器管理", description_key: "查看端口状态并控制本机服务", sfSymbol: "server.rack", path: "/manager", requiresAuth: true, roles: ["super_admin"], sidebarVisible: true, homeVisible: true, pinned: false, tab_behavior: "singleton"},
+    {id: "mihomo", title: "Mihomo Dashboard", title_key: "Mihomo Dashboard", description_key: "打开官方 Mihomo Dashboard", sfSymbol: "network", path: "/mihomo", requiresAuth: true, roles: ["super_admin"], sidebarVisible: true, homeVisible: true, pinned: false, tab_behavior: "singleton"},
+    {id: "sqlite_web", title: "数据库", title_key: "数据库", description_key: "浏览统一 SQLite 数据库", sfSymbol: "cylinder.split.1x2", path: "/sqlite-web/", requiresAuth: true, roles: ["super_admin"], sidebarVisible: true, homeVisible: true, pinned: false, tab_behavior: "singleton"},
+    {id: "docs", title: "技术文档", title_key: "技术文档", description_key: "阅读 FactorTester 技术文档", sfSymbol: "book", path: "/docs", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: false, tab_behavior: "singleton"},
     {id: "settings", title: "设置", title_key: "设置", path: "/settings/account", requiresAuth: false, sidebarVisible: false, homeVisible: false, pinned: true},
   ];
 

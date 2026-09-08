@@ -1,5 +1,5 @@
 diff --git a/packages/chatkit-ui/src/components/chat.tsx b/packages/chatkit-ui/src/components/chat.tsx
-index 2c6757d..f67bf1f 100644
+index 2c6757d..80a87fe 100644
 --- a/packages/chatkit-ui/src/components/chat.tsx
 +++ b/packages/chatkit-ui/src/components/chat.tsx
 @@ -1326,8 +1326,7 @@ export function Chat({
@@ -44,7 +44,18 @@ index 2c6757d..f67bf1f 100644
              <div className="flex items-center gap-1">
                {taskSummaryAvailable && (
                  <TaskSummaryTrigger
-@@ -3692,6 +3668,7 @@ export function Chat({
+@@ -3470,6 +3446,10 @@ export function Chat({
+                 </Tooltip>
+               )}
+ 
++              {new URLSearchParams(window.location.search).get('ft_drawer') === '1' && (
++                <button type="button" aria-label="收起" className="inline-flex h-8 w-8 items-center justify-center text-muted-foreground"
++                  onClick={() => window.dispatchEvent(new Event('ft-drawer-close'))}><X size={16} /></button>
++              )}
+               <Tooltip>
+                 <TooltipTrigger asChild>
+                   <span className="inline-flex h-8 w-8">
+@@ -3692,6 +3672,7 @@ export function Chat({
                        setMessageNavigationAnchor(messageNavigationId, node)
                      }
                      data-message-navigation-id={messageNavigationId}
@@ -52,7 +63,7 @@ index 2c6757d..f67bf1f 100644
                      className={cn(
                        'group flex gap-3',
                        message.type === 'human'
-@@ -3715,7 +3692,7 @@ export function Chat({
+@@ -3715,7 +3696,7 @@ export function Chat({
                          className={cn(
                            'max-w-full rounded-2xl',
                            message.type === 'human'
@@ -61,15 +72,53 @@ index 2c6757d..f67bf1f 100644
                              : message.type === 'system'
                                ? 'bg-muted text-muted-foreground text-xs px-4 py-2.5'
                                : 'py-1 text-chat-foreground', // AI messages: use chat-specific foreground color
-@@ -4250,7 +4227,7 @@ export function Chat({
+@@ -3800,7 +3781,7 @@ export function Chat({
+                         )}
+                       </div>
+                       {/* Message actions - hidden during streaming, retry only for last AI message */}
+-                      <MessageActions
++                      {!(Array.isArray(message.content) && message.content.some((part: any) => part.data?.type === "FTProcess")) && <MessageActions
+                         content={messageContent}
+                         isAssistant={isAssistantMessage}
+                         isStreaming={isStreamingMessage}
+@@ -3811,7 +3792,7 @@ export function Chat({
+                             ? () => handleRetry(index)
+                             : undefined
+                         }
+-                      />
++                      />}
+                     </div>
+                   </div>
+                 );
+@@ -4250,7 +4231,7 @@ export function Chat({
              />
            )}
-
+ 
 -          <form className="flex items-end" onSubmit={handleSubmit}>
 +          <form style={new URLSearchParams(location.search).get("ft_read_only") === "1" ? {display: "none"} : undefined} className="flex items-end" onSubmit={handleSubmit}>
              <div
                data-slot="composer-input-shell"
                data-layout="stacked"
+diff --git a/packages/chatkit-ui/src/components/composer/ComposerMenu.tsx b/packages/chatkit-ui/src/components/composer/ComposerMenu.tsx
+index 2696a21..c395bbb 100644
+--- a/packages/chatkit-ui/src/components/composer/ComposerMenu.tsx
++++ b/packages/chatkit-ui/src/components/composer/ComposerMenu.tsx
+@@ -612,6 +612,7 @@ export function ComposerMenu({
+         icon={<Target />}
+         label={t('composer.workbuddy.targets')}
+         active={activePanel === 'targets'}
++        disabled={!goalCommandAvailable}
+         onSelect={() => choosePanel('targets')}
+         className={menuItemRoundedClass}
+       />
+@@ -620,6 +621,7 @@ export function ComposerMenu({
+         label={t('composer.workbuddy.experts')}
+         count={selectedSubAgentCount}
+         active={activePanel === 'experts'}
++        disabled={!runtimeCapabilities?.subAgents?.length}
+         onSelect={() => choosePanel('experts')}
+         className={menuItemRoundedClass}
+       />
 diff --git a/packages/chatkit-ui/src/components/history/HistorySidebar.tsx b/packages/chatkit-ui/src/components/history/HistorySidebar.tsx
 index 701ff46..edcc576 100644
 --- a/packages/chatkit-ui/src/components/history/HistorySidebar.tsx
@@ -125,13 +174,13 @@ index bbc6a97..05a87a2 100644
 -import { PetPreview } from '../pet/PetPreview';
 +import { Sheet, SheetContent, SheetHeader, SheetTitle } from '../ui/sheet';
 +import type { PetLocalSettings } from '../pet/pet-local-settings';
-
+ 
  export type SettingsSheetProps = {
    open: boolean;
 @@ -39,263 +10,13 @@ export type SettingsSheetProps = {
    onSave: (settings: PetLocalSettings) => void;
  };
-
+ 
 -const CHARACTER_TYPES: PetLocalCharacterType[] = [
 -  'builtin',
 -  'atlas',
@@ -397,6 +446,100 @@ index bbc6a97..05a87a2 100644
        </SheetContent>
      </Sheet>
    );
+diff --git a/packages/chatkit-ui/src/components/thread/messages/ai.tsx b/packages/chatkit-ui/src/components/thread/messages/ai.tsx
+index 0e5a3cd..0e30f23 100644
+--- a/packages/chatkit-ui/src/components/thread/messages/ai.tsx
++++ b/packages/chatkit-ui/src/components/thread/messages/ai.tsx
+@@ -143,6 +143,61 @@ function getInlinePetState(
+   return status === 'loading' ? 'running' : 'review';
+ }
+ 
++// Process records are data, not separate assistant replies. Mount expensive
++// markdown only after expansion; durable detail is read through the host API.
++function FTProcessGroup({ data }: { data: any }) {
++  const [open, setOpen] = React.useState(false);
++  const [loaded, setLoaded] = React.useState<Record<string, any>>({});
++  const [error, setError] = React.useState('');
++  const [loading, setLoading] = React.useState(false);
++  const pending = React.useRef(false);
++  const items = data.items as any[];
++  const expand = async (expanded: boolean) => {
++    setOpen(expanded);
++    if (!expanded || pending.current) return;
++    const missing = items.filter(item => item.details_deferred && !loaded[item.id]);
++    if (!missing.length) return;
++    pending.current = true; setLoading(true); setError('');
++    try {
++      const pages = await Promise.all([...new Set(missing.map(item => item.detail_after || ''))].map(async after => {
++        const response = await fetch(`/ft-profile-bridge/conversations/${encodeURIComponent(data.conversationId)}/process-details`, {
++          method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({after}),
++        });
++        const payload = await response.json();
++        if (!response.ok) throw new Error(payload.error || '读取执行详情失败');
++        return payload.data || [];
++      }));
++      setLoaded(previous => ({...previous, ...Object.fromEntries(pages.flat().map((item: any) => [item.id, item]))}));
++    } catch (error) { setError(error instanceof Error ? error.message : String(error)); }
++    finally { pending.current = false; setLoading(false); }
++  };
++  const failed = items.some(item => item.workflow?.tasks?.some((task: any) => /error|failed/.test(task.status_indicator || '')));
++  return <details className="w-full text-sm text-muted-foreground" open={open}
++    onToggle={event => { void expand(event.currentTarget.open); }}>
++    <summary className="cursor-pointer py-2">执行过程 · {items.length} 步{failed ? ' · 有失败步骤' : ''}</summary>
++    {open && <div className="space-y-2 pl-3">
++      {loading && <p>正在加载执行详情…</p>}
++      {error && <button onClick={() => void expand(true)}>重试：{error}</button>}
++      {items.map(item => <details key={item.id} className="py-1">
++        <summary className="cursor-pointer">{(item.workflow?.tasks || []).map((task: any) => task.title).join(' · ') || '执行步骤'}</summary>
++        <FTProcessDetail item={loaded[item.id] || item} />
++      </details>)}
++    </div>}
++  </details>;
++}
++function FTProcessDetail({item}: {item: any}) {
++  const ref = React.useRef<HTMLDivElement>(null);
++  const [visible, setVisible] = React.useState(false);
++  React.useEffect(() => {
++    const parent = ref.current?.parentElement as HTMLDetailsElement | null;
++    const toggle = () => setVisible(Boolean(parent?.open));
++    parent?.addEventListener('toggle', toggle); toggle();
++    return () => parent?.removeEventListener('toggle', toggle);
++  }, []);
++  return <div ref={ref}>{visible && (item.workflow?.tasks || []).map((task: any, index: number) =>
++    <MarkdownText key={index}>{typeof task.content === 'string' ? task.content : ''}</MarkdownText>)}</div>;
++}
++
+ function ReasoningBlock({
+   reasoning,
+ }: {
+@@ -478,6 +533,9 @@ function renderContentItem(
+   }
+ 
+   if (isComponentContent(content)) {
++    if ((content.data as any)?.type === 'FTProcess') {
++      return <FTProcessGroup key={content.id ?? `process-${index}`} data={content.data} />;
++    }
+     if (isContextCompressionComponent(content)) {
+       return (
+         <div
+@@ -612,7 +670,7 @@ function renderEntryBatch(
+     {
+       shouldGroupComponent: (item) =>
+         getRequestUserInputResultCardData(item, lookupMessages) === null &&
+-        !isMcpAppComponent(item),
++        !isMcpAppComponent(item) && (item.data as any)?.type !== "FTProcess",
+     },
+   );
+ 
+@@ -716,7 +774,7 @@ function renderContent(
+   const renderUnits = buildToolComponentRenderUnits(content, {
+     shouldGroupComponent: (item) =>
+       getRequestUserInputResultCardData(item, lookupMessages) === null &&
+-      !isMcpAppComponent(item),
++      !isMcpAppComponent(item) && (item.data as any)?.type !== "FTProcess",
+   });
+ 
+   return (
 diff --git a/packages/chatkit-ui/src/providers/ParentMessenger.tsx b/packages/chatkit-ui/src/providers/ParentMessenger.tsx
 index 0c3f44c..9ee5324 100644
 --- a/packages/chatkit-ui/src/providers/ParentMessenger.tsx
@@ -413,7 +556,7 @@ index 0c3f44c..9ee5324 100644
 @@ -539,6 +541,21 @@ export function ParentMessengerProvider({
          return;
        }
-
+ 
 +      if (payload.type === 'command' && payload.command === 'onShowHistory') {
 +        window.dispatchEvent(new Event('ft-show-history'));
 +        sendResponse(payload.nonce, { ok: true });
@@ -433,9 +576,18 @@ index 0c3f44c..9ee5324 100644
        if (typeof payload.nonce !== 'string') return;
        const handler = pendingRef.current.get(payload.nonce);
 diff --git a/packages/chatkit-ui/src/providers/Stream.tsx b/packages/chatkit-ui/src/providers/Stream.tsx
-index 63a8e2e..8f3cb26 100644
+index 63a8e2e..9c40383 100644
 --- a/packages/chatkit-ui/src/providers/Stream.tsx
 +++ b/packages/chatkit-ui/src/providers/Stream.tsx
+@@ -1605,7 +1605,7 @@ export function applyStreamEvent(
+       .filter((item): item is ChatKitAIMessage => Boolean(item));
+     setValues((prev) => ({
+       ...prev,
+-      messages: mergePreservedMessages(
++      messages: (parsed as any).ft_authoritative === true ? normalizedMessages : mergePreservedMessages(
+         normalizedMessages,
+         preservedMessages,
+         prev.messages ?? [],
 @@ -3134,8 +3134,8 @@ const StreamSession = ({
        const activeThreadId = activeThreadIdRef.current ?? threadId ?? null;
        if (!activeThreadId) {
@@ -447,18 +599,28 @@ index 63a8e2e..8f3cb26 100644
          });
          return;
        }
-@@ -3145,17 +3145,21 @@ const StreamSession = ({
+@@ -3145,17 +3145,30 @@ const StreamSession = ({
            ...(currentItem.context ? { context: currentItem.context } : {}),
            ...(currentItem.config ? { config: currentItem.config } : {}),
          });
 +        flushSteerFollowUps([id]);
        } catch (followUpError) {
-         setError(followUpError);
+-        setError(followUpError);
++        const ended = /Steer target turn has ended/.test(String(followUpError));
++        if (ended) {
++          // The server confirmed this exact target ended. Abort only the stale
++          // reader, never send cancel (which could interrupt a newer turn).
++          abortRef.current?.abort();
++          abortRef.current = null;
++          isLoadingRef.current = false;
++          setIsLoading(false);
++          setError(null);
++        } else setError(followUpError);
 +        removeSteerPriorityFollowUpIds([id]);
          markPendingFollowUpsAsQueued([id], {
 -          autoDrain: true,
 -          queuedFromSteer: true,
-+          autoDrain: false,
++          autoDrain: ended,
 +          queuedFromSteer: false,
          });
        }
@@ -471,3 +633,12 @@ index 63a8e2e..8f3cb26 100644
        removeAutoQueuedFollowUpIds,
        sendSteerFollowUp,
        setError,
+@@ -3621,7 +3634,7 @@ const StreamSession = ({
+       return;
+     }
+ 
+-    if (requestedInitialThread === activeThreadId) {
++    if (requestedInitialThread === activeThreadId && consumedInitialThreadRef.current === requestedInitialThread) {
+       consumedInitialThreadRef.current = requestedInitialThread;
+       return;
+     }

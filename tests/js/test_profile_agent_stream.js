@@ -301,7 +301,7 @@ const state = {
     'a new message steers the authoritative active turn after a remount',
   );
   assert.ok(requestedURLs.some(url => (
-    url.includes('conversation-items') && url.includes('view=timeline')
+    url.includes('conversation-items') && url.includes('view=outline')
   )));
   assert.equal(historyReads, 1, 'a completed turn reconciles durable history once');
   assert.match(output, /"thread.item.added","item":\{"id":"file-history-only"/);

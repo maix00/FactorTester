@@ -42,7 +42,7 @@ def test_provider_thread_projects_structured_chatkit_items_without_raw_reasoning
 
     assert [item["type"] for item in items] == [
         "user_message", "workflow", "workflow", "workflow",
-        "client_tool_call", "workflow", "assistant_message", "assistant_message",
+        "client_tool_call", "workflow", "workflow", "assistant_message",
     ]
     assert items[1]["workflow"]["type"] == "reasoning"
     assert items[1]["workflow"]["tasks"][0]["content"] == (
@@ -56,7 +56,7 @@ def test_provider_thread_projects_structured_chatkit_items_without_raw_reasoning
         "title": "factortester product-library list",
     }
     assert items[4]["arguments"] == {"limit": 20}
-    assert items[-2]["content"][0]["text"] == "正在整理结果。"
+    assert items[-2]["workflow"]["tasks"][0]["content"] == "正在整理结果。"
     assert items[-1]["content"][0]["text"].startswith("完成。\n\n```bash")
     assert all(item["thread_id"] == "conversation-1" for item in items)
 
@@ -179,12 +179,12 @@ def test_provider_thread_preserves_complete_visible_timeline():
     timeline = provider_thread_page(thread, "conversation-1", view="timeline")
 
     assert [item["type"] for item in timeline["items"]] == [
-        "assistant_message", "assistant_message", "workflow", "user_message",
+        "assistant_message", "workflow", "workflow", "user_message",
     ]
     assert "PRIVATE_CHAIN_OF_THOUGHT" not in repr(timeline)
 
 
-def test_progress_without_explicit_title_is_plain_body_text():
+def test_progress_without_explicit_title_is_collapsible_process():
     items = provider_thread_items({"turns": [{"items": [{
         "id": "progress-1",
         "type": "agentMessage",
@@ -198,8 +198,8 @@ def test_progress_without_explicit_title_is_plain_body_text():
     }]}]}, "conversation-progress")
 
     progress = items[0]
-    assert progress["type"] == "assistant_message"
-    assert progress["content"][0]["text"] == (
+    assert progress["type"] == "workflow"
+    assert progress["workflow"]["tasks"][0]["content"] == (
         "正在检查页面。\n\n已读取配置，下一步校验。"
     )
     assert "Agent progress" not in repr(progress)
@@ -234,3 +234,19 @@ def test_progress_does_not_repeat_identical_explicit_title_and_body():
     task = items[0]["workflow"]["tasks"][0]
     assert task["title"] == "完成结构校验"
     assert task["content"] is None
+
+
+def test_outline_defers_large_process_details_with_stable_turn_cursor():
+    thread = {"turns": [{"id": f"turn-{i}", "items": [
+        {"id": f"cmd-{i}", "type": "commandExecution", "command": "inspect",
+         "aggregatedOutput": "large-output" * 10000, "status": "completed"},
+        {"id": f"answer-{i}", "type": "agentMessage", "text": "ok"},
+    ]} for i in range(3)]}
+    outline = provider_thread_page(thread, "c", view="outline", limit=2)
+    command = next(item for item in outline["items"] if item["id"] == "cmd-1")
+    assert "large-output" not in repr(outline)
+    assert command["details_deferred"] is True
+    details = provider_thread_page(thread, "c", limit=1, after=command["detail_after"])
+    assert {item["turn_id"] for item in details["items"]} == {"turn-1"}
+    assert "large-output" in repr(details)
+    assert len([item for item in outline["items"] if item["type"] == "assistant_message"]) == 2

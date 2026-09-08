@@ -510,7 +510,22 @@ class AgentProfileService:
             raise ProfileRuntimeError("Profile belongs to another server")
         claim = self.runtime_store.active_claim(principal, profile_id)
         if claim is None:
-            raise ProfileRuntimeError("claim the Profile before starting its Agent")
+            # Opening an owned local Profile may start its Agent. Reuse its
+            # last provider, or the sole configured provider; never guess among
+            # multiple choices and never bind another user's/server's provider.
+            available = [item for item in self.providers(principal, runtime_kind="server")
+                         if item.get("enabled")]
+            active = self.conversation_store.active(principal, profile_id) or {}
+            preferred = str(active.get("provider_id") or "")
+            candidates = [item for item in available if item.get("provider_id") == preferred]
+            if not candidates and len(available) == 1:
+                candidates = available
+            if len(candidates) != 1:
+                raise ProfileRuntimeError("请先为此 Profile 选择一个可用的模型提供商")
+            self.claim(principal, profile_id, provider_id=candidates[0]["provider_id"])
+            claim = self.runtime_store.active_claim(principal, profile_id)
+            if claim is None:
+                raise ProfileRuntimeError("Profile Agent 绑定未完成")
         provider_id = str(claim.get("provider_id") or "").strip()
         provider = self.provider_store.get(
             principal,

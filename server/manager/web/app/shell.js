@@ -122,6 +122,20 @@
       row.querySelector(".nav-label").textContent = moduleTitle(module);
       row.title = moduleTitle(module);
       row.addEventListener("click", () => tabs.openModule(module));
+      if (module.tab_behavior === "singleton") {
+        const wrapper = document.createElement("div");
+        wrapper.className = "nav-singleton";
+        const close = document.createElement("button");
+        close.type = "button";
+        close.className = "nav-singleton-close";
+        close.dataset.moduleClose = module.id;
+        close.setAttribute("aria-label", `${t("关闭")} ${moduleTitle(module)}`);
+        close.append(FTIcons.node("xmark"));
+        close.hidden = !state.tabs.some(tab => tab.id === module.id);
+        close.addEventListener("click", () => tabs.closeTab(module.id));
+        wrapper.append(row, close);
+        return wrapper;
+      }
       return row;
     }
 

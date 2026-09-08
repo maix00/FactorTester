@@ -5,7 +5,7 @@
   const CHATKIT_SCRIPT =
     "/research-static/vendor/xpert-chatkit/xpert-chatkit.js?v=20d26e03";
   const CHATKIT_ENDPOINT = "/api/client/profile-agent/chatkit";
-  const ITEM_VIEW = "timeline";
+  const ITEM_VIEW = "outline";
   let scriptLoad = null;
 
   async function load() {
@@ -66,6 +66,13 @@
         {locked: profileState.historyOnly},
       ));
     }
+    if (operation === "items.detail") {
+      const state = await C.getConversation(profileState, C.conversationIDFrom(params), false);
+      const page = await S.authoritativePage(state, {
+        view: "timeline", after: params.after || "", limit: 1,
+      });
+      return P.jsonResponse(P.page(page.items));
+    }
     if (operation === "items.list") {
       const state = await C.getConversation(
         profileState, C.conversationIDFrom(params), false,
@@ -103,7 +110,8 @@
       const state = await C.getConversation(profileState, C.conversationIDFrom(params), false);
       const text = P.extractInputText(params);
       if (!text) return P.jsonResponse({error: "消息不能为空"}, 400);
-      if (!state.active || !state.turnID || state.turnID !== params.turn_id) {
+      if (!state.active || !state.turnID) return P.jsonResponse({error: "Steer target turn has ended"}, 409);
+      if (state.turnID !== params.turn_id) {
         return P.jsonResponse({error: "目标运行已结束或已改变，请重新发送"}, 409);
       }
       await S.rpc(state, "turn/steer", {
@@ -138,6 +146,11 @@
         : await C.createConversation(profileState);
       if (operation === "threads.create" && !text) {
         return P.jsonResponse(P.threadObject(state));
+      }
+      if (Array.isArray(params.skill_ids)) {
+        const allowed = new Set(profileState.skills);
+        if (params.skill_ids.some(id => !allowed.has(id))) return P.jsonResponse({error: "技能未在当前 Profile 启用"}, 400);
+        state.skills = [...params.skill_ids];
       }
       const controller = new AbortController();
       if (init.signal) {
@@ -235,7 +248,7 @@
     if (pageParams.limit) params.set("limit", String(pageParams.limit));
     if (pageParams.after) params.set("after", pageParams.after);
     if (pageParams.order) params.set("order", pageParams.order);
-    params.set("view", ITEM_VIEW);
+    params.set("view", pageParams.view || ITEM_VIEW);
     return `${path}?${params}`;
   }
 
@@ -270,7 +283,7 @@
     const after = P.chronologicalPageAfter(
       previous, pageParams.after, ITEM_VIEW,
     );
-    const requestParams = {...pageParams, after};
+    const requestParams = {...pageParams, after, view: params.view || ITEM_VIEW};
     const payload = await readOnlyJSON(
       profileState,
       "/api/client/profile-directory/conversation-items",
@@ -308,6 +321,7 @@
         item => String(item.conversation_id || "") === conversationID,
       );
       if (!conversation) return P.jsonResponse({error: "conversation not found"}, 404);
+      C.rememberSelectedConversation(profileState.profileKey, conversationID);
       profileState.onConversationChange?.({
         conversationID,
         conversation: {...conversation},
@@ -317,6 +331,12 @@
         conversation,
         await readOnlyItems(profileState, conversationID),
       ));
+    }
+    if (operation === "items.detail") {
+      const page = await readOnlyItems(profileState, conversationID, {
+        view: "timeline", after: params.after || "", limit: 1,
+      });
+      return P.jsonResponse(P.page(page.items.map(item => readOnlyItem(profileState.profileKey, conversationID, item))));
     }
     if (operation === "items.list") {
       const page = await readOnlyItems(
@@ -359,6 +379,13 @@
         itemPages: new Map(),
       };
       return {
+        async prepare() {
+          const conversations = await readOnlyConversations(profileState);
+          const selected = C.readSelectedConversation(profileKey);
+          profileState.selectedID = conversations.find(item => item.conversation_id === selected)?.conversation_id
+            || conversations.find(item => item.active)?.conversation_id || conversations[0]?.conversation_id || null;
+        },
+        get initialThread() { return profileState.selectedID || null; },
         fetch: (input, init) => fetchReadOnlyAdapter(profileState, input, init),
         endpoint: CHATKIT_ENDPOINT,
         locale: P.chatLocale(context),
@@ -376,7 +403,8 @@
       fetch: (input, init) => fetchAdapter(profileState, input, init),
       endpoint: CHATKIT_ENDPOINT,
       locale: P.chatLocale(context),
-      initialThread: profileState.selectedID || null,
+      prepare: () => C.loadConversations(profileState),
+      get initialThread() { return profileState.selectedID || null; },
       dispose() {
         C.dispose(profileState, S.closeSource);
       },

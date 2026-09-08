@@ -121,7 +121,22 @@
       },
       onRuntimeEvent: runtimeControls.observeEvent,
     });
+    await adapter.prepare?.();
     const transport = window.FTXpertTransport.create(adapter, {
+      onClose: options.onClose,
+      capabilities: async () => {
+        const payload = await context.api(`/api/client/profile-skills?profile_id=${encodeURIComponent(profile.profile_id)}`);
+        return {skills: (payload.skills || []).filter(item => item.selected).map(item => ({
+          id: item.skill_id, label: item.title || item.name || item.skill_id,
+          description: item.description || "", workspaceId: profile.profile_id,
+        })), plugins: [], subAgents: [], workspaces: [], connectors: []};
+      },
+      upload: options.readOnly || options.historyOnly ? null : async file => {
+        const query = new URLSearchParams({profile_id: profile.profile_id, path: "uploads", filename: file.name});
+        return context.api(`/api/client/profile-workspace/upload?${query}`, {
+          method: "POST", body: file, headers: {"Content-Type": "application/octet-stream"},
+        });
+      },
       mountControls(kind, slot) {
         if (kind === "profile") slot.replaceChildren(identity);
         if (kind === "settings") {
@@ -139,41 +154,13 @@
     chatStage.className = "profile-chatkit-stage";
     target = document.createElement("xpertai-chatkit");
     target.className = "profile-chatkit";
-    let updateTimer = null;
+    // Xpert loads the selected thread and joins its active run. A second
+    // host polling loop would race that stream and reload its partial history.
     let disposed = false;
-    let observedProcessing = false;
-    let initialRuntimeStatus = options.runtimeStatus || null;
-    async function refreshProcessingTurn() {
-      if (disposed || !selectedConversationID
-          || typeof target.fetchUpdates !== "function") return;
-      try {
-        const runtimeStatus = initialRuntimeStatus || (await context.api(
-          `/api/client/profile-agent?profile_id=${encodeURIComponent(profile.profile_id)}`,
-        )).status || {};
-        initialRuntimeStatus = null;
-        const processing = String(
-          runtimeStatus.processing_conversation_id || "",
-        ).trim() === selectedConversationID;
-        if (!processing && !observedProcessing) return;
-        // Refresh once when an active conversation is remounted and once when
-        // it finishes. Replacing ChatKit's authoritative item list every
-        // second resets its internal scroll anchor and makes the transcript
-        // appear to jump while the user is reading it.
-        if (!observedProcessing || !processing) await target.fetchUpdates();
-        observedProcessing = processing;
-        if (processing && !disposed) {
-          updateTimer = setTimeout(refreshProcessingTurn, 1000);
-        }
-      } catch (_) {
-        if (observedProcessing && !disposed) {
-          updateTimer = setTimeout(refreshProcessingTurn, 1500);
-        }
-      }
-    }
     const title = await conversationTitle(context, profile, selectedConversation || {});
     modelLabel.textContent = title;
     chatOptions = {
-      frameUrl: `/research-static/vendor/xpert-chatkit/index.html?ft_channel=${transport.key}&ft_read_only=${options.readOnly || options.historyOnly ? "1" : "0"}`,
+      frameUrl: `/research-static/vendor/xpert-chatkit/index.html?ft_channel=${transport.key}&ft_drawer=${options.onClose ? "1" : "0"}&ft_read_only=${options.readOnly || options.historyOnly ? "1" : "0"}`,
       api: {
         apiUrl: `${location.origin}/ft-profile-bridge/`,
         // An opaque UI readiness marker, never a provider credential.
@@ -197,15 +184,14 @@
       },
       composer: {
         placeholder: context.t("输入要交给 Agent 的研究问题…"),
-        attachments: {enabled: false},
+        attachments: {enabled: !options.readOnly && !options.historyOnly},
         models: [],
       },
     };
     target.setOptions(chatOptions);
     target.addEventListener("chatkit.ready", () => {
       status.textContent = context.t("Agent 对话已连接");
-      void refreshProcessingTurn();
-      if ((options.readOnly || options.historyOnly)
+      if ((options.readOnly || options.historyOnly) && !adapter.initialThread
           && typeof target.showHistory === "function") {
         // Read-only entry is a history-list entry point, not a new-thread
         // entry point.  ChatKit owns the list and will open a thread only
@@ -244,7 +230,6 @@
       dispose() {
         disposed = true;
         transport.dispose();
-        if (updateTimer !== null) clearTimeout(updateTimer);
       },
     };
   }
@@ -337,30 +322,25 @@
 
     async function activateAgent() {
       if (!isCurrent() || leaving) return;
-      const payload = options.runtimeStatus
+      let payload = options.runtimeStatus
         ? {status: options.runtimeStatus}
         : await context.api(
           `/api/client/profile-agent?profile_id=${encodeURIComponent(profile.profile_id)}`,
         );
       if (!isCurrent() || leaving) return;
-      if (!profile.active_claim) {
-        status.textContent = context.t(
-          "请先认领这个服务器 Profile；历史会话仍可读取",
-        );
-        mounted = await mountChatKit(
-          context, profile, host, status,
-          {...options, historyOnly: true, settingsHost},
-        );
-        return;
-      }
       if (!options.lifecycleManaged && !payload.status?.running) {
         status.textContent = context.t("正在启动 Agent…");
-        await context.api("/api/client/profile-agent/start", {
+        payload = await context.api("/api/client/profile-agent/start", {
           method: "POST",
           body: JSON.stringify({profile_id: profile.profile_id}),
         });
       }
       if (!isCurrent() || leaving) return;
+      if (!profile.active_claim) {
+        const catalog = await context.api("/api/client/profiles");
+        const refreshed = (catalog.profiles || []).find(item => item.profile_id === profile.profile_id);
+        if (refreshed) profile = {...profile, ...refreshed};
+      }
       status.textContent = context.t("正在加载 Agent 对话…");
       mounted = await mountChatKit(
         context, profile, host, status, {
