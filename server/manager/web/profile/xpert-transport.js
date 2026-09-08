@@ -30,11 +30,33 @@
       return {text: text.slice(0, at), files: files.map(file => ({...file, id: file.workspacePath, originalName: file.workspacePath.split("/").at(-1)}))};
     } catch { return {text, files: []}; }
   }
+  function toolText(value) {
+    return typeof value === "string" ? value : JSON.stringify(value ?? {}, null, 2);
+  }
+  function fenced(value, language = "text") {
+    const text = toolText(value);
+    const longest = Math.max(2, ...[...text.matchAll(/`+/g)].map(match => match[0].length));
+    const fence = "`".repeat(longest + 1);
+    return `${fence}${language}\n${text}\n${fence}`;
+  }
   function processItem(item) {
     if (item.type !== "client_tool_call") return item;
-    return {...item, type: "workflow", workflow: {tasks: [{title: item.name || "工具调用",
+    let args = item.arguments;
+    // Legacy projection wrapped JSON arguments in {input: "..."}.
+    for (let depth = 0; depth < 4; depth += 1) {
+      if (typeof args === "string") {
+        try { args = JSON.parse(args); } catch { break; }
+      } else if (args && typeof args === "object" && Object.keys(args).length === 1 && "input" in args) {
+        args = args.input;
+      } else break;
+    }
+    const command = args?.cmd || args?.command;
+    const body = command
+      ? `命令\n\n${fenced(command, "sh")}`
+      : `参数\n\n${fenced(args, typeof args === "object" ? "json" : "text")}`;
+    return {...item, type: "workflow", workflow: {tasks: [{title: command ? "终端执行" : item.name || "工具调用",
       status_indicator: item.status === "pending" ? "loading" : "complete",
-      content: item.details_deferred ? "" : JSON.stringify({input: item.arguments, output: item.output}, null, 2),
+      content: item.details_deferred ? "" : body + (item.output == null ? "" : `\n\n输出\n\n${fenced(item.output)}`),
     }]}};
   }
   function messages(items) {
