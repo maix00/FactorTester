@@ -482,6 +482,7 @@ def provider_thread_page(
     after: str = "",
     view: str = "timeline",
     order: str = "desc",
+    enrich=None,
 ) -> dict[str, Any]:
     """Return one newest-first navigation page in chronological item order.
 
@@ -525,6 +526,8 @@ def provider_thread_page(
         end = min(len(turns), start + size)
         has_more = end < len(turns)
     selected = turns[start:end]
+    if enrich is not None:
+        selected = enrich(selected, view == "outline")
     page_thread = {**thread, "turns": selected}
     if has_more and selected:
         cursor_index = start if selected_order == "desc" else end - 1

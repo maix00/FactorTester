@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from server.manager.services.provider_rollout_history import enrich_turns
+
 import logging
 import threading
 import time
@@ -365,8 +367,16 @@ class AgentAppServerSupervisor:
             )
         if not isinstance(thread, Mapping):
             raise AgentAppServerError("Provider did not return the conversation thread")
+        workspace = getattr(getattr(session, "runtime", None), "workspace_root", None)
+        if workspace is None and hasattr(self.thread_reader, "history_workspace"):
+            workspace = self.thread_reader.history_workspace(
+                key[0], key[1], str(conversation.get("provider_id") or ""),
+            )
         page = provider_thread_page(
             thread, identifier, limit=limit, after=after, view=view, order=order,
+            enrich=(lambda turns, outline: enrich_turns(
+                thread, turns, workspace, outline=outline,
+            )) if workspace is not None else None,
         )
         processing = self._processing_turns.get(key) or {}
         if (
