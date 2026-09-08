@@ -135,23 +135,9 @@
     shell.setAttribute("aria-label", context.t("页面智能体助手"));
     applyDrawerBoundary(shell);
     const header = document.createElement("header");
-    const title = document.createElement("div");
-    title.className = "page-agent-drawer-title";
-    const heading = document.createElement("strong");
-    heading.textContent = options.title || context.t("智能体助手");
-    const profileButton = document.createElement("button");
-    profileButton.type = "button";
-    profileButton.className = "page-agent-drawer-profile";
-    profileButton.hidden = true;
-    const profileMenuButton = document.createElement("button");
-    profileMenuButton.type = "button";
-    profileMenuButton.className = "page-agent-drawer-profile-menu-button";
-    profileMenuButton.textContent = "▾";
-    profileMenuButton.setAttribute("aria-label", context.t("切换研究身份"));
-    profileMenuButton.hidden = true;
-    const profileMenu = document.createElement("div");
-    profileMenu.className = "page-agent-drawer-profile-menu";
-    profileMenu.hidden = true;
+    const profileSelect = document.createElement("select");
+    profileSelect.setAttribute("aria-label", context.t("Profile"));
+    profileSelect.className = "ft-chat-profile-select";
     const close = document.createElement("button");
     close.type = "button";
     close.className = "page-agent-drawer-close";
@@ -159,8 +145,7 @@
     close.setAttribute("aria-label", context.t("收起"));
     const body = document.createElement("div");
     body.className = "page-agent-drawer-body";
-    title.append(heading, profileButton, profileMenuButton, profileMenu);
-    header.append(title, close);
+    header.append(close);
     shell.append(header, body);
     document.body.append(shell);
 
@@ -190,27 +175,17 @@
       profile?.alias || profile?.title || profile?.name || profile?.profile_id || "",
     ).trim() + (profile?.runtime_bound_here === false
       ? ` · ${context.t("未绑定当前服务器/客户端")}` : "");
-    const profileDetails = () => {
-      if (!profileID) return;
-      context.navigate?.(
-        `/research?section=profiles&profile=${encodeURIComponent(profileID)}`,
-      );
-    };
     const renderProfileSelector = () => {
-      profileButton.textContent = profileLabel(activeProfile);
-      profileButton.hidden = !profileID;
-      profileMenuButton.hidden = selectableProfiles.length < 2;
-      profileMenu.replaceChildren(...selectableProfiles.map(profile => {
-        const item = document.createElement("button");
-        item.type = "button";
+      const profiles = [...selectableProfiles];
+      if (activeProfile && !profiles.some(item => String(item.profile_id) === profileID)) profiles.unshift(activeProfile);
+      profileSelect.replaceChildren(...profiles.map(profile => {
+        const item = document.createElement("option");
+        item.value = String(profile.profile_id);
         item.textContent = profileLabel(profile);
-        item.className = String(profile.profile_id) === profileID ? "active" : "";
-        item.addEventListener("click", () => {
-          profileMenu.hidden = true;
-          void selectProfile(profile);
-        });
         return item;
       }));
+      profileSelect.value = profileID;
+      profileSelect.disabled = profiles.length < 2;
     };
     async function selectProfile(profile) {
       const nextID = String(profile?.profile_id || "").trim();
@@ -294,6 +269,7 @@
             })();
           const chatReady = window.FTAgentChat.render({...mountContext, isRouteCurrent: () => true}, profile, {
             conversationOnly: true,
+            profileControl: profileSelect,
             lifecycleManaged: true,
             runtimeStatus: lifecycle.runtimeStatus,
             profileKey: mountOptions.profileKey,
@@ -339,9 +315,10 @@
     );
 
     close.addEventListener("click", hide);
-    profileButton.addEventListener("click", profileDetails);
-    profileMenuButton.addEventListener("click", () => {
-      profileMenu.hidden = !profileMenu.hidden;
+    profileSelect.addEventListener("change", () => {
+      const profile = selectableProfiles.find(item => String(item.profile_id) === profileSelect.value);
+      if (profile) void selectProfile(profile);
+      else renderProfileSelector();
     });
     const api = Object.freeze({hide, open, registration, shell, toggle, updatePage});
     drawers.set(tabID, api);

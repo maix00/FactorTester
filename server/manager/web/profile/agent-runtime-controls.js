@@ -43,7 +43,7 @@
 
   function create(profile, context, options = {}) {
     const readOnly = Boolean(options.readOnly);
-    const root = document.createElement("details");
+    const root = document.createElement(options.embedded ? "div" : "details");
     root.className = "profile-agent-runtime-controls";
     const summary = document.createElement("summary");
     summary.textContent = context.t("Agent 运行设置");
@@ -77,7 +77,8 @@
     const usageText = document.createElement("span");
     usage.append(progress, usageText);
     body.append(fields, actions, catalogStatus, runtimeStatus, usage, notice);
-    root.append(summary, body);
+    if (!options.embedded) root.append(summary);
+    root.append(body);
 
     const controls = {};
     for (const [key, label] of [
@@ -90,6 +91,7 @@
       const title = document.createElement("span");
       title.textContent = context.t(label);
       const select = document.createElement("select");
+      select.setAttribute("aria-label", context.t(label));
       select.disabled = true;
       field.append(title, select);
       fields.append(field);
@@ -149,8 +151,8 @@
       }
       addSelectedFallback(controls.effort, String(draft?.reasoning_effort || ""));
       addSelectedFallback(controls.tier, String(draft?.service_tier || ""));
-      controls.effort.disabled = readOnly || !current || saving;
-      controls.tier.disabled = readOnly || !current || saving;
+      controls.effort.disabled = readOnly || !current || saving || Boolean(current?.active);
+      controls.tier.disabled = readOnly || !current || saving || Boolean(current?.active);
     }
 
     function renderRuntimeStatus(conversation) {
@@ -190,9 +192,9 @@
         addSelectedFallback(controls.model, selected);
       }
       controls.model.value = selected;
-      controls.model.disabled = readOnly || !current || saving;
+      controls.model.disabled = readOnly || !current || saving || Boolean(current?.active);
       refresh.disabled = readOnly || saving;
-      apply.disabled = readOnly || !current || saving || !selected;
+      apply.disabled = readOnly || !current || saving || Boolean(current?.active) || !selected;
       renderDependentChoices();
       const measured = contextUsage(conversation);
       progress.value = measured.percent;
@@ -245,7 +247,7 @@
     }
 
     async function applySettings() {
-      if (readOnly || saving || !current || !draft?.model_id) return;
+      if (readOnly || saving || !current || current.active || !draft?.model_id) return;
       const conversationID = current.conversationID;
       saving = true;
       showNotice(context.t("正在刷新目录并验证会话模型设置…"));
@@ -266,6 +268,7 @@
         if (payload.conversation && current?.conversationID === conversationID) {
           current.conversation = {...current.conversation, ...payload.conversation};
           draft = settingsOf(current.conversation);
+          options.onChange?.(current.conversation);
         }
         catalogValidated = true;
         showNotice(
@@ -275,6 +278,7 @@
       } catch (error) {
         if (current?.conversationID === conversationID) {
           draft = settingsOf(current.conversation);
+          options.onChange?.(current.conversation);
         }
         showNotice(
           `${context.t("会话模型设置保存失败")}: ${error.message || ""}`,
@@ -322,8 +326,8 @@
     function observeEvent(payload) {
       if (!current) return;
       const patch = runtimeEventPatch(payload, current.conversation);
-      if (!Object.keys(patch).length) return;
       current.conversation = {...current.conversation, ...patch};
+      if (Object.keys(patch).length) options.onChange?.(current.conversation);
       renderConversation();
     }
 
@@ -334,6 +338,7 @@
       observeEvent,
       setConversation,
       currentConversation: () => current?.conversation || null,
+      refresh: renderConversation,
       dispose() { current = null; draft = null; },
     };
   }

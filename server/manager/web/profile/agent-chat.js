@@ -8,14 +8,6 @@
     return root;
   }
 
-  function passiveRuntimeControls() {
-    return {
-      dispose() {},
-      observeEvent() {},
-      setConversation() {},
-    };
-  }
-
   function message(context, title, detail = "") {
     return FTUI.empty(context.t(title), detail ? context.t(detail) : "");
   }
@@ -65,6 +57,7 @@
     }
     const model = conversationModel(profile, conversation);
     if (provider && model) return `${provider} · ${model}`;
+    if (model) return model;
     if (provider) return provider;
     return context.t("智能体助手");
   }
@@ -78,17 +71,20 @@
         ? Promise.resolve([]) : loadSkills(context, profile),
       window.FTProfileChatKit.load(),
     ]);
-    if (!options.conversationOnly && !window.FTProfileAgentRuntimeControls) {
+    if (!window.FTProfileAgentRuntimeControls) {
       throw new Error(context.t("Agent 运行设置组件尚未加载"));
     }
-    const runtimeControls = options.conversationOnly
-      ? passiveRuntimeControls()
-      : window.FTProfileAgentRuntimeControls.create(
-        profile, context, {readOnly: Boolean(options.readOnly)},
-      );
-    if (!options.conversationOnly) {
-      options.settingsHost?.replaceChildren(runtimeControls.element);
-    }
+    const profileControl = options.profileControl || document.createElement("strong");
+    if (!options.profileControl) profileControl.textContent = profile.alias || profile.title || profile.profile_id;
+    const identity = document.createElement("div");
+    identity.className = "ft-chat-identity";
+    const modelLabel = document.createElement("span");
+    modelLabel.className = "ft-chat-model-label";
+    identity.append(profileControl, modelLabel);
+    const runtimeControls = window.FTProfileAgentRuntimeControls.create(profile, context, {
+      readOnly: Boolean(options.readOnly || options.historyOnly), embedded: true,
+      onChange: conversation => { void refreshTitle(conversation); },
+    });
     let selectedConversationID = "";
     let selectedConversation = null;
     let target = null;
@@ -100,6 +96,7 @@
       const revision = ++titleRevision;
       const title = await conversationTitle(context, profile, selectedConversation || {});
       if (revision !== titleRevision || !target || !chatOptions) return;
+      modelLabel.textContent = title;
       chatOptions = {
         ...chatOptions,
         header: {enabled: true, title: {enabled: true, text: title}},
@@ -125,6 +122,14 @@
       onRuntimeEvent: runtimeControls.observeEvent,
     });
     const transport = window.FTXpertTransport.create(adapter, {
+      mountControls(kind, slot) {
+        if (kind === "profile") slot.replaceChildren(identity);
+        if (kind === "settings") {
+          runtimeControls.refresh?.();
+          slot.replaceChildren(runtimeControls.element);
+          void runtimeControls.loadModels?.().catch(() => {});
+        }
+      },
       runtimeStatus: async () => (await context.api(
         `/api/client/profile-agent?profile_id=${encodeURIComponent(profile.profile_id)}`,
       )).status || {},
@@ -166,6 +171,7 @@
       }
     }
     const title = await conversationTitle(context, profile, selectedConversation || {});
+    modelLabel.textContent = title;
     chatOptions = {
       frameUrl: `/research-static/vendor/xpert-chatkit/index.html?ft_channel=${transport.key}&ft_read_only=${options.readOnly || options.historyOnly ? "1" : "0"}`,
       api: {
