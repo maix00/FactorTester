@@ -21,6 +21,10 @@ global.EventSource = class {
       if (this.closed) return;
       this.onopen?.();
       const events = [
+        {method: 'item/completed', params: {turnId: 'turn-1',
+          item: {id: 'user-wire-1', type: 'message', role: 'user',
+            content: [{type: 'input_text', text: 'USER_INPUT_MUST_NOT_BECOME_REPLY'}]}},
+          chatkit_item: {id: 'user-wire-1', type: 'user_message'}},
         {
           method: 'thread/tokenUsage/updated',
           params: {
@@ -255,6 +259,8 @@ const state = {
     async () => {},
   );
   const output = chunks.join('');
+  assert.doesNotMatch(output, /USER_INPUT_MUST_NOT_BECOME_REPLY/);
+  assert.notEqual(state.assistant?.id, 'user-wire-1');
   assert.match(output, /第一句/);
   assert.match(output, /第二句/);
   assert.doesNotMatch(output, /agent_process_exited|exited before producing/);
@@ -328,3 +334,12 @@ const state = {
   console.error(error);
   process.exitCode = 1;
 });
+
+for (const role of ['user', 'tool', 'system']) {
+  assert.equal(window.FTProfileChatKitProtocol.completedText({params: {
+    item: {type: 'message', role, content: 'never assistant output'},
+  }}), '');
+}
+assert.equal(window.FTProfileChatKitProtocol.completedText({params: {
+  item: {type: 'message', role: 'assistant', content: 'final answer'},
+}}), 'final answer');

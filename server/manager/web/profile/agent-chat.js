@@ -74,13 +74,32 @@
     if (!window.FTProfileAgentRuntimeControls) {
       throw new Error(context.t("Agent 运行设置组件尚未加载"));
     }
-    const profileControl = options.profileControl || document.createElement("strong");
-    if (!options.profileControl) profileControl.textContent = profile.alias || profile.title || profile.profile_id;
     const identity = document.createElement("div");
     identity.className = "ft-chat-identity";
+    const header = document.createElement("div");
+    header.className = "ft-chat-identity-heading";
+    const label = document.createElement("strong");
+    label.textContent = context.t("智能体助手");
+    const profileGroup = document.createElement("span");
+    profileGroup.className = "ft-chat-profile-group";
+    const link = document.createElement("a");
+    link.className = "ft-chat-profile-link";
+    link.textContent = profile.alias || profile.title || profile.profile_id;
+    const query = new URLSearchParams({profile_tab: "overview"});
+    if (profile.profile_key) query.set("profile_key", profile.profile_key);
+    link.href = `/profiles/${encodeURIComponent(profile.profile_id)}?${query}`;
+    link.addEventListener("click", event => {
+      event.preventDefault();
+      context.navigate?.(`/profiles/${encodeURIComponent(profile.profile_id)}?${query}`);
+    });
+    profileGroup.append(link);
+    // A dedicated Agent session keeps a fixed Profile; only the drawer
+    // supplies the existing authorized selector (including a single option).
+    if (options.profileControl) profileGroup.append(options.profileControl);
+    header.append(label, profileGroup);
     const modelLabel = document.createElement("span");
     modelLabel.className = "ft-chat-model-label";
-    identity.append(profileControl, modelLabel);
+    identity.append(header, modelLabel);
     const runtimeControls = window.FTProfileAgentRuntimeControls.create(profile, context, {
       readOnly: Boolean(options.readOnly || options.historyOnly), embedded: true,
       onChange: conversation => { void refreshTitle(conversation); },

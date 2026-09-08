@@ -561,7 +561,8 @@
         finish("error");
         return;
       }
-      const completed = structuredItem?.type === "workflow" ? "" : P.completedText(payload);
+      const completed = structuredItem && structuredItem.type !== "assistant_message"
+        ? "" : P.completedText(payload);
       if (completed) {
         const assistant = ensureAssistant(state);
         assistant.text = completed;
