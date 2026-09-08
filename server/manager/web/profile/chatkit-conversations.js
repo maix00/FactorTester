@@ -262,6 +262,8 @@
   }
 
   window.FTProfileChatKitConversations = Object.freeze({
+    readSelectedConversation,
+    rememberSelectedConversation,
     conversationIDFrom,
     conversationState,
     createConversation,

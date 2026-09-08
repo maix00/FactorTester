@@ -283,3 +283,20 @@ assert.equal(
   false,
 );
 console.log("ok");
+
+const defaultScope = structuredClone(sourceState);
+defaultScope.settingsMountedTabs = [];
+defaultScope.manifest = {...defaultScope.manifest, defaults: {
+  data_source: {default: ["source-a"]}, category: {default: "metals"},
+}};
+assert.deepEqual(window.FTStrategyEditorScope.selectedSourceIDs(defaultScope), ["source-a"]);
+assert.deepEqual(window.FTStrategyEditorScope.outerCategoryIDs(defaultScope), ["metals"]);
+assert.equal(window.FTStrategyEditorScope.candidateCompatible(defaultScope,
+  "product_path_candidates", {...compatibleGroup, category_ids: ["metals"]}), true);
+assert.equal(window.FTStrategyEditorScope.candidateCompatible(defaultScope,
+  "product_path_candidates", {...compatibleGroup, category_ids: ["energy"]}), false);
+
+// Ungrouped factor evaluation uses the same default scope without an inner-editor contract.
+const ungroupedScope = {...defaultScope, manifest: {defaults: defaultScope.manifest.defaults}};
+assert.equal(window.FTStrategyEditorScope.candidateCompatible(ungroupedScope,
+  "product_path_candidates", {...compatibleGroup, category_ids: ["energy"]}), false);

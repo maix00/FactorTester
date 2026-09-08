@@ -173,15 +173,7 @@ def _progress_item(
     base: Mapping[str, object],
     text: str,
 ) -> dict[str, Any]:
-    title = str(item.get("title") or "").strip()
-    if not title:
-        return {
-            **base,
-            "type": "assistant_message",
-            "content": [{
-                "type": "output_text", "text": text, "annotations": [],
-            }],
-        }
+    title = str(item.get("title") or "执行进度").strip()
     return _workflow(base, tasks=[{
         "type": "custom",
         "title": title,
@@ -460,6 +452,7 @@ def provider_thread_items(
                 agent_phase="commentary" if phase == "commentary" else "final",
             )
             if projected is not None:
+                projected["turn_id"] = _turn_id(turn, turn_index)
                 result.append(projected)
         outcome = _turn_outcome_item(
             turn,
@@ -529,8 +522,30 @@ def provider_thread_page(
         page_thread, conversation_id, turn_offset=start,
     )
     selected_view = str(view or "timeline").strip().casefold()
-    if selected_view != "timeline":
+    if selected_view not in {"timeline", "outline"}:
         raise ValueError("conversation item view is invalid")
+    if selected_view == "outline":
+        # Preserve stable item/turn identities while deferring potentially large
+        # command output. The existing timeline view remains the detail source.
+        turn_indexes = {_turn_id(turn, index): index for index, turn in enumerate(turns)}
+        for item in projected:
+            if item.get("type") not in {"workflow", "client_tool_call"}:
+                continue
+            index = turn_indexes.get(item.get("turn_id"), len(turns) - 1)
+            item["detail_after"] = (
+                _encode_cursor(_turn_id(turns[index + 1], index + 1), "desc")
+                if index + 1 < len(turns) else ""
+            )
+            item["details_deferred"] = True
+            if item.get("type") == "client_tool_call":
+                item.pop("arguments", None)
+                item.pop("output", None)
+                continue
+            item["workflow"] = {
+                **item["workflow"],
+                "tasks": [{key: task[key] for key in ("type", "title", "status_indicator")
+                           if key in task} for task in item["workflow"].get("tasks", [])],
+            }
     if selected_order == "desc":
         projected.reverse()
     return {

@@ -15,6 +15,8 @@ global.FTTestFieldRow = {create: () => ({})};
 const outer = [{group_ref:'product-group:one'}, {id:'inline:products:two', paths:['Product/_products/B']}];
 global.FTStrategyEditorScope = {
   mounted: () => false,
+  selectedSourceIDs: () => ["DefaultSource"],
+  contract: () => ({}),
   outerCategoryIDs: () => ['category-one'],
   scope: () => ({source:'outer', items:outer, ready:true}),
 };
@@ -28,10 +30,13 @@ vm.runInThisContext(fs.readFileSync('server/manager/web/workbench/test-products.
     return {products:[{name:params.get('page'),product_path:'Product/_products/'+params.get('page')}], has_more:params.get('page')==='1'};
   }}, state, () => {}, {groups:()=>[], sourceState:{productSourceMode:'products'}, multi:false});
   const direct = controls.find(item=>item.loadItems);
+  assert.equal(controls.length,1);
   assert.equal(direct.multi,true);
+  assert.deepEqual(direct.selectionTypes, {exclusive:true, modes:{product_group:"single",product:"multi"}});
   const items = await direct.loadItems('search');
   assert.equal(items.length,2);
   for (const params of requests) {
+    assert.deepEqual(params.getAll('data_source'),['DefaultSource']);
     assert.deepEqual(params.getAll('group_ref'),['product-group:one']);
     assert.deepEqual(params.getAll('product_path'),['Product/_products/B']);
     assert.deepEqual(params.getAll('category_id'),['category-one']);

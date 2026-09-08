@@ -418,5 +418,54 @@ assert.equal(failed.summary.children[0].textContent, "产品组候选读取失�
     "delete removes the on-the-fly candidate");
   assert.equal(removedCandidate?.value, "t2", "caller notified of the removal");
 
+  const typed = window.FTMultiSelectFilter.create({t: value => value}, {
+    multi: true, candidateTypes: ["product_group", "product"],
+    selectionTypes: {exclusive: true, modes: {product_group: "single", product: "multi"}},
+    items: [{value: "g1", type: "product_group"}, {value: "g2", type: "product_group"},
+      {value: "p1", type: "product"}, {value: "p2", type: "product"}],
+  });
+  typed.setValues(["p1", "p2"]);
+  assert.deepEqual(typed.values, ["p1", "p2"]);
+  const choose = async value => {
+    for (const head of descendants(typed.optionList).filter(item => (
+      item.className === "ft-multi-select-section-heading" && item.children[0]?.textContent === "▸"
+    ))) head.listeners.click({preventDefault() {}, stopPropagation() {}});
+    const input = inputOf(typed, value);
+    input.checked = true;
+    await input.listeners.change();
+  };
+  await choose("g1");
+  assert.deepEqual(typed.values, ["g1"]);
+  await choose("g2");
+  assert.deepEqual(typed.values, ["g2"]);
+  await choose("p1");
+  await choose("p2");
+  assert.deepEqual(typed.values, ["p1", "p2"]);
+  typed.setValues(["g1", "g2"]);
+  assert.deepEqual(typed.values, ["g2"]);
+  const emptyTyped = window.FTMultiSelectFilter.create({t: value => value}, {
+    items: [], candidateTypes: ["product_group", "product"],
+    canAddForType: key => key === "product_group",
+    onAddCandidateForType: (_key, _ctx, {add}) => add({value: "new-group"}),
+  });
+  assert.ok(descendants(emptyTyped.optionList).some(item => item.tagName === "button"),
+    "empty typed catalog retains its typed creation entry");
+  let loads = [];
+  const remotePicker = window.FTMultiSelectFilter.create({t: value => value}, {
+    items: [], loadItems: async query => { loads.push(query); return [{value: "remote"}]; },
+  });
+  remotePicker.dropdown.open = true;
+  remotePicker.dropdown.listeners.toggle();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(loads, [""], "opening loads remote candidates");
+  remotePicker.search.value = "needle";
+  remotePicker.search.listeners.input();
+  await new Promise(resolve => setTimeout(resolve, 250));
+  assert.deepEqual(loads, ["", "needle"], "search reloads candidates");
+  descendants(remotePicker.menu).find(item => (
+    String(item.className).includes("ft-multi-select-sync-toggle")
+  )).listeners.click({stopPropagation() {}});
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(loads, ["", "needle", "needle"], "refresh reloads the same scope/query");
   console.log("ok");
 })();

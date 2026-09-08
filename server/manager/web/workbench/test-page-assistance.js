@@ -32,7 +32,9 @@
     );
     const itemContract = state.manifest?.configuration_item_contract;
     const itemSchema = itemContract?.schema;
-    if (!itemSchema) {
+    // Factor evaluation has no inner configuration collection. Requiring the
+    // IC/backtest item contract here prevents its snapshot reaching assist CLI.
+    if (["ic", "backtest"].includes(state.kind) && !itemSchema) {
       throw new Error("test manifest is missing its configuration-item contract");
     }
     const analysisSchema = state.kind === "backtest" ? {

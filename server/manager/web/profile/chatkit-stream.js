@@ -233,7 +233,7 @@
 
   async function authoritativePage(state, params = {}) {
     const pageParams = P.itemPageParams(params);
-    const view = "timeline";
+    const view = params.view || "outline";
     const query = new URLSearchParams({
       profile_id: state.profileID,
       conversation_id: state.conversationID,
@@ -296,7 +296,15 @@
     // Process records must be committed before the final answer.  Otherwise
     // a delayed history reconciliation briefly places the answer above the
     // commands that produced it until the next full refresh.
-    if (assistant) appendAssistantText(state, itemText(assistant));
+    if (assistant) {
+      appendAssistantText(state, itemText(assistant));
+      const temporaryID = state.assistant.id;
+      state.assistant.id = assistant.id;
+      state.assistant.created_at = assistant.created_at;
+      if (temporaryID !== assistant.id) writeEvent(controller, {
+        type: "thread.item.removed", item_id: temporaryID,
+      });
+    }
     if (!assistant && state.finalResponseComplete && state.assistant?.text) {
       return state.items;
     }
@@ -553,9 +561,15 @@
         finish("error");
         return;
       }
-      const completed = P.completedText(payload);
+      const completed = structuredItem?.type === "workflow" ? "" : P.completedText(payload);
       if (completed) {
-        appendAssistantText(state, completed);
+        const assistant = ensureAssistant(state);
+        assistant.text = completed;
+        const stableID = structuredItem?.id || payload?.params?.item?.id;
+        if (stableID && stableID !== assistant.id) {
+          writeEvent(controller, {type: "thread.item.removed", item_id: assistant.id});
+          assistant.id = stableID;
+        }
         markFinalResponse(state);
       }
       if (delta) {

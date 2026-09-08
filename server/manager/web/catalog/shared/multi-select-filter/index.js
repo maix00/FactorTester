@@ -194,10 +194,24 @@
     const typeLabelOf = options.typeLabelOf
       || ((key, item) => String(item?.typeLabel || key || "").trim());
     const candidateGrouped = options.groupByType !== false
-      && items.some(item => typeOf(item));
+      && (items.some(item => typeOf(item)) || options.candidateTypes?.length);
+    // Opt-in type selection policy is independent from type visibility/new-item UI.
+    const normalizeChoice = values => {
+      let result = normalizeSelected(values, items);
+      const policy = options.selectionTypes;
+      const last = items.find(item => item.value === result[result.length - 1]);
+      if (policy && last) {
+        const type = typeOf(last);
+        if (policy.exclusive) result = result.filter(value => (
+          typeOf(items.find(item => item.value === value)) === type
+        ));
+        if (policy.modes?.[type] === "single") result = [last.value];
+      }
+      return result;
+    };
     const singleGroupName = `${String(options.name || "ft-single-select").trim()
       || "ft-single-select"}-${++pickerSequence}`;
-    let selected = normalizeSelected(options.selected ?? [], items);
+    let selected = normalizeChoice(options.selected ?? []);
     if (!multi && selected.length > 1) selected = [selected[selected.length - 1]];
     let committedSelected = [...selected];
     let manualStatusText = String(options.statusText || "").trim();
@@ -514,15 +528,15 @@
         disabled: item.disabled || (typeof options.disabled === "function"
           ? Boolean(options.disabled(item)) : controlDisabled),
       })));
-      selected = normalizeSelected(selected, items);
+      selected = normalizeChoice(selected);
       if (!multi && selected.length > 1) selected = [selected[selected.length - 1]];
       committedSelected = preserveSelected
-        ? normalizeSelected(committedSelected, items) : [...selected];
+        ? normalizeChoice(committedSelected) : [...selected];
       render();
     }
 
     const remote = remoteFactory ? remoteFactory({
-      context, options, controlDisabled, search, setItems,
+      context, options, controlDisabled: () => controlDisabled, search, setItems,
       refresh: () => render(),
     }) : null;
 
@@ -609,7 +623,8 @@
         if (item.disabled) row.classList.add("is-disabled");
         row.setAttribute("aria-label", `${item.label}：${item.description}`);
         const input = document.createElement("input");
-        input.type = multi ? "checkbox" : "radio";
+        input.type = multi && options.selectionTypes?.modes?.[typeOf(item)] !== "single"
+          ? "checkbox" : "radio";
         if (!multi) input.name = singleGroupName;
         input.value = item.value;
         input.checked = selected.includes(item.value);
@@ -673,20 +688,20 @@
           if (!multi) return isSelected ? [] : [item.value];
           if (isSelected) return selected.filter(value => value !== item.value);
           if (item.exclusive) return [item.value];
-          return [
+          return normalizeChoice([
             ...selected.filter(value => !itemFor(value)?.exclusive),
             item.value,
-          ];
+          ]);
         }
         function selectionAfterNativeChange() {
           if (!input.checked) return selected.filter(value => value !== item.value);
           if (!multi) return [item.value];
           if (item.exclusive) return [item.value];
-          return [
+          return normalizeChoice([
             ...selected.filter(value => value !== item.value
               && !itemFor(value)?.exclusive),
             item.value,
-          ];
+          ]);
         }
         async function commitSingle(next) {
           const previous = [...committedSelected];
@@ -882,9 +897,9 @@
       const others = shown.filter(item => (
         !item.exclusive && (candidateGrouped || item.onsite !== true)
       ));
-      if (others.length) {
+      if (others.length || options.candidateTypes?.length) {
         if (candidateGrouped) {
-          const grouped = new Map();
+          const grouped = new Map((options.candidateTypes || []).map(key => [key, []]));
           for (const item of others) {
             const key = typeOf(item);
             if (!grouped.has(key)) grouped.set(key, []);
@@ -956,7 +971,7 @@
       search.focus?.();
     });
     // Typing only narrows the candidates below (已选 stays untouched).
-    search.addEventListener("input", () => render());
+    search.addEventListener("input", () => { render(); remote?.schedule?.(); });
     // Delete an on-the-fly candidate: pull it from the pool and selection
     // states, then let the caller release any view overlay / state.
     function removeTemporaryCandidate(item) {
@@ -1014,6 +1029,7 @@
         // Lazy catalog owners attach their loader here. Keep opening fast,
         // then let their refresh callback rebuild the host with loaded items.
         try {
+          void remote?.load?.();
           const opened = options.onOpen?.(context);
           if (opened && typeof opened.catch === "function") opened.catch(() => {});
         } catch (_error) { /* the owner renders its own load error state */ }
@@ -1050,7 +1066,7 @@
       get hasSelection() { return selected.length > 0; },
       get multi() { return multi; },
       setValues(values) {
-        selected = normalizeSelected(values, items);
+        selected = normalizeChoice(values);
         if (!multi && selected.length > 1) selected = [selected[selected.length - 1]];
         committedSelected = [...selected];
         render();

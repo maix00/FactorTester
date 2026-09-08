@@ -134,19 +134,12 @@
     shell.setAttribute("role", "dialog");
     shell.setAttribute("aria-label", context.t("页面智能体助手"));
     applyDrawerBoundary(shell);
-    const header = document.createElement("header");
     const profileSelect = document.createElement("select");
     profileSelect.setAttribute("aria-label", context.t("Profile"));
     profileSelect.className = "ft-chat-profile-select";
-    const close = document.createElement("button");
-    close.type = "button";
-    close.className = "page-agent-drawer-close";
-    close.textContent = "×";
-    close.setAttribute("aria-label", context.t("收起"));
     const body = document.createElement("div");
     body.className = "page-agent-drawer-body";
-    header.append(close);
-    shell.append(header, body);
+    shell.append(body);
     document.body.append(shell);
 
     const toggle = ensureToggle(context);
@@ -185,7 +178,7 @@
         return item;
       }));
       profileSelect.value = profileID;
-      profileSelect.disabled = profiles.length < 2;
+      profileSelect.disabled = profiles.length === 0;
     };
     async function selectProfile(profile) {
       const nextID = String(profile?.profile_id || "").trim();
@@ -271,6 +264,7 @@
             conversationOnly: true,
             profileControl: profileSelect,
             lifecycleManaged: true,
+            onClose: hide,
             runtimeStatus: lifecycle.runtimeStatus,
             profileKey: mountOptions.profileKey,
             profileScope: mountOptions.profileScope,
@@ -314,7 +308,6 @@
       desiredOpen ? void open() : restoreClosed()
     );
 
-    close.addEventListener("click", hide);
     profileSelect.addEventListener("change", () => {
       const profile = selectableProfiles.find(item => String(item.profile_id) === profileSelect.value);
       if (profile) void selectProfile(profile);

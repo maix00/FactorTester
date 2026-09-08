@@ -80,10 +80,18 @@
     ).trim();
   }
 
+  function effectiveValue(state, field, tab) {
+    return mounted(state, tab) ? state?.values?.[field]
+      : state?.manifest?.defaults?.[field]?.default;
+  }
+
   function selectedSourceIDs(state) {
     const rule = contract(state).candidate_constraints?.product_path_candidates
       || contract(state).candidate_constraints?.category_candidates || {};
-    return sourceIDs(state?.values?.[rule.source_field || "data_source"]);
+    const tab = rule.source_tab || "data_source";
+    const mode = effectiveValue(state, rule.mode_field || "data_source_mode", tab);
+    if (mode === (rule.automatic_mode || "auto")) return [];
+    return sourceIDs(effectiveValue(state, rule.source_field || "data_source", tab));
   }
 
   function candidateSourceIDs(value) {
@@ -92,7 +100,11 @@
 
   function outerCategoryIDs(state) {
     const rule = contract(state).outer_scope_tabs?.category || {};
-    if (!mounted(state, rule.mounted_tab || "category")) return [];
+    if (!mounted(state, rule.mounted_tab || "category")) {
+      return (rule.selection_fields || ["category"]).flatMap(key => (
+        arrayValue(state?.manifest?.defaults?.[key]?.default)
+      )).map(categoryID).filter(Boolean);
+    }
     return fieldValues(state, rule.selection_fields || ["category"])
       .map(categoryID).filter(Boolean);
   }
@@ -103,14 +115,20 @@
   }
 
   function candidateCompatible(state, fieldKey, candidate) {
-    const rule = contract(state).candidate_constraints?.[fieldKey];
+    const rule = contract(state).candidate_constraints?.[fieldKey]
+      || (["product_path_candidates", "category_candidates"].includes(fieldKey) ? {
+        source_field: "data_source", mode_field: "data_source_mode",
+        coverage: "complete_product_coverage",
+      } : null);
     if (!rule) return true;
     const values = state?.values || {};
     const automaticMode = String(rule.automatic_mode || "auto");
-    const selected = new Set(sourceIDs(values[rule.source_field]));
-    const mode = String(values[rule.mode_field] || (selected.size ? "list" : automaticMode));
+    const selected = new Set(selectedSourceIDs(state));
+    const mode = String(effectiveValue(state, rule.mode_field, rule.source_tab || "data_source")
+      || (selected.size ? "list" : automaticMode));
     const sourceCompatible = () => {
-      if (!mounted(state, rule.source_tab || "data_source")) return true;
+      // Effective default source values constrain candidates even before a tab is mounted.
+      if (!selected.size && !mounted(state, rule.source_tab || "data_source")) return true;
       if (mode === automaticMode) return true;
       if (!selected.size) return false;
       const overlaps = value => {

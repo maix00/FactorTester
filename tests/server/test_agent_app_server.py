@@ -449,7 +449,8 @@ def test_unimplemented_codex_protocol_cannot_be_saved(tmp_path):
         )
 
 
-def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypatch):
+@pytest.mark.parametrize("auto_claim", [False, True])
+def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypatch, auto_claim):
     monkeypatch.setenv(
         "FACTORTESTER_CLI", _fake_factor_tester(tmp_path / "factortester")
     )
@@ -491,6 +492,8 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
         heartbeat_interval=0.1,
     )
 
+    if auto_claim:
+        service.release(PRINCIPAL, claim["claim"]["claim_id"], agent_id="agent-a")
     status = supervisor.start(PRINCIPAL, PROFILE_ID)
     assert status["ready"] is True
     assert status["running"] is True
@@ -628,11 +631,8 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
         (PRINCIPAL, PROFILE_ID),
         SimpleNamespace(observe=lambda _payload: None),
         {
-            "method": "item/completed",
-            "params": {
-                "turnId": "turn-active",
-                "item": {"id": "final", "type": "agentMessage"},
-            },
+            "method": "turn/completed",
+            "params": {"turnId": "turn-active"},
         },
     )
 
@@ -1142,7 +1142,7 @@ def test_profile_agent_sse_replays_final_event_after_agent_stops():
     assert supervisor.calls == [(5, 5.0), (8, 5.0)]
 
 
-def test_profile_agent_final_item_clears_processing_conversation():
+def test_profile_agent_item_completion_preserves_processing_conversation():
     supervisor = AgentAppServerSupervisor.__new__(AgentAppServerSupervisor)
     supervisor._lock = threading.RLock()
     key = (PRINCIPAL, PROFILE_ID)
@@ -1159,7 +1159,7 @@ def test_profile_agent_final_item_clears_processing_conversation():
     supervisor._observe_runtime_event(key, observer, payload)
 
     assert observed == [payload]
-    assert key not in supervisor._processing_turns
+    assert key in supervisor._processing_turns
 
 
 def test_profile_agent_binds_provider_turn_id_from_runtime_event():
