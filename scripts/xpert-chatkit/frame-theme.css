@@ -1,0 +1,30 @@
+/* Host controls share the existing Manager controller, styled inside this iframe. */
+html { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 15px; }
+body { -webkit-font-smoothing: antialiased; }
+.ft-chat-identity { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ft-chat-profile-select { width: fit-content; max-width: 100%; border: 0; background: transparent; font: inherit; font-weight: 600; padding: 4px 20px 4px 0; }
+.ft-chat-model-label { font-size: 12px; color: #737373; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-agent-runtime-fields { display: grid; gap: 16px; }
+.profile-agent-runtime-field { display: grid; gap: 6px; font-size: 14px; }
+.profile-agent-runtime-field select { width: 100%; min-width: 0; border: 1px solid #ddd; border-radius: 8px; padding: 8px; background: transparent; font: inherit; }
+.profile-agent-runtime-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0; }
+.profile-agent-runtime-actions button { border: 1px solid #ddd; border-radius: 8px; padding: 8px 12px; font: inherit; }
+.profile-agent-runtime-actions button.primary { background: #171717; color: white; border-color: #171717; }
+.profile-agent-runtime-controls button:disabled, .profile-agent-runtime-controls select:disabled { opacity: .5; cursor: default; }
+.profile-agent-runtime-body p, .profile-agent-context-usage { margin: 12px 0; font-size: 12px; color: #737373; line-height: 1.5; }
+.profile-agent-context-usage { display: grid; gap: 8px; }
+.profile-agent-context-usage progress { width: 100%; }
+[data-ft-message-role] { font-size: 15px; line-height: 1.65; }
+[data-ft-message-role="human"] .bg-muted { background: #f1f1f1; color: #171717; border-radius: 20px; }
+.markdown-content p { margin-block: .65em; line-height: 1.65; }
+.markdown-content p:first-child { margin-top: 0; }
+.markdown-content p:last-child { margin-bottom: 0; }
+.markdown-content :is(h1,h2,h3,h4) { line-height: 1.35; margin-block: 1em .5em; }
+.markdown-content h1 { font-size: 1.5em; }
+.markdown-content h2 { font-size: 1.3em; }
+.markdown-content h3 { font-size: 1.15em; }
+.markdown-content :is(pre,code) { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; line-height: 1.55; font-weight: 400; }
+.markdown-content pre { max-width: 100%; overflow-x: auto; }
+@media (prefers-color-scheme: dark) {
+  .dark [data-ft-message-role="human"] .bg-muted { background: #303030; color: #ececec; }
+}

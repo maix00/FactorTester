@@ -7,7 +7,7 @@ from server.manager.web.assets import static_file
 ROOT = Path(__file__).resolve().parents[2]
 
 @pytest.mark.parametrize('name', ['test_xpert_transport.js', 'test_xpert_steer.js', 'test_page_agent_drawer_lazy.js',
-    'test_profile_agent_view_switch.js', 'test_profile_agent_stream.js'])
+    'test_profile_agent_runtime_controls.js', 'test_profile_agent_view_switch.js', 'test_profile_agent_stream.js'])
 def test_xpert_ui_contracts(name):
     result = subprocess.run(['node', str(ROOT / 'tests/js' / name)], cwd=ROOT,
         capture_output=True, text=True, timeout=30)

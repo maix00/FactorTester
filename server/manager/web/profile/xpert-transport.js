@@ -2,6 +2,7 @@
   // Xpert is a local presentation client. Manager remains the only conversation
   // authority; the iframe receives no provider credentials or remote API access.
   const sessions = new Map();
+  const controls = new Map();
   const json = (body, status = 200) => new Response(JSON.stringify(body), {
     status, headers: {"Content-Type": "application/json"},
   });
@@ -180,13 +181,15 @@
       return json({error: `不支持的界面操作：${method} ${parts.join("/")}`}, 400);
     }
     const key = crypto.randomUUID();
+    controls.set(key, options.mountControls);
     sessions.set(key, async (input, init) => {
       try { return await fetch(input, init); }
       catch (error) { return json({error: error.message}, error.status || 400); }
     });
-    return {key, dispose() { disposed = true; sessions.delete(key); for (const controller of active) controller.abort(); active.clear(); }};
+    return {key, dispose() { disposed = true; sessions.delete(key); controls.delete(key); for (const controller of active) controller.abort(); active.clear(); }};
   }
   window.FTXpertTransport = Object.freeze({create,
+    mountControls(key, kind, slot) { controls.get(key)?.(kind, slot); },
     fetch(key, input, init) {
       const fetch = sessions.get(key);
       if (!fetch) return Promise.reject(new Error("会话界面通道已关闭"));

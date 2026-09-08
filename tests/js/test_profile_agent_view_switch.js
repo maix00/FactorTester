@@ -39,7 +39,8 @@ async function flush() {
 
 global.window = {};
 global.location = {origin: "http://test.local"};
-window.FTXpertTransport = {create: () => ({key: "test", dispose() {}})};
+let hostOptions;
+window.FTXpertTransport = {create: (_adapter, options) => (hostOptions = options, ({key: "test", dispose() {}}))};
 global.navigator = {language: "zh-CN"};
 global.document = {
   documentElement: {lang: "zh-Hans"},
@@ -108,6 +109,9 @@ assert.equal(window.FTAgentChat.conversationModel({
     active_claim: true,
   });
   await flush();
+  const identitySlot = new Element('div');
+  hostOptions.mountControls('profile', identitySlot);
+  assert.equal(identitySlot.children[0].children[0].tagName, 'strong', 'dedicated sessions keep a fixed Profile');
   const buttons = findAll(root, item => item.tagName === "button");
   assert.equal(buttons.some(item => [
     "结果", "过程", "启动 Agent", "停止 Agent",

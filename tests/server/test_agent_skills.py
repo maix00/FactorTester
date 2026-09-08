@@ -605,10 +605,11 @@ def test_profile_module_loads_skill_selector_after_manifest_entry():
     assert "profile-chatkit-readonly-composer" in chat_source
     assert "不能发送问题" in chat_source
     assert (
-        "options.settingsHost?.replaceChildren(runtimeControls.element)" in chat_source
+        "slot.replaceChildren(runtimeControls.element)" in chat_source
     )
     assert "options.conversationOnly" in chat_source
-    assert "passiveRuntimeControls" in chat_source
+    assert 'embedded: true' in chat_source
+    assert 'mountControls(kind, slot)' in chat_source
     assert "host.replaceChildren(chatStage)" in chat_source
     assert "chatSlot.replaceChildren(target)" not in chat_source
     assert 'context.t("结果")' not in chat_source
@@ -671,7 +672,7 @@ def test_profile_module_loads_skill_selector_after_manifest_entry():
     )
     assert (
         "profile/agent-runtime-controls.js"
-        in manifest["groups"]["profile-agent-session"]
+        in manifest["groups"]["profile-agent-chat"]
     )
 
 
