@@ -1,5 +1,7 @@
 (() => {
   const drawers = new Map();
+  const pages = new Map();
+  const DRAWER_ID = "global-agent-drawer";
   let activeContext = null;
   let globalToggle = null;
   let suppressClick = false;
@@ -73,8 +75,7 @@
     toggle.addEventListener("pointercancel", finishDrag);
     toggle.addEventListener("click", () => {
       if (suppressClick) { suppressClick = false; return; }
-      const tabID = String(activeContext?.tabID || "");
-      let drawer = drawers.get(tabID);
+      let drawer = drawers.get(DRAWER_ID);
       if (!drawer && activeContext) {
         const context = activeContext;
         drawer = attach(context, {
@@ -94,11 +95,12 @@
     activeContext = context;
     void window.FTPageAssistance?.resume?.(context);
     const toggle = ensureToggle(context);
-    const tabID = String(context?.tabID || "");
-    drawers.forEach((drawer, key) => {
-      if (key !== tabID) drawer.shell.hidden = true;
+    const current = drawers.get(DRAWER_ID);
+    if (current) current.updatePage(context, pages.get(String(context?.tabID || "")) || {
+      resolveProfiles: () => window.FTPageAgentProfiles.forPage(context),
+      resolveProfile: () => window.FTPageAgentProfiles.self(context),
+      assistanceEnabled: false,
     });
-    const current = drawers.get(tabID);
     const open = current?.shell?.dataset.ftPageAgentDesiredOpen === "true";
     if (current) {
       applyDrawerBoundary(current.shell);
@@ -110,12 +112,23 @@
   }
 
   function attach(context, options = {}) {
-    const tabID = String(context.tabID || "");
+    const pageID = String(context.tabID || "");
+    const pageOptions = options;
+    pages.set(pageID, pageOptions);
+    context.pageState?.register?.("page-agent-scope", {
+      capture: () => null, restore() {},
+      dispose() {
+        if (pages.get(pageID) === pageOptions) pages.delete(pageID);
+        pageOptions.assistance?.disconnect?.();
+      },
+    });
+    const tabID = DRAWER_ID;
     const previous = drawers.get(tabID);
-    if (previous) previous.shell.remove();
+    if (previous) { previous.updatePage(context, options); return previous; }
     const shell = document.createElement("aside");
     shell.className = "page-agent-drawer";
-    shell.dataset.ftPageAgentTab = context.tabID;
+    // The tab view cache must never park or dispose the application drawer.
+    shell.dataset.ftGlobalAgentDrawer = "true";
     shell.dataset.ftPageAgentRole = "drawer";
     shell.hidden = true;
     shell.setAttribute("role", "dialog");
@@ -149,7 +162,7 @@
     title.append(heading, profileButton, profileMenuButton, profileMenu);
     header.append(title, close);
     shell.append(header, body);
-    (options.host || document.body).append(shell);
+    document.body.append(shell);
 
     const toggle = ensureToggle(context);
 
@@ -209,6 +222,7 @@
       options.onProfileChange?.(profile);
       profileID = nextID;
       activeProfile = profile;
+      body.querySelector?.("[data-ft-keep-connected-on-tab-save]")?.__ftBeforeTabSave?.();
       mounted = false;
       opening = null;
       body.classList.remove("page-agent-drawer-body-conversation-only");
@@ -216,43 +230,44 @@
       await mountConversation();
       context.checkpointTabSession?.();
     }
-    const registration = context.pageState?.register?.("page-agent-drawer", {
-      // Preserve user intent rather than reading DOM visibility. The tab cache
-      // temporarily hides both nodes while parking a view; that hidden state
-      // must never overwrite an open drawer preference.
-      capture: () => ({profile_id: profileID, open: desiredOpen}),
-      restore: value => {
-        profileID = String(value?.profile_id || profileID || "").trim();
-        setDesiredOpen(value?.open === true);
-        queueMicrotask(() => desiredOpen ? void open() : restoreClosed());
-      },
-      describe: () => ({
-        page: options.pageKind || "",
-        section: options.section || "",
-        fields: [],
-        agent_profile_id: profileID,
-      }),
-      dispose: () => {
-        workspaceReceiver?.dispose();
-        shell.remove();
-        if (drawers.get(tabID)?.shell === shell) drawers.delete(tabID);
-      },
-    });
+    let pageGeneration = 0;
+    function updatePage(nextContext, nextOptions) {
+      if (context === nextContext && options === nextOptions) return;
+      options.assistance?.disconnect?.();
+      workspaceReceiver?.dispose(); workspaceReceiver = null;
+      context = nextContext; options = nextOptions;
+      const generation = ++pageGeneration;
+      // Page scope changes the selector and authoring receiver, never the
+      // mounted chat or its stream. A research profile can keep chatting but
+      // receives no write receiver for an unrelated page.
+      if (!mounted && !opening) return;
+      void Promise.resolve(options.resolveProfiles?.() || []).then(async profiles => {
+        if (generation !== pageGeneration) return;
+        selectableProfiles = profiles;
+        renderProfileSelector();
+        if (!profiles.some(item => String(item.profile_id) === profileID)) return;
+        options.onProfileChange?.(activeProfile);
+        if (options.assistanceEnabled !== false) await options.assistance?.connect?.();
+      }).catch(() => {});
+    }
+    const registration = null;
 
     async function mountConversation() {
       if (mounted) return;
       if (!opening) {
+        const mountContext = context;
+        const mountOptions = options;
         opening = (async () => {
           status("正在加载智能体助手…");
-          if (!selectableProfiles.length && options.resolveProfiles) {
-            selectableProfiles = await options.resolveProfiles();
+          if (!selectableProfiles.length && mountOptions.resolveProfiles) {
+            selectableProfiles = await mountOptions.resolveProfiles();
           }
           const profile = activeProfile || selectableProfiles.find(
             item => String(item.profile_id || "") === profileID,
-          ) || await (options.resolveProfile?.() || options.profile);
+          ) || await (mountOptions.resolveProfile?.() || mountOptions.profile);
           activeProfile = profile;
           profileID = String(profile?.profile_id || "").trim();
-          if (!profileID) throw new Error(context.t("页面 Agent 缺少 Profile"));
+          if (!profileID) throw new Error(mountContext.t("页面 Agent 缺少 Profile"));
           if (!selectableProfiles.length) selectableProfiles = [profile];
           renderProfileSelector();
           if (profile?.runtime_bound_here === false) {
@@ -260,15 +275,15 @@
             mounted = true;
             return;
           }
-          const lifecycle = await context.pageAgentLifecycle.open(profileID, context.tabID);
+          const lifecycle = await mountContext.pageAgentLifecycle.open(profileID, DRAWER_ID);
           body.classList.add("page-agent-drawer-body-conversation-only");
-          const assistanceReady = options.assistanceEnabled !== false
-            && options.assistance?.connect
-            ? options.assistance.connect()
+          const assistanceReady = mountOptions.assistanceEnabled !== false
+            && mountOptions.assistance?.connect
+            ? mountOptions.assistance.connect()
             : (async () => {
-              if (!context.assistanceWorkspace) return;
+              if (!mountContext.assistanceWorkspace) return;
               workspaceReceiver?.dispose();
-              workspaceReceiver = window.FTPageAgentContext.create(context, profileID, {
+              workspaceReceiver = window.FTPageAgentContext.create(mountContext, profileID, {
                 snapshot: () => ({schema_version: 1, page_kind: "read-only",
                   revision: 0, document: {}, document_schema: {type: "object", additionalProperties: false},
                   navigation: {schema_version: 1, root_id: "page", nodes: {
@@ -277,12 +292,12 @@
               });
               await workspaceReceiver.start();
             })();
-          const chatReady = window.FTAgentChat.render(context, profile, {
+          const chatReady = window.FTAgentChat.render({...mountContext, isRouteCurrent: () => true}, profile, {
             conversationOnly: true,
             lifecycleManaged: true,
             runtimeStatus: lifecycle.runtimeStatus,
-            profileKey: options.profileKey,
-            profileScope: options.profileScope,
+            profileKey: mountOptions.profileKey,
+            profileScope: mountOptions.profileScope,
             mountHost: body,
           });
           const [chat] = await Promise.all([chatReady, assistanceReady]);
@@ -328,7 +343,7 @@
     profileMenuButton.addEventListener("click", () => {
       profileMenu.hidden = !profileMenu.hidden;
     });
-    const api = Object.freeze({hide, open, registration, shell, toggle});
+    const api = Object.freeze({hide, open, registration, shell, toggle, updatePage});
     drawers.set(tabID, api);
     if (activeContext?.tabID === context.tabID) activate(context);
     return api;

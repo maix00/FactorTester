@@ -3,13 +3,13 @@
   const C = window.FTProfileChatKitConversations;
   const S = window.FTProfileChatKitStream;
   const CHATKIT_SCRIPT =
-    "https://cdn.platform.openai.com/deployments/chatkit/chatkit.js";
+    "/research-static/vendor/xpert-chatkit/xpert-chatkit.js?v=20d26e03";
   const CHATKIT_ENDPOINT = "/api/client/profile-agent/chatkit";
   const ITEM_VIEW = "timeline";
   let scriptLoad = null;
 
   async function load() {
-    if (customElements.get("openai-chatkit")) return;
+    if (customElements.get("xpertai-chatkit")) return;
     if (!scriptLoad) {
       scriptLoad = new Promise((resolve, reject) => {
         const existing = document.querySelector(
@@ -18,7 +18,7 @@
         if (existing) {
           existing.addEventListener("load", resolve, {once: true});
           existing.addEventListener("error", () => reject(
-            new Error("ChatKit script failed to load"),
+            new Error("Xpert ChatKit 本地资源加载失败"),
           ), {once: true});
           return;
         }
@@ -26,9 +26,9 @@
         script.src = CHATKIT_SCRIPT;
         script.async = true;
         script.onload = resolve;
-        script.onerror = () => reject(new Error("ChatKit script failed to load"));
+        script.onerror = () => reject(new Error("Xpert ChatKit 本地资源加载失败"));
         document.head.append(script);
-      }).then(() => customElements.whenDefined("openai-chatkit"));
+      }).then(() => customElements.whenDefined("xpertai-chatkit"));
     }
     return scriptLoad;
   }
@@ -98,6 +98,20 @@
       await C.deleteConversation(profileState, state, S.closeSource);
       return P.jsonResponse({});
     }
+    if (operation === "threads.steer") {
+      if (profileState.historyOnly) return P.jsonResponse({error: "会话只读"}, 403);
+      const state = await C.getConversation(profileState, C.conversationIDFrom(params), false);
+      const text = P.extractInputText(params);
+      if (!text) return P.jsonResponse({error: "消息不能为空"}, 400);
+      if (!state.active || !state.turnID || state.turnID !== params.turn_id) {
+        return P.jsonResponse({error: "目标运行已结束或已改变，请重新发送"}, 409);
+      }
+      await S.rpc(state, "turn/steer", {
+        threadId: state.threadID, turnId: state.turnID, requireActiveTurn: true,
+        input: [{type: "text", text}],
+      });
+      return P.jsonResponse({run_id: state.turnID, status: "running"});
+    }
     if (operation === "threads.stop") {
       if (profileState.historyOnly) return P.jsonResponse({});
       const state = await C.getConversation(
@@ -111,7 +125,7 @@
       S.closeSource(state);
       return P.jsonResponse({});
     }
-    if (operation === "threads.create" || operation === "threads.add_user_message") {
+    if (operation === "threads.create" || operation === "threads.add_user_message" || operation === "threads.resume") {
       if (profileState.historyOnly) {
         return P.jsonResponse({
           error: "start the Profile Agent before sending a question",
@@ -138,7 +152,7 @@
             streamController,
             state,
             profileState,
-            params,
+            {...params, resume: operation === "threads.resume"},
             controller.signal,
             C.updateConversation,
           ).catch(error => {

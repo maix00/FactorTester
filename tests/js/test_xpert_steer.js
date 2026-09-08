@@ -1,0 +1,33 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+global.window = global;
+global.location = {origin:'http://localhost'};
+vm.runInThisContext(fs.readFileSync('server/manager/web/profile/xpert-transport.js','utf8'));
+(async()=>{
+ let output; const calls=[];
+ const bridge=FTXpertTransport.create({endpoint:'/manager',fetch:async(_,init)=>{
+  const body=JSON.parse(init.body);calls.push(body);
+  if(body.type==='threads.add_user_message') return new Response(new ReadableStream({start(c){output=c;}}));
+  return new Response(JSON.stringify({run_id:'turn1',status:'running'}));
+ }});
+ const request=(path,body)=>FTXpertTransport.fetch(bridge.key,location.origin+'/ft-profile-bridge/'+path,{method:'POST',body:JSON.stringify(body)});
+ const response=await request('threads/a/runs/stream',{input:{input:'start'}});
+ const reader=response.body.getReader();
+ output.enqueue(new TextEncoder().encode('data: {"type":"turn.started","turn_id":"turn1"}\n\n'));
+ assert.match(new TextDecoder().decode((await reader.read()).value),/turn1/);
+ const follow={input:{action:'follow_up',mode:'steer',conversationId:'a',target:{executionId:'wrong'},message:{clientMessageId:'m1',input:{input:'adjust'}}}};
+ assert.equal((await request('threads/a/runs',follow)).status,409);
+ assert.equal(calls.length,1,'wrong turn never reaches Manager');
+ follow.input.target.executionId='turn1';
+ assert.equal((await request('threads/a/runs',follow)).status,200);
+ assert.equal(calls.at(-1).type,'threads.steer');
+ assert.equal(calls.at(-1).params.turn_id,'turn1');
+ output.enqueue(new TextEncoder().encode('data: {"type":"thread.item.replaced","item":{"id":"answer","type":"assistant_message","content":[{"text":"continues"}]}}\n\n'));
+ const text=new TextDecoder().decode((await reader.read()).value);
+ assert.match(text,/adjust/);assert.match(text,/continues/);
+ output.close();await reader.read();
+ assert.equal((await request('threads/a/runs',follow)).status,409,'ended run cannot restart');
+ assert.equal(calls.filter(x=>x.type==='threads.add_user_message').length,1);
+ bridge.dispose();console.log('PASS exact-target Steer preserves stream and refuses stale targets');
+})().catch(e=>{console.error(e);process.exitCode=1});

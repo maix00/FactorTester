@@ -56,7 +56,7 @@ def _parse_module_manifest(
     if not isinstance(manifest.get("entry"), str):
         raise RuntimeError("web module manifest entry is invalid")
     paths: list[str] = []
-    for key in ("external_styles", "styles", "external_scripts", "scripts"):
+    for key in ("external_styles", "styles", "external_scripts", "scripts", "vendor_assets"):
         values = manifest.get(key, [])
         if not isinstance(values, list) or not all(isinstance(item, str) and item for item in values):
             raise RuntimeError(f"web module manifest {key} is invalid")
@@ -231,6 +231,7 @@ def static_file(relative: str) -> tuple[bytes, str]:
             *manifest.get("scripts", []),
             *manifest.get("external_styles", []),
             *manifest.get("styles", []),
+            *manifest.get("vendor_assets", []),
         }
         if value not in declared:
             raise ValueError("web module asset is not declared in manifest")
