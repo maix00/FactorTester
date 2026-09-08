@@ -1,9 +1,14 @@
 (() => {
   // Xpert is a local presentation client. Manager remains the only conversation
   // authority; the iframe receives no provider credentials or remote API access.
+  function identifier() {
+    if (crypto.randomUUID) return crypto.randomUUID();
+    return [...crypto.getRandomValues(new Uint8Array(16))].map(n => n.toString(16).padStart(2, "0")).join("");
+  }
   const sessions = new Map();
   const controls = new Map();
   const closers = new Map();
+  const previews = new Map();
   const json = (body, status = 200) => new Response(JSON.stringify(body), {
     status, headers: {"Content-Type": "application/json"},
   });
@@ -12,6 +17,18 @@
       [task.title, typeof task.content === "string" ? task.content : ""].filter(Boolean).join("\n")
     ).join("\n\n");
     return (item.content || []).map(part => part.text || "").join("");
+  }
+  function attachmentParts(item) {
+    if (item.type !== "user_message") return {text: content(item), files: []};
+    if (item.attachments?.length) return {text: content(item), files: item.attachments};
+    const text = content(item), start = "\n\n<factortester-attachments>\n", end = "\n</factortester-attachments>";
+    const at = text.lastIndexOf(start);
+    if (at < 0 || !text.endsWith(end)) return {text, files: []};
+    try {
+      const files = JSON.parse(text.slice(at + start.length, -end.length));
+      if (!Array.isArray(files) || files.length > 10 || files.some(f => !/^uploads\/\d{4}-\d{2}-\d{2}\/[a-f0-9]{32}\/[^/\\]+$/.test(f.workspacePath))) return {text, files: []};
+      return {text: text.slice(0, at), files: files.map(file => ({...file, id: file.workspacePath, originalName: file.workspacePath.split("/").at(-1)}))};
+    } catch { return {text, files: []}; }
   }
   function processItem(item) {
     if (item.type !== "client_tool_call") return item;
@@ -41,7 +58,7 @@
       result.push({id: item.id, role, type: role, executionId: item.turn_id,
         content: process ? [{type: "component", data: {
           type: "FTProcess", conversationId: item.thread_id, items: [item],
-        }}] : content(item), createdAt: item.created_at});
+        }}] : attachmentParts(item).text, fileAssets: attachmentParts(item).files, createdAt: item.created_at});
     }
     return result;
   }
@@ -51,11 +68,13 @@
   }
   function create(adapter, options = {}) {
     let disposed = false;
+    let currentConversation = "";
     const active = new Set();
     const pages = new Map();
     const runs = new Map();
     const liveItems = new Map();
     const uploads = new Map();
+    const pendingSteers = new Map();
     async function call(type, params = {}, signal) {
       if (disposed) throw new Error("会话界面已关闭");
       const response = await adapter.fetch(adapter.endpoint, {
@@ -69,6 +88,7 @@
     }
     const data = async (type, params) => (await call(type, params)).json();
     async function history(id, offset = 0, limit = 50) {
+      currentConversation = id;
       let page = pages.get(id);
       if (!page || offset === 0) {
         const thread = await data("threads.get_by_id", {thread_id: id});
@@ -86,15 +106,22 @@
       return {items: messages(page.items).slice(Math.max(0, messages(page.items).length - offset - limit), messages(page.items).length - offset),
         total: messages(page.items).length + (page.more ? 1 : 0)};
     }
+    function withAttachments(text, input) {
+      const files = (input?.files || []).map(file => uploads.get(file.fileId || file.id) || file);
+      if (!files.length) return text;
+      if (files.some(file => !/^uploads\/\d{4}-\d{2}-\d{2}\/[a-f0-9]{32}\/[^/\\]+$/.test(file.workspacePath)))
+        throw new Error("附件引用无效，请重新上传");
+      return text + "\n\n<factortester-attachments>\n" + JSON.stringify(files.map(({workspacePath, sha256, size, mimeType}) => ({workspacePath, sha256, size, mimeType}))) + "\n</factortester-attachments>";
+    }
     async function stream(id, input, resume, signal) {
+      currentConversation = id;
       const controller = new AbortController(); active.add(controller);
       signal?.addEventListener("abort", () => controller.abort(), {once: true});
       if (signal?.aborted) controller.abort();
       input = input?.state?.human || input;
       let text = typeof input?.input === "string" ? input.input :
         typeof input === "string" ? input : "";
-      const files = (input?.files || []).map(file => uploads.get(file.fileId || file.id)).filter(Boolean);
-      if (files.length) text += "\n\n附件（当前 Profile 工作区）：\n" + files.map(file => file.workspacePath).join("\n");
+      text = withAttachments(text, input);
       if (!resume && !text.trim()) { active.delete(controller); throw new Error("消息不能为空"); }
       let response;
       try { response = await call(resume ? "threads.resume" : "threads.add_user_message", {
@@ -142,10 +169,21 @@
                   continue;
                 }
                 if (event.type === "thread.item.removed") items.delete(event.item_id);
+                if (event.item?.type === "user_message") {
+                  const pending = [...pendingSteers.values()].find(entry => entry.thread === id
+                    && entry.turn === (event.item.turn_id || runs.get(id)) && entry.text === attachmentParts(event.item).text);
+                  if (pending) {
+                    pendingSteers.delete(pending.clientID);
+                    emit("events", {type: "event", event: "on_chat_event", data: {
+                      type: "follow_up_consumed", mode: "steer", clientMessageIds: [pending.clientID],
+                      messageIds: [event.item.id], executionId: pending.turn, visibleAt: event.item.created_at,
+                    }});
+                  }
+                }
                 if (event.item || event.type === "thread.item.removed") {
                   if (event.item) items.set(event.item.id, {...event.item,
                     thread_id: event.item.thread_id || id, turn_id: event.item.turn_id || runs.get(id)});
-                  emit("values", {ft_authoritative: true, messages: messages([...items.values()]).filter(item => item.content)});
+                  emit("values", {ft_authoritative: true, messages: messages([...items.values()]).filter(item => item.content || item.fileAssets?.length)});
                 }
               }
             }
@@ -167,10 +205,10 @@
         const file = body.get?.("file");
         if (!file || typeof file.arrayBuffer !== "function") return json({error: "缺少附件文件"}, 400);
         const saved = await options.upload(file);
-        const fileID = crypto.randomUUID();
+        const fileID = identifier();
         const result = {id: fileID, fileId: fileID, storageFileId: fileID,
           originalName: saved.name, size: saved.size_bytes, mimeType: file.type,
-          workspacePath: saved.path, status: "ready", parseStatus: "ready", parseMode: "none"};
+          workspacePath: saved.path, sha256: saved.sha256, status: "ready", parseStatus: "ready", parseMode: "none"};
         uploads.set(fileID, result); return json(result);
       }
       if (kind === "files" && action === "status" && uploads.has(id)) return json(uploads.get(id));
@@ -216,10 +254,18 @@
             return json({error: "Steer 目标运行已结束或不匹配"}, 409);
           }
           const human = input.message?.input;
-          const text = typeof human === "string" ? human : human?.input;
+          const text = withAttachments(typeof human === "string" ? human : human?.input || "", human);
           if (typeof text !== "string" || !text.trim()) return json({error: "消息不能为空"}, 400);
-          const result = await data("threads.steer", {thread_id: id, turn_id: turn,
-            input: {content: [{type: "input_text", text}]}});
+          const clientID = input.message.clientMessageId;
+          if (clientID) pendingSteers.set(clientID, {clientID, thread: id, turn, text: attachmentParts({type:"user_message", content:[{text}]}).text});
+          let result;
+          try {
+            result = await data("threads.steer", {thread_id: id, turn_id: turn,
+              input: {content: [{type: "input_text", text}]}});
+          } catch (error) {
+            pendingSteers.delete(clientID);
+            throw error;
+          }
           // Acceptance is not the application position. The provider's user
           // item event inserts the steer instruction in the current turn.
           return json(result);
@@ -241,17 +287,19 @@
       }
       return json({error: `不支持的界面操作：${method} ${parts.join("/")}`}, 400);
     }
-    const key = crypto.randomUUID();
+    const key = identifier();
     controls.set(key, options.mountControls);
     closers.set(key, options.onClose);
+    previews.set(key, file => options.preview?.(file, currentConversation));
     sessions.set(key, async (input, init) => {
       try { return await fetch(input, init); }
       catch (error) { return json({error: error.message}, error.status || 400); }
     });
-    return {key, dispose() { disposed = true; sessions.delete(key); controls.delete(key); closers.delete(key); for (const controller of active) controller.abort(); active.clear(); }};
+    return {key, dispose() { disposed = true; sessions.delete(key); controls.delete(key); closers.delete(key); previews.delete(key); for (const controller of active) controller.abort(); active.clear(); }};
   }
   window.FTXpertTransport = Object.freeze({create,
     close(key) { closers.get(key)?.(); },
+    preview(key, file) { return previews.get(key)?.(file); },
     mountControls(key, kind, slot) { controls.get(key)?.(kind, slot); },
     fetch(key, input, init) {
       const fetch = sessions.get(key);

@@ -7,6 +7,8 @@ render conversation data.
 
 from __future__ import annotations
 
+from server.manager.services.conversation_attachments import split_attachments
+
 import base64
 import json
 from collections.abc import Mapping
@@ -238,7 +240,7 @@ def _file_change_item(item: Mapping[str, object], base: Mapping[str, object]) ->
 
 
 def _tool_item(item: Mapping[str, object], base: Mapping[str, object]) -> dict[str, Any]:
-    server = str(item.get("server") or item.get("serverName") or "").strip()
+    server = str(item.get("server") or item.get("serverName") or item.get("namespace") or "").strip()
     tool = str(item.get("tool") or item.get("toolName") or item.get("name") or "tool").strip()
     name = f"{server}.{tool}" if server else tool
     arguments = item.get("arguments") or item.get("args") or {}
@@ -249,7 +251,7 @@ def _tool_item(item: Mapping[str, object], base: Mapping[str, object]) -> dict[s
         "call_id": str(item.get("callId") or item.get("call_id") or base["id"]),
         "name": name,
         "arguments": dict(arguments) if isinstance(arguments, Mapping) else {"input": arguments},
-        "output": item.get("result", item.get("output")),
+        "output": item.get("result", item.get("output", item.get("contentItems"))),
     }
 
 
@@ -326,18 +328,18 @@ def _project_item(
         )
     if kind in {"usermessage", "inputmessage", "user"}:
         text = _text(item.get("content") or item.get("text")).strip()
+        text, attachments = split_attachments(text)
         return ({
             **base,
             "type": "user_message",
             "content": [{"type": "input_text", "text": text}],
-            "attachments": [],
+            "attachments": attachments,
             "quoted_text": None,
             "inference_options": {},
-        } if text else None)
+        } if text or attachments else None)
     if kind in {"agentmessage", "assistantmessage", "assistant"}:
         text = _text(item.get("text") or item.get("content")).strip()
-        if text and agent_phase == "commentary":
-            return _progress_item(item, base, text)
+        # Commentary is visible assistant prose, not a reasoning summary.
         return ({
             **base,
             "type": "assistant_message",
@@ -351,7 +353,7 @@ def _project_item(
         return _command_item(item, base)
     if kind == "filechange":
         return _file_change_item(item, base)
-    if kind in {"mcptoolcall", "collabtoolcall", "toolcall"}:
+    if kind in {"mcptoolcall", "collabtoolcall", "toolcall", "dynamictoolcall"}:
         return _tool_item(item, base)
     if kind == "websearch":
         return _web_search_item(item, base)

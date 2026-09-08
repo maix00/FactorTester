@@ -395,3 +395,24 @@ def test_mirrored_profile_reads_from_executing_server_even_for_stale_local_key(
 
     assert conversations[0]["title"] == "远端最新会话"
     assert items["items"][0]["text"] == "来自远端"
+
+
+def test_parent_preview_is_limited_to_referenced_conversation_attachments(monkeypatch):
+    import pytest
+    service = ProfileDirectoryService(server_id='local-1', client_state=None, agent_profiles=None)
+    monkeypatch.setattr(service, '_source_profile', lambda *a, **k: (
+        {'capabilities': {'view_conversations': True}}, 'child', 'self'))
+    monkeypatch.setattr(service, '_conversation_sources', lambda item: ['local-1'])
+    file = {'workspacePath': 'uploads/2026-09-09/' + 'a'*32 + '/image.png',
+        'sha256': 'b'*64, 'size': 12, 'originalName': 'image.png', 'mimeType': 'image/png'}
+    monkeypatch.setattr(service, '_source_conversation_items', lambda *a, **k: {
+        'items': [{'type':'user_message', 'attachments':[file]}], 'has_more':False})
+    owner, metadata = service.conversation_attachment('parent', 'key', 'c', file['workspacePath'])
+    assert owner == 'child'
+    assert metadata['object_id'] == 'self/' + file['workspacePath']
+    with pytest.raises(PermissionError):
+        service.conversation_attachment('parent', 'key', 'c', 'uploads/another.png')
+    monkeypatch.setattr(service, '_source_profile', lambda *a, **k: (
+        {'capabilities': {'view_conversations': False}}, 'child', 'self'))
+    with pytest.raises(PermissionError):
+        service.conversation_attachment('other', 'key', 'c', file['workspacePath'])

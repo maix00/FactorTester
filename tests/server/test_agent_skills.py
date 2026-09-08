@@ -574,6 +574,20 @@ def test_profile_workspace_file_upload_route(tmp_path):
     assert payload["saved"] is True
     assert (workspace / "research" / "route.txt").read_bytes() == b"route bytes"
 
+    paths = []
+    for body in (b"first image", b"second image"):
+        upload = _Handler(service, raw_body=body, headers={"Content-Length": str(len(body))})
+        upload._post_agent_routes(urlparse(
+            f"/api/client/profile-workspace/upload?profile_id={PROFILE_ID}&chat_attachment=1&filename=image.png"))
+        saved = json.loads(upload.wfile.getvalue())
+        paths.append(saved["path"])
+        assert saved["path"].startswith("uploads/")
+        assert (workspace / saved["path"]).read_bytes() == body
+        assert len(saved["sha256"]) == 64
+        assert service.profile_workspace_file(PRINCIPAL, PROFILE_ID, saved["path"])["content_type"] == "image/png"
+    assert paths[0] != paths[1]
+    assert (workspace / paths[0]).read_bytes() == b"first image"
+
 
 def test_profile_module_loads_skill_selector_after_manifest_entry():
     manifest = json.loads(
