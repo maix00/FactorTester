@@ -384,7 +384,8 @@
    "core"
   ],
   "settings-devices": [
-   "settings"
+   "settings",
+   "access-table"
   ],
   "settings-control-database": [
    "settings"
@@ -393,7 +394,8 @@
    "core"
   ],
   "manager-access": [
-   "manager"
+   "manager",
+   "access-table"
   ],
   "manager-accounts": [
    "manager"
@@ -404,7 +406,10 @@
   "docs": [
    "core"
   ],
-  "factor-catalog-runtime": []
+  "factor-catalog-runtime": [],
+  "access-table": [
+   "core"
+  ]
  },
  "control_groups": {
   "ic_horizon_grid": {
@@ -945,7 +950,6 @@
    "settings/manager.js"
   ],
   "manager-access": [
-   "manager/access-control-table.js",
    "manager/access-control.js"
   ],
   "manager-accounts": [
@@ -976,6 +980,9 @@
   ],
   "factor-catalog-runtime": [
    "catalog/factor-catalog-runtime.js"
+  ],
+  "access-table": [
+   "manager/access-control-table.js"
   ]
  },
  "external_scripts": [

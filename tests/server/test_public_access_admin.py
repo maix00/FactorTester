@@ -176,3 +176,44 @@ def test_admin_allowlist_mutations_reject_other_server(tmp_path):
     store = _CentralStore()
     state = _VisitorState(store)
     assert state.server_id == "public-main"
+
+
+def test_allowlist_delete_stays_on_manager_and_checks_role_and_scope(tmp_path, monkeypatch):
+    """The broad /api/admin proxy must never consume Manager policy deletes."""
+    from urllib.error import HTTPError
+    import pytest
+
+    monkeypatch.delenv("FACTORTESTER_REQUIRE_LOGIN_FOR_UI", raising=False)
+    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
+    state.control_store = store = _CentralStore()
+    state._sessions[state._token_hash("admin")] = ("admin", "super_admin", float("inf"))
+    state._sessions[state._token_hash("user")] = ("testB", "user", float("inf"))
+
+    class Handler(manager.Handler):
+        def _proxy_authenticated_local_service(self, parsed, *, method):
+            raise AssertionError("Manager allowlist must not reach service proxy")
+
+    Handler.state = state
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    def delete(token, **extra):
+        request = Request(
+            f"http://127.0.0.1:{server.server_port}/api/admin/public-visitor-allowlist",
+            method="DELETE", data=json.dumps({"username": "testB", **extra}).encode(),
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        )
+        with urlopen(request) as response:
+            return json.load(response)
+    try:
+        with pytest.raises(HTTPError) as failure:
+            delete("user")
+        assert failure.value.code == 403
+        with pytest.raises(HTTPError) as failure:
+            delete("admin", server_id="other-server")
+        assert failure.value.code == 400
+        assert store.removed == []
+        assert delete("admin")["entry"]["enabled"] is False
+        assert store.removed == [("public-main", "testB")]
+    finally:
+        server.shutdown(); server.server_close(); thread.join(timeout=2)
