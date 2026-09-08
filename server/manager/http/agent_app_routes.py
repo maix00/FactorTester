@@ -5,9 +5,6 @@ from __future__ import annotations
 import json
 from urllib.parse import parse_qs
 
-from server.manager.http.page_assistance_routes import (
-    page_assistance_turn_params,
-)
 from server.manager.http.responses import json_response
 from server.manager.services.agent_app_server import (
     AgentAppServerError,
@@ -352,10 +349,6 @@ class AgentAppServerRoutesMixin:
             params = payload.get("params") or {}
             if not isinstance(params, dict):
                 raise AgentAppServerError("params must be an object")
-            if method == "turn/start":
-                params = page_assistance_turn_params(
-                    principal, identifier, params,
-                )
             response = supervisor.request(
                 principal,
                 identifier,

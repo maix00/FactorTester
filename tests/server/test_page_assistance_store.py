@@ -5,7 +5,6 @@ import pytest
 
 from server.manager.http.page_assistance_routes import (
     PageAssistanceStore,
-    page_assistance_turn_params,
     validate_document,
 )
 
@@ -358,66 +357,6 @@ def test_draft_retarget_rejects_current_page_of_another_kind() -> None:
             schema_version=1,
             document=document,
         )
-
-
-def test_assisted_turn_receives_builtin_cli_protocol_without_selected_skill() -> None:
-    store = PageAssistanceStore()
-    original = {
-        "threadId": "thread-1",
-        "input": [{"type": "text", "text": "fill this test configuration"}],
-    }
-    store.publish(
-        "owner",
-        "self",
-        {
-            "tab_id": "backtest-1",
-            "assistance": {
-                "schema_version": 1,
-                "navigation": _navigation(),
-                "page_kind": "test-configuration",
-                "revision": 4,
-                "document_schema": {"type": "object"},
-                "document": {},
-            },
-        },
-    )
-
-    prepared = page_assistance_turn_params(
-        "owner",
-        "self",
-        original,
-        store=store,
-    )
-
-    assert prepared is not original
-    assert prepared["input"][0] == original["input"][0]
-    instruction = prepared["input"][1]["text"]
-    assert "factortester assist inspect" in instruction
-    assert "inspect --node <node-id>" in instruction
-    assert "page-registered semantic node" in instruction
-    assert "factortester assist drafts create --from-current" in instruction
-    assert "inspect the registered `configurations` node" in instruction
-    assert "`create_template`" in instruction
-    assert "do not guess keys" in instruction
-    assert "Never patch either schema_version" in instruction
-    assert "factortester assist drafts patch <draft-id> --stdin" in instruction
-    assert "factortester assist drafts validate <draft-id>" in instruction
-    assert "factortester assist drafts apply <draft-id>" in instruction
-    assert "do not inspect frontend source" in instruction.lower()
-
-
-def test_unassisted_turn_is_not_modified() -> None:
-    store = PageAssistanceStore()
-    original = {"input": [{"type": "text", "text": "ordinary research"}]}
-    assert (
-        page_assistance_turn_params(
-            "owner",
-            "self",
-            original,
-            store=store,
-        )
-        == original
-    )
 
 
 def test_background_heartbeat_does_not_steal_the_assisted_page(monkeypatch):
