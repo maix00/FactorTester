@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 from urllib.parse import parse_qs, unquote
 
 from server.manager.http.responses import json_response
@@ -137,6 +138,37 @@ class ResearchCatalogRoutesMixin:
                             research_id, viewer=viewer,
                         ),
                     }
+                elif child == "collaboration-branches":
+                    # Group-A (owner/editor) branches for every report in this
+                    # research.  The catalog's ``_report_branches`` already
+                    # projects branch choices from migrated source records
+                    # (client / server_agent / publication), which includes
+                    # branches synced from other servers and clients.  We do
+                    # NOT re-scan the local workspaces here: a collaboration
+                    # branch is visible through the shared catalog registry,
+                    # even when its bytes live on another server or client.
+                    reports = service.list_reports(
+                        research_id, viewer=viewer,
+                    )
+                    seen: set[str] = set()
+                    branches: list[dict[str, Any]] = []
+                    for rep in reports:
+                        for br in rep.get("branches") or []:
+                            publication_id = str(
+                                br.get("publication_id") or "",
+                            ).strip()
+                            if not publication_id or publication_id in seen:
+                                continue
+                            seen.add(publication_id)
+                            branches.append({
+                                **br,
+                                "report_id": str(rep.get("report_id") or ""),
+                                "research_id": research_id,
+                                "profile_ref": str(
+                                    br.get("profile_ref") or ""
+                                ),
+                            })
+                    payload = {"branches": branches}
                 elif child == "manifest":
                     manifest = service.research_manifest(
                         research_id, viewer=viewer,
