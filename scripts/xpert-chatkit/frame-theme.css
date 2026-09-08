@@ -40,3 +40,12 @@ body { -webkit-font-smoothing: antialiased; }
 .markdown-content .ft-code-block { display: block; min-width: 0; max-width: 100%; margin-block: .8em; overflow-x: auto; }
 .markdown-content .ft-code-block code { display: block; white-space: pre; overflow-wrap: normal; word-break: normal; }
 [data-ft-message-role] > div { min-width: 0; max-width: 100%; }
+
+/* Consecutive assistant paragraphs/process groups belong to one turn. */
+[data-ft-message-role="ai"] + [data-ft-message-role="ai"] { margin-top: 6px !important; }
+[data-ft-message-role] details { min-width: 0; max-width: 100%; }
+[data-ft-message-role] details .markdown-content { color: var(--foreground, #222); }
+[data-ft-message-role] details pre { max-height: 360px; overflow: auto; text-align: left; }
+[data-ft-message-role] details summary { padding-block: 3px; }
+[data-ft-message-role="ai"]:has(+ [data-ft-message-role="ai"]) { margin-bottom: 0 !important; }
+[data-ft-message-role="ai"]:has(+ [data-ft-message-role="ai"]) > div > .opacity-0 { display: none; }
