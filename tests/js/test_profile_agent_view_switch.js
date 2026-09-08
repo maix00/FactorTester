@@ -123,15 +123,15 @@ assert.equal(window.FTAgentChat.conversationModel({
   initialChats[0].dispatch("chatkit.ready");
   await flush();
   assert.equal(
-    initialChats[0].updateCount,
-    1,
-    "a remounted active conversation fetches process items produced while absent",
+    initialChats[0].updateCount || 0,
+    0,
+    "native thread load owns restoration; host must not start a competing fetch",
   );
   initialChats[0].dispatch("chatkit.ready");
   await flush();
   assert.equal(
-    initialChats[0].updateCount,
-    1,
+    initialChats[0].updateCount || 0,
+    0,
     "status polling does not repeatedly replace the ChatKit timeline and scroll anchor",
   );
   assert.equal(

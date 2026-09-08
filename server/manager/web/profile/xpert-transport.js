@@ -3,6 +3,7 @@
   // authority; the iframe receives no provider credentials or remote API access.
   const sessions = new Map();
   const controls = new Map();
+  const closers = new Map();
   const json = (body, status = 200) => new Response(JSON.stringify(body), {
     status, headers: {"Content-Type": "application/json"},
   });
@@ -12,10 +13,37 @@
     ).join("\n\n");
     return (item.content || []).map(part => part.text || "").join("");
   }
-  function message(item) {
-    return {id: item.id, role: item.type === "user_message" ? "human" : "ai",
-      type: item.type === "user_message" ? "human" : "ai", content: content(item),
-      createdAt: item.created_at};
+  function processItem(item) {
+    if (item.type !== "client_tool_call") return item;
+    return {...item, type: "workflow", workflow: {tasks: [{title: item.name || "工具调用",
+      status_indicator: item.status === "pending" ? "loading" : "complete",
+      content: item.details_deferred ? "" : JSON.stringify({input: item.arguments, output: item.output}, null, 2),
+    }]}};
+  }
+  function messages(items) {
+    const result = [];
+    for (const raw of items) {
+      const item = processItem(raw);
+      const previous = result.at(-1);
+      const process = item.type === "workflow";
+      const role = item.type === "user_message" ? "human" : "ai";
+      if (process) {
+        const part = previous?.content?.[0];
+        if (part?.data?.type === "FTProcess" && previous.executionId === item.turn_id) {
+          part.data.items.push(item);
+          continue;
+        }
+      } else if (role === "ai" && item.turn_id && previous?.executionId === item.turn_id
+          && typeof previous.content === "string") {
+        previous.content += "\n\n" + content(item);
+        continue;
+      }
+      result.push({id: item.id, role, type: role, executionId: item.turn_id,
+        content: process ? [{type: "component", data: {
+          type: "FTProcess", conversationId: item.thread_id, items: [item],
+        }}] : content(item), createdAt: item.created_at});
+    }
+    return result;
   }
   function conversation(thread) {
     return {id: thread.id, threadId: thread.id, title: thread.title,
@@ -27,6 +55,7 @@
     const pages = new Map();
     const runs = new Map();
     const liveItems = new Map();
+    const uploads = new Map();
     async function call(type, params = {}, signal) {
       if (disposed) throw new Error("会话界面已关闭");
       const response = await adapter.fetch(adapter.endpoint, {
@@ -47,27 +76,29 @@
           more: thread.items.has_more};
         pages.set(id, page);
       }
-      while (page.more && page.items.length < offset + limit) {
+      while (page.more && messages(page.items).length < offset + limit) {
         const next = await data("items.list", {thread_id: id, after: page.after, limit: 50});
         const known = new Set(page.items.map(item => item.id));
         const older = (next.data || []).filter(item => !known.has(item.id));
         if (!older.length && next.has_more) throw new Error("历史消息分页没有前进");
         page.items.unshift(...older); page.after = next.after; page.more = next.has_more;
       }
-      return {items: [...page.items].reverse().slice(offset, offset + limit).map(message),
-        total: page.items.length + (page.more ? 1 : 0)};
+      return {items: messages(page.items).slice(Math.max(0, messages(page.items).length - offset - limit), messages(page.items).length - offset),
+        total: messages(page.items).length + (page.more ? 1 : 0)};
     }
     async function stream(id, input, resume, signal) {
       const controller = new AbortController(); active.add(controller);
       signal?.addEventListener("abort", () => controller.abort(), {once: true});
       if (signal?.aborted) controller.abort();
       input = input?.state?.human || input;
-      const text = typeof input?.input === "string" ? input.input :
+      let text = typeof input?.input === "string" ? input.input :
         typeof input === "string" ? input : "";
+      const files = (input?.files || []).map(file => uploads.get(file.fileId || file.id)).filter(Boolean);
+      if (files.length) text += "\n\n附件（当前 Profile 工作区）：\n" + files.map(file => file.workspacePath).join("\n");
       if (!resume && !text.trim()) { active.delete(controller); throw new Error("消息不能为空"); }
       let response;
       try { response = await call(resume ? "threads.resume" : "threads.add_user_message", {
-        thread_id: id, input: {content: [{type: "input_text", text}]},
+        thread_id: id, skill_ids: input?.runtimeCapabilities?.skills?.ids, input: {content: [{type: "input_text", text}]},
       }, controller.signal); } catch (error) { active.delete(controller); throw error; }
       const items = new Map((pages.get(id)?.items || []).map(item => [item.id, item]));
       liveItems.set(id, items);
@@ -99,9 +130,11 @@
                   emit("events", {type: "event", event: "on_message_start", data: {executionId: event.turn_id}});
                 }
                 if (event.type === "error") { emit("error", event.message); continue; }
-                if (event.item) {
-                  items.set(event.item.id, event.item);
-                  emit("values", {messages: [...items.values()].map(message).filter(item => item.content)});
+                if (event.type === "thread.item.removed") items.delete(event.item_id);
+                if (event.item || event.type === "thread.item.removed") {
+                  if (event.item) items.set(event.item.id, {...event.item,
+                    thread_id: event.item.thread_id || id, turn_id: event.item.turn_id || runs.get(id)});
+                  emit("values", {ft_authoritative: true, messages: messages([...items.values()]).filter(item => item.content)});
                 }
               }
             }
@@ -116,11 +149,24 @@
       const url = new URL(typeof input === "string" ? input : input.url, location.origin);
       const parts = url.pathname.replace(/^.*\/ft-profile-bridge\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
       const method = (init.method || "GET").toUpperCase();
-      const body = init.body ? JSON.parse(init.body) : {};
+      const body = typeof init.body === "string" ? JSON.parse(init.body) : (init.body || {});
       const [kind, id, action, run, operation] = parts;
+      if (kind === "contexts" && id === "file" && method === "POST") {
+        if (!options.upload) return json({error: "当前会话不允许上传附件"}, 403);
+        const file = body.get?.("file");
+        if (!file || typeof file.arrayBuffer !== "function") return json({error: "缺少附件文件"}, 400);
+        const saved = await options.upload(file);
+        const fileID = crypto.randomUUID();
+        const result = {id: fileID, fileId: fileID, storageFileId: fileID,
+          originalName: saved.name, size: saved.size_bytes, mimeType: file.type,
+          workspacePath: saved.path, status: "ready", parseStatus: "ready", parseMode: "none"};
+        uploads.set(fileID, result); return json(result);
+      }
+      if (kind === "files" && action === "status" && uploads.has(id)) return json(uploads.get(id));
+      if (kind === "contexts" && method === "DELETE") return json({});
       if (kind === "assistants") {
         if (action === "models") return json({models: []});
-        if (action === "runtime-capabilities") return json({skills: [], plugins: [], subAgents: [], workspaces: [], connectors: []});
+        if (action === "runtime-capabilities") return json(await options.capabilities?.() || {skills: [], plugins: [], subAgents: [], workspaces: [], connectors: []});
         return json({id: "profile", name: "智能体助手"});
       }
       if (kind === "conversations" && id === "search") {
@@ -136,6 +182,10 @@
       if (kind === "conversations" && !id && method === "POST") {
         return json(conversation(await data("threads.get_by_id", {thread_id: body.threadId})));
       }
+      if (kind === "conversations" && action === "process-details") {
+        const detail = await data("items.detail", {thread_id: id, after: body.after || ""});
+        return json({...detail, data: (detail.data || []).map(processItem)});
+      }
       if (kind === "conversations" && action === "messages") return json(await history(id, body.offset || 0, body.limit || 50));
       if (kind === "conversations" && !action) {
         if (method === "PATCH") {
@@ -149,6 +199,7 @@
         if (!run && method === "POST") {
           const input = body.input;
           const turn = runs.get(id);
+          if (!turn && input?.mode === "steer") return json({error: "Steer target turn has ended"}, 409);
           if (input?.action !== "follow_up" || input.mode !== "steer" || input.conversationId !== id
               || !turn || input.target?.executionId !== turn) {
             return json({error: "Steer 目标运行已结束或不匹配"}, 409);
@@ -182,13 +233,15 @@
     }
     const key = crypto.randomUUID();
     controls.set(key, options.mountControls);
+    closers.set(key, options.onClose);
     sessions.set(key, async (input, init) => {
       try { return await fetch(input, init); }
       catch (error) { return json({error: error.message}, error.status || 400); }
     });
-    return {key, dispose() { disposed = true; sessions.delete(key); controls.delete(key); for (const controller of active) controller.abort(); active.clear(); }};
+    return {key, dispose() { disposed = true; sessions.delete(key); controls.delete(key); closers.delete(key); for (const controller of active) controller.abort(); active.clear(); }};
   }
   window.FTXpertTransport = Object.freeze({create,
+    close(key) { closers.get(key)?.(); },
     mountControls(key, kind, slot) { controls.get(key)?.(kind, slot); },
     fetch(key, input, init) {
       const fetch = sessions.get(key);

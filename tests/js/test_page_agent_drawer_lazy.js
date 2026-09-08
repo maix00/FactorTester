@@ -82,7 +82,7 @@ vm.runInThisContext(
   const opening = drawer.open();
   resolveProfile({profile_id: "self"}); resolveAssistance(); await opening;
   assert.equal(events.filter(e => e[0] === "chat").length, 1);
-  const chat = drawer.shell.children[1].children[0];
+  const chat = drawer.shell.children[0].children[0];
   const next = {...context, tabID: "b"};
   global.FTPageAgentProfiles = {forPage: async () => [], self: async () => ({profile_id: "self"})};
   FTPageAgentDrawer.activate(next);
@@ -92,7 +92,7 @@ vm.runInThisContext(
   await Promise.resolve();
   assert.equal(same, drawer, "all tabs share the application drawer");
   assert.equal(drawer.shell.hidden, false, "tab changes retain open state");
-  assert.equal(drawer.shell.children[1].children[0], chat, "tab changes never move or replace the chat iframe");
+  assert.equal(drawer.shell.children[0].children[0], chat, "tab changes never move or replace the chat iframe");
   const disconnectsBeforeClose = nextDisconnects;
   hooks[0].dispose();
   assert.equal(nextDisconnects, disconnectsBeforeClose, "closing an old page must not disconnect the new page receiver");

@@ -1238,7 +1238,7 @@ button.reference-item { cursor: pointer; }
   left: auto;
   width: min(32rem, calc(100vw - 2rem));
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   background: var(--surface, #fff);
   border: 1px solid var(--border, #d9dce3);
   border-radius: 1rem;
@@ -1324,3 +1324,8 @@ button.reference-item { cursor: pointer; }
   width: 24px; height: 24px; min-width: 24px; min-height: 0;
   margin: 0; padding: 0; border: 0; background: transparent;
 }
+
+.nav-singleton { display: flex; align-items: center; min-width: 0; }
+.nav-singleton > .nav-button { flex: 1; min-width: 0; }
+.nav-singleton-close { border: 0; background: transparent; color: inherit; padding: .35rem; cursor: pointer; }
+.nav-singleton-close[hidden] { display: none; }

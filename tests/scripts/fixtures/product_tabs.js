@@ -202,3 +202,16 @@ assert.deepStrictEqual(nativeMessages, [{
 }]);
 assert.strictEqual(state.tabs.length, tabCount);
 console.log("ok");
+
+// Feature utilities are lazy singletons. Closing removes only the page;
+// service/VPN state is deliberately not represented by a tab lifecycle call.
+closeState.modules.push({id:'mihomo', path:'/mihomo', title:'Mihomo', tab_behavior:'singleton'});
+const utility = closeState.modules.at(-1);
+closeTabs.openModule(utility);
+closeTabs.openModule(utility);
+assert.strictEqual(closeState.tabs.filter(tab => tab.id === 'mihomo').length, 1);
+assert.strictEqual(closeState.tabs.find(tab => tab.id === 'mihomo').closable, true);
+closeTabs.closeTab('mihomo');
+assert.strictEqual(closeState.tabs.some(tab => tab.id === 'mihomo'), false);
+closeTabs.openModule(utility);
+assert.strictEqual(closeState.tabs.filter(tab => tab.id === 'mihomo').length, 1);

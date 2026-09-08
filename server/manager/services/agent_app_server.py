@@ -215,13 +215,9 @@ class AgentAppServerSupervisor:
                 active = self._processing_turns.get(key)
                 if active is not None and not active.get("turn_id"):
                     active["turn_id"] = event_turn_id
-        item = params.get("item")
-        item = item if isinstance(item, Mapping) else {}
-        item_type = str(item.get("type") or "").replace("_", "").casefold()
-        final_assistant = method == "item/completed" and item_type in {
-            "agentmessage", "assistantmessage",
-        }
-        if method == "app_server_exit" or terminal_turn or final_assistant:
+        # One turn can contain many assistant items interleaved with tools.
+        # Only the turn terminal event releases its active binding.
+        if method == "app_server_exit" or terminal_turn:
             with self._lock:
                 active = self._processing_turns.get(key)
                 active_turn_id = str((active or {}).get("turn_id") or "")
@@ -508,6 +504,13 @@ class AgentAppServerSupervisor:
                     ))
                 )
                 if inactive_steer and require_active_turn:
+                    # A provider-confirmed ended turn must not remain advertised
+                    # as running. Preserve a newer concurrently started binding.
+                    with self._lock:
+                        active = self._processing_turns.get(key) or {}
+                        if (active.get("conversation_id") == identifier
+                                and active.get("turn_id") == request_params.get("turnId")):
+                            self._processing_turns.pop(key, None)
                     raise AgentAppServerError("Steer target turn has ended") from exc
                 if inactive_steer:
                     with self._lock:

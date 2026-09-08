@@ -447,13 +447,17 @@
     }
 
     function renderOpenedTabs() {
+      document.querySelectorAll?.("[data-module-close]").forEach(button => {
+        button.hidden = !state.tabs.some(tab => tab.id === button.dataset.moduleClose);
+      });
       const host = document.querySelector("#opened-tabs");
       const caption = document.querySelector("#opened-caption");
       if (!host || !caption) return;
       host.replaceChildren();
       const hasResearchHost = Boolean(researchFolderHost());
       const opened = state.tabs.filter(tab => (
-        tab.closable && (!hasResearchHost || !isResearchSidebarTab(tab))
+        tab.closable && !state.modules.some(module => module.id === tab.id && module.tab_behavior === "singleton")
+          && (!hasResearchHost || !isResearchSidebarTab(tab))
       ));
       caption.hidden = !state.tabs.some(tab => tab.closable);
       for (const tab of opened) {
@@ -573,6 +577,11 @@
           icon: FTIcons.module(root),
           closable: false,
         });
+      }
+      if (module.tab_behavior === "singleton") {
+        const existing = state.tabs.find(tab => tab.id === module.id);
+        if (existing) return activateTab(existing.id);
+        return openTab(path, {id: module.id, title: t(module.title_key || module.title), closable: true});
       }
       if (module.tab_behavior === "new") {
         return openTab(path, {forceNew: true, title: t(module.title_key || module.title)});
@@ -783,6 +792,11 @@
         options.parentTabID = parentID;
         options.parentResearchID = reportResearchID;
       }
+      const singleton = state.modules.find(module => module.tab_behavior === "singleton"
+        && (pathname === modulePath(module).split("?")[0].replace(/\/$/, "")
+          || (module.id === "docs" && pathname.startsWith("/docs/"))
+          || (module.id === "sqlite_web" && pathname.startsWith("/sqlite-web/"))));
+      if (singleton) return openTab(path, {id: singleton.id, title: t(singleton.title_key || singleton.title), closable: true});
       // An overlay owns the source tab.  Any internal navigation initiated
       // from it gets a dedicated tab, including normally pinned feature routes.
       // Stable detail tabs remain deduplicated even when opened from an
@@ -958,6 +972,17 @@
       const fixedIDs = new Set(state.tabs.map(tab => tab.id));
       restored.filter(tab => tab.closable && !fixedIDs.has(tab.id))
         .forEach(tab => state.tabs.push({...tab, closable: true}));
+      for (const module of state.modules.filter(item => item.tab_behavior === "singleton")) {
+        const root = modulePath(module).split("?")[0].replace(/\/$/, "");
+        const candidates = state.tabs.filter(tab => tabPathname(tab).replace(/\/$/, "") === root
+          || (module.id === "docs" && tabPathname(tab).startsWith("/docs/")));
+        if (!candidates.length) continue;
+        const selected = candidates.find(tab => tab.id === snapshot?.activeTabID) || candidates[0];
+        state.tabs = state.tabs.filter(tab => !candidates.includes(tab));
+        state.tabs.push({...selected, id: module.id, closable: true});
+        for (const tab of candidates) if (tab.id !== module.id) workspace?.removeSession?.(tab.id);
+        if (candidates.some(tab => tab.id === snapshot?.activeTabID)) snapshot = {...snapshot, activeTabID: module.id};
+      }
       normalizeResearchTabHierarchy();
       state.tabs.forEach(tab => viewCache.hydrateSession(tab.id));
       state.activeTabID = state.tabs.some(tab => tab.id === snapshot?.activeTabID)
