@@ -59,13 +59,12 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  async function upload(context, profileID, reload) {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.multiple = true;
+  function configureUpload(context, profileID, input, reload) {
     input.addEventListener("change", async () => {
       const files = Array.from(input.files || []);
       if (!files.length) return;
+      input.disabled = true;
+      context.showNotice?.(context.t("正在上传…"), false);
       try {
         for (const file of files) {
           const query = new URLSearchParams({
@@ -83,10 +82,11 @@
       } catch (error) {
         context.showNotice?.(error.message || String(error), true);
       } finally {
+        input.value = ""; // 同一个文件再次选择时也触发 change。
+        input.disabled = false;
         await reload("uploads");
       }
     });
-    input.click();
   }
 
   function render(context, profile) {
@@ -97,8 +97,15 @@
     const heading = document.createElement("h2");
     heading.textContent = context.t("工作区文件");
     header.append(heading);
+    // Safari 文件选择器必须由已挂载且持续存活的 input 持有。
+    // 不在点击回调里创建游离节点：选择器打开期间节点可能被回收，导致无 change。
+    const uploadInput = document.createElement("input");
+    uploadInput.type = "file";
+    uploadInput.multiple = true;
+    uploadInput.hidden = true;
+    root.append(uploadInput);
     const uploadButton = iconButton(context, "arrow.up.circle", context.t("上传到 uploads"), () => {
-      void upload(context, profile.profile_id, path => { currentPath = path; return load(); });
+      if (!uploadInput.disabled) uploadInput.click();
     });
     uploadButton.classList.add("workspace-upload-btn");
     const actions = document.createElement("div");
@@ -206,6 +213,10 @@
         ));
       } finally { pending -= 1; }
     };
+    configureUpload(context, profile.profile_id, uploadInput, path => {
+      currentPath = path;
+      return load();
+    });
     void load();
     // One visible directory per mounted browser; stop when the view is removed.
     // No recursive scan or new synchronization channel is needed.
