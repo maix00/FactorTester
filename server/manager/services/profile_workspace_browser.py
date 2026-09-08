@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import mimetypes
 import re
 from pathlib import Path
 from typing import Any
@@ -143,7 +144,7 @@ class ProfileWorkspaceBrowser:
         return {
             "object_id": workspace_object_id(profile_id, relative),
             "filename": path.name,
-            "content_type": "application/octet-stream",
+            "content_type": mimetypes.guess_type(path.name)[0] or "application/octet-stream",
             "size_bytes": path.stat().st_size,
             "sha256": digest.hexdigest(),
             "path": relative,
@@ -192,8 +193,8 @@ class ProfileWorkspaceBrowser:
         root = self._root(principal, profile_id)
         directory = self._safe_path(root, relative_path)
         # Older workspaces predate uploads/. Create only this managed directory.
-        if _relative_parts(relative_path) == ("uploads",):
-            directory.mkdir(exist_ok=True)
+        if _relative_parts(relative_path)[:1] == ("uploads",):
+            directory.mkdir(parents=True, exist_ok=True)
         if not directory.is_dir():
             raise ProfileWorkspaceError("workspace path is not a directory")
         safe_name = _safe_filename(filename)
@@ -228,6 +229,7 @@ class ProfileWorkspaceBrowser:
             "name": safe_name,
             "kind": "file",
             "size_bytes": size,
+            "sha256": hashlib.sha256(data or b"").hexdigest(),
             "saved": True,
         }
 

@@ -151,10 +151,28 @@
         })), plugins: [], subAgents: [], workspaces: [], connectors: []};
       },
       upload: options.readOnly || options.historyOnly ? null : async file => {
-        const query = new URLSearchParams({profile_id: profile.profile_id, path: "uploads", filename: file.name});
+        const query = new URLSearchParams({profile_id: profile.profile_id, path: "uploads", filename: file.name, chat_attachment: "1"});
         return context.api(`/api/client/profile-workspace/upload?${query}`, {
           method: "POST", body: file, headers: {"Content-Type": "application/octet-stream"},
         });
+      },
+      preview: async (file, conversationID) => {
+        const payload = {object_kind: "profile_workspace", profile_id: profile.profile_id,
+          path: file.workspacePath};
+        if (options.readOnly || options.historyOnly) Object.assign(payload, {
+          profile_key: options.profileKey, scope: options.profileScope || "servers",
+          conversation_id: conversationID,
+        });
+        const issued = await context.api("/api/transfers/objects/download-access", {
+          method: "POST", body: JSON.stringify(payload),
+        });
+        const access = issued.access || {};
+        if (!access.url || !access.bearer) throw new Error("附件下载授权无效");
+        const response = await fetch(access.url, {credentials: "omit", redirect: "error",
+          headers: {Authorization: `Bearer ${access.bearer}`}});
+        if (!response.ok) throw new Error(`附件读取失败: HTTP ${response.status}`);
+        const blob = await response.blob();
+        return new Blob([blob], {type: issued.object?.content_type || file.mimeType || blob.type});
       },
       mountControls(kind, slot) {
         if (kind === "profile") slot.replaceChildren(identity);
@@ -203,7 +221,7 @@
       },
       composer: {
         placeholder: context.t("输入要交给 Agent 的研究问题…"),
-        attachments: {enabled: !options.readOnly && !options.historyOnly},
+        attachments: {enabled: !options.readOnly && !options.historyOnly, maxSize: 64 * 1024 * 1024},
         models: [],
       },
     };

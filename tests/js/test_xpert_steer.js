@@ -28,6 +28,8 @@ vm.runInThisContext(fs.readFileSync('server/manager/web/profile/xpert-transport.
  assert.doesNotMatch(text,/adjust/, 'accepted steer waits for its application event');
  assert.match(text,/continues/);
  output.enqueue(new TextEncoder().encode('data: '+JSON.stringify({type:'thread.item.added',item:{id:'applied-steer',type:'user_message',content:[{text:'adjust'}]}})+'\n\n'));
+ const consumed = new TextDecoder().decode((await reader.read()).value);
+ assert.match(consumed,/follow_up_consumed/);assert.match(consumed,/m1/);
  await reader.read();
  output.enqueue(new TextEncoder().encode('data: '+JSON.stringify({type:'thread.item.added',item:{id:'after-steer',type:'assistant_message',content:[{text:'applied'}]}})+'\n\n'));
  const applied = JSON.parse(new TextDecoder().decode((await reader.read()).value).split('data: ')[1]);

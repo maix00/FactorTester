@@ -308,6 +308,10 @@ class AgentRoutesMixin:
                     )
                 relative_path = query.get("path", [""])[0]
                 filename = query.get("filename", [""])[0]
+                if query.get("chat_attachment", [""])[0] == "1":
+                    from datetime import datetime, timezone
+                    from uuid import uuid4
+                    relative_path = f"uploads/{datetime.now(timezone.utc):%Y-%m-%d}/{uuid4().hex}"
                 data = self._raw_body(64 * 1024 * 1024)
                 result = self._agent_service().save_profile_workspace_file(
                     principal,
