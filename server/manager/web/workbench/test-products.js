@@ -214,6 +214,65 @@
       };
     };
     let picker = null;
+    let productItems = [];
+    const multiGroups = options.multi ?? (state.kind === "ic");
+    let manualGroup = allGroups().find(group => selectedRefs.includes(groupID(group))
+      && (group.manual_products === true || String(groupID(group)).startsWith("inline:products:")));
+    const publishRefs = refs => {
+      if (typeof options.onChange === "function") options.onChange(refs);
+      else {
+        state.groupRefs = refs; state.groupRef = refs[0] || "";
+        if (state.values) state.values.product_path_selections = [];
+      }
+      synchronize(state);
+      refresh?.();
+    };
+    const publishManual = paths => {
+      if (!paths.length) { publishRefs([]); return; }
+      manualGroup = upsertGroup(state, {
+        ...(manualGroup || {}),
+        id: groupID(manualGroup) || `inline:products:${crypto.randomUUID()}`,
+        name: context.t("手选产品"), paths, temporary: true, origin: "inline",
+        manual_products: true,
+        category_ids: window.FTStrategyEditorScope?.outerCategoryIDs(state) || [],
+        source_ids: window.FTStrategyEditorScope?.selectedSourceIDs(state) || [],
+      });
+      publishRefs(paths.length ? [groupID(manualGroup)] : []);
+    };
+    const loadProducts = async query => {
+      const helper = window.FTStrategyEditorScope;
+      const params = new URLSearchParams({query, page: "1", limit: "100"});
+      const ids = helper?.selectedSourceIDs(state) || [];
+      ids.forEach(id => params.append("data_source", id));
+      const categories = helper?.outerCategoryIDs(state) || [];
+      categories.forEach(id => params.append("category_id", id));
+      // Explicitly mounted empty restrictions must not widen the query.
+      const rule = helper?.contract(state).candidate_constraints?.product_path_candidates || {};
+      if (helper?.mounted(state, "data_source") && !ids.length
+          && (state.values?.[rule.mode_field] || "auto") !== "auto") return [];
+      if (helper?.mounted(state, "category") && !categories.length) return [];
+      const scope = options.groups && helper?.scope(state, "product_path_selection");
+      if (scope?.required && !scope.ready) return [];
+      if (scope?.source === "outer") {
+        if (!scope.items.length) return [];
+        for (const item of scope.items) {
+          const ref = groupID(item);
+          if (ref.startsWith("product-group:")) params.append("group_ref", ref);
+          else (item.paths || item.selected_paths || []).forEach(path => params.append("product_path", path));
+        }
+        if (!params.has("group_ref") && !params.has("product_path")) return [];
+      }
+      const products = [];
+      for (let page = 1; ; page += 1) {
+        params.set("page", String(page));
+        const payload = await context.api(`/api/product-library/products?${params}`);
+        products.push(...(payload.products || []));
+        if (!payload.has_more) break;
+      }
+      return products.map(item => ({type: "product", value: item.product_path,
+        label: item.desc ? `${item.name} · ${item.desc}` : item.name,
+        description: item.product_path}));
+    };
     const savedGroup = value => {
       const group = upsertGroup(state, value);
       if (!group) return;
@@ -222,20 +281,15 @@
         const index = scopedGroups.findIndex(item => groupID(item) === groupID(group));
         if (index >= 0) scopedGroups[index] = group; else scopedGroups.push(group);
       }
-      if (typeof options.onChange === "function") {
-        options.onChange([groupID(group)]);
-      } else {
-        selectNew(state, group);
-        synchronize(state);
-      }
-      picker?.setItems(pickerItems());
+      picker?.setItems([...pickerItems(), ...productItems]);
       picker?.setValues([groupID(group)]);
-      refresh?.();
+      publishRefs([groupID(group)]);
     };
     const pickerItems = () => groups().filter(group => !String(groupID(group)).startsWith("inline:products:")).map(group => {
       const view = window.FTFactorDetailShared?.productGroupRowView?.(group)
         || {kind: "product_group", ref: groupID(group)};
       return {
+        type: "product_group",
         value: groupID(group),
         label: groupLabel(group),
         description: [
@@ -249,44 +303,54 @@
     }).filter(item => item.value);
     const syncCatalog = () => {
       picker?.setStatus({loading: false, ...catalogStatus()});
-      picker?.setItems(pickerItems());
+      picker?.setItems([...pickerItems(), ...productItems], true);
     };
     picker = FTTestObjectPicker.create(context, {
       title: context.t("产品路径候选"),
       note: context.t(state.kind === "ic"
         ? "可多选产品组；每个候选冻结为独立 IC 任务"
         : "选择一个产品组作为本次回测的产品范围"),
-      items: pickerItems(),
-      selected: selectedRefs,
-      multi: options.multi ?? (state.kind === "ic"),
+      items: [...pickerItems(), ...(manualGroup?.paths || []).map(path => ({
+        type: "product", value: path, label: path.split("/_products/").pop(),
+      }))],
+      selected: manualGroup ? manualGroup.paths || [] : selectedRefs,
+      multi: true,
+      selectionTypes: {exclusive: true, modes: {product_group: multiGroups ? "multi" : "single", product: "multi"}},
+      candidateTypes: ["product_group", "product"],
+      loadItems: async query => {
+        await window.FTTests?.ensureProductsForExecution?.(context, state);
+        productItems = await loadProducts(query);
+        return [...pickerItems(), ...productItems];
+      },
       loading: options.loading ?? FTTestObjectPicker.lazyLoading(state, "products"),
       loadingText: context.t("正在读取产品组候选…"),
       ...catalogStatus(),
       compact: true,
       name: `test-product-groups-${state.kind}`,
-      onCreate: context.session && options.canCreate !== false
-        ? () => void openEditor(context, "create", "new", savedGroup, state)
-        : null,
+      canAddForType: key => key === "product_group" && Boolean(context.session)
+        && options.canCreate !== false,
+      onAddCandidateForType: key => {
+        if (key === "product_group" && context.session && options.canCreate !== false) {
+          void openEditor(context, "create", "new", savedGroup, state);
+        }
+      },
       createLabel: context.t("新建产品组"),
       testState: state,
       onRefresh: async () => {
         picker?.setStatus({loading: true, text: "", errorText: ""});
-        await window.FTTests?.refreshProductsForExecution?.(context, state, refresh);
-        syncCatalog();
+        try {
+          await window.FTTests?.refreshProductsForExecution?.(context, state);
+          productItems = await loadProducts(picker?.search?.value || "");
+          syncCatalog();
+        } catch (error) {
+          picker?.setStatus({loading: false, errorText: error.message || String(error)});
+        }
       },
       onChange: values => {
         const refs = uniqueReferences(values);
-        if (typeof options.onChange === "function") {
-          options.onChange(refs);
-        } else if (state.kind === "ic") {
-          state.groupRefs = refs;
-          state.groupRef = refs[0] || "";
-        } else {
-          state.groupRef = refs[0] || "";
-          state.groupRefs = state.groupRef ? [state.groupRef] : [];
-        }
-        synchronize(state);
-        refresh?.();
+        const groupRefs = refs.filter(ref => pickerItems().some(item => item.value === ref));
+        if (groupRefs.length) publishRefs(multiGroups ? groupRefs : [groupRefs[groupRefs.length - 1]]);
+        else publishManual(refs);
       },
     });
     const catalogPromise = state.lazy?.products?.promise;
@@ -300,92 +364,8 @@
         : ["product_path_selection", "product_path_selections"],
       context,
     ) || "";
-    const content = document.createElement("div");
-    const choice = document.createElement("div");
-    let manualGroup = allGroups().find(group => selectedRefs.includes(groupID(group))
-      && (group.manual_products === true || String(groupID(group)).startsWith("inline:products:")));
-    const sourceState = options.sourceState || state;
-    let mode = sourceState.productSourceMode || (manualGroup ? "products" : "group");
-    const publishManual = paths => {
-      manualGroup = upsertGroup(state, {
-        ...(manualGroup || {}),
-        id: groupID(manualGroup) || `inline:products:${crypto.randomUUID()}`,
-        name: context.t("手选产品"), paths, temporary: true, origin: "inline",
-        manual_products: true,
-        category_ids: window.FTStrategyEditorScope?.outerCategoryIDs(state) || [],
-        source_ids: window.FTStrategyEditorScope?.selectedSourceIDs(state) || [],
-      });
-      const refs = paths.length ? [groupID(manualGroup)] : [];
-      if (typeof options.onChange === "function") options.onChange(refs);
-      else { state.groupRefs = refs; state.groupRef = refs[0] || ""; }
-      synchronize(state);
-      refresh?.();
-    };
-    const renderChoice = () => {
-      if (mode === "group") { choice.replaceChildren(picker.element); return; }
-      const direct = FTTestObjectPicker.create(context, {
-        title: context.t("产品"), compact: true, multi: true,
-        name: `test-direct-products-${state.kind}`,
-        selected: manualGroup?.paths || [],
-        items: (manualGroup?.paths || []).map(path => ({value: path, label: path.split("/_products/").pop()})),
-        placeholder: context.t("搜索并多选产品"),
-        loadItems: async query => {
-          const scopeHelper = window.FTStrategyEditorScope;
-          const params = new URLSearchParams({query, page: "1", limit: "100"});
-          if (scopeHelper?.mounted(state, "data_source")) {
-            const ids = scopeHelper.selectedSourceIDs(state);
-            const rule = scopeHelper.contract(state).candidate_constraints?.product_path_candidates || {};
-            const sourceMode = state.values?.[rule.mode_field] || (ids.length ? "list" : "auto");
-            if (sourceMode !== "auto" && !ids.length) return [];
-            ids.forEach(id => params.append("data_source", id));
-          }
-          (scopeHelper?.outerCategoryIDs(state) || []).forEach(id => params.append("category_id", id));
-          const scope = options.groups && scopeHelper?.scope(state, "product_path_selection");
-          if (scope?.required && !scope.ready) return [];
-          if (scope?.source === "outer") {
-            scope.items.map(groupID).filter(id => id.startsWith("product-group:"))
-              .forEach(id => params.append("group_ref", id));
-          }
-          if (scope?.source === "outer") {
-            scope.items.filter(item => String(groupID(item)).startsWith("inline:products:"))
-              .flatMap(item => item.paths || []).forEach(path => params.append("product_path", path));
-          }
-          const products = [];
-          // The API is paginated; a library picker must not silently lose page 2.
-          for (let page = 1; ; page += 1) {
-            params.set("page", String(page));
-            const payload = await context.api(`/api/product-library/products?${params}`);
-            products.push(...(payload.products || []));
-            if (!payload.has_more) break;
-          }
-          return products.map(item => ({
-            value: item.product_path, label: item.desc ? `${item.name} · ${item.desc}` : item.name,
-            description: item.product_path,
-          }));
-        },
-        onChange: publishManual,
-      });
-      choice.replaceChildren(direct.element);
-    };
-    const source = FTTestObjectPicker.create(context, {
-      title: context.t("产品来源"), compact: true, multi: false,
-      items: [{value: "group", label: context.t("产品组")}, {value: "products", label: context.t("多选产品")}],
-      selected: [mode],
-      onChange: values => {
-        mode = sourceState.productSourceMode = values[0] || "group";
-        picker.setValues([]);
-        if (typeof options.onChange === "function") options.onChange([]);
-        else {
-          state.groupRef = ""; state.groupRefs = [];
-          if (state.values) state.values.product_path_selections = [];
-        }
-        renderChoice();
-      },
-    });
-    renderChoice();
-    content.append(source.element, choice);
     const root = FTTestFieldRow.create(
-      context.t("产品范围"), content, help,
+      context.t("产品范围"), picker.element, help,
       {className: "test-product-selector"},
     );
     return root;
