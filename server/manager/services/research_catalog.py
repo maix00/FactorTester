@@ -481,6 +481,25 @@ class ResearchCatalog:
             value["branches"] = self._report_branches(value)
         return values
 
+    def can_read_publication(self, record: dict, viewer: str | None) -> bool:
+        """Reuse current research download rights for its immutable projection.
+
+        Publication metadata is authenticated at ingestion; match both its report
+        and owner. Do not copy an authorization list that becomes stale on revoke.
+        """
+        report_id = str(record.get("report_id") or "")
+        if not report_id:
+            return False
+        try:
+            row = self._report_row(report_id)
+        except KeyError:
+            return False
+        return bool(
+            str(row["status"]) == "active"
+            and str(row["owner_ref"]) == str(record.get("owner_ref") or "")
+            and self._report_access(row, viewer)["can_download"]
+        )
+
     def authorize_server_report_read(
         self, *, owner: str, server_ref: str, viewer: str,
     ) -> dict[str, Any]:

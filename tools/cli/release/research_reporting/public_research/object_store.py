@@ -11,7 +11,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from .library import _attachment_id, _can_read
+from .library import _attachment_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +37,7 @@ class PublicResearchObjectStore:
         viewer_ref: str | None,
     ) -> PublicResearchObject:
         record = self.library._record(publication_id)
-        if not _can_read(record, viewer_ref):
+        if not self.library.can_read(record, viewer_ref):
             raise PermissionError("research report access is not authorized")
         projection = self.library._projection(publication_id)
         metadata, path = self._entry(projection, publication_id, object_kind, item_id)
@@ -97,7 +97,7 @@ class PublicResearchObjectStore:
         while accepting a not-yet-materialized destination.
         """
         record = self.library._record(publication_id)
-        if not _can_read(record, viewer_ref):
+        if not self.library.can_read(record, viewer_ref):
             raise PermissionError("research report access is not authorized")
         projection = self.library._projection(publication_id)
         metadata, _path = self._entry(

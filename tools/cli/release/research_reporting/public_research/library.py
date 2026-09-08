@@ -22,11 +22,17 @@ VISIBILITIES = {"private", "superiors", "authorized", "public"}
 class PublicResearchLibrary:
     """Persist uploaded projections without resolving the owner's local files."""
 
-    def __init__(self, root: Path, *, storage_server_id: str = "") -> None:
+    def __init__(self, root: Path, *, storage_server_id: str = "", read_authorizer=None) -> None:
+        self.read_authorizer = read_authorizer
         self.root = root.resolve()
         self.registry_path = self.root / "publications.json"
         self.mirror_root = self.root / "mirrors"
         self.storage_server_id = str(storage_server_id or "").strip()
+
+    def can_read(self, record: dict[str, Any], viewer_ref: str | None) -> bool:
+        return _can_read(record, viewer_ref) or bool(
+            self.read_authorizer and self.read_authorizer(record, viewer_ref)
+        )
 
     def sync(self, payload: dict[str, Any]) -> dict[str, Any]:
         report_id = _required(payload, "report_id")
@@ -202,7 +208,7 @@ class PublicResearchLibrary:
     def list_visible(self, viewer_ref: str | None) -> list[dict[str, Any]]:
         values: list[dict[str, Any]] = []
         for record in self._registry()["publications"]:
-            if not _can_read(record, viewer_ref):
+            if not self.can_read(record, viewer_ref):
                 continue
             try:
                 title = str(record.get("title") or "")
@@ -239,7 +245,7 @@ class PublicResearchLibrary:
         self, publication_id: str, viewer_ref: str | None,
     ) -> dict[str, Any]:
         record = self._record(publication_id)
-        if not _can_read(record, viewer_ref):
+        if not self.can_read(record, viewer_ref):
             raise PermissionError("research report access is not authorized")
         value = self._projection(publication_id)
         value["access"] = {
@@ -256,7 +262,7 @@ class PublicResearchLibrary:
     ) -> dict[str, Any]:
         """Read only chapter metadata before the selected chapter is opened."""
         record = self._record(publication_id)
-        if not _can_read(record, viewer_ref):
+        if not self.can_read(record, viewer_ref):
             raise PermissionError("research report access is not authorized")
         value = self._read_index(
             publication_id,
@@ -277,7 +283,7 @@ class PublicResearchLibrary:
     ) -> dict[str, Any]:
         """Read one report chapter and its descendants on demand."""
         record = self._record(publication_id)
-        if not _can_read(record, viewer_ref):
+        if not self.can_read(record, viewer_ref):
             raise PermissionError("research report access is not authorized")
         path = self._chapter_path(publication_id, chapter_id)
         try:
@@ -313,7 +319,7 @@ class PublicResearchLibrary:
     ) -> dict[str, Any]:
         """Read one component body after a metadata-only chapter load."""
         record = self._record(publication_id)
-        if not _can_read(record, viewer_ref):
+        if not self.can_read(record, viewer_ref):
             raise PermissionError("research report access is not authorized")
         chapter = self.chapter(
             publication_id, chapter_id, viewer_ref, include_content=True,
@@ -332,7 +338,7 @@ class PublicResearchLibrary:
         self, publication_id: str, asset_id: str, viewer_ref: str | None,
     ) -> tuple[bytes, str, str]:
         record = self._record(publication_id)
-        if not _can_read(record, viewer_ref):
+        if not self.can_read(record, viewer_ref):
             raise PermissionError("research report access is not authorized")
         metadata = next((item for item in self._projection(publication_id).get("assets", [])
                          if item.get("asset_id") == asset_id), None)
@@ -352,7 +358,7 @@ class PublicResearchLibrary:
     ) -> tuple[bytes, str, str]:
         """Read a content-addressed related-object snapshot."""
         record = self._record(publication_id)
-        if not _can_read(record, viewer_ref):
+        if not self.can_read(record, viewer_ref):
             raise PermissionError("research report access is not authorized")
         metadata = next((item for item in self._projection(publication_id).get("attachments", [])
                          if item.get("attachment_ref") == attachment_ref), None)
@@ -373,7 +379,7 @@ class PublicResearchLibrary:
     ) -> tuple[bytes, str, str]:
         """Read a bounded local-file snapshot uploaded with a publication."""
         record = self._record(publication_id)
-        if not _can_read(record, viewer_ref):
+        if not self.can_read(record, viewer_ref):
             raise PermissionError("research report access is not authorized")
         if not re.fullmatch(r"[a-f0-9]{24}", resource_id):
             raise ValueError("research local resource id is invalid")
