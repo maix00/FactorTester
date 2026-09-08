@@ -237,3 +237,51 @@ def test_branch_http_route_precedes_generic_projection():
         "/api/server-research/branch?target_ref=owner&profile_id=self&package_id=p&branch_id=main"))
     assert handler.status == 200
     assert calls[0][1]["package_id"] == "p"
+
+
+def test_shared_publication_uses_current_catalog_permissions(tmp_path):
+    from tools.cli.release.research_reporting.public_research.library import PublicResearchLibrary
+    catalog = _service(tmp_path).research_catalog
+    library = PublicResearchLibrary(tmp_path / "public-research", read_authorizer=catalog.can_read_publication)
+    projection = {"schema_version": 2, "report_id": "report-one-editor", "title": "共享报告",
+                  "generation": 1, "components": [], "projection_hash": "hash"}
+    value = library.sync({"report_id": "report-one-editor", "owner_ref": EDITOR_A, "projection": projection})
+    publication = value["publication_id"]
+    assert library.list_visible(READER)[0]["publication_id"] == publication
+    assert library.index(publication, READER)["title"] == "共享报告"
+    assert not library.list_visible("GTHT@stranger@4")
+    with pytest.raises(PermissionError):
+        library.index(publication, "GTHT@stranger@4")
+    assert not catalog.can_read_publication({"report_id": "report-one-editor", "owner_ref": OWNER}, READER)
+    research = catalog.list_researches(viewer=EDITOR_A)[0]
+    catalog.update_research(research["research_id"], actor=EDITOR_A, authorized_users=[])
+    assert not library.list_visible(READER)
+    with pytest.raises(PermissionError):
+        library.index(publication, READER)
+    assert library.index(publication, EDITOR_A)["title"] == "共享报告"
+
+
+def test_data_plane_research_asset_reuses_catalog_without_control_database(tmp_path, png_bytes):
+    import base64
+    import hashlib
+    from server.manager.data_plane.app import research_read_authorizer
+    from tools.cli.release.research_reporting.public_research.library import PublicResearchLibrary
+    from tools.cli.release.research_reporting.public_research.object_store import PublicResearchObjectStore
+    catalog = _service(tmp_path).research_catalog
+    library = PublicResearchLibrary(tmp_path / "public-research")
+    asset_id = "a" * 24
+    projection = {"schema_version": 2, "report_id": "report-one-editor", "title": "共享报告",
+        "generation": 1, "components": [], "projection_hash": "hash", "assets": [{
+        "asset_id": asset_id, "media_type": "image/png", "filename": "图片.png",
+        "content_hash": hashlib.sha256(png_bytes).hexdigest(),
+        "content_base64": base64.b64encode(png_bytes).decode()}]}
+    publication = library.sync({"report_id": "report-one-editor", "owner_ref": EDITOR_A,
+                               "projection": projection})["publication_id"]
+    byte_library = PublicResearchLibrary(library.root,
+        read_authorizer=research_read_authorizer(str(catalog.db_path)))
+    objects = PublicResearchObjectStore(byte_library)
+    assert objects.resolve(publication, "research_asset", asset_id, READER).path.read_bytes() == png_bytes
+    research = catalog.list_researches(viewer=EDITOR_A)[0]
+    catalog.update_research(research["research_id"], actor=EDITOR_A, authorized_users=[])
+    with pytest.raises(PermissionError):
+        objects.resolve(publication, "research_asset", asset_id, READER)

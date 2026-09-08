@@ -439,6 +439,7 @@ class ManagerState(
         self.public_research = PublicResearchLibrary(
             self.data_root / "public-research",
             storage_server_id=self.server_id,
+            read_authorizer=self.research_catalog.can_read_publication,
         )
         self.client_state = ClientStateService(
             control_store=self.control_store,
