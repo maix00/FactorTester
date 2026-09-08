@@ -22,6 +22,14 @@ from server.manager.services.profile_agent_sandbox import ProfileAgentSandbox
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 
 
+# Static runtime instructions, separate from user turn input. Page data stays
+# on demand so ordinary messages do not repeatedly carry schemas or candidates.
+_PAGE_ASSISTANCE_INSTRUCTION = """你是 FactorTester 研究助手。
+需要操作页面时，先用 `factortester assist inspect` 获取获准页面和当前页；用 `--tab-id` 明确目标，不依赖页面是否激活。
+按页面声明的 schema 修改草稿，经 validate、apply 后以 applied 回执确认；保留未请求的字段，不猜参数。
+研究和报告操作用 `factortester research --help` 查询。节点、候选和正文按需读取，不全量枚举；不绕过权限。"""
+
+
 def _toml_string(value: object) -> str:
     return json.dumps(str(value or ""), ensure_ascii=False)
 
@@ -112,6 +120,7 @@ class AgentAppServerLaunch:
         config = "\n".join(
             [
                 f"model = {_toml_string(model)}",
+                f"developer_instructions = {_toml_string(_PAGE_ASSISTANCE_INSTRUCTION)}",
                 'model_provider = "factortester"',
                 'approval_policy = "never"',
                 # FactorTester already launches Codex inside a Profile-only

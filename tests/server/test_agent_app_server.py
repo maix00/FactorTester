@@ -603,6 +603,12 @@ def test_server_profile_app_server_starts_and_forwards_jsonl(tmp_path, monkeypat
         / "config.toml"
     )
     config = config_path.read_text(encoding="utf-8")
+    import tomllib
+    instructions = tomllib.loads(config)["developer_instructions"]
+    assert instructions.startswith("你是 FactorTester")
+    assert "factortester assist inspect" in instructions
+    assert "\n" in instructions
+    assert len(instructions) < 400
     assert "research-model" in config
     assert "server-secret-token" not in config
     assert 'approval_policy = "never"' in config
@@ -1631,3 +1637,27 @@ def test_missing_factor_tester_cli_blocks_process_start(tmp_path, monkeypatch):
         supervisor.start(PRINCIPAL, PROFILE_ID)
     assert error.value.code == "runtime_missing"
     assert supervisor.status(PRINCIPAL, PROFILE_ID)["running"] is False
+
+
+def test_assisted_rpc_preserves_user_message_without_prompt_injection(monkeypatch):
+    from server.manager.http import page_assistance_routes as assistance
+    store = assistance.PageAssistanceStore()
+    store.publish_workspace(PRINCIPAL, PROFILE_ID, {"tabs": [{"tab_id": "page"}]})
+    monkeypatch.setattr(assistance, "_STORE", store)
+    captured = []
+    class Handler(AgentAppServerRoutesMixin):
+        def _json_body(self, _maximum):
+            return {"profile_id": PROFILE_ID, "method": "turn/start", "params": {
+                "input": [{"type": "text", "text": "请添加图片\n保持原文"}]}}
+        def _agent_app_profile(self, _profile): return PRINCIPAL, PROFILE_ID
+        def _agent_app_server(self):
+            return SimpleNamespace(request=lambda *args, **kwargs: captured.append(args[3]) or {})
+        def send_response(self, status): self.status = status
+        def send_header(self, *args): pass
+        def end_headers(self): pass
+    handler = Handler()
+    handler.wfile = io.BytesIO()
+    for _ in range(2):
+        assert handler._post_agent_app_routes(urlparse("/api/client/profile-agent/rpc"))
+        assert handler.status == 200
+    assert captured == [{"input": [{"type": "text", "text": "请添加图片\n保持原文"}]}] * 2
