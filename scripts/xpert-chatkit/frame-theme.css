@@ -1,7 +1,7 @@
 /* Host controls share the existing Manager controller, styled inside this iframe. */
 html { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 15px; }
 body { -webkit-font-smoothing: antialiased; }
-.ft-chat-identity { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ft-chat-identity { padding-left: 6px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .ft-chat-identity-heading { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
 .ft-chat-profile-group { display: inline-flex; align-items: center; gap: 0; min-width: 0; }
 .ft-chat-profile-link { color: #087cff; font-weight: 600; text-decoration: none; }
