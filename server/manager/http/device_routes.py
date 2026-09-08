@@ -62,11 +62,9 @@ class DeviceNetworkRoutesMixin:
         if session is None:
             json_response(self, {"success": False, "error": "login required"}, 401)
             return
-        owner = (
-            ""
-            if str(session.get("role") or "") == "super_admin"
-            else str(session["username"])
-        )
+        # Personal settings always use account scope, including super admins.
+        # Server-wide administration has dedicated /api/admin/access-control APIs.
+        owner = str(session["username"])
         try:
             devices = self.state.device_registry.list(
                 username=owner,
@@ -202,9 +200,8 @@ class DeviceNetworkRoutesMixin:
         try:
             payload = self._json_body(16 * 1024)
             device_id = str(payload.get("device_id") or "")
-            admin = str(session.get("role") or "") == "super_admin"
             records = self.state.device_registry.list(
-                username="" if admin else str(session["username"]),
+                username=str(session["username"]),
                 include_disabled=True,
             )
             record = next(
