@@ -70,7 +70,8 @@ assert.deepEqual(navigation.nodes.page.children, ["tab:factor", "tab:time"]);
 assert.equal(navigation.nodes.configurations, undefined);
 let adapter;
 global.FTPageAssistance = {register: (_context, value) => { adapter = value; return {}; }};
-global.FTTestLazyCode = {loadGroup: async () => {}};
+const loadedGroups = [];
+global.FTTestLazyCode = {loadGroup: async group => { loadedGroups.push(group); }};
 Object.assign(global.FTTestState, {
   applyWorkspaceConfiguration: value => {
     value.configuration = structuredClone(value.workspace.configuration.payload);
@@ -79,6 +80,10 @@ Object.assign(global.FTTestState, {
   applyRegisteredRunValues: (value, fields) => { value.runValues = {...fields}; },
 });
 window.FTTestPageAssistance.register({pageState: {}}, state, () => {});
+adapter.prepare();
+assert.deepEqual(loadedGroups, [
+  "workbench-run-submit", "workbench-factors", "workbench-products",
+]);
 const draft = adapter.exportDocument();
 draft.configuration.analyses.factor_evaluation.factor_ref = "factor:v2:replacement";
 // A CLI draft uses the same registered adapter, without inventing inner groups.
