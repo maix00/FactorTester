@@ -124,10 +124,15 @@
       },
       onRuntimeEvent: runtimeControls.observeEvent,
     });
+    const transport = window.FTXpertTransport.create(adapter, {
+      runtimeStatus: async () => (await context.api(
+        `/api/client/profile-agent?profile_id=${encodeURIComponent(profile.profile_id)}`,
+      )).status || {},
+    });
     selectedConversationID = String(adapter.initialThread || "").trim();
     const chatStage = document.createElement("div");
     chatStage.className = "profile-chatkit-stage";
-    target = document.createElement("openai-chatkit");
+    target = document.createElement("xpertai-chatkit");
     target.className = "profile-chatkit";
     let updateTimer = null;
     let disposed = false;
@@ -162,15 +167,14 @@
     }
     const title = await conversationTitle(context, profile, selectedConversation || {});
     chatOptions = {
+      frameUrl: `/research-static/vendor/xpert-chatkit/index.html?ft_channel=${transport.key}&ft_read_only=${options.readOnly || options.historyOnly ? "1" : "0"}`,
       api: {
-        // ChatKit is the UI protocol only. The Manager adapter owns the
-        // Profile-scoped thread catalog and provider-thread mapping.
-        url: adapter.endpoint,
-        domainKey: "factor-tester-profile-agent",
-        fetch: adapter.fetch,
+        apiUrl: `${location.origin}/ft-profile-bridge/`,
+        // An opaque UI readiness marker, never a provider credential.
+        getClientSecret: async () => ({secret: "cs-x-factor-tester", xpertId: "profile"}),
       },
       locale: adapter.locale || locale(context),
-      history: {enabled: true},
+      history: {enabled: true, showDelete: !options.readOnly && !options.historyOnly, showRename: !options.readOnly && !options.historyOnly},
       ...(adapter.initialThread
         ? {initialThread: adapter.initialThread}
         : (options.readOnly || options.historyOnly ? {initialThread: null} : {})),
@@ -188,6 +192,7 @@
       composer: {
         placeholder: context.t("输入要交给 Agent 的研究问题…"),
         attachments: {enabled: false},
+        models: [],
       },
     };
     target.setOptions(chatOptions);
@@ -232,6 +237,7 @@
       chat: target,
       dispose() {
         disposed = true;
+        transport.dispose();
         if (updateTimer !== null) clearTimeout(updateTimer);
       },
     };

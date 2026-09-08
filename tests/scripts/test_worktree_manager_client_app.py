@@ -2096,8 +2096,8 @@ def test_web_shell_allows_authenticated_blob_image_previews(tmp_path) -> None:
             assert response.headers["Content-Security-Policy"] == (
                 "default-src 'self'; img-src 'self' blob: data: https:; "
                 "style-src 'self' 'unsafe-inline'; "
-                "script-src 'self' https://cdn.platform.openai.com; "
-                "frame-src 'self' https://cdn.platform.openai.com; "
+                "script-src 'self'; "
+                "frame-src 'self'; "
                 "connect-src 'self' http: https:"
             )
             assert response.headers["Cache-Control"] == "no-store"

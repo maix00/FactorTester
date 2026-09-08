@@ -441,6 +441,7 @@ class AgentAppServerSupervisor:
         with self._lock:
             processing = dict(self._processing_turns.get(key) or {})
         requested_method = method
+        require_active_turn = request_params.pop("requireActiveTurn", False) is True
         converted_steer = False
         if method == "turn/start" and processing:
             raise AgentAppServerError(
@@ -459,6 +460,8 @@ class AgentAppServerSupervisor:
             if expected_turn and requested_turn != expected_turn:
                 raise AgentAppServerError("active Profile Agent turn binding is invalid")
             if not expected_conversation or not expected_turn:
+                if require_active_turn:
+                    raise AgentAppServerError("Steer target turn has ended")
                 method = "turn/start"
                 converted_steer = True
                 request_params.pop("turnId", None)
@@ -504,6 +507,8 @@ class AgentAppServerSupervisor:
                         "unknown turn", "invalid turn",
                     ))
                 )
+                if inactive_steer and require_active_turn:
+                    raise AgentAppServerError("Steer target turn has ended") from exc
                 if inactive_steer:
                     with self._lock:
                         active = self._processing_turns.get(key) or {}

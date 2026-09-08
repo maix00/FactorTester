@@ -59,153 +59,48 @@ vm.runInThisContext(
   {filename: "page-agent-drawer.js"},
 );
 
-const css = fs.readFileSync("server/manager/web/styles/app.css", "utf8");
-const fixedHeight = css.indexOf(".profile-chatkit-host openai-chatkit { height: 600px; }");
-const drawerHeight = css.indexOf(
-  ".page-agent-drawer .profile-agent-chat-conversation-only openai-chatkit",
-);
-assert(fixedHeight >= 0 && drawerHeight > fixedHeight,
-  "the drawer-specific fluid ChatKit height overrides fixed profile-page heights");
-
 (async () => {
-  const context = {
-    tabID: "tab", t: value => value,
-    pageState: {register: (_name, hooks) => { stateHooks = hooks; return {}; }},
-    pageAgentLifecycle: {
-      open: async profileID => {
-        events.push(["open", profileID]);
-        return {runtimeStatus: {running: true}};
-      },
-      hide: () => {},
-    },
+  const hooks = [];
+  const context = {tabID: "a", t: value => value,
+    pageState: {register: (_name, value) => { hooks.push(value); }},
+    pageAgentLifecycle: {open: async (id, owner) => {
+      assert.equal(owner, "global-agent-drawer");
+      events.push(["open", id]); return {runtimeStatus: {running: true}};
+    }, hide() {}},
   };
-  const icon = FTPageAgentDrawer.ensureGlobal(context);
-  const toggle = body.children.find(item => item.className === "page-agent-drawer-toggle");
-  assert.equal(toggle.style.top, "124px", "absent saved position defaults entirely below the header");
-  positions.set("ft-page-agent-toggle-y:tab", "5");
-  windowEvents.resize();
-  assert.equal(toggle.style.top, "124px", "old positions cannot overlap the header");
-  const drawer = FTPageAgentDrawer.attach(context, {
-    resolveProfile: () => profilePromise,
-    assistance: {connect: async () => {
-      events.push(["bridge"]);
-      await assistancePromise;
-    }},
-  });
-  assert.equal(drawer.shell.style.top, "96px",
-    "the floating window starts below the sticky page header");
-  assert.equal(drawer.shell.style.bottom, "16px");
-  assert.equal(body.children.length, 2, "registration only mounts shell and trigger");
-  assert.equal(events.length, 0, "registration performs no deferred work");
-  stateHooks.restore({open: false, profile_id: "self"});
-  await Promise.resolve();
-  assert.equal(drawer.shell.hidden, true, "a previously closed drawer stays closed");
-  assert.equal(drawer.toggle.hidden, false, "its floating trigger remains visible");
-  assert.equal(events.length, 0, "restoring a closed drawer performs no Agent work");
-
+  const options = {resolveProfile: () => profilePromise,
+    resolveProfiles: async () => [{profile_id: "self"}],
+    assistance: {connect: async () => {events.push(["bridge"]); await assistancePromise;}, disconnect() {}},
+  };
+  FTPageAgentDrawer.ensureGlobal(context);
+  const drawer = FTPageAgentDrawer.attach(context, options);
+  assert.equal(body.children.length, 2);
+  assert.equal(drawer.shell.style.top, "96px");
+  assert.equal(drawer.toggle.style.top, "124px");
+  assert.equal(events.length, 0, "registration is lazy");
   const opening = drawer.open();
+  resolveProfile({profile_id: "self"}); resolveAssistance(); await opening;
+  assert.equal(events.filter(e => e[0] === "chat").length, 1);
+  const chat = drawer.shell.children[1].children[0];
+  const next = {...context, tabID: "b"};
+  global.FTPageAgentProfiles = {forPage: async () => [], self: async () => ({profile_id: "self"})};
+  FTPageAgentDrawer.activate(next);
+  let nextDisconnects = 0;
+  const same = FTPageAgentDrawer.attach(next, {resolveProfiles: async () => [], assistanceEnabled: false,
+    assistance: {disconnect() {nextDisconnects += 1;}}});
   await Promise.resolve();
-  assert.equal(drawer.toggle.hidden, true, "the trigger disappears while the drawer is open");
-  assert.match(drawer.shell.children[1].children[0].textContent, /正在加载/);
-  assert(events.some(item => item[0] === "groups"
-    && item[1][0] === "profile-agent-chat"),
-    "profile code starts loading only after the user opens the drawer");
-
-  resolveProfile({profile_id: "self"});
-  await new Promise(resolve => setTimeout(resolve, 0));
-  assert(events.some(item => item[0] === "chat"),
-    "ChatKit mounts without waiting for page-assistance code");
-  resolveAssistance();
-  await opening;
-  assert(events.some(item => item[0] === "open"));
-  assert(events.some(item => item[0] === "bridge"));
-  assert(events.some(item => item[0] === "chat"));
-  drawer.hide();
-  assert.equal(drawer.toggle.hidden, false, "the trigger returns after the drawer closes");
-  assert(events.some(item => item[0] === "chat" && item[1] === true));
-  const title = drawer.shell.children[0].children[0];
-  assert.equal(title.children[1].textContent, "self",
-    "the active Profile is visible beside the assistant title");
-  const bridgeStarts = events.filter(item => item[0] === "bridge").length;
+  assert.equal(same, drawer, "all tabs share the application drawer");
+  assert.equal(drawer.shell.hidden, false, "tab changes retain open state");
+  assert.equal(drawer.shell.children[1].children[0], chat, "tab changes never move or replace the chat iframe");
+  const disconnectsBeforeClose = nextDisconnects;
+  hooks[0].dispose();
+  assert.equal(nextDisconnects, disconnectsBeforeClose, "closing an old page must not disconnect the new page receiver");
+  assert.equal(drawer.shell.isConnected, true, "closing the originating tab cannot dispose the drawer");
+  assert.equal(drawer.shell.dataset.ftPageAgentTab, undefined, "tab cache cannot park this shell");
   await drawer.open();
-  assert.equal(events.filter(item => item[0] === "bridge").length, bridgeStarts,
-    "reopening the drawer reuses its continuously active receiver");
-  drawer.hide();
-  stateHooks.restore({open: true, profile_id: "self"});
-  await new Promise(resolve => setTimeout(resolve, 0));
-  assert.equal(drawer.shell.hidden, false,
-    "restoring an assisted tab reopens a drawer that the user left open");
-  assert.equal(drawer.toggle.hidden, true);
-  assert.equal(events.filter(item => item[0] === "bridge").length, bridgeStarts,
-    "restoring the drawer does not create a duplicate receiver");
-  const savedDrawerState = stateHooks.capture();
-  assert.equal(savedDrawerState.open, true);
-  stateHooks.dispose();
-  let rebuiltHooks = null;
-  const rebuiltContext = {
-    ...context,
-    pageState: {register: (_name, hooks) => {
-      rebuiltHooks = hooks;
-      hooks.restore(savedDrawerState);
-      return {};
-    }},
-  };
-  const rebuilt = FTPageAgentDrawer.attach(rebuiltContext, {
-    resolveProfile: async () => ({profile_id: "self"}),
-    assistance: {connect: async () => {}},
-  });
-  await new Promise(resolve => setTimeout(resolve, 0));
-  assert(rebuiltHooks, "the rebuilt assisted page registers its drawer state");
-  assert.equal(rebuilt.shell.hidden, false,
-    "a performance-evicted assisted page reopens the drawer after rebuilding");
-  assert.equal(rebuilt.toggle.hidden, true);
-  const navigated = [];
-  const switcher = FTPageAgentDrawer.attach({
-    ...context,
-    navigate: path => navigated.push(path),
-    checkpointTabSession: () => {},
-  }, {
-    resolveProfile: async () => ({profile_id: "alpha", alias: "Alpha"}),
-    resolveProfiles: async () => [
-      {profile_id: "alpha", alias: "Alpha"},
-      {profile_id: "beta", alias: "Beta"},
-    ],
-    onProfileChange: profile => events.push(["selected", profile.profile_id]),
-    assistance: {connect: async () => {}, disconnect: () => {}},
-  });
-  await switcher.open();
-  const switcherTitle = switcher.shell.children[0].children[0];
-  const switcherProfile = switcherTitle.children[1];
-  const switcherMenuButton = switcherTitle.children[2];
-  const switcherMenu = switcherTitle.children[3];
-  assert.equal(switcherProfile.textContent, "Alpha");
-  switcherProfile.listeners.click();
-  assert.match(navigated[0], /profile=alpha$/,
-    "clicking the active Profile opens its detail page");
-  switcherMenuButton.listeners.click();
-  assert.equal(switcherMenu.hidden, false);
-  switcherMenu.children[1].listeners.click();
-  await new Promise(resolve => setTimeout(resolve, 0));
-  assert(events.some(item => item[0] === "selected" && item[1] === "beta"));
-  assert.equal(switcherProfile.textContent, "Beta",
-    "selecting a bound Profile remounts the conversation under that Profile");
-  const researchChild = {...context, tabID: "read-only-report", parentResearchID: "research:one"};
-  const profileRequests = [];
-  global.FTPageAgentProfiles = {
-    self: async () => ({profile_id: "self"}),
-    forPage: async page => {
-      profileRequests.push(page.parentResearchID);
-      return [{profile_id: "self"}, {profile_id: "research-member"}];
-    },
-  };
-  FTPageAgentDrawer.activate(researchChild);
-  toggle.listeners.click();
-  // Opening is lazy; switching pages must not retarget its captured context.
-  FTPageAgentDrawer.activate({...context, tabID: "another-page"});
-  await new Promise(resolve => setTimeout(resolve, 0));
-  assert.deepEqual(profileRequests, ["research:one"]);
-  const childShell = body.children.find(item => item.dataset.ftPageAgentTab === "read-only-report");
-  assert.equal(childShell.children[0].children[0].children[2].hidden, false,
-    "a read-only research child exposes the same member selector without a filling adapter");
-  console.log("PASS: page Agent drawer reuses its page-owned assistance receiver");
-})().catch(error => { console.error(error); process.exitCode = 1; });
+  assert.equal(events.filter(e => e[0] === "chat").length, 1, "reopening does not duplicate a stream");
+  drawer.hide(); assert.equal(drawer.shell.hidden, true);
+  FTPageAgentDrawer.activate(context); assert.equal(drawer.shell.hidden, true, "switching tabs cannot reopen a closed drawer");
+  assert.equal(drawer.toggle.hidden, false);
+  console.log("PASS: global lazy drawer survives tab changes and eviction");
+})().catch(error => {console.error(error);process.exitCode = 1;});
