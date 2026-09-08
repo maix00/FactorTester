@@ -22,6 +22,7 @@ WORKSPACE_DIRECTORIES = (
     "research",
     "reports",
     "manifests",
+    "uploads",
 )
 
 

@@ -1,4 +1,13 @@
 import SwiftUI
+import AppKit
+
+/// Open a local profile workspace folder in Finder, revealing its contents.
+func revealWorkspace(_ path: String) {
+    guard !path.isEmpty else { return }
+    let url = URL(fileURLWithPath: path, isDirectory: true)
+    guard FileManager.default.fileExists(atPath: url.path) else { return }
+    NSWorkspace.shared.activateFileViewerSelecting([url])
+}
 
 struct ProfileOverviewSection: View {
     let profile: LocalProfileModel
@@ -16,6 +25,15 @@ struct ProfileOverviewSection: View {
                         Text(profile.workspaceRoot)
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
+                        if !profile.workspaceRoot.isEmpty {
+                            Button {
+                                revealWorkspace(profile.workspaceRoot)
+                            } label: {
+                                Label("打开访达", systemImage: "folder")
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
                         Text("Agent 的因子修改、过程文件和报告写入这里。")
                             .font(.caption)
                             .foregroundStyle(.secondary)

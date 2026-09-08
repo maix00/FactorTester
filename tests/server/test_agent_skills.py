@@ -370,6 +370,7 @@ def test_profile_workspace_browser_hides_sensitive_paths_and_hashes_files(tmp_pa
         "research",
         "reports",
         "manifests",
+        "uploads",
     }
     research = browser.list(PRINCIPAL, PROFILE_ID, "research")
     assert [item["name"] for item in research["entries"]] == ["notes.txt"]
@@ -383,7 +384,7 @@ def test_profile_workspace_browser_hides_sensitive_paths_and_hashes_files(tmp_pa
 
 
 class _Handler(AgentRoutesMixin):
-    def __init__(self, service, *, payload=None):
+    def __init__(self, service, *, payload=None, raw_body=b"", headers=None):
         self.state = SimpleNamespace(
             agent_profiles=service,
             server_id="public-1",
@@ -397,6 +398,8 @@ class _Handler(AgentRoutesMixin):
             ),
         )
         self._payload = payload or {}
+        self._raw = raw_body or b""
+        self._headers = headers or {}
         self.response_status = None
         self.wfile = io.BytesIO()
 
@@ -405,6 +408,9 @@ class _Handler(AgentRoutesMixin):
 
     def _json_body(self, _maximum):
         return self._payload
+
+    def _raw_body(self, _maximum):
+        return self._raw
 
     def _is_local_ftclient(self):
         return False
@@ -417,6 +423,10 @@ class _Handler(AgentRoutesMixin):
 
     def end_headers(self):
         pass
+
+
+def _raw_headers(handler):
+    return handler._headers
 
 
 def _body(handler):
@@ -495,6 +505,73 @@ def test_profile_workspace_route_lists_only_safe_entries(tmp_path):
             "downloadable": True,
         }
     ]
+
+
+def test_profile_workspace_file_upload_persists_and_lists(tmp_path):
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "agent-provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+    )
+    runtime = service.bind_runtime(
+        PRINCIPAL, PROFILE_ID, runtime_kind="server", executor_id="public-1",
+    )
+    workspace = tmp_path / "data" / runtime["workspace_relpath"]
+
+    saved = service.save_profile_workspace_file(
+        PRINCIPAL, PROFILE_ID, "research", b"uploaded bytes", filename="note.txt",
+    )
+    assert saved["saved"] is True
+    assert saved["path"] == "research/note.txt"
+    assert (workspace / "research" / "note.txt").read_bytes() == b"uploaded bytes"
+
+    listing = service.profile_workspace(PRINCIPAL, PROFILE_ID, "research")
+    assert {item["name"] for item in listing["entries"]} == {"note.txt"}
+
+
+def test_profile_workspace_file_upload_rejects_unsafe_targets(tmp_path):
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "agent-provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+    )
+    service.bind_runtime(
+        PRINCIPAL, PROFILE_ID, runtime_kind="server", executor_id="public-1",
+    )
+
+    # Sensitive / hidden filenames are refused.
+    for bad in (".env", "secret.key", "../escape.txt", "a/b.txt"):
+        with pytest.raises(Exception):
+            service.save_profile_workspace_file(
+                PRINCIPAL, PROFILE_ID, "", b"x", filename=bad,
+            )
+
+
+def test_profile_workspace_file_upload_route(tmp_path):
+    service = AgentProfileService(
+        db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "agent-provider.key",
+        data_root=tmp_path / "data",
+        server_id="public-1",
+    )
+    runtime = service.bind_runtime(
+        PRINCIPAL, PROFILE_ID, runtime_kind="server", executor_id="public-1",
+    )
+    workspace = tmp_path / "data" / runtime["workspace_relpath"]
+
+    handler = _Handler(
+        service, raw_body=b"route bytes",
+        headers={"Content-Length": "11"},
+    )
+    assert handler._post_agent_routes(urlparse(
+        f"/api/client/profile-workspace/upload?profile_id={PROFILE_ID}"
+        f"&path=research&filename=route.txt",
+    )) is True
+    payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
+    assert payload["saved"] is True
+    assert (workspace / "research" / "route.txt").read_bytes() == b"route bytes"
 
 
 def test_profile_module_loads_skill_selector_after_manifest_entry():
