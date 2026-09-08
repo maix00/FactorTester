@@ -120,6 +120,56 @@ class ServerResearchService:
             None,
         )
 
+    def read_branch(
+        self,
+        viewer: str,
+        *,
+        target_ref: str,
+        profile_id: str,
+        package_id: str,
+        branch_id: str,
+        build_source: str = "server_agent",
+    ) -> dict[str, Any]:
+        """Read one creator's branch.
+
+        The report tree lives in the *creator's* profile workspace.  ``target_ref``
+        is the branch owner (group A member).  Only local ``server_agent`` branches
+        are resolved here; a branch whose ``build_source`` is ``client``/
+        ``publication`` (or a remote ``server``) is served by the caller's own read
+        channel (``public_research``, transfers/data-plane, or the client source).
+        For those we report the source location honestly instead of misreading a
+        local workspace, so a page or CLI never silently reads the wrong bytes.
+        """
+        source = str(build_source or "server_agent").strip().lower()
+        if source != "server_agent":
+            return {
+                "viewer_ref": viewer,
+                "branch_id": branch_id,
+                "profile_id": profile_id,
+                "package_id": package_id,
+                "build_source": source,
+                "available": False,
+                "reason": "source-not-local",
+                "note": (
+                    f"branch 来源为 {source}，不在本机 server 工作区；"
+                    "请通过对应读通道(client/publication/transfers)获取。"
+                ),
+            }
+        target = _required_principal(target_ref)
+        if not _safe(profile_id) or not _safe(package_id) or not _safe(branch_id):
+            raise ValueError("server research reference is invalid")
+        server_ref = _server_ref(profile_id, package_id, branch_id)
+        location = self._location(target, server_ref)
+        value = build_upload_index(load_report_index(
+            package_root=location["package_root"],
+            branch_id=location["branch_id"],
+        ))
+        value = self._decorate(value, location)
+        value["viewer_ref"] = viewer
+        value["available"] = True
+        value["build_source"] = "server_agent"
+        return value
+
     def projection(self, principal: str, server_ref: str) -> dict[str, Any]:
         location = self._location(principal, server_ref)
         value = build_upload_projection(
@@ -186,18 +236,28 @@ class ServerResearchService:
         return self._decorate(value, location)
 
     def asset(
-        self, principal: str, server_ref: str, asset_id: str,
+        self,
+        principal: str,
+        server_ref: str,
+        asset_id: str,
+        *,
+        target_ref: str | None = None,
     ) -> tuple[bytes, str, str]:
-        location = self._location(principal, server_ref)
+        location = self._location(target_ref or principal, server_ref)
         value = read_local_asset(self._snapshot(location), asset_id)
         if value is None:
             raise ValueError("research asset is unavailable")
         return value
 
     def local_resource(
-        self, principal: str, server_ref: str, resource_id: str,
+        self,
+        principal: str,
+        server_ref: str,
+        resource_id: str,
+        *,
+        target_ref: str | None = None,
     ) -> tuple[bytes, str, str]:
-        location = self._location(principal, server_ref)
+        location = self._location(target_ref or principal, server_ref)
         value = read_local_resource(self._snapshot(location), resource_id)
         if value is None:
             raise ValueError("research local resource is unavailable")

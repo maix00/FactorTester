@@ -1,0 +1,50 @@
+"""Research report collaboration-branch CLI commands.
+
+Group A (owner/editor) author branches in their own profile workspaces.  Any
+reader (group B) may list and read them via ``report branch-list`` /
+``report branch-read``.
+"""
+
+from __future__ import annotations
+
+import json
+
+import click
+
+from tools.cli.core.context import client_from_config
+
+
+def _json(value: object) -> None:
+    click.echo(json.dumps(value, ensure_ascii=False, indent=2))
+
+
+def register_branch_commands(group: click.Group) -> None:
+    group.add_command(branch_list)
+    group.add_command(branch_read)
+
+
+@click.command("branch-list")
+@click.argument("research_id")
+def branch_list(research_id: str) -> None:
+    """列出该研究所有创建者(owner/editor)工作区里的 branch(读者可见)。"""
+    _json(client_from_config().collaboration_branches(research_id))
+
+
+@click.command("branch-read")
+@click.argument("target_ref")
+@click.option("--profile-id", required=True, help="branch 所属 profile id")
+@click.option("--package-id", required=True, help="报告包 id")
+@click.option("--branch-id", required=True, help="branch id")
+def branch_read(
+    target_ref: str, profile_id: str, package_id: str, branch_id: str,
+) -> None:
+    """读取某个创建者(branch 归属 principal)工作区里的 branch 内容。"""
+    _json(client_from_config().read_server_branch(
+        target_ref=target_ref,
+        profile_id=profile_id,
+        package_id=package_id,
+        branch_id=branch_id,
+    ))
+
+
+__all__ = ["register_branch_commands", "branch_list", "branch_read"]

@@ -161,6 +161,35 @@ class ResearchClientMixin(ClientMixinBase):
         ))
         return dict(data.get("manifest") or {})
 
+    def collaboration_branches(self, research_id: str) -> dict[str, Any]:
+        """List every branch authored by the report's creator group (group A).
+
+        Any reader (group B) may list them.  Returns the catalog
+        ``/collaboration-branches`` payload.
+        """
+        return dict(self._expect_success(self.session.get(
+            self._research_url(research_id, "/collaboration-branches"),
+        )) or {})
+
+    def read_server_branch(
+        self,
+        *,
+        target_ref: str,
+        profile_id: str,
+        package_id: str,
+        branch_id: str,
+    ) -> dict[str, Any]:
+        """Read one creator branch resolved against the creator's workspace."""
+        query = {
+            "target_ref": target_ref,
+            "profile_id": profile_id,
+            "package_id": package_id,
+            "branch_id": branch_id,
+        }
+        return dict(self._expect_success(self.session.get(
+            "/api/server-research/branch", query=query,
+        )) or {})
+
     def research_report_catalog(self, *, scope: str) -> dict[str, Any]:
         """Backward-compatible method name using the canonical API."""
         return self.list_research_reports(scope=scope)

@@ -86,7 +86,11 @@ class ServerResearchRoutesMixin:
         if asset_match:
             try:
                 raw, content_type, filename = service.asset(
-                    principal, unquote(asset_match.group(1)), asset_match.group(2),
+                    principal,
+                    unquote(asset_match.group(1)),
+                    asset_match.group(2),
+                    target_ref=parse_qs(parsed.query).get("target_ref", [""])[0]
+                    or None,
                 )
                 self._send_server_research_bytes(
                     raw, content_type, filename, disposition="inline",
@@ -107,6 +111,8 @@ class ServerResearchRoutesMixin:
                     principal,
                     unquote(resource_match.group(1)),
                     resource_match.group(2),
+                    target_ref=parse_qs(parsed.query).get("target_ref", [""])[0]
+                    or None,
                 )
                 disposition = (
                     "inline" if parse_qs(parsed.query).get("inline") == ["1"]
@@ -128,6 +134,22 @@ class ServerResearchRoutesMixin:
             try:
                 value = service.projection(
                     principal, unquote(report_match.group(1)),
+                )
+                json_response(self, {"success": True, **value})
+            except PermissionError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 403)
+            except (OSError, ValueError, KeyError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 404)
+            return True
+        if parsed.path == "/api/server-research/branch":
+            query = parse_qs(parsed.query)
+            try:
+                value = service.read_branch(
+                    principal,
+                    target_ref=query.get("target_ref", [""])[0],
+                    profile_id=query.get("profile_id", [""])[0],
+                    package_id=query.get("package_id", [""])[0],
+                    branch_id=query.get("branch_id", [""])[0],
                 )
                 json_response(self, {"success": True, **value})
             except PermissionError as exc:
