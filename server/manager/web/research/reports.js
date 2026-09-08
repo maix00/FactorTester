@@ -223,7 +223,7 @@
   function reportRoute(item, researchID = "") {
     const explicit = String(item?.href || "").trim();
     let route = explicit;
-    const reference = String(item?.source_ref || item?.report_id || "").trim();
+    const reference = publicationID(item);
     const linkedResearchID = String(
       researchID || item?.research_id || item?.research?.research_id || "",
     ).trim();
@@ -232,6 +232,7 @@
     if (!route || !linkedResearchID) return route;
     const url = new URL(route, location.origin);
     url.searchParams.set("research_id", linkedResearchID);
+    if (item?.owner_ref) url.searchParams.set("owner_ref", item.owner_ref);
     return `${url.pathname}${url.search}${url.hash}`;
   }
 
@@ -465,7 +466,7 @@
     try {
       await window.FTStaticLoader?.loadGroups?.(["report"]);
       if (!current(context)) return;
-      const source = FTReportSource.create(id, context.api);
+      const source = FTReportSource.create(id, context.api, {ownerRef: item.owner_ref});
       const value = await source.load();
       if (!current(context)) return;
       const reading = state.reading[id] || {selectedChapterID: "", disclosures: {}};

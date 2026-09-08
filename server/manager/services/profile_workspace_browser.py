@@ -191,6 +191,9 @@ class ProfileWorkspaceBrowser:
 
         root = self._root(principal, profile_id)
         directory = self._safe_path(root, relative_path)
+        # Older workspaces predate uploads/. Create only this managed directory.
+        if _relative_parts(relative_path) == ("uploads",):
+            directory.mkdir(exist_ok=True)
         if not directory.is_dir():
             raise ProfileWorkspaceError("workspace path is not a directory")
         safe_name = _safe_filename(filename)
@@ -199,7 +202,7 @@ class ProfileWorkspaceBrowser:
         if _is_hidden_or_sensitive(safe_name):
             raise ProfileWorkspaceError("workspace filename is not allowed")
         size = len(data or b"")
-        if size < 0:
+        if size > 64 * 1024 * 1024:
             raise ProfileWorkspaceError("workspace upload is invalid")
         target = directory / safe_name
         if target.is_symlink():
@@ -209,11 +212,10 @@ class ProfileWorkspaceBrowser:
             prefix=f".{safe_name}.upload.", dir=str(directory),
         )
         try:
-            os.write(fd, data or b"")
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data or b"")
+                handle.flush()
+                os.fsync(handle.fileno())
             os.replace(temp, target)
         finally:
             if os.path.exists(temp):
@@ -240,7 +242,7 @@ def _safe_filename(value: object) -> str:
         return ""
     if name.startswith("."):
         return ""
-    if len(name) > 255:
+    if "\x00" in name or len(name.encode("utf-8")) > 255:
         return ""
     return name
 

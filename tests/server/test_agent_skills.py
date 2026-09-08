@@ -19,6 +19,7 @@ from server.manager.services.agent_skill_runtime import (
 from server.manager.services.agent_workspace import profile_workspace_relative_path
 from server.manager.services.profile_workspace_browser import (
     ProfileWorkspaceBrowser,
+    ProfileWorkspaceError,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -671,3 +672,26 @@ def test_profile_module_loads_skill_selector_after_manifest_entry():
         "profile/agent-runtime-controls.js"
         in manifest["groups"]["profile-agent-session"]
     )
+
+
+def test_upload_creates_legacy_uploads_and_preserves_binary(tmp_path):
+    service = AgentProfileService(db_path=tmp_path / "manager.sqlite",
+        provider_key_path=tmp_path / "key", data_root=tmp_path / "data", server_id="public-1")
+    runtime = service.bind_runtime(PRINCIPAL, PROFILE_ID, runtime_kind="server", executor_id="public-1")
+    root = tmp_path / "data" / runtime["workspace_relpath"]
+    (root / "uploads").rmdir()
+    content = b"\x89PNG\r\n\x1a\n" + bytes(range(256)) * 1000
+    result = service.save_profile_workspace_file(PRINCIPAL, PROFILE_ID, "uploads", content, filename="截图.png")
+    assert result["path"] == "uploads/截图.png"
+    assert (root / result["path"]).read_bytes() == content
+    assert not list((root / "uploads").glob(".*upload*"))
+
+
+def test_upload_short_body_is_rejected():
+    from io import BytesIO
+    from server.manager.http.agent_routes import AgentRoutesMixin
+    handler = object.__new__(AgentRoutesMixin)
+    handler.headers = {"Content-Length": "10"}
+    handler.rfile = BytesIO(b"short")
+    with pytest.raises(ProfileWorkspaceError, match="incomplete"):
+        handler._raw_body(100)

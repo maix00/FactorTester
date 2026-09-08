@@ -809,7 +809,7 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .research-graph-filters { min-width: 0; }
 .research-graph-source-filter { max-width: none; }
 .research-graph-row-actions, .agent-model-actions { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 5px; }
-.research-graph-row-actions .button-link, .research-graph-row-actions button { min-height: 30px; padding: 6px 9px; font-size: 12px; }
+.research-graph-row-actions { display: inline-flex; align-items: center; gap: 4px; }
 .agent-model-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .agent-model-header p { margin: 0; }
 .agent-model-list-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 14px 0 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--panel) 88%, var(--accent) 12%); }
@@ -848,7 +848,10 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .profile-workspace-browser .table-link:hover { text-decoration: underline; }
 .profile-workspace-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .profile-workspace-header .workspace-upload-btn { width: 30px; height: 30px; min-width: 30px; }
-.profile-workspace-browser .workspace-row { height: 38px; }
+.profile-workspace-browser .workspace-row { height: 30px; }
+.profile-workspace-browser th, .profile-workspace-browser td { padding: 3px 8px; vertical-align: middle; line-height: 20px; }
+.profile-workspace-browser table { min-width: 0; }
+.profile-workspace-actions { display: flex; gap: 6px; }
 .profile-workspace-browser td:first-child { white-space: nowrap; }
 .profile-workspace-browser td:first-child .ft-icon,
 .profile-workspace-browser td:first-child .ft-icon-svg { width: 16px; height: 16px; margin-right: 7px; vertical-align: -2px; flex-shrink: 0; }
@@ -1329,3 +1332,12 @@ button.reference-item { cursor: pointer; }
 }
 .icon-action-button[data-refresh-state="complete"] { color: var(--accent); }
 .icon-action-button[data-refresh-state="error"] { color: var(--danger); }
+
+/* Shared data-list rows: icon actions must not impose button/pill row height. */
+.table-shell table:has(> tbody > tr > td .icon-action-button) > tbody > tr > td {
+  padding-top: 3px; padding-bottom: 3px; vertical-align: middle;
+}
+.table-shell td .icon-action-button {
+  width: 24px; height: 24px; min-width: 24px; min-height: 0;
+  margin: 0; padding: 0; border: 0; background: transparent;
+}
