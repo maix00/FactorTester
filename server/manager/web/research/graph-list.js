@@ -104,15 +104,17 @@
     const actions = document.createElement("span");
     actions.className = "research-graph-row-actions";
     const download = document.createElement("a");
-    download.className = "button-link secondary";
+    download.className = "icon-action-button";
     download.href = row.downloadURL;
     download.download = row.filename || `${row.graph_id || "research-graph"}.yaml`;
-    download.textContent = context.t("下载 YAML");
+    download.title = context.t("下载 YAML");
+    download.setAttribute("aria-label", download.title);
+    download.append(window.FTIcons.node("arrow.down.circle"));
     download.addEventListener("click", event => event.stopPropagation());
     actions.append(download);
     if (row.source === "mine") {
       if (!row.is_default) {
-        const makeDefault = context.button(context.t("设为默认"), async event => {
+        const makeDefault = FTUI.iconButton(context, "checkmark.circle", "设为默认", async event => {
           event.stopPropagation();
           try {
             await context.api(path("/user-library/default"), {
@@ -123,11 +125,11 @@
           } catch (error) {
             context.showNotice(error.message || String(error), true);
           }
-        }, context.t("设为研究 Agent 默认研究图"));
-        makeDefault.className = "secondary";
+        });
+
         actions.append(makeDefault);
       }
-      const remove = context.button(context.t("删除"), async event => {
+      const remove = FTUI.iconButton(context, "trash", "删除研究图", async event => {
         event.stopPropagation();
         if (!window.confirm(context.t("确定删除这个研究图吗？"))) return;
         try {
@@ -136,8 +138,8 @@
         } catch (error) {
           context.showNotice(error.message || String(error), true);
         }
-      }, context.t("删除这个个人研究图"));
-      remove.className = "secondary";
+      });
+
       actions.append(remove);
     }
     return actions;

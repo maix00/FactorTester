@@ -14,6 +14,7 @@ import pytest
 
 from server.manager.services.agent_workspace import ensure_server_profile_workspace
 from server.manager.services.server_research import ServerResearchService
+from server.manager.services.research_catalog import ResearchCatalog
 from server.manager.storage.profile_runtime_store import ProfileRuntimeStore
 from tools.cli.release.research_reporting.authoring.tree_assets import append_asset
 from tools.cli.release.research_reporting.authoring.tree_fork import (
@@ -61,7 +62,12 @@ def _service(tmp_path: Path) -> ServerResearchService:
     ]:
         ensure_server_profile_workspace(data_root, principal, pid)
         _bind(store, principal, pid)
-    return ServerResearchService(data_root, store, server_id="public-1")
+    catalog = ResearchCatalog(tmp_path / "manager.sqlite")
+    research = catalog.create_research(owner_ref=EDITOR_A, title="协作", authorized_users=[READER])
+    catalog.register_report(research["research_id"], actor=EDITOR_A,
+        report_id="report-one-editor", build_source="server_agent",
+        source_ref="profile-editor:report-one:editor-main")
+    return ServerResearchService(data_root, store, server_id="public-1", research_catalog=catalog)
 
 
 def test_branch_read_resolves_against_creator_workspace(tmp_path):
@@ -103,6 +109,12 @@ def test_branch_read_resolves_against_creator_workspace(tmp_path):
     assert value["branch_id"] == "editor-main"
     assert value["profile_id"] == "profile-editor"
     assert value["build_source"] == "server_agent"
+    assert value["access"]["can_manage"] is False
+    index = service.index(READER, "profile-editor:report-one:editor-main", target_ref=EDITOR_A)
+    assert index["branch_id"] == "editor-main"
+    assert index["access"]["can_manage"] is False
+    chapter = service.chapter(READER, "profile-editor:report-one:editor-main", "editor-chapter", target_ref=EDITOR_A)
+    assert chapter["access"]["can_manage"] is False
 
 
 def test_read_branch_denied_for_invalid_reference(tmp_path):
@@ -191,3 +203,85 @@ def test_reader_reads_foreign_branch_asset(png_bytes: bytes, tmp_path):
     assert media_type == "image/png"
     assert filename == "diagram.png"
 
+
+
+def test_foreign_unregistered_or_unauthorized_source_is_denied(tmp_path):
+    service = _service(tmp_path)
+    for viewer, ref in [("GTHT@stranger@4", "profile-editor:report-one:editor-main"),
+                        (READER, "profile-editor:report-one:private-branch")]:
+        with pytest.raises(PermissionError, match="not authorized"):
+            service.asset(viewer, ref, "a" * 24, target_ref=EDITOR_A)
+    catalog = service.research_catalog
+    research = catalog.list_researches(viewer=EDITOR_A)[0]
+    catalog.update_research(research["research_id"], actor=EDITOR_A, authorized_users=[])
+    with pytest.raises(PermissionError, match="not authorized"):
+        service.local_resource(READER, "profile-editor:report-one:editor-main", "a" * 24, target_ref=EDITOR_A)
+
+
+def test_branch_http_route_precedes_generic_projection():
+    from io import BytesIO
+    from types import SimpleNamespace
+    from urllib.parse import urlparse
+    from server.manager.http.server_research_routes import ServerResearchRoutesMixin
+    calls = []
+    class Handler(ServerResearchRoutesMixin):
+        def _session(self): return {"username": READER}
+        def send_response(self, status): self.status = status
+        def send_header(self, *args): pass
+        def end_headers(self): pass
+    handler = Handler()
+    handler.wfile = BytesIO()
+    handler.state = SimpleNamespace(server_research=SimpleNamespace(
+        read_branch=lambda *a, **kw: calls.append((a, kw)) or {"available": True}))
+    assert handler._get_server_research_routes(urlparse(
+        "/api/server-research/branch?target_ref=owner&profile_id=self&package_id=p&branch_id=main"))
+    assert handler.status == 200
+    assert calls[0][1]["package_id"] == "p"
+
+
+def test_shared_publication_uses_current_catalog_permissions(tmp_path):
+    from tools.cli.release.research_reporting.public_research.library import PublicResearchLibrary
+    catalog = _service(tmp_path).research_catalog
+    library = PublicResearchLibrary(tmp_path / "public-research", read_authorizer=catalog.can_read_publication)
+    projection = {"schema_version": 2, "report_id": "report-one-editor", "title": "共享报告",
+                  "generation": 1, "components": [], "projection_hash": "hash"}
+    value = library.sync({"report_id": "report-one-editor", "owner_ref": EDITOR_A, "projection": projection})
+    publication = value["publication_id"]
+    assert library.list_visible(READER)[0]["publication_id"] == publication
+    assert library.index(publication, READER)["title"] == "共享报告"
+    assert not library.list_visible("GTHT@stranger@4")
+    with pytest.raises(PermissionError):
+        library.index(publication, "GTHT@stranger@4")
+    assert not catalog.can_read_publication({"report_id": "report-one-editor", "owner_ref": OWNER}, READER)
+    research = catalog.list_researches(viewer=EDITOR_A)[0]
+    catalog.update_research(research["research_id"], actor=EDITOR_A, authorized_users=[])
+    assert not library.list_visible(READER)
+    with pytest.raises(PermissionError):
+        library.index(publication, READER)
+    assert library.index(publication, EDITOR_A)["title"] == "共享报告"
+
+
+def test_data_plane_research_asset_reuses_catalog_without_control_database(tmp_path, png_bytes):
+    import base64
+    import hashlib
+    from server.manager.data_plane.app import research_read_authorizer
+    from tools.cli.release.research_reporting.public_research.library import PublicResearchLibrary
+    from tools.cli.release.research_reporting.public_research.object_store import PublicResearchObjectStore
+    catalog = _service(tmp_path).research_catalog
+    library = PublicResearchLibrary(tmp_path / "public-research")
+    asset_id = "a" * 24
+    projection = {"schema_version": 2, "report_id": "report-one-editor", "title": "共享报告",
+        "generation": 1, "components": [], "projection_hash": "hash", "assets": [{
+        "asset_id": asset_id, "media_type": "image/png", "filename": "图片.png",
+        "content_hash": hashlib.sha256(png_bytes).hexdigest(),
+        "content_base64": base64.b64encode(png_bytes).decode()}]}
+    publication = library.sync({"report_id": "report-one-editor", "owner_ref": EDITOR_A,
+                               "projection": projection})["publication_id"]
+    byte_library = PublicResearchLibrary(library.root,
+        read_authorizer=research_read_authorizer(str(catalog.db_path)))
+    objects = PublicResearchObjectStore(byte_library)
+    assert objects.resolve(publication, "research_asset", asset_id, READER).path.read_bytes() == png_bytes
+    research = catalog.list_researches(viewer=EDITOR_A)[0]
+    catalog.update_research(research["research_id"], actor=EDITOR_A, authorized_users=[])
+    with pytest.raises(PermissionError):
+        objects.resolve(publication, "research_asset", asset_id, READER)

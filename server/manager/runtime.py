@@ -439,6 +439,7 @@ class ManagerState(
         self.public_research = PublicResearchLibrary(
             self.data_root / "public-research",
             storage_server_id=self.server_id,
+            read_authorizer=self.research_catalog.can_read_publication,
         )
         self.client_state = ClientStateService(
             control_store=self.control_store,
@@ -472,6 +473,7 @@ class ManagerState(
             self.data_root,
             self.agent_profiles.runtime_store,
             server_id=self.server_id,
+            research_catalog=self.research_catalog,
         )
         self.agent_app_server = AgentAppServerSupervisor(
             self.agent_profiles,

@@ -163,6 +163,7 @@ class ResearchCatalogRoutesMixin:
                             branches.append({
                                 **br,
                                 "report_id": str(rep.get("report_id") or ""),
+                                "owner_ref": str(rep.get("owner_ref") or ""),
                                 "research_id": research_id,
                                 "profile_ref": str(
                                     br.get("profile_ref") or ""

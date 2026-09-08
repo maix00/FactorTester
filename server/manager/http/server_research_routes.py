@@ -27,6 +27,7 @@ class ServerResearchRoutesMixin:
             return True
         principal = str(session.get("username") or "")
         service = self.state.server_research
+        target = parse_qs(parsed.query).get("target_ref", [""])[0] or None
         if parsed.path == "/api/server-research":
             try:
                 value = service.list_owner(principal)
@@ -47,6 +48,7 @@ class ServerResearchRoutesMixin:
                     unquote(component_match.group(1)),
                     unquote(component_match.group(2)),
                     unquote(component_match.group(3)),
+                    target_ref=target,
                 )
                 json_response(self, {"success": True, **value})
             except PermissionError as exc:
@@ -64,12 +66,13 @@ class ServerResearchRoutesMixin:
                 server_ref = unquote(chapter_match.group(1))
                 suffix = chapter_match.group(2)
                 if suffix == "index":
-                    value = service.index(principal, server_ref)
+                    value = service.index(principal, server_ref, **({"target_ref": target} if target else {}))
                 else:
                     value = service.chapter(
                         principal,
                         server_ref,
                         unquote(suffix.split("/", 1)[1]),
+                        target_ref=target,
                         include_content=parse_qs(parsed.query).get("metadata") != ["1"],
                     )
                 json_response(self, {"success": True, **value})
@@ -127,20 +130,6 @@ class ServerResearchRoutesMixin:
                 json_response(self, {"success": False, "error": str(exc)}, 404)
             return True
 
-        report_match = re.fullmatch(
-            r"/api/server-research/([^/]+)", parsed.path,
-        )
-        if report_match:
-            try:
-                value = service.projection(
-                    principal, unquote(report_match.group(1)),
-                )
-                json_response(self, {"success": True, **value})
-            except PermissionError as exc:
-                json_response(self, {"success": False, "error": str(exc)}, 403)
-            except (OSError, ValueError, KeyError) as exc:
-                json_response(self, {"success": False, "error": str(exc)}, 404)
-            return True
         if parsed.path == "/api/server-research/branch":
             query = parse_qs(parsed.query)
             try:
@@ -150,6 +139,22 @@ class ServerResearchRoutesMixin:
                     profile_id=query.get("profile_id", [""])[0],
                     package_id=query.get("package_id", [""])[0],
                     branch_id=query.get("branch_id", [""])[0],
+                )
+                json_response(self, {"success": True, **value})
+            except PermissionError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 403)
+            except (OSError, ValueError, KeyError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 404)
+            return True
+
+        report_match = re.fullmatch(
+            r"/api/server-research/([^/]+)", parsed.path,
+        )
+        if report_match:
+            try:
+                value = service.projection(
+                    principal, unquote(report_match.group(1)),
+                    **({"target_ref": target} if target else {}),
                 )
                 json_response(self, {"success": True, **value})
             except PermissionError as exc:

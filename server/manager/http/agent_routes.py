@@ -54,7 +54,10 @@ class AgentRoutesMixin:
         length = int(self.headers.get("Content-Length", "0"))
         if length < 0 or length > maximum:
             raise ProfileWorkspaceError("invalid request body")
-        return self.rfile.read(length) if length else b""
+        data = self.rfile.read(length) if length else b""
+        if len(data) != length:
+            raise ProfileWorkspaceError("incomplete request body")
+        return data
 
     def _local_profiles(self, principal: str) -> list[dict[str, Any]]:
         profile_service = getattr(self.state, "federated_public_data", None)

@@ -74,6 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--artifact-root", required=True)
     parser.add_argument("--submission-root", required=True)
     parser.add_argument("--research-root", default="")
+    parser.add_argument("--research-catalog-database", default="")
     parser.add_argument("--factor-source-database", default="")
     parser.add_argument("--local-run-database", default="")
     parser.add_argument("--profile-workspace-root", default="")
@@ -85,6 +86,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tls-cert", default=None)
     parser.add_argument("--tls-key", default=None)
     return parser
+
+
+def research_read_authorizer(database: str):
+    """The byte process uses local projections only; never opens PostgreSQL."""
+    if not database:
+        return None
+    from server.manager.services.research_catalog import ResearchCatalog
+    from tools.data.sqlite.db import connect_sqlite
+
+    def accounts():
+        with connect_sqlite(database, readonly=True) as conn:
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='accounts'").fetchone() is None:
+                return []
+            return [dict(row) for row in conn.execute("SELECT username, parent_username FROM accounts")]
+
+    return ResearchCatalog(database, account_provider=accounts).can_read_publication
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -100,6 +117,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.research_root:
         research = PublicResearchLibrary(
             Path(args.research_root), storage_server_id=args.server_id,
+            read_authorizer=research_read_authorizer(args.research_catalog_database),
         )
         research_store = PublicResearchObjectStore(research)
         adapters[TransferObjectKind.RESEARCH_ASSET.value] = PublicResearchOriginAdapter(

@@ -151,6 +151,8 @@ class DataPlaneProcessStateMixin:
             str((self.data_root / "job-results").resolve()),
             "--submission-root",
             str((self.data_root / "submissions").resolve()),
+            "--research-catalog-database",
+            str(Path(CACHE_DB_PATH).expanduser().resolve()),
             "--research-root",
             str((self.data_root / "public-research").resolve()),
             "--factor-source-database",

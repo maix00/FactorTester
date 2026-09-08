@@ -5,7 +5,10 @@
     const {state, api, t, content} = context;
     const isCurrent = () => context.isRouteCurrent?.() !== false;
     if (!isCurrent()) return;
-    const source = FTReportSource.create(publicationID, api);
+    const source = FTReportSource.create(publicationID, api, {
+      ownerRef: new URLSearchParams(location.search).get("owner_ref") || "",
+      researchID: new URLSearchParams(location.search).get("research_id") || "",
+    });
     // The research feature tab owns the report list. A concrete report owns
     // its actual closable left-sidebar tab, so reading state must stay on
     // that tab instead of a publication-only alias shared by reports.
