@@ -222,8 +222,9 @@
 
   function reportRoute(item, researchID = "") {
     const explicit = String(item?.href || "").trim();
-    let route = explicit;
     const reference = publicationID(item);
+    // Catalog hrefs from older servers omit the local/server source type.
+    let route = reference ? `/research/${encodeURIComponent(reference)}` : explicit;
     const linkedResearchID = String(
       researchID || item?.research_id || item?.research?.research_id || "",
     ).trim();

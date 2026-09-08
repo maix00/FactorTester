@@ -37,5 +37,16 @@ vm.runInThisContext(fs.readFileSync('server/manager/web/report/source.js', 'utf8
  for(const path of [...foreignPaths,foreign.reportAssetPath('asset'),foreign.localResourcePath('resource')]) {
    assert.equal(new URL(path,'https://test').searchParams.get('target_ref'),'GTHT@owner@1');
  }
+ const restoredPaths=[];
+ const restored=window.FTReportSource.create('self:pkg:main',async path=>{
+   restoredPaths.push(path);
+   if(path.startsWith('/api/research/')) return {reports:[{source_ref:'self:pkg:main',
+     owner_ref:'GTHT@owner@1',build_source:'server_agent'}]};
+   return {title:'shared',chapters:[]};
+ },{researchID:'research:one'});
+ await restored.load();
+ assert.equal(restored.isServer,true);
+ assert(restoredPaths[1].startsWith('/api/server-research/self%3Apkg%3Amain/index?'));
+ assert.equal(new URL(restored.reportAssetPath('image'),'https://test').searchParams.get('target_ref'),'GTHT@owner@1');
  console.log('PASS: report index updates render only changed active reports and clean up on disposal');
 })().catch(error=>{console.error(error);process.exitCode=1});

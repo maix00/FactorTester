@@ -44,7 +44,7 @@
   }
 
   function create(publicationID, api, options = {}) {
-    const source = basePath(publicationID);
+    let source = basePath(publicationID);
     let targetRef = String(options.ownerRef || "");
     function addressed(path) {
       if (!source.isServer || !targetRef) return path;
@@ -88,12 +88,19 @@
 
     async function load() {
       // Restore old independent report tabs from their existing research scope.
-      if (source.isServer && !targetRef && options.researchID) {
+      if (options.researchID && ((source.isServer && !targetRef)
+          || (!source.isOwnerLocal && /^[^:]+:[^:]+:[^:]+$/.test(source.publicationID)))) {
         const catalog = await api(`/api/research/${encodeURIComponent(options.researchID)}/reports`);
         const report = (catalog.reports || []).find(item => (
           item.source_ref === source.serverRef || item.source_ref === source.publicationID
         ));
-        targetRef = String(report?.owner_ref || "");
+        if (report?.build_source === "server_agent" && !source.isOwnerLocal
+            && report.source_ref === source.publicationID
+            && report.selected_branch?.source_kind !== "publication"
+            && report.source_kind !== "publication") {
+          source = basePath(`server:${report.source_ref}`);
+        }
+        targetRef ||= String(report?.owner_ref || "");
       }
       const indexPath = `${source.path}/index`;
       try {
@@ -201,7 +208,13 @@
     }
 
     return Object.freeze({
-      ...source,
+      get publicationID() { return source.publicationID; },
+      get isLocal() { return source.isLocal; },
+      get isServer() { return source.isServer; },
+      get isOwnerLocal() { return source.isOwnerLocal; },
+      get localRef() { return source.localRef; },
+      get serverRef() { return source.serverRef; },
+      get path() { return source.path; },
       load,
       watch,
       loadChapter,
