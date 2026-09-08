@@ -148,6 +148,18 @@ async function testSaveNoticeAndRollback() {
   });
   assert.equal(selects.every(select => !select.disabled), true);
 
+  const busy = {conversationID: "conversation-1", conversation, active: true};
+  component.setConversation(busy);
+  assert(selects.every(select => select.disabled));
+  apply.click(); await flush();
+  assert.equal(writes.length, 1, "running turns cannot change settings");
+  busy.active = false;
+  component.observeEvent({method: "turn/completed"});
+  assert(selects.every(select => !select.disabled));
+  component.setConversation({conversationID: "conversation-1", conversation: {model_id: "model-b"}});
+  const embedded = runtime.create({profile_id: "profile-1"}, context, {embedded: true});
+  assert.equal(embedded.element.tagName, "div");
+  assert(!embedded.element.children.some(child => child.tagName === "summary"));
   rejectSave = true;
   selects[0].value = "model-a";
   selects[0].dispatch("change");

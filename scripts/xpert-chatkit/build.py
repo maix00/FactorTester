@@ -42,8 +42,11 @@ def main():
     bootstrap = Path(__file__).with_name('frame-bootstrap.js').read_bytes()
     bootstrap_name = 'frame-bootstrap-' + hashlib.sha256(bootstrap).hexdigest()[:12] + '.js'
     (target / bootstrap_name).write_bytes(bootstrap)
+    theme = Path(__file__).with_name('frame-theme.css').read_bytes()
+    theme_name = 'frame-theme-' + hashlib.sha256(theme).hexdigest()[:12] + '.css'
+    (target / theme_name).write_bytes(theme)
     index = target / 'index.html'
-    index.write_text(index.read_text().replace('<head>', f'<head>\n<script src="./{bootstrap_name}"></script>'))
+    index.write_text(index.read_text().replace('<head>', f'<head>\n<script src="./{bootstrap_name}"></script>\n<link rel="stylesheet" href="./{theme_name}">'))
     manifest_path = ROOT / 'server/manager/web/module-manifest.json'
     manifest = json.loads(manifest_path.read_text())
     manifest['vendor_assets'] = ['vendor/xpert-chatkit/' + str(p.relative_to(target))

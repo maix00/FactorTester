@@ -48,6 +48,7 @@ let stateHooks = null;
 global.FTStaticLoader = {loadGroups: async names => events.push(["groups", names])};
 global.FTAgentChat = {render: async (_context, _profile, options) => {
   const chat = new Element("chat");
+  assert.equal(options.profileControl.tag, "select", "drawer places its authorized Profile selector inside ChatKit");
   assert(options.mountHost.classes.has("page-agent-drawer-body-conversation-only"));
   assert.deepEqual(options.runtimeStatus, {running: true},
     "the drawer reuses the lifecycle response instead of fetching Agent status again");
