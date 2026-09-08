@@ -169,6 +169,81 @@ class ProfileWorkspaceBrowser:
             "deleted": True,
         }
 
+    def write_file(
+        self,
+        principal: str,
+        profile_id: str,
+        relative_path: str,
+        data: bytes,
+        *,
+        filename: str = "",
+    ) -> dict[str, Any]:
+        """Atomically persist an uploaded file inside the Profile workspace.
+
+        The target is the optional ``relative_path`` directory joined with the
+        (sanitized) ``filename``.  Uploads are bounded, filtered against hidden
+        /sensitive names, and written via a temp file + ``os.replace`` so a
+        concurrent reader never sees a partial file.  Path escape and symlink
+        guards are the same as for delete/download.
+        """
+        import os
+        import tempfile
+
+        root = self._root(principal, profile_id)
+        directory = self._safe_path(root, relative_path)
+        if not directory.is_dir():
+            raise ProfileWorkspaceError("workspace path is not a directory")
+        safe_name = _safe_filename(filename)
+        if not safe_name:
+            raise ProfileWorkspaceError("workspace filename is invalid")
+        if _is_hidden_or_sensitive(safe_name):
+            raise ProfileWorkspaceError("workspace filename is not allowed")
+        size = len(data or b"")
+        if size < 0:
+            raise ProfileWorkspaceError("workspace upload is invalid")
+        target = directory / safe_name
+        if target.is_symlink():
+            raise ProfileWorkspaceError("workspace upload target is invalid")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp = tempfile.mkstemp(
+            prefix=f".{safe_name}.upload.", dir=str(directory),
+        )
+        try:
+            os.write(fd, data or b"")
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        try:
+            os.replace(temp, target)
+        finally:
+            if os.path.exists(temp):
+                os.unlink(temp)
+        current = "/".join(_relative_parts(relative_path))
+        child_path = f"{current}/{safe_name}" if current else safe_name
+        return {
+            "profile_id": _profile_id(profile_id),
+            "path": child_path,
+            "name": safe_name,
+            "kind": "file",
+            "size_bytes": size,
+            "saved": True,
+        }
+
+
+
+
+
+def _safe_filename(value: object) -> str:
+    """Return a safe single-path-component filename, or '' when invalid."""
+    name = str(value or "").strip()
+    if not name or name in {".", ".."} or "/" in name or "\\" in name:
+        return ""
+    if name.startswith("."):
+        return ""
+    if len(name) > 255:
+        return ""
+    return name
+
 
 def _profile_id(value: object) -> str:
     result = str(value or "").strip()

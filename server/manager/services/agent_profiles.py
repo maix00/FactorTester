@@ -275,6 +275,23 @@ class AgentProfileService:
     ) -> dict[str, Any]:
         return self.workspace_browser.delete_file(principal, profile_id, relative_path)
 
+    def save_profile_workspace_file(
+        self,
+        principal: str,
+        profile_id: str,
+        relative_path: str,
+        data: bytes,
+        *,
+        filename: str = "",
+    ) -> dict[str, Any]:
+        return self.workspace_browser.write_file(
+            principal,
+            profile_id,
+            relative_path,
+            data,
+            filename=filename,
+        )
+
     def assistance_drafts(
         self, principal: str, profile_id: str
     ) -> AssistanceDraftStore:

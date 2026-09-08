@@ -49,6 +49,13 @@ class AgentRoutesMixin:
             raise ProfileRuntimeError("authenticated principal is missing")
         return principal
 
+    def _raw_body(self, maximum: int) -> bytes:
+        """Read the raw request body up to ``maximum`` bytes (binary-safe)."""
+        length = int(self.headers.get("Content-Length", "0"))
+        if length < 0 or length > maximum:
+            raise ProfileWorkspaceError("invalid request body")
+        return self.rfile.read(length) if length else b""
+
     def _local_profiles(self, principal: str) -> list[dict[str, Any]]:
         profile_service = getattr(self.state, "federated_public_data", None)
         if profile_service is None:
@@ -284,6 +291,33 @@ class AgentRoutesMixin:
         return False
 
     def _post_agent_routes(self, parsed) -> bool:
+        if parsed.path == "/api/client/profile-workspace/upload":
+            session = self._agent_session()
+            if session is None:
+                return True
+            try:
+                query = parse_qs(parsed.query, keep_blank_values=True)
+                principal = self._agent_principal(session)
+                profile_id = query.get("profile_id", [""])[0].strip()
+                if not self._profile_exists(principal, profile_id):
+                    raise ProfileWorkspaceError(
+                        "Profile does not belong to current account"
+                    )
+                relative_path = query.get("path", [""])[0]
+                filename = query.get("filename", [""])[0]
+                data = self._raw_body(64 * 1024 * 1024)
+                result = self._agent_service().save_profile_workspace_file(
+                    principal,
+                    profile_id,
+                    relative_path,
+                    data,
+                    filename=filename,
+                )
+                json_response(self, {"success": True, **result}, 201)
+            except (ProfileWorkspaceError, RuntimeError, ValueError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 400)
+            return True
+
         duplicate_match = re.fullmatch(
             rf"/api/client/agent-models/({PROVIDER_ID_PATTERN})/duplicate",
             parsed.path,

@@ -846,6 +846,15 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .profile-detail-tab:not(.active):hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .profile-workspace-browser .table-link { border: 0; padding: 0; background: transparent; color: var(--accent); text-align: left; }
 .profile-workspace-browser .table-link:hover { text-decoration: underline; }
+.profile-workspace-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.profile-workspace-header .workspace-upload-btn { width: 30px; height: 30px; min-width: 30px; }
+.profile-workspace-browser .workspace-row { height: 38px; }
+.profile-workspace-browser td:first-child { white-space: nowrap; }
+.profile-workspace-browser td:first-child .ft-icon,
+.profile-workspace-browser td:first-child .ft-icon-svg { width: 16px; height: 16px; margin-right: 7px; vertical-align: -2px; flex-shrink: 0; }
+.profile-workspace-browser .icon-action-button { width: 24px; height: 24px; min-width: 24px; }
+.profile-workspace-browser .icon-action-button:hover { color: var(--accent); }
+.profile-workspace-browser td:last-child { white-space: nowrap; }
 .profile-projection-note { margin: 0; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: color-mix(in srgb, var(--soft) 58%, var(--panel)); }
 .profile-agent-chat { min-width: 0; }
 .profile-agent-chat-conversation-only,
