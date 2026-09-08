@@ -339,7 +339,11 @@
     const existing = state.pageAssistanceRegistration;
     if (existing && existing.pageState === context.pageState) return existing.controller;
     const controller = FTPageAssistance.register(context, {
-      prepare: () => FTTestLazyCode.loadGroup("workbench-run-submit"),
+      // Export uses factor/product helpers even when their tabs have never
+      // been opened. Loading code does not fetch candidate catalogs.
+      prepare: () => Promise.all([
+        "workbench-run-submit", "workbench-factors", "workbench-products",
+      ].map(group => FTTestLazyCode.loadGroup(group))),
       navigation: () => navigationFor(state),
       schema: () => schemaFor(state),
       exportDocument: () => documentFor(state),
