@@ -39,7 +39,6 @@ const state = {
   runValues: {retention_mode: "full", output_requests: ["factor_series"]},
   manifest: {
     research_configuration_schema_version: 2,
-    configuration_item_contract: {schema: {type: "object"}},
     run_fields: [], field_contracts: {settings: {}}, chip_fields: [],
     modules: [
       {key: "factor", label: "因子"},
@@ -55,7 +54,12 @@ assert.deepEqual(analysis.required, ["factor_ref", "product_path_selection"]);
 assert.equal(analysis.properties.factor_ref.type, "string");
 assert.equal(analysis.properties.factor_ref.minLength, undefined);
 for (const kind of ["ic", "backtest"]) {
-  const draftSchema = window.FTTestPageAssistance.schemaFor({...state, kind});
+  assert.throws(() => window.FTTestPageAssistance.schemaFor({...state, kind}),
+    /configuration-item contract/);
+  const draftSchema = window.FTTestPageAssistance.schemaFor({...state, kind,
+    manifest: {...state.manifest,
+      configuration_item_contract: {schema: {type: "object"}}},
+  });
   const fields = draftSchema.properties.configuration.properties.analyses.properties[kind].properties;
   assert.equal(fields[kind === "ic" ? "configuration_groups" : "groups"].minItems, 1);
 }
@@ -64,4 +68,23 @@ const navigation = window.FTTestPageAssistance.navigationFor(state);
 assert.equal(navigation.nodes.page.label, "查看因子序列配置");
 assert.deepEqual(navigation.nodes.page.children, ["tab:factor", "tab:time"]);
 assert.equal(navigation.nodes.configurations, undefined);
+let adapter;
+global.FTPageAssistance = {register: (_context, value) => { adapter = value; return {}; }};
+global.FTTestLazyCode = {loadGroup: async () => {}};
+Object.assign(global.FTTestState, {
+  applyWorkspaceConfiguration: value => {
+    value.configuration = structuredClone(value.workspace.configuration.payload);
+  },
+  seedSavedCatalogs: () => {},
+  applyRegisteredRunValues: (value, fields) => { value.runValues = {...fields}; },
+});
+window.FTTestPageAssistance.register({pageState: {}}, state, () => {});
+const draft = adapter.exportDocument();
+draft.configuration.analyses.factor_evaluation.factor_ref = "factor:v2:replacement";
+// A CLI draft uses the same registered adapter, without inventing inner groups.
+adapter.validate(draft);
+adapter.importDocument(draft);
+assert.equal(adapter.exportDocument().configuration.analyses.factor_evaluation.factor_ref,
+  "factor:v2:replacement");
+assert.deepEqual(adapter.schema(), schema);
 console.log("ok");
