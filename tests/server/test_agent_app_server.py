@@ -1671,3 +1671,24 @@ def test_assisted_rpc_preserves_user_message_without_prompt_injection(monkeypatc
         assert handler._post_agent_app_routes(urlparse("/api/client/profile-agent/rpc"))
         assert handler.status == 200
     assert captured == [{"input": [{"type": "text", "text": "请添加图片\n保持原文"}]}] * 2
+
+
+def test_live_sse_supplements_persisted_tools_without_provider_item_events():
+    class Supervisor(_SSESupervisor):
+        def status(self, *args):
+            return {"running": True, "active_conversation_id": "conversation-live",
+                    "processing_conversation_id": "conversation-live", "processing_turn_id": "turn-live"}
+
+        def conversation_items(self, *args, **kwargs):
+            assert kwargs == {"limit": 1, "view": "outline"}
+            return {"items": [{"id": "persisted-call", "turn_id": "turn-live",
+                "type": "client_tool_call", "name": "exec_command",
+                "details_deferred": True}]}
+
+    supervisor = Supervisor()
+    handler = _AppHandler(None, supervisor)
+    handler._stream_agent_events(supervisor, PRINCIPAL, PROFILE_ID, after=0)
+    raw = handler.wfile.getvalue()
+    assert raw.count(b'"id": "persisted-call"') == 1
+    assert b'"details_deferred": true' in raw
+    assert b'id: 7' in raw  # Supplemental records do not change Provider cursors.

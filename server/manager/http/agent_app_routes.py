@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from urllib.parse import parse_qs
 
 from server.manager.http.responses import json_response
@@ -221,6 +222,11 @@ class AgentAppServerRoutesMixin:
         conversation_id = str(
             status.get("active_conversation_id") or ""
         ).strip()
+        # Some Provider versions persist tool calls without emitting item
+        # notifications. Reuse the same lazy history projection on this live
+        # connection; no background worker or duplicate transcript is needed.
+        process_versions = {}
+        next_history_check = 0.0
         try:
             while True:
                 events = supervisor.events(
@@ -229,6 +235,29 @@ class AgentAppServerRoutesMixin:
                     after=cursor,
                     timeout=5.0,
                 )
+                now = time.monotonic()
+                if now >= next_history_check:
+                    next_history_check = now + 3.0
+                    current = supervisor.status(principal, profile_id)
+                    active_id = current.get("processing_conversation_id")
+                    turn_id = current.get("processing_turn_id")
+                    if active_id and turn_id:
+                        page = supervisor.conversation_items(
+                            principal, profile_id, active_id, limit=1, view="outline",
+                        )
+                        for item in reversed(page.get("items", [])):
+                            if item.get("turn_id") != turn_id or item.get("type") not in {"workflow", "client_tool_call"}:
+                                continue
+                            encoded = json.dumps(item, ensure_ascii=False, sort_keys=True)
+                            identity = (active_id, item.get("id"))
+                            if process_versions.get(identity) == encoded:
+                                continue
+                            process_versions[identity] = encoded
+                            payload = {"method": "item/completed",
+                                "params": {"turnId": turn_id}, "chatkit_item": item}
+                            self._write_sse_chunk(
+                                ("data: " + json.dumps(payload, ensure_ascii=False) + "\n\n").encode("utf-8")
+                            )
                 if not events:
                     if not supervisor.status(principal, profile_id).get("running"):
                         return

@@ -85,7 +85,7 @@ def enrich_turns(thread, turns, workspace_root, *, outline=False):
                         if not call_id or call_id in calls:
                             continue
                         # Prefer a native item if the Provider already projects it.
-                        existing = next((v for v in canonical if v.get('id') == call_id), None)
+                        existing = next((v for v in canonical if call_id in {v.get('id'), v.get('callId'), v.get('call_id')}), None)
                         value = dict(existing) if existing else {'id': call_id, 'type': 'dynamicToolCall',
                             'tool': item.get('name') or '工具调用', 'status': 'inProgress',
                             'arguments': '' if outline else item.get('arguments', '')}
