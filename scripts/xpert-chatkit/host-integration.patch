@@ -1,8 +1,43 @@
+diff --git a/packages/chatkit-ui/src/components/chat.paste.test.tsx b/packages/chatkit-ui/src/components/chat.paste.test.tsx
+index 9a51f3d..5257f6b 100644
+--- a/packages/chatkit-ui/src/components/chat.paste.test.tsx
++++ b/packages/chatkit-ui/src/components/chat.paste.test.tsx
+@@ -319,6 +319,22 @@ describe('Chat composer paste and drop behavior', () => {
+     expect(screen.queryByText('Pasted text')).not.toBeInTheDocument();
+   });
+ 
++  it('does not send IME confirmation Enter including Safari keyCode 229', () => {
++    render(<Chat clientSecret="secret" />);
++    const input = screen.getByRole('textbox');
++    fireEvent.compositionStart(input);
++    const composing = createEvent.keyDown(input, {key: 'Enter', keyCode: 13});
++    fireEvent(input, composing);
++    expect(composing.defaultPrevented).toBe(false);
++    fireEvent.compositionEnd(input);
++    const safari = createEvent.keyDown(input, {key: 'Enter', keyCode: 229});
++    fireEvent(input, safari);
++    expect(safari.defaultPrevented).toBe(false);
++    const ordinary = createEvent.keyDown(input, {key: 'Enter', keyCode: 13});
++    fireEvent(input, ordinary);
++    expect(ordinary.defaultPrevented).toBe(true);
++  });
++
+   it('uploads a pasted image and adds it as an image reference chip', async () => {
+     mocks.uploadFile.mockResolvedValueOnce({
+       id: 'file-1',
 diff --git a/packages/chatkit-ui/src/components/chat.tsx b/packages/chatkit-ui/src/components/chat.tsx
-index 2c6757d..c431b04 100644
+index 2c6757d..78d2feb 100644
 --- a/packages/chatkit-ui/src/components/chat.tsx
 +++ b/packages/chatkit-ui/src/components/chat.tsx
-@@ -1326,8 +1326,7 @@ export function Chat({
+@@ -69,6 +69,7 @@ import { HITLApprovalPanel } from './composer/hitl-approval-panel';
+ import { RequestUserInputPanel } from './composer/request-user-input-panel';
+ import { useConversationSummaryEvent } from './chat/useConversationSummaryEvent';
+ import {
++  ChatAttachmentPreview,
+   ChatAttachments,
+   type AttachmentFileStatus,
+   type ChatAttachmentFile,
+@@ -1326,8 +1327,7 @@ export function Chat({
        setSelectedModelId,
      ],
    );
@@ -12,7 +47,18 @@ index 2c6757d..c431b04 100644
    const handleMinimizeToPet = React.useCallback(() => {
      parentMessenger?.sendEvent('chat_minimize_change', { minimized: true });
    }, [parentMessenger]);
-@@ -3411,30 +3410,7 @@ export function Chat({
+@@ -2726,6 +2726,10 @@ export function Chat({
+   const handleComposerKeyDown = (
+     event: React.KeyboardEvent<HTMLDivElement>,
+   ) => {
++    // IME confirmation is not a submit (Safari may report isComposing=false
++    // on its final Enter but still supplies keyCode 229).
++    if (isComposerComposingRef.current || event.nativeEvent.isComposing
++        || event.nativeEvent.keyCode === 229) return;
+     if (workspaceFileMention) {
+       if (event.key === 'Escape') {
+         event.preventDefault();
+@@ -3411,30 +3415,7 @@ export function Chat({
              className="mx-auto flex w-full items-center justify-between border-b p-2 sticky top-0 z-10 bg-background"
              style={chatColumnStyle}
            >
@@ -44,7 +90,7 @@ index 2c6757d..c431b04 100644
              <div className="flex items-center gap-1">
                {taskSummaryAvailable && (
                  <TaskSummaryTrigger
-@@ -3470,6 +3446,22 @@ export function Chat({
+@@ -3470,6 +3451,22 @@ export function Chat({
                  </Tooltip>
                )}
  
@@ -67,7 +113,7 @@ index 2c6757d..c431b04 100644
                <Tooltip>
                  <TooltipTrigger asChild>
                    <span className="inline-flex h-8 w-8">
-@@ -3692,6 +3684,7 @@ export function Chat({
+@@ -3692,6 +3689,7 @@ export function Chat({
                        setMessageNavigationAnchor(messageNavigationId, node)
                      }
                      data-message-navigation-id={messageNavigationId}
@@ -75,7 +121,7 @@ index 2c6757d..c431b04 100644
                      className={cn(
                        'group flex gap-3',
                        message.type === 'human'
-@@ -3715,7 +3708,7 @@ export function Chat({
+@@ -3715,7 +3713,7 @@ export function Chat({
                          className={cn(
                            'max-w-full rounded-2xl',
                            message.type === 'human'
@@ -84,7 +130,24 @@ index 2c6757d..c431b04 100644
                              : message.type === 'system'
                                ? 'bg-muted text-muted-foreground text-xs px-4 py-2.5'
                                : 'py-1 text-chat-foreground', // AI messages: use chat-specific foreground color
-@@ -3800,7 +3793,7 @@ export function Chat({
+@@ -3770,15 +3768,7 @@ export function Chat({
+                               humanAttachments.length > 0 && (
+                                 <div className="flex flex-wrap gap-1.5 mb-2">
+                                   {humanAttachments.map((file, fileIndex) => (
+-                                    <div
+-                                      key={fileIndex}
+-                                      className="flex items-center gap-1.5 rounded-md bg-primary-foreground/20 px-2 py-1 text-xs"
+-                                    >
+-                                      <FileText size={12} />
+-                                      <span className="max-w-[100px] truncate">
+-                                        {file.originalName ?? file.id}
+-                                      </span>
+-                                    </div>
++                                    <ChatAttachmentPreview key={fileIndex} file={file} />
+                                   ))}
+                                 </div>
+                               )}
+@@ -3800,7 +3790,7 @@ export function Chat({
                          )}
                        </div>
                        {/* Message actions - hidden during streaming, retry only for last AI message */}
@@ -93,7 +156,7 @@ index 2c6757d..c431b04 100644
                          content={messageContent}
                          isAssistant={isAssistantMessage}
                          isStreaming={isStreamingMessage}
-@@ -3811,7 +3804,7 @@ export function Chat({
+@@ -3811,7 +3801,7 @@ export function Chat({
                              ? () => handleRetry(index)
                              : undefined
                          }
@@ -102,7 +165,7 @@ index 2c6757d..c431b04 100644
                      </div>
                    </div>
                  );
-@@ -4250,7 +4243,7 @@ export function Chat({
+@@ -4250,7 +4240,7 @@ export function Chat({
              />
            )}
  
@@ -111,6 +174,79 @@ index 2c6757d..c431b04 100644
              <div
                data-slot="composer-input-shell"
                data-layout="stacked"
+diff --git a/packages/chatkit-ui/src/components/chat/attachments.tsx b/packages/chatkit-ui/src/components/chat/attachments.tsx
+index c483f74..6e1fc92 100644
+--- a/packages/chatkit-ui/src/components/chat/attachments.tsx
++++ b/packages/chatkit-ui/src/components/chat/attachments.tsx
+@@ -1,4 +1,5 @@
+ import * as React from 'react';
++import * as Dialog from '@radix-ui/react-dialog';
+ import { FileText, Loader2, RefreshCw, X } from 'lucide-react';
+ 
+ import { cn, createMessageId } from '../../lib/utils';
+@@ -22,6 +23,7 @@ const TERMINAL_PARSE_STATUSES = new Set<AgentFileStatus>([
+ const INITIAL_STATUS_POLL_DELAY_MS = 500;
+ 
+ export type ChatAttachmentFile = Partial<AgentFile> & {
++  sha256?: string;
+   fileAssetId?: string;
+   filePath?: string;
+   originalName?: string;
+@@ -118,6 +120,7 @@ function toSubmittedFiles(attachments: UploadingFile[]): ChatAttachmentFile[] {
+         capabilities: uploadedFile.capabilities,
+         summary: uploadedFile.summary,
+         workspacePath: uploadedFile.workspacePath,
++        sha256: (uploadedFile as AgentFile & {sha256?: string}).sha256,
+       };
+     });
+ }
+@@ -518,3 +521,46 @@ export const ChatAttachments = React.forwardRef<
+     </>
+   );
+ });
++
++
++// Reuse the same Dialog primitives as native tool-output image previews.
++// Authorization and bytes stay with the host's existing object-download API.
++export function ChatAttachmentPreview({file}: {file: ChatAttachmentFile}) {
++  const [open, setOpen] = React.useState(false);
++  const [preview, setPreview] = React.useState<{url: string; type: string} | null>(null);
++  const [error, setError] = React.useState('');
++  React.useEffect(() => {
++    if (!open) return;
++    let disposed = false, url = '';
++    setPreview(null); setError('');
++    const key = new URL(location.href).searchParams.get('ft_channel');
++    Promise.resolve((parent as any).FTXpertTransport.preview(key, file)).then((blob: Blob) => {
++      if (disposed) return;
++      if (!blob) throw new Error('附件不可用');
++      url = URL.createObjectURL(blob); setPreview({url, type: blob.type});
++    }).catch(e => { if (!disposed) setError(String(e.message || e)); });
++    return () => { disposed = true; if (url) URL.revokeObjectURL(url); };
++  }, [open, file.workspacePath]);
++  const name = file.originalName || file.id || '附件';
++  return <Dialog.Root open={open} onOpenChange={setOpen}>
++    <Dialog.Trigger asChild><button type="button" className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-muted" title={name}>
++      <FileText size={14}/><span className="max-w-[240px] truncate">{name}</span>
++    </button></Dialog.Trigger>
++    <Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-[80] bg-black/60"/>
++      <Dialog.Content className="fixed inset-3 z-[81] flex min-w-0 flex-col rounded-xl bg-background p-4 shadow-xl">
++        <div className="flex items-center justify-between gap-2"><Dialog.Title className="truncate">{name}</Dialog.Title>
++          <Dialog.Close aria-label="关闭预览" className="rounded p-1 hover:bg-muted"><X size={18}/></Dialog.Close></div>
++        <Dialog.Description className="sr-only">会话附件预览</Dialog.Description>
++        {!preview && !error && <p role="status">正在加载附件…</p>}
++        {error && <p role="alert">{error}</p>}
++        {preview && <><div className="my-3 min-h-0 flex-1 overflow-auto">
++          {/^image\/(png|jpeg|gif|webp|avif)$/.test(preview.type)
++            ? <img src={preview.url} alt={name} className="h-full w-full object-contain"/>
++            : preview.type === 'application/pdf'
++              ? <iframe title={name} src={preview.url} className="h-full w-full" sandbox="allow-same-origin"/>
++              : <p>此格式可下载后查看。</p>}
++        </div><a href={preview.url} download={name} className="text-primary underline">下载附件</a></>}
++      </Dialog.Content>
++    </Dialog.Portal>
++  </Dialog.Root>;
++}
 diff --git a/packages/chatkit-ui/src/components/composer/ComposerMenu.tsx b/packages/chatkit-ui/src/components/composer/ComposerMenu.tsx
 index 2696a21..c395bbb 100644
 --- a/packages/chatkit-ui/src/components/composer/ComposerMenu.tsx
@@ -458,6 +594,19 @@ index bbc6a97..05a87a2 100644
        </SheetContent>
      </Sheet>
    );
+diff --git a/packages/chatkit-ui/src/components/thread/markdown-text.tsx b/packages/chatkit-ui/src/components/thread/markdown-text.tsx
+index 2b1bb30..6f3bf46 100644
+--- a/packages/chatkit-ui/src/components/thread/markdown-text.tsx
++++ b/packages/chatkit-ui/src/components/thread/markdown-text.tsx
+@@ -611,7 +611,7 @@ const defaultComponents: any = {
+     ) : (
+       <div
+         className={cn(
+-          'max-w-4xl overflow-x-auto rounded-lg text-sm bg-black text-white dark:bg-zinc-800',
++          'ft-code-block my-3 w-full min-w-0 max-w-full overflow-x-auto rounded-lg text-sm bg-black text-white dark:bg-zinc-800',
+           className,
+         )}
+       >
 diff --git a/packages/chatkit-ui/src/components/thread/messages/ai.tsx b/packages/chatkit-ui/src/components/thread/messages/ai.tsx
 index 0e5a3cd..01b5f15 100644
 --- a/packages/chatkit-ui/src/components/thread/messages/ai.tsx
@@ -555,6 +704,32 @@ index 0e5a3cd..01b5f15 100644
    });
  
    return (
+diff --git a/packages/chatkit-ui/src/i18n/locales/en-US.json b/packages/chatkit-ui/src/i18n/locales/en-US.json
+index bd5fb19..d7a8671 100644
+--- a/packages/chatkit-ui/src/i18n/locales/en-US.json
++++ b/packages/chatkit-ui/src/i18n/locales/en-US.json
+@@ -89,7 +89,7 @@
+       "edit": "Edit message",
+       "queueHint": "Starts after the current run finishes",
+       "manualQueueHint": "Ready to send as a new run",
+-      "steerHint": "Injects after the current tool call"
++      "steerHint": "Waiting to be applied"
+     },
+     "todos": {
+       "summary": "{{total}} tasks, {{completed}} completed"
+diff --git a/packages/chatkit-ui/src/i18n/locales/zh-CN.json b/packages/chatkit-ui/src/i18n/locales/zh-CN.json
+index de585b2..0980974 100644
+--- a/packages/chatkit-ui/src/i18n/locales/zh-CN.json
++++ b/packages/chatkit-ui/src/i18n/locales/zh-CN.json
+@@ -89,7 +89,7 @@
+       "edit": "编辑消息",
+       "queueHint": "当前运行结束后开启下一轮",
+       "manualQueueHint": "保留为待发送，可手动开启新一轮",
+-      "steerHint": "当前工具调用完成后注入"
++      "steerHint": "等待应用"
+     },
+     "todos": {
+       "summary": "共 {{total}} 个任务，已经完成 {{completed}} 个"
 diff --git a/packages/chatkit-ui/src/providers/ParentMessenger.tsx b/packages/chatkit-ui/src/providers/ParentMessenger.tsx
 index 0c3f44c..9ee5324 100644
 --- a/packages/chatkit-ui/src/providers/ParentMessenger.tsx
@@ -591,7 +766,7 @@ index 0c3f44c..9ee5324 100644
        if (typeof payload.nonce !== 'string') return;
        const handler = pendingRef.current.get(payload.nonce);
 diff --git a/packages/chatkit-ui/src/providers/Stream.tsx b/packages/chatkit-ui/src/providers/Stream.tsx
-index 63a8e2e..9c40383 100644
+index 63a8e2e..d935cd0 100644
 --- a/packages/chatkit-ui/src/providers/Stream.tsx
 +++ b/packages/chatkit-ui/src/providers/Stream.tsx
 @@ -1605,7 +1605,7 @@ export function applyStreamEvent(
@@ -614,11 +789,9 @@ index 63a8e2e..9c40383 100644
          });
          return;
        }
-@@ -3145,17 +3145,30 @@ const StreamSession = ({
-           ...(currentItem.context ? { context: currentItem.context } : {}),
+@@ -3146,16 +3146,28 @@ const StreamSession = ({
            ...(currentItem.config ? { config: currentItem.config } : {}),
          });
-+        flushSteerFollowUps([id]);
        } catch (followUpError) {
 -        setError(followUpError);
 +        const ended = /Steer target turn has ended/.test(String(followUpError));
@@ -648,7 +821,7 @@ index 63a8e2e..9c40383 100644
        removeAutoQueuedFollowUpIds,
        sendSteerFollowUp,
        setError,
-@@ -3621,7 +3634,7 @@ const StreamSession = ({
+@@ -3621,7 +3633,7 @@ const StreamSession = ({
        return;
      }
  

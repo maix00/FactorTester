@@ -83,6 +83,7 @@
     const controls = {};
     for (const [key, label] of [
       ["model", "会话模型"],
+      ["thinking", "思考模式"],
       ["effort", "推理强度"],
       ["tier", "速度档位"],
     ]) {
@@ -135,6 +136,14 @@
 
     function renderDependentChoices() {
       const model = selectedModel() || {};
+      controls.thinking.replaceChildren();
+      const efforts = model.reasoning_efforts || [];
+      option(controls.thinking, "", context.t("使用模型默认设置"));
+      if (efforts.some(item => item.id !== "none")) option(controls.thinking, "on", context.t("开启"));
+      if (efforts.some(item => item.id === "none")) option(controls.thinking, "off", context.t("关闭"));
+      controls.thinking.value = draft?.reasoning_effort === "none" ? "off" : draft?.reasoning_effort ? "on" : "";
+      controls.thinking.disabled = readOnly || !current || saving || Boolean(current?.active) || !efforts.length;
+      controls.thinking.title = efforts.length ? "" : context.t("模型尚未声明可设置的思考能力");
       controls.effort.replaceChildren();
       controls.tier.replaceChildren();
       option(controls.effort, "", context.t("默认推理强度"));
@@ -151,7 +160,7 @@
       }
       addSelectedFallback(controls.effort, String(draft?.reasoning_effort || ""));
       addSelectedFallback(controls.tier, String(draft?.service_tier || ""));
-      controls.effort.disabled = readOnly || !current || saving || Boolean(current?.active);
+      controls.effort.disabled = readOnly || !current || saving || Boolean(current?.active) || draft?.reasoning_effort === "none";
       controls.tier.disabled = readOnly || !current || saving || Boolean(current?.active);
     }
 
@@ -290,6 +299,14 @@
       }
     }
 
+    controls.thinking.addEventListener("change", () => {
+      if (!draft) return;
+      const model = selectedModel() || {};
+      const enabled = (model.reasoning_efforts || []).filter(item => item.id !== "none");
+      draft.reasoning_effort = controls.thinking.value === "off" ? "none"
+        : controls.thinking.value === "on" ? (enabled.find(item => item.id === model.default_reasoning_effort)?.id || enabled[0]?.id || "") : "";
+      renderDependentChoices();
+    });
     controls.model.addEventListener("focus", () => loadModels().catch(() => {}));
     controls.model.addEventListener("pointerdown", () => loadModels().catch(() => {}));
     controls.model.addEventListener("change", () => {

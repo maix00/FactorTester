@@ -109,9 +109,14 @@ class ObjectTransferRoutesMixin:
                     raise PermissionError("login required")
                 profile_id = str(payload.get("profile_id") or "").strip()
                 relative_path = str(payload.get("path") or "")
-                metadata = self.state.agent_profiles.profile_workspace_file(
-                    principal, profile_id, relative_path,
-                )
+                if payload.get("profile_key") and payload.get("conversation_id"):
+                    attachment_owner, metadata = self.state.profile_directory.conversation_attachment(
+                        principal, str(payload["profile_key"]), str(payload["conversation_id"]),
+                        relative_path, scope=str(payload.get("scope") or "servers"))
+                else:
+                    metadata = self.state.agent_profiles.profile_workspace_file(
+                        principal, profile_id, relative_path,
+                    )
                 expected_size = int(metadata.get("size_bytes") or 0)
                 expected_sha256 = str(metadata.get("sha256") or "").strip().lower()
                 storage_server_id = str(
@@ -176,7 +181,8 @@ class ObjectTransferRoutesMixin:
             ).strip()
             access = self._rewrite_client_data_access(
                 self.state.prepare_object_download(
-                    principal=principal,
+                    principal=attachment_owner if object_kind == TransferObjectKind.PROFILE_WORKSPACE.value
+                        and payload.get("profile_key") and payload.get("conversation_id") else principal,
                     storage_server_id=storage_server_id,
                     object_kind=object_kind,
                     object_id=object_id,

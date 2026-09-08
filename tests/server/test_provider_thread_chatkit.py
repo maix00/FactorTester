@@ -42,7 +42,7 @@ def test_provider_thread_projects_structured_chatkit_items_without_raw_reasoning
 
     assert [item["type"] for item in items] == [
         "user_message", "workflow", "workflow", "workflow",
-        "client_tool_call", "workflow", "workflow", "assistant_message",
+        "client_tool_call", "workflow", "assistant_message", "assistant_message",
     ]
     assert items[1]["workflow"]["type"] == "reasoning"
     assert items[1]["workflow"]["tasks"][0]["content"] == (
@@ -56,7 +56,7 @@ def test_provider_thread_projects_structured_chatkit_items_without_raw_reasoning
         "title": "factortester product-library list",
     }
     assert items[4]["arguments"] == {"limit": 20}
-    assert items[-2]["workflow"]["tasks"][0]["content"] == "正在整理结果。"
+    assert items[-2]["content"][0]["text"] == "正在整理结果。"
     assert items[-1]["content"][0]["text"].startswith("完成。\n\n```bash")
     assert all(item["thread_id"] == "conversation-1" for item in items)
 
@@ -179,12 +179,12 @@ def test_provider_thread_preserves_complete_visible_timeline():
     timeline = provider_thread_page(thread, "conversation-1", view="timeline")
 
     assert [item["type"] for item in timeline["items"]] == [
-        "assistant_message", "workflow", "workflow", "user_message",
+        "assistant_message", "assistant_message", "workflow", "user_message",
     ]
     assert "PRIVATE_CHAIN_OF_THOUGHT" not in repr(timeline)
 
 
-def test_progress_without_explicit_title_is_collapsible_process():
+def test_progress_without_explicit_title_is_visible_prose():
     items = provider_thread_items({"turns": [{"items": [{
         "id": "progress-1",
         "type": "agentMessage",
@@ -198,14 +198,14 @@ def test_progress_without_explicit_title_is_collapsible_process():
     }]}]}, "conversation-progress")
 
     progress = items[0]
-    assert progress["type"] == "workflow"
-    assert progress["workflow"]["tasks"][0]["content"] == (
+    assert progress["type"] == "assistant_message"
+    assert progress["content"][0]["text"] == (
         "正在检查页面。\n\n已读取配置，下一步校验。"
     )
     assert "Agent progress" not in repr(progress)
 
 
-def test_progress_with_explicit_title_uses_expandable_summary():
+def test_progress_with_explicit_title_keeps_prose():
     items = provider_thread_items({"turns": [{"items": [{
         "id": "progress-titled",
         "type": "agentMessage",
@@ -214,10 +214,8 @@ def test_progress_with_explicit_title_uses_expandable_summary():
         "text": "查看服务端 schema 确认新字段要求。",
     }]}]}, "conversation-progress")
 
-    progress = items[0]["workflow"]
-    assert progress["summary"] == {"title": "文档结构已更新"}
-    assert progress["expanded"] is True
-    assert progress["tasks"][0]["content"] == (
+    assert items[0]["type"] == "assistant_message"
+    assert items[0]["content"][0]["text"] == (
         "查看服务端 schema 确认新字段要求。"
     )
 
@@ -231,9 +229,7 @@ def test_progress_does_not_repeat_identical_explicit_title_and_body():
         "text": "完成结构校验",
     }]}]}, "conversation-progress")
 
-    task = items[0]["workflow"]["tasks"][0]
-    assert task["title"] == "完成结构校验"
-    assert task["content"] is None
+    assert items[0]["content"] == [{"type": "output_text", "text": "完成结构校验", "annotations": []}]
 
 
 def test_outline_defers_large_process_details_with_stable_turn_cursor():
@@ -272,3 +268,31 @@ def test_steer_preserves_full_turn_and_detail_cursor_after_new_turn():
     assert {item["id"] for item in detail["items"]} == {"u", "r", "c", "s", "p", "a"}
     assert "FULL_OUTPUT" in str(detail)
     assert "apply steer" in str(detail)
+
+
+def test_dynamic_terminal_tools_survive_history_outline_and_lazy_detail():
+    thread = {"turns": [{"id": "turn-tool", "items": [{
+        "id": "terminal", "type": "dynamicToolCall", "namespace": "functions",
+        "tool": "exec_command", "arguments": {"cmd": "pwd"},
+        "contentItems": [{"type": "inputText", "text": "terminal-result"}],
+        "status": "completed", "success": True,
+    }]}]}
+    outline = provider_thread_page(thread, "c", view="outline")
+    item = outline["items"][0]
+    assert item["name"] == "functions.exec_command"
+    assert item["details_deferred"] is True
+    assert "terminal-result" not in repr(outline)
+    detail = provider_thread_page(thread, "c", after=item["detail_after"], view="timeline")
+    assert detail["items"][0]["output"] == [{"type": "inputText", "text": "terminal-result"}]
+
+
+def test_attachments_survive_provider_history_without_a_second_transcript():
+    import json
+    from server.manager.services.conversation_attachments import split_attachments, START, END
+    path = 'uploads/2026-09-09/' + 'a' * 32 + '/图.png'
+    text = 'inspect' + START + json.dumps([{'workspacePath': path, 'size': 12, 'mimeType': 'image/png'}]) + END
+    items = provider_thread_items({'turns': [{'items': [{'type':'userMessage', 'text':text}]}]}, 'c')
+    assert items[0]['content'][0]['text'] == 'inspect'
+    assert items[0]['attachments'][0]['workspacePath'] == path
+    malicious = 'inspect' + START + json.dumps([{'workspacePath':'../.env'}]) + END
+    assert split_attachments(malicious) == (malicious, [])

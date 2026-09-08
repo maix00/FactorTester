@@ -778,6 +778,33 @@ class ProfileDirectoryService:
             limit=limit, after=after, view=view, order=order,
         )
 
+    def conversation_attachment(self, viewer, profile_key, conversation_id, path, *, scope="servers"):
+        """Authorize just a referenced attachment, never the owner's workspace."""
+        import re
+        item, owner, profile_id = self._source_profile(viewer, profile_key, scope=scope)
+        if not item["capabilities"].get("view_conversations"):
+            raise PermissionError("Profile conversations are not visible to this account")
+        source = (self._conversation_sources(item) or [self.server_id])[0]
+        after = ""
+        while True:
+            page = self._source_conversation_items(source, viewer, owner, profile_id,
+                conversation_id, limit=100, after=after, view="outline", order="desc")
+            for message in page.get("items", []):
+                if message.get("type") != "user_message":
+                    continue
+                for attachment in message.get("attachments", []):
+                    if attachment.get("workspacePath") == path:
+                        if not re.fullmatch(r"[a-f0-9]{64}", attachment.get("sha256", "")):
+                            raise ValueError("Attachment content identity is unavailable")
+                        return owner, {"object_id": f"{profile_id}/{path}",
+                            "storage_server_id": source, "size_bytes": attachment["size"],
+                            "sha256": attachment["sha256"], "filename": attachment["originalName"],
+                            "content_type": attachment["mimeType"]}
+            next_after = page.get("after")
+            if not page.get("has_more") or not next_after or next_after == after:
+                raise PermissionError("File is not an attachment in this conversation")
+            after = next_after
+
     @staticmethod
     def _public_conversation(value: dict[str, Any], *, read_only: bool) -> dict[str, Any]:
         return {
