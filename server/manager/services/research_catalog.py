@@ -481,6 +481,28 @@ class ResearchCatalog:
             value["branches"] = self._report_branches(value)
         return values
 
+    def authorize_server_report_read(
+        self, *, owner: str, server_ref: str, viewer: str,
+    ) -> dict[str, Any]:
+        """Authorize raw authoring bytes against the registered source, not a name.
+
+        Report-only visibility is insufficient for downloading private source
+        files. Re-evaluate research membership on every request, including revoke.
+        """
+        with connect_sqlite(self.db_path, readonly=True) as conn:
+            rows = conn.execute(
+                """SELECT * FROM research_catalog_reports
+                   WHERE owner_ref=? AND status='active'
+                     AND build_source='server_agent'
+                     AND source_ref IN (?, ?)""",
+                (owner, server_ref, f"server:{server_ref}"),
+            ).fetchall()
+        for row in rows:
+            access = self._report_access(row, viewer)
+            if access["can_download"]:
+                return access
+        raise PermissionError("research report download is not authorized")
+
     def _report_branches(self, report: dict[str, Any]) -> list[dict[str, Any]]:
         """Project migrated source records as lazy Report branch choices.
 
@@ -510,6 +532,9 @@ class ResearchCatalog:
         migration_source = str(research["migration_source"] if research else "")
         if migration_source and not migration_source.endswith(f":{report_id}"):
             return []
+        # Native reports are registered directly and have no migration row.
+        if selected_source and not any(str(row["source_ref"]) == selected_source for row in rows):
+            rows = [{"source_kind": report.get("build_source", ""), "source_ref": selected_source}, *rows]
         branches: list[dict[str, Any]] = []
         seen: set[str] = set()
         for row in rows:

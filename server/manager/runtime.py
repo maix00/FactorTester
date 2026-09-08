@@ -472,6 +472,7 @@ class ManagerState(
             self.data_root,
             self.agent_profiles.runtime_store,
             server_id=self.server_id,
+            research_catalog=self.research_catalog,
         )
         self.agent_app_server = AgentAppServerSupervisor(
             self.agent_profiles,

@@ -29,5 +29,13 @@ vm.runInThisContext(fs.readFileSync('server/manager/web/report/source.js', 'utf8
  assert(paths.every(path=>path.endsWith('/index')),'refresh never prefetches chapter bodies');
  stop();assert(cleared);assert.equal(listeners.size,0);
  await scheduled();assert.equal(changes.length,1,'disposed watcher cannot update the page');
+ const foreignPaths=[];
+ const foreign=window.FTReportSource.create('server:self:pkg:main',async path=>{
+   foreignPaths.push(path);return {title:'shared',chapters:[],components:[]};
+ },{ownerRef:'GTHT@owner@1'});
+ await foreign.load(); await foreign.loadChapter('c'); await foreign.loadComponent('c','x');
+ for(const path of [...foreignPaths,foreign.reportAssetPath('asset'),foreign.localResourcePath('resource')]) {
+   assert.equal(new URL(path,'https://test').searchParams.get('target_ref'),'GTHT@owner@1');
+ }
  console.log('PASS: report index updates render only changed active reports and clean up on disposal');
 })().catch(error=>{console.error(error);process.exitCode=1});

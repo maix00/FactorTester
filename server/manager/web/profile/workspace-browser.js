@@ -15,19 +15,14 @@
 
   // A bare icon button (no surrounding pill/ring), fixed height, so rows stay
   // the same height whether or not an action column is present.
-  function iconButton(symbol, label, action) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "icon-action-button";
-    button.title = label;
-    button.setAttribute("aria-label", label);
-    const icon = window.FTIcons?.node?.(symbol);
-    if (icon && typeof button.replaceChildren === "function") {
-      button.replaceChildren(icon);
-    }
-    button.addEventListener("click", event => {
+  function iconButton(context, symbol, label, action) {
+    const button = FTUI.iconButton(context, symbol, label, async event => {
       event?.stopPropagation?.();
-      action();
+      if (button.disabled) return;
+      button.disabled = true;
+      try { await action(); }
+      catch (error) { context.showNotice?.(error.message || String(error), true); }
+      finally { button.disabled = false; }
     });
     return button;
   }
@@ -64,7 +59,7 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  async function upload(context, profileID) {
+  async function upload(context, profileID, reload) {
     const input = document.createElement("input");
     input.type = "file";
     input.multiple = true;
@@ -84,11 +79,11 @@
             headers: {"Content-Type": "application/octet-stream"},
           });
         }
-        context.showNotice?.(context.t("已上传"), false);
+        context.showNotice?.(context.t("已上传到 uploads/"), false);
       } catch (error) {
         context.showNotice?.(error.message || String(error), true);
       } finally {
-        if (context.__workspaceReload) await context.__workspaceReload();
+        await reload("uploads");
       }
     });
     input.click();
@@ -102,11 +97,14 @@
     const heading = document.createElement("h2");
     heading.textContent = context.t("工作区文件");
     header.append(heading);
-    const uploadButton = iconButton("arrow.up.circle", context.t("上传到 uploads"), () => {
-      void upload(context, profile.profile_id);
+    const uploadButton = iconButton(context, "arrow.up.circle", context.t("上传到 uploads"), () => {
+      void upload(context, profile.profile_id, path => { currentPath = path; return load(); });
     });
     uploadButton.classList.add("workspace-upload-btn");
-    header.append(uploadButton);
+    const actions = document.createElement("div");
+    actions.className = "profile-workspace-actions";
+    actions.append(iconButton(context, "arrow.clockwise", context.t("刷新"), () => load()), uploadButton);
+    header.append(actions);
     root.append(header);
 
     const body = document.createElement("div");
@@ -114,6 +112,7 @@
 
     const runtime = profile.runtime || {};
     if (runtime.runtime_kind !== "server" || runtime.configured === false) {
+      uploadButton.disabled = true;
       body.append(FTUI.empty(
         context.t("工作区尚未创建"),
         context.t("请先在运行绑定中绑定服务器运行位置。"),
@@ -122,11 +121,23 @@
     }
 
     let currentPath = "";
-    const load = async () => {
-      context.__workspaceReload = load;
-      body.replaceChildren(FTUI.loading(context.t("正在读取工作区…")));
+    let revision = 0;
+    let lastListing = "";
+    let pending = 0;
+    let disposed = false;
+    const load = async (quiet = false) => {
+      if (disposed || (quiet && pending)) return;
+      pending += 1;
+      const request = ++revision;
+      const path = currentPath;
+      if (!quiet) body.replaceChildren(FTUI.loading(context.t("正在读取工作区…")));
       try {
         const payload = await context.api(pathQuery(profile.profile_id, currentPath));
+        if (disposed || request !== revision || path !== currentPath) return;
+        const signature = JSON.stringify(payload);
+        if (quiet && signature === lastListing) return;
+        lastListing = signature;
+        heading.textContent = `${context.t("工作区文件")} /${path}`;
         const shell = FTUI.table([
           context.t("名称"), context.t("类型"), context.t("大小"), context.t("操作"),
         ], []);
@@ -138,7 +149,7 @@
           row.insertCell().textContent = context.t("上级目录");
           row.insertCell();
           const action = row.insertCell();
-          action.append(iconButton("arrow.left.arrow.right", context.t("返回"), () => {
+          action.append(iconButton(context, "chevron.left", context.t("返回上级"), () => {
             currentPath = parent; load();
           }));
         }
@@ -149,23 +160,29 @@
           const name = row.insertCell();
           const icon = window.FTIcons?.node?.(isDir ? "folder.fill" : "doc.text");
           if (icon) name.append(icon);
-          const nameSpan = document.createElement("span");
+          const nameSpan = document.createElement(isDir ? "button" : "span");
+          if (isDir) {
+            nameSpan.type = "button";
+            nameSpan.className = "table-link";
+            nameSpan.onclick = () => { currentPath = item.path; void load(); };
+          }
           nameSpan.textContent = item.name;
           name.append(nameSpan);
           row.insertCell().textContent = isDir ? context.t("文件夹") : context.t("文件");
           row.insertCell().textContent = isDir ? "—" : formatBytes(item.size_bytes);
           const action = row.insertCell();
           if (isDir) {
-            const openBtn = iconButton("arrow.clockwise", context.t("打开"), () => {
+            const openBtn = iconButton(context, "folder", context.t("打开"), () => {
               currentPath = item.path; load();
             });
             action.append(openBtn);
           } else {
-            const downloadBtn = iconButton("arrow.down.circle", context.t("下载"), () => {
-              void download(context, profile.profile_id, item.path, item.name);
+            const downloadBtn = iconButton(context, "arrow.down.circle", context.t("下载"), async () => {
+              try { await download(context, profile.profile_id, item.path, item.name); }
+              catch (error) { context.showNotice?.(error.message || String(error), true); }
             });
             action.append(downloadBtn);
-            const deleteButton = iconButton("trash", context.t("删除"), async () => {
+            const deleteButton = iconButton(context, "trash", context.t("删除"), async () => {
               if (!window.confirm(context.t(`确定删除 ${item.name}？此操作无法恢复。`))) return;
               try {
                 await context.api("/api/client/profile-workspace", {
@@ -182,12 +199,23 @@
         });
         body.replaceChildren(shell.shell);
       } catch (error) {
+        if (disposed || request !== revision) return;
+        if (quiet) return;
         body.replaceChildren(FTUI.empty(
           context.t("无法读取工作区"), error.message || String(error),
         ));
-      }
+      } finally { pending -= 1; }
     };
-    load();
+    void load();
+    // One visible directory per mounted browser; stop when the view is removed.
+    // No recursive scan or new synchronization channel is needed.
+    const timer = setInterval(() => {
+      if (!root.isConnected || context.isRouteCurrent?.() === false || document.hidden) return;
+      void load(true);
+    }, 5000);
+    context.pageState?.register?.(`profile-workspace:${profile.profile_id}`, {
+      dispose() { disposed = true; revision += 1; clearInterval(timer); },
+    });
     return root;
   }
 

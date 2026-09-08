@@ -47,9 +47,11 @@ class ServerResearchService:
         runtime_store: ProfileRuntimeStore,
         *,
         server_id: str,
+        research_catalog=None,
     ) -> None:
         self.data_root = Path(data_root).expanduser().resolve()
         self.runtime_store = runtime_store
+        self.research_catalog = research_catalog
         self.server_id = str(server_id or "").strip()
         if not self.server_id:
             raise ValueError("server_id is required")
@@ -120,6 +122,17 @@ class ServerResearchService:
             None,
         )
 
+    def _read_location(self, viewer: str, target: str, server_ref: str):
+        viewer = _required_principal(viewer)
+        target = _required_principal(target)
+        if viewer != target:
+            if self.research_catalog is None:
+                raise PermissionError("research report download is not authorized")
+            self.research_catalog.authorize_server_report_read(
+                owner=target, server_ref=server_ref, viewer=viewer,
+            )
+        return self._location(target, server_ref)
+
     def read_branch(
         self,
         viewer: str,
@@ -159,19 +172,19 @@ class ServerResearchService:
         if not _safe(profile_id) or not _safe(package_id) or not _safe(branch_id):
             raise ValueError("server research reference is invalid")
         server_ref = _server_ref(profile_id, package_id, branch_id)
-        location = self._location(target, server_ref)
+        location = self._read_location(viewer, target, server_ref)
         value = build_upload_index(load_report_index(
             package_root=location["package_root"],
             branch_id=location["branch_id"],
         ))
-        value = self._decorate(value, location)
+        value = self._decorate_read(value, location, viewer)
         value["viewer_ref"] = viewer
         value["available"] = True
         value["build_source"] = "server_agent"
         return value
 
-    def projection(self, principal: str, server_ref: str) -> dict[str, Any]:
-        location = self._location(principal, server_ref)
+    def projection(self, principal: str, server_ref: str, *, target_ref: str | None = None) -> dict[str, Any]:
+        location = self._read_location(principal, target_ref or principal, server_ref)
         value = build_upload_projection(
             load_snapshot(
                 package_root=location["package_root"],
@@ -180,15 +193,15 @@ class ServerResearchService:
             include_local_resource_bytes=False,
             include_asset_bytes=False,
         )
-        return self._decorate(value, location)
+        return self._decorate_read(value, location, principal)
 
-    def index(self, principal: str, server_ref: str) -> dict[str, Any]:
-        location = self._location(principal, server_ref)
+    def index(self, principal: str, server_ref: str, *, target_ref: str | None = None) -> dict[str, Any]:
+        location = self._read_location(principal, target_ref or principal, server_ref)
         value = build_upload_index(load_report_index(
             package_root=location["package_root"],
             branch_id=location["branch_id"],
         ))
-        return self._decorate(value, location)
+        return self._decorate_read(value, location, principal)
 
     def chapter(
         self,
@@ -197,8 +210,9 @@ class ServerResearchService:
         chapter_id: str,
         *,
         include_content: bool = True,
+        target_ref: str | None = None,
     ) -> dict[str, Any]:
-        location = self._location(principal, server_ref)
+        location = self._read_location(principal, target_ref or principal, server_ref)
         snapshot = load_chapter_snapshot(
             package_root=location["package_root"],
             branch_id=location["branch_id"],
@@ -211,7 +225,7 @@ class ServerResearchService:
             include_asset_bytes=False,
             include_component_content=include_content,
         )
-        return self._decorate(value, location)
+        return self._decorate_read(value, location, principal)
 
     def component(
         self,
@@ -219,8 +233,9 @@ class ServerResearchService:
         server_ref: str,
         chapter_id: str,
         component_id: str,
+        *, target_ref: str | None = None,
     ) -> dict[str, Any]:
-        location = self._location(principal, server_ref)
+        location = self._read_location(principal, target_ref or principal, server_ref)
         snapshot = load_component_snapshot(
             package_root=location["package_root"],
             branch_id=location["branch_id"],
@@ -233,7 +248,7 @@ class ServerResearchService:
             include_local_resource_bytes=False,
             include_asset_bytes=False,
         )
-        return self._decorate(value, location)
+        return self._decorate_read(value, location, principal)
 
     def asset(
         self,
@@ -243,7 +258,7 @@ class ServerResearchService:
         *,
         target_ref: str | None = None,
     ) -> tuple[bytes, str, str]:
-        location = self._location(target_ref or principal, server_ref)
+        location = self._read_location(principal, target_ref or principal, server_ref)
         value = read_local_asset(self._snapshot(location), asset_id)
         if value is None:
             raise ValueError("research asset is unavailable")
@@ -257,7 +272,7 @@ class ServerResearchService:
         *,
         target_ref: str | None = None,
     ) -> tuple[bytes, str, str]:
-        location = self._location(target_ref or principal, server_ref)
+        location = self._read_location(principal, target_ref or principal, server_ref)
         value = read_local_resource(self._snapshot(location), resource_id)
         if value is None:
             raise ValueError("research local resource is unavailable")
@@ -317,6 +332,13 @@ class ServerResearchService:
             package_root=location["package_root"],
             branch_id=location["branch_id"],
         )
+
+    def _decorate_read(self, value, location, viewer):
+        value = self._decorate(value, location)
+        if viewer != location["owner"]:
+            value["access"]["can_manage"] = False
+            value["branches"] = [b for b in value["branches"] if b["selected"]]
+        return value
 
     def _decorate(
         self, value: dict[str, Any], location: dict[str, Any],

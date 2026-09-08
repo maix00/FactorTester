@@ -43,8 +43,14 @@
     return value;
   }
 
-  function create(publicationID, api) {
+  function create(publicationID, api, options = {}) {
     const source = basePath(publicationID);
+    let targetRef = String(options.ownerRef || "");
+    function addressed(path) {
+      if (!source.isServer || !targetRef) return path;
+      return `${path}${path.includes("?") ? "&" : "?"}target_ref=${encodeURIComponent(targetRef)}`;
+    }
+    const request = (path, options) => api(addressed(path), options);
     let value = null;
     let chapterLazy = true;
     let componentLazy = true;
@@ -81,15 +87,23 @@
     }
 
     async function load() {
+      // Restore old independent report tabs from their existing research scope.
+      if (source.isServer && !targetRef && options.researchID) {
+        const catalog = await api(`/api/research/${encodeURIComponent(options.researchID)}/reports`);
+        const report = (catalog.reports || []).find(item => (
+          item.source_ref === source.serverRef || item.source_ref === source.publicationID
+        ));
+        targetRef = String(report?.owner_ref || "");
+      }
       const indexPath = `${source.path}/index`;
       try {
-        value = normalize(await api(indexPath));
+        value = normalize(await request(indexPath));
       } catch (error) {
         // A 404 is the only supported signal for an older Manager that has
         // not published the bounded index/chapter endpoints.  Do not turn
         // auth or malformed-response failures into a second full read.
         if (error?.status !== 404) throw error;
-        value = normalize(await api(source.path));
+        value = normalize(await request(source.path));
         chapterLazy = false;
       }
       indexSignature = JSON.stringify(value);
@@ -106,7 +120,7 @@
         pending = true;
         try {
           // Read the bounded index; never prefetch report bodies or chapters.
-          const next = normalize(await api(`${source.path}/index`));
+          const next = normalize(await request(`${source.path}/index`));
           const signature = JSON.stringify(next);
           if (!disposed && isCurrent() && signature !== indexSignature) {
             indexSignature = signature;
@@ -137,12 +151,12 @@
       let chapter;
       try {
         const separator = chapterPath.includes("?") ? "&" : "?";
-        chapter = await api(`${chapterPath}${separator}metadata=1`, options);
+        chapter = await request(`${chapterPath}${separator}metadata=1`, options);
       } catch (error) {
         // A 404 means this manager predates component-level lazy loading. The
         // existing chapter endpoint remains the compatibility boundary.
         if (error?.status !== 404) throw error;
-        chapter = await api(chapterPath, options);
+        chapter = await request(chapterPath, options);
       }
       componentLazy = Boolean(chapter?.content_lazy);
       setChapterMetadata(chapter);
@@ -154,13 +168,13 @@
         + `/components/${encodeURIComponent(componentID)}`;
       let value;
       try {
-        value = await api(componentPath, options);
+        value = await request(componentPath, options);
       } catch (error) {
         // A mixed-version manager may expose metadata but not the component
         // route yet. Use the old chapter response only for that 404 boundary;
         // auth and server errors must remain visible to the report.
         if (error?.status !== 404) throw error;
-        value = await api(
+        value = await request(
           `${source.path}/chapters/${encodeURIComponent(chapterID)}`,
           options,
         );
@@ -172,14 +186,14 @@
 
     function localResourcePath(resourceID) {
       if (source.isLocal) {
-        return `${source.path}/local-resources/${encodeURIComponent(resourceID)}?inline=1`;
+        return addressed(`${source.path}/local-resources/${encodeURIComponent(resourceID)}?inline=1`);
       }
-      return `${source.path}/local-resources/${encodeURIComponent(resourceID)}?inline=1`;
+      return addressed(`${source.path}/local-resources/${encodeURIComponent(resourceID)}?inline=1`);
     }
 
     function reportAssetPath(assetRef) {
       const assetID = assetIDFor(assetRef);
-      return `${source.path}/assets/${encodeURIComponent(assetID)}`;
+      return addressed(`${source.path}/assets/${encodeURIComponent(assetID)}`);
     }
 
     function assetIDFor(assetRef) {
