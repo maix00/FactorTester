@@ -105,6 +105,9 @@ class AgentProviderThreadReader:
             raise AgentAppServerError("Provider did not return the conversation thread")
         return thread
 
+    def history_workspace(self, principal, profile_id, provider_id=""):
+        return self._session(principal, profile_id, provider_id).runtime.workspace_root
+
     def close_all(self) -> None:
         with self._lock:
             for key in list(self._sessions):
