@@ -25,7 +25,7 @@
     }
 
     async function load(query = search.value) {
-      if (controlDisabled) return;
+      if (typeof controlDisabled === "function" ? controlDisabled() : controlDisabled) return;
       const normalizedQuery = String(query || "").trim();
       if (loadedQuery === normalizedQuery && !errorText) return;
       const currentRequestID = ++requestID;
@@ -70,6 +70,7 @@
 
     return Object.freeze({
       load, render, schedule,
+      refresh: () => { loadedQuery = null; return load(); },
       status: () => ({
         loading, errorText,
         empty: loadedQuery !== null && resultCount === 0,
