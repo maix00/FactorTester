@@ -1,0 +1,17 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const path = require('node:path');
+const patch = fs.readFileSync(path.join(__dirname, '../../scripts/xpert-chatkit/host-integration.patch'), 'utf8');
+const added = patch.split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++')).map(line => line.slice(1)).join('\n');
+const start = added.indexOf('export function normalizeMathDelimiters');
+const end = added.indexOf('\n}', start) + 2;
+assert(start >= 0 && end > start);
+const code = added.slice(start, end).replace('export function', 'function').replace('(text: string): string', '(text)');
+const context = {};
+vm.runInNewContext(code, context);
+const normalize = context.normalizeMathDelimiters;
+assert.equal(normalize(String.raw`\(CF_t\)`), '$CF_t$');
+assert.equal(normalize(String.raw`\[ P=\sum_{t=1}^{T}\frac{CF_t}{(1+y)^t} \]`), '\n\n$$\nP=\\sum_{t=1}^{T}\\frac{CF_t}{(1+y)^t}\n$$\n\n');
+for (const source of ['`\\(code\\)`', '```tex\n\\[literal\\]\n```', '$$x$$', '$x$', 'normal [text]', '\\[incomplete']) assert.equal(normalize(source), source);
+console.log('Xpert math delimiter compatibility passed');
