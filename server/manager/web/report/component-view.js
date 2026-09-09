@@ -318,7 +318,9 @@
 
   function componentView(component, children, context, depth = 0, bridgeEntry = false) {
     const wrapper = document.createElement("section");
-    wrapper.className = `component depth-${Math.min(depth, 8)} ${component.kind} ${component.display_kind || ""}${bridgeEntry ? " bridge-entry" : ""}`;
+    // Legacy subsection is a section; only ancestry controls presentation depth.
+    const sectionKind = component.kind === "subsection" ? "section" : component.kind;
+    wrapper.className = `component depth-${Math.min(depth, 8)} ${sectionKind} ${component.display_kind || ""}${bridgeEntry ? " bridge-entry" : ""}`;
     // A titled content component is still a report subsection from the
     // reader's perspective, even when its payload is a single list, table,
     // or paragraph. Keep it in the same default-open disclosure path as

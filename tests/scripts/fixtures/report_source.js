@@ -60,5 +60,16 @@ vm.runInThisContext(fs.readFileSync(
   });
   await encoded.load();
   assert.equal(encoded.publicationID, "publication 1");
+  const requests = [];
+  const restoredServer = window.FTReportSource.create('server:self:report-package:main', async path => {
+    requests.push(path);
+    if(path.startsWith('/api/research/')) return {reports:[{source_ref:'self:report-package:main',
+      owner_ref:'owner', branches:[{source_kind:'publication',branch_ref:'main',publication_id:'shared-main'}]}]};
+    assert.equal(path,'/api/public-research/shared-main/index');
+    return {title:'跨服务器报告'};
+  }, {researchID:'research-one',ownerRef:'owner'});
+  await restoredServer.load();
+  assert.equal(restoredServer.publicationID,'shared-main');
+  assert.equal(requests.length,2);
   console.log("ok");
 })();

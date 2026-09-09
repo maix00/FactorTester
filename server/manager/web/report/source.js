@@ -88,7 +88,7 @@
 
     async function load() {
       // Restore old independent report tabs from their existing research scope.
-      if (options.researchID && ((source.isServer && !targetRef)
+      if (options.researchID && (source.isServer
           || (!source.isOwnerLocal && /^[^:]+:[^:]+:[^:]+$/.test(source.publicationID)))) {
         const catalog = await api(`/api/research/${encodeURIComponent(options.researchID)}/reports`);
         const report = (catalog.reports || []).find(item => (
@@ -101,6 +101,10 @@
           source = basePath(`server:${report.source_ref}`);
         }
         targetRef ||= String(report?.owner_ref || "");
+        const branchRef = (source.serverRef || source.publicationID).split(":").at(-1);
+        const publication = (report?.branches || []).find(branch =>
+          branch.source_kind === "publication" && branch.branch_ref === branchRef);
+        if (publication?.publication_id) source = basePath(publication.publication_id);
       }
       const indexPath = `${source.path}/index`;
       try {

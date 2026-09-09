@@ -244,12 +244,25 @@ def _tool_item(item: Mapping[str, object], base: Mapping[str, object]) -> dict[s
     tool = str(item.get("tool") or item.get("toolName") or item.get("name") or "tool").strip()
     name = f"{server}.{tool}" if server else tool
     arguments = item.get("arguments") or item.get("args") or {}
+    summary_args = arguments
+    for _ in range(4):
+        if isinstance(summary_args, str):
+            try:
+                summary_args = json.loads(summary_args)
+            except ValueError:
+                break
+        elif isinstance(summary_args, Mapping) and set(summary_args) == {"input"}:
+            summary_args = summary_args["input"]
+        else:
+            break
+    summary = (summary_args.get("cmd") or summary_args.get("command")) if isinstance(summary_args, Mapping) else ""
     return {
         **base,
         "type": "client_tool_call",
         "status": "pending" if _status(item.get("status")) == "loading" else "completed",
         "call_id": str(item.get("callId") or item.get("call_id") or base["id"]),
         "name": name,
+        "display_summary": str(summary or name).replace("\n", " ")[:512],
         "arguments": dict(arguments) if isinstance(arguments, Mapping) else {"input": arguments},
         "output": item.get("result", item.get("output", item.get("contentItems"))),
     }
