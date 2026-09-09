@@ -32,3 +32,19 @@
     return new Response(response.body, {status: response.status, headers: [...response.headers]});
   };
 })();
+// WebKit can chain wheel input out of an iframe even with overscroll containment.
+window.addEventListener('wheel', event => {
+  const axis = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? 'y' : 'x';
+  const delta = axis === 'y' ? event.deltaY : event.deltaX;
+  if (!delta || event.ctrlKey) return;
+  for (const node of event.composedPath()) {
+    if (!(node instanceof HTMLElement)) continue;
+    const style = getComputedStyle(node);
+    const overflow = axis === 'y' ? style.overflowY : style.overflowX;
+    if (!/(auto|scroll)/.test(overflow)) continue;
+    const position = axis === 'y' ? node.scrollTop : node.scrollLeft;
+    const extent = axis === 'y' ? node.scrollHeight - node.clientHeight : node.scrollWidth - node.clientWidth;
+    if (extent > 0 && (delta < 0 ? position > 0 : position < extent - 1)) return;
+  }
+  event.preventDefault();
+}, {passive: false});
