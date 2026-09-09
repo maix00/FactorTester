@@ -215,3 +215,16 @@ closeTabs.closeTab('mihomo');
 assert.strictEqual(closeState.tabs.some(tab => tab.id === 'mihomo'), false);
 closeTabs.openModule(utility);
 assert.strictEqual(closeState.tabs.filter(tab => tab.id === 'mihomo').length, 1);
+
+// Dedicated objects are unique per folder, while each folder keeps its own view.
+closeTabs.openTab('/products/product/A.SHF');
+const rootObject = closeState.activeTabID;
+closeTabs.openTab('/products/product/A.SHF', {forceNew:true});
+assert.equal(closeState.activeTabID, rootObject);
+closeTabs.openTab('/products/product/A.SHF', {parentTabID:'research:one', parentFolder:'research'});
+const folderObject = closeState.activeTabID;
+assert.notEqual(folderObject, rootObject);
+closeTabs.openTab('/products/product/A.SHF?mode=edit', {parentTabID:'research:one', parentFolder:'research'});
+assert.equal(closeState.activeTabID, folderObject);
+assert.equal(closeState.tabs.find(t=>t.id===folderObject).path, '/products/product/A.SHF?mode=edit');
+assert.equal(closeState.tabs.filter(t=>t.path.startsWith('/products/product/A.SHF')).length,2);

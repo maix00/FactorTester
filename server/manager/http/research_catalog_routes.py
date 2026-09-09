@@ -212,6 +212,8 @@ class ResearchCatalogRoutesMixin:
             local = [dict(item) for item in value.get("branches") or []]
             projected = []
             for item in by_report.get(str(value.get("report_id") or ""), []):
+                if str(item.get("owner_ref") or "") != str(value.get("owner_ref") or ""):
+                    continue
                 projected.append({
                     "branch_ref": str(item.get("branch_ref") or ""),
                     "title": str(item.get("branch_ref") or item.get("title") or ""),
@@ -224,10 +226,17 @@ class ResearchCatalogRoutesMixin:
             if projected:
                 for item in local:
                     item["selected"] = False
-            seen = {item["publication_id"] for item in projected}
-            value["branches"] = projected + [
-                item for item in local if item.get("publication_id") not in seen
-            ]
+            # A branch has several transports, not several identities. Publications
+            # are readable across Managers; authoring refs are local-only fallbacks.
+            seen = set()
+            branches = []
+            for item in [*projected, *local]:
+                key = str(item.get("branch_ref") or item.get("publication_id") or "")
+                if key in seen:
+                    continue
+                seen.add(key)
+                branches.append(item)
+            value["branches"] = branches
             result.append(value)
         return result
 

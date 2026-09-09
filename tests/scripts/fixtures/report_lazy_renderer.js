@@ -196,3 +196,13 @@ assert.equal(resetObserver.disconnected, true, "chapter cleanup must disconnect 
 resetObserver.trigger(resetBody, true);
 assert.equal(calls.blocks, 2, "detached observer must not mount a reset body");
 console.log("ok");
+
+// Legacy and special siblings share the same depth and structural layout.
+for (const kind of ['section', 'subsection', 'special']) {
+ const peer = window.FTReportComponents.componentView(
+   {kind, title:'同级小节', display_kind:kind==='special'?'external_review':''}, [],
+   {t:x=>x}, 4, true);
+ assert.match(peer.className, /depth-4/);
+ assert.match(peer.className, /bridge-entry/);
+ if(kind==='subsection') assert.match(peer.className, / section /);
+}

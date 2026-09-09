@@ -189,7 +189,7 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
                 value = {
                     key: payload.get(key)
                     for key in (
-                        "publication_id", "report_id", "owner_ref", "profile_ref",
+                        "publication_id", "report_id", "owner_ref", "profile_ref", "branch_ref",
                         "title", "generation", "updated_at", "visibility",
                         "is_owned", "href", "projection_hash",
                         "build_source", "build_source_ref",
@@ -270,11 +270,18 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
                 source_id = self._publication_sources.get(publication_id)
         if not source_id or source_id == self.server_id:
             return None
-        return next(
-            (route for route in self._peer_routes()
-             if route.server_id == source_id),
-            None,
-        )
+        routes = self._peer_routes()
+        route = next((item for item in routes if item.server_id == source_id), None)
+        if route is None:
+            # A restored tab can outlive its cached storage-source mapping.
+            # Refresh discovery once before declaring that exact publication offline.
+            with self._lock:
+                self._cache.pop(("research-list", str(viewer_ref or VISITOR_PRINCIPAL)), None)
+            self.list_visible(viewer_ref)
+            with self._lock:
+                source_id = self._publication_sources.get(publication_id)
+            route = next((item for item in self._peer_routes() if item.server_id == source_id), None)
+        return route
 
     def _publication_source_id(self, publication_id: str) -> str:
         with self._lock:

@@ -26,7 +26,7 @@ def _add(
     add_component(
         package_root=package, branch_id="main",
         component_id=component_id, kind=kind, title=component_id,
-        parent_id=parent_id, body="", content=None, display_kind="",
+        parent_id=parent_id, body="", content=None, display_kind="external_review" if kind == "special" else "",
     )
 
 
@@ -123,3 +123,49 @@ def test_move_rejects_raw_bindings_and_duplicate_move_slot(
             package_root=package, branch_id="main",
             operations=[operation, operation],
         )
+
+
+def test_recursive_subsections_round_trip_and_special_peer_heading(tmp_path: Path) -> None:
+    from tools.cli.release.research_reporting.authoring.tree_model import load_snapshot
+    from tools.cli.release.research_reporting.authoring.tree_render import render_tree_markdown
+    package, _ = _tree(tmp_path)
+    for component_id, kind, parent in [
+        ("chapter", "chapter", None), ("section", "section", "chapter"),
+        ("duration", "subsection", "section"),
+        ("why", "subsection", "duration"),
+        ("reason", "subsection", "why"),
+        ("audit", "special", "why"),
+        ("nested", "subsection", "audit"),
+        ("body", "entry", "nested"),
+    ]:
+        _add(package, component_id, kind, parent)
+    saved = load_snapshot(package_root=package, branch_id="main")
+    assert all(item["kind"] == "section" for item in saved["components"]
+               if item["component_id"] in {"section", "duration", "why", "reason", "nested"})
+    parents = {item["component_id"]: item["parent_id"] for item in saved["components"]}
+    assert parents["why"] == "duration" and parents["nested"] == "audit"
+    text = render_tree_markdown(saved).decode()
+    assert "\n#### why\n" in text
+    assert "\n##### reason\n" in text and "\n##### audit\n" in text
+    assert "\n###### nested\n" in text
+    moved = apply_batch(package_root=package, branch_id="main", operations=[{
+        "op": "move", "component_id": "reason", "parent_id": "nested",
+        "after_component_id": None,
+    }])
+    assert next(item for item in moved["components"] if item["component_id"] == "reason")["parent_id"] == "nested"
+    with pytest.raises(ValueError, match="cycle"):
+        apply_batch(package_root=package, branch_id="main", operations=[{
+            "op": "move", "component_id": "why", "parent_id": "reason",
+            "after_component_id": None,
+        }])
+
+
+def test_legacy_section_alias_preserves_stored_bytes_and_accepts_recursive_children():
+    from tools.cli.release.research_reporting.authoring.tree_hierarchy import validate_parent_child
+    from tools.cli.release.research_reporting.authoring.tree_schema import validate_node
+    legacy = {"schema_version":1, "node_id":"old", "kind":"subsection", "title":"旧子节",
+              "body":"", "content":None, "display_kind":"", "created_at":1.0, "children":[], "bindings":[]}
+    assert validate_node(legacy) == legacy  # Reading must not change content-addressed identities.
+    for parent in ["section", "subsection", "special"]:
+        for child in ["section", "subsection", "special"]:
+            validate_parent_child(parent_kind=parent, child_kind=child)

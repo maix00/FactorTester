@@ -6,13 +6,6 @@ import json
 from typing import Any
 
 
-_LEVELS = {
-    "chapter": 1, "section": 2, "subsection": 3, "entry": 4,
-    "special": 4, "list": 4, "table": 4, "image": 4, "code": 4, "math": 4,
-    "result": 4,
-}
-
-
 def render_tree_markdown(
     snapshot: dict[str, Any], *, image_prefix: str = "../../",
 ) -> bytes:
@@ -28,7 +21,9 @@ def render_tree_markdown(
 
 def _render_children(lines: list[str], children: dict[str | None, list[dict[str, Any]]], assets: dict[str, dict[str, Any]], parent: str | None, depth: int, image_prefix: str) -> None:
     for item in children.get(parent, []):
-        level = min(6, _LEVELS[item["kind"]] + min(depth, 2))
+        # Heading hierarchy comes from ancestry, never from a special kind.
+        # Markdown has six heading levels; deeper nodes remain in tree order.
+        level = min(6, depth + 1)
         if item["title"]:
             lines.extend(["#" * level + " " + item["title"], ""])
         if item["body"]:
