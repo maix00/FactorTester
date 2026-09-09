@@ -126,3 +126,35 @@ def test_remote_conversation_content_is_never_served_from_stale_cache():
         assert "offline" in str(error)
     else:  # pragma: no cover - stale content must never masquerade as current
         raise AssertionError("stale conversation content was returned")
+
+
+def test_restored_publication_refreshes_stale_storage_source_once():
+    route = ServiceRoute(server_id="remote-main", role="manager", branch="main", revision="new", port=7998)
+    service = _service(_Registry(route), _Gateway())
+    service._publication_sources["publication"] = "retired-manager"
+    calls = []
+    def refresh(viewer):
+        calls.append(viewer)
+        service._publication_sources["publication"] = "remote-main"
+        return []
+    service.list_visible = refresh
+    assert service._publication_route("publication", "viewer") == route
+    assert calls == ["viewer"]
+
+
+def test_report_branches_merge_transports_but_not_other_owners():
+    from types import SimpleNamespace
+    from server.manager.http.research_catalog_routes import ResearchCatalogRoutesMixin
+    owner = "owner"
+    publications = [
+        {"report_id":"r", "owner_ref":owner, "branch_ref":"main", "publication_id":"pub-main"},
+        {"report_id":"r", "owner_ref":"other", "branch_ref":"secret", "publication_id":"other-pub"},
+    ]
+    handler = SimpleNamespace(_research_service=lambda:SimpleNamespace(list_visible=lambda _:publications))
+    report = {"report_id":"r", "owner_ref":owner, "branches":[
+        {"branch_ref":"main", "publication_id":"server:self:package:main"},
+        {"branch_ref":"experiment", "publication_id":"server:self:package:experiment"},
+    ]}
+    result = ResearchCatalogRoutesMixin._research_catalog_publication_branches(handler,[report],owner)
+    assert [b["branch_ref"] for b in result[0]["branches"]] == ["main", "experiment"]
+    assert result[0]["branches"][0]["publication_id"] == "pub-main"

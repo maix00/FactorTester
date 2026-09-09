@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .binding_index import binding_exists
-from .tree_hierarchy import validate_parent_child, validate_root_child
+from .tree_hierarchy import canonical_section_kind, validate_parent_child, validate_root_child
 from .tree_locators import locator_exists
 from .tree_navigation import contains_node, node_path, rewrite
 from .tree_schema import (
@@ -122,7 +122,7 @@ def new_node(
     display_kind: str, bindings: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return validate_node({
-        "schema_version": 1, "node_id": node_id, "kind": kind,
+        "schema_version": 1, "node_id": node_id, "kind": canonical_section_kind(kind),
         "title": title, "body": body, "content": content,
         "display_kind": display_kind, "created_at": time.time(),
         "children": [], "bindings": bindings,

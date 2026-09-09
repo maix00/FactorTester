@@ -164,6 +164,8 @@ CLI 从报告 HEAD 读取 `report_id`；智能体不能为 Run 手写或猜测�
 ## 报告撰写与修改
 
 写入作用域始终为 Profile、Work Package、branch，不存在任意 `--file` 报告路径。
+普通节统一使用 `section`，可通过 `parent_id` 递归嵌套；`subsection` 仅是旧输入的兼容别名，新写入会保存为 `section`。特殊小节保留 `special` 与 `display_kind`，其标题层级和缩进与同父普通节一致。不得要求用户为了添加子节重排祖先。
+
 每批相关修改后验证。章节和小节结构使用 `chapter`、`section`、`subsection`、`special`，必须有具体主题标题；不能用“正文”“表格”“列表”或 `Body`、`Table`、`List` 占位。
 内容使用 `entry`、`list`、`table`、`image`、`code`、`math`、`result`，这些组件不带 `--title`；需要标题时增加结构容器。
 
