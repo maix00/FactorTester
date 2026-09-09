@@ -5,7 +5,7 @@ index 9a51f3d..5257f6b 100644
 @@ -319,6 +319,22 @@ describe('Chat composer paste and drop behavior', () => {
      expect(screen.queryByText('Pasted text')).not.toBeInTheDocument();
    });
- 
+
 +  it('does not send IME confirmation Enter including Safari keyCode 229', () => {
 +    render(<Chat clientSecret="secret" />);
 +    const input = screen.getByRole('textbox');
@@ -101,7 +101,7 @@ index 2c6757d..99723d6 100644
 @@ -3470,6 +3452,22 @@ export function Chat({
                  </Tooltip>
                )}
- 
+
 +              {new URLSearchParams(window.location.search).get('ft_drawer') === '1' && (
 +                <Tooltip>
 +                  <TooltipTrigger asChild>
@@ -176,7 +176,7 @@ index 2c6757d..99723d6 100644
 @@ -4250,7 +4241,7 @@ export function Chat({
              />
            )}
- 
+
 -          <form className="flex items-end" onSubmit={handleSubmit}>
 +          <form style={new URLSearchParams(location.search).get("ft_read_only") === "1" ? {display: "none"} : undefined} className="flex items-end" onSubmit={handleSubmit}>
              <div
@@ -190,11 +190,11 @@ index c483f74..69ae673 100644
  import * as React from 'react';
 +import * as Dialog from '@radix-ui/react-dialog';
  import { FileText, Loader2, RefreshCw, X } from 'lucide-react';
- 
+
  import { cn, createMessageId } from '../../lib/utils';
 @@ -22,6 +23,7 @@ const TERMINAL_PARSE_STATUSES = new Set<AgentFileStatus>([
  const INITIAL_STATUS_POLL_DELAY_MS = 500;
- 
+
  export type ChatAttachmentFile = Partial<AgentFile> & {
 +  sha256?: string;
    fileAssetId?: string;
@@ -358,13 +358,13 @@ index bbc6a97..05a87a2 100644
 -import { PetPreview } from '../pet/PetPreview';
 +import { Sheet, SheetContent, SheetHeader, SheetTitle } from '../ui/sheet';
 +import type { PetLocalSettings } from '../pet/pet-local-settings';
- 
+
  export type SettingsSheetProps = {
    open: boolean;
 @@ -39,263 +10,13 @@ export type SettingsSheetProps = {
    onSave: (settings: PetLocalSettings) => void;
  };
- 
+
 -const CHARACTER_TYPES: PetLocalCharacterType[] = [
 -  'builtin',
 -  'atlas',
@@ -650,7 +650,7 @@ index 0e5a3cd..a812dab 100644
 @@ -143,6 +143,64 @@ function getInlinePetState(
    return status === 'loading' ? 'running' : 'review';
  }
- 
+
 +// Process records are data, not separate assistant replies. Mount expensive
 +// markdown only after expansion; durable detail is read through the host API.
 +function FTProcessGroup({ data }: { data: any }) {
@@ -714,7 +714,7 @@ index 0e5a3cd..a812dab 100644
  }: {
 @@ -478,6 +536,9 @@ function renderContentItem(
    }
- 
+
    if (isComponentContent(content)) {
 +    if ((content.data as any)?.type === 'FTProcess') {
 +      return <FTProcessGroup key={content.id ?? `process-${index}`} data={content.data} />;
@@ -730,7 +730,7 @@ index 0e5a3cd..a812dab 100644
 +        !isMcpAppComponent(item) && (item.data as any)?.type !== "FTProcess",
      },
    );
- 
+
 @@ -716,7 +777,7 @@ function renderContent(
    const renderUnits = buildToolComponentRenderUnits(content, {
      shouldGroupComponent: (item) =>
@@ -738,7 +738,7 @@ index 0e5a3cd..a812dab 100644
 -      !isMcpAppComponent(item),
 +      !isMcpAppComponent(item) && (item.data as any)?.type !== "FTProcess",
    });
- 
+
    return (
 diff --git a/packages/chatkit-ui/src/i18n/locales/en-US.json b/packages/chatkit-ui/src/i18n/locales/en-US.json
 index bd5fb19..d7a8671 100644
@@ -782,7 +782,7 @@ index 0c3f44c..9ee5324 100644
 @@ -539,6 +541,21 @@ export function ParentMessengerProvider({
          return;
        }
- 
+
 +      if (payload.type === 'command' && payload.command === 'onShowHistory') {
 +        window.dispatchEvent(new Event('ft-show-history'));
 +        sendResponse(payload.nonce, { ok: true });
@@ -860,9 +860,39 @@ index 63a8e2e..d935cd0 100644
 @@ -3621,7 +3633,7 @@ const StreamSession = ({
        return;
      }
- 
+
 -    if (requestedInitialThread === activeThreadId) {
 +    if (requestedInitialThread === activeThreadId && consumedInitialThreadRef.current === requestedInitialThread) {
        consumedInitialThreadRef.current = requestedInitialThread;
        return;
      }
+diff --git a/packages/chatkit-ui/src/components/thread/markdown-text.tsx b/packages/chatkit-ui/src/components/thread/markdown-text.tsx
+index 2b1bb30..cfcfa05 100644
+--- a/packages/chatkit-ui/src/components/thread/markdown-text.tsx
++++ b/packages/chatkit-ui/src/components/thread/markdown-text.tsx
+@@ -292,6 +292,16 @@ const splitProposedPlanSegments = (markdown: string): MarkdownSegment[] => {
+   return segments;
+ };
+
++// Normalize model LaTeX delimiters before Markdown consumes their escapes.
++// Code spans/fences and existing dollar math remain literal.
++export function normalizeMathDelimiters(text: string): string {
++  const protectedOrMath = /(`{3,}[^\n]*\n[\s\S]*?(?:\n`{3,}(?=\s|$)|$)|~{3,}[^\n]*\n[\s\S]*?(?:\n~{3,}(?=\s|$)|$)|(`+)[\s\S]*?\2|\$\$[\s\S]*?\$\$|\$[^\n$]+\$)|\\\[([\s\S]*?)\\\]|\\\(([^\n]*?)\\\)/g;
++  return text.replace(protectedOrMath, (match, protectedText, _ticks, display, inline) => {
++    if (protectedText) return match;
++    return display !== undefined ? `\n\n$$\n${display.trim()}\n$$\n\n` : `$${inline}$`;
++  });
++}
++
+ function MarkdownContent({ children }: { children: string }) {
+   return (
+     <ReactMarkdown
+@@ -300,7 +310,7 @@ function MarkdownContent({ children }: { children: string }) {
+       urlTransform={markdownUrlTransform}
+       components={defaultComponents}
+     >
+-      {children}
++      {normalizeMathDelimiters(children)}
+     </ReactMarkdown>
+   );
+ }

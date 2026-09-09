@@ -1252,6 +1252,7 @@ button.reference-item { cursor: pointer; }
   padding: .2rem .65rem;
 }
 .page-agent-drawer-body { min-height: 0; overflow: auto; padding: .75rem; }
+.page-agent-drawer, .page-agent-drawer-body { overscroll-behavior: contain; }
 .page-agent-drawer-body-conversation-only {
   overflow: hidden;
   padding: 0;

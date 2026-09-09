@@ -118,7 +118,9 @@
           more: thread.items.has_more};
         pages.set(id, page);
       }
-      while (page.more && messages(page.items).length < offset + limit) {
+      // Initial history stays bounded. Xpert's timeline button requests older pages.
+      // Do not drain backend pages just to fill a UI message-count target.
+      if (offset > 0 && page.more && messages(page.items).length < offset + limit) {
         const next = await data("items.list", {thread_id: id, after: page.after, limit: 50});
         const known = new Set(page.items.map(item => item.id));
         const older = (next.data || []).filter(item => !known.has(item.id));
