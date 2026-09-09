@@ -88,7 +88,7 @@ def enrich_turns(thread, turns, workspace_root, *, outline=False):
                         existing = next((v for v in canonical if call_id in {v.get('id'), v.get('callId'), v.get('call_id')}), None)
                         value = dict(existing) if existing else {'id': call_id, 'type': 'dynamicToolCall',
                             'tool': item.get('name') or '工具调用', 'status': 'inProgress',
-                            'arguments': '' if outline else item.get('arguments', '')}
+                            'arguments': item.get('arguments', '')}
                         calls[call_id] = value
                         ordered.append(value)
                     elif row.get('type') == 'response_item' and kind == 'function_call_output':

@@ -1329,3 +1329,29 @@ button.reference-item { cursor: pointer; }
 .nav-singleton > .nav-button { flex: 1; min-width: 0; }
 .nav-singleton-close { border: 0; background: transparent; color: inherit; padding: .35rem; cursor: pointer; }
 .nav-singleton-close[hidden] { display: none; }
+
+/* Shared icon interaction: same 32px hit area and baseline as the chat header. */
+:is(.icon-action-button, .tab-close, .dialog-close, .agent-model-icon-action,
+    .job-result-tab-close, button.ft-help-icon) {
+  display: inline-flex; align-items: center; justify-content: center;
+  box-sizing: border-box; vertical-align: middle; flex: 0 0 32px;
+  width: 32px !important; min-width: 32px !important; height: 32px !important;
+  padding: 0 !important; margin-block: 0; border: 0 !important;
+  border-radius: 6px !important; background: transparent; color: var(--muted);
+  line-height: 1; cursor: pointer;
+  transition: background-color 150ms, color 150ms;
+}
+:is(.icon-action-button, .tab-close, .dialog-close, .agent-model-icon-action,
+    .job-result-tab-close, button.ft-help-icon):hover:not(:disabled) {
+  background: color-mix(in srgb, var(--muted) 12%, transparent) !important;
+  color: var(--text);
+}
+:is(.icon-action-button, .tab-close, .dialog-close, .agent-model-icon-action,
+    .job-result-tab-close, button.ft-help-icon):focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+:is(.icon-action-button, .tab-close, .dialog-close, .agent-model-icon-action,
+    .job-result-tab-close, button.ft-help-icon):disabled { opacity: .45; cursor: default; }
+.tab-close :is(.ft-icon, .ft-icon-svg) { width: 16px; height: 16px; }
+.nav-singleton[hidden] { display: none; }
+:is(.icon-action-button, .tab-close, .dialog-close, .agent-model-icon-action, .job-result-tab-close)[hidden] { display: none !important; }

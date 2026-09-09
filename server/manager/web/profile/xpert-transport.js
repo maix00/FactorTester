@@ -54,7 +54,7 @@
     const body = command
       ? `命令\n\n${fenced(command, "sh")}`
       : `参数\n\n${fenced(args, typeof args === "object" ? "json" : "text")}`;
-    return {...item, type: "workflow", workflow: {tasks: [{title: command ? "终端执行" : item.name || "工具调用",
+    return {...item, type: "workflow", workflow: {tasks: [{title: item.display_summary || command || item.name || "工具调用",
       status_indicator: item.status === "pending" ? "loading" : "complete",
       content: item.details_deferred ? "" : body + (item.output == null ? "" : `\n\n输出\n\n${fenced(item.output)}`),
     }]}};

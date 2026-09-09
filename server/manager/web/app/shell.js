@@ -125,9 +125,11 @@
       if (module.tab_behavior === "singleton") {
         const wrapper = document.createElement("div");
         wrapper.className = "nav-singleton";
+        wrapper.dataset.mountedModule = module.id;
+        wrapper.hidden = !state.tabs.some(tab => tab.id === module.id);
         const close = document.createElement("button");
         close.type = "button";
-        close.className = "nav-singleton-close";
+        close.className = "nav-singleton-close tab-close icon-action-button";
         close.dataset.moduleClose = module.id;
         close.setAttribute("aria-label", `${t("关闭")} ${moduleTitle(module)}`);
         close.append(FTIcons.node("xmark"));

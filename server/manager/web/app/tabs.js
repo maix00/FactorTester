@@ -178,9 +178,9 @@
 
     function tabCloseButton(tab) {
       const close = document.createElement("button");
-      close.className = "tab-close";
+      close.className = "tab-close icon-action-button";
       close.type = "button";
-      close.textContent = "×";
+      close.append(FTIcons.node("xmark"));
       close.title = t("关闭");
       close.addEventListener("click", event => {
         event.stopPropagation();
@@ -236,6 +236,10 @@
       const parent = state.tabs.find(item => item.id === parentTabID);
       if (parentTabID && (!parent || !isResearchDetailTab(parent))) return false;
       if (parentTabID === tab.id) return false;
+      const objectID = /\/new(?:[?#]|$)/.test(tab.path) ? "" : detailTabIDForPath(tab.path);
+      if (objectID && state.tabs.some(item => item !== tab
+        && detailTabIDForPath(item.path) === objectID
+        && String(item.parentTabID || "") === parentTabID)) return false;
       if (parentTabID) {
         const researchID = researchIDForTab(parent);
         if (!researchID) return false;
@@ -447,6 +451,9 @@
     }
 
     function renderOpenedTabs() {
+      document.querySelectorAll?.("[data-mounted-module]").forEach(row => {
+        row.hidden = !state.tabs.some(tab => tab.id === row.dataset.mountedModule);
+      });
       document.querySelectorAll?.("[data-module-close]").forEach(button => {
         button.hidden = !state.tabs.some(tab => tab.id === button.dataset.moduleClose);
       });
@@ -592,6 +599,14 @@
     }
 
     function openTab(path, options = {}) {
+      const objectID = /\/new(?:[?#]|$)/.test(path) ? "" : detailTabIDForPath(path);
+      const parentID = String(options.parentTabID || "");
+      if (objectID) {
+        const existing = state.tabs.find(tab => detailTabIDForPath(tab.path) === objectID
+          && String(tab.parentTabID || "") === parentID);
+        options = {...options, forceNew: false,
+          id: existing?.id || (parentID ? `${objectID}:parent:${encodeURIComponent(parentID)}` : objectID)};
+      }
       if (!options.forceNew && options.id) {
         const existingByID = state.tabs.find(tab => tab.id === options.id);
         if (existingByID) {
@@ -610,7 +625,7 @@
         }
       }
       if (!options.forceNew) {
-        const existing = state.tabs.find(tab => tab.path === path);
+        const existing = state.tabs.find(tab => tab.path === path && String(tab.parentTabID || "") === parentID);
         if (existing) {
           applyTabMetadata(existing, options);
           activateTab(existing.id, {beforeTabChange: options.beforeTabChange});
@@ -872,12 +887,17 @@
       if (!path) return;
       const tab = state.tabs.find(item => item.id === state.activeTabID);
       if (!tab) return navigate(path);
-      const targetID = detailTabIDForPath(path);
+      const objectID = detailTabIDForPath(path);
+      const parentID = String(tab.parentTabID || "");
+      const targetID = objectID && (parentID ? `${objectID}:parent:${encodeURIComponent(parentID)}` : objectID);
       if (targetID && targetID !== tab.id) {
-        const occupant = state.tabs.find(item => item.id === targetID);
+        const occupant = state.tabs.find(item => item !== tab
+          && detailTabIDForPath(item.path) === objectID
+          && String(item.parentTabID || "") === parentID);
         if (occupant) {
           const closingID = tab.id;
-          navigate(path);
+          openTab(path, {parentTabID: parentID, parentFolder: tab.parentFolder,
+            parentResearchID: tab.parentResearchID});
           if (closingID !== state.activeTabID) closeTab(closingID);
           return;
         }
@@ -886,6 +906,7 @@
       viewCache.saveActiveTabSession?.();
       viewCache.discardView?.(previousID);
       if (targetID) tab.id = targetID;
+      state.activeTabID = tab.id;
       tab.path = path;
       if (previousID !== tab.id) {
         state.tabSessions.delete(previousID);
@@ -984,6 +1005,19 @@
         if (candidates.some(tab => tab.id === snapshot?.activeTabID)) snapshot = {...snapshot, activeTabID: module.id};
       }
       normalizeResearchTabHierarchy();
+      // Old snapshots can contain several tabs for one object in one folder.
+      // Keep the active copy (and its session), without merging separate drafts.
+      const objects = new Map();
+      for (const tab of [...state.tabs].sort((a, b) => Number(b.id === snapshot?.activeTabID) - Number(a.id === snapshot?.activeTabID))) {
+        const objectID = /\/new(?:[?#]|$)/.test(tab.path) ? "" : detailTabIDForPath(tab.path);
+        if (!objectID) continue;
+        const key = JSON.stringify([objectID, tab.parentTabID || ""]);
+        if (objects.has(key)) {
+          state.tabs = state.tabs.filter(item => item !== tab);
+          state.tabSessions.delete(tab.id);
+          workspace?.removeSession?.(tab.id);
+        } else objects.set(key, tab);
+      }
       state.tabs.forEach(tab => viewCache.hydrateSession(tab.id));
       state.activeTabID = state.tabs.some(tab => tab.id === snapshot?.activeTabID)
         ? snapshot.activeTabID : "home";

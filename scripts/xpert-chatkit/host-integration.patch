@@ -26,7 +26,7 @@ index 9a51f3d..5257f6b 100644
      mocks.uploadFile.mockResolvedValueOnce({
        id: 'file-1',
 diff --git a/packages/chatkit-ui/src/components/chat.tsx b/packages/chatkit-ui/src/components/chat.tsx
-index 2c6757d..78d2feb 100644
+index 2c6757d..99723d6 100644
 --- a/packages/chatkit-ui/src/components/chat.tsx
 +++ b/packages/chatkit-ui/src/components/chat.tsx
 @@ -69,6 +69,7 @@ import { HITLApprovalPanel } from './composer/hitl-approval-panel';
@@ -47,7 +47,15 @@ index 2c6757d..78d2feb 100644
    const handleMinimizeToPet = React.useCallback(() => {
      parentMessenger?.sendEvent('chat_minimize_change', { minimized: true });
    }, [parentMessenger]);
-@@ -2726,6 +2726,10 @@ export function Chat({
+@@ -1789,6 +1789,7 @@ export function Chat({
+     missingConfig ||
+     isHistoryLoading ||
+     hasUploadingFiles ||
++    attachmentState.hasFailedFiles ||
+     isUploadingReferenceImages;
+   const isSendDisabled =
+     (!trimmedDraft && !hasReferences) || isSubmissionBlocked;
+@@ -2726,6 +2727,10 @@ export function Chat({
    const handleComposerKeyDown = (
      event: React.KeyboardEvent<HTMLDivElement>,
    ) => {
@@ -58,7 +66,7 @@ index 2c6757d..78d2feb 100644
      if (workspaceFileMention) {
        if (event.key === 'Escape') {
          event.preventDefault();
-@@ -3411,30 +3415,7 @@ export function Chat({
+@@ -3411,30 +3416,7 @@ export function Chat({
              className="mx-auto flex w-full items-center justify-between border-b p-2 sticky top-0 z-10 bg-background"
              style={chatColumnStyle}
            >
@@ -90,7 +98,7 @@ index 2c6757d..78d2feb 100644
              <div className="flex items-center gap-1">
                {taskSummaryAvailable && (
                  <TaskSummaryTrigger
-@@ -3470,6 +3451,22 @@ export function Chat({
+@@ -3470,6 +3452,22 @@ export function Chat({
                  </Tooltip>
                )}
  
@@ -113,7 +121,7 @@ index 2c6757d..78d2feb 100644
                <Tooltip>
                  <TooltipTrigger asChild>
                    <span className="inline-flex h-8 w-8">
-@@ -3692,6 +3689,7 @@ export function Chat({
+@@ -3692,6 +3690,7 @@ export function Chat({
                        setMessageNavigationAnchor(messageNavigationId, node)
                      }
                      data-message-navigation-id={messageNavigationId}
@@ -121,7 +129,7 @@ index 2c6757d..78d2feb 100644
                      className={cn(
                        'group flex gap-3',
                        message.type === 'human'
-@@ -3715,7 +3713,7 @@ export function Chat({
+@@ -3715,7 +3714,7 @@ export function Chat({
                          className={cn(
                            'max-w-full rounded-2xl',
                            message.type === 'human'
@@ -130,7 +138,7 @@ index 2c6757d..78d2feb 100644
                              : message.type === 'system'
                                ? 'bg-muted text-muted-foreground text-xs px-4 py-2.5'
                                : 'py-1 text-chat-foreground', // AI messages: use chat-specific foreground color
-@@ -3770,15 +3768,7 @@ export function Chat({
+@@ -3770,15 +3769,7 @@ export function Chat({
                                humanAttachments.length > 0 && (
                                  <div className="flex flex-wrap gap-1.5 mb-2">
                                    {humanAttachments.map((file, fileIndex) => (
@@ -147,7 +155,7 @@ index 2c6757d..78d2feb 100644
                                    ))}
                                  </div>
                                )}
-@@ -3800,7 +3790,7 @@ export function Chat({
+@@ -3800,7 +3791,7 @@ export function Chat({
                          )}
                        </div>
                        {/* Message actions - hidden during streaming, retry only for last AI message */}
@@ -156,7 +164,7 @@ index 2c6757d..78d2feb 100644
                          content={messageContent}
                          isAssistant={isAssistantMessage}
                          isStreaming={isStreamingMessage}
-@@ -3811,7 +3801,7 @@ export function Chat({
+@@ -3811,7 +3802,7 @@ export function Chat({
                              ? () => handleRetry(index)
                              : undefined
                          }
@@ -165,7 +173,7 @@ index 2c6757d..78d2feb 100644
                      </div>
                    </div>
                  );
-@@ -4250,7 +4240,7 @@ export function Chat({
+@@ -4250,7 +4241,7 @@ export function Chat({
              />
            )}
  
@@ -175,7 +183,7 @@ index 2c6757d..78d2feb 100644
                data-slot="composer-input-shell"
                data-layout="stacked"
 diff --git a/packages/chatkit-ui/src/components/chat/attachments.tsx b/packages/chatkit-ui/src/components/chat/attachments.tsx
-index c483f74..6e1fc92 100644
+index c483f74..69ae673 100644
 --- a/packages/chatkit-ui/src/components/chat/attachments.tsx
 +++ b/packages/chatkit-ui/src/components/chat/attachments.tsx
 @@ -1,4 +1,5 @@
@@ -192,7 +200,15 @@ index c483f74..6e1fc92 100644
    fileAssetId?: string;
    filePath?: string;
    originalName?: string;
-@@ -118,6 +120,7 @@ function toSubmittedFiles(attachments: UploadingFile[]): ChatAttachmentFile[] {
+@@ -33,6 +35,7 @@ export type ChatAttachmentFile = Partial<AgentFile> & {
+ export type ChatAttachmentsState = {
+   uploadedFiles: ChatAttachmentFile[];
+   hasUploadingFiles: boolean;
++  hasFailedFiles?: boolean;
+   hasParsingFiles: boolean;
+ };
+
+@@ -118,6 +121,7 @@ function toSubmittedFiles(attachments: UploadingFile[]): ChatAttachmentFile[] {
          capabilities: uploadedFile.capabilities,
          summary: uploadedFile.summary,
          workspacePath: uploadedFile.workspacePath,
@@ -200,7 +216,27 @@ index c483f74..6e1fc92 100644
        };
      });
  }
-@@ -518,3 +521,46 @@ export const ChatAttachments = React.forwardRef<
+@@ -331,6 +335,7 @@ export const ChatAttachments = React.forwardRef<
+         (item) => item.status === 'uploading',
+       ),
+       hasParsingFiles: attachments.some((item) => isPollingTarget(item)),
++      hasFailedFiles: attachments.some(item => item.status === 'error' || readParseStatus(item.uploadedFile) === 'failed'),
+     });
+   }, [attachments, onStateChange]);
+
+@@ -488,6 +493,11 @@ export const ChatAttachments = React.forwardRef<
+                 </span>
+               )}
+
++              {(item.status === 'error' || parseFailed) && (
++                <span role="alert" className="text-xs text-destructive whitespace-normal break-words">
++                  {item.error || '附件上传失败，请重试或移除后再发送'}
++                </span>
++              )}
+               {item.status === 'error' && (
+                 <button
+                   type="button"
+@@ -518,3 +528,46 @@ export const ChatAttachments = React.forwardRef<
      </>
    );
  });
@@ -608,7 +644,7 @@ index 2b1bb30..6f3bf46 100644
          )}
        >
 diff --git a/packages/chatkit-ui/src/components/thread/messages/ai.tsx b/packages/chatkit-ui/src/components/thread/messages/ai.tsx
-index 0e5a3cd..01b5f15 100644
+index 0e5a3cd..a812dab 100644
 --- a/packages/chatkit-ui/src/components/thread/messages/ai.tsx
 +++ b/packages/chatkit-ui/src/components/thread/messages/ai.tsx
 @@ -143,6 +143,64 @@ function getInlinePetState(
@@ -647,14 +683,14 @@ index 0e5a3cd..01b5f15 100644
 +  };
 +  React.useEffect(() => { if (open) void expand(true); }, [data.items]);
 +  const failed = items.some(item => item.workflow?.tasks?.some((task: any) => /error|failed/.test(task.status_indicator || '')));
-+  return <details className="w-full text-sm text-muted-foreground" open={open}
++  return <details className="ft-process w-full text-sm text-muted-foreground" open={open}
 +    onToggle={event => { void expand(event.currentTarget.open); }}>
 +    <summary className="cursor-pointer py-2">执行过程 · {items.length} 步{failed ? ' · 有失败步骤' : ''}</summary>
-+    {open && <div className="space-y-2 pl-3">
++    {open && <div className="ft-process-steps pl-3">
 +      {loading && <p>正在加载执行详情…</p>}
 +      {error && <button onClick={() => void expand(true)}>重试：{error}</button>}
-+      {items.map(item => <details key={item.id} className="py-1">
-+        <summary className="cursor-pointer">{(item.workflow?.tasks || []).map((task: any) => task.title).join(' · ') || '执行步骤'}</summary>
++      {items.map(item => <details key={item.id} className="ft-process-step">
++        <summary className="cursor-pointer" title={(item.workflow?.tasks || []).map((task: any) => task.title).join(' · ')}><span>{(item.workflow?.tasks || []).map((task: any) => task.title).join(' · ') || '执行步骤'}</span></summary>
 +        <FTProcessDetail item={item.details_deferred ? loaded[item.id] || item : item} />
 +      </details>)}
 +    </div>}

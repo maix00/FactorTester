@@ -28,7 +28,7 @@
     const root = section(
       context,
       "公网访客白名单",
-      "白名单按当前服务器保存；共享同一 PostgreSQL 的 Manager 会读取同一条记录。",
+      "管理可在公网访客模式登录的用户。",
     );
     const enabled = new Set();
     const mutate = async (method, username, button) => {
@@ -49,51 +49,32 @@
       headers: ["账户", "机构", "角色", "状态", "操作"],
       searchPlaceholder: "搜索用户（用户名、别名、机构）",
       empty: "没有符合条件的用户",
+      refresh: reload,
       searchText: item => [item.username, item.alias, item.organization_id].join(" "),
       cells: item => [
         accountLabel(context, item), item.organization_id || "",
         item.role === "super_admin" ? context.t("超级管理员") : context.t("普通用户"),
         enabled.has(item.username) ? context.t("已加入白名单") : context.t("未加入白名单"),
         () => {
-          const button = FTUI.iconButton(context, "plus", "添加到白名单", () => mutate("POST", item.username, button));
-          button.disabled = enabled.has(item.username);
+          const included = enabled.has(item.username);
+          const button = FTUI.iconButton(context, included ? "xmark" : "plus",
+            included ? "从白名单移除" : "添加到白名单",
+            () => mutate(included ? "DELETE" : "POST", item.username, button));
+          button.disabled = !included && item.active === false;
           return button;
         },
       ],
     });
-    const candidateTitle = document.createElement("h4");
-    candidateTitle.textContent = context.t("添加用户");
-    root.append(candidateTitle, candidates.root);
-    const table = FTManagerAccessTable.create(context, {
-      headers: ["账户", "机构", "角色", "状态", "操作"],
-      searchPlaceholder: "搜索白名单用户",
-      refresh: reload,
-      empty: "当前服务器没有白名单用户",
-      searchText: item => [
-        item.alias, item.username, item.organization_id, item.role,
-      ].join(" "),
-      cells: item => [
-        `${item.alias || ""} · ${item.username || ""}`,
-        item.organization_id || "",
-        item.role === "super_admin" ? context.t("超级管理员") : context.t("普通用户"),
-        item.enabled && item.account_active
-          ? context.t("已启用") : context.t("已停用或账户不可用"),
-        (ctx, entry) => {
-          const button = FTUI.iconButton(ctx, "xmark", "从白名单移除", () => mutate("DELETE", entry.username, button));
-          button.disabled = !entry.enabled;
-          return button;
-        },
-      ],
-    });
+    root.append(candidates.root);
     root.update = latest => {
       const entries = Array.isArray(latest.visitor_allowlist) ? latest.visitor_allowlist : [];
       enabled.clear();
       entries.filter(item => item.enabled).forEach(item => enabled.add(item.username));
-      candidates.setRows((latest.users || []).filter(item => item.active));
-      table.setRows(entries);
+      const accounts = new Map(entries.map(item => [item.username, item]));
+      for (const item of latest.users || []) accounts.set(item.username, {...accounts.get(item.username), ...item});
+      candidates.setRows([...accounts.values()]);
     };
     root.update(payload);
-    root.append(table.root);
     return root;
   }
 

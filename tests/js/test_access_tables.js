@@ -35,7 +35,9 @@ const button=(root,label)=>find(root,e=>e.tag==='button'&&e.attributes['aria-lab
  const search=find(candidates,e=>e.tag==='input')[0];search.value='testB';search.listeners.input();
  assert.equal(find(candidates,e=>e.tag==='tbody')[0].children.length,1);
  await button(candidates,'添加到白名单').click();
- assert.equal(button(candidates,'添加到白名单').disabled,true);
+ assert.equal(button(candidates,'添加到白名单'),undefined);
+ assert.ok(button(candidates,'从白名单移除'));
+ assert.equal(find(body,e=>e.className==='manager-access-table').length,1);
  assert.equal(search.value,'testB');
  await button(body,'从白名单移除').click();
  assert.equal(button(candidates,'添加到白名单').disabled,false);

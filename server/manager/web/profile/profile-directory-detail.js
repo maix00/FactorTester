@@ -213,7 +213,7 @@
       profile.display_name || profile.profile_id,
       `${context.t("研究身份")} · ${profile.owner_alias || profile.owner_ref}`,
     );
-    context.updateActiveTab?.({title: profile.display_name || profile.profile_id});
+    context.updateActiveTab?.({title: `${profile.display_name || profile.profile_id} · ${profile.owner_alias || profile.owner_ref}`});
     context.toolbar.replaceChildren();
     const sectionTabs = window.FTResearch?.sectionTabs?.(
       context,

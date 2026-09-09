@@ -32,6 +32,8 @@ def test_history_recovers_tools_in_place_and_defers_outputs(tmp_path):
     page = provider_thread_page(thread, 'conv', view='outline', enrich=enrich)
     tool = next(v for v in page['items'] if v['id'] == 'c1')
     assert tool['details_deferred'] and 'output' not in tool
+    assert tool['display_summary'] == 'pwd'
+    assert 'arguments' not in tool
     detail = provider_thread_page(thread, 'conv', after=tool['detail_after'], enrich=enrich)
     assert next(v for v in detail['items'] if v['id'] == 'c1')['output'] == 'terminal output'
     # A partial appended record is ignored until the writer finishes it.
