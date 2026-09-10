@@ -208,3 +208,18 @@ def test_public_library_visible_list_uses_registry_metadata(tmp_path, monkeypatc
     assert value[0]["title"] == projection["title"]
     assert value[0]["generation"] == projection["generation"]
     assert value[0]["publication_id"] == result["publication_id"]
+
+
+def test_metadata_revision_detects_in_place_body_change():
+    from tools.cli.release.research_reporting.public_research.projection import chapter_projection
+
+    projection = {"components": [
+        {"component_id": "c", "kind": "chapter", "parent_id": None},
+        {"component_id": "text", "kind": "entry", "parent_id": "c", "body": "before"},
+    ]}
+    before = chapter_projection(projection, "c", include_content=False)["components"][1]
+    projection["components"][1]["body"] = "after"
+    after = chapter_projection(projection, "c", include_content=False)["components"][1]
+    assert before["content_revision"] != after["content_revision"]
+    assert before["body"] == after["body"] == ""
+    assert before["content_available"] == after["content_available"]

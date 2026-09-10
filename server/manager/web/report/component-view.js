@@ -181,12 +181,12 @@
         dispose = null;
         return;
       }
-      if (body.dataset.lazyState === "ready") return;
+      if (body.__ftReportDisposed || body.dataset.lazyState === "ready") return;
       dispose?.();
       dispose = null;
       const finish = value => {
         if (Number(context.renderGeneration || 0) !== renderGeneration
-          || context.lazyDisposed) return;
+          || context.lazyDisposed || body.__ftReportDisposed) return;
         body.dataset.lazyState = "ready";
         body.style.removeProperty("min-height");
         renderLeafInto(body, value || component, context);
@@ -205,7 +205,7 @@
         context.chapterID, component.component_id,
       )).then(finish).catch(error => {
         if (Number(context.renderGeneration || 0) !== renderGeneration
-          || context.lazyDisposed) return;
+          || context.lazyDisposed || body.__ftReportDisposed) return;
         body.dataset.lazyState = "error";
         body.style.removeProperty("min-height");
         body.textContent = context.t?.("内容读取失败") || "内容读取失败";
@@ -269,17 +269,43 @@
       host.replaceChildren(renderBridgeGroup(children, context, depth));
     };
     dispose = window.FTReportLazyRuntime.observe(host, context, mount);
-    if (!dispose) {
-      mount();
-      return host;
-    }
+    if (!dispose) mount();
+    host.__ftReportUpdateChildren = next => {
+      children = next;
+      if (mounted) host.firstElementChild?.__ftReportUpdateChildren?.(next);
+    };
     return host;
+  }
+
+  function disposeSubtree(node, context) {
+    if (!node) return;
+    [node, ...node.querySelectorAll("*")].forEach(element => {
+      element.__ftReportDisposed = true;
+      context.lazyCallbacks?.delete(element);
+      context.lazyObserver?.unobserve(element);
+    });
   }
 
   function renderBridgeGroup(children, context, depth = 0) {
     const host = document.createElement("div");
     host.className = "section-bridge";
     if (children.some(child => usesSectionBridge(child.component))) host.classList.add("contains-section-bridge");
+    host.__ftReportUpdateChildren = next => {
+      const existing = new Map([...host.children].map(element => [element.dataset.reportComponentId, element]));
+      next.forEach((child, index) => {
+        const key = String(child.component.component_id || "");
+        let element = existing.get(key);
+        existing.delete(key);
+        if (element) {
+          const previous = element;
+          element = element.__ftReportUpdate(child.component, child.children);
+          if (element !== previous) previous.replaceWith(element);
+        } else element = componentView(child.component, child.children, context, depth, true);
+        if (host.children[index] !== element) host.insertBefore(element, host.children[index] || null);
+      });
+      existing.forEach(element => { disposeSubtree(element, context); element.remove(); });
+      host.classList.toggle("contains-section-bridge", next.some(child => usesSectionBridge(child.component)));
+    };
     children.forEach(child => host.append(componentView(child.component, child.children, context, depth, true)));
     return host;
   }
@@ -318,6 +344,40 @@
 
   function componentView(component, children, context, depth = 0, bridgeEntry = false) {
     const wrapper = document.createElement("section");
+    wrapper.dataset.reportComponentId = String(component.component_id || "");
+    const signature = JSON.stringify([component, context.reportMetadataRevision || ""]);
+    wrapper.__ftReportUpdate = (next, nextChildren) => {
+      const nextSignature = JSON.stringify([next, context.reportMetadataRevision || ""]);
+      const ownChildHost = element => [...(element.firstElementChild?.children || [])]
+        .find(host => host.classList.contains("component-children"));
+      const oldChildHost = ownChildHost(wrapper);
+      if (signature === nextSignature
+          && (wrapper.firstElementChild?.tagName === "DETAILS" || !nextChildren.length)) {
+        children = nextChildren;
+        oldChildHost?.__ftReportUpdateChildren?.(children);
+        // An initially empty structural node can acquire its first child.
+        if (children.length && !oldChildHost) {
+          const details = wrapper.firstElementChild;
+          if (details?.tagName === "DETAILS" && details.open) {
+            details.append(lazyChildren(children, context, depth + 1));
+          }
+        }
+        return wrapper;
+      }
+      const replacement = componentView(next, nextChildren, context, depth, bridgeEntry);
+      if (wrapper.firstElementChild?.tagName === "DETAILS"
+          && replacement.firstElementChild?.tagName === "DETAILS") {
+        replacement.firstElementChild.open = wrapper.firstElementChild.open;
+      }
+      const replacementChildHost = ownChildHost(replacement);
+      if (oldChildHost && replacementChildHost) {
+        oldChildHost.__ftReportUpdateChildren?.(nextChildren);
+        disposeSubtree(replacementChildHost, context);
+        replacementChildHost.replaceWith(oldChildHost);
+      }
+      disposeSubtree(wrapper, context);
+      return replacement;
+    };
     // Legacy subsection is a section; only ancestry controls presentation depth.
     const sectionKind = component.kind === "subsection" ? "section" : component.kind;
     wrapper.className = `component depth-${Math.min(depth, 8)} ${sectionKind} ${component.display_kind || ""}${bridgeEntry ? " bridge-entry" : ""}`;

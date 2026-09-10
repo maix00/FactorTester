@@ -242,6 +242,14 @@ def read_local_asset(
     return None
 
 
+def component_content_revision(value: dict[str, Any]) -> str:
+    """Detect in-place payload edits even when structural metadata is unchanged."""
+    payload = {key: value.get(key) for key in ("body", "content")}
+    return hashlib.sha256(json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, default=str,
+    ).encode("utf-8")).hexdigest()
+
+
 def chapter_projection(
     projection: dict[str, Any], chapter_id: str, *, include_content: bool = True,
 ) -> dict[str, Any]:
@@ -273,6 +281,7 @@ def chapter_projection(
             value["content_available"] = bool(
                 value.get("body") or value.get("content") is not None
             )
+            value["content_revision"] = component_content_revision(item)
             value["body"] = ""
             value["content"] = None
             selected_output.append(value)
@@ -549,6 +558,7 @@ def public_component(
         "body": _public_text(str(value.get("body") or ""), resources) if include_content else "",
         "content": content,
         "content_available": content_available,
+        "content_revision": component_content_revision(value),
         "display_kind": str(value.get("display_kind") or ""),
         "binding_ids": (binding_ids_by_component or {}).get(component_id, []),
         "created_at": value.get("created_at"),

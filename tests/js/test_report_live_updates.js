@@ -29,6 +29,16 @@ vm.runInThisContext(fs.readFileSync('server/manager/web/report/source.js', 'utf8
  assert(paths.every(path=>path.endsWith('/index')),'refresh never prefetches chapter bodies');
  stop();assert(cleared);assert.equal(listeners.size,0);
  await scheduled();assert.equal(changes.length,1,'disposed watcher cannot update the page');
+ let failOnce=true;let applied=0;
+ const retrySource=window.FTReportSource.create('server:retry',async()=>structuredClone(index));
+ await retrySource.load();
+ const stopRetry=retrySource.watch({isCurrent:()=>true,onChange:()=>{
+  if(failOnce){failOnce=false;throw new Error('temporary chapter read failure');}
+  applied++;
+ }});
+ index={...index,generation:3};
+ await scheduled();await scheduled();assert.equal(applied,1,'failed reconciliation retries the same index revision');
+ stopRetry();
  const foreignPaths=[];
  const foreign=window.FTReportSource.create('server:self:pkg:main',async path=>{
    foreignPaths.push(path);return {title:'shared',chapters:[],components:[]};
