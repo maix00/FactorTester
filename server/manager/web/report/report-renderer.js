@@ -15,9 +15,9 @@
       context.lazyObserver = null;
       context.lazyCallbacks = null;
     };
-    const chapterDescriptors = Array.isArray(report.chapters)
+    let chapterDescriptors = Array.isArray(report.chapters)
       ? report.chapters : [];
-    const roots = chapterRoots(report);
+    let roots = chapterRoots(report);
     const bindContext = value => {
       const referenceMeta = {};
       const bindingByID = {};
@@ -30,6 +30,7 @@
     };
     context = {...context, lazyObservers};
     bindContext(report);
+    context.reportMetadataRevision = JSON.stringify([report.bindings, report.assets, report.local_resources]);
     const chapterCacheLimit = Math.max(
       1,
       Number(context.chapterCacheLimit) || DEFAULT_CHAPTER_CACHE_LIMIT,
@@ -55,7 +56,7 @@
       chapterAbortController = controller;
       return Promise.resolve(context.loadChapter(
         chapterID,
-        controller ? {signal: controller.signal} : {},
+        controller ? {signal: controller.signal, applyMetadata: false} : {applyMetadata: false},
       )).finally(() => {
         if (token === chapterLoadToken && chapterAbortController === controller) {
           chapterAbortController = null;
@@ -68,6 +69,7 @@
     );
     const originalCleanup = mount.__ftLazyCleanup;
     mount.__ftLazyCleanup = () => {
+      ++chapterLoadToken;
       abortChapterLoad();
       chapterCache.clear();
       railController?.cleanup?.();
@@ -173,6 +175,7 @@
     };
     function activate(index, initial = false) {
       if (!Number.isInteger(index) || index < 0 || index >= roots.length) return;
+      ++chapterLoadToken;
       abortChapterLoad();
       selected = index;
       context.setSelectedChapter?.(roots[index]?.component?.component_id || "");
@@ -185,6 +188,7 @@
         context.setChapterMetadata?.(cached.report);
         activeNode = cached.node;
         bindContext(cached.report);
+        context.reportMetadataRevision = JSON.stringify([cached.report.bindings, cached.report.assets, cached.report.local_resources]);
         draw();
         if (initial) notifyInitialReady();
         return;
@@ -196,6 +200,8 @@
           .find(node => node.component.kind === "chapter");
         if (!loaded) throw new Error(context.t?.("章节内容为空") || "章节内容为空");
         chapterCache.set(chapterID, {report: value, node: loaded});
+        context.setChapterMetadata?.(value);
+        context.reportMetadataRevision = JSON.stringify([value.bindings, value.assets, value.local_resources]);
         bindContext(value);
         activeNode = loaded;
         draw();
@@ -233,6 +239,62 @@
     if (!context.suppressAutoScroll) {
       requestAnimationFrame(() => window.scrollTo({top: document.body.scrollHeight}));
     }
+    // The index is an invalidation signal, not a list of changed components.
+    // Reconcile an authoritative chapter snapshot so deletion and moves cannot
+    // disappear between notifications. Never discard the readable DOM while loading.
+    async function update(next) {
+      const chapterID = roots[selected]?.component.component_id;
+      const token = ++chapterLoadToken;
+      abortChapterLoad();
+      chapterCache.clear();
+      report = next;
+      chapterDescriptors = Array.isArray(next.chapters) ? next.chapters : [];
+      roots = chapterRoots(next);
+      const nextIndex = roots.findIndex(node => node.component.component_id === chapterID);
+      selected = nextIndex >= 0 ? nextIndex : Math.min(selected, Math.max(0, roots.length - 1));
+      railController?.cleanup?.();
+      railController = rail ? FTReportChapterRail.setup(rail, roots, context, {
+        getSelected: () => selected, activate: index => activate(index),
+      }) : null;
+      if (nextIndex < 0) {
+        activeNode = null;
+        if (roots.length) activate(selected);
+        else draw();
+        return;
+      }
+      let value = next;
+      if (context.loadChapter && chapterDescriptors.length) {
+        value = await abortableLoad(chapterID, token);
+        if (token !== chapterLoadToken || context.lazyDisposed) return;
+        // Older managers have no payload digest. Compare their full current
+        // chapter rather than treating unchanged metadata as unchanged content.
+        if (value.content_lazy && (value.components || []).some(item => !item.content_revision)) {
+          value = await context.loadChapter(chapterID, {full: true, applyMetadata: false});
+        }
+      }
+      if (token !== chapterLoadToken || context.lazyDisposed) return;
+      const loaded = componentTree(value.components || [])
+        .find(node => node.component.component_id === chapterID);
+      if (!loaded) throw new Error(context.t?.("章节内容为空") || "章节内容为空");
+      context.setChapterMetadata?.(value);
+      context.reportMetadataRevision = JSON.stringify([value.bindings, value.assets, value.local_resources]);
+      bindContext(value);
+      activeNode = loaded;
+      chapterCache.set(chapterID, {report: value, node: loaded});
+      const article = mount.querySelector("article.chapter");
+      if (!article) { draw(); return; }
+      const heading = article.querySelector(".chapter-title");
+      if (heading) heading.textContent = loaded.component.title || `${context.t?.("章节") || "章节"} ${selected + 1}`;
+      let bridge = [...article.children].find(child => child.classList.contains("section-bridge"));
+      if (bridge) bridge.__ftReportUpdateChildren(loaded.children);
+      else {
+        [...article.children].filter(child => !child.classList.contains("chapter-heading-row"))
+          .forEach(child => child.remove());
+        article.append(renderBridgeGroup(loaded.children, context, 0));
+      }
+      railController?.refresh();
+    }
+    return {update};
   }
 
   window.FTReportRenderer = {render};

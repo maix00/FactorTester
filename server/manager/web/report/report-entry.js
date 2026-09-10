@@ -114,12 +114,13 @@
       });
       infoLine.append(branchPicker);
     }
+    FTResearchReportSettings.applyReading(context);
     const infoActions = document.createElement("span");
     infoActions.className = "research-report-actions";
     infoActions.append(FTUI.iconButton(
       context, "arrow.clockwise", "刷新", () => render(publicationID, context),
     ));
-    if (value.access?.can_manage) {
+    {
       infoActions.append(FTUI.iconButton(
         context, "gearshape", "研究报告设置",
         () => FTResearchReportSettings.open(
@@ -252,19 +253,18 @@
       suppressAutoScroll: true,
       t,
     });
-    renderContent();
+    const renderer = renderContent();
     const stopWatching = source.watch({
       isCurrent,
       onChange: next => {
         if (!isCurrent()) return;
-        refreshScrollY = window.scrollY;
-        mount.__ftLazyCleanup?.();
+
         value = next;
         state.report = next;
         context.setHeading(next.title, t("研究报告"));
         context.updateActiveTab({title: next.title});
         reportTitle.textContent = next.title || t("研究报告");
-        renderContent();
+        return renderer.update(next);
       },
     });
     context.pageState?.register?.("research-report-updates", {dispose: stopWatching});
