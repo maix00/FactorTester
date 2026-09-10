@@ -305,7 +305,7 @@
       ? {...selected, ...selected.selected_branch,
         publication_id: selected.selected_branch.publication_id}
       : selected;
-    if (settingsTarget?.access?.can_manage === true || selected?.can_manage === true) {
+    if (settingsTarget) {
       actions.append(FTUI.iconButton(
         context, "gearshape", "研究报告设置",
         () => FTResearchReportSettings.open(context, settingsTarget, rerender),
@@ -450,6 +450,7 @@
 
   async function renderReportBody(context, mount, item, state) {
     mount.__ftReportCleanup?.();
+    FTResearchReportSettings.applyReading(context);
     if (item?.build_source === "workspace" && !item?.source_ref) {
       mount.replaceChildren(FTUI.empty(
         context.t("研究报告尚未撰写"),

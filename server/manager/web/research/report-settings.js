@@ -41,20 +41,20 @@
     ));
   }
 
+  const fontSizes = [14, 16, 18, 20, 22, 24];
+  function fontKey(context) {
+    return `ft-report-font:${context.session?.username || context.session?.user?.username || "anonymous"}`;
+  }
+  function applyReading(context) {
+    let size = 16;
+    try { size = Number(localStorage.getItem(fontKey(context))) || 16; } catch (_) {}
+    if (!fontSizes.includes(size)) size = 16;
+    document.documentElement.style.setProperty("--report-font-size", `${size}px`);
+    return size;
+  }
+
   async function open(context, report, onSaved = null) {
     let settings;
-    try {
-      settings = await ownerSettings(context, report);
-    } catch (error) {
-      context.showNotice?.(error.message || String(error), true);
-      return;
-    }
-    if (!settings) {
-      context.showNotice?.(
-        context.t("报告尚未上传；首次上传后才能设置服务器同步"), true,
-      );
-      return;
-    }
     const dialog = document.createElement("dialog");
     dialog.className = "ft-dialog research-report-settings-dialog";
     const form = document.createElement("form");
@@ -65,6 +65,42 @@
     const close = FTUI.iconButton(context, "xmark", "关闭", () => dialog.close());
     close.classList.add("dialog-close");
     form.append(heading, close);
+    const readingRow = document.createElement("label");
+    readingRow.className = "setting-row";
+    const readingLabel = document.createElement("span");
+    readingLabel.textContent = context.t("文字大小");
+    const fontSize = document.createElement("select");
+    fontSize.setAttribute("aria-label", context.t("文字大小"));
+    const currentSize = applyReading(context);
+    fontSizes.forEach(size => {
+      const option = document.createElement("option");
+      option.value = String(size);
+      option.textContent = `${size} px${size === 16 ? `（${context.t("默认")}）` : ""}`;
+      option.selected = size === currentSize;
+      fontSize.append(option);
+    });
+    fontSize.addEventListener("change", () => {
+      const size = Number(fontSize.value);
+      if (!fontSizes.includes(size)) return;
+      try { localStorage.setItem(fontKey(context), String(size)); } catch (_) {}
+      document.documentElement.style.setProperty("--report-font-size", `${size}px`);
+    });
+    readingRow.append(readingLabel, fontSize);
+    form.append(readingRow);
+    dialog.append(form);
+    dialog.addEventListener("close", () => dialog.remove(), {once: true});
+    document.body.append(dialog);
+    dialog.showModal();
+    if (!(report?.access?.can_manage === true || report?.can_manage === true)) return;
+    try { settings = await ownerSettings(context, report); }
+    catch (error) {
+      const errorNote = document.createElement("p");
+      errorNote.textContent = error.message || String(error);
+      form.append(errorNote);
+      return;
+    }
+    if (!settings || !dialog.isConnected) return;
+
 
     const note = document.createElement("p");
     note.className = "secondary";
@@ -185,11 +221,7 @@
     save.classList.add("primary");
     actions.append(cancel, save);
     form.append(actions);
-    dialog.append(form);
-    dialog.addEventListener("close", () => dialog.remove(), {once: true});
-    document.body.append(dialog);
-    dialog.showModal();
   }
 
-  window.FTResearchReportSettings = Object.freeze({open});
+  window.FTResearchReportSettings = Object.freeze({open, applyReading});
 })();

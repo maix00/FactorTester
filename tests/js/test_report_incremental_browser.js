@@ -6,7 +6,8 @@ const path = require('node:path');
 for (const engine of [chromium, webkit]) {
  const browser = await engine.launch(engine === chromium ? {channel:'chrome'} : {});
  const page = await browser.newPage();
- await page.setContent('<div id="mount"></div>');
+ await page.route('http://report.test/**', route=>route.fulfill({contentType:'text/html',body:'<div id="mount" class="report-mount"></div>'}));
+ await page.goto('http://report.test/');
  await page.evaluate(() => {
   window.FTRichText={blocks: text=>document.createTextNode(text),inline:text=>document.createTextNode(text)};
   window.FTIcons={node:()=>document.createElement('i'),section:()=>''};
@@ -61,6 +62,22 @@ for (const engine of [chromium, webkit]) {
   checks.push(mount.textContent.includes('newest')&&!mount.textContent.includes('stale'));
   return checks;
  });
+ await page.addScriptTag({path:path.resolve('server/manager/web/research/report-settings.js')});
+ await page.addStyleTag({path:path.resolve('server/manager/web/styles/report.css')});
+ const reading = await page.evaluate(async()=>{
+  FTUI.iconButton=(context,icon,label,click)=>{const b=document.createElement('button');b.textContent=label;b.onclick=click;return b;};
+  const context={t:x=>x,session:{username:'reader'},api:()=>{throw new Error('read-only settings must not request owner permissions');}};
+  const article=document.querySelector('article');
+  await FTResearchReportSettings.open(context,{access:{can_manage:false}});
+  const select=document.querySelector('dialog select');select.value='24';select.dispatchEvent(new Event('change'));
+  const resized=getComputedStyle(article).fontSize==='24px' && article===document.querySelector('article');
+  document.querySelector('dialog').close();
+  FTResearchReportSettings.applyReading({session:{username:'other'}});
+  const isolated=getComputedStyle(article).fontSize==='16px';
+  FTResearchReportSettings.applyReading(context);
+  return resized && isolated && getComputedStyle(article).fontSize==='24px';
+ });
+ assert(reading,'reader font applies without reload, persists, and is user scoped');
  assert(result.every(Boolean),`${engine.name()} checks: ${JSON.stringify(result)}`);
  console.log(`PASS ${engine.name()}: stable DOM, edits, add/delete/move, closed sections, payload revisions, out-of-order responses`);
  await browser.close();

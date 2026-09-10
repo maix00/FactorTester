@@ -114,12 +114,13 @@
       });
       infoLine.append(branchPicker);
     }
+    FTResearchReportSettings.applyReading(context);
     const infoActions = document.createElement("span");
     infoActions.className = "research-report-actions";
     infoActions.append(FTUI.iconButton(
       context, "arrow.clockwise", "刷新", () => render(publicationID, context),
     ));
-    if (value.access?.can_manage) {
+    {
       infoActions.append(FTUI.iconButton(
         context, "gearshape", "研究报告设置",
         () => FTResearchReportSettings.open(

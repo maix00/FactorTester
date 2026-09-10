@@ -86,3 +86,12 @@ body.sidebar-collapsed:not(.embedded-presentation) .chapter-rail { left: calc(va
   body.sidebar-collapsed:not(.embedded-presentation) .chapter-rail { left: 8px; }
   .chapter-rail-item { flex: 0 0 auto; }
 }
+
+/* Reader preference: scope typography to report content, not navigation/settings. */
+.report-mount .chapter { font-size: var(--report-font-size, 16px); }
+.report-mount .chapter-title { font-size: calc(var(--report-font-size, 16px) * 1.375); }
+.report-mount .component details > summary,
+.report-mount .component.depth-0 > details > summary { font-size: var(--report-font-size, 16px); }
+.report-mount .component-body, .report-mount .component-body-title,
+.report-mount .component-body table, .report-mount .component-body pre,
+.report-mount .component-body code { font-size: inherit; }
