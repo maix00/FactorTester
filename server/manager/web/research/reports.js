@@ -484,6 +484,7 @@
       mount.replaceChildren(layout, rail);
       const transferContext = {api: context.api, t: context.t};
       const renderer = FTReportRenderer.render(value, body, {
+        t: context.t,
         chapterRail: rail,
         loadChapter: source.chapterLazy ? source.loadChapter : null,
         loadComponent: source.loadComponent,
