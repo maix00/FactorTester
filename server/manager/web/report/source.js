@@ -77,6 +77,7 @@
     }
 
     function setChapterMetadata(chapter) {
+      componentLazy = Boolean(chapter?.content_lazy);
       // Chapter sidecars are the active metadata window.  Keeping every
       // visited chapter's assets and related objects in the report root made
       // the JS model grow without bound even though the renderer's chapter
@@ -134,10 +135,10 @@
           const next = normalize(await request(`${source.path}/index`));
           const signature = JSON.stringify(next);
           if (!disposed && isCurrent() && signature !== indexSignature) {
-            indexSignature = signature;
             value = next;
             rebuildIndexes();
             await onChange(next);
+            indexSignature = signature;
           }
         } catch (_) { /* Retry a temporary failure on the next visible check. */ }
         finally { pending = false; }
@@ -162,15 +163,14 @@
       let chapter;
       try {
         const separator = chapterPath.includes("?") ? "&" : "?";
-        chapter = await request(`${chapterPath}${separator}metadata=1`, options);
+        chapter = await request(options.full ? chapterPath : `${chapterPath}${separator}metadata=1`, options);
       } catch (error) {
         // A 404 means this manager predates component-level lazy loading. The
         // existing chapter endpoint remains the compatibility boundary.
         if (error?.status !== 404) throw error;
         chapter = await request(chapterPath, options);
       }
-      componentLazy = Boolean(chapter?.content_lazy);
-      setChapterMetadata(chapter);
+      if (options.applyMetadata !== false) setChapterMetadata(chapter);
       return chapter;
     }
 

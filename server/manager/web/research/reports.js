@@ -449,6 +449,7 @@
   }
 
   async function renderReportBody(context, mount, item, state) {
+    mount.__ftReportCleanup?.();
     if (item?.build_source === "workspace" && !item?.source_ref) {
       mount.replaceChildren(FTUI.empty(
         context.t("研究报告尚未撰写"),
@@ -481,7 +482,7 @@
       layout.append(body);
       mount.replaceChildren(layout, rail);
       const transferContext = {api: context.api, t: context.t};
-      FTReportRenderer.render(value, body, {
+      const renderer = FTReportRenderer.render(value, body, {
         chapterRail: rail,
         loadChapter: source.chapterLazy ? source.loadChapter : null,
         loadComponent: source.loadComponent,
@@ -511,6 +512,12 @@
           reading.disclosures[componentID] = Boolean(open);
         },
       });
+      const stopWatching = source.watch({
+        isCurrent: () => current(context) && body.isConnected && mount.contains(body),
+        onChange: next => renderer.update(next),
+      });
+      mount.__ftReportCleanup = () => { stopWatching(); body.__ftLazyCleanup?.(); };
+      context.pageState?.register?.("embedded-report-updates", {dispose: mount.__ftReportCleanup});
     } catch (error) {
       if (current(context)) mount.replaceChildren(FTUI.empty(
         context.t("无法读取研究报告"), error?.message || String(error),

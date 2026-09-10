@@ -252,19 +252,18 @@
       suppressAutoScroll: true,
       t,
     });
-    renderContent();
+    const renderer = renderContent();
     const stopWatching = source.watch({
       isCurrent,
       onChange: next => {
         if (!isCurrent()) return;
-        refreshScrollY = window.scrollY;
-        mount.__ftLazyCleanup?.();
+
         value = next;
         state.report = next;
         context.setHeading(next.title, t("研究报告"));
         context.updateActiveTab({title: next.title});
         reportTitle.textContent = next.title || t("研究报告");
-        renderContent();
+        return renderer.update(next);
       },
     });
     context.pageState?.register?.("research-report-updates", {dispose: stopWatching});
