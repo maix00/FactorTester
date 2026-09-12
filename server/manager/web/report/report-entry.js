@@ -288,6 +288,12 @@
     const {state, t, navigate, showNotice} = context;
     try {
       const reference = new URL(target);
+      // Callers outside rich text can also open a reference directly. Never
+      // interpret a website hostname as a FactorTester object kind.
+      if (["http:", "https:"].includes(reference.protocol)) {
+        window.open(reference.href, "_blank", "noopener,noreferrer");
+        return;
+      }
       const type = reference.hostname.replaceAll("_", "-");
       const value = decodeURIComponent(reference.pathname.replace(/^\//, ""));
       // Bindings store the typed target (for example ``job:<id>``), while
