@@ -571,7 +571,9 @@
 
     function captureScrollPosition() {
       state.pendingScrollCapture = {tabID: state.activeTabID, scrollY: window.scrollY};
-      saveActiveTabSession();
+      // Called on pointerdown: the pressed link must remain connected until
+      // pointerup/click. Only an actual tab switch may park the live view.
+      checkpointActiveSession();
     }
 
     function markActiveViewLoading() {
