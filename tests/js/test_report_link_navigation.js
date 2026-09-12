@@ -23,19 +23,34 @@ const {chromium, webkit} = require('playwright');
       for (const file of ['rich-text', 'report-entry']) {
         await page.addScriptTag({path: path.resolve(`server/manager/web/report/${file}.js`)});
       }
+      await page.addScriptTag({path: path.resolve('server/manager/web/app/tab-view-cache.js')});
+      await page.evaluate(() => {
+        window.cacheState = {activeTabID: 'report', tabSessions: new Map(),
+          tabs: [{id: 'report', path: '/report'}]};
+        window.cache = FTTabViewCache.create({state: cacheState,
+          content: document.querySelector('#report')});
+      });
       for (const nativeReference of [false, true]) {
         await page.evaluate(nativeReference => {
           const root = document.querySelector('#report');
           root.replaceChildren();
-          const options = {nativeReference,
+          const options = {nativeReference, captureScrollPosition: cache.captureScrollPosition,
             openReference: target => calls.push(['object', target]),
             openLocalResource: target => calls.push(['resource', target])};
           FTRichText.appendLink(root, 'Article', 'https://article.test/story', options);
           FTRichText.appendLink(root, 'Factor', 'factortester://factor/example', options);
           FTRichText.appendLink(root, 'Attachment', 'factortester-local://uploads/picture.png', options);
         }, nativeReference);
+        // A trackpad/mouse press runs pointerdown before click. The real tab
+        // cache must not detach the pressed anchor or empty the report here.
+        const link = page.getByRole('link', {name: 'Article', exact: true});
+        const box = await link.boundingBox();
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.down();
+        assert.equal(await page.locator('#report a').count(), 3,
+          'pointerdown must leave the report and pressed link connected');
         const popupPromise = page.waitForEvent('popup');
-        await page.getByRole('link', {name: 'Article', exact: true}).click();
+        await page.mouse.up();
         const popup = await popupPromise;
         await popup.waitForLoadState();
         assert.equal(popup.url(), 'https://article.test/story');
@@ -60,6 +75,10 @@ const {chromium, webkit} = require('playwright');
         });
         return calls;
       }), [['external', 'https://article.test/direct', '_blank', 'noopener,noreferrer']]);
+      assert.equal(await page.evaluate(() => {
+        cache.saveActiveTabSession();
+        return document.querySelector('#report').childNodes.length;
+      }), 0, 'an actual tab switch must still park the report');
       console.log(`${engine.name()}: external article, internal reference and attachment routing passed`);
     } finally { await browser.close(); }
   }
