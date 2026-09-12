@@ -25,8 +25,37 @@ index 9a51f3d..5257f6b 100644
    it('uploads a pasted image and adds it as an image reference chip', async () => {
      mocks.uploadFile.mockResolvedValueOnce({
        id: 'file-1',
+diff --git a/packages/chatkit-ui/src/components/chat.plan-mode.test.tsx b/packages/chatkit-ui/src/components/chat.plan-mode.test.tsx
+index 172908d..9af5e41 100644
+--- a/packages/chatkit-ui/src/components/chat.plan-mode.test.tsx
++++ b/packages/chatkit-ui/src/components/chat.plan-mode.test.tsx
+@@ -3186,4 +3186,24 @@ describe('Chat plan mode payload', () => {
+       expect.any(Object),
+     );
+   });
++  it('renders only one footer for a turn containing a question and steer', async () => {
++    mocks.stream.messages = [
++      {id: 'q', type: 'human', executionId: 'turn', content: 'question'},
++      {id: 'progress', type: 'ai', executionId: 'turn', content: 'progress'},
++      {id: 'steer', type: 'human', executionId: 'turn', content: 'steer'},
++      {id: 'answer', type: 'ai', executionId: 'turn', content: 'answer'},
++    ];
++    renderChat();
++    await act(async () => { await Promise.resolve(); });
++    const actions = screen.getAllByTestId(/^message-actions-/);
++    expect(actions).toHaveLength(1);
++    const copied = actions[0].getAttribute('data-testid');
++    expect(copied).toContain('提问者：\nquestion');
++    expect(copied).toContain('提问者：\nsteer');
++    expect(copied).toContain('回答者（');
++    expect(copied).toContain('answer');
++    expect(screen.getByText('question').parentElement?.parentElement?.querySelector('[data-testid^="message-actions-"]')).toBeNull();
++    expect(screen.getByText('steer').parentElement?.parentElement?.querySelector('[data-testid^="message-actions-"]')).toBeNull();
++  });
++
+ });
 diff --git a/packages/chatkit-ui/src/components/chat.tsx b/packages/chatkit-ui/src/components/chat.tsx
-index 2c6757d..99723d6 100644
+index 2c6757d..919cf03 100644
 --- a/packages/chatkit-ui/src/components/chat.tsx
 +++ b/packages/chatkit-ui/src/components/chat.tsx
 @@ -69,6 +69,7 @@ import { HITLApprovalPanel } from './composer/hitl-approval-panel';
@@ -37,7 +66,26 @@ index 2c6757d..99723d6 100644
    ChatAttachments,
    type AttachmentFileStatus,
    type ChatAttachmentFile,
-@@ -1326,8 +1327,7 @@ export function Chat({
+@@ -85,6 +86,7 @@ import {
+ } from './thread/messages/ai';
+ import { MessageNavigator } from './thread/MessageNavigator';
+ import { MessageActions } from './thread/MessageActions';
++import { buildTurnCopies } from './thread/turn-copy';
+ import { StartScreen } from './thread/StartScreen';
+ import {
+   ChatkitAvatar,
+@@ -894,6 +896,10 @@ export function Chat({
+     () => stream.messages ?? [],
+     [stream.messages],
+   );
++  const turnCopies = React.useMemo(
++    () => buildTurnCopies(messages, stream.isLoading, assistantTitle),
++    [messages, stream.isLoading, assistantTitle],
++  );
+   const messageNavigationLabels = React.useMemo<MessageNavigationLabels>(
+     () => ({
+       user: t('chat.youLabel'),
+@@ -1326,8 +1332,7 @@ export function Chat({
        setSelectedModelId,
      ],
    );
@@ -47,7 +95,7 @@ index 2c6757d..99723d6 100644
    const handleMinimizeToPet = React.useCallback(() => {
      parentMessenger?.sendEvent('chat_minimize_change', { minimized: true });
    }, [parentMessenger]);
-@@ -1789,6 +1789,7 @@ export function Chat({
+@@ -1789,6 +1794,7 @@ export function Chat({
      missingConfig ||
      isHistoryLoading ||
      hasUploadingFiles ||
@@ -55,7 +103,7 @@ index 2c6757d..99723d6 100644
      isUploadingReferenceImages;
    const isSendDisabled =
      (!trimmedDraft && !hasReferences) || isSubmissionBlocked;
-@@ -2726,6 +2727,10 @@ export function Chat({
+@@ -2726,6 +2732,10 @@ export function Chat({
    const handleComposerKeyDown = (
      event: React.KeyboardEvent<HTMLDivElement>,
    ) => {
@@ -66,7 +114,7 @@ index 2c6757d..99723d6 100644
      if (workspaceFileMention) {
        if (event.key === 'Escape') {
          event.preventDefault();
-@@ -3411,30 +3416,7 @@ export function Chat({
+@@ -3411,30 +3421,7 @@ export function Chat({
              className="mx-auto flex w-full items-center justify-between border-b p-2 sticky top-0 z-10 bg-background"
              style={chatColumnStyle}
            >
@@ -98,7 +146,7 @@ index 2c6757d..99723d6 100644
              <div className="flex items-center gap-1">
                {taskSummaryAvailable && (
                  <TaskSummaryTrigger
-@@ -3470,6 +3452,22 @@ export function Chat({
+@@ -3470,6 +3457,22 @@ export function Chat({
                  </Tooltip>
                )}
 
@@ -121,7 +169,7 @@ index 2c6757d..99723d6 100644
                <Tooltip>
                  <TooltipTrigger asChild>
                    <span className="inline-flex h-8 w-8">
-@@ -3692,6 +3690,7 @@ export function Chat({
+@@ -3692,6 +3695,7 @@ export function Chat({
                        setMessageNavigationAnchor(messageNavigationId, node)
                      }
                      data-message-navigation-id={messageNavigationId}
@@ -129,7 +177,7 @@ index 2c6757d..99723d6 100644
                      className={cn(
                        'group flex gap-3',
                        message.type === 'human'
-@@ -3715,7 +3714,7 @@ export function Chat({
+@@ -3715,7 +3719,7 @@ export function Chat({
                          className={cn(
                            'max-w-full rounded-2xl',
                            message.type === 'human'
@@ -138,7 +186,7 @@ index 2c6757d..99723d6 100644
                              : message.type === 'system'
                                ? 'bg-muted text-muted-foreground text-xs px-4 py-2.5'
                                : 'py-1 text-chat-foreground', // AI messages: use chat-specific foreground color
-@@ -3770,15 +3769,7 @@ export function Chat({
+@@ -3770,15 +3774,7 @@ export function Chat({
                                humanAttachments.length > 0 && (
                                  <div className="flex flex-wrap gap-1.5 mb-2">
                                    {humanAttachments.map((file, fileIndex) => (
@@ -155,16 +203,18 @@ index 2c6757d..99723d6 100644
                                    ))}
                                  </div>
                                )}
-@@ -3800,7 +3791,7 @@ export function Chat({
+@@ -3800,8 +3796,8 @@ export function Chat({
                          )}
                        </div>
                        {/* Message actions - hidden during streaming, retry only for last AI message */}
 -                      <MessageActions
-+                      {!(Array.isArray(message.content) && message.content.some((part: any) => part.data?.type === "FTProcess")) && <MessageActions
-                         content={messageContent}
+-                        content={messageContent}
++                      {turnCopies.has(index) && <MessageActions
++                        content={turnCopies.get(index)!}
                          isAssistant={isAssistantMessage}
                          isStreaming={isStreamingMessage}
-@@ -3811,7 +3802,7 @@ export function Chat({
+                         onRetry={
+@@ -3811,7 +3807,7 @@ export function Chat({
                              ? () => handleRetry(index)
                              : undefined
                          }
@@ -173,7 +223,7 @@ index 2c6757d..99723d6 100644
                      </div>
                    </div>
                  );
-@@ -4250,7 +4241,7 @@ export function Chat({
+@@ -4250,7 +4246,7 @@ export function Chat({
              />
            )}
 
@@ -631,10 +681,36 @@ index bbc6a97..05a87a2 100644
      </Sheet>
    );
 diff --git a/packages/chatkit-ui/src/components/thread/markdown-text.tsx b/packages/chatkit-ui/src/components/thread/markdown-text.tsx
-index 2b1bb30..6f3bf46 100644
+index 2b1bb30..1c1ff27 100644
 --- a/packages/chatkit-ui/src/components/thread/markdown-text.tsx
 +++ b/packages/chatkit-ui/src/components/thread/markdown-text.tsx
-@@ -611,7 +611,7 @@ const defaultComponents: any = {
+@@ -292,6 +292,16 @@ const splitProposedPlanSegments = (markdown: string): MarkdownSegment[] => {
+   return segments;
+ };
+
++// Normalize model LaTeX delimiters before Markdown consumes their escapes.
++// Code spans/fences and existing dollar math remain literal.
++export function normalizeMathDelimiters(text: string): string {
++  const protectedOrMath = /(`{3,}[^\n]*\n[\s\S]*?(?:\n`{3,}(?=\s|$)|$)|~{3,}[^\n]*\n[\s\S]*?(?:\n~{3,}(?=\s|$)|$)|(`+)[\s\S]*?\2|\$\$[\s\S]*?\$\$|\$[^\n$]+\$)|\\\[([\s\S]*?)\\\]|\\\(([^\n]*?)\\\)/g;
++  return text.replace(protectedOrMath, (match, protectedText, _ticks, display, inline) => {
++    if (protectedText) return match;
++    return display !== undefined ? `\n\n$$\n${display.trim()}\n$$\n\n` : `$${inline}$`;
++  });
++}
++
+ function MarkdownContent({ children }: { children: string }) {
+   return (
+     <ReactMarkdown
+@@ -300,7 +310,7 @@ function MarkdownContent({ children }: { children: string }) {
+       urlTransform={markdownUrlTransform}
+       components={defaultComponents}
+     >
+-      {children}
++      {normalizeMathDelimiters(children)}
+     </ReactMarkdown>
+   );
+ }
+@@ -611,7 +621,7 @@ const defaultComponents: any = {
      ) : (
        <div
          className={cn(
@@ -740,6 +816,97 @@ index 0e5a3cd..a812dab 100644
    });
 
    return (
+diff --git a/packages/chatkit-ui/src/components/thread/turn-copy.test.ts b/packages/chatkit-ui/src/components/thread/turn-copy.test.ts
+new file mode 100644
+index 0000000..718be84
+--- /dev/null
++++ b/packages/chatkit-ui/src/components/thread/turn-copy.test.ts
+@@ -0,0 +1,33 @@
++import {describe, it, expect} from 'vitest';
++import {buildTurnCopies} from './turn-copy';
++
++describe('whole-turn copy', () => {
++  const history = [
++    {type: 'human', executionId: 'one', content: '问题'},
++    {type: 'ai', executionId: 'one', content: '正在检查'},
++    {type: 'human', executionId: 'one', content: '追加要求'},
++    {type: 'ai', executionId: 'one', content: '最终回答'},
++    {type: 'human', executionId: 'two', content: '下一问'},
++    {type: 'ai', executionId: 'two', content: '下一答'},
++  ];
++  it('puts one action at each turn end and includes questions and steer with roles', () => {
++    const copies = buildTurnCopies(history, false, 'self');
++    expect([...copies.keys()]).toEqual([3, 5]);
++    expect(copies.get(3)).toBe('提问者：\n问题\n\n回答者（self）：\n正在检查\n\n提问者：\n追加要求\n\n回答者（self）：\n最终回答');
++    expect(copies.get(3)).not.toContain('下一问');
++  });
++  it('does not expose a footer inside an ongoing turn', () => {
++    expect([...buildTurnCopies(history, true).keys()]).toEqual([3]);
++    expect(buildTurnCopies(history.slice(0, 3), false).size).toBe(0);
++  });
++  it('keeps legacy/optimistic questions separate and includes attachment names', () => {
++    const copies = buildTurnCopies([
++      {type: 'human', content: '问题一'}, {type: 'ai', content: '回答一'},
++      {type: 'human', content: '', fileAssets: [{originalName: '附件.png'}]},
++      {type: 'ai', executionId: 'new', content: [{type: 'text', text: '回答二'}]},
++    ], false);
++    expect([...copies.keys()]).toEqual([1, 3]);
++    expect(copies.get(3)).toContain('提问者：\n附件：附件.png');
++    expect(copies.get(3)).not.toContain('问题一');
++  });
++});
+diff --git a/packages/chatkit-ui/src/components/thread/turn-copy.ts b/packages/chatkit-ui/src/components/thread/turn-copy.ts
+new file mode 100644
+index 0000000..6619804
+--- /dev/null
++++ b/packages/chatkit-ui/src/components/thread/turn-copy.ts
+@@ -0,0 +1,46 @@
++type CopyMessage = {
++  type?: string;
++  role?: string;
++  executionId?: string | null;
++  content?: unknown;
++  fileAssets?: { originalName?: string; workspacePath?: string }[];
++};
++
++function textContent(content: unknown): string {
++  if (typeof content === 'string') return content;
++  if (!Array.isArray(content)) return '';
++  return content.map(part => typeof part === 'string' ? part
++    : part?.type === 'text' && typeof part.text === 'string' ? part.text : '').join('\n');
++}
++
++// executionId is shared by the initial question, steer messages and replies.
++// Missing IDs are tolerated for optimistic/legacy messages without joining
++// independent human questions. Tool cards keep their own local code actions.
++export function buildTurnCopies(messages: CopyMessage[], running: boolean, assistant = '智能体') {
++  const result = new Map<number, string>();
++  let turn: {id: string | null; entries: string[]; tail: number; answered: boolean} | null = null;
++  const finish = () => {
++    if (turn?.answered && turn.tail >= 0) result.set(turn.tail, turn.entries.join('\n\n'));
++  };
++  messages.forEach((message, index) => {
++    const role = message.type || message.role;
++    const human = role === 'human' || role === 'user';
++    const ai = role === 'ai' || role === 'assistant';
++    const id = message.executionId || null;
++    if (!turn || (id && turn.id && id !== turn.id) || (human && (!id || !turn.id))) {
++      finish();
++      turn = {id, entries: [], tail: -1, answered: false};
++    }
++    if (id && !turn.id) turn.id = id;
++    if (!human && !ai) return;
++    const text = textContent(message.content);
++    const files = (message.fileAssets || []).map(file => file.originalName || file.workspacePath).filter(Boolean);
++    const body = [text, files.length ? `附件：${files.join('、')}` : ''].filter(Boolean).join('\n');
++    if (!body) return;
++    turn.entries.push(`${human ? '提问者' : `回答者（${assistant}）`}：\n${body}`);
++    turn.tail = ai ? index : -1;
++    if (ai) turn.answered = true;
++  });
++  if (!running) finish();
++  return result;
++}
 diff --git a/packages/chatkit-ui/src/i18n/locales/en-US.json b/packages/chatkit-ui/src/i18n/locales/en-US.json
 index bd5fb19..d7a8671 100644
 --- a/packages/chatkit-ui/src/i18n/locales/en-US.json
@@ -866,33 +1033,3 @@ index 63a8e2e..d935cd0 100644
        consumedInitialThreadRef.current = requestedInitialThread;
        return;
      }
-diff --git a/packages/chatkit-ui/src/components/thread/markdown-text.tsx b/packages/chatkit-ui/src/components/thread/markdown-text.tsx
-index 2b1bb30..cfcfa05 100644
---- a/packages/chatkit-ui/src/components/thread/markdown-text.tsx
-+++ b/packages/chatkit-ui/src/components/thread/markdown-text.tsx
-@@ -292,6 +292,16 @@ const splitProposedPlanSegments = (markdown: string): MarkdownSegment[] => {
-   return segments;
- };
-
-+// Normalize model LaTeX delimiters before Markdown consumes their escapes.
-+// Code spans/fences and existing dollar math remain literal.
-+export function normalizeMathDelimiters(text: string): string {
-+  const protectedOrMath = /(`{3,}[^\n]*\n[\s\S]*?(?:\n`{3,}(?=\s|$)|$)|~{3,}[^\n]*\n[\s\S]*?(?:\n~{3,}(?=\s|$)|$)|(`+)[\s\S]*?\2|\$\$[\s\S]*?\$\$|\$[^\n$]+\$)|\\\[([\s\S]*?)\\\]|\\\(([^\n]*?)\\\)/g;
-+  return text.replace(protectedOrMath, (match, protectedText, _ticks, display, inline) => {
-+    if (protectedText) return match;
-+    return display !== undefined ? `\n\n$$\n${display.trim()}\n$$\n\n` : `$${inline}$`;
-+  });
-+}
-+
- function MarkdownContent({ children }: { children: string }) {
-   return (
-     <ReactMarkdown
-@@ -300,7 +310,7 @@ function MarkdownContent({ children }: { children: string }) {
-       urlTransform={markdownUrlTransform}
-       components={defaultComponents}
-     >
--      {children}
-+      {normalizeMathDelimiters(children)}
-     </ReactMarkdown>
-   );
- }
