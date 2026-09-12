@@ -86,15 +86,9 @@
       return;
     }
     if (/^https?:\/\//i.test(target)) {
-      if (context.nativeReference) {
-        chip.href = "#";
-        chip.addEventListener("click", event => {
-          event.preventDefault();
-          context?.openReference?.(target, label);
-        });
-      } else {
-        chip.href = target; chip.target = "_blank"; chip.rel = "noopener noreferrer";
-      }
+      // Web URLs are browser navigation, not FactorTester object references.
+      // Keep the real href even when a WebKit object-reference bridge exists.
+      chip.href = target; chip.target = "_blank"; chip.rel = "noopener noreferrer";
       parent.append(chip);
       return;
     }
