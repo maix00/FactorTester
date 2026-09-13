@@ -112,6 +112,7 @@ def begin_batch_submission(
     diagnostics: list[dict[str, Any]] = []
     try:
         current_kinds = _current_component_kinds(scope, operations)
+        report_components = _planned_report_components(scope, operations)
     except (OSError, ValueError) as error:
         reject_mutation(scope=scope, submission=submission, error=error,
                         as_json=as_json)
@@ -142,6 +143,7 @@ def begin_batch_submission(
                 allow_historical_entry_requirement=(
                     historical_review is not None
                 ),
+                report_components=report_components,
             )
             value["bindings"] = generated
             diagnostics.extend(issues)
@@ -187,3 +189,14 @@ def _current_component_kinds(
         str(item["component_id"]): str(item["kind"])
         for item in snapshot["components"]
     }
+
+
+def _planned_report_components(scope: Any, operations: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Validate internal links against the complete batch, including forward references."""
+    snapshot = load_snapshot(package_root=scope.package_root, branch_id=scope.branch_id)
+    nodes = {item['component_id']: dict(item) for item in snapshot['components']}
+    for operation in operations:
+        node_id = operation.get('component_id')
+        if operation.get('op') in {'add', 'replace'} and node_id:
+            nodes[node_id] = {**nodes.get(node_id, {}), **operation}
+    return nodes
