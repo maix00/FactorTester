@@ -126,7 +126,14 @@ class FederationAnnouncer:
 
     def run_once(self) -> None:
         """Renew the bootstrap and every directly discovered node once."""
-        payload = self.payload_factory()
+        try:
+            payload = self.payload_factory()
+        except (OSError, ValueError, TypeError) as exc:
+            # LAN snapshots expire during sleep/network changes. Skip this
+            # renewal, never advertise stale addresses, and let the scheduler
+            # retry after its normal interval rather than losing the thread.
+            print(f"[federation] local registration unavailable: {exc}", flush=True)
+            return
         try:
             self._post(self.bootstrap_url, payload)
         except (OSError, URLError, HTTPError, ValueError, TypeError) as exc:
