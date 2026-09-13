@@ -521,6 +521,20 @@ class ResearchCatalog(ResearchBranchesMixin):
             and self._report_access(row, viewer)["can_download"]
         )
 
+    def can_read_authoring_publication(self, record: dict, viewer: str | None) -> bool:
+        """Editable source is restricted to active collaborators, not public readers."""
+        if not viewer or not self.can_read_publication(record, viewer):
+            return False
+        row = self._report_row(str(record["report_id"]))
+        if str(row["owner_ref"]) == viewer:
+            return True
+        with connect_sqlite(self.db_path, readonly=True) as conn:
+            return conn.execute(
+                """SELECT 1 FROM research_catalog_memberships WHERE research_id=?
+                   AND principal_ref=? AND status='active' AND role IN ('owner','editor')""",
+                (str(row["research_id"]), viewer),
+            ).fetchone() is not None
+
     def authorize_server_report_read(
         self, *, owner: str, server_ref: str, viewer: str,
     ) -> dict[str, Any]:

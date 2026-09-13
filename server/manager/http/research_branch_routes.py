@@ -42,6 +42,13 @@ class ResearchBranchRoutesMixin:
                     publication.get('branch_ref')) != (report_id, actor, data.get('profile_ref'), branch_id):
                     raise PermissionError('published object does not belong to the reserved report branch Profile')
                 index = research.index(publication_id, actor)
+                if index.get('authoring_bundle'):
+                    from tools.cli.release.research_reporting.authoring.tree_bundle import validate_report_bundle
+                    bundle = index['authoring_bundle']
+                    raw, _, _ = research.local_resource(publication_id, bundle['resource_id'], actor)
+                    validate_report_bundle(payload=raw, expected_sha256=bundle['content_hash'],
+                                           report_id=report_id, source_generation=index.get('generation'),
+                                           source_root_ref=bundle['root_ref'])
             except PermissionError:
                 raise
             except (ConnectionError, OSError) as error:

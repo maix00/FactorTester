@@ -132,6 +132,8 @@ def projection_index(projection: dict[str, Any]) -> dict[str, Any]:
         "generation": projection.get("generation", 0),
         "projection_hash": projection.get("projection_hash", ""),
         "chapters": chapters,
+        **({"authoring_bundle": projection["authoring_bundle"]}
+           if projection.get("authoring_bundle") else {}),
     }
 
 

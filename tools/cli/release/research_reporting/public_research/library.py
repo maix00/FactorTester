@@ -22,8 +22,9 @@ VISIBILITIES = {"private", "superiors", "authorized", "public"}
 class PublicResearchLibrary:
     """Persist uploaded projections without resolving the owner's local files."""
 
-    def __init__(self, root: Path, *, storage_server_id: str = "", read_authorizer=None) -> None:
+    def __init__(self, root: Path, *, storage_server_id: str = "", read_authorizer=None, authoring_authorizer=None) -> None:
         self.read_authorizer = read_authorizer
+        self.authoring_authorizer = authoring_authorizer
         self.root = root.resolve()
         self.registry_path = self.root / "publications.json"
         self.mirror_root = self.root / "mirrors"
@@ -33,6 +34,15 @@ class PublicResearchLibrary:
         return _can_read(record, viewer_ref) or bool(
             self.read_authorizer and self.read_authorizer(record, viewer_ref)
         )
+
+    def require_resource_access(self, record, metadata, viewer_ref):
+        if metadata.get("purpose") != "report_authoring":
+            return
+        if viewer_ref and (viewer_ref == record.get("owner_ref") or (
+            self.authoring_authorizer and self.authoring_authorizer(record, viewer_ref)
+        )):
+            return
+        raise PermissionError("editable report source requires active research membership")
 
     def sync(self, payload: dict[str, Any]) -> dict[str, Any]:
         report_id = _required(payload, "report_id")
@@ -77,6 +87,10 @@ class PublicResearchLibrary:
                 record["profile_ref"] = profile_ref
             if self.storage_server_id:
                 record["storage_server_id"] = self.storage_server_id
+            if record.get("authoring_snapshot") and record.get("projection_hash") != projection.get("projection_hash"):
+                raise ValueError("editable report publication is immutable; publish a new revision")
+            if projection.get("authoring_bundle"):
+                record["authoring_snapshot"] = True
             if not record.get("auto_sync", True):
                 return {"status": "disabled", "report_id": report_id}
             current_generation = int(record.get("generation") or -1)
@@ -387,6 +401,7 @@ class PublicResearchLibrary:
                          if item.get("resource_id") == resource_id), None)
         if metadata is None:
             raise ValueError("research local resource was not found")
+        self.require_resource_access(record, metadata, viewer_ref)
         path = self._local_resource_path(publication_id, resource_id)
         if not path.is_file():
             raise ValueError("research local resource is unavailable")

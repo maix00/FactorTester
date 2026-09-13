@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from pathlib import Path
 from typing import Any
@@ -225,7 +226,10 @@ class PublicResearchClient:
         show_profile: bool = False,
         visibility: str = "public",
         authorized_users: tuple[str, ...] = (),
+        include_authoring: bool = False,
     ) -> dict[str, Any]:
+        if include_authoring and visibility != "private":
+            raise ValueError("Editable collaboration bundles require a private publication")
         scope = resolve_branch_report_scope(
             client_root=self.client_root,
             profile_id=profile_id,
@@ -241,6 +245,25 @@ class PublicResearchClient:
             projection, object_uploads = detach_object_bytes(
                 build_upload_projection(snapshot),
             )
+            if include_authoring:
+                from ..authoring.tree_bundle import bundle_from_snapshot
+                raw = bundle_from_snapshot(snapshot, package_root=scope.package_root, branch_id=branch_id)
+                digest = hashlib.sha256(raw).hexdigest()
+                resource_id = digest[:24]
+                descriptor = {"resource_id": resource_id, "filename": "report-authoring.zip",
+                              "media_type": "application/zip", "content_hash": digest,
+                              "size_bytes": len(raw), "available": True,
+                              "purpose": "report_authoring"}
+                projection["local_resources"].append(descriptor)
+                projection["authoring_bundle"] = {
+                    **descriptor, "generation": head["generation"], "root_ref": head["root_ref"],
+                }
+                object_uploads = (*object_uploads, ResearchObjectUpload(
+                    object_kind="research_local_resource", object_id=resource_id,
+                    filename=descriptor["filename"], content_type="application/zip",
+                    content_hash=digest, content=raw,
+                ))
+                projection["projection_hash"] = projection_hash(projection)
         title = str(public_title or "").strip()
         if title:
             projection = {**projection, "title": title}
@@ -255,7 +278,8 @@ class PublicResearchClient:
             owner_ref=owner_ref,
             profile_ref=profile_id,
             report_id=str(projection["report_id"]),
-            publication_key=f"{projection['report_id']}:branch:{branch_id}",
+            publication_key=(f"{projection['report_id']}:branch:{branch_id}"
+                             + (f":revision:{projection['projection_hash']}" if include_authoring else "")),
             branch_ref=branch_id,
             visibility=visibility,
             authorized_users=authorized_users,
