@@ -205,3 +205,24 @@ def test_local_report_migration_inventory_collapses_one_work_package(
     applied = client.local_report_migration_records(apply_identities=True)
     assert {item["report_id"] for item in applied} == {"report-sgccs-review"}
     assert {item["work_package_id"] for item in applied} == {"sgccs-review"}
+
+
+def test_local_branch_publication_status_uses_complete_author_identity(tmp_path, monkeypatch):
+    store = profile(tmp_path)
+    value = store.load("maxa")
+    value["session_binding"] = {"principal_ref": "GTHT@MaxA@1", "session_ref": "session-binding:test"}
+    store.save(value)
+    package = tmp_path / "profile-root" / "research" / "sgccs-review"
+    for branch in ("branch-sgccs", "alternative"):
+        initialize_tree(package_root=package, branch_id=branch, report_id="same-report",
+                        title="Shared report")
+    client = PublicResearchClient(tmp_path, manager_url="http://manager.invalid")
+    own = {"owner_ref": "GTHT@MaxA@1", "profile_ref": "maxa", "report_id": "same-report",
+           "branch_ref": "branch-sgccs", "publication_id": "own-publication", "visibility": "authorized"}
+    other = {**own, "owner_ref": "GTHT@Other@2", "publication_id": "other-publication"}
+    monkeypatch.setattr(client, "list_publications", lambda: [own, other])
+    values = {item["branch_id"]: item for item in client.list_local_reports()}
+    assert values["branch-sgccs"]["publication_id"] == "own-publication"
+    assert values["branch-sgccs"]["sync_status"] == "synced"
+    assert values["alternative"]["publication_id"] is None
+    assert values["alternative"]["sync_status"] == "local"

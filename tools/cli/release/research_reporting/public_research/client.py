@@ -21,7 +21,7 @@ from tools.cli.release.research_reporting.authoring.tree_paths import report_tre
 from tools.cli.release.research_reporting.authoring.tree_projection import (
     project_snapshot,
 )
-from tools.cli.release.research_reporting.authoring.tree_store import load_head
+from tools.cli.release.research_reporting.authoring.tree_store import load_head, tree_lock
 from tools.cli.release.research_reporting.public_research.object_uploads import (
     ResearchObjectUpload,
     detach_object_bytes,
@@ -96,13 +96,16 @@ class PublicResearchClient:
             return self.outbox.load_publication_cache()
 
     def list_local_reports(self) -> list[dict[str, Any]]:
+        def identity(item):
+            return tuple(str(item.get(key) or "") for key in
+                         ("owner_ref", "profile_ref", "report_id", "branch_ref"))
         public_by_report = {
-            str(item.get("report_id")): item
+            identity(item): item
             for item in self.list_publications()
             if item.get("report_id")
         }
         pending_by_report = {
-            str(item.get("report_id")): item
+            identity(item): item
             for item in self.outbox.pending()
             if item.get("kind") == "publish" and item.get("report_id")
         }
@@ -127,8 +130,10 @@ class PublicResearchClient:
                     except (OSError, ValueError):
                         continue
                     report_id = str(head["report_id"])
-                    publication = public_by_report.get(report_id)
-                    pending = pending_by_report.get(report_id)
+                    owner_ref = str((profile.get("session_binding") or {}).get("principal_ref") or "")
+                    key = (owner_ref, profile_id, report_id, branch_root.name)
+                    publication = public_by_report.get(key)
+                    pending = pending_by_report.get(key)
                     visibility = (
                         publication.get("visibility", "private")
                         if publication else "private"
@@ -228,11 +233,14 @@ class PublicResearchClient:
             branch_id=branch_id,
         )
         paths = report_tree_paths(scope.package_root, branch_id)
-        head = load_head(paths)
-        snapshot = project_snapshot(paths, head)
-        projection, object_uploads = detach_object_bytes(
-            build_upload_projection(snapshot),
-        )
+        # Freeze the tree and read resource bytes under the authoring lock;
+        # network transfer happens only after releasing it.
+        with tree_lock(paths):
+            head = load_head(paths)
+            snapshot = project_snapshot(paths, head)
+            projection, object_uploads = detach_object_bytes(
+                build_upload_projection(snapshot),
+            )
         title = str(public_title or "").strip()
         if title:
             projection = {**projection, "title": title}
