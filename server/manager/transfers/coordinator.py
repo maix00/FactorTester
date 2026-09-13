@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
+import hashlib
+import json
 
 from server.manager.storage.transfers import (
     TransferAttemptStore,
@@ -64,6 +67,15 @@ class TransferCoordinator:
         now: float,
         ticket_ttl: float = 15 * 60,
     ) -> TransferAccess:
+        # Requests are mirrored into the source Manager's store. The same
+        # object/key may be read by distinct Managers or principals there.
+        key = str(request.idempotency_key or "").strip()
+        if not key:
+            raise ValueError("idempotency_key is required")
+        scope = json.dumps([self.manager_id, request.principal.strip(), key],
+                           ensure_ascii=False, separators=(",", ":"))
+        request = replace(request, idempotency_key="download-v2:" +
+                          hashlib.sha256(scope.encode()).hexdigest())
         return self._prepare(
             request,
             operation=TransferOperation.DOWNLOAD,
