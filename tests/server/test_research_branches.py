@@ -150,6 +150,8 @@ def test_http_branch_projection_preserves_registered_head_and_profile_identity()
             return SimpleNamespace(list_visible=lambda viewer: [
                 {'report_id': 'report', 'owner_ref': 'alice', 'profile_ref': 'self',
                  'branch_ref': 'main', 'publication_id': 'old-snapshot'},
+                {'report_id': 'report', 'owner_ref': 'alice', 'profile_ref': 'self',
+                 'branch_ref': '', 'publication_id': 'initial-default-snapshot'},
                 {'report_id': 'report', 'owner_ref': 'alice', 'profile_ref': 'other',
                  'branch_ref': 'main', 'publication_id': 'other-profile'},
             ])

@@ -220,8 +220,8 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 if str(item.get("owner_ref") or "") != str(value.get("owner_ref") or ""):
                     continue
                 projected.append({
-                    "branch_ref": str(item.get("branch_ref") or ""),
-                    "title": str(item.get("branch_ref") or item.get("title") or ""),
+                    "branch_ref": str(item.get("branch_ref") or "main"),
+                    "title": str(item.get("branch_ref") or "main"),
                     "profile_ref": str(item.get("profile_ref") or value.get("profile_ref") or ""),
                     "principal_ref": str(item.get("owner_ref") or ""),
                     "updated_at": item.get("updated_at") or 0,
