@@ -223,3 +223,21 @@ def test_upload_retry_accepts_completed_destination_as_zero_byte_attempt(
         consume=True,
         now=103.0,
     )
+
+
+def test_download_keys_are_scoped_to_requesting_manager_and_principal(tmp_path):
+    from dataclasses import replace
+    coordinator = _coordinator(tmp_path)
+    endpoints = {'node-a': _node('node-a', 1), 'node-b': _node('node-b', 2),
+                 'node-c': _node('node-c', 3)}
+    first = coordinator.prepare_download(_download(), endpoints=endpoints, now=100)
+    retry = coordinator.prepare_download(_download(), endpoints=endpoints, now=101)
+    assert first.transfer_id == retry.transfer_id
+    other_user = coordinator.prepare_download(replace(_download(), principal='bob'),
+                                               endpoints=endpoints, now=102)
+    assert other_user.transfer_id != first.transfer_id
+    # A receiving Manager already holds the first transfer's replicated row.
+    # Its own request for the same bytes must not collide with that row.
+    coordinator.manager_id = 'node-c'
+    other_manager = coordinator.prepare_download(_download(), endpoints=endpoints, now=103)
+    assert other_manager.transfer_id not in {first.transfer_id, other_user.transfer_id}

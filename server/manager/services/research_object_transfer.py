@@ -8,6 +8,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from server.manager.objects import research_object_id
+from server.manager.services.data_plane_client import loopback_client_access
 
 
 class ResearchObjectTransfer:
@@ -65,13 +66,14 @@ class ResearchObjectTransfer:
                 f"research-object:{object_kind}:{object_id}:{expected_sha256}"
             ),
         )
+        local_url, tls_context = loopback_client_access(access.get("url"))
         request = Request(
-            str(access.get("url") or ""),
+            local_url,
             headers={"Authorization": f"Bearer {access.get('bearer') or ''}"},
             method="GET",
         )
         try:
-            with urlopen(request, timeout=120.0) as response_stream:
+            with urlopen(request, timeout=120.0, context=tls_context) as response_stream:
                 raw = response_stream.read(expected_size + 1)
         except (HTTPError, URLError, OSError, TimeoutError) as exc:
             raise ConnectionError(
