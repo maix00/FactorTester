@@ -20,10 +20,16 @@ class SourceLinkIssue:
     example: str
 
 
-def source_link_issues(value: str, *, package_root: Path) -> list[SourceLinkIssue]:
+def source_link_issues(value: str, *, package_root: Path, branch_root: Path | None = None) -> list[SourceLinkIssue]:
     """Check only relative files; web and typed links have separate authorities."""
     issues: list[SourceLinkIssue] = []
     root = package_root.resolve()
+    roots = [root]
+    if branch_root is not None:
+        branch = branch_root.resolve()
+        if not branch.is_relative_to(root):
+            raise ValueError('report branch escapes Work Package')
+        roots.insert(0, branch)
     for match in _LINK.finditer(value):
         target = match.group(1)
         if urlsplit(target).scheme or target.startswith("#"):
@@ -35,8 +41,8 @@ def source_link_issues(value: str, *, package_root: Path) -> list[SourceLinkIssu
                 "研究文件链接必须位于当前 Work Package 内",
             ))
             continue
-        resolved = (root / PurePosixPath(path)).resolve()
-        if not resolved.is_relative_to(root) or not resolved.is_file():
+        resolved = [(base / PurePosixPath(path)).resolve() for base in roots]
+        if not any(candidate.is_relative_to(root) and candidate.is_file() for candidate in resolved):
             issues.append(_issue(
                 match.start(1), "report.markdown.file.missing",
                 "研究文件链接目标不存在或不是文件",

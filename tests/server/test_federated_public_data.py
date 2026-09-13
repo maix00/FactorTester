@@ -158,3 +158,23 @@ def test_report_branches_merge_transports_but_not_other_owners():
     result = ResearchCatalogRoutesMixin._research_catalog_publication_branches(handler,[report],owner)
     assert [b["branch_ref"] for b in result[0]["branches"]] == ["main", "experiment"]
     assert result[0]["branches"][0]["publication_id"] == "pub-main"
+
+
+def test_missing_report_route_activates_only_exact_discovered_source():
+    route = ServiceRoute(server_id='remote-main', role='manager', branch='main', revision='one', port=7998)
+    registry = _Registry(route)
+    registry.routes = lambda **kwargs: []
+    service = _service(registry, _Gateway())
+    service._publication_sources['report'] = 'remote-main'
+    service.list_visible = lambda viewer: []
+    calls = []
+    def activate(source):
+        calls.append(source)
+        registry.routes = lambda **kwargs: [route]
+    service.activate_source = activate
+    assert service._publication_route('report', 'alice') == route
+    assert calls == ['remote-main']
+    assert service._publication_route('report', 'alice') == route
+    assert calls == ['remote-main']
+    assert service._publication_route('unknown-report', 'alice') is None
+    assert calls == ['remote-main']

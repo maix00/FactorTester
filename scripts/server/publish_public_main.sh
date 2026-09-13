@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# The caller supplies this only after explicit user release authorization.
+[[ "${FACTORTESTER_PUBLISH_AUTHORIZED:-0}" == "1" ]] || {
+  echo "explicit release authorization is required (FACTORTESTER_PUBLISH_AUTHORIZED=1)" >&2
+  exit 2
+}
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 remote="${FACTORTESTER_REMOTE:-launch-advisor}"
 remote_git_root="${FACTORTESTER_REMOTE_GIT_ROOT:-/opt/factortester}"
@@ -51,6 +57,10 @@ done
 }
 
 git -C "$repo_root" fetch origin
+[[ "$(git -C "$repo_root" rev-parse feat)" == "$(git -C "$repo_root" rev-parse origin/feat)" ]] || {
+  echo "feat must equal origin/feat before publication" >&2
+  exit 2
+}
 for baseline in origin/main origin/feat; do
   git -C "$repo_root" merge-base --is-ancestor "$baseline" main || {
     echo "main must include $baseline before publication" >&2

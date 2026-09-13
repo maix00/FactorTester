@@ -51,7 +51,9 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
         account_domain_sync: object | None = None,
         object_transfer_provider: object | None = None,
         cache_seconds: float = DEFAULT_CACHE_SECONDS,
+        activate_source=None,
     ) -> None:
+        self.activate_source = activate_source
         self.server_id = str(server_id or "").strip()
         self.registry = registry
         self.gateway = gateway
@@ -280,6 +282,14 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
             self.list_visible(viewer_ref)
             with self._lock:
                 source_id = self._publication_sources.get(publication_id)
+            route = next((item for item in self._peer_routes() if item.server_id == source_id), None)
+        if route is None and source_id and source_id != self.server_id and self.activate_source:
+            # Content reads may activate the exact trusted, discovered provider.
+            # A list must never establish direct routes or invent peer endpoints.
+            try:
+                self.activate_source(source_id)
+            except (KeyError, ConnectionError, OSError, RuntimeError, ValueError) as exc:
+                raise ConnectionError("research source route could not be established") from exc
             route = next((item for item in self._peer_routes() if item.server_id == source_id), None)
         return route
 

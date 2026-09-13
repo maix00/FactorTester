@@ -104,11 +104,12 @@ class ResearchClientMixin(ClientMixinBase):
         return dict(data.get("report") or {})
 
     def remove_research_member(
-        self, research_id: str, profile_ref: str,
+        self, research_id: str, profile_ref: str, *, principal_ref: str | None = None,
     ) -> dict[str, Any]:
         target = quote(str(profile_ref or "").strip(), safe="")
         data = self._expect_success(self.session.delete(
             self._research_url(research_id, f"/members/{target}"),
+            **({"query": {"principal_ref": principal_ref}} if principal_ref else {}),
         ))
         return dict(data.get("member") or {})
 
@@ -169,6 +170,38 @@ class ResearchClientMixin(ClientMixinBase):
         """
         return dict(self._expect_success(self.session.get(
             self._research_url(research_id, "/collaboration-branches"),
+        )) or {})
+
+    @staticmethod
+    def _report_branches_url(report_id: str) -> str:
+        return '/api/research/reports/' + quote(report_id, safe='') + '/branches'
+
+    def report_branch_status(self, report_id: str) -> dict[str, Any]:
+        return self._expect_success(self.session.get(self._report_branches_url(report_id)))
+
+    def reserve_report_branch(self, report_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._expect_success(self.session.post(self._report_branches_url(report_id), payload))
+
+    def publish_report_branch(self, report_id: str, branch_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        path = self._report_branches_url(report_id) + '/' + quote(branch_id, safe='') + '/publish'
+        return self._expect_success(self.session.post(path, payload))
+
+    def read_publication_branch(
+        self, publication_id: str, *, chapter_id: str = "",
+    ) -> dict[str, Any]:
+        """Read an authorized branch through the existing federated adapter.
+
+        The publication may originate on a client or any server. Do not infer
+        a local Profile path from its identity or collapse offline into absent.
+        """
+        import re
+        if not re.fullmatch(r"[A-Za-z0-9_-]{20,64}", publication_id):
+            raise ValueError("publication_id is invalid")
+        if chapter_id and not re.fullmatch(r"[A-Za-z0-9_.:-]{1,256}", chapter_id):
+            raise ValueError("chapter_id is invalid")
+        suffix = f"chapters/{chapter_id}" if chapter_id else "index"
+        return dict(self._expect_success(self.session.get(
+            f"/api/public-research/{publication_id}/{suffix}",
         )) or {})
 
     def read_server_branch(

@@ -7,9 +7,10 @@ from typing import Any
 from urllib.parse import parse_qs, unquote
 
 from server.manager.http.responses import json_response
+from .research_branch_routes import ResearchBranchRoutesMixin
 
 
-class ResearchCatalogRoutesMixin:
+class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
     """Expose the Research catalog without duplicating report/Evidence stores."""
 
     def _research_catalog_service(self):
@@ -58,6 +59,8 @@ class ResearchCatalogRoutesMixin:
         service = self._research_catalog_service()
         query = parse_qs(parsed.query, keep_blank_values=True)
         try:
+            if self._get_report_branch_route(parsed, viewer):
+                return True
             if parsed.path == "/api/research":
                 scope = str(query.get("scope", ["all"])[0] or "all")
                 subordinate_refs = self._research_catalog_subordinate_refs(viewer)
@@ -139,16 +142,10 @@ class ResearchCatalogRoutesMixin:
                         ),
                     }
                 elif child == "collaboration-branches":
-                    # Group-A (owner/editor) branches for every report in this
-                    # research.  The catalog's ``_report_branches`` already
-                    # projects branch choices from migrated source records
-                    # (client / server_agent / publication), which includes
-                    # branches synced from other servers and clients.  We do
-                    # NOT re-scan the local workspaces here: a collaboration
-                    # branch is visible through the shared catalog registry,
-                    # even when its bytes live on another server or client.
-                    reports = service.list_reports(
-                        research_id, viewer=viewer,
+                    # Use the same readable metadata projection as the report
+                    # page; no local workspace scan or report-byte download.
+                    reports = self._research_catalog_publication_branches(
+                        service.list_reports(research_id, viewer=viewer), viewer,
                     )
                     seen: set[str] = set()
                     branches: list[dict[str, Any]] = []
@@ -210,6 +207,14 @@ class ResearchCatalogRoutesMixin:
         for original in reports:
             value = dict(original)
             local = [dict(item) for item in value.get("branches") or []]
+            # A registered head is authoritative even when the publication store
+            # also retains older immutable snapshots of this branch.
+            registered = [item for item in local if item.get("branch_id") and item.get("status") == "active"]
+            metadata = {item['publication_id']: item for item in by_report.get(str(value.get('report_id') or ''), [])}
+            for item in registered:
+                publication = metadata.get(item.get('publication_id'), {})
+                if publication.get('owner_ref') == item.get('principal_ref') and publication.get('updated_at'):
+                    item['updated_at'] = publication['updated_at']
             projected = []
             for item in by_report.get(str(value.get("report_id") or ""), []):
                 if str(item.get("owner_ref") or "") != str(value.get("owner_ref") or ""):
@@ -217,7 +222,9 @@ class ResearchCatalogRoutesMixin:
                 projected.append({
                     "branch_ref": str(item.get("branch_ref") or ""),
                     "title": str(item.get("branch_ref") or item.get("title") or ""),
-                    "profile_ref": str(item.get("profile_ref") or ""),
+                    "profile_ref": str(item.get("profile_ref") or value.get("profile_ref") or ""),
+                    "principal_ref": str(item.get("owner_ref") or ""),
+                    "updated_at": item.get("updated_at") or 0,
                     "source_kind": "publication",
                     "source_ref": str(item.get("publication_id") or ""),
                     "publication_id": str(item.get("publication_id") or ""),
@@ -230,13 +237,20 @@ class ResearchCatalogRoutesMixin:
             # are readable across Managers; authoring refs are local-only fallbacks.
             seen = set()
             branches = []
-            for item in [*projected, *local]:
-                key = str(item.get("branch_ref") or item.get("publication_id") or "")
+            for item in [*registered, *projected, *local]:
+                key = (
+                    str(item.get("principal_ref") or value.get("owner_ref") or ""),
+                    str(item.get("profile_ref") or value.get("profile_ref") or ""),
+                    str(item.get("branch_ref") or item.get("publication_id") or ""),
+                )
                 if key in seen:
                     continue
                 seen.add(key)
                 branches.append(item)
             value["branches"] = branches
+            content_times = [item.get("updated_at") for item in branches if item.get("updated_at")]
+            if content_times:
+                value["updated_at"] = max(content_times)
             result.append(value)
         return result
 
@@ -250,6 +264,8 @@ class ResearchCatalogRoutesMixin:
         service = self._research_catalog_service()
         try:
             data = self._research_catalog_body()
+            if self._post_report_branch_route(parsed, actor, data):
+                return True
             if parsed.path == "/api/research":
                 value = service.create_research(
                     owner_ref=actor,
@@ -466,6 +482,7 @@ class ResearchCatalogRoutesMixin:
                 value = self._research_catalog_service().remove_membership(
                     unquote(member_match.group(1)),
                     profile_ref=unquote(member_match.group(2)),
+                    principal_ref=parse_qs(parsed.query).get("principal_ref", [None])[0],
                     actor=actor,
                 )
                 payload = {"member": value}
@@ -576,7 +593,7 @@ class ResearchCatalogRoutesMixin:
     @staticmethod
     def _research_catalog_target(path: str) -> tuple[str, str | None]:
         match = re.fullmatch(
-            r"/api/research/([^/]+)(?:/(members|workspaces|reports|evidence|manifest|share-links))?",
+            r"/api/research/([^/]+)(?:/(members|workspaces|reports|evidence|manifest|share-links|collaboration-branches))?",
             path,
         )
         if not match:

@@ -180,11 +180,13 @@ def register_research_catalog_commands(research: click.Group) -> None:
     @research.command("member-remove")
     @click.argument("research_id")
     @click.option("--profile", "profile_ref", required=True)
+    @click.option("--principal", "principal_ref", default=None)
     @friendly_errors
-    def remove_member(research_id: str, profile_ref: str) -> None:
+    def remove_member(research_id: str, profile_ref: str, principal_ref: str | None) -> None:
         """从 Research 移除一个 Profile，并停用其 Research Workspace。"""
         click.echo(_json(client_from_config().remove_research_member(
             research_id, profile_ref,
+            **({"principal_ref": principal_ref} if principal_ref else {}),
         )))
 
     @research.command("remove")

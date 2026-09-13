@@ -16,9 +16,10 @@ from .payloads import public_payload
 KIND = 'research_catalog'
 TABLES = {
     'research': ('research_catalog_researches', ('research_id',)),
-    'members': ('research_catalog_memberships', ('research_id', 'profile_ref')),
+    'members': ('research_catalog_memberships', ('research_id', 'principal_ref', 'profile_ref')),
     'workspaces': ('research_catalog_workspaces', ('workspace_id',)),
     'reports': ('research_catalog_reports', ('report_id',)),
+    'branches': ('research_catalog_branches', ('report_id', 'branch_id')),
     'evidence_links': ('research_catalog_report_evidence_links', ('link_ref',)),
 }
 
@@ -50,7 +51,7 @@ def publish_research(sync, conn, research_id: str) -> str:
     ).fetchone()
     prior = json.loads(previous['payload_json']) if previous else {}
     payload = public_payload({
-        'schema_version': 1, 'visibility': 'public',
+        'schema_version': 2, 'visibility': 'public',
         'replication_scope': 'trusted_managers',
         'storage_server_id': prior.get('storage_server_id') or sync.manager_id,
         **value,
@@ -89,12 +90,20 @@ def materialize_research(database, envelope: dict) -> None:
                          (identifier, envelope['principal']))
             _record_revision(conn, identifier, revision)
         return
-    if (payload.get('schema_version') != 1 or research.get('research_id') != identifier
+    if (payload.get('schema_version') not in {1, 2} or research.get('research_id') != identifier
             or research.get('owner_ref') != envelope['principal']):
         raise ValueError('invalid research synchronization identity')
+    legacy = payload.get('schema_version') == 1
+    if legacy:
+        payload = {**payload, 'branches': []}
     if any(not isinstance(payload.get(key), list) for key in TABLES if key != 'research'):
         raise ValueError('incomplete research relationship snapshot')
     with connect_sqlite(database) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        if legacy and conn.execute(
+            'SELECT 1 FROM research_catalog_branches WHERE research_id=? LIMIT 1', (identifier,),
+        ).fetchone():
+            raise ValueError('legacy research snapshot cannot replace registered branches')
         # Schema is owned by ResearchCatalog and initialized before sync.
         # An accepted snapshot replaces the relationship projection, including
         # an explicit conflict choice. Otherwise local-only grants survive and
@@ -107,8 +116,8 @@ def materialize_research(database, envelope: dict) -> None:
             if not columns:
                 raise ValueError('research projection schema is unavailable')
             for record in records:
-                if key == 'evidence_links':
-                    if record.get('report_id') not in reports:
+                if key in {'evidence_links', 'branches'}:
+                    if record.get('report_id') not in reports or (key == 'branches' and record.get('research_id') != identifier):
                         raise ValueError('research evidence belongs to another report')
                 elif record.get('research_id') != identifier:
                     raise ValueError('research relationship belongs to another research')
@@ -120,6 +129,9 @@ def materialize_research(database, envelope: dict) -> None:
                 ).fetchone()
                 if existing is not None:
                     identity_fields = ('report_id',) if key == 'evidence_links' else ('research_id',)
+                    if key == 'branches':
+                        identity_fields += ('principal_ref', 'profile_ref', 'workspace_id', 'source_branch_id',
+                                            'source_generation', 'source_revision', 'source_publication_id')
                     if key == 'research':
                         identity_fields += ('owner_ref',)
                     if any(existing[name] != record[name] for name in identity_fields):

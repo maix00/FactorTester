@@ -6,6 +6,8 @@ import click
 
 from .research_report_authoring import register_authoring_commands
 from .research_report_branch import register_branch_commands
+from .research_report_copy import copy_preview
+from .research_report_copy_apply import copy_apply
 from .research_report_export import export_report
 from .research_report_inspection import register_inspection_commands
 from .research_report_publication import publication
@@ -27,5 +29,7 @@ def report() -> None:
 register_authoring_commands(report)
 register_branch_commands(report)
 register_inspection_commands(report)
+report.add_command(copy_preview)
+report.add_command(copy_apply)
 report.add_command(export_report)
 report.add_command(publication)

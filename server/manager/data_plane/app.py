@@ -88,7 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def research_read_authorizer(database: str):
+def research_read_authorizer(database: str, *, authoring: bool = False):
     """The byte process uses local projections only; never opens PostgreSQL."""
     if not database:
         return None
@@ -101,7 +101,8 @@ def research_read_authorizer(database: str):
                 return []
             return [dict(row) for row in conn.execute("SELECT username, parent_username FROM accounts")]
 
-    return ResearchCatalog(database, account_provider=accounts).can_read_publication
+    catalog = ResearchCatalog(database, account_provider=accounts)
+    return catalog.can_read_authoring_publication if authoring else catalog.can_read_publication
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -118,6 +119,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         research = PublicResearchLibrary(
             Path(args.research_root), storage_server_id=args.server_id,
             read_authorizer=research_read_authorizer(args.research_catalog_database),
+            authoring_authorizer=research_read_authorizer(args.research_catalog_database, authoring=True),
         )
         research_store = PublicResearchObjectStore(research)
         adapters[TransferObjectKind.RESEARCH_ASSET.value] = PublicResearchOriginAdapter(

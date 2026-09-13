@@ -25,10 +25,22 @@ def validate_declared_reference(
     scope: Any,
     client: FactorTesterClient | None = None,
     allow_historical_entry_requirement: bool = False,
+    report_components: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Validate one declared kind/ref pair without rewriting either value."""
     kind, target_ref = reference.kind, reference.target_ref
-    if kind == "factor":
+    if kind == 'report_section':
+        component_id = _suffix(target_ref, 'node:')
+        if report_components is None:
+            from ..authoring.tree_projection import load_snapshot
+            snapshot = load_snapshot(package_root=scope.package_root, branch_id=scope.branch_id)
+            report_components = {n['component_id']: n for n in snapshot['components']}
+        node = report_components.get(component_id)
+        if node is None:
+            raise ValueError('report section reference does not exist in the target branch')
+        data = {'component_id': component_id, 'title': str(node.get('title') or ''),
+                'kind': str(node.get('kind') or ''), 'branch_id': scope.branch_id}
+    elif kind == "factor":
         validator = (
             validate_factor_set_reference
             if target_ref.startswith("factor-set:")
