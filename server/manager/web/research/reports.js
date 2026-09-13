@@ -406,17 +406,16 @@
     });
     line.append(picker);
     const branches = Array.isArray(selected?.branches) ? selected.branches : [];
-    if (branches.length > 1) {
-      const branch = selectedBranch(selected, state);
+    const branch = selectedBranch(selected, state);
+    if (branches.length) {
       const branchPicker = document.createElement("select");
       branchPicker.className = "branch-picker";
       branchPicker.setAttribute("aria-label", context.t("研究路径"));
       branches.forEach(item => {
         const option = document.createElement("option");
         option.value = item.publication_id || "";
-        const owner = FTUI.userLabel(item.principal_ref || selected.owner_ref, item.owner_alias);
-        option.textContent = [item.branch_ref || item.title || context.t("研究路径"),
-          item.profile_ref, owner].filter(Boolean).join(" · ");
+        option.textContent = FTUI.reportBranchLabel(item, selected);
+        option.title = item.principal_ref || item.owner_ref || selected.owner_ref || "";
         option.selected = option.value === branch?.publication_id;
         branchPicker.append(option);
       });
