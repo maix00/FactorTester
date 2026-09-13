@@ -93,3 +93,57 @@ def test_copy_provenance_survives_reload_and_preview_checks_target_structure(tmp
     assert origin['data']['source_root_ref'] == source['head']['root_ref']
     assert origin['data']['source_generation'] == source['head']['generation']
     assert origin['data']['source_component_id'] == 'chapter'
+
+
+def test_cli_copy_apply_rebuilds_preview_and_uses_real_submission_gate(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from click.testing import CliRunner
+    from tools.cli.commands import research_report_copy_apply as command
+    for branch in ('source', 'target'):
+        initialize_tree(package_root=tmp_path, branch_id=branch, report_id='report', title='report')
+    component(tmp_path, 'source', 'chapter', 'chapter')
+    component(tmp_path, 'source', 'section', 'section', 'chapter')
+    source, target = [load_snapshot(package_root=tmp_path, branch_id=b) for b in ('source', 'target')]
+    plan = plan_subtree_copy(source, target, component_ids=['chapter'], copy_id='cli-copy')
+    preview = {'status': 'preview', **deepcopy(plan), 'selection': {
+        'source_profile': 'self', 'source_work_package_id': 'package', 'source_branch_id': 'source',
+        'component_ids': ['chapter'], 'parent_id': 'root', 'after_component_id': None}}
+    path = tmp_path / 'preview.json'
+    path.write_text(json.dumps(preview))
+    def scope(**kwargs):
+        return SimpleNamespace(package_root=tmp_path, branch_id=kwargs['branch_id'],
+                               branch_ref='report-branch:' + kwargs['branch_id'],
+                               profile={'session_binding': {'principal_ref': 'alice'}})
+    monkeypatch.setattr(command, 'load_profile_root', lambda _: tmp_path)
+    monkeypatch.setattr(command, 'resolve_branch_report_scope', scope)
+    monkeypatch.setattr(command, 'load_current_authoring', lambda s: {'descriptor': {}})
+    # Only persistence into the local Profile registry and Git is isolated here;
+    # source reads, preflight, submission lease and atomic tree publication are real.
+    finalizations = []
+    def finalize(**kwargs):
+        finalizations.append(kwargs['submission'].phase)
+        if len(finalizations) == 1:
+            raise RuntimeError('simulated interruption after HEAD publication')
+        return {'git': {'commit': 'test'}}
+    monkeypatch.setattr(command, 'finalize_report_command', finalize)
+    runner = CliRunner()
+    args = ['--profile', 'self', '--work-package-id', 'package', '--branch-id', 'target',
+            '--preview-file', str(path), '--json']
+    preview['operations'][0]['title'] = 'tampered'
+    path.write_text(json.dumps(preview))
+    result = runner.invoke(command.copy_apply, args)
+    assert result.exit_code != 0 and 'preview changed' in result.output
+    assert load_snapshot(package_root=tmp_path, branch_id='target')['head'] == target['head']
+    preview['operations'] = plan['operations']
+    path.write_text(json.dumps(preview))
+    result = runner.invoke(command.copy_apply, args)
+    assert result.exit_code != 0 and 'simulated interruption' in result.output
+    published = load_snapshot(package_root=tmp_path, branch_id='target')['head']
+    result = runner.invoke(command.copy_apply, args + ['--submission-sequence', '1'])
+    assert result.exit_code == 0, result.output
+    assert load_snapshot(package_root=tmp_path, branch_id='target')['head'] == published
+    assert json.loads(result.output)['status'] == 'applied'
+    saved = load_snapshot(package_root=tmp_path, branch_id='target')
+    assert len(saved['components']) == 2
+    assert saved['head']['generation'] == 1

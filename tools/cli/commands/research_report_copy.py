@@ -43,4 +43,9 @@ def copy_preview(profile_id: str, work_package_id: str, branch_id: str,
     plan = plan_subtree_copy(load_authoring(source), load_authoring(target),
                             component_ids=list(component_id), parent_id=parent_id,
                             copy_id=copy_id, after_component_id=after_component_id)
-    output({'status': 'preview', **plan}, as_json)
+    output({'status': 'preview', **plan, 'selection': {
+        'source_profile': source_profile or profile_id,
+        'source_work_package_id': source_work_package_id or work_package_id,
+        'source_branch_id': source_branch_id, 'component_ids': list(component_id),
+        'parent_id': parent_id, 'after_component_id': after_component_id,
+    }}, as_json)
