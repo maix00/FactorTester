@@ -38,6 +38,8 @@ ENTITY_TYPES = {
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
     """Create the mirror tables in the existing Manager SQLite database."""
+    from .research_merge import SCHEMA
+    conn.executescript(SCHEMA)
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS account_domain_entities (
@@ -150,6 +152,11 @@ class LocalAccountDomainStore:
                 "WHERE principal=? AND entity_type=? AND entity_id=?",
                 (principal, entity_type, entity_id),
             ).fetchone()
+            if current is not None and previous is None:
+                from .research_merge import remember_base
+                remember_base(conn, principal=principal, entity_type=entity_type, entity_id=entity_id,
+                              revision=current["remote_revision"], payload=_decode(current["payload_json"]),
+                              deleted=bool(current["deleted"]))
             if current and current["payload_json"] == encoded and bool(current["deleted"]) == bool(deleted):
                 return str(previous["operation_id"]) if previous else ""
             blocked = bool(previous and previous["last_error"] == "remote revision conflict")
@@ -267,12 +274,40 @@ class LocalAccountDomainStore:
                 (str(error or "")[:1000], operation_id),
             )
 
+    def _rebase_research(self, conn, key, remote) -> bool:
+        if key[1] != 'research_catalog' or remote.get('deleted'):
+            return False
+        pending = conn.execute('SELECT * FROM account_domain_outbox WHERE principal=? AND entity_type=? AND entity_id=?', key).fetchone()
+        base = conn.execute('SELECT * FROM account_domain_research_bases WHERE principal=? AND entity_id=?', (key[0], key[2])).fetchone()
+        if (pending is None or base is None or pending['deleted'] or base['deleted']
+                or pending['base_revision'] != base['revision']):
+            return False
+        from .research_merge import merge_research, remember_base
+        merged = merge_research(_decode(base['payload_json']), _decode(pending['payload_json']), remote.get('payload') or {})
+        if merged is None:
+            return False
+        revision = int(remote.get('revision') or 0)
+        if revision <= base['revision']:
+            return False
+        manager = conn.execute('SELECT origin_manager_id FROM account_domain_entities WHERE principal=? AND entity_type=? AND entity_id=?', key).fetchone()[0]
+        conn.execute('UPDATE account_domain_entities SET remote_revision=?,base_revision=? WHERE principal=? AND entity_type=? AND entity_id=?', (revision, revision, *key))
+        operation = self.upsert_local(principal=key[0], entity_type=key[1], entity_id=key[2],
+                                      payload=merged, manager_id=manager, connection=conn)
+        conn.execute("UPDATE account_domain_outbox SET base_revision=?,last_error='' WHERE operation_id=?", (revision, operation))
+        remember_base(conn, principal=key[0], entity_type=key[1], entity_id=key[2], revision=revision, payload=remote['payload'])
+        from .research_sync import materialize_research
+        materialize_research(self.path, {'principal': key[0], 'entity_type': key[1], 'entity_id': key[2],
+                             'revision': revision, 'payload': merged}, connection=conn)
+        return True
+
     def record_push_conflict(
         self, item: dict[str, Any], remote: dict[str, Any],
-    ) -> None:
-        """Persist a compare-and-set rejection for later user resolution."""
+    ) -> bool:
+        """Rebase disjoint research edits; preserve other conflicts for review."""
         with connect_sqlite(self.path) as conn:
             conn.execute("BEGIN IMMEDIATE")
+            if self._rebase_research(conn, (item['principal'], item['entity_type'], item['entity_id']), remote):
+                return True
             _record_conflict(conn, item, remote)
             conn.execute(
                 "UPDATE account_domain_outbox SET last_error='remote revision conflict' WHERE operation_id=?",
@@ -335,6 +370,11 @@ class LocalAccountDomainStore:
     def acknowledge(self, operation_id: str, *, revision: int, sent_item: dict[str, Any] | None = None) -> None:
         with connect_sqlite(self.path) as conn:
             conn.execute("BEGIN IMMEDIATE")
+            if sent_item is not None:
+                from .research_merge import remember_base
+                remember_base(conn, principal=sent_item['principal'], entity_type=sent_item['entity_type'],
+                              entity_id=sent_item['entity_id'], revision=revision,
+                              payload=sent_item['payload'], deleted=sent_item['deleted'])
             row = conn.execute(
                 """
                 SELECT principal, entity_type, entity_id
@@ -412,6 +452,8 @@ class LocalAccountDomainStore:
                     "deleted": bool(pending["deleted"]),
                 }
                 if local != {"payload": payload, "deleted": deleted}:
+                    if self._rebase_research(conn, (principal, entity_type, entity_id), row):
+                        return "rebased"
                     _record_conflict(conn, {
                         "principal": principal, "entity_type": entity_type,
                         "entity_id": entity_id, "payload": local["payload"],
@@ -443,6 +485,9 @@ class LocalAccountDomainStore:
                     str(row.get("origin_manager_id") or ""), time.time(),
                 ),
             )
+            from .research_merge import remember_base
+            remember_base(conn, principal=principal, entity_type=entity_type, entity_id=entity_id,
+                          revision=revision, payload=payload, deleted=deleted)
             _materialize_factor_entries(conn, principal, entity_type, entity_id, payload, deleted, str(row.get("origin_manager_id") or ""))
         return "applied"
 
