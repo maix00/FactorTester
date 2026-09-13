@@ -37,6 +37,9 @@ def merge_research(base: dict, local: dict, remote: dict) -> dict | None:
             return l
         if l == b:
             return r
+        if isinstance(l, dict) and isinstance(r, dict) and 'updated_at' in l and 'updated_at' in r:
+            if {k: v for k, v in l.items() if k != 'updated_at'} == {k: v for k, v in r.items() if k != 'updated_at'}:
+                return {**l, 'updated_at': max(l['updated_at'], r['updated_at'])}
         raise ValueError('overlapping research edit')
     result = {}
     try:
