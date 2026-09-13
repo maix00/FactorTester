@@ -289,7 +289,7 @@ assert.ok(
   });
   assert.strictEqual(sourceView.children[0].children[0].textContent, "Python 源码");
   assert.match(sourceView.children[1].children[0].textContent, /MmRateOfChg/);
-  await sourceView.children[0].children[1].listeners.click();
+  await sourceView.children[0].children[1].children[0].listeners.click();
   assert.match(navigator.copied, /FactorFamily/);
 
   await window.FTFactorDetails.factorDetail(
@@ -570,7 +570,7 @@ assert.ok(
     "factor-family:sha256:momentum",
   );
   const currentSource = walk(currentFamilyContext.content).find(item => (
-    item.className === "factor-detail-source"
+    item.className.split(" ").includes("factor-detail-source")
   ));
   assert.match(currentSource.children[1].children[0].textContent, /MmRateOfChg/);
 
@@ -612,7 +612,7 @@ assert.ok(
   await historyPicker.pickerOptions.onChange(["b".repeat(64)]);
   await new Promise(resolve => setTimeout(resolve, 0));
   const historicalSource = walk(familyContext.content).find(item => (
-    item.className === "factor-detail-source"
+    item.className.split(" ").includes("factor-detail-source")
   ));
   assert.match(
     historicalSource.children[1].children[0].textContent,
@@ -661,7 +661,7 @@ assert.ok(
     "a local family must not offer a server version history",
   );
   const localSource = walk(localFamilyContext.content).find(item => (
-    item.className === "factor-detail-source"
+    item.className.split(" ").includes("factor-detail-source")
   ));
   assert.ok(localSource, "local family source tab renders the carried source");
   assert.match(localSource.children[1].children[0].textContent, /InlineFamily/);

@@ -1156,7 +1156,8 @@ def test_factor_editor_family_picker_uses_the_shared_source_control() -> None:
     assert "state.validationMessage" in source
     assert "state.validationError" in source
     assert 'params: state.parameterValues || {}' in source
-    assert "FTUI.actionButton" in source
+    assert "FTUI.iconButton" in source_controls
+    assert "FTUI.sourcePanel" in source_controls
     assert "FTUI.codeEditor" in source
     assert 'loadSourceVersion(\n              context, state.family, "current"' in source
     assert 'loadSourceVersion(\n          context, selectedFamily, "current"' in source
@@ -1170,7 +1171,7 @@ def test_factor_editor_family_picker_uses_the_shared_source_control() -> None:
     assert "test-factor-family-row" not in source
 
     styles = (WEB_ROOT / "styles" / "app.css").read_text(encoding="utf-8")
-    assert ".editable-code-editor textarea" in styles
+    assert ".editable-code-editor > textarea" in styles
     assert "background: transparent !important" in styles
 
 

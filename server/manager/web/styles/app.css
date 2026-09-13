@@ -392,7 +392,7 @@ button.ft-help-icon:focus-visible { outline: 2px solid color-mix(in srgb, var(--
 .object-detail-tab-notice.is-readonly { border-left-color: var(--muted); background: var(--soft); }
 .factor-detail-top { display: grid; gap: 12px; min-width: 0; }
 .factor-detail-source-editor { display: grid; gap: 9px; min-width: 0; }
-.factor-detail-source-editor textarea { width: 100%; min-height: 320px; box-sizing: border-box; resize: vertical; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; tab-size: 4; }
+
 .factor-editor-version-picker { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .factor-editor-version-picker > *:first-child { min-width: 0; flex: 1 1 auto; }
 .factor-editor-version-actions { flex: 0 0 auto; }
@@ -693,8 +693,7 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .custom-analysis-status { margin-left: auto; }
 .custom-analysis-workspace { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, .65fr); gap: 12px; min-height: 420px; }
 .custom-analysis-source, .custom-analysis-source .editable-code-editor { width: 100%; min-width: 0; min-height: 420px; }
-.custom-analysis-source .editable-code-editor pre,
-.custom-analysis-source .editable-code-editor textarea { min-height: 420px; }
+.custom-analysis-source .editable-code-editor { --source-min-height: 420px; }
 .custom-analysis-output { min-width: 0; overflow: auto; border: 1px solid var(--line); border-radius: 9px; padding: 10px; }
 @media (max-width: 760px) { .custom-analysis-workspace { grid-template-columns: 1fr; } }
 .job-detail .field-table { max-height: min(300px, 34vh); }
@@ -1064,14 +1063,23 @@ button.reference-item { cursor: pointer; }
   background: var(--panel);
   font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-.code-viewer code.hljs { padding: 0; color: inherit; background: transparent; }
-.editable-code-editor { position: relative; min-height: 320px; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: #f6f8fa; }
-.editable-code-editor pre,
-.editable-code-editor textarea { box-sizing: border-box; width: 100%; height: 100%; min-height: 320px; margin: 0; padding: 14px 16px; border: 0; border-radius: inherit; overflow: auto; white-space: pre; tab-size: 4; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-.editable-code-editor pre { position: absolute; z-index: 1; inset: 0; pointer-events: none; color: #24292f; background: transparent; }
-.editable-code-editor pre code.hljs { padding: 0; color: inherit; background: transparent; }
-.editable-code-editor textarea { position: relative; z-index: 2; resize: vertical; color: transparent; caret-color: #24292f; background: transparent !important; -webkit-text-fill-color: transparent; }
-.editable-code-editor textarea::selection { color: transparent; background: rgba(56, 139, 253, .38); }
+.code-viewer code, .code-viewer code.hljs { font: inherit; padding: 0; color: inherit; background: transparent; }
+.source-panel { min-width: 0; display: grid; gap: 8px; }
+.source-panel-heading { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.source-panel-heading h3 { margin: 0; font-size: 13px; line-height: 24px; }
+.source-panel-actions { display: flex; align-items: center; gap: 2px; }
+.source-panel > .code-viewer { padding: 14px 16px; tab-size: 4; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+.editable-code-editor { --source-min-height: 320px; position: relative; min-height: var(--source-min-height); overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: #f6f8fa; }
+/* These metrics belong to the component, never to its surrounding form. */
+.editable-code-editor > pre,
+.editable-code-editor > textarea { display: block; box-sizing: border-box; width: 100%; min-height: var(--source-min-height); margin: 0; padding: 14px 16px; border: 0; border-radius: inherit; white-space: pre; overflow-wrap: normal; word-break: normal; tab-size: 4; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; letter-spacing: normal; text-align: left; text-indent: 0; }
+.editable-code-editor > pre { position: absolute; z-index: 1; inset: 0; height: 100%; overflow: hidden; pointer-events: none; color: #24292f; background: transparent; }
+.editable-code-editor > pre > code,
+.editable-code-editor > pre > code * { font: inherit; letter-spacing: inherit; }
+.editable-code-editor > pre > code,
+.editable-code-editor > pre > code.hljs { display: block; margin: 0; padding: 0; white-space: inherit; overflow: visible; color: inherit; background: transparent; }
+.editable-code-editor > textarea { position: relative; z-index: 2; height: var(--source-min-height); overflow: auto; resize: vertical; color: transparent; caret-color: #24292f; background: transparent !important; -webkit-text-fill-color: transparent; overscroll-behavior: contain; }
+.editable-code-editor > textarea::selection { color: transparent; background: rgba(56, 139, 253, .38); }
 .editable-code-editor:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent); }
 @media (prefers-color-scheme: dark) {
   .editable-code-editor { background: #161b22; }

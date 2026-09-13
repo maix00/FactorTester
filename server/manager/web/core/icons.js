@@ -92,6 +92,7 @@
     "checkmark.shield": '<path d="M12 3 20 6v5c0 5-3.3 8.3-8 10-4.7-1.7-8-5-8-10V6l8-3Z"/><path d="m8 12 2.5 2.5L16 9"/>',
     "chart.bar.doc.horizontal": '<path d="M5 4h10l4 4v12H5zM15 4v5h5M8 13h8M8 17h5"/><path d="M2 10v8M2 18h2M2 14h2"/>',
     "exclamationmark.triangle": '<path d="m12 4 9 16H3L12 4Z"/><path d="M12 9v5M12 17v.1"/>',
+    "doc.on.doc": '<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M15 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h3"/>',
     "doc.text": '<path d="M6 3h8l4 4v14H6zM14 3v5h5M9 12h6M9 16h6"/>',
     "globe": '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 2.5 4 5.5 4 9s-1 6.5-4 9c-3-2.5-4-5.5-4-9s1-6.5 4-9Z"/>',
     "arrow.down.circle": '<circle cx="12" cy="12" r="9"/><path d="M12 7v9M8.5 12.5 12 16l3.5-3.5"/>',

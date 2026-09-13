@@ -22,7 +22,7 @@ global.document = {
 };
 let highlighted = 0;
 global.window = {
-  hljs: {highlightElement() { highlighted += 1; }},
+  hljs: {getLanguage: name => name === "python",highlightElement() { highlighted += 1; }},
   setTimeout(handler) { handler(); },
   FTIcons: {node(symbol) { return {symbol}; }},
 };
@@ -61,6 +61,12 @@ editor.textarea.value = "value = 2";
 editor.textarea.listeners.input();
 assert.strictEqual(editor.value(), "value = 2");
 assert.strictEqual(highlighted, 2);
+assert.strictEqual(editor.textarea.wrap, "off");
+const highlighter = window.hljs;
+window.hljs = undefined;
+editor.setValue("plain = 3\n");
+assert.strictEqual(editor.element.children[0].children[0].textContent, "plain = 3\n\n");
+window.hljs = highlighter;
 
 (async () => {
   let release;

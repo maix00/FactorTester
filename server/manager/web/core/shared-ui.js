@@ -169,18 +169,25 @@
     textarea.value = text(value);
     textarea.required = options.required === true;
     textarea.spellcheck = false;
+    textarea.wrap = "off";
+    textarea.setAttribute("autocapitalize", "off");
+    textarea.setAttribute("autocorrect", "off");
     textarea.placeholder = text(options.placeholder);
     textarea.setAttribute("aria-label", text(options.ariaLabel || options.placeholder));
+    const syncScroll = () => {
+      highlight.scrollTop = textarea.scrollTop;
+      highlight.scrollLeft = textarea.scrollLeft;
+    };
     const render = () => {
       codeNode.removeAttribute("data-highlighted");
       codeNode.textContent = `${textarea.value}\n`;
-      window.hljs?.highlightElement?.(codeNode);
+      if (window.hljs?.getLanguage?.(language)) {
+        window.hljs.highlightElement(codeNode);
+      }
+      syncScroll();
     };
     textarea.addEventListener("input", render);
-    textarea.addEventListener("scroll", () => {
-      highlight.scrollTop = textarea.scrollTop;
-      highlight.scrollLeft = textarea.scrollLeft;
-    });
+    textarea.addEventListener("scroll", syncScroll);
     root.append(highlight, textarea);
     render();
     return {
@@ -190,6 +197,32 @@
       setValue(next) { textarea.value = text(next); render(); },
       focus: () => textarea.focus(),
     };
+  }
+
+  // Shared source header; callers own upload/validation and persistence.
+  function sourcePanel(context, body, options = {}) {
+    const root = document.createElement("section");
+    root.className = ["source-panel", options.className || ""].filter(Boolean).join(" ");
+    const heading = document.createElement("div");
+    heading.className = "source-panel-heading";
+    const title = document.createElement("h3");
+    title.textContent = context.t(options.title || "Python 源码");
+    const actions = document.createElement("div");
+    actions.className = "source-panel-actions";
+    actions.append(...(options.actions || []));
+    heading.append(title, actions);
+    root.append(heading, body);
+    return root;
+  }
+
+  function sourceView(context, value, options = {}) {
+    const source = text(value);
+    const actions = source && options.copy !== false ? [iconButton(
+      context, "doc.on.doc", "复制源码", () => navigator.clipboard.writeText(source),
+    )] : [];
+    return sourcePanel(context, code(source, {language: "python", ...options, className: options.codeClassName || ""}), {
+      ...options, actions,
+    });
   }
 
   function iconButton(context, symbol, label, action, options = {}) {
@@ -255,7 +288,7 @@
   }
 
   window.FTUI = {
-    actionButton, appendRow, code, codeEditor, empty, fieldRows, formatDate, helpIcon, iconButton,
+    actionButton, appendRow, code, codeEditor, sourcePanel, sourceView, empty, fieldRows, formatDate, helpIcon, iconButton,
     refreshButton,
     loading, pagedTable, table, text,
   };
