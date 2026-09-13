@@ -232,7 +232,7 @@
         members.map(item => [
           item.factor_alias,
           context.t(item.factor_kind === "public" ? "公共" : "用户"),
-          model().owner(item),
+          FTUI.userDisplay(item.owner_ref || item.owner_username, model().owner(item)),
         ]),
       );
       linkRows(view, members, item =>

@@ -152,9 +152,7 @@
   }
 
   function owner(value) {
-    return value?.schema_version === 2
-      ? String(value.owner_ref || "")
-      : value.owner_alias || value.owner_username || value.profile_id || "";
+    return FTUI.userLabel(value?.owner_ref || value?.owner_username || value?.profile_id || "", value?.owner_alias);
   }
 
   function mergeFactorSets(serverItems, localItems) {

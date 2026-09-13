@@ -160,7 +160,7 @@
         ]);
       }
       const workspaces = (profile.workspaces || []).map(item => [
-        item.workspace_id, item.access_mode, item.owner_ref, item.server_workspace_ref,
+        item.workspace_id, item.access_mode, FTUI.userDisplay(item.owner_ref, item.owner_alias), item.server_workspace_ref,
       ]);
       if (!workspaces.length && runtime.workspace_relpath) {
         workspaces.push([

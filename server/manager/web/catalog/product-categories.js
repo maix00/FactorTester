@@ -179,7 +179,7 @@
     if (category.source_managed) return context.t("数据源");
     const owner = String(category.owner_ref || "")
       .replace(/^user:/, "").trim();
-    return owner || context.t("当前用户");
+    return FTUI.userDisplay(category.owner_ref, category.owner_alias || FTUI.userLabel(owner) || context.t("当前用户"));
   }
 
   function parentSummary(context, category, byID) {
