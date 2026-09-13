@@ -86,7 +86,7 @@
       ], jobs.map(job => [
         job.task_name || job.job_id,
         context.t(job.kind || ""),
-        job.acting_profile_name || job.owner || "—",
+        FTUI.userDisplay(job.owner, job.owner_alias || job.acting_profile_name),
         FTUI.formatDate?.(job.updated_at) || String(job.updated_at || ""),
         context.t(job.status || ""),
       ]), {

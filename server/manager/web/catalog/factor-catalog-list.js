@@ -261,11 +261,11 @@
         card.append(warning);
       }
       if (impact.registrations?.length) card.append(FTUI.table(
-        [context.t("用户"), context.t("因子数")], impact.registrations.map(row => [row.username, row.factor_count]),
+        [context.t("用户"), context.t("因子数")], impact.registrations.map(row => [FTUI.userDisplay(row.username, row.alias), row.factor_count]),
       ).shell);
       if (impact.factor_sets?.length) card.append(FTUI.table(
         [context.t("用户"), context.t("受影响集合"), context.t("移除或替换成员数")],
-        impact.factor_sets.map(row => [row.username, row.alias, row.affected_factor_refs.length]),
+        impact.factor_sets.map(row => [FTUI.userDisplay(row.username), row.alias, row.affected_factor_refs.length]),
       ).shell);
       const actions = document.createElement("div");
       actions.className = "dialog-actions";
@@ -321,7 +321,7 @@
     values.forEach(item => {
       const username = String(item?.owner_username || "").trim();
       if (!username) return;
-      owners.set(username, String(item?.owner_alias || username));
+      owners.set(username, FTUI.userLabel(username, item?.owner_alias));
     });
     return FTMultiSelectFilter.create(context, {
       title: context.t("按下级用户筛选"),

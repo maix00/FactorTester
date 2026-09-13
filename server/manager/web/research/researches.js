@@ -221,7 +221,7 @@
         actions.addEventListener("click", event => event.stopPropagation());
         return [
         item.title || item.research_id,
-        item.owner_ref || context.t("未知"),
+        FTUI.userDisplay(item.owner_ref, item.owner_alias || (item.owner_ref ? "" : context.t("未知"))),
         FTResearchVisibility.control(context, item, {
           kind: "research", onSaved: () => renderRootContent(context, root),
         }),

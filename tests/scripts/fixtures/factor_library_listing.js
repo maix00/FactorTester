@@ -36,6 +36,10 @@ window.FTUI = {
   },
   empty(title, description) { return {title, description}; },
 };
+const stubUI = window.FTUI;
+vm.runInThisContext(fs.readFileSync("server/manager/web/core/shared-ui.js", "utf8"));
+window.FTUI = {...stubUI, userLabel: window.FTUI.userLabel, userDisplay: window.FTUI.userDisplay};
+global.FTUI = window.FTUI;
 global.FTUI = window.FTUI;
 vm.runInThisContext(
   fs.readFileSync("server/manager/web/catalog/factor-list.js", "utf8"),
@@ -286,5 +290,6 @@ assert.deepStrictEqual(mount.value.headers, [
   "因子", "原类名", "说明", "来源", "所有者", "产品组",
 ]);
 assert.strictEqual(mount.value.rows[0][3], "下级");
-assert.strictEqual(mount.value.rows[0][4], "Child");
+assert.strictEqual(mount.value.rows[0][4].textContent, "Child");
+assert.strictEqual(mount.value.rows[0][4].title, "child");
 console.log("ok");

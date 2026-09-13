@@ -137,7 +137,7 @@
         model().description(item),
         (item.categories || []).join("、"),
         origin(item, context, scope),
-        model().owner(item),
+        FTUI.userDisplay(item.owner_ref || item.owner_username, model().owner(item)),
         item.factor_count || 0,
         ...(canModify || showAddFactor ? [actionCell(
           context,
@@ -248,7 +248,7 @@
     const renderRow = item => kind === "factor-set" ? [
       item.value.title_zh || item.value.set_id,
       item.value.member_count || 0,
-      model().owner(item.value),
+      FTUI.userDisplay(item.value.owner_ref || item.value.owner_username, model().owner(item.value)),
       visibility(item.value, context),
       model().groupLabels(item, names, bySubject, context.t("未绑定产品组")).join("、"),
       ...(canModify ? [actionCell(
@@ -263,7 +263,7 @@
       model().familyName(item.value),
       model().description(item.value),
       origin(item.value, context, scope),
-      ...(showOwner ? [model().owner(item.value)] : []),
+      ...(showOwner ? [FTUI.userDisplay(item.value.owner_ref || item.value.owner_username, model().owner(item.value))] : []),
       model().groupLabels(item, names, bySubject, context.t("未绑定产品组")).join("、"),
       ...(canModify
         ? [actionCell(context, onDelete, onEdit, null, item.value)] : []),

@@ -27,6 +27,10 @@ global.FTUI = window.FTUI = {
     return {shell, body, options};
   },
 };
+const stubUI = window.FTUI;
+vm.runInThisContext(fs.readFileSync("server/manager/web/core/shared-ui.js", "utf8"));
+window.FTUI = {...stubUI, userLabel: window.FTUI.userLabel, userDisplay: window.FTUI.userDisplay};
+global.FTUI = window.FTUI;
 vm.runInThisContext(
   fs.readFileSync("server/manager/web/catalog/shared/object-job-table.js", "utf8"),
   {filename: "object-job-table.js"},

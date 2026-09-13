@@ -109,7 +109,7 @@
       }));
       selectOptions(level, levels, account?.level_id || levels[0]?.value || "", context.t("暂无层级"));
       const users = allUsers.filter(item => item.organization_id === orgID && item.username !== account?.username).map(item => ({
-        value: item.username, label: `${item.alias || item.username} · ${item.username}`,
+        value: item.username, label: `${FTUI.userLabel(item.username, item.alias)} · ${item.username}`,
       }));
       selectOptions(parent, [{value: "", label: context.t("不设置上级用户")}, ...users], account?.parent_username || "", "");
     }
@@ -206,7 +206,7 @@
     actions.append(addUser, addOrg, addLevel); intro.append(actions); root.append(intro);
 
     const users = section(context, "用户", "用户可以移动到其他机构或层级，完整用户名会保留为不可变的登录标识。");
-    const userTable = FTManagerAccessTable.create(context, {headers: ["用户", "机构", "层级", "上级用户", "角色", "操作"], searchPlaceholder: "搜索用户", empty: "暂无用户", searchText: item => [item.alias, item.username, item.organization_id, item.organization_name, item.level_id, item.parent_username, item.role].join(" "), cells: item => [`${item.alias || ""} · ${item.username || ""}`, item.organization_name || item.organization_id || "", item.level_id || context.t("未设置"), item.parent_username || context.t("无"), context.t((payload.role_labels || {})[item.role] || item.role || ""), (ctx, value) => { const button = document.createElement("button"); button.className = "secondary"; button.textContent = ctx.t("编辑"); button.onclick = () => showUserDialog(ctx, payload, value, refresh); return button; }]});
+    const userTable = FTManagerAccessTable.create(context, {headers: ["用户", "机构", "层级", "上级用户", "角色", "操作"], searchPlaceholder: "搜索用户", empty: "暂无用户", searchText: item => [item.alias, item.username, item.organization_id, item.organization_name, item.level_id, item.parent_username, item.role].join(" "), cells: item => [FTUI.userDisplay(item.username, item.alias), item.organization_name || item.organization_id || "", item.level_id || context.t("未设置"), FTUI.userDisplay(item.parent_username, (payload.users || []).find(user => user.username === item.parent_username)?.alias || (item.parent_username ? "" : context.t("无"))), context.t((payload.role_labels || {})[item.role] || item.role || ""), (ctx, value) => { const button = document.createElement("button"); button.className = "secondary"; button.textContent = ctx.t("编辑"); button.onclick = () => showUserDialog(ctx, payload, value, refresh); return button; }]});
     userTable.setRows(payload.users || []); users.append(userTable.root); root.append(users);
 
     const organizations = section(context, "机构", "机构是用户名和服务器管理范围的一级边界。");
@@ -214,7 +214,7 @@
     orgTable.setRows(payload.organizations || []); organizations.append(orgTable.root); root.append(organizations);
 
     const levels = section(context, "层级", "层级可以建立父子关系；用户和层级管理员必须属于同一机构。");
-    const levelTable = FTManagerAccessTable.create(context, {headers: ["层级", "机构", "上级层级", "层级管理员", "操作"], searchPlaceholder: "搜索层级", empty: "暂无层级", searchText: item => [item.id, item.name, item.organization_id, item.parent_level_id, item.manager_username].join(" "), cells: item => [item.name || item.id, item.organization_id || "", item.parent_level_id || context.t("根层级"), item.manager_username || context.t("未设置"), (ctx, value) => { const button = document.createElement("button"); button.className = "secondary"; button.textContent = ctx.t("编辑"); button.onclick = () => showLevelDialog(ctx, payload, refresh, value); return button; }]});
+    const levelTable = FTManagerAccessTable.create(context, {headers: ["层级", "机构", "上级层级", "层级管理员", "操作"], searchPlaceholder: "搜索层级", empty: "暂无层级", searchText: item => [item.id, item.name, item.organization_id, item.parent_level_id, item.manager_username].join(" "), cells: item => [item.name || item.id, item.organization_id || "", item.parent_level_id || context.t("根层级"), FTUI.userDisplay(item.manager_username, (payload.users || []).find(user => user.username === item.manager_username)?.alias || (item.manager_username ? "" : context.t("未设置"))), (ctx, value) => { const button = document.createElement("button"); button.className = "secondary"; button.textContent = ctx.t("编辑"); button.onclick = () => showLevelDialog(ctx, payload, refresh, value); return button; }]});
     levelTable.setRows(payload.levels || []); levels.append(levelTable.root); root.append(levels);
     return root;
   }

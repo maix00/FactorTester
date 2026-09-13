@@ -60,8 +60,8 @@
   function ownerDisplay(item, context) {
     const owner = String(item.owner_ref || item.owner_username || "").trim();
     const profile = String(item.profile_ref || item.profile_id || "").trim();
-    if (owner && profile) return `${owner}（${profile}）`;
-    return owner || profile || context.t("未知");
+    const label = FTUI.userLabel(owner, item.owner_alias);
+    return FTUI.userDisplay(owner, (label && profile ? `${label}（${profile}）` : label || profile || context.t("未知")));
   }
 
   function visibilityTitle(context, value) {
