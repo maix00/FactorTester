@@ -363,6 +363,12 @@ def api_delete_factor(factor_id):
     username = _username()
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
+    if request.args.get('revision'):
+        from server.modules.custom_factors.family_transfer import delete_family
+        try:
+            return jsonify(delete_family('custom',username,factor_id,expected_revision=request.args['revision']))
+        except ValueError as error:
+            return jsonify({'success':False,'error':str(error)}),409
     existing_source = load_factor_source(username, factor_id)
     if existing_source is None:
         head = family_head('custom', username, factor_id)
@@ -394,6 +400,12 @@ def api_delete_factor(factor_id):
 def api_delete_public_factor(factor_id):
     if not _current_user_is_super_admin():
         return jsonify({'success': False, 'error': '只有超级管理员可以删除公共因子家族'}), 403
+    if request.args.get('revision'):
+        from server.modules.custom_factors.family_transfer import delete_family
+        try:
+            return jsonify(delete_family('public',_username(),factor_id,expected_revision=request.args['revision']))
+        except ValueError as error:
+            return jsonify({'success':False,'error':str(error)}),409
     existing_source = load_public_factor_source(factor_id)
     if existing_source is None:
         head = family_head('public', '', factor_id)
@@ -458,3 +470,29 @@ def api_get_factor(factor_id):
             'params': [serialize_param_meta(param) for param in factor_family.params] if factor_family is not None else [],
         }
     })
+
+@factor_library_internal_bp.route('/families/<kind>/<factor_id>/impact', methods=['GET'])
+@login_required
+def api_family_change_impact(kind, factor_id):
+    if kind not in {'public','custom'}:
+        return jsonify({'success':False,'error':'无效类别'}),400
+    if kind=='public' and not _current_user_is_super_admin():
+        return jsonify({'success':False,'error':'只有超级管理员可以操作公共家族'}),403
+    from server.modules.custom_factors.family_transfer import family_change_impact
+    try:
+        return jsonify({'success':True,**family_change_impact(kind,_username(),factor_id)})
+    except ValueError as error:
+        return jsonify({'success':False,'error':str(error)}),409
+
+
+@factor_library_internal_bp.route('/families/<kind>/<factor_id>/transfer', methods=['POST'])
+@login_required
+def api_transfer_family(kind, factor_id):
+    if not _current_user_is_super_admin():
+        return jsonify({'success':False,'error':'只有超级管理员可以转换因子家族归属'}),403
+    from server.modules.custom_factors.family_transfer import transfer_family
+    try:
+        return jsonify(transfer_family(kind,_username(),factor_id,
+            expected_revision=(request.get_json(silent=True) or {}).get('revision')))
+    except (ValueError,FileNotFoundError) as error:
+        return jsonify({'success':False,'error':str(error)}),409

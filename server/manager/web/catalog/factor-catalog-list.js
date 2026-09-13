@@ -113,6 +113,8 @@
       onPageChange: value => { tablePage = value; render(); },
       canModify,
       canAddFactor,
+      onTransfer: page === "families" && canModify && context.session?.role === "super_admin"
+        ? item => transferItem(context, familyScope, item) : null,
       onDelete: item => removeItem(context, page, familyScope, item),
       onEdit: item => editItem(context, page, familyScope, item),
       onAddFactor: page === "families"
@@ -189,13 +191,13 @@
     if (!familyAlias) return;
     const factorCount = page === "families"
       ? Math.max(0, Number(item?.factor_count || 0)) : 0;
-    const confirmed = page === "families"
-      ? await confirmFamilyDeletion(
-        context, label || familyAlias, factorCount,
-      )
-      : window.confirm(
-        context.t("确认删除“%@”？").replace("%@", label || familyAlias),
-      );
+    let impact = null;
+    if (page === "families") {
+      try { impact = await confirmFamilyChange(context, scope === "public" ? "public" : "custom", familyAlias, label); }
+      catch (error) {context.showNotice?.(error.message, true); return;}
+    }
+    const confirmed = page === "families" ? Boolean(impact) : window.confirm(
+      context.t("确认删除“%@”？").replace("%@", label || familyAlias));
     if (!confirmed) return;
     const endpoint = page === "families"
       ? scope === "public"
@@ -205,7 +207,7 @@
         + `?factor_alias=${encodeURIComponent(item.factor_alias || "")}`
         + `&scope_key=${encodeURIComponent(item.scope_key || item.product_group || "default")}`;
     try {
-      await context.api(endpoint, {
+      await context.api(endpoint + (impact ? `?revision=${encodeURIComponent(impact.revision)}` : ""), {
         method: "DELETE",
         ...(page === "families" ? {} : {body: JSON.stringify({})}),
       });
@@ -219,26 +221,52 @@
     }
   }
 
-  function confirmFamilyDeletion(context, label, factorCount) {
+  async function confirmFamilyChange(context, kind, alias, label, transfer = false) {
+    const impact = await context.api(`/api/factor-library/families/${kind}/${encodeURIComponent(alias)}/impact`);
+    return await confirmFamilyDeletion(context, label || alias, impact.factor_count, impact, transfer) ? impact : null;
+  }
+
+  async function transferItem(context, scope, item) {
+    const kind = scope === "public" ? "public" : "custom";
+    const alias = item.factor_family_alias || item.factor_family_name;
+    try {
+      const impact = await confirmFamilyChange(context, kind, alias, modelFamilyLabel(item), true);
+      if (!impact) return;
+      await context.api(`/api/factor-library/families/${kind}/${encodeURIComponent(alias)}/transfer`,
+        {method: "POST", body: JSON.stringify({revision: impact.revision})});
+      context.showNotice?.(context.t("归属已转换，集合历史已记录"));
+      await catalog().load(context, {refresh: true, library: true, sets: true});
+      if (catalog().isCurrent(context)) await list(context, "families", scope === "public" ? "mine" : "public");
+    } catch (error) {context.showNotice?.(error.message || context.t("转换失败"), true);}
+  }
+
+  function confirmFamilyDeletion(context, label, factorCount, impact = {}, transfer = false) {
     return new Promise(resolve => {
       const dialog = document.createElement("dialog");
       const card = document.createElement("form");
       card.method = "dialog";
       card.className = "dialog-card factor-family-delete-card";
       const title = document.createElement("h2");
-      title.textContent = context.t("删除因子家族");
+      title.textContent = context.t(transfer ? "转换因子家族归属" : "删除因子家族");
       const message = document.createElement("p");
-      message.textContent = context.t("确认删除“%@”？").replace("%@", label);
+      message.textContent = context.t(transfer ? "确认转换“%@”？" : "确认删除“%@”？").replace("%@", label);
       card.append(title, message);
-      if (factorCount > 0) {
+      if (factorCount > 0 || impact.factor_sets?.length) {
         const warning = document.createElement("p");
         warning.className = "form-error factor-family-delete-warning";
         warning.setAttribute("role", "alert");
         warning.textContent = context.t(
-          `该因子家族仍有 ${factorCount} 个因子。继续删除会级联删除这些因子，且无法恢复。`,
+          `影响 ${factorCount} 个已登记因子、${impact.factor_sets?.length || 0} 个因子集合。${transfer ? "保留本人的参数并重新登记，其他用户的相关登记将移除。" : "相关因子登记将移除。"}集合会生成新版本并记录成员变化，历史记录和测试快照保留。`,
         );
         card.append(warning);
       }
+      if (impact.registrations?.length) card.append(FTUI.table(
+        [context.t("用户"), context.t("因子数")], impact.registrations.map(row => [row.username, row.factor_count]),
+      ).shell);
+      if (impact.factor_sets?.length) card.append(FTUI.table(
+        [context.t("用户"), context.t("受影响集合"), context.t("移除或替换成员数")],
+        impact.factor_sets.map(row => [row.username, row.alias, row.affected_factor_refs.length]),
+      ).shell);
       const actions = document.createElement("div");
       actions.className = "dialog-actions";
       const cancel = FTUI.actionButton(
@@ -246,7 +274,7 @@
       );
       cancel.type = "button";
       const confirm = FTUI.actionButton(
-        context.t(factorCount > 0 ? "删除家族及因子" : "删除"),
+        context.t(transfer ? "确认转换并处理依赖" : factorCount > 0 ? "删除家族及因子" : "删除"),
         () => dialog.close("confirm"), {
           variant: factorCount > 0 ? "danger" : "warning",
         },
@@ -309,5 +337,5 @@
     });
   }
 
-  window.FTFactorCatalogList = Object.freeze({list});
+  window.FTFactorCatalogList = Object.freeze({list, confirmFamilyChange});
 })();

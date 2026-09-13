@@ -20,6 +20,8 @@ ENTITY_TYPES = {
     "level",
     "profile",
     "factor_set",
+    "factor_set_event",
+    "factor_set_head",
     "factor_param_config",
     "factor_source",
     "factor_source_version",
@@ -62,6 +64,13 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS account_domain_factor_catalog_ref
             ON account_domain_entities(principal, json_extract(payload_json, '$.factor.factor_ref'))
             WHERE entity_type='factor_catalog_entry';
+
+        CREATE INDEX IF NOT EXISTS account_domain_set_history
+            ON account_domain_entities(principal,
+                json_extract(payload_json, '$.set_owner_ref'),
+                json_extract(payload_json, '$.set_id'),
+                json_extract(payload_json, '$.occurred_at') DESC, entity_id DESC)
+            WHERE entity_type='factor_set_event' AND NOT deleted;
 
         CREATE TABLE IF NOT EXISTS account_domain_outbox (
             operation_id TEXT PRIMARY KEY,

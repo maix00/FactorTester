@@ -84,12 +84,12 @@
   function render(context, data, mount, {
     page, query, groupRefs = ["*"], ownerUsernames = ["*"], scope = "public",
     tablePage = 1, onPageChange = () => {}, canModify = false,
-    canAddFactor = false, onDelete = null, onEdit = null, onAddFactor = null,
+    canAddFactor = false, onDelete = null, onEdit = null, onAddFactor = null, onTransfer = null,
   }) {
     if (page === "families") {
       return renderFamilies(context, data, mount, {
         query, scope, groupRefs, ownerUsernames, tablePage, onPageChange,
-        canModify, canAddFactor, onDelete, onEdit, onAddFactor,
+        canModify, canAddFactor, onDelete, onEdit, onAddFactor, onTransfer,
       });
     }
     return renderSubjects(context, data, mount, {
@@ -100,7 +100,7 @@
 
   function renderFamilies(context, data, mount, {
     query, scope, groupRefs, ownerUsernames, tablePage, onPageChange,
-    canModify, canAddFactor, onDelete, onEdit, onAddFactor,
+    canModify, canAddFactor, onDelete, onEdit, onAddFactor, onTransfer,
   }) {
     const showAddFactor = canAddFactor || typeof onAddFactor === "function";
     const scoped = dataForScope(data, scope);
@@ -144,7 +144,7 @@
           canModify ? onDelete : null,
           canModify ? onEdit : null,
           showAddFactor ? onAddFactor : null,
-          item,
+          item, onTransfer,
         )] : []),
       ]},
     );
@@ -338,7 +338,7 @@
     });
   }
 
-  function actionCell(context, onDelete, onEdit, onAddFactor, item) {
+  function actionCell(context, onDelete, onEdit, onAddFactor, item, onTransfer = null) {
     const root = document.createElement("span");
     root.className = "factor-catalog-row-actions";
     if (onAddFactor) root.append(iconButton(
@@ -358,6 +358,11 @@
     if (onEdit) root.append(iconButton(
       context, "编辑", "square.and.pencil", handleEdit,
       "factor-catalog-edit-action",
+    ));
+    if (onTransfer) root.append(iconButton(
+      context, item.factor_kind === "public" || item.source === "public" ? "转为本人家族" : "转为公共家族",
+      "arrow.left.arrow.right", event => {event?.stopPropagation?.(); return onTransfer(item);},
+      "factor-catalog-transfer-action",
     ));
     if (onDelete) root.append(iconButton(
       context, "删除", "trash", handleDelete,

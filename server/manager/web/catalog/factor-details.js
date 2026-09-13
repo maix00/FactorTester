@@ -68,7 +68,7 @@
     context.toolbar?.append(context.button(context.t("查看因子序列"), () => {
       context.navigate(`/factor-series?factor_ref=${encodeURIComponent(frozenRef)}`);
     }, context.t("使用冻结因子配置运行序列查看任务")));
-    if (editableBySession(context, factor)) {
+    if (!factor.historical_member && editableBySession(context, factor)) {
       // Same-tab authoring: the shared mode-actions component derives the edit
       // URL from the current location (same pathname → same detail tab).
       window.FTObjectModeActions?.mount?.(context, {
@@ -96,6 +96,7 @@
       objectKind: "factor",
       mode: "view",
       overrides: {
+        source: {hidden: !factor.historical_member},
         parameters: {hidden: !parameters},
         identity: {hidden: !provenance},
         jobs: {onActivate: jobs.load},
@@ -104,6 +105,7 @@
         overview: FTUI.table(
           [context.t("字段"), context.t("值")], FTUI.fieldRows(factor),
         ).shell,
+        source: factor.historical_member ? window.FTFactorDetailShared.source(context, factor) : null,
         parameters,
         identity: provenance,
         jobs: jobs.mount,
@@ -173,13 +175,18 @@
         editHelp: "编辑因子家族",
       });
       context.toolbar?.append(context.button(context.t("删除"), async () => {
-        if (!window.confirm(context.t("确认删除该因子家族？"))) return;
         const alias = baseFamily.factor_family_alias || baseFamily.factor_family_name;
+        if (!window.FTFactorCatalogList?.confirmFamilyChange) {
+          await window.FTStaticLoader.loadGroups(["factor-catalog-list"]);
+        }
+        const impact = await window.FTFactorCatalogList.confirmFamilyChange(
+          context, publicFamily ? "public" : "custom", alias, alias);
+        if (!impact) return;
         const endpoint = publicFamily
           ? `/api/factor-library/families/public/${encodeURIComponent(alias)}`
           : `/api/factor-library/families/custom/${encodeURIComponent(alias)}`;
         try {
-          await context.api(endpoint, {method: "DELETE"});
+          await context.api(`${endpoint}?revision=${encodeURIComponent(impact.revision)}`, {method: "DELETE"});
           context.showNotice?.(context.t("已删除"));
           if (FTTabReturn.returnToSource(context)) return;
           context.closeTab?.(context.tabID);
@@ -345,8 +352,8 @@
     context.updateActiveTab?.({title: value.title_zh || context.t(fallbackTitle)});
     // Same-tab authoring entry: the shared component mounts the pencil
     // action that swaps this tab to the set editor.
-    const setEditable = selected?.can_edit === true
-      || editableBySession(context, selected || value);
+    const setEditable = value.registration_active !== false && (selected?.can_edit === true
+      || editableBySession(context, selected || value));
     if (setEditable) {
       window.FTObjectModeActions?.mount?.(context, {
         mode: "view",
@@ -364,10 +371,42 @@
     const sourceRows = factorSetSourceRows(context, value);
     const provenance = window.FTFactorDetailShared.provenance(context, value);
     const jobs = objectJobs(context, "set", frozenRef, value);
+    const history = document.createElement("section");
+    let historyLoaded = false;
+    async function loadHistory(offset = 0) {
+      if (historyLoaded && offset === 0) return;
+      const query = new URLSearchParams({target_ref: frozenRef, offset: String(offset), limit: "50",
+        owner_username: selected?.owner_username || value.owner_username || ""});
+      try {
+        const payload = await context.api(`/api/factor-library/factor-sets/history?${query}`);
+        if (context.isRouteCurrent?.() === false) return;
+        const page = payload.history;
+        const rows = page.items.map(event => [
+          event.member.alias, context.t(event.action === "added" ? "新增成员" : "移除成员"),
+          new Date(event.occurred_at * 1000).toLocaleString(),
+        ]);
+        const table = FTUI.table([context.t("因子"), context.t("变化"), context.t("时间")], rows);
+        linkRows(table, page.items, event => {
+          const params = new URLSearchParams({history_set: frozenRef,
+            set_owner: selected?.owner_username || value.owner_username || ""});
+          return `/factors/factor/${encodeURIComponent(event.member.ref)}?${params}`;
+        }, context);
+        history.replaceChildren(table.shell);
+        if (!rows.length) history.append(document.createTextNode(context.t("暂无可追溯的成员变化记录")));
+        const nav = document.createElement("div");
+        if (offset > 0) nav.append(context.button(context.t("上一页"), () => loadHistory(Math.max(0, offset - 50))));
+        if (page.has_more) nav.append(context.button(context.t("下一页"), () => loadHistory(page.next_offset)));
+        history.append(nav);
+        historyLoaded = true;
+      } catch (error) {
+        history.textContent = error.message || context.t("读取历史失败");
+      }
+    }
     const tabs = window.FTObjectDetailTabs.create(context, {
       objectKind: "set",
       mode: "view",
       overrides: {
+        history: {hidden: context.testObjectTemporary === true || selected?.visibility === "local", onActivate: () => loadHistory()},
         sources: {hidden: !sourceRows.length},
         identity: {hidden: !provenance},
         jobs: {onActivate: jobs.load},
@@ -377,6 +416,7 @@
           [context.t("字段"), context.t("值")], FTUI.fieldRows(value),
         ).shell,
         members: memberMount,
+        history,
         sources: sourceRows.length ? FTUI.table(
           [context.t("字段"), context.t("值")], sourceRows,
         ).shell : null,

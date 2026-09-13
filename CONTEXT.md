@@ -291,3 +291,7 @@ IC / 分组测试结果的保留边界见 ADR-008：保留最新图表与分组�
 ---
 
 > 任务跟踪以 [GitHub Issues](https://github.com/maix00/FactorTester/issues) 为准。
+
+### 因子集合历史
+
+因子集合的逻辑登记与成员冻结版本分离；新增、移除成员记录分页事件，退出登记不清除历史。历史成员通过集合权限读取精确源码版本，不能从历史重新投影当前因子目录。见 [ADR-153](docs/adr/153-factor-set-membership-history.md)。

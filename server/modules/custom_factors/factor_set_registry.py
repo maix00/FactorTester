@@ -161,7 +161,9 @@ def _summary(value: dict[str, Any]) -> dict[str, Any]:
         "member_count": len(identity["members"]),
         "authority": value.get("authority"),
         "owner_username": value.get("owner_username"),
+        "registration_active": value.get("registration_active", True),
         "can_edit": (
+            value.get("registration_active", True) and
             str(value.get("owner_ref") or "")
             == f"principal:{value.get('owner_username')}"
         ),

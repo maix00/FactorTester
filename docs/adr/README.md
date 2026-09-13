@@ -44,3 +44,5 @@
 修改 ADR 时先核对当前源码、路由注册、CLI 命令树、Web/Swift 调用方、测试和部署 manifest。
 如果实现与文字不一致，优先改状态和迁移边界；只有源码也应改变时才同时开代码任务。不要为了
 让目录看起来整齐而删除仍被 import、历史数据或 capability 使用的内部模块。
+
+- [153 — 因子集合登记生命周期与成员事件](153-factor-set-membership-history.md)
