@@ -9,6 +9,7 @@ from tools.cli.core.errors import friendly_errors
 from tools.cli.release.profile import load_profile_root
 from tools.cli.release.research_reporting.authoring.tree_copy import plan_subtree_copy, apply_subtree_copy
 from tools.cli.release.research_reporting.authoring.tree_fork import _copy_assets
+from tools.cli.release.research_reporting.authoring.copy_resources import stage_resources
 from .research_report_common import scope_options, read_json, output
 from .research_report_scope import resolve_branch_report_scope, load_authoring, load_current_authoring
 from .research_report_submission import begin_batch_submission, reject_mutation
@@ -46,11 +47,13 @@ def copy_apply(profile_id: str, work_package_id: str, branch_id: str,
     if not owner or (source.profile.get('session_binding') or {}).get('principal_ref') != owner:
         raise PermissionError('cross-user source must be read through Manager authorization')
     snapshot = load_authoring(target)
-    plan = plan_subtree_copy(load_authoring(source), snapshot,
+    source_snapshot = load_authoring(source)
+    plan = plan_subtree_copy(source_snapshot, snapshot,
                             component_ids=selection['component_ids'], parent_id=selection['parent_id'],
                             after_component_id=selection.get('after_component_id'), copy_id=preview['copy_id'])
     if any(preview.get(key) != value for key, value in plan.items()):
         raise ValueError('source, target or copy preview changed; generate a new preview')
+    stage_resources(source_snapshot, snapshot['paths'], plan['resources'])
     # Only the independently reconstructed source bindings may be preserved.
     # User-authored bindings never enter the normal preflight request.
     clean = [{k: deepcopy(v) for k, v in op.items() if k != 'bindings'} for op in plan['operations']]

@@ -128,3 +128,33 @@ def test_public_research_does_not_mask_editor_profile_role(tmp_path):
     assert empty['status'] == 'active'
     with pytest.raises(PermissionError):
         catalog.reserve_report_branch('report', actor='bob', profile_ref='reader-profile', branch_id='reader-write')
+
+
+def test_registered_head_replaces_legacy_source_without_merging_other_profiles(tmp_path):
+    catalog, rid = setup(tmp_path)
+    from tools.data.sqlite.db import connect_sqlite
+    with connect_sqlite(catalog.db_path) as conn:
+        conn.execute("UPDATE research_catalog_reports SET source_ref='self:package:main', build_source='server_agent' WHERE report_id='report'")
+    catalog.reserve_report_branch('report', actor='alice', profile_ref='self', branch_id='main')
+    publish(catalog, 'main')
+    report = catalog.list_reports(rid, viewer='alice')[0]
+    assert len(report['branches']) == 1
+    assert report['branches'][0]['publication_id'] == 'p' * 24
+
+
+def test_http_branch_projection_preserves_registered_head_and_profile_identity():
+    from types import SimpleNamespace
+    from server.manager.http.research_catalog_routes import ResearchCatalogRoutesMixin
+    class Handler(ResearchCatalogRoutesMixin):
+        def _research_service(self):
+            return SimpleNamespace(list_visible=lambda viewer: [
+                {'report_id': 'report', 'owner_ref': 'alice', 'profile_ref': 'self',
+                 'branch_ref': 'main', 'publication_id': 'old-snapshot'},
+                {'report_id': 'report', 'owner_ref': 'alice', 'profile_ref': 'other',
+                 'branch_ref': 'main', 'publication_id': 'other-profile'},
+            ])
+    current = {'branch_id': 'main', 'branch_ref': 'main', 'status': 'active',
+               'principal_ref': 'alice', 'profile_ref': 'self', 'publication_id': 'current'}
+    report = {'report_id': 'report', 'owner_ref': 'alice', 'profile_ref': 'self', 'branches': [current]}
+    branches = Handler()._research_catalog_publication_branches([report], 'alice')[0]['branches']
+    assert [branch['publication_id'] for branch in branches] == ['current', 'other-profile']

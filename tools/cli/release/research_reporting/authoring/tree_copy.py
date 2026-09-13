@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 from urllib.parse import quote, unquote
 
+from .copy_resources import plan_resources, rewrite_resources, verify_resources
 from .tree_operations import apply_operation
 from .tree_schema import identifier
 from .tree_hierarchy import validate_parent_child, validate_root_child
@@ -116,17 +117,20 @@ def plan_subtree_copy(source: dict, target: dict, *, component_ids: list[str],
     assets = {a['asset_ref']: a for a in source['head'].get('assets', [])}
     if not asset_refs.issubset(assets):
         raise ValueError('source subtree references an unregistered asset')
+    resources = plan_resources(source, operations)
+    operations = rewrite_resources(operations, resources)
     return {'source': {k: source['head'][k] for k in ('report_id', 'generation', 'root_ref')},
             'target': {k: target['head'][k] for k in ('report_id', 'generation', 'root_ref')},
             'copy_id': copy_id, 'component_map': mapping,
             'target_assets': deepcopy(target['head'].get('assets', [])),
             'assets': [deepcopy(assets[ref]) for ref in sorted(asset_refs)],
-            'operations': operations}
+            'resources': resources, 'operations': operations}
 
 
 def apply_subtree_copy(paths: dict[str, Path], plan: dict, *, staged_assets: list[dict],
                        submission=None) -> dict:
     """The caller stages verified asset bytes, then obtains one atomic HEAD."""
+    verify_resources(paths, plan.get('resources', []))
     required = {a['asset_ref']: a for a in plan['assets']}
     staged = {a['asset_ref']: a for a in staged_assets}
     if len(staged) != len(staged_assets) or set(staged) != set(required):

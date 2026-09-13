@@ -608,6 +608,9 @@ class ResearchCatalog(ResearchBranchesMixin):
                 else:
                     publication_id = f"local:{source_ref}"
             elif source_kind == "server_agent":
+                parts = source_ref.removeprefix("server:").split(":", 2)
+                if len(parts) == 3:
+                    profile_ref, _record_id, branch_ref = parts
                 publication_id = source_ref if source_ref.startswith("server:") \
                     else f"server:{source_ref}"
             if publication_id in seen:
@@ -622,7 +625,16 @@ class ResearchCatalog(ResearchBranchesMixin):
                 "publication_id": publication_id,
                 "selected": source_ref == selected_source,
             })
-        return [*registered, *branches]
+        registered_keys = {
+            (item["principal_ref"], item["profile_ref"], item["branch_ref"])
+            for item in registered
+        }
+        owner = str(report.get("owner_ref") or "")
+        return [*registered, *[
+            {**item, "principal_ref": owner}
+            for item in branches
+            if (owner, item["profile_ref"], item["branch_ref"]) not in registered_keys
+        ]]
 
     def list_reports_for_scope(
         self,

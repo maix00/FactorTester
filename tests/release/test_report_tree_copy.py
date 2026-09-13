@@ -147,3 +147,33 @@ def test_cli_copy_apply_rebuilds_preview_and_uses_real_submission_gate(tmp_path,
     saved = load_snapshot(package_root=tmp_path, branch_id='target')
     assert len(saved['components']) == 2
     assert saved['head']['generation'] == 1
+
+
+def test_selected_subtree_copies_complete_local_files_and_checks_preview_hash(tmp_path):
+    from hashlib import sha256
+    from tools.cli.release.research_reporting.authoring.copy_resources import stage_resources, destination_path
+    source, target = pair(tmp_path)
+    attachment = tmp_path / 'branches/source/data.csv'
+    raw = b'row,value\n' + b'1,2\n' * 350
+    attachment.write_bytes(raw)
+    component(tmp_path, 'source', 'attachment', 'entry', 'section', body='[full data](data.csv)')
+    # An unrelated missing link must not block copying the selected chapter.
+    component(tmp_path, 'source', 'other-chapter', 'chapter')
+    component(tmp_path, 'source', 'other-file', 'entry', 'other-chapter', body='[missing](missing.csv)')
+    source = load_snapshot(package_root=tmp_path, branch_id='source')
+    plan = plan_subtree_copy(source, target, component_ids=['chapter'], copy_id='with-file')
+    assert len(plan['resources']) == 1
+    assert plan['resources'][0]['sha256'] == sha256(raw).hexdigest()
+    with pytest.raises(ValueError, match='staged'):
+        apply_subtree_copy(target['paths'], plan, staged_assets=[])
+    attachment.write_bytes(b'changed after preview')
+    with pytest.raises(ValueError, match='changed since preview'):
+        stage_resources(source, target['paths'], plan['resources'])
+    attachment.write_bytes(raw)
+    stage_resources(source, target['paths'], plan['resources'])
+    apply_subtree_copy(target['paths'], plan, staged_assets=[])
+    attachment.unlink()
+    saved = load_snapshot(package_root=tmp_path, branch_id='target')
+    copied = next(n for n in saved['components'] if n['component_id'] == plan['component_map']['attachment'])
+    assert copied['body'] == f"[full data]({plan['resources'][0]['destination']})"
+    assert destination_path(target['paths'], plan['resources'][0]).read_bytes() == raw

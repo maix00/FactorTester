@@ -207,6 +207,9 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
         for original in reports:
             value = dict(original)
             local = [dict(item) for item in value.get("branches") or []]
+            # A registered head is authoritative even when the publication store
+            # also retains older immutable snapshots of this branch.
+            registered = [item for item in local if item.get("branch_id") and item.get("status") == "active"]
             projected = []
             for item in by_report.get(str(value.get("report_id") or ""), []):
                 if str(item.get("owner_ref") or "") != str(value.get("owner_ref") or ""):
@@ -214,7 +217,8 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 projected.append({
                     "branch_ref": str(item.get("branch_ref") or ""),
                     "title": str(item.get("branch_ref") or item.get("title") or ""),
-                    "profile_ref": str(item.get("profile_ref") or ""),
+                    "profile_ref": str(item.get("profile_ref") or value.get("profile_ref") or ""),
+                    "principal_ref": str(item.get("owner_ref") or ""),
                     "source_kind": "publication",
                     "source_ref": str(item.get("publication_id") or ""),
                     "publication_id": str(item.get("publication_id") or ""),
@@ -227,8 +231,12 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
             # are readable across Managers; authoring refs are local-only fallbacks.
             seen = set()
             branches = []
-            for item in [*projected, *local]:
-                key = str(item.get("branch_ref") or item.get("publication_id") or "")
+            for item in [*registered, *projected, *local]:
+                key = (
+                    str(item.get("principal_ref") or value.get("owner_ref") or ""),
+                    str(item.get("profile_ref") or value.get("profile_ref") or ""),
+                    str(item.get("branch_ref") or item.get("publication_id") or ""),
+                )
                 if key in seen:
                     continue
                 seen.add(key)
