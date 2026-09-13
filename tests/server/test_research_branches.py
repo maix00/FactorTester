@@ -114,3 +114,17 @@ def test_branch_http_agent_cannot_choose_another_profile():
     handler._require_branch_profile_actor('bound')
     with pytest.raises(PermissionError, match='another Profile'):
         handler._require_branch_profile_actor('other')
+
+
+def test_public_research_does_not_mask_editor_profile_role(tmp_path):
+    catalog, rid = setup(tmp_path)
+    catalog.update_research(rid, actor='alice', visibility='public')
+    catalog.add_membership(rid, actor='alice', principal_ref='bob', profile_ref='reader-profile', role='viewer')
+    catalog.create_workspace(rid, actor='bob', principal_ref='bob', profile_ref='self', title='Bob')
+    catalog.reserve_report_branch('report', actor='bob', profile_ref='self', branch_id='empty')
+    empty = catalog.publish_report_branch('report', 'empty', actor='bob', profile_ref='self',
+        expected_generation=0, expected_revision='', generation=0, revision='a' * 64,
+        publication_id='p' * 24, storage_server_id='server-one')
+    assert empty['status'] == 'active'
+    with pytest.raises(PermissionError):
+        catalog.reserve_report_branch('report', actor='bob', profile_ref='reader-profile', branch_id='reader-write')

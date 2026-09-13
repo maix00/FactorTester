@@ -668,7 +668,8 @@ class ResearchCatalog(ResearchBranchesMixin):
                 for item in conn.execute(
                     """SELECT research_id, role, status
                        FROM research_catalog_memberships
-                      WHERE principal_ref=? AND status='active'""",
+                      WHERE principal_ref=? AND status='active'
+                      ORDER BY CASE role WHEN 'owner' THEN 2 WHEN 'editor' THEN 1 ELSE 0 END""",
                     (viewer_ref,),
                 ).fetchall()
             } if viewer_ref else {}
@@ -1734,7 +1735,8 @@ class ResearchCatalog(ResearchBranchesMixin):
                 membership = conn.execute(
                     """SELECT role, status FROM research_catalog_memberships
                        WHERE research_id=? AND principal_ref=?
-                         AND status='active'""",
+                         AND status='active'
+                       ORDER BY CASE role WHEN 'owner' THEN 2 WHEN 'editor' THEN 1 ELSE 0 END DESC""",
                     (str(row["research_id"]), viewer_ref),
                 ).fetchone()
         return self._research_access_values(
@@ -1762,18 +1764,18 @@ class ResearchCatalog(ResearchBranchesMixin):
             return _access(True, True, True, True, "owner", research_id)
         if status == "archived":
             return _access(False, False, False, False, "none", research_id)
-        if visibility == "public":
-            return _access(True, True, True, False, "research", research_id)
-        if visibility == "superiors" and self._is_superior(viewer, owner):
-            return _access(True, True, True, False, "research", research_id)
-        if viewer and viewer in _loads_list(authorized_users_json):
-            return _access(True, True, True, False, "research", research_id)
         if membership is not None and str(membership["status"]) == "active":
             return _access(
                 True, True, True,
                 str(membership["role"]) in {"owner", "editor"},
                 "research", research_id,
             )
+        if visibility == "public":
+            return _access(True, True, True, False, "research", research_id)
+        if visibility == "superiors" and self._is_superior(viewer, owner):
+            return _access(True, True, True, False, "research", research_id)
+        if viewer and viewer in _loads_list(authorized_users_json):
+            return _access(True, True, True, False, "research", research_id)
         return _access(False, False, False, False, "none", research_id)
 
     def _report_access(

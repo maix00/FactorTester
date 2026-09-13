@@ -533,10 +533,16 @@ def _job_artifact_path(external_ref: str, filename: str) -> Path | None:
         or not re.fullmatch(r"[A-Za-z0-9._-]{1,255}", parts[1])
     ):
         return None
+    if any(part in {".", ".."} for part in parts):
+        return None
+    from tools.cli.release.job_cache import cached_job_artifact, default_job_cache_root
+    cached = cached_job_artifact(job_id=parts[0], name=parts[1])
+    if cached is not None:
+        return Path(cached["path"])
     safe_name = Path(filename).name
     if not safe_name or parts[1] not in {safe_name, Path(safe_name).stem}:
         return None
-    return Path.home() / "Documents" / "FactorTester" / "jobs" / parts[0] / safe_name
+    return default_job_cache_root() / parts[0] / safe_name
 
 
 def public_component(
@@ -638,7 +644,8 @@ def _public_text(
             }:
                 return match.group(0)
         if scheme == "factortester-artifact" and not image:
-            return match.group(0)
+            resource_id = _capture_local_resource(resources, target, label)
+            return f"[{label}](factortester-local://{resource_id})" if resource_id else label
         return label
 
     result = _MARKDOWN_LINK.sub(replace_link, value)
@@ -708,10 +715,10 @@ def _local_targets(snapshot: dict[str, Any]) -> list[str]:
                 parsed = urlparse(target)
                 scheme = parsed.scheme.lower()
                 if target.startswith("#") or scheme in {
-                    "http", "https", "factortester-artifact",
+                    "http", "https",
                 }:
                     continue
-                if not scheme or scheme == "file" or (
+                if not scheme or scheme in {"file", "factortester-artifact"} or (
                     scheme == "factortester" and parsed.netloc == "file"
                 ):
                     targets.add(target)
@@ -735,6 +742,8 @@ def _resolve_local_resource(
     resources: dict[str, dict[str, Any]], target: str,
 ) -> Path | None:
     parsed = urlparse(target)
+    if parsed.scheme == "factortester-artifact":
+        return _job_artifact_path(target, Path(parsed.path).name)
     if parsed.scheme == "file":
         candidate = Path(unquote(parsed.path)).expanduser()
         roots = _allowed_resource_roots(resources)

@@ -28,6 +28,7 @@ def register_branch_commands(group: click.Group) -> None:
     group.add_command(branch_publish)
     group.add_command(branch_upload)
     group.add_command(branch_fork)
+    group.add_command(branch_diff)
 
 
 @click.command("branch-list")
@@ -146,3 +147,16 @@ def branch_fork(report_id, profile_id, source_branch_id, branch_id, release_prof
     _json(fork_remote_branch(client_from_config(), LocalProfileStore(load_profile_root(release_profile)),
                              profile_id=profile_id, report_id=report_id,
                              source_branch_id=source_branch_id, branch_id=branch_id))
+
+
+@click.command('branch-diff')
+@click.argument('report_id')
+@click.option('--base', 'base_branch_id', required=True)
+@click.option('--compare', 'other_branch_id', required=True)
+@click.option('--include-content', is_flag=True, help='包含每个变化节点的前后完整内容')
+@friendly_errors
+def branch_diff(report_id, base_branch_id, other_branch_id, include_content):
+    """比较任意两个可访问协作分支的节点与附件变化。"""
+    from tools.cli.release.research_reporting.collaboration import diff_remote_branches
+    _json(diff_remote_branches(client_from_config(), report_id=report_id, base_branch_id=base_branch_id,
+                               other_branch_id=other_branch_id, include_content=include_content))

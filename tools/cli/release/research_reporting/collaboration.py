@@ -132,3 +132,28 @@ def fork_remote_branch(client, store: LocalProfileStore, *, profile_id: str,
     result = publish_local_branch(client, store, profile_id=profile_id, work_package_id=package_id, branch_id=branch_id)
     return {**result, 'work_package_id': package_id, 'inherited': inherited['inherited'],
             'source_branch_id': source_branch_id, 'source_revision': source['revision']}
+
+
+def diff_remote_branches(client, *, report_id: str, base_branch_id: str,
+                         other_branch_id: str, include_content: bool = False) -> dict:
+    from .authoring.tree_bundle import validate_report_bundle
+    from .authoring.tree_diff import diff_report_manifests
+    branches = client.report_branch_status(report_id)['branches']
+    manifests = []
+    for branch_id in (base_branch_id, other_branch_id):
+        branch = next((item for item in branches if item['branch_id'] == branch_id and item['status'] == 'active'), None)
+        if branch is None:
+            raise ValueError('comparison branch is unavailable')
+        index = client.read_publication_branch(branch['publication_id'])
+        index = index.get('index', index)
+        if (index.get('report_id'), index.get('generation'), index.get('projection_hash')) != (report_id, branch['generation'], branch['revision']):
+            raise ValueError('comparison branch version changed')
+        descriptor = index.get('authoring_bundle')
+        if not descriptor:
+            raise ValueError('comparison requires an uploaded editable snapshot')
+        payload = download_bundle(client, branch['publication_id'], descriptor)
+        manifest, _ = validate_report_bundle(payload=payload, expected_sha256=descriptor['content_hash'],
+            report_id=report_id, source_generation=branch['generation'], source_root_ref=descriptor['root_ref'])
+        manifests.append(manifest)
+    return {**diff_report_manifests(*manifests, include_content=include_content),
+            'base_branch_id': base_branch_id, 'other_branch_id': other_branch_id}

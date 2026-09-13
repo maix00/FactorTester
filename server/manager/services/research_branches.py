@@ -95,7 +95,7 @@ class ResearchBranchesMixin:
                               expected_generation: int, expected_revision: str, generation: int,
                               revision: str, publication_id: str, storage_server_id: str) -> dict:
         """Advance only the reserved writer's exact version after byte publication."""
-        if (not isinstance(generation, int) or isinstance(generation, bool) or generation < 1
+        if (not isinstance(generation, int) or isinstance(generation, bool) or generation < 0
                 or not isinstance(revision, str) or not re.fullmatch('[0-9a-f]{64}', revision)
                 or not isinstance(publication_id, str) or not re.fullmatch('[A-Za-z0-9_-]{20,64}', publication_id)
                 or not isinstance(storage_server_id, str) or not storage_server_id.strip()):
@@ -113,7 +113,7 @@ class ResearchBranchesMixin:
                     generation, revision, publication_id, storage_server_id):
                 return dict(row)
             if ((row['generation'], row['revision']) != (expected_generation, expected_revision)
-                    or generation <= row['generation']):
+                    or (row['status'] == 'active' and generation <= row['generation'])):
                 raise ValueError('branch version conflict; refresh before publishing')
             conn.execute('''UPDATE research_catalog_branches SET generation=?, revision=?, publication_id=?,
                 storage_server_id=?, status='active', updated_at=? WHERE report_id=? AND branch_id=?''',

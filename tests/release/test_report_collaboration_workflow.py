@@ -105,3 +105,10 @@ def test_two_profiles_fork_edit_publish_same_report(tmp_path, monkeypatch):
     assert [item['body'] for item in selected['components'] if item['kind'] == 'entry'] == [
         'Source advances after the fork', 'Bob edits independently']
     assert len(load_snapshot(package_root=target, branch_id='bob-review')['components']) == 2
+
+    comparison = workflow.diff_remote_branches(alice, report_id='same-report', base_branch_id='main',
+                                               other_branch_id='bob-review', include_content=True)
+    assert {change['component_id'] for change in comparison['changes']} == {'chapter', 'alice-later', 'bob-note'}
+    assert 'root' not in {change['component_id'] for change in comparison['changes']}
+    assert any(change['status'] == 'added' and change['after']['body'] == 'Bob edits independently'
+               for change in comparison['changes'])

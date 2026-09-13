@@ -104,3 +104,16 @@ owner/editor 成员可读；7998 与 7997 均应用相同实时授权。上传�
 `test_report_collaboration_workflow` 使用两个独立 Profile store、真实目录、报告树、
 发布库和对象存储，验证 fork、独立编辑、版本发布、源前进后的重试和拥有者选择性
 复制。网络调用被替代；该测试不替代两端部署、对象通道和浏览器验收。
+
+### 完整 Job 数据与分支差异
+
+bundle v2 增加 Job artifact 清单，依据报告中冻结的 Job/产物/哈希读取现有缓存；
+表格预览之外的全部原始数据一并传输。目标已有不同哈希的同名产物时拒绝导入，
+不覆盖缓存；相关下载链接重定位到本分支资源，公共投影使用既有 local-resource
+接口读取。Job 图片解析同时尊重客户端/服务器配置的缓存根目录。
+
+`research reports branch-diff REPORT --base B1 --compare B2 [--include-content]`
+按真实节点内容、子节点顺序和资产哈希比较两份受权快照；单纯由子树变化导致的
+祖先内容寻址哈希变化不算正文修改。第 0 代空报告也可完成首次发布，但活动分支
+仍拒绝相同 generation 的不同内容覆盖。公开研究的浏览许可不会覆盖有效 editor
+权限；具体分支写入仍检查确切 principal/Profile，不能借其他 Profile 的角色写入。

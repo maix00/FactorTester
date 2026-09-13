@@ -112,3 +112,40 @@ def test_bundle_publication_is_detached_private_and_immutable(tmp_path, monkeypa
                       'projection': {**projection, 'generation': head['generation'] + 1, 'projection_hash': 'different'}})
     with pytest.raises(ValueError, match='private'):
         client.publish(profile_id='self', work_package_id='source', branch_id='main', visibility='public', include_authoring=True)
+
+
+def test_bundle_preserves_full_job_table_beyond_preview(tmp_path, monkeypatch):
+    from tools.cli.release.job_cache import cache_job_artifact, cached_job_artifact
+    from tools.cli.release.research_reporting.job_artifact_tables import table_content
+    source_cache, target_cache = tmp_path / 'source-cache', tmp_path / 'target-cache'
+    monkeypatch.setenv('FACTORTESTER_JOB_CACHE_ROOT', str(source_cache))
+    raw = ('value\n' + '\n'.join(str(i) for i in range(350))).encode()
+    digest = hashlib.sha256(raw).hexdigest()
+    cache_job_artifact(job_id='job-1', name='statistics', filename='statistics.csv', content_type='text/csv',
+                       raw=raw, server_url='http://source-manager')
+    source, _ = _source(tmp_path)
+    add_component(package_root=source, branch_id='main', component_id='job-table', kind='table', title='',
+        parent_id='chapter', body='[Full data](factortester-artifact://jobs/job-1/statistics)',
+        content=table_content(raw, 'text/csv', source={'job_id': 'job-1', 'artifact_ref': 'job-artifact:job-1:statistics',
+                             'filename': 'statistics.csv', 'content_hash': digest, 'content_type': 'text/csv'}), display_kind='')
+    snapshot = load_snapshot(package_root=source, branch_id='main')
+    assert len(snapshot['components'][-1]['content']['rows']) == 200
+    payload = export_report_bundle(package_root=source, branch_id='main', expected_generation=snapshot['head']['generation'],
+                                    expected_root_ref=snapshot['head']['root_ref'])
+    monkeypatch.setenv('FACTORTESTER_JOB_CACHE_ROOT', str(target_cache))
+    options = dict(payload=payload, expected_sha256=hashlib.sha256(payload).hexdigest(), package_root=tmp_path / 'target',
+                   branch_id='review', report_id='same-report', source_generation=snapshot['head']['generation'],
+                   source_root_ref=snapshot['head']['root_ref'])
+    assert import_report_bundle(**options)['inherited']
+    imported = load_snapshot(package_root=tmp_path / 'target', branch_id='review')
+    assert '](resources/' in imported['components'][-1]['body']
+    from tools.cli.release.research_reporting.public_research.projection import build_upload_projection
+    projected = build_upload_projection(imported)
+    assert projected['local_resources'][-1]['available'] is True
+    assert cached_job_artifact(job_id='job-1', name='statistics', expected_hash=digest)['raw'] == raw
+    assert b'349' in cached_job_artifact(job_id='job-1', name='statistics')['raw']
+    cache_job_artifact(job_id='job-1', name='statistics', filename='statistics.csv', content_type='text/csv',
+                       raw=b'different version', server_url='http://target-manager')
+    with pytest.raises(ValueError, match='conflicts'):
+        import_report_bundle(**{**options, 'branch_id': 'conflicting'})
+    assert not (tmp_path / 'target/branches/conflicting/authoring/HEAD.json').exists()

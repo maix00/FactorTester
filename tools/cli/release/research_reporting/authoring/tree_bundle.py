@@ -16,6 +16,7 @@ from urllib.parse import quote
 
 from .tree_paths import report_tree_paths
 from .tree_hierarchy import validate_parent_child
+from .bundle_job_artifacts import export_job_artifacts, restore_job_artifacts, artifact_requests
 from .tree_schema import canonical_bytes, digest, validate_node
 from .tree_store import (atomic_write, load_head, load_node, store_node,
                          tree_lock, validate_head, write_head)
@@ -93,8 +94,9 @@ def bundle_from_snapshot(snapshot: dict, *, package_root: Path, branch_id: str) 
         if path is None or not path.is_file():
             raise ValueError('report bundle local resource is unavailable')
         links.append({'target': target, **capture(path.read_bytes(), path.name)})
-    manifest = {'schema_version': 1, 'source_branch_id': branch_id,
-                'head': head, 'nodes': nodes, 'assets': assets, 'links': links}
+    job_artifacts = export_job_artifacts(snapshot, capture)
+    manifest = {'schema_version': 2, 'source_branch_id': branch_id,
+                'head': head, 'nodes': nodes, 'assets': assets, 'links': links, 'job_artifacts': job_artifacts}
     encoded = canonical_bytes(manifest)
     if total + len(encoded) > MAX_BUNDLE_BYTES:
         raise ValueError('report bundle exceeds size limit')
@@ -118,7 +120,7 @@ def _read_bundle(payload: bytes, expected_sha256: str):
             if sum(item.file_size for item in archive.infolist()) > MAX_BUNDLE_BYTES:
                 raise ValueError('report bundle expanded size exceeds limit')
             manifest = json.loads(archive.read('manifest.json'))
-            if set(manifest) != {'schema_version', 'source_branch_id', 'head', 'nodes', 'assets', 'links'} or manifest['schema_version'] != 1:
+            if set(manifest) != {'schema_version', 'source_branch_id', 'head', 'nodes', 'assets', 'links', 'job_artifacts'} or manifest['schema_version'] != 2:
                 raise ValueError('report bundle schema is invalid')
             files = {name.removeprefix('objects/'): archive.read(name) for name in names if name != 'manifest.json'}
     except (zipfile.BadZipFile, json.JSONDecodeError, KeyError, TypeError) as exc:
@@ -126,12 +128,12 @@ def _read_bundle(payload: bytes, expected_sha256: str):
     for key, raw in files.items():
         if hashlib.sha256(raw).hexdigest() != key:
             raise ValueError('report bundle resource checksum mismatch')
-    for item in [*manifest['assets'], *manifest['links']]:
+    for item in [*manifest['assets'], *manifest['links'], *manifest['job_artifacts']]:
         if not isinstance(item.get('filename'), str) or item['filename'] in {'', '.', '..'} or Path(item['filename']).name != item['filename']:
             raise ValueError('report bundle filename is invalid')
         if item['sha256'] not in files or len(files[item['sha256']]) != item['size_bytes']:
             raise ValueError('report bundle resource is missing or truncated')
-    if set(files) != {item['sha256'] for item in [*manifest['assets'], *manifest['links']]}:
+    if set(files) != {item['sha256'] for item in [*manifest['assets'], *manifest['links'], *manifest['job_artifacts']]}:
         raise ValueError('report bundle contains unreferenced resources')
     return manifest, files
 
@@ -166,6 +168,13 @@ def validate_report_bundle(*, payload: bytes, expected_sha256: str, report_id: s
     asset_map = {item['asset_ref']: item for item in manifest['assets']}
     if len(asset_map) != len(manifest['assets']) or set(asset_map) != {item['asset_ref'] for item in head['assets']}:
         raise ValueError('report bundle asset manifest mismatch')
+    requests = artifact_requests({'components': list(nodes.values())})
+    jobs = {(item['job_id'], item['name']): item for item in manifest['job_artifacts']}
+    if len(jobs) != len(manifest['job_artifacts']) or set(jobs) != set(requests):
+        raise ValueError('report bundle Job artifact inventory mismatch')
+    for key, expected in requests.items():
+        if expected and jobs[key]['sha256'] != expected:
+            raise ValueError('report bundle Job artifact version mismatch')
     return manifest, files
 
 
@@ -185,6 +194,7 @@ def import_report_bundle(*, payload: bytes, expected_sha256: str, package_root: 
                 return {'paths': paths, 'head': load_head(paths), 'inherited': False}
             raise ValueError('target branch already exists with another origin')
         ensure_work_package_identity(Path(package_root), work_package_id=Path(package_root).name, report_id=report_id)
+        restore_job_artifacts(manifest['job_artifacts'], files)
         replacements = {}
         resource_root = Path(package_root).resolve() / 'branches' / branch_id / 'resources'
         for item in manifest['links']:
