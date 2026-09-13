@@ -62,9 +62,15 @@ def mutate_batch(
         tuple[dict[str, Any], dict[str, Any], list[str]],
     ],
     submission: ReportSubmission | None = None,
+    expected_head: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     with tree_lock(paths):
         previous = load_head(paths)
+        if expected_head is not None and any(
+            previous.get(key) != expected_head.get(key)
+            for key in ("report_id", "generation", "root_ref")
+        ):
+            raise ValueError("report target version changed; rebuild the copy preview")
         validate_publish_lease(paths, previous, submission)
         head = deepcopy(previous)
         root = load_node(paths, previous["root_ref"])
