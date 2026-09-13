@@ -701,21 +701,22 @@
     const root = document.createElement("section");
     root.className = "factor-editor-source-controls";
     const actions = document.createElement("div");
-    actions.className = "detail-actions factor-editor-source-actions";
+    actions.className = "source-panel-actions";
     const file = options.fileInput || filePicker(
       context, state, redraw, options.onChanged,
     );
     if (options.showUpload !== false) {
-      const upload = FTUI.actionButton(
-        context.t("上传因子源码"), () => file.click(), {variant: "secondary"},
+      const upload = FTUI.iconButton(
+        context, "arrow.up.circle", "上传因子源码", () => file.click(),
       );
       actions.append(upload);
     }
-    const validate = FTUI.actionButton(context.t("校验源码"), async () => {
+    const validate = FTUI.iconButton(context, "checkmark.circle", "校验源码", async () => {
       validate.disabled = true;
       await inspect(context, state, redraw);
       validate.disabled = false;
-    }, {variant: "secondary"});
+    });
+    validate.disabled = state.inspecting === true;
     actions.append(validate);
     const editor = FTUI.codeEditor(state.sourceCode, {
       language: "python",
@@ -741,9 +742,9 @@
       status.textContent = context.t("正在校验源码并解析参数…");
     }
     if (!options.fileInput) root.append(file);
-    const sourceRow = field(context.t("Python 源码"), editor.element);
-    sourceRow.classList.add("factor-editor-source-code-row");
-    root.append(actions, sourceRow, status);
+    root.append(FTUI.sourcePanel(context, editor.element, {
+      actions: Array.from(actions.children),
+    }), status);
     return root;
   }
 

@@ -81,7 +81,7 @@
 .strategy-editor-scope-summary { display: grid; gap: 3px; padding: 9px 10px; border: 1px dashed var(--line); border-radius: 8px; background: var(--soft); }
 .strategy-editor-scope-summary strong, .strategy-editor-scope-summary small { min-width: 0; overflow-wrap: anywhere; }
 .strategy-editor-factor-source-editor { display: grid; gap: 7px; min-width: 0; }
-.strategy-editor-factor-source-editor textarea { width: 100%; box-sizing: border-box; min-height: 150px; resize: vertical; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+
 .strategy-editor-factor-source-status { min-height: 1.2em; color: var(--muted); overflow-wrap: anywhere; }
 .strategy-editor-factor-source-status:where(:not(:empty)) { padding: 5px 7px; border-radius: 7px; background: var(--soft); }
 .json-editor { min-height: 96px; resize: vertical; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }

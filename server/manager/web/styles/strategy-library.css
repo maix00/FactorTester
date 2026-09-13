@@ -88,7 +88,7 @@
 }
 
 .strategy-source-editor {
-  min-height: 24rem;
+  --source-min-height: 24rem;
   width: 100%;
 }
 

@@ -815,31 +815,10 @@
         "当前身份无权读取源码，或源码尚未同步到此服务器",
       ),
     ).trim();
-    const root = document.createElement("section");
-    root.className = "factor-detail-source";
-    const heading = document.createElement("div");
-    heading.className = "factor-detail-source-heading";
-    const title = document.createElement("h3");
-    title.textContent = context.t("Python 源码");
-    heading.append(title);
-    if (sourceCode) {
-      const copy = context.button(context.t("复制"), async () => {
-        await navigator.clipboard.writeText(sourceCode);
-      }, context.t("复制源码"));
-      copy.className = `${copy.className || ""} secondary`.trim();
-      heading.append(copy);
-    }
-    const body = FTUI.code(
-      sourceCode || unavailableReason || context.t(
-        "当前身份无权读取源码，或源码尚未同步到此服务器",
-      ),
-      {
-        language: sourceCode ? "python" : "",
-        className: "factor-detail-source-code",
-      },
-    );
-    root.append(heading, body);
-    return root;
+    return FTUI.sourceView(context, sourceCode || unavailableReason, {
+      language: sourceCode ? "python" : "", copy: !!sourceCode,
+      className: "factor-detail-source",
+    });
   }
 
   function versionQuery(options = {}) {

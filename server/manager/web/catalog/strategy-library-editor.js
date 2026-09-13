@@ -39,7 +39,7 @@
     });
     const sourcePanel = document.createElement("div");
     sourcePanel.className = "strategy-editor-source-panel";
-    sourcePanel.append(row(context, "Python 源码", source.element));
+    sourcePanel.append(FTUI.sourcePanel(context, source.element));
     const tabs = FTObjectDetailTabs.create(context, {
       objectKind: "strategy", mode,
       stateKey: `strategy-editor-tabs:${value.strategy_ref || "new"}`,
