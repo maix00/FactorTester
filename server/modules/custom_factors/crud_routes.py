@@ -43,6 +43,7 @@ from tools.data.sqlite.factor_source_store import (
     get_factor_source_metadata,
 )
 from tools.data.sqlite.factor_source_versions import record_factor_formula_version
+from tools.data.sqlite.factor_family_heads import family_head
 
 
 def _current_user_is_super_admin() -> bool:
@@ -364,14 +365,17 @@ def api_delete_factor(factor_id):
         return jsonify({'success': False, 'error': '未登录'}), 401
     existing_source = load_factor_source(username, factor_id)
     if existing_source is None:
-        return jsonify({'success': False, 'error': '因子不存在'}), 404
+        head = family_head('custom', username, factor_id)
+        if not head or not head['deleted']:
+            return jsonify({'success': False, 'error': '因子不存在'}), 404
 
-    old_name = factor_class_name(existing_source)
+    old_name = factor_class_name(existing_source) if existing_source else factor_id
     frozen_dependents = list_factor_family_dependency_configs(
         old_name or factor_id, owner_ref=username,
     )
     cascade = delete_factor_family_configs(old_name or factor_id, username=username)
-    delete_factor_source(username, factor_id)
+    if existing_source is not None:
+        delete_factor_source(username, factor_id)
 
     invalidate_custom_factor_cache(username, factor_id)
     if old_name:
@@ -392,12 +396,15 @@ def api_delete_public_factor(factor_id):
         return jsonify({'success': False, 'error': '只有超级管理员可以删除公共因子家族'}), 403
     existing_source = load_public_factor_source(factor_id)
     if existing_source is None:
-        return jsonify({'success': False, 'error': '公共因子家族不存在'}), 404
+        head = family_head('public', '', factor_id)
+        if not head or not head['deleted']:
+            return jsonify({'success': False, 'error': '公共因子家族不存在'}), 404
     frozen_dependents = list_factor_family_dependency_configs(
         factor_id, owner_ref='public',
     )
     cascade = delete_factor_family_configs(factor_id)
-    delete_factor_source_row('public', '', factor_id)
+    if existing_source is not None:
+        delete_factor_source_row('public', '', factor_id)
     invalidate_factor_family_cache(factor_id)
     return jsonify({
         'success': True,

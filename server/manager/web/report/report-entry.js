@@ -83,11 +83,9 @@
         // unavailable; only the Branch selector is omitted.
       }
     }
-    const infoLine = document.createElement("div");
-    infoLine.className = "research-report-info-line";
-    const reportTitle = document.createElement("strong");
-    reportTitle.textContent = value.title || t("研究报告");
-    infoLine.append(reportTitle);
+    if (!isCurrent()) return;
+    const reportControls = document.createElement("div");
+    reportControls.className = "research-report-actions";
     if (branches.length > 1) {
       const branchPicker = document.createElement("select");
       branchPicker.className = "branch-picker";
@@ -112,7 +110,7 @@
         }
         render(targetPublicationID, context);
       });
-      infoLine.append(branchPicker);
+      reportControls.append(branchPicker);
     }
     FTResearchReportSettings.applyReading(context);
     const infoActions = document.createElement("span");
@@ -129,7 +127,8 @@
         ),
       ));
     }
-    infoLine.append(infoActions);
+    reportControls.append(infoActions);
+    context.toolbar.replaceChildren(reportControls);
     const boundProfileID = String(
       value.profile_ref || value.profile_id || value.generation?.profile_id || "",
     ).trim();
@@ -201,7 +200,7 @@
     const layout = document.createElement("div"); layout.className = "report-layout";
     const rail = document.createElement("nav"); rail.className = "chapter-rail";
     const mount = document.createElement("div"); mount.className = "report-mount";
-    layout.append(mount); content.replaceChildren(infoLine, layout, rail);
+    layout.append(mount); content.replaceChildren(layout, rail);
     let refreshScrollY = null;
     const renderContent = () => FTReportRenderer.render(value, mount, {
       chapterRail: rail,
@@ -263,7 +262,6 @@
         state.report = next;
         context.setHeading(next.title, t("研究报告"));
         context.updateActiveTab({title: next.title});
-        reportTitle.textContent = next.title || t("研究报告");
         return renderer.update(next);
       },
     });

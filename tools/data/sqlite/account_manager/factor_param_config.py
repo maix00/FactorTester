@@ -173,34 +173,51 @@ def delete_factor_family_configs(
     A custom family is restricted to its owner.  A public family passes no
     username because registrations may belong to any account.
     """
+    from server.manager.storage.account_domain.local import LocalAccountDomainStore
+
+    mirror = LocalAccountDomainStore(Settings.CACHE_DB_PATH)
     with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
         ensure_factor_param_config_schema(conn)
+        conn.execute("BEGIN IMMEDIATE")
         where = "ff_alias = ?"
         params: tuple[Any, ...] = (ff_alias,)
         if username is not None:
             where += " AND username = ?"
-            params = (ff_alias, username)
-        rows = conn.execute(
-            f"SELECT username, scope_key, payload_json "
-            f"FROM account_factor_param_configs WHERE {where}",
+            params += (username,)
+        authored = conn.execute(
+            f"SELECT username, scope_key, payload_json FROM account_factor_param_configs WHERE {where}",
             params,
         ).fetchall()
-        conn.execute(
-            f"DELETE FROM account_factor_param_configs WHERE {where}", params,
-        )
-    deleted = []
-    for row in rows:
-        try:
-            payload = json.loads(row["payload_json"])
-        except Exception:
-            payload = {}
-        params_list = payload.get("params_list") if isinstance(payload, dict) else []
-        deleted.append({
-            "username": str(row["username"]),
-            "scope_key": str(row["scope_key"]),
-            "factor_count": len(params_list) if isinstance(params_list, list) else 0,
-        })
-    return deleted
+        targets = {(row['username'], f"{row['scope_key']}:{ff_alias}"):
+                   (row['scope_key'], row['payload_json']) for row in authored}
+        # A receiving server can have frozen registrations without authored rows.
+        # Match the full family suffix; scope keys themselves may contain colons.
+        suffix = ':' + ff_alias
+        query = ("SELECT principal, entity_id, payload_json, deleted FROM account_domain_entities "
+                 "WHERE entity_type='factor_param_config' AND substr(entity_id, -?)=?")
+        args: tuple[Any, ...] = (len(suffix), suffix)
+        if username is not None:
+            query += " AND principal=?"
+            args += (username,)
+        for row in conn.execute(query, args).fetchall():
+            key = (row['principal'], row['entity_id'])
+            if row['deleted']:
+                targets.pop(key, None)
+            else:
+                targets[key] = (row['entity_id'][:-len(suffix)], row['payload_json'])
+        conn.execute(f"DELETE FROM account_factor_param_configs WHERE {where}", params)
+        deleted = []
+        for (owner, identifier), (scope, raw) in targets.items():
+            payload = json.loads(raw)
+            params_list = payload.get('params_list') or payload.get('resolved_factors') or []
+            mirror.upsert_local(
+                principal=owner, entity_type='factor_param_config', entity_id=identifier,
+                payload={}, deleted=True, connection=conn,
+                manager_id=os.environ.get('FACTORTESTER_SERVER_ID') or 'local',
+            )
+            deleted.append({'username': owner, 'scope_key': scope,
+                            'factor_count': len(params_list) if isinstance(params_list, list) else 0})
+        return deleted
 
 
 def list_factor_family_dependency_configs(
