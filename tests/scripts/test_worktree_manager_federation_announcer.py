@@ -112,3 +112,29 @@ def test_lazy_activation_rejects_a_different_responder_identity() -> None:
 
     assert handled == []
     assert announcer.active_registration_urls == ()
+
+
+def test_temporary_host_address_failure_does_not_kill_heartbeat_scheduler():
+    """A real scheduler iteration must recover, without publishing stale endpoints."""
+    transport = _Transport()
+    attempts = 0
+    def payload_factory():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise ValueError('current host LAN address is unavailable')
+        return {'heartbeat': attempts}
+    announcer = FederationAnnouncer(
+        bootstrap_url='http://10.77.0.2:17998/api/federation/register',
+        registration_token='cluster-token', payload_factory=payload_factory,
+        transport=transport,
+    )
+    class TwoIterations:
+        def is_set(self):
+            return attempts >= 2
+        def wait(self, _interval):
+            return False
+    announcer._stop = TwoIterations()
+    announcer._run()
+    assert attempts == 2
+    assert [payload for _, payload in transport.calls] == [{'heartbeat': 2}]
