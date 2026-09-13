@@ -139,16 +139,10 @@ class ResearchCatalogRoutesMixin:
                         ),
                     }
                 elif child == "collaboration-branches":
-                    # Group-A (owner/editor) branches for every report in this
-                    # research.  The catalog's ``_report_branches`` already
-                    # projects branch choices from migrated source records
-                    # (client / server_agent / publication), which includes
-                    # branches synced from other servers and clients.  We do
-                    # NOT re-scan the local workspaces here: a collaboration
-                    # branch is visible through the shared catalog registry,
-                    # even when its bytes live on another server or client.
-                    reports = service.list_reports(
-                        research_id, viewer=viewer,
+                    # Use the same readable metadata projection as the report
+                    # page; no local workspace scan or report-byte download.
+                    reports = self._research_catalog_publication_branches(
+                        service.list_reports(research_id, viewer=viewer), viewer,
                     )
                     seen: set[str] = set()
                     branches: list[dict[str, Any]] = []
@@ -577,7 +571,7 @@ class ResearchCatalogRoutesMixin:
     @staticmethod
     def _research_catalog_target(path: str) -> tuple[str, str | None]:
         match = re.fullmatch(
-            r"/api/research/([^/]+)(?:/(members|workspaces|reports|evidence|manifest|share-links))?",
+            r"/api/research/([^/]+)(?:/(members|workspaces|reports|evidence|manifest|share-links|collaboration-branches))?",
             path,
         )
         if not match:
