@@ -88,3 +88,19 @@ Job 附件以及所有引用类型的完整覆盖仍需扩展验收，不能以�
 可编辑源码下载独立于普通公开报告浏览权限，仅源作者、报告拥有者或仍有效的
 owner/editor 成员可读；7998 与 7997 均应用相同实时授权。上传、断线 outbox 与
 对象校验复用现有公共基础设施；尚未上传完的预留分支不视为可用。
+
+### CLI 协作入口
+
+- `research reports branch-upload --profile P --work-package-id W --branch-id B`：
+  冻结当前 Profile 已登记的完整树、通过 outbox/7997 上传不可变版本，再比较旧版本
+  推进共享分支。断线保留 pending_sync，不能当成已完成共享。
+- `research reports branch-fork REPORT --profile P --from-branch SOURCE --branch-id NEW`：
+  从目录读取受权源版本，预留目标 Profile 分支，通过下载 ticket 读取 bundle，
+  校验后登记本地 Work Package 和报告 artifact，随后执行 branch-upload。
+  本地已登记 fork 的重试继续发布原 fork，不重新跟随已变化的源分支。
+- 拥有者可将协作者分支 fork 到自己的审阅分支，再使用 `copy-preview` /
+  `copy-apply` 选择章节或小节到定稿分支。复制保留来源，且不能绕过目标版本检查。
+
+`test_report_collaboration_workflow` 使用两个独立 Profile store、真实目录、报告树、
+发布库和对象存储，验证 fork、独立编辑、版本发布、源前进后的重试和拥有者选择性
+复制。网络调用被替代；该测试不替代两端部署、对象通道和浏览器验收。

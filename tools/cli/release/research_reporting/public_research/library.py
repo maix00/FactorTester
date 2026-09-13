@@ -173,6 +173,10 @@ class PublicResearchLibrary:
                     "build_source_ref": requested_source_ref,
                 }
                 registry["publications"].append(record)
+            if record.get("authoring_snapshot") and record.get("projection_hash") != value.get("projection_hash"):
+                raise ValueError("editable report publication is immutable; publish a new revision")
+            if value.get("authoring_bundle"):
+                record["authoring_snapshot"] = True
             _merge_build_metadata(
                 record,
                 build_source=requested_source,

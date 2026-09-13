@@ -8,6 +8,7 @@ reader (group B) may list and read them via ``report branch-list`` /
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import click
 
@@ -25,6 +26,8 @@ def register_branch_commands(group: click.Group) -> None:
     group.add_command(branch_status)
     group.add_command(branch_reserve)
     group.add_command(branch_publish)
+    group.add_command(branch_upload)
+    group.add_command(branch_fork)
 
 
 @click.command("branch-list")
@@ -111,3 +114,35 @@ def branch_publish(report_id: str, profile_ref: str, branch_id: str, publication
         'profile_ref': profile_ref, 'publication_id': publication_id,
         'expected_generation': expected_generation, 'expected_revision': expected_revision,
     }))
+
+
+@click.command('branch-upload')
+@click.option('--profile', 'profile_id', required=True)
+@click.option('--work-package-id', required=True)
+@click.option('--branch-id', required=True)
+@click.option('--release-profile', type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@friendly_errors
+def branch_upload(profile_id, work_package_id, branch_id, release_profile):
+    """上传本 Profile 的完整可编辑快照，并以版本检查推进共享分支。"""
+    from tools.cli.release.profile import load_profile_root
+    from tools.cli.release.local_profile import LocalProfileStore
+    from tools.cli.release.research_reporting.collaboration import publish_local_branch
+    _json(publish_local_branch(client_from_config(), LocalProfileStore(load_profile_root(release_profile)),
+                               profile_id=profile_id, work_package_id=work_package_id, branch_id=branch_id))
+
+
+@click.command('branch-fork')
+@click.argument('report_id')
+@click.option('--profile', 'profile_id', required=True)
+@click.option('--from-branch', 'source_branch_id', required=True)
+@click.option('--branch-id', required=True)
+@click.option('--release-profile', type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@friendly_errors
+def branch_fork(report_id, profile_id, source_branch_id, branch_id, release_profile):
+    """从任意在线服务器或客户端已发布分支 fork 到当前 Profile，再发布新分支。"""
+    from tools.cli.release.profile import load_profile_root
+    from tools.cli.release.local_profile import LocalProfileStore
+    from tools.cli.release.research_reporting.collaboration import fork_remote_branch
+    _json(fork_remote_branch(client_from_config(), LocalProfileStore(load_profile_root(release_profile)),
+                             profile_id=profile_id, report_id=report_id,
+                             source_branch_id=source_branch_id, branch_id=branch_id))
