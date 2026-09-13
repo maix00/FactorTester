@@ -54,3 +54,21 @@ principal/Profile 是作者身份，服务器只是内容提供者。同一分�
 摘要不符或源 generation 与预期不符均拒绝发布，源 HEAD 不变。
 这些是 fork 的基础修复，不等同于跨端 fork CLI、协作分支登记与选择性复制完成。
 后者及身份迁移仍未发布，不能把本地聚焦测试视为跨端验收。
+
+## 协作分支登记（未发布）
+
+新增 research_catalog_branches，主键为 `(report_id, branch_id)`，作者使用完整
+principal_ref + profile_ref + workspace_id。分支先 reserved，完成内容发布后才
+active；发布必须由预留的 Profile 执行，并比较旧 generation/revision。fork
+预留记录来源 branch_id/generation/revision，不能将新作者改成报告拥有者。
+当前这是服务层能力；HTTP 发布入口还必须核验实际发布对象，不能信任客户端
+单方面声明资源已经可用。
+
+元数据纳入原 research_catalog outbox 信封 schema_version=2，继续使用原有
+游标与冲突处理。旧 v1 快照只可应用到没有新分支记录的研究；一旦存在协作
+分支就拒绝旧快照，不能把旧版本不知道的分支当成删除。旧服务也会拒绝 v2，
+因此上线必须协调两端版本，不能将单端聚焦测试视为混合版本兼容承诺。
+
+报告下载授权允许读取已登记编辑者的确切 publication_id，并匹配其 principal
+与 report_id；其他同 report_id 的未登记第三方发布不获得报告权限。授权仍在
+每次读取时根据当前研究权限检查；撤销编辑者不会删除已贡献的历史分支。

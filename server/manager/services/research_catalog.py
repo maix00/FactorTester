@@ -18,6 +18,7 @@ from contextlib import contextmanager
 from typing import Any
 
 from tools.data.sqlite.db import connect_sqlite
+from .research_branches import BRANCH_SCHEMA, ResearchBranchesMixin
 
 VISIBILITIES = frozenset({"private", "superiors", "authorized", "public"})
 RESEARCH_STATUSES = frozenset({"active", "archived"})
@@ -26,7 +27,7 @@ MEMBER_STATUSES = frozenset({"active", "invited", "revoked"})
 RESEARCH_SCOPES = frozenset({"all", "mine", "subordinates", "shared"})
 
 
-class ResearchCatalog:
+class ResearchCatalog(ResearchBranchesMixin):
     """Persist Research relationships in the Manager-owned SQLite database."""
 
     def __init__(
@@ -215,6 +216,7 @@ class ResearchCatalog:
                     ON research_catalog_share_links(owner_ref, created_at);
                 """
             )
+            conn.executescript(BRANCH_SCHEMA)
             # Old publication projections were shared before ADR-142. Restore
             # them exactly once, so a later owner choice of "private" remains
             # authoritative across restarts.
@@ -504,9 +506,18 @@ class ResearchCatalog:
             row = self._report_row(report_id)
         except KeyError:
             return False
+        same_owner = str(row["owner_ref"]) == str(record.get("owner_ref") or "")
+        registered = False
+        if not same_owner:
+            with connect_sqlite(self.db_path, readonly=True) as conn:
+                registered = conn.execute(
+                    """SELECT 1 FROM research_catalog_branches WHERE report_id=?
+                       AND principal_ref=? AND publication_id=? AND status='active'""",
+                    (report_id, str(record.get("owner_ref") or ""),
+                     str(record.get("publication_id") or "")),
+                ).fetchone() is not None
         return bool(
-            str(row["status"]) == "active"
-            and str(row["owner_ref"]) == str(record.get("owner_ref") or "")
+            str(row["status"]) == "active" and (same_owner or registered)
             and self._report_access(row, viewer)["can_download"]
         )
 
@@ -544,6 +555,7 @@ class ResearchCatalog:
         selected_source = str(report.get("source_ref") or "").strip()
         if not research_id or not report_id:
             return []
+        registered = self._registered_branch_choices(report_id)
         with connect_sqlite(self.db_path, readonly=True) as conn:
             research = conn.execute(
                 "SELECT migration_source FROM research_catalog_researches "
@@ -560,7 +572,7 @@ class ResearchCatalog:
             ).fetchall()
         migration_source = str(research["migration_source"] if research else "")
         if migration_source and not migration_source.endswith(f":{report_id}"):
-            return []
+            return registered
         # Native reports are registered directly and have no migration row.
         if selected_source and not any(str(row["source_ref"]) == selected_source for row in rows):
             rows = [{"source_kind": report.get("build_source", ""), "source_ref": selected_source}, *rows]
@@ -596,7 +608,7 @@ class ResearchCatalog:
                 "publication_id": publication_id,
                 "selected": source_ref == selected_source,
             })
-        return branches
+        return [*registered, *branches]
 
     def list_reports_for_scope(
         self,

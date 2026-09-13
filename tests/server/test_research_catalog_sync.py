@@ -166,3 +166,28 @@ def test_same_named_profile_members_replicate_and_revoke_independently(tmp_path)
     outgoing.flush(principal='alice'); incoming.pull(principal='bob')
     assert mirror.list_researches(viewer='bob') == []
     assert {(m['principal_ref'], m['profile_ref']) for m in mirror.list_members(rid, viewer='alice')} == {('alice', 'self')}
+
+
+def test_shared_report_branches_sync_without_changing_report_owner(tmp_path):
+    from copy import deepcopy
+    from server.manager.storage.account_domain.research_sync import materialize_research
+    ((author, outgoing), (mirror, incoming)), _ = replicas(tmp_path)
+    rid = author.create_research(owner_ref='alice', title='shared')['research_id']
+    author.register_report(rid, actor='alice', report_id='report', profile_ref='self')
+    author.add_membership(rid, actor='alice', principal_ref='bob', profile_ref='self', role='editor')
+    author.create_workspace(rid, actor='alice', principal_ref='bob', profile_ref='self', title='bob')
+    author.reserve_report_branch('report', actor='bob', profile_ref='self', branch_id='bob-branch')
+    author.publish_report_branch('report', 'bob-branch', actor='bob', profile_ref='self',
+                                 expected_generation=0, expected_revision='', generation=1,
+                                 revision='a' * 64, publication_id='p' * 24, storage_server_id='client-cache')
+    outgoing.flush(principal='alice')
+    incoming.pull(principal='bob')
+    branches = mirror.list_report_branches('report', viewer='bob')
+    assert len(branches) == 1 and branches[0]['principal_ref'] == 'bob'
+    assert mirror.list_reports(rid, viewer='bob')[0]['owner_ref'] == 'alice'
+    envelope = deepcopy(outgoing.local.get_entity('alice', 'research_catalog', rid))
+    envelope['payload']['schema_version'] = 1
+    envelope['payload'].pop('branches')
+    with pytest.raises(ValueError, match='legacy research snapshot'):
+        materialize_research(incoming.local.path, envelope)
+    assert mirror.list_report_branches('report', viewer='bob') == branches
