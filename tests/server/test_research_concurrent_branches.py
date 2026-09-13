@@ -73,3 +73,13 @@ def test_overlapping_research_edits_are_not_auto_resolved(tmp_path):
     sa.flush(principal='alice')
     assert sb.flush(principal='alice')['conflicts'] == 1
     assert b.get_research_summary(rid, viewer='alice')['title'] == 'right title'
+
+
+def test_idempotent_member_timestamp_touches_do_not_conflict(tmp_path):
+    ((a, sa), (b, sb)), rid = setup_pair(tmp_path)
+    for catalog in (a, b):
+        catalog.add_membership(rid, actor='alice', principal_ref='alice', profile_ref='left', role='editor')
+    sa.flush(principal='alice')
+    assert sb.flush(principal='alice')['conflicts'] == 0
+    sb.flush(principal='alice'); sa.pull(principal='alice')
+    assert sa.local.conflicts(principal='alice') == sb.local.conflicts(principal='alice') == []
