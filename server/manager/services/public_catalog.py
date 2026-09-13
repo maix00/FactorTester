@@ -160,11 +160,11 @@ def public_factor_library() -> dict[str, Any]:
         if "no such table" not in str(exc):
             raise
         manifests = []
-    for row in manifests:
-        payload = json.loads(row[0])
-        alias = str(payload.get("factor_id") or "")
-        if payload.get("source_kind") != "public" or not alias:
-            continue
+    from tools.data.sqlite.factor_family_heads import legacy_source_manifests
+    providers = ({"principal": "__public__", "payload": json.loads(row[0])}
+                 for row in manifests)
+    for payload in legacy_source_manifests(providers, "public", ""):
+        alias = str(payload["factor_id"]).strip()
         current = local.get(alias)
         if current is None or (not current.get("family_formula_fingerprint") and payload.get("family_formula_fingerprint")):
             summary = payload.get("catalog") or payload

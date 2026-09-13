@@ -94,3 +94,24 @@ def test_delete_preserves_same_alias_other_owner(setup):
     delete_family('public','alice','CA',expected_revision=revision)
     assert load_factor_param_config('charlie','CA')['resolved_factors'][0]['ref']==other['ref']
     assert load_factor_param_config('bob','CA') is None
+
+
+def test_transfer_public_catalog_does_not_revive_peer_source(setup):
+    """A remote byte provider remains available for historical frozen refs."""
+    from server.manager.storage.account_domain.local import LocalAccountDomainStore
+    from server.manager.services.public_catalog import public_factor_library
+    mirror = LocalAccountDomainStore(settings.CACHE_DB_PATH)
+    mirror.upsert_local(principal='__public__', entity_type='factor_source',
+        entity_id='public:CA@peer', manager_id='peer', payload={
+            'source_kind': 'public', 'factor_id': 'CA', 'factor_name': 'CA',
+            'family_formula_fingerprint': 'a' * 64,
+            'storage_server_id': 'peer', 'catalog': {'description': 'old provider'},
+        })
+    assert 'CA' in {f['factor_family_alias'] for f in public_factor_library()['families']}
+    revision = family_change_impact('public', 'alice', 'CA')['revision']
+    transfer_family('public', 'alice', 'CA', expected_revision=revision)
+    assert 'CA' not in {f['factor_family_alias'] for f in public_factor_library()['families']}
+    assert load_factor_formula_version('public', '', 'CA', 'a' * 64)
+    revision = family_change_impact('custom', 'alice', 'CA')['revision']
+    transfer_family('custom', 'alice', 'CA', expected_revision=revision)
+    assert 'CA' in {f['factor_family_alias'] for f in public_factor_library()['families']}
