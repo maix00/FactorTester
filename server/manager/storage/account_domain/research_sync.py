@@ -16,7 +16,7 @@ from .payloads import public_payload
 KIND = 'research_catalog'
 TABLES = {
     'research': ('research_catalog_researches', ('research_id',)),
-    'members': ('research_catalog_memberships', ('research_id', 'profile_ref')),
+    'members': ('research_catalog_memberships', ('research_id', 'principal_ref', 'profile_ref')),
     'workspaces': ('research_catalog_workspaces', ('workspace_id',)),
     'reports': ('research_catalog_reports', ('report_id',)),
     'evidence_links': ('research_catalog_report_evidence_links', ('link_ref',)),

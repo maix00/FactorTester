@@ -150,3 +150,19 @@ def test_selected_remote_snapshot_removes_local_only_grants_and_workspace_collis
     assert materialize_pending_researches(outgoing) == 1
     assert author.list_researches(viewer='bob') == []
     assert author.create_workspace(rid, actor='alice', principal_ref='alice', profile_ref='analysis')['workspace_id'] == remote_workspace['workspace_id']
+
+
+def test_same_named_profile_members_replicate_and_revoke_independently(tmp_path):
+    ((author, outgoing), (mirror, incoming)), _ = replicas(tmp_path)
+    rid = author.create_research(owner_ref='alice', title='Shared')['research_id']
+    author.add_membership(rid, actor='alice', principal_ref='bob', profile_ref='self', role='editor')
+    author.create_workspace(rid, actor='alice', principal_ref='bob', profile_ref='self')
+    outgoing.flush(principal='alice'); incoming.pull(principal='bob')
+    assert {(m['principal_ref'], m['profile_ref']) for m in mirror.list_members(rid, viewer='bob')} == {
+        ('alice', 'self'), ('bob', 'self'),
+    }
+    assert len(mirror.list_workspaces(rid, viewer='bob')) == 2
+    author.remove_membership(rid, actor='alice', principal_ref='bob', profile_ref='self')
+    outgoing.flush(principal='alice'); incoming.pull(principal='bob')
+    assert mirror.list_researches(viewer='bob') == []
+    assert {(m['principal_ref'], m['profile_ref']) for m in mirror.list_members(rid, viewer='alice')} == {('alice', 'self')}

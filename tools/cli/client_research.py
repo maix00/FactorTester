@@ -104,11 +104,12 @@ class ResearchClientMixin(ClientMixinBase):
         return dict(data.get("report") or {})
 
     def remove_research_member(
-        self, research_id: str, profile_ref: str,
+        self, research_id: str, profile_ref: str, *, principal_ref: str | None = None,
     ) -> dict[str, Any]:
         target = quote(str(profile_ref or "").strip(), safe="")
         data = self._expect_success(self.session.delete(
             self._research_url(research_id, f"/members/{target}"),
+            **({"query": {"principal_ref": principal_ref}} if principal_ref else {}),
         ))
         return dict(data.get("member") or {})
 

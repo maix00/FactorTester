@@ -70,6 +70,16 @@ class ResearchCatalog:
     def ensure_schema(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with connect_sqlite(self.db_path) as conn:
+            membership_columns = conn.execute(
+                "PRAGMA table_info(research_catalog_memberships)"
+            ).fetchall()
+            if membership_columns and not any(
+                col["name"] == "principal_ref" and col["pk"] for col in membership_columns
+            ):
+                raise RuntimeError(
+                    "research catalog requires explicit principal-key migration; "
+                    "run scripts/research/migrate_research_principal_keys.py dry-run first"
+                )
             legacy = conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' "
                 "AND name='research_catalog_evidence_links'"
@@ -110,7 +120,7 @@ class ResearchCatalog:
                     invited_by TEXT NOT NULL,
                     created_at REAL NOT NULL,
                     updated_at REAL NOT NULL,
-                    PRIMARY KEY(research_id, profile_ref),
+                    PRIMARY KEY(research_id, principal_ref, profile_ref),
                     FOREIGN KEY(research_id)
                       REFERENCES research_catalog_researches(research_id)
                 );
@@ -123,7 +133,7 @@ class ResearchCatalog:
                     status TEXT NOT NULL,
                     created_at REAL NOT NULL,
                     updated_at REAL NOT NULL,
-                    UNIQUE(research_id, profile_ref),
+                    UNIQUE(research_id, principal_ref, profile_ref),
                     FOREIGN KEY(research_id)
                       REFERENCES research_catalog_researches(research_id)
                 );
@@ -259,7 +269,7 @@ class ResearchCatalog:
                        (workspace_id, research_id, principal_ref, profile_ref,
                         title, status, created_at, updated_at)
                        VALUES (?, ?, ?, 'self', ?, 'active', ?, ?)
-                       ON CONFLICT(research_id, profile_ref) DO UPDATE SET
+                       ON CONFLICT(research_id, principal_ref, profile_ref) DO UPDATE SET
                          principal_ref=excluded.principal_ref,
                          status='active', updated_at=excluded.updated_at""",
                     (
@@ -814,47 +824,49 @@ class ResearchCatalog:
             )
             value = conn.execute(
                 """SELECT * FROM research_catalog_memberships
-                   WHERE research_id=? AND profile_ref=?""",
-                (research_id, profile),
+                   WHERE research_id=? AND principal_ref=? AND profile_ref=?""",
+                (research_id, principal, profile),
             ).fetchone()
         return self._membership_value(value)
 
     def remove_membership(
         self, research_id: str, *, profile_ref: str, actor: str,
+        principal_ref: str | None = None,
     ) -> dict[str, Any]:
         row = self._research_row(research_id)
         if not self._research_access(row, actor)["can_manage"]:
             raise PermissionError("research membership management is not authorized")
         profile = _profile(profile_ref)
-        if profile == "self":
-            raise PermissionError(
-                "the Research owner's self Profile is a required member"
-            )
+        principal = _principal(principal_ref) if principal_ref else None
         now = time.time()
         with self._write(research_id) as conn:
-            value = conn.execute(
-                """SELECT * FROM research_catalog_memberships
-                   WHERE research_id=? AND profile_ref=?""",
+            candidates = conn.execute(
+                "SELECT * FROM research_catalog_memberships WHERE research_id=? AND profile_ref=?",
                 (research_id, profile),
-            ).fetchone()
+            ).fetchall()
+            if principal is None:
+                if len(candidates) > 1:
+                    raise ValueError("principal_ref is required for an ambiguous Profile")
+                principal = str(candidates[0]["principal_ref"]) if candidates else None
+            value = next((item for item in candidates if item["principal_ref"] == principal), None)
             if value is None:
                 raise KeyError("research member not found")
+            if profile == "self" and principal == row["owner_ref"]:
+                raise PermissionError("the Research owner's self Profile is a required member")
             conn.execute(
-                """UPDATE research_catalog_memberships
-                   SET status='revoked', updated_at=?
-                   WHERE research_id=? AND profile_ref=?""",
-                (now, research_id, profile),
+                """UPDATE research_catalog_memberships SET status='revoked', updated_at=?
+                   WHERE research_id=? AND principal_ref=? AND profile_ref=?""",
+                (now, research_id, principal, profile),
             )
             conn.execute(
-                """UPDATE research_catalog_workspaces
-                   SET status='archived', updated_at=?
-                   WHERE research_id=? AND profile_ref=? AND status='active'""",
-                (now, research_id, profile),
+                """UPDATE research_catalog_workspaces SET status='archived', updated_at=?
+                   WHERE research_id=? AND principal_ref=? AND profile_ref=? AND status='active'""",
+                (now, research_id, principal, profile),
             )
             updated = conn.execute(
                 """SELECT * FROM research_catalog_memberships
-                   WHERE research_id=? AND profile_ref=?""",
-                (research_id, profile),
+                   WHERE research_id=? AND principal_ref=? AND profile_ref=?""",
+                (research_id, principal, profile),
             ).fetchone()
         return self._membership_value(updated)
 
@@ -880,15 +892,15 @@ class ResearchCatalog:
         with self._write(research_id) as conn:
             membership = conn.execute(
                 """SELECT status FROM research_catalog_memberships
-                   WHERE research_id=? AND profile_ref=?""",
-                (research_id, profile),
+                   WHERE research_id=? AND principal_ref=? AND profile_ref=?""",
+                (research_id, principal, profile),
             ).fetchone()
             if membership is None or str(membership["status"]) != "active":
                 raise ValueError("profile must be an active research member")
             existing = conn.execute(
                 """SELECT * FROM research_catalog_workspaces
-                   WHERE research_id=? AND profile_ref=?""",
-                (research_id, profile),
+                   WHERE research_id=? AND principal_ref=? AND profile_ref=?""",
+                (research_id, principal, profile),
             ).fetchone()
             if existing is not None:
                 if str(existing["status"]) != "active":
@@ -949,7 +961,7 @@ class ResearchCatalog:
         with self._write(research_id) as conn:
             if clean_workspace:
                 workspace = conn.execute(
-                    """SELECT workspace_id, research_id, profile_ref, status
+                    """SELECT workspace_id, research_id, principal_ref, profile_ref, status
                          FROM research_catalog_workspaces
                         WHERE workspace_id=?""",
                     (clean_workspace,),
@@ -960,6 +972,8 @@ class ResearchCatalog:
                     raise ValueError("research workspace does not belong to research")
                 if str(workspace["status"]) != "active":
                     raise ValueError("research workspace is not active")
+                if str(workspace["principal_ref"]) != str(row["owner_ref"]):
+                    raise ValueError("report workspace principal does not match report owner")
                 workspace_profile = _optional_profile(workspace["profile_ref"])
                 if clean_profile and clean_profile != workspace_profile:
                     raise ValueError("report profile does not match research workspace")
@@ -967,8 +981,8 @@ class ResearchCatalog:
             if clean_profile:
                 membership = conn.execute(
                     """SELECT status FROM research_catalog_memberships
-                        WHERE research_id=? AND profile_ref=?""",
-                    (research_id, clean_profile),
+                        WHERE research_id=? AND principal_ref=? AND profile_ref=?""",
+                    (research_id, str(row["owner_ref"]), clean_profile),
                 ).fetchone()
                 if membership is None or str(membership["status"]) != "active":
                     raise ValueError("report profile must be an active research member")
@@ -1923,7 +1937,7 @@ class ResearchCatalog:
                (research_id, principal_ref, profile_ref, role, status,
                 invited_by, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(research_id, profile_ref) DO UPDATE SET
+               ON CONFLICT(research_id, principal_ref, profile_ref) DO UPDATE SET
                  principal_ref=excluded.principal_ref, role=excluded.role,
                  status=excluded.status, invited_by=excluded.invited_by,
                  updated_at=excluded.updated_at""",

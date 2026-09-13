@@ -484,6 +484,7 @@ class ManagerState(
             proxy_url_provider=self.mihomo.proxy_url,
         )
         self.federated_public_data = FederatedPublicDataService(
+            activate_source=self.activate_federated_node,
             server_id=self.server_id,
             registry=self.federation_registry,
             gateway=self.federation_gateway,

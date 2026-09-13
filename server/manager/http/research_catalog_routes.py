@@ -466,6 +466,7 @@ class ResearchCatalogRoutesMixin:
                 value = self._research_catalog_service().remove_membership(
                     unquote(member_match.group(1)),
                     profile_ref=unquote(member_match.group(2)),
+                    principal_ref=parse_qs(parsed.query).get("principal_ref", [None])[0],
                     actor=actor,
                 )
                 payload = {"member": value}
