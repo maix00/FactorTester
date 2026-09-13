@@ -172,6 +172,24 @@ class ResearchClientMixin(ClientMixinBase):
             self._research_url(research_id, "/collaboration-branches"),
         )) or {})
 
+    def read_publication_branch(
+        self, publication_id: str, *, chapter_id: str = "",
+    ) -> dict[str, Any]:
+        """Read an authorized branch through the existing federated adapter.
+
+        The publication may originate on a client or any server. Do not infer
+        a local Profile path from its identity or collapse offline into absent.
+        """
+        import re
+        if not re.fullmatch(r"[A-Za-z0-9_-]{20,64}", publication_id):
+            raise ValueError("publication_id is invalid")
+        if chapter_id and not re.fullmatch(r"[A-Za-z0-9_.:-]{1,256}", chapter_id):
+            raise ValueError("chapter_id is invalid")
+        suffix = f"chapters/{chapter_id}" if chapter_id else "index"
+        return dict(self._expect_success(self.session.get(
+            f"/api/public-research/{publication_id}/{suffix}",
+        )) or {})
+
     def read_server_branch(
         self,
         *,

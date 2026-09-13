@@ -107,3 +107,47 @@ def test_report_identity_rejects_path_traversal(tmp_path):
     for report_id in ("report:v1:../escape", "report:v1:/absolute", "report:v1:"):
         with pytest.raises(ValueError):
             ensure_work_package_identity(tmp_path / "report", work_package_id="safe", report_id=report_id)
+
+
+def test_branch_read_uses_federated_publication_for_client_or_server(monkeypatch):
+    calls = []
+    class Client:
+        def read_publication_branch(self, publication_id, *, chapter_id):
+            calls.append((publication_id, chapter_id))
+            return {'report_id': 'shared-report', 'generation': 3}
+    monkeypatch.setattr('tools.cli.commands.research_report_branch.client_from_config', lambda: Client())
+    runner = CliRunner()
+    result = runner.invoke(cli, ['research', 'reports', 'branch-read', '--publication-id', 'a' * 24,
+                                 '--chapter-id', 'chapter-one'])
+    assert result.exit_code == 0, result.output
+    assert calls == [('a' * 24, 'chapter-one')]
+    assert json.loads(result.output)['report_id'] == 'shared-report'
+    result = runner.invoke(cli, ['research', 'reports', 'branch-read', 'alice', '--publication-id', 'a' * 24])
+    assert result.exit_code != 0
+    assert len(calls) == 1
+
+
+def test_publication_branch_read_keeps_route_and_offline_failure():
+    import pytest
+    from tools.cli.client_research import ResearchClientMixin
+    calls = []
+    class Session:
+        fail = False
+        def get(self, path):
+            calls.append(path)
+            if self.fail:
+                raise ConnectionError('source offline')
+            return {'generation': 2}
+    class Client(ResearchClientMixin):
+        session = Session()
+        def _expect_success(self, response):
+            return response
+    client = Client()
+    assert client.read_publication_branch('a' * 24, chapter_id='chapter:one') == {'generation': 2}
+    assert calls == ['/api/public-research/' + 'a' * 24 + '/chapters/chapter:one']
+    client.session.fail = True
+    with pytest.raises(ConnectionError, match='offline'):
+        client.read_publication_branch('a' * 24)
+    with pytest.raises(ValueError, match='chapter_id'):
+        client.read_publication_branch('a' * 24, chapter_id='../other')
+    assert len(calls) == 2
