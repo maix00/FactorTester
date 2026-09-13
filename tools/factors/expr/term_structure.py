@@ -139,7 +139,7 @@ class TermStructureOp(OperandExpr):
             if isinstance(expr, ConstExpr):
                 return DataColumn(expr.value).name
             if isinstance(expr, ParamRef):
-                return f"\\textcolor{{red}}{{{expr.param.alias}}}"
+                return expr._parameter_latex()
         if isinstance(expr, ConstExpr):
             return str(expr.value)
         return expr._to_latex()
