@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from .package_layout import PACKAGE_DIRECTORIES, ensure_branch_report_tree
-from .authoring.tree_descriptor import report_tree_descriptor
+from .authoring.tree_descriptor import report_tree_descriptor, section_refs_from_snapshot
+from .authoring.tree_projection import load_snapshot
 from .authoring.tree_model import initialize_tree
 from .authoring.service import commit_branch_authoring
 from .work_package_identity import ensure_work_package_identity
@@ -41,6 +42,7 @@ def initialize_work_package(
     descriptor = report_tree_descriptor(
         package_root=package_root, work_package_id=work_package_id,
         branch_id=branch_id, head=initialized["head"],
+        section_refs=section_refs_from_snapshot(load_snapshot(package_root=package_root, branch_id=branch_id)),
     )
     git = commit_branch_authoring(
         package_root,

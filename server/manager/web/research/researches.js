@@ -432,7 +432,8 @@
               try {
                 await context.api(
                   `/api/research/${encodeURIComponent(researchID)}`
-                    + `/members/${encodeURIComponent(item.profile_ref)}`,
+                    + `/members/${encodeURIComponent(item.profile_ref)}`
+                    + `?principal_ref=${encodeURIComponent(item.principal_ref)}`,
                   {method: "DELETE"},
                 );
                 await rerender();

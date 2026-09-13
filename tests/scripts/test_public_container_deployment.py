@@ -465,25 +465,18 @@ def test_public_factor_identity_migration_is_explicit_and_rollback_safe() -> Non
     assert "PRAGMA integrity_check" in script
     assert "schema_version=1" in script
     assert "legacy factor revision manifests" in script
-    release_sequence = """bash "$public_script" stop-app
-app_stopped=1
-sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \\
-  bash "$public_script" migrate-factor-identities
-
-sudo mv "$next_env" "$production_env"
-switched=1
-sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \\
-  bash "$public_script" migrate-factor-control-identities
-sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \\
-  bash "$public_script" restart-app"""
-    assert release_sequence in activate
-    assert activate.index("migrate-factor-control-identities") < activate.index(
-        'bash "$public_script" verify'
-    )
+    # Historical upgrades remain explicit maintenance commands. Ordinary
+    # publication and application rollback must not mutate factor identities.
+    for command in (
+        "migrate-factor-identities", "migrate-factor-control-identities",
+        "restore-factor-identities", "restore-factor-control-identities",
+        "finalize-factor-identities",
+    ):
+        assert command not in activate
+    assert activate.index('bash "$public_script" stop-app') < activate.index(
+        'sudo mv "$next_env" "$production_env"'
+    ) < activate.index('bash "$public_script" verify')
     assert "run --rm --no-deps --entrypoint /bin/sh factortester-public" in script
-    assert "restore-factor-identities" in activate
-    assert "restore-factor-control-identities" in activate
-    assert "finalize-factor-identities" in activate
 
 
 def test_public_main_publish_is_one_incremental_rollback_safe_command() -> None:
@@ -645,3 +638,13 @@ def test_public_activation_state_stays_in_deployer_owned_git_root() -> None:
     assert 'exec 9>"$publish_lock"' in activate
     assert '$container_root/deployments.log' not in activate
     assert '$container_root/.publish.lock' not in activate
+
+
+def test_public_publish_refuses_without_authorization_before_transport(tmp_path: Path) -> None:
+    script = ROOT / "scripts/server/publish_public_main.sh"
+    env = dict(os.environ)
+    env.pop("FACTORTESTER_PUBLISH_AUTHORIZED", None)
+    result = subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True)
+    assert result.returncode == 2
+    assert "explicit release authorization is required" in result.stderr
+    assert "Pushing" not in result.stdout

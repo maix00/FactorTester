@@ -318,6 +318,7 @@ class HttpSession:
         *,
         payload: dict[str, Any] | None = None,
         query: dict[str, Any] | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         url = self._url(path, query=query)
         body = None
@@ -326,6 +327,10 @@ class HttpSession:
             "User-Agent": "FactorTester-CLI/1",
             "X-FactorTester-Client": "cli",
         }
+        if extra_headers:
+            if any(key.lower() != "idempotency-key" for key in extra_headers):
+                raise ValueError("Only Idempotency-Key may be supplied as an extra header")
+            headers.update(extra_headers)
         headers = self._headers(headers)
         if payload is not None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")

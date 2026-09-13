@@ -606,3 +606,36 @@ def test_evidence_summary_route_uses_same_report_access(
     assert responses[0][0]["evidence"]["owner"] == "alice"
     assert responses[0][0]["access"]["access_basis"] == "report"
     assert responses[0][0]["access"]["can_download"] is False
+
+
+def test_collaboration_cli_and_report_page_share_remote_branch_projection(monkeypatch):
+    reports = [{'report_id': 'r', 'owner_ref': 'alice', 'branches': [
+        {'branch_ref': 'main', 'publication_id': 'server:self:package:main'},
+    ]}]
+    publications = [
+        {'report_id': 'r', 'owner_ref': 'alice', 'branch_ref': 'main', 'publication_id': 'remote-main'},
+        {'report_id': 'r', 'owner_ref': 'alice', 'branch_ref': 'review', 'publication_id': 'client-review'},
+        {'report_id': 'r', 'owner_ref': 'other', 'branch_ref': 'private', 'publication_id': 'forged'},
+    ]
+    responses = []
+
+    class Handler(research_catalog_routes.ResearchCatalogRoutesMixin):
+        state = SimpleNamespace(research_catalog=SimpleNamespace(list_reports=lambda *a, **k: reports))
+
+        def _session(self):
+            return {'username': 'alice'}
+
+        def _research_service(self):
+            return SimpleNamespace(list_visible=lambda viewer: publications)
+
+    monkeypatch.setattr(research_catalog_routes, 'json_response',
+                        lambda handler, value, status=200: responses.append(value))
+    handler = Handler()
+    assert handler._get_research_catalog_routes(SimpleNamespace(
+        path='/api/research/research-1/collaboration-branches', query='',
+    ))
+    actual = responses[0]['branches']
+    page = handler._research_catalog_publication_branches(reports, 'alice')[0]['branches']
+    assert {b['publication_id'] for b in actual} == {b['publication_id'] for b in page}
+    assert {b['publication_id'] for b in actual} == {'remote-main', 'client-review'}
+    assert all(b['report_id'] == 'r' for b in actual)

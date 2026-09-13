@@ -42,7 +42,7 @@ def load_report_index(*, package_root: Path, branch_id: str) -> dict[str, Any]:
                 "graph_version": chapter.get("graph_version"),
                 "preview": first_child_title,
             })
-        return {"paths": paths, "head": head, "chapter_descriptors": chapters}
+        return {"paths": paths, "head": head, "updated_at": paths["head"].stat().st_mtime, "chapter_descriptors": chapters}
 
 
 def load_chapter_snapshot(
@@ -70,6 +70,7 @@ def load_chapter_snapshot(
         return {
             "paths": paths,
             "head": head,
+            "updated_at": paths["head"].stat().st_mtime,
             "components": components,
             "bindings": bindings,
         }
@@ -126,6 +127,7 @@ def load_component_snapshot(
         return {
             "paths": paths,
             "head": head,
+            "updated_at": paths["head"].stat().st_mtime,
             "components": [component],
             "bindings": bindings,
         }
@@ -145,6 +147,7 @@ def project_snapshot(
     return {
         "paths": paths,
         "head": head,
+        "updated_at": paths["head"].stat().st_mtime,
         "components": components,
         "bindings": bindings,
     }

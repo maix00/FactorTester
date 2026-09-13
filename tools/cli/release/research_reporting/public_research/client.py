@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
 from tools.cli.manager.config import ManagerConfig, ManagerCredentialStore
+from tools.cli.http import HttpSession, HttpClientError
 
 from tools.cli.commands.research_report_scope_identity import (
     resolve_branch_report_scope,
@@ -20,7 +22,7 @@ from tools.cli.release.research_reporting.authoring.tree_paths import report_tre
 from tools.cli.release.research_reporting.authoring.tree_projection import (
     project_snapshot,
 )
-from tools.cli.release.research_reporting.authoring.tree_store import load_head
+from tools.cli.release.research_reporting.authoring.tree_store import load_head, tree_lock
 from tools.cli.release.research_reporting.public_research.object_uploads import (
     ResearchObjectUpload,
     detach_object_bytes,
@@ -54,10 +56,14 @@ class ManagerRequestError(RuntimeError):
 class PublicResearchClient:
     """Resolve local report trees and control their Manager publication."""
 
-    def __init__(self, client_root: Path, *, manager_url: str | None = None) -> None:
+    def __init__(self, client_root: Path, *, manager_url: str | None = None,
+                 session: HttpSession | None = None) -> None:
         self.client_root = Path(client_root).expanduser().resolve()
         self.outbox = PublicResearchOutbox(self.client_root)
-        configured = manager_url or os.environ.get("FACTORTESTER_MANAGER_URL", "")
+        self.session = session
+        if session is not None and manager_url and manager_url.rstrip("/") != session.base_url.rstrip("/"):
+            raise ValueError("Publication Manager must match the authenticated session")
+        configured = (session.base_url if session is not None else manager_url) or os.environ.get("FACTORTESTER_MANAGER_URL", "")
         if not configured:
             try:
                 from tools.cli.manager.config import load_manager_config
@@ -69,7 +75,8 @@ class PublicResearchClient:
         # Explicit URLs are also used by offline tests and injected local
         # runtimes. Persisted Manager configuration is validated when loaded.
         self.manager_config = ManagerConfig(base_url=self.manager_url)
-        self.credentials = ManagerCredentialStore(self.manager_config)
+        self.credentials = (None if session is not None
+                            else ManagerCredentialStore(self.manager_config))
 
     def list_publications(self) -> list[dict[str, Any]]:
         # A read is also a reconnect boundary.  Local browsing must continue
@@ -90,13 +97,16 @@ class PublicResearchClient:
             return self.outbox.load_publication_cache()
 
     def list_local_reports(self) -> list[dict[str, Any]]:
+        def identity(item):
+            return tuple(str(item.get(key) or "") for key in
+                         ("owner_ref", "profile_ref", "report_id", "branch_ref"))
         public_by_report = {
-            str(item.get("report_id")): item
+            identity(item): item
             for item in self.list_publications()
             if item.get("report_id")
         }
         pending_by_report = {
-            str(item.get("report_id")): item
+            identity(item): item
             for item in self.outbox.pending()
             if item.get("kind") == "publish" and item.get("report_id")
         }
@@ -121,8 +131,10 @@ class PublicResearchClient:
                     except (OSError, ValueError):
                         continue
                     report_id = str(head["report_id"])
-                    publication = public_by_report.get(report_id)
-                    pending = pending_by_report.get(report_id)
+                    owner_ref = str((profile.get("session_binding") or {}).get("principal_ref") or "")
+                    key = (owner_ref, profile_id, report_id, branch_root.name)
+                    publication = public_by_report.get(key)
+                    pending = pending_by_report.get(key)
                     visibility = (
                         publication.get("visibility", "private")
                         if publication else "private"
@@ -214,7 +226,10 @@ class PublicResearchClient:
         show_profile: bool = False,
         visibility: str = "public",
         authorized_users: tuple[str, ...] = (),
+        include_authoring: bool = False,
     ) -> dict[str, Any]:
+        if include_authoring and visibility != "private":
+            raise ValueError("Editable collaboration bundles require a private publication")
         scope = resolve_branch_report_scope(
             client_root=self.client_root,
             profile_id=profile_id,
@@ -222,11 +237,33 @@ class PublicResearchClient:
             branch_id=branch_id,
         )
         paths = report_tree_paths(scope.package_root, branch_id)
-        head = load_head(paths)
-        snapshot = project_snapshot(paths, head)
-        projection, object_uploads = detach_object_bytes(
-            build_upload_projection(snapshot),
-        )
+        # Freeze the tree and read resource bytes under the authoring lock;
+        # network transfer happens only after releasing it.
+        with tree_lock(paths):
+            head = load_head(paths)
+            snapshot = project_snapshot(paths, head)
+            projection, object_uploads = detach_object_bytes(
+                build_upload_projection(snapshot),
+            )
+            if include_authoring:
+                from ..authoring.tree_bundle import bundle_from_snapshot
+                raw = bundle_from_snapshot(snapshot, package_root=scope.package_root, branch_id=branch_id)
+                digest = hashlib.sha256(raw).hexdigest()
+                resource_id = digest[:24]
+                descriptor = {"resource_id": resource_id, "filename": "report-authoring.zip",
+                              "media_type": "application/zip", "content_hash": digest,
+                              "size_bytes": len(raw), "available": True,
+                              "purpose": "report_authoring"}
+                projection["local_resources"].append(descriptor)
+                projection["authoring_bundle"] = {
+                    **descriptor, "generation": head["generation"], "root_ref": head["root_ref"],
+                }
+                object_uploads = (*object_uploads, ResearchObjectUpload(
+                    object_kind="research_local_resource", object_id=resource_id,
+                    filename=descriptor["filename"], content_type="application/zip",
+                    content_hash=digest, content=raw,
+                ))
+                projection["projection_hash"] = projection_hash(projection)
         title = str(public_title or "").strip()
         if title:
             projection = {**projection, "title": title}
@@ -241,7 +278,8 @@ class PublicResearchClient:
             owner_ref=owner_ref,
             profile_ref=profile_id,
             report_id=str(projection["report_id"]),
-            publication_key=f"{projection['report_id']}:branch:{branch_id}",
+            publication_key=(f"{projection['report_id']}:branch:{branch_id}"
+                             + (f":revision:{projection['projection_hash']}" if include_authoring else "")),
             branch_ref=branch_id,
             visibility=visibility,
             authorized_users=authorized_users,
@@ -503,6 +541,19 @@ class PublicResearchClient:
         allow_anonymous: bool = False,
         extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
+        if self.session is not None:
+            try:
+                value = self.session.request(method, path, payload=payload,
+                                             extra_headers=extra_headers)
+            except HttpClientError as exc:
+                raise ManagerRequestError(exc.status, str(exc)) from exc
+            except OSError as exc:
+                raise ManagerRequestError(0, "Manager publication service is unavailable") from exc
+            except ValueError as exc:
+                raise ManagerRequestError(502, "Manager returned invalid publication JSON") from exc
+            if value.get("success") is False:
+                raise ManagerRequestError(409, str(value.get("error") or "Manager publication request failed"))
+            return value
         body = None
         headers = {
             "Accept": "application/json",

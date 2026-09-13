@@ -406,15 +406,16 @@
     });
     line.append(picker);
     const branches = Array.isArray(selected?.branches) ? selected.branches : [];
-    if (branches.length > 1) {
-      const branch = selectedBranch(selected, state);
+    const branch = selectedBranch(selected, state);
+    if (branches.length) {
       const branchPicker = document.createElement("select");
       branchPicker.className = "branch-picker";
       branchPicker.setAttribute("aria-label", context.t("研究路径"));
       branches.forEach(item => {
         const option = document.createElement("option");
         option.value = item.publication_id || "";
-        option.textContent = item.title || item.branch_ref || context.t("研究路径");
+        option.textContent = FTUI.reportBranchLabel(item, selected);
+        option.title = item.principal_ref || item.owner_ref || selected.owner_ref || "";
         option.selected = option.value === branch?.publication_id;
         branchPicker.append(option);
       });
@@ -429,12 +430,15 @@
     [
       buildSource(context, selected),
       visibility(context, selected.visibility),
-      FTUI.formatDate(selected.updated_at || selected.created_at),
     ].filter(Boolean).forEach(value => {
       const item = document.createElement("span");
       item.textContent = value;
       metadata.append(item);
     });
+    const timestamp = document.createElement("time");
+    timestamp.className = "research-report-content-updated";
+    timestamp.textContent = FTUI.formatDate(branch?.updated_at || selected.updated_at || selected.created_at);
+    metadata.append(timestamp);
     const actions = reportActions(
       context, researchID, selectedSource(selected, state), rerender, canManage,
     );
@@ -471,6 +475,14 @@
       const source = FTReportSource.create(id, context.api, {ownerRef: item.owner_ref});
       const value = await source.load();
       if (!current(context)) return;
+      const updateTimestamp = next => {
+        const timestamp = mount.parentElement?.querySelector(".research-report-content-updated");
+        if (timestamp && Number(next.updated_at) > 0) {
+          timestamp.textContent = FTUI.formatDate(next.updated_at);
+          timestamp.dateTime = new Date(Number(next.updated_at) * 1000).toISOString();
+        }
+      };
+      updateTimestamp(value);
       const reading = state.reading[id] || {selectedChapterID: "", disclosures: {}};
       state.reading[id] = reading;
       const layout = document.createElement("div");
@@ -515,7 +527,7 @@
       });
       const stopWatching = source.watch({
         isCurrent: () => current(context) && body.isConnected && mount.contains(body),
-        onChange: next => renderer.update(next),
+        onChange: next => { updateTimestamp(next); return renderer.update(next); },
       });
       mount.__ftReportCleanup = () => { stopWatching(); body.__ftLazyCleanup?.(); };
       context.pageState?.register?.("embedded-report-updates", {dispose: mount.__ftReportCleanup});

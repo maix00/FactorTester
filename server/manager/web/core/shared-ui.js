@@ -15,6 +15,12 @@
     return span;
   }
 
+  function reportBranchLabel(branch, report = {}) {
+    return [branch.branch_ref || branch.branch_id || branch.title || "main",
+      userLabel(branch.principal_ref || branch.owner_ref || report.owner_ref, branch.owner_alias),
+      branch.profile_ref || report.profile_ref].filter(Boolean).join(" · ");
+  }
+
   function table(headers, rows = []) {
     const shell = document.createElement("div"); shell.className = "table-shell";
     if (shell.dataset) shell.dataset.ftScrollState = "shared-table";
@@ -304,6 +310,6 @@
   window.FTUI = {
     actionButton, appendRow, code, codeEditor, sourcePanel, sourceView, empty, fieldRows, formatDate, helpIcon, iconButton,
     refreshButton,
-    loading, pagedTable, table, text, userLabel, userDisplay,
+    loading, pagedTable, table, text, userLabel, userDisplay, reportBranchLabel,
   };
 })();

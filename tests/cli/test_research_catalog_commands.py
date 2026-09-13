@@ -107,3 +107,72 @@ def test_report_identity_rejects_path_traversal(tmp_path):
     for report_id in ("report:v1:../escape", "report:v1:/absolute", "report:v1:"):
         with pytest.raises(ValueError):
             ensure_work_package_identity(tmp_path / "report", work_package_id="safe", report_id=report_id)
+
+
+def test_branch_read_uses_federated_publication_for_client_or_server(monkeypatch):
+    calls = []
+    class Client:
+        def read_publication_branch(self, publication_id, *, chapter_id):
+            calls.append((publication_id, chapter_id))
+            return {'report_id': 'shared-report', 'generation': 3}
+    monkeypatch.setattr('tools.cli.commands.research_report_branch.client_from_config', lambda: Client())
+    runner = CliRunner()
+    result = runner.invoke(cli, ['research', 'reports', 'branch-read', '--publication-id', 'a' * 24,
+                                 '--chapter-id', 'chapter-one'])
+    assert result.exit_code == 0, result.output
+    assert calls == [('a' * 24, 'chapter-one')]
+    assert json.loads(result.output)['report_id'] == 'shared-report'
+    result = runner.invoke(cli, ['research', 'reports', 'branch-read', 'alice', '--publication-id', 'a' * 24])
+    assert result.exit_code != 0
+    assert len(calls) == 1
+
+
+def test_publication_branch_read_keeps_route_and_offline_failure():
+    import pytest
+    from tools.cli.client_research import ResearchClientMixin
+    calls = []
+    class Session:
+        fail = False
+        def get(self, path):
+            calls.append(path)
+            if self.fail:
+                raise ConnectionError('source offline')
+            return {'generation': 2}
+    class Client(ResearchClientMixin):
+        session = Session()
+        def _expect_success(self, response):
+            return response
+    client = Client()
+    assert client.read_publication_branch('a' * 24, chapter_id='chapter:one') == {'generation': 2}
+    assert calls == ['/api/public-research/' + 'a' * 24 + '/chapters/chapter:one']
+    client.session.fail = True
+    with pytest.raises(ConnectionError, match='offline'):
+        client.read_publication_branch('a' * 24)
+    with pytest.raises(ValueError, match='chapter_id'):
+        client.read_publication_branch('a' * 24, chapter_id='../other')
+    assert len(calls) == 2
+
+
+def test_branch_lifecycle_cli_routes_identity_and_expected_version(monkeypatch):
+    from types import SimpleNamespace
+    calls = []
+    fake = SimpleNamespace(
+        reserve_report_branch=lambda rid, payload: calls.append(('reserve', rid, payload)) or {'branch': {'status': 'reserved'}},
+        publish_report_branch=lambda rid, bid, payload: calls.append(('publish', rid, bid, payload)) or {'branch': {'status': 'active'}},
+        report_branch_status=lambda rid: {'branches': [{'branch_id': 'review'}]},
+    )
+    monkeypatch.setattr('tools.cli.commands.research_report_branch.client_from_config', lambda: fake)
+    runner = CliRunner()
+    reserved = runner.invoke(cli, ['research', 'reports', 'branch-reserve', 'report:v1:one',
+                                   '--profile', 'self', '--branch-id', 'review', '--from-branch', 'main',
+                                   '--source-generation', '3', '--source-revision', 'a' * 64])
+    assert reserved.exit_code == 0, reserved.output
+    assert calls[0][2]['source_generation'] == 3
+    published = runner.invoke(cli, ['research', 'reports', 'branch-publish', 'report:v1:one',
+                                    '--profile', 'self', '--branch-id', 'review', '--publication-id', 'p' * 24,
+                                    '--expected-generation', '0'])
+    assert published.exit_code == 0, published.output
+    assert calls[1][1:3] == ('report:v1:one', 'review')
+    assert calls[1][3]['expected_generation'] == 0
+    status = runner.invoke(cli, ['research', 'reports', 'branch-status', 'report:v1:one'])
+    assert status.exit_code == 0 and json.loads(status.output)['branches'][0]['branch_id'] == 'review'

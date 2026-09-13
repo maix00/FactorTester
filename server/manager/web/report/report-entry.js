@@ -86,15 +86,17 @@
     if (!isCurrent()) return;
     const reportControls = document.createElement("div");
     reportControls.className = "research-report-actions";
-    if (branches.length > 1) {
+    if (branches.length) {
       const branchPicker = document.createElement("select");
       branchPicker.className = "branch-picker";
+      const currentBranch = branches.find(branch => branch.publication_id === publicationID)
+        || branches.find(branch => branch.selected) || branches[0];
       branches.forEach(branch => {
         const option = document.createElement("option");
         option.value = branch.publication_id || "";
-        option.textContent = branch.title || branch.branch_ref || t("研究路径");
-        option.selected = Boolean(branch.selected)
-          || option.value === publicationID;
+        option.textContent = FTUI.reportBranchLabel(branch, value);
+        option.title = branch.principal_ref || branch.owner_ref || value.owner_ref || "";
+        option.selected = branch === currentBranch;
         branchPicker.append(option);
       });
       branchPicker.setAttribute("aria-label", t("研究路径"));

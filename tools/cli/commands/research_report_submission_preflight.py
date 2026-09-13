@@ -22,6 +22,7 @@ def checked_component_preflight(
     content: Any,
     display_kind: str,
     allow_historical_entry_requirement: bool = False,
+    report_components: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Return bindings or durable diagnostics; never strand an empty pending."""
     try:
@@ -36,6 +37,7 @@ def checked_component_preflight(
             allow_historical_entry_requirement=(
                 allow_historical_entry_requirement
             ),
+            report_components=report_components,
         ), []
     except ReportPreflightError as error:
         return [], error.diagnostics

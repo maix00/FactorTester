@@ -236,6 +236,10 @@ class FederatedGateway:
             raise ConnectionError("federated public data response is invalid") from exc
         if not isinstance(value, dict):
             raise ConnectionError("federated public data response is invalid")
+        if status == 403:
+            raise PermissionError(str(value.get('error') or 'federated resource access is denied'))
+        if status == 404:
+            raise ValueError(str(value.get('error') or 'federated resource was not found'))
         if not 200 <= status < 300 or value.get("success") is False:
             raise ConnectionError(
                 str(value.get("error") or f"federated public data returned HTTP {status}")

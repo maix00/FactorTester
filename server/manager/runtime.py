@@ -440,6 +440,7 @@ class ManagerState(
             self.data_root / "public-research",
             storage_server_id=self.server_id,
             read_authorizer=self.research_catalog.can_read_publication,
+            authoring_authorizer=self.research_catalog.can_read_authoring_publication,
         )
         self.client_state = ClientStateService(
             control_store=self.control_store,
@@ -484,6 +485,7 @@ class ManagerState(
             proxy_url_provider=self.mihomo.proxy_url,
         )
         self.federated_public_data = FederatedPublicDataService(
+            activate_source=self.activate_federated_node,
             server_id=self.server_id,
             registry=self.federation_registry,
             gateway=self.federation_gateway,

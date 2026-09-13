@@ -223,3 +223,23 @@ def test_metadata_revision_detects_in_place_body_change():
     assert before["content_revision"] != after["content_revision"]
     assert before["body"] == after["body"] == ""
     assert before["content_available"] == after["content_available"]
+
+
+def test_report_content_time_survives_sync_retry_and_sharing_change(tmp_path, monkeypatch):
+    from tools.cli.release.research_reporting.public_research import library as module
+    clock = [2000.0]
+    monkeypatch.setattr(module.time, 'time', lambda: clock[0])
+    library = PublicResearchLibrary(tmp_path)
+    projection = {**_projection(), 'updated_at': 1000.0}
+    sent = {'owner_ref': 'alice', 'report_id': 'r', 'projection': projection}
+    receipt = library.sync(sent)
+    pid = receipt['publication_id']
+    clock[0] = 3000.0
+    library.sync(sent)
+    library.configure(owner_ref='alice', report_id='r', projection=None, visibility='private',
+                      auto_sync=True, relay_local_files=False, authorized_users=[])
+    assert library.index(pid, 'alice')['updated_at'] == 1000.0
+    assert library.publication_metadata(pid)['updated_at'] == 1000.0
+    projection = {**projection, 'generation': 5, 'updated_at': 2500.0, 'projection_hash': 'new-hash'}
+    library.sync({**sent, 'projection': projection})
+    assert library.index(pid, 'alice')['updated_at'] == 2500.0

@@ -41,6 +41,7 @@ class PublicResearchObjectStore:
             raise PermissionError("research report access is not authorized")
         projection = self.library._projection(publication_id)
         metadata, path = self._entry(projection, publication_id, object_kind, item_id)
+        self.library.require_resource_access(record, metadata, viewer_ref)
         if path.is_symlink() or not path.is_file():
             raise FileNotFoundError("research object is unavailable")
         raw = path.read_bytes()
@@ -103,6 +104,7 @@ class PublicResearchObjectStore:
         metadata, _path = self._entry(
             projection, publication_id, object_kind, item_id,
         )
+        self.library.require_resource_access(record, metadata, viewer_ref)
         digest = str(metadata.get("content_hash") or "").strip().lower()
         if len(digest) != 64:
             raise ValueError("research object metadata has no content hash")

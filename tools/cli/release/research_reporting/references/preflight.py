@@ -35,6 +35,7 @@ def preflight_component(
     scope: Any,
     client: Any = None,
     allow_historical_entry_requirement: bool = False,
+    report_components: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     diagnostics: list[dict[str, Any]] = []
     validated: list[dict[str, Any]] = []
@@ -90,6 +91,8 @@ def preflight_component(
             continue
         local_links = source_link_issues(
             semantic_value, package_root=scope.package_root,
+            branch_root=(scope.package_root / 'branches' / scope.branch_id)
+                if getattr(scope, 'branch_id', '') else None,
         )
         if local_links:
             diagnostics += [
@@ -114,6 +117,8 @@ def preflight_component(
                 }
                 if allow_historical_entry_requirement:
                     authority_options["allow_historical_entry_requirement"] = True
+                if reference.kind == 'report_section' and report_components is not None:
+                    authority_options['report_components'] = report_components
                 result = validate_declared_reference(**authority_options)
             except (
                 KeyError, LookupError, OSError, RuntimeError, ValueError,

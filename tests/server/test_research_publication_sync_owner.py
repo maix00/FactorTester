@@ -48,3 +48,29 @@ def test_loopback_agent_publication_uses_authenticated_owner(monkeypatch, claime
         assert received[0]["owner_ref"] == "alice"
     else:
         assert received == []
+
+
+@pytest.mark.parametrize('endpoint', ['sync', 'publish'])
+def test_agent_publication_cannot_supply_another_profile(monkeypatch, endpoint):
+    responses, writes = [], []
+    class Handler(write_routes.WriteRoutesMixin):
+        path = '/api/research-publications/' + endpoint
+        state = SimpleNamespace(
+            public_research=SimpleNamespace(sync=lambda data: writes.append(data)),
+            session_authentication=lambda token: 'agent',
+            agent_session_matches=lambda token, profile, claim: profile == 'bound',
+        )
+        headers = {'X-FactorTester-Agent-Claim': 'claim'}
+        def _session(self): return {'username': 'alice'}
+        def _bearer_token(self): return 'test-token'
+        def _public_login_gate(self, *a, **k): return True
+        def _is_local_ftclient(self): return False
+        def _json_body(self, maximum):
+            return {'report_id': 'r', 'profile_ref': 'another', 'owner_ref': 'alice'}
+        def __getattr__(self, name):
+            if name.startswith('_'): return lambda *a, **k: False
+            raise AttributeError(name)
+    monkeypatch.setattr(write_routes, 'json_response', lambda handler, payload, code=200: responses.append(code))
+    Handler().do_POST()
+    assert responses == [403]
+    assert writes == []
