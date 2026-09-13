@@ -141,7 +141,9 @@ class JobProxyRoutesMixin:
                     self.state, family_match.group(1), unquote(family_match.group(2)),
                     principal=str(session['username']),
                     owner=str(query_values.get('owner_username', [''])[0]) if method == 'GET' else '',
-                ):
+                ) and method != 'DELETE':
+                    # A retry must reach the delete route to clear residual
+                    # mirrored registrations after the family head was deleted.
                     json_response(self, {'success': False, 'error': '因子家族已删除或源码尚不可用'}, 404)
                     return True
             route = self.state.route_for(server_id=self.state.server_id)

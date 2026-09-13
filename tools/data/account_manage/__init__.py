@@ -699,11 +699,6 @@ def delete_factor_family_configs(
     """Delete a family's registrations and publish matching tombstones."""
     ensure_account_manager_sqlite_store()
     deleted = _delete_factor_family_configs(ff_alias, username=username)
-    for item in deleted:
-        _enqueue_domain_entity(
-            item["username"], "factor_param_config",
-            f'{item["scope_key"]}:{ff_alias}', {}, deleted=True,
-        )
     return {
         "config_count": len(deleted),
         "factor_count": sum(item["factor_count"] for item in deleted),
