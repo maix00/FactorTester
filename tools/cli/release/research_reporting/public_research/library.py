@@ -107,6 +107,7 @@ class PublicResearchLibrary:
                 projection_hash=projection["projection_hash"],
                 title=str(projection.get("title") or ""),
                 synced_at=now,
+                content_updated_at=_content_updated_at(record, projection, now),
                 client_online_at=now,
             )
             publication_id = record["publication_id"]
@@ -191,6 +192,7 @@ class PublicResearchLibrary:
                 projection_hash=value["projection_hash"],
                 title=str(value.get("title") or ""),
                 synced_at=now,
+                content_updated_at=_content_updated_at(record, value, now),
                 client_online_at=now,
             )
             if self.storage_server_id:
@@ -249,7 +251,7 @@ class PublicResearchLibrary:
                 "profile_ref": record.get("profile_ref") or "",
                 "title": title,
                 "generation": generation,
-                "updated_at": record.get("synced_at") or 0,
+                "updated_at": record.get("content_updated_at") or record.get("synced_at") or 0,
                 "visibility": record["visibility"],
                 "is_owned": viewer_ref == record["owner_ref"],
                 "projection_hash": record.get("projection_hash") or "",
@@ -266,6 +268,8 @@ class PublicResearchLibrary:
         if not self.can_read(record, viewer_ref):
             raise PermissionError("research report access is not authorized")
         value = self._projection(publication_id)
+        if not value.get("updated_at"):
+            value["updated_at"] = record.get("content_updated_at") or record.get("synced_at") or 0
         value["access"] = {
             "visibility": record["visibility"],
             **provenance_fields(record),
@@ -286,6 +290,8 @@ class PublicResearchLibrary:
             publication_id,
             expected_hash=str(record.get("projection_hash") or ""),
         )
+        if not value.get("updated_at"):
+            value["updated_at"] = record.get("content_updated_at") or record.get("synced_at") or 0
         value["access"] = {
             "visibility": record["visibility"],
             **provenance_fields(record),
@@ -618,6 +624,16 @@ class PublicResearchLibrary:
         return read_registry(self.registry_path)
 
 
+def _content_updated_at(record: dict, projection: dict, now: float) -> float:
+    import math
+    supplied = projection.get("updated_at")
+    if isinstance(supplied, (int, float)) and not isinstance(supplied, bool) and math.isfinite(supplied) and supplied > 0:
+        return supplied
+    if record.get("projection_hash") == projection.get("projection_hash"):
+        return record.get("content_updated_at") or record.get("synced_at") or now
+    return now
+
+
 def _projection(value: Any, report_id: str) -> dict[str, Any]:
     if not isinstance(value, dict) or value.get("schema_version") != 2:
         raise ValueError("uploaded research projection is invalid")
@@ -728,7 +744,7 @@ def _owner_record(record: dict[str, Any]) -> dict[str, Any]:
         )
     } | {
         "owner_client_online": _client_online(record),
-        "updated_at": record.get("synced_at") or 0,
+        "updated_at": record.get("content_updated_at") or record.get("synced_at") or 0,
     }
     value.update(provenance_fields(record))
     return value

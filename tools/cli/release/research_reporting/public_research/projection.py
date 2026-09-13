@@ -82,6 +82,7 @@ def build_upload_projection(
         "title": _public_text(str(snapshot["head"]["title"]), resources),
         "language": snapshot["head"].get("language") or "zh-Hans",
         "generation": int(snapshot["head"]["generation"]),
+        "updated_at": snapshot.get("updated_at", 0),
         "content_lazy": not include_component_content,
         "components": [
             public_component(
@@ -130,6 +131,7 @@ def projection_index(projection: dict[str, Any]) -> dict[str, Any]:
         "title": projection.get("title", ""),
         "language": projection.get("language", "zh-Hans"),
         "generation": projection.get("generation", 0),
+        "updated_at": projection.get("updated_at", 0),
         "projection_hash": projection.get("projection_hash", ""),
         "chapters": chapters,
         **({"authoring_bundle": projection["authoring_bundle"]}
@@ -155,6 +157,7 @@ def build_upload_index(snapshot: dict[str, Any]) -> dict[str, Any]:
         "title": _public_text(str(head.get("title") or ""), {}),
         "language": head.get("language") or "zh-Hans",
         "generation": int(head.get("generation") or 0),
+        "updated_at": snapshot.get("updated_at", 0),
         "chapters": chapters,
     }
     value["projection_hash"] = hashlib.sha256(
@@ -320,6 +323,7 @@ def chapter_projection(
         "title": projection.get("title", ""),
         "language": projection.get("language", "zh-Hans"),
         "generation": projection.get("generation", 0),
+        "updated_at": projection.get("updated_at", 0),
         "projection_hash": projection.get("projection_hash", ""),
         "chapter_id": chapter_id,
         "content_lazy": not include_content,

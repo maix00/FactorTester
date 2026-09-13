@@ -210,6 +210,11 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
             # A registered head is authoritative even when the publication store
             # also retains older immutable snapshots of this branch.
             registered = [item for item in local if item.get("branch_id") and item.get("status") == "active"]
+            metadata = {item['publication_id']: item for item in by_report.get(str(value.get('report_id') or ''), [])}
+            for item in registered:
+                publication = metadata.get(item.get('publication_id'), {})
+                if publication.get('owner_ref') == item.get('principal_ref') and publication.get('updated_at'):
+                    item['updated_at'] = publication['updated_at']
             projected = []
             for item in by_report.get(str(value.get("report_id") or ""), []):
                 if str(item.get("owner_ref") or "") != str(value.get("owner_ref") or ""):
@@ -219,6 +224,7 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                     "title": str(item.get("branch_ref") or item.get("title") or ""),
                     "profile_ref": str(item.get("profile_ref") or value.get("profile_ref") or ""),
                     "principal_ref": str(item.get("owner_ref") or ""),
+                    "updated_at": item.get("updated_at") or 0,
                     "source_kind": "publication",
                     "source_ref": str(item.get("publication_id") or ""),
                     "publication_id": str(item.get("publication_id") or ""),
@@ -242,6 +248,9 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                 seen.add(key)
                 branches.append(item)
             value["branches"] = branches
+            content_times = [item.get("updated_at") for item in branches if item.get("updated_at")]
+            if content_times:
+                value["updated_at"] = max(content_times)
             result.append(value)
         return result
 
