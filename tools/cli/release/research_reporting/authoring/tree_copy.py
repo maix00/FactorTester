@@ -9,6 +9,7 @@ from urllib.parse import quote, unquote
 
 from .tree_operations import apply_operation
 from .tree_schema import identifier
+from .tree_hierarchy import validate_parent_child, validate_root_child
 from .tree_transactions import mutate_batch
 
 
@@ -27,6 +28,13 @@ def plan_subtree_copy(source: dict, target: dict, *, component_ids: list[str],
     nodes = {n['component_id']: n for n in source['components']}
     if len(nodes) != len(source['components']):
         raise ValueError('source contains duplicate components')
+    target_nodes = {n['component_id']: n for n in target['components']}
+    if parent_id != 'root' and parent_id not in target_nodes:
+        raise ValueError('target parent component does not exist')
+    if after_component_id is not None:
+        sibling = target_nodes.get(after_component_id)
+        if sibling is None or (sibling.get('parent_id') or 'root') != parent_id:
+            raise ValueError('insertion anchor must belong to the target parent')
     roots = set(component_ids)
     if not roots or len(roots) != len(component_ids) or not roots.issubset(nodes):
         raise ValueError('select distinct existing source components')
@@ -45,8 +53,14 @@ def plan_subtree_copy(source: dict, target: dict, *, component_ids: list[str],
         visiting.remove(node_id)
     for node_id in component_ids:
         visit(node_id)
+    for node_id in component_ids:
+        validate_root_child(kind=nodes[node_id]['kind'], parent_id=parent_id)
+        validate_parent_child(parent_kind='root' if parent_id == 'root' else target_nodes[parent_id]['kind'],
+                              child_kind=nodes[node_id]['kind'])
     mapping = {old: 'copy-' + sha256(f'{copy_id}:{old}'.encode()).hexdigest()[:32]
                for old in selected}
+    if set(mapping.values()) & set(target_nodes):
+        raise ValueError('copy_id already exists in the target branch')
     asset_refs = set()
     def rewrite(value):
         if isinstance(value, dict):
@@ -80,6 +94,16 @@ def plan_subtree_copy(source: dict, target: dict, *, component_ids: list[str],
             item = rewrite({k: v for k, v in binding.items() if k != 'component_id'})
             item['binding_id'] = 'copy-' + sha256(f"{copy_id}:{binding['binding_id']}".encode()).hexdigest()[:32]
             copied_bindings.append(item)
+        if old in roots:
+            copied_bindings.append({
+                'binding_id': 'copy-origin-' + sha256(f'{copy_id}:{old}'.encode()).hexdigest()[:32],
+                'kind': 'graph_reference', 'target_ref': f'report-copy:{copy_id}',
+                'label': 'Copied report subtree',
+                'data': {'source_report_id': source['head']['report_id'],
+                         'source_generation': source['head']['generation'],
+                         'source_root_ref': source['head']['root_ref'],
+                         'source_component_id': old, 'copy_id': copy_id},
+            })
         operation = {'op': 'add', 'component_id': mapping[old],
                      'kind': node['kind'], 'parent_id': parent_id if old in roots else mapping[node['parent_id']],
                      **{k: rewrite(node.get(k)) for k in ('title', 'body', 'content', 'display_kind')},

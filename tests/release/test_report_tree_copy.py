@@ -55,3 +55,41 @@ def test_copy_rejects_overlapping_selection_and_missing_assets(tmp_path):
     source['components'][2].update(kind='image', content={'asset_ref': 'asset:missing'})
     with pytest.raises(ValueError, match='unregistered asset'):
         plan_subtree_copy(source, target, component_ids=['chapter'], copy_id='two')
+
+
+def test_cli_copy_preview_resolves_profiles_and_never_writes(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from click.testing import CliRunner
+    from tools.cli.commands import research_report_copy as command
+    source, target = pair(tmp_path)
+    def scope(**kwargs):
+        return SimpleNamespace(package_root=tmp_path, branch_id=kwargs['branch_id'],
+                               profile={'session_binding': {'principal_ref': 'alice'}})
+    monkeypatch.setattr(command, 'load_profile_root', lambda _: tmp_path)
+    monkeypatch.setattr(command, 'resolve_branch_report_scope', scope)
+    monkeypatch.setattr(command, 'load_authoring', lambda s: source if s.branch_id == 'source' else target)
+    result = CliRunner().invoke(command.copy_preview, [
+        '--profile', 'self', '--work-package-id', 'package', '--branch-id', 'target',
+        '--source-branch-id', 'source', '--component-id', 'chapter', '--copy-id', 'review', '--json',
+    ])
+    assert result.exit_code == 0, result.output
+    preview = json.loads(result.output)
+    assert preview['status'] == 'preview'
+    assert len(preview['operations']) == 4
+    assert load_snapshot(package_root=tmp_path, branch_id='target')['head'] == target['head']
+
+
+def test_copy_provenance_survives_reload_and_preview_checks_target_structure(tmp_path):
+    source, target = pair(tmp_path)
+    with pytest.raises(ValueError, match='parent component'):
+        plan_subtree_copy(source, target, component_ids=['section'], parent_id='missing', copy_id='bad')
+    with pytest.raises(ValueError, match='anchor'):
+        plan_subtree_copy(source, target, component_ids=['chapter'], after_component_id='missing', copy_id='bad')
+    plan = plan_subtree_copy(source, target, component_ids=['chapter'], copy_id='audit')
+    apply_subtree_copy(target['paths'], plan, staged_assets=[])
+    saved = load_snapshot(package_root=tmp_path, branch_id='target')
+    origin = next(b for b in saved['bindings'] if b['target_ref'] == 'report-copy:audit')
+    assert origin['data']['source_root_ref'] == source['head']['root_ref']
+    assert origin['data']['source_generation'] == source['head']['generation']
+    assert origin['data']['source_component_id'] == 'chapter'
