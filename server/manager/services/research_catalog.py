@@ -1090,13 +1090,17 @@ class ResearchCatalog(ResearchBranchesMixin):
         publishes the first branch generation.
         """
         profile = _profile(profile_ref)
+        research = self._research_row(research_id)
+        if not self._research_access(research, actor)["can_manage"]:
+            raise PermissionError("research report management is not authorized")
         workspaces = self.list_workspaces(research_id, viewer=actor)
         workspace = next(
-            (item for item in workspaces if item["profile_ref"] == profile),
+            (item for item in workspaces
+             if item["profile_ref"] == profile
+             and item["principal_ref"] == research["owner_ref"]),
             None,
         )
         if workspace is None:
-            research = self._research_row(research_id)
             workspace = self.create_workspace(
                 research_id,
                 actor=actor,
