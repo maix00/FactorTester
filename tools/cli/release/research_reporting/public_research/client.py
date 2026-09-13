@@ -11,6 +11,7 @@ from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
 from tools.cli.manager.config import ManagerConfig, ManagerCredentialStore
+from tools.cli.http import HttpSession, HttpClientError
 
 from tools.cli.commands.research_report_scope_identity import (
     resolve_branch_report_scope,
@@ -54,10 +55,14 @@ class ManagerRequestError(RuntimeError):
 class PublicResearchClient:
     """Resolve local report trees and control their Manager publication."""
 
-    def __init__(self, client_root: Path, *, manager_url: str | None = None) -> None:
+    def __init__(self, client_root: Path, *, manager_url: str | None = None,
+                 session: HttpSession | None = None) -> None:
         self.client_root = Path(client_root).expanduser().resolve()
         self.outbox = PublicResearchOutbox(self.client_root)
-        configured = manager_url or os.environ.get("FACTORTESTER_MANAGER_URL", "")
+        self.session = session
+        if session is not None and manager_url and manager_url.rstrip("/") != session.base_url.rstrip("/"):
+            raise ValueError("Publication Manager must match the authenticated session")
+        configured = (session.base_url if session is not None else manager_url) or os.environ.get("FACTORTESTER_MANAGER_URL", "")
         if not configured:
             try:
                 from tools.cli.manager.config import load_manager_config
@@ -69,7 +74,8 @@ class PublicResearchClient:
         # Explicit URLs are also used by offline tests and injected local
         # runtimes. Persisted Manager configuration is validated when loaded.
         self.manager_config = ManagerConfig(base_url=self.manager_url)
-        self.credentials = ManagerCredentialStore(self.manager_config)
+        self.credentials = (None if session is not None
+                            else ManagerCredentialStore(self.manager_config))
 
     def list_publications(self) -> list[dict[str, Any]]:
         # A read is also a reconnect boundary.  Local browsing must continue
@@ -503,6 +509,19 @@ class PublicResearchClient:
         allow_anonymous: bool = False,
         extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
+        if self.session is not None:
+            try:
+                value = self.session.request(method, path, payload=payload,
+                                             extra_headers=extra_headers)
+            except HttpClientError as exc:
+                raise ManagerRequestError(exc.status, str(exc)) from exc
+            except OSError as exc:
+                raise ManagerRequestError(0, "Manager publication service is unavailable") from exc
+            except ValueError as exc:
+                raise ManagerRequestError(502, "Manager returned invalid publication JSON") from exc
+            if value.get("success") is False:
+                raise ManagerRequestError(409, str(value.get("error") or "Manager publication request failed"))
+            return value
         body = None
         headers = {
             "Accept": "application/json",

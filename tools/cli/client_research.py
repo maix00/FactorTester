@@ -172,6 +172,20 @@ class ResearchClientMixin(ClientMixinBase):
             self._research_url(research_id, "/collaboration-branches"),
         )) or {})
 
+    @staticmethod
+    def _report_branches_url(report_id: str) -> str:
+        return '/api/research/reports/' + quote(report_id, safe='') + '/branches'
+
+    def report_branch_status(self, report_id: str) -> dict[str, Any]:
+        return self._expect_success(self.session.get(self._report_branches_url(report_id)))
+
+    def reserve_report_branch(self, report_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._expect_success(self.session.post(self._report_branches_url(report_id), payload))
+
+    def publish_report_branch(self, report_id: str, branch_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        path = self._report_branches_url(report_id) + '/' + quote(branch_id, safe='') + '/publish'
+        return self._expect_success(self.session.post(path, payload))
+
     def read_publication_branch(
         self, publication_id: str, *, chapter_id: str = "",
     ) -> dict[str, Any]:

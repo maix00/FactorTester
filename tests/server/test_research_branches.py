@@ -69,3 +69,48 @@ def test_editor_publication_read_is_bound_to_registered_identity_and_live_grants
     catalog.remove_membership(rid, actor='alice', profile_ref='self', principal_ref='bob')
     assert catalog.can_read_publication(record, 'alice')  # historical work remains available to the report owner
     assert not catalog.can_read_publication(record, 'bob')
+
+
+def test_branch_http_verifies_real_publication_identity_and_version(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from server.manager.http import research_branch_routes as routes
+    from server.manager.http.research_catalog_routes import ResearchCatalogRoutesMixin
+    catalog, _ = setup(tmp_path)
+    catalog.reserve_report_branch('report', actor='bob', profile_ref='self', branch_id='review')
+    publication = {'report_id': 'report', 'owner_ref': 'bob', 'profile_ref': 'self',
+                   'branch_ref': 'review', 'publication_id': 'p' * 24, 'generation': 1,
+                   'projection_hash': 'a' * 64, 'storage_server_id': 'actual-source'}
+    index = {'report_id': 'report', 'generation': 1, 'projection_hash': 'a' * 64}
+    class Handler(ResearchCatalogRoutesMixin):
+        state = SimpleNamespace(research_catalog=catalog)
+        def _research_service(self):
+            return SimpleNamespace(list_visible=lambda actor: [publication], index=lambda pid, actor: index)
+    responses = []
+    monkeypatch.setattr(routes, 'json_response', lambda h, body, status=200: responses.append((body, status)))
+    request = SimpleNamespace(path='/api/research/reports/report/branches/review/publish')
+    payload = {'profile_ref': 'self', 'publication_id': 'p' * 24, 'expected_generation': 0,
+               'expected_revision': '', 'generation': 999, 'revision': 'forged', 'storage_server_id': 'forged'}
+    publication['owner_ref'] = 'mallory'
+    with pytest.raises(PermissionError):
+        Handler()._post_report_branch_route(request, 'bob', payload)
+    publication['owner_ref'] = 'bob'
+    index['generation'] = 2
+    with pytest.raises(ValueError, match='changed during verification'):
+        Handler()._post_report_branch_route(request, 'bob', payload)
+    index['generation'] = 1
+    assert Handler()._post_report_branch_route(request, 'bob', payload)
+    branch = responses[-1][0]['branch']
+    assert branch['generation'] == 1 and branch['storage_server_id'] == 'actual-source'
+
+
+def test_branch_http_agent_cannot_choose_another_profile():
+    from types import SimpleNamespace
+    from server.manager.http.research_branch_routes import ResearchBranchRoutesMixin
+    handler = ResearchBranchRoutesMixin()
+    handler.state = SimpleNamespace(session_authentication=lambda token: 'agent',
+                                    agent_session_matches=lambda token, profile, claim: profile == 'bound')
+    handler._bearer_token = lambda: 'test-token'
+    handler.headers = {'X-FactorTester-Agent-Claim': 'claim'}
+    handler._require_branch_profile_actor('bound')
+    with pytest.raises(PermissionError, match='another Profile'):
+        handler._require_branch_profile_actor('other')

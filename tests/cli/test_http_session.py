@@ -59,3 +59,40 @@ def test_profile_capability_does_not_persist_manager_cookies(tmp_path: Path) -> 
 
     assert session.persist_cookies is False
     assert not hasattr(session.cookie_jar, "filename")
+
+
+def test_publication_uses_profile_session_and_preserves_idempotency(tmp_path, monkeypatch):
+    import pytest
+    from tools.cli.http import HttpClientError
+    from tools.cli.release.research_reporting.public_research.client import (
+        PublicResearchClient, ManagerRequestError,
+    )
+    capability = AgentCapability(base_url="http://127.0.0.1:7998", token="test-capability",
+                                 profile_id="self", claim_id="test-claim")
+    session = HttpSession(capability.base_url, cookies=tmp_path / "unused",
+                          agent_capability=capability, bearer_token=capability.token)
+    seen = []
+    def opened(request, **kwargs):
+        seen.append(request)
+        return _Response({"success": True})
+    monkeypatch.setattr(session._opener, "open", opened)
+    client = PublicResearchClient(tmp_path, session=session)
+    assert client.credentials is None
+    client._request("POST", "/api/transfers/objects/access", payload={"object_id": "asset"},
+                    extra_headers={"Idempotency-Key": "upload-1"})
+    headers = {key.lower(): value for key, value in seen[0].header_items()}
+    assert headers["authorization"] == "Bearer test-capability"
+    assert headers["x-factortester-agent-profile"] == "self"
+    assert headers["x-factortester-agent-claim"] == "test-claim"
+    assert headers["idempotency-key"] == "upload-1"
+    with pytest.raises(ValueError, match="match the authenticated"):
+        PublicResearchClient(tmp_path, session=session, manager_url="http://other:7998")
+    with pytest.raises(ValueError, match="Only Idempotency-Key"):
+        session.request("POST", "/api/test", extra_headers={"authorization": "other"})
+    def conflict(*args, **kwargs):
+        raise HttpClientError(409, "http://127.0.0.1:7998/api/test", "version conflict")
+    monkeypatch.setattr(session, "request", conflict)
+    with pytest.raises(ManagerRequestError) as error:
+        client._request("POST", "/api/test")
+    assert error.value.status_code == 409
+    assert not error.value.retryable

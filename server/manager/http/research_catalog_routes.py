@@ -7,9 +7,10 @@ from typing import Any
 from urllib.parse import parse_qs, unquote
 
 from server.manager.http.responses import json_response
+from .research_branch_routes import ResearchBranchRoutesMixin
 
 
-class ResearchCatalogRoutesMixin:
+class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
     """Expose the Research catalog without duplicating report/Evidence stores."""
 
     def _research_catalog_service(self):
@@ -58,6 +59,8 @@ class ResearchCatalogRoutesMixin:
         service = self._research_catalog_service()
         query = parse_qs(parsed.query, keep_blank_values=True)
         try:
+            if self._get_report_branch_route(parsed, viewer):
+                return True
             if parsed.path == "/api/research":
                 scope = str(query.get("scope", ["all"])[0] or "all")
                 subordinate_refs = self._research_catalog_subordinate_refs(viewer)
@@ -244,6 +247,8 @@ class ResearchCatalogRoutesMixin:
         service = self._research_catalog_service()
         try:
             data = self._research_catalog_body()
+            if self._post_report_branch_route(parsed, actor, data):
+                return True
             if parsed.path == "/api/research":
                 value = service.create_research(
                     owner_ref=actor,

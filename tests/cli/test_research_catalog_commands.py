@@ -151,3 +151,28 @@ def test_publication_branch_read_keeps_route_and_offline_failure():
     with pytest.raises(ValueError, match='chapter_id'):
         client.read_publication_branch('a' * 24, chapter_id='../other')
     assert len(calls) == 2
+
+
+def test_branch_lifecycle_cli_routes_identity_and_expected_version(monkeypatch):
+    from types import SimpleNamespace
+    calls = []
+    fake = SimpleNamespace(
+        reserve_report_branch=lambda rid, payload: calls.append(('reserve', rid, payload)) or {'branch': {'status': 'reserved'}},
+        publish_report_branch=lambda rid, bid, payload: calls.append(('publish', rid, bid, payload)) or {'branch': {'status': 'active'}},
+        report_branch_status=lambda rid: {'branches': [{'branch_id': 'review'}]},
+    )
+    monkeypatch.setattr('tools.cli.commands.research_report_branch.client_from_config', lambda: fake)
+    runner = CliRunner()
+    reserved = runner.invoke(cli, ['research', 'reports', 'branch-reserve', 'report:v1:one',
+                                   '--profile', 'self', '--branch-id', 'review', '--from-branch', 'main',
+                                   '--source-generation', '3', '--source-revision', 'a' * 64])
+    assert reserved.exit_code == 0, reserved.output
+    assert calls[0][2]['source_generation'] == 3
+    published = runner.invoke(cli, ['research', 'reports', 'branch-publish', 'report:v1:one',
+                                    '--profile', 'self', '--branch-id', 'review', '--publication-id', 'p' * 24,
+                                    '--expected-generation', '0'])
+    assert published.exit_code == 0, published.output
+    assert calls[1][1:3] == ('report:v1:one', 'review')
+    assert calls[1][3]['expected_generation'] == 0
+    status = runner.invoke(cli, ['research', 'reports', 'branch-status', 'report:v1:one'])
+    assert status.exit_code == 0 and json.loads(status.output)['branches'][0]['branch_id'] == 'review'

@@ -22,6 +22,9 @@ def _json(value: object) -> None:
 def register_branch_commands(group: click.Group) -> None:
     group.add_command(branch_list)
     group.add_command(branch_read)
+    group.add_command(branch_status)
+    group.add_command(branch_reserve)
+    group.add_command(branch_publish)
 
 
 @click.command("branch-list")
@@ -64,3 +67,47 @@ def branch_read(
 
 
 __all__ = ["register_branch_commands", "branch_list", "branch_read"]
+
+
+@click.command('branch-status')
+@click.argument('report_id')
+@friendly_errors
+def branch_status(report_id: str) -> None:
+    """查看报告的共享分支、作者 Profile、版本及预留/可用状态。"""
+    _json(client_from_config().report_branch_status(report_id))
+
+
+@click.command('branch-reserve')
+@click.argument('report_id')
+@click.option('--profile', 'profile_ref', required=True)
+@click.option('--branch-id', required=True)
+@click.option('--title', default='')
+@click.option('--from-branch', 'source_branch_id', default='')
+@click.option('--source-generation', type=click.IntRange(min=0), default=0)
+@click.option('--source-revision', default='')
+@friendly_errors
+def branch_reserve(report_id: str, profile_ref: str, branch_id: str, title: str,
+                   source_branch_id: str, source_generation: int, source_revision: str) -> None:
+    """为当前用户的确切 Profile 预留独立分支；不会声称内容已传输。"""
+    _json(client_from_config().reserve_report_branch(report_id, {
+        'profile_ref': profile_ref, 'branch_id': branch_id, 'title': title,
+        'source_branch_id': source_branch_id, 'source_generation': source_generation,
+        'source_revision': source_revision,
+    }))
+
+
+@click.command('branch-publish')
+@click.argument('report_id')
+@click.option('--profile', 'profile_ref', required=True)
+@click.option('--branch-id', required=True)
+@click.option('--publication-id', required=True)
+@click.option('--expected-generation', type=click.IntRange(min=0), required=True)
+@click.option('--expected-revision', default='')
+@friendly_errors
+def branch_publish(report_id: str, profile_ref: str, branch_id: str, publication_id: str,
+                   expected_generation: int, expected_revision: str) -> None:
+    """核验已上传的发布对象，再按旧版本推进共享分支；拒绝覆盖竞争写入。"""
+    _json(client_from_config().publish_report_branch(report_id, branch_id, {
+        'profile_ref': profile_ref, 'publication_id': publication_id,
+        'expected_generation': expected_generation, 'expected_revision': expected_revision,
+    }))
