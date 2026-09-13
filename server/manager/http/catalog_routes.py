@@ -85,6 +85,11 @@ class CatalogRoutesMixin:
         owner = str(requested_owner or "").strip()
         if owner == principal:
             return principal
+        if owner:
+            from server.manager.services.subordinate_factor_library import direct_subordinate_accounts
+            account_store = getattr(self.state.client_state, 'local_account_store', None)
+            if any(item.get('username') == owner for item in direct_subordinate_accounts(principal, account_store)):
+                return owner
         reader = getattr(self.state.client_state, "factor_set_scopes", None)
         scopes = reader(principal) if callable(reader) else {}
         if not owner and any(str(item.get("target_ref") or "") == target_ref
@@ -403,6 +408,50 @@ class CatalogRoutesMixin:
         query = parse_qs(parsed.query, keep_blank_values=True)
         refresh = str(query.get("refresh", [""])[0] or "") == "1"
         try:
+            if parsed.path in {"/api/factor-library/factor-sets/history", "/api/factor-library/factor-sets/history-factor"}:
+                if visitor is not None:
+                    raise VisitorCatalogAccessError("访客模式不能读取用户因子集合")
+                target = str(query.get("target_ref", [""])[0])
+                owner = self._visible_factor_set_owner(principal, target,
+                    str(query.get("owner_username", [""])[0]))
+                from tools.data.sqlite.account_manager.factor_set import factor_set_history, historical_factor
+                if parsed.path.endswith('/history'):
+                    value = factor_set_history(owner, target,
+                        offset=query.get('offset', ['0'])[0], limit=query.get('limit', ['50'])[0])
+                else:
+                    member = historical_factor(owner, target, str(query.get('factor_ref', [''])[0]))
+                    value = None
+                    if member is not None:
+                        from server.services.factor_source_catalog import FactorSourceCatalog
+                        from server.modules.shared.factor_preview_latex import preview_expression
+                        identity = member['identity']
+                        source_owner = member['owner_ref'].removeprefix('principal:')
+                        kind = 'public' if source_owner in {'public', '__public_jobs__', '__public__'} else 'custom'
+                        alias, fingerprint = identity['family_alias'], identity['family_formula_fingerprint']
+                        catalog = FactorSourceCatalog()
+                        try:
+                            source = catalog.version(principal, kind, alias, fingerprint, owner_username=source_owner)
+                        except FileNotFoundError:
+                            from server.manager.services.factor_source_hydration import FactorSourceHydrator
+                            if not FactorSourceHydrator(self.state).hydrate(
+                                f"{'public' if kind == 'public' else source_owner}:{alias}",
+                                principal=principal, fingerprint=fingerprint):
+                                raise
+                            source = catalog.version(principal, kind, alias, fingerprint, owner_username=source_owner)
+                        values = identity.get('params', {})
+                        parameters = [{**p, 'value': values.get(p['alias'])} for p in source.get('params', [])]
+                        value = {**source, **member, 'factor_ref': member['ref'],
+                            'factor_alias': member['alias'], 'factor_family_alias': alias,
+                            'factor_kind': kind, 'source': kind, 'owner_username': source_owner,
+                            'factor_owner_ref': member['owner_ref'], 'parameter_definitions': parameters,
+                            'family_formula_fingerprint': fingerprint,
+                            'self_formula_fingerprint': identity['self_formula_fingerprint'],
+                            'historical_member': True, 'can_edit': False}
+                        value['resolved_math_expr'] = preview_expression(value, values)
+                json_response(self, {'success': value is not None,
+                    'history' if parsed.path.endswith('/history') else 'factor': value},
+                    200 if value is not None else 404)
+                return True
             source_match = re.fullmatch(
                 r"/api/factor-library/family-sources/(custom|public)/([^/]+)"
                 r"/versions(?:/([^/]+))?",

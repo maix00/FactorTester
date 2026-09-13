@@ -91,7 +91,7 @@ class JobProxyRoutesMixin:
             for pattern in (
                 r"overview",
                 r"families/(?:operators|validate|custom|public)",
-                r"families/(?:custom|public)/[^/]+",
+                r"families/(?:custom|public)/[^/]+(?:/(?:impact|transfer))?",
                 r"configurations/[^/]+(?:/[^/]+|/factors)?",
                 r"configuration-scopes(?:/[^/]+)?",
                 r"workspace/user/(?:root|download|upload|merge-download)",
@@ -134,6 +134,31 @@ class JobProxyRoutesMixin:
                 return True
             body = self.rfile.read(length) if length else b""
         try:
+            changing_family = re.fullmatch(r'families/(custom|public)/([^/]+)/(impact|transfer)', suffix)
+            if changing_family:
+                if changing_family.group(1) == 'public' or changing_family.group(3) == 'transfer':
+                    if session.get('role') != 'super_admin':
+                        raise PermissionError('需要超级管理员权限')
+                sync = getattr(getattr(self.state, 'client_state', None), 'account_domain_sync', None)
+                if sync is not None:
+                    store = getattr(self.state.client_state, 'local_account_store', None)
+                    accounts = store.load_accounts() if store is not None else []
+                    principals = {str(session['username']), '__public__'}
+                    if changing_family.group(1) == 'public':
+                        principals.update(str(row['username']) for row in accounts if row.get('username'))
+                    for user in sorted(principals):
+                        for _ in range(100):
+                            state = sync.pull(principal=user, limit=1000)
+                            if state.get('offline') or state.get('conflicts'):
+                                raise RuntimeError('无法确认完整依赖，请先恢复同步或解决冲突')
+                            if not state.get('has_more'):
+                                break
+                        else:
+                            raise RuntimeError('依赖尚未同步完整，请稍后重试')
+                from server.manager.services.factor_family_current import ensure_current_family
+                if not ensure_current_family(self.state, changing_family.group(1), unquote(changing_family.group(2)),
+                    principal=str(session['username'])):
+                    raise ValueError('家族已删除或源码尚不可用')
             family_match = re.fullmatch(r'families/(custom|public)/([^/]+)', suffix)
             if prefix == '/api/factor-library/' and family_match and method in {'GET', 'PUT', 'DELETE'}:
                 from server.manager.services.factor_family_current import ensure_current_family
@@ -169,6 +194,9 @@ class JobProxyRoutesMixin:
             refresh = getattr(getattr(self.state, "client_state", None), "_refresh_account_domain_async", None)
             if callable(refresh) and response.json_object().get("success", True):
                 refresh(str(session["username"]), force=True)
+                for owner in response.json_object().get('affected_users', []):
+                    if owner != str(session['username']):
+                        refresh(owner, force=True)
         if workspace_push and 200 <= response.status < 300:
             try:
                 value = response.json_object()

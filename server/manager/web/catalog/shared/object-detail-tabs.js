@@ -10,6 +10,7 @@
     ],
     factor: [
       ["overview", "详情", true],
+      ["source", "源码", false],
       ["parameters", "参数", true],
       ["identity", "身份与来源", false],
       ["jobs", "测试任务", false],
@@ -17,6 +18,7 @@
     set: [
       ["overview", "详情", true],
       ["members", "成员因子", true],
+      ["history", "历史变化", false],
       ["sources", "来源", false],
       ["identity", "身份与来源", false],
       ["jobs", "测试任务", false],
@@ -34,6 +36,7 @@
       key,
       label,
       editable,
+      ...((key === "history" || (kind === "factor" && key === "source")) ? {hidden: true} : {}),
       ...(overrides[key] || {}),
     })).filter(item => item.hidden !== true);
   }

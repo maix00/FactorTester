@@ -217,6 +217,8 @@ def delete_factor_family_configs(
             )
             deleted.append({'username': owner, 'scope_key': scope,
                             'factor_count': len(params_list) if isinstance(params_list, list) else 0})
+        from server.modules.custom_factors.family_impact import apply_set_family_change
+        apply_set_family_change(conn, mirror, owner_ref=username or 'public', family_alias=ff_alias)
         return deleted
 
 

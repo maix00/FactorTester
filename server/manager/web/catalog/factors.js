@@ -20,6 +20,16 @@
     const inline = mode === "view"
       && (context.testObjectTemporary || context.testObjectSnapshot)
       && context.testObjectInitialValue;
+    const historyQuery = new URLSearchParams(window.location.search);
+    const historySet = mode === "view" && historyQuery.get("history_set");
+    if (historySet) {
+      const query = new URLSearchParams({target_ref: historySet, factor_ref: targetRef,
+        owner_username: historyQuery.get("set_owner") || ""});
+      const payload = await context.api(`/api/factor-library/factor-sets/history-factor?${query}`);
+      if (!catalog().isCurrent(context)) return;
+      return window.FTFactorDetails.factorDetail(context,
+        {factors: [payload.factor], families: []}, targetRef, mode, catalog().nativeRequest, options);
+    }
     let data = inline
       ? {factors: [context.testObjectInitialValue], families: []}
       : await catalog().load(context, {library: true});
