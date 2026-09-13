@@ -92,3 +92,21 @@ def test_cross_package_fork_rejects_missing_asset_before_head_publication(tmp_pa
             source_branch_id='main', target_branch_id='review', target_report_id='report-1',
         )
     assert not (target / 'branches/review/authoring/HEAD.json').exists()
+
+
+def test_fork_source_version_check_precedes_target_publication(tmp_path):
+    import pytest
+    from tools.cli.release.research_reporting.authoring.tree_fork import inherit_report_tree_across_packages
+    source = tmp_path / 'source'
+    initialize_tree(package_root=source, branch_id='main', report_id='report-one', title='report')
+    add_component(package_root=source, branch_id='main', component_id='chapter', kind='chapter',
+                  title='changed', parent_id=None, body='', content=None, display_kind='')
+    with pytest.raises(ValueError, match='source version changed'):
+        fork_report_tree(package_root=source, source_branch_id='main', target_branch_id='new',
+                         target_report_id='report-one', expected_source_generation=0)
+    with pytest.raises(ValueError, match='source version changed'):
+        inherit_report_tree_across_packages(source_package_root=source, target_package_root=tmp_path / 'target',
+                         source_branch_id='main', target_branch_id='new',
+                         target_report_id='report-one', expected_source_generation=0)
+    assert not (source / 'branches/new/authoring/HEAD.json').exists()
+    assert not (tmp_path / 'target/branches/new/authoring/HEAD.json').exists()

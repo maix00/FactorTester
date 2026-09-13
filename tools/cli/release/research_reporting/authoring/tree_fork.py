@@ -23,6 +23,7 @@ def fork_report_tree(
     target_branch_id: str,
     target_report_id: str,
     reuse_existing: bool = False,
+    expected_source_generation: int | None = None,
 ) -> dict[str, Any]:
     """Clone the source HEAD and immutable nodes into a new branch report."""
     if source_branch_id == target_branch_id:
@@ -36,6 +37,8 @@ def fork_report_tree(
     )
     with tree_lock(source):
         source_head = load_head(source)
+        if expected_source_generation is not None and source_head["generation"] != expected_source_generation:
+            raise ValueError("report fork source version changed; refresh before retrying")
         require_no_pending(source, source_head)
         with tree_lock(target):
             if target["head"].exists():
@@ -91,6 +94,7 @@ def inherit_report_tree_across_packages(
     source_branch_id: str,
     target_branch_id: str,
     target_report_id: str,
+    expected_source_generation: int | None = None,
 ) -> dict[str, Any]:
     """Clone one branch tree into an isolated continuation Work Package."""
     source_root = Path(source_package_root).expanduser().resolve()
@@ -111,6 +115,8 @@ def inherit_report_tree_across_packages(
     )
     with tree_lock(source):
         source_head = load_head(source)
+        if expected_source_generation is not None and source_head["generation"] != expected_source_generation:
+            raise ValueError("report fork source version changed; refresh before retrying")
         require_no_pending(source, source_head)
         with tree_lock(target):
             if target["head"].exists():
