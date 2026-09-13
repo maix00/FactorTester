@@ -420,7 +420,9 @@ def _smoke_test_frozen_runtime(binary: Path) -> None:
             # is Mach-O and is always exercised here.
             return
     _run_frozen_help(binary)
-    _run_frozen_help(binary, arguments=["factor-library", "profile", "--help"])
+    _run_frozen_help(binary, arguments=["factor-library", "--help"])
+    for command in ("branch-fork", "branch-upload", "branch-diff", "copy-preview", "copy-apply"):
+        _run_frozen_help(binary, arguments=["research", "reports", command, "--help"])
     research_env = os.environ.copy()
     research_env["FACTORTESTER_ENTRYPOINT"] = (
         "cli-anything-factortester-research"
