@@ -19,9 +19,7 @@
   }
 
   function accountLabel(context, account) {
-    const alias = String(account?.alias || account?.username || "");
-    const username = String(account?.username || "");
-    return alias && alias !== username ? `${alias} · ${username}` : username;
+    return FTUI.userDisplay(account?.username, account?.alias);
   }
 
   function allowlistView(context, payload, reload) {
@@ -95,7 +93,7 @@
       ].join(" "),
       cells: item => [
         `${item.device_name || context.t("白名单设备")} · ${item.device_id || ""}`,
-        item.username || "",
+        FTUI.userDisplay(item.username, item.alias),
         item.client_name || item.client_type || context.t("未知客户端"),
         `${context.t("登记 IP")}: ${item.enrollment_ip || context.t("未记录")} · ${context.t("最近访问 IP")}: ${item.last_seen_ip || context.t("未记录")}`,
         item.enabled ? context.t("已启用") : context.t("已撤销"),

@@ -159,3 +159,19 @@ def test_failed_local_source_does_not_mask_valid_manifest():
     failed = {"factor_family_alias": "F", "owner_username": "alice", "family_formula_fingerprint": ""}
     valid = {**failed, "family_formula_fingerprint": "a" * 64}
     assert stub._merge_source_families([failed], [valid]) == [valid]
+
+
+def test_factor_library_passes_account_alias_to_manifest_templates(monkeypatch, tmp_path):
+    import settings
+    from server.manager.storage.account_domain.local import LocalAccountDomainStore
+    monkeypatch.setattr(settings, 'CACHE_DB_PATH', tmp_path / 'catalog.sqlite')
+    LocalAccountDomainStore(settings.CACHE_DB_PATH)
+    principal = 'GTHT@MaxJJW@392452984564'
+    stub = _Stub(_StubSynchronizer([_mirror_row('Mm', owner=principal)]))
+    stub._refresh_account_domain_async = lambda *_: None
+    stub._local_account = lambda _: {'username': principal, 'alias': '新别名'}
+    stub._custom_source_families = lambda *_: []
+    stub._registered_factor_rows = lambda *_: []
+    family = stub.factor_library(principal)['families'][0]
+    assert family['owner_alias'] == '新别名'
+    assert family['owner_username'] == principal

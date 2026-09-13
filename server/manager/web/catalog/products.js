@@ -542,7 +542,9 @@
   function creatorLabel(group, context) {
     const kind = group.creator_kind === "profile"
       ? context.t("Profile") : context.t("用户");
-    return `${kind} · ${group.creator_title || group.creator_ref || "—"}`;
+    const label = group.creator_kind === "profile" ? group.creator_title || group.creator_ref
+      : FTUI.userLabel(group.creator_ref, group.creator_title);
+    return FTUI.userDisplay(group.creator_ref, `${kind} · ${label || "—"}`);
   }
   function researchLabel(group, context) {
     const bindings = Array.isArray(group.research_bindings)

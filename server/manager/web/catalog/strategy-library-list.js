@@ -93,7 +93,7 @@
     );
     const rows = items.map(item => [
       nameCell(context, item),
-      item.owner_ref || "—",
+      FTUI.userDisplay(item.owner_ref, item.owner_alias),
       item.current_revision?.entrypoint || "—",
       hooks(item),
       revision(item),

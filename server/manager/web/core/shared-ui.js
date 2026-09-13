@@ -1,6 +1,20 @@
 (() => {
   const text = value => value == null ? "" : String(value);
 
+  // Presentation only. Never use this label as an owner key or API value.
+  function userLabel(value, alias = "") {
+    const label = text(alias).trim() || text(value).trim();
+    const match = /^(?:principal:)?[^@\s]+@([^@]+)@[0-9]+$/.exec(label);
+    return match ? match[1] : label;
+  }
+
+  function userDisplay(value, alias = "") {
+    const span = document.createElement("span");
+    span.textContent = userLabel(value, alias);
+    span.title = text(value).trim();
+    return span;
+  }
+
   function table(headers, rows = []) {
     const shell = document.createElement("div"); shell.className = "table-shell";
     if (shell.dataset) shell.dataset.ftScrollState = "shared-table";
@@ -290,6 +304,6 @@
   window.FTUI = {
     actionButton, appendRow, code, codeEditor, sourcePanel, sourceView, empty, fieldRows, formatDate, helpIcon, iconButton,
     refreshButton,
-    loading, pagedTable, table, text,
+    loading, pagedTable, table, text, userLabel, userDisplay,
   };
 })();

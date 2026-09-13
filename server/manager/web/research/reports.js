@@ -74,8 +74,7 @@
   function ownerDisplay(context, item) {
     const owner = String(item.owner_ref || item.owner_username || "").trim();
     const profile = String(item.profile_ref || item.profile_id || "").trim();
-    const parts = owner.split("@").filter(Boolean);
-    const alias = String(item.owner_alias || (parts.length >= 2 ? parts[1] : owner)).trim();
+    const alias = FTUI.userLabel(owner, item.owner_alias);
     const institution = String(item.owner_institution || "").trim();
     const label = [alias || context.t("未知"), institution ? `· ${institution}` : ""]
       .filter(Boolean).join(" ") + (profile ? `（${profile}）` : "");

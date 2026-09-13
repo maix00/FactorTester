@@ -164,7 +164,7 @@ class ClientFactorCatalogMixin:
                 principal,
                 str(owner_account.get("alias") or owner_account.get("username") or principal),
             ),
-            self._manifest_source_families(principal),
+            self._manifest_source_families(principal, str(owner_account.get("alias") or "")),
         )
         if self.account_domain_sync is not None:
             mirrored = self._registered_factor_rows(principal, owner_account)
@@ -232,7 +232,7 @@ class ClientFactorCatalogMixin:
                     owner,
                     str(account.get("alias") or account.get("display_name") or owner),
                 ),
-                self._manifest_source_families(owner),
+                self._manifest_source_families(owner, str(account.get("alias") or account.get("display_name") or "")),
             ))
         if self.account_domain_sync is None:
             for account in accounts:

@@ -122,7 +122,7 @@
       identity.append(badge);
     }
     identity.append(id);
-    const owner = `${text(item.owner_alias || item.owner_ref)}\n${text(item.owner_ref)}`;
+    const owner = FTUI.userDisplay(item.owner_ref, item.owner_alias);
     const sourceServers = Array.isArray(item.source_server_ids) && item.source_server_ids.length
       ? item.source_server_ids
       : [item.source_server_id];
