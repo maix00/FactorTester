@@ -36,3 +36,27 @@ def project_family_heads(values, source_kind, owner):
             merged[key] = {**(payload.get('catalog') or {}), **payload,
                            'owner_username': row['owner'], 'factor_id': row['factor_id']}
     return list(merged.values())
+
+
+def legacy_source_manifests(rows, source_kind, owner):
+    """Yield scoped provider metadata only where no current family head exists.
+
+    Providers retain bytes for frozen history. Neither a live provider nor a
+    newer provider revision can override a current head or its tombstone.
+    Public and private catalogs must share this rule.
+    """
+    principal = owner or '__public__'
+    current_ids = {row['factor_id'] for row in family_heads(source_kind, owner)}
+    for row in rows:
+        if not isinstance(row, dict) or row.get('deleted'):
+            continue
+        payload = row.get('payload')
+        if not isinstance(payload, dict):
+            continue
+        kind = str(payload.get('source_kind') or source_kind).strip().lower()
+        payload_owner = str(payload.get('owner_username') or row.get('principal') or '').strip()
+        if kind != source_kind or payload_owner != principal:
+            continue
+        alias = str(payload.get('factor_id') or '').strip()
+        if alias and alias not in current_ids:
+            yield payload

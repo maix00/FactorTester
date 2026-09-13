@@ -73,22 +73,10 @@ class ClientFactorCatalogMixin:
             include_deleted=False,
         )
         families: list[dict[str, Any]] = []
-        from tools.data.sqlite.factor_family_heads import family_heads
-        current_ids = {row['factor_id'] for row in family_heads('custom', username)}
-        for row in rows:
-            if not isinstance(row, dict) or row.get("deleted"):
-                continue
-            payload = row.get("payload")
-            if not isinstance(payload, dict):
-                continue
-            factor_id = str(payload.get("factor_id") or "").strip()
-            if not factor_id or factor_id in current_ids:
-                continue
-            source_kind = str(
-                payload.get("source_kind") or "custom",
-            ).strip().lower() or "custom"
-            if source_kind != "custom" or str(payload.get("owner_username") or row.get("principal") or "") != username:
-                continue
+        from tools.data.sqlite.factor_family_heads import legacy_source_manifests
+        for payload in legacy_source_manifests(rows, "custom", username):
+            factor_id = str(payload["factor_id"]).strip()
+            source_kind = "custom"
             fingerprint = str(payload.get("family_formula_fingerprint") or "").strip()
             summary = payload.get("catalog") or payload
             families.append({
