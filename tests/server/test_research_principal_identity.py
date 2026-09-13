@@ -74,3 +74,15 @@ def test_explicit_migration_preserves_rows_and_requires_backup(tmp_path):
     restored = ResearchCatalog(database)
     restored.add_membership(rid, actor='alice', principal_ref='bob', profile_ref='self')
     assert len(restored.list_members(rid, viewer='alice')) == 2
+
+
+def test_report_creation_selects_owner_workspace_among_same_named_profiles(tmp_path):
+    catalog = ResearchCatalog(tmp_path / "research.sqlite")
+    rid = catalog.create_research(owner_ref="alice", title="Research")["research_id"]
+    catalog.add_membership(rid, actor="alice", principal_ref="bob", profile_ref="self", role="editor")
+    bob = catalog.create_workspace(rid, actor="alice", principal_ref="bob", profile_ref="self")
+    report = catalog.create_report_space(rid, actor="alice", title="Owner report", profile_ref="self")
+    assert report["owner_ref"] == "alice"
+    assert report["workspace_id"] != bob["workspace_id"]
+    owners = {row["workspace_id"]: row["principal_ref"] for row in catalog.list_workspaces(rid, viewer="alice")}
+    assert owners[report["workspace_id"]] == "alice"
