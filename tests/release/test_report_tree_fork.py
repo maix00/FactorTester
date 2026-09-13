@@ -110,3 +110,20 @@ def test_fork_source_version_check_precedes_target_publication(tmp_path):
                          target_report_id='report-one', expected_source_generation=0)
     assert not (source / 'branches/new/authoring/HEAD.json').exists()
     assert not (tmp_path / 'target/branches/new/authoring/HEAD.json').exists()
+
+
+def test_forked_staged_image_is_readable_by_existing_publication_adapter(tmp_path):
+    from tools.cli.release.research_reporting.assets import stage_branch_image
+    from tools.cli.release.research_reporting.authoring.tree_model import add_asset
+    from tools.cli.release.research_reporting.public_research.projection import read_local_asset, asset_id_for
+    from tools.cli.release.research_reporting.authoring.tree_fork import inherit_report_tree_across_packages
+    source, target = tmp_path / 'source', tmp_path / 'target'
+    initialize_tree(package_root=source, branch_id='main', report_id='r', title='r')
+    image = tmp_path / 'image.png'
+    image.write_bytes(b'image bytes')
+    asset = stage_branch_image(package_root=source, branch_id='main', source_path=image)
+    add_asset(package_root=source, branch_id='main', asset=asset)
+    inherit_report_tree_across_packages(source_package_root=source, target_package_root=target,
+                                       source_branch_id='main', target_branch_id='copy', target_report_id='r')
+    snapshot = load_snapshot(package_root=target, branch_id='copy')
+    assert read_local_asset(snapshot, asset_id_for(asset['asset_ref']))[0] == image.read_bytes()

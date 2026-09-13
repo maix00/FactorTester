@@ -52,6 +52,10 @@ def fork_report_tree(
                 return {
                     "paths": target, "head": head, "inherited": False,
                 }
+            _copy_assets(
+                Path(package_root).resolve(), Path(package_root).resolve(), source_head["assets"],
+                source_branch_id, target_branch_id,
+            )
             _copy_tree(source["nodes"], target["nodes"])
             if source["binding_registry"].is_file():
                 shutil.copy2(
@@ -128,7 +132,7 @@ def inherit_report_tree_across_packages(
                 return {
                     "paths": target, "head": head, "inherited": False,
                 }
-            _copy_assets(source_root, target_root, source_head["assets"])
+            _copy_assets(source_root, target_root, source_head["assets"], source_branch_id, target_branch_id)
             _copy_tree(source["nodes"], target["nodes"])
             if source["binding_registry"].is_file():
                 shutil.copy2(
@@ -153,7 +157,10 @@ def _copy_tree(source: Path, target: Path) -> None:
     shutil.copytree(source, target, dirs_exist_ok=True)
 
 
-def _copy_assets(source_root: Path, target_root: Path, assets: list[dict]) -> None:
+def _copy_assets(
+    source_root: Path, target_root: Path, assets: list[dict],
+    source_branch_id: str, target_branch_id: str,
+) -> None:
     """Verify all local bytes before publishing an inherited report HEAD.
 
     Content-addressed destinations avoid overwriting files of another branch.
@@ -163,8 +170,14 @@ def _copy_assets(source_root: Path, target_root: Path, assets: list[dict]) -> No
     try:
         for asset in assets:
             relative = asset.get("local_ref")
-            if not relative:
+            if not relative and asset.get("external_ref"):
                 continue
+            if not relative:
+                filename = Path(asset["filename"]).name
+                candidates = [source_root / "branches" / source_branch_id / "assets" / filename,
+                              source_root / "assets" / filename]
+                relative = next((path.relative_to(source_root) for path in candidates if path.is_file()),
+                                candidates[0].relative_to(source_root))
             source = (source_root / relative).resolve()
             if not source.is_relative_to(source_root) or not source.is_file():
                 raise ValueError("report fork asset is missing or outside its package")
@@ -172,7 +185,7 @@ def _copy_assets(source_root: Path, target_root: Path, assets: list[dict]) -> No
                 digest = hashlib.file_digest(stream, "sha256").hexdigest()
             if asset.get("content_hash") and asset["content_hash"] != digest:
                 raise ValueError("report fork asset hash mismatch")
-            relative_target = f"assets/inherited/{digest}/{source.name}"
+            relative_target = f"branches/{target_branch_id}/assets/{digest}{source.suffix}"
             destination = (target_root / relative_target).resolve()
             if not destination.is_relative_to(target_root):
                 raise ValueError("report fork asset destination escapes its package")
@@ -190,10 +203,11 @@ def _copy_assets(source_root: Path, target_root: Path, assets: list[dict]) -> No
                 os.link(temporary, destination)
             except FileExistsError:
                 with destination.open("rb") as stream:
-                    if hashlib.file_digest(stream, "sha256").hexdigest() != destination.parent.name:
+                    if hashlib.file_digest(stream, "sha256").hexdigest() != destination.stem:
                         raise ValueError("report fork destination asset hash mismatch")
             asset["local_ref"] = relative_target
-            asset["content_hash"] = destination.parent.name
+            asset["content_hash"] = destination.stem
+            asset["filename"] = destination.name
     finally:
         for temporary, *_ in staged:
             temporary.unlink(missing_ok=True)
