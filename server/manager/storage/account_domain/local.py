@@ -386,6 +386,18 @@ class LocalAccountDomainStore:
         deleted = bool(row.get("deleted"))
         with connect_sqlite(self.path) as conn:
             conn.execute("BEGIN IMMEDIATE")
+            # A pull may contain the acknowledged predecessor of a newer
+            # local edit. Reject old revisions before comparing the outbox;
+            # otherwise our own previous write becomes a false conflict.
+            current = conn.execute(
+                """
+                SELECT remote_revision FROM account_domain_entities
+                WHERE principal=? AND entity_type=? AND entity_id=?
+                """,
+                (principal, entity_type, entity_id),
+            ).fetchone()
+            if current and current["remote_revision"] is not None and int(current["remote_revision"]) >= revision:
+                return "stale"
             pending = conn.execute(
                 """
                 SELECT operation_id, payload_json, deleted FROM account_domain_outbox
@@ -411,15 +423,6 @@ class LocalAccountDomainStore:
                     return "conflict"
             if pending is not None:
                 conn.execute("DELETE FROM account_domain_outbox WHERE operation_id=?", (pending["operation_id"],))
-            current = conn.execute(
-                """
-                SELECT remote_revision FROM account_domain_entities
-                WHERE principal=? AND entity_type=? AND entity_id=?
-                """,
-                (principal, entity_type, entity_id),
-            ).fetchone()
-            if current and current["remote_revision"] is not None and int(current["remote_revision"]) >= revision:
-                return "stale"
             conn.execute(
                 """
                 INSERT INTO account_domain_entities(

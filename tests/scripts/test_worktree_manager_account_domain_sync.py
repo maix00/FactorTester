@@ -1027,3 +1027,24 @@ def test_reconcile_does_not_resurrect_deleted_authored_set(monkeypatch, tmp_path
     service.delete("alice", "factor_set", value["ref"], flush=False)
     assert service.reconcile_factor_catalog("alice", force=True) == 0
     assert service.local.pending(principal="alice")[0]["deleted"] is True
+
+
+def test_old_pull_cannot_block_successor_of_acknowledged_write(tmp_path):
+    local = LocalAccountDomainStore(tmp_path / 'delayed-pull.sqlite')
+    key = dict(principal='alice', entity_type='research_catalog', entity_id='r')
+    first = local.upsert_local(**key, manager_id='a', payload={'status': 'reserved'})
+    sent = local.pending()[0]
+    successor = local.upsert_local(**key, manager_id='a', payload={'status': 'active'})
+    local.acknowledge(first, revision=10, sent_item=sent)
+    for revision in (9, 10):
+        assert local.apply_remote({**key, 'payload': {'status': 'reserved'},
+                                   'revision': revision}) == 'stale'
+    assert local.conflicts(principal='alice') == []
+    pending = local.pending(principal='alice')
+    assert len(pending) == 1
+    assert pending[0]['operation_id'] == successor
+    assert pending[0]['base_revision'] == 10
+    # A genuinely newer remote edit still conflicts and preserves local work.
+    assert local.apply_remote({**key, 'payload': {'status': 'peer edit'},
+                               'revision': 11}) == 'conflict'
+    assert local.get_entity('alice', 'research_catalog', 'r')['payload'] == {'status': 'active'}
