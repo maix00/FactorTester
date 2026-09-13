@@ -224,11 +224,15 @@ class CompositeExpr(OperandExpr):
                 # Natural negation inside the source expression stays black.
                 if self.op == 'neg' and getattr(self.operands[0], 'op', None) == 'SIGNAL_ALIGN':
                     operator = r'\textcolor{red}{-}'
+                if self.op == 'sqrt':
+                    return f"\\sqrt{{{operand_latex}}}"
                 return f"{operator}\\left({operand_latex}\\right)"
             elif self._Ops[self.op]['nop'] == 2:
                 left_latex = self._binary_operand_latex(self.operands[0], operands_latex[0], side='left', subst=subst)
                 right_latex = self._binary_operand_latex(self.operands[1], operands_latex[1], side='right', subst=subst)
-                if self.op in ('add', 'sub', 'mul', 'pow', 'gt', 'lt', 'ge', 'le', 'eq', 'ne', 'and', 'or'):
+                if self.op == 'pow':
+                    return f'{left_latex}^{{{operands_latex[1]}}}'
+                if self.op in ('add', 'sub', 'mul', 'gt', 'lt', 'ge', 'le', 'eq', 'ne', 'and', 'or'):
                     return f'{left_latex} {self._Ops[self.op]["latex"]} {right_latex}'
                 elif self.op in ('div'):
                     return f'{self._Ops[self.op]["latex"]}{{{left_latex}}}{{{right_latex}}}'
@@ -246,9 +250,15 @@ class CompositeExpr(OperandExpr):
         return cls._LATEX_PRECEDENCE.get(expr.op, 0)
 
     def _needs_parenthesis(self, child: FactorExpr, side: str, subst: dict | None = None) -> bool:
-        if not isinstance(child, CompositeExpr):
-            return False
         if subst is not None and child._structural_key() in subst:
+            return False
+        # A minus sign is not part of an atomic power base.
+        if self.op == 'pow' and side == 'left':
+            if isinstance(child, ConstExpr) and child._to_latex().startswith('-'):
+                return True
+            if isinstance(child, CompositeExpr) and child.op == 'neg':
+                return True
+        if not isinstance(child, CompositeExpr):
             return False
         if self.op == 'div':
             return False
