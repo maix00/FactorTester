@@ -205,11 +205,11 @@
         capture: () => ({title: title.value, source: source.value}),
         restore: value => {
           title.value = value?.title ?? title.value;
-          source.value = value?.source ?? source.value;
+          sourceEditor.setValue(value?.source ?? source.value);
         },
       });
       FTCustomAnalysisAssistance.register(context, {tabID, title, source});
-      editor.append(sourceEditor.element);
+      editor.append(FTUI.sourcePanel(context, sourceEditor.element));
       const output = document.createElement("div"); output.className = "custom-analysis-output";
       output.append(FTUI.empty(context.t("结构化输出"), context.t("运行后在这里显示结果")));
       if (context.session && analysis.source != null) {

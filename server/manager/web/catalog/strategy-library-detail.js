@@ -93,8 +93,8 @@
       try {
         const source = await loadRevision();
         if (context.isRouteCurrent?.() === false) return;
-        panel.replaceChildren(FTUI.code(source.source_code || "", {
-          language: "python", className: "strategy-source-viewer",
+        panel.replaceChildren(FTUI.sourceView(context, source.source_code || "", {
+          language: "python", codeClassName: "strategy-source-viewer",
         }));
         state = "loaded";
       } catch (error) {
