@@ -110,8 +110,10 @@ class AccountDomainSyncService:
         versioned = self.materialize_factor_source_versions(owner)
         from .research_sync import materialize_pending_researches
         research_materialized = materialize_pending_researches(self)
+        # A pull can rebase a disjoint research edit into a new pending CAS.
+        final_state = self.local.sync_state(principal=owner)
         return {
-            "status": "incomplete" if (flushed.get("pending") or flushed.get("offline") or flushed.get("blocked") or flushed.get("conflicts")
+            "status": "incomplete" if (final_state.get("pending") or flushed.get("pending") or flushed.get("offline") or flushed.get("blocked") or flushed.get("conflicts")
                                         or pulled.get("offline") or pulled.get("has_more")
                                         or pulled.get("conflicts")) else "synced",
             "principal": owner,
@@ -197,8 +199,9 @@ class AccountDomainSyncService:
                     operation_id=item["operation_id"],
                 )
                 if str(receipt.get("status") or "") == "conflict":
+                    if self.local.record_push_conflict(item, receipt):
+                        continue
                     conflicts += 1
-                    self.local.record_push_conflict(item, receipt)
                     self.local.mark_attempt(item["operation_id"], "remote revision conflict")
                     continue
                 self.local.acknowledge(
