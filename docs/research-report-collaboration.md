@@ -8,7 +8,7 @@
 
 `branch-fork <report-id> --profile <profile> --from-branch <source> --branch-id <new>` 从已发布的服务器或客户端分支取得完整可编辑快照，在当前 Profile 登记新分支并发布。新分支标识应唯一；重试必须使用原标识，以继续同一次 fork，不能换标识掩盖失败。
 
-本地通过已有 `show`、`add`、`replace`、`batch` 等报告命令编辑。之后用 `branch-upload --profile <profile> --work-package-id <package> --branch-id <branch>` 上传完整版本。它检查共享分支版本；发生并发冲突时保留本地工作并报错，不静默覆盖另一作者。
+本地通过已有 `show`、`add`、`add-batch` 等报告命令编辑；替换内容使用 `add-batch` 的 `op=replace`。之后用 `branch-upload --profile <profile> --work-package-id <package> --branch-id <branch>` 上传完整版本。它检查共享分支版本；发生并发冲突时保留本地工作并报错，不静默覆盖另一作者。
 
 `branch-diff <report-id> --base <branch> --compare <other> --include-content` 比较两个可访问的已发布分支，包含正文、附件及 Job 资源变化。
 

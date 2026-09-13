@@ -27,7 +27,11 @@ def copy_preview(profile_id: str, work_package_id: str, branch_id: str,
                  source_work_package_id: str, source_branch_id: str,
                  component_id: tuple[str, ...], parent_id: str,
                  after_component_id: str | None, copy_id: str, as_json: bool) -> None:
-    """预览已在本端登记的报告分支间章节复制，不修改报告或创建目标分支。"""
+    """预览同一报告跨 branch 的章节/小节复制，不修改正文。
+
+    远端来源先用 branch-fork 导入本人审阅分支；检查本命令完整 JSON 后，
+    交给 copy-apply 提交，最后 branch-upload 发布目标分支。
+    """
     client_root = load_profile_root(release_profile)
     target = resolve_branch_report_scope(client_root=client_root, profile_id=profile_id,
                                         work_package_id=work_package_id, branch_id=branch_id)
