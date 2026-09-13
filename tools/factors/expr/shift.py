@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 from .core import FactorExpr, EvaluateContext
 from .operands import OperandExpr
-from .leaf import ConstExpr, _to_expr
+from .leaf import ConstExpr, ColumnRef, ParamRef, _to_expr
 from .rolling import _resolve_windows
 
 class ShiftOp(OperandExpr):
@@ -113,10 +113,25 @@ class ShiftOp(OperandExpr):
         if subst is not None and sk in subst:
             return f"{subst[sk]}_t"
         operand_latex = self.operand._to_latex(subst)
-        operand_base = _strip_latex_time_subscript(operand_latex)
         if _is_zero_shift_period(self.periods):
-            return f"{operand_base}_{{t}}"
-        p_label = self.periods._to_latex(subst) if isinstance(self.periods, FactorExpr) else str(self.periods)
+            return operand_latex
+        p_label = self.periods._to_latex(subst)
+        # Only a leaf (or a named intermediate) has a replaceable time index.
+        # Stripping a suffix from a sum would shift only its final operand;
+        # appending a subscript to a nested shift would create double indices.
+        named = subst is not None and self.operand._structural_key() in subst
+        indexed_leaf = isinstance(self.operand, (ColumnRef, ParamRef)) or named
+        operand_base = _strip_latex_time_subscript(operand_latex)
+        if not indexed_leaf or operand_base == operand_latex:
+            return f"\\operatorname{{Shift}}_{{{p_label}}}\\left({operand_latex}\\right)"
+        from .composite import CompositeExpr
+        # Reuse subtraction's RHS precedence rules for the synthetic t - p.
+        subtraction = CompositeExpr('sub', self.operand, self.periods)
+        p_label = subtraction._binary_operand_latex(
+            self.periods, p_label, side='right', subst=subst,
+        )
+        if p_label.startswith('-'):
+            p_label = f"\\left({p_label}\\right)"
         return f"{operand_base}_{{t - {p_label}}}"
 
     def _get_alias(self) -> str:
