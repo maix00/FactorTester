@@ -9,6 +9,7 @@ Report bytes and share-link capabilities are deliberately absent.
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 
 from tools.data.sqlite.db import connect_sqlite
 from .payloads import public_payload
@@ -77,7 +78,7 @@ def backfill_researches(sync, principal: str) -> int:
         return len(rows)
 
 
-def materialize_research(database, envelope: dict) -> None:
+def materialize_research(database, envelope: dict, *, connection=None) -> None:
     if envelope.get('entity_type') != KIND:
         return
     payload = envelope.get('payload') or {}
@@ -85,7 +86,15 @@ def materialize_research(database, envelope: dict) -> None:
     identifier = str(envelope['entity_id'])
     revision = int(envelope.get('remote_revision') or envelope.get('revision') or 0)
     if envelope.get('deleted'):
-        with connect_sqlite(database) as conn:
+        with (nullcontext(connection) if connection is not None else connect_sqlite(database)) as conn:
+            if connection is None:
+                conn.execute('BEGIN IMMEDIATE')
+                current = conn.execute('SELECT payload_json,remote_revision,deleted FROM account_domain_entities '
+                                       'WHERE principal=? AND entity_type=? AND entity_id=?',
+                                       (envelope['principal'], KIND, identifier)).fetchone()
+                if current is not None and (json.loads(current['payload_json']) != payload
+                                            or current['remote_revision'] != revision or not current['deleted']):
+                    return
             conn.execute("UPDATE research_catalog_researches SET status='archived' WHERE research_id=? AND owner_ref=?",
                          (identifier, envelope['principal']))
             _record_revision(conn, identifier, revision)
@@ -98,12 +107,22 @@ def materialize_research(database, envelope: dict) -> None:
         payload = {**payload, 'branches': []}
     if any(not isinstance(payload.get(key), list) for key in TABLES if key != 'research'):
         raise ValueError('incomplete research relationship snapshot')
-    with connect_sqlite(database) as conn:
-        conn.execute('BEGIN IMMEDIATE')
+    with (nullcontext(connection) if connection is not None else connect_sqlite(database)) as conn:
+        if connection is None:
+            conn.execute('BEGIN IMMEDIATE')
         if legacy and conn.execute(
             'SELECT 1 FROM research_catalog_branches WHERE research_id=? LIMIT 1', (identifier,),
         ).fetchone():
             raise ValueError('legacy research snapshot cannot replace registered branches')
+        if connection is None:
+            current = conn.execute('SELECT payload_json,remote_revision FROM account_domain_entities '
+                                   'WHERE principal=? AND entity_type=? AND entity_id=?',
+                                   (envelope['principal'], KIND, identifier)).fetchone()
+            if current is not None and (json.loads(current['payload_json']) != envelope['payload']
+                                        or current['remote_revision'] != revision):
+                # The caller's snapshot lost a race to a local edit or a newer
+                # pull. Never overwrite the live authoring projection with it.
+                return
         # Schema is owned by ResearchCatalog and initialized before sync.
         # An accepted snapshot replaces the relationship projection, including
         # an explicit conflict choice. Otherwise local-only grants survive and
