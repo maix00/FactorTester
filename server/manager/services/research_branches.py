@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS research_catalog_branches (
     source_branch_id TEXT NOT NULL,
     source_generation INTEGER NOT NULL,
     source_revision TEXT NOT NULL,
+    source_publication_id TEXT NOT NULL,
     generation INTEGER NOT NULL,
     revision TEXT NOT NULL,
     publication_id TEXT NOT NULL,
@@ -75,19 +76,21 @@ class ResearchBranchesMixin:
                                                'source_branch_id', 'source_generation', 'source_revision')) != identity:
                     raise ValueError('branch identity already belongs to another writer or fork source')
                 return dict(previous)
+            source_publication_id = ''
             if source_branch_id:
                 source = conn.execute('''SELECT * FROM research_catalog_branches
                     WHERE report_id=? AND branch_id=? AND status='active' ''',
                     (report_id, source_branch_id)).fetchone()
                 if source is None or (source['generation'], source['revision']) != (source_generation, source_revision):
                     raise ValueError('fork source branch version is unavailable or changed')
+                source_publication_id = source['publication_id']
             elif source_generation or source_revision:
                 raise ValueError('source version requires a source branch')
             now = time.time()
             conn.execute('''INSERT INTO research_catalog_branches VALUES
-                (?, ?, ?, ?, ?, ?, ?, 'reserved', ?, ?, ?, 0, '', '', '', ?, ?)''',
+                (?, ?, ?, ?, ?, ?, ?, 'reserved', ?, ?, ?, ?, 0, '', '', '', ?, ?)''',
                 (report_id, branch_id, report['research_id'], actor, profile_ref, workspace, title or branch_id,
-                 source_branch_id, source_generation, source_revision, now, now))
+                 source_branch_id, source_generation, source_revision, source_publication_id, now, now))
             return dict(conn.execute('SELECT * FROM research_catalog_branches WHERE report_id=? AND branch_id=?',
                                      (report_id, branch_id)).fetchone())
 

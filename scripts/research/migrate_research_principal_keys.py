@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import sqlite3
@@ -46,6 +47,10 @@ def migrate(database: Path, *, backup: Path | None = None):
         if backup.exists() or backup.resolve() == database.resolve():
             raise ValueError('backup must be a new, distinct path')
         backup.parent.mkdir(parents=True, exist_ok=True)
+        # The full SQLite backup may contain sessions. Create it exclusively
+        # with owner-only permissions before SQLite opens the destination.
+        descriptor = os.open(backup, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.close(descriptor)
         with sqlite3.connect(backup) as target:
             source.backup(target)
             if target.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':

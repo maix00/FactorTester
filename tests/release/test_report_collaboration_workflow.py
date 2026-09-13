@@ -3,6 +3,7 @@
 Only network transport is replaced; this is not a deployed/browser acceptance.
 """
 from pathlib import Path
+import pytest
 from types import SimpleNamespace
 
 from server.manager.services.research_catalog import ResearchCatalog
@@ -93,7 +94,20 @@ def test_two_profiles_fork_edit_publish_same_report(tmp_path, monkeypatch):
     assert not retried['inherited']
     assert retried['source_revision'] == original['revision']
     assert len(load_snapshot(package_root=target, branch_id='bob-review')['components']) == 2
+    # A failed first download must resume the exact reserved snapshot, including
+    # an editor-owned publication that is no longer that editor's current head.
+    real_download = workflow.download_bundle
+    monkeypatch.setattr(workflow, 'download_bundle', lambda *a, **k: (_ for _ in ()).throw(ConnectionError('interrupted')))
+    with pytest.raises(ConnectionError, match='interrupted'):
+        workflow.fork_remote_branch(alice, stores['alice'], profile_id='self', report_id='same-report', source_branch_id='bob-review', branch_id='owner-review')
+    add_component(package_root=target, branch_id='bob-review', component_id='bob-after-reservation', kind='entry', title='',
+                  parent_id='chapter', body='Not part of the reserved source', content=None, display_kind='')
+    workflow.publish_local_branch(bob, stores['bob'], profile_id='self', work_package_id=package_id, branch_id='bob-review')
+    monkeypatch.setattr(workflow, 'download_bundle', real_download)
     imported = workflow.fork_remote_branch(alice, stores['alice'], profile_id='self', report_id='same-report', source_branch_id='bob-review', branch_id='owner-review')
+    assert imported['source_revision'] == updated['branch']['revision']
+    assert 'bob-after-reservation' not in {n['component_id'] for n in load_snapshot(package_root=package, branch_id='owner-review')['components']}
+
     from tools.cli.release.research_reporting.authoring.tree_copy import plan_subtree_copy, apply_subtree_copy
     from tools.cli.release.research_reporting.authoring.tree_paths import report_tree_paths
     source_snapshot = load_snapshot(package_root=package, branch_id='owner-review')
@@ -104,11 +118,11 @@ def test_two_profiles_fork_edit_publish_same_report(tmp_path, monkeypatch):
     selected = load_snapshot(package_root=package, branch_id='main')
     assert [item['body'] for item in selected['components'] if item['kind'] == 'entry'] == [
         'Source advances after the fork', 'Bob edits independently']
-    assert len(load_snapshot(package_root=target, branch_id='bob-review')['components']) == 2
+    assert len(load_snapshot(package_root=target, branch_id='bob-review')['components']) == 3
 
     comparison = workflow.diff_remote_branches(alice, report_id='same-report', base_branch_id='main',
                                                other_branch_id='bob-review', include_content=True)
-    assert {change['component_id'] for change in comparison['changes']} == {'chapter', 'alice-later', 'bob-note'}
+    assert {change['component_id'] for change in comparison['changes']} == {'chapter', 'alice-later', 'bob-note', 'bob-after-reservation'}
     assert 'root' not in {change['component_id'] for change in comparison['changes']}
     assert any(change['status'] == 'added' and change['after']['body'] == 'Bob edits independently'
                for change in comparison['changes'])

@@ -149,3 +149,18 @@ def test_bundle_preserves_full_job_table_beyond_preview(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match='conflicts'):
         import_report_bundle(**{**options, 'branch_id': 'conflicting'})
     assert not (tmp_path / 'target/branches/conflicting/authoring/HEAD.json').exists()
+
+
+def test_branch_diff_detects_resource_changes_without_text_changes():
+    from copy import deepcopy
+    from tools.cli.release.research_reporting.authoring.tree_diff import diff_report_manifests
+    base = {'head': {'report_id': 'r', 'generation': 1}, 'nodes': {}, 'assets': [],
+            'links': [{'target': 'data.csv', 'sha256': 'a' * 64}],
+            'job_artifacts': [{'job_id': 'job', 'name': 'table', 'sha256': 'b' * 64}]}
+    other = deepcopy(base)
+    other['links'][0]['sha256'] = 'c' * 64
+    other['job_artifacts'][0]['sha256'] = 'd' * 64
+    result = diff_report_manifests(base, other)
+    assert result['component_change_count'] == 0
+    assert result['resource_change_count'] == 2
+    assert {item['resource_ref'] for item in result['resource_changes']} == {'data.csv', 'job:table'}

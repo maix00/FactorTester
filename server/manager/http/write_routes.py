@@ -152,6 +152,8 @@ class WriteRoutesMixin:
                 return
             try:
                 payload = self._json_body(32 * 1024 * 1024)
+                from .research_branch_routes import ResearchBranchRoutesMixin
+                ResearchBranchRoutesMixin._require_branch_profile_actor(self, str(payload.get("profile_ref") or ""))
                 if client_session is not None:
                     owner = str(client_session["username"])
                     if payload.get("owner_ref") not in (None, "", owner):
@@ -214,6 +216,8 @@ class WriteRoutesMixin:
                 json_response(self, {"success": False, "error": "authenticated FTClient required"}, 403)
                 return
             try:
+                from .research_branch_routes import ResearchBranchRoutesMixin
+                ResearchBranchRoutesMixin._require_branch_profile_actor(self, str(payload.get("profile_ref") or ""))
                 projection = payload.get("projection")
                 report_id = str(payload.get("report_id") or "")
                 owner_ref = str(

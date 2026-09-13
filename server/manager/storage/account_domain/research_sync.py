@@ -130,7 +130,8 @@ def materialize_research(database, envelope: dict) -> None:
                 if existing is not None:
                     identity_fields = ('report_id',) if key == 'evidence_links' else ('research_id',)
                     if key == 'branches':
-                        identity_fields += ('principal_ref', 'profile_ref', 'workspace_id')
+                        identity_fields += ('principal_ref', 'profile_ref', 'workspace_id', 'source_branch_id',
+                                            'source_generation', 'source_revision', 'source_publication_id')
                     if key == 'research':
                         identity_fields += ('owner_ref',)
                     if any(existing[name] != record[name] for name in identity_fields):

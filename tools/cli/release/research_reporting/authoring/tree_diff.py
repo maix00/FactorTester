@@ -31,6 +31,15 @@ def diff_report_manifests(base: dict, other: dict, *, include_content: bool = Fa
     a, b = assets(base), assets(other)
     resources = [{'asset_ref': key, 'before': a.get(key), 'after': b.get(key)}
                  for key in sorted(a.keys() | b.keys()) if a.get(key) != b.get(key)]
+    resource_changes = []
+    for kind, key_field in (('links', 'target'), ('job_artifacts', 'artifact_ref')):
+        def inventory(manifest):
+            return {(item.get(key_field) or f"{item.get('job_id')}:{item.get('name')}"): item['sha256']
+                    for item in manifest.get(kind, [])}
+        left, right = inventory(base), inventory(other)
+        resource_changes.extend({'kind': kind, 'resource_ref': key, 'before': left.get(key), 'after': right.get(key)}
+                                for key in sorted(left.keys() | right.keys()) if left.get(key) != right.get(key))
     return {'report_id': base['head']['report_id'], 'base_generation': base['head']['generation'],
             'other_generation': other['head']['generation'], 'changes': changes, 'asset_changes': resources,
-            'component_change_count': len(changes), 'asset_change_count': len(resources)}
+            'component_change_count': len(changes), 'asset_change_count': len(resources),
+            'resource_changes': resource_changes, 'resource_change_count': len(resource_changes)}

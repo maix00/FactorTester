@@ -516,6 +516,18 @@ class ResearchCatalog(ResearchBranchesMixin):
                     (report_id, str(record.get("owner_ref") or ""),
                      str(record.get("publication_id") or "")),
                 ).fetchone() is not None
+                if not registered:
+                    # Fork reservations retain a precise source snapshot even if
+                    # its writer advances before the download can be retried.
+                    registered = conn.execute(
+                        """SELECT 1 FROM research_catalog_branches fork
+                           JOIN research_catalog_branches source
+                             ON source.report_id=fork.report_id AND source.branch_id=fork.source_branch_id
+                           WHERE fork.report_id=? AND source.principal_ref=?
+                             AND fork.source_publication_id=?""",
+                        (report_id, str(record.get("owner_ref") or ""),
+                         str(record.get("publication_id") or "")),
+                    ).fetchone() is not None
         return bool(
             str(row["status"]) == "active" and (same_owner or registered)
             and self._report_access(row, viewer)["can_download"]

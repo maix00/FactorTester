@@ -88,6 +88,13 @@ def fork_remote_branch(client, store: LocalProfileStore, *, profile_id: str,
             return {**result, 'work_package_id': package_id, 'inherited': False,
                     'source_branch_id': source_branch_id, 'source_revision': existing['source_revision']}
     source = next((item for item in branches if item['branch_id'] == source_branch_id and item['status'] == 'active'), None)
+    if existing:
+        if (existing['principal_ref'], existing['profile_ref'], existing['source_branch_id']) != (principal, profile_id, source_branch_id):
+            raise PermissionError('existing fork belongs to another writer or source')
+        if not existing.get('source_publication_id'):
+            raise ValueError('reserved fork has no pinned source publication')
+        source = {'research_id': existing['research_id'], 'publication_id': existing['source_publication_id'],
+                  'generation': existing['source_generation'], 'revision': existing['source_revision']}
     if source is None:
         raise ValueError('source collaboration branch is unavailable')
     index = client.read_publication_branch(source['publication_id'])

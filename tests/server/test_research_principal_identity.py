@@ -67,6 +67,7 @@ def test_explicit_migration_preserves_rows_and_requires_backup(tmp_path):
     backup = tmp_path / 'backup.sqlite'
     after = migrate(database, backup=backup)
     assert backup.exists()
+    assert backup.stat().st_mode & 0o777 == 0o600
     for table, original in before['tables'].items():
         assert after['tables'][table]['hash'] == original['hash']
         assert not after['tables'][table]['requires_migration']
