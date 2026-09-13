@@ -282,7 +282,7 @@ class ClientFactorCatalogMixin:
         known = {str(item.get("target_ref") or "") for item in values}
         for row in rows:
             payload = row.get("payload") if isinstance(row, dict) else None
-            if not isinstance(payload, dict) or row.get("deleted"):
+            if not isinstance(payload, dict) or row.get("deleted") or not payload.get("registration_active", True):
                 continue
             try:
                 summary = _summary(payload)

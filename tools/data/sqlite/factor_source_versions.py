@@ -8,6 +8,7 @@ executed even when no workspace exists on the server.
 from __future__ import annotations
 
 import hashlib
+from contextlib import nullcontext
 import json
 import os
 import re
@@ -93,6 +94,7 @@ def record_factor_formula_version(
     *,
     family_formula_fingerprint: str,
     subject: str = "",
+    connection=None, mirror=None,
 ) -> dict[str, Any]:
     kind, owner, factor = _identity(source_kind, owner_username, factor_id)
     fingerprint = _fingerprint(family_formula_fingerprint)
@@ -102,8 +104,8 @@ def record_factor_formula_version(
     source_sha256 = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
     created_at = time.time()
     from server.manager.storage.account_domain.local import LocalAccountDomainStore
-    mirror = LocalAccountDomainStore(Settings.CACHE_DB_PATH)
-    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+    mirror = mirror or LocalAccountDomainStore(Settings.CACHE_DB_PATH)
+    with (nullcontext(connection) if connection is not None else connect_sqlite(Settings.CACHE_DB_PATH)) as conn:
         _ensure_schema(conn)
         conn.execute(
             f"""

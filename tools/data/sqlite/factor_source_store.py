@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+from contextlib import nullcontext
 import hashlib
 import os
 import sqlite3
@@ -247,6 +248,7 @@ def upsert_factor_source(
     category: str | None = None,
     family_formula_fingerprint: str = "",
     publish_family: bool = True,
+    connection=None, mirror=None,
 ) -> str:
     normalized_source_code = canonical_factor_source_code(source_code or "")
     metadata = {
@@ -259,7 +261,7 @@ def upsert_factor_source(
         "factor_id": factor_id, "factor_name": factor_name,
         "source_code": normalized_source_code, **metadata,
     }, source_kind=source_kind)
-    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+    with (nullcontext(connection) if connection is not None else connect_sqlite(Settings.CACHE_DB_PATH)) as conn:
         _ensure_schema(conn)
         conn.execute(
             """
@@ -290,12 +292,13 @@ def upsert_factor_source(
         metadata={**metadata, **summary},
         family_formula_fingerprint=summary.get("family_formula_fingerprint") or family_formula_fingerprint,
         publish_family=publish_family,
+        **({"connection": connection, "mirror": mirror} if connection is not None else {}),
     )
     return str(Settings.CACHE_DB_PATH)
 
 
-def delete_factor_source(source_kind: str, owner_username: str, factor_id: str) -> str:
-    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
+def delete_factor_source(source_kind: str, owner_username: str, factor_id: str, *, connection=None, mirror=None) -> str:
+    with (nullcontext(connection) if connection is not None else connect_sqlite(Settings.CACHE_DB_PATH)) as conn:
         _ensure_schema(conn)
         conn.execute(
             """
@@ -313,6 +316,7 @@ def delete_factor_source(source_kind: str, owner_username: str, factor_id: str) 
         )
     _enqueue_source_metadata(
         source_kind, owner_username, factor_id, "", "", deleted=True,
+        **({"connection": connection, "mirror": mirror} if connection is not None else {}),
     )
     return str(Settings.CACHE_DB_PATH)
 
@@ -424,10 +428,20 @@ def _enqueue_source_metadata(
     deleted: bool = False,
     family_formula_fingerprint: str = "",
     publish_family: bool = True,
+    connection=None, mirror=None,
 ) -> None:
     """Sync a source manifest, never the source code itself."""
     try:
         from tools.data.sqlite.account_manager.domain_sync import enqueue_entity
+
+        def emit(principal, entity_type, entity_id, payload, *, deleted=False):
+            if connection is None:
+                enqueue_entity(principal, entity_type, entity_id, payload, deleted=deleted)
+            else:
+                from server.manager.storage.account_domain.payloads import public_payload
+                mirror.upsert_local(principal=principal, entity_type=entity_type, entity_id=entity_id,
+                    payload=public_payload(payload), deleted=deleted, connection=connection,
+                    manager_id=os.environ.get('FACTORTESTER_SERVER_ID') or 'local')
 
         principal = str(owner_username or "").strip() or "__public__"
         payload = {
@@ -455,14 +469,16 @@ def _enqueue_source_metadata(
                     family_formula_fingerprint or ""
                 ).strip(),
             }
-        enqueue_entity(
+        emit(
             principal, "factor_source",
             f"{source_kind}:{factor_id}@{str(os.environ.get('FACTORTESTER_SERVER_ID') or 'local').strip()}", payload,
             deleted=deleted,
         )
         if publish_family:
-            enqueue_entity(principal, 'factor_family', f'{source_kind}:{factor_id}', payload, deleted=deleted)
+            emit(principal, 'factor_family', f'{source_kind}:{factor_id}', payload, deleted=deleted)
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        if connection is not None:
+            raise
         return
 
 

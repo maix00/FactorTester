@@ -297,11 +297,16 @@ class ParamRef(FactorExpr):
         sk = self._structural_key()
         if subst is not None and sk in subst:
             return f"{subst[sk]}_t"
-        param_latex = f"\\textcolor{{red}}{{{self.param.alias}}}"
+        param_latex = self._parameter_latex()
         from tools.parameters import DataColumnParam, FactorParam
         if isinstance(self.param, (DataColumnParam, FactorParam)):
             return f"{param_latex}_{{t}}"
         return param_latex
+
+    def _parameter_latex(self) -> str:
+        # Parameter aliases are identifiers, not LaTeX math delimiters.
+        alias = str(self.param.alias).replace('$', r'\$')
+        return f"\\textcolor{{red}}{{{alias}}}"
 
     def _get_alias(self) -> str:
         return f"P{self.param.alias}"

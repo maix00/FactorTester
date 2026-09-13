@@ -630,21 +630,12 @@ def get_factor_set(username: str, target_ref: str) -> dict | None:
 
 def save_factor_set(username: str, value: dict) -> dict:
     ensure_account_manager_sqlite_store()
-    result = _save_factor_set(username, value)
-    _enqueue_domain_entity(
-        username, "factor_set", str(result.get("ref") or result.get("target_ref") or result.get("set_ref") or ""), result,
-    )
-    return result
+    return _save_factor_set(username, value)
 
 
 def delete_factor_set(username: str, target_ref: str) -> bool:
     ensure_account_manager_sqlite_store()
-    deleted = _delete_factor_set(username, target_ref)
-    if deleted:
-        _enqueue_domain_entity(
-            username, "factor_set", target_ref, {}, deleted=True,
-        )
-    return deleted
+    return _delete_factor_set(username, target_ref)
 
 
 def normalize_product_group(product_group: str | None) -> str:
