@@ -43,7 +43,7 @@ final class APIClient: NSObject {
         req.setValue("FactorTester-Swift/1", forHTTPHeaderField: "User-Agent")
         req.setValue("swift", forHTTPHeaderField: "X-FactorTester-Client")
         if path != "/auth/login", path != "/auth/register" {
-            let token = ManagerSessionTokenStore.read(for: url)
+            let token = ManagerSessionTokenStore.read(for: ManagerConfig.shared.baseURL)
             if !token.isEmpty {
                 req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             }
@@ -157,7 +157,7 @@ final class APIClient: NSObject {
         req.httpMethod = "GET"
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue("FactorTester-Swift/1", forHTTPHeaderField: "User-Agent")
-        let token = ManagerSessionTokenStore.read(for: url)
+        let token = ManagerSessionTokenStore.read(for: ManagerConfig.shared.baseURL)
         if !token.isEmpty {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
