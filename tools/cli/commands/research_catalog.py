@@ -376,7 +376,7 @@ def register_research_catalog_commands(research: click.Group) -> None:
         """发现客户端、服务器 Agent 与公共发布中的旧报告并显式迁移。"""
         client = client_from_config()
         local_records = PublicResearchClient(
-            default_client_root(),
+            default_client_root(), session=client.session,
         ).local_report_migration_records(apply_identities=apply)
         remote = client.discover_research_report_migration(apply=apply)
         if not apply:

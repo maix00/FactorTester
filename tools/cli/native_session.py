@@ -51,3 +51,22 @@ def certificate_for(endpoint: str) -> str:
     except FileNotFoundError:
         return ''
     return str(value.get('certificate_pem') or '') if value.get('endpoint') == endpoint.rstrip('/') else ''
+
+
+def transfer_tls_context(url: str, authority: str = ''):
+    """Share only certificate trust with server-declared data endpoints, never credentials."""
+    import ssl
+    target = urlsplit(url)
+    if target.scheme != 'https':
+        return None
+    origin = f'{target.scheme}://{target.netloc}'
+    pem = certificate_for(origin)
+    if not pem and authority:
+        source = urlsplit(authority)
+        if source.scheme == 'https' and source.hostname == target.hostname:
+            pem = certificate_for(authority)
+    if not pem:
+        return None
+    context = ssl.create_default_context()
+    context.load_verify_locations(cadata=pem)
+    return context
