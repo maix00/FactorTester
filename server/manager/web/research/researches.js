@@ -443,7 +443,9 @@
             },
           ));
         }
-        return [item.principal_ref, item.profile_ref, item.role, actions];
+        const roleLabel = item.principal_ref === research.owner_ref && item.role === "owner"
+          ? "拥有者" : ["owner", "editor", "contributor"].includes(item.role) ? "协作者" : "阅读者";
+        return [item.principal_ref, item.profile_ref, context.t(roleLabel), actions];
       }),
     );
     section.append(toolbar, members.length

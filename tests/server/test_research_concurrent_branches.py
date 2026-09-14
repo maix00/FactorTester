@@ -3,7 +3,7 @@ import pytest
 from tests.server.test_research_catalog_sync import replicas
 
 
-def setup_pair(tmp_path):
+def setup_pair(tmp_path, role="editor"):
     pair, control = replicas(tmp_path)
     (a, sa), (b, sb) = pair
     original_push = control.push_account_domain_entity
@@ -17,14 +17,15 @@ def setup_pair(tmp_path):
     rid = a.create_research(owner_ref='alice', title='shared')['research_id']
     a.register_report(rid, actor='alice', report_id='report', title='report', profile_ref='self')
     for profile in ('left', 'right'):
-        a.add_membership(rid, actor='alice', principal_ref='alice', profile_ref=profile, role='editor')
+        a.add_membership(rid, actor='alice', principal_ref='alice', profile_ref=profile, role=role)
     sa.flush(principal='alice'); sb.pull(principal='alice')
     return pair, rid
 
 
+@pytest.mark.parametrize('role', ['editor', 'contributor'])
 @pytest.mark.parametrize('pull_first', [False, True])
-def test_independent_workspace_and_branch_writes_converge(tmp_path, pull_first):
-    ((a, sa), (b, sb)), rid = setup_pair(tmp_path)
+def test_independent_workspace_and_branch_writes_converge(tmp_path, pull_first, role):
+    ((a, sa), (b, sb)), rid = setup_pair(tmp_path, role)
     # Valid hex revisions.
     def write(catalog, profile, marker):
         catalog.create_workspace(rid, actor='alice', principal_ref='alice', profile_ref=profile)

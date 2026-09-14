@@ -48,7 +48,7 @@ class ResearchBranchesMixin:
             WHERE research_id=? AND principal_ref=? AND profile_ref=? AND status='active' ''',
             (report['research_id'], actor, profile_ref)).fetchone()
         if (current is None or current['status'] != 'active' or research is None or research['status'] != 'active'
-                or member is None or member['role'] not in {'owner', 'editor'}):
+                or member is None or member['role'] not in {'owner', 'editor', 'contributor'}):
             raise PermissionError('this exact Profile is not an active report editor')
         workspace = conn.execute('''SELECT workspace_id FROM research_catalog_workspaces
             WHERE research_id=? AND principal_ref=? AND profile_ref=? AND status='active' ''',
