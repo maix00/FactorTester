@@ -543,7 +543,7 @@ class ResearchCatalog(ResearchBranchesMixin):
         with connect_sqlite(self.db_path, readonly=True) as conn:
             return conn.execute(
                 """SELECT 1 FROM research_catalog_memberships WHERE research_id=?
-                   AND principal_ref=? AND status='active' AND role IN ('owner','editor')""",
+                   AND principal_ref=? AND status='active' AND role IN ('owner','editor','contributor')""",
                 (str(row["research_id"]), viewer),
             ).fetchone() is not None
 
@@ -931,10 +931,19 @@ class ResearchCatalog(ResearchBranchesMixin):
         title: str = "",
     ) -> dict[str, Any]:
         row = self._research_row(research_id)
-        if not self._research_access(row, actor)["can_manage"]:
-            raise PermissionError("research workspace management is not authorized")
         principal = _principal(principal_ref)
         profile = _profile(profile_ref)
+        access = self._research_access(row, actor)
+        if not access["can_manage"]:
+            with connect_sqlite(self.db_path, readonly=True) as conn:
+                member = conn.execute(
+                    """SELECT role FROM research_catalog_memberships
+                       WHERE research_id=? AND principal_ref=? AND profile_ref=? AND status='active'""",
+                    (research_id, principal, profile),
+                ).fetchone()
+            if (not access["can_view"] or principal != actor or member is None
+                    or member["role"] not in {"owner", "editor", "contributor"}):
+                raise PermissionError("research workspace management is not authorized")
         clean_title = _text(
             title or profile, "title", maximum=256, allow_empty=False,
         )
@@ -1795,7 +1804,7 @@ class ResearchCatalog(ResearchBranchesMixin):
         if membership is not None and str(membership["status"]) == "active":
             return _access(
                 True, True, True,
-                str(membership["role"]) in {"owner", "editor"},
+                False,  # Membership grants collaboration, never research administration.
                 "research", research_id,
             )
         if visibility == "public":
