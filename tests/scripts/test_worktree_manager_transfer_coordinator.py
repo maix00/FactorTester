@@ -241,3 +241,20 @@ def test_download_keys_are_scoped_to_requesting_manager_and_principal(tmp_path):
     coordinator.manager_id = 'node-c'
     other_manager = coordinator.prepare_download(_download(), endpoints=endpoints, now=103)
     assert other_manager.transfer_id not in {first.transfer_id, other_user.transfer_id}
+
+
+def test_expired_download_gets_new_immutable_lease_and_retry_reuses_it(tmp_path):
+    from dataclasses import replace
+    coordinator = _coordinator(tmp_path)
+    endpoints = {'node-a': _node('node-a', 1), 'node-b': _node('node-b', 2)}
+    first = coordinator.prepare_download(replace(_download(), expires_at=110), endpoints=endpoints, now=100)
+    renewed = coordinator.prepare_download(replace(_download(), expires_at=130), endpoints=endpoints, now=111)
+    retry = coordinator.prepare_download(replace(_download(), expires_at=131), endpoints=endpoints, now=112)
+    assert first.transfer_id != renewed.transfer_id == retry.transfer_id
+    assert renewed.attempt_id == retry.attempt_id
+    assert renewed.expires_at == 130
+    assert coordinator.requests.require(first.transfer_id).expires_at == 110
+    again = coordinator.prepare_download(replace(_download(), expires_at=150), endpoints=endpoints, now=140)
+    assert again.transfer_id not in {first.transfer_id, renewed.transfer_id}
+    with pytest.raises(ValueError, match='expiry'):
+        coordinator.prepare_download(replace(_download(), expires_at=139), endpoints=endpoints, now=140)
