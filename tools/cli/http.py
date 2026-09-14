@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import urljoin, urlsplit, urlunsplit
-from urllib.request import HTTPCookieProcessor, Request, build_opener
+from urllib.request import HTTPCookieProcessor, HTTPSHandler, Request, build_opener
 
 from .agent_auth import AgentCapability
 
@@ -123,6 +123,7 @@ class HttpSession:
         cookies: Path | None = None,
         agent_capability: AgentCapability | None = None,
         bearer_token: str = "",
+        certificate_pem: str = "",
         persist_cookies: bool | None = None,
         timeout: float = 30,
     ) -> None:
@@ -137,6 +138,9 @@ class HttpSession:
             if persist_cookies is not None
             else agent_capability is None
         )
+        if self.persist_cookies and not self.bearer_token and self.agent_capability is None:
+            from .native_session import load_token
+            self.bearer_token = load_token(self.base_url)
         if self.persist_cookies:
             cookie_file = cookies or cookie_path_for(self.base_url)
             self.cookie_jar = LWPCookieJar(str(cookie_file))
@@ -151,7 +155,16 @@ class HttpSession:
             except LoadError:
                 Path(self.cookie_jar.filename).unlink(missing_ok=True)
                 self.cookie_jar = LWPCookieJar(str(cookie_file))
-        self._opener = build_opener(HTTPCookieProcessor(self.cookie_jar))
+        handlers = [HTTPCookieProcessor(self.cookie_jar)]
+        if self.persist_cookies and not certificate_pem:
+            from .native_session import certificate_for
+            certificate_pem = certificate_for(self.base_url)
+        if certificate_pem:
+            import ssl
+            context = ssl.create_default_context()
+            context.load_verify_locations(cadata=certificate_pem)
+            handlers.append(HTTPSHandler(context=context))
+        self._opener = build_opener(*handlers)
 
     def get(self, path: str, *, query: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.request("GET", path, query=query)
@@ -400,6 +413,10 @@ class HttpSession:
     def clear_cookies(self) -> None:
         """Remove the persisted authenticated session from this client."""
         self.cookie_jar.clear()
+        self.bearer_token = ""
+        if self.persist_cookies:
+            from .native_session import clear_session
+            clear_session(self.base_url)
         self._save_cookies()
 
     def import_cookies(self, values: list[dict[str, Any]]) -> None:

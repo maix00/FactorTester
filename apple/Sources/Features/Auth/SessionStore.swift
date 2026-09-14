@@ -189,7 +189,9 @@ final class SessionStore: ObservableObject {
                 "--server-url", serverURL,
                 "--principal-ref", principalRef,
             ], executable: ClientCLIResolution.executable(), stdinJSON: [
-                "cookies": cookies
+                "cookies": cookies,
+                "token": ManagerSessionTokenStore.read(for: ManagerConfig.shared.baseURL),
+                "certificate_pem": SelfSignedTrustDelegate.certificatePEM(for: ManagerConfig.shared.baseURL)
             ])
             return true
         } catch {

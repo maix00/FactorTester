@@ -1025,3 +1025,25 @@ def test_ui_session_bridge_uses_stdin_and_verifies_principal(
     assert [(cookie.name, cookie.value) for cookie in restored.cookie_jar] == [
         ("session", "opaque-secret")
     ]
+
+
+def test_native_token_bridge_is_origin_scoped_and_mismatch_is_non_destructive(tmp_path, monkeypatch):
+    from tools.cli.http import load_config
+    from tools.cli.native_session import session_path
+    monkeypatch.setenv('FACTORTESTER_HOME', str(tmp_path / 'home'))
+    monkeypatch.setenv('FACTORTESTER_CONFIG', str(tmp_path / 'config.json'))
+    monkeypatch.setattr(FactorTesterClient, 'current_principal', lambda self: {'username': 'alice'})
+    args = ['client', 'profile', 'import-ui-session', '--server-url', 'https://manager.example:9443', '--principal-ref', 'alice']
+    result = CliRunner().invoke(cli, args, input=json.dumps({'cookies': [], 'token': 'native-secret'}))
+    assert result.exit_code == 0, result.output
+    assert 'native-secret' not in result.output
+    assert HttpSession('https://manager.example:9443').bearer_token == 'native-secret'
+    assert HttpSession('https://manager.example:8443').bearer_token == ''
+    assert load_config().base_url == 'https://manager.example:9443'
+    assert session_path('https://manager.example:9443').stat().st_mode & 0o777 == 0o600
+    monkeypatch.setattr(FactorTesterClient, 'current_principal', lambda self: {'username': 'bob'})
+    denied = CliRunner().invoke(cli, args, input=json.dumps({'token': 'wrong-user'}))
+    assert denied.exit_code != 0
+    assert HttpSession('https://manager.example:9443').bearer_token == 'native-secret'
+    HttpSession('https://manager.example:9443').clear_cookies()
+    assert HttpSession('https://manager.example:9443').bearer_token == ''

@@ -12,8 +12,7 @@ from tools.cli.http import (
     HttpSession,
     load_config,
 )
-from tools.cli.manager.client import ManagerClient
-from tools.cli.manager.config import ManagerConfig, ManagerCredentialStore
+from tools.cli.manager.config import ManagerConfig
 
 _RETRYABLE_HTTP_STATUSES = {401, 403, 408, 429, *range(500, 600)}
 
@@ -31,7 +30,7 @@ def manager_url_for_profile(
     capability = load_capability()
     if capability is not None:
         return ManagerConfig.from_url(
-            ClientConfig(capability.base_url).for_port(7998).base_url,
+            capability.base_url,
         ).base_url
     try:
         configured = load_config()
@@ -40,16 +39,16 @@ def manager_url_for_profile(
             "client has no configured server; run `factortester configure` "
             "or pass --manager-url"
         ) from exc
-    return ManagerConfig.from_url(configured.for_port(7998).base_url).base_url
+    return ManagerConfig.from_url(configured.base_url).base_url
 
 
 def manager_url_for_client_url(server_url: str) -> str:
-    """Convert an explicit client connection override to Manager 7998."""
+    """Use the selected Manager connection without guessing a business port."""
     value = str(server_url or "").strip()
     if not value:
         raise ValueError("client server URL is empty")
     return ManagerConfig.from_url(
-        ClientConfig(value).for_port(7998).base_url,
+        value,
     ).base_url
 
 
@@ -60,10 +59,9 @@ def sync_profile(
 ) -> dict[str, object]:
     """Sync one Profile through an authenticated Manager session.
 
-    The native app logs into Manager separately from the execution service and
-    stores that bearer token in the CLI Keychain.  Keep cookie auth as a
-    compatibility fallback for older CLI sessions and tests.  Neither path
-    ever connects directly to PostgreSQL.
+    Use the native application's endpoint-scoped session, with legacy cookies
+    supported by HttpSession. Operator Manager credentials are a separate
+    authority and are never borrowed for ordinary Profile synchronization.
     """
     binding = profile.get("session_binding")
     principal_ref = str(
@@ -73,25 +71,6 @@ def sync_profile(
     if not principal_ref:
         raise ValueError("profile has no session principal binding")
     target = manager_url_for_profile(profile, manager_url=manager_url)
-    config = ManagerConfig.from_url(target)
-    credentials = ManagerCredentialStore(config)
-    token = credentials.read()
-    if token:
-        try:
-            client = ManagerClient(config, token=token)
-            authenticated = client.session()
-            _require_principal(authenticated, principal_ref)
-            return client.sync_profile(profile)
-        except HttpClientError as exc:
-            if exc.status not in _RETRYABLE_HTTP_STATUSES:
-                raise
-            # An expired Manager token may coexist with a valid legacy cookie;
-            # try that compatibility path before reporting pending.
-            if exc.status not in {401, 403}:
-                return _pending_receipt(profile, target, str(exc))
-        except (OSError, TimeoutError) as exc:
-            return _pending_receipt(profile, target, str(exc))
-
     try:
         legacy = FactorTesterClient(HttpSession(target, timeout=5))
         _require_principal(legacy.current_principal(), principal_ref)

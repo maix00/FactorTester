@@ -57,18 +57,33 @@ def client_profile() -> None:
 def import_ui_session(server_url: str, principal_ref: str) -> None:
     """Import the native UI cookie bridge from JSON on stdin."""
     value = json.load(sys.stdin)
-    if not isinstance(value, dict) or set(value) != {"cookies"}:
+    if not isinstance(value, dict) or not set(value) <= {"cookies", "token", "certificate_pem"}:
         raise ValueError("UI session bridge payload is invalid")
-    cookies = value["cookies"]
+    cookies = value.get("cookies", [])
     if not isinstance(cookies, list):
         raise ValueError("UI session cookies must be an array")
-    session = HttpSession(server_url)
+    token = value.get("token", "")
+    if not isinstance(token, str):
+        raise ValueError("UI session token must be a string")
+    # Validate in memory before replacing a working endpoint session.
+    certificate_pem = value.get("certificate_pem", "")
+    if not isinstance(certificate_pem, str):
+        raise ValueError("UI certificate must be a PEM string")
+    session = HttpSession(server_url, bearer_token=token, persist_cookies=False,
+                          certificate_pem=certificate_pem)
     session.import_cookies(cookies)
     principal = FactorTesterClient(session).current_principal()
     observed = str(principal.get("username") or "")
     if observed != principal_ref:
-        session.clear_cookies()
         raise ValueError("imported UI principal does not match")
+    from tools.cli.native_session import save_session, clear_session
+    if token or certificate_pem:
+        save_session(server_url, observed, token, certificate_pem)
+    else:
+        clear_session(server_url)
+    persisted = HttpSession(server_url)
+    persisted.import_cookies(cookies)
+    save_config(ClientConfig(server_url.rstrip("/")))
     click.echo(_json({
         "schema_version": 1,
         "principal_ref": observed,
