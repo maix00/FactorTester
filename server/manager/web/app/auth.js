@@ -1,16 +1,24 @@
 (() => {
+  function nativeAuthentication(action) {
+    const handler = window.webkit?.messageHandlers?.factorTesterAuthentication;
+    if (!handler?.postMessage) return false;
+    handler.postMessage({action});
+    return true;
+  }
+
+  function notifyRestoredSession(session) {
+    // Only a server-confirmed identity can trigger native cookie/session import.
+    // Never pass credentials through the JavaScript message bridge.
+    if (!session?.username) return false;
+    return nativeAuthentication("session-updated");
+  }
+
   function bind(context) {
     const {state, api, t} = context;
     const registrationEnabled = document.querySelector(
       'meta[name="ft-registration-enabled"]',
     )?.content !== "0";
 
-    function nativeAuthentication(action) {
-      const handler = window.webkit?.messageHandlers?.factorTesterAuthentication;
-      if (!handler?.postMessage) return false;
-      handler.postMessage({action});
-      return true;
-    }
 
     function showAuthForm(kind) {
       if (kind === "register" && !registrationEnabled) kind = "login";
@@ -112,5 +120,5 @@
     return {openLogin, logout};
   }
 
-  window.FTAuth = {bind};
+  window.FTAuth = {bind, notifyRestoredSession};
 })();

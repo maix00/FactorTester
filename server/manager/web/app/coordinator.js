@@ -42,6 +42,7 @@
         catch (_) { state.session = null; }
       }
     }
+    FTAuth.notifyRestoredSession(state.session);
   }
 
   function t(key, fallback = key) { return FTI18n.t(key, fallback); }
