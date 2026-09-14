@@ -7,6 +7,7 @@ from pathlib import Path
 import click
 
 from tools.cli.release.profile import load_profile_root
+from tools.cli.core.context import client_from_config
 from tools.cli.release.research_reporting.public_research import (
     PublicResearchClient,
 )
@@ -27,7 +28,7 @@ def publication() -> None:
 @click.option("--json", "as_json", is_flag=True)
 def sync_publications(release_profile: Path | None, as_json: bool) -> None:
     """Flush shared-report changes accumulated while offline."""
-    library = PublicResearchClient(load_profile_root(release_profile))
+    library = PublicResearchClient(load_profile_root(release_profile), session=client_from_config().session)
     output({"operations": library.sync_pending()}, as_json)
 
 
@@ -38,7 +39,7 @@ def sync_publications(release_profile: Path | None, as_json: bool) -> None:
 )
 @click.option("--json", "as_json", is_flag=True)
 def list_publications(release_profile: Path | None, as_json: bool) -> None:
-    library = PublicResearchClient(load_profile_root(release_profile))
+    library = PublicResearchClient(load_profile_root(release_profile), session=client_from_config().session)
     output({"publications": library.list_publications()}, as_json)
 
 
@@ -49,7 +50,7 @@ def list_publications(release_profile: Path | None, as_json: bool) -> None:
 )
 @click.option("--json", "as_json", is_flag=True)
 def list_local(release_profile: Path | None, as_json: bool) -> None:
-    library = PublicResearchClient(load_profile_root(release_profile))
+    library = PublicResearchClient(load_profile_root(release_profile), session=client_from_config().session)
     output({"reports": library.list_local_reports()}, as_json)
 
 
@@ -86,7 +87,7 @@ def publish_report(
             "public confirmation is required; preview the report, then pass "
             "--confirm-public"
         )
-    library = PublicResearchClient(load_profile_root(release_profile))
+    library = PublicResearchClient(load_profile_root(release_profile), session=client_from_config().session)
     value = library.publish(
         profile_id=profile_id,
         work_package_id=work_package_id,
@@ -112,7 +113,7 @@ def unpublish_report(
     as_json: bool,
 ) -> None:
     """Revoke a shared report now or queue the revocation while offline."""
-    library = PublicResearchClient(load_profile_root(release_profile))
+    library = PublicResearchClient(load_profile_root(release_profile), session=client_from_config().session)
     output(library.unpublish(publication_id), as_json)
 
 
@@ -146,7 +147,7 @@ def configure_publication(
         raise click.ClickException(
             "public confirmation is required; pass --confirm-public"
         )
-    library = PublicResearchClient(load_profile_root(release_profile))
+    library = PublicResearchClient(load_profile_root(release_profile), session=client_from_config().session)
     output(library.configure(
         publication_id,
         visibility=visibility,

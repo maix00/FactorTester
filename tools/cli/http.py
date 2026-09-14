@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import urljoin, urlsplit, urlunsplit
-from urllib.request import HTTPCookieProcessor, HTTPSHandler, Request, build_opener
+from urllib.request import HTTPCookieProcessor, HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
 from .agent_auth import AgentCapability
 
@@ -109,6 +109,18 @@ def load_config(path: Path | None = None) -> ClientConfig:
     return ClientConfig(base_url=base_url.rstrip("/"))
 
 
+def _origin(url: str):
+    value = urlsplit(url)
+    return (value.scheme.lower(), value.hostname, value.port or (443 if value.scheme == "https" else 80))
+
+
+class _OriginBoundRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if _origin(req.full_url) != _origin(newurl):
+            raise HTTPError(req.full_url, 403, "cross-origin session redirect rejected", headers, None)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 class HttpSession:
     """Cookie-aware JSON HTTP client.
 
@@ -155,7 +167,7 @@ class HttpSession:
             except LoadError:
                 Path(self.cookie_jar.filename).unlink(missing_ok=True)
                 self.cookie_jar = LWPCookieJar(str(cookie_file))
-        handlers = [HTTPCookieProcessor(self.cookie_jar)]
+        handlers = [HTTPCookieProcessor(self.cookie_jar), _OriginBoundRedirect()]
         if self.persist_cookies and not certificate_pem:
             from .native_session import certificate_for
             certificate_pem = certificate_for(self.base_url)
@@ -239,6 +251,7 @@ class HttpSession:
         # Lazy import keeps the small transport value types in this module
         # without creating an import cycle at module initialization time.
         from .capability_download import download_capability
+        from .native_session import transfer_tls_context
 
         return download_capability(
             access,
@@ -246,6 +259,7 @@ class HttpSession:
             maximum_bytes=maximum_bytes,
             expected_sha256=expected_sha256,
             content_type=content_type,
+            tls_context=transfer_tls_context(str(access.get("url") or ""), self.base_url),
         )
 
     def capability_download_to_path(
@@ -259,6 +273,7 @@ class HttpSession:
         """Stream 7997 bytes to an atomic file without Manager cookies."""
 
         from .capability_download import download_capability_to_path
+        from .native_session import transfer_tls_context
 
         return download_capability_to_path(
             access,
@@ -266,6 +281,7 @@ class HttpSession:
             timeout=self._stream_timeout(),
             expected_sha256=expected_sha256,
             content_type=content_type,
+            tls_context=transfer_tls_context(str(access.get("url") or ""), self.base_url),
         )
 
     def stream_request(
@@ -380,6 +396,8 @@ class HttpSession:
             base = path
         else:
             base = urljoin(f"{self.base_url}/", path.lstrip("/"))
+        if _origin(base) != _origin(self.base_url):
+            raise ValueError("session request must stay on its configured server origin")
         if not query:
             return base
         from urllib.parse import urlencode

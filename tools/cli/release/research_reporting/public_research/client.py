@@ -482,7 +482,9 @@ class PublicResearchClient:
             method="PUT",
         )
         try:
-            with urlopen(request, timeout=120.0) as response:
+            from tools.cli.native_session import transfer_tls_context
+            context = transfer_tls_context(request.full_url, self.manager_url)
+            with urlopen(request, timeout=120.0, **({"context": context} if context else {})) as response:
                 response.read()
         except HTTPError as exc:
             raw = exc.read().decode("utf-8", errors="replace")

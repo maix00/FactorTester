@@ -69,3 +69,33 @@ def test_cli_discovery_marker_does_not_disable_secure_transport():
         handler = SimpleNamespace(headers={'X-FactorTester-Client': 'cli'},
             _has_secure_ui_transport=lambda: secure)
         assert RequestSecurityMixin._is_swift_network_discovery_request(handler) is secure
+
+
+def test_data_plane_trust_does_not_cross_unrelated_hosts(tmp_path, monkeypatch):
+    from tools.cli import native_session
+    import ssl
+    monkeypatch.setenv('FACTORTESTER_HOME', str(tmp_path))
+    native_session.save_session('https://manager.example:9443', 'alice', 'secret', 'trusted-pem')
+    seen = []
+    class Context:
+        def load_verify_locations(self, **kwargs):
+            seen.append(kwargs)
+    monkeypatch.setattr(ssl, 'create_default_context', Context)
+    assert native_session.transfer_tls_context('https://manager.example:9555/object', 'https://manager.example:9443') is not None
+    assert seen == [{'cadata': 'trusted-pem'}]
+    assert native_session.transfer_tls_context('https://other.example/object', 'https://manager.example:9443') is None
+    assert native_session.transfer_tls_context('http://manager.example/object', 'https://manager.example:9443') is None
+
+
+def test_session_rejects_cross_origin_urls_and_redirects(tmp_path, monkeypatch):
+    import pytest
+    from urllib.request import Request
+    from urllib.error import HTTPError
+    from tools.cli.http import _OriginBoundRedirect
+    monkeypatch.setenv('FACTORTESTER_HOME', str(tmp_path))
+    session = HttpSession('https://manager.example:9443', bearer_token='secret')
+    with pytest.raises(ValueError, match='origin'):
+        session.get('https://manager.example:9555/api/me')
+    with pytest.raises(HTTPError, match='cross-origin'):
+        _OriginBoundRedirect().redirect_request(Request('https://manager.example:9443/api/me'), None, 302,
+            'found', {}, 'https://other.example/api/me')
