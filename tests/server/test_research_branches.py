@@ -160,3 +160,41 @@ def test_http_branch_projection_preserves_registered_head_and_profile_identity()
     report = {'report_id': 'report', 'owner_ref': 'alice', 'profile_ref': 'self', 'branches': [current]}
     branches = Handler()._research_catalog_publication_branches([report], 'alice')[0]['branches']
     assert [branch['publication_id'] for branch in branches] == ['current', 'other-profile']
+
+@pytest.mark.parametrize('role', ['contributor', 'editor', 'owner'])
+def test_collaborator_can_fork_own_branch_but_cannot_administer_research(tmp_path, role):
+    catalog, rid = setup(tmp_path)
+    catalog.add_membership(rid, actor='alice', principal_ref='bob', profile_ref='work', role=role)
+    catalog.create_workspace(rid, actor='bob', principal_ref='bob', profile_ref='work')
+    catalog.reserve_report_branch('report', actor='alice', profile_ref='self', branch_id='main')
+    publish(catalog, 'main')
+    branch = catalog.reserve_report_branch('report', actor='bob', profile_ref='work', branch_id='mine',
+        source_branch_id='main', source_generation=1, source_revision='a' * 64)
+    assert branch['principal_ref'] == 'bob'
+    catalog.publish_report_branch('report', 'mine', actor='bob', profile_ref='work',
+        expected_generation=0, expected_revision='', generation=1, revision='b' * 64,
+        publication_id='z' * 24, storage_server_id='server-two')
+    assert catalog.can_read_authoring_publication(
+        {'report_id': 'report', 'owner_ref': 'alice', 'publication_id': 'p' * 24}, 'bob')
+    with pytest.raises(PermissionError):
+        catalog.add_membership(rid, actor='bob', principal_ref='mallory', profile_ref='self', role='owner')
+    with pytest.raises(PermissionError):
+        catalog.create_workspace(rid, actor='bob', principal_ref='alice', profile_ref='self')
+    with pytest.raises(PermissionError):
+        catalog.update_report(rid, 'report', actor='bob', visibility='public')
+    with pytest.raises(PermissionError):
+        publish(catalog, 'main', actor='bob')
+    catalog.remove_membership(rid, actor='alice', principal_ref='bob', profile_ref='work')
+    with pytest.raises(PermissionError):
+        catalog.reserve_report_branch('report', actor='bob', profile_ref='work', branch_id='revoked')
+
+
+def test_viewer_cannot_create_workspace_or_reserve_branch(tmp_path):
+    catalog, rid = setup(tmp_path)
+    catalog.add_membership(rid, actor='alice', principal_ref='bob', profile_ref='self', role='viewer')
+    with pytest.raises(PermissionError):
+        catalog.create_workspace(rid, actor='bob', principal_ref='bob', profile_ref='self')
+    with pytest.raises(PermissionError):
+        catalog.reserve_report_branch('report', actor='bob', profile_ref='self', branch_id='denied')
+    assert not catalog.can_read_authoring_publication(
+        {'report_id': 'report', 'owner_ref': 'alice', 'publication_id': 'p' * 24}, 'bob')

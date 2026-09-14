@@ -84,7 +84,7 @@ def merge_research(base: dict, local: dict, remote: dict) -> dict | None:
             member = members.get((branch['principal_ref'], branch['profile_ref']), {})
             workspace = workspaces.get(branch['workspace_id'], {})
             if (research['status'] != 'active' or reports.get(branch['report_id'], {}).get('status') != 'active'
-                or member.get('status') != 'active' or member.get('role') not in {'owner', 'editor'}
+                or member.get('status') != 'active' or member.get('role') not in {'owner', 'editor', 'contributor'}
                 or workspace.get('status') != 'active'
                 or (workspace.get('principal_ref'), workspace.get('profile_ref')) != (branch['principal_ref'], branch['profile_ref'])):
                 return None
