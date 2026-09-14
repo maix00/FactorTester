@@ -95,3 +95,20 @@ body.sidebar-collapsed:not(.embedded-presentation) .chapter-rail { left: calc(va
 .report-mount .component-body, .report-mount .component-body-title,
 .report-mount .component-body table, .report-mount .component-body pre,
 .report-mount .component-body code { font-size: inherit; }
+
+/* Inline code chip — aligned with the Xpert ChatKit look: monospace, semibold,
+   muted rounded background.  All metrics use em so the chip tracks the reader
+   font size (--report-font-size); the inner padding + outer spacing are kept. */
+.report-mount .component-body code.inline {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .9em;
+  font-weight: 600;
+  padding: .08em .28em;
+  margin: 0 .06em;
+  border-radius: .28em;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
