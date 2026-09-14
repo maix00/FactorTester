@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
 from .http import BinaryResponse, HttpClientError
 
@@ -27,6 +27,7 @@ def download_capability(
     maximum_bytes: int,
     expected_sha256: str = "",
     content_type: str = "application/octet-stream",
+    tls_context=None,
 ) -> BinaryResponse:
     """Read one authorized 7997 object without exposing Manager cookies."""
 
@@ -37,7 +38,7 @@ def download_capability(
         raise ValueError("artifact exceeds local download limit")
     request = _request(url, bearer)
     try:
-        with build_opener(_RejectRedirects()).open(
+        with build_opener(_RejectRedirects(), *([HTTPSHandler(context=tls_context)] if tls_context else [])).open(
             request, timeout=max(1.0, float(timeout)),
         ) as response:
             declared = response.headers.get("Content-Length")
@@ -67,6 +68,7 @@ def download_capability_to_path(
     timeout: float,
     expected_sha256: str,
     content_type: str = "application/octet-stream",
+    tls_context=None,
 ) -> dict[str, Any]:
     """Stream a capability to an atomic local file and verify its digest."""
 
@@ -81,7 +83,7 @@ def download_capability_to_path(
     written = 0
     hasher = hashlib.sha256()
     try:
-        with build_opener(_RejectRedirects()).open(
+        with build_opener(_RejectRedirects(), *([HTTPSHandler(context=tls_context)] if tls_context else [])).open(
             request, timeout=max(1.0, float(timeout)),
         ) as response, staging.open("wb") as output:
             declared = response.headers.get("Content-Length")

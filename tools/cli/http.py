@@ -239,6 +239,7 @@ class HttpSession:
         # Lazy import keeps the small transport value types in this module
         # without creating an import cycle at module initialization time.
         from .capability_download import download_capability
+        from .native_session import transfer_tls_context
 
         return download_capability(
             access,
@@ -246,6 +247,7 @@ class HttpSession:
             maximum_bytes=maximum_bytes,
             expected_sha256=expected_sha256,
             content_type=content_type,
+            tls_context=transfer_tls_context(str(access.get("url") or ""), self.base_url),
         )
 
     def capability_download_to_path(
@@ -259,6 +261,7 @@ class HttpSession:
         """Stream 7997 bytes to an atomic file without Manager cookies."""
 
         from .capability_download import download_capability_to_path
+        from .native_session import transfer_tls_context
 
         return download_capability_to_path(
             access,
@@ -266,6 +269,7 @@ class HttpSession:
             timeout=self._stream_timeout(),
             expected_sha256=expected_sha256,
             content_type=content_type,
+            tls_context=transfer_tls_context(str(access.get("url") or ""), self.base_url),
         )
 
     def stream_request(

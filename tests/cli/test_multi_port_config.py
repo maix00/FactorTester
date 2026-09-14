@@ -69,3 +69,19 @@ def test_cli_discovery_marker_does_not_disable_secure_transport():
         handler = SimpleNamespace(headers={'X-FactorTester-Client': 'cli'},
             _has_secure_ui_transport=lambda: secure)
         assert RequestSecurityMixin._is_swift_network_discovery_request(handler) is secure
+
+
+def test_data_plane_trust_does_not_cross_unrelated_hosts(tmp_path, monkeypatch):
+    from tools.cli import native_session
+    import ssl
+    monkeypatch.setenv('FACTORTESTER_HOME', str(tmp_path))
+    native_session.save_session('https://manager.example:9443', 'alice', 'secret', 'trusted-pem')
+    seen = []
+    class Context:
+        def load_verify_locations(self, **kwargs):
+            seen.append(kwargs)
+    monkeypatch.setattr(ssl, 'create_default_context', Context)
+    assert native_session.transfer_tls_context('https://manager.example:9555/object', 'https://manager.example:9443') is not None
+    assert seen == [{'cadata': 'trusted-pem'}]
+    assert native_session.transfer_tls_context('https://other.example/object', 'https://manager.example:9443') is None
+    assert native_session.transfer_tls_context('http://manager.example/object', 'https://manager.example:9443') is None
