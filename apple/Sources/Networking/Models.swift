@@ -1,6 +1,6 @@
 import Foundation
 
-/// 与后端 `/api/me`、`/login`、`/register` 的 JSON 契约对应。
+/// 与 Manager `/api/session`、`/auth/login`、`/auth/register` 的 JSON 契约对应。
 struct UserInfo: Codable, Equatable {
     var username: String?
     var alias: String?
