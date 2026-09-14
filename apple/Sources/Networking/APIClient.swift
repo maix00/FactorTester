@@ -42,7 +42,7 @@ final class APIClient: NSObject {
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue("FactorTester-Swift/1", forHTTPHeaderField: "User-Agent")
         req.setValue("swift", forHTTPHeaderField: "X-FactorTester-Client")
-        if path != "/login", path != "/register" {
+        if path != "/auth/login", path != "/auth/register" {
             let token = ManagerSessionTokenStore.read(for: url)
             if !token.isEmpty {
                 req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -89,12 +89,18 @@ final class APIClient: NSObject {
     // ── 认证 ──────────────────────────────────────────────────────────────
 
     func me() async throws -> UserInfo {
-        let data = try await request(path: "/api/me")
-        return try decoder.decode(UserInfo.self, from: data)
+        let data = try await request(path: "/api/session")
+        var user = try decoder.decode(UserInfo.self, from: data)
+        // Manager sessions are persistent, server-expiring credentials; they
+        // do not implement the legacy business listener's idle-login toggle.
+        user.keepLogin = user.isLoggedIn
+        user.isAdmin = user.role == "super_admin"
+        user.isDeveloper = user.isAdmin || user.role == "developer"
+        return user
     }
 
     func login(username: String, password: String) async throws -> AuthResponse {
-        let data = try await request(path: "/login", method: "POST",
+        let data = try await request(path: "/auth/login", method: "POST",
                                      json: [
                                         "username": username,
                                         "password": password,
@@ -104,7 +110,7 @@ final class APIClient: NSObject {
     }
 
     func register(username: String, password: String, organizationId: String) async throws -> AuthResponse {
-        let data = try await request(path: "/register", method: "POST",
+        let data = try await request(path: "/auth/register", method: "POST",
                                      json: ["username": username, "password": password,
                                             "organization_id": organizationId,
                                             "keep_login": true])
@@ -112,11 +118,15 @@ final class APIClient: NSObject {
     }
 
     func logout() async throws {
-        _ = try await request(path: "/logout", method: "POST")
+        _ = try await request(path: "/auth/logout", method: "POST")
     }
 
     func setKeepLogin(_ keep: Bool) async throws {
-        _ = try await request(path: "/api/keep_login", method: "POST", json: ["keep_login": keep])
+        if keep {
+            _ = try await me()
+        } else {
+            throw APIError.server(L10n.text("Manager 不支持临时会话；如需结束会话，请退出登录。"))
+        }
     }
 
     func changePassword(currentPassword: String, newPassword: String) async throws -> ActionResponse {

@@ -96,3 +96,16 @@ def test_publication_uses_profile_session_and_preserves_idempotency(tmp_path, mo
         client._request("POST", "/api/test")
     assert error.value.status_code == 409
     assert not error.value.retryable
+
+
+def test_current_principal_uses_manager_session_contract(tmp_path, monkeypatch):
+    from tools.cli.client import FactorTesterClient
+
+    session = HttpSession("http://127.0.0.1:7998", cookies=tmp_path / "cookies")
+    seen = []
+    def opened(request, **kwargs):
+        seen.append(request.full_url)
+        return _Response({"success": True, "username": "test-principal", "role": "user"})
+    monkeypatch.setattr(session._opener, "open", opened)
+    assert FactorTesterClient(session).current_principal()["username"] == "test-principal"
+    assert seen == ["http://127.0.0.1:7998/api/session"]
