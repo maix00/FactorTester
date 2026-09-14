@@ -17,6 +17,13 @@ final class SelfSignedTrustDelegate: NSObject, URLSessionDelegate, URLSessionTas
         super.init()
     }
 
+    static func certificatePEM(for endpoint: URL?) -> String {
+        guard let endpoint, endpoint.scheme == "https", let host = endpoint.host else { return "" }
+        let authority = "https://\(host.lowercased()):\(endpoint.port ?? 443)"
+        guard let data = UserDefaults.standard.data(forKey: "cli.trusted-certificate." + authority) else { return "" }
+        return "-----BEGIN CERTIFICATE-----\n" + data.base64EncodedString(options: [.lineLength64Characters, .endLineWithLineFeed]) + "\n-----END CERTIFICATE-----\n"
+    }
+
     func urlSession(
         _ session: URLSession,
         task: URLSessionTask,
@@ -45,6 +52,11 @@ final class SelfSignedTrustDelegate: NSObject, URLSessionDelegate, URLSessionTas
             [configuredHost, managerHost].filter { !$0.isEmpty }
         )
         if configuredHosts.contains(challengedHost) {
+            if let certificate = SecTrustGetCertificateAtIndex(trust, 0) {
+                let data = SecCertificateCopyData(certificate) as Data
+                let authority = "https://\(challengedHost):\(challenge.protectionSpace.port)"
+                UserDefaults.standard.set(data, forKey: "cli.trusted-certificate." + authority)
+            }
             completionHandler(.useCredential, URLCredential(trust: trust))
         } else {
             completionHandler(.performDefaultHandling, nil)
