@@ -68,17 +68,7 @@ struct FactorTesterClientApp: App {
     #if DEBUG
     @ViewBuilder
     private var windowRoot: some View {
-        if ProcessInfo.processInfo.arguments.contains(
-            "--ui-test-report-navigation"
-        ) {
-            ResearchReportNavigationFixtureView()
-        } else if ProcessInfo.processInfo.arguments.contains(
-            "--ui-test-report-section-bridge"
-        ) {
-            ResearchReportSectionBridgeFixtureView()
-        } else {
-            productionRoot
-        }
+        productionRoot
     }
     #endif
 
