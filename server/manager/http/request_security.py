@@ -231,7 +231,7 @@ class RequestSecurityMixin:
         """
         return (
             self.headers.get("X-FactorTester-Client", "").strip().lower()
-            == "swift"
+            in {"swift", "cli"}
             and self._has_secure_ui_transport()
         )
 

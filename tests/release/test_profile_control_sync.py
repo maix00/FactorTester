@@ -34,7 +34,7 @@ def test_manager_url_is_separate_from_profile_execution_url(
     profile = _profile(tmp_path)
 
     assert profile_sync.manager_url_for_profile(profile) == (
-        "http://127.0.0.1:7998"
+        "http://127.0.0.1:8141"
     )
     assert profile_sync.manager_url_for_profile(
         profile, manager_url="http://127.0.0.1:7998/"
@@ -42,49 +42,33 @@ def test_manager_url_is_separate_from_profile_execution_url(
     assert "server" not in profile
 
 
-def test_sync_prefers_manager_keychain_token(tmp_path: Path, monkeypatch) -> None:
+def test_sync_uses_native_session_without_operator_credentials(tmp_path: Path, monkeypatch) -> None:
+    from tools.cli.native_session import save_session
     _configure_client(tmp_path, monkeypatch)
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
     profile = _profile(tmp_path)
-    captured: dict[str, object] = {}
-
-    monkeypatch.setattr(
-        profile_sync.ManagerCredentialStore,
-        "read",
-        lambda _self: "manager-token",
-    )
-
-    class FakeManagerClient:
-        def __init__(self, config, *, token: str = "", timeout: float = 30):
-            captured["url"] = config.base_url
-            captured["token"] = token
-
-        def session(self):
+    save_session("http://127.0.0.1:8141", "GTHT@MaxJJW@392452984564", "native-token")
+    captured = {}
+    class NativeClient:
+        def __init__(self, session):
+            captured["token"] = session.bearer_token
+            captured["url"] = session.base_url
+        def current_principal(self):
             return {"username": "GTHT@MaxJJW@392452984564"}
-
         def sync_profile(self, value):
-            captured["profile"] = value
-            return {"success": True, "status": "synced", "synced": True}
-
-    monkeypatch.setattr(profile_sync, "ManagerClient", FakeManagerClient)
-
-    receipt = profile_sync.sync_profile(profile)
-
-    assert receipt["synced"] is True
-    assert captured["url"] == "http://127.0.0.1:7998"
-    assert captured["token"] == "manager-token"
-    assert captured["profile"] == profile
+            return {"synced": True}
+    monkeypatch.setattr(profile_sync, "FactorTesterClient", NativeClient)
+    assert profile_sync.sync_profile(profile)["synced"]
+    assert captured == {"token": "native-token", "url": "http://127.0.0.1:8141"}
 
 
-def test_sync_uses_legacy_cookie_fallback_and_derived_manager_port(
+def test_sync_uses_selected_endpoint_with_legacy_cookie(
     tmp_path: Path, monkeypatch
 ) -> None:
     _configure_client(tmp_path, monkeypatch)
     profile = _profile(tmp_path)
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(
-        profile_sync.ManagerCredentialStore, "read", lambda _self: ""
-    )
 
     class FakeLegacyClient:
         def __init__(self, session):
@@ -102,7 +86,7 @@ def test_sync_uses_legacy_cookie_fallback_and_derived_manager_port(
     receipt = profile_sync.sync_profile(profile)
 
     assert receipt["synced"] is True
-    assert captured["url"] == "http://127.0.0.1:7998"
+    assert captured["url"] == "http://127.0.0.1:8141"
 
 
 def test_sync_reports_pending_when_manager_session_is_unavailable(
@@ -110,9 +94,6 @@ def test_sync_reports_pending_when_manager_session_is_unavailable(
 ) -> None:
     _configure_client(tmp_path, monkeypatch)
     profile = _profile(tmp_path)
-    monkeypatch.setattr(
-        profile_sync.ManagerCredentialStore, "read", lambda _self: ""
-    )
 
     class OfflineLegacyClient:
         def __init__(self, _session):
@@ -128,7 +109,7 @@ def test_sync_reports_pending_when_manager_session_is_unavailable(
     assert receipt["status"] == "pending"
     assert receipt["pending"] is True
     assert receipt["synced"] is False
-    assert receipt["manager_url"] == "http://127.0.0.1:7998"
+    assert receipt["manager_url"] == "http://127.0.0.1:8141"
 
 
 def test_create_profile_auto_syncs_after_local_write(tmp_path: Path, monkeypatch) -> None:
