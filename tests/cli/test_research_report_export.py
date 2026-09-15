@@ -94,7 +94,13 @@ def test_markdown_export_is_cli_owned_and_refuses_implicit_overwrite(
     payload = json.loads(exported.output)
     assert payload["format"] == "markdown"
     assert payload["output"] == str(output)
-    assert "# 因子语义" in output.read_text(encoding="utf-8")
+    written = output.read_text(encoding="utf-8")
+    assert "# 因子语义" in written
+    # The native export writes the same branch/version front matter.
+    assert "- 分支：main" in written
+    assert "- 作者 profile：maxa" in written
+    assert "- 导出时间：" in written
+    assert "报告版本" in written
     assert not (
         tmp_path / "workspace/research/wp/branches/main/REPORT.md"
     ).exists()
@@ -147,3 +153,4 @@ def test_export_requires_the_matching_filename_extension(
 
     assert result.exit_code != 0
     assert ".pdf" in result.output
+

@@ -8,6 +8,7 @@ from tools.factors.formula_identity import (
     freeze_factor_identity,
     require_frozen_factor,
 )
+from tools.cli.release.research_reporting.report_export import principal_alias
 
 
 def factor_rows_from_sync(
@@ -184,10 +185,7 @@ def _owner_alias(
         alias = str(owner_account.get("alias") or "").strip()
         if alias:
             return alias
-    parts = owner.split("@")
-    if len(parts) == 3 and parts[2].isdigit():
-        return parts[1]
-    return owner
+    return principal_alias(owner)
 
 
 def _looks_like_username(value: str) -> bool:

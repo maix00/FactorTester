@@ -6,10 +6,44 @@ import json
 import re
 import sqlite3
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, unquote
 
 from server.manager.http.responses import download_response, json_response
-from server.manager.services.research_export import markdown_export
+from server.manager.services.research_export import (
+    document_identity,
+    markdown_export,
+)
+
+
+def _publication_identity(
+    research: Any, publication_id: str, projection: dict[str, Any],
+) -> dict[str, Any]:
+    """Read the branch identity of the publication being exported.
+
+    The projection describes the report; the publication record says which
+    branch it is and who wrote it.
+    """
+    metadata: dict[str, Any] = {}
+    reader = getattr(research, "publication_metadata", None)
+    if callable(reader):
+        try:
+            value = reader(publication_id)
+        except (KeyError, OSError, RuntimeError, ValueError):
+            value = None
+        if isinstance(value, dict):
+            metadata = value
+    return document_identity(
+        branch=str(metadata.get("branch_ref") or ""),
+        owner=str(metadata.get("owner_ref") or ""),
+        profile=str(metadata.get("profile_ref") or ""),
+        generation=projection.get("generation") or metadata.get("generation") or 0,
+        projection_hash=str(
+            projection.get("projection_hash")
+            or metadata.get("projection_hash") or ""
+        ),
+        report_id=str(projection.get("report_id") or metadata.get("report_id") or ""),
+    )
 
 
 class PublicResearchRoutesMixin:
@@ -149,6 +183,9 @@ class PublicResearchRoutesMixin:
                 raw, content_type, filename = markdown_export(
                     value,
                     parse_qs(parsed.query).get("format", ["md"])[0] or "md",
+                    identity=_publication_identity(
+                        research, public_export_match.group(1), value,
+                    ),
                 )
             except PermissionError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 403)

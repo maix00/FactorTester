@@ -10,7 +10,16 @@ from server.manager.http.local_run_routes import ClientLocalRunRoutesMixin
 from server.manager.http.responses import download_response, json_response
 from server.manager.services.client_state import ProfileAlreadyExistsError
 from server.manager.services.profile_directory import ProfileDirectoryError
-from server.manager.services.research_export import markdown_export
+from server.manager.services.research_export import (
+    document_identity,
+    markdown_export,
+)
+
+
+def _local_branch(local_ref: str) -> str:
+    """The branch part of a client-local report reference."""
+    text = str(local_ref or "").strip()
+    return text.rsplit(":", 1)[-1] if ":" in text else ""
 
 
 class ClientResearchRoutesMixin(ClientLocalRunRoutesMixin):
@@ -352,13 +361,21 @@ class ClientResearchRoutesMixin(ClientLocalRunRoutesMixin):
                 json_response(self, {"success": False, "error": "login required"}, 401)
                 return True
             try:
+                local_ref = unquote(local_export_match.group(1))
                 value = self.state.client_state.local_research_report(
-                    str(session["username"]),
-                    unquote(local_export_match.group(1)),
+                    str(session["username"]), local_ref,
                 )
                 raw, content_type, filename = markdown_export(
                     value,
                     parse_qs(parsed.query).get("format", ["md"])[0] or "md",
+                    identity=document_identity(
+                        branch=_local_branch(local_ref),
+                        owner=str(session["username"]),
+                        profile=str(value.get("profile_id") or ""),
+                        generation=value.get("generation") or 0,
+                        projection_hash=str(value.get("projection_hash") or ""),
+                        report_id=str(value.get("report_id") or ""),
+                    ),
                 )
             except PermissionError as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 403)

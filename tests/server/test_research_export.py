@@ -10,7 +10,11 @@ import pytest
 
 from server.manager.http.client_research_routes import ClientResearchRoutesMixin
 from server.manager.http.public_research_routes import PublicResearchRoutesMixin
-from server.manager.services.research_export import markdown_export
+from server.manager.services.research_export import (
+    document_identity,
+    front_matter,
+    markdown_export,
+)
 from tools.cli.release.research_reporting.public_research.library import (
     PublicResearchLibrary,
 )
@@ -86,6 +90,7 @@ def test_publication_export_route_streams_markdown(tmp_path):
     library = PublicResearchLibrary(tmp_path / "public-research")
     publication = library.sync({
         "report_id": "report-one", "owner_ref": OWNER,
+        "profile_ref": "maxb", "branch_ref": "maxb-main",
         "projection": _projection(),
     })["publication_id"]
     handler = _PublicHandler()
@@ -96,6 +101,11 @@ def test_publication_export_route_streams_markdown(tmp_path):
     assert handler.status == 200
     body = handler.wfile.getvalue().decode("utf-8")
     assert "# 引言" in body and "要点一" in body
+    # The download says which branch it is and who wrote it.
+    assert "- 分支：maxb-main" in body
+    assert "- 作者：owner（profile: maxb）" in body
+    assert "- 导出时间：" in body
+    assert "报告版本 1" in body and "内容指纹" in body
     disposition = dict(handler.headers)["Content-Disposition"]
     assert disposition.startswith("attachment; ")
     assert "filename*=UTF-8''" in disposition
@@ -120,7 +130,7 @@ def test_local_export_route_uses_the_same_renderer():
 
     def local_research_report(principal, local_ref):
         calls.append((principal, local_ref))
-        return _projection()
+        return {**_projection(), "profile_id": "maxa", "local_ref": local_ref}
 
     handler = _LocalHandler()
     handler.state = SimpleNamespace(
@@ -131,7 +141,53 @@ def test_local_export_route_uses_the_same_renderer():
     ))
     assert calls == [(OWNER, "report-1:main")]
     assert handler.status == 200
-    assert "# 引言" in handler.wfile.getvalue().decode("utf-8")
+    body = handler.wfile.getvalue().decode("utf-8")
+    assert "# 引言" in body
+    # The client copy names its branch, its owner and the profile that wrote it.
+    assert "- 分支：main" in body
+    assert "- 作者：owner（profile: maxa）" in body
 
+
+
+
+
+
+def test_front_matter_carries_branch_author_time_and_versions():
+    identity = document_identity(
+        branch="maxb-main", owner="GTHT@MaxJJW@392452984564", profile="maxb",
+        generation=12, projection_hash="667c08b03149f6ae5327c86d7f94d041",
+        report_id="report:v1:OW3A", exported_at="2026-09-15T12:05:00+08:00",
+    )
+    assert front_matter(identity) == [
+        "- 分支：maxb-main",
+        "- 作者：MaxJJW（profile: maxb）",
+        "- 导出时间：2026-09-15T12:05:00+08:00",
+        "- 报告版本 12 · 内容指纹 667c08b03149 · 报告 ID report:v1:OW3A",
+    ]
+
+
+def test_front_matter_degrades_when_identity_is_partial():
+    # An unbound client profile still names the profile that wrote the branch.
+    lines = front_matter(document_identity(profile="maxa"))
+    assert lines[0] == "- 作者 profile：maxa"
+    assert lines[1].startswith("- 导出时间：")
+    # A document exported without identity keeps the plain report.
+    raw, _, _ = markdown_export(_projection())
+    assert raw.decode("utf-8").startswith("# 固收/久期:研究\n\n# 引言")
+
+
+def test_markdown_export_writes_the_front_matter_below_the_title():
+    raw, _, _ = markdown_export(
+        _projection(),
+        identity=document_identity(
+            branch="maxb-main", owner="GTHT@MaxJJW@392452984564",
+            profile="maxb", generation=2, exported_at="2026-09-15T12:05:00+08:00",
+        ),
+    )
+    lines = raw.decode("utf-8").splitlines()
+    assert lines[0] == "# 固收/久期:研究"
+    assert lines[2] == "- 分支：maxb-main"
+    assert lines[3] == ""
+    assert "正文一句。" in raw.decode("utf-8")
 
 
