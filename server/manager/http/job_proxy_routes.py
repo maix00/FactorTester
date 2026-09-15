@@ -32,6 +32,12 @@ _SERVICE_WRITE_PATTERNS = {
         r"/api/jobs/[A-Za-z0-9._-]{1,128}/(?:approve|cancel|continue|retry)",
     ),
 }
+# Retention control scoped to the caller rather than a single job.  These
+# paths carry no job id, so they are resolved before the per-job pattern.
+_JOB_COLLECTION_DELETE_PATHS = frozenset({
+    "/api/jobs",
+    "/api/jobs/artifacts",
+})
 _JOB_ANALYSIS_PATHS = {
     "/group-detail": "/get_group_detail",
     "/group-ranking-detail": "/get_group_ranking_detail",
@@ -666,6 +672,8 @@ class JobProxyRoutesMixin:
         }
 
     def _proxy_job_request(self, parsed, *, method: str) -> bool:
+        if self._proxy_job_collection_request(parsed, method=method):
+            return True
         match = re.fullmatch(
             r"/api/jobs/([A-Za-z0-9._-]{1,128})"
             r"(/result|/artifacts(?:/[A-Za-z0-9._%+-]{1,512})?"
@@ -889,6 +897,67 @@ class JobProxyRoutesMixin:
             return True
         json_response(
             self, {"success": False, "error": "job was not found"}, 404,
+        )
+        return True
+
+    def _proxy_job_collection_request(self, parsed, *, method: str) -> bool:
+        """Proxy retention control that is scoped to the caller, not one job.
+
+        ``DELETE /api/jobs/artifacts`` clears every retained result the caller
+        owns and ``DELETE /api/jobs`` clears their terminal history; both carry
+        no job id.  The per-job pattern below cannot match them, so without
+        this branch the request falls through to the Manager shell and the
+        caller receives an HTML page instead of JSON.
+        """
+        if parsed.path not in _JOB_COLLECTION_DELETE_PATHS:
+            return False
+        # These collection paths must never be parsed as a job whose id is
+        # "artifacts"; they only support the retention delete.
+        if method != "DELETE":
+            json_response(
+                self,
+                {"success": False, "error": "method not allowed"},
+                405,
+            )
+            return True
+        session = self._session()
+        if session is None:
+            json_response(self, {"success": False, "error": "login required"}, 401)
+            return True
+        principal = str(session["username"])
+        try:
+            routes = self._job_routes(
+                parsed, principal, for_artifact_storage=True,
+            )
+        except TargetUnavailable as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 503)
+            return True
+        except (TargetNotFound, ValueError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 502)
+            return True
+        path = parsed.path
+        if parsed.query:
+            path = f"{path}?{parsed.query}"
+        last_response: tuple[ServiceRoute, GatewayResponse] | None = None
+        for route in routes:
+            try:
+                response = self.state.route_request(
+                    route, path=path, principal=principal, method="DELETE",
+                )
+            except (ConnectionError, ValueError):
+                continue
+            last_response = (route, response)
+            if response.status == 404:
+                continue
+            self._send_gateway_response(response, route=route)
+            return True
+        if last_response is not None:
+            self._send_gateway_response(last_response[1], route=last_response[0])
+            return True
+        json_response(
+            self,
+            {"success": False, "error": "retention storage is unavailable"},
+            503,
         )
         return True
 
