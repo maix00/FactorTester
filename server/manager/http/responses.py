@@ -8,6 +8,12 @@ from pathlib import Path
 from typing import Any, TypeAlias
 from urllib.parse import quote
 
+from server.manager.http.content_encoding import (
+    encode_body,
+    encoding_headers,
+    request_accept_encoding,
+)
+
 
 HeaderValue: TypeAlias = str | list[str] | tuple[str, ...]
 
@@ -31,13 +37,18 @@ def download_response(
     header = f'{disposition}; filename="{safe_filename}"'
     if safe_filename != Path(filename).name:
         header += f"; filename*=UTF-8''{quote(Path(filename).name, safe='')}"
+    body, encoded = encode_body(
+        raw, content_type, request_accept_encoding(handler),
+    )
     handler.send_response(200)
     handler.send_header("Content-Type", content_type)
     handler.send_header("Content-Disposition", header)
     handler.send_header("Cache-Control", "private, no-cache")
-    handler.send_header("Content-Length", str(len(raw)))
+    for key, value in encoding_headers(encoded).items():
+        handler.send_header(key, value)
+    handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
-    handler.wfile.write(raw)
+    handler.wfile.write(body)
 
 
 def json_response(
@@ -54,6 +65,9 @@ def json_response(
     tested with a small fake handler.
     """
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    body, encoded = encode_body(
+        body, "application/json; charset=utf-8", request_accept_encoding(handler),
+    )
     response_headers = headers or {}
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
@@ -63,6 +77,8 @@ def json_response(
                 handler.send_header(key, str(item))
         else:
             handler.send_header(key, value)
+    for key, value in encoding_headers(encoded).items():
+        handler.send_header(key, value)
     if "Set-Cookie" not in response_headers:
         token = getattr(handler, "_bearer_token", lambda: "")()
         state = getattr(handler, "state", None)

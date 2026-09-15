@@ -4,6 +4,10 @@
   let manifestPromise = null;
   let manifestValue = null;
   let revision = "";
+  // Resolved from the manifest: a container that does not serve group bundles
+  // keeps loading the declared files one by one.
+  let bundlesEnabled = true;
+  const BUNDLE_PREFIX = "__group__";
 
   function assetURL(relative) {
     const query = revision ? `?v=${encodeURIComponent(revision)}` : "";
@@ -21,7 +25,11 @@
       }).then(response => {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return response.json();
-      }).then(value => { manifestValue = value; return value; });
+      }).then(value => {
+        manifestValue = value;
+        bundlesEnabled = value?.group_bundles !== false;
+        return value;
+      });
     }
     return manifestPromise;
   }
@@ -68,6 +76,27 @@
     return promise;
   }
 
+  async function loadScripts(name, value) {
+    const scripts = value.groups?.[name] || [];
+    if (!scripts.length) return;
+    if (bundlesEnabled) {
+      try {
+        // One request for the whole group instead of one per module.
+        await loadScript(`${BUNDLE_PREFIX}/${name}`);
+        return;
+      } catch (error) {
+        // A container that predates group bundles still serves the declared
+        // files, so a route is never blocked by a missing bundle.
+        bundlesEnabled = false;
+      }
+    }
+    // Keep fetching and evaluation on one ordered script path. WebKit can
+    // lose the dynamic script's load event when an identical preload link
+    // wins the fetch race, leaving the group Promise pending forever even
+    // though the server returned both assets successfully.
+    for (const relative of scripts) await loadScript(relative);
+  }
+
   async function loadGroup(name, value, stack = new Set()) {
     if (!name) return;
     if (stack.has(name)) {
@@ -84,12 +113,7 @@
       }
       const external = value.group_external_scripts?.[name] || [];
       for (const relative of external) await loadScript(relative);
-      const scripts = value.groups?.[name] || [];
-      // Keep fetching and evaluation on one ordered script path. WebKit can
-      // lose the dynamic script's load event when an identical preload link
-      // wins the fetch race, leaving the group Promise pending forever even
-      // though the server returned both assets successfully.
-      for (const relative of scripts) await loadScript(relative);
+      await loadScripts(name, value);
     })();
     groupLoads.set(name, promise);
     try {
