@@ -242,11 +242,15 @@
         reading.disclosures[componentID] = Boolean(open);
       },
       onInitialChapterReady: () => {
-        if (refreshScrollY !== null) {
-          if (isCurrent()) window.scrollTo({top: refreshScrollY, behavior: "auto"});
+        // Restore the reader's position only once the first chapter's content
+        // is actually rendered.  Scrolling before the lazy chapter loads would
+        // move again when the content grows — the visible jump on refresh.
+        const target = refreshScrollY ?? restoreScrollY;
+        if (target != null) {
+          if (isCurrent()) window.scrollTo({top: target, behavior: "auto"});
           return;
         }
-        if (restoreScrollY != null || !isCurrent()) return;
+        if (!isCurrent()) return;
         requestAnimationFrame(() => {
           if (isCurrent()) window.scrollTo({top: document.body.scrollHeight, behavior: "auto"});
         });
@@ -269,19 +273,6 @@
     });
     context.pageState?.register?.("research-report-updates", {dispose: stopWatching});
     session.publicationID = publicationID;
-    requestAnimationFrame(() => {
-      if (!isCurrent()) return;
-      if (restoreScrollY != null) {
-        // Rendering replaces the document body. Restore after a second layout
-        // pass so the rail and lazy content cannot overwrite the saved view.
-        requestAnimationFrame(() => {
-          if (isCurrent()) window.scrollTo({top: restoreScrollY, behavior: "auto"});
-        });
-        setTimeout(() => {
-          if (isCurrent()) window.scrollTo({top: restoreScrollY, behavior: "auto"});
-        }, 0);
-      }
-    });
   }
 
   function openReference(target, context, labelOverride = "") {
