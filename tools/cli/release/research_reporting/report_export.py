@@ -80,9 +80,12 @@ def front_matter(identity: dict[str, Any] | None) -> list[str]:
     versions: list[str] = []
     if int(value.get("generation") or 0) > 0:
         versions.append(f"报告版本 {int(value['generation'])}")
-    if value.get("revision"):
-        versions.append(f"分支版本 {value['revision']}")
     digest = str(value.get("projection_hash") or "").strip()
+    revision = str(value.get("revision") or "").strip()
+    # The branch revision and the published fingerprint are the same value for
+    # a published branch; print it once.
+    if revision and revision != digest:
+        versions.append(f"分支版本 {revision[:12]}")
     if digest:
         versions.append(f"内容指纹 {digest[:12]}")
     if value.get("report_id"):
