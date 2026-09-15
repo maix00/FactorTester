@@ -27,7 +27,12 @@
     const element = document.createElement("table");
     const head = element.createTHead().insertRow();
     headers.forEach(label => {
-      const cell = document.createElement("th"); cell.textContent = label; head.append(cell);
+      const cell = document.createElement("th");
+      // Accept a rendered node so a caller can put rich content (links, math,
+      // inline code, a header button) in the header without escaping it.
+      if (label instanceof Node) cell.append(label);
+      else cell.textContent = label;
+      head.append(cell);
     });
     const body = element.createTBody();
     rows.forEach(values => {

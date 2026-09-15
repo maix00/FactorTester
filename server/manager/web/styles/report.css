@@ -112,3 +112,15 @@ body.sidebar-collapsed:not(.embedded-presentation) .chapter-rail { left: calc(va
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }
+
+/* Paged report tables (FTReportTables -> FTUI.pagedTable): cell content stays
+   normal report content (links / inline math / inline code), but a block child
+   (display math, code block, paragraph, list) must not stretch the row — so
+   collapse its outer margins inside the table and let it scroll instead of
+   wrapping tall. */
+.report-mount .component-body .shared-paged-table td,
+.report-mount .component-body .shared-paged-table th { vertical-align: middle; }
+.report-mount .component-body .shared-paged-table td > :is(p, ul, ol, .display-math, pre) { margin: 0; }
+.report-mount .component-body .shared-paged-table td > .display-math { padding: 0; overflow-x: auto; }
+.report-mount .component-body .shared-paged-table td > pre { max-height: 12rem; overflow: auto; }
+.report-mount .component-body .shared-paged-table .inline-math { vertical-align: baseline; }

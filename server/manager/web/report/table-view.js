@@ -1,48 +1,59 @@
 (() => {
-  const CHUNK_SIZE = 80;
+  const DEFAULT_PAGE_SIZE = 20;
 
-  function schedule(context, callback) {
-    if (typeof requestIdleCallback === "function") {
-      requestIdleCallback(callback, {timeout: 80});
-    } else {
-      setTimeout(callback, 0);
-    }
-  }
+  // Report/job tables now reuse the shared pageable table primitive
+  // (``FTUI.pagedTable``) instead of a bespoke scroll+chunk renderer.  The
+  // rich hooks are preserved: ``renderHeader``/``renderCell`` may return any
+  // node (links, inline math, inline code, header buttons), and the table
+  // still exposes its own scroll boundary via ``.table-shell``.
+  function render({
+    columns,
+    rows,
+    context = {},
+    renderHeader,
+    renderCell,
+    values,
+    className = "table-shell",
+    pageSize = DEFAULT_PAGE_SIZE,
+  }) {
+    const headers = columns.map(column => renderHeader(column));
+    const rowValues = rows.map(row => values(row));
+    const size = Math.max(1, Number(pageSize) || DEFAULT_PAGE_SIZE);
+    const t = key => (typeof context.t === "function" ? context.t(key) : key);
+    let page = 1;
 
-  function render({columns, rows, context, renderHeader, renderCell, values, className = "table-shell"}) {
     const shell = document.createElement("div");
-    shell.className = className;
-    if (shell.dataset) shell.dataset.ftScrollState = `report-table:${className}`;
-    const element = document.createElement("table");
-    const head = element.createTHead().insertRow();
-    columns.forEach(column => {
-      const cell = document.createElement("th");
-      cell.append(renderHeader(column));
-      head.append(cell);
-    });
-    const body = element.createTBody();
-    const renderGeneration = Number(context?.renderGeneration || 0);
-    const isCurrent = () => !context?.lazyDisposed
-      && Number(context?.renderGeneration || 0) === renderGeneration;
-    let cursor = 0;
-    const appendChunk = () => {
-      if (!isCurrent()) return;
-      const end = Math.min(rows.length, cursor + CHUNK_SIZE);
-      for (; cursor < end; cursor += 1) {
-        const row = body.insertRow();
-        const sourceRow = rows[cursor];
-        values(sourceRow).forEach((item, columnIndex) => {
-          const cell = row.insertCell();
-          cell.append(renderCell(item, sourceRow, columns[columnIndex], cursor));
-        });
+    shell.className = "report-paged-table";
+
+    const draw = () => {
+      const view = window.FTUI.pagedTable(headers, rowValues, {
+        page,
+        pageSize: size,
+        previousLabel: t("上一页"),
+        nextLabel: t("下一页"),
+        renderRow: (cells, indexInPage) => {
+          const rowIndex = (page - 1) * size + indexInPage;
+          return cells.map((item, columnIndex) => renderCell(
+            item,
+            rows[rowIndex],
+            columns[columnIndex],
+            rowIndex,
+          ));
+        },
+        onPageChange: next => {
+          page = next;
+          draw();
+        },
+      });
+      view.tableShell.className = className;
+      if (view.tableShell.dataset) {
+        view.tableShell.dataset.ftScrollState = `report-table:${className}`;
       }
-      if (cursor < rows.length) schedule(context, appendChunk);
+      // A single page does not need a pager; keep the table's own scroll box.
+      view.pagination.hidden = view.totalPages <= 1;
+      shell.replaceChildren(view.shell);
     };
-    if (rows.length > CHUNK_SIZE && context?.tableRenderSync !== true) appendChunk();
-    else {
-      while (cursor < rows.length) appendChunk();
-    }
-    shell.append(element);
+    draw();
     return shell;
   }
 
