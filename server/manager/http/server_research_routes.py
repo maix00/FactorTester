@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from pathlib import Path
-from urllib.parse import parse_qs, unquote
+from urllib.parse import parse_qs, quote, unquote
 
 from server.manager.http.responses import json_response
 
@@ -146,6 +146,31 @@ class ServerResearchRoutesMixin:
             except (OSError, ValueError, KeyError) as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 404)
             return True
+        export_match = re.fullmatch(
+            r"/api/server-research/([^/]+)/export", parsed.path,
+        )
+        if export_match:
+            query = parse_qs(parsed.query)
+            output_format = (query.get("format", ["md"])[0] or "md").lower()
+            try:
+                raw, content_type, filename = service.export_report(
+                    principal,
+                    unquote(export_match.group(1)),
+                    output_format,
+                    **((
+                        {"target_ref": query.get("target_ref", [""])[0]}
+                    ) if query.get("target_ref", [""])[0] else {}),
+                )
+                self._send_server_research_bytes(
+                    raw, content_type, filename, disposition="attachment",
+                )
+            except PermissionError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 403)
+            except NotImplementedError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 501)
+            except (OSError, ValueError, KeyError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 404)
+            return True
 
         report_match = re.fullmatch(
             r"/api/server-research/([^/]+)", parsed.path,
@@ -176,12 +201,16 @@ class ServerResearchRoutesMixin:
         safe_filename = re.sub(
             r"[^A-Za-z0-9._-]", "_", Path(filename).name,
         ) or "research-object"
+        # Keep the ASCII fallback for old clients, and add the UTF-8 form so a
+        # Chinese report title downloads under its real name (RFC 5987).
+        disposition_header = f'{disposition}; filename="{safe_filename}"'
+        if safe_filename != Path(filename).name:
+            disposition_header += (
+                f"; filename*=UTF-8''{quote(Path(filename).name, safe='')}"
+            )
         self.send_response(200)
         self.send_header("Content-Type", content_type)
-        self.send_header(
-            "Content-Disposition",
-            f'{disposition}; filename="{safe_filename}"',
-        )
+        self.send_header("Content-Disposition", disposition_header)
         self.send_header("Cache-Control", "private, no-cache")
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()

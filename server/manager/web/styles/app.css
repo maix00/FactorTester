@@ -793,6 +793,11 @@ dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .research-detail-actions, .research-report-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
 .research-report-actions { flex: 0 0 auto; }
 .research-report-info-line > .research-report-actions:only-child { margin-left: auto; }
+.report-export-menu { position: relative; display: inline-flex; align-items: center; }
+.report-export-choices { position: absolute; top: calc(100% + 4px); right: 0; z-index: 40; display: grid; gap: 2px; min-width: 150px; padding: 4px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); box-shadow: 0 10px 26px #0003; }
+.report-export-choices[hidden] { display: none; }
+.report-export-choice { border: 0; border-radius: 6px; padding: 7px 10px; background: transparent; color: inherit; text-align: left; white-space: nowrap; }
+.report-export-choice:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .research-root-table table { min-width: 720px; }
 .research-root-detail section { display: grid; gap: 8px; min-width: 0; }
 .research-root-detail h2, .research-root-detail h3, .research-root-detail p { margin: 0; }

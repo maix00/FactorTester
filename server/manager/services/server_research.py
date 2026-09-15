@@ -183,6 +183,40 @@ class ServerResearchService:
         value["build_source"] = "server_agent"
         return value
 
+    def export_report(
+        self,
+        principal: str,
+        server_ref: str,
+        output_format: str = "md",
+        *,
+        target_ref: str | None = None,
+    ) -> tuple[bytes, str, str]:
+        """Render the server-held report tree as a downloadable document.
+
+        Only Markdown is produced server-side; the PDF renderer is a macOS
+        client binary, so a ``pdf`` request is refused here and the caller
+        routes it to the native (client) export instead.
+        """
+        source_format = str(output_format or "md").strip().lower()
+        if source_format not in {"md", "markdown"}:
+            raise NotImplementedError(
+                "服务端仅支持导出 Markdown；PDF 请在客户端导出",
+            )
+        location = self._read_location(principal, target_ref or principal, server_ref)
+        from tools.cli.release.research_reporting.authoring.tree_render import (
+            render_tree_markdown,
+        )
+
+        snapshot = self._snapshot(location)
+        payload = render_tree_markdown(snapshot)
+        title = str(
+            (snapshot.get("head") or {}).get("title")
+            or location.get("package_id")
+            or "report",
+        )
+        safe = "".join(ch for ch in title if ch not in "/\\:").strip() or "report"
+        return payload, "text/markdown; charset=utf-8", f"{safe}.md"
+
     def projection(self, principal: str, server_ref: str, *, target_ref: str | None = None) -> dict[str, Any]:
         location = self._read_location(principal, target_ref or principal, server_ref)
         value = build_upload_projection(

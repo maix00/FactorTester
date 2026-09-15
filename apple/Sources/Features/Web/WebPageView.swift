@@ -83,6 +83,7 @@ struct WebPageView: View {
     var onReference: ((ResearchDocumentTypedLink) -> Void)? = nil
     var onNavigation: ((String) -> Void)? = nil
     var onExternalURL: ((URL) -> Void)? = nil
+    var onReportExport: ((ResearchReportExportMessage.Request) -> Void)? = nil
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var languageStore: LanguageStore
     @State private var loadError: String?
@@ -135,6 +136,7 @@ struct WebPageView: View {
                     onReference: onReference,
                     onNavigation: onNavigation,
                     onExternalURL: onExternalURL,
+                    onReportExport: onReportExport,
                     onAuthentication: handleAuthentication,
                     loadError: $loadError
                 )
@@ -295,6 +297,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
     let onReference: ((ResearchDocumentTypedLink) -> Void)?
     let onNavigation: ((String) -> Void)?
     let onExternalURL: ((URL) -> Void)?
+    let onReportExport: ((ResearchReportExportMessage.Request) -> Void)?
     let onAuthentication: ((ClientWebAuthenticationMessage.Action) -> Void)?
     @Binding var loadError: String?
 
@@ -312,6 +315,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         onReference: ((ResearchDocumentTypedLink) -> Void)? = nil,
         onNavigation: ((String) -> Void)? = nil,
         onExternalURL: ((URL) -> Void)? = nil,
+        onReportExport: ((ResearchReportExportMessage.Request) -> Void)? = nil,
         onAuthentication: ((
             ClientWebAuthenticationMessage.Action
         ) -> Void)? = nil,
@@ -330,6 +334,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         self.onReference = onReference
         self.onNavigation = onNavigation
         self.onExternalURL = onExternalURL
+        self.onReportExport = onReportExport
         self.onAuthentication = onAuthentication
         _loadError = loadError
     }
@@ -342,6 +347,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             onReference: onReference,
             onNavigation: onNavigation,
             onExternalURL: onExternalURL,
+            onReportExport: onReportExport,
             onAuthentication: onAuthentication
         )
     }
@@ -389,6 +395,10 @@ struct WebViewRepresentable: PlatformViewRepresentable {
                     context.coordinator,
                     name: ResearchDocumentWebNavigationMessage.handlerName
                 )
+                existing.configuration.userContentController.add(
+                    context.coordinator,
+                    name: ResearchReportExportMessage.handlerName
+                )
             }
             existing.configuration.userContentController.add(
                 context.coordinator,
@@ -420,6 +430,10 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             configuration.userContentController.add(
                 context.coordinator,
                 name: ResearchDocumentWebNavigationMessage.handlerName
+            )
+            configuration.userContentController.add(
+                context.coordinator,
+                name: ResearchReportExportMessage.handlerName
             )
         }
         configuration.userContentController.add(
@@ -591,6 +605,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
         private let onReference: ((ResearchDocumentTypedLink) -> Void)?
         private let onNavigation: ((String) -> Void)?
         private let onExternalURL: ((URL) -> Void)?
+        private let onReportExport: ((ResearchReportExportMessage.Request) -> Void)?
         private let onAuthentication: ((
             ClientWebAuthenticationMessage.Action
         ) -> Void)?
@@ -602,6 +617,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             onReference: ((ResearchDocumentTypedLink) -> Void)?,
             onNavigation: ((String) -> Void)?,
             onExternalURL: ((URL) -> Void)?,
+            onReportExport: ((ResearchReportExportMessage.Request) -> Void)?,
             onAuthentication: ((
                 ClientWebAuthenticationMessage.Action
             ) -> Void)?
@@ -612,6 +628,7 @@ struct WebViewRepresentable: PlatformViewRepresentable {
             self.onReference = onReference
             self.onNavigation = onNavigation
             self.onExternalURL = onExternalURL
+            self.onReportExport = onReportExport
             self.onAuthentication = onAuthentication
         }
 
@@ -632,6 +649,13 @@ struct WebViewRepresentable: PlatformViewRepresentable {
                let path = ResearchDocumentWebNavigationMessage.path(from: message.body) {
                 DispatchQueue.main.async { [weak self] in
                     self?.onNavigation?(path)
+                }
+                return
+            }
+            if message.name == ResearchReportExportMessage.handlerName,
+               let request = ResearchReportExportMessage.decode(message.body) {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onReportExport?(request)
                 }
                 return
             }
