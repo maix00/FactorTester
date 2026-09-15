@@ -442,7 +442,7 @@
       section.className = "factor-family-summary";
       const heading = document.createElement("h3"); heading.textContent = t("LaTeX 公式");
       const formula = document.createElement("div"); formula.className = "factor-family-formula display-math";
-      katex.render(String(latex), formula, {displayMode: true, throwOnError: false});
+      window.FTUI?.renderMath?.(formula, String(latex), {display: true});
       section.append(heading, formula); root.append(section);
     }
     const refs = Array.isArray(object.attachment_refs) ? object.attachment_refs : [];
