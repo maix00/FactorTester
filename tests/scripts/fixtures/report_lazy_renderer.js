@@ -94,6 +94,12 @@ const section = window.FTReportComponents.componentView(
   context,
 );
 assert.equal(observers.length, 1, "all deferred report content should share one observer");
+// A nested section starts collapsed, so its children mount only once the
+// reader expands it.
+const sectionDetails = section.children[0];
+assert.equal(sectionDetails.open, false, "a nested section starts collapsed");
+sectionDetails.open = true;
+sectionDetails.listeners.toggle();
 
 const disclosureChanges = [];
 const restoredSection = window.FTReportComponents.componentView(

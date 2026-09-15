@@ -80,9 +80,12 @@ embedded.children[1].click();
 embedded.children[2].click();
 assert.deepEqual(embeddedReferences, [
   {target: "factortester://factor/factor%3Atwo", label: "factor [P:[[CA]]]"},
-  {target: "https://example.test/paper#a", label: "paper [section [A]]"},
   {target: "factortester://file/terminal-1", label: "terminal output"},
 ]);
+// A web URL stays browser navigation even inside the client bridge, so it is
+// never reported as a FactorTester object reference.
+assert.equal(embedded.children[1].href, "https://example.test/paper#a");
+assert.equal(embedded.children[1].target, "_blank");
 assert.deepEqual(embeddedLocalResources, []);
 
 const standalone = document.createDocumentFragment();
@@ -95,3 +98,4 @@ window.FTRichText.appendLink(
 assert.equal(standalone.children[0].href, "https://example.test/standalone");
 assert.equal(standalone.children[0].target, "_blank");
 console.log("ok");
+

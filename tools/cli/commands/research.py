@@ -14,7 +14,7 @@ from tools.cli.commands.research_report_common import scope_options
 from tools.cli.commands.research_report_job_binding import freeze_report_binding
 from tools.cli.commands.research_report_scope import resolve_branch_report_scope
 from tools.cli.core.context import client_from_config, requested_ports
-from tools.cli.core.errors import friendly_errors
+from tools.cli.core.errors import backtest_errors, friendly_errors
 from tools.cli.core.run_input_dependencies import (
     load as load_run_input_dependencies,
 )
@@ -586,7 +586,7 @@ def run(run_ports: tuple[int, ...]) -> None:
     ),
 )
 @run_input_option
-@friendly_errors
+@backtest_errors
 def run_preview(
     analyses: tuple[str, ...],
     retain_full: bool,
@@ -725,7 +725,7 @@ def run_preview(
     is_flag=True,
     help="输出 RunSpec 报告投影、运行与 Job 的完整机器可读响应。",
 )
-@friendly_errors
+@backtest_errors
 def run_submit(
     analyses: tuple[str, ...],
     retain_full: bool,
