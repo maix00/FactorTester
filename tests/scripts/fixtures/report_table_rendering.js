@@ -6,6 +6,7 @@ class Element {
   constructor(tagName) {
     this.tagName = tagName;
     this.children = [];
+    this.replaceChildren = (...kids) => { this.children = kids; };
     this.rows = [];
   }
   append(...items) { this.children.push(...items.filter(Boolean)); }
@@ -26,9 +27,24 @@ class Element {
 }
 
 global.document = {createElement: tagName => new Element(tagName)};
-global.window = {};
-const idle = [];
-global.requestIdleCallback = callback => idle.push(callback);
+
+// Report tables reuse the shared pageable table primitive, so this fixture
+// pins the pass-through contract: every row is handed over (no bespoke
+// chunking), the rich cell hooks still run, and the pager is only shown when
+// there is more than one page.
+const calls = [];
+global.window = {
+  FTUI: {
+    pagedTable(headers, rows, options) {
+      calls.push({headers, rows, options});
+      const shell = new Element("div");
+      const tableShell = new Element("div");
+      const pagination = new Element("nav");
+      shell.append(tableShell);
+      return {shell, tableShell, pagination, totalPages: Math.ceil(rows.length / (options.pageSize || 20))};
+    },
+  },
+};
 vm.runInThisContext(fs.readFileSync(
   "server/manager/web/report/table-view.js", "utf8",
 ), {filename: "table-view.js"});
@@ -39,34 +55,20 @@ const shell = window.FTReportTables.render({
   renderHeader: value => new Element(`th:${value}`),
   renderCell: value => new Element(`td:${value}`),
   values: row => row,
+  className: "table-shell",
 });
-const body = shell.children[0].children.find(item => item.tagName === "tbody");
-assert.equal(body.rows.length, 80, "large tables render only the first chunk synchronously");
-assert.equal(idle.length, 1);
-idle.shift()();
-assert.equal(body.rows.length, 160);
-idle.shift()();
-assert.equal(body.rows.length, 200);
-
-const small = window.FTReportTables.render({
-  columns: ["value"], rows: rows.slice(0, 2), context: {},
-  renderHeader: value => new Element(`th:${value}`),
-  renderCell: value => new Element(`td:${value}`),
-  values: row => row,
-});
-const smallBody = small.children[0].children.find(item => item.tagName === "tbody");
-assert.equal(smallBody.rows.length, 2, "small tables remain synchronous");
-
-const staleContext = {renderGeneration: 1};
-const stale = window.FTReportTables.render({
-  columns: ["value"], rows, context: staleContext,
-  renderHeader: value => new Element(`th:${value}`),
-  renderCell: value => new Element(`td:${value}`),
-  values: row => row,
-});
-const staleBody = stale.children[0].children.find(item => item.tagName === "tbody");
-assert.equal(staleBody.rows.length, 80);
-staleContext.renderGeneration = 2;
-idle.shift()();
-assert.equal(staleBody.rows.length, 80, "detached table chunks must stop after a chapter switch");
+assert.equal(calls.length, 1, "one page render hands the table to the shared pager");
+assert.equal(calls[0].rows.length, 200, "every row reaches the pager; report code keeps no private chunk");
+assert.equal(calls[0].options.pageSize, 20);
+assert.equal(calls[0].headers.length, 1);
+assert.equal(shell.className, "report-paged-table");
+const firstPage = calls[0].options.renderRow(["7", "8"], 3);
+assert.deepEqual(firstPage.map(node => node.tagName), ["td:7", "td:8"]);
+// Row indices continue across pages instead of restarting per chunk.
+calls[0].options.onPageChange(2);
+assert.equal(calls.length, 2);
+const secondPage = calls[1].options.renderRow(["0"], 1);
+assert.equal(secondPage.length, 1);
+assert.equal(calls[1].options.page, 2);
 console.log("ok");
+
