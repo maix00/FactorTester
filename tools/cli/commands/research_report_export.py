@@ -13,8 +13,9 @@ from hashlib import sha256
 import click
 
 from tools.cli.release.profile import load_profile_root
-from tools.cli.release.research_reporting.authoring.tree_render import (
-    render_tree_markdown,
+from tools.cli.release.research_reporting.report_export import (
+    document_identity,
+    markdown_export,
 )
 
 from .research_report_common import output as _output, scope_options
@@ -60,7 +61,19 @@ def export_report(
     snapshot = load_authoring(scope)
     target = output_path.expanduser().resolve()
     _validate_output(target, output_format.lower(), force=force)
-    payload = render_tree_markdown(snapshot)
+    head = snapshot.get("head") or {}
+    # The same policy the manager uses, so an exported file carries the branch
+    # identity, the export time and the report version wherever it was made.
+    payload, _content_type, _filename = markdown_export(
+        snapshot, "markdown",
+        identity=document_identity(
+            branch=scope.branch_id,
+            owner=str((scope.profile or {}).get("principal_ref") or ""),
+            profile=scope.profile_id,
+            generation=head.get("generation") or 0,
+            report_id=str(head.get("report_id") or ""),
+        ),
+    )
     content_hash = sha256(payload).hexdigest()
     target.parent.mkdir(parents=True, exist_ok=True)
     if output_format.lower() == "markdown":
