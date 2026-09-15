@@ -406,9 +406,13 @@
     const savedDisclosure = disclosureKey
       ? context.disclosureState?.[disclosureKey]
       : undefined;
+    // A freshly opened report shows every nested section collapsed; the reader
+    // expands one to lazily load (and render) its content.  A saved disclosure
+    // state wins so a refresh restores the previous expansion without a
+    // default-then-restore flash.
     details.open = typeof savedDisclosure === "boolean"
       ? savedDisclosure
-      : !isCollapsible(component);
+      : false;
     const summary = document.createElement("summary");
     const marker = document.createElement("span");
     marker.className = "section-marker";
