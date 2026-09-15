@@ -25,9 +25,7 @@
 
   function renderFormula(mount, source) {
     mount.replaceChildren?.();
-    if (window.katex) window.katex.render(source, mount, {
-      displayMode: true, throwOnError: false,
-    });
+    if (window.katex) window.FTUI?.renderMath?.(mount, source, {display: true});
     else {
       mount.textContent = source;
       mount.classList?.add?.("factor-family-formula-raw");

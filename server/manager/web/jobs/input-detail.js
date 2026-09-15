@@ -196,7 +196,7 @@
       }
       const formula = document.createElement("div");
       formula.className = "job-input-formula display-math";
-      katex.render(value.math_expr, formula, {displayMode: true, throwOnError: false});
+      window.FTUI?.renderMath?.(formula, value.math_expr, {display: true});
       instance.append(formula); section.append(instance);
     });
     return section;

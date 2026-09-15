@@ -158,7 +158,7 @@
     const element = document.createElement(display ? "div" : "span");
     element.className = display ? "display-math" : "inline-math";
     try {
-      katex.render(latex, element, {displayMode: display, throwOnError: false});
+      window.FTUI?.renderMath?.(element, latex, {display: display === true});
     } catch (_) {
       element.textContent = latex;
     }
