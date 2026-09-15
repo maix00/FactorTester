@@ -34,11 +34,26 @@ def build_client_library_projection(
     Only rows supplied through ``factors`` are treated as parameterized
     factors owned by an account.
     """
-    projected = [
-        _factor_projection(item)
-        for item in payload.get("factors") or []
-        if isinstance(item, dict)
-    ]
+    # A registration whose frozen identity no longer resolves must not take the
+    # whole library down: skip it and report it so the caller can repair it.
+    # Stale rows happen when a family's formula changes after a config was
+    # frozen, and they previously made this endpoint fail with a 400 for every
+    # caller instead of naming the offending registration.
+    projected: list[dict[str, Any]] = []
+    unresolved: list[dict[str, str]] = []
+    for item in payload.get("factors") or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            projected.append(_factor_projection(item))
+        except (ValueError, KeyError, TypeError) as exc:
+            unresolved.append({
+                "factor_family_alias": _safe_text(
+                    item.get("factor_family_alias") or item.get("factor_family_name")
+                ),
+                "factor_alias": _safe_text(item.get("factor_alias")),
+                "error": str(exc),
+            })
     projected = [item for item in projected if item["factor_alias"]]
     factors_by_ref: dict[str, dict[str, Any]] = {}
     for item in projected:
@@ -188,6 +203,9 @@ def build_client_library_projection(
     return {
         **projection,
         "projection_hash": sha256(encoded).hexdigest(),
+        # Reported separately from the hash so a stale registration is visible
+        # without changing the projection identity of the resolvable ones.
+        "unresolved_factors": unresolved,
     }
 
 
