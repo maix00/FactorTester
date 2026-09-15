@@ -349,7 +349,7 @@
         view.notice = notice ? {
           text: notice.textContent || "", color: notice.style?.color || "",
         } : null;
-        view.navRoute = document.querySelector?.(".nav-button.active")?.dataset?.route || "";
+        view.navRoute = activeNavRoute(state.activeTabID);
         view.ready = session.viewReady !== false;
         view.lastUsedAt = nextActivityAt();
         session.view = view;
@@ -371,7 +371,7 @@
         view.notice = notice ? {
           text: notice.textContent || "", color: notice.style?.color || "",
         } : null;
-        view.navRoute = document.querySelector?.(".nav-button.active")?.dataset?.route || "";
+        view.navRoute = activeNavRoute(state.activeTabID);
         view.rerenderOnRestore = true;
         view.ready = false;
         view.lastUsedAt = nextActivityAt();
@@ -392,7 +392,7 @@
       view.notice = notice ? {
         text: notice.textContent || "", color: notice.style?.color || "",
       } : null;
-      view.navRoute = document.querySelector?.(".nav-button.active")?.dataset?.route || "";
+      view.navRoute = activeNavRoute(state.activeTabID);
       view.ready = session.viewReady !== false;
       view.lastUsedAt = nextActivityAt();
       session.view = view;
@@ -456,6 +456,16 @@
         behavior: "auto",
       }));
       return "live";
+    }
+
+    function activeNavRoute(tabID) {
+      // A tab's stored highlight must describe that tab, so it comes from the
+      // entry the page chose for this tab (coordinator activeNav).  Sampling
+      // the DOM later froze whatever was highlighted at that moment, which let
+      // 测试台 replay 研究台 whenever the tab was switched back to.
+      const recorded = tabSession(tabID).navRoute;
+      if (typeof recorded === "string") return recorded;
+      return document.querySelector?.(".nav-button.active")?.dataset?.route || "";
     }
 
     function restoreActiveNav(route) {
@@ -543,7 +553,7 @@
         title: title?.textContent || "",
         eyebrow: eyebrow?.textContent || "",
         notice: notice ? {text: notice.textContent || "", color: notice.style?.color || ""} : null,
-        navRoute: document.querySelector?.(".nav-button.active")?.dataset?.route || "",
+        navRoute: activeNavRoute(state.activeTabID),
         contentControls: captureControlState(content),
         toolbarControls: captureControlState(toolbar),
         updatedAt: Date.now(),

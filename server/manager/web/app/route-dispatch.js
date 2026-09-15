@@ -5,9 +5,15 @@
   // constructing a browser or duplicating page routing in each module.
   function create({content, t, context, jobsContext, requireLogin, handlers}) {
     const pages = handlers || {};
-    const guarded = (pageContext, shell, handler, ...args) => {
+    // Presentation follows the route.  It is deliberately separate from the
+    // login guard so a public route (the test workbench feed) still gets the
+    // same feature-entry highlight and heading as the other pages.
+    const present = (pageContext, shell) => {
       pageContext.activeNav?.(shell.nav || "");
       pageContext.setHeading?.(t(shell.title));
+    };
+    const guarded = (pageContext, shell, handler, ...args) => {
+      present(pageContext, shell);
       if (!shell.allowVisitor && requireLogin()) return undefined;
       return handler?.(pageContext, ...args);
     };
@@ -63,10 +69,15 @@
         // selects the public server scope when there is no session and lets
         // the API decide which rows/details are visible.  Guarding it here
         // prevented that scope from ever rendering and left the previous
-        // page header in place because the list handler never ran.
-        case "jobs": return pages.jobs?.(
-          jobsContext(routeToken), route.section || "types",
-        );
+        // page header in place because the list handler never ran.  The
+        // feature-entry presentation is applied separately so the 测试台 entry
+        // is highlighted exactly like the other feature-entry pages.
+        case "jobs": {
+          present(context(routeToken), {nav: "jobs", title: "测试台"});
+          return pages.jobs?.(
+            jobsContext(routeToken), route.section || "types",
+          );
+        }
         case "job": return pages.job?.(
           jobsContext(routeToken), route.port, route.id, route.serverID,
         );
