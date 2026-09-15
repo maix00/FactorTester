@@ -312,8 +312,79 @@
     return icon;
   }
 
+  // Platform LaTeX carries Chinese labels (a family template embeds the
+  // Chinese name of a parameter).  In math mode that makes KaTeX declare the
+  // input LaTeX-incompatible, and with throwOnError:false the reader sees the
+  // raw source instead of the formula.  Wrapping each CJK run in \text{...}
+  // keeps the same input rendering as intended; runs already inside a
+  // \text{...} group are left alone.
+  const CJK_CHAR = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
+
+  function escapeText(value) {
+    return String(value).replace(/([%#$&_{}])/g, "\\$1");
+  }
+
+  function latexSafe(value) {
+    // A parameter placeholder must be escaped in math mode: several published
+    // family templates write ``$F`` where KaTeX needs ``\\$F``.  Escaping a
+    // bare ``$`` here keeps those formulas readable; the family source still
+    // owns the correct spelling.
+    const source = String(value == null ? "" : value)
+      .replace(/(^|[^\\])\$/g, "$1\\$");
+    let out = "";
+    let depth = 0;
+    let index = 0;
+    while (index < source.length) {
+      if (source.startsWith("\\text{", index)) {
+        depth += 1;
+        out += "\\text{";
+        index += 6;
+        continue;
+      }
+      const character = source[index];
+      if (character === "{") {
+        if (depth) depth += 1;
+        out += character;
+        index += 1;
+        continue;
+      }
+      if (character === "}") {
+        if (depth) depth -= 1;
+        out += character;
+        index += 1;
+        continue;
+      }
+      if (CJK_CHAR.test(character)) {
+        let run = "";
+        while (index < source.length && CJK_CHAR.test(source[index])) {
+          run += source[index];
+          index += 1;
+        }
+        out += depth > 0 ? escapeText(run) : `\\text{${escapeText(run)}}`;
+        continue;
+      }
+      out += character;
+      index += 1;
+    }
+    return out;
+  }
+
+  function renderMath(target, latex, options = {}) {
+    if (!target) return;
+    const source = latexSafe(latex);
+    if (window.katex && typeof window.katex.render === "function") {
+      window.katex.render(source, target, {
+        displayMode: options.display === true,
+        throwOnError: false,
+      });
+      return;
+    }
+    target.textContent = String(latex == null ? "" : latex);
+  }
+
   window.FTUI = {
     actionButton, appendRow, code, codeEditor, sourcePanel, sourceView, empty, fieldRows, formatDate, helpIcon, iconButton,
+    latexSafe, renderMath,
     refreshButton,
     loading, pagedTable, table, text, userLabel, userDisplay, reportBranchLabel,
   };

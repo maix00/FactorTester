@@ -31,9 +31,7 @@
         ? expression(value)
         : previewExpression(value, values, {includeNestedDefinitions: false});
       formulaMount.replaceChildren?.();
-      if (window.katex) window.katex.render(source || "", formulaMount, {
-        displayMode: true, throwOnError: false,
-      });
+      if (window.katex) window.FTUI?.renderMath?.(formulaMount, source || "", {display: true});
       else formulaMount.textContent = source;
     };
     [["parameters", context.t("参数")], ["values", context.t("值")]].forEach(([modeName, label]) => {
@@ -292,9 +290,7 @@
       const formula = document.createElement("div");
       formula.className = "factor-family-formula display-math";
       if (window.katex) {
-        window.katex.render(expressionValue, formula, {
-          displayMode: true, throwOnError: false,
-        });
+        window.FTUI?.renderMath?.(formula, expressionValue, {display: true});
       } else {
         formula.textContent = expressionValue;
         formula.classList.add("factor-family-formula-raw");
@@ -763,7 +759,7 @@
     const root = document.createElement("div");
     root.className = "factor-detail-parameter-formula display-math";
     if (window.katex) {
-      window.katex.render(value, root, {displayMode: true, throwOnError: false});
+      window.FTUI?.renderMath?.(root, value, {display: true});
     } else {
       root.textContent = value;
       root.classList?.add?.("factor-family-formula-raw");

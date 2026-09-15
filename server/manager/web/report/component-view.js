@@ -151,7 +151,7 @@
       const math = document.createElement("div");
       math.className = "display-math";
       const latex = typeof content === "object" ? content.latex || content.formula : content;
-      katex.render(String(latex || component.body || ""), math, {displayMode: true, throwOnError: false});
+      window.FTUI?.renderMath?.(math, String(latex || component.body || ""), {display: true});
       body.append(math);
     } else if (!component.body && content != null && component.kind !== "image") {
       const pre = document.createElement("pre");
