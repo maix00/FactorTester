@@ -33,8 +33,23 @@ IC_PARALLEL: bool = True
 # IC 并行计算的最大线程数（CPU 密集型，平台自适应）
 IC_PARALLEL_MAX_WORKERS: int = _default_max_workers(cpu_bound=True)
 
-# waitress 生产模式线程数（I/O 密集型，可略高于 CPU workers）
-WAITRESS_THREADS: int = _default_max_workers(cpu_bound=False)
+# waitress 生产模式线程数（I/O 密集型，可略高于 CPU workers）。
+# 容器/公网按部署规模用 FACTORTESTER_WAITRESS_THREADS 覆盖：默认值随
+# CPU 数下降（Linux 上 4 核只有 2 线程），多用户并发下会成为排队瓶颈。
+def _worker_env_override(name: str, default: int) -> int:
+    raw = str(os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return min(max(value, 1), 64)
+
+
+WAITRESS_THREADS: int = _worker_env_override(
+    "FACTORTESTER_WAITRESS_THREADS", _default_max_workers(cpu_bound=False),
+)
 
 # data 根目录（统一由 scripts/data_dir.py 解析，支持 worktree 隔离）
 from scripts.data_dir import DATA_DIR, CACHE_DB_PATH
