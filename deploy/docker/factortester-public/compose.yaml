@@ -30,6 +30,10 @@ services:
       - NET_RAW
     devices:
       - /dev/net/tun:/dev/net/tun
+    # A runaway research job must never starve the host: with a ceiling the
+    # container is OOM-killed and restarted by its policy instead of hanging
+    # the whole machine (the public host has no swap).
+    mem_limit: ${FACTORTESTER_PUBLIC_MEMORY_LIMIT:-6g}
     environment:
       FACTORTESTER_ALLOW_PUBLIC_REGISTRATION: "0"
       FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT: ${FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT:?set FACTORTESTER_ARTIFACT_PUBLIC_ENDPOINT}

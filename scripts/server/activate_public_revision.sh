@@ -212,7 +212,12 @@ trap - ERR INT TERM
 printf '%s\t%s\t%s\n' \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$revision" "verified" \
   >> "$deployment_log"
-if [[ "${FACTORTESTER_CLEANUP_RELEASES:-0}" == "1" ]]; then
+# Disk hygiene runs by default: old release images stay bounded by the
+# retention count, and dangling layers / build cache are never a release
+# artifact.  A full disk once starved PostgreSQL and hung the whole host.
+if [[ "${FACTORTESTER_CLEANUP_RELEASES:-1}" == "1" ]]; then
   cleanup_old_application_releases
 fi
-echo "Published public main $revision; PostgreSQL container preserved; release cleanup is opt-in"
+sudo docker image prune -f >/dev/null 2>&1 || true
+sudo docker builder prune -f --keep-storage 2GB >/dev/null 2>&1 || true
+echo "Published public main $revision; PostgreSQL container preserved; release images bounded to $release_retention"
