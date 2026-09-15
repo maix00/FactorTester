@@ -97,6 +97,11 @@
     "globe": '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 2.5 4 5.5 4 9s-1 6.5-4 9c-3-2.5-4-5.5-4-9s1-6.5 4-9Z"/>',
     "arrow.down.circle": '<circle cx="12" cy="12" r="9"/><path d="M12 7v9M8.5 12.5 12 16l3.5-3.5"/>',
     "arrow.up.circle": '<circle cx="12" cy="12" r="9"/><path d="M12 17V8M8.5 11.5 12 8l3.5 3.5"/>',
+    // Registered because the Web shell mirrors the Swift symbol registry: an
+    // unregistered symbol renders as the generic link glyph instead.
+    "arrow.2.circlepath": '<path d="M20 12a8 8 0 0 1-13.5 5.8L4 20v-5h5"/><path d="M4 12a8 8 0 0 1 13.5-5.8L20 4v5h-5"/>',
+    "person.2": '<circle cx="9" cy="8" r="3"/><path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><path d="M16 5.6a3 3 0 0 1 0 5.8"/><path d="M17.6 14.2c2 .5 3.4 2.4 3.4 4.8"/>',
+    "externaldrive.connected.to.line.below": '<rect x="3" y="6" width="18" height="8" rx="2"/><path d="M7 10h.01M10 10h.01"/><path d="M12 14v4M8.5 18h7"/>',
     "folder": '<path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/><path d="M4 10h16"/>',
     "folder.fill": '<path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z" fill="currentColor"/>',
     "arrow.clockwise": '<path d="M20 7v5h-5"/><path d="M19 12a7 7 0 1 1-2-5l3 3"/>',
