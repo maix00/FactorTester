@@ -29,6 +29,17 @@
       return fragment;
     }
 
+    function parkToolbar(view, element) {
+      const parked = moveChildren(element);
+      if (!parked) return;
+      // Switching tabs clears the live toolbar before the target view is
+      // restored, so an empty capture must not erase the actions this tab
+      // parked earlier: the header group would then never come back.
+      if (parked.childNodes?.length || !view.toolbar?.childNodes?.length) {
+        view.toolbar = parked;
+      }
+    }
+
     function restoreChildren(element, fragment) {
       if (!element || !fragment) return;
       element.replaceChildren(...fragment.childNodes);
@@ -343,7 +354,7 @@
         const parking = connectedParking(state.activeTabID);
         moveConnectedChildren(parking, content);
         view.connectedContent = parking;
-        view.toolbar = moveChildren(toolbar);
+        parkToolbar(view, toolbar);
         view.title = title?.textContent || "";
         view.eyebrow = eyebrow?.textContent || "";
         view.notice = notice ? {
@@ -386,7 +397,7 @@
         return;
       }
       view.content = moveChildren(content);
-      view.toolbar = moveChildren(toolbar);
+      parkToolbar(view, toolbar);
       view.title = title?.textContent || "";
       view.eyebrow = eyebrow?.textContent || "";
       view.notice = notice ? {

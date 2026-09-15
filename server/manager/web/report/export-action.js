@@ -121,7 +121,8 @@
     const root = document.createElement("span");
     root.className = "report-export-menu";
     const trigger = window.FTUI.iconButton(
-      context, "square.and.arrow.up", context.t("导出报告"), () => toggle(),
+      // The registry glyph every other download control in the app uses.
+      context, "arrow.down.circle", context.t("导出报告"), () => toggle(),
     );
     trigger.classList.add("report-export-trigger");
     trigger.setAttribute("aria-haspopup", "menu");
