@@ -13,7 +13,19 @@ def test_report_export_js():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_both_report_pages_load_the_download_module():
+def test_the_download_icon_uses_a_registered_symbol():
+    root = Path(__file__).resolve().parents[2]
+    web = root / "server/manager/web"
+    action = (web / "report/export-action.js").read_text(encoding="utf-8")
+    icons = (web / "core/icons.js").read_text(encoding="utf-8")
+    # An unregistered symbol renders as a fallback glyph, so the download
+    # control would look like something else entirely.
+    assert '"arrow.down.circle"' in action
+    assert '"arrow.down.circle":' in icons
+    assert "square.and.arrow.up" not in action
+
+
+def test_both_report_pages_expose_the_download_icon():
     root = Path(__file__).resolve().parents[2]
     web = root / "server/manager/web"
     manifest = json.loads((web / "module-manifest.json").read_text())
