@@ -203,19 +203,13 @@ class ServerResearchService:
                 "服务端仅支持导出 Markdown；PDF 请在客户端导出",
             )
         location = self._read_location(principal, target_ref or principal, server_ref)
-        from tools.cli.release.research_reporting.authoring.tree_render import (
-            render_tree_markdown,
-        )
+        from server.manager.services.research_export import markdown_export
 
         snapshot = self._snapshot(location)
-        payload = render_tree_markdown(snapshot)
-        title = str(
-            (snapshot.get("head") or {}).get("title")
-            or location.get("package_id")
-            or "report",
-        )
-        safe = "".join(ch for ch in title if ch not in "/\\:").strip() or "report"
-        return payload, "text/markdown; charset=utf-8", f"{safe}.md"
+        head = snapshot.setdefault("head", {})
+        if not head.get("title"):
+            head["title"] = location.get("package_id") or "report"
+        return markdown_export(snapshot, output_format)
 
     def projection(self, principal: str, server_ref: str, *, target_ref: str | None = None) -> dict[str, Any]:
         location = self._read_location(principal, target_ref or principal, server_ref)

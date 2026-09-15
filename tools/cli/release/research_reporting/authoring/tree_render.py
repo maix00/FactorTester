@@ -6,15 +6,41 @@ import json
 from typing import Any
 
 
+def render_report_markdown(
+    document: dict[str, Any], *, image_prefix: str = "../../",
+) -> bytes:
+    """Render a report document as Markdown.
+
+    A server-held tree snapshot carries ``head`` (title + assets); the Web and
+    publication projections the manager already serves expose ``title`` and
+    ``assets`` beside ``components`` instead.  Both describe the same tree, so
+    one renderer serves the server tree, a client copy and a publication.
+    """
+    if "head" not in document:
+        document = {
+            "head": {
+                "title": str(document.get("title") or ""),
+                "report_id": str(document.get("report_id") or ""),
+                "assets": list(document.get("assets") or []),
+            },
+            "components": list(document.get("components") or []),
+        }
+    return render_tree_markdown(document, image_prefix=image_prefix)
+
+
 def render_tree_markdown(
     snapshot: dict[str, Any], *, image_prefix: str = "../../",
 ) -> bytes:
-    components = list(snapshot["components"])
+    components = list(snapshot.get("components") or [])
     by_parent: dict[str | None, list[dict[str, Any]]] = {}
     for component in components:
-        by_parent.setdefault(component["parent_id"], []).append(component)
-    assets = {item["asset_ref"]: item for item in snapshot["head"]["assets"]}
-    lines = [f"# {snapshot['head']['title']}", ""]
+        by_parent.setdefault(component.get("parent_id"), []).append(component)
+    head = snapshot.get("head") or {}
+    assets = {
+        str(item.get("asset_ref")): item
+        for item in head.get("assets") or [] if item.get("asset_ref")
+    }
+    lines = [f"# {head.get('title') or ''}", ""]
     _render_children(lines, by_parent, assets, None, 0, image_prefix)
     return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
 
@@ -24,17 +50,17 @@ def _render_children(lines: list[str], children: dict[str | None, list[dict[str,
         # Heading hierarchy comes from ancestry, never from a special kind.
         # Markdown has six heading levels; deeper nodes remain in tree order.
         level = min(6, depth + 1)
-        if item["title"]:
-            lines.extend(["#" * level + " " + item["title"], ""])
-        if item["body"]:
-            lines.extend([item["body"], ""])
+        if item.get("title"):
+            lines.extend(["#" * level + " " + str(item["title"]), ""])
+        if item.get("body"):
+            lines.extend([str(item["body"]), ""])
         _render_content(lines, item, assets, image_prefix)
-        _render_children(lines, children, assets, item["component_id"], depth + 1, image_prefix)
+        _render_children(lines, children, assets, item.get("component_id"), depth + 1, image_prefix)
 
 
 def _render_content(lines: list[str], item: dict[str, Any], assets: dict[str, dict[str, Any]], image_prefix: str) -> None:
     content = item.get("content")
-    kind = item["kind"]
+    kind = str(item.get("kind") or "")
     if kind == "list" and isinstance(content, dict):
         _render_list(lines, content)
     elif isinstance(content, dict) and {"columns", "rows"}.issubset(content):

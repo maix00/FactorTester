@@ -141,13 +141,14 @@ struct ClientTabView: View {
     /// native renderer; otherwise fall back to the manager's Markdown export.
     private func handleReportExport(_ request: ResearchReportExportMessage.Request) {
         #if os(macOS)
-        let local = profiles.profiles.contains { $0.id == request.profileID }
+        let local = !request.profileRef.isEmpty
+            && profiles.profiles.contains { $0.id == request.profileRef }
         if local, !request.workPackageID.isEmpty, !request.branchID.isEmpty {
             Task { @MainActor in
                 do {
                     try await ResearchReportExportController.export(
                         format: request.format,
-                        profileID: request.profileID,
+                        profileID: request.profileRef,
                         workPackageID: request.workPackageID,
                         branchID: request.branchID,
                         title: request.title
@@ -163,23 +164,11 @@ struct ClientTabView: View {
         openServerExport(request)
     }
 
-    /// The manager renders Markdown from the report tree it holds; PDF is not
-    /// available server-side, so a remote PDF relies on the client renderer.
+    /// The manager renders Markdown from the report it holds; PDF is a client
+    /// renderer, so a report that is not on this machine still needs the client.
     private func openServerExport(_ request: ResearchReportExportMessage.Request) {
         guard let base = ManagerConfig.shared.baseURL,
-              var components = URLComponents(
-                url: base, resolvingAgainstBaseURL: false,
-              ) else { return }
-        components.path = "/api/server-research/\(request.serverRef)/export"
-        components.queryItems = [
-            URLQueryItem(name: "format", value: request.format.rawValue),
-        ]
-        if !request.targetRef.isEmpty {
-            components.queryItems?.append(
-                URLQueryItem(name: "target_ref", value: request.targetRef),
-            )
-        }
-        guard let url = components.url else { return }
+              let url = request.serverExportURL(relativeTo: base) else { return }
         open(.externalWeb(url))
     }
 
