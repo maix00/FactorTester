@@ -21,6 +21,7 @@ def _publication_identity(
     publication_id: str,
     projection: dict[str, Any],
     catalog: Any = None,
+    viewer: str | None = None,
 ) -> dict[str, Any]:
     """Read the branch identity of the publication being exported.
 
@@ -41,7 +42,7 @@ def _publication_identity(
     reader = getattr(research, "publication_metadata", None)
     if callable(reader):
         try:
-            value = reader(publication_id)
+            value = reader(publication_id, viewer)
         except (KeyError, OSError, RuntimeError, ValueError):
             value = None
         if isinstance(value, dict):
@@ -211,7 +212,7 @@ class PublicResearchRoutesMixin:
                     parse_qs(parsed.query).get("format", ["md"])[0] or "md",
                     identity=_publication_identity(
                         research, public_export_match.group(1), value,
-                        getattr(self.state, "research_catalog", None),
+                        getattr(self.state, "research_catalog", None), viewer,
                     ),
                 )
             except PermissionError as exc:

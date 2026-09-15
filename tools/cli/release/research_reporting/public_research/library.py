@@ -207,8 +207,14 @@ class PublicResearchLibrary:
             raise PermissionError("report settings require the owner")
         return _owner_record(record)
 
-    def publication_metadata(self, publication_id: str) -> dict[str, Any]:
-        """Return sync-safe publication metadata without report bytes."""
+    def publication_metadata(
+        self, publication_id: str, viewer_ref: str | None = None,
+    ) -> dict[str, Any]:
+        """Return sync-safe publication metadata without report bytes.
+
+        ``viewer_ref`` is accepted so a federated reader can expose the same
+        seam; the caller has already authorized the report read.
+        """
         return _owner_record(self._record(publication_id))
 
     def list_owner(self, owner_ref: str) -> list[dict[str, Any]]:

@@ -178,3 +178,76 @@ def test_missing_report_route_activates_only_exact_discovered_source():
     assert calls == ['remote-main']
     assert service._publication_route('unknown-report', 'alice') is None
     assert calls == ['remote-main']
+
+
+
+class _Sync:
+    """Account-domain mirror rows for one federated publication."""
+
+    def __init__(self, rows):
+        self.rows = rows
+
+    def entities(self, _viewer, **_kwargs):
+        return list(self.rows)
+
+
+class _LocalResearch:
+    """A publication store that does not hold the federated publication."""
+
+    def __init__(self, records=None):
+        self.records = records or {}
+
+    def list_visible(self, _viewer=None):
+        return []
+
+    def publication_metadata(self, publication_id, _viewer=None):
+        record = self.records.get(publication_id)
+        if record is None:
+            raise KeyError(publication_id)
+        return record
+
+
+def _federated(public_research, rows):
+    return FederatedPublicDataService(
+        server_id="local-1",
+        registry=_Registry(ServiceRoute(
+            server_id="remote-main", role="manager", branch="main",
+            revision="rev-1", port=7998,
+        )),
+        gateway=_Gateway(),
+        public_research=public_research,
+        client_state=object(),
+        account_domain_sync=_Sync(rows),
+    )
+
+
+def test_publication_metadata_reads_a_federated_publication_identity():
+    rows = [{
+        "entity_id": "pub-1", "principal": "GTHT@MaxJJW@392452984564",
+        "payload": {
+            "publication_id": "pub-1", "report_id": "report:v1:OW3A",
+            "owner_ref": "GTHT@MaxJJW@392452984564", "profile_ref": "maxb",
+            "branch_ref": "maxb-duration-data", "generation": 91,
+            "projection_hash": "hash-91", "visibility": "public",
+            "storage_server_id": "remote-main",
+        },
+    }]
+    service = _federated(_LocalResearch(), rows)
+    value = service.publication_metadata("pub-1", "GTHT@testA@545963541963")
+    assert value["profile_ref"] == "maxb"
+    assert value["branch_ref"] == "maxb-duration-data"
+    assert value["generation"] == 91
+    assert service.publication_metadata("") == {}
+
+
+def test_publication_metadata_prefers_the_local_record():
+    service = _federated(
+        _LocalResearch({"pub-2": {
+            "publication_id": "pub-2", "owner_ref": "GTHT@owner@1",
+            "profile_ref": "self", "branch_ref": "main",
+        }}),
+        [],
+    )
+    value = service.publication_metadata("pub-2")
+    assert value["branch_ref"] == "main"
+    assert value["profile_ref"] == "self"
