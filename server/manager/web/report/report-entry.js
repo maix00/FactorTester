@@ -161,6 +161,11 @@
         ),
       ));
     }
+    if (window.FTReportExport?.menu) {
+      infoActions.append(window.FTReportExport.menu(
+        context, {...value, publication_id: publicationID},
+      ));
+    }
     reportControls.append(infoActions);
     context.toolbar.replaceChildren(reportControls);
     const boundProfileID = String(
