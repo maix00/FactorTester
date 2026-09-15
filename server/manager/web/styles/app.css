@@ -1339,7 +1339,10 @@ button.reference-item { cursor: pointer; }
   margin: 0; padding: 0; border: 0; background: transparent;
 }
 
-.nav-singleton { display: flex; align-items: center; min-width: 0; }
+.nav-singleton { display: flex; align-items: center; min-width: 0;
+  /* An opened tab insets its content by the row's own 8px padding; a closable
+     feature entry carries the same inset here so both close controls line up. */
+  padding-right: 8px; }
 .nav-singleton > .nav-button { flex: 1; min-width: 0; }
 .nav-singleton-close { border: 0; background: transparent; color: inherit; padding: .35rem; cursor: pointer; }
 .nav-singleton-close[hidden] { display: none; }
