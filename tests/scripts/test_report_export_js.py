@@ -26,3 +26,13 @@ def test_both_report_pages_load_the_download_module():
     # The dedicated report page and the research report tab both mount it.
     assert "FTReportExport.menu(" in (web / "report/report-entry.js").read_text()
     assert "FTReportExport.menu(" in (web / "research/reports.js").read_text()
+
+
+
+def test_report_tab_exports_the_source_the_reader_opened():
+    root = Path(__file__).resolve().parents[2]
+    reports = (root / "server/manager/web/research/reports.js").read_text()
+    # The reader loads `publicationID(item)`; the download must address the
+    # same channel instead of the raw branch key.
+    assert "const id = publicationID(item);" in reports
+    assert "publication_id: publicationID(settingsTarget)" in reports
