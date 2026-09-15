@@ -62,6 +62,10 @@ services:
       # No other private subnet or container is allowed to assert client IPs.
       FACTORTESTER_TRUSTED_PROXY_CIDRS: ${FACTORTESTER_TRUSTED_PROXY_CIDRS:-172.30.186.1/32}
       FACTORTESTER_WIREGUARD_INTERFACE: ftwg0
+      # Business-app worker threads (waitress).  The platform default drops to
+      # two on a small Linux host, which serialises concurrent Web/API
+      # requests; the public deployment raises it through the env file.
+      FACTORTESTER_WAITRESS_THREADS: ${FACTORTESTER_WAITRESS_THREADS:-}
       GTHT_JOB_ARTIFACT_ROOT: /data/job-results
     healthcheck:
       test:

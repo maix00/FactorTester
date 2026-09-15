@@ -274,6 +274,13 @@ def main(
                 else:
                     print(message)
             runtime_module.Handler.state.start_configured_federation()
+            try:
+                from server.manager.services.startup_warmup import start_warmup
+
+                start_warmup(runtime_module.Handler.state)
+            except Exception as exc:
+                # Warmup is an optimisation; never block the listener for it.
+                print(f"startup warmup unavailable: {exc}", file=sys.stderr)
             scheme = "https" if tls_context is not None else "http"
             url = f"{scheme}://localhost:{args.port}/"
             print(f"Worktree Flask manager running at {url}")
