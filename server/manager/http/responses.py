@@ -3,10 +3,41 @@
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 from typing import Any, TypeAlias
+from urllib.parse import quote
 
 
 HeaderValue: TypeAlias = str | list[str] | tuple[str, ...]
+
+
+def download_response(
+    handler: Any,
+    raw: bytes,
+    content_type: str,
+    filename: str,
+    *,
+    disposition: str = "attachment",
+) -> None:
+    """Write a downloadable body, keeping the real name of a CJK file.
+
+    The ASCII fallback stays for older clients; the RFC 5987 form carries the
+    original title so a Chinese report downloads under its own name.
+    """
+    safe_filename = re.sub(
+        r"[^A-Za-z0-9._-]", "_", Path(filename).name,
+    ) or "research-object"
+    header = f'{disposition}; filename="{safe_filename}"'
+    if safe_filename != Path(filename).name:
+        header += f"; filename*=UTF-8''{quote(Path(filename).name, safe='')}"
+    handler.send_response(200)
+    handler.send_header("Content-Type", content_type)
+    handler.send_header("Content-Disposition", header)
+    handler.send_header("Cache-Control", "private, no-cache")
+    handler.send_header("Content-Length", str(len(raw)))
+    handler.end_headers()
+    handler.wfile.write(raw)
 
 
 def json_response(

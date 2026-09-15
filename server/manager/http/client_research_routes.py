@@ -7,9 +7,10 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
 from server.manager.http.local_run_routes import ClientLocalRunRoutesMixin
-from server.manager.http.responses import json_response
+from server.manager.http.responses import download_response, json_response
 from server.manager.services.client_state import ProfileAlreadyExistsError
 from server.manager.services.profile_directory import ProfileDirectoryError
+from server.manager.services.research_export import markdown_export
 
 
 class ClientResearchRoutesMixin(ClientLocalRunRoutesMixin):
@@ -341,6 +342,34 @@ class ClientResearchRoutesMixin(ClientLocalRunRoutesMixin):
                 json_response(self, {"success": False, "error": str(exc)}, 404)
                 return True
             json_response(self, {"success": True, **value})
+            return True
+        local_export_match = re.fullmatch(
+            r"/api/client/research/([^/]+)/export", parsed.path,
+        )
+        if local_export_match:
+            session = self._session()
+            if session is None:
+                json_response(self, {"success": False, "error": "login required"}, 401)
+                return True
+            try:
+                value = self.state.client_state.local_research_report(
+                    str(session["username"]),
+                    unquote(local_export_match.group(1)),
+                )
+                raw, content_type, filename = markdown_export(
+                    value,
+                    parse_qs(parsed.query).get("format", ["md"])[0] or "md",
+                )
+            except PermissionError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 403)
+                return True
+            except NotImplementedError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 501)
+                return True
+            except (OSError, ValueError, KeyError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 404)
+                return True
+            download_response(self, raw, content_type, filename)
             return True
         local_research_match = re.fullmatch(
             r"/api/client/research/([^/]+)", parsed.path,

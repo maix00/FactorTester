@@ -8,7 +8,8 @@ import sqlite3
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
-from server.manager.http.responses import json_response
+from server.manager.http.responses import download_response, json_response
+from server.manager.services.research_export import markdown_export
 
 
 class PublicResearchRoutesMixin:
@@ -136,6 +137,32 @@ class PublicResearchRoutesMixin:
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+            return True
+        public_export_match = re.fullmatch(
+            r"/api/public-research/([A-Za-z0-9_-]{20,64})/export", parsed.path,
+        )
+        if public_export_match:
+            session = self._session()
+            viewer = str(session["username"]) if session else None
+            try:
+                value = research.projection(public_export_match.group(1), viewer)
+                raw, content_type, filename = markdown_export(
+                    value,
+                    parse_qs(parsed.query).get("format", ["md"])[0] or "md",
+                )
+            except PermissionError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 403)
+                return True
+            except NotImplementedError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 501)
+                return True
+            except ValueError as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 404)
+                return True
+            except (ConnectionError, OSError, RuntimeError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 503)
+                return True
+            download_response(self, raw, content_type, filename)
             return True
         asset_match = re.fullmatch(
             r"/api/public-research/([A-Za-z0-9_-]{20,64})/assets/([A-Za-z0-9_-]{8,64})",
