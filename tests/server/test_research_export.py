@@ -9,7 +9,10 @@ from urllib.parse import urlparse
 import pytest
 
 from server.manager.http.client_research_routes import ClientResearchRoutesMixin
-from server.manager.http.public_research_routes import PublicResearchRoutesMixin
+from server.manager.http.public_research_routes import (
+    PublicResearchRoutesMixin,
+    _publication_identity,
+)
 from server.manager.services.research_export import (
     document_identity,
     front_matter,
@@ -155,14 +158,16 @@ def test_local_export_route_uses_the_same_renderer():
 def test_front_matter_carries_branch_author_time_and_versions():
     identity = document_identity(
         branch="maxb-main", owner="GTHT@MaxJJW@392452984564", profile="maxb",
-        generation=12, projection_hash="667c08b03149f6ae5327c86d7f94d041",
+        generation=12, revision="rev-7",
+        projection_hash="667c08b03149f6ae5327c86d7f94d041",
         report_id="report:v1:OW3A", exported_at="2026-09-15T12:05:00+08:00",
     )
     assert front_matter(identity) == [
         "- 分支：maxb-main",
         "- 作者：MaxJJW（profile: maxb）",
         "- 导出时间：2026-09-15T12:05:00+08:00",
-        "- 报告版本 12 · 内容指纹 667c08b03149 · 报告 ID report:v1:OW3A",
+        "- 报告版本 12 · 分支版本 rev-7 · 内容指纹 667c08b03149"
+        " · 报告 ID report:v1:OW3A",
     ]
 
 
@@ -191,3 +196,47 @@ def test_markdown_export_writes_the_front_matter_below_the_title():
     assert "正文一句。" in raw.decode("utf-8")
 
 
+
+
+
+def test_publication_identity_prefers_the_branch_registration():
+    def branch_identity(publication_id):
+        assert publication_id == "pub-1"
+        return {
+            "branch_id": "maxb-main", "principal_ref": "GTHT@MaxJJW@392452984564",
+            "profile_ref": "maxb", "revision": "rev-7", "report_id": "report:v1:O",
+        }
+
+    def publication_metadata(_publication_id):
+        # The publication record alone names the publisher, not the writer.
+        return {
+            "owner_ref": "GTHT@other@9", "profile_ref": "other",
+            "branch_ref": "other", "generation": 99,
+        }
+
+    identity = _publication_identity(
+        SimpleNamespace(publication_metadata=publication_metadata),
+        "pub-1",
+        {"generation": 3, "projection_hash": "abc", "report_id": "report:v1:O"},
+        SimpleNamespace(report_branch_identity=branch_identity),
+    )
+    assert identity["branch"] == "maxb-main"
+    assert identity["owner"] == "GTHT@MaxJJW@392452984564"
+    assert identity["profile"] == "maxb"
+    assert identity["revision"] == "rev-7"
+    # The exported content version wins over the record's own generation.
+    assert identity["generation"] == 3
+
+
+def test_publication_identity_falls_back_to_the_record():
+    identity = _publication_identity(
+        SimpleNamespace(publication_metadata=lambda _id: {
+            "owner_ref": "GTHT@owner@1", "profile_ref": "maxb", "branch_ref": "main",
+        }),
+        "pub-2",
+        {"generation": 1, "report_id": "report:v1:P"},
+    )
+    assert identity["branch"] == "main"
+    assert identity["owner"] == "GTHT@owner@1"
+    assert identity["profile"] == "maxb"
+    assert identity["revision"] == ""
