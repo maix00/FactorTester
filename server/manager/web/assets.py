@@ -153,6 +153,10 @@ def shell_bytes() -> bytes:
     styles = [*manifest.get("external_styles", []), *manifest.get("styles", [])]
     scripts = [
         *manifest.get("initial_external_scripts", manifest.get("external_scripts", [])),
+        # The shell keeps one tag per initial module: those tags are the first
+        # paint and must stay on the proven path.  Groups loaded later by
+        # ``core/module-loader.js`` travel as one bundle and fall back to the
+        # declared files if a container does not serve bundles.
         *_initial_scripts(manifest),
     ]
     revision = asset_revision()
@@ -186,6 +190,45 @@ def shell_bytes() -> bytes:
     rendered = rendered.replace("<!-- FT_STATIC_STYLES -->", style_tags)
     rendered = rendered.replace("<!-- FT_STATIC_SCRIPTS -->", script_tags)
     return rendered.encode("utf-8")
+
+
+BUNDLE_PREFIX = "__group__"
+_BUNDLE_SEPARATOR = b"\n;\n"
+_bundle_cache: dict[tuple[str, str], bytes] = {}
+_bundle_lock = threading.Lock()
+
+
+def group_scripts(group: str) -> list[str]:
+    """The declared scripts of one manifest group, in load order."""
+    name = str(group or "").strip()
+    groups = _module_manifest().get("groups")
+    files = groups.get(name) if isinstance(groups, dict) else None
+    if not isinstance(files, list) or not files:
+        raise ValueError("web module group is not declared")
+    return [str(item) for item in files]
+
+
+def bundle_bytes(group: str) -> bytes:
+    """Serve a whole group in one request.
+
+    Every owned module is a self-contained IIFE, so concatenating a group keeps
+    the isolation the browser's separate script tags provided while removing
+    most of a cold visit's round trips over the public uplink.
+    """
+    name = str(group or "").strip()
+    revision = asset_revision()
+    with _bundle_lock:
+        cached = _bundle_cache.get((name, revision))
+    if cached is not None:
+        return cached
+    parts = [static_file(relative)[0] for relative in group_scripts(name)]
+    payload = _BUNDLE_SEPARATOR.join(parts)
+    with _bundle_lock:
+        # Only the live revision is worth keeping; an activated container
+        # changes the revision and the old concatenation is dead weight.
+        _bundle_cache.clear()
+        _bundle_cache[(name, revision)] = payload
+    return payload
 
 
 def _initial_scripts(manifest: dict) -> list[str]:

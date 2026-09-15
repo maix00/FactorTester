@@ -8,9 +8,19 @@ from urllib.parse import parse_qs, urlparse
 
 from server.manager.config import VIBE_TRADING_PORT
 from server.manager.domain.navigation_registry import navigation_modules
+from server.manager.http.content_encoding import (
+    encode_body,
+    encoding_headers,
+    request_accept_encoding,
+)
 from server.manager.http.localization import web_localization
 from server.manager.http.responses import json_response
-from server.manager.web.assets import asset_revision, shell_bytes, static_file
+from server.manager.web.assets import (
+    asset_revision,
+    bundle_bytes,
+    shell_bytes,
+    static_file,
+)
 
 
 class CoreGetRoutesMixin:
@@ -105,6 +115,35 @@ class CoreGetRoutesMixin:
             json_response(self, value)
             return True
         if parsed.path.startswith("/research-static/"):
+            bundle_match = re.fullmatch(
+                r"/research-static/__group__/([A-Za-z0-9._-]{1,64})", parsed.path,
+            )
+            if bundle_match:
+                # One request for a whole module group; the browser used to
+                # fetch every file separately on a cold visit.
+                try:
+                    bundle = bundle_bytes(bundle_match.group(1))
+                except ValueError:
+                    self.send_error(404)
+                    return True
+                bundle, bundled_gzip = encode_body(
+                    bundle, "application/javascript; charset=utf-8",
+                    request_accept_encoding(self),
+                )
+                self.send_response(200)
+                self.send_header(
+                    "Content-Type", "application/javascript; charset=utf-8",
+                )
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header(
+                    "Cache-Control", "public, max-age=31536000, immutable",
+                )
+                for key, value in encoding_headers(bundled_gzip).items():
+                    self.send_header(key, value)
+                self.send_header("Content-Length", str(len(bundle)))
+                self.end_headers()
+                self.wfile.write(bundle)
+                return True
             try:
                 body, content_type = static_file(
                     parsed.path.removeprefix("/research-static/"),
@@ -112,6 +151,11 @@ class CoreGetRoutesMixin:
             except ValueError:
                 self.send_error(404)
                 return True
+            # A cold visit pulls dozens of module files; gzip keeps that burst
+            # affordable on a slow public uplink.
+            body, encoded = encode_body(
+                body, content_type, request_accept_encoding(self),
+            )
             self.send_response(200)
             self.send_header("Content-Type", content_type)
             self.send_header("X-Content-Type-Options", "nosniff")
@@ -127,6 +171,8 @@ class CoreGetRoutesMixin:
                 self.send_header(
                     "Cache-Control", "public, max-age=31536000, immutable",
                 )
+            for key, value in encoding_headers(encoded).items():
+                self.send_header(key, value)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)

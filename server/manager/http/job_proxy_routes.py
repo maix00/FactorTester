@@ -8,6 +8,11 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, unquote, urlencode
 from urllib.request import Request, urlopen
 
+from server.manager.http.content_encoding import (
+    encode_body,
+    encoding_headers,
+    request_accept_encoding,
+)
 from server.manager.domain.federation import (
     ServiceRoute,
     TargetNotFound,
@@ -442,6 +447,12 @@ class JobProxyRoutesMixin:
                 content_type = "application/json; charset=utf-8"
             except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
                 pass
+        # The business service is reached through this bridge; compress here so
+        # a large catalog projection travels once, compressed, over the public
+        # uplink instead of as raw JSON.
+        body, encoded = encode_body(
+            body, content_type, request_accept_encoding(self),
+        )
         self.send_response(response.status)
         self.send_header("Content-Type", content_type)
         if response.content_disposition:
@@ -455,6 +466,8 @@ class JobProxyRoutesMixin:
             self.send_header("X-FactorTester-Service-Server", route.server_id)
             if route.branch:
                 self.send_header("X-FactorTester-Service-Branch", route.branch)
+        for key, value in encoding_headers(encoded).items():
+            self.send_header(key, value)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
