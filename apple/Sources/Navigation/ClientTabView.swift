@@ -52,7 +52,8 @@ struct ClientTabView: View {
                     openReference(reference)
                 },
                 onNavigation: openEmbeddedNavigation,
-                onExternalURL: { open(.externalWeb($0)) }
+                onExternalURL: { open(.externalWeb($0)) },
+                onReportExport: handleReportExport
             )
         case .externalWeb(let url):
             WebPageView(
@@ -133,6 +134,53 @@ struct ClientTabView: View {
                 }
             }
         }
+    }
+
+    /// Export a report requested from the embedded report page.  A report whose
+    /// profile is local (this machine holds its tree) exports through the
+    /// native renderer; otherwise fall back to the manager's Markdown export.
+    private func handleReportExport(_ request: ResearchReportExportMessage.Request) {
+        #if os(macOS)
+        let local = profiles.profiles.contains { $0.id == request.profileID }
+        if local, !request.workPackageID.isEmpty, !request.branchID.isEmpty {
+            Task { @MainActor in
+                do {
+                    try await ResearchReportExportController.export(
+                        format: request.format,
+                        profileID: request.profileID,
+                        workPackageID: request.workPackageID,
+                        branchID: request.branchID,
+                        title: request.title
+                    )
+                    return
+                } catch {
+                    openServerExport(request)
+                }
+            }
+            return
+        }
+        #endif
+        openServerExport(request)
+    }
+
+    /// The manager renders Markdown from the report tree it holds; PDF is not
+    /// available server-side, so a remote PDF relies on the client renderer.
+    private func openServerExport(_ request: ResearchReportExportMessage.Request) {
+        guard let base = ManagerConfig.shared.baseURL,
+              var components = URLComponents(
+                url: base, resolvingAgainstBaseURL: false,
+              ) else { return }
+        components.path = "/api/server-research/\(request.serverRef)/export"
+        components.queryItems = [
+            URLQueryItem(name: "format", value: request.format.rawValue),
+        ]
+        if !request.targetRef.isEmpty {
+            components.queryItems?.append(
+                URLQueryItem(name: "target_ref", value: request.targetRef),
+            )
+        }
+        guard let url = components.url else { return }
+        open(.externalWeb(url))
     }
 
     @ViewBuilder

@@ -20,6 +20,7 @@ private enum RendererError: LocalizedError {
 private struct ReportPDFRenderer {
     private let pageSize = CGSize(width: 595, height: 842)
     private let margin: CGFloat = 54
+    private let bodySize: CGFloat = 12
 
     func render(markdown: String) throws -> Data {
         let value = (try? AttributedString(
@@ -29,11 +30,7 @@ private struct ReportPDFRenderer {
         let attributed = NSMutableAttributedString(
             attributedString: NSAttributedString(value)
         )
-        attributed.addAttribute(
-            .foregroundColor,
-            value: NSColor.textColor,
-            range: NSRange(location: 0, length: attributed.length)
-        )
+        style(attributed, from: value)
         let output = NSMutableData()
         guard let consumer = CGDataConsumer(data: output as CFMutableData) else {
             throw RendererError.pdfContextUnavailable
@@ -49,6 +46,103 @@ private struct ReportPDFRenderer {
         draw(attributed, in: context)
         context.closePDF()
         return output as Data
+    }
+
+    /// Markdown parsing leaves the runs without a font, so CoreText falls back
+    /// to a Latin-only default and CJK text renders as garbage boxes.  Assign
+    /// an explicit font whose cascade covers CJK (the system font), then add
+    /// basic Markdown typography (headings, bold, italic, inline code).
+    private func style(
+        _ attributed: NSMutableAttributedString,
+        from value: AttributedString
+    ) {
+        let characters = value.characters
+        let full = NSRange(location: 0, length: attributed.length)
+        attributed.addAttribute(
+            .font,
+            value: NSFont.systemFont(ofSize: bodySize, weight: .regular),
+            range: full
+        )
+        attributed.addAttribute(
+            .foregroundColor,
+            value: NSColor.textColor,
+            range: full
+        )
+        for run in value.runs {
+            let start = characters.distance(
+                from: characters.startIndex,
+                to: run.range.lowerBound
+            )
+            let length = characters.distance(
+                from: run.range.lowerBound,
+                to: run.range.upperBound
+            )
+            guard length > 0 else { continue }
+            let range = NSRange(location: start, length: length)
+            var size = bodySize
+            var weight: NSFont.Weight = .regular
+            var monospaced = false
+            var italic = false
+            if let intent = run.presentationIntent {
+                for component in intent.components {
+                    switch component.kind {
+                    case .header(let level):
+                        size = Self.headerSize(level)
+                        weight = .bold
+                    case .codeBlock:
+                        monospaced = true
+                    default:
+                        break
+                    }
+                }
+            }
+            if let inline = run.inlinePresentationIntent {
+                if inline.contains(.stronglyEmphasized) { weight = .bold }
+                if inline.contains(.emphasized) { italic = true }
+                if inline.contains(.code) { monospaced = true }
+            }
+            attributed.addAttribute(
+                .font,
+                value: Self.font(
+                    size: size,
+                    weight: weight,
+                    monospaced: monospaced,
+                    italic: italic
+                ),
+                range: range
+            )
+        }
+    }
+
+    private static func headerSize(_ level: Int) -> CGFloat {
+        switch level {
+        case 1: return 24
+        case 2: return 20
+        case 3: return 17
+        case 4: return 15
+        default: return 13
+        }
+    }
+
+    private static func font(
+        size: CGFloat,
+        weight: NSFont.Weight,
+        monospaced: Bool,
+        italic: Bool
+    ) -> NSFont {
+        if monospaced {
+            return NSFont.monospacedSystemFont(ofSize: size, weight: weight)
+        }
+        let font = NSFont.systemFont(ofSize: size, weight: weight)
+        if italic {
+            let descriptor = font.fontDescriptor.withSymbolicTraits(
+                font.fontDescriptor.symbolicTraits.union(.italic)
+            )
+            if let italicFont = NSFont(descriptor: descriptor, size: size) {
+                return italicFont
+            }
+        }
+        return font
     }
 
     private func draw(

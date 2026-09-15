@@ -681,6 +681,7 @@
    "report/chapter-rail.js",
    "report/report-renderer.js",
    "report/source.js",
+   "report/export-action.js",
    "report/report-entry.js"
   ],
   "research-shell": [
@@ -1045,6 +1046,7 @@
   "report/report-renderer.js",
   "report/object-transfer.js",
   "report/source.js",
+  "report/export-action.js",
   "report/report-entry.js",
   "research/run-spec-view.js",
   "research/reference.js",

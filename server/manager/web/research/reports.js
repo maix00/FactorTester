@@ -310,6 +310,9 @@
         () => FTResearchReportSettings.open(context, settingsTarget, rerender),
       ));
     }
+    if (settingsTarget && window.FTReportExport?.menu) {
+      actions.append(window.FTReportExport.menu(context, settingsTarget));
+    }
     if (selected?.access?.can_manage === true && selected?.can_delete === true) {
       actions.append(FTUI.iconButton(
         context, "trash", "删除研究报告", async () => {

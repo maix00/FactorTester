@@ -261,6 +261,115 @@ def test_shared_publication_uses_current_catalog_permissions(tmp_path):
     assert library.index(publication, EDITOR_A)["title"] == "共享报告"
 
 
+def _editor_branch(service, tmp_path):
+    """Publish one editor branch under the owner's research shared with READER."""
+    owner_ws = ensure_server_profile_workspace(
+        tmp_path / "data", OWNER, "profile-owner",
+    )
+    initialize_work_package(
+        workspace_root=owner_ws, work_package_id="report-one",
+        branch_id="main", workspace_id="profile-owner",
+        title="协作报告", branch_ref="graph-branch:report-one:main",
+    )
+    editor_ws = ensure_server_profile_workspace(
+        tmp_path / "data", EDITOR_A, "profile-editor",
+    )
+    editor_pkg = editor_ws / "research" / "report-one"
+    inherit_report_tree_across_packages(
+        source_package_root=owner_ws / "research" / "report-one",
+        target_package_root=editor_pkg,
+        source_branch_id="main",
+        target_branch_id="editor-main",
+        target_report_id="report-one-editor",
+    )
+    add_component(
+        package_root=editor_pkg, branch_id="editor-main",
+        component_id="editor-chapter", kind="chapter", title="编辑章节",
+        parent_id=None, body="正文内容", content=None, display_kind="",
+    )
+    return editor_pkg
+
+
+def test_export_report_renders_markdown_and_refuses_pdf(tmp_path):
+    service = _service(tmp_path)
+    package_root = _editor_branch(service, tmp_path)
+    raw, content_type, filename = service.export_report(
+        EDITOR_A, "profile-editor:report-one:editor-main",
+    )
+    assert content_type == "text/markdown; charset=utf-8"
+    assert filename.endswith(".md"), filename
+    # The title is sanitized into a filesystem-safe name.
+    assert not (set(filename) & set("/\\:"))
+    assert "编辑章节" in raw.decode("utf-8")
+    assert "正文内容" in raw.decode("utf-8")
+    assert package_root.is_dir()
+    with pytest.raises(NotImplementedError, match="客户端"):
+        service.export_report(
+            EDITOR_A, "profile-editor:report-one:editor-main", "pdf",
+        )
+
+
+def test_export_report_authorizes_cross_profile_reader(tmp_path):
+    service = _service(tmp_path)
+    _editor_branch(service, tmp_path)
+    raw, _, _ = service.export_report(
+        READER, "profile-editor:report-one:editor-main", target_ref=EDITOR_A,
+    )
+    assert "编辑章节" in raw.decode("utf-8")
+    with pytest.raises(PermissionError, match="not authorized"):
+        service.export_report(
+            "GTHT@stranger@4",
+            "profile-editor:report-one:editor-main",
+            target_ref=EDITOR_A,
+        )
+
+
+def test_export_route_streams_attachment_and_maps_errors():
+    from io import BytesIO
+    from types import SimpleNamespace
+    from urllib.parse import urlparse
+    from server.manager.http.server_research_routes import ServerResearchRoutesMixin
+    seen = []
+    class Handler(ServerResearchRoutesMixin):
+        def _session(self): return {"username": READER}
+        def send_response(self, status): self.status = status
+        def send_header(self, *args):
+            self.headers = getattr(self, "headers", [])
+            self.headers.append(args)
+        def end_headers(self): pass
+    handler = Handler()
+    handler.wfile = BytesIO()
+
+    def export(principal, server_ref, output_format, **kwargs):
+        seen.append((principal, server_ref, output_format, kwargs))
+        return "# 报告".encode("utf-8"), "text/markdown; charset=utf-8", "报告.md"
+
+    handler.state = SimpleNamespace(server_research=SimpleNamespace(export_report=export))
+    assert handler._get_server_research_routes(urlparse(
+        "/api/server-research/profile-editor:report-one:editor-main/export"
+        "?format=md&target_ref=GTHT%40editorA%402"
+    ))
+    assert handler.status == 200
+    assert seen[0][2] == "md"
+    assert seen[0][3] == {"target_ref": "GTHT@editorA@2"}
+    assert handler.wfile.getvalue() == "# 报告".encode("utf-8")
+    headers = dict(handler.headers)
+    disposition = headers["Content-Disposition"]
+    assert disposition.startswith("attachment; ")
+    assert 'filename="__.md"' in disposition
+    assert "filename*=UTF-8''%E6%8A%A5%E5%91%8A.md" in disposition
+
+    def refuse(*args, **kwargs):
+        raise NotImplementedError("服务端仅支持导出 Markdown；PDF 请在客户端导出")
+
+    handler.status = None
+    handler.state = SimpleNamespace(server_research=SimpleNamespace(export_report=refuse))
+    handler._get_server_research_routes(urlparse(
+        "/api/server-research/profile-editor:report-one:editor-main/export?format=pdf"
+    ))
+    assert handler.status == 501
+
+
 def test_data_plane_research_asset_reuses_catalog_without_control_database(tmp_path, png_bytes):
     import base64
     import hashlib
