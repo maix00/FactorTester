@@ -20,6 +20,12 @@
       return {channel: "server", ref: explicit.slice("server:".length)};
     }
     if (explicit) {
+      // A published projection keeps its own key even when that key happens to
+      // look like a tree reference.
+      const kind = String(
+        target?.source_kind || target?.selected_branch?.source_kind || "",
+      ).trim();
+      if (kind === "publication") return {channel: "public", ref: explicit};
       // A tree reference is profile:package:branch; anything else is already
       // the canonical publication key.
       return explicit.includes(":")
