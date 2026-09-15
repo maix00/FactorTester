@@ -130,8 +130,15 @@
   }
 
   function activeNav(route) {
+    const value = String(route || "");
+    // Record the feature entry the page chose for this tab.  The tab view
+    // cache stores this value with the tab, so a tab always restores the entry
+    // that belongs to its own route instead of whatever was highlighted when
+    // the view happened to be saved.
+    const session = tabs?.tabSession?.(state.activeTabID);
+    if (session) session.navRoute = value;
     document.querySelectorAll(".nav-button").forEach(item => {
-      item.classList.toggle("active", item.dataset.route === route);
+      item.classList.toggle("active", item.dataset.route === value);
     });
   }
 
