@@ -314,8 +314,10 @@
       // Export the same source the reader opened.  The raw branch key is not
       // the addressable channel (a local/client branch key still needs its
       // channel prefix, and a publication is addressed by its own key).
+      // The download keeps the report's own title, not the branch label.
       actions.append(window.FTReportExport.menu(context, {
         ...settingsTarget,
+        title: String(selected?.title || settingsTarget.title || ""),
         publication_id: publicationID(settingsTarget)
           || String(settingsTarget.publication_id || ""),
         owner_ref: settingsTarget.owner_ref || settingsTarget.principal_ref || "",

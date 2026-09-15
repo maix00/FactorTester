@@ -36,3 +36,6 @@ def test_report_tab_exports_the_source_the_reader_opened():
     # same channel instead of the raw branch key.
     assert "const id = publicationID(item);" in reports
     assert "publication_id: publicationID(settingsTarget)" in reports
+    # The download is named after the report, not the branch label.
+    assert "title: String(selected?.title || settingsTarget.title" in reports
+
