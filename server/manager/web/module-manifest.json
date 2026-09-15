@@ -121,10 +121,14 @@
   "report-settings": [
    "core"
   ],
+  "report-export": [
+   "core"
+  ],
   "report": [
    "code-viewer",
    "object-transfer",
-   "report-settings"
+   "report-settings",
+   "report-export"
   ],
   "research-shell": [
    "core"
@@ -143,7 +147,8 @@
   "research-reports": [
    "core",
    "research-visibility",
-   "report-settings"
+   "report-settings",
+   "report-export"
   ],
   "research-local": [
    "core"
@@ -670,6 +675,9 @@
   "object-transfer": [
    "report/object-transfer.js"
   ],
+  "report-export": [
+   "report/export-action.js"
+  ],
   "report": [
    "report/rich-text.js",
    "report/rich-text-blocks.js",
@@ -681,7 +689,6 @@
    "report/chapter-rail.js",
    "report/report-renderer.js",
    "report/source.js",
-   "report/export-action.js",
    "report/report-entry.js"
   ],
   "research-shell": [
