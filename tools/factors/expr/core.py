@@ -410,7 +410,13 @@ class FactorExpr:
                 sym = f"{base}_{i}"
                 i += 1
             used.add(sym)
-            latex_sym = f"\\mathrm{{{sym}}}"
+            # A non-ASCII name (families name their intermediates in Chinese)
+            # is text, not a math identifier: \\mathrm leaves CJK inside math
+            # mode, which KaTeX reports as LaTeX-incompatible and then renders
+            # as raw source.
+            latex_sym = (
+                f"\\text{{{sym}}}" if not sym.isascii() else f"\\mathrm{{{sym}}}"
+            )
             lines.append(f"{latex_sym}_t &:= {node._to_latex(subst=sk_to_sym)},")
             sk_to_sym[node._structural_key()] = latex_sym
 
