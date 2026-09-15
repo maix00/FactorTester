@@ -203,13 +203,24 @@ class ServerResearchService:
                 "服务端仅支持导出 Markdown；PDF 请在客户端导出",
             )
         location = self._read_location(principal, target_ref or principal, server_ref)
-        from server.manager.services.research_export import markdown_export
+        from server.manager.services.research_export import (
+            document_identity,
+            markdown_export,
+        )
 
         snapshot = self._snapshot(location)
         head = snapshot.setdefault("head", {})
         if not head.get("title"):
             head["title"] = location.get("package_id") or "report"
-        return markdown_export(snapshot, output_format)
+        identity = document_identity(
+            branch=str(location.get("branch_id") or ""),
+            owner=str(location.get("owner") or ""),
+            profile=str(location.get("profile_id") or ""),
+            generation=head.get("generation") or 0,
+            projection_hash=str(snapshot.get("projection_hash") or ""),
+            report_id=str(head.get("report_id") or ""),
+        )
+        return markdown_export(snapshot, output_format, identity=identity)
 
     def projection(self, principal: str, server_ref: str, *, target_ref: str | None = None) -> dict[str, Any]:
         location = self._read_location(principal, target_ref or principal, server_ref)

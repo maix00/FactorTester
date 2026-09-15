@@ -8,6 +8,7 @@ from typing import Any
 
 def render_report_markdown(
     document: dict[str, Any], *, image_prefix: str = "../../",
+    front_matter: list[str] | None = None,
 ) -> bytes:
     """Render a report document as Markdown.
 
@@ -15,6 +16,9 @@ def render_report_markdown(
     publication projections the manager already serves expose ``title`` and
     ``assets`` beside ``components`` instead.  Both describe the same tree, so
     one renderer serves the server tree, a client copy and a publication.
+
+    ``front_matter`` lines (the branch/author/version block of a download) are
+    written directly below the report title.
     """
     if "head" not in document:
         document = {
@@ -25,11 +29,14 @@ def render_report_markdown(
             },
             "components": list(document.get("components") or []),
         }
-    return render_tree_markdown(document, image_prefix=image_prefix)
+    return render_tree_markdown(
+        document, image_prefix=image_prefix, front_matter=front_matter,
+    )
 
 
 def render_tree_markdown(
     snapshot: dict[str, Any], *, image_prefix: str = "../../",
+    front_matter: list[str] | None = None,
 ) -> bytes:
     components = list(snapshot.get("components") or [])
     by_parent: dict[str | None, list[dict[str, Any]]] = {}
@@ -41,6 +48,8 @@ def render_tree_markdown(
         for item in head.get("assets") or [] if item.get("asset_ref")
     }
     lines = [f"# {head.get('title') or ''}", ""]
+    for line in front_matter or []:
+        lines.extend([line, ""])
     _render_children(lines, by_parent, assets, None, 0, image_prefix)
     return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
 
