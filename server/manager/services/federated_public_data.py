@@ -261,6 +261,29 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
         )
         return [dict(item) for item in self._store(key, result)]
 
+    def publication_metadata(
+        self, publication_id: str, viewer_ref: str | None = None,
+    ) -> dict[str, Any]:
+        """Return one publication's branch identity, local or federated.
+
+        A publication may live on a peer Manager, so its identity comes from
+        the same merged reader list the Web already uses; a local registry
+        record is preferred when this Manager holds the publication itself.
+        """
+        key = str(publication_id or "").strip()
+        if not key:
+            return {}
+        try:
+            value = self.public_research.publication_metadata(key, viewer_ref)
+        except (KeyError, OSError, RuntimeError, ValueError):
+            value = None
+        if isinstance(value, dict) and value.get("publication_id"):
+            return value
+        for item in self.list_visible(viewer_ref):
+            if str(item.get("publication_id") or "") == key:
+                return dict(item)
+        return {}
+
     def _publication_route(
         self, publication_id: str, viewer_ref: str | None,
     ) -> ServiceRoute | None:

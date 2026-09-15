@@ -207,7 +207,7 @@ def test_publication_identity_prefers_the_branch_registration():
             "profile_ref": "maxb", "revision": "rev-7", "report_id": "report:v1:O",
         }
 
-    def publication_metadata(_publication_id):
+    def publication_metadata(_publication_id, _viewer=None):
         # The publication record alone names the publisher, not the writer.
         return {
             "owner_ref": "GTHT@other@9", "profile_ref": "other",
@@ -230,7 +230,7 @@ def test_publication_identity_prefers_the_branch_registration():
 
 def test_publication_identity_falls_back_to_the_record():
     identity = _publication_identity(
-        SimpleNamespace(publication_metadata=lambda _id: {
+        SimpleNamespace(publication_metadata=lambda _id, _viewer=None: {
             "owner_ref": "GTHT@owner@1", "profile_ref": "maxb", "branch_ref": "main",
         }),
         "pub-2",
