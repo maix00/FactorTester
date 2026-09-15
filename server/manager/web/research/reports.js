@@ -311,7 +311,15 @@
       ));
     }
     if (settingsTarget && window.FTReportExport?.menu) {
-      actions.append(window.FTReportExport.menu(context, settingsTarget));
+      // Export the same source the reader opened.  The raw branch key is not
+      // the addressable channel (a local/client branch key still needs its
+      // channel prefix, and a publication is addressed by its own key).
+      actions.append(window.FTReportExport.menu(context, {
+        ...settingsTarget,
+        publication_id: publicationID(settingsTarget)
+          || String(settingsTarget.publication_id || ""),
+        owner_ref: settingsTarget.owner_ref || settingsTarget.principal_ref || "",
+      }));
     }
     if (selected?.access?.can_manage === true && selected?.can_delete === true) {
       actions.append(FTUI.iconButton(

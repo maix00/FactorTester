@@ -143,7 +143,17 @@ const choiceNamed = (root, label) =>
     '/api/client/research/report-1%3Amain/export?format=md',
   ]);
 
-  // 5) Embedded in Swift: hand the request to the native export instead.
+  // 5) A publication whose key looks like a tree reference stays a publication.
+  fetched.length = 0;
+  await window.FTReportExport.run(context, {
+    publication_id: 'report:v1:OW3AVzDRiOZFk11OXY8I56HG',
+    source_kind: 'publication',
+  }, 'md');
+  assert.deepEqual(fetched, [
+    '/api/public-research/report%3Av1%3AOW3AVzDRiOZFk11OXY8I56HG/export?format=md',
+  ]);
+
+  // 6) Embedded in Swift: hand the request to the native export instead.
   fetched.length = 0;
   bridge = {
     messageHandlers: {
@@ -171,7 +181,7 @@ const choiceNamed = (root, label) =>
   }]);
   assert.deepEqual(fetched, []);
 
-  // 6) The menu routes its choices through the same run().
+  // 7) The menu routes its choices through the same run().
   const embedded = window.FTReportExport.menu(context, {
     publication_id: 'server:profile-one:report-one:main',
     profile_ref: 'profile-one',
@@ -181,7 +191,7 @@ const choiceNamed = (root, label) =>
   assert.equal(bridgePayloads.length, 2);
   assert.equal(bridgePayloads[1].format, 'pdf');
 
-  // 7) Without a usable address the reader is told, not silently ignored.
+  // 8) Without a usable address the reader is told, not silently ignored.
   bridge = null;
   await window.FTReportExport.run(context, { title: '孤儿' }, 'md');
   assert.equal(notices.length, 1);
@@ -189,3 +199,4 @@ const choiceNamed = (root, label) =>
 
   console.log('REPORT EXPORT: md/pdf, three channels, bridge PASSED');
 })();
+
