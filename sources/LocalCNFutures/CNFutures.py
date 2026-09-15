@@ -18,6 +18,21 @@ from sources.LocalCNFutures.contract_files import (
 )
 
 _data = load_product_catalog(sync=False)
+
+
+def _trading_day(value: Any) -> pd.Timestamp:
+    """Coerce one request bound to a naive, normalized trading day.
+
+    The engine hands a source its own time value (``tools.data.types.DataTime``,
+    which carries a pandas timestamp in ``.ts``).  Accepting that, a plain
+    timestamp and a date string keeps a data bound independent of which layer
+    produced it, instead of failing deep inside the pandas constructor.
+    """
+    moment = getattr(value, "ts", value)
+    day = pd.Timestamp(moment).normalize()
+    return day.tz_localize(None) if day.tz is not None else day
+
+
 data_dir_min = os.path.join(SOURCE_DATA_DIR, 'main_mink')
 data_path_day = os.path.join(SOURCE_DATA_DIR, 'main_series_adjusted.parquet')
 data_dir_day = os.path.join(SOURCE_DATA_DIR, 'main_dayk')
@@ -228,15 +243,11 @@ class _CNFuturesContractTermStructureView(ProductDataView):
             return pd.DataFrame(columns=cols)
         days = pd.to_datetime(df[TERM_TRADING_DAY_COL]).dt.normalize()
         if start_dt is not None:
-            start_day = pd.Timestamp(start_dt).normalize()
-            if start_day.tz is not None:
-                start_day = start_day.tz_localize(None)
+            start_day = _trading_day(start_dt)
             df = df.loc[days >= start_day]
             days = days.loc[df.index]
         if end_dt is not None:
-            end_day = pd.Timestamp(end_dt).normalize()
-            if end_day.tz is not None:
-                end_day = end_day.tz_localize(None)
+            end_day = _trading_day(end_dt)
             df = df.loc[days <= end_day]
             days = days.loc[df.index]
         result = df[[column for column in cols if column in df.columns]].copy() if copy else df[
