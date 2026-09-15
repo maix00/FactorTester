@@ -4,28 +4,71 @@
     ["pdf", "导出 PDF"],
   ];
 
-  function serverRef(target) {
-    const explicit = String(target?.server_ref || "").trim();
-    if (explicit) return explicit;
+  // A report is addressed by the same three channels the reader already uses:
+  // a server-held tree (``server:``), the client's own copy (``local:``) and a
+  // published projection (a bare publication id).  The report tab and the
+  // dedicated report page both hand over that publication id, so one address
+  // builder serves every page and channel.
+  function address(target) {
+    const explicit = String(
+      target?.publication_id || target?.source_ref || "",
+    ).trim();
+    if (explicit.startsWith("local:")) {
+      return {channel: "client", ref: explicit.slice("local:".length)};
+    }
+    if (explicit.startsWith("server:")) {
+      return {channel: "server", ref: explicit.slice("server:".length)};
+    }
+    if (explicit) {
+      // A tree reference is profile:package:branch; anything else is already
+      // the canonical publication key.
+      return explicit.includes(":")
+        ? {channel: "server", ref: explicit}
+        : {channel: "public", ref: explicit};
+    }
     const parts = [
       target?.profile_ref || target?.profile_id || "",
       target?.work_package_id || "",
       target?.branch_id || "",
     ].map(value => String(value || "").trim());
-    return parts.every(Boolean) ? parts.join(":") : "";
+    return parts.every(Boolean)
+      ? {channel: "server", ref: parts.join(":")} : null;
   }
 
-  function targetOwner(target) {
-    return String(target?.owner_ref || target?.target_ref || "").trim();
+  function channelPath(channel, ref) {
+    const encoded = encodeURIComponent(ref);
+    if (channel === "client") return `/api/client/research/${encoded}`;
+    if (channel === "server") return `/api/server-research/${encoded}`;
+    return `/api/public-research/${encoded}`;
+  }
+
+  function ownerRef(target) {
+    return String(target?.owner_ref || "").trim();
   }
 
   function exportURL(target, format) {
-    const ref = serverRef(target);
-    if (!ref) return "";
-    const owner = targetOwner(target);
-    return `/api/server-research/${encodeURIComponent(ref)}`
-      + `/export?format=${encodeURIComponent(format)}`
-      + (owner ? `&target_ref=${encodeURIComponent(owner)}` : "");
+    const resolved = address(target);
+    if (!resolved) return "";
+    const query = [`format=${encodeURIComponent(format)}`];
+    // Only a server tree can belong to another profile and needs the reader's
+    // authorization; a local copy and a publication are read as-is.
+    if (resolved.channel === "server" && ownerRef(target)) {
+      query.push(`target_ref=${encodeURIComponent(ownerRef(target))}`);
+    }
+    return `${channelPath(resolved.channel, resolved.ref)}/export?${query.join("&")}`;
+  }
+
+  function bridgePayload(target, format) {
+    return {
+      publication_id: String(target?.publication_id || "").trim(),
+      profile_ref: String(target?.profile_ref || target?.profile_id || "").trim(),
+      work_package_id: String(target?.work_package_id || "").trim(),
+      branch_id: String(target?.branch_id || "").trim(),
+      owner_ref: ownerRef(target),
+      // The client names the format as the CLI does.
+      format: format === "md" ? "markdown" : String(format || ""),
+      title: String(target?.title || ""),
+    };
   }
 
   function safeName(title) {
@@ -34,24 +77,18 @@
   }
 
   async function run(context, target, format) {
-    // Embedded in the Swift client: the native export owns the authoritative
-    // tree and the PDF renderer, so hand the request over.  For a report the
-    // client cannot export locally the native handler falls back to the
-    // server export below.
+    // Embedded in the Swift client: the native export owns the local tree and
+    // the PDF renderer, so hand the request over.  For a report the client
+    // cannot export locally the native handler falls back to the manager
+    // export below.
     const bridge = window.webkit?.messageHandlers?.researchReportExport;
     if (bridge && typeof bridge.postMessage === "function") {
-      bridge.postMessage({
-        publication_id: String(target?.publication_id || ""),
-        server_ref: serverRef(target),
-        target_ref: targetOwner(target),
-        format: String(format || "md"),
-        title: String(target?.title || ""),
-      });
+      bridge.postMessage(bridgePayload(target, format));
       return;
     }
     const url = exportURL(target, format);
     if (!url) {
-      context.showNotice?.(context.t("该报告不在此服务器，无法导出"), true);
+      context.showNotice?.(context.t("无法识别该报告的来源，不能导出"), true);
       return;
     }
     try {

@@ -1,6 +1,7 @@
-// The report download icon offers .md/.pdf.  Embedded in the Swift client the
-// request is handed to the native export (which owns the PDF renderer and the
-// local tree); on the Web it falls back to the manager export endpoint.
+// The report download icon offers .md/.pdf, and every channel the reader
+// already addresses (server tree, client copy, publication) exports through
+// the manager.  Embedded in the Swift client the request goes to the native
+// export instead, which owns the PDF renderer and the local tree.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
@@ -96,37 +97,53 @@ const choiceNamed = (root, label) =>
   find(root, e => e.tag === 'button' && e.attributes['aria-label'] === label)[0]
   || find(root, e => e.tag === 'button' && e.textContent === label)[0];
 
-const target = {
-  publication_id: 'publication:one',
-  server_ref: 'profile-one:report-one:main',
-  owner_ref: 'GTHT@owner@1',
-  title: '研究/报告:一',
-};
-
 (async () => {
   // 1) The download icon reveals both formats.
-  const menu = window.FTReportExport.menu(context, target);
+  const menu = window.FTReportExport.menu(context, {publication_id: 'publication-one'});
   assert.equal(menu.className, 'report-export-menu');
   const trigger = find(menu, e => e.tag === 'button')[0];
   assert.equal(trigger.attributes['aria-label'], '导出报告');
   const choices = find(menu, e => e.className === 'report-export-choices')[0];
   assert.equal(choices.hidden, true);
-  const labels = choices.children.map(item => item.textContent);
-  assert.deepEqual(labels, ['导出 Markdown', '导出 PDF']);
+  assert.deepEqual(
+    choices.children.map(item => item.textContent),
+    ['导出 Markdown', '导出 PDF'],
+  );
   trigger.click();
   assert.equal(choices.hidden, false);
 
-  // 2) Plain Web: the manager renders Markdown for the viewer.
-  assert.equal(fetched.length, 0);
-  await window.FTReportExport.run(context, target, 'md');
+  // 2) A published report (a bare publication id) exports from the manager.
+  await window.FTReportExport.run(context, {
+    publication_id: 'nEP71a7rs-HdhCkl1QTS60r3', title: '固收基金久期研究',
+  }, 'md');
   assert.deepEqual(fetched, [
-    '/api/server-research/profile-one%3Areport-one%3Amain'
-    + '/export?format=md&target_ref=GTHT%40owner%401',
+    '/api/public-research/nEP71a7rs-HdhCkl1QTS60r3/export?format=md',
   ]);
   assert.equal(downloads.length, 1);
   assert.equal(notices.length, 0);
 
-  // 3) Embedded in Swift: hand the request to the native export instead.
+  // 3) A server tree carries its owner so a reader is authorized.
+  fetched.length = 0;
+  await window.FTReportExport.run(context, {
+    publication_id: 'server:profile-one:report-one:main',
+    owner_ref: 'GTHT@owner@1',
+    title: '研究/报告:一',
+  }, 'md');
+  assert.deepEqual(fetched, [
+    '/api/server-research/profile-one%3Areport-one%3Amain'
+    + '/export?format=md&target_ref=GTHT%40owner%401',
+  ]);
+
+  // 4) The client's own copy goes to the client channel, no target_ref needed.
+  fetched.length = 0;
+  await window.FTReportExport.run(context, {
+    publication_id: 'local:report-1:main', owner_ref: 'GTHT@owner@1',
+  }, 'md');
+  assert.deepEqual(fetched, [
+    '/api/client/research/report-1%3Amain/export?format=md',
+  ]);
+
+  // 5) Embedded in Swift: hand the request to the native export instead.
   fetched.length = 0;
   bridge = {
     messageHandlers: {
@@ -135,28 +152,40 @@ const target = {
       },
     },
   };
-  await window.FTReportExport.run(context, target, 'pdf');
+  await window.FTReportExport.run(context, {
+    publication_id: 'server:profile-one:report-one:main',
+    profile_ref: 'profile-one',
+    work_package_id: 'report-one',
+    branch_id: 'main',
+    owner_ref: 'GTHT@owner@1',
+    title: '研究/报告:一',
+  }, 'md');
   assert.deepEqual(bridgePayloads, [{
-    publication_id: 'publication:one',
-    server_ref: 'profile-one:report-one:main',
-    target_ref: 'GTHT@owner@1',
-    format: 'pdf',
+    publication_id: 'server:profile-one:report-one:main',
+    profile_ref: 'profile-one',
+    work_package_id: 'report-one',
+    branch_id: 'main',
+    owner_ref: 'GTHT@owner@1',
+    format: 'markdown',
     title: '研究/报告:一',
   }]);
   assert.deepEqual(fetched, []);
 
-  // 4) The menu routes its choices through the same run().
-  const embedded = window.FTReportExport.menu(context, target);
+  // 6) The menu routes its choices through the same run().
+  const embedded = window.FTReportExport.menu(context, {
+    publication_id: 'server:profile-one:report-one:main',
+    profile_ref: 'profile-one',
+  });
   choiceNamed(embedded, '导出 PDF').click();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(bridgePayloads.length, 2);
   assert.equal(bridgePayloads[1].format, 'pdf');
 
-  // 5) Without a usable reference the reader is told, not silently ignored.
+  // 7) Without a usable address the reader is told, not silently ignored.
   bridge = null;
   await window.FTReportExport.run(context, { title: '孤儿' }, 'md');
   assert.equal(notices.length, 1);
   assert.equal(notices[0][1], true);
 
-  console.log('REPORT EXPORT MENU: md/pdf, bridge, server fallback PASSED');
+  console.log('REPORT EXPORT: md/pdf, three channels, bridge PASSED');
 })();

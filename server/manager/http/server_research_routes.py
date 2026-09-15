@@ -5,9 +5,9 @@ from __future__ import annotations
 import re
 import sqlite3
 from pathlib import Path
-from urllib.parse import parse_qs, quote, unquote
+from urllib.parse import parse_qs, unquote
 
-from server.manager.http.responses import json_response
+from server.manager.http.responses import download_response, json_response
 
 
 class ServerResearchRoutesMixin:
@@ -198,23 +198,9 @@ class ServerResearchRoutesMixin:
         *,
         disposition: str,
     ) -> None:
-        safe_filename = re.sub(
-            r"[^A-Za-z0-9._-]", "_", Path(filename).name,
-        ) or "research-object"
-        # Keep the ASCII fallback for old clients, and add the UTF-8 form so a
-        # Chinese report title downloads under its real name (RFC 5987).
-        disposition_header = f'{disposition}; filename="{safe_filename}"'
-        if safe_filename != Path(filename).name:
-            disposition_header += (
-                f"; filename*=UTF-8''{quote(Path(filename).name, safe='')}"
-            )
-        self.send_response(200)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Disposition", disposition_header)
-        self.send_header("Cache-Control", "private, no-cache")
-        self.send_header("Content-Length", str(len(raw)))
-        self.end_headers()
-        self.wfile.write(raw)
+        download_response(
+            self, raw, content_type, filename, disposition=disposition,
+        )
 
 
 __all__ = ["ServerResearchRoutesMixin"]
