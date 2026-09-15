@@ -28,6 +28,35 @@
     const reading = session.durable.reportReadingByBranch[publicationID];
     session.durable.reportReading = reading;
     reading.disclosures ||= {};
+    // Reader state — which sections the reader expanded, and the chapter — is
+    // persisted per publication and applied synchronously below, so a refresh
+    // restores the same expansion level before the first paint.  The tab
+    // session checkpoint alone is not authoritative (it may be missing on
+    // reload), so a durable store keeps the level across a refresh.
+    const durableReadingKey = `ft-report-reading:${encodeURIComponent(publicationID)}`;
+    const readDurableReading = () => {
+      try {
+        const raw = localStorage.getItem(durableReadingKey);
+        return raw ? JSON.parse(raw) : null;
+      } catch (_) { return null; }
+    };
+    const persistReading = () => {
+      try {
+        localStorage.setItem(durableReadingKey, JSON.stringify({
+          disclosures: reading.disclosures,
+          selected_chapter_id: reading.selectedChapterID || "",
+        }));
+      } catch (_) {}
+    };
+    if (Object.keys(reading.disclosures).length === 0) {
+      const durable = readDurableReading();
+      if (durable?.disclosures && typeof durable.disclosures === "object") {
+        reading.disclosures = durable.disclosures;
+      }
+      if (!reading.selectedChapterID && durable?.selected_chapter_id) {
+        reading.selectedChapterID = durable.selected_chapter_id;
+      }
+    }
     context.pageState?.register?.("research-report", {
       capture: () => ({
         selected_chapter_id: reading.selectedChapterID || "",
@@ -35,7 +64,10 @@
       }),
       restore: value => {
         reading.selectedChapterID = value?.selected_chapter_id || reading.selectedChapterID || "";
-        reading.disclosures = value?.disclosures || reading.disclosures;
+        // Mutate in place: the renderer captured this object's reference.
+        if (value?.disclosures && typeof value.disclosures === "object") {
+          Object.assign(reading.disclosures, value.disclosures);
+        }
       },
       describe: () => ({
         page: "research-report",
@@ -236,10 +268,14 @@
       captureScrollPosition: context.captureScrollPosition,
       restoreScrollY: refreshScrollY ?? restoreScrollY,
       selectedChapterID: reading.selectedChapterID || "",
-      setSelectedChapter: chapterID => { reading.selectedChapterID = chapterID; },
+      setSelectedChapter: chapterID => {
+        reading.selectedChapterID = chapterID;
+        persistReading();
+      },
       disclosureState: reading.disclosures,
       setDisclosureState: (componentID, open) => {
         reading.disclosures[componentID] = Boolean(open);
+        persistReading();
       },
       onInitialChapterReady: () => {
         // Restore the reader's position only once the first chapter's content
