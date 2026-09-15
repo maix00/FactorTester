@@ -1,6 +1,7 @@
 {
  "schema_version": 1,
  "entry": "research.html",
+ "group_bundles": true,
  "architecture": {
   "module_boundary_policy": "semantic",
   "route_load_policy": {

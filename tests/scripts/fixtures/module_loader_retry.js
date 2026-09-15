@@ -17,9 +17,14 @@ global.document = {
     },
   },
 };
+// This fixture keeps the per-file path (a container without group bundles,
+// also the loader's fallback) so the retry contract is unchanged there; the
+// bundle-first path and its fallback are covered by tests/js/
+// test_module_bundle_loader.js.
 global.fetch = async () => ({
   ok: true,
   json: async () => ({
+    group_bundles: false,
     group_dependencies: {},
     group_external_scripts: {},
     groups: {editor: ["catalog/factor-object-form.js"]},
