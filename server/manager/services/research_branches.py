@@ -139,3 +139,22 @@ class ResearchBranchesMixin:
                                 (report_id,)).fetchall()
         return [{**dict(row), 'branch_ref': row['branch_id'], 'source_kind': 'publication',
                  'source_ref': row['publication_id'], 'selected': False} for row in rows]
+
+    def report_branch_identity(self, publication_id: str) -> dict:
+        """Return the branch one publication belongs to.
+
+        The publication store holds the report bytes; the catalog knows which
+        branch produced that publication, who wrote the branch and at which
+        revision.  A publication key without a registration is reported as
+        unknown instead of inventing an author.
+        """
+        key = str(publication_id or '').strip()
+        if not key:
+            return {}
+        with connect_sqlite(self.db_path, readonly=True) as conn:
+            row = conn.execute(
+                "SELECT * FROM research_catalog_branches WHERE publication_id=?"
+                " AND status='active' ORDER BY created_at LIMIT 1",
+                (key,),
+            ).fetchone()
+        return dict(row) if row else {}

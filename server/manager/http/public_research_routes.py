@@ -17,13 +17,26 @@ from server.manager.services.research_export import (
 
 
 def _publication_identity(
-    research: Any, publication_id: str, projection: dict[str, Any],
+    research: Any,
+    publication_id: str,
+    projection: dict[str, Any],
+    catalog: Any = None,
 ) -> dict[str, Any]:
     """Read the branch identity of the publication being exported.
 
-    The projection describes the report; the publication record says which
-    branch it is and who wrote it.
+    The projection describes the report; the catalog registration of the
+    branch says who wrote that branch, and the publication record supplies
+    whatever the registration does not know.
     """
+    registered: dict[str, Any] = {}
+    reader = getattr(catalog, "report_branch_identity", None)
+    if callable(reader):
+        try:
+            value = reader(publication_id)
+        except (AttributeError, KeyError, OSError, RuntimeError, ValueError):
+            value = None
+        if isinstance(value, dict):
+            registered = value
     metadata: dict[str, Any] = {}
     reader = getattr(research, "publication_metadata", None)
     if callable(reader):
@@ -34,15 +47,28 @@ def _publication_identity(
         if isinstance(value, dict):
             metadata = value
     return document_identity(
-        branch=str(metadata.get("branch_ref") or ""),
-        owner=str(metadata.get("owner_ref") or ""),
-        profile=str(metadata.get("profile_ref") or ""),
+        branch=str(
+            registered.get("branch_id") or metadata.get("branch_ref") or ""
+        ),
+        owner=str(
+            registered.get("principal_ref")
+            or registered.get("owner_ref")
+            or metadata.get("owner_ref") or ""
+        ),
+        profile=str(
+            registered.get("profile_ref") or metadata.get("profile_ref") or ""
+        ),
         generation=projection.get("generation") or metadata.get("generation") or 0,
+        revision=str(registered.get("revision") or ""),
         projection_hash=str(
             projection.get("projection_hash")
             or metadata.get("projection_hash") or ""
         ),
-        report_id=str(projection.get("report_id") or metadata.get("report_id") or ""),
+        report_id=str(
+            registered.get("report_id")
+            or projection.get("report_id")
+            or metadata.get("report_id") or ""
+        ),
     )
 
 
@@ -185,6 +211,7 @@ class PublicResearchRoutesMixin:
                     parse_qs(parsed.query).get("format", ["md"])[0] or "md",
                     identity=_publication_identity(
                         research, public_export_match.group(1), value,
+                        getattr(self.state, "research_catalog", None),
                     ),
                 )
             except PermissionError as exc:

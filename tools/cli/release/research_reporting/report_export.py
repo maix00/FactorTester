@@ -41,6 +41,7 @@ def document_identity(
     owner: str = "",
     profile: str = "",
     generation: Any = 0,
+    revision: str = "",
     projection_hash: str = "",
     report_id: str = "",
     exported_at: str = "",
@@ -51,6 +52,7 @@ def document_identity(
         "owner": str(owner or "").strip(),
         "profile": str(profile or "").strip(),
         "generation": int(generation or 0),
+        "revision": str(revision or "").strip(),
         "projection_hash": str(projection_hash or "").strip(),
         "report_id": str(report_id or "").strip(),
         "exported_at": exported_at or export_timestamp(),
@@ -78,6 +80,8 @@ def front_matter(identity: dict[str, Any] | None) -> list[str]:
     versions: list[str] = []
     if int(value.get("generation") or 0) > 0:
         versions.append(f"报告版本 {int(value['generation'])}")
+    if value.get("revision"):
+        versions.append(f"分支版本 {value['revision']}")
     digest = str(value.get("projection_hash") or "").strip()
     if digest:
         versions.append(f"内容指纹 {digest[:12]}")
