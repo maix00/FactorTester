@@ -58,6 +58,22 @@ class FactorLibraryClientMixin(ClientMixinBase):
             self.session.get("/api/factor-library/families", query=query)
         )
 
+    def delete_factor_family(self, kind: str, alias: str) -> dict[str, Any]:
+        """Remove one family from the user library or the public library.
+
+        ``custom`` covers the account's own families; ``public`` covers the
+        shared ones and needs the super-admin right the Manager enforces.
+        """
+        library_kind = str(kind or "").strip().lower()
+        if library_kind not in {"custom", "public"}:
+            raise ValueError("factor family kind must be custom or public")
+        name = str(alias or "").strip()
+        if not name:
+            raise ValueError("factor family alias is required")
+        return self._expect_success(self.session.delete(
+            f"/api/factor-library/families/{library_kind}/{quote(name, safe='')}",
+        ))
+
     def validate_factor_expr(
         self,
         payload: dict[str, Any],
