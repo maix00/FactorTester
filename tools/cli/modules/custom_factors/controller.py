@@ -163,6 +163,21 @@ def describe_factor(
     _print_factor_description(payload, include_source=source_code, include_debug_graph=debug_graph)
 
 
+@factor_library.command("family-delete")
+@click.option(
+    "--kind", type=click.Choice(("custom", "public")), default="custom",
+    show_default=True,
+    help="custom = 用户因子库；public = 公共因子家族（需要超级管理员）。",
+)
+@click.argument("alias")
+@friendly_errors
+def factor_family_delete(kind: str, alias: str) -> None:
+    """从因子库移除一个因子家族（工作区同步不传播删除，此命令走平台接口）。"""
+    require_user_factor_library_write()
+    value = client_from_config().delete_factor_family(kind, alias)
+    click.echo(json.dumps(value, ensure_ascii=False, indent=2))
+
+
 @factor_library.group("workspace")
 def workspace() -> None:
     """Synchronize the user factor workspace or explain research Git collaboration."""
