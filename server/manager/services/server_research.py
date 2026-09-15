@@ -339,6 +339,7 @@ class ServerResearchService:
             "report_id": projection["report_id"],
             "owner_ref": principal,
             "profile_ref": location["profile_id"],
+            "branch_ref": location["branch_id"],
             "build_source": "server_agent",
             "build_source_ref": source_ref,
             "projection": projection,
