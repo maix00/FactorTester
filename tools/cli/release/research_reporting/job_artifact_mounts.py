@@ -26,6 +26,11 @@ _TABLE_NAMES = {
     "ic_statistics_summary_data",
     "ic_rolling_stability_data",
     "ic_period_diagnostics_data",
+    # The factor-series result area: one row per factor layer plus the traded
+    # market, so an auto-mounted Job section carries its numbers and not only
+    # the rendered chart.
+    "factor_series_summary_csv",
+    "factor_series_summary_data",
 }
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
