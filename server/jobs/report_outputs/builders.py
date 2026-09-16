@@ -60,45 +60,6 @@ def build_report_artifacts(
         if progress is not None:
             progress(len(completed), len(names), name)
 
-def _render_factor_series_chart(payload: dict[str, Any]) -> bytes:
-    """Render one panel per series entry: the signal plus every nested layer.
-
-    The matplotlib build has no CJK font, so a non-ASCII layer name is shown as
-    its ordinal plus an ASCII-safe suffix instead of tofu boxes.
-    """
-    items = [item for item in (payload.get("series") or []) if isinstance(item, dict)]
-    items = [item for item in items if item.get("values")]
-    if not items:
-        return b""
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    def _label(item: dict[str, Any], index: int) -> str:
-        layer = str(item.get("layer") or "").strip()
-        product = str(item.get("product") or "").strip()
-        token = layer if layer.isascii() and layer else f"layer {index}"
-        return f"{product} {token}".strip() or f"series {index}"
-
-    height = max(2.2, 1.7 * len(items))
-    figure, axes = plt.subplots(len(items), 1, figsize=(9.0, height), squeeze=False)
-    for index, item in enumerate(items):
-        axis = axes[index][0]
-        dates = item.get("dates") or []
-        values = item.get("values") or []
-        axis.plot(range(len(values)), values, linewidth=0.7)
-        axis.set_title(_label(item, index), fontsize=8)
-        axis.grid(alpha=0.25)
-        axis.tick_params(labelsize=6)
-    figure.tight_layout()
-    from io import BytesIO
-
-    buffer = BytesIO()
-    figure.savefig(buffer, format="svg")
-    plt.close(figure)
-    return buffer.getvalue()
-
-
     series = dataset.series if set(names) & {
         "equity_curve", "returns_over_time", "metrics_over_time",
         "ratio_detail", "drawdown_detail", "period_returns",
@@ -204,6 +165,45 @@ def _render_factor_series_chart(payload: dict[str, Any]) -> bytes:
         if name not in completed:
             done(name)
     return output
+
+
+def _render_factor_series_chart(payload: dict[str, Any]) -> bytes:
+    """Render one panel per series entry: the signal plus every nested layer.
+
+    The matplotlib build has no CJK font, so a non-ASCII layer name is shown as
+    its ordinal plus an ASCII-safe suffix instead of tofu boxes.
+    """
+    items = [item for item in (payload.get("series") or []) if isinstance(item, dict)]
+    items = [item for item in items if item.get("values")]
+    if not items:
+        return b""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    def _label(item: dict[str, Any], index: int) -> str:
+        layer = str(item.get("layer") or "").strip()
+        product = str(item.get("product") or "").strip()
+        token = layer if layer.isascii() and layer else f"layer {index}"
+        return f"{product} {token}".strip() or f"series {index}"
+
+    height = max(2.2, 1.7 * len(items))
+    figure, axes = plt.subplots(len(items), 1, figsize=(9.0, height), squeeze=False)
+    for index, item in enumerate(items):
+        axis = axes[index][0]
+        dates = item.get("dates") or []
+        values = item.get("values") or []
+        axis.plot(range(len(values)), values, linewidth=0.7)
+        axis.set_title(_label(item, index), fontsize=8)
+        axis.grid(alpha=0.25)
+        axis.tick_params(labelsize=6)
+    figure.tight_layout()
+    from io import BytesIO
+
+    buffer = BytesIO()
+    figure.savefig(buffer, format="svg")
+    plt.close(figure)
+    return buffer.getvalue()
 
 
 def series_reports(name, series, title):
