@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
 from .tree_navigation import node_path
 from .tree_store import load_node
+
+# ``job collect-report`` writes one ``test_result`` section per Job plus one
+# ``evidence_fragment`` section per mounted artifact, both keyed by the Job id.
+# They are the Agent's own mounts, so the Agent must be able to withdraw them
+# again (otherwise a re-mount after a retry can never be cleaned up).  Research
+# graph chapters and system lifecycle special sections stay protected.
+AGENT_MOUNTED_EVIDENCE_KINDS = frozenset({"test_result", "evidence_fragment"})
+_JOB_MOUNT_NODE_ID = re.compile(r"job-[0-9a-f]{32}(?:-|$)")
 
 
 def validate_agent_removal(
@@ -33,7 +42,7 @@ def validate_agent_removal(
 
     def visit(node: dict[str, Any]) -> None:
         removable.append(str(node["node_id"]))
-        if node["kind"] in {"chapter", "special"}:
+        if _is_protected(node):
             protected.append(str(node["node_id"]))
         for child in node["children"]:
             visit(load_node(paths, child["ref"]))
@@ -47,8 +56,25 @@ def validate_agent_removal(
     return removable
 
 
+def _is_protected(component: dict[str, Any]) -> bool:
+    if component["kind"] == "chapter":
+        return True
+    if component["kind"] != "special":
+        return False
+    return not is_agent_mounted_job_evidence(component)
+
+
+def is_agent_mounted_job_evidence(component: dict[str, Any]) -> bool:
+    """True for the Job evidence mounts the Agent itself created."""
+    return (
+        str(component.get("display_kind") or "")
+        in AGENT_MOUNTED_EVIDENCE_KINDS
+        and bool(_JOB_MOUNT_NODE_ID.match(str(component.get("node_id") or "")))
+    )
+
+
 def _reject_protected(component: dict[str, Any]) -> None:
     if component["kind"] == "chapter":
         raise ValueError("研究图章节不能由 Agent 删除")
-    if component["kind"] == "special":
+    if _is_protected(component):
         raise ValueError("特殊小节不能由 Agent 删除")
