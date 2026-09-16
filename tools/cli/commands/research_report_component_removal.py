@@ -31,7 +31,10 @@ from .research_report_submission_finalize import finalize_report_command
 @click.option(
     "--include-children",
     is_flag=True,
-    help="明确删除整棵普通子树；任意深度含特殊小节时仍会拒绝",
+    help=(
+        "明确删除整棵普通子树；任意深度含系统或研究图特殊小节时仍会拒绝"
+        "（Agent 自己挂载的 Job 证据小节除外）"
+    ),
 )
 @click.option(
     "--submission-sequence", type=click.IntRange(min=1), default=None,
