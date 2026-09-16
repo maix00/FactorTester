@@ -86,6 +86,7 @@ def build_report_artifacts(
             }
             chart = _render_factor_series_chart(payload)
             market_chart = _render_market_chart(payload)
+            summary_rows = _series_summary_rows(payload)
             output.extend([
                 GeneratedReport(
                     "factor_series_data", json_bytes(payload), "json",
@@ -95,7 +96,10 @@ def build_report_artifacts(
                     "factor_series_receipt", json_bytes(receipt), "json",
                     "application/json", receipt,
                 ),
-            ] + ([GeneratedReport(
+            ])
+            if summary_rows:
+                output.extend(table_reports("factor_series_summary", summary_rows))
+            output.extend(([GeneratedReport(
                     "factor_series_chart", chart, "svg", "image/svg+xml", receipt,
                 )] if chart else []) + ([GeneratedReport(
                     "factor_series_market_chart", market_chart, "svg",
@@ -188,10 +192,11 @@ def _render_factor_series_chart(payload: dict[str, Any]) -> bytes:
     from matplotlib import rc_context
 
     def _label(item: dict[str, Any], index: int) -> str:
+        """Name the panel after the layer it plots, in the layer's own script."""
         layer = str(item.get("layer") or "").strip()
         product = str(item.get("product") or "").strip()
-        token = layer if layer.isascii() and layer else f"layer {index}"
-        return f"{product} {token}".strip() or f"series {index}"
+        name = layer or "因子值"
+        return " · ".join(part for part in (product, name) if part)
 
     height = max(2.2, 1.7 * len(items))
     with rc_context(PLOT_RC):
@@ -294,6 +299,61 @@ def _render_market_chart(payload: dict[str, Any]) -> bytes:
         figure.savefig(buffer, format="svg")
         plt.close(figure)
     return passive_svg(buffer.getvalue())
+
+
+def _series_summary_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Summarise the result area: every factor layer plus the traded market."""
+    rows: list[dict[str, Any]] = []
+    for item in payload.get("series") or []:
+        if not isinstance(item, dict):
+            continue
+        values = [
+            float(value) for value in (item.get("values") or [])
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+        ]
+        dates = item.get("dates") or []
+        rows.append({
+            "序列": str(item.get("layer") or "因子值"),
+            "产品": str(item.get("product") or ""),
+            "点数": len(values),
+            "起始": str(dates[0])[:19] if dates else "",
+            "结束": str(dates[-1])[:19] if dates else "",
+            "最新": round(values[-1], 6) if values else "",
+            "均值": round(sum(values) / len(values), 6) if values else "",
+            "最小": round(min(values), 6) if values else "",
+            "最大": round(max(values), 6) if values else "",
+        })
+    for market in payload.get("market") or []:
+        if not isinstance(market, dict):
+            continue
+        bars = [bar for bar in (market.get("bars") or []) if isinstance(bar, dict)]
+        if not bars:
+            continue
+        product = str(market.get("product") or "")
+        rows.append(_bar_row(f"行情 · {product} K线", product, bars, "close"))
+        rows.append(_bar_row(f"行情 · {product} 成交量", product, bars, "volume"))
+        if any(bar.get("open_interest") is not None for bar in bars):
+            rows.append(_bar_row(f"行情 · {product} 持仓量", product, bars, "open_interest"))
+    return rows
+
+
+def _bar_row(label: str, product: str, bars: list[dict[str, Any]], field: str) -> dict[str, Any]:
+    values = [
+        float(bar[field]) for bar in bars
+        if isinstance(bar.get(field), (int, float)) and not isinstance(bar.get(field), bool)
+    ]
+    stamps = [str(bar.get("time") or "") for bar in bars]
+    return {
+        "序列": label,
+        "产品": product,
+        "点数": len(values),
+        "起始": stamps[0][:19] if stamps else "",
+        "结束": stamps[-1][:19] if stamps else "",
+        "最新": round(values[-1], 6) if values else "",
+        "均值": round(sum(values) / len(values), 6) if values else "",
+        "最小": round(min(values), 6) if values else "",
+        "最大": round(max(values), 6) if values else "",
+    }
 
 
 def _number(value: Any) -> float | None:

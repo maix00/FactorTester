@@ -23,6 +23,7 @@ RUN sed -i \
         ca-certificates \
         bubblewrap \
         curl \
+        fonts-noto-cjk \
         git \
         gosu \
         iproute2 \
