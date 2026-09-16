@@ -310,54 +310,110 @@ class FactorEvaluation:
 
 
     def _market_series(self, products: list[Any]) -> list[dict[str, Any]]:
-        """Load the product's own OHLCV so a report can draw K线/成交量/持仓量.
+        """Load the traded product's OHLCV so a report can draw K线/成交量/持仓量.
 
-        The request mirrors the factor-evaluation results page exactly, so the
-        mounted chart shows the same bars the page shows instead of a second
-        interpretation of the run window.
+        The HTTP projection (``product_market_data.price_series``) resolves
+        products from the Manager catalog, which is empty inside a Job worker, so
+        the run reads the bars through the product view the tester already uses.
+        A failure is recorded in the payload instead of being dropped.
         """
         settings = self.settings or {}
         if not products:
             return []
-        try:
-            from server.services.product_market_data import price_series
-        except Exception:  # pragma: no cover - product data is always present
-            return []
-        frequency = str(settings.get("frequency") or "").strip()
         adjusted = str(settings.get("price_type") or "adjusted") == "adjusted"
-        payloads: list[dict[str, Any]] = []
+        start_dt, end_dt = self._run_window_datetimes()
+        loaded: list[dict[str, Any]] = []
         for product in products[:2]:
             if self.product_name and str(getattr(product, "name", "")) != self.product_name:
                 continue
-            request: dict[str, Any] = {
-                "product_name": str(getattr(product, "name", "") or product),
-                "adjusted": adjusted,
-                "max_points": 1200,
-            }
-            if frequency:
-                request["freq"] = frequency
-            for key in ("start_date", "end_date", "time_precision"):
-                value = str(settings.get(key) or "").strip()
-                if value:
-                    request[key] = value
-            payloads.append(request)
-        loaded: list[dict[str, Any]] = []
-        for request in payloads:
-            try:
-                series = price_series(request)
-            except Exception:
-                continue
-            bars = series.get("data") or []
-            if not bars:
-                continue
-            loaded.append({
-                "product": str(series.get("product") or request["product_name"]),
-                "freq": str(series.get("freq") or frequency),
-                "adjusted": bool(series.get("adjusted")),
-                "has_open_interest": bool(series.get("has_oi")),
-                "bars": bars,
-            })
+            entry = self._market_entry(product, adjusted, start_dt, end_dt)
+            if entry:
+                loaded.append(entry)
         return loaded
+
+    def _market_entry(
+        self, product: Any, adjusted: bool, start_dt: DataTime, end_dt: DataTime,
+    ) -> dict[str, Any]:
+        """Return one product's market bars, or the reason they are unavailable."""
+        name = str(getattr(product, "name", "") or product)
+        available = list(product.list_available_freqs())
+        if not available:
+            return {"product": name, "bars": [], "reason": "该产品没有可用频率"}
+        current = getattr(product, "current_freq", None)
+        frequency = current if current in available else available[0]
+        try:
+            view = getattr(product, frequency.name)
+        except AttributeError:
+            return {
+                "product": name, "bars": [],
+                "reason": f"没有 {getattr(frequency, 'name', '')} 数据视图",
+            }
+        columns = (
+            ["OPEN_ADJUSTED", "HIGH_ADJUSTED", "LOW_ADJUSTED", "CLOSE_ADJUSTED", "VOLUME"]
+            if adjusted else ["OPEN", "HIGH", "LOW", "CLOSE", "VOLUME"]
+        )
+        reason = ""
+        try:
+            frame = view.get_and_adjust_cols(
+                [*columns, "OPEN_INTEREST"], copy=False,
+                start_dt=start_dt, end_dt=end_dt,
+            )
+        except Exception as error:
+            # Not every provider exposes open interest; keep the OHLCV bars and
+            # record why the 持仓量 panel is missing.
+            reason = f"读取持仓量失败: {type(error).__name__}"
+            try:
+                frame = view.get_and_adjust_cols(
+                    columns, copy=False, start_dt=start_dt, end_dt=end_dt,
+                )
+            except Exception as second:
+                return {
+                    "product": name, "bars": [],
+                    "reason": f"读取行情失败: {type(second).__name__}",
+                }
+        bars = self._market_bars(
+            name, frame, adjusted, frequency, reason,
+            getattr(product, "timezone", None) or "Asia/Shanghai",
+        )
+        return bars
+
+    def _market_bars(
+        self, name: str, frame: Any, adjusted: bool, frequency: Any,
+        reason: str, timezone: str, limit: int = 1500,
+    ) -> dict[str, Any]:
+        from server.modules.shared.price_data_helpers import (
+            format_price_row, open_interest_column,
+        )
+        if frame is None or getattr(frame, "empty", True):
+            return {"product": name, "bars": [], "reason": reason or "区间内没有行情"}
+        columns = (
+            ("OPEN_ADJUSTED", "HIGH_ADJUSTED", "LOW_ADJUSTED", "CLOSE_ADJUSTED", "VOLUME")
+            if adjusted else ("OPEN", "HIGH", "LOW", "CLOSE", "VOLUME")
+        )
+        interest = open_interest_column(getattr(frame, "columns", []))
+        emitted = frame.copy()
+        emitted["__time__"] = list(emitted.index)
+        if len(emitted) > limit:
+            emitted = emitted.tail(limit)
+            reason = (reason + "; " if reason else "") + f"只保留最近 {limit} 根"
+        is_daily = bool(getattr(frequency, "is_day_multiple", lambda: False)())
+        bars = [
+            format_price_row(
+                row=row, time_col="__time__", o_col=columns[0], h_col=columns[1],
+                l_col=columns[2], c_col=columns[3], v_col=columns[4],
+                oi_col=interest, freq_is_daily=is_daily, timezone=timezone,
+            )
+            for _, row in emitted.iterrows()
+        ]
+        has_interest = any("open_interest" in bar for bar in bars)
+        return {
+            "product": name,
+            "freq": str(getattr(frequency, "name", "")),
+            "adjusted": adjusted,
+            "has_open_interest": has_interest,
+            "bars": bars,
+            **({"reason": reason} if reason else {}),
+        }
 
     def _run_window_datetimes(self) -> tuple[DataTime, DataTime]:
         settings = self.settings or {}
