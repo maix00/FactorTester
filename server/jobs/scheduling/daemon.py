@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import threading
 import time
 import logging
@@ -13,6 +15,7 @@ from server.jobs.repository import JobRepository
 from server.jobs.states import JobStatus
 
 from .worker_pool import (
+    env_positive_int,
     LongLivedWorkerPool,
     WorkerUnavailable,
     persisted_result_summary,
@@ -35,12 +38,19 @@ class ResearchJobScheduler:
         *,
         repository: JobRepository,
         deployment_id: str,
-        planner_workers: int = 1,
-        execution_workers: int = 2,
+        planner_workers: int | None = None,
+        execution_workers: int | None = None,
         broker: EventBroker | None = None,
         cancel_grace_seconds: float = 2.0,
         result_artifact_root: str | None = None,
     ) -> None:
+        if planner_workers is None:
+            planner_workers = env_positive_int("GTHT_JOB_PLANNER_WORKERS", 1)
+        if execution_workers is None:
+            # Concurrency is a memory and CPU budget, not a target: each
+            # execution worker can hold its own working set, and the website
+            # shares the host.  Keep the default small and let a host opt up.
+            execution_workers = env_positive_int("GTHT_JOB_EXECUTION_WORKERS", 2)
         self.repository = repository
         self.deployment_id = str(deployment_id)
         self.broker = broker or EventBroker()

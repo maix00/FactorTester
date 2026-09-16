@@ -644,6 +644,22 @@ def _worker_entry(
             return
 
 
+def env_positive_int(name: str, default: int) -> int:
+    """Read a positive integer budget from the environment.
+
+    Invalid or non-positive values fall back to the default so a typo cannot
+    silently disable a memory boundary.
+    """
+    raw = os.environ.get(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
 def _peak_rss_bytes() -> int:
     value = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
     return value if sys.platform == "darwin" else value * 1024
@@ -671,11 +687,18 @@ class LongLivedWorkerPool:
         size: int,
         cancel_grace_seconds: float = 2.0,
         start_method: str = "spawn",
-        max_cache_keys_per_worker: int = 128,
+        max_cache_keys_per_worker: int | None = None,
         recycle_peak_rss_bytes: int | None = None,
     ) -> None:
         self.size = max(1, int(size))
         self.cancel_grace_seconds = max(0.0, float(cancel_grace_seconds))
+        if max_cache_keys_per_worker is None:
+            # Cache affinity keeps datasets warm, but every warm entry is
+            # resident memory for the life of the worker.  Small hosts must be
+            # able to keep fewer of them without changing the code.
+            max_cache_keys_per_worker = env_positive_int(
+                "GTHT_JOB_WORKER_MAX_CACHE_KEYS", 128,
+            )
         self.max_cache_keys_per_worker = max(1, int(max_cache_keys_per_worker))
         if recycle_peak_rss_bytes is None:
             recycle_peak_rss_bytes = int(os.environ.get(
