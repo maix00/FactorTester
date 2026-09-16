@@ -7,6 +7,14 @@
   } = FTJobListFormat;
 
   const pageSize = 20;
+
+  // Entering the page must show current tasks.  A cached page is only reused
+  // inside one visit (scope tabs and pagination); the entry call revalidates
+  // the active scope so tasks submitted from the CLI or another session show
+  // up without a manual refresh.
+  function mustRevalidate(options) {
+    return Boolean(options && (options.forceRefresh || options.revalidate));
+  }
   // A submission can finish while the pinned task-list tab is cached in a
   // different tab session.  This process-local generation invalidates those
   // caches without forcing every visit to fan out across every server.
@@ -135,7 +143,7 @@
     const scoped = state.byScope[scope];
     if (!scoped) throw new Error(context.t("不支持的任务范围"));
     if (scope !== "server") {
-      if (!options.forceRefresh && scoped.pages[page]) {
+      if (!mustRevalidate(options) && scoped.pages[page]) {
         return {...scoped.pages[page], page};
       }
       const query = new URLSearchParams({
@@ -259,7 +267,7 @@
     // discarded it before every request, turning every tab switch into a
     // cold federation fan-out.  The toolbar remains the explicit refresh
     // control and clears the cached page through this flag.
-    if (options.forceRefresh) {
+    if (mustRevalidate(options)) {
       Object.assign(scoped, freshScopeState());
     }
     const requested = Math.max(1, Math.min(1000, Number(requestedPage == null ? 1 : requestedPage) || 1));
