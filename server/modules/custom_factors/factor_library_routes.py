@@ -149,6 +149,11 @@ def api_add_factor_to_library_config(ff_alias):
                 )
         except ValueError as exc:
             return jsonify({'success': False, 'error': str(exc)}), 409
+        except ImportError as exc:
+            # A registration can outlive the family source it was frozen from
+            # (deleted or never uploaded).  That is a client-visible conflict,
+            # not a server fault, so answer 404 instead of an HTML 500.
+            return jsonify({'success': False, 'error': str(exc)}), 404
         return api_ok({'config': config, 'factor': factor, 'factors': [factor]})
     factor_alias = (data.get('factor_alias') or '').strip()
     product_group = data.get('product_group') or data.get('scope_key') or DEFAULT_SCOPE_KEY
