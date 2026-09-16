@@ -56,6 +56,13 @@ services:
       # the pool near 3 GiB and leaves room for the app, Postgres and the page
       # cache.  Raise it only together with host memory.
       GTHT_JOB_WORKER_RECYCLE_PEAK_RSS_BYTES: ${GTHT_JOB_WORKER_RECYCLE_PEAK_RSS_BYTES:-1073741824}
+      # How many datasets a worker may keep warm (each one is resident memory
+      # for the worker's life) and how many jobs may run at once.  Both are
+      # memory/CPU budgets shared with the website, so keep them small on a
+      # small host instead of letting the pool grow into the machine.
+      GTHT_JOB_WORKER_MAX_CACHE_KEYS: ${GTHT_JOB_WORKER_MAX_CACHE_KEYS:-16}
+      GTHT_JOB_PLANNER_WORKERS: ${GTHT_JOB_PLANNER_WORKERS:-1}
+      GTHT_JOB_EXECUTION_WORKERS: ${GTHT_JOB_EXECUTION_WORKERS:-1}
       FACTORTESTER_MANAGER_PUBLIC_ENDPOINT: ${FACTORTESTER_MANAGER_PUBLIC_ENDPOINT:?set FACTORTESTER_MANAGER_PUBLIC_ENDPOINT}
       # Only explicitly configured browser ingress origins may display the
       # visitor entry. The Manager public IP is intentionally not included.
