@@ -49,6 +49,13 @@ services:
       FACTORTESTER_MIHOMO_BIN: /usr/local/bin/mihomo
       FACTORTESTER_MIHOMO_CONFIG_FILE: /state/mihomo.yaml
       FACTORTESTER_MANAGED_ORGANIZATIONS: ${FACTORTESTER_MANAGED_ORGANIZATIONS:-default}
+      # The job pool keeps 1 planner + 2 execution workers alive, and each
+      # worker only recycles after its peak RSS passes this ceiling (upstream
+      # default 3 GiB, i.e. 9 GiB for the pool alone).  On a small public host
+      # that exceeds the machine, so cap it well below: 1 GiB per worker keeps
+      # the pool near 3 GiB and leaves room for the app, Postgres and the page
+      # cache.  Raise it only together with host memory.
+      GTHT_JOB_WORKER_RECYCLE_PEAK_RSS_BYTES: ${GTHT_JOB_WORKER_RECYCLE_PEAK_RSS_BYTES:-1073741824}
       FACTORTESTER_MANAGER_PUBLIC_ENDPOINT: ${FACTORTESTER_MANAGER_PUBLIC_ENDPOINT:?set FACTORTESTER_MANAGER_PUBLIC_ENDPOINT}
       # Only explicitly configured browser ingress origins may display the
       # visitor entry. The Manager public IP is intentionally not included.
