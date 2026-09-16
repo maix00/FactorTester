@@ -473,7 +473,12 @@
       docs: (pageContext, slug) => FTDocs.render(pageContext, slug),
       researchGraph: (pageContext, id) => FTResearchGraphList.detail(pageContext, pageContext.content, id),
       remoteModule: route => remoteModule(location.pathname, moduleForPath(location.pathname)),
-      jobs: (pageContext, section) => section === "types" ? FTTestTypes.render(pageContext) : FTJobs.list(pageContext),
+      // The task list is entered, not resumed: revalidate the active scope so
+      // newly submitted tasks appear without pressing refresh (the cached page
+      // is still reused within one visit for scope tabs and pagination).
+      jobs: (pageContext, section) => section === "types"
+        ? FTTestTypes.render(pageContext)
+        : FTJobs.list(pageContext, null, null, {revalidate: true}),
       job: (pageContext, port, id, serverID) => FTJobs.detail(
         pageContext, port, id, serverID,
       ),
