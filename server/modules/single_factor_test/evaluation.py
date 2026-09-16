@@ -295,6 +295,7 @@ class FactorEvaluation:
             },
             "products": [product_attrs(product, "name", "desc") for product in selected_products],
             "series": series_items,
+            "market": self._market_series(selected_products),
             "meta": {
                 "elapsed_ms": round((time.time() - started_at) * 1000),
                 "product_count": len(series_items),
@@ -307,6 +308,56 @@ class FactorEvaluation:
             ),
         }
 
+
+    def _market_series(self, products: list[Any]) -> list[dict[str, Any]]:
+        """Load the product's own OHLCV so a report can draw K线/成交量/持仓量.
+
+        The request mirrors the factor-evaluation results page exactly, so the
+        mounted chart shows the same bars the page shows instead of a second
+        interpretation of the run window.
+        """
+        settings = self.settings or {}
+        if not products:
+            return []
+        try:
+            from server.services.product_market_data import price_series
+        except Exception:  # pragma: no cover - product data is always present
+            return []
+        frequency = str(settings.get("frequency") or "").strip()
+        adjusted = str(settings.get("price_type") or "adjusted") == "adjusted"
+        payloads: list[dict[str, Any]] = []
+        for product in products[:2]:
+            if self.product_name and str(getattr(product, "name", "")) != self.product_name:
+                continue
+            request: dict[str, Any] = {
+                "product_name": str(getattr(product, "name", "") or product),
+                "adjusted": adjusted,
+                "max_points": 1200,
+            }
+            if frequency:
+                request["freq"] = frequency
+            for key in ("start_date", "end_date", "time_precision"):
+                value = str(settings.get(key) or "").strip()
+                if value:
+                    request[key] = value
+            payloads.append(request)
+        loaded: list[dict[str, Any]] = []
+        for request in payloads:
+            try:
+                series = price_series(request)
+            except Exception:
+                continue
+            bars = series.get("data") or []
+            if not bars:
+                continue
+            loaded.append({
+                "product": str(series.get("product") or request["product_name"]),
+                "freq": str(series.get("freq") or frequency),
+                "adjusted": bool(series.get("adjusted")),
+                "has_open_interest": bool(series.get("has_oi")),
+                "bars": bars,
+            })
+        return loaded
 
     def _run_window_datetimes(self) -> tuple[DataTime, DataTime]:
         settings = self.settings or {}
