@@ -32,6 +32,7 @@ from .ic_rolling import (
     rolling_stability_rows,
 )
 from .models import GeneratedReport
+from .plot_format import PLOT_RC, passive_svg
 from .render import csv_bytes, json_bytes
 from .series import metrics_rows
 from .series_plot import (
@@ -180,6 +181,7 @@ def _render_factor_series_chart(payload: dict[str, Any]) -> bytes:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from matplotlib import rc_context
 
     def _label(item: dict[str, Any], index: int) -> str:
         layer = str(item.get("layer") or "").strip()
@@ -188,22 +190,23 @@ def _render_factor_series_chart(payload: dict[str, Any]) -> bytes:
         return f"{product} {token}".strip() or f"series {index}"
 
     height = max(2.2, 1.7 * len(items))
-    figure, axes = plt.subplots(len(items), 1, figsize=(9.0, height), squeeze=False)
-    for index, item in enumerate(items):
-        axis = axes[index][0]
-        dates = item.get("dates") or []
-        values = item.get("values") or []
-        axis.plot(range(len(values)), values, linewidth=0.7)
-        axis.set_title(_label(item, index), fontsize=8)
-        axis.grid(alpha=0.25)
-        axis.tick_params(labelsize=6)
-    figure.tight_layout()
-    from io import BytesIO
+    with rc_context(PLOT_RC):
+        figure, axes = plt.subplots(len(items), 1, figsize=(9.0, height), squeeze=False)
+        for index, item in enumerate(items):
+            axis = axes[index][0]
+            dates = item.get("dates") or []
+            values = item.get("values") or []
+            axis.plot(range(len(values)), values, linewidth=0.7)
+            axis.set_title(_label(item, index), fontsize=8)
+            axis.grid(alpha=0.25)
+            axis.tick_params(labelsize=6)
+        figure.tight_layout()
+        from io import BytesIO
 
-    buffer = BytesIO()
-    figure.savefig(buffer, format="svg")
-    plt.close(figure)
-    return buffer.getvalue()
+        buffer = BytesIO()
+        figure.savefig(buffer, format="svg")
+        plt.close(figure)
+    return passive_svg(buffer.getvalue())
 
 
 def series_reports(name, series, title):
