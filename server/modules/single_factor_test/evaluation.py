@@ -251,6 +251,36 @@ class FactorEvaluation:
             if schedule_payload is not None:
                 series_item["signal_schedule"] = schedule_payload
             series_items.append(series_item)
+            # Nested layers: expose every intermediate the family computed so the
+            # viewer can show what each nesting level contributes.
+            for layer_name, frame in _intermediate_series(factor):
+                layer_col = _match_product_column(frame, product)
+                if layer_col is None:
+                    continue
+                layer = frame[layer_col].dropna()
+                if layer.empty:
+                    continue
+                layer = clip_series_by_tester_range(layer, tester)
+                layer = self._clip_series_by_run_window(layer, start_dt, end_dt)
+                if layer.empty:
+                    continue
+                layer_dates, layer_values = series_to_frontend(
+                    layer,
+                    factor.freq is not None and factor.freq.is_day_multiple(),
+                )
+                series_items.append({
+                    "product": name,
+                    "desc": layer_name,
+                    "dates": layer_dates,
+                    "values": layer_values,
+                    "returns": None,
+                    "chart": {
+                        "x_label": "time", "y_label": "factor",
+                        "title": name + " · " + layer_name,
+                    },
+                    "layer": layer_name,
+                    "nested_of": getattr(factor, "alias", self.factor_alias),
+                })
 
         if not series_items:
             raise LookupError("所选产品没有该因子的可显示序列")
@@ -383,6 +413,28 @@ class FactorEvaluation:
             scheduled,
             policy=policy_for_factor(factor),
         )
+
+def _intermediate_series(factor: Any, *, limit: int = 8):
+    """Yield the nested layers the runtime already computed for one factor.
+
+    A family keeps every ``as_intermediate`` series it built (threshold,
+    duration, fair price, ...).  They are the most informative part of the
+    factor-series view, so the serializer exposes them next to the final signal
+    instead of dropping them.
+    """
+    index = getattr(factor, "_intermediate_alias_index", None) or {}
+    try:
+        names = [str(name) for name in index][: max(0, int(limit))]
+    except TypeError:
+        return
+    for name in names:
+        try:
+            frame = factor.get_intermediate(name)
+        except Exception:
+            continue
+        if isinstance(frame, pd.DataFrame) and not frame.empty:
+            yield name, frame
+
 
 def factor_series_for_run_spec(data: dict[str, Any]) -> dict[str, Any]:
     """Evaluate the frozen root factors through the factor-series runtime.
