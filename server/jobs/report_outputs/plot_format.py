@@ -12,8 +12,14 @@ from matplotlib.ticker import FuncFormatter, PercentFormatter
 
 PLOT_RC = {
     "font.family": "sans-serif",
+    # Debian's fonts-noto-cjk registers the shared CJK faces under language
+    # suffixes, and the release image ends up with the JP faces only, so the
+    # JP/TC/KR names must be listed too or every Chinese chart title falls back
+    # to DejaVu Sans and renders as tofu boxes.
     "font.sans-serif": [
-        "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei",
+        "Noto Sans CJK SC", "Noto Sans CJK TC", "Noto Sans CJK JP",
+        "Noto Sans CJK KR",
+        "PingFang SC", "Microsoft YaHei",
         "Arial Unicode MS", "DejaVu Sans",
     ],
     "svg.fonttype": "none",
