@@ -24,11 +24,13 @@ def freeze_report_binding(
     branch come from the scope and the parent component from the caller, so a
     job never has to carry a TrialPlan just to appear in a report.
     """
-    if trial_binding is None or str(trial_binding.get("binding_origin") or "") == "agent_direct":
+    # An empty mapping means "no trial": the caller froze a report scope and an
+    # explicit parent for an ordinary run.
+    if not trial_binding or str(trial_binding.get("binding_origin") or "") == "agent_direct":
         return _freeze_direct_report_binding(
             scope,
             report_parent_id=report_parent_id,
-            binding_origin="agent_direct" if trial_binding is not None else "report_direct",
+            binding_origin="agent_direct" if trial_binding else "report_direct",
         )
     branch_ref = scope.branch_ref.split(":")
     if len(branch_ref) != 3 or branch_ref[0] != "graph-branch":
