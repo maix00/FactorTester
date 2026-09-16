@@ -16,7 +16,8 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "presentation": "chart", "viewer": "factor_series",
         "artifacts": [
             "factor_series_data", "factor_series_receipt", "factor_series_chart",
-            "factor_series_market_chart",
+            "factor_series_market_chart", "factor_series_summary_csv",
+            "factor_series_summary_data",
         ],
         "canonical_artifact": "factor_series_data",
         "rendition_artifacts": [
