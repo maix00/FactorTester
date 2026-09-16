@@ -23,13 +23,22 @@
   }
 
   function identity(item) {
-    return String(item?.product || item?.name || item?.code || "");
+    // A factor-series payload carries one entry per nested layer of the factor
+    // (threshold, duration, fair price ...) besides the final signal, so the
+    // layer is part of the identity: without it the selector collapses the
+    // layers onto the same product key and only one chart survives.
+    const name = String(item?.product || item?.name || item?.code || "");
+    const layer = String(item?.layer || "");
+    return layer ? `${name} · ${layer}` : name;
   }
 
   function label(item) {
     const name = identity(item);
     const desc = String(item?.desc || "");
-    return desc && desc !== name ? `${name} · ${desc}` : name;
+    if (!desc || desc === name) return name;
+    // A nested layer's desc is its layer name, which the identity already
+    // carries; do not repeat it in the option label.
+    return name.endsWith(` · ${desc}`) ? name : `${name} · ${desc}`;
   }
 
   function factorIdentity(item, model = {}) {
