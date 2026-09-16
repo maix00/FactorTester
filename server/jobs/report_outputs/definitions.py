@@ -16,9 +16,12 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "presentation": "chart", "viewer": "factor_series",
         "artifacts": [
             "factor_series_data", "factor_series_receipt", "factor_series_chart",
+            "factor_series_market_chart",
         ],
         "canonical_artifact": "factor_series_data",
-        "rendition_artifacts": ["factor_series_chart"],
+        "rendition_artifacts": [
+            "factor_series_chart", "factor_series_market_chart",
+        ],
         "receipt_artifact": "factor_series_receipt",
         # IC/backtest only retain these values when the primary run requests
         # them; the report supplemental builder cannot recreate tester state.
