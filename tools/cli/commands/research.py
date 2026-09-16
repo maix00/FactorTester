@@ -783,17 +783,14 @@ def run_submit(
         raise click.ClickException(
             "--report-parent-id 只能与完整报告范围同时使用"
         )
-    if has_report_scope and is_direct_trial and not report_parent_id:
+    # A run may bind a report without a TrialPlan: the work package, branch and
+    # a report parent component are enough to freeze the mount position, and the
+    # Graph trial identity stays optional.  The parent is what makes an
+    # out-of-graph mount unambiguous, so it is required in both cases.
+    standalone_report_run = has_report_scope and trial_binding is None
+    if (is_direct_trial or standalone_report_run) and not report_parent_id:
         raise click.ClickException(
-            "图外 Trial 绑定报告时必须提供 --report-parent-id"
-        )
-    if report_parent_id and not is_direct_trial:
-        raise click.ClickException(
-            "--report-parent-id 仅用于 agent_direct TrialPlan"
-        )
-    if has_report_scope and trial_binding is None:
-        raise click.ClickException(
-            "报告绑定需要 --trial-binding-file 以冻结 Graph 执行身份"
+            "绑定报告必须提供 --report-parent-id 以冻结挂载位置"
         )
     if trial_binding is not None and not has_report_scope and not without_report:
         raise click.ClickException(
@@ -810,7 +807,7 @@ def run_submit(
             branch_id=report_branch_id,
         )
         try:
-            if is_direct_trial:
+            if is_direct_trial or trial_binding is None:
                 report_binding = freeze_report_binding(
                     report_scope,
                     trial_binding=trial_binding or {},
