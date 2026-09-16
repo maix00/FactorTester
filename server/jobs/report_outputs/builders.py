@@ -85,6 +85,7 @@ def build_report_artifacts(
                 }),
             }
             chart = _render_factor_series_chart(payload)
+            market_chart = _render_market_chart(payload)
             output.extend([
                 GeneratedReport(
                     "factor_series_data", json_bytes(payload), "json",
@@ -96,7 +97,10 @@ def build_report_artifacts(
                 ),
             ] + ([GeneratedReport(
                     "factor_series_chart", chart, "svg", "image/svg+xml", receipt,
-                )] if chart else []))
+                )] if chart else []) + ([GeneratedReport(
+                    "factor_series_market_chart", market_chart, "svg",
+                    "image/svg+xml", receipt,
+                )] if market_chart else []))
         done("factor_series")
     if "equity_curve" in names and series:
         output.extend(series_reports("equity_curve", series, "净值曲线与回撤"))
@@ -207,6 +211,97 @@ def _render_factor_series_chart(payload: dict[str, Any]) -> bytes:
         figure.savefig(buffer, format="svg")
         plt.close(figure)
     return passive_svg(buffer.getvalue())
+
+
+def _render_market_chart(payload: dict[str, Any]) -> bytes:
+    """Render the traded product's own K线, 成交量 and 持仓量 for the run window."""
+    markets = [
+        item for item in (payload.get("market") or [])
+        if isinstance(item, dict) and item.get("bars")
+    ]
+    if not markets:
+        return b""
+    market = markets[0]
+    bars = [item for item in market["bars"] if isinstance(item, dict)]
+    if not bars:
+        return b""
+    opens = [_number(item.get("open")) for item in bars]
+    highs = [_number(item.get("high")) for item in bars]
+    lows = [_number(item.get("low")) for item in bars]
+    closes = [_number(item.get("close")) for item in bars]
+    volumes = [_number(item.get("volume")) or 0.0 for item in bars]
+    interests = [_number(item.get("open_interest")) for item in bars]
+    has_interest = any(value is not None for value in interests)
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib import rc_context
+
+    panels = 3 if has_interest else 2
+    height = 3.0 + 1.5 * panels
+    with rc_context(PLOT_RC):
+        figure, axes = plt.subplots(panels, 1, figsize=(9.0, height), squeeze=False)
+        price_axis = axes[0][0]
+        positions = list(range(len(bars)))
+        for index, position in enumerate(positions):
+            low, high = lows[index], highs[index]
+            open_value, close_value = opens[index], closes[index]
+            if low is None or high is None:
+                continue
+            rising = (
+                open_value is not None and close_value is not None
+                and close_value >= open_value
+            )
+            colour = "#18a572" if rising else "#e14d5b"
+            price_axis.vlines(position, low, high, color=colour, linewidth=0.5)
+            if open_value is None or close_value is None:
+                continue
+            bottom = min(open_value, close_value)
+            span = abs(close_value - open_value) or (abs(high - low) * 0.01)
+            price_axis.bar(
+                position, span, bottom=bottom, width=0.7, color=colour,
+                linewidth=0,
+            )
+        price_axis.set_title(
+            f"{market.get('product') or 'product'} "
+            f"{market.get('freq') or ''} K线".strip(),
+            fontsize=8,
+        )
+        price_axis.grid(alpha=0.25)
+        price_axis.tick_params(labelsize=6)
+        price_axis.set_xlim(-1, len(bars))
+        volume_axis = axes[1][0]
+        volume_axis.bar(positions, volumes, width=0.7, color="#8aa4c8", linewidth=0)
+        volume_axis.set_title("成交量", fontsize=8)
+        volume_axis.grid(alpha=0.25)
+        volume_axis.tick_params(labelsize=6)
+        volume_axis.set_xlim(-1, len(bars))
+        if has_interest:
+            interest_axis = axes[2][0]
+            interest_axis.plot(
+                positions,
+                [value if value is not None else float("nan") for value in interests],
+                linewidth=0.7, color="#d97706",
+            )
+            interest_axis.set_title("持仓量", fontsize=8)
+            interest_axis.grid(alpha=0.25)
+            interest_axis.tick_params(labelsize=6)
+            interest_axis.set_xlim(-1, len(bars))
+        figure.tight_layout()
+        from io import BytesIO
+
+        buffer = BytesIO()
+        figure.savefig(buffer, format="svg")
+        plt.close(figure)
+    return passive_svg(buffer.getvalue())
+
+
+def _number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number and abs(number) != float("inf") else None
 
 
 def series_reports(name, series, title):
