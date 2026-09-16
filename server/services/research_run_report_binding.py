@@ -43,10 +43,10 @@ def normalize_report_binding(
     """Validate an opt-in report binding and add the server-owned node."""
     if value is None:
         return None
-    if trial_binding is None:
-        raise ValueError("report_binding requires trial_binding")
     if isinstance(value, dict) and value.get("binding_origin") is not None:
         return _normalize_direct_report_binding(value, trial_binding)
+    if trial_binding is None:
+        raise ValueError("report_binding requires trial_binding")
     if not isinstance(value, dict) or set(value) != _FIELDS:
         raise ValueError(
             "report_binding must contain the complete frozen report identity"
@@ -91,16 +91,24 @@ def normalize_report_binding(
 
 def _normalize_direct_report_binding(
     value: dict[str, Any],
-    trial_binding: dict[str, Any],
+    trial_binding: dict[str, Any] | None,
 ) -> dict[str, Any]:
     if set(value) != _DIRECT_FIELDS:
         raise ValueError(
             "direct report_binding must contain the complete frozen report identity"
         )
-    if str(value.get("binding_origin") or "") != "agent_direct":
-        raise ValueError("direct report_binding origin must be agent_direct")
-    if str(trial_binding.get("binding_origin") or "") != "agent_direct":
-        raise ValueError("direct report_binding requires an agent_direct TrialPlan")
+    origin = str(value.get("binding_origin") or "")
+    if origin not in {"agent_direct", "report_direct"}:
+        raise ValueError(
+            "report_binding origin must be agent_direct or report_direct"
+        )
+    if origin == "agent_direct":
+        if str((trial_binding or {}).get("binding_origin") or "") != "agent_direct":
+            raise ValueError("agent_direct report_binding requires its TrialPlan")
+    elif trial_binding is not None:
+        raise ValueError(
+            "report_direct report_binding must not carry a trial binding"
+        )
     for field in ("branch_id", "report_parent_id"):
         if not _IDENTIFIER.fullmatch(str(value.get(field) or "")):
             raise ValueError(f"report_binding.{field} is invalid")
