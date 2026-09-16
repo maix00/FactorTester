@@ -166,7 +166,9 @@ def _validate_scope(detail: dict[str, Any], scope: BranchReportScope) -> dict[st
     expected_package = f"work-package:{scope.work_package_id}"
     if str(binding.get("work_package_ref") or "") != expected_package:
         raise ValueError("Job 不属于指定的研究工作包")
-    if str(binding.get("binding_origin") or "") == "agent_direct":
+    # Both the graph-outside Trial mount and an ordinary run's explicit mount
+    # carry their position in report_parent_id.
+    if str(binding.get("binding_origin") or "") in {"agent_direct", "report_direct"}:
         if str(binding.get("branch_id") or "") != scope.branch_id:
             raise ValueError("Job 不属于指定的研究分支")
         parent_id = str(binding.get("report_parent_id") or "")

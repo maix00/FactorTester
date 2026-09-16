@@ -15,14 +15,20 @@ from .research_report_scope import BranchReportScope, load_authoring
 def freeze_report_binding(
     scope: BranchReportScope,
     *,
-    trial_binding: dict[str, Any],
+    trial_binding: dict[str, Any] | None = None,
     report_parent_id: str = "",
 ) -> dict[str, Any]:
-    """Return immutable local report identity without guessing a report scope."""
-    if str(trial_binding.get("binding_origin") or "") == "agent_direct":
+    """Return immutable local report identity without guessing a report scope.
+
+    ``trial_binding=None`` freezes an ordinary run's mount: the work package and
+    branch come from the scope and the parent component from the caller, so a
+    job never has to carry a TrialPlan just to appear in a report.
+    """
+    if trial_binding is None or str(trial_binding.get("binding_origin") or "") == "agent_direct":
         return _freeze_direct_report_binding(
             scope,
             report_parent_id=report_parent_id,
+            binding_origin="agent_direct" if trial_binding is not None else "report_direct",
         )
     branch_ref = scope.branch_ref.split(":")
     if len(branch_ref) != 3 or branch_ref[0] != "graph-branch":
@@ -49,6 +55,7 @@ def _freeze_direct_report_binding(
     scope: BranchReportScope,
     *,
     report_parent_id: str,
+    binding_origin: str = "agent_direct",
 ) -> dict[str, Any]:
     parent_id = str(report_parent_id or "").strip()
     if not parent_id:
@@ -58,14 +65,14 @@ def _freeze_direct_report_binding(
         branch_id=scope.branch_id,
     )
     if not presence.component_exists(parent_id):
-        raise ValueError("图外报告绑定的 parent_id 不存在")
+        raise ValueError("报告绑定的 parent_id 不存在")
     if presence.component_kind(parent_id) not in {
         "chapter", "section", "subsection", "special",
     }:
         raise ValueError("图外报告绑定的 parent_id 必须是报告 container")
     head = load_authoring(scope)["head"]
     return {
-        "binding_origin": "agent_direct",
+        "binding_origin": binding_origin,
         "profile_ref": f"profile:{scope.profile_id}",
         "work_package_ref": f"work-package:{scope.work_package_id}",
         "branch_id": scope.branch_id,
