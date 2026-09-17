@@ -392,10 +392,14 @@ class FactorEvaluation:
         )
         interest = open_interest_column(getattr(frame, "columns", []))
         emitted = frame.copy()
-        emitted["__time__"] = list(emitted.index)
         if len(emitted) > limit:
             emitted = emitted.tail(limit)
             reason = (reason + "; " if reason else "") + f"只保留最近 {limit} 根"
+        # A product view can hand back a MultiIndex (instrument, time); taking the
+        # raw index would put tuples into the timestamp column and every row would
+        # fail to format.
+        index = emitted.index
+        emitted["__time__"] = list(finest_index(index) if isinstance(index, pd.MultiIndex) else index)
         is_daily = bool(getattr(frequency, "is_day_multiple", lambda: False)())
         bars = [
             format_price_row(
