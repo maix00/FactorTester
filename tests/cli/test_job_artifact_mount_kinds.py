@@ -26,6 +26,19 @@ def test_factor_series_charts_mount_as_images():
         }) == "image"
 
 
+def test_artifact_titles_are_reader_facing():
+    from tools.cli.release.research_reporting.job_artifact_mounts import (
+        artifact_label,
+    )
+    assert artifact_label("factor_series_overview_full", {}) == "因子值序列与行情（全时段）"
+    assert artifact_label("factor_series_overview_intraday", {}) == "因子值序列与行情（最近交易日日内）"
+    assert artifact_label("factor_series_overview_hourly", {}) == "因子值序列与行情（小时级）"
+    assert artifact_label("factor_series_summary_csv", {}) == "结果概览（CSV）"
+    # an explicit description always wins, and unknown names stay verbatim
+    assert artifact_label("anything", {"description": "自定义标题"}) == "自定义标题"
+    assert artifact_label("unknown_artifact", {}) == "unknown_artifact"
+
+
 def test_unrelated_artifacts_stay_unmounted():
     assert mount_kind("factor_series_data", {
         "name": "factor_series_data", "content_type": "application/json",

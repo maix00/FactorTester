@@ -65,12 +65,14 @@ def mount_operations(
             ),
         )
     bindings = provenance_bindings(job_id, detail, digest)
-    title = str(metadata.get("description") or name)
+    title = artifact_label(name, metadata)
     operations.extend((add_special_section_operation(
         component_id=fragment_id,
         title=title,
         parent_id=parent_id,
-        body=_report_body(job_id, name, bindings),
+        # The result section already carries the job links; repeating them under
+        # every figure is pure noise for a reader.
+        body="",
         display_kind="evidence_fragment",
         bindings=bindings,
     ), {
@@ -98,12 +100,42 @@ def result_container_operation(
     bindings = result_bindings(job_id, detail)
     return component_id, [add_special_section_operation(
         component_id=component_id,
-        title=f"测试结果 · {job_id}",
+        title=f"{_job_label(detail)} 运行结果",
         parent_id=parent_id,
         body=_result_body(job_id, status, bindings),
         display_kind="test_result",
         bindings=bindings,
     )]
+
+
+_JOB_KIND_LABELS = {
+    "factor_evaluation": "因子序列", "factor_series": "因子序列",
+    "backtest": "回测", "group_test": "回测", "ic": "IC 测试",
+}
+# Reader-facing names for the artifacts this module mounts, so a section shows
+# what a figure is instead of its internal artifact name.
+_ARTIFACT_LABELS = {
+    "factor_series_overview_full": "因子值序列与行情（全时段）",
+    "factor_series_overview_intraday": "因子值序列与行情（最近交易日日内）",
+    "factor_series_overview_hourly": "因子值序列与行情（小时级）",
+    "factor_series_summary_csv": "结果概览（CSV）",
+    "factor_series_summary_data": "结果概览（JSON）",
+    "ic_statistics_summary_data": "IC 统计汇总",
+    "ic_rolling_stability_data": "IC 滚动稳定性",
+    "ic_period_diagnostics_data": "IC 分期诊断",
+}
+
+
+def _job_label(detail: dict[str, Any]) -> str:
+    candidates = _detail_candidates(detail)
+    kind = _first_text(candidates, ("kind", "job_type", "application"))
+    return _JOB_KIND_LABELS.get(kind.lower(), kind or "测试")
+
+
+def artifact_label(name: str, metadata: dict[str, Any]) -> str:
+    """Human title for a mounted artifact."""
+    described = str(metadata.get("description") or "").strip()
+    return described or _ARTIFACT_LABELS.get(name) or name
 
 
 def result_component_id(job_id: str) -> str:
@@ -245,16 +277,6 @@ def result_bindings(
             "data": {},
         })
     return bindings
-
-
-def _report_body(
-    job_id: str, name: str, bindings: list[dict[str, Any]],
-) -> str:
-    links = typed_link_list([{
-        "kind": str(item["kind"]), "target_ref": str(item["target_ref"]),
-        "label": str(item["label"]),
-    } for item in bindings])
-    return f"测试任务 {job_id} · 生成物 {name}\n\n关联：\n{links}"
 
 
 def _result_body(
