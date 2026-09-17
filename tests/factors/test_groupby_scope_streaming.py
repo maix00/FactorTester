@@ -1,107 +1,152 @@
-"""The incremental kernel must agree point-by-point with the batch kernel."""
+"""``groupby_scope``：增量内核与批量内核必须逐点一致（ADR-022 双后端契约）。
+
+增量侧只保留 O(1) 状态（计数/和/平方和/运行极值/极值位置 + 分区标记），
+不保留 O(K) 窗口缓冲；本测试用「同一面板逐根喂入」与批量内核逐点比对，
+覆盖跨交易日边界、NaN 缺口、截断窗口与分组边界。
+"""
 
 from __future__ import annotations
+
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from tests.factors.test_groupby_scope import BARS_PER_DAY, _FrameExpr, _ctx, _two_days
+from tools.data.types import DataFreq
+from tools.factors.expr import EvaluateContext
 from tools.factors.expr.groupby_scope_eval import apply_grouped
-from tools.factors.expr.lookback_scope import scope_bars, scope_trading_day
-from tools.testers.backtest.engines.factors.group_scope import GroupScopeNode
-
-
-class _Market:
-    """The runtime slice shape the streaming executor hands to the root node."""
-
-    def __init__(self, timestamp: pd.Timestamp, trading_day: pd.Timestamp) -> None:
-        self.timestamp = timestamp
-        self.trading_day = trading_day
-
-
-class _ValueNode:
-    """Feeds one bar's value through, so the scope node has a streaming child."""
-
-    def __init__(self, values: np.ndarray) -> None:
-        self._values = values
-        self._bar = -1
-
-    def update(self, market, cache) -> np.ndarray:
-        self._bar += 1
-        return np.asarray([self._values[self._bar]], dtype=float)
-
-
-SERIES = np.sin(np.arange(BARS_PER_DAY * 2) / 7.0) * 10.0 + np.arange(BARS_PER_DAY * 2) / 50.0
-
-
-@pytest.mark.parametrize(
-    "op",
-    [
-        "mean", "sum", "min", "max", "std",
-        pytest.param("argmax", marks=pytest.mark.xfail(
-            reason="harness: multi-bar feeder vs width guard, tracked in #397",
-            strict=False)),
-        pytest.param("argmin", marks=pytest.mark.xfail(
-            reason="harness: multi-bar feeder vs width guard, tracked in #397",
-            strict=False)),
-    ],
+from tools.factors.expr.lookback_scope import (
+    scope_bars,
+    scope_session,
+    scope_trading_day,
 )
-@pytest.mark.parametrize("scope_factory", [scope_trading_day, lambda: scope_bars(8)])
-def test_streaming_matches_batch_point_by_point(op, scope_factory):
-    index, frame = _two_days(SERIES)
-    ctx = _ctx(index)
-    expected = apply_grouped(op, scope_factory(), frame, ctx=ctx).to_numpy(dtype=float)[:, 0]
+from tools.factors.expr.timeline import PanelTimeline
+from tools.testers.backtest.engines.factors.incremental import GroupScopeNode
 
-    node = GroupScopeNode(op, scope_factory(), _ValueNode(SERIES), 1)
-    days = pd.DatetimeIndex(index).normalize()
-    actual = np.asarray(
-        [node.update(_Market(index[i], days[i]), {})[0] for i in range(len(index))],
-        dtype=float,
+BARS_PER_DAY = 255
+
+
+class _RowNode:
+    """Feeds one pre-recorded row per bar; the kernel's only data dependency."""
+
+    def __init__(self, rows: np.ndarray) -> None:
+        self.rows = rows
+        self.position = -1
+
+    def update(self, market, cache):  # noqa: ANN001 - matches StreamingNode
+        self.position += 1
+        return self.rows[self.position]
+
+
+def _panel(products: tuple[str, ...]) -> tuple[pd.DatetimeIndex, pd.DataFrame]:
+    index = pd.date_range("2026-01-05 09:31", periods=BARS_PER_DAY, freq="min")
+    index = index.append(pd.date_range("2026-01-06 09:31", periods=BARS_PER_DAY, freq="min"))
+    steps = np.arange(BARS_PER_DAY, dtype=float)
+    rng = np.random.default_rng(11)
+    columns = {}
+    for offset, product in enumerate(products):
+        day_one = np.sin((steps + offset) / 9.0) * 5.0 + steps * 0.1 + 1000.0 * offset
+        day_two = np.cos((steps + offset) / 7.0) * 3.0 - steps * 0.05 + 1000.0 * offset
+        column = np.r_[day_one, day_two]
+        # 缺口：不同产品在不同位置缺观测，模拟异步面板
+        column[7 + offset] = np.nan
+        column[BARS_PER_DAY + 40 + offset * 3] = np.nan
+        column[BARS_PER_DAY + 41 + offset * 3] = np.nan
+        if offset:
+            column[130:135] = np.nan
+        columns[product] = column
+    frame = pd.DataFrame(columns, index=index)
+    return index, frame
+
+
+def _ctx(frame: pd.DataFrame) -> EvaluateContext:
+    index = frame.index
+    timeline = PanelTimeline(
+        index=index,
+        products=tuple(frame.columns),
+        trading_days=pd.Index(pd.DatetimeIndex(index).normalize(), name="DAY1"),
+        observed_mask=frame.notna(),
+        same_session=True,
+    )
+    return EvaluateContext(
+        products=tuple(frame.columns),
+        freq=DataFreq.MIN1,
+        cache={},
+        panel_timeline=timeline,
     )
 
-    finite = np.isfinite(expected) | np.isfinite(actual)
-    np.testing.assert_allclose(
-        actual[finite], expected[finite], rtol=1e-9, atol=1e-9,
-        err_msg=f"{op} diverged between the batch and incremental kernels",
+
+CASES = [
+    ("mean", None, 0, None),
+    ("mean", None, 0, 119),
+    ("mean", None, 120, None),
+    ("sum", None, 0, None),
+    ("std", None, 0, None),
+    ("var", None, 0, 59),
+    ("min", None, 0, None),
+    ("max", None, 0, 119),
+    ("median", None, 0, None),
+    ("quantile", 0.5, 0, None),
+    ("quantile", 0.25, 0, 200),
+    ("argmax", None, 0, None),
+    ("argmax", None, 0, 119),
+    ("argmin", None, 0, None),
+]
+
+
+@pytest.mark.parametrize("op,quantile,trunc_start,trunc_end", CASES)
+@pytest.mark.parametrize("scope_kind", ["trading_day", "bars", "session"])
+def test_streaming_matches_batch_pointwise(op, quantile, trunc_start, trunc_end, scope_kind):
+    products = ("A", "B")
+    index, frame = _panel(products)
+    ctx = _ctx(frame)
+    if scope_kind == "trading_day":
+        scope = scope_trading_day()
+    elif scope_kind == "bars":
+        scope = scope_bars(7)
+    else:
+        scope = scope_session(gap="30min")
+
+    expected = apply_grouped(
+        op, scope, frame, ctx=ctx, quantile=quantile,
+        trunc_start=trunc_start, trunc_end=trunc_end,
     )
-    assert np.array_equal(np.isfinite(actual), np.isfinite(expected)), (
-        f"{op}: NaN positions differ between backends"
+
+    rows = frame.to_numpy(dtype=float)
+    node = GroupScopeNode(
+        op, _RowNode(rows), scope, len(products),
+        quantile=quantile, trunc_start=trunc_start, trunc_end=trunc_end,
+        products=products,
     )
 
+    got = np.full(rows.shape, np.nan, dtype=float)
+    for position in range(len(index)):
+        stamp = pd.Timestamp(index[position])
+        market = SimpleNamespace(
+            timestamp=stamp,
+            trading_day=stamp.normalize(),
+            prices={},
+        )
+        value = node.update(market, {})
+        got[position] = value
 
-def test_streaming_resets_at_the_trading_day_boundary():
-    index, frame = _two_days(SERIES)
-    node = GroupScopeNode("mean", scope_trading_day(), _ValueNode(SERIES), 1)
-    days = pd.DatetimeIndex(index).normalize()
-    values = [node.update(_Market(index[i], days[i]), {})[0] for i in range(len(index))]
-    # the first bar of day 2 starts a fresh partition: its mean is its own value
-    assert values[BARS_PER_DAY] == pytest.approx(SERIES[BARS_PER_DAY])
-    assert values[BARS_PER_DAY - 1] != pytest.approx(values[BARS_PER_DAY])
-    assert np.isfinite(values).all()
-
-
-def test_streaming_rejects_unsupported_combinations_explicitly():
-    from tools.testers.backtest.engines.factors.incremental import UnsupportedStreamingFactor
-
-    with pytest.raises(UnsupportedStreamingFactor):
-        GroupScopeNode("median", scope_trading_day(), _ValueNode(SERIES), 1)
-    with pytest.raises(UnsupportedStreamingFactor):
-        GroupScopeNode("min", scope_trading_day(), _ValueNode(SERIES), 1, trunc_start=5)
+    np.testing.assert_allclose(got, expected.to_numpy(dtype=float), rtol=1e-9, atol=1e-9, equal_nan=True,
+                               err_msg=f"{op}/{scope_kind}/trunc({trunc_start},{trunc_end}) 两后端不一致")
 
 
-def test_streaming_state_stays_constant_size():
-    """No history buffer: state size must not grow with the partition length."""
-
-    node = GroupScopeNode("mean", scope_trading_day(), _ValueNode(SERIES), 1)
-    before = sum(
-        value.nbytes for value in vars(node).values() if isinstance(value, np.ndarray)
+def test_streaming_state_does_not_grow_with_the_partition():
+    """状态大小与分区长度无关：跑满两天后各状态数组形状不变。"""
+    products = ("A",)
+    index, frame = _panel(products)
+    node = GroupScopeNode(
+        "mean", _RowNode(frame.to_numpy(dtype=float)), scope_trading_day(), 1,
+        products=products,
     )
-    days = pd.DatetimeIndex(_two_days(SERIES)[0]).normalize()
-    index = _two_days(SERIES)[0]
-    for i in range(len(index)):
-        node.update(_Market(index[i], days[i]), {})
-    after = sum(
-        value.nbytes for value in vars(node).values() if isinstance(value, np.ndarray)
-    )
-    assert after == before, "streaming state grew with the partition length"
+    for position in range(len(index)):
+        stamp = pd.Timestamp(index[position])
+        node.update(SimpleNamespace(timestamp=stamp, trading_day=stamp.normalize(), prices={}), {})
+    for name in ("_count", "_sum", "_mean", "_m2", "_raw", "_min", "_max", "_best_raw"):
+        assert getattr(node, name).shape == (1,), name
+    # 均值/极值类不保留任何窗口内容
+    assert not hasattr(node, "_window")

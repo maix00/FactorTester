@@ -520,6 +520,291 @@ class WhereNode:
         return cache[key]
 
 
+from bisect import insort  # placed next to its only consumer
+
+
+def _resolve_truncation(expr: FactorExpr | None) -> int | None:
+    """Resolve a groupby_scope truncation bound; streaming needs fixed bars."""
+    if expr is None:
+        return None
+    if isinstance(expr, ConstExpr):
+        value = expr.value
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise UnsupportedStreamingFactor("groupby_scope truncation must be numeric")
+        return max(0, int(value))
+    raise UnsupportedStreamingFactor("groupby_scope truncation must resolve to fixed bars")
+
+
+def _with_timestamp(market: MarketSlice, timestamp: pd.Timestamp) -> MarketSlice:
+    """Attach the bar timestamp when the slice does not carry one.
+
+    The run-scoped executor already hands over an internal slice that carries
+    ``timestamp``/``trading_day``; the precomputed adapter builds a bare
+    ``MarketSlice``.  Scope-partitioned kernels need the time to find partition
+    boundaries, so fill it in here rather than teaching every node about time.
+    """
+    if getattr(market, "timestamp", None) is not None:
+        return market
+    import dataclasses
+
+    try:
+        return dataclasses.replace(
+            market, timestamp=pd.Timestamp(timestamp), trading_day=None,
+        )
+    except TypeError:
+        return market
+
+
+class GroupScopeNode:
+    """Streaming kernel for ``groupby_scope`` (scope-partitioned aggregation).
+
+    State is **O(1) per product** for every decomposable aggregation (count,
+    sum, sum-of-squares, running extreme, running arg-extreme) and the partition
+    boundary is read off the market slice, so no O(K) window buffer is needed:
+    memory does not grow with the partition length.  ``median``/``quantile`` are
+    the only ops carrying a partition-sized order-statistic list, which is
+    unavoidable for an order statistic.
+    """
+
+    def __init__(
+        self,
+        op: str,
+        child: StreamingNode,
+        scope: Any,
+        width: int,
+        *,
+        quantile: float | None = None,
+        trunc_start: int = 0,
+        trunc_end: int | None = None,
+        products: tuple[Any, ...] | None = None,
+        source_freq: Any | None = None,
+    ) -> None:
+        from tools.factors.expr.groupby_scope_eval import _MIN_PERIODS
+        from tools.factors.expr.lookback_scope import (
+            BarCountScope,
+            SessionScope,
+            TradingDayScope,
+        )
+
+        self.op = op
+        self.child = child
+        self.scope = scope
+        self.width = width
+        self.quantile = quantile
+        self.trunc_start = max(0, int(trunc_start or 0))
+        self.trunc_end = None if trunc_end is None else max(0, int(trunc_end))
+        self.products = tuple(products) if products is not None else tuple(range(width))
+        self._min_periods = _MIN_PERIODS
+        self._bar_scope = BarCountScope
+        self._day_scope = TradingDayScope
+        self._session_scope = SessionScope
+        self._bar_count = 0
+        if isinstance(scope, BarCountScope):
+            # 与 rolling 同口径解析：整数根数直接可用，时长按源频率折算成固定根数
+            try:
+                self._bar_count = int(
+                    scope.resolved_count(source_freq=source_freq, products=self.products)
+                )
+            except (TypeError, ValueError) as error:
+                raise UnsupportedStreamingFactor(
+                    f"streaming groupby_scope(scope_bars) needs a fixed bar count: {error}"
+                ) from error
+            if self._bar_count < 1:
+                raise UnsupportedStreamingFactor("scope_bars(K) requires K >= 1")
+        elif not isinstance(scope, (TradingDayScope, SessionScope)):
+            raise UnsupportedStreamingFactor(
+                f"unsupported groupby_scope scope for streaming: {scope!r}"
+            )
+        self._key: np.ndarray = np.empty(width, dtype=object)
+        self._opened = np.zeros(width, dtype=bool)
+        self._raw = np.zeros(width, dtype=np.int64)
+        self._count = np.zeros(width, dtype=np.int64)
+        self._sum = np.zeros(width, dtype=float)
+        # Welford 在线均值/二阶矩：O(1) 状态且避免 sum-of-squares 的抵消误差
+        self._mean = np.zeros(width, dtype=float)
+        self._m2 = np.zeros(width, dtype=float)
+        self._min = np.full(width, np.inf, dtype=float)
+        self._max = np.full(width, -np.inf, dtype=float)
+        self._best_raw = np.full(width, -1, dtype=np.int64)
+        self._best_value = np.full(width, np.nan, dtype=float)
+        self._frozen = np.zeros(width, dtype=bool)
+        self._frozen_value = np.full(width, np.nan, dtype=float)
+        self._sorted: list[list[float]] = [[] for _ in range(width)]
+        self._track_sum = op == "sum"
+        self._track_moments = op in ("mean", "var", "std")
+        self._track_extremes = op in ("min", "max")
+        self._track_order = op in ("median", "quantile")
+        self._last_ts: list[Any] = [None] * width
+        self._session_id = np.zeros(width, dtype=np.int64)
+        self._bar_ordinal = np.zeros(width, dtype=np.int64)
+
+    # -- partition bookkeeping -------------------------------------------
+    def _partition_of(
+        self, index: int, timestamp: Any, trading_day: Any, observed: bool,
+    ) -> Any:
+        scope = self.scope
+        if isinstance(scope, self._bar_scope):
+            if not observed:
+                return self._key[index] if self._opened[index] else None
+            ordinal = int(self._bar_ordinal[index])
+            self._bar_ordinal[index] = ordinal + 1
+            return ordinal // self._bar_count
+        if isinstance(scope, self._day_scope):
+            if trading_day is None:
+                raise UnsupportedStreamingFactor(
+                    "groupby_scope(trading_day) needs a trading day on the market slice"
+                )
+            return trading_day
+        if not observed:
+            return self._key[index] if self._opened[index] else None
+        last = self._last_ts[index]
+        if last is not None and timestamp - last >= pd.Timedelta(scope.gap):
+            self._session_id[index] += 1
+        self._last_ts[index] = timestamp
+        return int(self._session_id[index])
+
+    def _reset(self, index: int, partition: Any) -> None:
+        self._key[index] = partition
+        self._opened[index] = True
+        self._raw[index] = 0
+        self._count[index] = 0
+        self._sum[index] = 0.0
+        self._mean[index] = 0.0
+        self._m2[index] = 0.0
+        self._min[index] = np.inf
+        self._max[index] = -np.inf
+        self._best_raw[index] = -1
+        self._best_value[index] = np.nan
+        self._frozen[index] = False
+        self._frozen_value[index] = np.nan
+        self._sorted[index] = []
+
+    # -- per-bar evaluation ----------------------------------------------
+    def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
+        key = id(self)
+        if key in cache:
+            return cache[key]
+        values = np.asarray(self.child.update(market, cache), dtype=float)
+        timestamp = getattr(market, "timestamp", None)
+        trading_day = getattr(market, "trading_day", None)
+        if timestamp is not None:
+            timestamp = pd.Timestamp(timestamp)
+        if isinstance(self.scope, (self._day_scope, self._session_scope)):
+            if timestamp is None:
+                raise UnsupportedStreamingFactor(
+                    "groupby_scope needs bar timestamps; the market slice carries none"
+                )
+            if trading_day is None and isinstance(self.scope, self._day_scope):
+                trading_day = timestamp.normalize()
+        elif trading_day is not None:
+            trading_day = pd.Timestamp(trading_day)
+        output = np.full(self.width, np.nan, dtype=float)
+        for index in range(self.width):
+            observed = index < values.shape[0] and not np.isnan(values[index])
+            partition = self._partition_of(index, timestamp, trading_day, observed)
+            if partition is not None and (
+                not self._opened[index] or partition != self._key[index]
+            ):
+                self._reset(index, partition)
+            if observed:
+                output[index] = self._consume(index, float(values[index]))
+        cache[key] = output
+        return output
+
+    def _consume(self, index: int, value: float) -> float:
+        raw = int(self._raw[index])
+        self._raw[index] = raw + 1
+        if raw < self.trunc_start:
+            return np.nan
+        self._count[index] += 1
+        # 只维护当前算子真正需要的状态，避免每根做无用的浮点运算
+        if self._track_sum:
+            self._sum[index] += value
+        if self._track_moments:
+            count = int(self._count[index])
+            delta = value - self._mean[index]
+            self._mean[index] += delta / count
+            self._m2[index] += delta * (value - self._mean[index])
+        if self._track_extremes:
+            if value < self._min[index]:
+                self._min[index] = value
+            if value > self._max[index]:
+                self._max[index] = value
+        if self._track_order:
+            insort(self._sorted[index], value)
+        if self.op in ("argmax", "argmin"):
+            if self.trunc_end is None or raw <= self.trunc_end:
+                best = int(self._best_raw[index])
+                better = (
+                    value > self._best_value[index] if self.op == "argmax"
+                    else value < self._best_value[index]
+                )
+                if best < 0 or np.isnan(self._best_value[index]) or better:
+                    self._best_raw[index] = raw
+                    self._best_value[index] = value
+            span = raw - self.trunc_start
+            if span <= 0:
+                return 0.0
+            best = int(self._best_raw[index])
+            return np.nan if best < 0 else (raw - best) / span
+        if (
+            self.trunc_end is not None
+            and raw > self.trunc_end
+            and self._frozen[index]
+        ):
+            return float(self._frozen_value[index])
+        result = self._value(index, raw)
+        if self.trunc_end is not None and raw == self.trunc_end:
+            self._frozen[index] = True
+            self._frozen_value[index] = result
+        return result
+
+    def _minimum(self) -> int:
+        floor = int(self._min_periods.get(self.op, 1))
+        if self.trunc_end is None:
+            return floor
+        return min(floor, max(1, self.trunc_end - self.trunc_start + 1))
+
+    def _value(self, index: int, raw: int) -> float:
+        op = self.op
+        count = int(self._count[index])
+        if count < self._minimum():
+            return np.nan
+        if op == "sum":
+            return float(self._sum[index])
+        if op == "mean":
+            return float(self._mean[index])
+        if op in ("var", "std"):
+            if count < 2:
+                return np.nan
+            variance = max(0.0, float(self._m2[index] / (count - 1)))
+            return float(np.sqrt(variance)) if op == "std" else variance
+        if op == "min":
+            return float(self._min[index])
+        if op == "max":
+            return float(self._max[index])
+        if op in ("median", "quantile"):
+            return self._order_statistic(index)
+        raise UnsupportedStreamingFactor(f"unsupported groupby_scope op: {op}")
+
+    def _order_statistic(self, index: int) -> float:
+        values = self._sorted[index]
+        size = len(values)
+        if size == 0 or size < self._minimum():
+            return np.nan
+        if self.op == "median":
+            if size % 2:
+                return float(values[size // 2])
+            return 0.5 * (values[size // 2 - 1] + values[size // 2])
+        q = 0.5 if self.quantile is None else float(self.quantile)
+        position = q * (size - 1)
+        lower = int(np.floor(position))
+        upper = int(np.ceil(position))
+        if lower == upper:
+            return float(values[lower])
+        return float(values[lower] + (values[upper] - values[lower]) * (position - lower))
+
+
 class StreamingFactorPlan:
     def __init__(
         self,
@@ -536,7 +821,7 @@ class StreamingFactorPlan:
     def update(self, timestamp: pd.Timestamp, market: MarketSlice) -> dict[str, float]:
         if set(market.prices) != set(self.products):
             raise ValueError("streaming factor products do not match the market slice")
-        values = self._root.update(market, {})
+        values = self._root.update(_with_timestamp(market, timestamp), {})
         return dict(zip(self.products, values, strict=True))
 
 
@@ -742,6 +1027,36 @@ def compile_streaming_factor(
                 quantile=_const_float(expr.quantile),
                 trunc_start=int(_const_float(expr.trunc_start) or 0),
                 trunc_end=None if expr.trunc_end is None else int(_const_float(expr.trunc_end)),
+            )
+        elif isinstance(expr, GroupByScopeOp):
+            from tools.factors.expr.groupby_scope import GroupByScopeOp as _GroupByScopeOp
+
+            op_name = expr.op
+            operands = expr.operands
+            data_operands = tuple(
+                compile_node(item)
+                for item in operands[1:1 + expr._data_count]
+            )
+            if not data_operands:
+                raise UnsupportedStreamingFactor("groupby_scope expects one data operand")
+            quantile = None
+            if op_name == "quantile":
+                quantile = expr.quantile_value()
+                if isinstance(quantile, ConstExpr):
+                    quantile = quantile.value
+                if isinstance(quantile, bool) or not isinstance(quantile, (int, float)):
+                    raise UnsupportedStreamingFactor("streaming quantile must be a constant")
+                quantile = float(quantile)
+            node = GroupScopeNode(
+                op_name,
+                data_operands[0],
+                expr.scope,
+                len(products),
+                quantile=quantile,
+                trunc_start=_resolve_truncation(expr.trunc_start),
+                trunc_end=_resolve_truncation(expr.trunc_end),
+                products=products,
+                source_freq=source_freq,
             )
         elif isinstance(expr, ShiftOp):
             if not isinstance(expr.periods, ConstExpr) or not isinstance(expr.periods.value, int):
