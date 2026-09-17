@@ -132,6 +132,21 @@ def test_market_entry_records_why_bars_are_missing(monkeypatch):
     assert entry["reason"].startswith("读取行情失败")
 
 
+def test_market_bars_accept_a_multiindex_frame(monkeypatch):
+    """A product view may index by (instrument, time); bars must still format."""
+    frame = _frame()
+    frame.index = pd.MultiIndex.from_arrays(
+        [["T2506"] * len(frame), frame.index], names=["instrument", "time"],
+    )
+    view = _View(frame)
+    product = _Product("T.CFE", view, _Frequency("MIN30"))
+    entry = _evaluation(monkeypatch)._market_entry(product, True, None, None)
+
+    assert len(entry["bars"]) == 3
+    assert entry["bars"][0]["timestamp"] > 0
+    assert "reason" not in entry
+
+
 def test_market_series_skips_other_products(monkeypatch):
     view = _View(_frame())
     product = _Product("TL.CFE", view, _Frequency("MIN30"))
