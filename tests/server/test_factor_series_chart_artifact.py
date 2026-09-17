@@ -29,8 +29,10 @@ def _payload():
 
 def test_factor_series_declares_a_rendition_chart():
     definition = OUTPUT_DEFINITIONS["factor_series"]
-    assert "factor_series_chart" in definition["artifacts"]
-    assert "factor_series_chart" in definition["rendition_artifacts"]
+    for name in ("factor_series_overview_full", "factor_series_overview_intraday",
+                 "factor_series_overview_hourly"):
+        assert name in definition["artifacts"]
+        assert name in definition["rendition_artifacts"]
     assert "svg" in definition["formats"]
 
 
@@ -106,10 +108,9 @@ def _market_payload(open_interest=True):
     }]}
 
 
-def test_factor_series_declares_a_market_chart_rendition():
+def test_factor_series_declares_the_result_area_table():
     definition = OUTPUT_DEFINITIONS["factor_series"]
-    assert "factor_series_market_chart" in definition["artifacts"]
-    assert "factor_series_market_chart" in definition["rendition_artifacts"]
+    assert "factor_series_summary_data" in definition["artifacts"]
 
 
 def test_market_chart_draws_price_volume_and_open_interest():
