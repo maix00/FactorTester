@@ -15,13 +15,15 @@ OUTPUT_DEFINITIONS: dict[str, dict[str, Any]] = {
         "label": "因子序列", "formats": ["svg", "json"],
         "presentation": "chart", "viewer": "factor_series",
         "artifacts": [
-            "factor_series_data", "factor_series_receipt", "factor_series_chart",
-            "factor_series_market_chart", "factor_series_summary_csv",
+            "factor_series_data", "factor_series_receipt",
+            "factor_series_overview_full", "factor_series_overview_intraday",
+            "factor_series_overview_hourly", "factor_series_summary_csv",
             "factor_series_summary_data",
         ],
         "canonical_artifact": "factor_series_data",
         "rendition_artifacts": [
-            "factor_series_chart", "factor_series_market_chart",
+            "factor_series_overview_full", "factor_series_overview_intraday",
+            "factor_series_overview_hourly",
         ],
         "receipt_artifact": "factor_series_receipt",
         # IC/backtest only retain these values when the primary run requests
