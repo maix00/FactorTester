@@ -43,6 +43,7 @@ from .cross_sectional_kernels import ordinal_rank, rank_percent, zscore
 from .cross_sectional_residual import ResidualizeNode
 from .group_cross_sectional import GroupCrossSectionalNode
 from .rolling_statistics import ROLLING_STATISTICS, RollingStatisticsNode
+from tools.factors.expr.groupby_scope import GroupByScopeOp
 
 if TYPE_CHECKING:
     # MarketSlice lived in the now-deleted engines/native/runtime.py
@@ -602,6 +603,17 @@ class IncrementalFactorExecutor:
         return dict(self._latest)
 
 
+def _const_float(value: Any) -> float | None:
+    """Fold a const operand (``ConstExpr`` / plain number) into a float."""
+
+    if value is None:
+        return None
+    resolved = getattr(value, "value", value)
+    if isinstance(resolved, (int, float)):
+        return float(resolved)
+    raise UnsupportedStreamingFactor("streaming groupby_scope parameters must be constants")
+
+
 def compile_streaming_factor(
     expression: FactorExpr,
     products: tuple[Any, ...],
@@ -716,6 +728,21 @@ def compile_streaming_factor(
                     window,
                     len(products),
                 )
+        elif isinstance(expr, GroupByScopeOp):
+            from .group_scope import GroupScopeNode
+
+            if expr._n_data != 1:
+                raise UnsupportedStreamingFactor("groupby_scope expects one streaming operand")
+            child = compile_node(expr.operands[expr._data_start])
+            node = GroupScopeNode(
+                expr.op,
+                expr.scope,
+                child,
+                len(products),
+                quantile=_const_float(expr.quantile),
+                trunc_start=int(_const_float(expr.trunc_start) or 0),
+                trunc_end=None if expr.trunc_end is None else int(_const_float(expr.trunc_end)),
+            )
         elif isinstance(expr, ShiftOp):
             if not isinstance(expr.periods, ConstExpr) or not isinstance(expr.periods.value, int):
                 raise UnsupportedStreamingFactor("streaming shifts must resolve to fixed bars")
