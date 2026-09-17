@@ -548,9 +548,8 @@ def _with_timestamp(market: MarketSlice, timestamp: pd.Timestamp) -> MarketSlice
     import dataclasses
 
     try:
-        return dataclasses.replace(
-            market, timestamp=pd.Timestamp(timestamp), trading_day=None,
-        )
+        # 只补时间戳，绝不覆盖调用方给出的交易日（它来自权威来源）
+        return dataclasses.replace(market, timestamp=pd.Timestamp(timestamp))
     except TypeError:
         return market
 
@@ -659,7 +658,8 @@ class GroupScopeNode:
         if isinstance(scope, self._day_scope):
             if trading_day is None:
                 raise UnsupportedStreamingFactor(
-                    "groupby_scope(trading_day) needs a trading day on the market slice"
+                    "groupby_scope(trading_day) needs the trading day on the market slice; "
+                    "it is not derived from the calendar date"
                 )
             return trading_day
         if not observed:
@@ -701,8 +701,13 @@ class GroupScopeNode:
                 raise UnsupportedStreamingFactor(
                     "groupby_scope needs bar timestamps; the market slice carries none"
                 )
+            # 交易日必须由权威来源给出（面板索引的 DAY1 层／运行时的 trading_day），
+            # 不能由时间戳日历日推出：夜盘 bar 归属的是下一个交易日。
             if trading_day is None and isinstance(self.scope, self._day_scope):
-                trading_day = timestamp.normalize()
+                raise UnsupportedStreamingFactor(
+                    "groupby_scope(trading_day) needs the trading day on the market slice; "
+                    "it is not derived from the calendar date"
+                )
         elif trading_day is not None:
             trading_day = pd.Timestamp(trading_day)
         if self._vector:

@@ -78,7 +78,13 @@ class FactorStepAdapter:
         self,
         timestamp: pd.Timestamp,
         fields: Mapping[str, Mapping[str, float]],
+        trading_day: pd.Timestamp | None = None,
     ) -> FactorSignal:
+        """``trading_day`` 必须来自权威来源（面板索引的 DAY1 层或运行时解析器）。
+
+        仅凭这里的 timestamp 无法推出交易日（夜盘归属下一个交易日），所以不能由
+        本适配器自行推断；作用域为 trading_day 的因子在缺少它时会显式报错。
+        """
         timestamp = pd.Timestamp(timestamp)
         if isinstance(self.factor_source, PrecomputedFactorSource):
             row = self.factor_source.signals.loc[timestamp]
@@ -86,14 +92,18 @@ class FactorStepAdapter:
                 self.factor_alias,
                 {instrument: float(row[instrument]) for instrument in self.instruments},
             )
-        market = MarketSlice({
-            instrument: ProductPrice(
-                instrument,
-                price=_reference_price(fields[instrument]),
-                fields=fields[instrument],
-            )
-            for instrument in self.instruments
-        })
+        market = MarketSlice(
+            {
+                instrument: ProductPrice(
+                    instrument,
+                    price=_reference_price(fields[instrument]),
+                    fields=fields[instrument],
+                )
+                for instrument in self.instruments
+            },
+            timestamp=timestamp,
+            trading_day=None if trading_day is None else pd.Timestamp(trading_day),
+        )
         assert self._streaming_plan is not None
         return FactorSignal(
             self.factor_alias,

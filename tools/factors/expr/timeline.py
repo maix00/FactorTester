@@ -109,6 +109,12 @@ def _timestamps(index: pd.Index) -> pd.DatetimeIndex:
 
 
 def _trading_days(index: pd.Index) -> pd.Index:
-    if isinstance(index, pd.MultiIndex) and "DAY1" in index.names:
-        return pd.Index(index.get_level_values("DAY1"), name="DAY1")
-    return pd.Index(_timestamps(index).normalize(), name="DAY1")
+    """交易日层与数据层同一权威：优先日级层，否则事件时间的自然日。
+
+    日级层的判定（``DAY1``、``trading_day``、``_SIGNAL@DAY1`` 等）统一交给
+    ``DataIndex``，因子层不再自认「名字必须恰为 DAY1」——否则名字不同的面板会
+    静默退回日历日，夜盘 bar 就会被归到错误的交易日。
+    """
+    from tools.data.types import DataIndex
+
+    return pd.Index(DataIndex.trading_day_index_from_index(index), name="DAY1")
