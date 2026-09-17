@@ -243,6 +243,13 @@
     let refreshScrollY = null;
     const renderContent = () => FTReportRenderer.render(value, mount, {
       chapterRail: rail,
+      // The reused Job surfaces of a report's result sections read through the
+      // same page context a Job route provides (api/session/notices).
+      api,
+      session: context.session,
+      button: context.button,
+      showNotice: context.showNotice,
+      navigate: context.navigate,
       loadChapter: source.chapterLazy ? source.loadChapter : null,
       loadComponent: source.loadComponent,
       componentContentLazy: () => source.componentLazy,

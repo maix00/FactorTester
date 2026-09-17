@@ -147,6 +147,33 @@ def test_market_bars_accept_a_multiindex_frame(monkeypatch):
     assert "reason" not in entry
 
 
+def test_ic_backtest_serializer_carries_the_same_market(monkeypatch):
+    """IC/backtest serialize tester tables, so they must load the bars too.
+
+    This path is why an auto-mounted section once showed factor layers with no
+    K线/成交量/持仓量 at all: only the dedicated 查看因子序列 evaluation attached
+    the market payload.
+    """
+    from server.modules.single_factor_test.evaluation import (
+        factor_series_from_tester,
+    )
+
+    view = _View(_frame())
+    product = _Product("T.CFE", view, _Frequency("MIN30"))
+
+    class _Tester:
+        products = [product]
+        results: dict = {}
+
+    payload = factor_series_from_tester(_Tester(), [], start_dt=None, end_dt=None)
+
+    assert payload["series"] == []
+    assert len(payload["market"]) == 1
+    entry = payload["market"][0]
+    assert entry["product"] == "T.CFE"
+    assert len(entry["bars"]) == 3
+
+
 def test_market_series_skips_other_products(monkeypatch):
     view = _View(_frame())
     product = _Product("TL.CFE", view, _Frequency("MIN30"))

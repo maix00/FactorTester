@@ -440,6 +440,12 @@
     const renderChildren = () => {
       if (rendered) return;
       rendered = true;
+      // A Job result special section renders the Job's own run surface (运行过程
+      // + 按 job 类型分发的运行结果) through the shared Job detail
+      // implementation, instead of only the artifacts mounted under it.
+      if (window.FTReportJobResult?.isJobResultSection?.(component)) {
+        details.append(window.FTReportJobResult.mount(component, context));
+      }
       if (hasPayload(component)) details.append(lazyLeaf(component, context));
       if (children.length) details.append(lazyChildren(children, context, depth + 1));
     };
