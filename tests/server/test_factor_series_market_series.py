@@ -157,11 +157,18 @@ def test_market_series_skips_other_products(monkeypatch):
 
 
 @pytest.mark.parametrize("with_interest", [True, False])
-def test_market_bars_cap_the_payload(monkeypatch, with_interest):
+def test_market_bars_thin_the_full_range_and_keep_a_native_tail(
+    monkeypatch, with_interest,
+):
+    """全时段抽样 + 近期原分辨率：K线面板才能与各层序列同跨度。"""
     frame = _frame(with_interest)
     evaluation = _evaluation(monkeypatch)
     entry = evaluation._market_bars(
-        "T.CFE", frame, True, _Frequency("MIN30"), "", "Asia/Shanghai", limit=2,
+        "T.CFE", frame, True, _Frequency("MIN30"), "", "Asia/Shanghai",
+        limit=2, recent=2,
     )
     assert len(entry["bars"]) == 2
-    assert "只保留最近 2 根" in entry["reason"]
+    assert "全时段按 1/2 抽样" in entry["reason"]
+    # the native-resolution tail spans the same range when the frame is short
+    assert entry.get("recent_bars") in (None, entry["bars"]) or len(entry["recent_bars"]) == 2
+    assert entry["has_open_interest"] is with_interest
