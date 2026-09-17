@@ -21,6 +21,9 @@ from tools.data.types import finest_index
 from .bar_search_eval import _observed_mask
 from .lookback_scope import BarCountScope, LookbackScope, SessionScope, TradingDayScope
 
+# 少于该长度时逐根循环更快（numpy 每次调用的固定开销超过扫描本身）
+_ARG_EXTREME_VECTOR_FLOOR = 32
+
 GROUPED_AGGREGATIONS = frozenset({
     "mean", "std", "var", "min", "max", "sum", "median", "quantile",
     "argmax", "argmin",
@@ -110,14 +113,10 @@ def _prefix_aggregate(
     return output
 
 
-def _prefix_arg_extreme(
+def _prefix_arg_extreme_loop(
     values: np.ndarray, op: str, start: int, end: int,
 ) -> np.ndarray:
-    """Normalised position of the running extreme, 0 = newest, 1 = oldest.
-
-    Mirrors ``rolling.py::_rolling_argmaxmin``'s convention so the two operators
-    mean the same thing at the day's last bar.
-    """
+    """逐根实现：小分区下比 numpy 调用开销更低，同时作为向量化版的等价参照。"""
     length = len(values)
     output = np.full(length, np.nan, dtype=float)
     best_index = -1
@@ -146,6 +145,53 @@ def _prefix_arg_extreme(
         span = position - start
         age = position - best_index
         output[position] = 0.0 if span == 0 else age / span
+    return output
+
+
+def _prefix_arg_extreme(
+    values: np.ndarray, op: str, start: int, end: int,
+) -> np.ndarray:
+    """Normalised position of the running extreme, 0 = newest, 1 = oldest.
+
+    Mirrors ``rolling.py::_rolling_argmaxmin``'s convention so the two operators
+    mean the same thing at the day's last bar.
+
+    Vectorised form of the per-bar recurrence: the running extreme and the
+    **first** position attaining it are both prefix scans, so the whole
+    partition is one pass of numpy instead of one Python step per bar.  Ties
+    keep the earliest occurrence (strict improvement only), and positions after
+    a truncated end keep advancing their span while the extreme stays frozen —
+    both match the per-bar implementation, which is kept for small partitions
+    where numpy's per-call overhead would dominate.
+    """
+    length = len(values)
+    if length == 0 or start >= length:
+        return np.full(length, np.nan, dtype=float)
+    stop = length - 1 if end is None else min(end, length - 1)
+    if stop - start + 1 < _ARG_EXTREME_VECTOR_FLOOR:
+        return _prefix_arg_extreme_loop(values, op, start, end)
+
+    is_max = op == "argmax"
+    window = values[start:stop + 1]
+    filled = np.where(np.isnan(window), -np.inf if is_max else np.inf, window)
+    running = np.maximum.accumulate(filled) if is_max else np.minimum.accumulate(filled)
+    previous = np.r_[-np.inf if is_max else np.inf, running[:-1]]
+    positions = np.arange(start, stop + 1)
+    # 严格优于「此前的极值」才记录 → 并列取最早出现（与逐根实现一致）
+    improved = np.isfinite(filled) & (filled > previous if is_max else filled < previous)
+    # 回退值是 start（不是 -1）：逐根实现即使在 start 处是 NaN 也把 best 置为 start，
+    # 而截断到 start 时 limit > best 不再成立、best 便不再推进，两者必须一致。
+    first_at = np.where(improved, positions, start)
+    best = np.maximum.accumulate(first_at)
+
+    tail = np.arange(start, length)
+    best_at = best[np.minimum(tail, stop) - start]
+    span = tail - start
+    with np.errstate(invalid="ignore", divide="ignore"):
+        result = np.where(span == 0, 0.0, (tail - best_at) / np.maximum(span, 1))
+    result = np.where(np.isnan(values[start:]), np.nan, result)
+    output = np.full(length, np.nan, dtype=float)
+    output[start:] = result
     return output
 
 

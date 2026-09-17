@@ -153,3 +153,41 @@ def test_quantile_and_truncate_bounds():
     # 当日中位数：第 k 根的组内中位数位于 [1000, 1000+k] 的中位
     assert quantile.iloc[BARS_PER_DAY] == 1000.0
     assert quantile.iloc[BARS_PER_DAY + 2] == 1001.0
+
+
+def test_arg_extreme_vectorised_and_per_bar_paths_agree(monkeypatch):
+    """向量化路径与逐根路径必须逐点相等（并列取最早、截断后 span 继续增长）。"""
+    from tools.factors.expr import groupby_scope_eval as gse
+
+    index, _ = _two_days(np.zeros(BARS_PER_DAY * 2))
+    values = np.resize(
+        np.array([1.0, 5.0, 5.0, 2.0, 5.0, 0.0, 3.0, 3.0, 4.0, 4.0, 9.0, 9.0]), len(index)
+    ).astype(float)
+    values[0] = np.nan
+    values[BARS_PER_DAY] = np.nan
+    values[BARS_PER_DAY + 7] = np.nan
+    values[-1] = np.nan
+    index, frame = _two_days(values)
+    ctx = _ctx(index)
+
+    cases = [
+        (op, scope, start, end)
+        for op in ("argmax", "argmin")
+        for scope in (scope_trading_day(), scope_bars(5))
+        for start, end in ((0, None), (0, 119), (3, 40), (0, 0))
+    ]
+    for op, scope, start, end in cases:
+        monkeypatch.setattr(gse, "_ARG_EXTREME_VECTOR_FLOOR", 1)
+        vectorised = gse.apply_grouped(
+            op, scope, frame, ctx=ctx, trunc_start=start, trunc_end=end
+        )["A"].to_numpy(dtype=float)
+        monkeypatch.setattr(gse, "_ARG_EXTREME_VECTOR_FLOOR", 10 ** 9)
+        per_bar = gse.apply_grouped(
+            op, scope, frame, ctx=ctx, trunc_start=start, trunc_end=end
+        )["A"].to_numpy(dtype=float)
+        label = f"{op}/trunc({start},{end})"
+        assert np.array_equal(np.isnan(vectorised), np.isnan(per_bar)), label
+        np.testing.assert_allclose(
+            vectorised[~np.isnan(vectorised)], per_bar[~np.isnan(per_bar)],
+            rtol=1e-12, atol=1e-12, err_msg=label,
+        )
