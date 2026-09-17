@@ -656,6 +656,17 @@ class FactorExpr:
         return _lazy()['RollingOp']('rolling_mean', _lazy()['_to_expr'](window), self)
 
     @factor_workspace
+    def groupby_scope(self, scope: Any) -> 'FactorExpr':
+        """按作用域分区后聚合（当日／会话／每 K 根）。
+
+        与 ``rolling`` 的固定长度滑动窗口不同：本方法在当前分区内累计，不跨分区
+        回溯。例如 1 分钟频率下 ``X.rolling('1d')`` 是「最近 255 根」，而
+        ``X.groupby_scope(scope_trading_day())`` 是「当日至当前根」。
+        """
+        from .groupby_scope import GroupByScopeExpr
+
+        return GroupByScopeExpr(scope, self)
+
     def rolling(self, window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingExpr':
         """创建滚动窗口，支持 .truncate() + .mean()/.argmax_raw() 等逐步构建。
 

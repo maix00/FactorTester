@@ -53,6 +53,24 @@ VISUAL_OPERATOR_GROUPS = [
             {'key': 'rolling_std', 'label': '标准差', 'symbol': 'RStd', 'desc': 'X.rolling_std(N)', 'arity': 2, 'slots': ['序列 X', '窗口 N']},
             {'key': 'rolling_min', 'label': '最小值', 'symbol': 'RMin', 'desc': 'X.rolling_min(N)', 'arity': 2, 'slots': ['序列 X', '窗口 N']},
             {'key': 'rolling_max', 'label': '最大值', 'symbol': 'RMax', 'desc': 'X.rolling_max(N)', 'arity': 2, 'slots': ['序列 X', '窗口 N']},
+            {
+                'key': 'groupby_scope',
+                'label': '作用域内聚合',
+                'symbol': 'R^Scope',
+                'desc': (
+                    'X.groupby_scope(scope).mean()/.argmax()/… ：按作用域（scope_trading_day() 交易日、'
+                    'scope_session(gap=...) 会话、scope_bars(K) 每 K 根）分区，在当前分区内聚合，'
+                    '只使用当前根及以前的观测，不跨分区回溯；truncate(a,b) 的 a/b 是**组内序号**。'
+                    '与 rolling 的区别（重要）：rolling 是固定长度滑动窗口，rolling(\'1d\') 等于'
+                    '「最近 N 根」而不是「当日」；1 分钟频率、每日 255 根时，下午某根的'
+                    'rolling(\'1d\').truncate(0,119) 会混入前一交易日的观测（实测 120 根里有 54 根不属于当日），'
+                    '因此「当日午前/午后均值」「当日最稳定节点」必须写 '
+                    'X.groupby_scope(scope_trading_day()).truncate(0,119).mean() 与 '
+                    'X.groupby_scope(scope_trading_day()).argmax()'
+                ),
+                'arity': 2,
+                'slots': ['序列 X', '作用域 scope'],
+            },
             {'key': 'shift', 'label': '平移', 'symbol': 'shift', 'desc': 'X.shift(N)', 'arity': 2, 'slots': ['序列 X', '步长 N']},
             {'key': 'delta', 'label': '差分', 'symbol': 'delta', 'desc': 'X.delta(N)', 'arity': 2, 'slots': ['序列 X', '步长 N']},
             {
