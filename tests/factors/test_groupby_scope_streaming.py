@@ -97,7 +97,8 @@ CASES = [
 
 @pytest.mark.parametrize("op,quantile,trunc_start,trunc_end", CASES)
 @pytest.mark.parametrize("scope_kind", ["trading_day", "bars", "session"])
-def test_streaming_matches_batch_pointwise(op, quantile, trunc_start, trunc_end, scope_kind):
+@pytest.mark.parametrize("vectorized", [False, True])
+def test_streaming_matches_batch_pointwise(op, quantile, trunc_start, trunc_end, scope_kind, vectorized):
     products = ("A", "B")
     index, frame = _panel(products)
     ctx = _ctx(frame)
@@ -117,7 +118,7 @@ def test_streaming_matches_batch_pointwise(op, quantile, trunc_start, trunc_end,
     node = GroupScopeNode(
         op, _RowNode(rows), scope, len(products),
         quantile=quantile, trunc_start=trunc_start, trunc_end=trunc_end,
-        products=products,
+        products=products, vectorized=vectorized,
     )
 
     got = np.full(rows.shape, np.nan, dtype=float)
@@ -133,6 +134,28 @@ def test_streaming_matches_batch_pointwise(op, quantile, trunc_start, trunc_end,
 
     np.testing.assert_allclose(got, expected.to_numpy(dtype=float), rtol=1e-9, atol=1e-9, equal_nan=True,
                                err_msg=f"{op}/{scope_kind}/trunc({trunc_start},{trunc_end}) 两后端不一致")
+
+
+def test_vector_and_scalar_paths_agree_on_the_same_input():
+    """两条路径必须给出逐点相同的值：向量化只是实现手段，不是另一套语义。"""
+    products = ("A", "B")
+    index, frame = _panel(products)
+    rows = frame.to_numpy(dtype=float)
+    scope = scope_trading_day()
+    results = []
+    for vectorized in (False, True):
+        node = GroupScopeNode(
+            "mean", _RowNode(rows), scope, len(products),
+            products=products, vectorized=vectorized,
+        )
+        got = np.full(rows.shape, np.nan, dtype=float)
+        for position in range(len(index)):
+            stamp = pd.Timestamp(index[position])
+            got[position] = node.update(
+                SimpleNamespace(timestamp=stamp, trading_day=stamp.normalize(), prices={}), {}
+            )
+        results.append(got)
+    np.testing.assert_allclose(results[0], results[1], rtol=1e-12, atol=1e-12, equal_nan=True)
 
 
 def test_streaming_state_does_not_grow_with_the_partition():

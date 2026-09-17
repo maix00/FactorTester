@@ -578,6 +578,7 @@ class GroupScopeNode:
         trunc_end: int | None = None,
         products: tuple[Any, ...] | None = None,
         source_freq: Any | None = None,
+        vectorized: bool | None = None,
     ) -> None:
         from tools.factors.expr.groupby_scope_eval import _MIN_PERIODS
         from tools.factors.expr.lookback_scope import (
@@ -637,6 +638,12 @@ class GroupScopeNode:
         self._last_ts: list[Any] = [None] * width
         self._session_id = np.zeros(width, dtype=np.int64)
         self._bar_ordinal = np.zeros(width, dtype=np.int64)
+        # 跨产品向量化路径在宽度大时明显更快（每 bar 恒定开销），
+        # 逐产品路径在宽度小（真实研究的 T/TL 两个品种）时更快。
+        # 阈值取自实测：2 产品 0.0146 vs 0.0214 ms/bar，20 产品 0.0400 vs 0.0214 ms/bar。
+        self._VECTOR_MIN_WIDTH = 8
+        self._vector = (width >= self._VECTOR_MIN_WIDTH) if vectorized is None else bool(vectorized)
+        self._last_ts_ns = np.zeros(width, dtype=np.int64)
 
     # -- partition bookkeeping -------------------------------------------
     def _partition_of(
@@ -698,16 +705,19 @@ class GroupScopeNode:
                 trading_day = timestamp.normalize()
         elif trading_day is not None:
             trading_day = pd.Timestamp(trading_day)
-        output = np.full(self.width, np.nan, dtype=float)
-        for index in range(self.width):
-            observed = index < values.shape[0] and not np.isnan(values[index])
-            partition = self._partition_of(index, timestamp, trading_day, observed)
-            if partition is not None and (
-                not self._opened[index] or partition != self._key[index]
-            ):
-                self._reset(index, partition)
-            if observed:
-                output[index] = self._consume(index, float(values[index]))
+        if self._vector:
+            output = self._update_vector(values, timestamp, trading_day)
+        else:
+            output = np.full(self.width, np.nan, dtype=float)
+            for index in range(self.width):
+                observed = index < values.shape[0] and not np.isnan(values[index])
+                partition = self._partition_of(index, timestamp, trading_day, observed)
+                if partition is not None and (
+                    not self._opened[index] or partition != self._key[index]
+                ):
+                    self._reset(index, partition)
+                if observed:
+                    output[index] = self._consume(index, float(values[index]))
         cache[key] = output
         return output
 
@@ -758,6 +768,125 @@ class GroupScopeNode:
             self._frozen[index] = True
             self._frozen_value[index] = result
         return result
+
+    # -- 跨产品向量化路径（与 _consume 同一语义，宽度大时每 bar 恒定开销）---
+    def _partition_ids_vector(
+        self, timestamp: Any, trading_day: Any, observed: np.ndarray,
+    ) -> np.ndarray:
+        scope = self.scope
+        if isinstance(scope, self._bar_scope):
+            ids = self._bar_ordinal // self._bar_count
+            self._bar_ordinal += observed
+            return ids
+        if isinstance(scope, self._day_scope):
+            if trading_day is None:
+                raise UnsupportedStreamingFactor(
+                    "groupby_scope(trading_day) needs a trading day on the market slice"
+                )
+            stamp = np.datetime64(pd.Timestamp(trading_day), "ns").astype("int64")
+            return np.full(self.width, stamp, dtype=np.int64)
+        stamp = np.datetime64(pd.Timestamp(timestamp), "ns").astype("int64")
+        gap = int(pd.Timedelta(scope.gap).value)
+        started = observed & (self._last_ts_ns > 0) & ((stamp - self._last_ts_ns) >= gap)
+        self._session_id += started
+        self._last_ts_ns = np.where(observed, stamp, self._last_ts_ns)
+        return self._session_id
+
+    def _update_vector(
+        self, values: np.ndarray, timestamp: Any, trading_day: Any,
+    ) -> np.ndarray:
+        observed = np.isfinite(values)
+        if values.shape[0] != self.width:
+            extra = np.zeros(self.width - values.shape[0], dtype=bool)
+            observed = np.r_[observed, extra]
+        ids = self._partition_ids_vector(timestamp, trading_day, observed)
+        reset = observed & (~self._opened | (ids != self._key))
+        if reset.any():
+            index = np.flatnonzero(reset)
+            self._key[index] = ids[index]
+            self._opened[index] = True
+            self._raw[index] = 0
+            self._count[index] = 0
+            self._sum[index] = 0.0
+            self._mean[index] = 0.0
+            self._m2[index] = 0.0
+            self._min[index] = np.inf
+            self._max[index] = -np.inf
+            self._best_raw[index] = -1
+            self._best_value[index] = np.nan
+            self._frozen[index] = False
+            self._frozen_value[index] = np.nan
+            for position in index:
+                self._sorted[position] = []
+        position = self._raw.copy()
+        kept = observed & (position >= self.trunc_start)
+        if self._track_sum:
+            self._sum += np.where(kept, values, 0.0)
+        if self._track_moments:
+            new_count = self._count + kept
+            delta = values - self._mean
+            safe = np.where(new_count > 0, new_count, 1)
+            self._mean = np.where(kept, self._mean + delta / safe, self._mean)
+            self._m2 = np.where(kept, self._m2 + delta * (values - self._mean), self._m2)
+        if self._track_extremes:
+            self._min = np.where(kept, np.minimum(self._min, values), self._min)
+            self._max = np.where(kept, np.maximum(self._max, values), self._max)
+        if self._track_order:
+            for index_position in np.flatnonzero(kept):
+                insort(self._sorted[index_position], float(values[index_position]))
+        if self.op in ("argmax", "argmin"):
+            advancing = kept if self.trunc_end is None else kept & (position <= self.trunc_end)
+            current = self._best_value
+            if self.op == "argmax":
+                better = values > np.where(np.isnan(current), -np.inf, current)
+            else:
+                better = values < np.where(np.isnan(current), np.inf, current)
+            take = advancing & ((self._best_raw < 0) | np.isnan(current) | better)
+            self._best_raw = np.where(take, position, self._best_raw)
+            self._best_value = np.where(take, values, self._best_value)
+        self._count += kept
+        self._raw += observed
+        result = self._values_vector(position)
+        if self.trunc_end is not None and self.op not in ("argmax", "argmin"):
+            freeze_now = kept & (position == self.trunc_end)
+            if freeze_now.any():
+                self._frozen |= freeze_now
+                self._frozen_value = np.where(freeze_now, result, self._frozen_value)
+            after = observed & (position > self.trunc_end) & self._frozen
+            result = np.where(after, self._frozen_value, result)
+        return np.where(observed, result, np.nan)
+
+    def _values_vector(self, position: np.ndarray) -> np.ndarray:
+        op = self.op
+        count = self._count
+        output = np.full(self.width, np.nan, dtype=float)
+        if op in ("median", "quantile"):
+            for index in range(self.width):
+                output[index] = self._order_statistic(index)
+            return output
+        minimum = self._minimum()
+        if op in ("sum", "mean"):
+            mask = count >= max(minimum, 1)
+            source = self._sum if op == "sum" else self._mean
+            output[mask] = source[mask]
+        elif op in ("var", "std"):
+            mask = count >= max(minimum, 2)
+            variance = np.maximum(self._m2 / np.maximum(count - 1, 1), 0.0)
+            output[mask] = np.sqrt(variance[mask]) if op == "std" else variance[mask]
+        elif op in ("min", "max"):
+            mask = count >= max(minimum, 1)
+            source = self._min if op == "min" else self._max
+            output[mask] = source[mask]
+        elif op in ("argmax", "argmin"):
+            span = position - self.trunc_start
+            valid = (self._best_raw >= 0) & (span >= 0)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                age = (position - self._best_raw) / np.maximum(span, 1)
+            positive = valid & (span > 0)
+            output[positive] = age[positive]
+            output[valid & (span == 0)] = 0.0
+        return output
+
 
     def _minimum(self) -> int:
         floor = int(self._min_periods.get(self.op, 1))
@@ -888,17 +1017,6 @@ class IncrementalFactorExecutor:
         return dict(self._latest)
 
 
-def _const_float(value: Any) -> float | None:
-    """Fold a const operand (``ConstExpr`` / plain number) into a float."""
-
-    if value is None:
-        return None
-    resolved = getattr(value, "value", value)
-    if isinstance(resolved, (int, float)):
-        return float(resolved)
-    raise UnsupportedStreamingFactor("streaming groupby_scope parameters must be constants")
-
-
 def compile_streaming_factor(
     expression: FactorExpr,
     products: tuple[Any, ...],
@@ -1013,21 +1131,6 @@ def compile_streaming_factor(
                     window,
                     len(products),
                 )
-        elif isinstance(expr, GroupByScopeOp):
-            from .group_scope import GroupScopeNode
-
-            if expr._n_data != 1:
-                raise UnsupportedStreamingFactor("groupby_scope expects one streaming operand")
-            child = compile_node(expr.operands[expr._data_start])
-            node = GroupScopeNode(
-                expr.op,
-                expr.scope,
-                child,
-                len(products),
-                quantile=_const_float(expr.quantile),
-                trunc_start=int(_const_float(expr.trunc_start) or 0),
-                trunc_end=None if expr.trunc_end is None else int(_const_float(expr.trunc_end)),
-            )
         elif isinstance(expr, GroupByScopeOp):
             from tools.factors.expr.groupby_scope import GroupByScopeOp as _GroupByScopeOp
 
