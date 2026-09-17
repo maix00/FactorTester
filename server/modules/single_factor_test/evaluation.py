@@ -331,8 +331,9 @@ class FactorEvaluation:
                 loaded.append(entry)
         return loaded
 
+    @staticmethod
     def _market_entry(
-        self, product: Any, adjusted: bool, start_dt: DataTime, end_dt: DataTime,
+        product: Any, adjusted: bool, start_dt: DataTime, end_dt: DataTime,
     ) -> dict[str, Any]:
         """Return one product's market bars, or the reason they are unavailable."""
         name = str(getattr(product, "name", "") or product)
@@ -371,14 +372,15 @@ class FactorEvaluation:
                     "product": name, "bars": [],
                     "reason": f"读取行情失败: {type(second).__name__}",
                 }
-        bars = self._market_bars(
+        bars = FactorEvaluation._market_bars(
             name, frame, adjusted, frequency, reason,
             getattr(product, "timezone", None) or "Asia/Shanghai",
         )
         return bars
 
+    @staticmethod
     def _market_bars(
-        self, name: str, frame: Any, adjusted: bool, frequency: Any,
+        name: str, frame: Any, adjusted: bool, frequency: Any,
         reason: str, timezone: str, limit: int = 1200, recent: int = 1500,
     ) -> dict[str, Any]:
         from server.modules.shared.price_data_helpers import (
@@ -405,17 +407,18 @@ class FactorEvaluation:
             "product": name,
             "freq": str(getattr(frequency, "name", "")),
             "adjusted": adjusted,
-            **self._market_columns(name, full, columns, interest, is_daily, timezone,
+            **FactorEvaluation._market_columns(name, full, columns, interest, is_daily, timezone,
                                    reason=reason, key="bars"),
             **(
-                self._market_columns(name, recent_frame, columns, interest, is_daily,
+                FactorEvaluation._market_columns(name, recent_frame, columns, interest, is_daily,
                                      timezone, key="recent_bars")
                 if len(recent_frame) != len(full) or len(frame) > recent else {}
             ),
         }
 
+    @staticmethod
     def _market_columns(
-        self, name: str, frame: Any, columns: tuple, interest: Any, is_daily: bool,
+        name: str, frame: Any, columns: tuple, interest: Any, is_daily: bool,
         timezone: str, *, key: str, reason: str = "",
     ) -> dict[str, Any]:
         from server.modules.shared.price_data_helpers import format_price_row
@@ -749,7 +752,24 @@ def factor_series_from_tester(
                 )
                 item[key] = {"dates": rank_dates, "values": rank_values}
             items.append(item)
-    return {"schema_version": 1, "factors": descriptors, "series": items}
+    # IC/backtest serialize tables the tester already computed, so the market
+    # bars have to be loaded here too or an auto-mounted section shows factor
+    # layers with no K线/成交量/持仓量 at all.
+    markets = [
+        entry for entry in (
+            FactorEvaluation._market_entry(product, True, start_dt, end_dt)
+            for product in sorted(
+                tester.products, key=lambda value: getattr(value, "name", str(value)),
+            )
+        )
+        if entry
+    ]
+    payload: dict[str, Any] = {
+        "schema_version": 1, "factors": descriptors, "series": items,
+    }
+    if markets:
+        payload["market"] = markets
+    return payload
 
 
 def _requested_factor_refs(data: dict[str, Any]) -> set[str]:
