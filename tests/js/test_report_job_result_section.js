@@ -1,7 +1,8 @@
-// A report's Job result special section must render the Job's own 运行过程
-// (progress) and 运行结果 (the per-Job-kind result viewer) by reusing the Job
-// detail implementation — not a second renderer, and not only the mounted
-// artifacts.  Everything below is stubbed: no network, no real Job.
+// A report's Job result special section must show the **same** 运行过程与结果 panel
+// the test configuration page shows after a run.  The page composes that panel in
+// workbench/test-run-results.js (FTTestRunResults.render → FTTestRunProgress +
+// the per-kind result view), so the report must call exactly that and own no
+// progress/result rendering of its own.  Everything below is stubbed: no network.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
@@ -43,10 +44,7 @@ class Element {
   set className(value) {
     this.classList.tokens = new Set(String(value).split(/\s+/).filter(Boolean));
   }
-  get firstElementChild() { return this.children.find(child => child instanceof Element); }
-  get textContent() {
-    return this.text + this.children.map(child => child.textContent).join('');
-  }
+  get textContent() { return this.text + this.children.map(child => child.textContent).join(''); }
   set textContent(value) { this.text = String(value); this.children = []; }
   append(...items) {
     items.filter(Boolean).forEach(item => {
@@ -80,9 +78,8 @@ class Element {
   scrollIntoView() {}
 }
 
-const created = [];
 global.document = {
-  createElement: tagName => { const node = new Element(tagName); created.push(node); return node; },
+  createElement: tagName => new Element(tagName),
   createDocumentFragment: () => new Element('#fragment'),
 };
 
@@ -96,10 +93,9 @@ function findByClass(root, name) {
   return null;
 }
 
-// --- stubs of the shared Job implementations ------------------------------
-const calls = {groups: [], loadDetail: [], group: [], loadGroup: [], domain: [], generic: [], progress: [], declarations: [], stopProgress: 0};
-let detailFails = false;
-let viewerGroup = 'job-detail-factor-series';
+// --- stubs of the shared implementations the test page uses ----------------
+const calls = {groups: []};
+let panelFails = false;
 
 global.FTRichText = {
   inline: text => new TextNode(text),
@@ -110,7 +106,6 @@ global.FTIcons = {
   node: (symbol, className) => {
     const icon = new Element('i');
     icon.className = className || '';
-    icon.dataset.symbol = String(symbol);
     return icon;
   },
   section: (kind, displayKind) => displayKind || kind,
@@ -121,70 +116,53 @@ global.FTUI = {
 };
 global.FTReportLazyRuntime = {observe: () => null, reset() {}};
 global.FTStaticLoader = {
-  loadGroups: async names => { calls.groups.push([...names]); },
-};
-global.FTJobs = {
-  loadDetail: async (context, port, jobID, serverID) => {
-    calls.loadDetail.push({port, jobID, serverID});
-    if (detailFails) throw new Error('任务不存在');
-    return {
-      payload: {result_summary: {}},
-      taskDetail: {
-        artifacts: [
-          {name: 'factor_series_data', state: 'active', role: 'output'},
-          {name: 'ig_grid', state: 'active', role: 'input'},
-        ],
-        input_artifacts: [{name: 'ig_grid'}],
-        output_declarations: ['factor_series'],
-        results: {summary: {}},
-      },
-      job: {kind: 'factor_evaluation', status: 'succeeded'},
-      executionQuery: '?port=8001',
-      artifactQuery: '',
-    };
+  loadGroups: async names => {
+    calls.groups.push([...names]);
+    if (panelFails) throw new Error('测试运行面板不可用');
+    // The panel module only exists after its lazy group loads, exactly as in the
+    // browser: the report must not assume it is already present.
+    global.FTTestRunResults = panelStub();
   },
 };
-global.FTJobArtifacts = {
-  effectiveDeclarations: (declarations, outputArtifacts) => {
-    calls.declarations.push({declarations: [...declarations], names: outputArtifacts.map(item => item.name)});
-    return declarations;
-  },
+// The report must ask for the test page's own lazy group.
+global.FTTestTypeRegistry = {
+  normalize: value => (String(value || '').includes('backtest') ? 'backtest' : ''),
 };
-global.FTJobProgress = {
-  stopProgress: () => { calls.stopProgress += 1; },
-  progressView: (context, status) => {
-    calls.progress.push(status);
-    const root = new Element('section');
-    root.className = 'job-progress job-section';
-    const heading = new Element('h2');
-    heading.textContent = '任务进度';
-    root.append(heading);
-    return {root, progressState: {terminal: true}};
-  },
-  // A finished Job must not open a live stream from the report.
-  watchProgress: () => { throw new Error('terminal jobs must not be watched'); },
-};
-global.FTJobResultViewers = {
-  group: (job, artifacts, results) => {
-    calls.group.push({kind: job.kind, names: artifacts.map(item => item.name)});
-    return viewerGroup;
-  },
-  loadGroup: async () => { calls.loadGroup.push(viewerGroup); },
-  domainSections: (context, options) => {
-    calls.domain.push(options);
-    const root = new Element('section');
-    root.className = 'job-section factor-series-results';
-    root.append(new TextNode('因子序列结果'));
+
+// The test page's run panel: 任务进度 + the tabs and table of the backtest 概览.
+function panelStub() {
+  return {
+  render: (context, state, item, rerender) => {
+    if (panelFails) throw new Error('测试运行面板不可用');
+    const root = new Element('div');
+    root.className = 'test-run-inline-results';
+    const progress = new Element('section');
+    progress.className = 'job-progress';
+    progress.append(new TextNode('任务进度'));
+    const status = new Element('div');
+    status.append(new TextNode('成功'));
+    progress.append(status);
+    const tabs = new Element('div');
+    ['运行摘要', '概览', '策略统计'].forEach(label => {
+      const tab = new Element('button');
+      tab.append(new TextNode(label));
+      tabs.append(tab);
+    });
+    const table = new Element('table');
+    ['策略', '初始权益', '期末权益', '总收益率', '年化收益率', 'Sharpe ratio', '历史最大回撤']
+      .forEach(label => {
+        const cell = new Element('th');
+        cell.append(new TextNode(label));
+        table.append(cell);
+      });
+    root.append(progress, tabs, table);
+    root.dataset.panelState = `${state.kind}|${state.jobID}|${state.port}|${state.serverID}`;
+    root.dataset.itemPhase = String(item.phase);
+    assert.equal(typeof rerender, 'function', 'the panel receives a rerender callback');
     return root;
   },
-  genericSection: (context, options) => {
-    calls.generic.push(options);
-    const root = new Element('section');
-    root.className = 'job-section generic-job-results';
-    root.append(new TextNode('结果'));
-    return root;
-  },
-};
+  };
+}
 
 // --- load the report renderer path under test -----------------------------
 for (const file of ['lazy-runtime', 'job-result-section', 'component-view']) {
@@ -197,135 +175,83 @@ for (const file of ['lazy-runtime', 'job-result-section', 'component-view']) {
 const settle = async () => {
   for (let tick = 0; tick < 40; tick += 1) await Promise.resolve();
   await new Promise(resolve => setTimeout(resolve, 0));
-  for (let tick = 0; tick < 40; tick += 1) await Promise.resolve();
 };
 
 const JOB_ID = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
 const jobResultID = `job-${JOB_ID}-result`;
-
-(function checkDetection() {
-  const detect = window.FTReportJobResult.isJobResultSection;
-  assert.equal(detect({
-    component_id: jobResultID, kind: 'special', display_kind: 'test_result',
-  }), true, 'a job-<32 hex>-result special section is recognized');
-  assert.equal(window.FTReportJobResult.jobResultID({
-    component_id: jobResultID, kind: 'special', display_kind: 'test_result',
-  }), JOB_ID, 'the job id is read between the job- prefix and -result suffix');
-  assert.equal(detect({
-    component_id: 'job-abc-result', kind: 'special', display_kind: 'test_result',
-  }), false, 'a truncated job id is not a Job result section');
-  assert.equal(detect({
-    component_id: jobResultID, kind: 'special', display_kind: 'evidence_fragment',
-  }), false, 'another special section kind is untouched');
-  assert.equal(detect({
-    component_id: jobResultID, kind: 'entry', display_kind: 'test_result',
-  }), false, 'a non-special component is untouched');
-  console.log('PASS: Job result section detection');
-})();
+const context = {
+  t: key => key,
+  lazyRendering: false,
+  renderGeneration: 0,
+  referenceMeta: {
+    [`job:${JOB_ID}`]: {
+      kind: 'job', target_ref: `job:${JOB_ID}`,
+      data: {port: 8001, server_id: 'srv-1', kind: 'backtest'},
+    },
+  },
+  disclosureState: {[jobResultID]: true},
+};
+const jobSection = {
+  component_id: jobResultID, kind: 'special', display_kind: 'test_result',
+  parent_id: 'chapter-1', title: '回测 运行结果', body: '测试任务已结束', content: null,
+};
 
 (async () => {
-  const context = {
-    t: key => key,
-    lazyRendering: false,
-    renderGeneration: 0,
-    referenceMeta: {
-      [`job:${JOB_ID}`]: {
-        kind: 'job', target_ref: `job:${JOB_ID}`,
-        data: {port: 8001, server_id: 'srv-1'},
-      },
-    },
-    disclosureState: {[jobResultID]: true},
-  };
-  const jobSection = {
-    component_id: jobResultID, kind: 'special', display_kind: 'test_result',
-    parent_id: 'chapter-1', title: '测试结果 · job',
-    body: '测试任务已结束，状态为 succeeded',
-    content: null,
-  };
+  // 0. Only a job-<32 hex>-result special section is a Job result section.
+  const detect = window.FTReportJobResult.isJobResultSection;
+  assert.equal(detect(jobSection), true);
+  assert.equal(window.FTReportJobResult.jobResultID(jobSection), JOB_ID);
+  assert.equal(detect({...jobSection, component_id: 'job-abc-result'}), false);
+  assert.equal(detect({...jobSection, display_kind: 'evidence_fragment'}), false);
+  assert.equal(detect({...jobSection, kind: 'entry'}), false);
+  console.log('PASS: Job result section detection');
 
-  // 1. The report subsection renders the reused run surface in place of the
-  //    artifact-only body.
+  // 1. The panel is the test page's own composition, with the Job identity the
+  //    report binding carries.
   const view = window.FTReportComponents.componentView(jobSection, [], context);
   await settle();
-
-  assert(calls.groups.length >= 1, 'the Job detail module group is loaded on demand');
-  assert.deepEqual(calls.groups[0], ['job-detail-core'],
-    'the report reuses the Job detail implementation through its published lazy group');
-  assert.deepEqual(calls.loadDetail, [{port: 8001, jobID: JOB_ID, serverID: 'srv-1'}],
-    'the Job is read through the existing detail loader with the report binding port/server');
-  assert.deepEqual(calls.progress, ['succeeded'], 'the existing progress view is rendered');
-  assert(view.textContent.includes('任务进度'),
-    `the rendered DOM shows 运行过程 (任务进度): ${view.textContent}`);
-  assert(view.textContent.includes('因子序列结果'),
-    `the rendered DOM shows the per-kind result view: ${view.textContent}`);
-  assert.deepEqual(calls.loadGroup, ['job-detail-factor-series'],
-    'the per-kind result viewer group is loaded before rendering');
-  assert.equal(calls.domain.length, 1, 'the domain result sections render the result');
-  const domain = calls.domain[0];
-  assert.equal(domain.job.kind, 'factor_evaluation');
-  assert.equal(domain.jobID, JOB_ID);
-  assert.equal(domain.executionQuery, '?port=8001');
-  assert.deepEqual(domain.activeArtifacts.map(item => item.name), ['factor_series_data'],
-    'input artifacts are excluded exactly like the Job detail page does');
-  assert.equal(domain.customAnalyses, null, 'a report owns no custom analyses');
-  assert.equal(typeof domain.onGenerated, 'function');
-  assert.equal(calls.generic.length, 0, 'the generic artifact preview is not used for a domain Job');
+  assert.deepEqual(calls.groups[0], ['workbench-run-results'],
+    'the report loads the test page run panel group on demand');
   const block = findByClass(view, 'report-job-result');
-  assert(block, 'the report subsection mounts a job result block');
-  assert.equal(block.dataset.reportJobID, JOB_ID);
+  assert(block, 'the report subsection mounts the Job run panel block');
   assert.equal(block.dataset.reportJobResult, 'ready');
-  assert(view.textContent.includes('测试任务已结束，状态为 succeeded'),
-    'the section prose is still rendered next to the reused run surface');
-  console.log('PASS: Job result subsection renders 运行过程与结果 from the Job detail implementation');
+  const panel = findByClass(view, 'test-run-inline-results');
+  assert(panel, 'the panel is the test page composition, not a report-only one');
+  for (const label of ['任务进度', '成功', '运行摘要', '概览', '策略统计',
+                       '初始权益', '期末权益', '总收益率', '年化收益率',
+                       'Sharpe ratio', '历史最大回撤']) {
+    assert(view.textContent.includes(label),
+      `the embedded panel shows the test page label ${label}: ${view.textContent}`);
+  }
+  assert.equal(panel.dataset.panelState, `backtest|${JOB_ID}|8001|srv-1`,
+    'the panel is driven by the report binding job kind/port/server');
+  console.log('PASS: the report panel is the test configuration page panel');
 
-  // 2. A Job without a domain viewer still renders the shared generic result
-  //    surface (result tabs + declarations) instead of nothing.
-  const genericComponent = {
-    ...jobSection, component_id: `job-${'b'.repeat(32)}-result`,
-  };
-  viewerGroup = '';
-  calls.domain.length = 0;
-  const genericView = window.FTReportComponents.componentView(
-    genericComponent, [], {...context, disclosureState: {[genericComponent.component_id]: true}},
-  );
-  await settle();
-  assert.equal(calls.generic.length, 1, 'an unknown Job kind falls back to the shared generic section');
-  assert.equal(calls.domain.length, 0);
-  assert.deepEqual(calls.generic[0].declarations, ['factor_series']);
-  assert.deepEqual(calls.declarations[0].names, ['factor_series_data'],
-    'generic declarations are computed from the Job output artifacts');
-  assert(genericView.textContent.includes('结果'));
-  viewerGroup = 'job-detail-factor-series';
-  console.log('PASS: unknown Job kinds still use the shared generic result section');
-
-  // 3. Sections that are not a Job result stay on the ordinary report path.
+  // 2. A section that is not a Job result stays on the ordinary report path.
   const plain = window.FTReportComponents.componentView({
     component_id: 'fragment-1', kind: 'special', display_kind: 'evidence_fragment',
     parent_id: 'chapter-1', title: '证据片段', body: '证据正文', content: null,
   }, [], {...context, disclosureState: {'fragment-1': true}});
   await settle();
   assert.equal(findByClass(plain, 'report-job-result'), null,
-    'a non-result special section mounts no Job run surface');
+    'a non-result special section mounts no Job run panel');
   assert(plain.textContent.includes('证据正文'));
   console.log('PASS: other special sections are untouched');
 
-  // 4. An unavailable Job states the failure instead of rendering empty.
-  calls.loadDetail.length = 0;
-  detailFails = true;
-  const failing = {
-    ...jobSection, component_id: `job-${'c'.repeat(32)}-result`,
-  };
+  // 3. An unavailable panel states so explicitly instead of rendering empty.
+  panelFails = true;
+  calls.groups.length = 0;
+  const failing = {...jobSection, component_id: `job-${'c'.repeat(32)}-result`};
   const failingView = window.FTReportComponents.componentView(
     failing, [], {...context, disclosureState: {[failing.component_id]: true}},
   );
   await settle();
-  detailFails = false;
+  panelFails = false;
   const failingBlock = findByClass(failingView, 'report-job-result');
   assert.equal(failingBlock.dataset.reportJobResult, 'error');
   assert(failingView.textContent.includes('结果查看器不可用'),
-    `a failed load is stated explicitly: ${failingView.textContent}`);
-  assert(failingView.textContent.includes('任务不存在'), 'the underlying error is shown');
-  console.log('PASS: a failed Job read reports 结果查看器不可用 explicitly');
+    `a failed panel load is stated explicitly: ${failingView.textContent}`);
+  console.log('PASS: an unavailable run panel is reported explicitly');
 
   console.log('test_report_job_result_section: ok');
 })().catch(error => { console.error(error); process.exitCode = 1; });
