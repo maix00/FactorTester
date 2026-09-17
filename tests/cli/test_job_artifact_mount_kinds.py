@@ -9,14 +9,14 @@ from __future__ import annotations
 from tools.cli.release.research_reporting.job_artifact_mounts import mount_kind
 
 
-def test_result_area_table_mounts_as_a_table():
-    for name in ("factor_series_summary_data", "factor_series_summary_csv"):
-        content_type = (
-            "application/json" if name.endswith("_data") else "text/csv"
-        )
-        assert mount_kind(name, {
-            "name": name, "content_type": content_type,
-        }) == "table"
+def test_result_area_table_mounts_once():
+    """只有 CSV 进小节；JSON 仍可下载，避免同一张表挂两次。"""
+    assert mount_kind("factor_series_summary_csv", {
+        "name": "factor_series_summary_csv", "content_type": "text/csv",
+    }) == "table"
+    assert mount_kind("factor_series_summary_data", {
+        "name": "factor_series_summary_data", "content_type": "application/json",
+    }) is None
 
 
 def test_factor_series_charts_mount_as_images():

@@ -30,7 +30,6 @@ _TABLE_NAMES = {
     # market, so an auto-mounted Job section carries its numbers and not only
     # the rendered chart.
     "factor_series_summary_csv",
-    "factor_series_summary_data",
 }
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
