@@ -379,7 +379,7 @@ class FactorEvaluation:
 
     def _market_bars(
         self, name: str, frame: Any, adjusted: bool, frequency: Any,
-        reason: str, timezone: str, limit: int = 1500,
+        reason: str, timezone: str, limit: int = 1200, recent: int = 1500,
     ) -> dict[str, Any]:
         from server.modules.shared.price_data_helpers import (
             format_price_row, open_interest_column,
@@ -391,16 +391,41 @@ class FactorEvaluation:
             if adjusted else ("OPEN", "HIGH", "LOW", "CLOSE", "VOLUME")
         )
         interest = open_interest_column(getattr(frame, "columns", []))
+        is_daily = bool(getattr(frequency, "is_day_multiple", lambda: False)())
+        # Two resolutions: the whole range thinned to LIMIT bars (so the K线 panel
+        # spans the same window as the factor layers) and the native-resolution
+        # tail (so the intraday window is not averaged away).
+        full = frame.copy()
+        if len(full) > limit:
+            step = max(1, -(-len(full) // limit))
+            full = full.iloc[::step]
+            reason = (reason + "; " if reason else "") + f"全时段按 1/{step} 抽样"
+        recent_frame = frame.tail(recent) if len(frame) > recent else frame
+        return {
+            "product": name,
+            "freq": str(getattr(frequency, "name", "")),
+            "adjusted": adjusted,
+            **self._market_columns(name, full, columns, interest, is_daily, timezone,
+                                   reason=reason, key="bars"),
+            **(
+                self._market_columns(name, recent_frame, columns, interest, is_daily,
+                                     timezone, key="recent_bars")
+                if len(recent_frame) != len(full) or len(frame) > recent else {}
+            ),
+        }
+
+    def _market_columns(
+        self, name: str, frame: Any, columns: tuple, interest: Any, is_daily: bool,
+        timezone: str, *, key: str, reason: str = "",
+    ) -> dict[str, Any]:
+        from server.modules.shared.price_data_helpers import format_price_row
+
         emitted = frame.copy()
-        if len(emitted) > limit:
-            emitted = emitted.tail(limit)
-            reason = (reason + "; " if reason else "") + f"只保留最近 {limit} 根"
         # A product view can hand back a MultiIndex (instrument, time); taking the
         # raw index would put tuples into the timestamp column and every row would
         # fail to format.
         index = emitted.index
         emitted["__time__"] = list(finest_index(index) if isinstance(index, pd.MultiIndex) else index)
-        is_daily = bool(getattr(frequency, "is_day_multiple", lambda: False)())
         bars = [
             format_price_row(
                 row=row, time_col="__time__", o_col=columns[0], h_col=columns[1],
@@ -409,14 +434,11 @@ class FactorEvaluation:
             )
             for _, row in emitted.iterrows()
         ]
-        has_interest = any("open_interest" in bar for bar in bars)
         return {
-            "product": name,
-            "freq": str(getattr(frequency, "name", "")),
-            "adjusted": adjusted,
-            "has_open_interest": has_interest,
-            "bars": bars,
-            **({"reason": reason} if reason else {}),
+            key: bars,
+            ("has_open_interest" if key == "bars" else "recent_has_open_interest"):
+                any("open_interest" in bar for bar in bars),
+            **({"reason": reason} if reason and key == "bars" else {}),
         }
 
     def _run_window_datetimes(self) -> tuple[DataTime, DataTime]:

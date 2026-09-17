@@ -146,7 +146,10 @@ def overview_panels(
         if isinstance(item, dict) and item.get("bars")
     ]
     market = markets[0] if markets else {}
-    price = _market_frame([bar for bar in (market.get("bars") or []) if isinstance(bar, dict)])
+    # The payload carries the whole range thinned plus the native-resolution tail;
+    # the intraday window is the only one that wants the fine bars.
+    key = "recent_bars" if window == "intraday" and market.get("recent_bars") else "bars"
+    price = _market_frame([bar for bar in (market.get(key) or []) if isinstance(bar, dict)])
     layers = []
     for item in payload.get("series") or []:
         if not isinstance(item, dict):
@@ -159,6 +162,8 @@ def overview_panels(
     if window == "intraday":
         price = _intraday_slice(price)
         layers = [(name, _intraday_slice(frame)) for name, frame in layers]
+        if price.empty and market.get("bars"):
+            price = _intraday_slice(_market_frame(market["bars"]))
     elif window == "hourly":
         price = _hourly(price, "close") if not price.empty else price
         layers = [(name, _hourly(frame, "value")) for name, frame in layers]
