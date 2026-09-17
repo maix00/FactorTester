@@ -18,11 +18,11 @@ def test_factor_series_request_returns_a_list():
     assert isinstance(reports, list)
     names = {report.name for report in reports}
     assert "factor_series_data" in names
-    assert "factor_series_chart" in names
-    chart = next(report for report in reports if report.name == "factor_series_chart")
-    assert chart.extension == "svg"
-    assert chart.content_type == "image/svg+xml"
-    assert chart.raw.startswith(b"<?xml") or chart.raw.startswith(b"<svg")
+    assert "factor_series_overview_full" in names
+    panel = next(report for report in reports if report.name == "factor_series_overview_full")
+    assert panel.extension == "png"
+    assert panel.content_type == "image/png"
+    assert panel.raw.startswith(b"\x89PNG\r\n\x1a\n")
 
 
 def test_empty_request_still_returns_a_list():

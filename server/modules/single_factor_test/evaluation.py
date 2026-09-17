@@ -594,6 +594,7 @@ def factor_series_for_run_spec(data: dict[str, Any]) -> dict[str, Any]:
     ))
     combined: list[dict[str, Any]] = []
     factors: list[dict[str, str]] = []
+    markets: list[dict[str, Any]] = []
     seen: set[str] = set()
     requested_refs = _requested_factor_refs(data)
     series_scope = {}
@@ -643,9 +644,20 @@ def factor_series_for_run_spec(data: dict[str, Any]) -> dict[str, Any]:
                 **item, "factor_ref": ref,
                 "factor_alias": descriptor["alias"], "factor": descriptor,
             })
+        # The per-factor evaluation already loaded the traded product's bars for
+        # the K线/成交量/持仓量 panels; dropping them here is why an IC/backtest
+        # run that requested factor_series mounted charts with no market at all.
+        for market in result.get("market") or ():
+            if isinstance(market, dict) and market not in markets:
+                markets.append(market)
     if not combined:
         raise ValueError("所选运行配置没有可生成的因子序列")
-    return {"schema_version": 1, "factors": factors, "series": combined}
+    payload: dict[str, Any] = {
+        "schema_version": 1, "factors": factors, "series": combined,
+    }
+    if markets:
+        payload["market"] = markets
+    return payload
 
 
 def factor_series_from_tester(
