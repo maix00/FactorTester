@@ -66,3 +66,42 @@ def test_rendering_is_pure_for_identity_and_parameters():
     before = (expr._structural_key(), expr._get_alias(), FactorFreqParam.alias)
     expr.to_latex()
     assert before == (expr._structural_key(), expr._get_alias(), FactorFreqParam.alias)
+
+
+def test_groupby_scope_uses_the_same_symbol_with_a_superscript():
+    """与 rolling 同字面 R：rolling 用下标承载窗口，groupby_scope 用上标承载作用域。"""
+    import pandas as pd
+
+    from tools.factors.expr.core import FactorExpr
+    from tools.factors.expr.groupby_scope import GroupByScopeExpr
+    from tools.factors.expr.lookback_scope import scope_bars, scope_session, scope_trading_day
+
+    class _Frame(FactorExpr):
+        def _evaluate(self, ctx):
+            return pd.DataFrame({"A": [1.0]})
+
+        def _structural_key(self):
+            return ("latex-frame", id(self))
+
+        def _to_latex(self, subst=None):
+            return "X"
+
+        def _get_alias(self):
+            return "X"
+
+    data = _Frame()
+
+    assert GroupByScopeExpr(scope_trading_day(), data).mean()._to_latex() == \
+        r"\mathrm{R}^{\text{trading\_day}}"
+    assert GroupByScopeExpr(scope_bars(5), data).mean()._to_latex() == \
+        r"\mathrm{R}^{\text{bars}(K)}"
+    assert GroupByScopeExpr(scope_session(gap="3h"), data).mean()._to_latex() == \
+        r"\mathrm{R}^{\text{session}(3h)}"
+    # 截断写进上标，与 rolling 的下标写法对称
+    truncated = GroupByScopeExpr(scope_trading_day(), data).truncate(0, 119).mean()._to_latex()
+    assert truncated.startswith(r"\mathrm{R}^{\text{trading\_day},\mathrm{trunc}(")
+    assert truncated.endswith(")}")
+    # rolling 仍是下标、不带上标（两者只靠上/下标区分作用域与窗口）
+    rolling_latex = data.rolling(20).mean()._to_latex()
+    assert "_{20}" in rolling_latex, rolling_latex
+    assert "^{" not in rolling_latex, rolling_latex

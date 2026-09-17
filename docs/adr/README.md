@@ -46,3 +46,4 @@
 让目录看起来整齐而删除仍被 import、历史数据或 capability 使用的内部模块。
 
 - [153 — 因子集合登记生命周期与成员事件](153-factor-set-membership-history.md)
+- [155 — 作用域分区聚合（groupby_scope）](155-scope-partitioned-aggregation.md)
