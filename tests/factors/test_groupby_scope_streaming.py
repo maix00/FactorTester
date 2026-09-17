@@ -173,3 +173,75 @@ def test_streaming_state_does_not_grow_with_the_partition():
         assert getattr(node, name).shape == (1,), name
     # 均值/极值类不保留任何窗口内容
     assert not hasattr(node, "_window")
+
+
+def test_compiled_plan_routes_groupby_scope_to_the_scope_kernel():
+    """接线证据：走真正的 compile_streaming_factor 路径，必须落到作用域内核。
+
+    直接 import 内核的单测不能证明分派接线正确（两条 elif 分支里只有第一条可达），
+    所以这里断言编译产物本身，并喂几根 bar 看它真的按当日累计。
+    """
+    from tools.data.types import DataColumn, DataFreq
+    from tools.factors.expr.groupby_scope import GroupByScopeExpr
+    from tools.factors.expr.leaf import ColumnRef
+    from tools.testers.backtest.engines.adapters.factor_step import MarketSlice, ProductPrice
+    from tools.testers.backtest.engines.factors.incremental import (
+        GroupScopeNode,
+        StreamingFactorPlan,
+        compile_streaming_factor,
+    )
+
+    column = DataColumn.CLOSE
+    expression = GroupByScopeExpr(scope_trading_day(), ColumnRef(column)).mean()
+    plan = compile_streaming_factor(expression, ("A",), source_freq=DataFreq.MIN1)
+    assert isinstance(plan, StreamingFactorPlan)
+    assert isinstance(plan._root, GroupScopeNode), (
+        f"编译路径没有接到作用域内核，而是 {type(plan._root).__name__}"
+    )
+
+    # 两条输入形态各用独立 plan：同一 plan 每根只能喂一次
+    bare_plan = compile_streaming_factor(expression, ("A",), source_freq=DataFreq.MIN1)
+    stamped_plan = compile_streaming_factor(expression, ("A",), source_freq=DataFreq.MIN1)
+    index = pd.date_range("2026-01-05 09:31", periods=4, freq="min")
+    with_stamp, without_stamp = [], []
+    for position, stamp in enumerate(index):
+        price = ProductPrice(
+            instrument="A", price=float(position), fields={column.name: float(position)},
+        )
+        # 适配器路径构造的是裸 MarketSlice（不带时间），日切分依赖 _with_timestamp 补齐
+        market = MarketSlice({"A": price})
+        without_stamp.append(bare_plan.update(pd.Timestamp(stamp), market)["A"])
+        stamped = MarketSlice(
+            {"A": price}, timestamp=pd.Timestamp(stamp),
+            trading_day=pd.Timestamp(stamp).normalize(),
+        )
+        with_stamp.append(stamped_plan.update(pd.Timestamp(stamp), stamped)["A"])
+
+    assert without_stamp == [0.0, 0.5, 1.0, 1.5], without_stamp
+    assert with_stamp == without_stamp, (with_stamp, without_stamp)
+
+
+def test_compiled_plan_resets_at_the_day_boundary():
+    """跨日必须重置：第二天的第一根只等于自己的值，而不是两天的累计。"""
+    from tools.data.types import DataColumn, DataFreq
+    from tools.factors.expr.groupby_scope import GroupByScopeExpr
+    from tools.factors.expr.leaf import ColumnRef
+    from tools.testers.backtest.engines.adapters.factor_step import MarketSlice, ProductPrice
+    from tools.testers.backtest.engines.factors.incremental import compile_streaming_factor
+
+    column = DataColumn.CLOSE
+    expression = GroupByScopeExpr(scope_trading_day(), ColumnRef(column)).mean()
+    plan = compile_streaming_factor(expression, ("A",), source_freq=DataFreq.MIN1)
+
+    def feed(day: str, values: list[float]) -> list[float]:
+        out = []
+        stamps = pd.date_range(f"{day} 09:31", periods=len(values), freq="min")
+        for value, stamp in zip(values, stamps, strict=True):
+            price = ProductPrice(instrument="A", price=value, fields={column.name: value})
+            out.append(plan.update(pd.Timestamp(stamp), MarketSlice({"A": price}))["A"])
+        return out
+
+    first = feed("2026-01-05", [10.0, 20.0, 30.0])
+    second = feed("2026-01-06", [100.0, 300.0])
+    assert first == [10.0, 15.0, 20.0], first
+    assert second == [100.0, 200.0], second

@@ -177,7 +177,13 @@ class GroupByScopeOp(OperandExpr):
 
     @property
     def _n_data(self) -> int:
-        return len(self.operands) - 1 - (2 if self._has_truncate else 0)
+        """数据操作数的个数（本算子恒为 1）。
+
+        尾部可能挂截断的 start/end（两个），quantile 还会在数据之后挂一个 q；
+        这两类都不是数据操作数。
+        """
+        trailing = (2 if self._has_truncate else 0) + (1 if self.op == "quantile" else 0)
+        return len(self.operands) - trailing
 
     @property
     def quantile_value(self) -> Any:

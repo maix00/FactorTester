@@ -1138,8 +1138,9 @@ def compile_streaming_factor(
             operands = expr.operands
             data_operands = tuple(
                 compile_node(item)
-                for item in operands[1:1 + expr._data_count]
+                for item in operands[expr._data_start:expr._data_start + expr._n_data]
             )
+            # 数据操作数恒为一个；quantile 的 q 与截断上下界都在尾部
             if not data_operands:
                 raise UnsupportedStreamingFactor("groupby_scope expects one data operand")
             quantile = None
