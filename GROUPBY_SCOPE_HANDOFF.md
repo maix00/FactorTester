@@ -54,3 +54,18 @@ ADR-022：作者不写第二个 evaluate_event；compiler 把同一表达式图�
   - 归一化：argmax/argmin 必须与 `rolling.py::_rolling_argmaxmin` 相同（0=最新、1=最早）
 - 一致性验收（Issue #397 第 9–11 条）：同一表达式在 batch 与 incremental 上**逐点一致**，覆盖跨交易日边界、日初不足、NaN 位置三类；暂不支持的作用域抛 `UnsupportedStreamingFactor` 而不是降级
 - 回归入口：`tests/factors/` 与既有 backtest engine 测试目录；先跑 `python -m pytest tests/factors -q`
+
+
+## 增量实现的**具体障碍**（本轮查证，动手前必读）
+
+节点协议 `StreamingNode.update(market, cache)` **拿不到时间戳**，而分区边界判定必须知道当前 bar 属于哪个交易日/会话：
+
+- `MarketSlice` 只有 `prices`（`engines/adapters/factor_step.py:24`），`ProductPrice` 只有 `instrument/price/fields`（同文件 :17），**都没有时间**。
+- 唯一有时间的是上层：`StreamingFactorPlan.update(timestamp, market)`（`incremental.py` 尾部），调用点在 `factor_step.py:96`。
+
+因此实现前必须先定这个 seam（推荐做法，二选一）：
+
+1. **协议向后兼容扩展**：把 `update(market, cache)` 扩成 `update(market, cache, *, timestamp=None)`，只有需要的节点（groupby_scope、scope_session）使用它；既有节点不传即不受影响。计划层把 timestamp 透传即可。
+2. **由计划层注入分区键**：`StreamingFactorPlan.update` 计算当前 bar 的分区键/边界标志，放入 cache 供 scope 节点读取。
+
+这是**跨模块的接口决定**（节点协议是 compiler 与所有 kernel 的公共 seam），按 AGENTS.md 应先定方案再写；不要在单个 kernel 里用 hack 绕过（例如从 `fields` 反推时间）。
