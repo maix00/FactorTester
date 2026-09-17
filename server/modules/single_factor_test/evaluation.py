@@ -521,26 +521,59 @@ class FactorEvaluation:
             policy=policy_for_factor(factor),
         )
 
-def _intermediate_series(factor: Any, *, limit: int = 8):
-    """Yield the nested layers the runtime already computed for one factor.
+def _intermediate_series(factor: Any, *, limit: int = 12):
+    """Yield every intermediate the runtime computed for one factor.
 
-    A family keeps every ``as_intermediate`` series it built (threshold,
-    duration, fair price, ...).  They are the most informative part of the
-    factor-series view, so the serializer exposes them next to the final signal
-    instead of dropping them.
+    ``_intermediate_alias_index`` only holds the names the **root** expression
+    declared, so nested (and anonymous) layers never reached the report and the
+    reader only saw the final value.  Walk the expression tree instead and label
+    each node by its declared name, else by the family alias that produced it.
     """
-    index = getattr(factor, "_intermediate_alias_index", None) or {}
-    try:
-        names = [str(name) for name in index][: max(0, int(limit))]
-    except TypeError:
-        return
-    for name in names:
+    nodes: list[Any] = []
+    expr = getattr(factor, "_expr", None)
+    if expr is not None and hasattr(expr, "iter_intermediate_nodes"):
         try:
-            frame = factor.get_intermediate(name)
+            nodes = list(expr.iter_intermediate_nodes())
+        except Exception:
+            nodes = []
+    if not nodes:
+        index = getattr(factor, "_intermediate_alias_index", None) or {}
+        try:
+            names = [str(name) for name in index][: max(0, int(limit))]
+        except TypeError:
+            return
+        for name in names:
+            try:
+                frame = factor.get_intermediate(name)
+            except Exception:
+                continue
+            if isinstance(frame, pd.DataFrame) and not frame.empty:
+                yield name, frame
+        return
+    seen: set[str] = set()
+    yielded = 0
+    for position, node in enumerate(nodes, start=1):
+        if yielded >= max(0, int(limit)):
+            break
+        try:
+            key = node._structural_key()
         except Exception:
             continue
-        if isinstance(frame, pd.DataFrame) and not frame.empty:
-            yield name, frame
+        try:
+            frame = factor.get_intermediate(key)
+        except Exception:
+            continue
+        if not isinstance(frame, pd.DataFrame) or frame.empty:
+            continue
+        label = str(getattr(node, "_intermediate_name", "") or "").strip()
+        if not label:
+            label = str(getattr(node, "factor_alias", "") or "").strip()
+        label = label or f"第 {position} 层"
+        if label in seen:
+            label = f"{label} #{position}"
+        seen.add(label)
+        yielded += 1
+        yield label, frame
 
 
 def factor_series_for_run_spec(data: dict[str, Any]) -> dict[str, Any]:

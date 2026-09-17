@@ -35,6 +35,10 @@ from .models import GeneratedReport
 from .plot_format import PLOT_RC, passive_svg
 from .render import csv_bytes, json_bytes
 from .series import metrics_rows
+from .series_overview import (
+    available_windows as overview_windows,
+    render_overview_png,
+)
 from .series_plot import (
     render_holding_half_life_svg,
     render_metrics_svg,
@@ -84,8 +88,6 @@ def build_report_artifacts(
                     for item in payload["series"] if isinstance(item, dict)
                 }),
             }
-            chart = _render_factor_series_chart(payload)
-            market_chart = _render_market_chart(payload)
             summary_rows = _series_summary_rows(payload)
             output.extend([
                 GeneratedReport(
@@ -99,12 +101,15 @@ def build_report_artifacts(
             ])
             if summary_rows:
                 output.extend(table_reports("factor_series_summary", summary_rows))
-            output.extend(([GeneratedReport(
-                    "factor_series_chart", chart, "svg", "image/svg+xml", receipt,
-                )] if chart else []) + ([GeneratedReport(
-                    "factor_series_market_chart", market_chart, "svg",
-                    "image/svg+xml", receipt,
-                )] if market_chart else []))
+            # PNG panel stacks (K线 + 每层因子值 + 成交量 + 持仓量) per time window;
+            # PNG keeps the mounted assets small and readable.
+            for window in overview_windows(payload):
+                panel = render_overview_png(payload, window=window)
+                if panel:
+                    output.append(GeneratedReport(
+                        f"factor_series_overview_{window}", panel, "png",
+                        "image/png", receipt,
+                    ))
         done("factor_series")
     if "equity_curve" in names and series:
         output.extend(series_reports("equity_curve", series, "净值曲线与回撤"))
