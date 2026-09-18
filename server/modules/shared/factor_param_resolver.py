@@ -157,10 +157,33 @@ def _resolving_factor(active_refs: set[str], factor_ref: str):
         active_refs.remove(factor_ref)
 
 
+def _visible_library_overview(username: str) -> dict:
+    """Return the caller's library overview, built at most once per request.
+
+    Resolving one nested chain asks for many aliases, and every lookup used to
+    rebuild the whole overview (families plus factors for the user and their
+    subordinates).  On a populated library that is quadratic in chain length and
+    enough to push a simple registration past its timeout while it holds the
+    user's write lock.  Caching per request keeps one build, and staying inside
+    the request scope means a later write can never see a stale overview.
+    """
+    from flask import g, has_request_context
+
+    if not has_request_context():
+        return build_factor_library_overview(username, include_subordinates=True)
+    cache = getattr(g, "_factor_library_overview_cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        g._factor_library_overview_cache = cache
+    if username not in cache:
+        cache[username] = build_factor_library_overview(username, include_subordinates=True)
+    return cache[username]
+
+
 def _find_visible_factor(alias: str, *, username: str | None = None) -> dict:
     import re
     resolved_username = username or cast(str, current_user())
-    payload = build_factor_library_overview(resolved_username, include_subordinates=True)
+    payload = _visible_library_overview(resolved_username)
     
     def _normalize(a: str) -> str:
         """去掉 $F:xxx 后做匹配，因为 FactorParam 的子因子无独立 SignalAlign。"""
