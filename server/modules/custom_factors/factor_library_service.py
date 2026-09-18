@@ -456,9 +456,20 @@ def save_current_user_library_config(
         )
     # Freeze once. Authored configuration, catalog mirror and outbox commit
     # together, so a crash cannot leave a successful write unpublished.
-    from server.manager.storage.account_domain.factor_sync import _FACTOR_KEYS
-    resolved = [{key: item[key] for key in _FACTOR_KEYS if item.get(key) not in (None, '')}
-                for item in candidate_factors]
+    from server.manager.storage.account_domain.factor_sync import (
+        _FACTOR_KEYS,
+        _flatten_dependencies,
+    )
+
+    # 保留各字段（resolved_math_expr / parameter_definitions 等本地消费方要用），
+    # 但 factor_dependencies 必须扁平去重：递归依赖会在深链下指数级膨胀（实测单实例
+    # ~528KB），把整个家族配置撑到读不动。
+    resolved = []
+    for item in candidate_factors:
+        record = {key: item[key] for key in _FACTOR_KEYS if item.get(key) not in (None, '')}
+        if 'factor_dependencies' in record:
+            record['factor_dependencies'] = _flatten_dependencies(record['factor_dependencies'])
+        resolved.append(record)
     config = save_factor_param_config(
         current_username,
         ff_alias,
