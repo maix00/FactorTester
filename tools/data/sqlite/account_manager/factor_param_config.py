@@ -145,8 +145,15 @@ def save_factor_param_config_payload(
         )
         if mirror is not None:
             from server.manager.storage.account_domain.payloads import public_payload
+
+            # 本地 payload_json（上面 json.dumps(config)）保留全量；只有跨服务器传输的
+            # 账户域镜像用精简形态，去掉可由家族源码重建的大字段并把依赖扁平去重。
+            mirror_payload = dict(config)
+            if isinstance(config.get('resolved_factors'), list):
+                from server.manager.storage.account_domain.factor_sync import _resolved_factor_rows
+                mirror_payload['resolved_factors'] = _resolved_factor_rows(config['resolved_factors'])
             mirror.upsert_local(principal=username, entity_type='factor_param_config',
-                                entity_id=f'{scope_key}:{ff_alias}', payload=public_payload(config),
+                                entity_id=f'{scope_key}:{ff_alias}', payload=public_payload(mirror_payload),
                                 manager_id=os.environ.get('FACTORTESTER_SERVER_ID') or 'local',
                                 connection=conn)
 
