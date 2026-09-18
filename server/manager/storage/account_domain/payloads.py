@@ -33,6 +33,21 @@ def public_payload(value: Mapping[str, Any] | None) -> dict[str, Any]:
     result = _clean(dict(value or {}), depth=0)
     encoded = json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     if len(encoded.encode("utf-8")) > MAX_PAYLOAD_BYTES:
+        # 定位超限字段：只在该异常发生时打印逐字段/逐子结构的序列化大小，日常零开销。
+        import logging
+
+        log = logging.getLogger("account_domain.payload")
+        sizes = []
+        for key, value in result.items():
+            size = len(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+            sizes.append((size, key))
+        for size, key in sorted(sizes, reverse=True)[:8]:
+            log.error("account_domain payload field %s = %d bytes", key, size)
+        if "resolved_factors" in result:
+            rows = result.get("resolved_factors") or []
+            log.error("account_domain payload resolved_factors count=%d", len(rows))
+            for index, row in enumerate(rows[:3]):
+                log.error("  row[%d] keys=%s", index, sorted(row.keys()))
         raise ValueError("account-domain metadata payload is too large")
     return result
 
