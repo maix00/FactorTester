@@ -246,7 +246,11 @@ def _load_revision_definition(
     ):
         for alias in factor_aliases:
             try:
-                params = family.parse_alias(alias)
+                # 与登记路径（build_library_factor_param_item）用同一套 canonical 归一化。
+                # family.parse_alias 只做语法切分，数值型参数仍是字符串 '119.0'，而登记时
+                # 物化的身份里是 119.0（数值）；两侧不一致会让 self_formula_fingerprint 与
+                # params 对不上，任何从库里冻结身份构建的 RunSpec 都被判成「公式已变」。
+                params = normalize_factor_param_row(family, family.parse_alias(alias))
                 metadata = instantiate_factor_metadata(
                     family, params, username=owner,
                 )
