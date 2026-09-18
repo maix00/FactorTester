@@ -67,6 +67,34 @@ def _coerce_transport_value(param, value):
     return value
 
 
+def freeze_factor_param_alias(param, value) -> dict | None:
+    """FactorParam 槽位填的是**因子别名**时，由代码解析并冻结成规范记录。
+
+    平台的既有形态是 ``factor:v2:`` ref（唯一标识）。调用方（API / CLI / 前端）应当只给出
+    别名，ref 必须由代码派生 —— 不能要求调用方手写，否则会像手工拼接那样写出别名形态的行，
+    使冻结侧与校验侧对同一行算出不同的 self_formula_fingerprint。
+
+    取名与做法都对齐平台既有的一环：``editor_routes._freeze_validated_factor``
+    （解析 → 冻结 → 返回规范记录）。
+
+    只处理「确实指向一个因子」的取值：别名带 ``|`` 参数段；列引用与常值（例如 ``'2m'``、
+    ``'CA'``）不参与解析，按原样存储。
+    """
+    if not isinstance(param, FactorParam) or not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text or text.startswith('factor:v2:') or '|' not in text:
+        return None
+    try:
+        from tools.factors.factor_param_resolution import resolve_factor_param_value
+
+        resolved = resolve_factor_param_value(text)
+    except Exception:
+        # 解析不了就不是因子别名（列/常值等），保持原样。
+        return None
+    return frozen_factor_record(resolved)
+
+
 def normalize_factor_param_rows(factor_family, params_list: list) -> list:
     normalized_rows = []
     for params in params_list:
@@ -89,6 +117,9 @@ def normalize_factor_param_rows(factor_family, params_list: list) -> list:
                     frozen_factor_record(normalized[p.alias])
                     if isinstance(p, FactorParam) else None
                 )
+                if frozen is None:
+                    # 调用方给的是别名：这里解析并冻结成规范记录（ref 由代码派生）。
+                    frozen = freeze_factor_param_alias(p, normalized[p.alias])
                 v = frozen if frozen is not None else p._value_space.rectify(
                     normalized[p.alias]
                 )
