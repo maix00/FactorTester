@@ -18,6 +18,16 @@ _PRIVATE_KEY_PARTS = (
 MAX_PAYLOAD_BYTES = 512 * 1024
 
 
+class PayloadTooLarge(ValueError):
+    """携带超限字段清单，便于上层把诊断信息透传给调用方。"""
+
+    def __init__(self, byte_length: int, field_sizes: list[dict[str, object]]) -> None:
+        self.byte_length = int(byte_length)
+        self.field_sizes = field_sizes
+        summary = ", ".join(f"{item['field']}={item['bytes']}" for item in field_sizes[:6])
+        super().__init__(f"account-domain metadata payload is too large ({byte_length} bytes): {summary}")
+
+
 def validate_entity(entity_type: str, entity_id: str) -> tuple[str, str]:
     kind = str(entity_type or "").strip()
     identifier = str(entity_id or "").strip()
@@ -33,22 +43,13 @@ def public_payload(value: Mapping[str, Any] | None) -> dict[str, Any]:
     result = _clean(dict(value or {}), depth=0)
     encoded = json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     if len(encoded.encode("utf-8")) > MAX_PAYLOAD_BYTES:
-        # 定位超限字段：只在该异常发生时打印逐字段/逐子结构的序列化大小，日常零开销。
-        import logging
-
-        log = logging.getLogger("account_domain.payload")
+        # 定位超限字段：把逐字段大小与 resolved_factors 形状带进异常，供上层透传。
         sizes = []
         for key, value in result.items():
             size = len(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"))
-            sizes.append((size, key))
-        for size, key in sorted(sizes, reverse=True)[:8]:
-            log.error("account_domain payload field %s = %d bytes", key, size)
-        if "resolved_factors" in result:
-            rows = result.get("resolved_factors") or []
-            log.error("account_domain payload resolved_factors count=%d", len(rows))
-            for index, row in enumerate(rows[:3]):
-                log.error("  row[%d] keys=%s", index, sorted(row.keys()))
-        raise ValueError("account-domain metadata payload is too large")
+            sizes.append({"field": key, "bytes": size})
+        sizes.sort(key=lambda item: item["bytes"], reverse=True)
+        raise PayloadTooLarge(encoded.encode("utf-8"), sizes)
     return result
 
 
