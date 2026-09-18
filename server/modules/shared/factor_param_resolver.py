@@ -41,10 +41,10 @@ def _request_username() -> str:
     """
     try:
         return str(current_user() or '').strip()
-    except Exception:
-        # 无请求上下文时 Flask session 不可用（RuntimeError: Working outside of
-        # request context）。worker/守护进程正是这种环境，必须退化为「无身份」，
-        # 由调用方改走按家族解析的窄路径，而不是让整条请求崩掉。
+    except RuntimeError:
+        # 只有「无请求上下文」这一种情况可以退化为「无身份」：worker/守护进程在提交后
+        # 展开冻结配置时没有请求在飞，读 Flask session 会抛 RuntimeError。其他异常
+        # 必须继续抛出，不要在这里被吞掉。
         return ''
 
 
