@@ -13,9 +13,8 @@ _FACTOR_KEYS = (
     "factor_alias", "factor_family_alias", "factor_family_name",
     "factor_owner_ref", "family_formula_fingerprint",
     "self_formula_fingerprint",
-    "params", "factor_params", "parameter_definitions", "chinese_name",
-    "description", "math_expr", "resolved_math_expr",
-    "resolved_math_expr_version", "factor_dependencies",
+    "params", "factor_params", "chinese_name",
+    "description", "math_expr", "resolved_math_expr_version", "factor_dependencies",
     "category", "factor_kind", "source", "owner_username", "owner_alias",
     "owner_organization_id", "owner_organization_name", "updated_at",
     "scope_key", "product_group",
@@ -146,9 +145,9 @@ def materialized_factor_configs(owner: str, *, existing: list[dict[str, Any]] | 
                 isinstance(previous_factors, list)
                 and all(
                     isinstance(item, dict)
-                    and str(item.get("resolved_math_expr") or "").strip()
                     and item.get("resolved_math_expr_version")
                     == RESOLVED_MATH_EXPR_VERSION
+                    and item.get("identity")
                     for item in previous_factors
                 )
             )
