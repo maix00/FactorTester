@@ -159,6 +159,16 @@ class GroupByScopeOp(OperandExpr):
         self.scope = scope
         super().__init__(op, *operands)
 
+    def resolve(self, *args, **kwargs) -> "GroupByScopeOp":
+        """重建时带上 scope。
+
+        OperandExpr.resolve 只传 self.op 与 operands，但本算子把 scope 存成独立属性
+        （不在 operands 里），不覆盖就会在深链 resolve 时抛
+        ``GroupByScopeOp.__init__() missing 1 required positional argument: 'scope'``。
+        """
+        resolved_operands = [opnd.resolve(*args, **kwargs) for opnd in self.operands]
+        return type(self)(self.op, self.scope, *resolved_operands)
+
     @property
     def _has_truncate(self) -> bool:
         return len(self.operands) >= 3
