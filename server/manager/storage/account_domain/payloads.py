@@ -49,7 +49,7 @@ def public_payload(value: Mapping[str, Any] | None) -> dict[str, Any]:
             size = len(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"))
             sizes.append({"field": key, "bytes": size})
         sizes.sort(key=lambda item: item["bytes"], reverse=True)
-        raise PayloadTooLarge(encoded.encode("utf-8"), sizes)
+        raise PayloadTooLarge(len(encoded.encode("utf-8")), sizes)
     return result
 
 
