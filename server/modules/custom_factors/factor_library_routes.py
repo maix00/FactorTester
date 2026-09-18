@@ -24,7 +24,7 @@ from server.modules.custom_factors.factor_library_store import (
 from server.services.api_response import api_ok, route_guard
 from server.services.factor_registry import get_factor_family_instance
 from server.services.http_auth import login_required
-from server.services.session_runtime import current_user, get_user_file_lock
+from server.services.session_runtime import current_user, user_file_lock_budget, get_user_file_lock
 from tools.data.account_manage import can_view_user_scope
 
 
@@ -93,7 +93,7 @@ def api_save_factor_library_config(ff_alias):
             metadata[key] = data.get(key)
     if not isinstance(params_list, list):
         return jsonify({'success': False, 'error': '参数列表格式无效'})
-    with get_user_file_lock(username):
+    with user_file_lock_budget(username):
         config, factors = save_current_user_library_config(
             username,
             ff_alias,
@@ -112,7 +112,7 @@ def api_delete_factor_library_config(ff_alias):
         return jsonify({'success': False, 'error': '未登录'}), 401
     scope_key = request.args.get('product_group') or request.args.get('scope_key') or DEFAULT_SCOPE_KEY
     factor_alias = str(request.args.get('factor_alias') or '').strip()
-    with get_user_file_lock(username):
+    with user_file_lock_budget(username):
         deleted = (
             delete_factor_library_factor(
                 username, ff_alias, factor_alias, product_group=scope_key,
@@ -140,7 +140,7 @@ def api_add_factor_to_library_config(ff_alias):
         if data.get('mode') == 'edit' and not str(data.get('replace_factor_ref') or '').strip():
             return jsonify({'success': False, 'error': '编辑目标缺少冻结引用，请刷新后重试'}), 409
         try:
-            with get_user_file_lock(username):
+            with user_file_lock_budget(username):
                 config, factor = save_single_library_factor(
                     username, ff_alias, data['params'],
                     product_group=data.get('product_group') or data.get('scope_key') or DEFAULT_SCOPE_KEY,
@@ -182,7 +182,7 @@ def api_add_factor_to_library_config(ff_alias):
         return jsonify({'success': False, 'error': f'未找到因子 {factor_alias} 对应的参数'}), 404
 
     # 读取当前 scope 下的已有配置，追加新参数行（去重）
-    with get_user_file_lock(username):
+    with user_file_lock_budget(username):
         existing_config = load_factor_param_config(username, ff_alias, scope_key=scope_key)
         existing_params = existing_config.get('params_list', []) if existing_config else []
 
@@ -220,7 +220,7 @@ def api_ensure_scope(scope_key):
     username = _username()
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
-    with get_user_file_lock(username):
+    with user_file_lock_budget(username):
         actual = ensure_scope_exists(username, scope_key)
     return jsonify({'success': True, 'scope_key': actual, 'product_group': actual})
 
@@ -237,7 +237,7 @@ def api_rename_scope(scope_key):
         return jsonify({'success': False, 'error': '新 scope key 不能为空'})
     if new_key == scope_key:
         return jsonify({'success': True, 'scope_key': scope_key, 'product_group': scope_key})
-    with get_user_file_lock(username):
+    with user_file_lock_budget(username):
         ok = rename_scope(username, scope_key, new_key)
     if not ok:
         return jsonify({'success': False, 'error': '重命名失败，源 scope 不存在或目标已存在'}), 400
@@ -250,7 +250,7 @@ def api_delete_scope(scope_key):
     username = _username()
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
-    with get_user_file_lock(username):
+    with user_file_lock_budget(username):
         ok = delete_scope(username, scope_key)
     if not ok:
         return jsonify({'success': False, 'error': '无法删除默认或不存在'}), 400
