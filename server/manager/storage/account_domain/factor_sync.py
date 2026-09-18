@@ -21,6 +21,45 @@ _FACTOR_KEYS = (
     "scope_key", "product_group",
 )
 
+# 依赖记录本身不再携带自己的 factor_dependencies（已在扁平化时递归走完），
+# 否则扁平后的每个记录又会把整棵子树重新嵌进去，深链下再次指数膨胀。
+_DEPENDENCY_KEYS = tuple(key for key in _FACTOR_KEYS if key != "factor_dependencies")
+
+
+def _flatten_dependencies(dependencies: Any) -> list[dict[str, Any]]:
+    """把（可能嵌套的）factor_dependencies 扁平化，并按 ref 去重。
+
+    冻结依赖是递归的：每个记录再嵌自己的依赖，深链（如
+    TsHistCmp → *DayScope → SgChgDurDay → SgChgPct → …）下同一子记录被反复
+    展开，序列化后超过账户域 512KiB 载荷上限。这里每个冻结记录只保留一次。
+    """
+    flat: dict[str, dict[str, Any]] = {}
+    stack = list(dependencies or [])
+    while stack:
+        record = stack.pop(0)
+        if not isinstance(record, dict):
+            continue
+        ref = record.get("ref")
+        if ref:
+            flat.setdefault(ref, {
+                key: record[key] for key in _DEPENDENCY_KEYS if record.get(key) not in (None, "")
+            })
+        stack.extend(record.get("factor_dependencies") or [])
+    return list(flat.values())
+
+
+def _resolved_factor_rows(factors: Any) -> list[dict[str, Any]]:
+    """账户域载荷里的 resolved_factors：依赖扁平去重后的记录。"""
+    rows: list[dict[str, Any]] = []
+    for item in factors:
+        if not isinstance(item, dict):
+            continue
+        record = {key: item[key] for key in _FACTOR_KEYS if item.get(key) not in (None, "")}
+        if "factor_dependencies" in record:
+            record["factor_dependencies"] = _flatten_dependencies(record["factor_dependencies"])
+        rows.append(record)
+    return rows
+
 
 def materialized_factor_configs(owner: str, *, existing: list[dict[str, Any]] | None = None) -> list[tuple[str, dict[str, Any]]]:
     """Freeze changed authoring configurations; reuse persisted frozen rows otherwise.
@@ -81,15 +120,7 @@ def materialized_factor_configs(owner: str, *, existing: list[dict[str, Any]] | 
             return None
         if len(factors) < len(params_list):
             return None
-        resolved = [
-            {
-                key: item[key]
-                for key in _FACTOR_KEYS
-                if item.get(key) not in (None, "")
-            }
-            for item in factors
-            if isinstance(item, dict)
-        ]
+        resolved = _resolved_factor_rows(factors)
         if len(resolved) < len(params_list):
             return None
         return public_payload({
@@ -146,8 +177,7 @@ def materialized_factor_configs(owner: str, *, existing: list[dict[str, Any]] | 
                 if previous_factors:
                     result.append((identifier, previous))
                 continue
-            resolved = [{key: item[key] for key in _FACTOR_KEYS if item.get(key) not in (None, "")}
-                        for item in factors if isinstance(item, dict)]
+            resolved = _resolved_factor_rows(factors)
             payload = public_payload({**config, "schema_version": 2, "factor_family_alias": family,
                                       "resolved_factors": resolved})
             result.append((identifier, payload))
