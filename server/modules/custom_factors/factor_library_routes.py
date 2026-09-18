@@ -148,6 +148,14 @@ def api_add_factor_to_library_config(ff_alias):
                     replace_factor_ref=str(data.get('replace_factor_ref') or ''),
                 )
         except ValueError as exc:
+            from server.manager.storage.account_domain.payloads import PayloadTooLarge
+
+            if isinstance(exc, PayloadTooLarge):
+                return jsonify({
+                    'success': False, 'error': str(exc),
+                    'payload_bytes': exc.byte_length,
+                    'field_sizes': exc.field_sizes,
+                }), 409
             return jsonify({'success': False, 'error': str(exc)}), 409
         except ImportError as exc:
             # A registration can outlive the family source it was frozen from
