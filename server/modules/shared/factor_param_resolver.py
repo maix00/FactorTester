@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import threading
+import threading
 from contextlib import contextmanager
 from typing import cast
 
@@ -164,6 +165,12 @@ def _resolving_factor(active_refs: set[str], factor_ref: str):
 _overview_build = threading.local()
 
 
+# 构建整库总览时会解析家族参数，而解析参数又要查可见因子；不打断就会互相递归
+# （总览 → 解析 → 总览 …），每一层都重建一次总览，实测把一次登记拖到 10~15 秒，
+# 超过管理端代理超时后外部永远失败。用线程本地标记让总览构建期间的查找走窄路径。
+_overview_build = threading.local()
+
+
 def _visible_library_overview(username: str) -> dict:
     """Return the caller's library overview, built at most once per request.
 
@@ -183,7 +190,11 @@ def _visible_library_overview(username: str) -> dict:
         cache = {}
         g._factor_library_overview_cache = cache
     if username not in cache:
-        cache[username] = build_factor_library_overview(username, include_subordinates=True)
+        _overview_build.active = True
+        try:
+            cache[username] = build_factor_library_overview(username, include_subordinates=True)
+        finally:
+            _overview_build.active = False
     return cache[username]
 
 
