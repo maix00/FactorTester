@@ -21,6 +21,33 @@ from tools.factors.factor_param_resolution import factor_param_resolver_scope
 from tools.factors.formula_identity import require_frozen_factor
 
 
+def _has_request_context() -> bool:
+    """当前是否有可用的 HTTP 请求上下文（worker/守护进程里为 False）。"""
+    try:
+        from flask import has_request_context
+
+        return bool(has_request_context())
+    except Exception:
+        return False
+
+
+def _request_username() -> str:
+    """当前请求的用户名；没有任何 HTTP 请求上下文时返回 ''。
+
+    worker / 作业守护进程会在没有请求在飞的情况下解析因子（例如提交后由
+    planning runner 或 job daemon 展开冻结配置）。那里访问 Flask session 会抛
+    ``RuntimeError: Working outside of request context``，直接把请求打断成
+    客户端侧 RemoteDisconnected —— 必须先判断上下文，再决定读不读 session。
+    """
+    try:
+        return str(current_user() or '').strip()
+    except Exception:
+        # 无请求上下文时 Flask session 不可用（RuntimeError: Working outside of
+        # request context）。worker/守护进程正是这种环境，必须退化为「无身份」，
+        # 由调用方改走按家族解析的窄路径，而不是让整条请求崩掉。
+        return ''
+
+
 def resolve_factor_param_value(
     value, *, username: str | None = None,
     frozen_by_ref: dict[str, dict] | None = None,
@@ -56,7 +83,7 @@ def resolve_factor_param_value(
     if not family_alias:
         raise ValueError('缺少因子家族')
 
-    owner_username = item.get('owner_username') or username or current_user()
+    owner_username = item.get('owner_username') or username or _request_username()
     ff = get_factor_family_instance(family_alias, username=owner_username)
     params = _params_list_to_dict(item.get('params') or [])
     normalized = normalize_factor_param_row(ff, params)
@@ -93,7 +120,7 @@ def _resolve_frozen_factor(
             for merged in merged_records:
                 dependencies[merged['ref']] = merged
         identity = frozen['identity']
-        principal = str(username or current_user() or '').strip()
+        principal = str(username or _request_username() or '').strip()
         owner_ref = str(frozen['owner_ref'] or '').strip()
         is_public = owner_ref in {'public', '__public_jobs__'}
         owner_username = owner_ref.removeprefix('principal:')
@@ -193,11 +220,13 @@ def _visible_library_overview(username: str) -> dict:
 
 def _find_visible_factor(alias: str, *, username: str | None = None) -> dict:
     import re
-    resolved_username = username or cast(str, current_user())
-    if getattr(_overview_build, "active", False):
+    resolved_username = username or _request_username()
+    if getattr(_overview_build, "active", False) or not resolved_username:
         # 已在构建总览：不得再触发一次总览，否则总览↔解析互相递归（每层重载整库），
         # 一次登记被拖到十几秒、超过管理端代理超时。这里直接按家族解析别名，语义
         # 与下方 family 分支一致（同一 get_factor_family_instance/factor_from_alias）。
+        # 解析不到身份时同理：总览按用户构建，没有身份只会拿到空总览，把「能找到的因子」
+        # 误报成「找不到且无法唯一解析」。
         family_alias = alias.split("|", 1)[0]
         try:
             instance = get_factor_family_instance(family_alias, username=resolved_username)
