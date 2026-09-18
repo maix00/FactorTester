@@ -234,28 +234,38 @@ def _load_revision_definition(
     if getattr(family, "expr", None) is None:
         raise ValueError(f"factor family formula is unavailable: {family_ref}")
     resolved = []
-    for alias in factor_aliases:
-        try:
-            params = family.parse_alias(alias)
-            metadata = instantiate_factor_metadata(
-                family, params, username=owner,
-            )
-            factor = family.factor_from_alias(alias)
-            if getattr(factor, "expr", None) is None:
-                raise ValueError(f"factor formula is unavailable: {alias}")
-            column_refs = fixed_column_refs(getattr(factor, "expr", None))
-        except ValueError as error:
-            raise ValueError(
-                f"factor formula cannot be frozen: {alias}"
-            ) from error
-        resolved.append({
-            "factor_alias": alias,
-            "self_formula_fingerprint": metadata[
-                "self_formula_fingerprint"
-            ],
-            "params": metadata["normalized_params"],
-            "column_refs": sorted(column_refs),
-        })
+    # 嵌套别名（如 TsHistCmp|X:[TsDurDevDayScope|...]）在解析过程中要按 owner 找用户自定义家族；
+    # 没有解析器作用域时 get_factor_family_instance 拿不到 username，会退化成「公共注册表里没有 +
+    # 无活动会话」，把本来能冻结的自定义家族判成无法冻结。这里把 owner 绑进作用域，
+    # 与登记路径（factor_library_service._configuration_factor_resolver）同一套语义。
+    from server.modules.shared.factor_param_resolver import resolve_factor_param_value
+    from tools.factors.factor_param_resolution import factor_param_resolver_scope
+
+    with factor_param_resolver_scope(
+        lambda value: resolve_factor_param_value(value, username=owner)
+    ):
+        for alias in factor_aliases:
+            try:
+                params = family.parse_alias(alias)
+                metadata = instantiate_factor_metadata(
+                    family, params, username=owner,
+                )
+                factor = family.factor_from_alias(alias)
+                if getattr(factor, "expr", None) is None:
+                    raise ValueError(f"factor formula is unavailable: {alias}")
+                column_refs = fixed_column_refs(getattr(factor, "expr", None))
+            except ValueError as error:
+                raise ValueError(
+                    f"factor formula cannot be frozen: {alias}"
+                ) from error
+            resolved.append({
+                "factor_alias": alias,
+                "self_formula_fingerprint": metadata[
+                    "self_formula_fingerprint"
+                ],
+                "params": metadata["normalized_params"],
+                "column_refs": sorted(column_refs),
+            })
     return {
         **source,
         "factor_owner_ref": (
