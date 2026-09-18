@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from typing import Any
 
@@ -410,6 +411,109 @@ def _source_operator_tokens(source: str) -> list[str]:
     # Unary minus can be normalized away by FactorFamily, so it is intentionally
     # checked only when explicit .neg() is used.
     return [token for token in tokens if token in seen]
+
+
+def _family_source_id(source_code: str) -> str:
+    import re as _re
+
+    match = _re.search(r"^\s*class\s+(\w+)\s*\(", source_code, _re.MULTILINE)
+    if not match:
+        raise click.ClickException("源码中未找到 class 定义")
+    return match.group(1)
+
+
+def _current_username(client: Any) -> str:
+    """尽力取当前用户名；取不到就返回空串（镜像步骤会因此不写文件并说明原因）。"""
+    for holder in (client, getattr(client, "session", None)):
+        if holder is None:
+            continue
+        for attribute in ("username", "user", "account", "owner_ref"):
+            value = getattr(holder, attribute, None)
+            if isinstance(value, str) and value:
+                return value
+    return ""
+
+
+def mirror_family_source_to_workspace(username: str, factor_id: str, source_code: str) -> dict[str, Any]:
+    """把已入库的家族源码镜像进**合法**的工作区；不合格则不写，并说明原因。
+
+    平台口径（``factor_workspace.storage.existing_factor_workspace_root``）：库
+    （SQLite 源登记表）是权威，工作区只是镜像；只有用户**显式配置**过的工作区、
+    或有归属清单匹配的历史生成工作区才可以被镜像，默认回退目录**不得**被静默写入。
+    工作区里若已有同名但内容不同的旧文件，下一步 ``workspace user upload`` 会把旧
+    版本覆盖回库，因此必须告警并给出刷新命令。
+    """
+    from tools.data.factor_workspace.storage import existing_factor_workspace_root
+
+    root = existing_factor_workspace_root(username)
+    if not root:
+        return {"mirrored": False, "reason": "未显式配置工作区（默认目录不镜像）"}
+    target = os.path.join(root, "custom_factors", f"{factor_id}.py")
+    previous = None
+    if os.path.isfile(target):
+        with open(target, "r", encoding="utf-8") as handle:
+            previous = handle.read()
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    with open(target, "w", encoding="utf-8") as handle:
+        handle.write(source_code)
+    diverged = previous is not None and previous != source_code
+    return {
+        "mirrored": True,
+        "path": target,
+        "workspace_root": root,
+        "overwrote_divergent": diverged,
+        "refresh_hint": "factortester factor-library workspace user download",
+    }
+
+
+def _print_family_write(payload: dict[str, Any]) -> None:
+    click.echo(f"入库: {payload.get('factor_id')}（{'成功' if payload.get('stored') else '未写入'}）")
+    if payload.get("stored_error"):
+        click.echo(f"原因: {payload.get('stored_error')}")
+    mirror = payload.get("mirror") or {}
+    if mirror.get("mirrored"):
+        click.echo(f"工作区镜像: {mirror.get('path')}")
+        click.echo(f"工作区根: {mirror.get('workspace_root')}")
+        if mirror.get("overwrote_divergent"):
+            click.echo("注意: 工作区原有同名文件内容不同，已按库内容覆盖")
+            click.echo(f"如需从库刷新整个工作区: {mirror.get('refresh_hint')}")
+    else:
+        click.echo(f"工作区镜像: 未写入（{mirror.get('reason')}）")
+
+
+@factor_library.command("family-write")
+@click.option("--file", "source_file", required=True, type=click.Path(exists=True, dir_okay=False))
+@click.option("--chinese-name", default="")
+@click.option("--description", default="")
+@click.option("--category", default="自编")
+@click.option("--json", "as_json", is_flag=True)
+def family_write(source_file: str, chinese_name: str, description: str, category: str, as_json: bool) -> None:
+    """把一个因子家族源码写入因子库（直接写库），并按平台规则镜像进合法工作区。"""
+    with open(source_file, "r", encoding="utf-8") as handle:
+        source_code = handle.read()
+    factor_id = _family_source_id(source_code)
+    payload: dict[str, Any] = {"factor_id": factor_id, "stored": False}
+    try:
+        client = client_from_config()
+        client.create_custom_factor(
+            source_code=source_code,
+            chinese_name=chinese_name,
+            description=description,
+            category=category,
+        )
+        payload["stored"] = True
+    except Exception as error:  # 入库失败时不做任何工作区写入
+        payload["stored_error"] = f"{type(error).__name__}: {str(error)[:200]}"
+    if payload["stored"]:
+        username = _current_username(client)
+        payload["mirror"] = (
+            mirror_family_source_to_workspace(username, factor_id, source_code)
+            if username else {"mirrored": False, "reason": "无法确定当前用户，未写入工作区"}
+        )
+    if as_json:
+        click.echo(json.dumps(payload, ensure_ascii=False, indent=1))
+        return
+    _print_family_write(payload)
 
 
 def _print_workspace_action(action: str, payload: dict[str, Any]) -> None:
