@@ -507,6 +507,23 @@ def save_single_library_factor(
         index = matches[0]
         rows[index] = params
     else:
+        # 幂等：相同参数（同一 canonical alias）不应重复追加。此前每次登记都 append，
+        # 同一参数的重复登记会留下多个因子行，导致后续按别名引用时「无法唯一解析」。
+        try:
+            family = get_factor_family_instance(ff_alias, username=current_username)
+            new_alias = str(family.get_alias(**params) or "").strip()
+        except Exception:
+            new_alias = ""
+        if new_alias:
+            for position, row in enumerate(rows):
+                if not isinstance(row, dict):
+                    continue
+                try:
+                    row_alias = str(family.get_alias(**row) or "").strip()
+                except Exception:
+                    row_alias = ""
+                if row_alias and row_alias == new_alias:
+                    return existing, factors[position]
         rows.append(params)
     config, factors = save_current_user_library_config(
         current_username, ff_alias, rows, product_group=scope, metadata=metadata,
