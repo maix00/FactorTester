@@ -50,12 +50,46 @@ def _configuration_factor_resolver(
     ))
 
 
+def _referenced_factor_refs(values) -> set[str]:
+    """收集参数数据里真正被引用到的 factor ref（含深层嵌套）。"""
+    refs: set[str] = set()
+
+    def visit(node) -> None:
+        if isinstance(node, dict):
+            ref = node.get('ref')
+            if isinstance(ref, str) and ref.startswith('factor:v2:'):
+                refs.add(ref)
+            for item in node.values():
+                visit(item)
+        elif isinstance(node, (list, tuple)):
+            for item in node:
+                visit(item)
+        elif isinstance(node, str) and node.startswith('factor:v2:'):
+            refs.add(node)
+
+    visit(values)
+    return refs
+
+
 def _configuration_frozen_factor_map(
     config: dict, values=None,
 ) -> dict[str, dict]:
+    """本次解析可用的冻结记录：只包含参数数据**真正引用到**的 ref。
+
+    遗留记录必须丢弃：老配置的 metadata.factor_dependencies 里可能留着早先版本产出的身份
+    （例如 groupby_scope 渲染修正前的 self_formula_fingerprint）。若把它交进 frozen_by_ref，
+    嵌套因子会以该身份被重建、再被原样写回，于是「重算」永远复现旧身份，而校验侧重算的是
+    新身份 —— 两侧永久不一致，任何 RunSpec 都被判 factor formula changed after RunSpec freeze。
+    """
     metadata = config.get('metadata') if isinstance(config.get('metadata'), dict) else {}
     records = list(metadata.get('factor_dependencies') or [])
     if values is not None:
+        # 只保留被引用的记录，再补上参数数据里自带的记录。
+        referenced = _referenced_factor_refs(values)
+        records = [
+            record for record in records
+            if str(record.get('ref') or '') in referenced
+        ]
         records.extend(frozen_factor_records_from_values(values))
     return {
         value['ref']: value
