@@ -213,6 +213,8 @@ def push_factor_workspace(username: str, allow_public_write: bool = False, branc
         return {
             "workspace_root": root,
             "git_selected_branch": current_branch,
+            "current_branch": current_branch,
+            "auto_sync_branch": auto_branch,
             "skipped": True,
             "skip_reason": f"当前分支 {current_branch} 不是自动同步分支 {auto_branch}",
             "updated_custom_count": 0,
