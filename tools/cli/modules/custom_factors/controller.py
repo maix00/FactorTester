@@ -414,6 +414,17 @@ def _source_operator_tokens(source: str) -> list[str]:
 
 def _print_workspace_action(action: str, payload: dict[str, Any]) -> None:
     click.echo(f"{action}完成")
+    # 同步是否被跳过必须打出来：只打印计数时，「更新 0」既可能是「无差异」也可能是
+    # 「根本没执行」，调用方无法区分（此前正是这一点把诊断引向错误方向）。
+    if payload.get("skipped"):
+        click.echo("跳过: 本次未写入数据库")
+    if payload.get("skip_reason"):
+        click.echo(f"原因: {payload.get('skip_reason')}")
+    if payload.get("current_branch") or payload.get("auto_sync_branch"):
+        click.echo(
+            "分支判定: 当前=%s 自动同步=%s"
+            % (payload.get("current_branch") or "-", payload.get("auto_sync_branch") or "-")
+        )
     if payload.get("workspace_root"):
         click.echo(f"workspace: {payload.get('workspace_root')}")
     if payload.get("git_selected_branch"):
