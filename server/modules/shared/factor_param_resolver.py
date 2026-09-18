@@ -1,6 +1,7 @@
 """Resolve serialized FactorParam selections from the visible factor library."""
 
 from __future__ import annotations
+import threading
 from contextlib import contextmanager
 from typing import cast
 
@@ -157,6 +158,12 @@ def _resolving_factor(active_refs: set[str], factor_ref: str):
         active_refs.remove(factor_ref)
 
 
+# 构建整库总览时会解析家族参数，而解析参数又会去找可见因子；不打断就会互相递归
+# （总览 → 解析 → 总览 …），且每层都重跑 SQLite 的 _ensure_schema 与全量装载，于是
+# 请求永不返回、一直抱着用户写锁。线程本地标记让「已在构建总览」期间的查找走窄路径。
+_overview_build = threading.local()
+
+
 def _visible_library_overview(username: str) -> dict:
     """Return the caller's library overview, built at most once per request.
 
@@ -183,7 +190,15 @@ def _visible_library_overview(username: str) -> dict:
 def _find_visible_factor(alias: str, *, username: str | None = None) -> dict:
     import re
     resolved_username = username or cast(str, current_user())
-    payload = _visible_library_overview(resolved_username)
+    if getattr(_overview_build, "active", False):
+        # 已在构建总览：不得再触发总览，否则递归无限展开且放大成永不返回。
+        payload = {"factors": [], "families": []}
+    else:
+        _overview_build.active = True
+        try:
+            payload = _visible_library_overview(resolved_username)
+        finally:
+            _overview_build.active = False
     
     def _normalize(a: str) -> str:
         """去掉 $F:xxx 后做匹配，因为 FactorParam 的子因子无独立 SignalAlign。"""
