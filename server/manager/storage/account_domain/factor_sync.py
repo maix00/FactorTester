@@ -13,16 +13,21 @@ _FACTOR_KEYS = (
     "factor_alias", "factor_family_alias", "factor_family_name",
     "factor_owner_ref", "family_formula_fingerprint",
     "self_formula_fingerprint",
-    "params", "factor_params", "chinese_name",
-    "description", "math_expr", "resolved_math_expr_version", "factor_dependencies",
+    "params", "factor_params", "parameter_definitions", "chinese_name",
+    "description", "math_expr", "resolved_math_expr", "resolved_math_expr_version", "factor_dependencies",
     "category", "factor_kind", "source", "owner_username", "owner_alias",
     "owner_organization_id", "owner_organization_name", "updated_at",
     "scope_key", "product_group",
 )
 
+# 存储保留全量（resolved_math_expr / parameter_definitions 可被本地消费方使用）；
+# 跨服务器传输只带必要字段（紧凑身份），大字段由库里的家族源码按需重建。
+_SYNC_FACTOR_KEYS = tuple(
+    key for key in _FACTOR_KEYS if key not in ("resolved_math_expr", "parameter_definitions")
+)
 # 依赖记录本身不再携带自己的 factor_dependencies（已在扁平化时递归走完），
 # 否则扁平后的每个记录又会把整棵子树重新嵌进去，深链下再次指数膨胀。
-_DEPENDENCY_KEYS = tuple(key for key in _FACTOR_KEYS if key != "factor_dependencies")
+_DEPENDENCY_KEYS = tuple(key for key in _SYNC_FACTOR_KEYS if key != "factor_dependencies")
 
 
 def _flatten_dependencies(dependencies: Any) -> list[dict[str, Any]]:
@@ -53,7 +58,7 @@ def _resolved_factor_rows(factors: Any) -> list[dict[str, Any]]:
     for item in factors:
         if not isinstance(item, dict):
             continue
-        record = {key: item[key] for key in _FACTOR_KEYS if item.get(key) not in (None, "")}
+        record = {key: item[key] for key in _SYNC_FACTOR_KEYS if item.get(key) not in (None, "")}
         if "factor_dependencies" in record:
             record["factor_dependencies"] = _flatten_dependencies(record["factor_dependencies"])
         rows.append(record)
