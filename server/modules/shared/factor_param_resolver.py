@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 import threading
-import threading
 from contextlib import contextmanager
 from typing import cast
 
@@ -159,12 +158,6 @@ def _resolving_factor(active_refs: set[str], factor_ref: str):
         active_refs.remove(factor_ref)
 
 
-# 构建整库总览时会解析家族参数，而解析参数又会去找可见因子；不打断就会互相递归
-# （总览 → 解析 → 总览 …），且每层都重跑 SQLite 的 _ensure_schema 与全量装载，于是
-# 请求永不返回、一直抱着用户写锁。线程本地标记让「已在构建总览」期间的查找走窄路径。
-_overview_build = threading.local()
-
-
 # 构建整库总览时会解析家族参数，而解析参数又要查可见因子；不打断就会互相递归
 # （总览 → 解析 → 总览 …），每一层都重建一次总览，实测把一次登记拖到 10~15 秒，
 # 超过管理端代理超时后外部永远失败。用线程本地标记让总览构建期间的查找走窄路径。
@@ -202,14 +195,29 @@ def _find_visible_factor(alias: str, *, username: str | None = None) -> dict:
     import re
     resolved_username = username or cast(str, current_user())
     if getattr(_overview_build, "active", False):
-        # 已在构建总览：不得再触发总览，否则递归无限展开且放大成永不返回。
-        payload = {"factors": [], "families": []}
-    else:
-        _overview_build.active = True
+        # 已在构建总览：不得再触发一次总览，否则总览↔解析互相递归（每层重载整库），
+        # 一次登记被拖到十几秒、超过管理端代理超时。这里直接按家族解析别名，语义
+        # 与下方 family 分支一致（同一 get_factor_family_instance/factor_from_alias）。
+        family_alias = alias.split("|", 1)[0]
         try:
-            payload = _visible_library_overview(resolved_username)
-        finally:
-            _overview_build.active = False
+            instance = get_factor_family_instance(family_alias, username=resolved_username)
+        except Exception as error:
+            raise ValueError(f"因子库中找不到且无法唯一解析因子: {alias}") from error
+        factor = instance.factor_from_alias(alias)
+        return {
+            "factor_alias": str(factor.alias),
+            "factor_family_alias": family_alias,
+            "owner_username": str(resolved_username or ""),
+            "params": [
+                {"alias": key, "value": value}
+                for key, value in instance.parse_alias(alias).items()
+            ],
+        }
+    _overview_build.active = True
+    try:
+        payload = _visible_library_overview(resolved_username)
+    finally:
+        _overview_build.active = False
     
     def _normalize(a: str) -> str:
         """去掉 $F:xxx 后做匹配，因为 FactorParam 的子因子无独立 SignalAlign。"""
