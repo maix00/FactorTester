@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import time
 import os
@@ -12,6 +13,42 @@ import settings as Settings
 from tools.data.sqlite.db import connect_sqlite
 
 DEFAULT_SCOPE_KEY = "default"
+
+logger = logging.getLogger(__name__)
+
+
+def _dedupe_registration_rows(config: dict[str, Any], username: str, ff_alias: str) -> dict[str, Any]:
+    """一个家族配置是登记行的**集合**，不是多重集：落库前按 canonical 参数身份去重。
+
+    行的唯一性此前只由「追加」这一条调用路径自己保证（save_single_library_factor 的幂等
+    检查），而 PUT /api/factor-library/configurations/<family> 会把调用方给的列表原样交给
+    save_current_user_library_config，任何读-改-写或导入路径也都能把重复行带进来——
+    重复登记随后会让按别名引用变成「无法唯一解析」。把不变量放在落库这唯一收口处，
+    任何写入方都无法造出重复行；resolved_factors 与行按同序对齐，一并裁剪。
+    """
+    rows = config.get('params_list')
+    if not isinstance(rows, list) or len(rows) < 2:
+        return config
+    keep: list[int] = []
+    seen: set[str] = set()
+    for index, row in enumerate(rows):
+        key = json.dumps(row, sort_keys=True, ensure_ascii=False, default=str)
+        if key in seen:
+            continue
+        seen.add(key)
+        keep.append(index)
+    if len(keep) == len(rows):
+        return config
+    deduped = dict(config)
+    deduped['params_list'] = [rows[index] for index in keep]
+    resolved = config.get('resolved_factors')
+    if isinstance(resolved, list) and len(resolved) == len(rows):
+        deduped['resolved_factors'] = [resolved[index] for index in keep]
+    logger.warning(
+        'factor param config %s/%s: dropped %d duplicate registration row(s) (%d -> %d)',
+        username, ff_alias, len(rows) - len(keep), len(rows), len(keep),
+    )
+    return deduped
 
 
 def normalize_product_group(product_group: str | None) -> str:
@@ -119,6 +156,7 @@ def save_factor_param_config_payload(
     scope_key: str = DEFAULT_SCOPE_KEY,
 ) -> None:
     scope_key = ensure_scope_exists(username, scope_key)
+    config = _dedupe_registration_rows(config, username, ff_alias)
     now = time.time()
     mirror = None
     if isinstance(config.get('resolved_factors'), list):
