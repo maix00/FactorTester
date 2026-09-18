@@ -114,6 +114,20 @@ def build_library_factor_param_item(
     custom_by_alias: dict,
 ) -> dict:
     owner_username = owner_account.get('username') or ''
+    # 配置里已物化过与 params_list 逐行对齐的解析结果（由同一构造函数 build_factor_library_config_factors
+    # 产出后按 _FACTOR_KEYS 落库）。读取时直接复用，不要重新解析整棵依赖链：深链单实例数秒，
+    # 24 个实例即可把一次 GET 拖到数分钟并触发客户端断连。仅当物化缺失/不对齐时回退到实时解析。
+    materialised = config.get('resolved_factors') if isinstance(config, dict) else None
+    params_list = config.get('params_list') if isinstance(config, dict) else None
+    if (
+        isinstance(materialised, list)
+        and isinstance(params_list, list)
+        and len(materialised) == len(params_list)
+        and 0 <= row_index < len(materialised)
+        and isinstance(materialised[row_index], dict)
+        and materialised[row_index].get('ref')
+    ):
+        return dict(materialised[row_index])
     factor_family, meta = resolve_param_factor_family(owner_username, ff_alias, public_by_alias, custom_by_alias)
     account = dict(owner_account)
     account['alias'] = account_display_name(owner_account)
