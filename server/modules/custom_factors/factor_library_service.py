@@ -53,7 +53,13 @@ def _freeze_alias_factor_param_rows(username, factor_family, params_list: list) 
 
     只处理「确实指向一个因子」的取值：别名带 ``|`` 参数段；DataColumn 与常值按原样保留。
     """
-    factor_params = [p for p in factor_family.params if isinstance(p, FactorParam)]
+    declared = getattr(factor_family, 'params', None)
+    if declared is None:
+        # 非家族对象（占位/桩）：没有任何 FactorParam 槽位可冻结。
+        # 别名冻结的不变量仍由序列化路径（normalize_factor_param_rows →
+        # freeze_factor_param_alias）强制，这里只是提前做，以便解析器作用域生效。
+        return params_list
+    factor_params = [p for p in declared if isinstance(p, FactorParam)]
     if not factor_params:
         return params_list
     # 延迟导入：factor_param_resolver 在模块层反向依赖本模块，顶部导入会成环。

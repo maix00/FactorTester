@@ -122,20 +122,20 @@ def _frozen_record_from_resolved_factor(resolved, text: str) -> dict:
     owner_ref = str(getattr(resolved, 'owner_ref', '') or '').strip()
     if not owner_ref:
         raise ValueError(f"FactorParam alias resolved without owner_ref: {text}")
-    # 记录里的 factor_alias 必须是**规范化后的输入别名**：作者写的列引用（如 P:[CA]）与
-    # 平台渲染（P:[CLOSE_ADJUSTED]）是同一因子的两种写法，保存侧要求记录别名与输入别名一致。
-    try:
-        canonical_alias = family.get_alias(**family.parse_alias(text))
-    except Exception:
-        canonical_alias = str(resolved.alias)
+    # 记录必须**自洽**：校验侧会用 identity.params 重新渲染，并要求渲染结果逐字等于 alias。
+    # 因此 params 要由「输入别名解析后归一化」得到（而不是取家族当前值，那会渲染成
+    # P:[CLOSE_ADJUSTED] 这类平台写法的别名，与作者写的 P:[CA] 对不上）。
+    parsed = family.parse_alias(text)
+    normalized_input = normalize_factor_param_row(family, parsed)
+    canonical_alias = str(family.get_alias(**normalized_input))
     return freeze_factor_identity(
         owner_ref=owner_ref,
         family_alias=str(family.alias).strip(),
-        factor_alias=str(canonical_alias),
+        factor_alias=canonical_alias,
         family_formula_fingerprint=family.expr.semantic_fingerprint(),
         self_formula_fingerprint=expression.semantic_fingerprint(),
         params={
-            p.alias: factor_param_value_storage(p, applied.get(p.alias, getattr(p, 'default_value', None)))
+            p.alias: factor_param_value_storage(p, normalized_input.get(p.alias))
             for p in family.params
         },
     )
@@ -395,17 +395,49 @@ def _merge_frozen_factor_records(left: dict, right: dict) -> dict:
     return result
 
 
-def frozen_factor_dependencies(parameters, values: dict) -> list[dict]:
-    """Flatten complete FactorParam records in stable parameter order."""
+def frozen_factor_dependencies(
+    parameters, values: dict, frozen_by_ref: dict | None = None,
+) -> list[dict]:
+    """Flatten complete FactorParam records in stable parameter order.
+
+    ``values`` may legitimately hold the canonical **opaque reference**
+    (``factor:v2:``) instead of an inline record — that is the storage form the
+    platform produces and the form a caller is allowed to send.  Such values are
+    resolved through ``frozen_by_ref`` so every row keeps **its own** dependency
+    graph; without this the caller falls back to whatever the whole
+    configuration happens to carry, which is how a stale duplicate (same alias,
+    different ref) leaked into a single row and tripped the alias-uniqueness
+    guard on write.
+    """
     records = []
     for param in parameters:
         value = values.get(param.alias)
         if not isinstance(param, FactorParam):
             continue
         record = frozen_factor_record(value)
+        if record is None and frozen_by_ref:
+            reference = value if isinstance(value, str) else str(
+                getattr(value, 'factor_ref', '') or ''
+            )
+            if reference.startswith('factor:v2:'):
+                record = frozen_factor_record(frozen_by_ref.get(reference))
         if record is not None:
             records.append(record)
     return unique_frozen_factor_records(records)
+
+
+def referenced_dependency_records(frozen: dict | None, frozen_by_ref: dict) -> list[dict]:
+    """本行**真正引用到**的依赖记录（按 ref 排序，输出稳定）。
+
+    只认行自身 params 里出现的 ``factor:v2:`` 引用。绝不能退回「配置级并集」：
+    并集里可能同时留着同一别名的旧、新两条身份，整体上报会撞平台的别名唯一性校验
+    （实测 ``factor alias must be unique: TsHiPosPMDayScope|C:[119.0]|$F:30m``）。
+    """
+    referenced = {
+        value for value in ((frozen or {}).get('params') or {}).values()
+        if isinstance(value, str) and value.startswith('factor:v2:')
+    }
+    return [frozen_by_ref[ref] for ref in sorted(referenced) if ref in frozen_by_ref]
 
 
 def build_factor_rows(factor_family, params_list: list) -> list:
@@ -502,9 +534,16 @@ def build_factor_param_item(
             for p in factor_family.params
         },
     )
+    frozen_map = {
+        str(item.get('ref')): item
+        for item in (metadata.get('factor_dependencies') or [])
+        if isinstance(item, dict) and str(item.get('ref') or '').startswith('factor:v2:')
+    }
     dependency_records = frozen_factor_dependencies(
-        factor_family.params, normalized_row,
-    ) or list(metadata.get('factor_dependencies') or [])
+        factor_family.params, normalized_row, frozen_by_ref=frozen_map,
+    )
+    if not dependency_records:
+        dependency_records = referenced_dependency_records(frozen, frozen_map)
     from server.modules.shared.factor_instance_metadata import (
         build_factor_instance_metadata,
     )
