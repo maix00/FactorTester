@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import cast
+
+logger = logging.getLogger(__name__)
 
 from server.modules.custom_factors.catalog import (
     list_custom_factors,
@@ -541,9 +544,24 @@ def save_current_user_library_config(
     factor_family = get_factor_family_instance(ff_alias, username=current_username)
     params_list = _freeze_alias_factor_param_rows(current_username, factor_family, params_list)
     config_metadata = _merged_library_metadata(current_username, ff_alias, product_group, metadata)
+    # The editable rows are authoritative for refs they currently derive.
+    # A legacy metadata copy can carry the same ref with obsolete params;
+    # merging that copy first would reject the entire save before the current
+    # record can replace it.  Keep every other stored ref for unchanged rows.
+    current_records = frozen_factor_records_from_values(params_list)
+    current_refs = {item['ref'] for item in current_records}
+    stored_records = list(config_metadata.get('factor_dependencies') or [])
+    retained = [
+        item for item in stored_records
+        if not isinstance(item, dict) or item.get('ref') not in current_refs
+    ]
+    if len(retained) != len(stored_records):
+        logger.warning(
+            'replaced %s obsolete factor dependency record(s) for %s',
+            len(stored_records) - len(retained), ff_alias,
+        )
     dependency_records = unique_frozen_factor_records([
-        *(config_metadata.get('factor_dependencies') or []),
-        *frozen_factor_records_from_values(params_list),
+        *retained, *current_records,
     ])
     if dependency_records:
         config_metadata['factor_dependencies'] = dependency_records
