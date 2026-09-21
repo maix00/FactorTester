@@ -25,6 +25,7 @@ from server.modules.shared.factor_param_utils import (
     frozen_factor_records_from_values,
     hydrate_frozen_factor_params,
     normalize_factor_param_row,
+    sanitize_factor_record_dependencies,
     serialize_factor_param_rows,
     unique_frozen_factor_records,
 )
@@ -228,7 +229,10 @@ def build_library_factor_param_item(
         and isinstance(materialised[row_index], dict)
         and materialised[row_index].get('ref')
     ):
-        return dict(materialised[row_index])
+        # 物化记录里可能留着同一别名的旧/新两条身份（历史写入）。上报前统一按
+        # 「依赖 = 本行 params 引用到的因子」收敛，否则平台唯一性守卫生效：
+        # 400 factor alias must be unique: <alias>。
+        return sanitize_factor_record_dependencies(dict(materialised[row_index]))
     factor_family, meta = resolve_param_factor_family(owner_username, ff_alias, public_by_alias, custom_by_alias)
     account = dict(owner_account)
     account['alias'] = account_display_name(owner_account)
@@ -237,10 +241,10 @@ def build_library_factor_param_item(
     with _configuration_factor_resolver(
         config, current_username, values=row,
     ):
-        return build_factor_param_item(
+        return sanitize_factor_record_dependencies(build_factor_param_item(
             factor_family, row or {}, row_index, account, current_username,
             meta=meta, config=config,
-        )
+        ))
 
 
 def build_factor_library_config_factors(current_username: str, owner_account: dict, ff_alias: str, config: dict) -> list:
