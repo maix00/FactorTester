@@ -7,7 +7,7 @@ import os
 import pytest
 
 from tools.cli.modules.custom_factors import controller
-from tools.data.factor_workspace import storage as workspace_storage
+from tools.cli.release import factor_workspace_mirror
 
 SOURCE = "class ProbeMirror(FactorFamily):\n    value = 1\n"
 OLD = "class ProbeMirror(FactorFamily):\n    value = 0\n"
@@ -15,12 +15,12 @@ OLD = "class ProbeMirror(FactorFamily):\n    value = 0\n"
 
 @pytest.fixture()
 def fake_root(tmp_path, monkeypatch):
-    monkeypatch.setattr(workspace_storage, "existing_factor_workspace_root", lambda username: str(tmp_path))
+    monkeypatch.setattr(factor_workspace_mirror, "existing_client_factor_workspace", lambda username: tmp_path)
     return tmp_path
 
 
 def test_no_configured_workspace_means_no_file(monkeypatch, tmp_path):
-    monkeypatch.setattr(workspace_storage, "existing_factor_workspace_root", lambda username: None)
+    monkeypatch.setattr(factor_workspace_mirror, "existing_client_factor_workspace", lambda username: None)
     result = controller.mirror_family_source_to_workspace("u", "ProbeMirror", SOURCE)
     assert result["mirrored"] is False
     assert "未显式配置" in result["reason"]

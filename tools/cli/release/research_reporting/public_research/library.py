@@ -274,8 +274,6 @@ class PublicResearchLibrary:
         if not self.can_read(record, viewer_ref):
             raise PermissionError("research report access is not authorized")
         value = self._projection(publication_id)
-        if not value.get("updated_at"):
-            value["updated_at"] = record.get("content_updated_at") or record.get("synced_at") or 0
         value["access"] = {
             "visibility": record["visibility"],
             **provenance_fields(record),
@@ -296,8 +294,6 @@ class PublicResearchLibrary:
             publication_id,
             expected_hash=str(record.get("projection_hash") or ""),
         )
-        if not value.get("updated_at"):
-            value["updated_at"] = record.get("content_updated_at") or record.get("synced_at") or 0
         value["access"] = {
             "visibility": record["visibility"],
             **provenance_fields(record),

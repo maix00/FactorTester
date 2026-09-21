@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from server.manager.storage.account_domain import factor_sync
+from server.manager.storage.account_domain.service import AccountDomainSyncService
 
 
 def test_storage_keeps_full_fields():
@@ -19,6 +20,62 @@ def test_transfer_omits_rebuildable_heavy_fields():
     assert "identity" in factor_sync._SYNC_FACTOR_KEYS
     assert "ref" in factor_sync._SYNC_FACTOR_KEYS
     assert "factor_dependencies" in factor_sync._SYNC_FACTOR_KEYS
+
+
+def test_local_rows_keep_heavy_fields_while_transfer_rows_drop_them():
+    factor = {
+        "ref": "factor:v2:abc",
+        "identity": {"schema_version": 2},
+        "resolved_math_expr": r"\mathrm{F}_t",
+        "parameter_definitions": [{"alias": "N"}],
+    }
+
+    local = factor_sync._resolved_factor_rows([factor])[0]
+    transfer = factor_sync._resolved_factor_rows([factor], transfer=True)[0]
+
+    assert local["resolved_math_expr"] == r"\mathrm{F}_t"
+    assert local["parameter_definitions"] == [{"alias": "N"}]
+    assert "resolved_math_expr" not in transfer
+    assert "parameter_definitions" not in transfer
+
+
+def test_flush_sends_compact_projection_without_mutating_local_copy(tmp_path):
+    class Control:
+        def __init__(self):
+            self.pushed = []
+
+        def push_account_domain_entity(self, **item):
+            self.pushed.append(item)
+            return {"status": "ok", "revision": 1}
+
+    control = Control()
+    service = AccountDomainSyncService(
+        sqlite_path=tmp_path / "manager.sqlite",
+        control_store=control,
+        manager_id="local",
+    )
+    payload = {
+        "resolved_factors": [{
+            "ref": "factor:v2:abc",
+            "identity": {"schema_version": 2},
+            "resolved_math_expr": r"\mathrm{F}_t",
+            "parameter_definitions": [{"alias": "N"}],
+        }],
+    }
+
+    service.upsert(
+        "alice", "factor_param_config", "default:F", payload, flush=False,
+    )
+    service.flush(principal="alice")
+
+    sent = control.pushed[0]["payload"]["resolved_factors"][0]
+    assert "resolved_math_expr" not in sent
+    assert "parameter_definitions" not in sent
+    local = service.local.list_entities(
+        principal="alice", entity_type="factor_param_config",
+    )[0]["payload"]["resolved_factors"][0]
+    assert local["resolved_math_expr"] == r"\mathrm{F}_t"
+    assert local["parameter_definitions"] == [{"alias": "N"}]
 
 
 def test_deep_chain_transfer_payload_stays_small():

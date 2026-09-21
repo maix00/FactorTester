@@ -437,18 +437,19 @@ def _current_username(client: Any) -> str:
 def mirror_family_source_to_workspace(username: str, factor_id: str, source_code: str) -> dict[str, Any]:
     """把已入库的家族源码镜像进**合法**的工作区；不合格则不写，并说明原因。
 
-    平台口径（``factor_workspace.storage.existing_factor_workspace_root``）：库
-    （SQLite 源登记表）是权威，工作区只是镜像；只有用户**显式配置**过的工作区、
-    或有归属清单匹配的历史生成工作区才可以被镜像，默认回退目录**不得**被静默写入。
+    远端因子库是权威，工作区只是镜像；打包客户端只写已登记且归属当前
+    用户的 canonical factor repository，默认目录**不得**被静默创建。
     工作区里若已有同名但内容不同的旧文件，下一步 ``workspace user upload`` 会把旧
     版本覆盖回库，因此必须告警并给出刷新命令。
     """
-    from tools.data.factor_workspace.storage import existing_factor_workspace_root
+    from tools.cli.release.factor_workspace_mirror import (
+        existing_client_factor_workspace,
+    )
 
-    root = existing_factor_workspace_root(username)
+    root = existing_client_factor_workspace(username)
     if not root:
         return {"mirrored": False, "reason": "未显式配置工作区（默认目录不镜像）"}
-    target = os.path.join(root, "custom_factors", f"{factor_id}.py")
+    target = os.path.join(str(root), "custom_factors", f"{factor_id}.py")
     previous = None
     if os.path.isfile(target):
         with open(target, "r", encoding="utf-8") as handle:
@@ -460,7 +461,7 @@ def mirror_family_source_to_workspace(username: str, factor_id: str, source_code
     return {
         "mirrored": True,
         "path": target,
-        "workspace_root": root,
+        "workspace_root": str(root),
         "overwrote_divergent": diverged,
         "refresh_hint": "factortester factor-library workspace user download",
     }
