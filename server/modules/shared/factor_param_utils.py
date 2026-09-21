@@ -92,7 +92,17 @@ def freeze_factor_param_alias(param, value) -> dict | None:
     resolved = resolve_factor_param_value(text)
     if resolved is None:
         raise ValueError(f"FactorParam alias could not be resolved: {text}")
-    return frozen_factor_record(resolved)
+    record = frozen_factor_record(resolved)
+    if record is None:
+        # 解析结果不是冻结记录（例如引擎按契约返回 Factor 对象）。这里**不允许**静默
+        # 退回别名：保存路径必须先把别名解析成规范记录（见
+        # factor_library_service._freeze_alias_factor_param_rows），否则同一行会在
+        # 冻结侧与校验侧算出不同身份。
+        raise ValueError(
+            "FactorParam alias must be resolved into a frozen record before storage: "
+            f"{text} (got {type(resolved).__name__})"
+        )
+    return record
 
 
 def normalize_factor_param_rows(factor_family, params_list: list) -> list:
