@@ -21,7 +21,21 @@ class _Family:
 
     def __init__(self):
         self.params = [FactorParam("P"), FactorParam("N")]
+        self.params_dict = {p.alias: p for p in self.params}
         self._params_list = [{"P": "CA", "N": "250d"}]
+
+    # 平台契约：解析别名 → 归一化 → 重新渲染（校验侧要求渲染结果逐字等于 alias）
+    def _normalize_param_kwargs(self, **params):
+        return dict(params)
+
+    def _check_in_space(self, **params):
+        return None
+
+    def parse_alias(self, text):
+        return {"P": "CA", "N": "250d"}
+
+    def get_alias(self, **params):
+        return f"SgChgPct|P:[{params.get('P')}]|N:{params.get('N')}"
 
 
 class _Factor:
