@@ -440,6 +440,49 @@ def referenced_dependency_records(frozen: dict | None, frozen_by_ref: dict) -> l
     return [frozen_by_ref[ref] for ref in sorted(referenced) if ref in frozen_by_ref]
 
 
+def sanitize_factor_record_dependencies(record: dict) -> dict:
+    """不变量：**记录的依赖列表 = 它自己 params 引用到的因子**（递归、按别名唯一）。
+
+    历史写入曾在记录里留下同一别名的旧、新两条身份；这类记录一旦被上报，平台的别名
+    唯一性守卫会正确拒绝。这里按 ``identity.params`` 的 ``factor:v2:`` 引用重建依赖列表，
+    保留被引用的那条，并按别名去重；当场源码/临时因子（带 ``temporary``/``source_code``）
+    必须保留，否则内联因子会执行不了。
+    """
+    if not isinstance(record, dict):
+        return record
+    dependencies = record.get('factor_dependencies')
+    if not isinstance(dependencies, list) or not dependencies:
+        return record
+    params = (record.get('identity') or {}).get('params') or {}
+    referenced = {
+        value for value in params.values()
+        if isinstance(value, str) and value.startswith('factor:v2:')
+    }
+    kept: list[dict] = []
+    seen_alias: set[str] = set()
+    # 被引用的排在前面，保证「同别名取被引用的那条」
+    ordered = sorted(
+        (item for item in dependencies if isinstance(item, dict)),
+        key=lambda item: 0 if str(item.get('ref')) in referenced else 1,
+    )
+    for item in ordered:
+        if not (
+            str(item.get('ref')) in referenced
+            or item.get('temporary') is True
+            or item.get('source_code')
+        ):
+            continue
+        alias = str(item.get('alias') or '')
+        if alias and alias in seen_alias:
+            continue
+        if alias:
+            seen_alias.add(alias)
+        kept.append(sanitize_factor_record_dependencies(item))
+    if kept:
+        return {**record, 'factor_dependencies': kept}
+    return {key: value for key, value in record.items() if key != 'factor_dependencies'}
+
+
 def build_factor_rows(factor_family, params_list: list) -> list:
     """Build factor row payload for parameter table rendering."""
     factors = factor_family.get_factors(params_list=params_list)
