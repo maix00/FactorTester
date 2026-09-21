@@ -52,17 +52,33 @@ def _flatten_dependencies(dependencies: Any) -> list[dict[str, Any]]:
     return list(flat.values())
 
 
-def _resolved_factor_rows(factors: Any) -> list[dict[str, Any]]:
-    """账户域载荷里的 resolved_factors：依赖扁平去重后的记录。"""
+def _resolved_factor_rows(
+    factors: Any, *, transfer: bool = False,
+) -> list[dict[str, Any]]:
+    """Build local full rows or their compact network projection."""
+    keys = _SYNC_FACTOR_KEYS if transfer else _FACTOR_KEYS
     rows: list[dict[str, Any]] = []
     for item in factors:
         if not isinstance(item, dict):
             continue
-        record = {key: item[key] for key in _SYNC_FACTOR_KEYS if item.get(key) not in (None, "")}
+        record = {key: item[key] for key in keys if item.get(key) not in (None, "")}
         if "factor_dependencies" in record:
             record["factor_dependencies"] = _flatten_dependencies(record["factor_dependencies"])
         rows.append(record)
     return rows
+
+
+def compact_factor_config_payload(payload: Any) -> Any:
+    """Project one local factor config onto the bounded transport contract."""
+    if not isinstance(payload, dict):
+        return payload
+    factors = payload.get("resolved_factors")
+    if not isinstance(factors, list):
+        return payload
+    return {
+        **payload,
+        "resolved_factors": _resolved_factor_rows(factors, transfer=True),
+    }
 
 
 def materialized_factor_configs(owner: str, *, existing: list[dict[str, Any]] | None = None) -> list[tuple[str, dict[str, Any]]]:
