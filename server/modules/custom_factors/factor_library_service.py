@@ -21,8 +21,10 @@ from server.modules.custom_factors.factor_library_store import (
 from server.modules.products.product_group_store import load_product_groups
 from server.modules.shared.factor_param_utils import (
     build_factor_param_item,
+    factor_param_value_storage,
     frozen_factor_records_from_values,
     hydrate_frozen_factor_params,
+    normalize_factor_param_row,
     serialize_factor_param_rows,
     unique_frozen_factor_records,
 )
@@ -37,6 +39,65 @@ from tools.data.account_manage import (
     get_account,
 )
 from tools.factors.factor_param_resolution import factor_param_resolver_scope
+from tools.factors.formula_identity import freeze_factor_identity
+from tools.parameters import FactorParam
+
+
+def _freeze_alias_factor_param_rows(username, factor_family, params_list: list) -> list:
+    """把 FactorParam 槽位里的**因子别名**解析并冻结成规范记录（ref 由代码派生）。
+
+    与 ``editor_routes._freeze_validated_factor`` 是同一环：解析 → 归一化 →
+    ``freeze_factor_identity``。必须在配置自身冻结映射的作用域**之外**执行：别名解析要查
+    可见因子库，靠的是平台默认解析器；一旦被「只认本配置 ref」的映射覆盖，别名就解析不到
+    （本项目曾因此把别名按原样落库，使冻结侧与校验侧对同一行算出不同的 self_fingerprint）。
+
+    只处理「确实指向一个因子」的取值：别名带 ``|`` 参数段；DataColumn 与常值按原样保留。
+    """
+    factor_params = [p for p in factor_family.params if isinstance(p, FactorParam)]
+    if not factor_params:
+        return params_list
+    # 延迟导入：factor_param_resolver 在模块层反向依赖本模块，顶部导入会成环。
+    from server.modules.shared.factor_param_resolver import (
+        _find_visible_factor,
+        _params_list_to_dict,
+    )
+    frozen_rows = []
+    for row in params_list:
+        if not isinstance(row, dict):
+            frozen_rows.append(row)
+            continue
+        frozen_row = dict(row)
+        for param in factor_params:
+            value = frozen_row.get(param.alias)
+            if not isinstance(value, str):
+                continue
+            text = value.strip()
+            if not text or text.startswith('factor:v2:') or '|' not in text:
+                continue
+            item = _find_visible_factor(text, username=username)
+            family_alias = item.get('factor_family_alias') or item.get('factor_family_name')
+            if not family_alias:
+                raise ValueError(f'因子别名缺少家族信息: {text}')
+            owner = item.get('owner_username') or username
+            nested_family = get_factor_family_instance(family_alias, username=owner)
+            factor = nested_family.factor_from_alias(str(item.get('factor_alias') or text))
+            normalized = normalize_factor_param_row(
+                nested_family, _params_list_to_dict(item.get('params') or []),
+            )
+            expression = getattr(factor, '_source_expr', None) or factor.expr
+            frozen_row[param.alias] = freeze_factor_identity(
+                owner_ref=str(item.get('owner_ref') or '').strip(),
+                family_alias=str(family_alias).strip(),
+                factor_alias=str(factor.alias),
+                family_formula_fingerprint=nested_family.expr.semantic_fingerprint(),
+                self_formula_fingerprint=expression.semantic_fingerprint(),
+                params={
+                    p.alias: factor_param_value_storage(p, normalized.get(p.alias))
+                    for p in nested_family.params
+                },
+            )
+        frozen_rows.append(frozen_row)
+    return frozen_rows
 
 
 def _configuration_factor_resolver(
@@ -468,6 +529,7 @@ def save_current_user_library_config(
 ) -> tuple[dict, list]:
     product_group = normalize_product_group(product_group)
     factor_family = get_factor_family_instance(ff_alias, username=current_username)
+    params_list = _freeze_alias_factor_param_rows(current_username, factor_family, params_list)
     config_metadata = _merged_library_metadata(current_username, ff_alias, product_group, metadata)
     dependency_records = unique_frozen_factor_records([
         *(config_metadata.get('factor_dependencies') or []),
