@@ -94,15 +94,45 @@ def freeze_factor_param_alias(param, value) -> dict | None:
         raise ValueError(f"FactorParam alias could not be resolved: {text}")
     record = frozen_factor_record(resolved)
     if record is None:
-        # 解析结果不是冻结记录（例如引擎按契约返回 Factor 对象）。这里**不允许**静默
-        # 退回别名：保存路径必须先把别名解析成规范记录（见
-        # factor_library_service._freeze_alias_factor_param_rows），否则同一行会在
-        # 冻结侧与校验侧算出不同身份。
-        raise ValueError(
-            "FactorParam alias must be resolved into a frozen record before storage: "
-            f"{text} (got {type(resolved).__name__})"
-        )
+        record = _frozen_record_from_resolved_factor(resolved, text)
     return record
+
+
+def _frozen_record_from_resolved_factor(resolved, text: str) -> dict:
+    """把解析得到的 Factor 对象冻结成规范记录（与 editor_routes 同一构造）。
+
+    解析器按契约返回 Factor 对象；冻结所需的 owner、家族、表达式与当前取值都在对象上
+    （``owner_ref`` / 家族实例 / ``expr`` / ``_source_expr`` / ``_params_list``），
+    因此不必依赖调用方补参数，也不能因为「拿不到记录」就退回别名存储。
+    """
+    from tools.factors.formula_identity import freeze_factor_identity
+
+    family = (
+        getattr(resolved, 'factor_family', None)
+        or getattr(resolved, '_family', None)
+        or getattr(resolved, 'family', None)
+    )
+    if family is None or not getattr(family, 'alias', None):
+        raise ValueError(f"FactorParam alias resolved without a family: {text}")
+    expression = getattr(resolved, '_source_expr', None) or resolved.expr
+    applied = {}
+    for candidate in (getattr(family, '_params_list', None) or []):
+        if isinstance(candidate, dict):
+            applied = candidate
+    owner_ref = str(getattr(resolved, 'owner_ref', '') or '').strip()
+    if not owner_ref:
+        raise ValueError(f"FactorParam alias resolved without owner_ref: {text}")
+    return freeze_factor_identity(
+        owner_ref=owner_ref,
+        family_alias=str(family.alias).strip(),
+        factor_alias=str(resolved.alias),
+        family_formula_fingerprint=family.expr.semantic_fingerprint(),
+        self_formula_fingerprint=expression.semantic_fingerprint(),
+        params={
+            p.alias: factor_param_value_storage(p, applied.get(p.alias, getattr(p, 'default_value', None)))
+            for p in family.params
+        },
+    )
 
 
 def normalize_factor_param_rows(factor_family, params_list: list) -> list:
