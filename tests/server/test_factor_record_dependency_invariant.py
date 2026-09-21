@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from server.modules.shared.factor_param_utils import (
     sanitize_factor_record_dependencies as sanitize,
 )
@@ -54,7 +56,7 @@ def test_inline_source_dependencies_are_preserved():
     inline = {"ref": "factor:v2:INLINE", "alias": "T", "source_code": "class T: ..."}
     temporary = {"ref": "factor:v2:TEMP", "alias": "U", "temporary": True}
     record = {
-        "identity": {"params": {"X": "factor:v2:OTHER"}},
+        "identity": {"params": {"X": inline["ref"]}},
         "factor_dependencies": [inline, temporary],
     }
     kept = sanitize(record)["factor_dependencies"]
@@ -84,9 +86,71 @@ def test_record_without_dependencies_is_untouched():
     assert sanitize(record) == record
 
 
-def test_all_dependencies_dropped_removes_the_key():
+def test_missing_referenced_dependency_is_reported():
     record = {
         "identity": {"params": {"X": "factor:v2:ONLY"}},
         "factor_dependencies": [_dep("factor:v2:OTHER", "Z")],
     }
-    assert "factor_dependencies" not in sanitize(record)
+    with pytest.raises(ValueError, match="依赖记录缺失: factor:v2:ONLY"):
+        sanitize(record)
+
+
+def test_flat_transport_keeps_transitive_child_without_expanding_graph():
+    child = _dep("factor:v2:CHILD", "Child")
+    parent = _dep("factor:v2:PARENT", "Parent")
+    parent["identity"]["params"] = {"X": child["ref"]}
+    stale = _dep("factor:v2:STALE", "Child")
+    record = {
+        "identity": {"params": {"X": parent["ref"]}},
+        "factor_dependencies": [parent, stale, child],
+    }
+
+    got = sanitize(record)["factor_dependencies"]
+    assert got == [parent, child]
+    assert all("factor_dependencies" not in item for item in got)
+
+
+def test_two_reachable_versions_of_one_alias_are_rejected():
+    first = _dep("factor:v2:FIRST", "Same")
+    second = _dep("factor:v2:SECOND", "Same")
+    record = {
+        "identity": {"params": {"X": first["ref"], "Y": second["ref"]}},
+        "factor_dependencies": [first, second],
+    }
+    with pytest.raises(ValueError, match="多个被引用的冻结身份: Same"):
+        sanitize(record)
+
+
+def test_legacy_alias_is_kept_only_when_it_identifies_one_record():
+    alias = "Nested|N:10d"
+    only = _dep("factor:v2:ONLY", alias)
+    record = {
+        "identity": {"params": {"X": alias}},
+        "factor_dependencies": [only, _dep("factor:v2:STALE", "Stale")],
+    }
+    assert sanitize(record)["factor_dependencies"] == [only]
+
+
+def test_legacy_alias_with_two_versions_is_not_guessed_by_list_order():
+    alias = "Nested|N:10d"
+    record = {
+        "identity": {"params": {"X": alias}},
+        "factor_dependencies": [
+            _dep("factor:v2:OLD", alias), _dep("factor:v2:NEW", alias),
+        ],
+    }
+    with pytest.raises(ValueError, match="无法确定旧参数引用"):
+        sanitize(record)
+
+
+def test_cycle_in_flat_transport_is_rejected():
+    first = _dep("factor:v2:FIRST", "First")
+    second = _dep("factor:v2:SECOND", "Second")
+    first["identity"]["params"] = {"X": second["ref"]}
+    second["identity"]["params"] = {"X": first["ref"]}
+    record = {
+        "identity": {"params": {"X": first["ref"]}},
+        "factor_dependencies": [first, second],
+    }
+    with pytest.raises(ValueError, match="依赖形成循环"):
+        sanitize(record)

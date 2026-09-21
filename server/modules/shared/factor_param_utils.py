@@ -441,43 +441,115 @@ def referenced_dependency_records(frozen: dict | None, frozen_by_ref: dict) -> l
 
 
 def sanitize_factor_record_dependencies(record: dict) -> dict:
-    """不变量：**记录的依赖列表 = 它自己 params 引用到的因子**（递归、按别名唯一）。
+    """Keep the complete referenced dependency graph in its existing shape.
 
-    历史写入曾在记录里留下同一别名的旧、新两条身份；这类记录一旦被上报，平台的别名
-    唯一性守卫会正确拒绝。这里按 ``identity.params`` 的 ``factor:v2:`` 引用重建依赖列表，
-    保留被引用的那条，并按别名去重；当场源码/临时因子（带 ``temporary``/``source_code``）
-    必须保留，否则内联因子会执行不了。
+    Sync stores a *flat* dependency list, whereas local records may contain a
+    nested tree.  Both representations need the transitive closure of the
+    record's parameter refs.  Never choose arbitrarily between two reachable
+    identities with the same alias: that would change the formula being run.
     """
     if not isinstance(record, dict):
         return record
     dependencies = record.get('factor_dependencies')
     if not isinstance(dependencies, list) or not dependencies:
         return record
-    params = (record.get('identity') or {}).get('params') or {}
-    referenced = {
-        value for value in params.values()
-        if isinstance(value, str) and value.startswith('factor:v2:')
-    }
-    kept: list[dict] = []
-    seen_alias: set[str] = set()
-    # 被引用的排在前面，保证「同别名取被引用的那条」
-    ordered = sorted(
-        (item for item in dependencies if isinstance(item, dict)),
-        key=lambda item: 0 if str(item.get('ref')) in referenced else 1,
-    )
-    for item in ordered:
-        if not (
-            str(item.get('ref')) in referenced
-            or item.get('temporary') is True
-            or item.get('source_code')
-        ):
-            continue
+
+    by_alias: dict[str, set[str]] = {}
+
+    def parameter_refs(item: dict) -> set[str]:
+        params = (item.get('identity') or {}).get('params') or {}
+        refs = {
+            value for value in params.values()
+            if isinstance(value, str) and value.startswith('factor:v2:')
+        }
+        for value in params.values():
+            if not isinstance(value, str) or '|' not in value:
+                continue
+            candidates = by_alias.get(value.strip(), set())
+            if len(candidates) > 1:
+                raise ValueError(f'因子别名对应多个冻结身份，无法确定旧参数引用: {value}')
+            refs.update(candidates)
+        return refs
+
+    by_ref: dict[str, dict] = {}
+
+    def index(items: list) -> None:
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            ref = str(item.get('ref') or '')
+            if ref:
+                # A flat copy can coexist with a nested copy.  Prefer the
+                # copy containing its children so the original tree survives.
+                previous = by_ref.get(ref)
+                if previous is None or (
+                    not previous.get('factor_dependencies')
+                    and item.get('factor_dependencies')
+                ):
+                    by_ref[ref] = item
+            index(item.get('factor_dependencies') or [])
+
+    index(dependencies)
+    for ref, item in by_ref.items():
         alias = str(item.get('alias') or '')
-        if alias and alias in seen_alias:
-            continue
         if alias:
-            seen_alias.add(alias)
-        kept.append(sanitize_factor_record_dependencies(item))
+            by_alias.setdefault(alias, set()).add(ref)
+    roots = parameter_refs(record)
+    roots.update(
+        ref for ref, item in by_ref.items()
+        if item.get('temporary') is True or item.get('source_code')
+    )
+    reachable: set[str] = set()
+    visiting: set[str] = set()
+
+    def visit(ref: str) -> None:
+        if ref in visiting:
+            raise ValueError(f'FactorParam 依赖形成循环: {ref}')
+        if ref in reachable:
+            return
+        item = by_ref.get(ref)
+        if item is None:
+            raise ValueError(f'FactorParam 依赖记录缺失: {ref}')
+        visiting.add(ref)
+        for child_ref in sorted(parameter_refs(item)):
+            visit(child_ref)
+        visiting.remove(ref)
+        reachable.add(ref)
+
+    for ref in sorted(roots):
+        visit(ref)
+
+    aliases: dict[str, str] = {}
+    for ref in sorted(reachable):
+        alias = str(by_ref[ref].get('alias') or '')
+        previous = aliases.setdefault(alias, ref) if alias else None
+        if previous is not None and previous != ref:
+            raise ValueError(f'因子别名对应多个被引用的冻结身份: {alias}')
+
+    emitted: set[str] = set()
+
+    def project(items: list) -> list[dict]:
+        kept = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            ref = str(item.get('ref') or '')
+            if ref not in reachable or ref in emitted:
+                continue
+            emitted.add(ref)
+            child_items = project(item.get('factor_dependencies') or [])
+            projected = dict(item)
+            if child_items:
+                projected['factor_dependencies'] = child_items
+            else:
+                projected.pop('factor_dependencies', None)
+            kept.append(projected)
+        return kept
+
+    kept = project(dependencies)
+    # A reachable record may occur only under a discarded legacy parent.
+    # Keep the closure complete without expanding a flat graph into a tree.
+    kept.extend(project([by_ref[ref] for ref in sorted(reachable - emitted)]))
     if kept:
         return {**record, 'factor_dependencies': kept}
     return {key: value for key, value in record.items() if key != 'factor_dependencies'}
