@@ -65,8 +65,8 @@ def test_existing_reference_is_not_reprocessed(monkeypatch, param_kind):
     ) is None
 
 
-def test_unresolvable_alias_is_left_alone(monkeypatch, param_kind):
-    """解析不了（没有解析器 / 不是因子）时保持原样，不抛异常。"""
+def test_resolver_failure_is_not_silently_stored(monkeypatch, param_kind):
+    """解析基础设施故障必须阻止写入未冻结别名。"""
     import tools.factors.factor_param_resolution as resolution
 
     def _boom(_value):
@@ -74,9 +74,20 @@ def test_unresolvable_alias_is_left_alone(monkeypatch, param_kind):
 
     monkeypatch.setattr(resolution, 'resolve_factor_param_value', _boom)
 
-    assert factor_param_utils.freeze_factor_param_alias(
-        param_kind(), 'SomeFamily|N:[10d]',
-    ) is None
+    with pytest.raises(RuntimeError, match='No FactorParam resolver'):
+        factor_param_utils.freeze_factor_param_alias(
+            param_kind(), 'SomeFamily|N:[10d]',
+        )
+
+
+def test_resolver_returning_none_is_rejected(monkeypatch, param_kind):
+    import tools.factors.factor_param_resolution as resolution
+    monkeypatch.setattr(resolution, 'resolve_factor_param_value', lambda _value: None)
+
+    with pytest.raises(ValueError, match='could not be resolved'):
+        factor_param_utils.freeze_factor_param_alias(
+            param_kind(), 'SomeFamily|N:[10d]',
+        )
 
 
 def test_non_factor_param_slots_are_untouched(monkeypatch):

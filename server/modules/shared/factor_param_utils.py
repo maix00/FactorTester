@@ -85,13 +85,13 @@ def freeze_factor_param_alias(param, value) -> dict | None:
     text = value.strip()
     if not text or text.startswith('factor:v2:') or '|' not in text:
         return None
-    try:
-        from tools.factors.factor_param_resolution import resolve_factor_param_value
+    from tools.factors.factor_param_resolution import resolve_factor_param_value
 
-        resolved = resolve_factor_param_value(text)
-    except Exception:
-        # 解析不了就不是因子别名（列/常值等），保持原样。
-        return None
+    # 带参数段的 FactorParam 字符串已经明确声明为因子别名。解析器不可用、
+    # 源码缺失或身份不一致都必须阻止写入，不能静默退回可变别名。
+    resolved = resolve_factor_param_value(text)
+    if resolved is None:
+        raise ValueError(f"FactorParam alias could not be resolved: {text}")
     return frozen_factor_record(resolved)
 
 

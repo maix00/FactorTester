@@ -188,15 +188,22 @@ class AccountDomainSyncService:
         sent = conflicts = 0
         for item in pending:
             try:
+                outbound = item
+                if item["entity_type"] == "factor_param_config":
+                    from .factor_sync import compact_factor_config_payload
+                    outbound = {
+                        **item,
+                        "payload": compact_factor_config_payload(item["payload"]),
+                    }
                 receipt = self.control_store.push_account_domain_entity(
-                    principal=item["principal"],
-                    entity_type=item["entity_type"],
-                    entity_id=item["entity_id"],
-                    payload=item["payload"],
-                    deleted=item["deleted"],
-                    base_revision=item["base_revision"],
+                    principal=outbound["principal"],
+                    entity_type=outbound["entity_type"],
+                    entity_id=outbound["entity_id"],
+                    payload=outbound["payload"],
+                    deleted=outbound["deleted"],
+                    base_revision=outbound["base_revision"],
                     origin_manager_id=self.manager_id,
-                    operation_id=item["operation_id"],
+                    operation_id=outbound["operation_id"],
                 )
                 if str(receipt.get("status") or "") == "conflict":
                     if self.local.record_push_conflict(item, receipt):
@@ -205,7 +212,7 @@ class AccountDomainSyncService:
                     self.local.mark_attempt(item["operation_id"], "remote revision conflict")
                     continue
                 self.local.acknowledge(
-                    item["operation_id"], revision=int(receipt.get("revision") or 0), sent_item=item,
+                    item["operation_id"], revision=int(receipt.get("revision") or 0), sent_item=outbound,
                 )
                 sent += 1
             except (TypeError, ValueError) as exc:
