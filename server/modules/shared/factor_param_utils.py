@@ -122,10 +122,16 @@ def _frozen_record_from_resolved_factor(resolved, text: str) -> dict:
     owner_ref = str(getattr(resolved, 'owner_ref', '') or '').strip()
     if not owner_ref:
         raise ValueError(f"FactorParam alias resolved without owner_ref: {text}")
+    # 记录里的 factor_alias 必须是**规范化后的输入别名**：作者写的列引用（如 P:[CA]）与
+    # 平台渲染（P:[CLOSE_ADJUSTED]）是同一因子的两种写法，保存侧要求记录别名与输入别名一致。
+    try:
+        canonical_alias = family.get_alias(**family.parse_alias(text))
+    except Exception:
+        canonical_alias = str(resolved.alias)
     return freeze_factor_identity(
         owner_ref=owner_ref,
         family_alias=str(family.alias).strip(),
-        factor_alias=str(resolved.alias),
+        factor_alias=str(canonical_alias),
         family_formula_fingerprint=family.expr.semantic_fingerprint(),
         self_formula_fingerprint=expression.semantic_fingerprint(),
         params={
