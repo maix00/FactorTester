@@ -40,11 +40,12 @@ Agent 批量研究的 ref 预检、独立台账与断点恢复见
 
 Workspace、Research、ReportBranch 和 Run 正交：Workspace 是可变执行配置环境；Research
 是协作根对象；ReportBranch 是报告正文的一条版本线；Run 冻结一次研究/回测输入；Job
-记录实际执行。目标中的 AgentWorkflowRun 将记录 Agent 研究任务的可恢复状态，并链接其 Profile、
-ChatKit conversation、ReportBranch、ResearchRun、Job 与产物引用；它不复制对话正文、Job
-结果，也不把执行步骤固定为节点/边。Research Graph、WorkPackage、Graph Branch 和 Graph
-TrialPlan 属于退役中的旧模型，不得作为新功能门禁；目标与分阶段边界见
-[ADR-156](docs/adr/156-retire-research-graph-agent-workflow.md)。旧模型的数据历史无需迁移保留。
+记录实际执行。先复用现有 Agent 对话、Profile runtime、ResearchRun 和 Job；只有实证发现可恢复状态、进度或
+幂等执行缺口时，才新增最小的 Graph-free 工作流状态。它不复制对话正文或 Job 结果，也不把
+执行步骤固定为节点/边。Research Graph、WorkPackage、Graph Branch 和 Graph TrialPlan 将在
+同一次完整切换中移除；不发布逐步退役的中间状态。Graph 专属历史无需迁移保留，普通研究报告、
+ReportBranch、Run、Job 与因子数据继续保留并解耦。见
+[ADR-156](docs/adr/156-retire-research-graph-agent-workflow.md)。
 
 ReportBranch 的稳定身份、跨 Profile/服务器访问和 Report 章节协作按 ADR-149、ADR-154
 演进，不以执行 Workspace 或服务器位置作为内容身份。保护样本和统计约束须独立证明价值，

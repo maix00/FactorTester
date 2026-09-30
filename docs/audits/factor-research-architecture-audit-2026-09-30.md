@@ -7,7 +7,7 @@
 
 ## 结论与当前架构基础
 
-FactorTester 已有若干成熟的核心边界：因子 DSL 的批量/增量执行分离、冻结的因子身份和源码版本、产品组与提交时产品范围快照、RunSpec/ExecutionPlan/Job 生命周期、研究图与版本化 TrialPlan、受保护样本暴露检查、结果 artifact 哈希、因子集合成员历史以及跨服务器研究目录基础设施。统计设计已把比较、样本角色、停止规则和多重检验计划纳入 TrialPlan；本审计没有证据支持“平台完全没有多重检验机制”这一说法。
+FactorTester 已有若干可独立保留的核心边界：因子 DSL 的批量/增量执行分离、冻结的因子身份和源码版本、产品组与提交时产品范围快照、RunSpec/ExecutionPlan/Job 生命周期、结果 artifact 哈希、因子集合成员历史以及跨服务器研究目录基础设施。部分样本保护和研究流程目前仍耦合于 Research Graph/TrialPlan，需要在整体切换中迁到 Run 级规范边界。统计设计已把比较、样本角色、停止规则和多重检验计划纳入 TrialPlan；这只证明旧设施表达过这些概念，不意味着 TrialPlan 或 Graph 必须保留。
 
 用户已明确决定整体退役 Research Graph，Graph 专属历史无需保留。报告正文、Report Branch 和跨服务器协作继续保留为独立领域对象；ResearchRun、Job、因子与样本正确性只有在能独立于 Graph 工作时才继续保留。不能把 Graph 历史搬进另一套节点/义务系统。
 
@@ -16,6 +16,8 @@ FactorTester 已有若干成熟的核心边界：因子 DSL 的批量/增量执�
 源码与规范显示 Graph/Branch/TrialPlan 不只是历史关系视图：它们还参与研究路径状态、运行绑定、Evidence admission 和执行检查点。用户决定这些设施整体剥离、Graph 历史不留存；与之相连但有独立价值的报告、Run/Job 和统计正确性必须先落到自己的身份与生命周期，再删除 Graph 代码和数据。
 
 ## 成熟研究架构参照
+
+Research Graph 全量移除的初始路径审计清单见[候选文件清单](research-graph-removal-manifest-2026-09-30.md)；清单命中项须逐个判定，不能机械删除。
 
 公开实现提供的是可借鉴的工程模式，不是必须照搬的规范：Microsoft Qlib 将行情数据准备、Data Loader、Data Handler、Dataset 与缓存分层；其 Experiment/Recorder 按实验组织单次运行，并保留参数、指标和 artifacts；需要批量试验时另有 task generation、storage、training、collection 生命周期。Alphalens 把单因子诊断聚焦在带日期、资产、因子值、前瞻收益期与可选分组的数据集，输出 IC、分位数组合收益、换手等诊断。mlfinlab 的交叉验证实现将标签信息区间用于 PurgedKFold，并支持 embargo，体现了时间区间重叠应进入验证边界的原则。QuantConnect 建议先在交互式 Research 环境分析假设和统计显著性，再用较慢的事件驱动回测验证，并允许研究代码导入回测项目。Microsoft 的 RD-Agent(Q) 采用 Research → Development/代码实现 → 回测 → Feedback 的迭代闭环，并动态选择下一步任务；论文把它描述为 Agent 研究过程，而不是要求研究者先维护固定的通用知识图。
 
@@ -46,20 +48,20 @@ FactorTester 已有若干成熟的核心边界：因子 DSL 的批量/增量执�
 
 ### 建议方向
 
-用户已明确决定**整体移除 Research Graph 设施，历史 Graph 内容不需要保留**。目标不是继续保留一个只读 Graph 投影视图，而是把仍需的研究正确性约束重建在普通研究对象和 Run 生命周期上，再删除 Graph 专属 UI、API、CLI、运行时、schema 和历史数据。完整决策已落为 [ADR-156](../adr/156-retire-research-graph-agent-workflow.md)；渐进目标如下：
+用户已明确决定**一次性完整移除 Research Graph 设施，Graph 历史内容不需要保留**。目标不是继续保留只读 Graph 投影视图，也不是逐步发布一个仍依赖 Graph 的过渡产品；完整切换时须同时把仍需的研究能力落在独立研究对象和 Run 生命周期，并删除 Graph 专属 UI、API、CLI、运行时、schema 和历史数据。完整决策已落为 [ADR-156](../adr/156-retire-research-graph-agent-workflow.md)：
 
 1. **只保留独立验证后仍有价值的研究事实与统计护栏。** Research/成员、Report/Branch、冻结因子版本、RunSpec、数据快照、Job、指标/产物引用、样本角色、holdout 暴露台账、权限与审计按各自领域建模。TrialPlan 不视为必须保留；需要的多重检验、预注册、保护样本规则，应拆成小型可选的统计合同和 Run 级暴露校验，不要求一般探索、报告撰写或 Agent 对话先走整套 TrialPlan。
-2. **引入轻量可恢复的 Agent WorkflowRun。** 以 `research_id + report_id/branch + principal/profile + runtime server` 绑定身份；采用追加式、可分页的事件记录：用户输入、Agent 计划摘要、工具调用、工具结果/Job 引用、审批等待/决定、checkpoint、失败/重试与最终产物。保存有用的进度与简明理由，不保存模型隐藏思维链。允许 workflow 自己决定下一步、创建并行子任务、循环或请求人类补充；可提供可编辑模板，但模板不是状态机门禁。
+2. **先审查 Agent 工作流现状，只补实证缺口。** 检查 `research_id + report_id/branch + principal/profile + runtime server` 身份关联、可分页进度、工具/Job 引用、审批、断线和重启恢复、幂等副作用。只有现有 ChatKit conversation、Profile runtime 和 Job 不能满足明确验收时，才增加最小 WorkflowRun 状态；记录可见进度，不保存模型隐藏思维链，也不复制对话/Job。
 3. **复用现有持久 Job 与 Agent 权限边界。** LLM/CLI/Manager I/O 作为可重试、有幂等键的活动；长任务可暂停、恢复、取消、超时和预算封顶。回测仍走当前 Job daemon；Agent workflow 负责调用与编排，不复制调度队列或运行行情逻辑。先验证 SQLite 持久事件 + 当前调度器是否满足单机与客户端场景，再评估 Temporal/DBOS 等外部持久编排引擎。
 4. **删除 Graph 特有历史与存储。** Graph 节点/边、Claim/obligation、Graph YAML/版本、旧 TrialPlan、Graph traces、专属 checkpoint 和偏好均不迁成另一种“Graph 历史”。用户已明确这些历史内容无需保留；迁移仍须 dry-run 报告对象/表行/引用数量、检查非 Graph Run/Job/Report/Evidence 是否被 Graph 外键或业务字段错误级联影响、提供备份和回退点，再删除 Graph 专属表和字段。独立 RunSpec、Job、Artifact、Research、Report 和 Factor 数据不跟随 Graph 历史一起删除。
-5. **按切面拆除产品依赖。** 先让正常 Agent 研究和 Run 不再创建、读取或写入 Graph/TrialPlan；再移除 Graph 导航、Web 与 Swift UI、HTTP 路由/Manager 代理、CLI 命令/客户端库、Skills、后台初始化与 catalog；最后在完成备份/dry-run 后清理 Graph schema/migrations 与无主 Graph 历史。清理时不能留下启动时自动重建 Graph 表的路径。
+5. **同一完整交付移除所有 Graph 切面。** 最终集成必须同时包含正常 Agent 研究和 Run 不再创建、读取或写入 Graph/TrialPlan，Web 与 Swift 入口、HTTP 路由/Manager 代理、CLI 命令/客户端库、Skills、后台初始化与 catalog、Graph schema/migrations 及专属历史数据清理方案；不能发布只隐藏入口、只切新写入或仍会自动重建 Graph 表的中间状态。
 
-Agent workflow 也不应变成另一张固定图；其事件时间线可直接显示执行步骤，而无需定义 Graph 节点/边协议。整体退役必须按可验证的垂直切片进行，避免单次删除掩盖实际仍依赖 Graph 的运行入口。
+Agent workflow 也不应变成另一张固定图；应先审查现有 ChatKit conversation、Profile runtime 和 Job 的可恢复能力，只在明确缺口上补最小状态/事件。代码可以分提交实现，但完整方案需在同一次集成中验证，避免留下仍依赖 Graph 的运行入口。
 
 ## 更新后的顺序化改进队列
 
-1. **Research Graph 全量退役（Issue #403）**：外部框架比较、静态依赖盘点和 ADR-156 已完成。Graph 历史不迁移保留；按 WorkflowRun/无 Graph Run/ReportBranch/客户端与服务器产品入口/Graph schema 与数据清理分阶段实现，每阶段设精确 Ownership 与验收。
-2. **保护样本范围重叠（F-01，Issue #402）**：目标保留，但改为普通 ResearchRun 级样本暴露检查，不再依赖 Graph TrialPlan。Issue 已按新 Ownership 重新认领；独立样本身份/交集实现正在聚焦验收。
+1. **Research Graph 全量移除（Issue #403）**：外部框架比较、静态依赖盘点和 ADR-156 已完成。Graph 历史不迁移保留；Report/Branch、ResearchRun/Job、因子/样本保护、Profile Agent 等正常能力必须在同一集成范围内确认脱离 Graph，再与 Graph UI/API/CLI/Skills/runtime/schema/data 清理一起验收；不得分批发布退役。
+2. **保护样本范围重叠（F-01，Issue #402）**：目标保留为普通 ResearchRun 级样本暴露检查，不再依赖 Graph TrialPlan。独立实现提交 `cbe0781f3` 仍只在本地任务分支，计划随完整 Research Graph 移除工作一并审查和集成；不作为单独发布。
 3. **冻结行情输入身份（F-02，P1）**。
 4. **冻结因子历史解析（F-03，P1）**。
 5. **旧报告 publication fork（F-05，P2，Issue #396）**。
@@ -82,16 +84,16 @@ Agent workflow 也不应变成另一张固定图；其事件时间线可直接�
 
 | ID / 优先级 | 发现与证据 | 影响与改进方向 | 状态 |
 | --- | --- | --- | --- |
-| F-01 / P1 | **保护样本暴露检查漏掉部分产品范围重叠。** 原查询按 `sample_universe_hash` 完全相等、日期相交来查历史暴露；旧身份模块明确列出 `partial_universe_overlap_not_detected`。 | 一个验证/holdout 运行可以换成部分重叠或超集产品，旧检查不会识别既有暴露。独立 Run 级规则已保存冻结产品成员，并按日期和成员交集判断；旧成员快照缺失/损坏时会明确失败。 | [Issue #402](https://github.com/maix00/FactorTester/issues/402) 已按 Graph-free Ownership 重新认领；待聚焦测试与审查。 |
+| F-01 / P1 | **保护样本暴露检查漏掉部分产品范围重叠。** 原查询按 `sample_universe_hash` 完全相等、日期相交来查历史暴露；旧身份模块明确列出 `partial_universe_overlap_not_detected`。 | 一个验证/holdout 运行可以换成部分重叠或超集产品，旧检查不会识别既有暴露。独立 Run 级规则已保存冻结产品成员，并按日期和成员交集判断；旧成员快照缺失/损坏时会明确失败。 | [Issue #402](https://github.com/maix00/FactorTester/issues/402) 的独立提交 `cbe0781f3` 仅在本地分支，须纳入 #403 完整切换审查，不单独合并或发布。 |
 | F-02 / P1 | **RunSpec 没有绑定行情内容版本。** `single_factor_test/planning.py::_backtest_plan` 冻结源标签、产品、频率、字段与日期；`build_execution_plan` 的哈希和缓存键没有行情 revision。`tools/data/availability/parquet_footer.py` 的 `snapshot_ref` 来自文件大小、mtime、行数等元数据；`derive_sample_identity` 明确列出 `data_snapshot_identity_not_bound`。`research_cycle/data_availability_evidence.py` 也将数据 checksum、日历、合约成员 vintage、session/timezone 等列为未决维度。 | 同一 RunSpec 重试时不能保证读取相同 bars，也不能充分证明当时可用的数据版本、调整方式和交易日语义。增加服务端冻结的 Data Input Manifest/分区引用；数据读取、计划哈希、缓存键、重放和证据收据共用该引用。源不支持稳定版本引用时，明确标记不可精确重放并要求确认。当前没有验证到具体线上历史任务发生漂移。 | 待建 Issue 与设计；不得用文件 mtime 冒充内容校验和。 |
 | F-03 / P1 | **冻结因子历史版本与 RunSpec 校验路径不一致。** `factor_revisions.py::assert_run_spec_factor_revisions_current` 对已经冻结的 RunSpec 再调用 `_assert_factors_current`；`planning.py::build_execution_plan` 在规划/验证时调用它。另一方面，`factor_param_resolver.py::_resolve_frozen_factor` 和 ADR-146 支持按冻结 fingerprint 加载历史源码。当前 `test_factor_revision_manifest.py` 覆盖“当前公式变化后报错”，没有覆盖“冻结 v1、编辑到 v2、旧 Run 仍解析 v1”。 | 当前目录变化可能挡住仍能按历史 fingerprint 精确解析的冻结 RunSpec，削弱重试和复现。新 Run 冻结时检查当前目录；冻结后的执行只按不可变 ref/fingerprint 解析历史源码和依赖，历史字节缺失、哈希不符或身份不完整时才失败。完整重试影响范围尚需回归测试确认。 | 待建 Issue 与冻结后编辑回归测试。 |
 | F-04 / P2 | **`groupby_scope(trading_day)` 在外部回测适配器上没有交易日来源。** `FactorStepAdapter.update` 支持显式接收 `trading_day`，但 Qlib、Backtrader、Zipline 的因子适配器调用没有传入该值。核心现在会显式拒绝缺少交易日的流式计算，避免把夜盘错误归到日历日。 | 三种 worker 后端上无法使用交易日作用域增量因子。应从框架/数据源的权威交易日映射透传；没有权威信息时继续显式拒绝。该项属于 #397 的现有写入范围/Claim，本任务不接管也不修改其文件。 | #397 仍 OPEN，保留现有 Claim，等待该任务结束后再评估。 |
 | F-05 / P2 | **旧 publication 的 fork 兼容尚未完成。** Issue #396 的验收说明指出旧 main publication 没有 authoring bundle，writer branch 表为空，因此无法按新协作协议 fork；Issue #396 仍 OPEN、`ready-for-agent` 且没有 Claim/完成记录。 | 用户无法从某些旧报告准确继承可编辑章节和附件。应提供显式、幂等的兼容准备流程；缺源码或资源时明确拒绝，不能从渲染文本伪造，也不能建空分支冒充 fork。 | 下一项或随后按优先级处理；必须按 #396 Ownership 实施。 |
 | F-06 / P2 | **ADR/上下文与真实实现状态不一致。** `CONTEXT.md` 与 `docs/development-environment.md` 的 Conda 环境名称需一致；ADR-148/#381、ADR-149/#382 与 ADR-154/#394 的状态也需同各自 Issue 生命周期核对，旧 publication fork 仍由 #396 跟踪。 | 过时状态会让 Agent 重复实现，或运行错环境。应更新知识入口与 ADR 的当前状态，并明确 #396 遗留边界；不要把活动中的 ADR-155/#397 标成完成。 | 本审计更新了 Research Graph 退役决策文档；F-06 环境/ADR 状态核对仍待单独完成。 |
 
-## 其他研究正确性与性能审核（Graph 退役切片完成后）
+## 其他研究正确性与性能审核（Graph 完整切换后）
 
-按研究结论可信度、回归风险和依赖排序。每项单独建 Issue（已有 Issue 则复用），按其 Ownership 在独立分支/工作区实现并跑聚焦测试；跨模块 schema、API 或数据迁移先写验收与兼容策略。
+按研究结论可信度、回归风险和依赖排序。Graph 完整切换作为一个集成目标；其余独立缺陷另按各自 Issue/Ownership 推进。跨模块 schema、API 或数据迁移先写验收与兼容策略。
 
 1. **冻结行情输入身份（F-02，P1）**：先完成 source/partition revision 能力盘点，再定义 Data Input Manifest；验证源内容原地变化、冷/热缓存、重试、旧数据源和缺少稳定版本时的显式状态。不得宣称元数据 hash 是数据内容 hash。
 2. **统一冻结因子解析（F-03，P1）**：先复现 v1 freeze → 当前源码编辑为 v2 → v1 Run 重试；验证嵌套依赖、历史源码缺失和新 Run 的当前版本门禁。
@@ -117,7 +119,7 @@ Agent workflow 也不应变成另一张固定图；其事件时间线可直接�
 
 | Issue | 复核结论 |
 | --- | --- |
-| [#402](https://github.com/maix00/FactorTester/issues/402) | 保护样本目标保留，但旧实现依赖 Graph TrialPlan；已重定义为 Run 级独立规则并重新认领。实现阶段只修改 Issue Ownership 列出的文件；Graph 实现继续保持原状。 |
+| [#402](https://github.com/maix00/FactorTester/issues/402) | 保护样本目标保留，但旧实现依赖 Graph TrialPlan；已重定义为 Run 级独立规则并提交到本地分支，须与 #403 一次性移除完整集成，不单独发布。 |
 | [#396](https://github.com/maix00/FactorTester/issues/396) | 旧 publication 缺失 authoring bundle 的 fork 兼容缺口；未见完成记录，保留。 |
 | [#397](https://github.com/maix00/FactorTester/issues/397) | `groupby_scope` 有活动写入 Claim 与适配器交易日来源缺口；不接管、不改其范围。 |
 | [#173](https://github.com/maix00/FactorTester/issues/173) / [#182](https://github.com/maix00/FactorTester/issues/182) | #173 是 IC 方法学/语义母 Issue，#182 是实现切片；#182 有 Claim 但长时间无新进展。不是重复单，应核验实现 worktree 后决定续作或调整范围。 |
@@ -127,7 +129,7 @@ Agent workflow 也不应变成另一张固定图；其事件时间线可直接�
 | [#78](https://github.com/maix00/FactorTester/issues/78) | 只有旧 Claim 评论、未见完成回执；需检查原 Claim/worktree 与当前测试后重新认领或关闭。 |
 | [#127](https://github.com/maix00/FactorTester/issues/127) | 具体期限结构/Carry 因子能力缺口；未见完成回执，保留待范围核验。 |
 | [#384](https://github.com/maix00/FactorTester/issues/384) | 最新记录按用户要求暂停；不视为完成。 |
-| [#403](https://github.com/maix00/FactorTester/issues/403) | Research Graph 全量退役与 Agent WorkflowRun 替代的父 Issue；代码需拆为有精确写入范围的阶段 Issue。ADR-156 与审计/领域文档更新在当前文档工作区内进行。 |
+| [#403](https://github.com/maix00/FactorTester/issues/403) | Research Graph 一次性全量移除的唯一集成 Issue：研究报告等正常功能保留并解耦，Graph 专属历史不保留；不得分阶段发布。 |
 
 此外，2026-05 至 06 的其他 OPEN 旧条目仍在因子/回测搜索结果中；这次没有据标题猜测已完成。下一次范围复核应读取 Issue 全文、生命周期评论、最新 worktree/Claim，再把可确认的已实现工作写入 `Done-by`，不将历史本地合并误认为部署。
 
