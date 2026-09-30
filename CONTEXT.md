@@ -22,7 +22,7 @@ FactorTester 是一个量化因子研究与回测平台，面向期货及多资�
 
 ## 领域概念
 
-### Research Workspace / Run / Job
+### Research Workspace / Run / Job / Agent WorkflowRun
 
 异步研究不归浏览器页面所有。`session_uuid` 只负责认证，`page_uuid`/`view_uuid` 只用于
 当前 UI/runtime 隔离；`workspace_id` 只标识稳定的研究工作上下文，不声明因子家族、
@@ -38,11 +38,17 @@ ADR-037、ADR-038、ADR-039。
 Agent 批量研究的 ref 预检、独立台账与断点恢复见
 [研究矩阵跑批](docs/agents/research-batch-experiments.md)。
 
-Workspace、Work Package 与 Branch 正交：Workspace 是可变执行配置环境，
-Work Package 是一项研究，Branch 是其中一条决策路径。研究对象与每次执行分别由
-冻结的 factor/factor-set、configuration snapshot、RunSpec 和 TrialPlan 声明；任何
-Workspace 等值关系都不得成为 Graph、Evidence、报告或 Job 的门禁。完整决策见
-ADR-047。
+Workspace、Research、ReportBranch 和 Run 正交：Workspace 是可变执行配置环境；Research
+是协作根对象；ReportBranch 是报告正文的一条版本线；Run 冻结一次研究/回测输入；Job
+记录实际执行。目标中的 AgentWorkflowRun 将记录 Agent 研究任务的可恢复状态，并链接其 Profile、
+ChatKit conversation、ReportBranch、ResearchRun、Job 与产物引用；它不复制对话正文、Job
+结果，也不把执行步骤固定为节点/边。Research Graph、WorkPackage、Graph Branch 和 Graph
+TrialPlan 属于退役中的旧模型，不得作为新功能门禁；目标与分阶段边界见
+[ADR-156](docs/adr/156-retire-research-graph-agent-workflow.md)。旧模型的数据历史无需迁移保留。
+
+ReportBranch 的稳定身份、跨 Profile/服务器访问和 Report 章节协作按 ADR-149、ADR-154
+演进，不以执行 Workspace 或服务器位置作为内容身份。保护样本和统计约束须独立证明价值，
+并归 Research/Run 的可选合同；不得依赖 Graph 路径。
 
 ### Agent Assistance Document
 

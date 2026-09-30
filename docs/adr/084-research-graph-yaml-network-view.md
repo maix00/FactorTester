@@ -1,5 +1,7 @@
 # ADR-084：研究图的 YAML 发布下载与网络节点视图
 
+> 已被 ADR-156 取代。Graph YAML/catalog/network view 属于退役设施，历史 Graph 内容无需保留；本文仅作为实现历史记录。
+
 ## 状态
 
 已接受
