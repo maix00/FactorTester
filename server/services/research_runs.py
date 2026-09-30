@@ -18,7 +18,13 @@ from server.services.research_run_schema import (
     ensure_schema as ensure_research_run_schema,
 )
 from server.services.research_run_identity import RUN_SPEC_VERSION, hash_run_spec
-from server.services.research_graph.trial_plan.binding import validate_branch_binding
+from server.services.research_graph.trial_plan.binding import (
+    validate_branch_binding,
+)
+from server.services.research_sample_exposure import (
+    PROTECTED_SAMPLE_ROLES,
+    validate_protected_sample_exposure,
+)
 from server.services.research_run_inputs import (
     derive_sample_identity_or_none,
     normalize_trial_binding,
@@ -102,8 +108,30 @@ def create_run(
     created_at = time.time()
     with _connect() as conn:
         if binding is not None:
-            if int(binding["trial_plan_schema_version"]) == 5:
+            is_protected_sample = (
+                str(binding.get("trial_stage") or "")
+                in PROTECTED_SAMPLE_ROLES
+            )
+            if int(binding["trial_plan_schema_version"]) == 5 or is_protected_sample:
                 conn.execute("BEGIN IMMEDIATE")
+            if is_protected_sample:
+                validate_protected_sample_exposure(
+                    conn,
+                    owner=owner,
+                    trial_plan_hash=str(binding["trial_plan_hash"]),
+                    trial_plan_schema_version=int(
+                        binding["trial_plan_schema_version"]
+                    ),
+                    trial_stage=str(binding["trial_stage"]),
+                    sample_identity_hash=str(
+                        persisted_sample["sample_identity_hash"]
+                    ),
+                    sample_start=str(persisted_sample["sample_start"]),
+                    sample_end=str(persisted_sample["sample_end"]),
+                    sample_universe_members_json=str(
+                        persisted_sample["sample_universe_members_json"]
+                    ),
+                )
             if binding.get("binding_origin") == "research_graph":
                 action_snapshot = validate_branch_binding(
                     conn,
@@ -158,7 +186,8 @@ def create_run(
                 graph_instance_id, graph_branch_id, graph_execution_node,
                 sample_ref, sample_hash,
                 sample_identity_hash, sample_start, sample_end,
-                sample_universe_hash, sample_design_context_hash,
+                sample_universe_hash, sample_universe_members_json,
+                sample_design_context_hash,
                 sample_identity_assurance,
                 evidence_action_id, evidence_action_binding_hash,
                 evidence_action_binding_json,
@@ -166,9 +195,8 @@ def create_run(
                 created_at
             ) VALUES (
                 ?, ?, ?, ?, ?, 'factor_research',
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             )
             """,
             (
@@ -196,6 +224,7 @@ def create_run(
                 persisted_sample["sample_start"],
                 persisted_sample["sample_end"],
                 persisted_sample["sample_universe_hash"],
+                persisted_sample["sample_universe_members_json"],
                 persisted_sample["sample_design_context_hash"],
                 persisted_sample["sample_identity_assurance"],
                 str((binding or {}).get("evidence_action_id") or ""),

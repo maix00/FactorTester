@@ -4,10 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
+import orjson
+
 from server.services.research_graph.trial_plan.binding import (
     normalize_run_binding,
 )
-from server.services.research_graph.trial_plan.sample_identity import (
+from server.services.research_sample_exposure import (
+    PROTECTED_SAMPLE_ROLES,
+    require_exact_product_membership,
+)
+from server.services.research_sample_identity import (
     derive_sample_identity,
 )
 
@@ -23,11 +29,12 @@ def normalize_trial_binding(
     if not isinstance(value, dict):
         raise ValueError("trial_binding must be an object")
     if value.get("binding_origin") is not None:
-        return _normalize_direct_trial_binding(
+        binding = _normalize_direct_trial_binding(
             value,
             run_spec_hash=run_spec_hash,
             sample_identity=sample_identity,
         )
+        return _require_protected_sample_scope(binding, sample_identity)
     required = {
         "instance_id", "branch_id", "trial_plan", "trial_plan_hash",
         "trial_plan_version", "trial_role", "comparison_id",
@@ -73,7 +80,7 @@ def normalize_trial_binding(
             )
     elif any(str(value.get(field) or "").strip() for field in action_fields):
         raise ValueError("legacy TrialPlan cannot bind Evidence Action fields")
-    return {
+    binding = {
         "binding_origin": "research_graph",
         "instance_id": instance_id,
         "branch_id": branch_id,
@@ -86,6 +93,16 @@ def normalize_trial_binding(
         ),
         **binding,
     }
+    return _require_protected_sample_scope(binding, sample_identity)
+
+
+def _require_protected_sample_scope(
+    binding: dict[str, Any],
+    sample_identity: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if str(binding.get("trial_stage") or "") in PROTECTED_SAMPLE_ROLES:
+        require_exact_product_membership(sample_identity)
+    return binding
 
 
 def _normalize_direct_trial_binding(
@@ -152,6 +169,15 @@ def persisted_sample_identity(
     sample_identity: dict[str, Any] | None,
 ) -> dict[str, str]:
     identity = sample_identity or {}
+    exact_members = (
+        identity.get("universe_membership_assurance")
+        == "exact_frozen_product_scope"
+    )
+    members_json = (
+        orjson.dumps(require_exact_product_membership(identity)).decode()
+        if exact_members
+        else ""
+    )
     assurance = str(
         (binding or {}).get("sample_identity_assurance")
         or ("server_derived_unbound" if sample_identity else "unavailable")
@@ -161,6 +187,7 @@ def persisted_sample_identity(
         "sample_start": str(identity.get("sample_start") or ""),
         "sample_end": str(identity.get("sample_end") or ""),
         "sample_universe_hash": str(identity.get("universe_hash") or ""),
+        "sample_universe_members_json": members_json,
         "sample_design_context_hash": str(
             identity.get("design_context_hash") or ""
         ),

@@ -77,6 +77,17 @@ def _bind(plan: dict) -> dict:
     }
 
 
+def _sample_scope_run_spec(
+    paths: list[str],
+    *,
+    start: str,
+    end: str,
+) -> dict:
+    value = run_spec_with_dates(start, end)
+    value["configuration"]["analyses"]["ic"]["paths"] = paths
+    return value
+
+
 def _activate_plan(path, plan: dict) -> None:
     with connect_sqlite(path) as conn:
         conn.execute(
@@ -325,8 +336,9 @@ def test_sample_use_is_auditable_without_hardcoded_stage_order(
 ) -> None:
     path = tmp_path / "sample-stage.sqlite"
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
-    selection_spec = run_spec_with_dates(
-        "2020-01-01", "2021-12-31", sample="selection",
+    product = "Product/Futures/CNFutures/_products/AP.CZC"
+    selection_spec = _sample_scope_run_spec(
+        [product], start="2020-01-01", end="2021-12-31",
     )
     selection = _staged_plan(
         selection_spec,
@@ -349,8 +361,8 @@ def test_sample_use_is_auditable_without_hardcoded_stage_order(
         selection_spec
     )["sample_hash"]
 
-    confirmation_spec = run_spec_with_dates(
-        "2024-01-01", "2024-12-31", sample="confirmation",
+    confirmation_spec = _sample_scope_run_spec(
+        [product], start="2024-01-01", end="2024-12-31",
     )
     confirmation = _staged_plan(
         confirmation_spec,
@@ -368,8 +380,8 @@ def test_sample_use_is_auditable_without_hardcoded_stage_order(
     )
     assert second["trial_role"] == "confirmation"
 
-    validation_spec = run_spec_with_dates(
-        "2022-01-01", "2023-12-31", sample="validation",
+    validation_spec = _sample_scope_run_spec(
+        [product], start="2022-01-01", end="2023-12-31",
     )
     validation = _staged_plan(
         validation_spec,
@@ -394,8 +406,9 @@ def test_protected_sample_use_rejects_prior_exposure_and_role_relabeling(
 ) -> None:
     path = tmp_path / "sample-stage-invalid.sqlite"
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
-    selection_spec = run_spec_with_dates(
-        "2024-01-01", "2024-12-31", sample="selection",
+    product = "Product/Futures/CNFutures/_products/AP.CZC"
+    selection_spec = _sample_scope_run_spec(
+        [product], start="2024-01-01", end="2024-12-31",
     )
     selection = _staged_plan(
         selection_spec,
@@ -412,10 +425,10 @@ def test_protected_sample_use_rejects_prior_exposure_and_role_relabeling(
         trial_binding=_bind(selection),
     )
 
-    confirmation_spec = run_spec_with_dates(
-        "2024-01-01", "2024-12-31",
-        sample="confirmation", factor_revision=2,
+    confirmation_spec = _sample_scope_run_spec(
+        [product], start="2024-01-01", end="2024-12-31",
     )
+    confirmation_spec.update(sample="confirmation", factor_revision=2)
     skipped = _staged_plan(
         confirmation_spec,
         version=2,
@@ -432,10 +445,10 @@ def test_protected_sample_use_rejects_prior_exposure_and_role_relabeling(
             trial_binding=_bind(skipped),
         )
 
-    validation_spec = run_spec_with_dates(
-        "2024-01-01", "2024-12-31",
-        sample="validation", factor_revision=3,
+    validation_spec = _sample_scope_run_spec(
+        [product], start="2024-01-01", end="2024-12-31",
     )
+    validation_spec.update(sample="validation", factor_revision=3)
     reused = _staged_plan(
         validation_spec,
         version=2,
@@ -459,9 +472,11 @@ def test_first_bound_run_may_be_untouched_confirmation(
 ) -> None:
     path = tmp_path / "first-confirmation.sqlite"
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", path)
-    run_spec_value = run_spec_with_dates(
-        "2025-01-01", "2025-12-31", sample="confirmation",
+    run_spec_value = _sample_scope_run_spec(
+        ["Product/Futures/CNFutures/_products/AP.CZC"],
+        start="2025-01-01", end="2025-12-31",
     )
+    run_spec_value["sample"] = "confirmation"
     plan = _staged_plan(
         run_spec_value,
         version=1,

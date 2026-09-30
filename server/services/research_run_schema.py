@@ -78,6 +78,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         ("sample_start", "TEXT NOT NULL DEFAULT ''"),
         ("sample_end", "TEXT NOT NULL DEFAULT ''"),
         ("sample_universe_hash", "TEXT NOT NULL DEFAULT ''"),
+        ("sample_universe_members_json", "TEXT NOT NULL DEFAULT ''"),
         ("sample_design_context_hash", "TEXT NOT NULL DEFAULT ''"),
         ("sample_identity_assurance", "TEXT NOT NULL DEFAULT ''"),
     )
@@ -97,6 +98,10 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_research_runs_owner_sample_scope "
         "ON research_runs(owner, sample_universe_hash, sample_start, sample_end)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_research_runs_owner_sample_dates "
+        "ON research_runs(owner, sample_start, sample_end)"
     )
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_research_runs_action_member "
