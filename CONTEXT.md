@@ -1,7 +1,8 @@
 # FactorTester — 上下文
 
 > 领域语言、架构概览、开发约定。供 Agent 和开发者参考。  
-> 架构决策记录见 `docs/adr/`。
+> 架构决策记录见 `docs/adr/`；因子研究架构的审计证据、缺陷清单与改进队列见
+> [2026-09-30 因子研究架构审计](docs/audits/factor-research-architecture-audit-2026-09-30.md)。
 
 ---
 
@@ -15,7 +16,7 @@ FactorTester 是一个量化因子研究与回测平台，面向期货及多资�
 - **价格查看器** — 原始 OHLCV / 价格序列可视化
 - **因子引擎** — 40+ 内置因子，表达式树 DSL，自定义因子持久化
 
-开发环境约定见 `docs/development-environment.md`；当前标准环境为 Conda `ft`。
+开发环境约定见 `docs/development-environment.md`；当前标准环境为 Conda `GTHT`。
 
 ---
 
