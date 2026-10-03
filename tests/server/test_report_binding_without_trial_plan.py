@@ -1,7 +1,7 @@
-"""A run may mount itself into a report without a TrialPlan.
+"""A run may mount itself into a report independently from sample-use policy.
 
 The report workspace, branch and an explicit parent component are enough to
-freeze where a Job result goes; ordinary runs need no TrialPlan.
+freeze where a Job result goes.
 """
 
 from __future__ import annotations
@@ -25,8 +25,8 @@ def _binding():
     }
 
 
-def test_report_direct_binding_needs_no_trial_plan():
-    out = normalize_report_binding(_binding(), trial_binding=None, branch_snapshot={})
+def test_report_direct_binding_has_no_sample_policy_dependency():
+    out = normalize_report_binding(_binding())
     assert out["report_parent_id"] == "s8"
 
 

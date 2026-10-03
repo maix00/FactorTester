@@ -73,9 +73,11 @@ def fake_server() -> Iterator[str]:
         payload = request.get_json()
         assert payload["workspace_id"] == "workspace-1"
         assert payload["configuration_revision"] == 1
-        assert payload["trial_binding"] == {
-            "instance_id": "instance-1",
-            "branch_id": "branch-1",
+        assert "trial_binding" not in payload
+        assert payload["sample_use"] == {
+            "schema_version": 1,
+            "purpose": "validation",
+            "protection": "open",
         }
         assert payload["run_input_dependencies"] == [{
             "path": "run-configs/options.json",
@@ -435,9 +437,10 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
         "workspace-1",
         1,
         analyses=["ic"],
-        trial_binding={
-            "instance_id": "instance-1",
-            "branch_id": "branch-1",
+        sample_use={
+            "schema_version": 1,
+            "purpose": "validation",
+            "protection": "open",
         },
         run_input_dependencies=[{
             "path": "run-configs/options.json",

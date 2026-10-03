@@ -49,6 +49,13 @@ ReportBranch 的稳定身份、跨 Profile/服务器访问和 Report 章节协�
 演进，不以执行 Workspace 或服务器位置作为内容身份。保护样本和统计约束须独立证明价值，
 并归 Research/Run 的可选合同；不得依赖 Graph 路径。
 
+样本用途通过 Run 的可选 `sample_use` 合同表达，分开声明 `purpose` 与 `protection`；
+`open` validation 不自动成为一次性 holdout，`sealed` 比较冻结比较 ID 和完整 RunSpec 成员哈希，
+并在同一写事务内按 owner、日期范围和精确产品成员检查历史暴露。这个合同只约束样本访问，
+不代替真实执行的统计方法或研究判断。新 Run、Evidence 和报告不要求 TrialPlan；历史
+TrialPlan 记录保留只读读取路径，不再提供创建或绑定入口。细节见
+[ADR-157](docs/adr/157-run-sample-use-without-trial-plan.md)。
+
 ### Agent Assistance Document
 
 需要智能体协助填写的页面注册一个版本化结构文档及其 schema、导出、校验和原子导入

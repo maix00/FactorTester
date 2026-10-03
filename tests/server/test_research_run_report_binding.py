@@ -28,15 +28,8 @@ def test_direct_report_binding_freezes_an_explicit_parent() -> None:
     assert normalize_report_binding(_binding()) == _binding()
 
 
-def test_report_binding_rejects_a_different_branch() -> None:
-    with pytest.raises(ValueError, match="branch_id"):
-        normalize_report_binding(
-            _binding(), branch_snapshot={"branch_id": "another-branch"}
-        )
-
-
-def test_report_binding_does_not_require_a_trial_plan() -> None:
-    assert normalize_report_binding(_binding(), trial_binding=None) == _binding()
+def test_report_binding_is_independent_from_sample_policy() -> None:
+    assert normalize_report_binding(_binding()) == _binding()
 
 
 def test_run_retains_frozen_report_identity(tmp_path, monkeypatch) -> None:

@@ -25,11 +25,8 @@ _FIELDS = {
 
 def normalize_report_binding(
     value: dict[str, Any] | None,
-    *,
-    trial_binding: dict[str, Any] | None = None,
-    branch_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    """Validate a report tree mount without requiring Graph or TrialPlan state."""
+    """Validate a report tree mount independently from Run sample-use state."""
     if value is None:
         return None
     if not isinstance(value, dict) or set(value) != _FIELDS:
@@ -49,12 +46,4 @@ def normalize_report_binding(
     if isinstance(generation, bool) or not isinstance(generation, int) or generation < 0:
         raise ValueError("report_binding.report_generation is invalid")
 
-    snapshot = branch_snapshot or {}
-    if snapshot:
-        expected_report_id = str(snapshot.get("report_id") or "")
-        expected_branch_id = str(snapshot.get("branch_id") or "")
-        if expected_report_id and str(value["report_id"]) != expected_report_id:
-            raise ValueError("report_binding.report_id does not match the ReportBranch")
-        if expected_branch_id and str(value["branch_id"]) != expected_branch_id:
-            raise ValueError("report_binding.branch_id does not match the ReportBranch")
     return dict(value)

@@ -1,5 +1,8 @@
+import pytest
+
 from server.services.research_evidence_scope import (
     applicability_schema,
+    check_identity_scope,
     validate_applicability,
 )
 from tools.factors.factor_set_identity import freeze_factor_set_identity
@@ -56,3 +59,20 @@ def test_applicability_schema_reuses_registered_test_controls() -> None:
         "product_library_product", "product_path_selection",
     ]
     assert fields["contract_hash"]["exposed"] is False
+
+
+def test_sample_use_hash_can_scope_reusable_evidence() -> None:
+    digest = "c" * 64
+    scope = validate_applicability({
+        "product_refs": ["product:AP.CZC"],
+        "sample_use_hash": digest,
+    })
+    check_identity_scope(
+        {"identity_refs": {"sample_use_hash": digest}},
+        scope,
+    )
+    with pytest.raises(ValueError, match="does not match"):
+        check_identity_scope(
+            {"identity_refs": {"sample_use_hash": "d" * 64}},
+            scope,
+        )

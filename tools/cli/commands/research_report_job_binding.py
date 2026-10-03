@@ -14,7 +14,6 @@ from .research_report_scope import BranchReportScope, load_authoring
 def freeze_report_binding(
     scope: BranchReportScope,
     *,
-    trial_binding: dict[str, Any] | None = None,
     report_parent_id: str = "",
 ) -> dict[str, Any]:
     """Freeze the report tree identity independently of run methodology."""

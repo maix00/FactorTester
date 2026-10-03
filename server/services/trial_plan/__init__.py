@@ -1,6 +1,5 @@
-"""Direct TrialPlan contracts for factor research runs."""
+"""Legacy TrialPlan parsing retained for historical tooling only."""
 
-from .binding import normalize_run_binding
 from .contract import (
     TRIAL_PLAN_SCHEMA_VERSION,
     canonical_trial_plan,
@@ -10,6 +9,5 @@ from .contract import (
 __all__ = [
     "TRIAL_PLAN_SCHEMA_VERSION",
     "canonical_trial_plan",
-    "normalize_run_binding",
     "trial_plan_hash",
 ]
