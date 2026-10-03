@@ -1,9 +1,8 @@
 """Public fragment-bound Evidence catalog service."""
 
 from .lifecycle import (
-    finalize_lifecycle_transition,
+    change_evidence_status,
     get_evidence_lifecycle,
-    prepare_lifecycle_transition,
     require_active_evidence,
 )
 from .listing import (
@@ -46,7 +45,7 @@ __all__ = [
     "detach_tag",
     "evidence_contains_job_source",
     "evidence_source",
-    "finalize_lifecycle_transition",
+    "change_evidence_status",
     "find_job_evidence",
     "get_composed_evidence",
     "get_evidence_lifecycle",
@@ -58,7 +57,6 @@ __all__ = [
     "list_research_evidence_page",
     "list_source_fragments",
     "list_tags",
-    "prepare_lifecycle_transition",
     "propose_tag",
     "put_source_capture",
     "put_source_fragment",

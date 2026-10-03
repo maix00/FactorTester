@@ -15,7 +15,7 @@ from tools.cli.commands.research_report_content_structure import (
 )
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.research_reporting.authoring.tree_model import load_snapshot
-from tools.cli.release.research_reporting.workspace import initialize_work_package
+from tools.cli.release.research_reporting.workspace import initialize_report_workspace
 
 
 def _scope(tmp_path: Path) -> tuple[Path, Path]:
@@ -24,20 +24,10 @@ def _scope(tmp_path: Path) -> tuple[Path, Path]:
         profile_id="maxa", display_name="MaxA",
         server_url="http://127.0.0.1:8141", workspace_root=workspace_root,
     )
-    profile["research_records"] = [{
-        "record_id": "wp", "title": "报告", "status": "pending",
-        "scope": {}, "factor_family_versions": [], "agent_id": "research-maxa",
-        "created_at": 1.0, "updated_at": 1.0,
-        "workspace_ref": "workspace:one", "run_ref": "",
-        "graph_instance_ref": "work-package:wp",
-        "graph_branch_ref": "report-branch:main",
-        "checkpoint_ref": "", "evidence_refs": [], "timeline_refs": [],
-        "artifacts": [], "provenance": {"kind": "owned_research"},
-    }]
     LocalProfileStore(client_root).save(profile)
-    initialize_work_package(
-        workspace_root=workspace_root, work_package_id="wp", branch_id="main",
-        workspace_id="one", title="报告",
+    initialize_report_workspace(
+        workspace_root=workspace_root, report_workspace_id="wp", branch_id="main",
+        report_id="report-wp", workspace_id="one", title="报告",
         branch_ref="report-branch:main",
     )
     return client_root, workspace_root
@@ -45,7 +35,7 @@ def _scope(tmp_path: Path) -> tuple[Path, Path]:
 
 def _args() -> list[str]:
     return [
-        "--profile", "maxa", "--work-package-id", "wp",
+        "--profile", "maxa", "--report-workspace-id", "wp",
         "--branch-id", "main",
     ]
 
@@ -260,6 +250,8 @@ def test_cli_allows_kind_and_parent_correction_for_same_component(
         "add", *_args(), "--component-id", "finding", "--kind", "entry",
         "--parent-id", "missing", "--title", "结论", "--json",
     ])
+    assert rejected.exit_code == 1, (repr(rejected.exception), rejected.output)
+    assert rejected.output, repr(rejected.exception)
     assert json.loads(rejected.output)["submission_sequence"] == 1
 
     accepted = runner.invoke(report_cli, [

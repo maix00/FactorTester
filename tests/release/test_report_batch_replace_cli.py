@@ -13,7 +13,7 @@ from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.research_reporting.references import (
     preflight as preflight_module,
 )
-from tools.cli.release.research_reporting.workspace import initialize_work_package
+from tools.cli.release.research_reporting.workspace import initialize_report_workspace
 
 
 def _scope(tmp_path):
@@ -22,19 +22,10 @@ def _scope(tmp_path):
         profile_id="maxa", display_name="MaxA",
         server_url="http://127.0.0.1:8141", workspace_root=workspace,
     )
-    profile["research_records"] = [{
-        "record_id": "wp", "title": "报告", "status": "pending",
-        "scope": {}, "factor_family_versions": [],
-        "agent_id": "research-maxa", "created_at": 1.0, "updated_at": 1.0,
-        "workspace_ref": "workspace:one", "run_ref": "",
-        "graph_instance_ref": "work-package:wp",
-        "graph_branch_ref": "report-branch:main",
-        "checkpoint_ref": "", "evidence_refs": [], "timeline_refs": [],
-        "artifacts": [], "provenance": {"kind": "owned_research"},
-    }]
     LocalProfileStore(client_root).save(profile)
-    initialize_work_package(
-        workspace_root=workspace, work_package_id="wp", branch_id="main",
+    initialize_report_workspace(
+        workspace_root=workspace, report_workspace_id="wp", branch_id="main",
+        report_id="report-test",
         workspace_id="one", title="报告",
         branch_ref="report-branch:main",
     )
@@ -43,7 +34,7 @@ def _scope(tmp_path):
 
 def _args() -> list[str]:
     return [
-        "--profile", "maxa", "--work-package-id", "wp",
+        "--profile", "maxa", "--report-workspace-id", "wp",
         "--branch-id", "main",
     ]
 
@@ -131,7 +122,8 @@ def test_cli_imports_workspace_png_into_exact_branch(tmp_path, monkeypatch):
     assert any(item.get("content") == {"asset_ref": ref} for item in snapshot["components"])
     source.unlink()
     assert read_local_asset(snapshot, asset_id_for(ref))[0] == raw
-    initialize_work_package(workspace_root=workspace, work_package_id="wp", branch_id="other",
+    initialize_report_workspace(workspace_root=workspace, report_workspace_id="wp", branch_id="other",
+                            report_id="report-test",
                             workspace_id="one", title="其他分支", branch_ref="report-branch:other")
     other = load_branch_authoring(package_root=package, branch_id="other")
     assert read_local_asset(other, asset_id_for(ref)) is None

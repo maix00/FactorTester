@@ -37,12 +37,12 @@ def test_local_profile_is_strict_private_and_version_independent(
     assert path.stat().st_mode & 0o777 == 0o600
     assert not (root / "current.json").exists()
     assert not {"password", "token", "email"}.intersection(stored)
-    assert stored["schema_version"] == 10
+    assert stored["schema_version"] == 11
     assert stored["status"] == "active"
     assert stored["workspaces"] == []
     assert stored["initialization_sources"] == []
     assert stored["session_binding"] == {}
-    assert stored["research_records"] == []
+    assert "research_records" not in stored
     assert stored["factor_workspace_binding"] == {}
 
     with pytest.raises(ValueError, match="fields"):
@@ -53,168 +53,36 @@ def test_local_profile_is_strict_private_and_version_independent(
         })
 
 
-def test_loading_profile_migrates_legacy_research_identity_once(
+def test_loading_legacy_profile_discards_retired_graph_research_history(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "client-support"
-    store = LocalProfileStore(root)
-    profile = new_local_profile(
+    path = root / "profiles" / "maxa.json"
+    path.parent.mkdir(parents=True)
+    legacy = new_local_profile(
         profile_id="maxa",
         display_name="MaxA",
         server_url="http://127.0.0.1:8141",
         workspace_root=tmp_path / "workspace",
     )
-    profile["research_records"] = [{
-        "record_id": "work-package-1",
-        "title": "研究",
-        "status": "pending",
-        "scope": {},
-        "factor_family_versions": [],
-        "agent_id": "research-maxa",
-        "created_at": 1.0,
-        "updated_at": 1.0,
-        "workspace_ref": "",
-        "run_ref": "",
-        "graph_instance_ref": "graph-instance:physical-1",
-        "graph_branch_ref": "graph-branch:branch-1",
-        "checkpoint_ref": "",
-        "evidence_refs": [],
-        "artifacts": [],
-        "provenance": {},
-        "timeline_refs": [],
-    }]
-    store.save(profile)
-
-    migrated = store.load("maxa")
-    record = migrated["research_records"][0]
-    assert record["graph_instance_ref"] == "work-package:work-package-1"
-    assert record["graph_branch_ref"] == (
-        "graph-branch:physical-1:branch-1"
-    )
-    assert store.load("maxa") == migrated
-
-
-def test_graph_upgrade_retargets_one_stable_work_package_record(
-    tmp_path: Path,
-) -> None:
-    root = tmp_path / "client-support"
-    store = LocalProfileStore(root)
-    profile = new_local_profile(
-        profile_id="maxa",
-        display_name="MaxA",
-        server_url="http://127.0.0.1:8141",
-        workspace_root=tmp_path / "workspace",
-        principal_ref="18717974771",
-    )
-    profile["agents"] = [{
+    legacy["schema_version"] = 10
+    legacy["research_records"] = [{"record_id": "retired-graph-history"}]
+    legacy["agents"] = [{
         "agent_id": "research-maxa",
         "role": "research",
-        "scope": {"instance_id": "physical-v6", "branch_id": "branch-v6"},
+        "scope": {"instance_id": "old-instance", "branch_id": "old-branch"},
         "status": "ready",
-        "next_action": "Resume the authorized research scope.",
+        "next_action": "Continue research.",
     }]
-    stable = {
-        "record_id": "sgccs-work-package",
-        "title": "SgCCS research",
-        "status": "ready",
-        "scope": {"factor_families": ["SgCCS"]},
-        "factor_family_versions": ["SgCCS@6"],
-        "agent_id": "research-maxa",
-        "created_at": 1.0,
-        "updated_at": 2.0,
-        "workspace_ref": "workspace:sgccs",
-        "run_ref": "run:v6",
-        "graph_instance_ref": "work-package:sgccs-work-package",
-        "graph_branch_ref": "graph-branch:physical-v6:branch-v6",
-        "checkpoint_ref": "trace:v6",
-        "evidence_refs": ["evidence:v6"],
-        "timeline_refs": [],
-        "artifacts": [],
-        "provenance": {"kind": "owned_research"},
-    }
-    duplicate = {
-        **stable,
-        "record_id": "physical-v7",
-        "title": "SgCCS auxiliary-signal research",
-        "factor_family_versions": ["SgCCS@7"],
-        "updated_at": 3.0,
-        "run_ref": "",
-        "graph_instance_ref": "work-package:physical-v7",
-        "graph_branch_ref": "graph-branch:physical-v7:branch-v7",
-        "checkpoint_ref": "trace:v7",
-        "evidence_refs": ["evidence:v7"],
-        "artifacts": [{
-            "artifact_ref": (
-                "artifact:research/physical-v7/branches/branch-v7/REPORT.md"
-            ),
-            "format": "markdown",
-            "status": "ready",
-            "content_hash": "abc",
-            "local_ref": (
-                tmp_path / "workspace" / "research" / "physical-v7"
-                / "branches" / "branch-v7" / "REPORT.md"
-            ).as_uri(),
-            "index_ref": (
-                tmp_path / "workspace" / "research" / "physical-v7"
-                / "INDEX.json"
-            ).as_uri(),
-            "journal_ref": (
-                tmp_path / "workspace" / "research" / "physical-v7"
-                / "branches" / "branch-v7" / "JOURNAL.json"
-            ).as_uri(),
-            "journal_hash": "a" * 64,
-            "section_refs": [],
-        }],
-        "provenance": {"kind": "active_graph_research"},
-    }
-    profile["research_records"] = [stable, duplicate]
-    store.save(profile)
+    path.write_text(json.dumps(legacy))
 
-    saved = store.retarget_research_incarnation(
-        "maxa",
-        agent_id="research-maxa",
-        work_package_id="sgccs-work-package",
-        source_instance_id="physical-v6",
-        source_branch_id="branch-v6",
-        target_instance_id="physical-v7",
-        target_branch_id="branch-v7",
-    )
+    migrated = LocalProfileStore(root).load("maxa")
 
-    assert saved["agents"][0]["scope"] == {
-        "instance_id": "physical-v7",
-        "branch_id": "branch-v7",
-    }
-    assert len(saved["research_records"]) == 1
-    record = saved["research_records"][0]
-    assert record["record_id"] == "sgccs-work-package"
-    assert record["graph_instance_ref"] == (
-        "work-package:sgccs-work-package"
-    )
-    assert record["graph_branch_ref"] == (
-        "graph-branch:physical-v7:branch-v7"
-    )
-    assert record["factor_family_versions"] == ["SgCCS@6", "SgCCS@7"]
-    assert record["created_at"] == 1.0
-    assert record["updated_at"] == 3.0
-    assert record["checkpoint_ref"] == "trace:v7"
-    assert record["evidence_refs"] == ["evidence:v6", "evidence:v7"]
-    artifact = record["artifacts"][0]
-    assert artifact["artifact_ref"].startswith(
-        "artifact:research/physical-v7/"
-    )
-    assert "/research/physical-v7/" in artifact["local_ref"]
-    assert "/research/physical-v7/" in artifact["journal_ref"]
-
-    repeated = store.retarget_research_incarnation(
-        "maxa",
-        agent_id="research-maxa",
-        work_package_id="sgccs-work-package",
-        source_instance_id="physical-v6",
-        source_branch_id="branch-v6",
-        target_instance_id="physical-v7",
-        target_branch_id="branch-v7",
-    )
-    assert repeated == saved
+    assert migrated["schema_version"] == 11
+    assert "research_records" not in migrated
+    assert "research_records" not in json.loads(path.read_text())
+    assert migrated["agents"][0]["scope"] == {"workspace_id": "unbound"}
+    assert migrated["agents"][0]["status"] == "needs_scope"
 
 
 def test_client_cli_exposes_generic_profile_and_adapter_commands(
@@ -454,7 +322,7 @@ def test_profile_workspace_remove_downgrades_scoped_planning_agent(
     assert agent["scope"] == {"workspace_id": "unbound"}
     assert agent["status"] == "needs_scope"
     assert agent["next_action"] == (
-        "Bind an authorized research scope before execution."
+        "Bind an authorized research workspace before execution."
     )
 
 
@@ -476,7 +344,7 @@ def test_version_one_profile_is_upgraded_without_losing_identity(
 
     upgraded = LocalProfileStore(root).load("legacy")
 
-    assert upgraded["schema_version"] == 10
+    assert upgraded["schema_version"] == 11
     assert upgraded["status"] == "active"
     assert upgraded["profile_id"] == "legacy"
     assert upgraded["workspaces"] == []
@@ -675,7 +543,7 @@ def test_claim_receipt_exposes_compact_bound_factor_worktree(
     profile["agents"] = [{
         "agent_id": "research-maxa",
         "role": "research",
-        "scope": {"instance_id": "i-1", "branch_id": "b-1"},
+        "scope": {"workspace_id": "workspace-1"},
         "status": "ready",
         "next_action": "Continue research.",
     }]
@@ -860,8 +728,6 @@ def test_local_agent_identity_resumes_without_provider_or_model_fields(
         ("planner-a", {
             "role": "planning",
             "workspace_id": "workspace-1",
-            "instance_id": "",
-            "branch_id": "",
         }),
     ] * 2
     profile = store.load("agent-profile")
@@ -929,67 +795,18 @@ def test_adapter_profile_binding_exposes_only_opaque_references(
     assert "password" not in json.dumps(binding).lower()
 
 
-def test_profile_history_stores_only_compact_refs_and_deep_links(
+def test_new_profile_schema_rejects_retired_graph_history(
     tmp_path: Path,
 ) -> None:
-    root = tmp_path / "client-support"
-    store = LocalProfileStore(root)
-    store.save(new_local_profile(
+    profile = new_local_profile(
         profile_id="maxa",
         display_name="MaxA",
         server_url="http://127.0.0.1:8000",
         workspace_root=tmp_path / "workspace",
-    ))
-    record = {
-        "record_id": "research-1",
-        "title": "SgCCS review",
-        "status": "ready",
-        "scope": {"factor_families": ["SgCCS"]},
-        "factor_family_versions": ["SgCCS@7"],
-        "agent_id": "research-maxa",
-        "created_at": 1.0,
-        "updated_at": 2.0,
-        "workspace_ref": "workspace:dd2322",
-        "run_ref": "run:1",
-        "graph_instance_ref": "instance:1",
-        "graph_branch_ref": "branch:1",
-        "checkpoint_ref": "checkpoint:1",
-        "evidence_refs": ["evidence:1"],
-        "timeline_refs": [{
-            "link_id": "step-1",
-            "kind": "trial_plan",
-            "target_ref": "trial-plan:1",
-            "section_ref": "section:method",
-        }],
-        "artifacts": [{
-            "artifact_ref": "report:1",
-            "format": "markdown",
-            "status": "ready",
-            "content_hash": "sha256:abc",
-            "local_ref": (tmp_path / "report.md").as_uri(),
-            "index_ref": (tmp_path / "REPORT.index.json").as_uri(),
-            "section_refs": [{
-                "link_id": "section-method",
-                "kind": "evidence",
-                "target_ref": "evidence:1",
-                "section_ref": "section:method",
-            }],
-        }],
-        "provenance": {
-            "kind": "owned_legacy_research",
-            "owner_ref": "default$MaxA@1",
-        },
-    }
+    )
 
-    saved = store.upsert_research_record("maxa", record)
-
-    assert saved["research_records"] == [{
-        **record,
-        "branch_bindings": [],
-    }]
-    serialized = json.dumps(saved)
-    assert "report body" not in serialized
-    assert "source_code" not in serialized
+    with pytest.raises(ValueError, match="Graph research history"):
+        validate_local_profile({**profile, "research_records": []})
 
 
 def test_ui_session_bridge_uses_stdin_and_verifies_principal(

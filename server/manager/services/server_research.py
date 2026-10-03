@@ -139,7 +139,7 @@ class ServerResearchService:
         *,
         target_ref: str,
         profile_id: str,
-        package_id: str,
+        report_workspace_id: str,
         branch_id: str,
         build_source: str = "server_agent",
     ) -> dict[str, Any]:
@@ -159,7 +159,7 @@ class ServerResearchService:
                 "viewer_ref": viewer,
                 "branch_id": branch_id,
                 "profile_id": profile_id,
-                "package_id": package_id,
+                "report_workspace_id": report_workspace_id,
                 "build_source": source,
                 "available": False,
                 "reason": "source-not-local",
@@ -169,9 +169,9 @@ class ServerResearchService:
                 ),
             }
         target = _required_principal(target_ref)
-        if not _safe(profile_id) or not _safe(package_id) or not _safe(branch_id):
+        if not _safe(profile_id) or not _safe(report_workspace_id) or not _safe(branch_id):
             raise ValueError("server research reference is invalid")
-        server_ref = _server_ref(profile_id, package_id, branch_id)
+        server_ref = _server_ref(profile_id, report_workspace_id, branch_id)
         location = self._read_location(viewer, target, server_ref)
         value = build_upload_index(load_report_index(
             package_root=location["package_root"],
@@ -211,7 +211,7 @@ class ServerResearchService:
         snapshot = self._snapshot(location)
         head = snapshot.setdefault("head", {})
         if not head.get("title"):
-            head["title"] = location.get("package_id") or "report"
+            head["title"] = location.get("report_workspace_id") or "report"
         identity = document_identity(
             branch=str(location.get("branch_id") or ""),
             owner=str(location.get("owner") or ""),
@@ -388,7 +388,7 @@ class ServerResearchService:
         value["profile_id"] = location["profile_id"]
         # Authoring scope is public identity metadata, not a filesystem path.
         # Page assistants must not infer it by splitting a presentation URL.
-        value["work_package_id"] = location["package_id"]
+        value["report_workspace_id"] = location["report_workspace_id"]
         value["branch_id"] = location["branch_id"]
         value["source_server_id"] = self.server_id
         value["branches"] = [
@@ -402,7 +402,7 @@ class ServerResearchService:
             for item in self.list_owner(location["owner"])
             if (
                 str(item.get("profile_id") or "") == location["profile_id"]
-                and str(item.get("work_package_id") or "") == location["package_id"]
+                and str(item.get("report_workspace_id") or "") == location["report_workspace_id"]
             )
         ]
         value["access"] = {
@@ -418,7 +418,7 @@ class ServerResearchService:
 
     def _location(self, principal: str, server_ref: str) -> dict[str, Any]:
         owner = _required_principal(principal)
-        profile_id, package_id, branch_id = _parse_server_ref(server_ref)
+        profile_id, report_workspace_id, branch_id = _parse_server_ref(server_ref)
         runtime = self.runtime_store.runtime(owner, profile_id)
         if (
             runtime is None
@@ -428,16 +428,16 @@ class ServerResearchService:
             raise PermissionError("server research report is not available")
         package_root = server_profile_workspace(
             self.data_root, owner, profile_id,
-        ) / "research" / package_id
+        ) / "research" / report_workspace_id
         head_path = package_root / "branches" / branch_id / "authoring" / "HEAD.json"
         if not head_path.is_file():
             raise ValueError("server research report was not found")
         claim = self.runtime_store.active_claim(owner, profile_id)
         return {
             "owner": owner,
-            "server_ref": _server_ref(profile_id, package_id, branch_id),
+            "server_ref": _server_ref(profile_id, report_workspace_id, branch_id),
             "profile_id": profile_id,
-            "package_id": package_id,
+            "report_workspace_id": report_workspace_id,
             "branch_id": branch_id,
             "package_root": package_root,
             "build_source_ref": str(
@@ -449,7 +449,7 @@ class ServerResearchService:
     def _list_item(
         owner: str,
         profile_id: str,
-        package_id: str,
+        report_workspace_id: str,
         branch_id: str,
         server_ref: str,
         head: dict[str, Any],
@@ -468,10 +468,10 @@ class ServerResearchService:
             "profile_id": profile_id,
             "profile_ref": profile_id,
             "profile_name": profile_id,
-            "work_package_id": package_id,
+            "report_workspace_id": report_workspace_id,
             "branch_id": branch_id,
             "report_id": str(head.get("report_id") or ""),
-            "title": str(head.get("title") or package_id),
+            "title": str(head.get("title") or report_workspace_id),
             "generation": int(head.get("generation") or 0),
             "visibility": "private",
             "status": "active",
@@ -487,8 +487,8 @@ def _parse_server_ref(value: Any) -> tuple[str, str, str]:
     return parts[0], parts[1], parts[2]
 
 
-def _server_ref(profile_id: str, package_id: str, branch_id: str) -> str:
-    return f"{profile_id}:{package_id}:{branch_id}"
+def _server_ref(profile_id: str, report_workspace_id: str, branch_id: str) -> str:
+    return f"{profile_id}:{report_workspace_id}:{branch_id}"
 
 
 def _safe(value: str) -> bool:

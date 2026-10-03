@@ -27,7 +27,7 @@ FactorTester 是一个量化因子研究与回测平台，面向期货及多资�
 异步研究不归浏览器页面所有。`session_uuid` 只负责认证，`page_uuid`/`view_uuid` 只用于
 当前 UI/runtime 隔离；`workspace_id` 只标识稳定的研究工作上下文，不声明因子家族、
 具体因子或因子集合。可编辑的试验草稿配置可以归档在该上下文中，但它不是研究对象
-范围，也不能成为 Research Graph 推进门禁。一次冻结配置属于 `run_id`，具体
+范围。一次冻结配置属于 `run_id`，具体
 回测、IC、因子评估或类型分析属于独立 `job_id`。关闭页面不会取消任务，取消只能显式
 发生。worker 只接收可序列化 RunSpec 和 planning 后冻结的 ExecutionPlan，不读取页面
 FactorTester 或 `page_factors`。Web 与 CLI 统一通过 `/api/test-authoring/workspaces`、`/api/runs`、
@@ -40,12 +40,10 @@ Agent 批量研究的 ref 预检、独立台账与断点恢复见
 
 Workspace、Research、ReportBranch 和 Run 正交：Workspace 是可变执行配置环境；Research
 是协作根对象；ReportBranch 是报告正文的一条版本线；Run 冻结一次研究/回测输入；Job
-记录实际执行。先复用现有 Agent 对话、Profile runtime、ResearchRun 和 Job；只有实证发现可恢复状态、进度或
-幂等执行缺口时，才新增最小的 Graph-free 工作流状态。它不复制对话正文或 Job 结果，也不把
-执行步骤固定为节点/边。Research Graph、WorkPackage、Graph Branch 和 Graph TrialPlan 将在
-同一次完整切换中移除；不发布逐步退役的中间状态。Graph 专属历史无需迁移保留，普通研究报告、
-ReportBranch、Run、Job 与因子数据继续保留并解耦。见
-[ADR-156](docs/adr/156-retire-research-graph-agent-workflow.md)。
+记录实际执行。Agent 工作流复用现有对话、Profile runtime、ResearchRun 和 Job，不要求图结构、
+节点义务或固定执行拓扑。普通研究、报告、ReportBranch、Run、Job 与因子数据各自独立保存。
+Research Graph 已由 ADR-156 定义为一次性移除范围，不是当前产品能力；它的历史状态不迁移。
+见 [ADR-156](docs/adr/156-retire-research-graph-agent-workflow.md)。
 
 ReportBranch 的稳定身份、跨 Profile/服务器访问和 Report 章节协作按 ADR-149、ADR-154
 演进，不以执行 Workspace 或服务器位置作为内容身份。保护样本和统计约束须独立证明价值，

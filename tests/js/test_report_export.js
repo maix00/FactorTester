@@ -165,7 +165,7 @@ const choiceNamed = (root, label) =>
   await window.FTReportExport.run(context, {
     publication_id: 'server:profile-one:report-one:main',
     profile_ref: 'profile-one',
-    work_package_id: 'report-one',
+    report_workspace_id: 'report-one',
     branch_id: 'main',
     owner_ref: 'GTHT@owner@1',
     title: '研究/报告:一',
@@ -173,7 +173,7 @@ const choiceNamed = (root, label) =>
   assert.deepEqual(bridgePayloads, [{
     publication_id: 'server:profile-one:report-one:main',
     profile_ref: 'profile-one',
-    work_package_id: 'report-one',
+    report_workspace_id: 'report-one',
     branch_id: 'main',
     owner_ref: 'GTHT@owner@1',
     format: 'markdown',
@@ -199,4 +199,3 @@ const choiceNamed = (root, label) =>
 
   console.log('REPORT EXPORT: md/pdf, three channels, bridge PASSED');
 })();
-

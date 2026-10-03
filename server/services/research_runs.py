@@ -18,9 +18,6 @@ from server.services.research_run_schema import (
     ensure_schema as ensure_research_run_schema,
 )
 from server.services.research_run_identity import RUN_SPEC_VERSION, hash_run_spec
-from server.services.research_graph.trial_plan.binding import (
-    validate_branch_binding,
-)
 from server.services.research_sample_exposure import (
     PROTECTED_SAMPLE_ROLES,
     validate_protected_sample_exposure,
@@ -112,7 +109,7 @@ def create_run(
                 str(binding.get("trial_stage") or "")
                 in PROTECTED_SAMPLE_ROLES
             )
-            if int(binding["trial_plan_schema_version"]) == 5 or is_protected_sample:
+            if is_protected_sample:
                 conn.execute("BEGIN IMMEDIATE")
             if is_protected_sample:
                 validate_protected_sample_exposure(
@@ -132,43 +129,6 @@ def create_run(
                         persisted_sample["sample_universe_members_json"]
                     ),
                 )
-            if binding.get("binding_origin") == "research_graph":
-                action_snapshot = validate_branch_binding(
-                    conn,
-                    owner=owner,
-                    instance_id=str(binding["instance_id"]),
-                    branch_id=str(binding["branch_id"]),
-                    trial_plan_hash=binding["trial_plan_hash"],
-                    trial_plan_schema_version=int(
-                        binding["trial_plan_schema_version"]
-                    ),
-                    trial_plan_version=int(binding["trial_plan_version"]),
-                    trial_role=str(binding["trial_role"]),
-                    trial_stage=str(binding["trial_stage"]),
-                    sample_identity_hash=str(
-                        binding["sample_identity_hash"]
-                    ),
-                    sample_start=str(binding["sample_start"]),
-                    sample_end=str(binding["sample_end"]),
-                    sample_universe_hash=str(
-                        binding["sample_universe_hash"]
-                    ),
-                    run_spec_hash=run_spec_hash,
-                    evidence_action_id=str(
-                        binding.get("evidence_action_id") or ""
-                    ),
-                    action_input_hash=str(
-                        binding.get("action_input_hash") or ""
-                    ),
-                    expected_checkpoint_hash=str(
-                        binding.get("expected_checkpoint_hash") or ""
-                    ),
-                    expected_latest_trace_id=str(
-                        binding.get("expected_latest_trace_id") or ""
-                    ),
-                    trial_plan=binding.get("trial_plan"),
-                )
-                binding.update(action_snapshot)
         persisted_report_binding = normalize_report_binding(
             report_binding,
             trial_binding=binding,
@@ -179,45 +139,33 @@ def create_run(
             INSERT INTO research_runs (
                 run_id, owner, workspace_id, configuration_id,
                 configuration_revision, kind, run_spec_version,
-                run_spec_hash, run_spec_json, decision_contract_hash,
-                methodology_hash, trial_plan_id, trial_plan_hash,
+                run_spec_hash, run_spec_json, trial_plan_id, trial_plan_hash,
                 trial_plan_schema_version, trial_plan_version,
-                trial_role, trial_stage, trial_stage_id, comparison_id,
-                graph_instance_id, graph_branch_id, graph_execution_node,
+                trial_role, trial_stage, comparison_id,
                 sample_ref, sample_hash,
                 sample_identity_hash, sample_start, sample_end,
                 sample_universe_hash, sample_universe_members_json,
                 sample_design_context_hash,
                 sample_identity_assurance,
-                evidence_action_id, evidence_action_binding_hash,
-                evidence_action_binding_json,
                 report_binding_json,
                 created_at
             ) VALUES (
                 ?, ?, ?, ?, ?, 'factor_research',
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             )
             """,
             (
                 run_id, owner, workspace_id, configuration_id,
                 int(configuration_revision), run_spec_version,
                 run_spec_hash, raw.decode(),
-                str(
-                    (binding or {}).get("decision_contract_hash") or ""
-                ),
-                str((binding or {}).get("methodology_hash") or ""),
                 str((binding or {}).get("trial_plan_id") or ""),
                 str((binding or {}).get("trial_plan_hash") or ""),
                 int((binding or {}).get("trial_plan_schema_version") or 0),
                 int((binding or {}).get("trial_plan_version") or 0),
                 str((binding or {}).get("trial_role") or ""),
                 str((binding or {}).get("trial_stage") or ""),
-                str((binding or {}).get("action_stage_id") or ""),
                 str((binding or {}).get("comparison_id") or ""),
-                str((binding or {}).get("instance_id") or ""),
-                str((binding or {}).get("branch_id") or ""),
-                str((binding or {}).get("execution_node") or ""),
                 str((binding or {}).get("sample_ref") or ""),
                 str((binding or {}).get("sample_hash") or ""),
                 persisted_sample["sample_identity_hash"],
@@ -227,13 +175,6 @@ def create_run(
                 persisted_sample["sample_universe_members_json"],
                 persisted_sample["sample_design_context_hash"],
                 persisted_sample["sample_identity_assurance"],
-                str((binding or {}).get("evidence_action_id") or ""),
-                str(
-                    (binding or {}).get("evidence_action_binding_hash") or ""
-                ),
-                str(
-                    (binding or {}).get("evidence_action_binding_json") or "{}"
-                ),
                 orjson.dumps(
                     persisted_report_binding or {},
                     option=orjson.OPT_SORT_KEYS,
@@ -252,12 +193,6 @@ def create_run(
         "run_spec_version": run_spec_version,
         "run_spec_hash": run_spec_hash,
         "run_spec": deepcopy(run_spec),
-        "decision_contract_hash": str(
-            persisted_binding.get("decision_contract_hash") or ""
-        ),
-        "methodology_hash": str(
-            persisted_binding.get("methodology_hash") or ""
-        ),
         "trial_plan_id": str(
             persisted_binding.get("trial_plan_id") or ""
         ),
@@ -272,38 +207,11 @@ def create_run(
         ),
         "trial_role": str(persisted_binding.get("trial_role") or ""),
         "trial_stage": str(persisted_binding.get("trial_stage") or ""),
-        "trial_stage_id": str(
-            persisted_binding.get("action_stage_id") or ""
-        ),
         "comparison_id": str(
             persisted_binding.get("comparison_id") or ""
         ),
-        "graph_instance_id": str(
-            persisted_binding.get("instance_id") or ""
-        ),
-        "graph_branch_id": str(
-            persisted_binding.get("branch_id") or ""
-        ),
-        "graph_execution_node": str(
-            persisted_binding.get("execution_node") or ""
-        ),
         "sample_ref": str(persisted_binding.get("sample_ref") or ""),
         "sample_hash": str(persisted_binding.get("sample_hash") or ""),
-        "evidence_action_id": str(
-            persisted_binding.get("evidence_action_id") or ""
-        ),
-        "evidence_action_binding_hash": str(
-            persisted_binding.get("evidence_action_binding_hash") or ""
-        ),
-        "evidence_action_binding": (
-            orjson.loads(
-                str(
-                    persisted_binding.get("evidence_action_binding_json")
-                    or "{}"
-                )
-            )
-            or None
-        ),
         "report_binding": deepcopy(persisted_report_binding),
         **persisted_sample,
         "created_at": created_at,

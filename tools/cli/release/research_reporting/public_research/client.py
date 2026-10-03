@@ -31,9 +31,8 @@ from tools.cli.release.research_reporting.public_research.object_uploads import 
 from tools.cli.release.research_reporting.public_research.projection import (
     build_upload_projection,
 )
-from tools.cli.release.research_reporting.work_package_identity import (
-    load_work_package_migration_head,
-    migrate_work_package_report_identity,
+from tools.cli.release.research_reporting.report_workspace_identity import (
+    load_report_workspace_identity,
 )
 
 from .outbox import PublicResearchOutbox
@@ -114,11 +113,17 @@ class PublicResearchClient:
         for profile in LocalProfileStore(self.client_root).list():
             profile_id = str(profile["profile_id"])
             workspace = Path(str(profile["workspace_root"])).expanduser()
-            for record in profile.get("research_records") or []:
-                work_package_id = _work_package_id(record.get("graph_instance_ref"))
-                if not work_package_id:
+            research_root = workspace / "research"
+            if not research_root.is_dir():
+                continue
+            for package_root in sorted(research_root.iterdir()):
+                if not package_root.is_dir():
                     continue
-                package_root = workspace / "research" / work_package_id
+                try:
+                    identity_manifest = load_report_workspace_identity(package_root)
+                except (OSError, ValueError):
+                    continue
+                report_workspace_id = str(identity_manifest["report_workspace_id"])
                 branches_root = package_root / "branches"
                 if not branches_root.is_dir():
                     continue
@@ -142,7 +147,7 @@ class PublicResearchClient:
                     shared = visibility in {"superiors", "authorized", "public"}
                     values.append({
                         "profile_id": profile_id,
-                        "work_package_id": work_package_id,
+                        "report_workspace_id": report_workspace_id,
                         "branch_id": branch_root.name,
                         "report_id": report_id,
                         "title": str(head["title"]),
@@ -162,7 +167,7 @@ class PublicResearchClient:
                         ),
                         "pending_sync": pending is not None,
                     })
-        return sorted(values, key=lambda item: (item["title"], item["work_package_id"], item["branch_id"]))
+        return sorted(values, key=lambda item: (item["title"], item["report_workspace_id"], item["branch_id"]))
 
     def local_report_migration_records(
         self, *, apply_identities: bool = False,
@@ -172,11 +177,17 @@ class PublicResearchClient:
         for profile in LocalProfileStore(self.client_root).list():
             profile_id = str(profile["profile_id"])
             workspace = Path(str(profile["workspace_root"])).expanduser()
-            for record in profile.get("research_records") or []:
-                work_package_id = _work_package_id(record.get("graph_instance_ref"))
-                if not work_package_id:
+            research_root = workspace / "research"
+            if not research_root.is_dir():
+                continue
+            for package_root in sorted(research_root.iterdir()):
+                if not package_root.is_dir():
                     continue
-                package_root = workspace / "research" / work_package_id
+                try:
+                    identity_manifest = load_report_workspace_identity(package_root)
+                except (OSError, ValueError):
+                    continue
+                report_workspace_id = str(identity_manifest["report_workspace_id"])
                 branches_root = package_root / "branches"
                 if not branches_root.is_dir():
                     continue
@@ -186,24 +197,18 @@ class PublicResearchClient:
                 ]
                 if not branch_roots:
                     continue
-                migrate_work_package_report_identity(
-                    package_root, apply=apply_identities,
-                )
                 for branch_root in branch_roots:
                     try:
-                        head = load_work_package_migration_head(
-                            package_root, branch_root.name,
-                        )
+                        head = load_head(report_tree_paths(package_root, branch_root.name))
                     except (OSError, ValueError):
                         continue
                     records.append({
                         "source_kind": "client",
                         "source_ref": (
-                            f"{profile_id}:{work_package_id}:{branch_root.name}"
+                            f"{profile_id}:{report_workspace_id}:{branch_root.name}"
                         ),
                         "profile_ref": profile_id,
-                        "record_id": work_package_id,
-                        "work_package_id": work_package_id,
+                        "report_workspace_id": report_workspace_id,
                         "branch_id": branch_root.name,
                         "report_id": str(head["report_id"]),
                         "title": str(head["title"]),
@@ -213,14 +218,14 @@ class PublicResearchClient:
                         "build_source_ref": profile_id,
                     })
         return sorted(records, key=lambda item: (
-            item["profile_ref"], item["work_package_id"], item["branch_id"],
+            item["profile_ref"], item["report_workspace_id"], item["branch_id"],
         ))
 
     def publish(
         self,
         *,
         profile_id: str,
-        work_package_id: str,
+        report_workspace_id: str,
         branch_id: str,
         public_title: str = "",
         show_profile: bool = False,
@@ -233,7 +238,7 @@ class PublicResearchClient:
         scope = resolve_branch_report_scope(
             client_root=self.client_root,
             profile_id=profile_id,
-            work_package_id=work_package_id,
+            report_workspace_id=report_workspace_id,
             branch_id=branch_id,
         )
         paths = report_tree_paths(scope.package_root, branch_id)
@@ -293,7 +298,7 @@ class PublicResearchClient:
         return {
             **sync,
             "profile_id": profile_id,
-            "work_package_id": work_package_id,
+            "report_workspace_id": report_workspace_id,
             "branch_id": branch_id,
             "generation": projection["generation"],
             "projection_hash": sync.get(
@@ -604,8 +609,3 @@ class PublicResearchClient:
                 str(value.get("error") or "Manager publication request failed"),
             )
         return value
-
-
-def _work_package_id(value: Any) -> str:
-    text = str(value or "").strip()
-    return text.removeprefix("work-package:") if text.startswith("work-package:") else ""

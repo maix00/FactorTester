@@ -25,11 +25,7 @@ class ProfileRevisionStore:
 
     def freeze(self, profile: dict[str, Any]) -> dict[str, Any]:
         normalized = validate_local_profile(profile)
-        configuration = {
-            key: value
-            for key, value in normalized.items()
-            if key != "research_records"
-        }
+        configuration = normalized
         digest = _digest(configuration)
         profile_id = str(normalized["profile_id"])
         target_ref = (

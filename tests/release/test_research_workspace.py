@@ -4,21 +4,22 @@ from pathlib import Path
 import subprocess
 
 from tools.cli.release.research_reporting.workspace import (
-    initialize_work_package,
+    initialize_report_workspace,
 )
 from tools.cli.release.research_reporting.package_layout import (
     ensure_branch_report_tree,
 )
 
 
-def test_initialize_matches_work_package_skeleton(tmp_path: Path) -> None:
-    result = initialize_work_package(
+def test_initialize_matches_report_workspace_skeleton(tmp_path: Path) -> None:
+    result = initialize_report_workspace(
         workspace_root=tmp_path,
-        work_package_id="wp-1",
+        report_workspace_id="wp-1",
+        report_id="report-1",
         branch_id="branch-1",
         workspace_id="workspace-1",
         title="研究工作包",
-        branch_ref="graph-branch:instance-1:branch-1",
+        branch_ref="report-branch:branch-1",
     )
     package = tmp_path / "research" / "wp-1"
     assert result["descriptor"]["format"] == "report_tree"

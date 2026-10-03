@@ -98,7 +98,7 @@ def _object_kind(kind: Any, target_ref: str) -> str:
         return "factor_set"
     if value == "factor":
         return "factor"
-    if value in {"run_spec", "trial_plan", "job", "run", "product", "product_group", "contract", "continuous_contract", "profile", "profile_revision", "evidence", "obligation", "requirement", "graph_reference"}:
+    if value in {"run_spec", "trial_plan", "job", "run", "product", "product_group", "contract", "continuous_contract", "profile", "profile_revision", "evidence"}:
         return value
     return value or "object"
 

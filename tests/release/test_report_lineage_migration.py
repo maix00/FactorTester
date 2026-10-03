@@ -68,8 +68,8 @@ def test_lineage_repair_fills_binding_missing_from_matching_component(
     for branch in ("ancestor", "descendant"):
         _initialize(package, branch)
     binding = {
-        "binding_id": "claim-a", "kind": "claim",
-        "target_ref": "claim:a", "label": "研究主张", "data": {},
+        "binding_id": "evidence-a", "kind": "evidence",
+        "target_ref": "evidence:a", "label": "样本证据", "data": {},
     }
     _add(
         package, "ancestor", "chapter-a", "chapter", None, "假设登记",
@@ -86,8 +86,8 @@ def test_lineage_repair_fills_binding_missing_from_matching_component(
     )
 
     assert result["added_component_ids"] == []
-    assert result["added_binding_ids"] == ["claim-a"]
-    assert result["snapshot"]["bindings"][0]["target_ref"] == "claim:a"
+    assert result["added_binding_ids"] == ["evidence-a"]
+    assert result["snapshot"]["bindings"][0]["target_ref"] == "evidence:a"
 
 
 def _initialize(package: Path, branch_id: str) -> None:

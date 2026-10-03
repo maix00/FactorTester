@@ -196,7 +196,7 @@
               summary: "先读取 CLI --help，再按当前报告范围添加章节、小节或绑定测试；不要通过页面文档替换正文。",
               value: {
                 scope: {publication_id: publicationID, research_id: researchID,
-                  profile_ref: boundProfileID, work_package_id: value.work_package_id || value.generation?.work_package_id || "",
+                  profile_ref: boundProfileID, report_workspace_id: value.report_workspace_id || value.generation?.report_workspace_id || "",
                   branch_id: value.branch_id || value.generation?.branch_id || ""},
                 help: ["factortester research reports --help",
                   "factortester research reports show --help",

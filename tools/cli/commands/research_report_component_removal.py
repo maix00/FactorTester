@@ -12,7 +12,6 @@ from tools.cli.release.research_reporting.authoring import (
 )
 
 from .research_report_common import output, scope_options
-from .research_report_graph_guard import validate_graph_bound_mutations
 from .research_report_scope import (
     ensure_authoring,
     load_current_authoring,
@@ -32,7 +31,7 @@ from .research_report_submission_finalize import finalize_report_command
     "--include-children",
     is_flag=True,
     help=(
-        "明确删除整棵普通子树；任意深度含系统或研究图特殊小节时仍会拒绝"
+        "明确删除整棵普通子树；任意深度含系统特殊小节时仍会拒绝"
         "（Agent 自己挂载的 Job 证据小节除外）"
     ),
 )
@@ -43,7 +42,7 @@ from .research_report_submission_finalize import finalize_report_command
 @click.option("--json", "as_json", is_flag=True)
 def remove_report_component(
     profile_id: str,
-    work_package_id: str,
+    report_workspace_id: str,
     branch_id: str,
     release_profile: Path | None,
     component_id: str,
@@ -55,7 +54,7 @@ def remove_report_component(
     scope = resolve_branch_report_scope(
         client_root=load_profile_root(release_profile),
         profile_id=profile_id,
-        work_package_id=work_package_id,
+        report_workspace_id=report_workspace_id,
         branch_id=branch_id,
     )
     ensure_authoring(scope, materialize=False, persist=False)
@@ -80,16 +79,9 @@ def remove_report_component(
         saved = load_current_authoring(scope)
     else:
         try:
-            validate_graph_bound_mutations(
-                scope,
-                operations=[{
-                    "op": "remove",
-                    "component_id": component_id,
-                }],
-            )
             mutation = remove_branch_component(
                 package_root=scope.package_root,
-                work_package_id=work_package_id,
+                report_workspace_id=report_workspace_id,
                 branch_id=branch_id,
                 component_id=component_id,
                 include_children=include_children,

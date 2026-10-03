@@ -70,7 +70,7 @@ def test_cli_copy_preview_resolves_profiles_and_never_writes(tmp_path, monkeypat
     monkeypatch.setattr(command, 'resolve_branch_report_scope', scope)
     monkeypatch.setattr(command, 'load_authoring', lambda s: source if s.branch_id == 'source' else target)
     result = CliRunner().invoke(command.copy_preview, [
-        '--profile', 'self', '--work-package-id', 'package', '--branch-id', 'target',
+        '--profile', 'self', '--report-workspace-id', 'package', '--branch-id', 'target',
         '--source-branch-id', 'source', '--component-id', 'chapter', '--copy-id', 'review', '--json',
     ])
     assert result.exit_code == 0, result.output
@@ -107,7 +107,7 @@ def test_cli_copy_apply_rebuilds_preview_and_uses_real_submission_gate(tmp_path,
     source, target = [load_snapshot(package_root=tmp_path, branch_id=b) for b in ('source', 'target')]
     plan = plan_subtree_copy(source, target, component_ids=['chapter'], copy_id='cli-copy')
     preview = {'status': 'preview', **deepcopy(plan), 'selection': {
-        'source_profile': 'self', 'source_work_package_id': 'package', 'source_branch_id': 'source',
+        'source_profile': 'self', 'source_report_workspace_id': 'package', 'source_branch_id': 'source',
         'component_ids': ['chapter'], 'parent_id': 'root', 'after_component_id': None}}
     path = tmp_path / 'preview.json'
     path.write_text(json.dumps(preview))
@@ -128,7 +128,7 @@ def test_cli_copy_apply_rebuilds_preview_and_uses_real_submission_gate(tmp_path,
         return {'git': {'commit': 'test'}}
     monkeypatch.setattr(command, 'finalize_report_command', finalize)
     runner = CliRunner()
-    args = ['--profile', 'self', '--work-package-id', 'package', '--branch-id', 'target',
+    args = ['--profile', 'self', '--report-workspace-id', 'package', '--branch-id', 'target',
             '--preview-file', str(path), '--json']
     preview['operations'][0]['title'] = 'tampered'
     path.write_text(json.dumps(preview))

@@ -12,13 +12,14 @@ from tools.cli.release.local_profile import LocalProfileStore
 from .authoring.tree_bundle import MAX_BUNDLE_BYTES, import_report_bundle
 from .authoring.tree_projection import load_snapshot
 from .public_research.client import PublicResearchClient
-from .workspace import initialize_work_package
+from .workspace import initialize_report_workspace
+from .report_workspace_identity import report_workspace_id_for
 
 
 def publish_local_branch(client, store: LocalProfileStore, *, profile_id: str,
-                         work_package_id: str, branch_id: str) -> dict:
+                         report_workspace_id: str, branch_id: str) -> dict:
     scope = resolve_branch_report_scope(client_root=store.root.parent, profile_id=profile_id,
-                                        work_package_id=work_package_id, branch_id=branch_id)
+                                        report_workspace_id=report_workspace_id, branch_id=branch_id)
     head = load_snapshot(package_root=scope.package_root, branch_id=branch_id)['head']
     report_id = head['report_id']
     branches = client.report_branch_status(report_id)['branches']
@@ -30,7 +31,7 @@ def publish_local_branch(client, store: LocalProfileStore, *, profile_id: str,
     if (existing['principal_ref'], existing['profile_ref']) != (principal, profile_id):
         raise PermissionError('shared branch belongs to another Profile')
     published = PublicResearchClient(store.root.parent, session=client.session).publish(
-        profile_id=profile_id, work_package_id=work_package_id, branch_id=branch_id,
+        profile_id=profile_id, report_workspace_id=report_workspace_id, branch_id=branch_id,
         visibility='private', include_authoring=True)
     if published['status'] != 'synced':
         return published
@@ -69,8 +70,8 @@ def fork_remote_branch(client, store: LocalProfileStore, *, profile_id: str,
         raise ValueError('fork requires a distinct branch')
     branches = client.report_branch_status(report_id)['branches']
     existing = next((item for item in branches if item['branch_id'] == branch_id), None)
-    package_id = 'report-' + hashlib.sha256(report_id.encode()).hexdigest()[:24]
-    package_root = Path(profile['workspace_root']).expanduser() / 'research' / package_id
+    report_workspace_id = report_workspace_id_for(report_id)
+    package_root = Path(profile['workspace_root']).expanduser() / 'research' / report_workspace_id
     receipt = package_root / 'branches' / branch_id / 'authoring/collaboration-fork.json'
     if existing and receipt.is_file():
         provenance = json.loads(receipt.read_text())
@@ -80,12 +81,10 @@ def fork_remote_branch(client, store: LocalProfileStore, *, profile_id: str,
             raise ValueError('local fork provenance differs from the reserved branch')
         # After local registration, retries only complete publication. They must
         # not follow a source branch that has advanced since the original fork.
-        if any(item['record_id'] == package_id and any(
-            artifact.get('artifact_ref') == f'artifact:research/{package_id}/branches/{branch_id}/authoring/HEAD.json'
-            for artifact in item.get('artifacts', [])) for item in profile['research_records']):
+        if (package_root / 'branches' / branch_id / 'authoring' / 'HEAD.json').is_file():
             result = publish_local_branch(client, store, profile_id=profile_id,
-                                          work_package_id=package_id, branch_id=branch_id)
-            return {**result, 'work_package_id': package_id, 'inherited': False,
+                                          report_workspace_id=report_workspace_id, branch_id=branch_id)
+            return {**result, 'report_workspace_id': report_workspace_id, 'inherited': False,
                     'source_branch_id': source_branch_id, 'source_revision': existing['source_revision']}
     source = next((item for item in branches if item['branch_id'] == source_branch_id and item['status'] == 'active'), None)
     if existing:
@@ -115,29 +114,15 @@ def fork_remote_branch(client, store: LocalProfileStore, *, profile_id: str,
     if (branch['principal_ref'], branch['profile_ref']) != (principal, profile_id):
         raise PermissionError('reserved branch belongs to another Profile')
     payload = download_bundle(client, source['publication_id'], bundle)
-    package_id = 'report-' + hashlib.sha256(report_id.encode()).hexdigest()[:24]
-    package_root = Path(profile['workspace_root']).expanduser() / 'research' / package_id
+    report_workspace_id = report_workspace_id_for(report_id)
+    package_root = Path(profile['workspace_root']).expanduser() / 'research' / report_workspace_id
     inherited = import_report_bundle(payload=payload, expected_sha256=bundle['content_hash'], package_root=package_root,
         branch_id=branch_id, report_id=report_id, source_generation=source['generation'], source_root_ref=bundle['root_ref'])
-    tree = initialize_work_package(workspace_root=Path(profile['workspace_root']), work_package_id=package_id,
-        branch_id=branch_id, workspace_id=branch['workspace_id'], title=index['title'], branch_ref=f'report-branch:{branch_id}')
-    # Reload after publication of the tree; retain every other local branch artifact.
-    profile = store.load(profile_id)
-    record = next((dict(item) for item in profile['research_records'] if item['record_id'] == package_id), None)
-    if record is None:
-        now = time.time()
-        record = {'record_id': package_id, 'title': index['title'], 'status': 'pending',
-            'scope': {'profile_id': profile_id, 'research_id': source['research_id']}, 'factor_family_versions': [],
-            'agent_id': profile_id, 'created_at': now, 'updated_at': now,
-            'workspace_ref': 'workspace:' + branch['workspace_id'], 'run_ref': '',
-            'graph_instance_ref': 'work-package:' + package_id, 'graph_branch_ref': '', 'branch_bindings': [],
-            'checkpoint_ref': '', 'evidence_refs': [], 'artifacts': [], 'timeline_refs': [],
-            'provenance': {'created_by': 'factortester research reports branch-fork',
-                           'research_id': source['research_id'], 'report_id': report_id}}
-    record['artifacts'] = [item for item in record['artifacts'] if item['artifact_ref'] != tree['descriptor']['artifact_ref']] + [tree['descriptor']]
-    store.upsert_research_record(profile_id, record)
-    result = publish_local_branch(client, store, profile_id=profile_id, work_package_id=package_id, branch_id=branch_id)
-    return {**result, 'work_package_id': package_id, 'inherited': inherited['inherited'],
+    tree = initialize_report_workspace(workspace_root=Path(profile['workspace_root']), report_workspace_id=report_workspace_id,
+        report_id=report_id, branch_id=branch_id, workspace_id=branch['workspace_id'],
+        title=index['title'], branch_ref=f'report-branch:{branch_id}')
+    result = publish_local_branch(client, store, profile_id=profile_id, report_workspace_id=report_workspace_id, branch_id=branch_id)
+    return {**result, 'report_workspace_id': report_workspace_id, 'inherited': inherited['inherited'],
             'source_branch_id': source_branch_id, 'source_revision': source['revision']}
 
 

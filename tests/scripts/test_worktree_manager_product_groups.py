@@ -32,7 +32,7 @@ def _catalog(tmp_path):
         "name": "跨市场候选",
         "definition": {
             "description": "研究用产品组",
-            "research_refs": ["work-package:momentum"],
+            "research_refs": ["report-workspace:momentum"],
         },
     })
     store.replace_group_products(
@@ -60,6 +60,8 @@ def _projection(store, origin, products):
         research_records=[{
             "record_id": "momentum",
             "local_ref": "momentum:main",
+            "report_workspace_id": "momentum",
+            "report_id": "report-momentum",
             "profile_id": "maxa",
             "title": "动量因子研究",
         }],
@@ -83,7 +85,7 @@ def test_group_projection_exposes_profile_research_and_subject_bindings(tmp_path
     assert group["profile_ref"] == "profile:maxa"
     assert group["created_for_research"] is True
     assert group["research_bindings"] == [{
-        "research_ref": "work-package:momentum",
+        "research_ref": "report-workspace:momentum",
         "title": "动量因子研究",
         "profile_id": "maxa",
         "local_ref": "momentum:main",
@@ -133,13 +135,14 @@ def test_account_groups_remain_visible_without_a_service_port():
             "product_names": ["AP.CZC", "JNI.OSE"],
             "creator_kind": "profile",
             "creator_ref": "profile:maxa",
-            "research_refs": ["work-package:momentum"],
+            "research_refs": ["report-workspace:momentum"],
             "factor_refs": ["factor:roc"],
         }],
         principal="18717974771",
         profiles=[{"profile_id": "maxa", "display_name": "MaxA"}],
         research_records=[{
             "record_id": "momentum",
+            "report_workspace_id": "momentum",
             "title": "动量因子研究",
             "profile_id": "maxa",
         }],

@@ -21,6 +21,7 @@ class _EvidenceClient:
         self.proposal = None
         self.lifecycle_prepare = None
         self.lifecycle_finalize = None
+        self.status_change = None
 
     def search_research_evidence(self, query):
         self.query = query
@@ -60,26 +61,13 @@ class _EvidenceClient:
             "reason_zh": payload["reason_zh"],
         }
 
-    def finalize_research_evidence_lifecycle(
-        self, transition_ref, report_receipt,
-    ):
-        self.lifecycle_finalize = (transition_ref, report_receipt)
+    def change_research_evidence_status(self, evidence_ref, payload):
+        self.status_change = (evidence_ref, payload)
         return {
             "status": "excluded",
-            "transition": {"transition_ref": transition_ref},
+            "evidence_ref": evidence_ref,
+            "lifecycle": {"status": "excluded"},
         }
-
-
-class _EvidenceLibrary:
-    def __init__(self) -> None:
-        self.recorded = []
-        self.rebuilt = False
-
-    def record_evidence(self, evidence):
-        self.recorded.append(evidence)
-
-    def rebuild_index(self):
-        self.rebuilt = True
 
 
 def test_research_evidence_help_exposes_fragment_workflow():
@@ -93,13 +81,14 @@ def test_research_evidence_help_exposes_fragment_workflow():
     assert "restore" in result.output
 
 
-def test_exclude_help_uses_evidence_then_graph_scope_order():
+def test_exclude_help_uses_only_evidence_scope():
     result = CliRunner().invoke(cli, [
         "research", "evidence", "exclude", "--help",
     ])
     assert result.exit_code == 0, result.output
-    assert "EVIDENCE_REF INSTANCE_ID" in result.output
-    assert "BRANCH_ID" in result.output
+    assert "EVIDENCE_REF" in result.output
+    assert "INSTANCE_ID" not in result.output
+    assert "BRANCH_ID" not in result.output
 
 
 def test_guide_returns_machine_executable_next_action():
@@ -171,84 +160,27 @@ def test_tag_propose_returns_existing_candidate_without_create_token(
     assert fake.proposal["created_by_profile_ref"] == "profile:maxa"
 
 
-def test_exclude_reports_then_finalizes_and_refreshes_local_mirror(
-    monkeypatch, tmp_path,
-):
+def test_exclude_changes_evidence_status_with_idempotency_key(monkeypatch):
     fake = _EvidenceClient()
-    library = _EvidenceLibrary()
-    recorded = {}
-    change_file = tmp_path / "exclude.json"
-    change_file.write_text(json.dumps({
-        "expected_projection_hash": "sha256:projection",
-            "research_cycle": {
-                "schema_version": 1,
-                "parent_trace_ref": "trace:current",
-                "events": [],
-            },
-        "obligation_delta": [],
-        "obligation_presentations": {},
-        "reason_markdown": "该证据的样本范围不符合当前研究合同",
-    }), encoding="utf-8")
-
     monkeypatch.setattr(
         research_evidence_query, "client_from_config", lambda: fake,
     )
-    monkeypatch.setattr(
-        research_evidence_query, "library_for_profile",
-        lambda **_kwargs: library,
-    )
-
-    def record_report(**kwargs):
-        recorded.update(kwargs)
-        return {
-            "report_submission_sequence": 12,
-            "report_components": {"special_id": "special:evidence-excluded"},
-            "git": {"commit": "a" * 40},
-            "ledger_generation": 7,
-            "ledger_projection_hash": "sha256:next",
-            "removed_evidence_use_count": 2,
-        }
-
-    monkeypatch.setattr(
-        research_evidence_query,
-        "record_evidence_lifecycle_report",
-        record_report,
-    )
     result = CliRunner().invoke(cli, [
-        "research", "evidence", "exclude",
-        "evidence:one", "instance-1", "branch-1",
-        "--profile-id", "maxa",
-        "--agent-id", "research-maxa",
-        "--parent-id", "special:grill",
+        "research", "evidence", "exclude", "evidence:one",
+        "--operation-id", "exclude-evidence-one",
         "--reason-zh", "该证据的样本范围不符合当前研究合同",
-        "--change-file", str(change_file),
         "--json",
     ])
 
     assert result.exit_code == 0, result.output
-    assert fake.lifecycle_prepare == (
+    assert fake.status_change == (
         "evidence:one",
         {
             "action": "exclude",
             "reason_zh": "该证据的样本范围不符合当前研究合同",
-            "profile_ref": "profile:maxa",
-            "agent_id": "research-maxa",
-            "instance_id": "instance-1",
-            "branch_id": "branch-1",
-            "parent_id": "special:grill",
+            "operation_id": "exclude-evidence-one",
         },
     )
-    assert recorded["parent_id"] == "special:grill"
-    assert recorded["change_payload"]["obligation_delta"] == []
-    assert fake.lifecycle_finalize == (
-        "evidence-lifecycle:sha256:test",
-        {
-            "submission_sequence": 12,
-            "component_id": "special:evidence-excluded",
-            "git_commit": "a" * 40,
-            "ledger_generation": 7,
-            "ledger_projection_hash": "sha256:next",
-        },
-    )
-    assert library.rebuilt is True
-    assert library.recorded[-1]["lifecycle"]["status"] == "excluded"
+    payload = json.loads(result.output)
+    assert payload["status"] == "excluded"
+    assert payload["lifecycle"]["status"] == "excluded"

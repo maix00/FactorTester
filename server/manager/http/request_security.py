@@ -742,14 +742,6 @@ class RequestSecurityMixin:
         if method == "GET" and path.startswith("/api/client/releases/"):
             return True
 
-        if method == "GET":
-            from server.manager.http.research_graph_catalog_routes import (
-                is_public_research_graph_catalog_read,
-            )
-
-            if is_public_research_graph_catalog_read(path):
-                return True
-
         machine_request = (
             path.startswith("/api/federation/")
             or path == "/api/worktrees"

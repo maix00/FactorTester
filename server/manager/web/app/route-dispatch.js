@@ -45,10 +45,6 @@
           context(routeToken), {nav: "", title: "技术文档", allowVisitor: true},
           pages.docs, route.slug,
         );
-        case "research-graph": return guarded(
-          context(routeToken), {nav: "research", title: "研究图"},
-          pages.researchGraph, route.id,
-        );
         case "remote-module": {
           if (route.module === "sqlite-web") {
             const pageContext = context(routeToken);

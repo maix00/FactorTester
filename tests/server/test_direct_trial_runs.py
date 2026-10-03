@@ -16,7 +16,7 @@ from server.services.research_sample_identity import (
 from tests.server.trial_plan_fixtures import run_spec, semantic_hash, trial_plan
 
 
-def test_direct_trial_run_does_not_require_a_graph_branch(
+def test_direct_trial_run_works_without_a_report_branch(
     tmp_path, monkeypatch,
 ) -> None:
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "direct-run.sqlite")
@@ -40,9 +40,7 @@ def test_direct_trial_run_does_not_require_a_graph_branch(
     )
 
     assert run["trial_plan_hash"] == binding["trial_plan_hash"]
-    assert run["graph_instance_id"] == ""
-    assert run["graph_branch_id"] == ""
-    assert run["graph_execution_node"] == ""
+    assert run["report_binding"] is None
 
 
 def test_direct_trial_run_persists_its_report_parent(
@@ -59,9 +57,8 @@ def test_direct_trial_run_persists_its_report_parent(
     )
     direct_trial_plan_registry.save(owner="alice", binding=binding)
     report_binding = {
-        "binding_origin": "agent_direct",
         "profile_ref": "profile:maxa",
-        "work_package_ref": "work-package:package-1",
+        "report_workspace_id": "workspace-package-1",
         "branch_id": "branch-1",
         "report_id": "report-package-1-branch-1",
         "report_generation": 7,

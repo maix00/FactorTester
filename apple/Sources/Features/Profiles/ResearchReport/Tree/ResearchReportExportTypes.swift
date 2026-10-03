@@ -21,7 +21,7 @@ enum ResearchReportExportFormat: String, CaseIterable {
 
 struct ResearchReportExportRequest {
     let profileID: String
-    let workPackageID: String
+    let reportWorkspaceID: String
     let branchID: String
     let format: ResearchReportExportFormat
 
@@ -29,7 +29,7 @@ struct ResearchReportExportRequest {
         [
             "report", "export",
             "--profile", profileID,
-            "--work-package-id", workPackageID,
+            "--report-workspace-id", reportWorkspaceID,
             "--branch-id", branchID,
             "--format", format.rawValue,
             "--output", output.path,

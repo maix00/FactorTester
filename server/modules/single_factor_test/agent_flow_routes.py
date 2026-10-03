@@ -19,7 +19,7 @@ def resume_agent(agent_id: str):
     data = request.get_json(silent=True) or {}
     role = str(data.get("role") or "")
     allowed = {
-        "research": {"role", "instance_id", "branch_id"},
+        "research": {"role", "workspace_id"},
         "planning": {"role", "workspace_id"},
         "server_maintenance": {"role"},
     }.get(role)
@@ -47,8 +47,6 @@ def resume_agent(agent_id: str):
             owner=owner,
             agent_id=agent_id,
             role=role,
-            instance_id=str(data.get("instance_id") or ""),
-            branch_id=str(data.get("branch_id") or ""),
             workspace_id=str(data.get("workspace_id") or ""),
         )
     except (KeyError, ValueError) as exc:

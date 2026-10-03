@@ -1,7 +1,7 @@
 """Server-derived sample identity from an immutable ResearchRun RunSpec.
 
-This module intentionally has no Research Graph or TrialPlan dependencies so
-the sample scope remains valid after the Graph product is retired.
+This module intentionally has no workflow orchestration dependencies so
+the sample scope remains valid independently of Agent orchestration.
 """
 
 from __future__ import annotations

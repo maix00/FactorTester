@@ -1,1 +1,0 @@
-"""Core research harness primitives."""

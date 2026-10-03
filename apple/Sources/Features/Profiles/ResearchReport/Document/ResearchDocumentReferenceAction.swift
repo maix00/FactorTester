@@ -49,26 +49,6 @@ enum ResearchDocumentReferenceRouter {
         return nil
     }
 
-    static func cycleObjectHref(
-        for reference: ResearchDocumentTypedLink,
-        steps: [ResearchTransitionStep]
-    ) -> String? {
-        // Transition object links use the same canonical kind vocabulary as
-        // the report router.  Otherwise a hyphenated kind can be written to
-        // a cycle transition while the report binding uses its underscored
-        // spelling, producing two different reference identities.
-        let objectKind = ResearchDocumentReferenceCatalog.canonicalKind(
-            reference.kind
-        )
-        return steps.reversed().lazy.compactMap { step in
-            guard step.allRefs.contains(reference.targetRef) else { return nil }
-            return step.objectHref(
-                kind: objectKind,
-                targetRef: reference.targetRef
-            )
-        }.first
-    }
-
     static func localFileURL(
         for reference: ResearchDocumentTypedLink,
         reportRef: String,

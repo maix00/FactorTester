@@ -71,7 +71,7 @@ def list_local(release_profile: Path | None, as_json: bool) -> None:
 @click.option("--json", "as_json", is_flag=True)
 def publish_report(
     profile_id: str,
-    work_package_id: str,
+    report_workspace_id: str,
     branch_id: str,
     release_profile: Path | None,
     title: str,
@@ -90,7 +90,7 @@ def publish_report(
     library = PublicResearchClient(load_profile_root(release_profile), session=client_from_config().session)
     value = library.publish(
         profile_id=profile_id,
-        work_package_id=work_package_id,
+        report_workspace_id=report_workspace_id,
         branch_id=branch_id,
         public_title=title,
         show_profile=show_profile,

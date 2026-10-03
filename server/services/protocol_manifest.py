@@ -16,7 +16,6 @@ _CAPABILITIES = (
     ("factor.workspace", 1),
     ("research.run", 1),
     ("research.job", 1),
-    ("research.graph", 1),
     ("products.liquidity", 1),
 )
 

@@ -29,7 +29,6 @@ from .storage import json_hash, read_json, utc_now
 COMMANDS = (
     "factortester",
     "factortester-manager",
-    "cli-anything-factortester-research",
 )
 REGISTERED_SKILL_NAME = "factortester-research-skill"
 _SKILL_RELATIVE = Path("skills") / REGISTERED_SKILL_NAME / "SKILL.md"

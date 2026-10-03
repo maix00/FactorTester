@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from server.services.research_graph.trial_plan import (
+from server.services.trial_plan import (
     canonical_trial_plan,
     trial_plan_hash,
 )
@@ -26,7 +26,7 @@ def create_binding(
         raise ValueError("trial_plan must be an object")
     if int(trial_plan.get("schema_version") or 0) == 5:
         raise ValueError(
-            "TrialPlan schema v5 is Research Graph action state and cannot be direct"
+            "TrialPlan schema v5 is unsupported by the direct experiment workflow"
         )
     plan = canonical_trial_plan(trial_plan)
     normalized_hash = str(run_spec_hash).removeprefix("sha256:")

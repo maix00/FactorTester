@@ -175,7 +175,7 @@ def test_large_factor_set_report_binding_keeps_only_frozen_identity(
     assert "related_references" not in binding["data"]
 
 
-def test_profile_revision_freezes_configuration_not_research_history(
+def test_profile_revision_discards_legacy_research_history(
     tmp_path: Path,
 ) -> None:
     profile = new_local_profile(
@@ -186,20 +186,19 @@ def test_profile_revision_freezes_configuration_not_research_history(
     )
     store = ProfileRevisionStore(tmp_path / "client")
 
-    first = store.freeze(profile)
+    profile["schema_version"] = 10
     profile["research_records"] = [{
         "record_id": "research-a", "title": "history", "status": "pending",
         "scope": {}, "factor_family_versions": [], "agent_id": "research-maxa",
         "created_at": 1.0, "updated_at": 1.0,
         "workspace_ref": "", "run_ref": "",
-        "graph_instance_ref": "", "graph_branch_ref": "",
-        "checkpoint_ref": "", "evidence_refs": [], "timeline_refs": [],
+        "evidence_refs": [],
         "artifacts": [], "provenance": {},
     }]
-    second = store.freeze(profile)
+    frozen = store.freeze(profile)
 
-    assert first["target_ref"] == second["target_ref"]
-    assert store.load(first["target_ref"])["profile_id"] == "maxa"
+    assert "research_records" not in frozen["configuration"]
+    assert store.load(frozen["target_ref"])["profile_id"] == "maxa"
 
 
 def test_profile_revision_changes_when_configuration_changes(
@@ -338,231 +337,6 @@ def test_authority_rejects_a_server_that_rewrites_the_reference(
             ),
             client=Client(),
         )
-
-
-@pytest.mark.parametrize(
-    ("kind", "target_ref", "object_type", "object_id", "field"),
-    [
-        (
-            "obligation", "obligation:predictive-validity",
-            "obligation", "predictive-validity", "obligation_id",
-        ),
-        (
-            "claim", "claim:sgccs-survival",
-            "claim", "sgccs-survival", "claim_id",
-        ),
-        (
-            "task", "research-cycle-review:abc",
-            "task", "research-cycle-review:abc", "task_ref",
-        ),
-    ],
-)
-def test_authority_validates_exact_branch_cycle_objects(
-    tmp_path: Path,
-    kind: str,
-    target_ref: str,
-    object_type: str,
-    object_id: str,
-    field: str,
-) -> None:
-    class Client:
-        def get_research_cycle_object(
-            self, instance_id, branch_id, requested_type, requested_id,
-            *, trace_id=None,
-        ):
-            assert (instance_id, branch_id) == ("instance-1", "branch-1")
-            assert (requested_type, requested_id) == (
-                object_type, object_id,
-            )
-            assert trace_id is None
-            return {
-                field: object_id,
-                "status": "open",
-                "requirement_refs": ["data.required_fields"],
-                "claim_ids": ["claim-related"],
-                "evidence_refs": ["evidence:accepted"],
-            }
-
-    result = validate_declared_reference(
-        reference=DeclaredReportReference(
-            kind=kind, target_ref=target_ref, label="对象",
-        ),
-        scope=SimpleNamespace(
-            client_root=tmp_path / "client",
-            profile_id="maxa",
-            profile={},
-            package_root=tmp_path / "research" / "wp",
-            branch_ref="graph-branch:instance-1:branch-1",
-        ),
-        client=Client(),
-    )
-
-    assert result["target_ref"] == target_ref
-    assert result["data"][field] == object_id
-    assert result["data"]["related_references"] == [{
-        "relation": "要求",
-        "kind": "entry_requirement",
-        "target_ref": "requirement:data.required_fields",
-        "label": "data.required_fields",
-        "data": {},
-    }, {
-        "relation": "关联主张",
-        "kind": "claim",
-        "target_ref": "claim:claim-related",
-        "label": "claim-related",
-        "data": {},
-    }, {
-        "relation": "支持证据",
-        "kind": "evidence",
-        "target_ref": "evidence:accepted",
-        "label": "accepted",
-        "data": {},
-    }]
-
-
-def test_authority_requires_an_explicit_graph_branch_scope(
-    tmp_path: Path,
-) -> None:
-    with pytest.raises(ValueError, match="graph branch"):
-        validate_declared_reference(
-            reference=DeclaredReportReference(
-                kind="obligation",
-                target_ref="obligation:predictive-validity",
-                label="义务",
-            ),
-            scope=SimpleNamespace(
-                client_root=tmp_path / "client",
-                profile_id="maxa",
-                profile={},
-                package_root=tmp_path / "research" / "wp",
-                branch_ref="report-branch:local",
-            ),
-            client=object(),
-        )
-
-
-def test_authority_validates_exact_current_node_check(
-    tmp_path: Path,
-) -> None:
-    class Client:
-        def get_current_graph_requirement(
-            self, instance_id, branch_id, requirement_id,
-        ):
-            assert (instance_id, branch_id) == ("instance-1", "branch-1")
-            assert requirement_id == "factor_semantics.expression_identity"
-            return {
-                "graph_ref": "factor-research@v10",
-                "node_id": "hypothesis_preregistration",
-                "requirement": {
-                    "requirement_id": requirement_id,
-                    "title_zh": "表达式身份",
-                    "gate_policy": "required",
-                },
-            }
-
-    result = validate_declared_reference(
-        reference=DeclaredReportReference(
-            kind="entry_requirement",
-            target_ref=(
-                "requirement:factor_semantics.expression_identity"
-            ),
-            label="节点检查",
-        ),
-        scope=SimpleNamespace(
-            client_root=tmp_path / "client",
-            profile_id="maxa",
-            profile={},
-            package_root=tmp_path / "research" / "wp",
-            branch_ref="graph-branch:instance-1:branch-1",
-        ),
-        client=Client(),
-    )
-
-    assert result["data"] == {
-        "graph_ref": "factor-research@v10",
-        "node_id": "hypothesis_preregistration",
-        "requirement_id": "factor_semantics.expression_identity",
-        "title_zh": "表达式身份",
-        "gate_policy": "required",
-        "detail_ref": (
-            "graph-requirement:factor_semantics.expression_identity"
-        ),
-    }
-
-
-def test_authority_rejects_a_different_node_check(
-    tmp_path: Path,
-) -> None:
-    class Client:
-        def get_current_graph_requirement(self, *_args):
-            return {
-                "requirement": {"requirement_id": "data.scope"},
-            }
-
-    with pytest.raises(ValueError, match="exact requirement"):
-        validate_declared_reference(
-            reference=DeclaredReportReference(
-                kind="entry_requirement",
-                target_ref=(
-                    "requirement:factor_semantics.expression_identity"
-                ),
-                label="节点检查",
-            ),
-            scope=SimpleNamespace(
-                branch_ref="graph-branch:instance-1:branch-1",
-            ),
-            client=Client(),
-        )
-
-
-def test_authority_uses_immutable_catalog_for_historical_chapter(
-    tmp_path: Path,
-) -> None:
-    class Client:
-        def get_current_graph_requirement(self, *_args):
-            raise KeyError("requirement is not active at current node")
-
-        def get_research_graph_node_info(self, *_args):
-            return {"graph": "factor-research@v10"}
-
-        def list_research_graph_versions(self, graph_id):
-            assert graph_id == "factor-research"
-            return [{
-                "version": 10,
-                "requirement_catalog": {"requirements": [{
-                    "requirement_id": (
-                        "hypothesis_validity.mechanism_chain"
-                    ),
-                    "title_zh": "机制作用链",
-                    "gate_policy": "required",
-                }]},
-            }]
-
-    result = validate_declared_reference(
-        reference=DeclaredReportReference(
-            kind="entry_requirement",
-            target_ref=(
-                "requirement:hypothesis_validity.mechanism_chain"
-            ),
-            label="义务小类",
-        ),
-        scope=SimpleNamespace(
-            branch_ref="graph-branch:instance-1:branch-1",
-        ),
-        client=Client(),
-        allow_historical_entry_requirement=True,
-    )
-
-    assert result["data"] == {
-        "graph_ref": "factor-research@v10",
-        "authority_scope": "historical_graph_catalog",
-        "requirement_id": "hypothesis_validity.mechanism_chain",
-        "title_zh": "机制作用链",
-        "gate_policy": "required",
-        "detail_ref": (
-            "graph-requirement:hypothesis_validity.mechanism_chain"
-        ),
-    }
 
 
 def _factor(alias: str, fingerprint: str) -> dict:

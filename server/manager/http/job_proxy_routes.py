@@ -62,11 +62,6 @@ class JobProxyRoutesMixin:
                     "families/public": "families/public",
                 },
             ),
-            (
-                "/api/research-graph-instances/",
-                "/api/research-graph-instances/",
-                {},
-            ),
             ("/api/admin/", "/admin/api/", {}),
         )
         selected = next(
@@ -108,8 +103,6 @@ class JobProxyRoutesMixin:
                 r"workspace/user/(?:root|download|upload|merge-download)",
             )
         ):
-            return False
-        if prefix == "/api/research-graph-instances/" and not self._safe_local_service_suffix(suffix):
             return False
         workspace_push = (
             method == "POST" and suffix == "workspace/user/upload"

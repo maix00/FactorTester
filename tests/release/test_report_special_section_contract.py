@@ -13,12 +13,15 @@ _ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_client_and_cli_share_the_same_special_section_catalog() -> None:
-    source = (_ROOT / (
-        "apple/Sources/Features/Profiles/"
-        "ResearchReport/Tree/ResearchReportSectionDisclosure.swift"
-    )).read_text(encoding="utf-8")
-    client_kinds = set(re.findall(r'displayKind == "([a-z_]+)"', source))
-    assert client_kinds == set(SPECIAL_SECTION_DISPLAY_KINDS)
+    renderer = (_ROOT / "server/manager/web/report/component-view.js").read_text(
+        encoding="utf-8"
+    )
+    assert '"special"' in renderer
+    assert "component.display_kind || component.kind" in renderer
+    assert "graph_continuation" not in renderer
+    assert "capability_detour" not in renderer
+    assert "graph_continuation" not in SPECIAL_SECTION_DISPLAY_KINDS
+    assert "capability_detour" not in SPECIAL_SECTION_DISPLAY_KINDS
 
 
 def test_semantic_special_adds_use_the_shared_operation_builder() -> None:

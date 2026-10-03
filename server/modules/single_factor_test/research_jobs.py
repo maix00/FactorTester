@@ -64,9 +64,7 @@ from server.services.federated_factor_sources import (
 from server.services.federated_factor_sources import (
     source_transfer_manifest as federated_source_transfer_manifest,
 )
-from server.services.research_graph.trial_plan.sample_identity import (
-    derive_sample_identity,
-)
+from server.services.research_sample_identity import derive_sample_identity
 from server.services.research_report_presentations import (
     run_spec_presentation,
 )
@@ -551,22 +549,6 @@ def _prepare_local_research_run_request(
         if run_input_dependencies
         else {"mode": "metadata_only", "files": []}
     )
-    trial_binding = data.get("trial_binding")
-    if isinstance(trial_binding, dict):
-        research_binding = {
-            key: str(trial_binding.get(key) or "")
-            for key in (
-                "profile_ref", "acting_profile_ref", "work_package_ref",
-                "instance_id", "branch_id",
-            )
-            if trial_binding.get(key)
-        }
-        if research_binding.get("instance_id") and not research_binding.get("work_package_ref"):
-            research_binding["work_package_ref"] = (
-                "work-package:" + research_binding["instance_id"]
-            )
-        if research_binding:
-            run_spec["research_binding"] = research_binding
     snapshot = configuration.get("snapshot")
     if isinstance(snapshot, dict):
         run_spec["configuration_snapshot"] = {

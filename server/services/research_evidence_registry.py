@@ -9,7 +9,7 @@ from typing import Any
 import settings as Settings
 from tools.data.sqlite.db import connect_sqlite
 
-from server.services.research_graph.research_cycle.evidence import validate_agent_evidence_envelope
+from server.services.research_evidence_envelope import validate_agent_evidence_envelope
 from server.services.research_evidence_scope import (
     canonical,
     check_identity_scope,
@@ -154,33 +154,6 @@ def admit_evidence(*, owner: str, evidence_ref: str, environment_ref: str,
         return _admit_evidence(
             conn, owner=owner, evidence_ref=evidence_ref,
             environment_ref=environment_ref, subject_ref=subject_ref,
-            qualification=qualification, note=note,
-        )
-
-
-def admit_evidence_for_graph(
-    *, owner: str, evidence_ref: str, instance_id: str, branch_id: str,
-    qualification: str, note: str = "",
-) -> dict[str, Any]:
-    """Admit Evidence for a Graph branch without client-derived scope text."""
-    from server.services.research_graph.branch.repository import (
-        load_instance_branch_with_latest_trace,
-    )
-
-    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        ensure_schema(conn)
-        branch = load_instance_branch_with_latest_trace(
-            conn, instance_id=instance_id, branch_id=branch_id, owner=owner,
-        )
-        if branch is None:
-            raise KeyError("graph branch not found")
-        return _admit_evidence(
-            conn, owner=owner, evidence_ref=evidence_ref,
-            environment_ref=(
-                "work-package:"
-                + str(branch["work_package_id"] or branch["instance_id"])
-            ),
-            subject_ref=f"graph-branch:{instance_id}:{branch_id}",
             qualification=qualification, note=note,
         )
 

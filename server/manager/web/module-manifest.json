@@ -67,12 +67,6 @@
   "catalog-product-detail": [
    "vendor/highcharts/highstock.min.js"
   ],
-  "research": [
-   "vendor/cytoscape/cytoscape.min.js"
-  ],
-  "research-graph": [
-   "vendor/cytoscape/cytoscape.min.js"
-  ],
   "profile": []
  },
  "group_dependencies": {
@@ -157,12 +151,8 @@
   "research-shared": [
    "research-shell"
   ],
-  "research-graph": [
-   "core",
-   "catalog-selection-core"
-  ],
   "research": [
-   "research-graph"
+   "research-shell"
   ],
   "job-detail-core": [
    "jobs",
@@ -455,9 +445,6 @@
   "research-detail": [
    "research-catalog"
   ],
-  "research-graph": [
-   "research-graph"
-  ],
   "jobs": [
    "jobs"
   ],
@@ -714,10 +701,6 @@
   ],
   "research-shared": [
    "research/shared.js"
-  ],
-  "research-graph": [
-   "research/graph.js",
-   "research/graph-list.js"
   ],
   "research": [],
   "research-reference": [
@@ -1060,8 +1043,6 @@
   "report/report-entry.js",
   "research/run-spec-view.js",
   "research/reference.js",
-  "research/graph.js",
-  "research/graph-list.js",
   "research/local.js",
   "research/evidence-applicability.js",
   "research/evidence.js",

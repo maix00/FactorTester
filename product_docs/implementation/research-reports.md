@@ -1,10 +1,10 @@
 ## 职责 {#responsibility}
 
-研究报告保存结构化章节、小节、对象链接、证据与要求绑定。它既是用户阅读内容，也是研究图判断已满足要求时使用的正式投影之一。Research 是上层协作对象，一个 Research 可以包含多份 Report；Report 不是 Research 的同义词。
+研究报告保存结构化章节、小节、对象链接与证据引用。Research 是协作对象，一个 Research 可以包含多份 Report；Report 不是 Research 的同义词。
 
 ## 存储与发布 {#storage-publishing}
 
-authoring 后端维护当前可写树与提交事务；发布生成只读投影。SQLite 保存节点、定位与提交收据，避免大量小 JSON 文件成为权威存储。Git 仍记录研究工作包中需要审计的材料。
+authoring 后端维护当前可写树与提交事务；发布生成只读投影。SQLite 保存节点、定位与提交收据，避免大量小 JSON 文件成为权威存储。Git 记录报告工作区中需要审计的材料。
 
 研究报告列表属于研究入口或具体 Research 页面；某份报告打开后才建立去重的独立标签页，并挂在对应 Research 之下。报告页面应恢复阅读位置和当前章节，但不能借此把 Research 嵌套到另一个 Research。
 

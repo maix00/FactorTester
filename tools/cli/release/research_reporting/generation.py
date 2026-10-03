@@ -15,7 +15,7 @@ else:
 
 
 @contextmanager
-def work_package_lock(package_root: Path) -> Iterator[None]:
+def report_workspace_lock(package_root: Path) -> Iterator[None]:
     package_root.mkdir(parents=True, exist_ok=True)
     lock_path = package_root / ".report.lock"
     created = not lock_path.exists()

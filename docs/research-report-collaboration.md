@@ -10,7 +10,7 @@
 
 `branch-fork <report-id> --profile <profile> --from-branch <source> --branch-id <new>` 从已发布的服务器或客户端分支取得完整可编辑快照，在当前 Profile 登记新分支并发布。新分支标识应唯一；重试必须使用原标识，以继续同一次 fork，不能换标识掩盖失败。
 
-本地通过已有 `show`、`add`、`add-batch` 等报告命令编辑；替换内容使用 `add-batch` 的 `op=replace`。之后用 `branch-upload --profile <profile> --work-package-id <package> --branch-id <branch>` 上传完整版本。它检查共享分支版本；发生并发冲突时保留本地工作并报错，不静默覆盖另一作者。
+本地通过已有 `show`、`add`、`add-batch` 等报告命令编辑；替换内容使用 `add-batch` 的 `op=replace`。之后用 `branch-upload --profile <profile> --report-workspace-id <workspace-id> --branch-id <branch>` 上传完整版本。它检查共享分支版本；发生并发冲突时保留本地工作并报错，不静默覆盖另一作者。
 
 `branch-diff <report-id> --base <branch> --compare <other> --include-content` 比较两个可访问的已发布分支，包含正文、附件及 Job 资源变化。
 
@@ -22,7 +22,7 @@
 
 ```bash
 factortester research reports copy-preview \
-  --profile self --work-package-id <package> --branch-id main \
+  --profile self --report-workspace-id <workspace-id> --branch-id main \
   --source-branch-id <review-branch> --component-id <chapter-or-section> \
   --parent-id <target-parent-or-root> --copy-id <stable-copy-id> --json
 ```
@@ -31,11 +31,11 @@ factortester research reports copy-preview \
 
 ```bash
 factortester research reports copy-apply \
-  --profile self --work-package-id <package> --branch-id main \
+  --profile self --report-workspace-id <workspace-id> --branch-id main \
   --preview-file <preview.json> --json
 ```
 
-`--component-id` 可重复选择互不重叠的小节或章节；`--after-component-id` 指定同级插入位置。来源位于本人另一 Profile 或工作包时，预览可指定 `--source-profile` 和 `--source-work-package-id`。复制重新编号内部节点和链接，保留完整公式、附件及来源记录，来源分支不变。
+`--component-id` 可重复选择互不重叠的小节或章节；`--after-component-id` 指定同级插入位置。来源位于本人另一 Profile 或报告工作区时，预览可指定 `--source-profile` 和 `--source-report-workspace-id`。复制重新编号内部节点和链接，保留完整公式、附件及来源记录，来源分支不变。
 
 预览后来源或目标版本变化会拒绝提交，应重新预览。若已经写入 HEAD，但登记或 Git 步骤中断，按错误回执的 `--submission-sequence` 重试同一预览，恢复收尾步骤而不重复插入。最终通过 `branch-upload` 发布整合后的目标分支。
 

@@ -169,12 +169,10 @@ verify_install() {
   fi
   local cli="Contents/Resources/FactorTester/bin/factortester"
   local manager_cli="Contents/Resources/FactorTester/bin/factortester-manager"
-  local research_cli="Contents/Resources/FactorTester/bin/cli-anything-factortester-research"
   local report_renderer="Contents/Resources/FactorTester/bin/factortester-report-renderer"
   local receipt="Contents/Resources/FactorTester/bundle-receipt.json"
   test -x "$installed/$cli"
   test -x "$installed/$manager_cli"
-  test -x "$installed/$research_cli"
   test -x "$installed/$report_renderer"
   test -f "$installed/$receipt"
   test "$(shasum -a 256 "$source/$cli" | awk '{print $1}')" = \

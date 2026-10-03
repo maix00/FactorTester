@@ -1,6 +1,6 @@
 ## 研究对象的边界 {#research-boundary}
 
-Research 是一个研究上下文，不是单篇文章的别名。它拥有研究目标、参与的研究身份、研究工作区和可以持续演进的证据集合；一个 Research 可以包含多份 Report。Research 可以单独公开或共享，Report 也可以有更窄的公开范围。
+Research 是一个研究上下文，不是单篇文章的别名。它拥有研究目标、参与的研究身份、工作区和可以持续演进的证据集合；一个 Research 可以包含多份 Report。Research 可以单独公开或共享，Report 也可以有更窄的公开范围。
 
 研究报告是面向阅读的结构化投影。它包含章节、段落、表格、对象引用和证据引用，但不能因为某段文字出现在报告里，就推断它已经成为正式证据或满足研究义务。
 
@@ -12,7 +12,7 @@ Research Workspace 不等于 Profile 的因子工作区。因子工作区是 Pro
 
 ## Report 与 Evidence {#report-evidence}
 
-Evidence 是跨 Research 可复用的事实对象。Job、RunSpec、Artifact、外部来源和人工记录都可以成为 Evidence 的不同来源，但只有通过正式绑定才会出现在报告或研究图的证据关系中。
+Evidence 是跨 Research 可复用的事实对象。Job、RunSpec、Artifact、外部来源和人工记录都可以成为 Evidence 的不同来源；报告只通过正式引用显示相应证据。
 
 权限按传播范围区分：报告公开时，报告读者可以看到被引用证据的摘要和关联关系，但不自动获得生成物或文件下载权；Research 公开或共享时，授权范围内的读者才可以按该 Research 的权限下载相应生成物和文件。UI 上的“可见”不能替代服务端权限判断。
 
@@ -29,7 +29,7 @@ Research
     └── 外部来源或人工记录
 ```
 
-Research 不嵌套 Research。需要组织层级时，应使用报告章节、研究图节点或 Evidence 关联表达，而不是把一个 Research 挂到另一个 Research 下面。
+Research 不嵌套 Research。需要组织层级时，应使用报告章节或 Evidence 关联表达，而不是把一个 Research 挂到另一个 Research 下面。
 
 ## 共享时要核对什么 {#sharing-checklist}
 

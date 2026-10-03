@@ -1,4 +1,4 @@
-"""Snapshot inheritance when one research Graph branch forks another."""
+"""Snapshot inheritance when one report branch forks another."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from .tree_paths import report_tree_paths
 from .submission_status import require_no_pending
 from .tree_store import load_head, load_node, tree_lock, write_head
 from .tree_sqlite_index import ensure_sqlite_index
-from ..work_package_identity import ensure_work_package_identity
+from ..report_workspace_identity import ensure_report_workspace_identity
 
 
 def fork_report_tree(
@@ -30,9 +30,9 @@ def fork_report_tree(
         raise ValueError("report fork requires a distinct target branch")
     source = report_tree_paths(package_root, source_branch_id)
     target = report_tree_paths(package_root, target_branch_id)
-    identity = ensure_work_package_identity(
+    identity = ensure_report_workspace_identity(
         package_root,
-        work_package_id=Path(package_root).name,
+        report_workspace_id=Path(package_root).name,
         report_id=target_report_id,
     )
     with tree_lock(source):
@@ -100,21 +100,21 @@ def inherit_report_tree_across_packages(
     target_report_id: str,
     expected_source_generation: int | None = None,
 ) -> dict[str, Any]:
-    """Clone one branch tree into an isolated continuation Work Package."""
+    """Clone one branch tree into an isolated continuation Report Workspace."""
     source_root = Path(source_package_root).expanduser().resolve()
     target_root = Path(target_package_root).expanduser().resolve()
     if source_root == target_root:
         raise ValueError("cross-package report inheritance requires two roots")
     source = report_tree_paths(source_root, source_branch_id)
     target = report_tree_paths(target_root, target_branch_id)
-    ensure_work_package_identity(
+    ensure_report_workspace_identity(
         source_root,
-        work_package_id=source_root.name,
+        report_workspace_id=source_root.name,
         report_id=str(load_head(source)["report_id"]),
     )
-    target_identity = ensure_work_package_identity(
+    target_identity = ensure_report_workspace_identity(
         target_root,
-        work_package_id=target_root.name,
+        report_workspace_id=target_root.name,
         report_id=target_report_id,
     )
     with tree_lock(source):

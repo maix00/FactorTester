@@ -3,8 +3,9 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-echo "[pre-commit] Checking generated Skill copies..."
-python3 "${ROOT_DIR}/tools/cli/agent-harness/scripts/sync_skill.py" --check
+echo "[pre-commit] Checking bundled Skill activation..."
+conda run --no-capture-output -n "${FT_ENV_NAME:-GTHT}" python -m pytest -q \
+  "${ROOT_DIR}/tests/release/test_bundled_runtime_activation.py"
 
 echo "[pre-commit] Running tests..."
 "${ROOT_DIR}/scripts/test.sh"

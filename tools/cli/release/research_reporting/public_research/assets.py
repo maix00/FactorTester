@@ -35,7 +35,7 @@ def asset_path(package_root: Path, asset: dict) -> Path:
     if local_ref:
         candidate = (package_root / unquote(local_ref)).resolve()
         if package_root.resolve() not in candidate.parents:
-            raise ValueError("public research asset escapes its Work Package")
+            raise ValueError("public research asset escapes its Report Workspace")
         return candidate
     external = urlparse(str(asset.get("external_ref") or ""))
     parts = [part for part in external.path.split("/") if part]

@@ -42,7 +42,7 @@ def test_audit_records_each_rich_component_and_rendered_export(
         }],
     )
     export_branch_report(
-        package_root=package, work_package_id="package-a",
+        package_root=package, report_workspace_id="package-a",
         branch_id="main", commit=False,
     )
 

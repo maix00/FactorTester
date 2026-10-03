@@ -32,38 +32,33 @@ def _add_special(
     )
 
 
-def test_single_component_add_enforces_report_parent_kinds(
-    tmp_path: Path,
-) -> None:
-    package = tmp_path / "research" / "wp"
-    created = initialize_tree(
-        package_root=package, branch_id="main",
-        report_id="report-wp", title="研究报告",
-    )
-    _add(package, "chapter", "chapter", None)
-    _add(package, "entry", "entry", "chapter")
-
-    for component_id, kind, parent_id in [
-        ("nested-section", "section", "entry"),
-        ("direct-subsection", "subsection", "chapter"),
-    ]:
-        before = created["paths"]["head"].read_bytes()
-        with pytest.raises(ValueError, match="parent kind"):
-            _add(package, component_id, kind, parent_id)
-        assert created["paths"]["head"].read_bytes() == before
-
-
-def test_capability_special_may_contain_graph_continuation(tmp_path: Path) -> None:
+def test_legacy_subsection_is_a_nested_section(tmp_path: Path) -> None:
     package = tmp_path / "research" / "wp"
     initialize_tree(
         package_root=package, branch_id="main",
         report_id="report-wp", title="研究报告",
     )
     _add(package, "chapter", "chapter", None)
-    _add_special(package, "detour", "chapter", "capability_detour")
-    _add_special(
-        package, "upgrade", "detour", "graph_continuation",
+    _add(package, "section", "section", "chapter")
+    _add(package, "nested-section", "section", "section")
+    _add(package, "legacy-subsection", "subsection", "nested-section")
+    _add(package, "entry", "entry", "legacy-subsection")
+
+    with pytest.raises(ValueError, match="parent kind"):
+        _add(package, "invalid-section", "section", "entry")
+
+
+def test_report_special_sections_do_not_require_graph_continuations(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "research" / "wp"
+    initialize_tree(
+        package_root=package, branch_id="main",
+        report_id="report-wp", title="研究报告",
     )
+    _add(package, "chapter", "chapter", None)
+    _add_special(package, "gap", "chapter", "research_gap")
+    _add(package, "nested-section", "section", "gap")
 
 
 def test_special_section_may_contain_deeper_report_sections(
@@ -75,6 +70,6 @@ def test_special_section_may_contain_deeper_report_sections(
         report_id="report-wp", title="研究报告",
     )
     _add(package, "chapter", "chapter", None)
-    _add_special(package, "detour", "chapter", "capability_detour")
-    _add(package, "section", "section", "detour")
+    _add_special(package, "gap", "chapter", "research_gap")
+    _add(package, "section", "section", "gap")
     _add(package, "subsection", "subsection", "section")

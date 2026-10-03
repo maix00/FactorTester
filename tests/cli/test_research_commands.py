@@ -510,7 +510,7 @@ def test_job_watch_report_collects_only_after_stream_ends(tmp_path, monkeypatch)
 
     result = CliRunner().invoke(cli, [
         "job", "watch-report", "job-step", "--profile", "maxa",
-        "--work-package-id", "package-1", "--branch-id", "branch-1",
+        "--report-workspace-id", "package-1", "--branch-id", "branch-1",
     ])
 
     assert result.exit_code == 0, result.output
@@ -1049,8 +1049,6 @@ def test_run_submit_passes_trial_binding_file(tmp_path, monkeypatch) -> None:
     state.configuration_revision = 2
     save_state(state)
     binding = {
-        "instance_id": "instance-1",
-        "branch_id": "branch-1",
         "trial_plan": {"schema_version": 1},
         "trial_plan_hash": "a" * 64,
         "trial_plan_version": 1,
@@ -1093,8 +1091,8 @@ def test_run_submit_requires_explicit_report_intent_for_trial_job(
     save_state(state)
     path = tmp_path / "trial-binding.json"
     path.write_text(json.dumps({
-        "instance_id": "instance-1",
-        "branch_id": "branch-1",
+        "binding_origin": "agent_direct",
+        "trial_plan": {"schema_version": 1},
     }), encoding="utf-8")
 
     submitted = runner.invoke(cli, [
@@ -1121,16 +1119,22 @@ def test_run_submit_freezes_explicit_report_scope(
     )
     frozen = {
         "profile_ref": "profile:maxa",
-        "work_package_ref": "work-package:package-1",
-        "instance_id": "instance-1",
+        "report_workspace_id": "package-1",
         "branch_id": "branch-1",
         "report_id": "report-package-1-branch-1",
         "report_generation": 7,
         "report_head_hash": "b" * 64,
+        "report_parent_id": "direct-trials",
     }
+
+    def _freeze(_scope, *, trial_binding, report_parent_id):
+        assert trial_binding["binding_origin"] == "agent_direct"
+        assert report_parent_id == "direct-trials"
+        return frozen
+
     monkeypatch.setattr(
         "tools.cli.commands.research.freeze_report_binding",
-        lambda _scope, trial_binding: frozen,
+        _freeze,
     )
     runner = CliRunner()
     assert runner.invoke(
@@ -1142,16 +1146,17 @@ def test_run_submit_freezes_explicit_report_scope(
     save_state(state)
     path = tmp_path / "trial-binding.json"
     path.write_text(json.dumps({
-        "instance_id": "instance-1",
-        "branch_id": "branch-1",
+        "binding_origin": "agent_direct",
+        "trial_plan": {"schema_version": 1},
     }), encoding="utf-8")
 
     submitted = runner.invoke(cli, [
         "run", "submit", "--analysis", "ic",
         "--trial-binding-file", str(path),
         "--profile", "maxa",
-        "--work-package-id", "package-1",
+        "--report-workspace-id", "package-1",
         "--branch-id", "branch-1",
+        "--report-parent-id", "direct-trials",
         "--no-wait-report",
     ])
 
@@ -1178,7 +1183,12 @@ def test_run_submit_binds_direct_trial_to_explicit_report_parent(
         lambda **_kwargs: scope,
     )
     frozen = {
-        "binding_origin": "agent_direct",
+        "profile_ref": "profile:maxa",
+        "report_workspace_id": "package-1",
+        "branch_id": "branch-1",
+        "report_id": "report-package-1-branch-1",
+        "report_generation": 7,
+        "report_head_hash": "b" * 64,
         "report_parent_id": "direct-trials",
     }
 
@@ -1225,7 +1235,7 @@ def test_run_submit_binds_direct_trial_to_explicit_report_parent(
         "run", "submit", "--analysis", "ic",
         "--trial-binding-file", str(path),
         "--profile", "maxa",
-        "--work-package-id", "package-1",
+        "--report-workspace-id", "package-1",
         "--branch-id", "branch-1",
         "--report-parent-id", "direct-trials",
         "--json",
@@ -1259,14 +1269,14 @@ def test_report_bound_submit_waits_mounts_and_requests_analysis(
     )
     monkeypatch.setattr(
         "tools.cli.commands.research.freeze_report_binding",
-        lambda _scope, trial_binding: {
+        lambda _scope, *, trial_binding, report_parent_id: {
             "profile_ref": "profile:maxa",
-            "work_package_ref": "work-package:package-1",
-            "instance_id": "instance-1",
+            "report_workspace_id": "package-1",
             "branch_id": "branch-1",
             "report_id": "report-package-1-branch-1",
             "report_generation": 7,
             "report_head_hash": "b" * 64,
+            "report_parent_id": report_parent_id,
         },
     )
     collected = []
@@ -1296,16 +1306,17 @@ def test_report_bound_submit_waits_mounts_and_requests_analysis(
     save_state(state)
     path = tmp_path / "trial-binding.json"
     path.write_text(json.dumps({
-        "instance_id": "instance-1",
-        "branch_id": "branch-1",
+        "binding_origin": "agent_direct",
+        "trial_plan": {"schema_version": 1},
     }), encoding="utf-8")
 
     submitted = runner.invoke(cli, [
         "run", "submit", "--analysis", "ic",
         "--trial-binding-file", str(path),
         "--profile", "maxa",
-        "--work-package-id", "package-1",
+        "--report-workspace-id", "package-1",
         "--branch-id", "branch-1",
+        "--report-parent-id", "direct-trials",
         "--json",
     ])
 

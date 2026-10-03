@@ -14,7 +14,7 @@ from .research_report_scope import resolve_branch_report_scope, load_authoring
 @click.command('copy-preview')
 @scope_options
 @click.option('--source-profile', default='', help='来源 Profile，省略时使用目标 Profile')
-@click.option('--source-work-package-id', default='', help='来源工作包，省略时使用目标工作包')
+@click.option('--source-report-workspace-id', default='', help='来源报告工作区，省略时使用目标报告工作区')
 @click.option('--source-branch-id', required=True)
 @click.option('--component-id', multiple=True, required=True, help='完整复制的章节或小节，可多次指定')
 @click.option('--parent-id', default='root', show_default=True)
@@ -22,9 +22,9 @@ from .research_report_scope import resolve_branch_report_scope, load_authoring
 @click.option('--copy-id', required=True, help='本次复制的稳定标识；重试使用同一标识')
 @click.option('--json', 'as_json', is_flag=True)
 @friendly_errors
-def copy_preview(profile_id: str, work_package_id: str, branch_id: str,
+def copy_preview(profile_id: str, report_workspace_id: str, branch_id: str,
                  release_profile: Path | None, source_profile: str,
-                 source_work_package_id: str, source_branch_id: str,
+                 source_report_workspace_id: str, source_branch_id: str,
                  component_id: tuple[str, ...], parent_id: str,
                  after_component_id: str | None, copy_id: str, as_json: bool) -> None:
     """预览同一报告跨 branch 的章节/小节复制，不修改正文。
@@ -34,9 +34,9 @@ def copy_preview(profile_id: str, work_package_id: str, branch_id: str,
     """
     client_root = load_profile_root(release_profile)
     target = resolve_branch_report_scope(client_root=client_root, profile_id=profile_id,
-                                        work_package_id=work_package_id, branch_id=branch_id)
+                                        report_workspace_id=report_workspace_id, branch_id=branch_id)
     source = resolve_branch_report_scope(client_root=client_root, profile_id=source_profile or profile_id,
-                                        work_package_id=source_work_package_id or work_package_id,
+                                        report_workspace_id=source_report_workspace_id or report_workspace_id,
                                         branch_id=source_branch_id)
     if source.package_root.resolve() == target.package_root.resolve() and source.branch_id == target.branch_id:
         raise ValueError('source and target must be distinct branches')
@@ -49,7 +49,7 @@ def copy_preview(profile_id: str, work_package_id: str, branch_id: str,
                             copy_id=copy_id, after_component_id=after_component_id)
     output({'status': 'preview', **plan, 'selection': {
         'source_profile': source_profile or profile_id,
-        'source_work_package_id': source_work_package_id or work_package_id,
+        'source_report_workspace_id': source_report_workspace_id or report_workspace_id,
         'source_branch_id': source_branch_id, 'component_ids': list(component_id),
         'parent_id': parent_id, 'after_component_id': after_component_id,
     }}, as_json)

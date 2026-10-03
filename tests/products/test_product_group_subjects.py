@@ -103,13 +103,13 @@ def test_product_group_creation_freezes_creator_and_research_metadata(
         ["Products/Futures/CNFutures/_products/SI.GFE"],
         creator_kind="profile",
         creator_ref="profile:maxa",
-        research_refs=["work-package:research-one"],
+        research_refs=["report-workspace:research-one"],
     )
 
     assert group is not None
     assert group["creator_kind"] == "profile"
     assert group["creator_ref"] == "profile:maxa"
-    assert group["research_refs"] == ["work-package:research-one"]
+    assert group["research_refs"] == ["report-workspace:research-one"]
     assert "product_names" not in group  # Membership is frozen at submission.
     assert state == [{key: value for key, value in group.items()
                       if key not in {"selection_paths", "path_bindings", "path_count"}}]
@@ -135,6 +135,7 @@ def test_product_group_creation_defaults_to_logged_in_user(monkeypatch) -> None:
         ("profile", "maxa", []),
         ("robot", "profile:maxa", []),
         ("profile", "profile:maxa", ["not-stable"]),
+        ("profile", "profile:maxa", ["work-package:legacy-graph"]),
     ],
 )
 def test_product_group_creation_rejects_unstable_provenance(

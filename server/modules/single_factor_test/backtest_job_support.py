@@ -7,9 +7,6 @@ from flask import jsonify, request, session
 from server.jobs.models import JobRecord
 from server.jobs.ports import detect_port
 from server.jobs.repository import JobRepository
-from server.services.research_graph.research_cycle.job_evidence import (
-    project_job_attempt_evidence,
-)
 from server.services.session_runtime import require_user
 
 
@@ -146,13 +143,5 @@ def job_evidence(detail: dict) -> dict:
             job.terminal_assurance.to_dict()
             if job.terminal_assurance is not None
             else None
-        ),
-        "job_attempt": project_job_attempt_evidence(
-            job,
-            identity_refs=detail["identity_refs"],
-            trial_stage=str(
-                (trial_binding or {}).get("trial_stage") or ""
-            ),
-            active_artifacts=detail["active_artifacts"],
         ),
     }

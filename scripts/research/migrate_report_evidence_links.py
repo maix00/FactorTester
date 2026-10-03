@@ -43,7 +43,6 @@ def migrate(db_path: Path) -> dict[str, int | str]:
                 evidence_ref TEXT NOT NULL,
                 evidence_owner_ref TEXT NOT NULL,
                 report_id TEXT NOT NULL,
-                graph_ref TEXT NOT NULL,
                 branch_ref TEXT NOT NULL,
                 job_id TEXT NOT NULL,
                 profile_ref TEXT NOT NULL,
@@ -55,10 +54,10 @@ def migrate(db_path: Path) -> dict[str, int | str]:
             );
             INSERT INTO {CURRENT}
                 (link_ref, evidence_ref, evidence_owner_ref, report_id,
-                 graph_ref, branch_ref, job_id, profile_ref, purpose, status,
+                 branch_ref, job_id, profile_ref, purpose, status,
                  created_at, revoked_at)
             SELECT link_ref, evidence_ref, evidence_owner_ref, report_id,
-                   graph_ref, branch_ref, job_id, profile_ref, purpose, status,
+                   branch_ref, job_id, profile_ref, purpose, status,
                    created_at, revoked_at
               FROM {LEGACY};
             CREATE INDEX idx_research_catalog_evidence

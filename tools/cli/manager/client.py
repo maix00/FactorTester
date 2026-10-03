@@ -369,30 +369,6 @@ class ManagerClient:
             ),
         }
 
-    def research_graph_versions(self, graph_id: str) -> dict[str, Any]:
-        return self._request(
-            "GET",
-            f"/api/catalog/research-graphs/{quote(str(graph_id), safe='')}/versions",
-        )
-
-    def active_research_graph(self, graph_id: str) -> dict[str, Any]:
-        return self._request(
-            "GET",
-            f"/api/catalog/research-graphs/{quote(str(graph_id), safe='')}/active",
-        )
-
-    def activate_research_graph(
-        self,
-        graph_id: str,
-        version: int,
-    ) -> dict[str, Any]:
-        return self._request(
-            "POST",
-            f"/api/catalog/research-graphs/{quote(str(graph_id), safe='')}/versions/"
-            f"{int(version)}/activate",
-            payload={},
-        )
-
     def action(self, instance_id: str, action: str) -> dict[str, Any]:
         routes = {
             "start": "/start",

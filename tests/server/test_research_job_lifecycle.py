@@ -1004,7 +1004,7 @@ def test_margin_execution_profile_is_opt_in_backtest_telemetry(client) -> None:
     assert "margin_execution_profile" not in ic.job_spec
 
 
-def test_registered_direct_trial_plan_submits_without_a_graph_branch(client) -> None:
+def test_registered_direct_trial_plan_submits_as_a_run_contract(client) -> None:
     workspace = _create_workspace(client)
     _update(client, workspace, _payload(workspace))
     request_payload = {
@@ -1031,9 +1031,7 @@ def test_registered_direct_trial_plan_submits_without_a_graph_branch(client) -> 
     assert run["trial_plan_hash"] == frozen.get_json()["trial_binding"][
         "trial_plan_hash"
     ]
-    assert run["graph_instance_id"] == ""
-    assert run["graph_branch_id"] == ""
-    assert run["graph_execution_node"] == ""
+    assert not any("graph" in key for key in run)
 
 
 def test_run_spec_freezes_one_exact_multi_factor_set_subject(client) -> None:

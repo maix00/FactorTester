@@ -1,6 +1,6 @@
 # Research Graph 移除候选文件清单
 
-- 基线：`9d35ee47f33cbc756103626a9a9eaeeb57631030`（本机 `origin/feat` 缓存；远端 fetch 尚未成功）。
+- 基线：`9d35ee47f33cbc756103626a9a9eaeeb57631030`（`origin/feat`；首次扫描时远端 fetch 暂时失败，随后 Issue #403 的认领记录确认 fresh fetch 成功；集成前仍需重新 fetch）。
 - 生成方式：对 Git 跟踪文件执行 `git grep -IlE "research_graph|Research Graph|graph_id|graph_instance|trial_plan|TrialPlan"`，排除 `static/vendor/**` 与 `*.lock`。
 - 候选文件：435 个。此清单是移除审计的起点；实现时逐个判定 Graph 专属代码与仍须保留的普通研究功能，不能因命中关键字而机械删除。
 - Ownership：仅允许删除 Graph 专属文件，或修改候选文件中直接耦合 Graph 的部分；若需要修改清单外文件，先审计依赖并更新 Issue #403 的 Ownership。
@@ -211,6 +211,153 @@
 | `tools/cli/modules` | 1 |
 | `tools/migrations/finalize_active_graph_cutover.py` | 1 |
 | `tools/migrations/recover_research_graph_history.py` | 1 |
+
+## 实现期间发现的补充依赖
+
+候选扫描之外，实际差异另有 142 条差异记录，共覆盖 147 个具体路径（相对上述 origin/feat 基线，含修改、新增、删除与重命名）。这些文件支撑 Graph-free 的导航/报告/证据/运行身份、客户端和容器打包、维护文档与回归测试；已逐项审阅并纳入 Issue #403 Ownership。Graph 专属目录内整文件删除仍按下方已授权目录范围处理。状态前缀为 Git 差异状态，重命名同时记录源和目标。
+
+- `M` `.githooks/pre-commit`
+- `M` `apple/Sources/Navigation/ClientTab.swift`
+- `M` `apple/Sources/Navigation/ClientTabSession.swift`
+- `M` `apple/Sources/Navigation/ClientTabView.swift`
+- `M` `apple/Sources/Navigation/Module.swift`
+- `D` `apple/Sources/Stores/ProfileLiveProcessController.swift`
+- `D` `apple/Sources/Stores/ResearchGraphBrowserController.swift`
+- `M` `apple/Tests/ClientTabSessionTests.swift`
+- `D` `apple/Tests/ResearchBranchPickerTests.swift`
+- `M` `apple/Tests/ResearchDocumentTextBlockTests.swift`
+- `D` `apple/Tests/ResearchHumanGateOverrideServiceTests.swift`
+- `M` `apple/Tests/ResearchReportExportRendererTests.swift`
+- `M` `deploy/docker/factortester-public/factortester-entrypoint.sh`
+- `M` `deploy/docker/factortester-server/compose.yaml`
+- `M` `docs/adr/094-local-research-runtime-and-shared-report-sync.md`
+- `M` `docs/adr/142-研究根对象与证据访问边界.md`
+- `M` `docs/adr/148-product-definitions-and-submission-snapshots.md`
+- `M` `docs/adr/149-research-catalog-replication.md`
+- `M` `docs/adr/154-research-principal-and-branch-identity.md`
+- `A` `docs/adr/156-retire-research-graph-agent-workflow.md`
+- `M` `docs/adr/README.md`
+- `M` `docs/agents/factortester-server-maintenance.md`
+- `A` `docs/audits/factor-research-architecture-audit-2026-09-30.md`
+- `A` `docs/audits/research-graph-removal-manifest-2026-09-30.md`
+- `M` `docs/research-report-collaboration.md`
+- `M` `product_docs/concepts/core-objects.md`
+- `M` `product_docs/concepts/research-model.md`
+- `M` `product_docs/guides/automation-and-cli.md`
+- `M` `product_docs/guides/research-workflow.md`
+- `M` `product_docs/implementation/research-reports.md`
+- `M` `product_docs/implementation/system-overview.md`
+- `M` `product_docs/implementation/web-swift-navigation.md`
+- `M` `product_docs/manifest.json`
+- `M` `product_docs/reference/api-cli-reference.md`
+- `M` `scripts/build_and_run.sh`
+- `M` `scripts/install_factortester_pipx.sh`
+- `M` `scripts/migrate_sqlite_control_to_postgres.py`
+- `M` `scripts/release/assets.py`
+- `M` `scripts/release/embed_runtime.py`
+- `M` `scripts/release/manifest.py`
+- `M` `scripts/release/package_layout.py`
+- `M` `scripts/release/publish.py`
+- `M` `scripts/research/migrate_report_evidence_links.py`
+- `M` `scripts/research/migrate_report_root_hierarchy.py`
+- `R066` `scripts/research/migrate_work_package_report_identity.py → scripts/research/migrate_report_workspace_identity.py`
+- `M` `scripts/server/factortester_public_container.sh`
+- `M` `scripts/test.sh`
+- `M` `server/manager/domain/navigation_registry.py`
+- `M` `server/manager/domain/product_groups.py`
+- `M` `server/manager/skills/catalog.json`
+- `M` `server/manager/state/processes.py`
+- `M` `server/modules/products/product_group_store.py`
+- `M` `server/services/protocol_manifest.py`
+- `A` `server/services/research_evidence_envelope.py`
+- `R100` `server/services/research_graph/trial_plan/components.py → server/services/trial_plan/components.py`
+- `R100` `server/services/research_graph/trial_plan/fields.py → server/services/trial_plan/fields.py`
+- `R059` `server/services/research_graph/trial_plan/sample_identity.py → server/services/research_sample_identity.py`
+- `A` `server/services/research_sample_exposure.py`
+- `A` `server/services/trial_plan/__init__.py`
+- `A` `server/services/trial_plan/binding.py`
+- `A` `server/services/trial_plan/contract.py`
+- `M` `server/skills/factortester-server-maintenance/SKILL.md`
+- `D` `server/skills/factortester-server-maintenance/references/graph-governance.md`
+- `M` `server/skills/factortester-server-maintenance/references/infrastructure.md`
+- `A` `skills/factortester-research-skill/SKILL.md`
+- `D` `skills/research-obligation-cycle/agents/openai.yaml`
+- `M` `tests/cli/test_business_domain_commands.py`
+- `M` `tests/cli/test_client_profile_sync.py`
+- `M` `tests/cli/test_manager_commands.py`
+- `M` `tests/cli/test_product_commands.py`
+- `M` `tests/cli/test_protocol_negotiation.py`
+- `M` `tests/cli/test_research_catalog_commands.py`
+- `M` `tests/cli/test_research_evidence_commands.py`
+- `D` `tests/cli/test_research_report_cycle_authority.py`
+- `D` `tests/cli/test_research_report_graph_guard.py`
+- `D` `tests/cli/test_research_report_history_cleanup.py`
+- `D` `tests/cli/test_research_step_cli.py`
+- `M` `tests/conftest.py`
+- `M` `tests/js/test_report_export.js`
+- `M` `tests/products/test_product_group_subjects.py`
+- `M` `tests/release/test_beta_release_pipeline.py`
+- `M` `tests/release/test_bundled_runtime_activation.py`
+- `D` `tests/release/test_capability_detour_report_projection.py`
+- `D` `tests/release/test_checkpoint_explicit_report_parent.py`
+- `M` `tests/release/test_client_wheel.py`
+- `D` `tests/release/test_compact_entry_resolution_carrier.py`
+- `D` `tests/release/test_current_node_narrative.py`
+- `D` `tests/release/test_graph_continuation_entry_event_hierarchy.py`
+- `D` `tests/release/test_graph_continuation_report_hierarchy.py`
+- `D` `tests/release/test_graph_node_chapter_identity.py`
+- `D` `tests/release/test_graph_packet_commands.py`
+- `D` `tests/release/test_harness_wheel.py`
+- `M` `tests/release/test_macos_release_settings.py`
+- `M` `tests/release/test_public_research_assets.py`
+- `M` `tests/release/test_public_research_outbox.py`
+- `M` `tests/release/test_release_builder.py`
+- `M` `tests/release/test_report_batch_replace.py`
+- `M` `tests/release/test_report_binding_migration.py`
+- `M` `tests/release/test_report_collaboration_workflow.py`
+- `M` `tests/release/test_report_copy_cli.py`
+- `M` `tests/release/test_report_hierarchy_contract.py`
+- `D` `tests/release/test_report_historical_section_wrap.py`
+- `M` `tests/release/test_report_lineage_migration.py`
+- `M` `tests/release/test_report_pending_git_exclusion.py`
+- `M` `tests/release/test_report_pending_write_closure.py`
+- `M` `tests/release/test_report_semantic_audit.py`
+- `M` `tests/release/test_report_special_section_contract.py`
+- `D` `tests/release/test_report_submission_descriptor_retry.py`
+- `M` `tests/release/test_report_tree.py`
+- `M` `tests/release/test_report_tree_bundle.py`
+- `M` `tests/release/test_report_tree_copy.py`
+- `M` `tests/release/test_research_workspace.py`
+- `M` `tests/release/test_unified_client_publish.py`
+- `R072` `tests/release/test_work_package_report_identity_migration.py → tests/release/test_report_workspace_identity_migration.py`
+- `M` `tests/scripts/test_local_container_deployment.py`
+- `M` `tests/scripts/test_public_container_deployment.py`
+- `M` `tests/scripts/test_worktree_flask_manager.py`
+- `M` `tests/scripts/test_worktree_manager_product_groups.py`
+- `M` `tests/scripts/test_worktree_manager_public_data.py`
+- `M` `tests/scripts/test_worktree_manager_web_manifest.py`
+- `M` `tests/server/test_agent_skills.py`
+- `M` `tests/server/test_maintenance_cases.py`
+- `A` `tests/server/test_remove_research_graph_migration.py`
+- `M` `tests/server/test_report_collaboration_http.py`
+- `M` `tests/server/test_report_collaboration_peers.py`
+- `M` `tests/server/test_research_evidence_catalog.py`
+- `M` `tests/server/test_research_evidence_routes.py`
+- `A` `tests/server/test_research_sample_exposure.py`
+- `M` `tests/server/test_server_research.py`
+- `M` `tests/server/test_server_research_collaboration.py`
+- `M` `tests/server/test_server_research_routes.py`
+- `M` `tests/skills/test_factortester_server_maintenance_skill.py`
+- `M` `tools/cli/client_agent_flow.py`
+- `M` `tools/cli/client_research_evidence.py`
+- `D` `tools/cli/client_research_step.py`
+- `D` `tools/cli/protocols/research_step.py`
+- `M` `tools/cli/pyproject.toml`
+- `D` `tools/cli/research_graph_entry_assessment.py`
+- `D` `tools/cli/research_graph_submission_contract.py`
+- `D` `tools/cli/research_graph_target_capabilities.py`
+- `A` `tools/migrations/remove_research_graph.py`
+- `M` `tools/testers/settings/applications.py`
 
 ## 跟踪文件
 

@@ -10,7 +10,7 @@ from .research_report_common import output
 
 
 _SCOPE = (
-    "--profile <profile> --work-package-id <package> --branch-id <branch>"
+    "--profile <profile> --report-workspace-id <package> --branch-id <branch>"
 )
 
 
@@ -33,7 +33,7 @@ def _move_guide() -> dict[str, Any]:
         "rules": [
             "省略 after_component_id 时移动到新父级的第一个位置",
             "after_component_id 必须是新父级已有的直接子项",
-            "不能移动 root、研究图系统容器或造成层级循环",
+            "不能移动 root、系统容器或造成层级循环",
             "父子组件类型必须符合报告树层级合同",
         ],
         "submit_command": (
@@ -68,7 +68,7 @@ def _replace_guide() -> dict[str, Any]:
             "先从 report show 读取当前组件，对未修改字段原样回填完整值",
             "不能改变组件 kind、parent_id 或 children",
             "不要提交 bindings；CLI 从正文中的显式类型化链接重新生成引用绑定",
-            "研究图系统容器和系统生命周期特殊小节不能由 Agent 替换",
+            "系统容器和系统生命周期特殊小节不能由 Agent 替换",
         ],
         "submit_command": (
             f"factortester research reports add-batch {_SCOPE} "

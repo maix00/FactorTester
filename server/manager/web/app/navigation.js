@@ -44,7 +44,7 @@
     const module = moduleForPath(path, modules);
     if (parts.length <= 1) return t(module.title_key || module.title);
     const labels = {
-      research: "研究报告", researches: "研究", "research-graphs": "研究图", jobs: "测试", factors: "因子详情",
+      research: "研究报告", researches: "研究", jobs: "测试", factors: "因子详情",
       evidence: "证据", products: "产品详情", profiles: "研究身份", strategies: "策略详情", "test-templates": "测试模板",
     };
     if (parts[0] === "products" && parts[1] === "categories") {
@@ -61,9 +61,6 @@
     if (/^\/research\//.test(pathname)) return "doc.text";
     if (/^\/researches\//.test(pathname)) return "lightbulb";
     if (/^\/evidence\//.test(pathname)) return "doc.text.magnifyingglass";
-    if (/^\/research-graphs\//.test(pathname)) {
-      return "point.3.connected.trianglepath.dotted";
-    }
     if (/^\/jobs\//.test(pathname)) return "doc.text.magnifyingglass";
     if (/^\/test-templates\//.test(pathname)) return "list.bullet.clipboard";
     if (/^\/factor-series(?:\/|$)/.test(pathname)) return "chart.xyaxis.line";
@@ -130,7 +127,6 @@
       sidebarVisible: true, homeVisible: true, pinned: true,
       children: [
         {id: "research.evidence", title: "证据", title_key: "证据", path: "/research?section=evidence", requiresAuth: true},
-        {id: "research.graph", title: "研究图", title_key: "研究图", path: "/research?section=graph", requiresAuth: true},
         {id: "research.profiles", title: "研究身份", title_key: "研究身份", path: "/research?section=profiles", requiresAuth: true},
         {id: "research.agent-models", title: "智能体模型", title_key: "智能体模型", path: "/research?section=agent-models", requiresAuth: true},
       ],
@@ -218,9 +214,6 @@
     }
     if (parts[0] === "evidence" && parts[1]) {
       return {kind: "evidence-detail", id: decodeURIComponent(parts.slice(1).join("/"))};
-    }
-    if (parts[0] === "research-graphs" && parts[1]) {
-      return {kind: "research-graph", id: decodeURIComponent(parts.slice(1).join("/"))};
     }
     if (parts[0] === "research") return {kind: "research"};
     if (parts[0] === "strategies" && parts[1]) {

@@ -320,7 +320,7 @@ def test_bundle_identity_hash_and_installed_tamper_fail_closed(
 def test_bundle_identity_accepts_executable_script_launcher(
     tmp_path: Path,
 ) -> None:
-    launcher = tmp_path / "cli-anything-factortester-research"
+    launcher = tmp_path / "factortester-manager"
     launcher.write_bytes(b"#!/bin/sh\nexec \"$0.real\" \"$@\"\n")
     launcher.chmod(0o755)
 

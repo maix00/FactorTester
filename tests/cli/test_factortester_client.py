@@ -197,73 +197,6 @@ def fake_server() -> Iterator[str]:
             next_cursor=None,
         )
 
-    @app.get("/api/profile-research")
-    def profile_research():
-        assert session.get("username") == "alice"
-        assert request.args["workspace_ref"] == "workspace:workspace-1"
-        assert request.args["limit"] == "7"
-        assert request.args["after"] == "research-cursor"
-        return jsonify(
-            success=True,
-            schema_version=1,
-            workspace_ref="workspace:workspace-1",
-            items=[{
-                "research_ref": "graph-branch:instance-1:branch-1",
-                "current_node": "statistical_robustness",
-            }],
-            next_cursor="next-research-cursor",
-            etag="sha256:list",
-        )
-
-    @app.get("/api/profile-research/<research_ref>")
-    def profile_research_detail(research_ref: str):
-        assert session.get("username") == "alice"
-        assert research_ref == "graph-branch:instance-1:branch-1"
-        return jsonify(
-            success=True,
-            schema_version=1,
-            research_ref=research_ref,
-            timeline_href=f"/api/profile-research/{research_ref}/timeline",
-            refresh={"mode": "conditional_etag", "terminal": False},
-            etag="sha256:detail",
-        )
-
-    @app.get("/api/profile-research/<research_ref>/timeline")
-    def profile_research_timeline(research_ref: str):
-        assert session.get("username") == "alice"
-        assert research_ref == "graph-branch:instance-1:branch-1"
-        assert request.args["limit"] == "11"
-        assert request.args["after"] == "timeline-cursor"
-        return jsonify(
-            success=True,
-            schema_version=1,
-            research_ref=research_ref,
-            items=[{"step_ref": "trace:trace-1"}],
-            next_cursor=None,
-            etag="sha256:timeline",
-        )
-
-    @app.get(
-        "/api/profile-research/<work_package_ref>/branches/<branch_id>/"
-        "checkpoints/<trace_id>/report-carrier"
-    )
-    def profile_research_report_carrier(
-        work_package_ref: str,
-        branch_id: str,
-        trace_id: str,
-    ):
-        assert session.get("username") == "alice"
-        assert work_package_ref == "work-package:instance-1"
-        assert branch_id == "branch-1"
-        assert trace_id == "trace-1"
-        return jsonify(
-            success=True,
-            schema_version=2,
-            work_package_ref=work_package_ref,
-            branch_ref="graph-branch:instance-1:branch-1",
-            checkpoint_ref="trace:trace-1",
-        )
-
     @app.get("/api/test-authoring/modules")
     def modules():
         parent = request.args.get("parent")
@@ -391,42 +324,6 @@ def fake_server() -> Iterator[str]:
             projection_hash="a" * 64,
         )
 
-    @app.post("/api/catalog/research-graphs/versions")
-    def publish_research_graph():
-        graph = request.get_json()["graph"]
-        return jsonify(success=True, graph=graph), 201
-
-    @app.get("/api/catalog/research-graphs/<graph_id>/versions")
-    def research_graph_versions(graph_id):
-        return jsonify(success=True, versions=[{
-            "graph_id": graph_id, "version": 1,
-        }])
-
-    @app.get("/api/catalog/research-graphs/<graph_id>/active")
-    def active_research_graph(graph_id):
-        return jsonify(success=True, graph={
-            "graph_id": graph_id, "version": 1,
-        })
-
-    @app.get(
-        "/api/catalog/research-graphs/<graph_id>/versions/<int:version>/yaml"
-    )
-    def research_graph_yaml(graph_id, version):
-        assert request.args.get("locale") == "en"
-        return Response(
-            f"graph_id: {graph_id}\nversion: {version}\n",
-            content_type="application/yaml",
-        )
-
-    @app.post(
-        "/api/catalog/research-graphs/<graph_id>/versions/"
-        "<int:version>/activate"
-    )
-    def activate_research_graph(graph_id, version):
-        return jsonify(success=True, graph={
-            "graph_id": graph_id, "version": version,
-        }), 201
-
     @app.post("/api/factor-library/factor-sets")
     def register_factor_set():
         descriptor = request.get_json()["descriptor"]
@@ -518,20 +415,6 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
         "target_ref": "factor-set:momentum",
     })["factor_set"]["target_ref"] == "factor-set:momentum"
     assert client.unregister_factor_set("factor-set:momentum")["success"] is True
-    graph = {"graph_id": "factor-research", "version": 1}
-    assert client.publish_research_graph(graph)["graph_id"] == "factor-research"
-    assert client.list_research_graph_versions("factor-research")[0][
-        "version"
-    ] == 1
-    assert client.get_active_research_graph("factor-research")[
-        "graph_id"
-    ] == "factor-research"
-    assert b"graph_id: factor-research" in client.download_research_graph_yaml(
-        "factor-research", 1, locale="en",
-    )
-    assert client.activate_research_graph("factor-research", 1)[
-        "version"
-    ] == 1
     assert client.product_catalog()["products"][0]["name"] == "RB.SHF"
     assert client.product_source_catalog()["sources"][0]["source_id"] == (
         "LocalCNFutures"
@@ -584,28 +467,6 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
     assert client.job_order_audit("job-1")["strategies"]["A1"]["groups"][0][
         "order_group_id"
     ] == "G1"
-    research = client.list_profile_research(
-        workspace_ref="workspace:workspace-1",
-        limit=7,
-        after="research-cursor",
-    )
-    assert research["items"][0]["research_ref"] == (
-        "graph-branch:instance-1:branch-1"
-    )
-    research_ref = research["items"][0]["research_ref"]
-    assert client.get_profile_research(research_ref)["refresh"]["mode"] == (
-        "conditional_etag"
-    )
-    assert client.list_profile_research_timeline(
-        research_ref,
-        limit=11,
-        after="timeline-cursor",
-    )["items"] == [{"step_ref": "trace:trace-1"}]
-    assert client.get_profile_research_report_carrier(
-        "work-package:instance-1",
-        "branch-1",
-        "trace-1",
-    )["checkpoint_ref"] == "trace:trace-1"
     assert client.list_modules()[0]["key"] == "single_factor_test"
     assert client.list_modules(parent="single_factor_page")[0]["kind"] == "tab"
     assert client.data_availability(

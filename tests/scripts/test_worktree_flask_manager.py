@@ -2829,10 +2829,8 @@ def test_service_env_adds_repo_harness_without_losing_pythonpath(
 
     env, _, _ = state._service_env(tmp_path, 8000)
 
-    harness = str((tmp_path / "tools/cli/agent-harness").resolve())
     entries = env["PYTHONPATH"].split(os.pathsep)
-    assert entries == [harness, "/existing/one", "/existing/two"]
-    assert entries.count(harness) == 1
+    assert entries == ["/existing/one", "/existing/two"]
     assert env["FACTORTESTER_SERVICE_HOST"] == "127.0.0.1"
 
 

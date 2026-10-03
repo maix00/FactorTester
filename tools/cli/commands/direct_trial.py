@@ -1,4 +1,4 @@
-"""Create an immutable TrialPlan binding without entering Research Graph."""
+"""Create an immutable TrialPlan binding for a direct experiment."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from tools.cli.core.errors import friendly_errors
 
 @click.group("trial-plan")
 def trial_plan() -> None:
-    """Validate and freeze TrialPlans for Graph or direct research runs."""
+    """Validate and freeze direct research trial plans."""
 
 
 @trial_plan.command("create")
@@ -68,7 +68,7 @@ def create_direct_trial_plan(
         }, {
             "command": (
                 "factortester run submit --trial-binding-file "
-                f"{output} --profile <profile> --work-package-id <id> "
+                f"{output} --profile <profile> --report-workspace-id <id> "
                 "--branch-id <branch> --report-parent-id <component> "
                 "--analysis <kind>"
             ),

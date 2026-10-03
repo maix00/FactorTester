@@ -61,12 +61,12 @@ def test_registered_branch_is_readable_through_other_manager_and_revocation_is_e
                                     workspace_root=tmp_path / 'workspace')
         profile['session_binding'] = {'principal_ref':'alice', 'session_ref':'session-binding:test'}
         store.save(profile)
-        package_id = initialize_report_space(store, 'self', report)['work_package_id']
+        package_id = initialize_report_space(store, 'self', report)['report_workspace_id']
         add_component(package_root=tmp_path / 'workspace/research' / package_id, branch_id='main',
                       component_id='chapter', kind='chapter', title='Across servers', parent_id=None,
                       body='', content=None, display_kind='')
         published = publish_local_branch(source_clients['alice'], store, profile_id='self',
-                                         work_package_id=package_id, branch_id='main')
+                                         report_workspace_id=package_id, branch_id='main')
         assert source.account_domain_sync.flush(principal='alice')['sent'] == 1
         assert reader.account_domain_sync.pull(principal='bob')['applied'] == 1
         branches = reader_clients['bob'].report_branch_status('peer-report')['branches']

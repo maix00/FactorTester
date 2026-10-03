@@ -53,13 +53,11 @@ class ProfileLifecycle:
             candidate["agents"] = [{
                 "agent_id": agent_id,
                 "role": role,
-                "scope": (
-                    {"workspace_id": "all"}
-                    if role == "planning"
-                    else {"instance_id": "unbound", "branch_id": "unbound"}
-                ),
+                "scope": {"workspace_id": "unbound"},
                 "status": "needs_scope",
-                "next_action": "Bind an authorized research scope.",
+                "next_action": (
+                    "Bind an authorized research workspace before execution."
+                ),
             }]
         try:
             existing = self.store.load(profile_id)

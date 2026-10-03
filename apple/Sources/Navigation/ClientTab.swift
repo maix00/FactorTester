@@ -6,7 +6,6 @@ enum ClientTabContent {
     case web(path: String)
     case externalWeb(URL)
     case research
-    case workPackage(ResearchDirectoryItem)
     case profiles
     case profile(id: String)
     case accountSettings
@@ -189,16 +188,6 @@ struct ClientTab: Identifiable {
         )
     }
 
-    static func workPackage(_ item: ResearchDirectoryItem) -> ClientTab {
-        ClientTab(
-            id: "work-package:\(item.id)",
-            title: item.displayTitle,
-            titleKey: nil,
-            systemImage: "point.3.connected.trianglepath.dotted",
-            content: .workPackage(item)
-        )
-    }
-
     static let profiles = ClientTab(
         id: "profiles",
         title: "Profiles",
@@ -323,12 +312,6 @@ struct ClientTab: Identifiable {
             return .web(
                 id: "evidence-detail:\(path)", title: "证据", titleKey: "证据",
                 systemImage: "doc.text.magnifyingglass", path: path
-            )
-        }
-        if pathname.hasPrefix("/research-graphs/") {
-            return .web(
-                id: "research-graph:\(path)", title: "研究图", titleKey: "研究图",
-                systemImage: "point.3.connected.trianglepath.dotted", path: path
             )
         }
         if pathname.hasPrefix("/jobs/") {

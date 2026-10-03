@@ -12,9 +12,6 @@ from server.services.maintenance_cases.queue import load_agent_case_queue
 from server.services.research_configuration_summary import (
     load_workspace_factor_summary,
 )
-from server.services.research_graph.branch.context import (
-    build_graph_branch_context,
-)
 
 
 _ROLES = {"planning", "research", "server_maintenance"}
@@ -25,8 +22,6 @@ def build_agent_resume_packet(
     owner: str,
     agent_id: str,
     role: str,
-    instance_id: str = "",
-    branch_id: str = "",
     workspace_id: str = "",
 ) -> dict[str, Any]:
     if role not in _ROLES:
@@ -43,8 +38,7 @@ def build_agent_resume_packet(
     if role == "research":
         packet["research"] = _research_packet(
             owner=owner,
-            instance_id=instance_id,
-            branch_id=branch_id,
+            workspace_id=workspace_id,
         )
     elif role == "planning":
         packet["planning"] = _planning_packet(
@@ -62,43 +56,17 @@ def build_agent_resume_packet(
     return packet
 
 
-def _research_packet(
-    *,
-    owner: str,
-    instance_id: str,
-    branch_id: str,
-) -> dict[str, Any]:
-    if not instance_id or not branch_id:
-        raise ValueError(
-            "research resume requires instance_id and branch_id"
-        )
-    source = build_graph_branch_context(
-        instance_id=instance_id,
-        branch_id=branch_id,
-        owner=owner,
-    )
-    graph_ref = str(source.get("graph") or "")
-    branch = dict(source.get("branch") or {})
-    node = dict(source.get("node") or {})
+def _research_packet(*, owner: str, workspace_id: str) -> dict[str, Any]:
+    if not workspace_id:
+        raise ValueError("research resume requires workspace_id")
     return {
-        "graph": graph_ref,
-        "branch": branch,
-        "node": node,
-        "current_node": str(node.get("node_id") or ""),
-        "next_action": "download_graph_and_evaluate_locally",
-        "graph_fetch": {
-            "command": (
-                "factortester research graphs fetch "
-                f"{graph_ref.split('@v', 1)[0] if '@v' in graph_ref else graph_ref}"
-            ),
-            "transport": "7998_control_then_7997_data",
-            "server_decides_next": False,
-        },
-        "local_cli": {
-            "command": "factortester research graphs next-local",
-            "requires": ["graph_file", "current_node"],
-        },
-        "running_backend_jobs_action": "continue",
+        "workspace_id": workspace_id,
+        "factor_summary": load_workspace_factor_summary(
+            workspace_id=workspace_id,
+            owner=owner,
+        ),
+        "authoritative_state": ["agent_conversation", "report_branch", "jobs"],
+        "next_action": "resume_from_agent_conversation_and_open_report_branch",
     }
 
 

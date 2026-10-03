@@ -233,8 +233,7 @@ def test_public_manager_can_import_vendored_research_contracts() -> None:
     )
 
     assert (
-        "PYTHONPATH=/opt/factortester/app/tools/cli/agent-harness:"
-        "/opt/factortester/app"
+        "PYTHONPATH=/opt/factortester/app"
     ) in entrypoint
 
 

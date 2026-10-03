@@ -1,7 +1,7 @@
 # ADR-156：一次性移除 Research Graph，独立保留研究对象与 Agent 工作流
 
 - **日期**：2026-09-30
-- **状态**：待一次性完整切换（整体跟踪见 Issue #403）
+- **状态**：方案已确定，完整实现待集成验收（整体跟踪见 Issue #403）
 - **取代**：ADR-040、ADR-047、ADR-084、ADR-094、ADR-142 中与 Research Graph、Graph Branch、WorkPackage、Graph TrialPlan 或 Graph 历史有关的要求；这些 ADR 其余不冲突的报告、对象访问与同步约束继续有效。
 
 ## 背景

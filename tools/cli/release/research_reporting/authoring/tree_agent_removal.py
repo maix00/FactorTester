@@ -12,8 +12,8 @@ from .tree_store import load_node
 # ``job collect-report`` writes one ``test_result`` section per Job plus one
 # ``evidence_fragment`` section per mounted artifact, both keyed by the Job id.
 # They are the Agent's own mounts, so the Agent must be able to withdraw them
-# again (otherwise a re-mount after a retry can never be cleaned up).  Research
-# graph chapters and system lifecycle special sections stay protected.
+# again (otherwise a re-mount after a retry can never be cleaned up). System
+# lifecycle special sections stay protected.
 AGENT_MOUNTED_EVIDENCE_KINDS = frozenset({"test_result", "evidence_fragment"})
 _JOB_MOUNT_NODE_ID = re.compile(r"job-[0-9a-f]{32}(?:-|$)")
 
@@ -75,6 +75,6 @@ def is_agent_mounted_job_evidence(component: dict[str, Any]) -> bool:
 
 def _reject_protected(component: dict[str, Any]) -> None:
     if component["kind"] == "chapter":
-        raise ValueError("研究图章节不能由 Agent 删除")
+        raise ValueError("报告章节不能由 Agent 删除")
     if _is_protected(component):
         raise ValueError("特殊小节不能由 Agent 删除")

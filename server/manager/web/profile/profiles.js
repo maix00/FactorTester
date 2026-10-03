@@ -67,10 +67,10 @@
       ));
       return;
     }
-    const view = FTUI.table([context.t("研究身份"), context.t("标识"), context.t("运行方式"), context.t("执行位置"), context.t("认领状态"), context.t("研究")], cached.map(item => [
+    const view = FTUI.table([context.t("研究身份"), context.t("标识"), context.t("运行方式"), context.t("执行位置"), context.t("认领状态")], cached.map(item => [
       profileIdentity(context, item), item.profile_id,
       runtimeLabel(context, item.runtime), item.runtime?.executor_id || "",
-      claimLabel(context, item.active_claim), (item.research_records || []).length,
+      claimLabel(context, item.active_claim),
     ]));
     [...view.body.rows].forEach((row, index) => {
       if (isSelfProfile(cached[index])) {
@@ -169,10 +169,6 @@
           runtime.server_id || runtime.executor_id || "",
         ]);
       }
-      const researchRecords = (profile.research_records || []).map(item => [
-        item.title || item.work_package_id || item.record_id, item.branch_id,
-        item.current_node || item.node_id, item.checkpoint_ref,
-      ]);
       const agentSection = section(
         context, "Agents",
         ["Agent", context.t("角色"), context.t("状态"), context.t("下一步")], agents,
@@ -182,12 +178,7 @@
         [context.t("工作区"), context.t("访问模式"), context.t("所有者"), context.t("服务端引用")],
         workspaces,
       );
-      const researchSection = section(
-        context, context.t("研究记录"),
-        [context.t("研究"), context.t("分支"), context.t("节点"), "Checkpoint"],
-        researchRecords,
-      );
-      [agentSection, workspaceSection, researchSection]
+      [agentSection, workspaceSection]
         .filter(Boolean)
         .forEach(item => root.append(item));
     } else if (selectedTab === "skills") {

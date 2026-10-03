@@ -26,7 +26,7 @@ from tools.cli.release.research_reporting.authoring.tree_model import (
 from tools.cli.release.research_reporting.authoring.tree_paths import (
     report_tree_paths,
 )
-from tools.cli.release.research_reporting.workspace import initialize_work_package
+from tools.cli.release.research_reporting.workspace import initialize_report_workspace
 
 OWNER = "GTHT@owner@1"
 EDITOR_A = "GTHT@editorA@2"
@@ -75,10 +75,10 @@ def test_branch_read_resolves_against_creator_workspace(tmp_path):
     owner_ws = ensure_server_profile_workspace(
         tmp_path / "data", OWNER, "profile-owner",
     )
-    initialize_work_package(
-        workspace_root=owner_ws, work_package_id="report-one",
+    initialize_report_workspace(
+        workspace_root=owner_ws, report_workspace_id="report-one",
         branch_id="main", workspace_id="profile-owner",
-        title="协作报告", branch_ref="graph-branch:report-one:main",
+        title="协作报告", branch_ref="report-branch:main",
     )
     editor_ws = ensure_server_profile_workspace(
         tmp_path / "data", EDITOR_A, "profile-editor",
@@ -102,7 +102,7 @@ def test_branch_read_resolves_against_creator_workspace(tmp_path):
         READER,
         target_ref=EDITOR_A,
         profile_id="profile-editor",
-        package_id="report-one",
+        report_workspace_id="report-one",
         branch_id="editor-main",
     )
     assert value["available"] is True
@@ -124,7 +124,7 @@ def test_read_branch_denied_for_invalid_reference(tmp_path):
             READER,
             target_ref=EDITOR_A,
             profile_id="bad/../path",
-            package_id="report-one",
+            report_workspace_id="report-one",
             branch_id="main",
         )
 
@@ -135,7 +135,7 @@ def test_read_branch_reports_non_local_source_honestly(tmp_path):
         READER,
         target_ref=EDITOR_A,
         profile_id="profile-editor",
-        package_id="report-one",
+        report_workspace_id="report-one",
         branch_id="editor-main",
         build_source="client",
     )
@@ -149,10 +149,10 @@ def test_reader_reads_foreign_branch_asset(png_bytes: bytes, tmp_path):
     owner_ws = ensure_server_profile_workspace(
         tmp_path / "data", OWNER, "profile-owner",
     )
-    initialize_work_package(
-        workspace_root=owner_ws, work_package_id="report-one",
+    initialize_report_workspace(
+        workspace_root=owner_ws, report_workspace_id="report-one",
         branch_id="main", workspace_id="profile-owner",
-        title="协作报告", branch_ref="graph-branch:report-one:main",
+        title="协作报告", branch_ref="report-branch:main",
     )
     editor_ws = ensure_server_profile_workspace(
         tmp_path / "data", EDITOR_A, "profile-editor",
@@ -234,9 +234,9 @@ def test_branch_http_route_precedes_generic_projection():
     handler.state = SimpleNamespace(server_research=SimpleNamespace(
         read_branch=lambda *a, **kw: calls.append((a, kw)) or {"available": True}))
     assert handler._get_server_research_routes(urlparse(
-        "/api/server-research/branch?target_ref=owner&profile_id=self&package_id=p&branch_id=main"))
+        "/api/server-research/branch?target_ref=owner&profile_id=self&report_workspace_id=p&branch_id=main"))
     assert handler.status == 200
-    assert calls[0][1]["package_id"] == "p"
+    assert calls[0][1]["report_workspace_id"] == "p"
 
 
 def test_shared_publication_uses_current_catalog_permissions(tmp_path):
@@ -266,10 +266,10 @@ def _editor_branch(service, tmp_path):
     owner_ws = ensure_server_profile_workspace(
         tmp_path / "data", OWNER, "profile-owner",
     )
-    initialize_work_package(
-        workspace_root=owner_ws, work_package_id="report-one",
+    initialize_report_workspace(
+        workspace_root=owner_ws, report_workspace_id="report-one",
         branch_id="main", workspace_id="profile-owner",
-        title="协作报告", branch_ref="graph-branch:report-one:main",
+        title="协作报告", branch_ref="report-branch:main",
     )
     editor_ws = ensure_server_profile_workspace(
         tmp_path / "data", EDITOR_A, "profile-editor",

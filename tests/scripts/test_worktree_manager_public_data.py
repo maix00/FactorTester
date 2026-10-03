@@ -60,7 +60,7 @@ class _Gateway:
             return {"profiles": [{
                 "profile_id": "maxa",
                 "display_name": "MaxA",
-                "research_records": [{"record_id": "r1"}],
+                "research_records": [{"record_id": "retired-graph-history"}],
             }]}
         if operation == "factors":
             return {"factors": [{
@@ -172,7 +172,7 @@ def test_control_profile_projection_is_used_without_local_client_root(tmp_path):
                 "profile_id": "maxa",
                 "display_name": "MaxA",
                 "payload": {
-                    "research_records": [{"record_id": "r1"}],
+                    "research_records": [{"record_id": "retired-graph-history"}],
                     "workspace_root": "/private/device/path",
                 },
                 "updated_at": "2026-08-14T00:00:00Z",
@@ -191,7 +191,7 @@ def test_control_profile_projection_is_used_without_local_client_root(tmp_path):
             time.sleep(0.01)
 
     assert profiles[0]["profile_id"] == "maxa"
-    assert profiles[0]["research_records"] == [{"record_id": "r1"}]
+    assert "research_records" not in profiles[0]
     assert "workspace_root" not in profiles[0]
 
 

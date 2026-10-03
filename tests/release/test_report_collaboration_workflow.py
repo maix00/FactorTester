@@ -67,11 +67,11 @@ def test_two_profiles_fork_edit_publish_same_report(tmp_path, monkeypatch):
                         library.local_resource(pid, desc['resource_id'], client.actor)[0])
     alice, bob = Client('alice'), Client('bob')
     initialized = initialize_report_space(stores['alice'], 'self', report)
-    package_id = initialized['work_package_id']
+    package_id = initialized['report_workspace_id']
     package = tmp_path / 'alice/workspace/research' / package_id
     add_component(package_root=package, branch_id='main', component_id='chapter', kind='chapter', title='Chapter',
                   parent_id=None, body='', content=None, display_kind='')
-    published = workflow.publish_local_branch(alice, stores['alice'], profile_id='self', work_package_id=package_id, branch_id='main')
+    published = workflow.publish_local_branch(alice, stores['alice'], profile_id='self', report_workspace_id=package_id, branch_id='main')
     original = published['branch']
     forked = workflow.fork_remote_branch(bob, stores['bob'], profile_id='self', report_id='same-report', source_branch_id='main', branch_id='bob-review')
     assert forked['branch']['report_id'] == original['report_id']
@@ -80,7 +80,7 @@ def test_two_profiles_fork_edit_publish_same_report(tmp_path, monkeypatch):
     target = tmp_path / 'bob/workspace/research' / package_id
     add_component(package_root=target, branch_id='bob-review', component_id='bob-note', kind='entry', title='',
                   parent_id='chapter', body='Bob edits independently', content=None, display_kind='')
-    updated = workflow.publish_local_branch(bob, stores['bob'], profile_id='self', work_package_id=package_id, branch_id='bob-review')
+    updated = workflow.publish_local_branch(bob, stores['bob'], profile_id='self', report_workspace_id=package_id, branch_id='bob-review')
     assert updated['branch']['generation'] == forked['branch']['generation'] + 1
     assert updated['publication_id'] != forked['publication_id']
     assert len(load_snapshot(package_root=package, branch_id='main')['components']) == 1
@@ -89,7 +89,7 @@ def test_two_profiles_fork_edit_publish_same_report(tmp_path, monkeypatch):
 
     add_component(package_root=package, branch_id='main', component_id='alice-later', kind='entry', title='',
                   parent_id='chapter', body='Source advances after the fork', content=None, display_kind='')
-    workflow.publish_local_branch(alice, stores['alice'], profile_id='self', work_package_id=package_id, branch_id='main')
+    workflow.publish_local_branch(alice, stores['alice'], profile_id='self', report_workspace_id=package_id, branch_id='main')
     retried = workflow.fork_remote_branch(bob, stores['bob'], profile_id='self', report_id='same-report', source_branch_id='main', branch_id='bob-review')
     assert not retried['inherited']
     assert retried['source_revision'] == original['revision']
@@ -102,7 +102,7 @@ def test_two_profiles_fork_edit_publish_same_report(tmp_path, monkeypatch):
         workflow.fork_remote_branch(alice, stores['alice'], profile_id='self', report_id='same-report', source_branch_id='bob-review', branch_id='owner-review')
     add_component(package_root=target, branch_id='bob-review', component_id='bob-after-reservation', kind='entry', title='',
                   parent_id='chapter', body='Not part of the reserved source', content=None, display_kind='')
-    workflow.publish_local_branch(bob, stores['bob'], profile_id='self', work_package_id=package_id, branch_id='bob-review')
+    workflow.publish_local_branch(bob, stores['bob'], profile_id='self', report_workspace_id=package_id, branch_id='bob-review')
     monkeypatch.setattr(workflow, 'download_bundle', real_download)
     imported = workflow.fork_remote_branch(alice, stores['alice'], profile_id='self', report_id='same-report', source_branch_id='bob-review', branch_id='owner-review')
     assert imported['source_revision'] == updated['branch']['revision']

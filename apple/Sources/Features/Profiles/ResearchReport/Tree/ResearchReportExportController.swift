@@ -7,12 +7,12 @@ enum ResearchReportExportController {
     static func export(
         format: ResearchReportExportFormat,
         profileID: String,
-        workPackageID: String,
+        reportWorkspaceID: String,
         branchID: String,
         title: String
     ) async throws {
         guard !profileID.isEmpty,
-              !workPackageID.isEmpty,
+              !reportWorkspaceID.isEmpty,
               !branchID.isEmpty else {
             throw ResearchReportExportError.missingReportIdentity
         }
@@ -27,7 +27,7 @@ enum ResearchReportExportController {
         try await BundledRuntimeActivator.waitUntilReady()
         let request = ResearchReportExportRequest(
             profileID: profileID,
-            workPackageID: workPackageID,
+            reportWorkspaceID: reportWorkspaceID,
             branchID: branchID,
             format: format
         )

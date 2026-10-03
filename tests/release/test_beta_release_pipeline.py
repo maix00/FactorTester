@@ -14,9 +14,7 @@ def _runtime_repo(root: Path) -> Path:
     for relative in (
         "tools/cli/pyproject.toml",
         "tools/cli/tools/app.py",
-        "tools/cli/agent-harness/pyproject.toml",
-        "tools/cli/agent-harness/cli_anything/harness.py",
-        "skills/cli-anything-factortester-research/SKILL.md",
+        "skills/factortester-research-skill/SKILL.md",
     ):
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -89,7 +87,7 @@ def test_runtime_uses_one_frozen_binary_and_a_script_entrypoint() -> None:
     assert "RUNTIME_CACHE_SCHEMA = 8" in source
     assert "FACTORTESTER_ENTRYPOINT" in source
     assert '"--collect-data",\n                "tools.cli.release"' in source
-    assert "research_launcher.write_text" in source
+    assert "manager_launcher.write_text" in source
     assert "shutil.copy2(\n            bin_dir / \"factortester\"" not in source
 
 
@@ -110,9 +108,6 @@ def test_cached_runtime_is_reused_with_a_fresh_release_receipt(
     manager = cache / key / "bin/factortester-manager"
     manager.write_bytes(b"cached executable")
     manager.chmod(0o755)
-    harness = cache / key / "bin/cli-anything-factortester-research"
-    harness.write_bytes(b"cached executable")
-    harness.chmod(0o755)
     renderer = cache / key / "bin/factortester-report-renderer"
     renderer.write_bytes(b"cached executable")
     renderer.chmod(0o755)
@@ -226,8 +221,6 @@ def test_incomplete_or_corrupt_runtime_cache_is_rejected(tmp_path: Path) -> None
     cli.parent.mkdir(parents=True)
     cli.write_bytes(b"only one executable")
     assert assets._valid_runtime_cache(cached, "a" * 64) is False
-    harness = cached / "bin/cli-anything-factortester-research"
-    harness.write_bytes(b"harness")
     manager = cached / "bin/factortester-manager"
     manager.write_bytes(b"manager")
     manager.chmod(0o755)

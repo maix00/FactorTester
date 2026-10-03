@@ -6,7 +6,6 @@ import json
 
 import click
 
-from tools.cli.commands.client_research import client_research
 from tools.cli.commands.research_catalog import register_research_catalog_commands
 from tools.cli.commands.research_evidence import research_evidence
 from tools.cli.commands.research_report import report
@@ -143,15 +142,11 @@ def list_research_profiles(
 
 def register_research_domain(
     research: click.Group,
-    *,
-    graph_command: click.Command,
 ) -> None:
     """Attach all Research children without duplicating their implementations."""
     if "list" not in report.commands:
         report.add_command(list_research_reports)
     research.add_command(report, name="reports")
-    research.add_command(graph_command, name="graphs")
     research.add_command(research_evidence, name="evidence")
     research.add_command(research_profiles)
-    research.add_command(client_research, name="workspaces")
     register_research_catalog_commands(research)

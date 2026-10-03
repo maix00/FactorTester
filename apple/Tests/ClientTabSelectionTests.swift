@@ -74,7 +74,7 @@ final class ClientTabSelectionTests: XCTestCase {
         {
           "id":"research",
           "title":"研究",
-          "desc":"研究报告、研究图与研究身份",
+          "desc":"研究报告、证据与研究身份",
           "icon":"chart",
           "sfSymbol":"chart.xyaxis.line",
           "path":"/research?section=shared",
