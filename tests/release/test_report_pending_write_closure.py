@@ -97,7 +97,7 @@ def test_pending_cannot_render_or_commit_old_head(tmp_path: Path) -> None:
         content=None, display_kind="",
     )
     first = export_branch_report(
-        package_root=package, work_package_id="wp",
+        package_root=package, report_workspace_id="report-wp",
         branch_id="main", commit=False,
     )
     before = first["path"].read_bytes()
@@ -113,7 +113,7 @@ def test_pending_cannot_render_or_commit_old_head(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="submission_sequence 2"):
         export_branch_report(
-            package_root=package, work_package_id="wp",
+            package_root=package, report_workspace_id="report-wp",
             branch_id="main", commit=True,
         )
     assert first["path"].read_bytes() == before

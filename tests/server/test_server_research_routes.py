@@ -8,7 +8,7 @@ from urllib.request import Request, urlopen
 
 from server.manager import runtime as manager
 from server.manager.services.agent_workspace import ensure_server_profile_workspace
-from tools.cli.release.research_reporting.workspace import initialize_work_package
+from tools.cli.release.research_reporting.workspace import initialize_report_workspace
 
 PRINCIPAL = "GTHT@MaxJJW@392452984564"
 
@@ -29,13 +29,14 @@ def test_server_research_routes_read_owner_report(tmp_path: Path):
         executor_id=state.server_id,
     )
     workspace = ensure_server_profile_workspace(data_root, PRINCIPAL, profile_id)
-    initialize_work_package(
+    initialize_report_workspace(
         workspace_root=workspace,
-        work_package_id="report-one",
+        report_workspace_id="report-one",
+        report_id="report-report-one",
         branch_id="main",
         workspace_id=profile_id,
         title="路由报告",
-        branch_ref="graph-branch:report-one:main",
+        branch_ref="report-branch:main",
     )
     token = "server-research-token"
     state._sessions[state._token_hash(token)] = (

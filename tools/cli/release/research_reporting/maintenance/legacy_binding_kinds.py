@@ -33,5 +33,7 @@ def normalized_legacy_binding_kind(kind: str, target_ref: str) -> str:
         for prefix, replacement in _REFERENCE_KINDS.items():
             if target_ref.startswith(prefix):
                 return replacement
-        return "graph_reference"
+        raise ValueError(
+            f"legacy report binding has no supported reference kind: {target_ref}"
+        )
     return kind

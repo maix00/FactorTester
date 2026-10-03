@@ -125,7 +125,7 @@ migrate_factor_identities() {
     "$image" -c '
 set -eu
 export HOME=/state/home
-export PYTHONPATH=/opt/factortester/app/tools/cli/agent-harness:/opt/factortester/app
+export PYTHONPATH=/opt/factortester/app
 cd /opt/factortester/app
 gosu factortester python - <<"PY"
 import sqlite3
@@ -183,7 +183,7 @@ migrate_factor_control_identities() {
   [[ -f "$plan" ]] || { echo "factor control-domain plan is unavailable" >&2; exit 1; }
   "${compose[@]}" run --rm --no-deps --entrypoint /bin/sh factortester-public -lc '
 set -eu
-export PYTHONPATH=/opt/factortester/app/tools/cli/agent-harness:/opt/factortester/app
+export PYTHONPATH=/opt/factortester/app
 cd /opt/factortester/app
 python -m tools.migrations.migrate_factor_control_domain \
   --plan /state/factor-v2-control-plan.json
@@ -197,7 +197,7 @@ restore_factor_control_identities() {
   [[ -f "$marker" ]] || return 0
   "${compose[@]}" run --rm --no-deps --entrypoint /bin/sh factortester-public -lc '
 set -eu
-export PYTHONPATH=/opt/factortester/app/tools/cli/agent-harness:/opt/factortester/app
+export PYTHONPATH=/opt/factortester/app
 cd /opt/factortester/app
 python -m tools.migrations.migrate_factor_control_domain \
   --plan /state/factor-v2-control-plan.json --restore
@@ -214,7 +214,7 @@ restore_factor_identities() {
     "$image" -c '
 set -eu
 export HOME=/state/home
-export PYTHONPATH=/opt/factortester/app/tools/cli/agent-harness:/opt/factortester/app
+export PYTHONPATH=/opt/factortester/app
 cd /opt/factortester/app
 gosu factortester python - <<"PY"
 import sqlite3
@@ -282,7 +282,7 @@ if [ -z "$control_line" ]; then
   exit 1
 fi
 export FACTORTESTER_CONTROL_DATABASE_URL="${control_line#*=}"
-export PYTHONPATH=/opt/factortester/app/tools/cli/agent-harness:/opt/factortester/app
+export PYTHONPATH=/opt/factortester/app
 exec python -
 ' <<'PY'
 import os

@@ -43,7 +43,7 @@ from .research_report_scope import (
 @click.option("--json", "as_json", is_flag=True)
 def export_report(
     profile_id: str,
-    work_package_id: str,
+    report_workspace_id: str,
     branch_id: str,
     release_profile: Path | None,
     output_format: str,
@@ -55,7 +55,7 @@ def export_report(
     scope = resolve_branch_report_scope(
         client_root=load_profile_root(release_profile),
         profile_id=profile_id,
-        work_package_id=work_package_id,
+        report_workspace_id=report_workspace_id,
         branch_id=branch_id,
     )
     snapshot = load_authoring(scope)

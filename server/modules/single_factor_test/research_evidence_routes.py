@@ -4,10 +4,11 @@ from flask import jsonify, request
 
 from server.modules.single_factor_test import sft_bp
 from server.services.research_evidence_registry import (
-    admit_evidence, admit_evidence_for_graph,
+    admit_evidence,
     get_evidence,
 )
 from server.services.research_evidence_catalog import (
+    change_evidence_status,
     attach_tag,
     capture_job_source,
     create_evidence,
@@ -22,8 +23,6 @@ from server.services.research_evidence_catalog import (
     retire_tag,
     search_evidence,
     update_tag,
-    finalize_lifecycle_transition,
-    prepare_lifecycle_transition,
 )
 from server.services.session_runtime import require_user
 
@@ -247,42 +246,6 @@ def read_research_evidence(evidence_ref: str):
     return jsonify({"success": True, "evidence": value})
 
 
-@sft_bp.post("/api/research-evidence/<path:evidence_ref>/lifecycle/prepare")
-def prepare_research_evidence_lifecycle(evidence_ref: str):
-    data = request.get_json(silent=True) or {}
-    try:
-        value = prepare_lifecycle_transition(
-            owner=require_user(),
-            evidence_ref=evidence_ref,
-            action=str(data.get("action") or ""),
-            reason_zh=data.get("reason_zh"),
-            profile_ref=str(data.get("profile_ref") or ""),
-            agent_id=str(data.get("agent_id") or ""),
-            instance_id=str(data.get("instance_id") or ""),
-            branch_id=str(data.get("branch_id") or ""),
-            parent_id=str(data.get("parent_id") or ""),
-        )
-    except (KeyError, TypeError, ValueError) as exc:
-        return jsonify({"success": False, "error": str(exc)}), 409
-    return jsonify({"success": True, "transition": value}), 201
-
-
-@sft_bp.post(
-    "/api/research-evidence/lifecycle/<path:transition_ref>/finalize"
-)
-def finalize_research_evidence_lifecycle(transition_ref: str):
-    data = request.get_json(silent=True) or {}
-    try:
-        value = finalize_lifecycle_transition(
-            owner=require_user(),
-            transition_ref=transition_ref,
-            report_receipt=data.get("report_receipt"),
-        )
-    except (KeyError, TypeError, ValueError) as exc:
-        return jsonify({"success": False, "error": str(exc)}), 409
-    return jsonify({"success": True, "lifecycle": value})
-
-
 @sft_bp.post("/api/research-evidence/<path:evidence_ref>/admissions")
 def admit_research_evidence(evidence_ref: str):
     data = request.get_json(silent=True) or {}
@@ -299,21 +262,21 @@ def admit_research_evidence(evidence_ref: str):
     return jsonify({"success": True, "admission": value}), 201
 
 
-@sft_bp.post("/api/research-evidence/<path:evidence_ref>/graph-admissions")
-def admit_research_evidence_for_graph(evidence_ref: str):
-    """Derive the target scope from an owned Graph branch on the server."""
+@sft_bp.post("/api/research-evidence/<path:evidence_ref>/status")
+def change_research_evidence_status(evidence_ref: str):
     data = request.get_json(silent=True) or {}
     try:
-        value = admit_evidence_for_graph(
-            owner=require_user(), evidence_ref=evidence_ref,
-            instance_id=str(data.get("instance_id") or ""),
-            branch_id=str(data.get("branch_id") or ""),
-            qualification=str(data.get("qualification") or ""),
-            note=str(data.get("note") or ""),
+        owner = require_user()
+        value = change_evidence_status(
+            owner=owner, evidence_ref=evidence_ref,
+            action=str(data.get("action") or ""),
+            reason_zh=str(data.get("reason_zh") or ""),
+            profile_ref=owner,
+            operation_id=str(data.get("operation_id") or ""),
         )
     except (KeyError, TypeError, ValueError) as exc:
         return jsonify({"success": False, "error": str(exc)}), 409
-    return jsonify({"success": True, "admission": value}), 201
+    return jsonify({"success": True, "lifecycle": value})
 
 
 def _time_window():

@@ -39,12 +39,8 @@ from . import (  # noqa: F401
     group,
     ic,
     job_port_routes,
-    research_graph_routes,
     research_jobs,
-    research_result_report_routes,
-    research_step_routes,
     run_input_routes,
     setting_instance_routes,
     supplemental_routes,
-    trial_plan_revision_routes,
 )

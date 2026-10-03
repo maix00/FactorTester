@@ -300,38 +300,6 @@ def test_registration_rejects_an_organization_outside_manager_scope(
         state.register("public_user", "secret", "default")
 
 
-def test_profile_research_reads_manager_projection_without_business_port(
-    tmp_path, monkeypatch,
-) -> None:
-    state = authenticated_state(tmp_path)
-    calls = []
-    monkeypatch.setattr(
-        "server.manager.http.profile_research_routes."
-        "ProfileResearchProjection.list_research",
-        lambda _self, **values: calls.append(values) or {"items": []},
-    )
-    monkeypatch.setattr(
-        state.gateway, "request",
-        lambda **_values: pytest.fail("profile research must not use a business port"),
-    )
-    with running_manager(state) as base_url:
-        request_value = Request(
-            f"{base_url}/api/profile-research?lifecycle=active&limit=200",
-            headers={"Authorization": "Bearer user-token"},
-        )
-        with urlopen(request_value) as response:
-            value = json.loads(response.read())
-
-    assert value["success"] is True
-    assert calls == [{
-        "owner": "user@1",
-        "workspace_ref": "",
-        "lifecycle": "active",
-        "limit": 200,
-        "after": "",
-    }]
-
-
 @pytest.mark.parametrize(
     ("path", "method_name"),
     (
@@ -471,44 +439,6 @@ def test_factor_source_detail_does_not_hydrate_an_unreadable_owner(
         ))
 
     assert raised.value.code == 403
-
-
-def test_research_lifecycle_patch_uses_manager_database(tmp_path, monkeypatch) -> None:
-    state = authenticated_state(tmp_path)
-    calls = []
-    monkeypatch.setattr(
-        "server.manager.http.profile_research_routes.transition_lifecycle",
-        lambda **values: calls.append(values) or {
-            "lifecycle": "archived", "revision": 8,
-        },
-    )
-    monkeypatch.setattr(
-        state.gateway, "request",
-        lambda **_values: pytest.fail("profile research must not use a business port"),
-    )
-    body = b'{"target":"archived","expected_revision":7}'
-    with running_manager(state) as base_url:
-        with urlopen(Request(
-            f"{base_url}/api/profile-research/work-package%3Aone/lifecycle?port=8141",
-            data=body,
-            method="PATCH",
-            headers={
-                "Authorization": "Bearer user-token",
-                "Content-Type": "application/json",
-            },
-        )) as response:
-            value = json.loads(response.read())
-
-    assert value["lifecycle"] == "archived"
-    assert response.headers["ETag"]
-    assert calls == [{
-        "owner": "user@1",
-        "work_package_ref": "work-package:one",
-        "target": "archived",
-        "expected_revision": 7,
-        "actor": "user@1",
-        "reason": "",
-    }]
 
 
 def test_strategy_library_patch_uses_manager_application_route(tmp_path) -> None:
@@ -1538,9 +1468,49 @@ def test_ensure_self_profile_repairs_kind_without_losing_profile_content(
     assert receipt["profile"]["profile_kind"] == "self"
     assert receipt["profile"]["display_name"] == "self"
     assert receipt["profile"]["agents"] == [{"agent_id": "research-agent"}]
-    assert receipt["profile"]["research_records"] == [
-        {"record_id": "report-one"},
-    ]
+    assert "research_records" not in receipt["profile"]
+
+
+def test_local_report_discovery_uses_report_manifest_not_profile_history(
+    tmp_path,
+) -> None:
+    from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
+    from tools.cli.release.research_reporting.workspace import (
+        initialize_report_workspace,
+    )
+
+    client_root = tmp_path / "client"
+    workspace_root = tmp_path / "workspace"
+    profiles = LocalProfileStore(client_root)
+    profiles.save(new_local_profile(
+        profile_id="self",
+        display_name="self",
+        workspace_root=workspace_root,
+        principal_ref="user@1",
+    ))
+    initialize_report_workspace(
+        workspace_root=workspace_root,
+        report_workspace_id="report-duration",
+        report_id="report:v1:duration",
+        branch_id="main",
+        workspace_id="workspace-1",
+        title="固收基金久期研究",
+        branch_ref="report-branch:main",
+    )
+
+    service = ClientStateService(
+        client_root,
+        control_store=None,
+        profile_cache_root=tmp_path / "profile-cache",
+    )
+    reports = service.local_research("user@1")
+
+    assert len(reports) == 1
+    assert reports[0]["local_ref"] == "report-duration:main"
+    assert reports[0]["report_workspace_id"] == "report-duration"
+    assert reports[0]["report_id"] == "report:v1:duration"
+    assert reports[0]["title"] == "固收基金久期研究"
+    assert "record_id" not in reports[0]
 
 
 def test_profile_projection_flushes_after_postgres_recovers(tmp_path) -> None:
@@ -2280,7 +2250,6 @@ def test_web_shell_serves_every_frontend_deep_link_on_refresh(tmp_path) -> None:
         "/research/report%3Alocal",
         "/researches/research%3Amigrated%3Aone",
         "/evidence/evidence%3Aone",
-        "/research-graphs/graph%3Aone",
         "/jobs/job%3Aone",
         "/factor-series?factor_ref=factor%3Aone",
         "/reference?kind=factor&target=factor%3Aone",
@@ -2520,7 +2489,8 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'renderDisplayMath' in rich_text_blocks
     assert 'FTReportTables.render' in rich_text_blocks
     assert 'window.FTReportTables' in table_view
-    assert 'CHUNK_SIZE' in table_view
+    assert 'DEFAULT_PAGE_SIZE = 20' in table_view
+    assert 'window.FTUI.pagedTable' in table_view
     assert 'function markdownLinkAt' in rich_text
     assert 'function isFactorAliasToken' in rich_text
     assert 'const parseTableCells = line =>' in rich_text_blocks
@@ -2646,7 +2616,7 @@ def test_manager_navigation_is_role_filtered_and_nests_profiles_under_research(
     assert {
         item["id"] for item in user_modules["research"]["children"]
     } == {
-        "research.graph", "research.profiles",
+        "research.profiles",
         "research.agent-models", "research.reports", "research.evidence",
     }
     assert "research.researches" not in user_modules["research"]["children"]
@@ -3528,7 +3498,7 @@ def test_web_catalog_profile_and_settings_ignore_stale_async_responses(tmp_path)
     assert "if (!current(context)) return;" in scripts["catalog_details"]
 
 
-def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) -> None:
+def test_web_research_exposes_local_download_shared_and_report_pages(tmp_path) -> None:
     state = authenticated_state(tmp_path)
     with running_manager(state) as base_url:
         with urlopen(
@@ -3545,10 +3515,6 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
             shared_page = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/app/coordinator.js") as response:
             shell = response.read().decode("utf-8")
-        with urlopen(f"{base_url}/research-static/research/graph.js") as response:
-            graph = response.read().decode("utf-8")
-        with urlopen(f"{base_url}/research-static/research/graph-list.js") as response:
-            graph_list = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research/reports.js") as response:
             reports = response.read().decode("utf-8")
         with urlopen(f"{base_url}/research-static/research/researches.js") as response:
@@ -3586,21 +3552,13 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
 
     assert '["researches", "研究"]' in workspaces
     assert 'context.setHeading(context.t("研究台")' in workspaces
-    assert '["graph", "研究图"]' in workspaces
     assert '["agent-models", "智能体模型"]' in workspaces
     assert 'FTAgentModels.list' in workspaces
     assert "FTResearchCatalog.render({...context, content: body}, body)" in workspaces
-    assert "FTResearchGraphList.render(context, body)" in workspaces
     assert "window.FTResearchLocal" in local_page
     assert "clientDownload(context" in local_page
     assert "window.FTResearchShared" in shared_page
     assert "resolvePublicationSource(item, localByReportID, embedded)" in shared_page
-    assert "window.FTResearchGraph" in graph
-    assert "async function render(context, mount)" in graph
-    assert "FTUI.pagedTable" in graph_list
-    assert "FTMultiSelectFilter.create" in graph_list
-    assert 'path("/user-library/subordinates")' in graph_list
-    assert "research-graphs/${encodeURIComponent" in graph_list
     assert "FTUI.pagedTable" in reports
     assert "我的研究报告" in reports
     assert "下级用户的研究报告" in reports
@@ -3665,7 +3623,6 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert 'context.t("返回研究")' not in researches
     assert "card.append(note, downloadChoices(context, value))" in local_page
     assert 'section.className = "job-section client-download"' not in local_page
-    assert 'note.className = "secondary research-graph-list-note"' in graph_list
     assert "source_server_ids" in profile_directory
     assert "直属下级研究身份的 Agent 会话默认对直属上级只读可见" in profile_directory_detail
     assert "profile-conversation-sharing" not in profile_directory_detail
@@ -3685,7 +3642,6 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert 'url.searchParams.delete("profile")' in workspaces
     assert 'context.isRouteCurrent?.() === false' in local_page
     assert 'context.isRouteCurrent?.() === false' in shared_page
-    assert 'context.isRouteCurrent?.() !== false' in graph
     assert "body.replaceChildren();" in workspaces
     assert 'context.content.append(body)' not in workspaces
     assert "clientDownload(context" in local_page
@@ -3709,8 +3665,8 @@ def test_web_research_exposes_local_download_shared_and_graph_pages(tmp_path) ->
     assert 'access_basis === "research"' in report_entry
     assert ".page-agent-drawer-close" in app_styles
     assert "background: transparent" in app_styles
-    assert 'infoLine.className = "research-report-info-line"' in report_entry
-    assert 'content.replaceChildren(infoLine, layout, rail)' in report_entry
+    assert 'line.className = "research-report-info-line"' in reports
+    assert 'root.append(infoLine, body)' in reports
     assert 'toolbar.append(branchPicker)' not in report_entry
     assert "research-graphs" not in shell
     assert 'parts[1] === "work"' not in shell

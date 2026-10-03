@@ -435,17 +435,13 @@ def bootstrap_profile(
         discovered = False
         store.save(candidate)
     store.bind_session(profile_id, principal_ref=principal_ref)
-    scope = (
-        {"workspace_id": "all"}
-        if role == "planning"
-        else {"instance_id": "unbound", "branch_id": "unbound"}
-    )
+    scope = {"workspace_id": "unbound"}
     profile = store.upsert_agent(profile_id, {
         "agent_id": agent_id,
         "role": role,
         "scope": scope,
         "status": "needs_scope",
-        "next_action": "Bind a real workspace or research instance and branch.",
+        "next_action": "Bind an authorized research workspace before execution.",
     })
     claim = store.claim_agent(profile_id, agent_id)
     profile = store.load(profile_id)
@@ -584,47 +580,6 @@ def bind_profile_initialization_source(
     })))
 
 
-@client_profile.group("history")
-def profile_history() -> None:
-    """Manage compact local research/report references."""
-
-
-@profile_history.command("list")
-@click.argument("profile_id")
-@_root_option
-@friendly_errors
-def list_profile_history(
-    profile_id: str,
-    release_profile: Path | None,
-) -> None:
-    profile = LocalProfileStore(
-        load_profile_root(release_profile)
-    ).load(profile_id)
-    click.echo(_json(profile["research_records"]))
-
-
-@profile_history.command("upsert")
-@click.argument("profile_id")
-@click.option(
-    "--record",
-    required=True,
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-)
-@_root_option
-@friendly_errors
-def upsert_profile_history(
-    profile_id: str,
-    record: Path,
-    release_profile: Path | None,
-) -> None:
-    value = read_json(record)
-    if not isinstance(value, dict):
-        raise ValueError("research record must be an object")
-    click.echo(_json(LocalProfileStore(
-        load_profile_root(release_profile)
-    ).upsert_research_record(profile_id, value)))
-
-
 @client_profile.group("agent")
 def profile_agent() -> None:
     """Configure provider-neutral local Agent identities."""
@@ -639,8 +594,6 @@ def profile_agent() -> None:
     required=True,
 )
 @click.option("--workspace-id", default="")
-@click.option("--instance-id", default="")
-@click.option("--branch-id", default="")
 @_root_option
 @friendly_errors
 def set_profile_agent(
@@ -648,20 +601,13 @@ def set_profile_agent(
     agent_id: str,
     role: str,
     workspace_id: str,
-    instance_id: str,
-    branch_id: str,
     release_profile: Path | None,
 ) -> None:
-    scope = (
-        {"workspace_id": workspace_id}
-        if role == "planning"
-        else {"instance_id": instance_id, "branch_id": branch_id}
-    )
     store = LocalProfileStore(load_profile_root(release_profile))
     click.echo(_json(store.upsert_agent(profile_id, {
         "agent_id": agent_id,
         "role": role,
-        "scope": scope,
+        "scope": {"workspace_id": workspace_id},
     })))
 
 

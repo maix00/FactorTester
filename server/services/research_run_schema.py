@@ -1,8 +1,25 @@
-"""Cold-path schema creation and upgrade for immutable ResearchRuns."""
+"""Cold-path schema for immutable factor ResearchRuns."""
 
 from __future__ import annotations
 
 import sqlite3
+
+
+_RETIRED_RUN_COLUMNS = (
+    "graph_instance_id",
+    "graph_branch_id",
+    "graph_execution_node",
+    "trial_stage_id",
+    "decision_contract_hash",
+    "methodology_hash",
+    "evidence_action_id",
+    "evidence_action_binding_hash",
+    "evidence_action_binding_json",
+)
+_RETIRED_INDEXES = (
+    "idx_research_runs_owner_graph_branch",
+    "idx_research_runs_action_member",
+)
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
@@ -18,6 +35,12 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             )
         if "lifecycle_policy" in columns:
             _remove_legacy_lifecycle(conn)
+        retired = columns.intersection(_RETIRED_RUN_COLUMNS)
+        if retired:
+            raise RuntimeError(
+                "retired Run columns require the backed-up schema cutover "
+                "before this server can start: " + ", ".join(sorted(retired))
+            )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS research_runs (
@@ -30,24 +53,22 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             run_spec_version INTEGER NOT NULL,
             run_spec_hash TEXT NOT NULL,
             run_spec_json TEXT NOT NULL,
-            decision_contract_hash TEXT NOT NULL DEFAULT '',
-            methodology_hash TEXT NOT NULL DEFAULT '',
             trial_plan_id TEXT NOT NULL DEFAULT '',
             trial_plan_hash TEXT NOT NULL DEFAULT '',
             trial_plan_schema_version INTEGER NOT NULL DEFAULT 0,
             trial_plan_version INTEGER NOT NULL DEFAULT 0,
             trial_role TEXT NOT NULL DEFAULT '',
             trial_stage TEXT NOT NULL DEFAULT '',
-            trial_stage_id TEXT NOT NULL DEFAULT '',
             comparison_id TEXT NOT NULL DEFAULT '',
-            graph_instance_id TEXT NOT NULL DEFAULT '',
-            graph_branch_id TEXT NOT NULL DEFAULT '',
-            graph_execution_node TEXT NOT NULL DEFAULT '',
             sample_ref TEXT NOT NULL DEFAULT '',
             sample_hash TEXT NOT NULL DEFAULT '',
-            evidence_action_id TEXT NOT NULL DEFAULT '',
-            evidence_action_binding_hash TEXT NOT NULL DEFAULT '',
-            evidence_action_binding_json TEXT NOT NULL DEFAULT '{}',
+            sample_identity_hash TEXT NOT NULL DEFAULT '',
+            sample_start TEXT NOT NULL DEFAULT '',
+            sample_end TEXT NOT NULL DEFAULT '',
+            sample_universe_hash TEXT NOT NULL DEFAULT '',
+            sample_universe_members_json TEXT NOT NULL DEFAULT '',
+            sample_design_context_hash TEXT NOT NULL DEFAULT '',
+            sample_identity_assurance TEXT NOT NULL DEFAULT '',
             report_binding_json TEXT NOT NULL DEFAULT '{}',
             created_at REAL NOT NULL
         )
@@ -56,30 +77,22 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     columns = _columns(conn)
     additions = (
         ("trial_plan_id", "TEXT NOT NULL DEFAULT ''"),
-        ("decision_contract_hash", "TEXT NOT NULL DEFAULT ''"),
-        ("methodology_hash", "TEXT NOT NULL DEFAULT ''"),
         ("trial_plan_hash", "TEXT NOT NULL DEFAULT ''"),
         ("trial_plan_schema_version", "INTEGER NOT NULL DEFAULT 0"),
         ("trial_plan_version", "INTEGER NOT NULL DEFAULT 0"),
         ("trial_role", "TEXT NOT NULL DEFAULT ''"),
         ("trial_stage", "TEXT NOT NULL DEFAULT ''"),
-        ("trial_stage_id", "TEXT NOT NULL DEFAULT ''"),
         ("comparison_id", "TEXT NOT NULL DEFAULT ''"),
-        ("graph_instance_id", "TEXT NOT NULL DEFAULT ''"),
-        ("graph_branch_id", "TEXT NOT NULL DEFAULT ''"),
-        ("graph_execution_node", "TEXT NOT NULL DEFAULT ''"),
         ("sample_ref", "TEXT NOT NULL DEFAULT ''"),
         ("sample_hash", "TEXT NOT NULL DEFAULT ''"),
-        ("evidence_action_id", "TEXT NOT NULL DEFAULT ''"),
-        ("evidence_action_binding_hash", "TEXT NOT NULL DEFAULT ''"),
-        ("evidence_action_binding_json", "TEXT NOT NULL DEFAULT '{}'"),
-        ("report_binding_json", "TEXT NOT NULL DEFAULT '{}'"),
         ("sample_identity_hash", "TEXT NOT NULL DEFAULT ''"),
         ("sample_start", "TEXT NOT NULL DEFAULT ''"),
         ("sample_end", "TEXT NOT NULL DEFAULT ''"),
         ("sample_universe_hash", "TEXT NOT NULL DEFAULT ''"),
+        ("sample_universe_members_json", "TEXT NOT NULL DEFAULT ''"),
         ("sample_design_context_hash", "TEXT NOT NULL DEFAULT ''"),
         ("sample_identity_assurance", "TEXT NOT NULL DEFAULT ''"),
+        ("report_binding_json", "TEXT NOT NULL DEFAULT '{}'"),
     )
     for column, declaration in additions:
         if column not in columns:
@@ -91,26 +104,19 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         "ON research_runs(owner, workspace_id, created_at)"
     )
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_research_runs_owner_graph_branch "
-        "ON research_runs(owner, graph_branch_id, created_at)"
-    )
-    conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_research_runs_owner_sample_scope "
         "ON research_runs(owner, sample_universe_hash, sample_start, sample_end)"
     )
     conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_research_runs_action_member "
-        "ON research_runs(owner, graph_branch_id, trial_plan_hash, "
-        "evidence_action_id, run_spec_hash) WHERE evidence_action_id<>''"
+        "CREATE INDEX IF NOT EXISTS idx_research_runs_owner_sample_dates "
+        "ON research_runs(owner, sample_start, sample_end)"
     )
 
 
 def _columns(conn: sqlite3.Connection) -> set[str]:
     return {
         str(row["name"])
-        for row in conn.execute(
-            "PRAGMA table_info(research_runs)"
-        ).fetchall()
+        for row in conn.execute("PRAGMA table_info(research_runs)").fetchall()
     }
 
 
@@ -128,31 +134,6 @@ def _remove_legacy_lifecycle(conn: sqlite3.Connection) -> None:
             run_spec_version INTEGER NOT NULL,
             run_spec_hash TEXT NOT NULL,
             run_spec_json TEXT NOT NULL,
-            decision_contract_hash TEXT NOT NULL DEFAULT '',
-            methodology_hash TEXT NOT NULL DEFAULT '',
-            trial_plan_id TEXT NOT NULL DEFAULT '',
-            trial_plan_hash TEXT NOT NULL DEFAULT '',
-            trial_plan_schema_version INTEGER NOT NULL DEFAULT 0,
-            trial_plan_version INTEGER NOT NULL DEFAULT 0,
-            trial_role TEXT NOT NULL DEFAULT '',
-            trial_stage TEXT NOT NULL DEFAULT '',
-            trial_stage_id TEXT NOT NULL DEFAULT '',
-            comparison_id TEXT NOT NULL DEFAULT '',
-            graph_instance_id TEXT NOT NULL DEFAULT '',
-            graph_branch_id TEXT NOT NULL DEFAULT '',
-            graph_execution_node TEXT NOT NULL DEFAULT '',
-            sample_ref TEXT NOT NULL DEFAULT '',
-            sample_hash TEXT NOT NULL DEFAULT '',
-            sample_identity_hash TEXT NOT NULL DEFAULT '',
-            sample_start TEXT NOT NULL DEFAULT '',
-            sample_end TEXT NOT NULL DEFAULT '',
-            sample_universe_hash TEXT NOT NULL DEFAULT '',
-            sample_design_context_hash TEXT NOT NULL DEFAULT '',
-            sample_identity_assurance TEXT NOT NULL DEFAULT '',
-            evidence_action_id TEXT NOT NULL DEFAULT '',
-            evidence_action_binding_hash TEXT NOT NULL DEFAULT '',
-            evidence_action_binding_json TEXT NOT NULL DEFAULT '{}',
-            report_binding_json TEXT NOT NULL DEFAULT '{}',
             created_at REAL NOT NULL
         );
         INSERT INTO research_runs (

@@ -40,7 +40,7 @@ handshake verification remain deployment-owned and are not inferred by the
 Manager CLI or this contract.
 
 The Manager CLI is intentionally limited to FactorTester application actions:
-`jobs`, `artifacts`, `storage`, `transfers`, `devices`, `research-graph`,
+`jobs`, `artifacts`, `storage`, `transfers`, `devices`,
 server health/federation status, and Manager-owned `services`. It does not
 expose host restart, container lifecycle, tunnel changes, source transfer, or
 deployment commands. Those actions use a separately authorized operator tool

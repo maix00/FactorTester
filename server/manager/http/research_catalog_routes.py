@@ -366,7 +366,6 @@ class ResearchCatalogRoutesMixin(ResearchBranchRoutesMixin):
                     evidence_ref=data.get("evidence_ref"),
                     evidence_owner_ref=str(data.get("evidence_owner_ref") or ""),
                     report_id=str(data.get("report_id") or ""),
-                    graph_ref=str(data.get("graph_ref") or ""),
                     branch_ref=str(data.get("branch_ref") or ""),
                     job_id=str(data.get("job_id") or ""),
                     profile_ref=str(data.get("profile_ref") or ""),

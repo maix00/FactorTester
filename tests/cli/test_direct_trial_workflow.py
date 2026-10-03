@@ -63,7 +63,7 @@ def test_agent_can_create_a_direct_trial_plan_binding(
     assert payload["output"] == str(output)
     report_action = payload["next_actions"][1]
     assert "--profile <profile>" in report_action["command"]
-    assert "--work-package-id <id>" in report_action["command"]
+    assert "--report-workspace-id <id>" in report_action["command"]
     assert "--branch-id <branch>" in report_action["command"]
     assert "--report-parent-id <component>" in report_action["command"]
     assert "报告 ID" in report_action["description_zh"]

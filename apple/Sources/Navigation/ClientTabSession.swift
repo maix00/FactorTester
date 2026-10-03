@@ -5,7 +5,6 @@ enum ResearchModuleSection: String, CaseIterable, Identifiable {
     case researches
     case evidence
     case reports
-    case graph
     case profiles
     case agentModels = "agent-models"
 
@@ -37,8 +36,6 @@ final class ClientTabSession: ObservableObject {
     /// Web section callback must not reload the already-rendered WebView.
     /// A later mount still reads the value and restores the selected section.
     var researchSection = ResearchModuleSection.researches
-    @Published var researchLifecycle = ResearchLifecycleFilter.active
-    @Published var selectedBranchID = ""
     /// Detail values survive tab view unmounting without retaining any native
     /// text views, charts, or web content processes.
     @Published var jobDetails: [String: TestJobDetail] = [:]
@@ -72,7 +69,6 @@ final class ClientTabSession: ObservableObject {
 final class ResearchReportTabSession {
     var generation: Int?
     var selectedChapterID = ""
-    var appliedGraphNavigationID = ""
 }
 
 final class ClientTabSessionStore: ObservableObject {

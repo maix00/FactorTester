@@ -1,4 +1,4 @@
-"""Create and append structured report components in a Work Package."""
+"""Create and append structured report components in a Report Workspace."""
 
 from __future__ import annotations
 
@@ -18,7 +18,6 @@ from .research_report_content_structure import (
 )
 from .research_report_component import add_report_component
 from .research_report_component_removal import remove_report_component
-from .research_report_graph_guard import validate_graph_bound_mutations
 from .research_report_mutation_guide import report_mutation_guide
 from .research_report_scope import (
     ensure_authoring, load_current_authoring, persist_descriptor,
@@ -45,11 +44,11 @@ def register_authoring_commands(group: click.Group) -> None:
 @scope_options
 @click.option("--json", "as_json", is_flag=True)
 def create_report(
-    profile_id: str, work_package_id: str, branch_id: str,
+    profile_id: str, report_workspace_id: str, branch_id: str,
     release_profile: Path | None, as_json: bool,
 ) -> None:
     """Initialize the exact branch-owned structured report source."""
-    scope = _scope(profile_id, work_package_id, branch_id, release_profile)
+    scope = _scope(profile_id, report_workspace_id, branch_id, release_profile)
     result = ensure_authoring(scope, materialize=False)
     git = commit_branch_authoring(scope.package_root, message="Initialize report tree")
     output({
@@ -66,14 +65,14 @@ def create_report(
 @click.option("--alt-text", default="")
 @click.option("--json", "as_json", is_flag=True)
 def add_report_asset(
-    profile_id: str, work_package_id: str, branch_id: str,
+    profile_id: str, report_workspace_id: str, branch_id: str,
     release_profile: Path | None, asset_file: Path | None, as_json: bool,
     source_path: Path | None = None, caption: str = "", alt_text: str = "",
 ) -> None:
     """向指定分支登记图片；随后用 image 部件引用返回的 asset_ref。"""
     if (asset_file is None) == (source_path is None):
         raise click.UsageError("--input 与 --asset-file 必须且只能提供一个")
-    scope = _scope(profile_id, work_package_id, branch_id, release_profile)
+    scope = _scope(profile_id, report_workspace_id, branch_id, release_profile)
     ensure_authoring(scope, materialize=False, persist=False)
     if source_path is not None:
         from tools.cli.release.research_reporting.assets import stage_branch_image
@@ -85,7 +84,7 @@ def add_report_asset(
         raise click.ClickException("--asset-file must contain a JSON object")
     try:
         saved = register_branch_asset(
-            package_root=scope.package_root, work_package_id=work_package_id,
+            package_root=scope.package_root, report_workspace_id=report_workspace_id,
             branch_id=branch_id, asset=asset, materialize=False,
         )
     except ValueError as error:
@@ -103,14 +102,14 @@ def add_report_asset(
     help="修正被拦截的提交时必须复用 CLI 返回的提交序号",
 )
 @click.option("--json", "as_json", is_flag=True)
-def add_report_batch(profile_id: str, work_package_id: str, branch_id: str, release_profile: Path | None, operations_file: Path, submission_sequence: int | None, as_json: bool) -> None:
+def add_report_batch(profile_id: str, report_workspace_id: str, branch_id: str, release_profile: Path | None, operations_file: Path, submission_sequence: int | None, as_json: bool) -> None:
     """Apply related report operations under one HEAD generation.
 
     ``op=replace`` requires component_id, title, body, content, and
     display_kind. It preserves the component's kind, parent, and children.
     Agent-authored bindings are rejected; write typed links in report fields.
     """
-    scope = _scope(profile_id, work_package_id, branch_id, release_profile)
+    scope = _scope(profile_id, report_workspace_id, branch_id, release_profile)
     ensure_authoring(scope, materialize=False, persist=False)
     payload = read_json(operations_file)
     operations = payload.get("operations") if isinstance(payload, dict) else None
@@ -132,16 +131,11 @@ def add_report_batch(profile_id: str, work_package_id: str, branch_id: str, rele
         saved = load_current_authoring(scope)
     else:
         try:
-            validate_graph_bound_mutations(
-                scope,
-                operations=enriched,
-                historical_review=historical_review,
-            )
             validate_titled_chapter_content(
                 load_current_authoring(scope), enriched,
             )
             apply_branch_batch(
-                package_root=scope.package_root, work_package_id=work_package_id,
+                package_root=scope.package_root, report_workspace_id=report_workspace_id,
                 branch_id=branch_id, operations=enriched, materialize=False,
                 submission=submission,
             )
@@ -172,8 +166,8 @@ def add_report_batch(profile_id: str, work_package_id: str, branch_id: str, rele
     }, as_json)
 
 
-def _scope(profile_id: str, work_package_id: str, branch_id: str, release_profile: Path | None):
+def _scope(profile_id: str, report_workspace_id: str, branch_id: str, release_profile: Path | None):
     return resolve_branch_report_scope(
         client_root=load_profile_root(release_profile), profile_id=profile_id,
-        work_package_id=work_package_id, branch_id=branch_id,
+        report_workspace_id=report_workspace_id, branch_id=branch_id,
     )

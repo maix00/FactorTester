@@ -24,7 +24,6 @@
           parent_id: null,
           title: chapter.title || "",
           created_at: chapter.created_at,
-          graph_version: chapter.graph_version,
           preview: chapter.preview || "",
         },
         children: [],

@@ -76,7 +76,6 @@ struct LocalProfileModel: Identifiable {
     let initializationSources: [LocalInitializationSourceModel]
     let agents: [LocalAgentModel]
     let principalRef: String
-    let researchRecords: [ResearchRecordModel]
     let factorWorkspaceBinding: FactorWorkspaceBindingModel?
 
     init(json: [String: Any]) {
@@ -96,24 +95,8 @@ struct LocalProfileModel: Identifiable {
         ).map(LocalInitializationSourceModel.init)
         agents = (json["agents"] as? [[String: Any]] ?? [])
             .map(LocalAgentModel.init)
-        researchRecords = (
-            json["research_records"] as? [[String: Any]] ?? []
-        ).map(ResearchRecordModel.init)
         factorWorkspaceBinding = FactorWorkspaceBindingModel(
             json: json["factor_workspace_binding"] as? [String: Any] ?? [:]
         )
-    }
-
-    func owns(workPackageRef: String) -> Bool {
-        return researchRecords.contains { record in
-            guard record.graphInstanceRef == workPackageRef,
-                  let agent = agents.first(where: {
-                      $0.id == record.agentID && $0.role == "research"
-                  }) else { return false }
-            guard !record.graphBranchRef.isEmpty else { return true }
-            return record.graphBranchRef == (
-                "graph-branch:\(agent.instanceID):\(agent.branchID)"
-            )
-        }
     }
 }

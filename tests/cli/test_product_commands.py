@@ -322,7 +322,7 @@ def test_product_group_creation_freezes_profile_and_research_refs(
         "--name", "硅产业",
         "--path", "Products/Futures/CNFutures/_products/SI.GFE",
         "--profile-id", "maxa",
-        "--research-ref", "work-package:research-one",
+        "--research-ref", "report-workspace:research-one",
     ])
 
     assert result.exit_code == 0, result.output
@@ -330,7 +330,7 @@ def test_product_group_creation_freezes_profile_and_research_refs(
         "name": "硅产业",
         "paths": ["Products/Futures/CNFutures/_products/SI.GFE"],
         "profile_id": "maxa",
-        "research_refs": ("work-package:research-one",),
+        "research_refs": ("report-workspace:research-one",),
     }
 
 

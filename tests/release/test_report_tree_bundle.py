@@ -82,7 +82,7 @@ def test_bundle_publication_is_detached_private_and_immutable(tmp_path, monkeypa
     monkeypatch.setattr(module, 'resolve_branch_report_scope', lambda **kwargs: SimpleNamespace(
         package_root=source, profile={'session_binding': {'principal_ref': 'alice'}}))
     monkeypatch.setattr(client, 'sync_pending', lambda **kwargs: [{'status': 'pending_sync'}])
-    client.publish(profile_id='self', work_package_id='source', branch_id='main', visibility='private', include_authoring=True)
+    client.publish(profile_id='self', report_workspace_id='source', branch_id='main', visibility='private', include_authoring=True)
     operation = client.outbox.load(client.outbox.pending()[0]['operation_id'])
     projection = operation['projection']
     descriptor = projection['authoring_bundle']
@@ -111,7 +111,7 @@ def test_bundle_publication_is_detached_private_and_immutable(tmp_path, monkeypa
         library.sync({'report_id': 'same-report', 'owner_ref': 'alice',
                       'projection': {**projection, 'generation': head['generation'] + 1, 'projection_hash': 'different'}})
     with pytest.raises(ValueError, match='private'):
-        client.publish(profile_id='self', work_package_id='source', branch_id='main', visibility='public', include_authoring=True)
+        client.publish(profile_id='self', report_workspace_id='source', branch_id='main', visibility='public', include_authoring=True)
 
 
 def test_bundle_preserves_full_job_table_beyond_preview(tmp_path, monkeypatch):

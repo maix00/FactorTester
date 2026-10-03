@@ -188,8 +188,6 @@ def test_local_runtime_refresh_reuses_exact_revision_and_rebuilds_stale(
     cli.write_bytes(b"old")
     manager_cli = resources / "bin/factortester-manager"
     manager_cli.write_bytes(b"old")
-    research_cli = resources / "bin/cli-anything-factortester-research"
-    research_cli.write_bytes(b"old")
     report_renderer = resources / "bin/factortester-report-renderer"
     report_renderer.write_bytes(b"old")
     receipt = resources / "bundle-receipt.json"
@@ -203,7 +201,6 @@ def test_local_runtime_refresh_reuses_exact_revision_and_rebuilds_stale(
         calls.append((repo, target, version, source_revision))
         cli.write_bytes(b"new")
         manager_cli.write_bytes(b"new")
-        research_cli.write_bytes(b"new")
         report_renderer.write_bytes(b"new")
         return receipt
 
@@ -545,7 +542,7 @@ def test_embedded_runtime_writes_internal_hash_receipt(
     renderer_source = repo / "tools/cli/native/report_renderer.swift"
     renderer_source.parent.mkdir(parents=True)
     renderer_source.write_text("// renderer")
-    skill = repo / "skills/cli-anything-factortester-research/SKILL.md"
+    skill = repo / "skills/factortester-research-skill/SKILL.md"
     skill.parent.mkdir(parents=True)
     skill.write_text(
         "---\nname: factortester-research-skill\n"
@@ -613,7 +610,6 @@ def test_embedded_runtime_writes_internal_hash_receipt(
     assert '"version":"0.2.0"' in body
     assert '"bin/factortester"' in body
     assert '"bin/factortester-manager"' in body
-    assert '"bin/cli-anything-factortester-research"' in body
     assert '"bin/factortester-report-renderer"' in body
     assert '"adapters/vibe-trading-adapter.zip"' in body
     resources = app / "Contents/Resources/FactorTester"

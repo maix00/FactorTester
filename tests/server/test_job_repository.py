@@ -748,19 +748,16 @@ def test_job_detail_uses_one_read_for_pin_and_run_identity(
             INSERT INTO research_runs (
                 run_id, owner, workspace_id, configuration_id,
                 configuration_revision, kind, run_spec_version,
-                run_spec_hash, run_spec_json, decision_contract_hash,
-                methodology_hash, trial_plan_id, trial_plan_hash,
-                trial_plan_version, trial_role, trial_stage,
-                comparison_id, graph_instance_id, graph_branch_id,
+                run_spec_hash, run_spec_json, trial_plan_id, trial_plan_hash,
+                trial_plan_version, trial_role, trial_stage, comparison_id,
                 sample_ref, sample_hash, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "run-1", "alice", "workspace-1", "configuration-1",
                 1, "backtest", 2, _record("identity").run_spec_hash,
-                "{}", "1" * 64, "2" * 64, "trial-plan-1",
-                "3" * 64, 1, "selection", "selection",
-                "baseline", "instance-1", "branch-1",
+                "{}", "trial-plan-1", "3" * 64, 1, "selection",
+                "selection", "baseline",
                 "sample-1", "4" * 64, time.time(),
             ),
         )
@@ -797,13 +794,8 @@ def test_job_detail_uses_one_read_for_pin_and_run_identity(
     assert detail["job"].job_id == "detail-1"
     assert detail["pinned"] is True
     assert detail["trial_binding"]["trial_plan_hash"] == "3" * 64
-    assert detail["graph_binding"] == {
-        "instance_id": "instance-1",
-        "branch_id": "branch-1",
-    }
+    assert "graph_binding" not in detail
     assert detail["identity_refs"] == {
-        "contract_hash": "1" * 64,
-        "methodology_hash": "2" * 64,
         "trial_plan_hash": "3" * 64,
         "run_spec_hash": _record("identity").run_spec_hash,
     }

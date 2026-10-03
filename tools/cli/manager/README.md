@@ -23,7 +23,6 @@ Use `--help` at each boundary and `--json` for automation:
 - `transfers metrics` — inspect bounded 7997 transfer telemetry;
 - `devices list|summary|revoke` — inspect or explicitly revoke public-access
   devices;
-- `research-graph versions|active|set-default` — manage graph activation;
 - `services list|start|stop|restart-api|restart-bundle|force-stop` — control
   Manager-owned FactorTester services;
 - `client release` — build and publish an authorized FactorTester client release.

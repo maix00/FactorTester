@@ -471,7 +471,6 @@
         return FTResearchEvidence.detail(pageContext, pageContext.content, id);
       },
       docs: (pageContext, slug) => FTDocs.render(pageContext, slug),
-      researchGraph: (pageContext, id) => FTResearchGraphList.detail(pageContext, pageContext.content, id),
       remoteModule: route => remoteModule(location.pathname, moduleForPath(location.pathname)),
       // The task list is entered, not resumed: revalidate the active scope so
       // newly submitted tasks appear without pressing refresh (the cached page

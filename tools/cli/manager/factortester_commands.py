@@ -194,43 +194,6 @@ def storage_usage(as_json: bool) -> None:
     _echo(client.job_storage(), as_json)
 
 
-@manager.group("research-graph")
-def research_graph() -> None:
-    """Inspect and activate the server's default Research Graph version."""
-
-
-@research_graph.command("versions")
-@click.argument("graph_id")
-@click.option("--json", "as_json", is_flag=True)
-@friendly_errors
-def research_graph_versions(graph_id: str, as_json: bool) -> None:
-    client, _ = _authenticated_client()
-    _echo(client.research_graph_versions(graph_id), as_json)
-
-
-@research_graph.command("active")
-@click.argument("graph_id")
-@click.option("--json", "as_json", is_flag=True)
-@friendly_errors
-def research_graph_active(graph_id: str, as_json: bool) -> None:
-    client, _ = _authenticated_client()
-    _echo(client.active_research_graph(graph_id), as_json)
-
-
-@research_graph.command("set-default")
-@click.argument("graph_id")
-@click.argument("version", type=click.IntRange(1))
-@click.option("--json", "as_json", is_flag=True)
-@friendly_errors
-def set_default_research_graph(
-    graph_id: str,
-    version: int,
-    as_json: bool,
-) -> None:
-    client, _ = _authenticated_client()
-    _echo(client.activate_research_graph(graph_id, version), as_json)
-
-
 @manager.group("services")
 def services() -> None:
     """Control FactorTester service instances owned by this Manager."""

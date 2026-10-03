@@ -23,7 +23,7 @@ factortester <domain> --help
 | 测试配置 | `factortester workspace ...`、`run preview` | 编辑可复用配置、预览规范化结果 |
 | 测试提交 | `factortester run submit` | 冻结 RunSpec 并创建 Job |
 | 任务 | `factortester job list`、`status`、`config`、`result`、`artifact`、`cancel` | 管理任务、查看冻结输入和结果 |
-| 研究 | `factortester research ...` | 管理 Research、Workspace、Report、Evidence 和研究图 |
+| 研究 | `factortester research ...` | 管理 Research、Workspace、Report、Evidence 和 ReportBranch |
 
 需要机器读取时使用 `--json`；脚本应检查 `success`、错误码和 schema 版本，而不是解析人类可读的行。
 
@@ -78,7 +78,6 @@ factortester research --help
 factortester research reports --help
 factortester research workspaces --help
 factortester research evidence --help
-factortester research graphs --help
 ```
 
 报告写入应使用稳定的 Research、Workspace、Report 和 component ID。若需要客户端下载，先读取访问范围和资源清单，再下载明确授权的文件；不要把报告正文中的本地路径当作下载地址。

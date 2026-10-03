@@ -23,7 +23,7 @@ from .tree_store import (atomic_write, load_head, load_node, store_node,
 from .tree_projection import project_snapshot
 from .submission_status import require_no_pending
 from .tree_sqlite_index import ensure_sqlite_index
-from ..work_package_identity import ensure_work_package_identity
+from ..report_workspace_identity import ensure_report_workspace_identity
 from ..public_research.projection import (
     _LocalResources, _local_targets, _resolve_local_resource, read_local_asset,
 )
@@ -193,7 +193,7 @@ def import_report_bundle(*, payload: bytes, expected_sha256: str, package_root: 
             if receipt.is_file() and json.loads(receipt.read_text()).get('bundle_sha256') == expected_sha256:
                 return {'paths': paths, 'head': load_head(paths), 'inherited': False}
             raise ValueError('target branch already exists with another origin')
-        ensure_work_package_identity(Path(package_root), work_package_id=Path(package_root).name, report_id=report_id)
+        ensure_report_workspace_identity(Path(package_root), report_workspace_id=Path(package_root).name, report_id=report_id)
         restore_job_artifacts(manifest['job_artifacts'], files)
         replacements = {}
         resource_root = Path(package_root).resolve() / 'branches' / branch_id / 'resources'

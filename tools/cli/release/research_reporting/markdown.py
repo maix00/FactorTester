@@ -20,7 +20,6 @@ class MarkdownReportTarget:
             "",
             f"- 状态：`{_status_label(value['status'])}`",
             f"- 产品范围：`{_product_group_label(value['product_group'])}`",
-            f"- 当前阶段：`{_node_label(value['current_node'])}`",
             (
                 "- TrialPlan：`已定义`"
                 if value["trial_plan_hash"]

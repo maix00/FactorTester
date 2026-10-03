@@ -164,7 +164,6 @@ def release_client(
         legacy_public_key,
     )
     _validate_release_trust_root_copies(REPO)
-    _validate_cli_anything_skill_copy(REPO)
     _validate_source_checkout(REPO, source_revision)
     validate_client_package_layout(REPO)
     build_environment = xcodebuild_environment()
@@ -831,25 +830,6 @@ def _stage_copy(source: Path, pointer: Path) -> Path:
 def _fsync(path: Path) -> None:
     with path.open("rb") as stream:
         os.fsync(stream.fileno())
-
-
-def _validate_cli_anything_skill_copy(repo: Path) -> None:
-    """Fail before packaging a harness with a stale bundled Skill."""
-    synchronizer = repo / "tools/cli/agent-harness/scripts/sync_skill.py"
-    result = subprocess.run(
-        [sys.executable, str(synchronizer), "--repo", str(repo), "--check"],
-        text=True,
-        capture_output=True,
-    )
-    if result.returncode:
-        detail = (result.stderr or result.stdout).strip()
-        raise ValueError(
-            "CLI-Anything Skill copies are out of sync; first merge every "
-            "intended change into skills/cli-anything-factortester-research/"
-            "SKILL.md, then run tools/cli/agent-harness/scripts/sync_skill.py "
-            "--write (do not discard newer packaged-only guidance)"
-            + (f": {detail}" if detail else "")
-        )
 
 
 def _shared_signing_certificate() -> str:

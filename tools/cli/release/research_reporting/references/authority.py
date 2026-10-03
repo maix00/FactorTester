@@ -10,8 +10,7 @@ from tools.cli.core.context import client_from_config
 from tools.cli.release.local_profile import LocalProfileStore
 
 from ..authoring.declared_links import DeclaredReportReference
-from .cycle_authority import validate_cycle_reference
-from .entry_requirements import validate_entry_requirement_reference
+from .run_authority import validate_run_reference
 from .factor_formula import validate_factor_reference
 from .factor_set_workspace import validate_factor_set_reference
 from .profile_revisions import ProfileRevisionStore
@@ -89,19 +88,9 @@ def validate_declared_reference(
         if str(job.get("job_id") or "") != job_id:
             raise ValueError("Job authority did not return the exact reference")
         data = _bounded_metadata(job)
-    elif kind == "entry_requirement":
-        data = validate_entry_requirement_reference(
+    elif kind in {"run", "run_spec", "trial_plan"}:
+        data = validate_run_reference(
             reference=reference,
-            scope=scope,
-            client=_client(scope, client),
-            allow_historical=allow_historical_entry_requirement,
-        )
-    elif kind in {
-        "claim", "obligation", "task", "run", "run_spec", "trial_plan",
-    }:
-        data = validate_cycle_reference(
-            reference=reference,
-            scope=scope,
             client=_client(scope, client),
         )
     else:

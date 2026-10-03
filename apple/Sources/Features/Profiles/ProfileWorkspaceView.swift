@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Profile 只管理本地研究身份与工作区配置。
-/// 所有进行中和已完成的研究统一从 Research -> Work Package 打开。
+/// 研究目录和报告由独立的 Research 模块管理。
 struct ProfileWorkspaceView: View {
     let profile: LocalProfileModel
 

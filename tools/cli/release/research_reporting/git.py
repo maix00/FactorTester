@@ -1,4 +1,4 @@
-"""Git persistence for local research Work Packages."""
+"""Git persistence for local research Report Workspaces."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ import subprocess
 from typing import Any
 
 
-def commit_work_package(package_root: Path, *, message: str) -> dict[str, Any]:
-    """Initialize and commit the tracked Work Package projection."""
+def commit_report_workspace(package_root: Path, *, message: str) -> dict[str, Any]:
+    """Initialize and commit the tracked Report Workspace projection."""
     package_root = Path(package_root).expanduser().resolve()
     package_root.mkdir(parents=True, exist_ok=True)
     initialized = not (package_root / ".git").exists()
@@ -17,7 +17,7 @@ def commit_work_package(package_root: Path, *, message: str) -> dict[str, Any]:
         _run_git(package_root, "config", "user.name", "FactorTester Research")
         _run_git(package_root, "config", "user.email", "research@localhost")
     _ensure_transient_ignore(package_root)
-    # A Work Package is owned as one local Git repository.  Do not maintain a
+    # A Report Workspace is owned as one local Git repository.  Do not maintain a
     # fixed allow-list here: users and research tools are allowed to add
     # package-scoped material (for example ``grill/``) which must survive
     # migration and participate in the same audit history.  The atomic report
@@ -72,7 +72,7 @@ def _run_git(package_root: Path, *args: str) -> subprocess.CompletedProcess[str]
         )
     except (OSError, subprocess.CalledProcessError) as exc:
         detail = getattr(exc, "stderr", "") or str(exc)
-        raise RuntimeError(f"Work Package git operation failed: {detail}") from exc
+        raise RuntimeError(f"Report Workspace git operation failed: {detail}") from exc
 
 
 def _head(package_root: Path) -> str:
@@ -80,7 +80,7 @@ def _head(package_root: Path) -> str:
 
 
 def _ensure_transient_ignore(package_root: Path) -> None:
-    """Keep atomic writer locks out of every Work Package status and commit."""
+    """Keep atomic writer locks out of every Report Workspace status and commit."""
     path = package_root / ".gitignore"
     existing = path.read_text(encoding="utf-8") if path.exists() else ""
     required = (

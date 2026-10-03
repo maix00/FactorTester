@@ -10,7 +10,7 @@ import click
 
 def scope_options(command):
     command = click.option("--profile", "profile_id", required=True)(command)
-    command = click.option("--work-package-id", required=True)(command)
+    command = click.option("--report-workspace-id", required=True)(command)
     command = click.option("--branch-id", required=True)(command)
     return click.option(
         "--release-profile", type=click.Path(

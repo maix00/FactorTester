@@ -35,6 +35,7 @@ def begin_component_submission(
     component: dict[str, Any],
     as_json: bool,
     allow_historical_entry_requirement: bool = False,
+    validation_error: ValueError | None = None,
 ) -> tuple[ReportSubmission, list[dict[str, Any]]]:
     submission = begin_or_raise(
         scope=scope,
@@ -45,6 +46,11 @@ def begin_component_submission(
     )
     if submission.phase in {"published", "finalized"}:
         return submission, []
+    if validation_error is not None:
+        reject_mutation(
+            scope=scope, submission=submission,
+            error=validation_error, as_json=as_json,
+        )
     bindings, diagnostics = checked_component_preflight(
         component_id=component["component_id"],
         kind=component["kind"],

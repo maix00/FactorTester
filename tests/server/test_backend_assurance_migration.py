@@ -49,22 +49,6 @@ def _create_legacy_database(path) -> None:
                 size_bytes INTEGER NOT NULL,
                 state TEXT NOT NULL
             );
-            CREATE TABLE research_graph_versions (
-                graph_id TEXT NOT NULL,
-                version INTEGER NOT NULL,
-                content_hash TEXT NOT NULL,
-                PRIMARY KEY (graph_id, version)
-            );
-            CREATE TABLE research_graph_instances (
-                instance_id TEXT PRIMARY KEY,
-                owner TEXT NOT NULL,
-                graph_id TEXT NOT NULL,
-                graph_version INTEGER NOT NULL
-            );
-            CREATE TABLE research_graph_branches (
-                branch_id TEXT PRIMARY KEY,
-                instance_id TEXT NOT NULL
-            );
             CREATE TABLE research_backend_assurance_receipts (
                 receipt_id TEXT PRIMARY KEY,
                 owner_user_id TEXT NOT NULL,
@@ -142,25 +126,6 @@ def _insert_job(
             return
         conn.execute(
             """
-            INSERT OR IGNORE INTO research_graph_versions
-            VALUES ('graph-1', 1, ?)
-            """,
-            ("a" * 64,),
-        )
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO research_graph_instances
-            VALUES ('instance-1', 'alice', 'graph-1', 1)
-            """
-        )
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO research_graph_branches
-            VALUES ('branch-1', 'instance-1')
-            """
-        )
-        conn.execute(
-            """
             INSERT INTO research_backend_assurance_receipts VALUES (
                 'receipt-1', 'alice', ?, ?, 1, 'graph-1', 1, ?,
                 'instance-1', 'branch-1', 'node-1', ?, ?, 'revision-1',
@@ -221,8 +186,8 @@ def test_migrates_legacy_receipt_to_job_assurance_and_drops_old_table(
     assert report["terminal_jobs_backfilled"] == 0
     assert report["maintenance_cases_migrated"] == 0
     assert report["legacy_table_dropped"] == 1
-    assert report["schema_tables_before"] == 7
-    assert report["schema_tables_after"] == 7
+    assert report["schema_tables_before"] == 4
+    assert report["schema_tables_after"] == 4
     assert report["sql_reads"] > 0
     assert report["sql_writes"] > 0
     assert report["sql_transactions"] == 1

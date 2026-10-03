@@ -40,7 +40,6 @@ def test_profile_sync_command_keeps_local_success_distinct_from_pending_pg(
 
     # ``client_profile`` delegates to the extracted release-layer sync
     # module; patch the dependency where that module resolves it.
-    monkeypatch.setattr(profile_sync.ManagerCredentialStore, "read", lambda _self: "")
     monkeypatch.setattr(profile_sync, "FactorTesterClient", OfflineClient)
     result = CliRunner().invoke(client_profile, ["sync", "maxa"])
 

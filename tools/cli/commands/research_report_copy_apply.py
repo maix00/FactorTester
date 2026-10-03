@@ -14,7 +14,6 @@ from .research_report_common import scope_options, read_json, output
 from .research_report_scope import resolve_branch_report_scope, load_authoring, load_current_authoring
 from .research_report_submission import begin_batch_submission, reject_mutation
 from .research_report_submission_finalize import finalize_report_command
-from .research_report_graph_guard import validate_graph_bound_mutations
 
 
 @click.command('copy-apply')
@@ -23,7 +22,7 @@ from .research_report_graph_guard import validate_graph_bound_mutations
 @click.option('--submission-sequence', type=click.IntRange(min=1), default=None)
 @click.option('--json', 'as_json', is_flag=True)
 @friendly_errors
-def copy_apply(profile_id: str, work_package_id: str, branch_id: str,
+def copy_apply(profile_id: str, report_workspace_id: str, branch_id: str,
                release_profile: Path | None, preview_file: Path,
                submission_sequence: int | None, as_json: bool) -> None:
     """按 copy-preview 输出复制；源/目标版本或预览内容变化时拒绝提交。"""
@@ -35,11 +34,11 @@ def copy_apply(profile_id: str, work_package_id: str, branch_id: str,
         raise ValueError('copy preview is missing source selection')
     root = load_profile_root(release_profile)
     target = resolve_branch_report_scope(client_root=root, profile_id=profile_id,
-                                        work_package_id=work_package_id, branch_id=branch_id)
+                                        report_workspace_id=report_workspace_id, branch_id=branch_id)
     if _resume_published_copy(target, preview, submission_sequence, as_json):
         return
     source = resolve_branch_report_scope(client_root=root, profile_id=selection['source_profile'],
-                                        work_package_id=selection['source_work_package_id'],
+                                        report_workspace_id=selection['source_report_workspace_id'],
                                         branch_id=selection['source_branch_id'])
     if source.package_root.resolve() == target.package_root.resolve() and source.branch_id == target.branch_id:
         raise ValueError('source and target must be distinct branches')
@@ -60,7 +59,6 @@ def copy_apply(profile_id: str, work_package_id: str, branch_id: str,
     submission, enriched = begin_batch_submission(scope=target, requested_sequence=submission_sequence,
                                                   operations=clean, as_json=as_json)
     try:
-        validate_graph_bound_mutations(target, operations=enriched)
         for original, validated in zip(plan['operations'], enriched, strict=True):
             bindings = deepcopy(original['bindings'])
             seen = {(b['kind'], b['target_ref']) for b in bindings}

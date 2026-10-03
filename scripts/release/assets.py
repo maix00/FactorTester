@@ -84,8 +84,6 @@ def runtime_input_digest(
     roots = (
         repo / "tools/cli/pyproject.toml",
         repo / "tools/cli",
-        repo / "tools/cli/agent-harness/pyproject.toml",
-        repo / "tools/cli/agent-harness/cli_anything",
     )
     labeled_roots = [(root, "repo") for root in roots]
     if client_sources_root is not None:
@@ -119,14 +117,7 @@ def runtime_input_digest(
 
 
 def build_python_assets(repo: Path, output: Path) -> list[Path]:
-    wheels = [
-        _build_wheel(repo / "tools" / "cli", "factortester", output),
-        _build_wheel(
-            repo / "tools" / "cli" / "agent-harness",
-            "cli_anything_factortester_research",
-            output,
-        ),
-    ]
+    wheels = [_build_wheel(repo / "tools" / "cli", "factortester", output)]
     subprocess.run(
         [
             sys.executable,
@@ -247,12 +238,10 @@ def embed_client_runtime(
 
     bin_dir = resources / "bin"
     bin_dir.mkdir(parents=True)
-    registered_skill = (
-        resources / "skills/factortester-research-skill/SKILL.md"
-    )
+    registered_skill = resources / "skills/factortester-research-skill/SKILL.md"
     registered_skill.parent.mkdir(parents=True)
     shutil.copy2(
-        repo / "skills/cli-anything-factortester-research/SKILL.md",
+        repo / "skills/factortester-research-skill/SKILL.md",
         registered_skill,
     )
     if client_sources_root is not None:
@@ -295,7 +284,6 @@ def embed_client_runtime(
                 str(python), "-m", "pip", "install", "--no-deps",
                 "--disable-pip-version-check",
                 str(repo / "tools" / "cli"),
-                str(repo / "tools" / "cli" / "agent-harness"),
             ],
             check=True,
         )
@@ -317,9 +305,7 @@ def embed_client_runtime(
             "from pathlib import Path\n"
             "import sys\n"
             "entry = os.environ.get(\"FACTORTESTER_ENTRYPOINT\", Path(sys.argv[0]).name)\n"
-            "if entry == 'cli-anything-factortester-research':\n"
-            "    from cli_anything.factortester_research.factortester_research_cli import cli\n"
-            "elif entry == 'factortester-manager':\n"
+            "if entry == 'factortester-manager':\n"
             "    from tools.cli.manager_app import manager_cli as cli\n"
             "else:\n"
             "    from tools.cli.app import cli\n"
@@ -334,8 +320,6 @@ def embed_client_runtime(
                 "--onefile",
                 "--name",
                 "factortester",
-                "--collect-all",
-                "cli_anything.factortester_research",
                 "--collect-all",
                 "pyright",
                 "--collect-data",
@@ -361,15 +345,6 @@ def embed_client_runtime(
             repo,
             bin_dir / "factortester-report-renderer",
         )
-        research_launcher = bin_dir / "cli-anything-factortester-research"
-        research_launcher.write_text(
-            "#!/bin/sh\n"
-            "set -eu\n"
-            "script_dir=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\n"
-            "FACTORTESTER_ENTRYPOINT=cli-anything-factortester-research \\\nexec \"$script_dir/factortester\" \"$@\"\n",
-            encoding="utf-8",
-        )
-        research_launcher.chmod(0o755)
         manager_launcher = bin_dir / "factortester-manager"
         manager_launcher.write_text(
             "#!/bin/sh\n"
@@ -423,11 +398,6 @@ def _smoke_test_frozen_runtime(binary: Path) -> None:
     _run_frozen_help(binary, arguments=["factor-library", "--help"])
     for command in ("branch-fork", "branch-upload", "branch-diff", "copy-preview", "copy-apply"):
         _run_frozen_help(binary, arguments=["research", "reports", command, "--help"])
-    research_env = os.environ.copy()
-    research_env["FACTORTESTER_ENTRYPOINT"] = (
-        "cli-anything-factortester-research"
-    )
-    _run_frozen_help(binary, env=research_env)
     manager_env = os.environ.copy()
     manager_env["FACTORTESTER_ENTRYPOINT"] = "factortester-manager"
     _run_frozen_help(binary, env=manager_env)
@@ -579,9 +549,7 @@ def _valid_runtime_cache(
     required = [
         resources / "bin/factortester",
         resources / "bin/factortester-manager",
-        resources / "bin/cli-anything-factortester-research",
         resources / "bin/factortester-report-renderer",
-        resources / "skills/factortester-research-skill/SKILL.md",
         resources / ".runtime-cache.json",
     ]
     if expect_adapters:
@@ -620,7 +588,6 @@ def _valid_runtime_cache(
         path.stat().st_mode & 0o111 != 0
         for path in (
             resources / "bin/factortester-manager",
-            resources / "bin/cli-anything-factortester-research",
             resources / "bin/factortester-report-renderer",
         )
     )
@@ -646,7 +613,6 @@ def _build_wheel(
             source,
             copied,
             ignore=shutil.ignore_patterns(
-                "agent-harness",
                 "build",
                 "dist",
                 "*.egg-info",

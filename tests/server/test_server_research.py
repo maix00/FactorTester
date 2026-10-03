@@ -9,7 +9,7 @@ from tools.cli.release.research_reporting.authoring.tree_fork import fork_report
 from tools.cli.release.research_reporting.public_research.library import (
     PublicResearchLibrary,
 )
-from tools.cli.release.research_reporting.workspace import initialize_work_package
+from tools.cli.release.research_reporting.workspace import initialize_report_workspace
 
 PRINCIPAL = "GTHT@MaxJJW@392452984564"
 
@@ -26,13 +26,14 @@ def _service(tmp_path: Path) -> tuple[ServerResearchService, str]:
         executor_id="public-1",
         workspace_relpath="users/profile/profiles/profile-main",
     )
-    initialize_work_package(
+    initialize_report_workspace(
         workspace_root=workspace,
-        work_package_id="report-one",
+        report_workspace_id="report-one",
+        report_id="report-report-one",
         branch_id="main",
         workspace_id="profile-main",
         title="服务器 Agent 报告",
-        branch_ref="graph-branch:report-one:main",
+        branch_ref="report-branch:main",
     )
     return ServerResearchService(data_root, runtime_store, server_id="public-1"), profile_id
 
@@ -51,7 +52,7 @@ def test_server_agent_report_is_listed_and_read_from_canonical_workspace(tmp_pat
 
     index = service.index(PRINCIPAL, row["server_ref"])
     assert index["profile_id"] == profile_id
-    assert index["work_package_id"] == "report-one"
+    assert index["report_workspace_id"] == "report-one"
     assert index["branch_id"] == "main"
     assert index["title"] == "服务器 Agent 报告"
     assert index["access"]["build_source"] == "server_agent"

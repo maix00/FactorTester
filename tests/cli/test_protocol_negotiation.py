@@ -51,5 +51,5 @@ def test_protocol_negotiation_rejects_missing_required_capability() -> None:
     with pytest.raises(ValueError, match="缺少所需能力"):
         negotiate_protocol(
             _manifest(),
-            required_capabilities=("research.graph",),
+            required_capabilities=("research.report-branch",),
         )

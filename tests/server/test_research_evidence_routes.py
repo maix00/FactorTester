@@ -5,7 +5,6 @@ from flask import Flask
 import settings as Settings
 from server.modules.single_factor_test import sft_bp
 from server.modules.single_factor_test import research_evidence_routes as _legacy_routes  # noqa: F401
-from tests.server.data_contract_fixtures import initialize
 
 
 def _client():
@@ -21,7 +20,6 @@ def _client():
 def test_fragment_bound_evidence_http_workflow(monkeypatch, tmp_path) -> None:
     path = tmp_path / "catalog.db"
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", str(path))
-    initialize(path)
     client = _client()
 
     retired = client.post("/api/research-evidence", json={})
@@ -110,31 +108,16 @@ def test_fragment_bound_evidence_http_workflow(monkeypatch, tmp_path) -> None:
     )
     assert created.status_code == 201
 
-    prepared = client.post(
-        f"/api/research-evidence/{evidence_ref}/lifecycle/prepare",
+    excluded = client.post(
+        f"/api/research-evidence/{evidence_ref}/status",
         json={
             "action": "exclude",
-            "reason_zh": "该版本输出不再适用于当前冻结环境",
-            "profile_ref": "profile:maxa",
-            "agent_id": "research-maxa",
-            "instance_id": "instance-1",
-            "branch_id": "branch-1",
-            "parent_id": "node-data-contract",
+            "reason_zh": "该版本输出不再适用于当前运行环境",
+            "operation_id": "exclude-old-environment",
         },
     )
-    assert prepared.status_code == 201
-    transition_ref = prepared.get_json()["transition"]["transition_ref"]
-    finalized = client.post(
-        f"/api/research-evidence/lifecycle/{transition_ref}/finalize",
-        json={"report_receipt": {
-            "submission_sequence": 1,
-            "component_id": "evidence-exclusion-one",
-            "git_commit": "a" * 40,
-            "ledger_generation": 1,
-            "ledger_projection_hash": "b" * 64,
-        }},
-    )
-    assert finalized.status_code == 200
+    assert excluded.status_code == 200
+    assert excluded.get_json()["lifecycle"]["status"] == "excluded"
     assert client.get("/api/research-evidence/search").get_json()[
         "result"
     ]["items"] == []

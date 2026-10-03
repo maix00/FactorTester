@@ -55,11 +55,6 @@
       description: "Manage Research roots, Profile memberships, workspaces and report links.",
     },
     {
-      id: "research_graph", path: "/research?section=graph", title: "Research graph", access: "authenticated",
-      cli: ["research"],
-      description: "Inspect and advance the research decision graph.",
-    },
-    {
       id: "profiles", path: "/research?section=profiles", title: "Research profiles", access: "authenticated",
       cli: ["research", "agents"],
       description: "Manage research identities, agents, skills and conversations.",

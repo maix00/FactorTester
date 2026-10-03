@@ -24,9 +24,6 @@ SQLITE_USER_REFERENCES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("factor_source_roots", ("username",)),
     ("factor_source_workspace_settings", ("username",)),
     ("levels", ("manager_username",)),
-    ("active_research_graphs", ("activated_by",)),
-    ("research_graph_versions", ("created_by",)),
-    ("research_graph_trace", ("actor",)),
     ("research_report_item_checkpoints", ("actor",)),
     ("research_configuration_snapshots", ("owner",)),
     ("research_configurations", ("owner",)),
@@ -34,26 +31,23 @@ SQLITE_USER_REFERENCES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("research_evidence_catalog_state", ("owner",)),
     ("research_evidence_fragments", ("owner",)),
     ("research_evidence_lifecycle", ("owner",)),
-    ("research_evidence_lifecycle_transitions", ("owner",)),
+    ("research_evidence_status_events", ("owner",)),
     ("research_evidence_object_tags", ("owner",)),
     ("research_evidence_objects", ("owner",)),
     ("research_evidence_sources", ("owner",)),
     ("research_evidence_tag_proposals", ("owner",)),
     ("research_evidence_tags", ("owner",)),
     ("research_fragment_evidence_objects", ("owner",)),
-    ("research_graph_instances", ("owner",)),
-    ("research_graph_objects", ("owner",)),
     ("research_human_gate_overrides", ("owner",)),
     ("research_jobs", ("owner",)),
     ("research_maintenance_cases", ("owner_user_id",)),
     ("research_runs", ("owner",)),
-    ("research_work_packages", ("owner",)),
     ("research_workspaces", ("owner",)),
     ("user_job_pins", ("owner",)),
     ("user_storage_policies", ("owner",)),
 )
 
-SYSTEM_OWNER_VALUES = frozenset({"__public_jobs__", "__public_graph__"})
+SYSTEM_OWNER_VALUES = frozenset({"__public_jobs__"})
 
 POSTGRES_USER_REFERENCES: tuple[tuple[str, str], ...] = (
     ("control_devices", "username"),

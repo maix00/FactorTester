@@ -1,7 +1,7 @@
 """Minimal Agent execution identity storage.
 
 This module deliberately contains no token budget, provider usage, or
-reservation lifecycle.  Research Graph governance only needs a durable
+ reservation lifecycle. Research governance only needs a durable
 identity record for a proposer or independent reviewer.
 """
 

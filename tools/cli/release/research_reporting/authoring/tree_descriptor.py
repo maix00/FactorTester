@@ -10,12 +10,12 @@ from .tree_schema import digest
 
 
 def report_tree_descriptor(
-    *, package_root: Path, work_package_id: str, branch_id: str,
+    *, package_root: Path, report_workspace_id: str, branch_id: str,
     head: dict[str, Any], section_refs: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     paths = report_tree_paths(package_root, branch_id)
     return {
-        "artifact_ref": f"artifact:research/{work_package_id}/branches/{branch_id}/authoring/HEAD.json",
+        "artifact_ref": f"artifact:research/{report_workspace_id}/branches/{branch_id}/authoring/HEAD.json",
         "format": "report_tree", "status": "ready",
         "content_hash": digest(head),
         "local_ref": paths["head"].resolve().as_uri(),

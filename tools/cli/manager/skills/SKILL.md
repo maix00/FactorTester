@@ -1,6 +1,6 @@
 ---
 name: cli-anything-factortester-manager
-description: 使用 FactorTester Manager CLI 检查和操作已授权的应用、Job、生成物、存储、Research Graph 版本与服务实例；已授权的部署使用现有脚本。
+description: 使用 FactorTester Manager CLI 检查和操作已授权的应用、Job、生成物、存储、Research 工作区与服务实例；已授权的部署使用现有脚本。
 ---
 
 # FactorTester Manager CLI
@@ -34,7 +34,6 @@ Manager 会话、研究 CLI 会话、浏览器会话和主机凭据不能互相�
 | `storage usage` | 查看 Job 与生成物占用 |
 | `transfers metrics` | 查看有界传输指标 |
 | `devices list\|summary\|revoke` | 查看设备，或在明确授权下撤销公网访问设备 |
-| `research-graph versions\|active\|set-default` | 查看或启用 Graph 版本 |
 | `services list\|start\|stop\|restart-api\|restart-bundle\|force-stop <port>` | 管理 Manager 所有的服务实例 |
 | `server inspect\|access` | 查看身份和非敏感连接声明 |
 | `server access check` | 检查声明的凭据是否存在，不读取其值 |

@@ -15,114 +15,6 @@ from tools.cli.commands.client_release import client, operator_client
 from tools.cli.release import app_update_control
 
 
-def test_release_rejects_a_drifted_cli_anything_skill_copy(
-    tmp_path: Path,
-) -> None:
-    source_root = Path(__file__).resolve().parents[2]
-    script = (
-        source_root / "tools/cli/agent-harness/scripts/sync_skill.py"
-    )
-    canonical = (
-        tmp_path / "skills/cli-anything-factortester-research/SKILL.md"
-    )
-    packaged = (
-        tmp_path
-        / "tools/cli/agent-harness/cli_anything/factortester_research/skills/SKILL.md"
-    )
-    target_script = tmp_path / "tools/cli/agent-harness/scripts/sync_skill.py"
-    resources = tmp_path / "tools/cli/agent-harness/cli_anything/factortester_research/resources"
-    canonical.parent.mkdir(parents=True)
-    packaged.parent.mkdir(parents=True)
-    target_script.parent.mkdir(parents=True)
-    resources.mkdir(parents=True)
-    canonical.write_text(
-        "---\nname: factortester-research-skill\n"
-        "description: Test skill.\n---\n\n# Test\n",
-        encoding="utf-8",
-    )
-    packaged.write_text("stale", encoding="utf-8")
-    (resources / "capabilities.v1.json").write_text(
-        '{"capabilities": []}', encoding="utf-8",
-    )
-    (resources / "provider-locks.v1.json").write_text(
-        '{"implementations": {}}', encoding="utf-8",
-    )
-    cycle = tmp_path / "skills/research-obligation-cycle/SKILL.md"
-    cycle.parent.mkdir(parents=True)
-    cycle.write_text("cycle", encoding="utf-8")
-    shutil.copy2(script, target_script)
-
-    with pytest.raises(ValueError, match="Skill copies are out of sync"):
-        publish._validate_cli_anything_skill_copy(tmp_path)
-
-    subprocess.run(
-        [
-            sys.executable, str(target_script), "--repo", str(tmp_path), "--write",
-            "--local-skill-root", str(tmp_path / "local-skills"),
-        ],
-        check=True,
-    )
-    publish._validate_cli_anything_skill_copy(tmp_path)
-
-
-def test_skill_sync_registers_the_canonical_skill_for_local_agents(
-    tmp_path: Path,
-) -> None:
-    source_root = Path(__file__).resolve().parents[2]
-    script = source_root / "tools/cli/agent-harness/scripts/sync_skill.py"
-    canonical = tmp_path / "skills/cli-anything-factortester-research/SKILL.md"
-    packaged = (
-        tmp_path
-        / "tools/cli/agent-harness/cli_anything/factortester_research/skills/SKILL.md"
-    )
-    target_script = tmp_path / "tools/cli/agent-harness/scripts/sync_skill.py"
-    resources = (
-        tmp_path
-        / "tools/cli/agent-harness/cli_anything/factortester_research/resources"
-    )
-    local_root = tmp_path / "local-skills"
-    canonical.parent.mkdir(parents=True)
-    packaged.parent.mkdir(parents=True)
-    target_script.parent.mkdir(parents=True)
-    resources.mkdir(parents=True)
-    canonical.write_text(
-        "---\nname: factortester-research-skill\n"
-        "description: Test skill.\n---\n\n# Test\n",
-        encoding="utf-8",
-    )
-    packaged.write_text("stale", encoding="utf-8")
-    cycle = tmp_path / "skills/research-obligation-cycle/SKILL.md"
-    cycle.parent.mkdir(parents=True)
-    cycle.write_text("cycle", encoding="utf-8")
-    (resources / "capabilities.v1.json").write_text(
-        '{"capabilities": []}', encoding="utf-8",
-    )
-    (resources / "provider-locks.v1.json").write_text(
-        '{"implementations": {}}', encoding="utf-8",
-    )
-    shutil.copy2(script, target_script)
-
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(target_script),
-            "--repo",
-            str(tmp_path),
-            "--write",
-            "--local-skill-root",
-            str(local_root),
-        ],
-        check=True,
-        text=True,
-        capture_output=True,
-    )
-
-    registered = local_root / "factortester-research-skill/SKILL.md"
-    assert registered.read_bytes() == canonical.read_bytes()
-    assert packaged.read_bytes() == canonical.read_bytes()
-    assert "registered" in result.stdout
-
-
 def _appcast(
     path: Path,
     *,
@@ -429,9 +321,6 @@ def test_release_rejects_stale_client_packages_before_xcode(
         lambda: publish.SHARED_SIGNING_CERTIFICATE_SHA1,
     )
     monkeypatch.setattr(
-        publish, "_validate_cli_anything_skill_copy", lambda _repo: None,
-    )
-    monkeypatch.setattr(
         publish, "_validate_source_checkout",
         lambda _repo, _revision: None,
     )
@@ -485,9 +374,6 @@ def test_failed_release_removes_its_output_directory(
     monkeypatch.setattr(
         publish, "_shared_signing_certificate",
         lambda: publish.SHARED_SIGNING_CERTIFICATE_SHA1,
-    )
-    monkeypatch.setattr(
-        publish, "_validate_cli_anything_skill_copy", lambda _repo: None,
     )
     monkeypatch.setattr(
         publish, "_validate_source_checkout",

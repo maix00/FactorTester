@@ -39,7 +39,6 @@ def load_report_index(*, package_root: Path, branch_id: str) -> dict[str, Any]:
                 "component_id": chapter["node_id"],
                 "title": str(chapter.get("title") or ""),
                 "created_at": chapter.get("created_at"),
-                "graph_version": chapter.get("graph_version"),
                 "preview": first_child_title,
             })
         return {"paths": paths, "head": head, "updated_at": paths["head"].stat().st_mtime, "chapter_descriptors": chapters}

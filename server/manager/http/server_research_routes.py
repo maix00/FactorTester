@@ -137,7 +137,7 @@ class ServerResearchRoutesMixin:
                     principal,
                     target_ref=query.get("target_ref", [""])[0],
                     profile_id=query.get("profile_id", [""])[0],
-                    package_id=query.get("package_id", [""])[0],
+                    report_workspace_id=query.get("report_workspace_id", [""])[0],
                     branch_id=query.get("branch_id", [""])[0],
                 )
                 json_response(self, {"success": True, **value})

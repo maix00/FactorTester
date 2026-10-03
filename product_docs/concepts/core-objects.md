@@ -4,9 +4,9 @@ Workspace 是一次研究或执行活动采用的配置与资源视图。它可�
 
 因子工作区、Research Workspace 和测试配置草稿是三个不同用途的工作面：前者管理可复用因子副本，后者保存某项研究的上下文，测试草稿只在提交前可编辑。名称相似不代表它们可以互相覆盖。
 
-## WorkPackage 与 Branch {#workpackage-branch}
+## Report 与 ReportBranch {#report-branch}
 
-WorkPackage 是研究材料与提交的持久化包；Branch 表示在包内演进的一条研究历史。它们负责隔离研究，不代替具体的因子、FactorSet 或 RunSpec 身份。服务器 Profile 的工作区副本可以使用自己的分支，但将变更写回用户因子工作区前仍需下载当前权威版本并检查冲突。
+Report 是可独立阅读、授权和发布的研究报告；ReportBranch 是报告正文的一条可编辑版本线。不同 Profile 可以在各自的 Branch 上协作，并通过受控的跨 Branch 操作复用章节。报告身份不依赖执行 Workspace 或服务器位置。
 
 ## 冻结对象 {#frozen-objects}
 

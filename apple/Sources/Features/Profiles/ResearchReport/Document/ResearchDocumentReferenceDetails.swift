@@ -45,24 +45,68 @@ enum ResearchDocumentReferenceDetails {
                 payload: object,
                 detail: evidence
             )
-        case "obligation":
-            values += ResearchDocumentGraphObjectSections.obligation(
-                object, related: binding?.relatedReferences ?? []
-            )
-        case "claim":
-            values += ResearchDocumentGraphObjectSections.claim(
-                object, related: binding?.relatedReferences ?? []
-            )
         case "trial_plan":
-            values += ResearchDocumentGraphObjectSections.trialPlan(object)
+            values += ResearchDocumentFrozenObjectSections.trialPlan(object)
         case "run", "run_spec":
-            values += ResearchDocumentGraphObjectSections.run(object)
-        case "delta":
-            values += ResearchDocumentGraphObjectSections.delta(object)
+            values += ResearchDocumentFrozenObjectSections.run(object)
         default:
-            values += ResearchDocumentGraphObjectSections.generic(object)
+            values += ResearchDocumentFrozenObjectSections.generic(object)
         }
         return values.filter { !$0.fields.isEmpty || !$0.links.isEmpty }
+    }
+}
+
+enum ResearchDocumentFrozenObjectSections {
+    static func trialPlan(
+        _ value: ResearchAuditObjectPayload?
+    ) -> [ResearchDocumentReferenceSection] {
+        guard let value else { return [] }
+        let outcomes = (value.outcomes?.primary ?? [])
+            + (value.outcomes?.secondary ?? [])
+        let samples = value.sampleRoles?.map {
+            "\($0.sampleRef)（\($0.role)）"
+        }
+        return [DetailFields.section("试验设计", [
+            DetailFields.field("摘要", value.summaryZH),
+            DetailFields.field("假设", value.hypothesisRef),
+            DetailFields.field("试验族", value.trialFamily),
+            DetailFields.field("协议", value.protocolRef),
+            DetailFields.values("样本角色", samples),
+            DetailFields.values("检验结果", outcomes),
+            DetailFields.field("停止条件", value.stopCondition),
+        ])]
+    }
+
+    static func run(
+        _ value: ResearchAuditObjectPayload?
+    ) -> [ResearchDocumentReferenceSection] {
+        guard let value else { return [] }
+        return [DetailFields.section("测试配置", [
+            DetailFields.field("摘要", value.summaryZH),
+            DetailFields.field("运行 ID", value.runID),
+            DetailFields.field("配置 ID", value.configurationID),
+            DetailFields.field(
+                "配置版本", value.configurationRevision.map(String.init)
+            ),
+            DetailFields.field("试验阶段", value.trialStage),
+            DetailFields.field("试验角色", value.trialRole),
+            DetailFields.field("样本", value.sampleRef),
+            DetailFields.field("样本开始", value.sampleStart),
+            DetailFields.field("样本结束", value.sampleEnd),
+            DetailFields.field("RunSpec 哈希", value.runSpecHash),
+        ])]
+    }
+
+    static func generic(
+        _ value: ResearchAuditObjectPayload?
+    ) -> [ResearchDocumentReferenceSection] {
+        guard let value else { return [] }
+        return [DetailFields.section("对象详情", [
+            DetailFields.field("对象类型", value.objectKind),
+            DetailFields.field("对象 ID", value.objectID),
+            DetailFields.field("状态", value.status),
+            DetailFields.field("摘要", value.summaryZH),
+        ])]
     }
 }
 

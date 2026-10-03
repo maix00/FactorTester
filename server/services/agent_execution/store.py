@@ -1,4 +1,4 @@
-"""Durable Agent execution identity records for Graph governance."""
+"""Durable identity records for resumable Agent executions."""
 
 from __future__ import annotations
 

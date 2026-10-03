@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 from pathlib import Path
 from typing import Any
 
@@ -13,16 +11,6 @@ from .research_report_common import component_content, rich_body
 from .research_report_content_structure import (
     validate_titled_chapter_content,
 )
-from .research_report_graph_guard import (
-    resolve_graph_report_parent,
-    validate_graph_bound_mutations,
-)
-from .research_report_entry_requirement import (
-    obligation_requirement_body,
-    resolve_obligation_requirement_title,
-    validate_report_requirement_section,
-)
-from .research_report_requirement import report_requirement
 from .research_report_scope import (
     ensure_authoring,
     load_current_authoring,
@@ -34,23 +22,49 @@ from .research_report_submission import (
 )
 from .research_report_submission_finalize import finalize_report_command
 
-_OWNER_CHAPTER_AUTHORIZATION_HASH = (
-    "888df25ae35772424a560c7152a1de794440e0ea5cfee62828333a456a506e05"
-)
 
-
-def _owner_chapter_authorized(value: int | None) -> bool:
-    if value is None:
-        return False
-    supplied = hashlib.sha256(str(value).encode("ascii")).hexdigest()
-    return hmac.compare_digest(supplied, _OWNER_CHAPTER_AUTHORIZATION_HASH)
+def _resolve_report_parent(
+    scope: Any,
+    *,
+    parent_id: str | None,
+    target_chapter_id: str,
+) -> tuple[str | None, str]:
+    """Place ordinary content in the requested or latest report chapter."""
+    snapshot = load_current_authoring(scope)
+    components = snapshot["components"]
+    by_id = {str(item["component_id"]): item for item in components}
+    chapters = [
+        str(item["component_id"]) for item in components
+        if item["kind"] == "chapter" and item["parent_id"] is None
+    ]
+    requested_chapter = target_chapter_id.strip()
+    if requested_chapter and requested_chapter not in chapters:
+        raise ValueError("target_chapter_id must identify a report chapter")
+    requested_parent = str(parent_id or "").strip()
+    ancestor = requested_parent
+    parent_chapter = ""
+    visited: set[str] = set()
+    while ancestor:
+        if ancestor in visited or ancestor not in by_id:
+            raise ValueError("parent_id must identify a report component")
+        visited.add(ancestor)
+        if ancestor in chapters:
+            parent_chapter = ancestor
+            break
+        ancestor = str(by_id[ancestor]["parent_id"] or "")
+    if requested_chapter and parent_chapter and requested_chapter != parent_chapter:
+        raise ValueError("parent_id and target_chapter_id identify different chapters")
+    selected = requested_chapter or parent_chapter or (
+        chapters[-1] if chapters else ""
+    )
+    return requested_parent or selected or None, selected
 
 
 def write_report_component(
     *,
     client_root: Path,
     profile_id: str,
-    work_package_id: str,
+    report_workspace_id: str,
     branch_id: str,
     component_id: str,
     kind: str,
@@ -69,64 +83,36 @@ def write_report_component(
     fallback: str,
     items: tuple[str, ...],
     ordered: bool,
-    obligation_requirement_id: str,
-    requirement_id: str,
-    subject_ref: str,
-    content_kind: str,
     submission_sequence: int | None,
     as_json: bool,
-    owner_chapter_authorization: int | None = None,
 ) -> dict[str, Any]:
     scope = resolve_branch_report_scope(
         client_root=client_root, profile_id=profile_id,
-        work_package_id=work_package_id, branch_id=branch_id,
+        report_workspace_id=report_workspace_id, branch_id=branch_id,
     )
     ensure_authoring(scope, materialize=False, persist=False)
-    owner_chapter_authorized = _owner_chapter_authorized(
-        owner_chapter_authorization,
-    )
+    parent_error = None
     if kind == "chapter":
         parent_id = None
         target_chapter_id = ""
-        allow_historical_entry_requirement = False
     else:
-        (
-            parent_id,
-            target_chapter_id,
-            allow_historical_entry_requirement,
-        ) = resolve_graph_report_parent(
-            scope,
-            parent_id=parent_id,
-            target_chapter_id=target_chapter_id,
-        )
+        try:
+            parent_id, target_chapter_id = _resolve_report_parent(
+                scope,
+                parent_id=parent_id,
+                target_chapter_id=target_chapter_id,
+            )
+        except ValueError as error:
+            # Reserve the branch-local submission sequence before surfacing
+            # the validation failure, so the caller can correct and retry the
+            # same logical component without losing the diagnostic.
+            parent_error = error
     content = component_content(
         kind=kind, content_file=content_file, code_file=code_file,
         language=language, latex=latex, fallback=fallback,
         items=items, ordered=ordered,
     )
-    plain_body = obligation_requirement_body(
-        body=rich_body(body=body, body_file=body_file),
-        kind=kind,
-        display_kind=display_kind,
-        requirement_id=obligation_requirement_id,
-        title_zh=(
-            resolve_obligation_requirement_title(
-                scope=scope,
-                requirement_id=obligation_requirement_id,
-                allow_historical=allow_historical_entry_requirement,
-            )
-            if kind == "special"
-            and display_kind == "obligation_requirement"
-            else ""
-        ),
-    )
-    validate_report_requirement_section(
-        kind=kind,
-        display_kind=display_kind,
-        obligation_requirement_id=obligation_requirement_id,
-        report_requirement_id=requirement_id,
-        report_subject_ref=subject_ref,
-    )
+    plain_body = rich_body(body=body, body_file=body_file)
     component = {
         "component_id": component_id, "kind": kind, "title": title,
         "parent_id": parent_id, "body": plain_body, "content": content,
@@ -134,16 +120,11 @@ def write_report_component(
         "target_chapter_id": target_chapter_id,
         "before_component_id": before_component_id,
         "after_component_id": after_component_id,
-        "report_requirement_id": requirement_id,
-        "report_subject_ref": subject_ref,
-        "report_content_kind": content_kind,
     }
     submission, reference_bindings = begin_component_submission(
         scope=scope, requested_sequence=submission_sequence,
         component=component, as_json=as_json,
-        allow_historical_entry_requirement=(
-            allow_historical_entry_requirement
-        ),
+        validation_error=parent_error,
     )
     if submission.phase == "finalized":
         saved = None
@@ -151,11 +132,10 @@ def write_report_component(
         saved = load_current_authoring(scope)
     else:
         _publish_component(
-            scope=scope, work_package_id=work_package_id,
+            scope=scope, report_workspace_id=report_workspace_id,
             branch_id=branch_id, component=component,
             reference_bindings=reference_bindings,
             submission=submission, as_json=as_json,
-            owner_chapter_authorized=owner_chapter_authorized,
         )
         saved = load_current_authoring(scope)
     finalized = finalize_report_command(
@@ -181,34 +161,14 @@ def write_report_component(
 def _publish_component(
     *,
     scope: Any,
-    work_package_id: str,
+    report_workspace_id: str,
     branch_id: str,
     component: dict[str, Any],
     reference_bindings: list[dict[str, Any]],
     submission: Any,
     as_json: bool,
-    owner_chapter_authorized: bool,
 ) -> dict[str, Any]:
     try:
-        requirement, rendered_body = report_requirement(
-            component_id=component["component_id"],
-            body=component["body"],
-            requirement_id=component["report_requirement_id"],
-            subject_ref=component["report_subject_ref"],
-            content_kind=component["report_content_kind"],
-        )
-        bindings = [*reference_bindings, *([requirement] if requirement else [])]
-        validate_graph_bound_mutations(scope, operations=[{
-            "op": "add",
-            "component_id": component["component_id"],
-            "kind": component["kind"],
-            "title": component["title"],
-            "parent_id": component["parent_id"],
-            "display_kind": component["display_kind"],
-            "target_chapter_id": component["target_chapter_id"],
-            "before_component_id": component["before_component_id"],
-            "after_component_id": component["after_component_id"],
-        }], owner_chapter_authorized=owner_chapter_authorized)
         validate_titled_chapter_content(
             load_current_authoring(scope),
             [{
@@ -220,14 +180,14 @@ def _publish_component(
             }],
         )
         return add_branch_component(
-            package_root=scope.package_root, work_package_id=work_package_id,
+            package_root=scope.package_root, report_workspace_id=report_workspace_id,
             branch_id=branch_id, component_id=component["component_id"],
             kind=component["kind"], title=component["title"],
-            parent_id=component["parent_id"], body=rendered_body,
+            parent_id=component["parent_id"], body=component["body"],
             content=component["content"], display_kind=component["display_kind"],
             before_component_id=component["before_component_id"],
             after_component_id=component["after_component_id"],
-            bindings=bindings, materialize=False, submission=submission,
+            bindings=reference_bindings, materialize=False, submission=submission,
         )
     except Exception as error:
         reject_mutation(

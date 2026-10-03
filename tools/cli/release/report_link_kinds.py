@@ -1,29 +1,21 @@
 """Canonical typed links shared by every local report representation."""
 
 REPORT_LINK_KINDS = frozenset({
-    "evidence", "obligation", "task", "job", "claim", "artifact",
-    "report_requirement", "graph_reference", "checkpoint", "run",
-    "run_spec", "trial_plan", "delta", "entry_requirement",
+    "evidence", "job", "artifact", "report_copy", "run",
+    "run_spec", "trial_plan",
     "factor", "profile", "profile_revision", "product",
     "contract", "continuous_contract",
-    "profile_handoff", "report_section",
+    "report_section",
 })
 
 _REFERENCE_LINK_KINDS = (
     ("evidence:", "evidence"),
-    ("obligation:", "obligation"),
-    ("task:", "task"),
     ("job:", "job"),
-    ("claim:", "claim"),
     ("artifact:", "artifact"),
-    ("report-requirement:", "report_requirement"),
-    ("requirement:", "entry_requirement"),
-    ("trace:", "graph_reference"),
-    ("report-checkpoint:", "graph_reference"),
+    ("report-copy:", "report_copy"),
     ("run:", "run"),
     ("runspec:", "run_spec"),
     ("trial-plan:", "trial_plan"),
-    ("delta:", "delta"),
     ("factor:", "factor"),
     ("factor-family:", "factor"),
     ("factor-set:", "factor"),
@@ -37,4 +29,4 @@ def report_link_kind_for_ref(target_ref: str) -> str:
     for prefix, kind in _REFERENCE_LINK_KINDS:
         if target_ref.startswith(prefix):
             return kind
-    return "graph_reference"
+    raise ValueError("unknown report reference kind")

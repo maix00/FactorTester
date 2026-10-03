@@ -1,4 +1,4 @@
-"""Add structured components to a branch-owned Work Package report."""
+"""Add structured components to a branch-owned Report Workspace report."""
 
 from __future__ import annotations
 
@@ -58,15 +58,7 @@ from .research_report_component_write import write_report_component
 @click.option(
     "--display-kind", default="",
     help=(
-        "特殊小节语义；Agent 可用 grill_resolution、external_review "
-        "或 obligation_requirement"
-    ),
-)
-@click.option(
-    "--obligation-requirement-id", default="",
-    help=(
-        "义务小类 ID；与 --kind special 和 "
-        "--display-kind obligation_requirement 一同使用"
+        "特殊小节语义；Agent 可用 grill_resolution 或 external_review"
     ),
 )
 @click.option(
@@ -89,45 +81,27 @@ from .research_report_component_write import write_report_component
     help="--kind list 使用有序或无序标记",
 )
 @click.option(
-    "--report-requirement-id", default="",
-    help="当前组件满足的研究图报告要求；须与另外两个 report 选项一同使用",
-)
-@click.option(
-    "--report-subject-ref", default="",
-    help="报告要求对应的图对象引用；须与另外两个 report 选项一同使用",
-)
-@click.option(
-    "--report-content-kind", default="",
-    help="本组件用于覆盖该要求的内容类型；须与另外两个 report 选项一同使用",
-)
-@click.option(
     "--submission-sequence", type=click.IntRange(min=1), default=None,
     help="修正被拦截的提交时必须复用 CLI 返回的提交序号",
 )
-@click.option(
-    "--owner-chapter-authorization", type=int, default=None, hidden=True,
-)
 @click.option("--json", "as_json", is_flag=True)
 def add_report_component(
-    profile_id: str, work_package_id: str, branch_id: str,
+    profile_id: str, report_workspace_id: str, branch_id: str,
     release_profile: Path | None, component_id: str, kind: str, title: str,
     parent_id: str | None, body: str | None, body_file: Path | None,
     target_chapter_id: str, before_component_id: str | None,
     after_component_id: str | None,
-    display_kind: str, obligation_requirement_id: str,
+    display_kind: str,
     content_file: Path | None, code_file: Path | None, language: str,
     latex: str | None, fallback: str, items: tuple[str, ...], ordered: bool,
-    report_requirement_id: str,
-    report_subject_ref: str, report_content_kind: str,
     submission_sequence: int | None,
-    owner_chapter_authorization: int | None,
     as_json: bool,
 ) -> None:
-    """Add one structured component to the branch Work Package report.
+    """Add one structured component to the branch Report Workspace report.
 
     Use portable Markdown in --body/--body-file.  A typed inline reference is
     ``[说明](factortester://evidence/evidence%3Astable-ref)``; use its domain
-    kind (evidence, obligation, task, job, artifact, and so on) as the host.
+    kind (evidence, job, artifact, and so on) as the host.
     The report only links to those objects and never registers them.
     """
     if before_component_id is not None and after_component_id is not None:
@@ -136,7 +110,7 @@ def add_report_component(
         )
     result = write_report_component(
         client_root=load_profile_root(release_profile),
-        profile_id=profile_id, work_package_id=work_package_id,
+        profile_id=profile_id, report_workspace_id=report_workspace_id,
         branch_id=branch_id, component_id=component_id, kind=kind,
         title=title, parent_id=parent_id, body=body, body_file=body_file,
         target_chapter_id=target_chapter_id,
@@ -145,10 +119,6 @@ def add_report_component(
         display_kind=display_kind, content_file=content_file,
         code_file=code_file, language=language, latex=latex,
         fallback=fallback, items=items, ordered=ordered,
-        obligation_requirement_id=obligation_requirement_id,
-        requirement_id=report_requirement_id, subject_ref=report_subject_ref,
-        content_kind=report_content_kind,
         submission_sequence=submission_sequence, as_json=as_json,
-        owner_chapter_authorization=owner_chapter_authorization,
     )
     output(result, as_json)

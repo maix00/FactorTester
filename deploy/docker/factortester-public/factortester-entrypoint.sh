@@ -92,7 +92,7 @@ revision="$(tr -d '\r\n' < /opt/factortester/app/.deployment-revision)"
 export GTHT_SOURCE_REVISION="$revision"
 export FACTORTESTER_IMMUTABLE_SOURCE=1
 export HOME=/state/home
-export PYTHONPATH=/opt/factortester/app/tools/cli/agent-harness:/opt/factortester/app
+export PYTHONPATH=/opt/factortester/app
 install -d -o factortester -g "$app_group" /state/home /state/logs
 chown -R factortester:"$app_group" /state
 if [[ -s /run/secrets/manager-state/mihomo.yaml ]]; then

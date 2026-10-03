@@ -28,7 +28,7 @@ from tools.cli.release.research_reporting.authoring.tree_model import (
     initialize_tree,
 )
 from tools.cli.release.research_reporting.authoring.tree_schema import validate_node
-from tools.cli.release.research_reporting.workspace import initialize_work_package
+from tools.cli.release.research_reporting.workspace import initialize_report_workspace
 
 
 def test_rich_body_accepts_portable_markdown(tmp_path: Path) -> None:
@@ -315,19 +315,10 @@ def test_report_add_reads_rich_body_file_and_reports_format(
         profile_id="maxa", display_name="MaxA",
         server_url="http://127.0.0.1:8141", workspace_root=profile_root,
     )
-    profile["research_records"] = [{
-        "record_id": "wp", "title": "研究报告", "status": "pending",
-        "scope": {"factor_families": []}, "factor_family_versions": [],
-        "agent_id": "research-maxa", "created_at": 1.0, "updated_at": 1.0,
-        "workspace_ref": "workspace:ws", "run_ref": "",
-        "graph_instance_ref": "work-package:wp",
-        "graph_branch_ref": "report-branch:main", "checkpoint_ref": "",
-        "evidence_refs": [], "timeline_refs": [], "artifacts": [],
-        "provenance": {"kind": "owned_research"},
-    }]
     LocalProfileStore(client_root).save(profile)
-    initialize_work_package(
-        workspace_root=profile_root, work_package_id="wp", branch_id="main",
+    initialize_report_workspace(
+        workspace_root=profile_root, report_workspace_id="wp", branch_id="main",
+        report_id="report-test",
         workspace_id="ws", title="研究报告", branch_ref="report-branch:main",
     )
     monkeypatch.setattr(
@@ -337,7 +328,7 @@ def test_report_add_reads_rich_body_file_and_reports_format(
     source.write_text("研究结论含 `SgCPS`。", encoding="utf-8")
 
     result = CliRunner().invoke(report, [
-        "add", "--profile", "maxa", "--work-package-id", "wp",
+        "add", "--profile", "maxa", "--report-workspace-id", "wp",
         "--branch-id", "main", "--component-id", "chapter", "--kind",
         "chapter", "--title", "发现", "--body-file", str(source), "--json",
     ])
@@ -345,55 +336,6 @@ def test_report_add_reads_rich_body_file_and_reports_format(
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["body_format"] == "restricted_markdown"
 
-
-def test_report_add_uses_requirement_options_without_chip_command(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client_root = tmp_path / "client"
-    profile_root = tmp_path / "profile"
-    profile = new_local_profile(
-        profile_id="maxa", display_name="MaxA",
-        server_url="http://127.0.0.1:8141", workspace_root=profile_root,
-    )
-    profile["research_records"] = [{
-        "record_id": "wp", "title": "研究报告", "status": "pending",
-        "scope": {"factor_families": []}, "factor_family_versions": [],
-        "agent_id": "research-maxa", "created_at": 1.0, "updated_at": 1.0,
-        "workspace_ref": "workspace:ws", "run_ref": "",
-        "graph_instance_ref": "work-package:wp",
-        "graph_branch_ref": "report-branch:main", "checkpoint_ref": "",
-        "evidence_refs": [], "timeline_refs": [], "artifacts": [],
-        "provenance": {"kind": "owned_research"},
-    }]
-    LocalProfileStore(client_root).save(profile)
-    initialize_work_package(
-        workspace_root=profile_root, work_package_id="wp", branch_id="main",
-        workspace_id="ws", title="研究报告", branch_ref="report-branch:main",
-    )
-    monkeypatch.setattr(
-        research_report_component, "load_profile_root", lambda _path: client_root,
-    )
-
-    result = CliRunner().invoke(report, [
-        "add", "--profile", "maxa", "--work-package-id", "wp",
-        "--branch-id", "main", "--component-id", "finding", "--kind",
-        "chapter", "--title", "结果", "--body", "结果正文",
-        "--report-requirement-id", "report.node.result",
-        "--report-subject-ref", "node:result_audit",
-        "--report-content-kind", "entry", "--json",
-    ])
-
-    assert result.exit_code == 0, result.output
-    source = (
-        profile_root / "research" / "wp" / "branches" / "main" / "authoring"
-    )
-    head = json.loads((source / "HEAD.json").read_text(encoding="utf-8"))
-    root = json.loads((source / head["root_ref"]).read_text(encoding="utf-8"))
-    finding = json.loads((source / root["children"][0]["ref"]).read_text(encoding="utf-8"))
-    assert finding["body"] == "结果正文"
-    assert "factortester://report_requirement/" not in finding["body"]
-    assert finding["bindings"][0]["kind"] == "report_requirement"
-    assert CliRunner().invoke(report, ["chip", "--help"]).exit_code != 0
 
 
 def test_report_add_rejects_inline_and_file_body_together(tmp_path: Path) -> None:

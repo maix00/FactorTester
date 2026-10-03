@@ -74,7 +74,7 @@ def test_claim_block_resolve_and_reject_are_material_transitions(
         owner_user_id="alice",
         kind="capability_gap",
         descriptor_hash="b" * 64,
-        affected_refs=["work-package:1"],
+        affected_refs=["report:report-1"],
         change_refs=[],
     )
     claimed = store.claim_case(
@@ -406,6 +406,46 @@ def test_maintenance_resume_compacts_one_case_long_reference_lists(
     assert case["remaining_affected_ref_count"] == 7
     assert case["change_refs"] == change_refs[:1]
     assert case["remaining_change_ref_count"] == 7
+
+
+def test_research_resume_uses_workspace_and_report_branch_authority(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        resume_module,
+        "load_workspace_factor_summary",
+        lambda *, workspace_id, owner: {
+            "workspace_id": workspace_id,
+            "owner": owner,
+        },
+    )
+
+    packet = resume_module.build_agent_resume_packet(
+        owner="alice",
+        agent_id="research-agent",
+        role="research",
+        workspace_id="workspace-1",
+    )
+
+    assert packet["research"] == {
+        "workspace_id": "workspace-1",
+        "factor_summary": {
+            "workspace_id": "workspace-1",
+            "owner": "alice",
+        },
+        "authoritative_state": ["agent_conversation", "report_branch", "jobs"],
+        "next_action": "resume_from_agent_conversation_and_open_report_branch",
+    }
+    assert "graph" not in str(packet).lower()
+
+
+def test_research_resume_requires_workspace_id() -> None:
+    with pytest.raises(ValueError, match="research resume requires workspace_id"):
+        resume_module.build_agent_resume_packet(
+            owner="alice",
+            agent_id="research-agent",
+            role="research",
+        )
 
 
 @pytest.mark.parametrize(

@@ -4,12 +4,7 @@
   const MAX_ESTIMATE_DEPTH = 2;
 
   function isCollapsible(component) {
-    return component.kind === "special" || (
-      ["section", "subsection", "table"].includes(component.kind)
-      && ["current_obligations", "obligation_requirement_coverage"].includes(
-        component.display_kind || "",
-      )
-    );
+    return component.kind === "special";
   }
 
   function usesSectionBridge(component) {

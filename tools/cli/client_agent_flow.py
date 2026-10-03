@@ -13,17 +13,10 @@ class AgentFlowClientMixin(ClientMixinBase):
         agent_id: str,
         *,
         role: str,
-        instance_id: str = "",
-        branch_id: str = "",
         workspace_id: str = "",
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {"role": role}
-        if role == "research":
-            payload.update({
-                "instance_id": instance_id,
-                "branch_id": branch_id,
-            })
-        elif role == "planning":
+        if role in {"planning", "research"}:
             payload["workspace_id"] = workspace_id
         data = self._expect_success(self.session.post(
             f"/api/agent-flow/agents/{agent_id}/resume",

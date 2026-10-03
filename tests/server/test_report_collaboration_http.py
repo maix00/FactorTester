@@ -61,13 +61,13 @@ def test_client_profile_fork_upload_over_real_control_and_object_http(tmp_path):
         store.save(profile)
         stores[user] = store
     initialized = initialize_report_space(stores['alice'], 'self', report)
-    package_id = initialized['work_package_id']
+    package_id = initialized['report_workspace_id']
     package = tmp_path / 'alice/workspace/research' / package_id
     add_component(package_root=package, branch_id='main', component_id='chapter', kind='chapter',
                   title='Real HTTP', parent_id=None, body='', content=None, display_kind='')
     with running(data), running(control):
         published = publish_local_branch(clients['alice'], stores['alice'], profile_id='self',
-                                         work_package_id=package_id, branch_id='main')
+                                         report_workspace_id=package_id, branch_id='main')
         assert published['status'] == 'synced', published
         copied = fork_remote_branch(clients['bob'], stores['bob'], profile_id='self', report_id='http-report',
                                      source_branch_id='main', branch_id='bob-review')
@@ -75,5 +75,5 @@ def test_client_profile_fork_upload_over_real_control_and_object_http(tmp_path):
         branches = clients['alice'].report_branch_status('http-report')['branches']
         assert {b['branch_id'] for b in branches} == {'main', 'bob-review'}
         assert {b['principal_ref'] for b in branches} == {'alice', 'bob'}
-        target = tmp_path / 'bob/workspace/research' / copied['work_package_id']
+        target = tmp_path / 'bob/workspace/research' / copied['report_workspace_id']
         assert load_snapshot(package_root=target, branch_id='bob-review')['components'][0]['title'] == 'Real HTTP'

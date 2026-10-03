@@ -653,7 +653,4 @@ final class ResearchDocumentTextBlockTests: XCTestCase {
         )
     }
 
-    func testUnknownGraphNodeKeepsItsRegisteredName() {
-        XCTAssertEqual(ResearchDisplayText.node("custom_review"), "custom review")
-    }
 }

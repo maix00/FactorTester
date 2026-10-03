@@ -48,7 +48,6 @@ struct LocalProfilesView: View {
                     if let profile = selectedProfile {
                         profileDetails(profile)
                         InitializationSourceView(profile: profile)
-                        ResearchHistoryView(profile: profile)
                         Button(
                             activeID == profile.id
                                 ? "当前 Adapter Profile"

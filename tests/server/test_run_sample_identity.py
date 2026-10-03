@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+
 import pytest
 
-from server.services.research_graph.trial_plan.sample_identity import (
+from server.services.research_sample_identity import (
     derive_sample_identity,
 )
 
@@ -82,3 +85,100 @@ def test_v2_rejects_conflicting_selected_analysis_ranges() -> None:
 
     with pytest.raises(ValueError, match="one unambiguous date range"):
         derive_sample_identity(spec)
+
+
+def test_frozen_product_selection_exposes_exact_membership() -> None:
+    members = [
+        "Product/Futures/CNFutures/_products/AP.CZC",
+        "Product/Futures/CNFutures/_products/SI.GFE",
+    ]
+    selection = {
+        "id": "product-group:metals",
+        "paths": members,
+        "resolution_sha256": hashlib.sha256(
+            json.dumps(members, ensure_ascii=False, separators=(",", ":"))
+            .encode()
+        ).hexdigest(),
+    }
+    spec = {
+        "run_spec_version": 3,
+        "analyses": ["ic"],
+        "configuration": {
+            "shared": {"product_selections": {
+                "product-group:metals": selection,
+            }},
+            "analyses": {
+                "ic": {
+                    "settings": {
+                        "start_date": "2024-01-01",
+                        "end_date": "2024-12-31",
+                    },
+                    "configuration_groups": [{
+                        "product_scope_ref": "product-group:metals",
+                    }],
+                },
+            },
+        },
+    }
+
+    identity = derive_sample_identity(spec)
+
+    assert identity["universe_members"] == members
+    assert identity["universe_membership_assurance"] == "exact_frozen_product_scope"
+    assert "partial_universe_overlap_not_detected" not in identity["limitations"]
+
+
+def test_exact_members_are_order_and_duplicate_independent() -> None:
+    first = "Product/Futures/CNFutures/_products/AP.CZC"
+    second = "Product/Futures/CNFutures/_products/SI.GFE"
+    spec = _run_spec_v2(["ic"])
+    scope = spec["configuration"]["analyses"]["ic"]
+    scope["paths"] = [first, second, first]
+
+    reordered = _run_spec_v2(["ic"])
+    reordered["configuration"]["analyses"]["ic"]["paths"] = [second, first]
+
+    identity = derive_sample_identity(spec)
+    reordered_identity = derive_sample_identity(reordered)
+
+    assert identity["universe_members"] == [first, second]
+    assert identity["universe_membership_assurance"] == "exact_frozen_product_scope"
+    assert identity["sample_hash"] == reordered_identity["sample_hash"]
+    assert identity["universe_members"] == reordered_identity["universe_members"]
+
+
+def test_frozen_selection_with_mismatched_resolution_is_not_exact() -> None:
+    identity = derive_sample_identity({
+        "run_spec_version": 3,
+        "analyses": ["ic"],
+        "configuration": {
+            "shared": {"product_selections": {
+                "scope": {
+                    "paths": ["Product/Futures/_products/AP.CZC"],
+                    "resolution_sha256": "0" * 64,
+                },
+            }},
+            "analyses": {"ic": {
+                "settings": {
+                    "start_date": "2024-01-01",
+                    "end_date": "2024-12-31",
+                },
+                "products": ["Product/Futures"],
+                "configuration_groups": [{"product_scope_ref": "scope"}],
+            }},
+        },
+    })
+
+    assert identity["universe_members"] == []
+    assert identity["universe_membership_assurance"] == "not_proven"
+
+
+def test_sample_identity_module_has_no_graph_dependency() -> None:
+    from pathlib import Path
+
+    for module in (
+        "server/services/research_sample_identity.py",
+        "server/services/research_sample_exposure.py",
+    ):
+        source = Path(module).read_text()
+        assert "server.services.research_graph" not in source

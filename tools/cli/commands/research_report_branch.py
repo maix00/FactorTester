@@ -119,17 +119,17 @@ def branch_publish(report_id: str, profile_ref: str, branch_id: str, publication
 
 @click.command('branch-upload')
 @click.option('--profile', 'profile_id', required=True)
-@click.option('--work-package-id', required=True)
+@click.option('--report-workspace-id', required=True)
 @click.option('--branch-id', required=True)
 @click.option('--release-profile', type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @friendly_errors
-def branch_upload(profile_id, work_package_id, branch_id, release_profile):
+def branch_upload(profile_id, report_workspace_id, branch_id, release_profile):
     """上传本 Profile 的完整可编辑快照，并以版本检查推进共享分支。"""
     from tools.cli.release.profile import load_profile_root
     from tools.cli.release.local_profile import LocalProfileStore
     from tools.cli.release.research_reporting.collaboration import publish_local_branch
     _json(publish_local_branch(client_from_config(), LocalProfileStore(load_profile_root(release_profile)),
-                               profile_id=profile_id, work_package_id=work_package_id, branch_id=branch_id))
+                               profile_id=profile_id, report_workspace_id=report_workspace_id, branch_id=branch_id))
 
 
 @click.command('branch-fork')

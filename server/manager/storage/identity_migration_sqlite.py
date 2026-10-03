@@ -182,14 +182,6 @@ def apply_sqlite_identity_migration(
                 ).rowcount
                 counts["renamed_references"] += max(0, int(renamed))
                 counts["deleted_references"] += max(0, int(deleted))
-            if table == "research_graph_instances" and "current_owner_profile_ref" in available:
-                renamed = connection.execute(
-                    'UPDATE "research_graph_instances" '
-                    'SET current_owner_profile_ref=REPLACE('
-                    'current_owner_profile_ref, ?, ?) WHERE owner=?',
-                    (old_username, new_username, new_username),
-                ).rowcount
-                counts["renamed_references"] += max(0, int(renamed))
         if "pending_account_registrations" in tables:
             connection.execute(
                 "DELETE FROM pending_account_registrations WHERE username<>?",

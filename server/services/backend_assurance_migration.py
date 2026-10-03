@@ -1,4 +1,4 @@
-"""Atomic Batch2 cutover from Graph receipts to terminal Job evidence."""
+"""Atomic cutover from legacy receipts to terminal Job evidence."""
 
 from __future__ import annotations
 
@@ -32,49 +32,69 @@ def migrate_backend_assurance(
 ) -> dict[str, Any]:
     """Convert all legacy backend assurance facts in one SQLite transaction."""
     telemetry = MigrationTelemetry()
+    with connect_sqlite(db_path, foreign_keys=True) as conn:
+        conn.set_trace_callback(telemetry.trace)
+        conn.execute("BEGIN IMMEDIATE")
+        return migrate_backend_assurance_in_transaction(
+            conn, telemetry=telemetry,
+        )
+
+
+def migrate_backend_assurance_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    telemetry: MigrationTelemetry | None = None,
+) -> dict[str, Any]:
+    """Migrate receipts using a caller-owned transaction and connection.
+
+    The one-shot legacy-schema cutover invokes this helper inside its own
+    backup-backed transaction. Keeping the conversion in the same transaction
+    prevents a failed schema cutover from leaving Job assurance half-migrated.
+    """
+    if not conn.in_transaction:
+        raise RuntimeError("backend assurance migration requires an active transaction")
+    telemetry = telemetry or MigrationTelemetry()
     report = {
         "legacy_receipts_migrated": 0,
         "terminal_jobs_backfilled": 0,
         "maintenance_cases_migrated": 0,
         "legacy_table_dropped": 0,
     }
-    with connect_sqlite(db_path, foreign_keys=True) as conn:
-        conn.set_trace_callback(telemetry.trace)
-        before_count = table_count(conn)
-        conn.execute("BEGIN IMMEDIATE")
-        _ensure_target_schema(conn)
-        _backfill_job_run_spec_hashes(conn)
-        legacy_exists = _table_exists(conn, _LEGACY_TABLE)
-        receipts = (
-            conn.execute(
-                f"SELECT * FROM {_LEGACY_TABLE} ORDER BY receipt_id"
-            ).fetchall()
-            if legacy_exists
-            else []
-        )
-        for receipt in receipts:
-            job, run = _validate_legacy_receipt(conn, receipt)
-            assurance = _legacy_assurance(receipt)
-            _store_assurance(
-                conn,
-                job=job,
-                run_spec_hash=str(run["run_spec_hash"]),
-                assurance=assurance,
-            )
-            if _migrate_maintenance_case(conn, receipt):
-                report["maintenance_cases_migrated"] += 1
-            report["legacy_receipts_migrated"] += 1
-
-        report["terminal_jobs_backfilled"] = _backfill_terminal_jobs(
+    conn.set_trace_callback(telemetry.trace)
+    before_count = table_count(conn)
+    _ensure_target_schema(conn)
+    _backfill_job_run_spec_hashes(conn)
+    legacy_exists = _table_exists(conn, _LEGACY_TABLE)
+    receipts = (
+        conn.execute(
+            f"SELECT * FROM {_LEGACY_TABLE} ORDER BY receipt_id"
+        ).fetchall()
+        if legacy_exists
+        else []
+    )
+    for receipt in receipts:
+        job, run = _validate_legacy_receipt(conn, receipt)
+        assurance = _legacy_assurance(receipt)
+        _store_assurance(
             conn,
-            excluded_job_ids={
-                str(receipt["job_id"]) for receipt in receipts
-            },
+            job=job,
+            run_spec_hash=str(run["run_spec_hash"]),
+            assurance=assurance,
         )
-        if legacy_exists:
-            conn.execute(f"DROP TABLE {_LEGACY_TABLE}")
-            report["legacy_table_dropped"] = 1
-        after_count = table_count(conn)
+        if _migrate_maintenance_case(conn, receipt):
+            report["maintenance_cases_migrated"] += 1
+        report["legacy_receipts_migrated"] += 1
+
+    report["terminal_jobs_backfilled"] = _backfill_terminal_jobs(
+        conn,
+        excluded_job_ids={
+            str(receipt["job_id"]) for receipt in receipts
+        },
+    )
+    if legacy_exists:
+        conn.execute(f"DROP TABLE {_LEGACY_TABLE}")
+        report["legacy_table_dropped"] = 1
+    after_count = table_count(conn)
     return report | {
         "schema_tables_before": before_count,
         "schema_tables_after": after_count,
@@ -154,48 +174,6 @@ def _validate_legacy_receipt(
     ):
         raise ValueError(
             f"legacy backend assurance run context conflict: "
-            f"{receipt['receipt_id']}"
-        )
-    instance = conn.execute(
-        """
-        SELECT * FROM research_graph_instances WHERE instance_id=?
-        """,
-        (receipt["instance_id"],),
-    ).fetchone()
-    if (
-        instance is None
-        or str(instance["owner"]) != str(receipt["owner_user_id"])
-        or str(instance["graph_id"]) != str(receipt["graph_id"])
-        or int(instance["graph_version"]) != int(receipt["graph_version"])
-    ):
-        raise ValueError(
-            f"legacy backend assurance instance context conflict: "
-            f"{receipt['receipt_id']}"
-        )
-    branch = conn.execute(
-        """
-        SELECT 1 FROM research_graph_branches
-        WHERE branch_id=? AND instance_id=?
-        """,
-        (receipt["branch_id"], receipt["instance_id"]),
-    ).fetchone()
-    if branch is None:
-        raise ValueError(
-            f"legacy backend assurance branch context conflict: "
-            f"{receipt['receipt_id']}"
-        )
-    graph = conn.execute(
-        """
-        SELECT content_hash FROM research_graph_versions
-        WHERE graph_id=? AND version=?
-        """,
-        (receipt["graph_id"], receipt["graph_version"]),
-    ).fetchone()
-    if graph is None or str(graph["content_hash"]) != str(
-        receipt["graph_hash"]
-    ):
-        raise ValueError(
-            f"legacy backend assurance graph context conflict: "
             f"{receipt['receipt_id']}"
         )
     result_summary = _loads(job["result_summary_json"])
@@ -309,9 +287,6 @@ def _migrate_maintenance_case(
     affected_refs = [
         f"job:{receipt['job_id']}",
         f"legacy-backend-assurance:{receipt['receipt_id']}",
-        f"graph:{receipt['graph_id']}@{receipt['graph_version']}",
-        f"graph-instance:{receipt['instance_id']}",
-        f"graph-branch:{receipt['branch_id']}",
     ]
     if implementation_id:
         affected_refs.append(f"agent-invocation:{implementation_id}")

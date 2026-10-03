@@ -90,7 +90,7 @@ def test_report_space_is_editable_without_factor_worktree_and_retry_preserves_tr
               "research_id": "research:v1:test", "workspace_id": "workspace-one", "title": "验收报告"}
     initialized = initialize_report_space(store, "self", report)
     scope = resolve_branch_report_scope(client_root=tmp_path / "client", profile_id="self",
-                                       work_package_id=initialized["work_package_id"], branch_id=initialized["branch_id"])
+                                       report_workspace_id=initialized["report_workspace_id"], branch_id=initialized["branch_id"])
     add_component(package_root=scope.package_root, branch_id=scope.branch_id,
                   component_id="chapter-one", kind="chapter", title="验收", parent_id=None,
                   body="", content=None, display_kind="")
@@ -98,15 +98,20 @@ def test_report_space_is_editable_without_factor_worktree_and_retry_preserves_tr
     assert initialize_report_space(store, "self", report) == initialized
     after = load_snapshot(package_root=scope.package_root, branch_id=scope.branch_id)
     assert after["head"] == before["head"]
-    assert len(store.load("self")["research_records"]) == 1
+    profile = store.load("self")
+    assert "research_records" not in profile
+    assert profile["workspaces"] == []
 
 
 def test_report_identity_rejects_path_traversal(tmp_path):
     import pytest
-    from tools.cli.release.research_reporting.work_package_identity import ensure_work_package_identity
+    from tools.cli.release.research_reporting.report_workspace_identity import ensure_report_workspace_identity
     for report_id in ("report:v1:../escape", "report:v1:/absolute", "report:v1:"):
         with pytest.raises(ValueError):
-            ensure_work_package_identity(tmp_path / "report", work_package_id="safe", report_id=report_id)
+            ensure_report_workspace_identity(
+                tmp_path / "report", report_workspace_id="safe",
+                report_id=report_id,
+            )
 
 
 def test_branch_read_uses_federated_publication_for_client_or_server(monkeypatch):

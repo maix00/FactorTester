@@ -103,105 +103,16 @@ struct ProfileResearchService {
         )
     }
 
-    func list(
-        workspaceRef: String = "",
-        lifecycle: String = "active",
-        after: String? = nil
-    ) async throws -> ProfileResearchListResponse {
-        var query = [
-            URLQueryItem(name: "lifecycle", value: lifecycle),
-            URLQueryItem(name: "limit", value: "20"),
-            URLQueryItem(name: "after", value: after),
-        ]
-        if !workspaceRef.isEmpty {
-            query.insert(
-                URLQueryItem(name: "workspace_ref", value: workspaceRef),
-                at: 0
-            )
-        }
-        let path = path(
-            "/api/profile-research",
-            query: query
-        )
-        return try await value(path: path, as: ProfileResearchListResponse.self)
-    }
-
-    func transitionLifecycle(
-        workPackageRef: String,
-        target: String,
-        expectedRevision: Int,
-        reason: String
-    ) async throws -> ProfileResearchLifecycleResult {
-        let body = try JSONSerialization.data(withJSONObject: [
-            "target": target,
-            "expected_revision": expectedRevision,
-            "reason": reason,
-        ])
-        let response = try await transport.data(for: request(
-            path: "/api/profile-research/\(workPackageRef)/lifecycle",
-            etag: nil,
-            method: "PATCH",
-            body: body
-        ))
-        guard (200..<300).contains(response.statusCode) else {
-            throw APIError.transport(
-                "Research lifecycle HTTP \(response.statusCode)"
-            )
-        }
-        return try decoder.decode(
-            ProfileResearchLifecycleResult.self,
-            from: response.data
-        )
-    }
-
-    func workPackageDetail(
-        href: String,
-        etag: String? = nil
-    ) async throws -> ConditionalProjection<ProfileResearchWorkPackageDetail> {
-        try await conditional(path: href, etag: etag)
-    }
-
-    func branchDetail(
-        href: String,
-        etag: String? = nil
-    ) async throws -> ConditionalProjection<ProfileResearchDetail> {
-        try await conditional(path: href, etag: etag)
-    }
-
-    // Temporary source compatibility for callers that already hold a branch
-    // detail href. New navigation first opens a Work Package.
-    func detail(
-        href: String,
-        etag: String? = nil
-    ) async throws -> ConditionalProjection<ProfileResearchDetail> {
-        try await branchDetail(href: href, etag: etag)
-    }
-
-    func timeline(
-        href: String,
-        after: String? = nil,
-        etag: String? = nil
-    ) async throws -> ConditionalProjection<ProfileResearchTimelinePage> {
-        let page = path(
-            href,
-            query: [
-                URLQueryItem(name: "limit", value: "50"),
-                URLQueryItem(name: "after", value: after),
-            ]
-        )
-        return try await conditional(path: page, etag: etag)
-    }
-
-    func events(href: String) -> AsyncThrowingStream<Void, Error> {
-        transport.events(for: request(path: href, etag: nil))
-    }
-
     func auditObject(href: String) async throws -> ResearchAuditObjectPayload {
         let envelope = try await value(
             path: href,
             as: ResearchAuditObjectEnvelope.self
         )
         return envelope.object
+    }
+
+    func events(href: String) -> AsyncThrowingStream<Void, Error> {
+        transport.events(for: request(path: href, etag: nil))
     }
 
     func frozenObjectJSON(
@@ -382,26 +293,6 @@ struct ProfileResearchService {
         return envelope.report
     }
 
-    func researchGraphVersions(
-        graphID: String
-    ) async throws -> [ResearchGraphVersion] {
-        let response = try await value(
-            path: "/api/catalog/research-graphs/\(graphID)/versions",
-            as: ResearchGraphVersionsEnvelope.self
-        )
-        return response.versions
-    }
-
-    func activeResearchGraph(
-        graphID: String
-    ) async throws -> ResearchGraphVersion {
-        let response = try await value(
-            path: "/api/catalog/research-graphs/\(graphID)/active",
-            as: ResearchGraphEnvelope.self
-        )
-        return response.graph
-    }
-
     private func value<T: Decodable>(
         path: String,
         as type: T.Type
@@ -567,14 +458,6 @@ struct ProfileResearchService {
         components.queryItems = query.filter { $0.value != nil }
         return components.string ?? value
     }
-}
-
-private struct ResearchGraphVersionsEnvelope: Decodable {
-    let versions: [ResearchGraphVersion]
-}
-
-private struct ResearchGraphEnvelope: Decodable {
-    let graph: ResearchGraphVersion
 }
 
 private struct ResearchProjectionErrorPayload: Decodable {
