@@ -61,32 +61,6 @@ final class ResearchDocumentReferenceDetailsTests: SimplifiedChineseLocalizedTes
         )
     }
 
-    func testObligationExplainsQuestionScopeAndCompletionCriterion() throws {
-        let payload = try decode(ResearchAuditObjectPayload.self, """
-        {"schema_version":1,"obligation_id":"fees","obligation_kind":"cost_test",
-         "epistemic_question":"手续费后收益能否保持为正？",
-         "scope":{"product_group":"CNFutures"},
-         "discharge_criterion":{"rule_ref":"net-return:positive"},
-         "requirement_refs":["requirement:fees"],"claim_ids":["claim:alpha"],
-         "status":"open","materiality":"decision_blocking",
-         "created_event_ref":"trace:start"}
-        """)
-        let sections = ResearchDocumentReferenceDetails.sections(
-            reference: .init(
-                kind: "obligation",
-                targetRef: "obligation:fees",
-                label: "手续费覆盖义务"
-            ),
-            binding: nil,
-            payload: payload,
-            evidence: nil
-        )
-
-        XCTAssertEqual(value("待回答问题", in: sections), "手续费后收益能否保持为正？")
-        XCTAssertEqual(value("完成标准 · 规则", in: sections), "net-return:positive")
-        XCTAssertEqual(value("范围 · 产品组", in: sections), "CNFutures")
-    }
-
     func testEvidenceExplainsClaimFactsAndApplicability() throws {
         let detail = try decode(ResearchEvidenceDetailPayload.self, """
         {"evidence_ref":"evidence:authoritative_backtest:sha256:abc",

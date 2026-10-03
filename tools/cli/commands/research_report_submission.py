@@ -34,7 +34,6 @@ def begin_component_submission(
     requested_sequence: int | None,
     component: dict[str, Any],
     as_json: bool,
-    allow_historical_entry_requirement: bool = False,
     validation_error: ValueError | None = None,
 ) -> tuple[ReportSubmission, list[dict[str, Any]]]:
     submission = begin_or_raise(
@@ -59,9 +58,6 @@ def begin_component_submission(
         content=component["content"],
         display_kind=str(component.get("display_kind") or ""),
         scope=scope,
-        allow_historical_entry_requirement=(
-            allow_historical_entry_requirement
-        ),
     )
     if (
         component["kind"] != "chapter"
@@ -99,7 +95,6 @@ def begin_batch_submission(
     requested_sequence: int | None,
     operations: list[dict[str, Any]],
     as_json: bool,
-    historical_review: dict[str, Any] | None = None,
 ) -> tuple[ReportSubmission, list[dict[str, Any]]]:
     try:
         logical_identity = batch_identity(operations)
@@ -146,9 +141,6 @@ def begin_batch_submission(
                 content=operation.get("content"),
                 display_kind=str(operation.get("display_kind") or ""),
                 scope=scope,
-                allow_historical_entry_requirement=(
-                    historical_review is not None
-                ),
                 report_components=report_components,
             )
             value["bindings"] = generated

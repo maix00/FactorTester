@@ -104,7 +104,6 @@ def trial_plan_v4() -> dict:
         "schema_version": 4,
         "decision_contract_hash": "1" * 64,
         "methodology_hash": "2" * 64,
-        "obligation_refs": ["obligation-stage"],
         "parent_trial_plan_hash": None,
         "stage_policy": {
             "ordered_stages": [

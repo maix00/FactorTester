@@ -212,10 +212,6 @@ final class ClientTabSelectionTests: XCTestCase {
 
     func testGenericReferenceKindsUseTheSharedSwiftWebTemplate() {
         let cases: [(String, String)] = [
-            ("obligation", "obligation:one"),
-            ("report_requirement", "report.requirement.factor_semantics"),
-            ("entry_requirement", "data.quality_and_continuity"),
-            ("obligation_requirement", "data.source_availability"),
             ("trial_plan", "trial-plan:sha256:\(String(repeating: "a", count: 64))"),
             ("run_spec", "runspec:sha256:\(String(repeating: "b", count: 64))"),
             ("run", "run:run-1"),

@@ -221,42 +221,42 @@ def test_abandon_reserved_submission_restores_committed_sidecar_base(
     package = workspace_root / "research" / "wp"
     branch_root = package / "branches" / "main"
     authoring = branch_root / "authoring"
-    ledger_path = branch_root / "obligations.json"
-    base = {"schema_version": 1, "generation": 0, "selected_edge": None}
+    sidecar_path = branch_root / "report-metadata.json"
+    base = {"schema_version": 1, "generation": 0, "mode": "published"}
     next_value = {
         "schema_version": 1,
         "generation": 1,
-        "selected_edge": "any_node__capability_gap",
+        "mode": "draft",
     }
-    ledger_path.write_text(json.dumps(base, sort_keys=True) + "\n")
+    sidecar_path.write_text(json.dumps(base, sort_keys=True) + "\n")
     subprocess.run(
-        ["git", "-C", str(package), "add", "branches/main/obligations.json"],
+        ["git", "-C", str(package), "add", "branches/main/report-metadata.json"],
         check=True,
     )
     subprocess.run(
-        ["git", "-C", str(package), "commit", "-m", "Add obligation ledger"],
+        ["git", "-C", str(package), "commit", "-m", "Add report metadata sidecar"],
         check=True, capture_output=True, text=True,
     )
     begin_submission(
         package_root=package,
         branch_id="main",
         requested_sequence=None,
-        logical_identity={"kind": "edge_selected", "event_id": "failure-edge"},
-        payload={"edge_id": "any_node__capability_gap"},
+        logical_identity={"kind": "metadata_update", "event_id": "metadata-draft"},
+        payload={"mode": "draft"},
         sidecars=[{
-            "path": "obligations.json",
+            "path": "report-metadata.json",
             "base_generation": 0,
             "next_generation": 1,
             "next_hash": digest(next_value),
             "next_value": next_value,
         }],
     )
-    ledger_path.write_text(json.dumps(next_value, sort_keys=True) + "\n")
+    sidecar_path.write_text(json.dumps(next_value, sort_keys=True) + "\n")
     subprocess.run(
         ["git", "-C", str(package), "add", "branches/main"], check=True,
     )
     subprocess.run(
-        ["git", "-C", str(package), "commit", "-m", "Strand reserved edge"],
+        ["git", "-C", str(package), "commit", "-m", "Strand reserved metadata update"],
         check=True, capture_output=True, text=True,
     )
 
@@ -268,8 +268,8 @@ def test_abandon_reserved_submission_restores_committed_sidecar_base(
     value = json.loads(abandoned.output)
     assert value["status"] == "abandoned"
     assert value["submission_sequence"] == 1
-    assert value["restored_sidecars"] == ["obligations.json"]
-    assert json.loads(ledger_path.read_text()) == base
+    assert value["restored_sidecars"] == ["report-metadata.json"]
+    assert json.loads(sidecar_path.read_text()) == base
     assert not (authoring / "pending-submission.json").exists()
     assert subprocess.run(
         ["git", "-C", str(package), "status", "--porcelain"],

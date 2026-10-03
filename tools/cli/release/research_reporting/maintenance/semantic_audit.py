@@ -123,18 +123,6 @@ def _audit_component(
             errors.append(
                 f"legacy binding metadata: {binding['binding_id']}"
             )
-        if (
-            binding["kind"] == "report_requirement"
-            and binding["target_ref"].startswith("report.requirement.")
-            and (
-                component["kind"] != "special"
-                or component["display_kind"] != "obligation_requirement"
-            )
-        ):
-            errors.append(
-                "report requirement is not an obligation_requirement "
-                f"special: {binding['binding_id']}"
-            )
     payload = {
         key: component[key]
         for key in (

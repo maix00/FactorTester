@@ -67,7 +67,7 @@ assert.equal(
   "/api/public-research/publication-123/local-resources/bbbbbbbbbbbbbbbbbbbbbbbb?inline=1",
 );
 assert.equal(page.resourceEndpoint({detailFields: []}), null);
-assert.equal(page.pathFor("obligation", "obligation:one"), "");
+assert.equal(page.pathFor("factor", "factor:v2:one"), "");
 assert.deepEqual(page.presentationFor("factor-family"), {
   title: "因子家族", symbol: "function", tone: "factor",
 });

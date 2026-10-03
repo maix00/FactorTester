@@ -188,12 +188,12 @@ final class ResearchReportTreeSourceTests: XCTestCase {
         ]), reference: rootRef, under: authoring)
         try write(
             node("first", kind: "chapter", bindings: [
-                binding("trace:first"),
+                binding("evidence:first"),
             ]), reference: firstRef, under: authoring
         )
         try write(
             node("second", kind: "chapter", bindings: [
-                binding("trace:second"),
+                binding("evidence:second"),
             ]), reference: secondRef, under: authoring
         )
         let head: [String: Any] = [
@@ -221,7 +221,7 @@ final class ResearchReportTreeSourceTests: XCTestCase {
     private func binding(_ reference: String) -> [String: Any] {
         [
             "binding_id": reference.replacingOccurrences(of: ":", with: "-"),
-            "kind": "checkpoint", "target_ref": reference,
+            "kind": "evidence", "target_ref": reference,
             "label": "节点", "data": [:],
         ]
     }

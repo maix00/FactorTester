@@ -501,8 +501,7 @@ struct ClientTab: Identifiable {
             )
         }
         // Report links must use the same Web renderer as the report itself.
-        // This gives evidence, obligations, requirements, frozen plans, files
-        // and future catalog kinds a single Swift-owned tab seam.
+        // This gives report references a single Swift-owned tab seam.
         let displayLabel = referenceLabel(
             kind: kind,
             label: reference.label

@@ -23,7 +23,6 @@ def validate_declared_reference(
     reference: DeclaredReportReference,
     scope: Any,
     client: FactorTesterClient | None = None,
-    allow_historical_entry_requirement: bool = False,
     report_components: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Validate one declared kind/ref pair without rewriting either value."""
