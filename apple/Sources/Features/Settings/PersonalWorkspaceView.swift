@@ -61,7 +61,7 @@ struct PersonalWorkspaceView: View {
                 Divider()
                 SettingsRow(
                     title: "研究现场",
-                    description: "Profile、实时研究步骤、Trial Plan、义务与报告"
+                    description: "Profile 与独立研究报告工作区"
                 ) {
                     Button("打开 Profiles", action: openProfiles)
                         .buttonStyle(.borderedProminent)

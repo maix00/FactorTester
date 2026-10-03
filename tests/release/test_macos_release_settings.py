@@ -346,7 +346,7 @@ def test_macos_settings_show_only_active_unified_workspace() -> None:
     assert "PersonalWorkspaceView(openProfiles:" in hub
     assert "LocalProfilesView()" not in hub
     workspace_view = view + (SOURCES / "Features" / "Profiles" / "ProfileWorkspaceView.swift").read_text(encoding="utf-8")
-    assert "Profile、实时研究步骤、Trial Plan、义务与报告" in workspace_view
+    assert "Profile 与独立研究报告工作区" in workspace_view
     assert "Documents/FactorTester/users" in view
     assert "personal-workspace/factor-library" in view
     assert "各个研究现场的独立 worktree" in view

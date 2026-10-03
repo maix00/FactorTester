@@ -58,9 +58,6 @@ def test_superseded_retry_returns_current_structured_gate(
             "body": values["body"],
             "content": values["content"],
             "display_kind": values["display_kind"],
-            "report_requirement_id": "",
-            "report_subject_ref": "",
-            "report_content_kind": "",
         }
         begin_submission(
             package_root=values["scope"].package_root,

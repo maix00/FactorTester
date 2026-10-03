@@ -170,7 +170,7 @@ def test_remove_rejects_job_named_system_special(tmp_path, monkeypatch):
     _patch(monkeypatch, client_root)
     _add(
         package, f"job-{_JOB}-result", "special", chapter,
-        "obligation_changes",
+        "external_review",
     )
 
     result = CliRunner().invoke(report, [

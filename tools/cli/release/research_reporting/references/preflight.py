@@ -34,7 +34,6 @@ def preflight_component(
     display_kind: str = "",
     scope: Any,
     client: Any = None,
-    allow_historical_entry_requirement: bool = False,
     report_components: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     diagnostics: list[dict[str, Any]] = []
@@ -62,11 +61,7 @@ def preflight_component(
             value=display_kind, offset=0,
             code="report.display_kind.kind_mismatch",
             message="特殊小节标签不能附着在普通报告组件上",
-            rule=(
-                "grill_resolution、external_review、obligation_requirement "
-                "等特殊小节标签"
-                "只能与 kind=special 一起提交"
-            ),
+            rule="特殊小节标签只能与 kind=special 一起提交",
             example=(
                 "--kind special --display-kind grill_resolution"
             ),
@@ -115,8 +110,6 @@ def preflight_component(
                     "scope": scope,
                     "client": client,
                 }
-                if allow_historical_entry_requirement:
-                    authority_options["allow_historical_entry_requirement"] = True
                 if reference.kind == 'report_section' and report_components is not None:
                     authority_options['report_components'] = report_components
                 result = validate_declared_reference(**authority_options)

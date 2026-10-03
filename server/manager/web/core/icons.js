@@ -27,19 +27,12 @@
 
   const referenceSymbols = {
     evidence: "doc.text.magnifyingglass",
-    obligation: "checkmark.seal",
     task: "checklist",
     job: "checklist",
-    claim: "quote.bubble",
     artifact: "paperclip",
-    report_requirement: "list.bullet.clipboard",
-    entry_requirement: "checkmark.square",
-    obligation_requirement: "checkmark.square",
     trial_plan: "list.bullet.clipboard",
-    checkpoint: "flag",
     run: "play.circle",
     run_spec: "slider.horizontal.3",
-    delta: "arrow.left.arrow.right",
     factor: "function",
     factor_family: "function",
     factor_set: "square.stack.3d.up",
@@ -166,15 +159,8 @@
   function section(kind, displayKind = "") {
     const value = normalize(displayKind || kind);
     return {
-      obligation_changes: "exclamationmark.bubble",
-      graph_continuation: "arrow.triangle.branch",
-      capability_detour: "wrench.and.screwdriver",
       grill_resolution: "checkmark.bubble",
       external_review: "text.magnifyingglass",
-      entry_requirements: "checklist",
-      obligation_requirement: "checkmark.circle",
-      obligation_coverage: "checkmark.shield",
-      path_selection: "arrow.triangle.branch",
       test_result: "chart.bar.doc.horizontal",
       research_gap: "exclamationmark.triangle",
     }[value] || "doc.text";

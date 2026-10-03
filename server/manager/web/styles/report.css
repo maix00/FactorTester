@@ -40,7 +40,6 @@ body.sidebar-collapsed:not(.embedded-presentation) .chapter-rail { left: calc(va
 .section-icon { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 20px; flex: 0 0 16px; color: #36b8e9; font-size: 13px; font-weight: 700; }
 .section-icon .ft-icon-svg { width: 16px; height: 16px; }
 .section-icon-special { color: #ff8a26; }
-.section-icon-entry_requirement, .section-icon-obligation_requirement { color: #36b8e9; }
 .section-icon-grill_resolution, .section-icon-external_audit { color: #ff8a26; }
 .section-icon-capability_gap, .section-icon-capability_resolution { color: #d83ddd; }
 .component.special > details > summary .section-marker { color: #ff8a26; }

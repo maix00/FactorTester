@@ -115,15 +115,11 @@ def add_report_batch(profile_id: str, report_workspace_id: str, branch_id: str, 
     operations = payload.get("operations") if isinstance(payload, dict) else None
     if not isinstance(operations, list):
         raise click.ClickException("--operations-file must contain an operations array")
-    historical_review = (
-        payload.get("historical_review") if isinstance(payload, dict) else None
-    )
     submission, enriched = begin_batch_submission(
         scope=scope,
         requested_sequence=submission_sequence,
         operations=operations,
         as_json=as_json,
-        historical_review=historical_review,
     )
     if submission.phase == "finalized":
         saved = None
