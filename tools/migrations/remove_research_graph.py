@@ -13,9 +13,11 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import shutil
 import sqlite3
+import stat
+import tempfile
 from typing import Any
 
 from server.services.backend_assurance_migration import (
@@ -339,7 +341,10 @@ def _nonempty_value_count(
 
 def _graph_files_inventory(path: Path | None) -> dict[str, Any]:
     if path is None:
-        return {"state": "not_configured", "file_count": 0, "bytes": 0, "files": []}
+        return {
+            "state": "not_configured", "file_count": 0, "bytes": 0,
+            "files": [], "directories": [], "root_metadata": None,
+        }
     supplied = Path(path).expanduser()
     if supplied.name != "research-graphs":
         raise ValueError("--graph-files must point to the exact research-graphs directory")
@@ -347,14 +352,28 @@ def _graph_files_inventory(path: Path | None) -> dict[str, Any]:
         raise ValueError("Graph files directory must not be a symbolic link")
     root = supplied.resolve(strict=False)
     if not root.exists():
-        return {"state": "absent", "path": str(root), "file_count": 0, "bytes": 0, "files": []}
+        return {
+            "state": "absent", "path": str(root), "file_count": 0,
+            "bytes": 0, "files": [], "directories": [],
+            "root_metadata": None,
+        }
     if not root.is_dir():
         raise ValueError("Graph files path is not a directory")
     entries = []
+    directories = []
     total_bytes = 0
     for item in sorted(root.rglob("*")):
         if item.is_symlink():
             raise ValueError("Graph files directory contains a symbolic link")
+        metadata = item.stat()
+        if item.is_dir():
+            directories.append({
+                "path": item.relative_to(root).as_posix(),
+                "mode": stat.S_IMODE(metadata.st_mode),
+                "uid": metadata.st_uid,
+                "gid": metadata.st_gid,
+            })
+            continue
         if not item.is_file():
             continue
         digest = hashlib.sha256()
@@ -368,6 +387,9 @@ def _graph_files_inventory(path: Path | None) -> dict[str, Any]:
             "path": item.relative_to(root).as_posix(),
             "bytes": size,
             "sha256": digest.hexdigest(),
+            "mode": stat.S_IMODE(metadata.st_mode),
+            "uid": metadata.st_uid,
+            "gid": metadata.st_gid,
         })
     return {
         "state": "present",
@@ -375,6 +397,12 @@ def _graph_files_inventory(path: Path | None) -> dict[str, Any]:
         "file_count": len(entries),
         "bytes": total_bytes,
         "files": entries,
+        "directories": directories,
+        "root_metadata": {
+            "mode": stat.S_IMODE(root.stat().st_mode),
+            "uid": root.stat().st_uid,
+            "gid": root.stat().st_gid,
+        },
     }
 
 
@@ -551,18 +579,145 @@ def _validate_file_backup_paths(
 ) -> tuple[Path, Path | None]:
     inventory = _graph_files_inventory(graph_files)
     root = Path(inventory.get("path") or graph_files.expanduser().resolve())
-    if inventory["state"] == "absent":
-        return root, None
-    if files_backup is None:
+    if inventory["state"] != "absent" and files_backup is None:
         raise ValueError("--files-backup is required when Graph files exist")
+    if files_backup is None:
+        return root, None
     backup = Path(files_backup).expanduser().resolve(strict=False)
-    if backup.exists():
-        raise FileExistsError(f"files backup already exists: {backup}")
-    if backup == database or backup == database_backup:
+    manifest = _file_backup_manifest_path(backup)
+    if backup.exists() or manifest.exists():
+        raise FileExistsError("Graph file backup already exists")
+    if backup in {database, database_backup} or manifest in {database, database_backup}:
         raise ValueError("file backup must be separate from the database and its backup")
     if backup == root or root in backup.parents or backup in root.parents:
         raise ValueError("file backup must be outside the Graph files directory")
     return root, backup
+
+
+def _file_backup_manifest_path(backup: Path) -> Path:
+    return Path(f"{backup}.manifest.json")
+
+
+def _write_file_backup_manifest(
+    backup: Path,
+    *,
+    state: str,
+    inventory: dict[str, Any],
+) -> Path:
+    manifest = _file_backup_manifest_path(backup)
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "format": 1,
+        "state": state,
+        "file_count": int(inventory["file_count"]),
+        "bytes": int(inventory["bytes"]),
+        "files": inventory["files"],
+        "directories": inventory["directories"],
+        "root_metadata": inventory["root_metadata"],
+    }
+    with manifest.open("x", encoding="utf-8") as stream:
+        json.dump(payload, stream, ensure_ascii=False, sort_keys=True)
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.chmod(manifest, 0o600)
+    return manifest
+
+
+def _manifest_inventory(manifest: Path) -> dict[str, Any]:
+    if manifest.is_symlink() or not manifest.is_file():
+        raise RuntimeError("Graph file backup manifest is unavailable")
+    try:
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise RuntimeError("Graph file backup manifest is invalid") from exc
+    if (
+        not isinstance(payload, dict)
+        or payload.get("format") != 1
+        or payload.get("state") not in {"absent", "present"}
+        or not isinstance(payload.get("files"), list)
+        or not isinstance(payload.get("directories"), list)
+    ):
+        raise RuntimeError("Graph file backup manifest is invalid")
+    files = payload["files"]
+    directories = payload["directories"]
+
+    def safe_relative_path(value: Any) -> bool:
+        if not isinstance(value, str):
+            return False
+        relative = PurePosixPath(value)
+        return (
+            not relative.is_absolute()
+            and "\\" not in value
+            and bool(relative.parts)
+            and all(part not in {"", ".", ".."} for part in relative.parts)
+        )
+
+    def valid_metadata(item: Any) -> bool:
+        return (
+            isinstance(item, dict)
+            and all(isinstance(item.get(key), int) and item[key] >= 0
+                    for key in ("mode", "uid", "gid"))
+        )
+
+    if any(
+        not isinstance(item, dict)
+        or not safe_relative_path(item.get("path"))
+        or not isinstance(item.get("bytes"), int)
+        or item["bytes"] < 0
+        or not isinstance(item.get("sha256"), str)
+        or len(item["sha256"]) != 64
+        or any(character not in "0123456789abcdef" for character in item["sha256"])
+        or not valid_metadata(item)
+        for item in files
+    ) or any(
+        not isinstance(item, dict)
+        or not safe_relative_path(item.get("path"))
+        or not valid_metadata(item)
+        for item in directories
+    ):
+        raise RuntimeError("Graph file backup manifest is invalid")
+    paths = [str(item["path"]) for item in [*files, *directories]]
+    if len(paths) != len(set(paths)):
+        raise RuntimeError("Graph file backup manifest contains duplicate paths")
+    if int(payload.get("file_count", -1)) != len(files):
+        raise RuntimeError("Graph file backup manifest count is invalid")
+    if int(payload.get("bytes", -1)) != sum(int(item["bytes"]) for item in files):
+        raise RuntimeError("Graph file backup manifest size is invalid")
+    if payload["state"] == "absent" and (
+        files or payload["directories"] or payload.get("root_metadata") is not None
+    ):
+        raise RuntimeError("absent Graph file backup manifest contains file entries")
+    if payload["state"] == "present" and not valid_metadata(
+        payload.get("root_metadata"),
+    ):
+        raise RuntimeError("Graph file backup manifest root metadata is invalid")
+    return payload
+
+
+def _restore_owner_mode(path: Path, metadata: dict[str, Any]) -> None:
+    uid, gid = int(metadata["uid"]), int(metadata["gid"])
+    try:
+        os.chown(path, uid, gid)
+    except PermissionError:
+        current = path.stat()
+        if current.st_uid != uid or current.st_gid != gid:
+            raise
+    os.chmod(path, int(metadata["mode"]))
+
+
+def _restore_graph_file_metadata(root: Path, inventory: dict[str, Any]) -> None:
+    for item in inventory["files"]:
+        _restore_owner_mode(root / str(item["path"]), item)
+    for item in sorted(
+        inventory["directories"],
+        key=lambda entry: str(entry["path"]).count("/"),
+        reverse=True,
+    ):
+        _restore_owner_mode(root / str(item["path"]), item)
+    root_metadata = inventory.get("root_metadata")
+    if isinstance(root_metadata, dict):
+        _restore_owner_mode(root, root_metadata)
 
 
 def _verify_file_backup(inventory: dict[str, Any], backup: Path) -> bool:
@@ -571,11 +726,15 @@ def _verify_file_backup(inventory: dict[str, Any], backup: Path) -> bool:
         for item in inventory["files"]
     }
     actual: dict[str, tuple[int, str]] = {}
+    actual_directories: set[str] = set()
     if not backup.is_dir():
         return False
     for item in sorted(backup.rglob("*")):
         if item.is_symlink():
             return False
+        if item.is_dir():
+            actual_directories.add(item.relative_to(backup).as_posix())
+            continue
         if not item.is_file():
             continue
         digest = hashlib.sha256()
@@ -585,7 +744,10 @@ def _verify_file_backup(inventory: dict[str, Any], backup: Path) -> bool:
                 size += len(chunk)
                 digest.update(chunk)
         actual[item.relative_to(backup).as_posix()] = (size, digest.hexdigest())
-    return actual == expected
+    expected_directories = {
+        str(item["path"]) for item in inventory.get("directories", [])
+    }
+    return actual == expected and actual_directories == expected_directories
 
 
 def apply(
@@ -621,11 +783,18 @@ def apply(
     if not backup_verified:
         raise RuntimeError("database backup verification failed")
 
+    files_manifest = None
     if files_backup_path is not None:
         files_backup_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(files_root, files_backup_path, copy_function=shutil.copy2)
-        if not _verify_file_backup(preflight["graph_files"], files_backup_path):
-            raise RuntimeError("Graph files backup verification failed")
+        if preflight["graph_files"]["state"] == "present":
+            shutil.copytree(files_root, files_backup_path, copy_function=shutil.copy2)
+            if not _verify_file_backup(preflight["graph_files"], files_backup_path):
+                raise RuntimeError("Graph files backup verification failed")
+        files_manifest = _write_file_backup_manifest(
+            files_backup_path,
+            state=str(preflight["graph_files"]["state"]),
+            inventory=preflight["graph_files"],
+        )
     staged = False
     removed_staging = False
     try:
@@ -662,7 +831,10 @@ def apply(
                     )
             _remove_evidence_graph_column(conn)
 
-            if files_backup_path is not None:
+            if (
+                files_backup_path is not None
+                and before["graph_files"]["state"] == "present"
+            ):
                 os.replace(files_root, staging)
                 staged = True
                 shutil.rmtree(staging)
@@ -682,10 +854,13 @@ def apply(
                 raise RuntimeError("Graph references remain in shared records")
             if conn.execute("PRAGMA foreign_key_check").fetchone():
                 raise RuntimeError("foreign-key check failed after Graph removal")
+            if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise RuntimeError("SQLite integrity check failed after Graph removal")
             conn.commit()
             return {
                 "backup": str(backup),
                 "files_backup": str(files_backup_path) if files_backup_path else None,
+                "files_manifest": str(files_manifest) if files_manifest else None,
                 "assurance_migration": assurance_migration,
                 "graph_evidence_admissions_removed": graph_admissions_removed,
                 "maintenance_graph_refs_removed": maintenance_refs_removed,
@@ -698,37 +873,288 @@ def apply(
                 os.replace(staging, files_root)
             elif removed_staging and files_backup_path is not None:
                 shutil.copytree(files_backup_path, files_root, copy_function=shutil.copy2)
+                if files_manifest is not None:
+                    _restore_graph_file_metadata(
+                        files_root, _manifest_inventory(files_manifest),
+                    )
         raise
+
+
+def restore_backup(
+    database: Path,
+    backup: Path,
+    *,
+    graph_files: Path,
+    files_backup: Path | None = None,
+) -> dict[str, Any]:
+    """Restore the verified pre-cutover SQLite and Graph-file backups offline.
+
+    The database is staged and verified beside the live file, then atomically
+    replaced. A Graph file tree is also staged and verified from its manifest;
+    failures before the database swap put the current tree back in place.
+    Callers must stop the application before invoking this function.
+    """
+    database_input = Path(database).expanduser()
+    backup_input = Path(backup).expanduser()
+    graph_input = Path(graph_files).expanduser()
+    if database_input.is_symlink() or backup_input.is_symlink() or graph_input.is_symlink():
+        raise ValueError("SQLite and Graph rollback paths must not be symbolic links")
+    database = database_input.resolve()
+    backup = backup_input.resolve(strict=True)
+    graph_root = graph_input.resolve(strict=False)
+    if not database.is_file():
+        raise FileNotFoundError("live database is unavailable or unsafe")
+    if backup == database or not backup.is_file():
+        raise ValueError("SQLite rollback backup is unavailable or unsafe")
+    if graph_root.name != "research-graphs":
+        raise ValueError("--graph-files must point to the exact research-graphs directory")
+    if graph_root.is_symlink():
+        raise ValueError("Graph files directory must not be a symbolic link")
+
+    with connect_sqlite(backup, readonly=True) as source:
+        if source.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+            raise RuntimeError("SQLite rollback backup failed integrity check")
+        if source.execute("PRAGMA foreign_key_check").fetchone() is not None:
+            raise RuntimeError("SQLite rollback backup failed foreign-key check")
+        expected_fingerprint = _database_fingerprint(source)
+
+    file_state: str | None = None
+    file_manifest: Path | None = None
+    files_backup_path: Path | None = None
+    if files_backup is not None:
+        files_backup_input = Path(files_backup).expanduser()
+        if files_backup_input.is_symlink():
+            raise ValueError("Graph file backup must not be a symbolic link")
+        files_backup_path = files_backup_input.resolve(strict=False)
+        file_manifest = _file_backup_manifest_path(files_backup_path)
+        if file_manifest.exists():
+            payload = _manifest_inventory(file_manifest)
+            file_state = str(payload["state"])
+            if file_state == "present":
+                if not _verify_file_backup(payload, files_backup_path):
+                    raise RuntimeError("Graph file rollback backup failed verification")
+            elif files_backup_path.exists():
+                raise RuntimeError("unexpected files exist for an absent Graph file backup")
+        elif files_backup_path.exists():
+            raise RuntimeError("Graph file rollback manifest is unavailable")
+
+    database.parent.mkdir(parents=True, exist_ok=True)
+    database_metadata = database.stat()
+    fd, staging_name = tempfile.mkstemp(
+        prefix=f".{database.name}.restore-", suffix=".tmp", dir=database.parent,
+    )
+    os.close(fd)
+    database_staging = Path(staging_name)
+    stage_root = graph_root.with_name(f".{graph_root.name}.restore-{os.getpid()}")
+    displaced_root = graph_root.with_name(f".{graph_root.name}.displaced-{os.getpid()}")
+    if stage_root.exists() or displaced_root.exists():
+        database_staging.unlink(missing_ok=True)
+        raise FileExistsError("stale Graph file rollback staging path exists")
+
+    graph_tree_displaced = False
+    graph_tree_installed = False
+    database_replaced = False
+    displaced_graph_files_retained = False
+    try:
+        with connect_sqlite(backup, readonly=True) as source, connect_sqlite(database_staging) as target:
+            source.backup(target)
+        with connect_sqlite(database_staging, readonly=True) as staged:
+            if staged.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise RuntimeError("staged SQLite rollback failed integrity check")
+            if _database_fingerprint(staged) != expected_fingerprint:
+                raise RuntimeError("staged SQLite rollback content does not match backup")
+        try:
+            os.chown(database_staging, database_metadata.st_uid, database_metadata.st_gid)
+        except PermissionError:
+            staged_owner = database_staging.stat()
+            if (
+                staged_owner.st_uid != database_metadata.st_uid
+                or staged_owner.st_gid != database_metadata.st_gid
+            ):
+                raise
+        os.chmod(database_staging, stat.S_IMODE(database_metadata.st_mode))
+        with database_staging.open("rb") as staged_file:
+            os.fsync(staged_file.fileno())
+
+        if file_state == "present":
+            assert files_backup_path is not None
+            shutil.copytree(files_backup_path, stage_root, copy_function=shutil.copy2)
+            payload = _manifest_inventory(file_manifest)  # type: ignore[arg-type]
+            if not _verify_file_backup(payload, stage_root):
+                raise RuntimeError("staged Graph file rollback failed verification")
+            _restore_graph_file_metadata(stage_root, payload)
+
+        # SQLite's WAL is a separate file and must not be replayed over the
+        # restored snapshot. The app is offline at this point; checkpoint any
+        # committed migration state and remove its sidecars before replacement.
+        with sqlite3.connect(database, timeout=30) as current:
+            checkpoint = current.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            if checkpoint is not None and int(checkpoint[0]) != 0:
+                raise RuntimeError("live SQLite database is still busy")
+
+        if file_state is not None:
+            if graph_root.exists():
+                os.replace(graph_root, displaced_root)
+                graph_tree_displaced = True
+            if file_state == "present":
+                os.replace(stage_root, graph_root)
+                graph_tree_installed = True
+
+        for suffix in ("-wal", "-shm"):
+            Path(f"{database}{suffix}").unlink(missing_ok=True)
+        os.replace(database_staging, database)
+        database_replaced = True
+        if graph_tree_displaced:
+            try:
+                if displaced_root.is_dir():
+                    shutil.rmtree(displaced_root)
+                else:
+                    displaced_root.unlink(missing_ok=True)
+            except OSError:
+                # The restored database and file tree are already installed.
+                # Keeping the displaced failed-release tree is safer than
+                # rolling back a completed SQLite replacement.
+                displaced_graph_files_retained = True
+        return {
+            "restored": True,
+            "database_integrity": "ok",
+            "graph_files_state": file_state or "not_restored",
+            "graph_files_restored": file_state is not None,
+            "displaced_graph_files_retained": displaced_graph_files_retained,
+            "backup_fingerprint": expected_fingerprint["sha256"],
+        }
+    except Exception:
+        if not database_replaced and graph_tree_installed and graph_root.exists():
+            shutil.rmtree(graph_root)
+        if not database_replaced and graph_tree_displaced and displaced_root.exists():
+            os.replace(displaced_root, graph_root)
+        raise
+    finally:
+        database_staging.unlink(missing_ok=True)
+        if stage_root.exists():
+            shutil.rmtree(stage_root)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--database", type=Path, required=True)
+    parser.add_argument("--database", type=Path)
     parser.add_argument("--backup", type=Path)
-    parser.add_argument("--graph-files", type=Path, required=True)
+    parser.add_argument("--graph-files", type=Path)
     parser.add_argument("--files-backup", type=Path)
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--restore-backup", action="store_true")
+    parser.add_argument("--summary-only", action="store_true")
     args = parser.parse_args()
-    database = args.database.expanduser().resolve()
+    if args.apply and args.restore_backup:
+        parser.error("--apply and --restore-backup cannot be combined")
+    if args.database is None or args.graph_files is None:
+        import settings
+
+        database = args.database or Path(settings.CACHE_DB_PATH)
+        graph_files = args.graph_files or Path(settings.DATA_DIR) / "research-graphs"
+    else:
+        database = args.database
+        graph_files = args.graph_files
+    database = database.expanduser().resolve()
+    graph_files = graph_files.expanduser()
     if not database.is_file():
         parser.error("database does not exist")
-    if args.apply:
+    if args.restore_backup:
+        if args.backup is None:
+            parser.error("--restore-backup requires --backup")
+        result = restore_backup(
+            database,
+            args.backup,
+            graph_files=graph_files,
+            files_backup=args.files_backup,
+        )
+    elif args.apply:
         if args.backup is None:
             parser.error("--apply requires --backup")
         result = apply(
             database,
             args.backup,
-            graph_files=args.graph_files,
+            graph_files=graph_files,
             files_backup=args.files_backup,
         )
     else:
         with connect_sqlite(database, readonly=True) as conn:
+            report = inspect(conn, graph_files=graph_files)
+            result = {"dry_run": True, **report}
+    if args.summary_only:
+        if args.restore_backup:
             result = {
-                "database": str(database),
-                "dry_run": True,
-                **inspect(conn, graph_files=args.graph_files),
+                "restored": result["restored"],
+                "database_integrity": result["database_integrity"],
+                "graph_files_state": result["graph_files_state"],
+                "graph_files_restored": result["graph_files_restored"],
+                "displaced_graph_files_retained": result[
+                    "displaced_graph_files_retained"
+                ],
             }
+        elif args.apply:
+            before = result["before"]
+            after = result["after"]
+            result = {
+                "applied": True,
+                "graph_tables_removed": len(before["graph_tables"]),
+                "graph_evidence_admissions_removed": result[
+                    "graph_evidence_admissions_removed"
+                ],
+                "maintenance_graph_refs_removed": result[
+                    "maintenance_graph_refs_removed"
+                ],
+                "preserved_before": {
+                    table: item["count"] for table, item in before["preserved"].items()
+                },
+                "preserved_after": {
+                    table: item["count"] for table, item in after["preserved"].items()
+                },
+                "database_integrity": "ok",
+            }
+        else:
+            result = _summary_report(result)
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+
+
+def _summary_report(report: dict[str, Any]) -> dict[str, Any]:
+    work_required = bool(
+        report["graph_tables"]
+        or report["legacy_backend_receipts"]
+        or report["graph_evidence_admissions"]
+        or report["maintenance_graph_refs"]["refs"]
+        or report["run_columns"]
+        or report["report_evidence_graph_column"]
+        or report["graph_files"]["state"] == "present"
+    )
+    return {
+        "dry_run": True,
+        "ready_to_apply": report["ready_to_apply"],
+        "work_required": work_required,
+        "graph_table_count": len(report["graph_tables"]),
+        "graph_rows": sum(report["graph_tables"].values()),
+        "legacy_backend_receipts": report["legacy_backend_receipts"],
+        "graph_evidence_admissions": report["graph_evidence_admissions"],
+        "maintenance_graph_refs": report["maintenance_graph_refs"],
+        "unknown_graph_table_count": len(report["unknown_graph_tables"]),
+        "unknown_graph_column_count": len(report["unknown_graph_columns"]),
+        "external_graph_foreign_key_count": len(report["external_graph_foreign_keys"]),
+        "run_columns": report["run_columns"],
+        "run_retired_column_values": report["run_retired_column_values"],
+        "report_evidence_graph_column": report["report_evidence_graph_column"],
+        "report_evidence_graph_ref_values": report[
+            "report_evidence_graph_ref_values"
+        ],
+        "graph_files": {
+            "state": report["graph_files"]["state"],
+            "file_count": report["graph_files"]["file_count"],
+            "bytes": report["graph_files"]["bytes"],
+        },
+        "preserved_rows": {
+            table: item["count"] for table, item in report["preserved"].items()
+        },
+        "blockers": report["blockers"],
+    }
 
 
 if __name__ == "__main__":

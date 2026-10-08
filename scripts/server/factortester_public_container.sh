@@ -29,6 +29,12 @@ Commands:
                  identities, discard irrecoverable v1 drafts, then verify
   restore-factor-identities
                  restore the pre-migration SQLite backup after failed release
+  graph-removal-dry-run
+                 inspect the Research Graph SQLite/file cutover without mutation
+  graph-removal-apply <attempt>
+                 back up and remove Graph-only storage while the app is stopped
+  restore-graph-removal <attempt>
+                 restore the backed-up Graph schema/files before old-code rollback
   migrate-factor-control-identities
                  apply the prepared account-domain plan to PostgreSQL
   restore-factor-control-identities
@@ -234,6 +240,70 @@ PY
 '
 }
 
+graph_removal_run() {
+  local mode="$1"
+  local attempt="${2:-}"
+  local backup=""
+  local files_backup=""
+  local state_root="${FACTORTESTER_STATE_ROOT:?set FACTORTESTER_STATE_ROOT}"
+  if [[ "$mode" != "dry-run" ]]; then
+    [[ "$attempt" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,100}$ ]] || {
+      echo "graph cutover attempt must be a safe identifier" >&2
+      exit 2
+    }
+    install -d -m 0700 "$state_root/release-backups"
+    backup="/state/release-backups/research-graph-$revision-$attempt.sqlite"
+    files_backup="/state/release-backups/research-graph-files-$revision-$attempt"
+  fi
+  if [[ "$mode" == "restore-if-backed-up" ]]; then
+    # apply writes this marker before its first database/schema mutation.
+    # A backup without it can only be a pre-migration backup attempt.
+    [[ -f "$files_backup.manifest.json" ]] || {
+      echo '{"restored":false,"reason":"cutover_not_started"}'
+      return 0
+    }
+    [[ -f "$state_root/release-backups/research-graph-$revision-$attempt.sqlite" ]] || {
+      echo "Research Graph rollback marker exists without its SQLite backup" >&2
+      exit 1
+    }
+    mode="restore"
+  fi
+
+  case "$mode" in
+    dry-run)
+      "${compose[@]}" run --rm --no-deps --entrypoint /bin/sh factortester-public -lc '
+set -eu
+export PYTHONPATH=/opt/factortester/app
+cd /opt/factortester/app
+exec python -m tools.migrations.remove_research_graph --summary-only
+'
+      ;;
+    apply)
+      "${compose[@]}" run --rm --no-deps --entrypoint /bin/sh factortester-public -lc "
+set -eu
+umask 077
+export PYTHONPATH=/opt/factortester/app
+cd /opt/factortester/app
+exec python -m tools.migrations.remove_research_graph \\
+  --apply --summary-only \\
+  --backup '$backup' --files-backup '$files_backup'
+"
+      ;;
+    restore)
+      "${compose[@]}" run --rm --no-deps --entrypoint /bin/sh factortester-public -lc "
+set -eu
+umask 077
+export PYTHONPATH=/opt/factortester/app
+cd /opt/factortester/app
+exec python -m tools.migrations.remove_research_graph \\
+  --restore-backup --summary-only \\
+  --backup '$backup' --files-backup '$files_backup'
+"
+      ;;
+    *) echo "unknown Graph removal operation" >&2; exit 2 ;;
+  esac
+}
+
 finalize_factor_identities() {
   state_root="${FACTORTESTER_STATE_ROOT:?set FACTORTESTER_STATE_ROOT}"
   rm -f "$state_root/factor-v2-migration-backup-path" \
@@ -339,6 +409,9 @@ case "$command" in
   migrate-factor-control-identities) migrate_factor_control_identities ;;
   restore-factor-control-identities) restore_factor_control_identities ;;
   restore-factor-identities) restore_factor_identities ;;
+  graph-removal-dry-run) graph_removal_run dry-run ;;
+  graph-removal-apply) graph_removal_run apply "${1:-}" ;;
+  restore-graph-removal) graph_removal_run restore-if-backed-up "${1:-}" ;;
   finalize-factor-identities) finalize_factor_identities ;;
   verify) verify ;;
   -h|--help|help) usage ;;

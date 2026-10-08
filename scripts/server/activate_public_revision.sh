@@ -21,7 +21,7 @@ publish_lock="$git_root/.publish.lock"
   echo "FACTORTESTER_PUBLIC_RELEASE_RETENTION must be a positive integer" >&2
   exit 2
 }
-for command in awk chmod date docker find flock git install sed sudo touch; do
+for command in awk chmod date docker find flock git install python3 sed sudo touch; do
   command -v "$command" >/dev/null || {
     echo "missing deployment command: $command" >&2
     exit 2
@@ -164,19 +164,51 @@ sudo chmod 0600 "$rollback_env"
 
 switched=0
 app_stopped=0
+graph_migration_started=0
+graph_migration_attempt="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+switch_env="$production_env.switch-$revision"
 rollback() {
   status=$?
   trap - ERR INT TERM
+  local rollback_ok=1
   if [[ "$switched" == "1" ]]; then
     echo "Public release failed; rolling back to $old_revision" >&2
-    sudo cp "$rollback_env" "$production_env"
-    old_script="$release_root/$old_revision/scripts/server/factortester_public_container.sh"
-    sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
-      bash "$old_script" restart-app || true
-  elif [[ "$app_stopped" == "1" ]]; then
-    old_script="$release_root/$old_revision/scripts/server/factortester_public_container.sh"
-    sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
-      bash "$old_script" restart-app || true
+  fi
+  if [[ "$switched" == "1" || "$app_stopped" == "0" ]]; then
+    if ! sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
+      bash "$public_script" stop-app; then
+      echo "Rollback stopped: could not stop the current application" >&2
+      rollback_ok=0
+    else
+      app_stopped=1
+    fi
+  fi
+  if [[ "$graph_migration_started" == "1" && "$rollback_ok" == "1" ]]; then
+    echo "Restoring pre-cutover SQLite and Graph-file snapshot" >&2
+    if ! sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \
+      bash "$public_script" restore-graph-removal "$graph_migration_attempt"; then
+      echo "Rollback stopped: pre-cutover data restoration failed; application remains stopped" >&2
+      rollback_ok=0
+    fi
+  fi
+  if [[ "$rollback_ok" == "1" ]]; then
+    if [[ "$switched" == "1" ]]; then
+      if ! sudo cp "$rollback_env" "$production_env"; then
+        echo "Rollback stopped: could not restore prior release configuration" >&2
+        rollback_ok=0
+      fi
+    fi
+    if [[ "$rollback_ok" == "1" ]]; then
+      old_script="$release_root/$old_revision/scripts/server/factortester_public_container.sh"
+      if ! sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
+        bash "$old_script" restart-app; then
+        echo "Rollback could not restart prior application $old_revision" >&2
+        rollback_ok=0
+      fi
+    fi
+  fi
+  if ! sudo rm -f "$switch_env"; then
+    echo "Warning: could not remove the temporary release configuration" >&2
   fi
   exit "$status"
 }
@@ -186,8 +218,45 @@ sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
   bash "$public_script" stop-app
 app_stopped=1
 
-sudo mv "$next_env" "$production_env"
+graph_plan="$(sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \
+  bash "$public_script" graph-removal-dry-run)"
+echo "Research Graph cutover preflight: $graph_plan"
+graph_ready="$(printf '%s' "$graph_plan" | python3 -c \
+  'import json,sys; print(str(json.load(sys.stdin).get("ready_to_apply", False)).lower())')"
+graph_work_required="$(printf '%s' "$graph_plan" | python3 -c \
+  'import json,sys; print(str(json.load(sys.stdin).get("work_required", False)).lower())')"
+[[ "$graph_ready" == "true" ]] || {
+  echo "Research Graph cutover preflight has blockers; old release will be restarted" >&2
+  exit 1
+}
+if [[ "$graph_work_required" == "true" ]]; then
+  graph_migration_started=1
+  graph_apply="$(sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \
+    bash "$public_script" graph-removal-apply "$graph_migration_attempt")"
+  echo "Research Graph cutover result: $graph_apply"
+  graph_applied="$(printf '%s' "$graph_apply" | python3 -c \
+    'import json,sys; print(str(json.load(sys.stdin).get("applied", False)).lower())')"
+  [[ "$graph_applied" == "true" ]] || {
+    echo "Research Graph cutover did not report a verified apply" >&2
+    exit 1
+  }
+  graph_after="$(sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$next_env" \
+    bash "$public_script" graph-removal-dry-run)"
+  printf '%s' "$graph_after" | python3 -c '
+import json, sys
+before, after = json.loads(sys.argv[1]), json.load(sys.stdin)
+if not after.get("ready_to_apply") or after.get("work_required"):
+    raise SystemExit("Graph-free post-cutover inventory failed")
+if before.get("preserved_rows") != after.get("preserved_rows"):
+    raise SystemExit("ordinary table row counts changed during Graph cutover")
+' "$graph_plan"
+  echo "Research Graph cutover post-check passed; preserved table row counts match"
+fi
+
+sudo cp "$next_env" "$switch_env"
+sudo chmod 0600 "$switch_env"
 switched=1
+sudo mv "$switch_env" "$production_env"
 sudo env FACTORTESTER_PUBLIC_DOCKER_ENV_FILE="$production_env" \
   bash "$public_script" restart-app
 app_stopped=0
@@ -209,6 +278,9 @@ postgres_after="$(sudo docker inspect --format '{{.Id}}' "$postgres_after")"
 
 switched=0
 trap - ERR INT TERM
+if ! sudo rm -f "$next_env"; then
+  echo "Warning: candidate release configuration was retained" >&2
+fi
 printf '%s\t%s\t%s\n' \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$revision" "verified" \
   >> "$deployment_log"
