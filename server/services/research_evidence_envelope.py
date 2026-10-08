@@ -21,6 +21,7 @@ _IDENTITY_HASH_FIELDS = {
     "contract_hash",
     "methodology_hash",
     "run_spec_hash",
+    "sample_use_hash",
     "trial_plan_hash",
 }
 _CONTRACT_EVIDENCE_KINDS = frozenset({
@@ -240,7 +241,6 @@ def _validate_research_identity(
         required = (
             "contract_hash",
             "methodology_hash",
-            "trial_plan_hash",
             "run_spec_hash",
         )
     else:

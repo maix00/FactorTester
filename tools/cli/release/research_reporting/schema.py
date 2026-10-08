@@ -62,11 +62,15 @@ def canonical_report_snapshot(snapshot: Any) -> dict[str, Any]:
         "decision_contract_hash",
     ):
         _bounded_text(value.get(field), field=field)
-    _bounded_text(
-        value.get("trial_plan_hash"),
-        field="trial_plan_hash",
-        allow_empty=True,
-    )
+    # Older report branches may contain this field. Preserve legacy values
+    # while hashing them so old snapshots remain byte-for-byte readable; new
+    # templates no longer emit the field.
+    if "trial_plan_hash" in value:
+        _bounded_text(
+            value["trial_plan_hash"],
+            field="trial_plan_hash",
+            allow_empty=True,
+        )
     value["factor_family_versions"] = _text_refs(
         value.get("factor_family_versions"),
         field="factor_family_versions",

@@ -19,7 +19,10 @@ from server.services.research_evidence_catalog import (
     put_source_fragment,
     search_evidence,
 )
-from server.services.research_evidence_catalog.validation import digest
+from server.services.research_evidence_catalog.validation import (
+    digest,
+    validate_identity,
+)
 from tools.factors.formula_identity import freeze_factor_identity
 
 
@@ -70,6 +73,22 @@ def _evidence(fragment_ref: str, *, title: str = "运行环境版本") -> dict:
         limitations=["只确认当前环境"],
         conflicts=[],
     )
+
+
+def test_run_evidence_identity_does_not_require_a_trial_plan() -> None:
+    value = validate_identity("authoritative_backtest", {
+        "contract_hash": "c" * 64,
+        "methodology_hash": "d" * 64,
+        "run_spec_hash": "e" * 64,
+        "sample_use_hash": "f" * 64,
+    })
+
+    assert value == {
+        "contract_hash": "c" * 64,
+        "methodology_hash": "d" * 64,
+        "run_spec_hash": "e" * 64,
+        "sample_use_hash": "f" * 64,
+    }
 
 
 def test_one_source_supports_multiple_fragments_and_evidence(

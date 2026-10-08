@@ -41,7 +41,7 @@ class FakeClient:
         analyses,
         retention_mode,
         step_mode,
-        trial_binding=None,
+        sample_use=None,
         report_binding=None,
         performance_profile=None,
         configuration_snapshot_id="",
@@ -52,7 +52,14 @@ class FakeClient:
             assert configuration_revision is None
         else:
             assert configuration_revision == 2
-        self.trial_binding = trial_binding
+        self.submission = {
+            "analyses": analyses,
+            "retention_mode": retention_mode,
+            "step_mode": step_mode,
+            "sample_use": sample_use,
+            "report_binding": report_binding,
+        }
+        self.sample_use = sample_use
         self.report_binding = report_binding
         self.performance_profile = performance_profile
         self.snapshot_selection = (
@@ -302,7 +309,7 @@ def test_multi_factor_configuration_and_run_use_one_contract(tmp_path, monkeypat
         "alias": "MmRet|P:CA|N:10d|$F:1d",
     }]
     assert fake.payload == payload
-    assert fake.trial_binding is None
+    assert "trial_binding" not in fake.submission
     assert load_state().configuration_revision == 2
 
 
@@ -1033,46 +1040,15 @@ def test_margin_only_position_changes_are_summarized_per_ledger() -> None:
     assert "AP.CZC" not in output and "step-field" in output
 
 
-def test_run_submit_passes_trial_binding_file(tmp_path, monkeypatch) -> None:
-    fake = FakeClient()
-    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
-    monkeypatch.setattr(
-        "tools.cli.commands.research.client_from_config",
-        lambda: fake,
-    )
-    runner = CliRunner()
-    assert runner.invoke(
-        cli,
-        ["workspace", "create", "--factor-family", "MmRet"],
-    ).exit_code == 0
-    state = load_state()
-    state.configuration_revision = 2
-    save_state(state)
-    binding = {
-        "trial_plan": {"schema_version": 1},
-        "trial_plan_hash": "a" * 64,
-        "trial_plan_version": 1,
-        "trial_role": "main",
-        "comparison_id": "comparison-1",
-    }
-    path = tmp_path / "trial-binding.json"
-    path.write_text(json.dumps(binding), encoding="utf-8")
-
-    submitted = runner.invoke(cli, [
-        "run",
-        "submit",
-        "--analysis",
-        "ic",
-        "--trial-binding-file",
-        str(path),
-        "--without-report",
+def test_run_submit_rejects_retired_trial_binding_option() -> None:
+    result = CliRunner().invoke(cli, [
+        "run", "submit", "--analysis", "ic", "--trial-binding-file", "old.json",
     ])
+    assert result.exit_code == 2
+    assert "No such option" in result.output
 
-    assert submitted.exit_code == 0, submitted.output
-    assert fake.trial_binding == binding
 
-
-def test_run_submit_requires_explicit_report_intent_for_trial_job(
+def test_run_submit_passes_sample_use_file_without_a_trial_plan(
     tmp_path, monkeypatch,
 ) -> None:
     fake = FakeClient()
@@ -1089,19 +1065,46 @@ def test_run_submit_requires_explicit_report_intent_for_trial_job(
     state = load_state()
     state.configuration_revision = 2
     save_state(state)
-    path = tmp_path / "trial-binding.json"
-    path.write_text(json.dumps({
-        "binding_origin": "agent_direct",
-        "trial_plan": {"schema_version": 1},
-    }), encoding="utf-8")
+    sample_use = {
+        "schema_version": 1,
+        "purpose": "validation",
+        "protection": "open",
+    }
+    path = tmp_path / "sample-use.json"
+    path.write_text(json.dumps(sample_use), encoding="utf-8")
 
     submitted = runner.invoke(cli, [
-        "run", "submit", "--analysis", "ic",
-        "--trial-binding-file", str(path),
+        "run", "submit", "--analysis", "ic", "--sample-use-file", str(path),
     ])
 
-    assert submitted.exit_code != 0
-    assert "必须绑定报告范围" in submitted.output
+    assert submitted.exit_code == 0, submitted.output
+    assert fake.sample_use == sample_use
+    assert "trial_binding" not in fake.submission
+
+
+def test_run_submit_without_trial_plan_needs_no_report_binding(
+    tmp_path, monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(
+        "tools.cli.commands.research.client_from_config",
+        lambda: fake,
+    )
+    runner = CliRunner()
+    assert runner.invoke(
+        cli,
+        ["workspace", "create", "--factor-family", "MmRet"],
+    ).exit_code == 0
+    state = load_state()
+    state.configuration_revision = 2
+    save_state(state)
+    submitted = runner.invoke(cli, [
+        "run", "submit", "--analysis", "ic", "--without-report",
+    ])
+
+    assert submitted.exit_code == 0, submitted.output
+    assert "trial_binding" not in fake.submission
 
 
 def test_run_submit_freezes_explicit_report_scope(
@@ -1127,8 +1130,7 @@ def test_run_submit_freezes_explicit_report_scope(
         "report_parent_id": "direct-trials",
     }
 
-    def _freeze(_scope, *, trial_binding, report_parent_id):
-        assert trial_binding["binding_origin"] == "agent_direct"
+    def _freeze(_scope, *, report_parent_id):
         assert report_parent_id == "direct-trials"
         return frozen
 
@@ -1144,15 +1146,8 @@ def test_run_submit_freezes_explicit_report_scope(
     state = load_state()
     state.configuration_revision = 2
     save_state(state)
-    path = tmp_path / "trial-binding.json"
-    path.write_text(json.dumps({
-        "binding_origin": "agent_direct",
-        "trial_plan": {"schema_version": 1},
-    }), encoding="utf-8")
-
     submitted = runner.invoke(cli, [
         "run", "submit", "--analysis", "ic",
-        "--trial-binding-file", str(path),
         "--profile", "maxa",
         "--report-workspace-id", "package-1",
         "--branch-id", "branch-1",
@@ -1164,7 +1159,7 @@ def test_run_submit_freezes_explicit_report_scope(
     assert fake.report_binding == frozen
 
 
-def test_run_submit_binds_direct_trial_to_explicit_report_parent(
+def test_run_submit_binds_run_to_explicit_report_parent(
     tmp_path, monkeypatch,
 ) -> None:
     fake = FakeClient()
@@ -1192,8 +1187,7 @@ def test_run_submit_binds_direct_trial_to_explicit_report_parent(
         "report_parent_id": "direct-trials",
     }
 
-    def _freeze(_scope, *, trial_binding, report_parent_id):
-        assert trial_binding["binding_origin"] == "agent_direct"
+    def _freeze(_scope, *, report_parent_id):
         assert report_parent_id == "direct-trials"
         return frozen
 
@@ -1225,15 +1219,8 @@ def test_run_submit_binds_direct_trial_to_explicit_report_parent(
     state = load_state()
     state.configuration_revision = 2
     save_state(state)
-    path = tmp_path / "direct-trial-binding.json"
-    path.write_text(json.dumps({
-        "binding_origin": "agent_direct",
-        "trial_plan": {"schema_version": 1},
-    }), encoding="utf-8")
-
     submitted = runner.invoke(cli, [
         "run", "submit", "--analysis", "ic",
-        "--trial-binding-file", str(path),
         "--profile", "maxa",
         "--report-workspace-id", "package-1",
         "--branch-id", "branch-1",
@@ -1269,7 +1256,7 @@ def test_report_bound_submit_waits_mounts_and_requests_analysis(
     )
     monkeypatch.setattr(
         "tools.cli.commands.research.freeze_report_binding",
-        lambda _scope, *, trial_binding, report_parent_id: {
+        lambda _scope, *, report_parent_id: {
             "profile_ref": "profile:maxa",
             "report_workspace_id": "package-1",
             "branch_id": "branch-1",
@@ -1304,15 +1291,8 @@ def test_report_bound_submit_waits_mounts_and_requests_analysis(
     state = load_state()
     state.configuration_revision = 2
     save_state(state)
-    path = tmp_path / "trial-binding.json"
-    path.write_text(json.dumps({
-        "binding_origin": "agent_direct",
-        "trial_plan": {"schema_version": 1},
-    }), encoding="utf-8")
-
     submitted = runner.invoke(cli, [
         "run", "submit", "--analysis", "ic",
-        "--trial-binding-file", str(path),
         "--profile", "maxa",
         "--report-workspace-id", "package-1",
         "--branch-id", "branch-1",

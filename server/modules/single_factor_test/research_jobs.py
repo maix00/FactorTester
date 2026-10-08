@@ -1125,6 +1125,14 @@ def delete_configuration_template(configuration_id: str):
 def submit_research_run():
     data = request.get_json(silent=True) or {}
     owner = require_user()
+    if "trial_binding" in data:
+        return jsonify({
+            "success": False,
+            "error": (
+                "TrialPlan Run binding is retired; use the optional Run-level "
+                "sample_use contract instead"
+            ),
+        }), 410
     repository = JobRepository()
     visitor_gateway = bool(session.get("manager_gateway_visitor_id"))
     if visitor_gateway and repository.count_with_metadata(owner=owner) >= _VISITOR_MAX_JOBS:
@@ -1217,7 +1225,7 @@ def submit_research_run():
             configuration_id=configuration["configuration_id"],
             configuration_revision=configuration["revision"],
             run_spec=run_spec,
-            trial_binding=data.get("trial_binding"),
+            sample_use=data.get("sample_use"),
             report_binding=data.get("report_binding"),
         )
     except ValueError as exc:

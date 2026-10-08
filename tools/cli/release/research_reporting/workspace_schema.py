@@ -36,7 +36,6 @@ def initial_index(
             "factor_family_versions": list(factor_family_versions),
             "evidence_refs": [], "asset_refs": [],
             "decision_contract_hash": hashlib.sha256(b"").hexdigest(),
-            "trial_plan_hash": "",
         }],
         "sections": [], "omitted_section_count": 0,
         "assets_ref": f"artifact:research/{report_workspace_id}/assets/",
@@ -63,7 +62,7 @@ def snapshot_identity(
         "report_workspace_id": report_workspace_id, "branch_id": branch_id,
         "title": title, "status": status, "product_group": "cnfutures",
         "methodology_hash": "0" * 64,
-        "decision_contract_hash": "0" * 64, "trial_plan_hash": "",
+        "decision_contract_hash": "0" * 64,
         "factor_family_versions": factor_family_versions, "evidence_refs": [],
         "sections": [{
             "section_id": "migration-bootstrap", "title": "迁移初始化",

@@ -1,39 +1,13 @@
-"""Content-addressed storage for Agent-authored direct TrialPlans."""
+"""Read-only compatibility access for historical TrialPlan records."""
 
 from __future__ import annotations
 
-import time
 from typing import Any
 
 import orjson
 import settings as Settings
 
 from tools.data.sqlite.db import connect_sqlite
-
-
-def save(*, owner: str, binding: dict[str, Any]) -> dict[str, Any]:
-    _ensure_schema()
-    digest = str(binding["trial_plan_hash"])
-    with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO direct_trial_plans (
-                owner, trial_plan_hash, trial_plan_id, trial_plan_version,
-                trial_plan_json, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                owner,
-                digest,
-                str(binding["trial_plan"]["trial_plan_id"]),
-                int(binding["trial_plan_version"]),
-                orjson.dumps(
-                    binding["trial_plan"], option=orjson.OPT_SORT_KEYS,
-                ).decode(),
-                time.time(),
-            ),
-        )
-    return load(owner=owner, trial_plan_hash=digest) or {}
 
 
 def load(*, owner: str, trial_plan_hash: str) -> dict[str, Any] | None:

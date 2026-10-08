@@ -19,7 +19,7 @@ class RunsClientMixin(ClientMixinBase):
         performance_profile: dict[str, Any] | None = None,
         margin_execution_profile: dict[str, Any] | None = None,
         output_requests: list[str] | None = None,
-        trial_binding: dict[str, Any] | None = None,
+        sample_use: dict[str, Any] | None = None,
         report_binding: dict[str, Any] | None = None,
         transient_factor_sources: list[dict[str, Any]] | None = None,
         strategy_specs: list[dict[str, Any]] | None = None,
@@ -46,8 +46,8 @@ class RunsClientMixin(ClientMixinBase):
             configuration_snapshot_id=configuration_snapshot_id,
             configuration_snapshot_revision=configuration_snapshot_revision,
         )
-        if trial_binding is not None:
-            payload["trial_binding"] = trial_binding
+        if sample_use is not None:
+            payload["sample_use"] = sample_use
         if report_binding is not None:
             payload["report_binding"] = report_binding
         return self._expect_success(self.session.post("/api/runs", payload))
@@ -167,4 +167,3 @@ class RunsClientMixin(ClientMixinBase):
             {"title": title},
         ))
         return dict(data.get("workspace") or {})
-

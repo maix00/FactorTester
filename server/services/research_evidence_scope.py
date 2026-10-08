@@ -46,6 +46,7 @@ APPLICABILITY_FIELDS = (
     {"name": "source_refs", "type": "string_array", "exposed": False},
     {"name": "contract_hash", "type": "sha256", "exposed": False},
     {"name": "methodology_hash", "type": "sha256", "exposed": False},
+    {"name": "sample_use_hash", "type": "sha256", "exposed": False},
     {"name": "trial_plan_hash", "type": "sha256", "exposed": False},
     {"name": "run_spec_hash", "type": "sha256", "exposed": False},
     {"name": "limitations", "type": "string_array", "exposed": False},
@@ -108,14 +109,18 @@ def validate_applicability(value: Any) -> dict[str, Any]:
         value = {**value, "factor_subjects": frozen_subjects}
     if "product_scope_ref" in value:
         text(value["product_scope_ref"], "applicability.product_scope_ref")
-    for field in ("contract_hash", "methodology_hash", "trial_plan_hash", "run_spec_hash"):
+    for field in (
+        "contract_hash", "methodology_hash", "sample_use_hash",
+        "trial_plan_hash", "run_spec_hash",
+    ):
         if field in value and not sha(value[field]):
             raise ValueError(f"applicability.{field} must be sha256")
     if not any(value.get(field) for field in (
         "product_refs", "source_refs", "factor_refs", "factor_set_refs",
         "factor_source_refs", "sample_refs", "product_scope_ref",
         "product_group_refs", "data_source_refs", "environment_refs",
-        "contract_hash", "methodology_hash", "trial_plan_hash", "run_spec_hash",
+        "contract_hash", "methodology_hash", "sample_use_hash",
+        "trial_plan_hash", "run_spec_hash",
     )):
         raise ValueError("applicability must declare a non-empty scope")
     if "time_window" in value:
@@ -134,7 +139,10 @@ def validate_applicability(value: Any) -> dict[str, Any]:
 
 def check_identity_scope(envelope: dict[str, Any], scope: dict[str, Any]) -> None:
     identity = envelope.get("identity_refs") or {}
-    for field in ("contract_hash", "methodology_hash", "trial_plan_hash", "run_spec_hash"):
+    for field in (
+        "contract_hash", "methodology_hash", "sample_use_hash",
+        "trial_plan_hash", "run_spec_hash",
+    ):
         if field not in scope:
             continue
         if field not in identity:

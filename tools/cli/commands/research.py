@@ -693,9 +693,12 @@ def run_preview(
 )
 @run_input_option
 @click.option(
-    "--trial-binding-file",
+    "--sample-use-file",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    help="绑定 trial-plan create 冻结的 TrialPlan JSON。",
+    help=(
+        "可选的 Run 级样本用途 JSON。sealed 用途须冻结比较 ID 与全部 RunSpec 哈希；"
+        "validation 默认应使用 protection=open。"
+    ),
 )
 @click.option("--profile", "report_profile_id", default="")
 @click.option("--report-workspace-id", "report_workspace_id", default="")
@@ -712,7 +715,7 @@ def run_preview(
 @click.option(
     "--without-report",
     is_flag=True,
-    help="明确提交不写入研究报告的 Trial Job。",
+    help="明确提交不写入研究报告的 Run。",
 )
 @click.option(
     "--wait-report/--no-wait-report",
@@ -736,7 +739,7 @@ def run_submit(
     flow_profile: bool,
     flow_profile_min_ms: float,
     margin_execution_profile: bool,
-    trial_binding_file: Path | None,
+    sample_use_file: Path | None,
     report_profile_id: str,
     report_workspace_id: str,
     report_branch_id: str,
@@ -752,15 +755,11 @@ def run_submit(
     as_json: bool,
 ) -> None:
     state = _require_workspace()
-    trial_binding = None
-    if trial_binding_file is not None:
-        trial_binding = json.loads(
-            trial_binding_file.read_text(encoding="utf-8")
-        )
-        if not isinstance(trial_binding, dict):
-            raise click.ClickException(
-                "trial binding JSON must be an object"
-            )
+    sample_use = None
+    if sample_use_file is not None:
+        sample_use = json.loads(sample_use_file.read_text(encoding="utf-8"))
+        if not isinstance(sample_use, dict):
+            raise click.ClickException("sample-use JSON must be an object")
     report_scope_values = (
         report_profile_id,
         report_workspace_id,
@@ -785,11 +784,6 @@ def run_submit(
         raise click.ClickException(
             "绑定报告必须提供 --report-parent-id 以冻结挂载位置"
         )
-    if trial_binding is not None and not has_report_scope and not without_report:
-        raise click.ClickException(
-            "研究 Trial Job 必须绑定报告范围；若该任务明确不写报告，"
-            "请使用 --without-report"
-        )
     report_binding = None
     report_scope = None
     if has_report_scope:
@@ -802,7 +796,6 @@ def run_submit(
         try:
             report_binding = freeze_report_binding(
                 report_scope,
-                trial_binding=trial_binding or {},
                 report_parent_id=report_parent_id,
             )
         except ValueError as exc:
@@ -829,7 +822,7 @@ def run_submit(
         load_run_inputs=load_run_input_dependencies,
     )
     submit_kwargs.update({
-        "trial_binding": trial_binding,
+        "sample_use": sample_use,
         "report_binding": report_binding,
     })
     client = client_from_config()

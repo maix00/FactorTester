@@ -813,6 +813,36 @@ def test_job_detail_uses_one_read_for_pin_and_run_identity(
     assert len(reads) == 1
 
 
+def test_job_detail_exposes_run_identity_without_a_trial_plan(tmp_path) -> None:
+    path = tmp_path / "unbound-jobs.sqlite"
+    with connect_sqlite(path) as connection:
+        ensure_research_run_schema(connection)
+        connection.execute(
+            """
+            INSERT INTO research_runs (
+                run_id, owner, workspace_id, configuration_id,
+                configuration_revision, kind, run_spec_version,
+                run_spec_hash, run_spec_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "run-unbound", "alice", "workspace-1", "configuration-1",
+                1, "backtest", 2, _record("identity").run_spec_hash,
+                "{}", time.time(),
+            ),
+        )
+    repository = JobRepository(path)
+    repository.create(replace(_record("unbound-detail"), run_id="run-unbound"))
+
+    detail = repository.load_detail("unbound-detail", owner="alice")
+
+    assert detail is not None
+    assert detail["trial_binding"] is None
+    assert detail["identity_refs"] == {
+        "run_spec_hash": _record("identity").run_spec_hash,
+    }
+
+
 def test_repository_allows_one_step_job_and_one_replaceable_pin_per_user(tmp_path) -> None:
     repository = JobRepository(tmp_path / "jobs.sqlite")
     repository.create(_record("step-1", step_mode=True))

@@ -17,7 +17,7 @@ _FACTOR_REF = (
 
 def _envelope() -> dict:
     hashes = {field: "a" * 64 for field in (
-        "contract_hash", "methodology_hash", "trial_plan_hash", "run_spec_hash",
+        "contract_hash", "methodology_hash", "run_spec_hash",
     )}
     return {
         "schema_version": 2,

@@ -1,4 +1,4 @@
-"""Manager-owned Evidence, TrialPlan, Run and RunSpec object routes."""
+"""Manager-owned Evidence, legacy TrialPlan, Run and RunSpec object routes."""
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ from server.services import (
     research_runs,
     research_workspaces,
 )
-from server.services.direct_trial_plans import create_binding
 from server.services.research_evidence_catalog import (
     attach_tag,
     capture_job_source,
@@ -296,19 +295,13 @@ class ResearchObjectRoutesMixin:
         owner = self._research_owner()
         if owner is None:
             return True
-        try:
-            data = self._research_object_body(4 * 1024 * 1024)
-            binding = create_binding(
-                trial_plan=data.get("trial_plan"),
-                run_spec_hash=str(data.get("run_spec_hash") or ""),
-                trial_role=str(data.get("trial_role") or ""),
-                comparison_id=str(data.get("comparison_id") or ""),
-            )
-            direct_trial_plan_registry.save(owner=owner, binding=binding)
-        except (KeyError, TypeError, ValueError) as exc:
-            self._research_object_error(exc)
-            return True
-        json_response(self, {"success": True, "trial_binding": binding})
+        json_response(self, {
+            "success": False,
+            "error": (
+                "TrialPlan creation is retired; declare sample_use on the Run "
+                "submission instead"
+            ),
+        }, 410)
         return True
 
     def _clone_run_workspace(self, run_id: str) -> bool:

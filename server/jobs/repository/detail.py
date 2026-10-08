@@ -87,13 +87,16 @@ def _identity_refs(
     row: Any,
     trial_binding: dict[str, Any] | None,
 ) -> dict[str, str] | None:
-    if trial_binding is None:
+    run_spec_hash = str(row["run_run_spec_hash"] or "")
+    if not run_spec_hash:
         return None
-    value = {
-        "trial_plan_hash": trial_binding["trial_plan_hash"],
-        "run_spec_hash": str(row["run_run_spec_hash"] or ""),
-    }
-    return value if all(value.values()) else None
+    value = {"run_spec_hash": run_spec_hash}
+    if trial_binding is not None:
+        value["trial_plan_hash"] = trial_binding["trial_plan_hash"]
+    sample_use_hash = str(row["run_sample_use_hash"] or "")
+    if sample_use_hash:
+        value["sample_use_hash"] = sample_use_hash
+    return value
 
 
 _DETAIL_COLUMNS = """
@@ -110,6 +113,7 @@ _DETAIL_COLUMNS = """
     runs.sample_identity_assurance AS run_sample_identity_assurance,
     runs.report_binding_json AS run_report_binding_json,
     runs.run_spec_hash AS run_run_spec_hash,
+    runs.sample_use_hash AS run_sample_use_hash,
     COALESCE((
         SELECT json_group_array(json_object(
             'name', evidence_artifacts.name,
@@ -156,6 +160,7 @@ _LEGACY_DETAIL_QUERY = """
            NULL AS run_sample_identity_assurance,
            NULL AS run_report_binding_json,
            NULL AS run_run_spec_hash,
+           NULL AS run_sample_use_hash,
            '[]' AS detail_artifacts_json
     FROM research_jobs AS jobs
     LEFT JOIN user_job_pins AS pins

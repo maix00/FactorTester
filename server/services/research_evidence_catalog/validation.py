@@ -131,6 +131,7 @@ def validate_identity(evidence: str, identity: Any) -> dict[str, str]:
     allowed = {
         "contract_hash",
         "methodology_hash",
+        "sample_use_hash",
         "trial_plan_hash",
         "run_spec_hash",
     }
@@ -146,7 +147,6 @@ def validate_identity(evidence: str, identity: Any) -> dict[str, str]:
         else (
             "contract_hash",
             "methodology_hash",
-            "trial_plan_hash",
             "run_spec_hash",
         )
     )

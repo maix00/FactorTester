@@ -246,25 +246,6 @@ class ResearchClientMixin(ClientMixinBase):
             },
         ))
 
-    def create_direct_trial_plan(
-        self,
-        *,
-        trial_plan: dict[str, Any],
-        run_spec_hash: str,
-        trial_role: str,
-        comparison_id: str,
-    ) -> dict[str, Any]:
-        data = self._expect_success(self.session.post(
-            "/api/trial-plans/direct",
-            {
-                "trial_plan": trial_plan,
-                "run_spec_hash": run_spec_hash,
-                "trial_role": trial_role,
-                "comparison_id": comparison_id,
-            },
-        ))
-        return dict(data.get("trial_binding") or {})
-
     def get_direct_trial_plan(self, trial_plan_ref: str) -> dict[str, Any]:
         digest = str(trial_plan_ref).removeprefix("trial-plan:sha256:")
         data = self._expect_success(

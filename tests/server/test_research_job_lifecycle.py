@@ -19,7 +19,6 @@ from server.services import (
     research_workspaces,
 )
 from server.services.factor_revisions import _load_revision_definition
-from tests.server.trial_plan_fixtures import trial_plan
 from tools.data.sqlite.db import connect_sqlite
 from tools.factors.factor_set_identity import freeze_factor_set_identity
 from tools.factors.alias_validator import factor_formula_identity
@@ -1004,34 +1003,55 @@ def test_margin_execution_profile_is_opt_in_backtest_telemetry(client) -> None:
     assert "margin_execution_profile" not in ic.job_spec
 
 
-def test_registered_direct_trial_plan_submits_as_a_run_contract(client) -> None:
+def test_run_submission_accepts_sample_use_without_a_trial_plan(
+    client, monkeypatch,
+) -> None:
     workspace = _create_workspace(client)
     _update(client, workspace, _payload(workspace))
+    monkeypatch.setattr(
+        research_runs,
+        "derive_sample_identity_or_none",
+        lambda _run_spec: {
+            "sample_hash": "a" * 64,
+            "sample_start": "2024-01-01",
+            "sample_end": "2024-12-31",
+            "universe_hash": "b" * 64,
+            "design_context_hash": "c" * 64,
+            "universe_membership_assurance": "not_proven",
+            "universe_members": [],
+            "authority": "test_fixture",
+            "limitations": [],
+        },
+    )
     request_payload = {
         "workspace_id": workspace["workspace_id"],
         "configuration_revision": workspace["configuration"]["revision"],
         "analyses": ["ic"],
     }
     preview = client.post("/api/runs/preview", json=request_payload).get_json()
-    frozen = client.post("/api/trial-plans/direct", json={
-        "trial_plan": trial_plan(preview["run_spec_hash"]),
-        "run_spec_hash": preview["run_spec_hash"],
-        "trial_role": "selection",
-        "comparison_id": "main-comparison",
-    })
-    assert frozen.status_code == 200, frozen.get_data(as_text=True)
-
+    sample_use = {
+        "schema_version": 1,
+        "purpose": "validation",
+        "protection": "open",
+    }
     submitted = client.post("/api/runs", json={
         **request_payload,
-        "trial_binding": frozen.get_json()["trial_binding"],
+        "sample_use": sample_use,
     })
 
     assert submitted.status_code == 202, submitted.get_data(as_text=True)
     run = submitted.get_json()["run"]
-    assert run["trial_plan_hash"] == frozen.get_json()["trial_binding"][
-        "trial_plan_hash"
-    ]
+    assert run["run_spec_hash"] == preview["run_spec_hash"]
+    assert "trial_plan_hash" not in run
+    assert run["sample_use"]["purpose"] == "validation"
+    assert run["sample_use"]["sample_use_hash"]
     assert not any("graph" in key for key in run)
+
+
+def test_run_submission_retires_trial_binding_payload(client) -> None:
+    response = client.post("/api/runs", json={"trial_binding": {}})
+    assert response.status_code == 410
+    assert "sample_use" in response.get_json()["error"]
 
 
 def test_run_spec_freezes_one_exact_multi_factor_set_subject(client) -> None:

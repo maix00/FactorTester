@@ -20,9 +20,10 @@ def test_submit_no_longer_demands_a_trial_binding_for_report_mounts():
     assert 'report_binding = freeze_report_binding(' in source
 
 
-def test_binding_freezer_freezes_report_workspace_branch_and_parent():
+def test_binding_freezer_freezes_report_workspace_branch_and_parent_without_trial_plan():
     source = BINDING.read_text(encoding="utf-8")
-    assert "trial_binding: dict[str, Any] | None = None" in source
+    assert "trial_binding" not in source
+    assert "def freeze_report_binding(" in source
     assert '"report_workspace_id": scope.report_workspace_id' in source
     assert '"branch_id": scope.branch_id' in source
     assert '"report_parent_id": parent_id' in source

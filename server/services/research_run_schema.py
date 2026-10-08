@@ -69,6 +69,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             sample_universe_members_json TEXT NOT NULL DEFAULT '',
             sample_design_context_hash TEXT NOT NULL DEFAULT '',
             sample_identity_assurance TEXT NOT NULL DEFAULT '',
+            sample_use_json TEXT NOT NULL DEFAULT '{}',
+            sample_use_hash TEXT NOT NULL DEFAULT '',
             report_binding_json TEXT NOT NULL DEFAULT '{}',
             created_at REAL NOT NULL
         )
@@ -92,6 +94,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         ("sample_universe_members_json", "TEXT NOT NULL DEFAULT ''"),
         ("sample_design_context_hash", "TEXT NOT NULL DEFAULT ''"),
         ("sample_identity_assurance", "TEXT NOT NULL DEFAULT ''"),
+        ("sample_use_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ("sample_use_hash", "TEXT NOT NULL DEFAULT ''"),
         ("report_binding_json", "TEXT NOT NULL DEFAULT '{}'"),
     )
     for column, declaration in additions:
