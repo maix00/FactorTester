@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import stat
 
 import pytest
 
-from tools.migrations.remove_research_graph import apply, inspect
+from tools.migrations.remove_research_graph import (
+    _summary_report,
+    apply,
+    inspect,
+    restore_backup,
+)
 from tests.server.test_backend_assurance_migration import (
     _create_legacy_database,
     _insert_job,
@@ -160,6 +166,175 @@ def test_cutover_preserves_normal_records_and_removes_graph_state_atomically(tmp
         assert conn.execute(
             "SELECT COUNT(*) FROM research_evidence_admissions"
         ).fetchone()[0] == 3
+
+
+def test_cutover_rollback_restores_database_and_graph_files(tmp_path):
+    database = tmp_path / "catalog.sqlite"
+    backup = tmp_path / "catalog-before.sqlite"
+    graph_files = tmp_path / "data" / "research-graphs"
+    files_backup = tmp_path / "release-backups" / "research-graphs"
+    graph_files.mkdir(parents=True)
+    (graph_files / "nested").mkdir()
+    (graph_files / "nested" / "graph.json").write_text(
+        '{"graph": true}\n', encoding="utf-8",
+    )
+    _create_database(database)
+    database.chmod(0o640)
+    with sqlite3.connect(database) as conn:
+        before = inspect(conn, graph_files=graph_files)
+    summary = _summary_report(before)
+    assert summary["work_required"] is True
+    assert str(tmp_path) not in json.dumps(summary, ensure_ascii=False)
+
+    apply(
+        database,
+        backup,
+        graph_files=graph_files,
+        files_backup=files_backup,
+    )
+    graph_files.mkdir(parents=True)
+    (graph_files / "candidate-only.txt").write_text("candidate\n", encoding="utf-8")
+    with sqlite3.connect(database) as conn:
+        conn.execute(
+            "UPDATE research_catalog_reports SET title='candidate title' "
+            "WHERE report_id='report-1'"
+        )
+
+    result = restore_backup(
+        database,
+        backup,
+        graph_files=graph_files,
+        files_backup=files_backup,
+    )
+
+    assert result["restored"] is True
+    assert result["database_integrity"] == "ok"
+    assert result["graph_files_state"] == "present"
+    assert stat.S_IMODE(database.stat().st_mode) == 0o640
+    assert (graph_files / "nested" / "graph.json").read_text(encoding="utf-8") == (
+        '{"graph": true}\n'
+    )
+    assert not (graph_files / "candidate-only.txt").exists()
+    with sqlite3.connect(database) as conn:
+        after = inspect(conn, graph_files=graph_files)
+        assert "research_graph_instances" in after["graph_tables"]
+        assert after["preserved"] == before["preserved"]
+        assert conn.execute(
+            "SELECT title FROM research_catalog_reports WHERE report_id='report-1'"
+        ).fetchone()[0] == "Report"
+
+
+def test_cutover_rollback_restores_absent_graph_directory(tmp_path):
+    database = tmp_path / "catalog.sqlite"
+    backup = tmp_path / "catalog-before.sqlite"
+    graph_files = tmp_path / "data" / "research-graphs"
+    files_backup = tmp_path / "release-backups" / "research-graphs"
+    graph_files.parent.mkdir()
+    _create_database(database)
+
+    apply(
+        database,
+        backup,
+        graph_files=graph_files,
+        files_backup=files_backup,
+    )
+    graph_files.mkdir()
+    (graph_files / "candidate-only.txt").write_text("candidate\n", encoding="utf-8")
+
+    restore_backup(
+        database,
+        backup,
+        graph_files=graph_files,
+        files_backup=files_backup,
+    )
+
+    assert not graph_files.exists()
+    with sqlite3.connect(database) as conn:
+        assert "research_graph_instances" in {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+
+
+def test_database_only_rollback_leaves_unmanaged_graph_directory_untouched(tmp_path):
+    database = tmp_path / "catalog.sqlite"
+    backup = tmp_path / "catalog-before.sqlite"
+    graph_files = tmp_path / "data" / "research-graphs"
+    graph_files.mkdir(parents=True)
+    marker = graph_files / "operator-owned.txt"
+    marker.write_text("keep\n", encoding="utf-8")
+    _create_database(database)
+    with sqlite3.connect(database) as source, sqlite3.connect(backup) as target:
+        source.backup(target)
+
+    restore_backup(database, backup, graph_files=graph_files)
+
+    assert marker.read_text(encoding="utf-8") == "keep\n"
+
+
+def test_cutover_rollback_rejects_corrupt_database_backup_before_mutating(tmp_path):
+    database = tmp_path / "catalog.sqlite"
+    backup = tmp_path / "catalog-before.sqlite"
+    graph_files = tmp_path / "data" / "research-graphs"
+    files_backup = tmp_path / "release-backups" / "research-graphs"
+    _create_database(database)
+    apply(
+        database,
+        backup,
+        graph_files=graph_files,
+        files_backup=files_backup,
+    )
+    backup.write_bytes(b"not a sqlite database")
+
+    with pytest.raises((sqlite3.DatabaseError, RuntimeError)):
+        restore_backup(
+            database,
+            backup,
+            graph_files=graph_files,
+            files_backup=files_backup,
+        )
+
+    with sqlite3.connect(database) as conn:
+        assert "research_graph_instances" not in {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+
+
+def test_cutover_rollback_rejects_manifest_path_traversal(tmp_path):
+    database = tmp_path / "catalog.sqlite"
+    backup = tmp_path / "catalog-before.sqlite"
+    graph_files = tmp_path / "data" / "research-graphs"
+    files_backup = tmp_path / "release-backups" / "research-graphs"
+    graph_files.mkdir(parents=True)
+    (graph_files / "graph.yaml").write_text("title: original\n", encoding="utf-8")
+    _create_database(database)
+    apply(
+        database,
+        backup,
+        graph_files=graph_files,
+        files_backup=files_backup,
+    )
+    manifest = tmp_path / "release-backups" / "research-graphs.manifest.json"
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["files"][0]["path"] = "../outside.txt"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("leave unchanged\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="manifest is invalid"):
+        restore_backup(
+            database,
+            backup,
+            graph_files=graph_files,
+            files_backup=files_backup,
+        )
+
+    assert outside.read_text(encoding="utf-8") == "leave unchanged\n"
 
 
 def test_cutover_migrates_job_assurance_inside_the_graph_transaction(tmp_path):
