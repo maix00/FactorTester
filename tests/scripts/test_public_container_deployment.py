@@ -472,10 +472,39 @@ def test_public_factor_identity_migration_is_explicit_and_rollback_safe() -> Non
         "finalize-factor-identities",
     ):
         assert command not in activate
-    assert activate.index('bash "$public_script" stop-app') < activate.index(
-        'sudo mv "$next_env" "$production_env"'
-    ) < activate.index('bash "$public_script" verify')
+    stop_index = activate.index('bash "$public_script" stop-app')
+    preflight_index = activate.index('bash "$public_script" graph-removal-dry-run')
+    apply_index = activate.index('bash "$public_script" graph-removal-apply')
+    switch_index = activate.index('sudo mv "$switch_env" "$production_env"')
+    verify_index = activate.index('bash "$public_script" verify')
+    assert stop_index < preflight_index < apply_index < switch_index < verify_index
     assert "run --rm --no-deps --entrypoint /bin/sh factortester-public" in script
+
+
+def test_public_graph_cutover_is_offline_verified_and_rollback_safe() -> None:
+    script = (
+        ROOT / "scripts" / "server" / "factortester_public_container.sh"
+    ).read_text(encoding="utf-8")
+    activate = (
+        ROOT / "scripts" / "server" / "activate_public_revision.sh"
+    ).read_text(encoding="utf-8")
+    migration = (
+        ROOT / "tools" / "migrations" / "remove_research_graph.py"
+    ).read_text(encoding="utf-8")
+
+    assert "graph-removal-dry-run" in script
+    assert "--backup '$backup' --files-backup '$files_backup'" in script
+    assert "--restore-backup --summary-only" in script
+    assert "graph_migration_started=1" in activate
+    assert 'bash "$public_script" restore-graph-removal "$graph_migration_attempt"' in activate
+    assert "Graph-free post-cutover inventory failed" in activate
+    assert "ordinary table row counts changed during Graph cutover" in activate
+    rollback = activate[activate.index("rollback() {"):activate.index("trap rollback ERR INT TERM")]
+    assert rollback.index("stop-app") < rollback.index("restore-graph-removal")
+    assert rollback.index("restore-graph-removal") < rollback.index("restart-app")
+    assert "def restore_backup(" in migration
+    assert "PRAGMA integrity_check" in migration
+    assert "os.replace(database_staging, database)" in migration
 
 
 def test_public_main_publish_is_one_incremental_rollback_safe_command() -> None:
