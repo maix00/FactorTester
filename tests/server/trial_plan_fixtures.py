@@ -9,12 +9,8 @@ import orjson
 
 from server.jobs.models import JobRecord
 from server.jobs.states import JobStatus
-from server.services.research_graph.branch.schema import (
-    create_instance_branch_schema,
-)
 from server.services.research_run_identity import RUN_SPEC_VERSION
-from server.services.research_graph.trial_plan import trial_plan_hash
-from tools.data.sqlite.db import connect_sqlite
+from server.services.trial_plan.contract import trial_plan_hash
 
 
 def run_spec() -> dict:
@@ -108,7 +104,6 @@ def trial_plan_v4() -> dict:
         "schema_version": 4,
         "decision_contract_hash": "1" * 64,
         "methodology_hash": "2" * 64,
-        "obligation_refs": ["obligation-stage"],
         "parent_trial_plan_hash": None,
         "stage_policy": {
             "ordered_stages": [
@@ -160,160 +155,8 @@ def trial_plan_v4() -> dict:
     return value
 
 
-def initialize_branch(path, plan_hash: str) -> None:
-    with connect_sqlite(path) as conn:
-        create_instance_branch_schema(conn)
-        conn.execute(
-            """
-            INSERT INTO research_graph_instances (
-                instance_id, owner, graph_id, graph_version, product_group,
-                workspace_id, mode, shadow_run_id, created_at
-            ) VALUES (
-                'instance-1', 'alice', 'factor-research', 1, 'CNFutures',
-                'workspace-1', 'live', '', 1
-            )
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO research_graph_branches (
-                branch_id, instance_id, label, current_node, status,
-                current_capability_resolution_json,
-                current_capability_resolution_hash,
-                current_trial_plan_hash, created_at, updated_at
-            ) VALUES (
-                'branch-1', 'instance-1', 'primary', 'validation_design',
-                'running', '{}', '', ?, 1, 1
-            )
-            """,
-            (plan_hash,),
-        )
-
-
-def initialize_graph_version(path) -> None:
-    graph = {
-        "graph_id": "factor-research",
-        "version": 1,
-        "lifecycle": "active",
-        "content_hash": "c" * 64,
-        "entry_node": "validation_design",
-        "nodes": [
-            {
-                "node_id": "validation_design",
-                "kind": "research",
-                "required_capabilities": [],
-            },
-            {
-                "node_id": "diagnostics",
-                "kind": "research",
-                "required_capabilities": [],
-            },
-            {
-                "node_id": "result",
-                "kind": "research",
-                "required_capabilities": [],
-            },
-            {
-                "node_id": "factor_improvement",
-                "kind": "research",
-                "required_capabilities": [],
-            },
-            {
-                "node_id": "hypothesis",
-                "kind": "research",
-                "required_capabilities": [],
-            },
-        ],
-        "edges": [
-            {
-                "edge_id": "freeze-plan",
-                "from_node": "validation_design",
-                "to_node": "diagnostics",
-                "guard": {},
-                "required_evidence": [],
-            },
-            {
-                "edge_id": "adjudicate-result",
-                "from_node": "diagnostics",
-                "to_node": "result",
-                "guard": {
-                    "adjudication_route_bound": True,
-                    "factor_revision_authorized": False,
-                    "next_trial_stage_required": False,
-                },
-                "required_evidence": [],
-            },
-            {
-                "edge_id": "advance-stage",
-                "from_node": "diagnostics",
-                "to_node": "validation_design",
-                "guard": {
-                    "adjudication_route_bound": True,
-                    "factor_revision_authorized": False,
-                    "next_trial_stage_required": True,
-                    "trial_stage_advance_authorized": True,
-                },
-                "required_evidence": [],
-            },
-            {
-                "edge_id": "result-cycle-event",
-                "from_node": "result",
-                "to_node": "result",
-                "guard": {"research_cycle_delta_applied": True},
-                "required_evidence": [],
-            },
-            {
-                "edge_id": "start-new-hypothesis",
-                "from_node": "factor_improvement",
-                "to_node": "hypothesis",
-                "guard": {
-                    "new_hypothesis_version_recorded": True,
-                    "trial_ledger_incremented": True,
-                    "holdout_status_recorded": True,
-                    "factor_change_retained": True,
-                },
-                "required_evidence": [],
-                "server_action": "start_new_hypothesis_lineage",
-            },
-            {
-                "edge_id": "hypothesis-to-validation",
-                "from_node": "hypothesis",
-                "to_node": "validation_design",
-                "guard": {},
-                "required_evidence": [],
-            },
-        ],
-    }
-    with connect_sqlite(path) as conn:
-        conn.execute(
-            """
-            CREATE TABLE research_graph_versions (
-                graph_id TEXT NOT NULL,
-                version INTEGER NOT NULL,
-                lifecycle TEXT NOT NULL,
-                parent_version INTEGER NOT NULL,
-                content_hash TEXT NOT NULL,
-                graph_json TEXT NOT NULL,
-                created_by TEXT NOT NULL,
-                created_at REAL NOT NULL,
-                PRIMARY KEY (graph_id, version)
-            )
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO research_graph_versions VALUES (
-                'factor-research', 1, 'active', 0, ?, ?, 'curator', 1
-            )
-            """,
-            (semantic_hash(graph), orjson.dumps(graph).decode()),
-        )
-
-
 def trial_binding(plan: dict) -> dict:
     return {
-        "instance_id": "instance-1",
-        "branch_id": "branch-1",
         "trial_plan": plan,
         "trial_plan_hash": trial_plan_hash(plan),
         "trial_plan_version": 1,

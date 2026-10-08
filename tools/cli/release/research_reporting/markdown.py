@@ -20,18 +20,14 @@ class MarkdownReportTarget:
             "",
             f"- 状态：`{_status_label(value['status'])}`",
             f"- 产品范围：`{_product_group_label(value['product_group'])}`",
-            f"- 当前阶段：`{_node_label(value['current_node'])}`",
-            (
-                "- TrialPlan：`已定义`"
-                if value["trial_plan_hash"]
-                else "- TrialPlan：`尚未定义`"
-            ),
             "- 因子家族版本："
             + ", ".join(
                 f"`{item}`" for item in value["factor_family_versions"]
             ),
             "",
         ]
+        if value.get("trial_plan_hash"):
+            lines.insert(4, "- 历史 TrialPlan：`" + value["trial_plan_hash"] + "`")
         assets = {
             item["asset_ref"]: item for item in value["assets"]
         }

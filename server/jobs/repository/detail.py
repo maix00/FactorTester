@@ -48,7 +48,6 @@ class JobDetailQueryImplementation:
             "job": record,
             "pinned": bool(row["detail_pinned"]),
             "trial_binding": trial_binding,
-            "graph_binding": _graph_binding(row, trial_binding),
             "report_binding": _report_binding(row),
             "identity_refs": _identity_refs(row, trial_binding),
             "active_artifacts": active_artifacts,
@@ -76,24 +75,6 @@ def _trial_binding(row: Any) -> dict[str, Any] | None:
     }
 
 
-def _graph_binding(
-    row: Any,
-    trial_binding: dict[str, Any] | None,
-) -> dict[str, str] | None:
-    if trial_binding is None:
-        return None
-    value = {
-        "instance_id": str(row["run_graph_instance_id"] or ""),
-        "branch_id": str(row["run_graph_branch_id"] or ""),
-    }
-    if not value["instance_id"] or not value["branch_id"]:
-        return None
-    execution_node = str(row["run_graph_execution_node"] or "")
-    if execution_node:
-        value["execution_node"] = execution_node
-    return value
-
-
 def _report_binding(row: Any) -> dict[str, Any] | None:
     try:
         value = orjson.loads(str(row["run_report_binding_json"] or "{}"))
@@ -106,21 +87,20 @@ def _identity_refs(
     row: Any,
     trial_binding: dict[str, Any] | None,
 ) -> dict[str, str] | None:
-    if trial_binding is None:
+    run_spec_hash = str(row["run_run_spec_hash"] or "")
+    if not run_spec_hash:
         return None
-    value = {
-        "contract_hash": str(row["run_contract_hash"] or ""),
-        "methodology_hash": str(row["run_methodology_hash"] or ""),
-        "trial_plan_hash": trial_binding["trial_plan_hash"],
-        "run_spec_hash": str(row["run_run_spec_hash"] or ""),
-    }
-    return value if all(value.values()) else None
+    value = {"run_spec_hash": run_spec_hash}
+    if trial_binding is not None:
+        value["trial_plan_hash"] = trial_binding["trial_plan_hash"]
+    sample_use_hash = str(row["run_sample_use_hash"] or "")
+    if sample_use_hash:
+        value["sample_use_hash"] = sample_use_hash
+    return value
 
 
 _DETAIL_COLUMNS = """
     CASE WHEN pins.job_id IS NULL THEN 0 ELSE 1 END AS detail_pinned,
-    runs.decision_contract_hash AS run_contract_hash,
-    runs.methodology_hash AS run_methodology_hash,
     runs.trial_plan_id AS run_trial_plan_id,
     runs.trial_plan_hash AS run_trial_plan_hash,
     runs.trial_plan_version AS run_trial_plan_version,
@@ -131,11 +111,9 @@ _DETAIL_COLUMNS = """
     runs.sample_hash AS run_sample_hash,
     runs.sample_identity_hash AS run_sample_identity_hash,
     runs.sample_identity_assurance AS run_sample_identity_assurance,
-    runs.graph_instance_id AS run_graph_instance_id,
-    runs.graph_branch_id AS run_graph_branch_id,
-    runs.graph_execution_node AS run_graph_execution_node,
     runs.report_binding_json AS run_report_binding_json,
     runs.run_spec_hash AS run_run_spec_hash,
+    runs.sample_use_hash AS run_sample_use_hash,
     COALESCE((
         SELECT json_group_array(json_object(
             'name', evidence_artifacts.name,
@@ -170,8 +148,6 @@ _LEGACY_DETAIL_QUERY = """
     SELECT jobs.*,
            CASE WHEN pins.job_id IS NULL
                 THEN 0 ELSE 1 END AS detail_pinned,
-           NULL AS run_contract_hash,
-           NULL AS run_methodology_hash,
            NULL AS run_trial_plan_id,
            NULL AS run_trial_plan_hash,
            NULL AS run_trial_plan_version,
@@ -182,11 +158,9 @@ _LEGACY_DETAIL_QUERY = """
            NULL AS run_sample_hash,
            NULL AS run_sample_identity_hash,
            NULL AS run_sample_identity_assurance,
-           NULL AS run_graph_instance_id,
-           NULL AS run_graph_branch_id,
-           NULL AS run_graph_execution_node,
            NULL AS run_report_binding_json,
            NULL AS run_run_spec_hash,
+           NULL AS run_sample_use_hash,
            '[]' AS detail_artifacts_json
     FROM research_jobs AS jobs
     LEFT JOIN user_job_pins AS pins

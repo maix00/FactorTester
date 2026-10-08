@@ -22,26 +22,11 @@ struct ResearchDocumentReferenceDescriptor: Equatable {
 enum ResearchDocumentReferenceCatalog {
     private static let descriptors: [String: ResearchDocumentReferenceDescriptor] = [
         "evidence": item("evidence", "证据", "doc.text.magnifyingglass", .evidence),
-        "obligation": item("obligation", "研究义务", "checkmark.seal", .link),
-        "task": item("task", "任务", "checklist", .link),
         "job": item("job", "测试任务", "checklist", .link),
-        "claim": item("claim", "研究主张", "quote.bubble", .link),
         "artifact": item("artifact", "任务生成物", "paperclip", .link),
-        "report_requirement": item(
-            "report_requirement", "报告要求", "list.bullet.clipboard", .link
-        ),
-        "entry_requirement": item(
-            "entry_requirement", "义务小类", "checkmark.square", .link
-        ),
         "trial_plan": item("trial_plan", "试验计划", "list.bullet.clipboard", .link),
-        "graph_reference": item(
-            "graph_reference", "研究图对象",
-            "point.3.connected.trianglepath.dotted", .link
-        ),
-        "checkpoint": item("checkpoint", "研究记录", "flag", .link),
         "run": item("run", "运行", "play.circle", .link),
         "run_spec": item("run_spec", "运行配置", "slider.horizontal.3", .link),
-        "delta": item("delta", "状态变化", "arrow.left.arrow.right", .link),
         "factor": item("factor", "因子", "function", .factor),
         "factor_family": item(
             "factor_family", "因子家族", "function", .factor

@@ -34,7 +34,7 @@
     }
     const parts = [
       target?.profile_ref || target?.profile_id || "",
-      target?.work_package_id || "",
+      target?.report_workspace_id || "",
       target?.branch_id || "",
     ].map(value => String(value || "").trim());
     return parts.every(Boolean)
@@ -68,7 +68,7 @@
     return {
       publication_id: String(target?.publication_id || "").trim(),
       profile_ref: String(target?.profile_ref || target?.profile_id || "").trim(),
-      work_package_id: String(target?.work_package_id || "").trim(),
+      report_workspace_id: String(target?.report_workspace_id || "").trim(),
       branch_id: String(target?.branch_id || "").trim(),
       owner_ref: ownerRef(target),
       // The client names the format as the CLI does.

@@ -95,7 +95,7 @@ def register_run_fields(
             "reference", editor="server_picker", ref_kind="manager_server",
             option_source="server.federation",
         ),
-        help_text="选择提供研究图与运行代码的 Manager；代码按需从该服务器 7997 获取。",
+        help_text="选择提供运行代码的 Manager；代码按需从该服务器 7997 获取。",
     ))
     app.register_run_field(RunFieldDefinition(
         "local_runtime_bundle_ref", "本地运行代码包", "text", "", "body",

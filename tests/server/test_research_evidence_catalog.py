@@ -9,19 +9,20 @@ from server.services.research_evidence_catalog import (
     create_source_fragment,
     create_tag,
     evidence_contains_job_source,
-    finalize_lifecycle_transition,
+    change_evidence_status,
     get_evidence_lifecycle,
     list_facets,
     list_source_fragments,
     list_tags,
-    prepare_lifecycle_transition,
     propose_tag,
     put_source_capture,
     put_source_fragment,
     search_evidence,
 )
-from server.services.research_evidence_catalog.validation import digest
-from tests.server.data_contract_fixtures import initialize
+from server.services.research_evidence_catalog.validation import (
+    digest,
+    validate_identity,
+)
 from tools.factors.formula_identity import freeze_factor_identity
 
 
@@ -72,6 +73,22 @@ def _evidence(fragment_ref: str, *, title: str = "运行环境版本") -> dict:
         limitations=["只确认当前环境"],
         conflicts=[],
     )
+
+
+def test_run_evidence_identity_does_not_require_a_trial_plan() -> None:
+    value = validate_identity("authoritative_backtest", {
+        "contract_hash": "c" * 64,
+        "methodology_hash": "d" * 64,
+        "run_spec_hash": "e" * 64,
+        "sample_use_hash": "f" * 64,
+    })
+
+    assert value == {
+        "contract_hash": "c" * 64,
+        "methodology_hash": "d" * 64,
+        "run_spec_hash": "e" * 64,
+        "sample_use_hash": "f" * 64,
+    }
 
 
 def test_one_source_supports_multiple_fragments_and_evidence(
@@ -325,12 +342,11 @@ def test_search_applies_scope_before_tags(monkeypatch, tmp_path) -> None:
     assert rejected["items"] == []
 
 
-def test_excluded_evidence_is_hidden_until_a_reported_restore(
+def test_excluded_evidence_is_hidden_until_restored_without_a_graph(
     monkeypatch, tmp_path,
 ) -> None:
     path = tmp_path / "catalog.db"
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", str(path))
-    initialize(path)
     evidence = _evidence(_fragment(_source()["source_ref"])["fragment_ref"])
     proposal = propose_tag(
         owner="alice",
@@ -346,26 +362,26 @@ def test_excluded_evidence_is_hidden_until_a_reported_restore(
         evidence_ref=evidence["evidence_ref"],
         tag_ref=tag["tag_ref"],
     )
-    prepared = prepare_lifecycle_transition(
+    excluded = change_evidence_status(
         owner="alice",
         evidence_ref=evidence["evidence_ref"],
         action="exclude",
         reason_zh="该片段的时间范围与当前结论不一致",
-        profile_ref="profile:maxa",
-        agent_id="research-maxa",
-        instance_id="instance-1",
-        branch_id="branch-1",
-        parent_id="node-data-contract",
+        profile_ref="alice",
+        operation_id="evidence-exclusion-one",
     )
-
-    assert search_evidence(owner="alice")["items"]
-    finalized = finalize_lifecycle_transition(
-        owner="alice",
-        transition_ref=prepared["transition_ref"],
-        report_receipt=_receipt("evidence-exclusion-one"),
-    )
-
-    assert finalized["status"] == "excluded"
+    assert excluded["status"] == "excluded"
+    assert change_evidence_status(
+        owner="alice", evidence_ref=evidence["evidence_ref"],
+        action="exclude", reason_zh="该片段的时间范围与当前结论不一致",
+        profile_ref="alice", operation_id="evidence-exclusion-one",
+    ) == excluded
+    with pytest.raises(ValueError, match="identity conflicts"):
+        change_evidence_status(
+            owner="alice", evidence_ref=evidence["evidence_ref"],
+            action="exclude", reason_zh="原因已变更",
+            profile_ref="alice", operation_id="evidence-exclusion-one",
+        )
     assert search_evidence(owner="alice")["items"] == []
     assert list_tags(owner="alice")[0]["evidence_count"] == 0
     with pytest.raises(ValueError, match="excluded Evidence"):
@@ -380,32 +396,15 @@ def test_excluded_evidence_is_hidden_until_a_reported_restore(
         owner="alice", evidence_ref=evidence["evidence_ref"],
     )["latest_transition"]["reason_zh"].startswith("该片段")
 
-    restore = prepare_lifecycle_transition(
+    restored = change_evidence_status(
         owner="alice",
         evidence_ref=evidence["evidence_ref"],
         action="restore",
         reason_zh="补充核验后确认该片段可在限定范围内复用",
-        profile_ref="profile:maxa",
-        agent_id="research-maxa",
-        instance_id="instance-1",
-        branch_id="branch-1",
-        parent_id="node-data-contract",
+        profile_ref="alice",
+        operation_id="evidence-restore-one",
     )
-    finalize_lifecycle_transition(
-        owner="alice",
-        transition_ref=restore["transition_ref"],
-        report_receipt=_receipt("evidence-restore-one"),
-    )
+    assert restored["status"] == "active"
     assert search_evidence(owner="alice")["items"][0][
         "evidence_ref"
     ] == evidence["evidence_ref"]
-
-
-def _receipt(component_id: str) -> dict:
-    return {
-        "submission_sequence": 1,
-        "component_id": component_id,
-        "git_commit": "a" * 40,
-        "ledger_generation": 1,
-        "ledger_projection_hash": "b" * 64,
-    }

@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from tools.cli.release.research_reporting.git import commit_work_package
+from tools.cli.release.research_reporting.git import commit_report_workspace
 
 
 def _git(package: Path, *args: str) -> str:
@@ -25,7 +25,7 @@ def test_pending_submission_is_ignored_and_never_committed(
     pending.write_text('{"submission_sequence":1}\n', encoding="utf-8")
     (package / "README.md").write_text("work package\n", encoding="utf-8")
 
-    first = commit_work_package(package, message="Initialize")
+    first = commit_report_workspace(package, message="Initialize")
 
     assert first["committed"] is True
     assert "pending-submission.json" in (
@@ -48,7 +48,7 @@ def test_pending_submission_is_ignored_and_never_committed(
         package, "diff", "--cached", "--name-only",
     )
     (package / "README.md").write_text("updated\n", encoding="utf-8")
-    second = commit_work_package(package, message="Update")
+    second = commit_report_workspace(package, message="Update")
 
     assert second["committed"] is True
     assert "pending-submission.json" not in _git(

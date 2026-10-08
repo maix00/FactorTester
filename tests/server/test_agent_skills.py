@@ -36,7 +36,6 @@ def test_skill_catalog_only_exposes_profile_audience_and_hides_paths():
     definitions = catalog.definitions("server")
     assert [item["skill_id"] for item in definitions] == [
         "factortester-research",
-        "research-obligation-cycle",
     ]
     public = catalog.public_definitions("server")
     assert all("path" not in item for item in public)
@@ -52,11 +51,9 @@ def test_skill_catalog_supports_client_and_server_runtime_boundaries():
     assert catalog.definitions("client") == []
     assert [item["label"] for item in catalog.public_definitions("server")] == [
         "FactorTester 研究",
-        "研究义务周期",
     ]
     assert [item["name"] for item in catalog.definitions("server")] == [
         "factortester-research-skill",
-        "research-obligation-cycle",
     ]
 
 
@@ -108,9 +105,9 @@ def test_profile_codex_runtime_updates_owned_links_without_touching_unknown_file
     unknown_file = runtime.skills_root / "keep-me.txt"
     unknown_file.write_text("user data", encoding="utf-8")
 
-    runtime.sync([definitions[1]])
+    runtime.sync([])
     assert not (runtime.skills_root / "factortester-research").exists()
-    assert (runtime.skills_root / "research-obligation-cycle").is_symlink()
+    assert not (runtime.skills_root / "research-obligation-cycle").exists()
     assert unknown_file.read_text(encoding="utf-8") == "user data"
 
 
@@ -237,7 +234,7 @@ def test_profile_codex_skill_protocol_disables_unselected_and_builds_turn_input(
     assert Path(turn_input["path"]) == selected_path
 
     with pytest.raises(ValueError, match="not selected"):
-        protocol.turn_skill_input("research-obligation-cycle")
+        protocol.turn_skill_input("removed-graph-skill")
 
 
 def test_profile_skill_selection_is_local_and_validated(tmp_path):
@@ -260,14 +257,17 @@ def test_profile_skill_selection_is_local_and_validated(tmp_path):
     assert initial["runtime_kind"] == "server"
     assert all(item["selected"] is False for item in initial["skills"])
 
+    with pytest.raises(ValueError, match="not installed"):
+        service.set_profile_skills(
+            PRINCIPAL,
+            PROFILE_ID,
+            ["research-obligation-cycle"],
+        )
     saved = service.set_profile_skills(
-        PRINCIPAL,
-        PROFILE_ID,
-        ["research-obligation-cycle", "factortester-research"],
+        PRINCIPAL, PROFILE_ID, ["factortester-research"],
     )
     assert saved["selected_skill_ids"] == [
         "factortester-research",
-        "research-obligation-cycle",
     ]
     bindings = service.selected_skill_bindings(PRINCIPAL, PROFILE_ID)
     assert [item["skill_id"] for item in bindings] == saved["selected_skill_ids"]
@@ -276,7 +276,7 @@ def test_profile_skill_selection_is_local_and_validated(tmp_path):
         tmp_path / "data" / profile_workspace_relative_path(PRINCIPAL, PROFILE_ID)
     )
     assert (workspace / ".codex/skills/factortester-research").is_symlink()
-    assert (workspace / ".codex/skills/research-obligation-cycle").is_symlink()
+    assert not (workspace / ".codex/skills/research-obligation-cycle").exists()
 
     provider = service.save_provider(
         PRINCIPAL,

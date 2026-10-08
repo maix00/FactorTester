@@ -37,42 +37,6 @@ def test_direct_trial_plan_uses_owner_registry_without_timeline(
     assert result["data"]["authority_scope"] == "direct_registry"
 
 
-def test_graph_trial_plan_is_resolved_only_after_direct_404(tmp_path: Path) -> None:
-    target = "trial-plan:sha256:" + "c" * 64
-
-    class Client:
-        def get_direct_trial_plan(self, requested):
-            raise HttpClientError(404, "/api/trial-plans/direct", "not found")
-
-        def list_profile_research_branch_timeline(
-            self, work_package_ref, branch_id, *, limit, after,
-        ):
-            return {
-                "items": [{
-                    "step_ref": "trace:graph-step",
-                    "trial_plan_refs": [target],
-                }],
-                "next_cursor": None,
-            }
-
-        def get_research_cycle_object(
-            self, instance_id, branch_id, object_type, object_id, *, trace_id,
-        ):
-            assert (object_type, object_id, trace_id) == (
-                "trial_plan", "sha256:" + "c" * 64, "graph-step",
-            )
-            return {
-                "trial_plan_id": "graph-plan",
-                "trial_plan_hash": "c" * 64,
-            }
-
-    result = _validate(
-        tmp_path, "trial_plan", target, Client(), graph_scope=True,
-    )
-
-    assert result["data"]["authority_scope"] == "research_graph_timeline"
-
-
 def test_trial_plan_server_failure_does_not_fall_back_to_timeline(
     tmp_path: Path,
 ) -> None:
@@ -117,7 +81,7 @@ def test_run_spec_uses_owner_registry_without_timeline(tmp_path: Path) -> None:
     result = _validate(tmp_path, "run_spec", target, Client())
 
     assert result["data"]["run_spec_hash"] == "e" * 64
-    assert result["data"]["authority_scope"] == "owner_run_spec_registry"
+    assert result["data"]["authority_scope"] == "owner_run_registry"
 
 
 def _validate(
@@ -125,8 +89,6 @@ def _validate(
     kind: str,
     target: str,
     client,
-    *,
-    graph_scope: bool = False,
 ):
     scope = {
         "client_root": tmp_path / "client",
@@ -134,12 +96,6 @@ def _validate(
         "profile": {},
         "package_root": tmp_path / "research" / "wp-1",
     }
-    if graph_scope:
-        scope.update({
-            "branch_ref": "graph-branch:instance-1:branch-1",
-            "work_package_id": "wp-1",
-            "branch_id": "branch-1",
-        })
     return validate_declared_reference(
         reference=DeclaredReportReference(
             kind=kind, target_ref=target, label="对象",

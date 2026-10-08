@@ -1,6 +1,6 @@
 """Typed rich-text links for report prose and internally generated lists.
 
-The report tree does not own evidence, obligations, Jobs, or other domain
+The report tree does not own evidence, Jobs, or other domain
 objects.  It only stores portable Markdown links to those objects.  Bindings
 remain an internal audit seam and are deliberately not the rendered UI model.
 """
@@ -50,7 +50,6 @@ _DOMAIN_PREFIXES = {
     "evidence": "evidence:",
     "job": "job:",
     "profile": "profile:",
-    "entry_requirement": "requirement:",
 }
 
 

@@ -9,23 +9,21 @@ final class ClientTabSessionTests: XCTestCase {
     func testStoreRetainsOnlyLightweightStateForAnOpenTab() {
         let store = ClientTabSessionStore()
         let first = store.session(for: ClientTab.research.id)
-        first.researchSection = .graph
-        first.researchLifecycle = .archived
+        first.researchSection = .reports
 
         let restored = store.session(for: ClientTab.research.id)
 
         XCTAssertTrue(first === restored)
-        XCTAssertEqual(restored.researchSection, .graph)
-        XCTAssertEqual(restored.researchLifecycle, .archived)
+        XCTAssertEqual(restored.researchSection, .reports)
     }
 
     func testClosingTabDiscardsItsSession() {
         let store = ClientTabSessionStore()
-        let first = store.session(for: "work-package:one")
+        let first = store.session(for: "report-workspace:one")
         first.selectedBranchID = "branch-one"
 
-        store.removeSession(for: "work-package:one")
-        let reopened = store.session(for: "work-package:one")
+        store.removeSession(for: "report-workspace:one")
+        let reopened = store.session(for: "report-workspace:one")
 
         XCTAssertFalse(first === reopened)
         XCTAssertEqual(reopened.selectedBranchID, "")

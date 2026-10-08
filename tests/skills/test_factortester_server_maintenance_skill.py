@@ -13,7 +13,6 @@ def test_server_maintenance_skill_routes_all_supported_case_types() -> None:
     for reference in (
         "backend-change.md",
         "database-change.md",
-        "graph-governance.md",
         "infrastructure.md",
     ):
         assert f"references/{reference}" in skill
@@ -53,10 +52,8 @@ def test_server_maintenance_ui_metadata_matches_skill_contract() -> None:
     assert '使用 $factortester-server-maintenance' in metadata
 
 
-def test_research_skill_points_to_registered_server_maintenance_skill() -> None:
+def test_research_skill_points_to_independent_research_cli() -> None:
     research = (
-        ROOT / "skills" / "cli-anything-factortester-research" / "SKILL.md"
+        ROOT / "skills" / "factortester-research-skill" / "SKILL.md"
     ).read_text(encoding="utf-8")
-
-    assert "`$factortester-server-maintenance`" in research
-    assert "references/infrastructure.md" in research
+    assert "factortester research --help" in research

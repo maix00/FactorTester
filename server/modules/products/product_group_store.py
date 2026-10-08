@@ -430,8 +430,12 @@ def _research_refs(value: object) -> list[str]:
     result = []
     for item in value:
         reference = str(item or "").strip()
+        prefix, separator, identifier = reference.partition(":")
         if (
             len(reference) > 512
+            or not separator
+            or prefix not in {"research", "report", "report-workspace"}
+            or not identifier
             or not re.fullmatch(r"[a-z][a-z0-9_-]*:[^\s]+", reference)
         ):
             raise ValueError("research_refs contains an invalid stable reference")

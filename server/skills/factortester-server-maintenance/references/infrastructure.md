@@ -6,7 +6,7 @@
 
 有现成部署脚本就使用脚本。检查脚本的目标配置、作用范围、状态或预检方式，再执行明确授权的修改。可以通过 `server inspect --json` 和 `server access --json` 核对应用声明；`management_access` 为空或过时不阻塞用户指定的现有脚本。只有目标仍有歧义时才请求补充信息，不猜测传输通道。
 
-Manager CLI 是应用客户端，`jobs`、`artifacts`、`storage`、`research-graph`、`services` 操作应用 API，不承担主机、容器或仓库传输。复用已有 Docker、Git、SSH 等工具，不再建立 `cli-anything-factortester-server` 这样的重复封装。CLI 登录交给用户，缺少登录不阻塞本地实现或独立授权的脚本部署。
+Manager CLI 是应用客户端，`jobs`、`artifacts`、`storage`、`research`、`services` 操作应用 API，不承担主机、容器或仓库传输。复用已有 Docker、Git、SSH 等工具，不再建立 `cli-anything-factortester-server` 这样的重复封装。CLI 登录交给用户，缺少登录不阻塞本地实现或独立授权的脚本部署。
 
 ## 应用通道
 

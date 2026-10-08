@@ -23,7 +23,6 @@ from .tree_store import (
 )
 from .tree_sqlite_index import ensure_sqlite_index
 from .tree_transactions import mutate, mutate_batch
-from .tree_chapters import ensure_node_chapter
 from .submission_gate import ReportSubmission
 
 MAX_BATCH_OPERATIONS = 256

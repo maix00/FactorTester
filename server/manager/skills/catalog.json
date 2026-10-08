@@ -4,19 +4,9 @@
     {
       "id": "factortester-research",
       "label": "FactorTester 研究",
-      "description": "通过 FactorTester CLI 进行因子研究、研究图推进、证据和报告工作。",
+      "description": "通过 FactorTester CLI 管理研究、报告、Run、Evidence 与因子研究。",
       "version": "1",
-      "path": "skills/cli-anything-factortester-research",
-      "runtime_kinds": ["server"],
-      "audience": "profile",
-      "enabled": true
-    },
-    {
-      "id": "research-obligation-cycle",
-      "label": "研究义务周期",
-      "description": "在研究图要求时处理研究义务、试验计划和证据审查。",
-      "version": "1",
-      "path": "skills/research-obligation-cycle",
+      "path": "skills/factortester-research-skill",
       "runtime_kinds": ["server"],
       "audience": "profile",
       "enabled": true

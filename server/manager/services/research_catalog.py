@@ -161,7 +161,6 @@ class ResearchCatalog(ResearchBranchesMixin):
                     evidence_ref TEXT NOT NULL,
                     evidence_owner_ref TEXT NOT NULL,
                     report_id TEXT NOT NULL,
-                    graph_ref TEXT NOT NULL,
                     branch_ref TEXT NOT NULL,
                     job_id TEXT NOT NULL,
                     profile_ref TEXT NOT NULL,
@@ -216,6 +215,17 @@ class ResearchCatalog(ResearchBranchesMixin):
                     ON research_catalog_share_links(owner_ref, created_at);
                 """
             )
+            evidence_columns = {
+                str(row["name"])
+                for row in conn.execute(
+                    "PRAGMA table_info(research_catalog_report_evidence_links)"
+                ).fetchall()
+            }
+            if "graph_ref" in evidence_columns:
+                raise RuntimeError(
+                    "Report-Evidence schema contains retired columns; run the "
+                    "backed-up schema cutover before this Manager can start"
+                )
             conn.executescript(BRANCH_SCHEMA)
             # Old publication projections were shared before ADR-142. Restore
             # them exactly once, so a later owner choice of "private" remains
@@ -1368,7 +1378,6 @@ class ResearchCatalog(ResearchBranchesMixin):
         evidence_ref: str,
         evidence_owner_ref: str = "",
         report_id: str = "",
-        graph_ref: str = "",
         branch_ref: str = "",
         job_id: str = "",
         profile_ref: str = "",
@@ -1389,7 +1398,6 @@ class ResearchCatalog(ResearchBranchesMixin):
             "evidence_ref": evidence,
             "evidence_owner_ref": owner,
             "report_id": report,
-            "graph_ref": str(graph_ref or "").strip(),
             "branch_ref": str(branch_ref or "").strip(),
             "job_id": str(job_id or "").strip(),
             "profile_ref": str(profile_ref or "").strip(),
@@ -1411,14 +1419,14 @@ class ResearchCatalog(ResearchBranchesMixin):
             conn.execute(
                 """INSERT INTO research_catalog_report_evidence_links
                    (link_ref, evidence_ref, evidence_owner_ref,
-                    report_id, graph_ref, branch_ref, job_id, profile_ref,
+                    report_id, branch_ref, job_id, profile_ref,
                     purpose, status, created_at, revoked_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, 0)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, 0)
                    ON CONFLICT(link_ref) DO UPDATE SET status='active', revoked_at=0""",
                 (
                     link_ref, values["evidence_ref"], values["evidence_owner_ref"],
                     values["report_id"],
-                    values["graph_ref"], values["branch_ref"], values["job_id"],
+                    values["branch_ref"], values["job_id"],
                     values["profile_ref"], values["purpose"], now,
                 ),
             )
@@ -1528,7 +1536,7 @@ class ResearchCatalog(ResearchBranchesMixin):
             source_ref = str(item.get("source_ref") or item.get("report_id") or "").strip()
             owner = str(item.get("owner_ref") or principal).strip()
             report_id = canonical_report_ids.get(
-                _migration_work_package_key(item, principal),
+                _legacy_report_workspace_key(item, principal),
                 legacy_report_ids.get(
                     str(item.get("report_id") or "").strip(),
                     str(item.get("report_id") or source_ref).strip(),
@@ -1975,7 +1983,6 @@ class ResearchCatalog(ResearchBranchesMixin):
             "evidence_ref": str(row["evidence_ref"]),
             "evidence_owner_ref": str(row["evidence_owner_ref"]),
             "report_id": str(row["report_id"]),
-            "graph_ref": str(row["graph_ref"]),
             "branch_ref": str(row["branch_ref"]),
             "job_id": str(row["job_id"]),
             "profile_ref": str(row["profile_ref"]),
@@ -2053,30 +2060,37 @@ def _stronger_access(*values: dict[str, Any] | None) -> dict[str, Any]:
     )
 
 
-def _migration_work_package_key(
+def _legacy_report_branch_group_key(
     item: dict[str, Any], owner: str,
 ) -> tuple[str, str, str] | None:
-    """Identify legacy Branches that belong to the same Work Package."""
-    package_id = str(
+    """Group old per-Branch records while migrating stable Report identities."""
+    legacy_workspace_id = str(
         item.get("work_package_id") or item.get("record_id") or ""
     ).strip()
-    if not package_id:
+    if not legacy_workspace_id:
         return None
     profile_ref = str(
         item.get("profile_ref") or item.get("profile_id") or ""
     ).strip()
-    return owner, profile_ref, package_id
+    return owner, profile_ref, legacy_workspace_id
+
+
+def _legacy_report_workspace_key(
+    item: dict[str, Any], owner: str,
+) -> tuple[str, str, str] | None:
+    """Normalize pre-ReportWorkspace package IDs during import."""
+    return _legacy_report_branch_group_key(item, owner)
 
 
 def _canonical_migration_report_ids(
     records: list[dict[str, Any]], owner: str,
 ) -> tuple[dict[tuple[str, str, str] | None, str], dict[str, str]]:
-    """Collapse old per-Branch report IDs without splitting the Work Package."""
+    """Collapse old per-Branch report IDs into one stable Report identity."""
     grouped: dict[tuple[str, str, str], set[str]] = {}
     for item in records:
         if not isinstance(item, dict):
             continue
-        key = _migration_work_package_key(item, owner)
+        key = _legacy_report_branch_group_key(item, owner)
         report_id = str(item.get("report_id") or "").strip()
         if key is not None and report_id:
             grouped.setdefault(key, set()).add(report_id)

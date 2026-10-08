@@ -169,7 +169,7 @@ def profile_metadata(value: Mapping[str, Any]) -> dict[str, Any] | None:
         return None
     allowed = {
         "schema_version", "profile_id", "status", "display_name",
-        "initialization_sources", "session_binding", "research_records",
+        "initialization_sources", "session_binding",
         "factor_workspace_binding", "strategy_workspace_binding", "agents",
     }
     payload = _drop_local_paths({key: value.get(key) for key in allowed if key in value})

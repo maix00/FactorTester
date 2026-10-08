@@ -8,6 +8,9 @@ import json
 from pathlib import Path
 
 from tools.cli.release.research_reporting.authoring.export import export_branch_report
+from tools.cli.release.research_reporting.report_workspace_identity import (
+    load_report_workspace_identity,
+)
 from tools.cli.release.research_reporting.maintenance.root_hierarchy import (
     inspect_root_hierarchy,
     migrate_single_chapter_root,
@@ -39,12 +42,12 @@ def main() -> int:
                 package_root=package_root, branch_id=branch_id,
             )
             result.update(migrated)
-            # REPORT.md is a derived view, but it must move with the canonical
-            # tree in the same Work Package commit.  Export also commits the
-            # changed tree and avoids leaving a stale branch report behind.
+            # REPORT.md is a derived view of the canonical ReportBranch tree.
+            # Export commits the changed tree and avoids leaving a stale view.
+            identity = load_report_workspace_identity(package_root)
             result["report_export"] = export_branch_report(
                 package_root=package_root,
-                work_package_id=package_root.name,
+                report_workspace_id=identity["report_workspace_id"],
                 branch_id=branch_id,
                 message="Migrate report root hierarchy",
             )

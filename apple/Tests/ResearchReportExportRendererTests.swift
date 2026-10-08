@@ -8,7 +8,7 @@ final class ResearchReportExportRendererTests: XCTestCase {
     func testExportRequestUsesTheAuthoritativeCLICommand() {
         let request = ResearchReportExportRequest(
             profileID: "maxa",
-            workPackageID: "work-one",
+            reportWorkspaceID: "work-one",
             branchID: "branch-one",
             format: .pdf
         )
@@ -17,7 +17,7 @@ final class ResearchReportExportRendererTests: XCTestCase {
         XCTAssertEqual(request.arguments(output: output), [
             "report", "export",
             "--profile", "maxa",
-            "--work-package-id", "work-one",
+            "--report-workspace-id", "work-one",
             "--branch-id", "branch-one",
             "--format", "pdf",
             "--output", "/tmp/研究报告.pdf",

@@ -840,10 +840,7 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
         "catalog-product-categories"
     ]
     assert manifest["route_groups"]["report"] == ["report"]
-    assert manifest["group_dependencies"]["research"] == ["research-graph"]
-    assert manifest["group_dependencies"]["research-graph"] == [
-        "core", "catalog-selection-core"
-    ]
+    assert manifest["group_dependencies"]["research"] == ["research-shell"]
     assert "report" not in manifest["group_dependencies"]["research"]
     workspaces = (WEB_ROOT / "research" / "workspaces.js").read_text(encoding="utf-8")
     assert 'loadGroups?.(["profile-directory"])' in workspaces

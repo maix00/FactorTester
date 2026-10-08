@@ -20,9 +20,8 @@ from urllib.parse import urlsplit
 from .assets import canonical_asset_descriptor
 from ..report_link_kinds import REPORT_LINK_KINDS
 
-# A checkpoint carrier stays small, while the local human report is cumulative.
 # These bounds cap disk and parsing cost without truncating ordinary long-running
-# research journals.  Nothing at this boundary is sent to an Agent context.
+# reports. Nothing at this boundary is sent to an Agent context.
 MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024
 MAX_REPORT_BYTES = 4 * 1024 * 1024
 MAX_REPORT_SECTIONS = 4_096
@@ -53,23 +52,25 @@ def canonical_report_snapshot(snapshot: Any) -> dict[str, Any]:
     value.pop("source_hash", None)
     if value.get("schema_version") != 1:
         raise ValueError("report snapshot schema_version must be 1")
-    for field in ("workspace_id", "work_package_id", "branch_id"):
+    for field in ("workspace_id", "report_workspace_id", "branch_id"):
         _safe_id(value.get(field), field=field)
     for field in (
         "title",
         "status",
         "product_group",
-        "current_node",
-        "graph_ref",
         "methodology_hash",
         "decision_contract_hash",
     ):
         _bounded_text(value.get(field), field=field)
-    _bounded_text(
-        value.get("trial_plan_hash"),
-        field="trial_plan_hash",
-        allow_empty=True,
-    )
+    # Older report branches may contain this field. Preserve legacy values
+    # while hashing them so old snapshots remain byte-for-byte readable; new
+    # templates no longer emit the field.
+    if "trial_plan_hash" in value:
+        _bounded_text(
+            value["trial_plan_hash"],
+            field="trial_plan_hash",
+            allow_empty=True,
+        )
     value["factor_family_versions"] = _text_refs(
         value.get("factor_family_versions"),
         field="factor_family_versions",
@@ -124,56 +125,6 @@ def _canonical_sections(value: Any) -> list[dict[str, Any]]:
             "links": _canonical_links(item.get("links", [])),
             "created_at": item.get("created_at", 0.0),
         }
-        if "chapter_ref" in item or "section_role" in item:
-            chapter_ref = item.get("chapter_ref")
-            section_role = item.get("section_role")
-            if (
-                not isinstance(chapter_ref, str)
-                or not chapter_ref.startswith("node:")
-                or not isinstance(section_role, str)
-            ):
-                raise ValueError("section semantic binding is invalid")
-            _safe_id(
-                chapter_ref.removeprefix("node:"),
-                field="section.chapter_ref",
-            )
-            _safe_id(section_role, field="section.section_role")
-            section["chapter_ref"] = chapter_ref
-            section["section_role"] = section_role
-        if "checkpoint_ref" in item or "branch_ref" in item:
-            checkpoint_ref = item.get("checkpoint_ref")
-            branch_ref = item.get("branch_ref")
-            if (
-                not isinstance(checkpoint_ref, str)
-                or not checkpoint_ref.startswith(
-                    ("trace:", "report-checkpoint:sha256:")
-                )
-                or not isinstance(branch_ref, str)
-                or not branch_ref.startswith("graph-branch:")
-            ):
-                raise ValueError(
-                    "section checkpoint_ref and branch_ref must be stable refs"
-                )
-            section["checkpoint_ref"] = checkpoint_ref
-            section["branch_ref"] = branch_ref
-        timing_fields = {
-            "research_occurred_at", "time_basis", "time_source_refs",
-        }
-        if timing_fields.intersection(item):
-            if not timing_fields.issubset(item):
-                raise ValueError("section occurrence timing is incomplete")
-            timing = _canonical_occurrence_timing(
-                occurred_at=item["research_occurred_at"],
-                time_basis=item["time_basis"],
-                time_source_refs=item["time_source_refs"],
-                recorded_at=section["created_at"],
-                field="section",
-            )
-            section.update({
-                "research_occurred_at": timing["occurred_at"],
-                "time_basis": timing["time_basis"],
-                "time_source_refs": timing["time_source_refs"],
-            })
         _safe_id(section["section_id"], field="section_id")
         _bounded_text(section["title"], field="section.title")
         _bounded_text(
@@ -193,7 +144,6 @@ def _canonical_sections(value: Any) -> list[dict[str, Any]]:
             section["blocks"] = _canonical_blocks(
                 item["blocks"],
                 link_ids={link["link_id"] for link in section["links"]},
-                recorded_at=section["created_at"],
             )
         sections.append(section)
     return sections
@@ -203,7 +153,6 @@ def _canonical_blocks(
     value: Any,
     *,
     link_ids: set[str],
-    recorded_at: float,
 ) -> list[dict[str, Any]]:
     if not isinstance(value, list) or not value or len(value) > 32:
         raise ValueError("section.blocks must be a bounded array")
@@ -212,13 +161,6 @@ def _canonical_blocks(
     for block in value:
         if not isinstance(block, dict):
             raise ValueError("section block must be an object")
-        report_binding = block.get("report_binding")
-        report_timing = block.get("report_timing")
-        if "report_binding" in block or "report_timing" in block:
-            block = {
-                key: item for key, item in block.items()
-                if key not in {"report_binding", "report_timing"}
-            }
         kind = block.get("kind")
         if kind == "math" and set(block) == {
             "kind", "latex", "fallback", "link_ids",
@@ -229,7 +171,7 @@ def _canonical_blocks(
                 or any(ref not in link_ids for ref in refs)
             ):
                 raise ValueError("section math links are invalid")
-            blocks.append(_with_report_binding({
+            blocks.append({
                 "kind": kind,
                 "latex": _bounded_text(
                     block["latex"], field="section.math.latex", maximum=2000,
@@ -240,7 +182,7 @@ def _canonical_blocks(
                     maximum=4000,
                 ),
                 "link_ids": list(refs),
-            }, report_binding, report_timing, recorded_at))
+            })
             used_link_ids.update(refs)
             continue
         if kind == "figure" and set(block) == {
@@ -252,11 +194,11 @@ def _canonical_blocks(
                 or any(ref not in link_ids for ref in refs)
             ):
                 raise ValueError("section figure links are invalid")
-            blocks.append(_with_report_binding({
+            blocks.append({
                 "kind": kind,
                 "asset": canonical_asset_descriptor(block["asset"]),
                 "link_ids": list(refs),
-            }, report_binding, report_timing, recorded_at))
+            })
             used_link_ids.update(refs)
             continue
         if kind == "paragraph" and set(block) in (
@@ -278,9 +220,7 @@ def _canonical_blocks(
                     raise ValueError("section paragraph links are invalid")
                 projected["link_ids"] = list(refs)
                 used_link_ids.update(refs)
-            blocks.append(_with_report_binding(
-                projected, report_binding, report_timing, recorded_at,
-            ))
+            blocks.append(projected)
             continue
         if kind == "code" and set(block) in (
             {"kind", "language", "code"},
@@ -307,9 +247,7 @@ def _canonical_blocks(
                     raise ValueError("section code links are invalid")
                 projected["link_ids"] = list(refs)
                 used_link_ids.update(refs)
-            blocks.append(_with_report_binding(
-                projected, report_binding, report_timing, recorded_at,
-            ))
+            blocks.append(projected)
             continue
         if kind == "list":
             expected = {"kind", "rows"}
@@ -378,91 +316,8 @@ def _canonical_blocks(
             projected_block["columns"] = columns
         if kind == "table" and result_kind is not None:
             projected_block["result_kind"] = result_kind
-        blocks.append(_with_report_binding(
-            projected_block, report_binding, report_timing, recorded_at,
-        ))
+        blocks.append(projected_block)
     return blocks
-
-
-def _with_report_binding(
-    block: dict[str, Any], value: Any, report_timing: Any,
-    recorded_at: float,
-) -> dict[str, Any]:
-    if value is None and report_timing is None:
-        return block
-    if value is None:
-        raise ValueError("section report_timing requires report_binding")
-    if not isinstance(value, dict) or set(value) != {
-        "report_requirement_id", "subject_ref", "report_item_ref",
-    }:
-        raise ValueError("section report_binding fields are invalid")
-    for field in ("report_requirement_id", "subject_ref"):
-        _bounded_text(
-            value[field], field=f"section.report_binding.{field}", maximum=256,
-        )
-    report_item_ref = value["report_item_ref"]
-    if (
-        not isinstance(report_item_ref, str)
-        or not report_item_ref.startswith("report-item:sha256:")
-        or not _SHA256.fullmatch(
-            report_item_ref.removeprefix("report-item:sha256:")
-        )
-    ):
-        raise ValueError("section.report_binding.report_item_ref is invalid")
-    result = {**block, "report_binding": dict(value)}
-    if report_timing is not None:
-        if not isinstance(report_timing, dict) or set(report_timing) != {
-            "occurred_at", "time_basis", "time_source_refs",
-        }:
-            raise ValueError("section report_timing fields are invalid")
-        result["report_timing"] = _canonical_occurrence_timing(
-            occurred_at=report_timing["occurred_at"],
-            time_basis=report_timing["time_basis"],
-            time_source_refs=report_timing["time_source_refs"],
-            recorded_at=recorded_at,
-            field="section.report",
-        )
-    return result
-
-
-def _canonical_occurrence_timing(
-    *, occurred_at: Any, time_basis: Any, time_source_refs: Any,
-    recorded_at: Any, field: str,
-) -> dict[str, Any]:
-    if (
-        type(occurred_at) not in {int, float}
-        or not math.isfinite(occurred_at)
-        or occurred_at < 0
-        or (
-            recorded_at is not None
-            and (
-                type(recorded_at) not in {int, float}
-                or not math.isfinite(recorded_at)
-                or recorded_at < 0
-                or occurred_at > recorded_at
-            )
-        )
-    ):
-        raise ValueError(f"{field}.occurred_at is invalid")
-    if time_basis not in {"transition", "historical_backfill"}:
-        raise ValueError(f"{field}.time_basis is invalid")
-    refs = sorted(set(_text_refs(
-        time_source_refs,
-        field=f"{field}.time_source_refs",
-    )))
-    if (
-        time_basis == "transition"
-        and recorded_at is not None
-        and occurred_at != recorded_at
-    ):
-        raise ValueError(f"{field} transition time must equal recorded time")
-    if time_basis == "historical_backfill" and not refs:
-        raise ValueError(f"historical {field} requires time_source_refs")
-    return {
-        "occurred_at": float(occurred_at),
-        "time_basis": time_basis,
-        "time_source_refs": refs,
-    }
 
 
 def _canonical_links(value: Any) -> list[dict[str, str]]:

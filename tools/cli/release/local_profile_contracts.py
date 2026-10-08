@@ -7,15 +7,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlparse
 
-from .report_link_kinds import REPORT_LINK_KINDS
-
 _IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _AGENT_ROLES = {"planning", "research"}
 _WORKSPACE_ACCESS = {"owner", "granted", "read_only"}
-_RESEARCH_STATUS = {
-    "pending", "generating", "failed", "stale", "ready",
-}
-_ARTIFACT_FORMATS = {"document", "report_tree", "markdown", "pdf"}
 
 
 def new_local_profile(
@@ -35,7 +29,7 @@ def new_local_profile(
     """
     del server_url
     return validate_local_profile({
-        "schema_version": 10,
+        "schema_version": 11,
         "profile_id": profile_id,
         "status": "active",
         "display_name": display_name,
@@ -52,7 +46,6 @@ def new_local_profile(
             if principal_ref else {}
         ),
         "agents": [],
-        "research_records": [],
         "factor_workspace_binding": {},
         "strategy_workspace_binding": {},
         "adapters": [],
@@ -91,16 +84,15 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
         "workspace_root", "workspaces", "agents", "adapters",
         "initialization_sources",
         "session_binding",
-        "research_records",
         "factor_workspace_binding",
         "strategy_workspace_binding",
     }
-    legacy_allowed = {*allowed, "server"}
+    legacy_allowed = {*allowed, "server", "research_records"}
     observed = set(value)
     legacy_optional = {
         "workspaces", "initialization_sources", "session_binding",
-        "research_records",
         "factor_workspace_binding", "strategy_workspace_binding", "status",
+        "research_records",
     }
     if not (allowed - legacy_optional).issubset(observed):
         raise ValueError("local profile fields are invalid")
@@ -108,11 +100,13 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
         raise ValueError("local profile fields are invalid")
     schema_version = value.get("schema_version")
     if schema_version not in {
-        1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
     }:
         raise ValueError("local profile schema_version is unsupported")
     if schema_version >= 10 and "server" in value:
         raise ValueError("client Profile must not contain server metadata")
+    if schema_version >= 11 and "research_records" in value:
+        raise ValueError("client Profile must not contain Graph research history")
     if schema_version < 10:
         server = value.get("server")
         if not isinstance(server, dict) or set(server) != {"base_url"}:
@@ -133,9 +127,6 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
         "initialization_sources",
     )
     session_binding = _session_binding(value.get("session_binding", {}))
-    research_records = _array(
-        value.get("research_records", []), "research_records"
-    )
     factor_workspace_binding = _factor_workspace_binding(
         value.get("factor_workspace_binding", {})
     )
@@ -143,7 +134,7 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
         value.get("strategy_workspace_binding", {})
     )
     return {
-        "schema_version": 10,
+        "schema_version": 11,
         "profile_id": validate_local_identifier(
             value.get("profile_id"), "profile_id"
         ),
@@ -157,12 +148,12 @@ def validate_local_profile(value: Any) -> dict[str, Any]:
             _initialization_source(item) for item in sources
         ],
         "session_binding": session_binding,
-        "research_records": [
-            _research_record(item) for item in research_records
-        ],
         "factor_workspace_binding": factor_workspace_binding,
         "strategy_workspace_binding": strategy_workspace_binding,
-        "agents": [_agent(item) for item in agents],
+        "agents": [
+            _agent(item, migrate_legacy_scope=schema_version < 11)
+            for item in agents
+        ],
         "adapters": [_adapter(item) for item in adapters],
     }
 
@@ -298,192 +289,6 @@ def _strategy_workspace_binding(value: Any) -> dict[str, Any]:
     }
 
 
-def _research_record(value: Any) -> dict[str, Any]:
-    legacy_fields = {
-        "record_id", "title", "status", "scope", "factor_family_versions",
-        "agent_id", "created_at", "updated_at", "workspace_ref", "run_ref",
-        "graph_instance_ref", "graph_branch_ref", "checkpoint_ref",
-        "evidence_refs", "artifacts", "provenance",
-        "timeline_refs",
-    }
-    fields = legacy_fields | {"branch_bindings"}
-    if not isinstance(value, dict) or set(value) not in {
-        frozenset(legacy_fields), frozenset(fields),
-    }:
-        raise ValueError("research record fields are invalid")
-    status = _text(value.get("status"), "research_record.status")
-    if status not in _RESEARCH_STATUS:
-        raise ValueError("research record status is unsupported")
-    scope = value.get("scope")
-    provenance = value.get("provenance")
-    if not isinstance(scope, dict) or not isinstance(provenance, dict):
-        raise ValueError("research record scope/provenance must be objects")
-    versions = _array(
-        value.get("factor_family_versions"), "factor_family_versions"
-    )
-    evidence = _array(value.get("evidence_refs"), "evidence_refs")
-    artifacts = _array(value.get("artifacts"), "artifacts")
-    timeline = _array(value.get("timeline_refs"), "timeline_refs")
-    primary_branch_ref = str(value.get("graph_branch_ref") or "")
-    derived_binding = [{
-        "branch_ref": primary_branch_ref,
-        "kind": "live",
-        "source_branch_ref": str(
-            provenance.get("source_graph_branch_ref") or ""
-        ),
-    }] if _canonical_graph_branch_ref(primary_branch_ref) else []
-    bindings = (
-        _array(value.get("branch_bindings"), "branch_bindings")
-        if "branch_bindings" in value
-        else derived_binding
-    )
-    return {
-        "record_id": validate_local_identifier(
-            value.get("record_id"), "research_record.record_id"
-        ),
-        "title": _text(value.get("title"), "research_record.title"),
-        "status": status,
-        "scope": scope,
-        "factor_family_versions": [
-            _text(item, "factor_family_version") for item in versions
-        ],
-        "agent_id": _text(value.get("agent_id"), "research_record.agent_id"),
-        "created_at": float(value.get("created_at") or 0),
-        "updated_at": float(value.get("updated_at") or 0),
-        "workspace_ref": str(value.get("workspace_ref") or ""),
-        "run_ref": str(value.get("run_ref") or ""),
-        "graph_instance_ref": str(value.get("graph_instance_ref") or ""),
-        "graph_branch_ref": primary_branch_ref,
-        "branch_bindings": [
-            _research_branch_binding(item) for item in bindings
-        ],
-        "checkpoint_ref": str(value.get("checkpoint_ref") or ""),
-        "evidence_refs": [
-            _text(item, "evidence_ref") for item in evidence
-        ],
-        "timeline_refs": [_deep_link(item) for item in timeline],
-        "artifacts": [_research_artifact(item) for item in artifacts],
-        "provenance": provenance,
-    }
-
-
-def _research_branch_binding(value: Any) -> dict[str, str]:
-    fields = {"branch_ref", "kind", "source_branch_ref"}
-    if not isinstance(value, dict) or set(value) != fields:
-        raise ValueError("research branch binding fields are invalid")
-    kind = _text(value.get("kind"), "research_branch_binding.kind")
-    if kind not in {"live", "fork"}:
-        raise ValueError("research branch binding kind is unsupported")
-    branch_ref = _text(
-        value.get("branch_ref"), "research_branch_binding.branch_ref"
-    )
-    parts = branch_ref.split(":")
-    if len(parts) != 3 or parts[0] != "graph-branch":
-        raise ValueError("research branch binding ref is invalid")
-    source_ref = str(value.get("source_branch_ref") or "")
-    source_parts = source_ref.split(":") if source_ref else []
-    if source_ref and (
-        len(source_parts) != 3 or source_parts[0] != "graph-branch"
-    ):
-        raise ValueError("research source branch binding ref is invalid")
-    return {
-        "branch_ref": branch_ref,
-        "kind": kind,
-        "source_branch_ref": source_ref,
-    }
-
-
-def _canonical_graph_branch_ref(value: str) -> bool:
-    parts = value.split(":")
-    return (
-        len(parts) == 3
-        and parts[0] == "graph-branch"
-        and bool(parts[1])
-        and bool(parts[2])
-    )
-
-
-def _research_artifact(value: Any) -> dict[str, Any]:
-    legacy_fields = {
-        "artifact_ref", "format", "status", "content_hash", "local_ref",
-        "section_refs",
-    }
-    fields = legacy_fields | {"index_ref"}
-    journal_fields = fields | {"journal_ref"}
-    hashed_journal_fields = journal_fields | {"journal_hash"}
-    if (
-        not isinstance(value, dict)
-        or set(value) not in {
-            frozenset(legacy_fields), frozenset(fields),
-            frozenset(journal_fields), frozenset(hashed_journal_fields),
-        }
-    ):
-        raise ValueError("research artifact fields are invalid")
-    format_name = _text(value.get("format"), "artifact.format")
-    if format_name not in _ARTIFACT_FORMATS:
-        raise ValueError("research artifact format is unsupported")
-    status = _text(value.get("status"), "artifact.status")
-    if status not in _RESEARCH_STATUS:
-        raise ValueError("research artifact status is unsupported")
-    local_ref = str(value.get("local_ref") or "")
-    index_ref = str(value.get("index_ref") or "")
-    journal_ref = str(value.get("journal_ref") or "")
-    journal_hash = str(value.get("journal_hash") or "")
-    section_refs = _array(value.get("section_refs"), "section_refs")
-    _reference(
-        local_ref,
-        field="artifact.local_ref",
-        schemes={"file", "artifact"},
-    )
-    _reference(
-        index_ref,
-        field="artifact.index_ref",
-        schemes={"file", "artifact"},
-    )
-    _reference(
-        journal_ref,
-        field="artifact.journal_ref",
-        schemes={"file", "artifact"},
-    )
-    result = {
-        "artifact_ref": _text(
-            value.get("artifact_ref"), "artifact.artifact_ref"
-        ),
-        "format": format_name,
-        "status": status,
-        "content_hash": str(value.get("content_hash") or ""),
-        "local_ref": local_ref,
-        "index_ref": index_ref,
-        "section_refs": [_deep_link(item) for item in section_refs],
-    }
-    if "journal_ref" in value:
-        result["journal_ref"] = journal_ref
-    if "journal_hash" in value:
-        if not re.fullmatch(r"[0-9a-f]{64}", journal_hash):
-            raise ValueError("artifact.journal_hash must be lowercase sha256")
-        result["journal_hash"] = journal_hash
-    return result
-
-
-def _deep_link(value: Any) -> dict[str, str]:
-    fields = {"link_id", "kind", "target_ref", "section_ref"}
-    fields_with_label = fields | {"label"}
-    if not isinstance(value, dict) or frozenset(value) not in {
-        frozenset(fields), frozenset(fields_with_label),
-    }:
-        raise ValueError("research deep link fields are invalid")
-    kind = _text(value.get("kind"), "deep_link.kind")
-    if kind not in REPORT_LINK_KINDS:
-        raise ValueError("research deep link kind is unsupported")
-    result = {
-        key: _text(value.get(key), f"deep_link.{key}")
-        for key in sorted(fields)
-    }
-    if "label" in value:
-        result["label"] = _text(value["label"], "deep_link.label")
-    return result
-
-
 def _session_binding(value: Any) -> dict[str, str]:
     if value == {}:
         return {}
@@ -611,7 +416,11 @@ def validate_principal_identifier(value: Any, field: str) -> str:
     return text
 
 
-def _agent(value: Any) -> dict[str, Any]:
+def _agent(
+    value: Any,
+    *,
+    migrate_legacy_scope: bool = False,
+) -> dict[str, Any]:
     legacy = {"agent_id", "role", "scope"}
     current = legacy | {"status", "next_action"}
     if not isinstance(value, dict) or set(value) not in {frozenset(legacy), frozenset(current)}:
@@ -620,13 +429,25 @@ def _agent(value: Any) -> dict[str, Any]:
     if role not in _AGENT_ROLES:
         raise ValueError("local agent role is unsupported")
     scope = value.get("scope")
-    expected = (
-        {"workspace_id"}
-        if role == "planning"
-        else {"instance_id", "branch_id"}
-    )
-    if not isinstance(scope, dict) or set(scope) != expected:
+    if not isinstance(scope, dict):
         raise ValueError(f"local {role} agent scope fields are invalid")
+    migrated_graph_scope = (
+        migrate_legacy_scope
+        and role == "research"
+        and set(scope) == {"instance_id", "branch_id"}
+    )
+    if migrated_graph_scope:
+        scope = {"workspace_id": "unbound"}
+    if set(scope) != {"workspace_id"}:
+        raise ValueError(f"local {role} agent scope fields are invalid")
+    status = str(value.get("status") or "needs_scope")
+    next_action = str(
+        value.get("next_action")
+        or "Bind an authorized research workspace before execution."
+    )
+    if migrated_graph_scope:
+        status = "needs_scope"
+        next_action = "Bind an authorized research workspace before execution."
     return {
         "agent_id": validate_local_identifier(
             value.get("agent_id"), "agent.agent_id"
@@ -636,11 +457,8 @@ def _agent(value: Any) -> dict[str, Any]:
             str(key): _text(item, f"agent.scope.{key}")
             for key, item in sorted(scope.items())
         },
-        "status": str(value.get("status") or "needs_scope"),
-        "next_action": str(
-            value.get("next_action")
-            or "Bind an authorized research scope before execution."
-        ),
+        "status": status,
+        "next_action": next_action,
     }
 
 

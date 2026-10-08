@@ -46,7 +46,7 @@ factortester-manager server access --json
 ## 维护流程
 
 1. 阅读仓库 `server/AGENTS.md` 和与本次任务相关的说明。
-2. 对已有维护案例使用其简要恢复信息；不要读取完整 Graph 或无关目录。
+2. 对已有维护案例使用其简要恢复信息；不要读取无关目录。
 3. 沿实际请求或调度路径复现具体异常，区分 `confirmed_reliable`、`research_input_issue`、`backend_change_proposed`。
 4. 在语义所属模块修复已授权的问题，运行聚焦测试与受影响协议、重放测试。
 5. 分开记录代码提交、测试结果、实际发布版本、运行时验收、限制与回退目标。
@@ -56,7 +56,6 @@ factortester-manager server access --json
 ## 按需参考
 
 - 后端异常：[backend-change.md](references/backend-change.md)
-- Graph 治理：[graph-governance.md](references/graph-governance.md)
 - 数据库修改：[database-change.md](references/database-change.md)
 - 容器、网络与发布：[infrastructure.md](references/infrastructure.md)
 

@@ -1,6 +1,6 @@
 ---
 name: cli-anything-factortester-manager
-description: Use the FactorTester Manager CLI to inspect and control the FactorTester application, Jobs, artifacts, storage, Research Graph versions, and Manager-owned service instances through authenticated server APIs.
+description: Use the FactorTester Manager CLI to inspect and control the FactorTester application, Jobs, artifacts, storage, Research workspaces, and Manager-owned service instances through authenticated server APIs.
 ---
 
 # FactorTester Manager CLI
@@ -33,7 +33,6 @@ non-manager principal.
 - `transfers metrics`: inspect bounded 7997 transfer telemetry;
 - `devices list|summary|revoke`: inspect or explicitly revoke public access
   devices;
-- `research-graph versions|active|set-default`: inspect or activate a graph
   version;
 - `services list|start|stop|restart-api|restart-bundle|force-stop <port>`:
   control a FactorTester service instance owned by the Manager;

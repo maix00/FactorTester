@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.release.report_tree_fixtures import profile
-from tools.cli.release.research_reporting.authoring.tree_model import initialize_tree
+from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
+from tools.cli.release.research_reporting.report_space import initialize_report_space
+from tools.cli.release.research_reporting.workspace import initialize_report_workspace
 from tools.cli.release.research_reporting.public_research.client import (
     ManagerRequestError,
     PublicResearchClient,
@@ -182,40 +183,32 @@ def test_client_configures_one_uploaded_branch(monkeypatch, tmp_path: Path) -> N
     })]
 
 
-def test_local_report_migration_inventory_collapses_one_work_package(
-    tmp_path: Path,
-) -> None:
-    profile(tmp_path)
-    package = tmp_path / "profile-root" / "research" / "sgccs-review"
-    for branch, report_id in (
-        ("branch-sgccs", "legacy-main"),
-        ("alternative", "legacy-alternative"),
-    ):
-        initialize_tree(
-            package_root=package, branch_id=branch, report_id=report_id,
-            title="SgCCS review",
-        )
-    client = PublicResearchClient(tmp_path, manager_url="http://manager.invalid")
-
-    planned = client.local_report_migration_records(apply_identities=False)
-    assert {item["report_id"] for item in planned} == {
-        "legacy-main", "legacy-alternative",
-    }
-
-    applied = client.local_report_migration_records(apply_identities=True)
-    assert {item["report_id"] for item in applied} == {"report-sgccs-review"}
-    assert {item["work_package_id"] for item in applied} == {"sgccs-review"}
-
-
 def test_local_branch_publication_status_uses_complete_author_identity(tmp_path, monkeypatch):
-    store = profile(tmp_path)
-    value = store.load("maxa")
-    value["session_binding"] = {"principal_ref": "GTHT@MaxA@1", "session_ref": "session-binding:test"}
+    store = LocalProfileStore(tmp_path)
+    value = new_local_profile(
+        profile_id="maxa", display_name="MaxA",
+        server_url="http://manager.invalid",
+        workspace_root=tmp_path / "profile-root",
+    )
+    value["session_binding"] = {
+        "principal_ref": "GTHT@MaxA@1",
+        "session_ref": "session-binding:test",
+    }
     store.save(value)
-    package = tmp_path / "profile-root" / "research" / "sgccs-review"
+    identity = initialize_report_space(store, "maxa", {
+        "report_id": "same-report", "research_id": "research-1",
+        "owner_ref": "GTHT@MaxA@1", "profile_ref": "maxa",
+        "workspace_id": "workspace-1", "title": "Shared report",
+    })
+    report_workspace_id = identity["report_workspace_id"]
     for branch in ("branch-sgccs", "alternative"):
-        initialize_tree(package_root=package, branch_id=branch, report_id="same-report",
-                        title="Shared report")
+        initialize_report_workspace(
+            workspace_root=tmp_path / "profile-root",
+            report_workspace_id=report_workspace_id,
+            report_id="same-report", branch_id=branch,
+            workspace_id="workspace-1", title="Shared report",
+            branch_ref=f"report-branch:{branch}",
+        )
     client = PublicResearchClient(tmp_path, manager_url="http://manager.invalid")
     own = {"owner_ref": "GTHT@MaxA@1", "profile_ref": "maxa", "report_id": "same-report",
            "branch_ref": "branch-sgccs", "publication_id": "own-publication", "visibility": "authorized"}

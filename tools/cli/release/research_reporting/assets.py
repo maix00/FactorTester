@@ -33,36 +33,30 @@ def stage_report_asset(
     *,
     client_root: Path,
     profile_id: str,
-    agent_id: str,
-    work_package_ref: str,
+    report_workspace_id: str,
     source_path: Path,
     media_type: str,
     caption: str,
     alt_text: str,
     provenance_refs: list[str],
 ) -> dict[str, Any]:
-    """Verify and stage one immutable asset in the owning Work Package."""
+    """Verify and stage one immutable asset in a report authoring workspace."""
     extension = _MEDIA_EXTENSIONS.get(str(media_type))
     if extension is None:
         raise ValueError("report asset media type is unsupported")
     profile = LocalProfileStore(client_root).load(profile_id)
-    matches = [
-        item for item in profile["research_records"]
-        if item["graph_instance_ref"] == work_package_ref
-        and item["agent_id"] == agent_id
-    ]
-    if len(matches) != 1:
-        raise ValueError(
-            "report asset requires exactly one matching local research record"
-        )
+    if not report_workspace_id or "/" in report_workspace_id or "\\" in report_workspace_id:
+        raise ValueError("report_workspace_id is invalid")
+    root = Path(profile["workspace_root"]) / "research" / report_workspace_id
+    if not root.is_dir():
+        raise ValueError("report workspace is not initialized locally")
     raw = _read_regular_file(Path(source_path))
     if media_type == "image/svg+xml":
         _validate_passive_svg(raw)
     digest = hashlib.sha256(raw).hexdigest()
-    work_package_id = _ref_id(work_package_ref, "work-package")
     filename = f"{digest}{extension}"
     target = (
-        Path(profile["workspace_root"]) / "research" / work_package_id
+        root
         / "assets" / filename
     )
     changed = False
@@ -155,13 +149,13 @@ def canonical_asset_descriptor(value: Any) -> dict[str, Any]:
 
 def verify_staged_asset(
     workspace_root: Path,
-    work_package_id: str,
+    report_workspace_id: str,
     descriptor: dict[str, Any],
 ) -> None:
     """Fail closed when a narrative names an absent or modified local asset."""
     filename = str(descriptor["filename"])
     target = (
-        Path(workspace_root) / "research" / work_package_id
+        Path(workspace_root) / "research" / report_workspace_id
         / "assets" / filename
     )
     raw = _read_regular_file(target)
@@ -173,13 +167,13 @@ def verify_staged_asset(
 
 def verify_snapshot_assets(
     workspace_root: Path,
-    work_package_id: str,
+    report_workspace_id: str,
     assets: list[dict[str, Any]],
 ) -> None:
     for descriptor in assets:
         verify_staged_asset(
             workspace_root,
-            work_package_id,
+            report_workspace_id,
             canonical_asset_descriptor(descriptor),
         )
 

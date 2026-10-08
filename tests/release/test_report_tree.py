@@ -11,7 +11,6 @@ from tools.cli.release.research_reporting.authoring import (
     tree_changes,
     tree_model,
     tree_navigation,
-    tree_transactions,
 )
 from tools.cli.release.research_reporting.authoring.tree_model import (
     add_binding,
@@ -411,47 +410,6 @@ def test_fast_append_never_materializes_the_complete_report(
 
     assert value["head"]["generation"] == 1
     assert value["components"] == []
-
-
-def test_node_chapter_lookup_never_materializes_report(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    package = tmp_path / "research" / "wp"
-    initialize_tree(
-        package_root=package, branch_id="main", report_id="report-wp",
-        title="研究报告",
-    )
-    apply_batch(
-        package_root=package, branch_id="main", include_snapshot=False,
-        operations=[{
-            "op": "add", "component_id": f"entry-{index}", "kind": "chapter",
-            "title": "批量章节", "parent_id": None, "body": "", "content": None,
-            "display_kind": "", "bindings": [],
-        } for index in range(128)],
-    )
-
-    def fail_snapshot(**_kwargs):
-        raise AssertionError("node chapter unexpectedly scanned the report")
-
-    monkeypatch.setattr(tree_model, "load_snapshot", fail_snapshot)
-    reads = 0
-    load_node = tree_transactions.load_node
-
-    def count_load_node(*args, **kwargs):
-        nonlocal reads
-        reads += 1
-        return load_node(*args, **kwargs)
-
-    monkeypatch.setattr(tree_transactions, "load_node", count_load_node)
-    chapter = tree_model.ensure_node_chapter(
-        package_root=package, branch_id="main", node_id="trial_execution",
-        title="试验执行",
-    )
-
-    assert chapter["changed"] is True
-    assert chapter["head"]["generation"] == 2
-    assert chapter["components"] == []
-    assert reads == 1
 
 
 def test_batch_adds_related_content_under_one_revision(tmp_path: Path) -> None:

@@ -501,8 +501,6 @@ class WriteRoutesMixin:
             return
         if self._mihomo_write(parsed, "PATCH"):
             return
-        if self._patch_profile_research_routes(parsed):
-            return
         if self._patch_research_catalog_routes(parsed):
             return
         if self._patch_research_object_routes(parsed):

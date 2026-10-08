@@ -17,15 +17,10 @@ MAX_INSTALL_OUTPUT_BYTES = 64 * 1024
 COMMAND_MODULES = {
     "factortester": ("tools.cli.app", "cli"),
     "factortester-manager": ("tools.cli.manager_app", "manager_cli"),
-    "cli-anything-factortester-research": (
-        "cli_anything.factortester_research.factortester_research_cli",
-        "cli",
-    ),
 }
 STABLE_COMMANDS = (
     "factortester",
     "factortester-manager",
-    "cli-anything-factortester-research",
 )
 ENV_SCRIPT = "factortester-env.sh"
 
@@ -38,7 +33,7 @@ def materialize_release(
     wheel_names = [
         item["filename"]
         for item in asset_receipts
-        if item["kind"] in {"python-wheel", "harness-wheel"}
+        if item["kind"] == "python-wheel"
     ]
     result: dict[str, object] = {"schema_version": 1}
     if wheel_names:
@@ -240,9 +235,6 @@ def _environment_script(root: Path) -> str:
     client_root = shlex.quote(str(root))
     cli = shlex.quote(str(root / "bin" / "factortester"))
     manager = shlex.quote(str(root / "bin" / "factortester-manager"))
-    research = shlex.quote(
-        str(root / "bin" / "cli-anything-factortester-research")
-    )
     return (
         "#!/bin/sh\n"
         "# Source this file; executing it cannot change the parent shell.\n"
@@ -250,7 +242,7 @@ def _environment_script(root: Path) -> str:
         f"FACTORTESTER_CLIENT_BIN={bin_root}\n"
         f"FACTORTESTER_CLI={cli}\n"
         f"FACTORTESTER_MANAGER_CLI={manager}\n"
-        f"FACTORTESTER_RESEARCH_CLI={research}\n"
+        f"FACTORTESTER_RESEARCH_CLI={cli}\n"
         "export FACTORTESTER_CLIENT_ROOT FACTORTESTER_CLIENT_BIN\n"
         "export FACTORTESTER_CLI FACTORTESTER_MANAGER_CLI\n"
         "export FACTORTESTER_RESEARCH_CLI\n"

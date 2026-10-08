@@ -52,7 +52,7 @@ def test_canonical_nested_cli_surfaces_are_registered() -> None:
     runner = CliRunner()
     for args in (
         ["strategy", "intent", "--help"],
-        ["research", "graphs", "--help"],
+        ["research", "workspace-create", "--help"],
         ["factor-library", "workspace", "user", "download", "--help"],
         ["factor-library", "workspace", "user", "upload", "--help"],
         ["client", "app-update", "--help"],
@@ -178,7 +178,8 @@ def test_nested_domain_help_matches_web_modules() -> None:
     assert products.exit_code == research.exit_code == agents.exit_code == 0
     for command in ("list", "groups", "categories", "sources"):
         assert command in products.output
-    for command in ("reports", "graphs", "evidence", "profiles", "workspaces"):
+    for command in ("reports", "evidence", "profiles", "workspace-create"):
         assert command in research.output
+    assert "graphs" not in research.output
     for command in ("models", "profile", "flow"):
         assert command in agents.output

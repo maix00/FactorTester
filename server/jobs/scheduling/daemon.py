@@ -324,8 +324,6 @@ class ResearchJobScheduler:
                         "message": "cancellation was requested before the result was committed",
                     },
                 )
-                if cancelled.job_role == "primary":
-                    self._register_terminal_evidence(cancelled)
                 self.broker.close(job_id)
                 return
             summary = persisted_result_summary(data)
@@ -335,8 +333,6 @@ class ResearchJobScheduler:
                 expected=JobStatus.RUNNING,
                 result_summary=summary,
             )
-            if completed.job_role == "primary":
-                self._register_terminal_evidence(completed)
             self.broker.close(job_id)
             return
         if event != "error":
@@ -351,38 +347,7 @@ class ResearchJobScheduler:
                 cancel_reason=job.cancel_reason if cancelled else "",
                 error={**data, "cancelled": True} if cancelled else data,
             )
-            if completed.job_role == "primary":
-                self._register_terminal_evidence(completed)
             self.broker.close(job_id)
-
-    def _register_terminal_evidence(self, job: Any) -> None:
-        """Persist factual JobAttempt evidence without delaying job success."""
-        try:
-            from server.services.research_graph.branch.job_attempt import (
-                persist_terminal_job_evidence,
-            )
-
-            detail = self.repository.load_detail(
-                job.job_id,
-                owner=job.owner,
-            )
-            if detail is None:
-                return
-            registered = persist_terminal_job_evidence(
-                detail=detail,
-                owner=job.owner,
-            )
-            if registered is not None:
-                self.broker.publish(
-                    job.job_id,
-                    "evidence_registered",
-                    registered,
-                )
-        except Exception:
-            _LOGGER.exception(
-                "terminal JobAttempt evidence registration failed: %s",
-                job.job_id,
-            )
 
     def _handle_worker_loss(self, job_id: str, message: dict[str, Any], *, stage: str) -> None:
         # A terminated/crashed worker does not emit ``task_finished``.  Clear
@@ -412,8 +377,6 @@ class ResearchJobScheduler:
                 "worker_exitcode": message.get("worker_exitcode"),
             },
         )
-        if completed.job_role == "primary":
-            self._register_terminal_evidence(completed)
         self.broker.publish(job_id, "error", completed.error or {})
         self.broker.close(job_id)
 

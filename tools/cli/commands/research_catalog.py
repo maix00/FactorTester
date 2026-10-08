@@ -321,7 +321,6 @@ def register_research_catalog_commands(research: click.Group) -> None:
     @click.option("--evidence-ref", required=True)
     @click.option("--evidence-owner", "evidence_owner_ref", default="")
     @click.option("--report-id", required=True)
-    @click.option("--graph-ref", default="")
     @click.option("--branch-ref", default="")
     @click.option("--job-id", default="")
     @click.option("--profile", "profile_ref", default="")
@@ -332,7 +331,6 @@ def register_research_catalog_commands(research: click.Group) -> None:
         evidence_ref: str,
         evidence_owner_ref: str,
         report_id: str,
-        graph_ref: str,
         branch_ref: str,
         job_id: str,
         profile_ref: str,
@@ -345,7 +343,6 @@ def register_research_catalog_commands(research: click.Group) -> None:
                 "evidence_ref": evidence_ref,
                 "evidence_owner_ref": evidence_owner_ref,
                 "report_id": report_id,
-                "graph_ref": graph_ref,
                 "branch_ref": branch_ref,
                 "job_id": job_id,
                 "profile_ref": profile_ref,

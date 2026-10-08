@@ -272,6 +272,7 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
                     if isinstance(binding, dict) else ""
                 )
                 if owner == principal:
+                    value.pop("research_records", None)
                     result.append(value)
 
         if self.profile_cache is not None:
@@ -526,7 +527,6 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
             "runtime_kind": "server",
             "workspaces": [],
             "agents": [],
-            "research_records": [],
         })
 
     def _flush_profile_cache(self, principal: str) -> None:
@@ -636,37 +636,63 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
         }
 
     def local_research(self, principal: str) -> list[dict[str, Any]]:
-        """Return owner-scoped local report branches without exposing paths."""
+        """Discover owner-scoped local Report branches from their manifests."""
+        from tools.cli.release.research_reporting.authoring.tree_paths import (
+            report_tree_paths,
+        )
+        from tools.cli.release.research_reporting.authoring.tree_store import (
+            load_head,
+        )
+        from tools.cli.release.research_reporting.report_workspace_identity import (
+            load_report_workspace_identity,
+        )
+
         result: list[dict[str, Any]] = []
         for profile in self.profiles(principal):
             workspace_root = Path(str(profile.get("workspace_root") or ""))
             research_root = workspace_root / "research"
-            for record in profile.get("research_records") or []:
-                record_id = str(record.get("record_id") or "").strip()
-                if not record_id or not research_root.is_dir():
+            if not research_root.is_dir():
+                continue
+            for package_root in sorted(research_root.iterdir()):
+                if not package_root.is_dir():
                     continue
-                package_root = research_root / record_id
-                for head in sorted(package_root.glob("branches/*/authoring/HEAD.json")):
-                    branch_id = head.parent.parent.name
+                try:
+                    identity = load_report_workspace_identity(package_root)
+                except (OSError, ValueError):
+                    continue
+                report_workspace_id = str(identity["report_workspace_id"])
+                branches_root = package_root / "branches"
+                if not branches_root.is_dir():
+                    continue
+                for branch_root in sorted(branches_root.iterdir()):
+                    head_path = branch_root / "authoring" / "HEAD.json"
+                    if not head_path.is_file():
+                        continue
                     try:
-                        head_value = json.loads(head.read_text(encoding="utf-8"))
+                        head = load_head(
+                            report_tree_paths(package_root, branch_root.name)
+                        )
+                        updated_at = float(head_path.stat().st_mtime)
                     except (OSError, ValueError, json.JSONDecodeError):
-                        head_value = {}
+                        continue
                     result.append({
-                        "local_ref": f"{record_id}:{branch_id}",
+                        "local_ref": f"{report_workspace_id}:{branch_root.name}",
                         "source": "client",
                         "build_source": "client",
                         "build_source_ref": str(profile.get("profile_id") or ""),
                         "sharing_state": "not_shared",
                         "is_shared": False,
-                        "record_id": record_id,
-                        "branch_id": branch_id,
-                        "report_id": str(head_value.get("report_id") or ""),
+                        "report_workspace_id": report_workspace_id,
+                        "branch_id": branch_root.name,
+                        "report_id": str(head["report_id"]),
                         "profile_id": str(profile.get("profile_id") or ""),
                         "profile_name": str(profile.get("display_name") or ""),
-                        "title": str(record.get("title") or record_id),
-                        "updated_at": float(record.get("updated_at") or 0),
-                        "status": str(record.get("status") or "active"),
+                        "title": str(
+                            head["title"] or identity.get("title")
+                            or report_workspace_id
+                        ),
+                        "updated_at": updated_at,
+                        "status": "active",
                     })
         return sorted(
             result,
@@ -711,12 +737,12 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
         self, principal: str, local_ref: str,
     ) -> list[dict[str, Any]]:
         """Project every local branch of one logical Report for its reader."""
-        package_id, separator, _branch_id = str(local_ref or "").rpartition(":")
-        if not separator or not package_id:
+        report_workspace_id, separator, _branch_id = str(local_ref or "").rpartition(":")
+        if not separator or not report_workspace_id:
             return []
         branches: list[dict[str, Any]] = []
         for item in self.local_research(principal):
-            if str(item.get("record_id") or "") != package_id:
+            if str(item.get("report_workspace_id") or "") != report_workspace_id:
                 continue
             branch_local_ref = str(item.get("local_ref") or "")
             if not branch_local_ref:
@@ -857,10 +883,11 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
         parts = str(local_ref or "").split(":", 1)
         if len(parts) != 2 or not all(parts):
             raise ValueError("local research reference is invalid")
-        record_id, branch_id = parts
+        report_workspace_id, branch_id = parts
         matches = [
             item for item in self.local_research(principal)
-            if item["record_id"] == record_id and item["branch_id"] == branch_id
+            if item["report_workspace_id"] == report_workspace_id
+            and item["branch_id"] == branch_id
         ]
         if not matches:
             raise PermissionError("local research report is not available")
@@ -868,7 +895,10 @@ class ClientStateService(ClientProductCatalogMixin, ClientFactorCatalogMixin):
             item for item in self.profiles(principal)
             if str(item.get("profile_id") or "") == matches[0]["profile_id"]
         )
-        package_root = Path(str(profile["workspace_root"])).expanduser() / "research" / record_id
+        package_root = (
+            Path(str(profile["workspace_root"])).expanduser()
+            / "research" / report_workspace_id
+        )
         return package_root, branch_id, matches[0]["profile_id"]
 
 

@@ -122,7 +122,6 @@ def projection_index(projection: dict[str, Any]) -> dict[str, Any]:
             "component_id": component.get("component_id"),
             "title": component.get("title") or "",
             "created_at": component.get("created_at"),
-            "graph_version": component.get("graph_version"),
             "preview": preview,
         })
     return {
@@ -574,7 +573,6 @@ def public_component(
         "display_kind": str(value.get("display_kind") or ""),
         "binding_ids": (binding_ids_by_component or {}).get(component_id, []),
         "created_at": value.get("created_at"),
-        "graph_version": value.get("graph_version"),
     }
 
 
@@ -641,9 +639,7 @@ def _public_text(
                 "job", "evidence", "factor", "factor-family", "factor-set",
                 "product", "product-group", "contract", "continuous-contract",
                 "continuous_contract", "profile", "profile-revision", "run",
-                "run_spec", "trial_plan", "obligation", "requirement",
-                "report_requirement", "entry_requirement", "claim", "task",
-                "artifact", "graph_reference", "checkpoint", "delta", "file",
+                "run_spec", "trial_plan", "artifact", "file",
                 "url",
             }:
                 return match.group(0)

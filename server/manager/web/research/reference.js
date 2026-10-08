@@ -4,13 +4,9 @@
 
   const presentations = {
     evidence: {title: "证据", symbol: "doc.text.magnifyingglass", tone: "evidence"},
-    obligation: {title: "研究义务", symbol: "checkmark.seal", tone: "link"},
     task: {title: "任务", symbol: "checklist", tone: "link"},
     job: {title: "测试任务", symbol: "checklist", tone: "link"},
     report: {title: "研究报告", symbol: "doc.text", tone: "link"},
-    report_requirement: {title: "报告要求", symbol: "list.bullet.clipboard", tone: "link"},
-    entry_requirement: {title: "义务小类", symbol: "checkmark.square", tone: "link"},
-    obligation_requirement: {title: "义务要求", symbol: "checkmark.square", tone: "link"},
     trial_plan: {title: "试验计划", symbol: "list.bullet.clipboard", tone: "link"},
     run_spec: {title: "运行配置", symbol: "slider.horizontal.3", tone: "link"},
     run: {title: "运行", symbol: "play.circle", tone: "link"},

@@ -50,7 +50,7 @@ _QUOTED_TECHNICAL = re.compile(
     r"(?P<close>[”\"])"
 )
 _TECHNICAL_PHRASES = tuple(sorted({
-    "Work Package", "term structure", "roll yield", "time series",
+    "Report Workspace", "term structure", "roll yield", "time series",
     "double sort", "long gate", "short gate", "raw factor",
     "conditional factor", "executable strategy", "warm up",
 }, key=len, reverse=True))

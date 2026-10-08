@@ -262,12 +262,8 @@ def _compatibility(job) -> dict[str, object]:
 def _list_research_binding(
     job_repository, job, owner: str,
 ) -> dict[str, object]:
-    binding = job_research_binding(job)
     detail = job_repository.load_detail(job.job_id, owner=owner)
-    if detail is not None:
-        binding.update(detail.get("report_binding") or {})
-        binding.update(detail.get("graph_binding") or {})
-    return binding
+    return dict(detail.get("report_binding") or {}) if detail else {}
 
 
 def _artifact_manifest(
@@ -364,11 +360,7 @@ def _task_detail(
     """
     job = detail["job"]
     report_binding = detail.get("report_binding") or {}
-    binding = (
-        job_research_binding(job)
-        | report_binding
-        | (detail.get("graph_binding") or {})
-    )
+    binding = report_binding
     caller = _submission_context(job)
     run_spec = job.job_spec.get("run_spec") if isinstance(job.job_spec, dict) else None
     configuration = (
@@ -688,9 +680,7 @@ def get_test_job(job_id: str):
         ),
         "server_context": _server_context(job),
         "research_binding": (
-            job_research_binding(job)
-            | (detail.get("report_binding") or {})
-            | (detail.get("graph_binding") or {})
+            detail.get("report_binding") or {}
         ),
         "report_binding": detail.get("report_binding") or {},
         "submission_context": _submission_context(job),

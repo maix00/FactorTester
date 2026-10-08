@@ -129,10 +129,7 @@
             .filter(Boolean)
           : [];
         const ordinary = firstLevel.filter(item =>
-          item.dataset.componentKind !== "special"
-          && !["current_obligations", "obligation_requirement_coverage"].includes(
-            item.dataset.displayKind,
-          ),
+          item.dataset.componentKind !== "special",
         );
         return {firstLevel, ordinary};
       };

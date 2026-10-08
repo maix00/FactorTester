@@ -124,21 +124,12 @@ class ResearchEvidenceClientMixin(ClientMixinBase):
         ))
         return dict(data.get("evidence") or {})
 
-    def prepare_research_evidence_lifecycle(
+    def change_research_evidence_status(
         self, evidence_ref: str, payload: dict[str, Any],
     ) -> dict[str, Any]:
         data = self._expect_success(self.session.post(
-            f"/api/research-evidence/{evidence_ref}/lifecycle/prepare",
+            f"/api/research-evidence/{evidence_ref}/status",
             payload,
-        ))
-        return dict(data.get("transition") or {})
-
-    def finalize_research_evidence_lifecycle(
-        self, transition_ref: str, report_receipt: dict[str, Any],
-    ) -> dict[str, Any]:
-        data = self._expect_success(self.session.post(
-            f"/api/research-evidence/lifecycle/{transition_ref}/finalize",
-            {"report_receipt": report_receipt},
         ))
         return dict(data.get("lifecycle") or {})
 
@@ -219,19 +210,6 @@ class ResearchEvidenceClientMixin(ClientMixinBase):
                 "subject_ref": subject_ref,
                 "qualification": qualification,
                 "note": note,
-            },
-        ))
-        return dict(data.get("admission") or {})
-
-    def admit_research_evidence_for_graph(
-        self, evidence_ref: str, *, instance_id: str, branch_id: str,
-        qualification: str, note: str = "",
-    ) -> dict[str, Any]:
-        data = self._expect_success(self.session.post(
-            f"/api/research-evidence/{evidence_ref}/graph-admissions",
-            {
-                "instance_id": instance_id, "branch_id": branch_id,
-                "qualification": qualification, "note": note,
             },
         ))
         return dict(data.get("admission") or {})

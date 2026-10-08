@@ -8,11 +8,11 @@ from click.testing import CliRunner
 from tools.cli.commands import research_report_export
 from tools.cli.commands.research_report import report as report_cli
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
-from tools.cli.release.research_reporting.authoring import (
-    ensure_branch_report_chapter,
+from tools.cli.release.research_reporting.authoring.tree_model import (
+    add_component,
 )
 from tools.cli.release.research_reporting.workspace import (
-    initialize_work_package,
+    initialize_report_workspace,
 )
 
 
@@ -25,41 +25,20 @@ def _scope(tmp_path: Path) -> Path:
         server_url="http://127.0.0.1:8141",
         workspace_root=workspace,
     )
-    profile["research_records"] = [{
-        "record_id": "wp",
-        "title": "报告",
-        "status": "pending",
-        "scope": {},
-        "factor_family_versions": [],
-        "agent_id": "research-maxa",
-        "created_at": 1.0,
-        "updated_at": 1.0,
-        "workspace_ref": "workspace:one",
-        "run_ref": "",
-        "graph_instance_ref": "work-package:wp",
-        "graph_branch_ref": "report-branch:main",
-        "checkpoint_ref": "",
-        "evidence_refs": [],
-        "timeline_refs": [],
-        "artifacts": [],
-        "provenance": {"kind": "owned_research"},
-    }]
     LocalProfileStore(client_root).save(profile)
-    initialize_work_package(
+    initialized = initialize_report_workspace(
         workspace_root=workspace,
-        work_package_id="wp",
+        report_workspace_id="wp",
         branch_id="main",
+        report_id="report-1",
         workspace_id="one",
         title="报告",
         branch_ref="report-branch:main",
     )
-    ensure_branch_report_chapter(
-        workspace_root=workspace,
-        work_package_id="wp",
-        title="报告",
-        node_id="factor_semantics",
-        branch_id="main",
-        branch_ref="report-branch:main",
+    add_component(
+        package_root=initialized["package_root"], branch_id="main",
+        component_id="factor_semantics", kind="chapter", title="因子语义",
+        parent_id=None, body="", content=None, display_kind="",
     )
     return client_root
 
@@ -68,7 +47,7 @@ def _args(output: Path, output_format: str) -> list[str]:
     return [
         "export",
         "--profile", "maxa",
-        "--work-package-id", "wp",
+        "--report-workspace-id", "wp",
         "--branch-id", "main",
         "--format", output_format,
         "--output", str(output),
@@ -153,4 +132,3 @@ def test_export_requires_the_matching_filename_extension(
 
     assert result.exit_code != 0
     assert ".pdf" in result.output
-

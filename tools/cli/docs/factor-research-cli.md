@@ -192,9 +192,9 @@ It does not declare MIN1 or DAY1 bars. Static local-data discovery never imports
 or connects the Tiger SDK; a separate explicit local probe is required before
 availability or latency may be claimed.
 
-Before freezing a product-by-product TrialPlan, screen liquidity independently
-of factor or backtest results. The cutoff is mandatory so the screen cannot
-silently inspect a later holdout:
+Before using a sample as sealed confirmation data, screen liquidity separately
+from factor or backtest results. The cutoff prevents the screen from silently
+inspecting later data:
 
 ```bash
 factortester product-library liquidity \
@@ -213,5 +213,22 @@ the cutoff, average daily volume, observed zero-volume days, and exact window
 coverage. Missing calendar days are not invented as zero-volume days. Missing
 files, columns, or unreadable scans are reported as `capability_gap`; the
 command never substitutes turnover, open interest, MIN1 data, or a different
-provider. Thresholds remain part of the predeclared TrialPlan rather than this
-evidence collector.
+provider. This command records bounded liquidity evidence; it does not enforce
+a trading threshold. Threshold decisions belong in the relevant analysis
+configuration or report text, and are not implied by this screen.
+
+Sample use is an optional Run-level contract rather than a separate TrialPlan.
+Open validation declares intended use without claiming one-time protection:
+
+```json
+{"schema_version":1,"purpose":"validation","protection":"open"}
+```
+
+Submit it with `factortester run submit --sample-use-file sample-use.json`.
+For a sealed comparison, use `protection: "sealed"`, a stable `comparison_id`,
+and the complete, frozen set of candidate RunSpec SHA-256 hashes in
+`member_run_spec_hashes`; submit the same contract for each member. Every
+member can be exposed once. An omitted contract or any earlier overlapping
+exposure blocks a new sealed comparison. Adding a candidate later is a new
+exposure and invalidates reuse of the original sealed comparison. The server
+checks the exact frozen product set and date overlap atomically for each owner.

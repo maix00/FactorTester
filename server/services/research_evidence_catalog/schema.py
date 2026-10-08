@@ -80,23 +80,12 @@ def ensure_schema(conn) -> None:
             updated_at REAL NOT NULL,
             PRIMARY KEY(owner, evidence_ref)
         );
-        CREATE TABLE IF NOT EXISTS research_evidence_lifecycle_transitions (
-            transition_ref TEXT PRIMARY KEY,
+        CREATE TABLE IF NOT EXISTS research_evidence_status_events (
+            event_ref TEXT PRIMARY KEY,
             owner TEXT NOT NULL,
             evidence_ref TEXT NOT NULL,
-            action TEXT NOT NULL,
-            from_status TEXT NOT NULL,
-            to_status TEXT NOT NULL,
-            reason_zh TEXT NOT NULL,
-            profile_ref TEXT NOT NULL,
-            agent_id TEXT NOT NULL,
-            instance_id TEXT NOT NULL,
-            branch_id TEXT NOT NULL,
-            parent_id TEXT NOT NULL,
-            status TEXT NOT NULL,
-            report_receipt_json TEXT NOT NULL,
-            created_at REAL NOT NULL,
-            updated_at REAL NOT NULL
+            payload_json TEXT NOT NULL,
+            created_at REAL NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_research_evidence_source_owner
             ON research_evidence_sources(owner, source_kind);
@@ -108,8 +97,8 @@ def ensure_schema(conn) -> None:
             ON research_evidence_tags(owner, status);
         CREATE INDEX IF NOT EXISTS idx_research_evidence_lifecycle_status
             ON research_evidence_lifecycle(owner, status);
-        CREATE INDEX IF NOT EXISTS idx_research_evidence_transition_target
-            ON research_evidence_lifecycle_transitions(
+        CREATE INDEX IF NOT EXISTS idx_research_evidence_status_target
+            ON research_evidence_status_events(
                 owner, evidence_ref, created_at
             );
     """)

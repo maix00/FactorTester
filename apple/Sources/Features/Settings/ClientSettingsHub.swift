@@ -98,7 +98,7 @@ private struct ClientLocalResearchSettingsView: View {
     var body: some View {
         SettingsPageShell(
             title: "本地研究",
-            subtitle: "管理本机研究图与本地研究页面",
+            subtitle: "管理本机研究页面与报告",
             systemImage: "point.3.connected.trianglepath.dotted"
         ) {
             ResearchModuleView(

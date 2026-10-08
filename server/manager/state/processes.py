@@ -80,16 +80,11 @@ class ProcessStateMixin:
         deployment_id = f"{safe_name(path.name)}-{port}"
         socket_path = job_daemon_socket_path(path, deployment_id)
         env = os.environ.copy()
-        harness_root = str(
-            (path / "tools" / "cli" / "agent-harness").resolve()
-        )
         python_path = [
             item
             for item in env.get("PYTHONPATH", "").split(os.pathsep)
             if item
         ]
-        if harness_root not in python_path:
-            python_path.insert(0, harness_root)
         source_revision = str(env.get("GTHT_SOURCE_REVISION") or "").strip()
         if not source_revision:
             source_revision = subprocess.check_output(

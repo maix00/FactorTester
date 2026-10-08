@@ -77,8 +77,4 @@ def test_local_manager_mounts_existing_runtime_data_root() -> None:
 def test_local_manager_can_import_vendored_research_contracts() -> None:
     python_path = _compose()["services"]["manager"]["environment"]["PYTHONPATH"]
 
-    assert python_path == (
-        "${FACTORTESTER_REPO_ROOT:?set FACTORTESTER_REPO_ROOT}:"
-        "${FACTORTESTER_REPO_ROOT:?set FACTORTESTER_REPO_ROOT}"
-        "/tools/cli/agent-harness"
-    )
+    assert python_path == "${FACTORTESTER_REPO_ROOT:?set FACTORTESTER_REPO_ROOT}"

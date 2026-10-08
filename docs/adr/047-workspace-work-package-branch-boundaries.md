@@ -4,6 +4,8 @@
 
 已接受。
 
+本 ADR 中的 WorkPackage、Graph Branch、Graph checkpoint、TrialPlan binding 与 Graph Evidence admission 约束已由 ADR-156 取代。Workspace 与冻结 Run 配置相互独立的规则仍有效；报告协作迁移为稳定 ReportBranch。
+
 ## 决策
 
 `Workspace` 是用户编辑执行配置的长期、可变环境。提交一次 Trial 时，系统把所需配置冻结为独立的 configuration snapshot；`RunSpec`、`TrialPlan`、`ResearchRun` 与 `JobAttempt` 引用该快照。Workspace 只保留来源和组织语义，不声明研究对象。

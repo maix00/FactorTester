@@ -10,7 +10,6 @@ from typing import Any
 
 from tools.cli.commands.research_report_scope import (
     BranchReportScope,
-    ensure_authoring,
     load_authoring,
     persist_descriptor,
 )
@@ -36,13 +35,8 @@ def collect_job_report(
     detail = client.get_job(job_id)
     status = _terminal_status(detail)
     target = _validate_scope(detail, scope)
-    node = target["execution_node"]
-    if node:
-        authoring = ensure_authoring(scope, node_id=node, materialize=False)
-        parent_id = str(authoring["chapter_sync"]["component_id"])
-    else:
-        authoring = load_authoring(scope)
-        parent_id = target["report_parent_id"]
+    authoring = load_authoring(scope)
+    parent_id = target["report_parent_id"]
     presence = ReportTreePresence.load(
         package_root=scope.package_root, branch_id=scope.branch_id,
     )
@@ -87,7 +81,7 @@ def collect_job_report(
         operations.extend(batch)
     if operations:
         saved = apply_branch_batch(
-            package_root=scope.package_root, work_package_id=scope.work_package_id,
+            package_root=scope.package_root, report_workspace_id=scope.report_workspace_id,
             branch_id=scope.branch_id, operations=operations, materialize=False,
         )
         persist_descriptor(scope, saved["descriptor"])
@@ -96,7 +90,7 @@ def collect_job_report(
         message="Mount report-ready Job artifacts",
     )
     return {
-        "job_id": str(job_id), "status": status, "execution_node": node,
+        "job_id": str(job_id), "status": status,
         "report_parent_id": parent_id,
         "result_component_id": result_component_id,
         "report_head": str(authoring["paths"]["head"]), "downloaded": downloaded,
@@ -162,25 +156,12 @@ def _validate_scope(detail: dict[str, Any], scope: BranchReportScope) -> dict[st
         or {}
     )
     if not isinstance(binding, dict):
-        raise TypeError("Job 未登记研究工作包绑定，不能挂载到报告")
-    expected_package = f"work-package:{scope.work_package_id}"
-    if str(binding.get("work_package_ref") or "") != expected_package:
-        raise ValueError("Job 不属于指定的研究工作包")
-    # Both the graph-outside Trial mount and an ordinary run's explicit mount
-    # carry their position in report_parent_id.
-    if str(binding.get("binding_origin") or "") in {"agent_direct", "report_direct"}:
-        if str(binding.get("branch_id") or "") != scope.branch_id:
-            raise ValueError("Job 不属于指定的研究分支")
-        parent_id = str(binding.get("report_parent_id") or "")
-        if not _SAFE_NODE.fullmatch(parent_id):
-            raise ValueError("图外 Job 未冻结有效的报告 parent_id")
-        return {"execution_node": "", "report_parent_id": parent_id}
-    branch_ref = scope.branch_ref.split(":")
-    if len(branch_ref) != 3:
-        raise ValueError("本地研究分支身份无效")
-    if str(binding.get("instance_id") or "") != branch_ref[1] or str(binding.get("branch_id") or "") != scope.branch_id:
+        raise TypeError("Job 未登记报告绑定，不能挂载到报告")
+    if str(binding.get("report_workspace_id") or "") != scope.report_workspace_id:
+        raise ValueError("Job 不属于指定的报告工作区")
+    if str(binding.get("branch_id") or "") != scope.branch_id:
         raise ValueError("Job 不属于指定的研究分支")
-    node = str(binding.get("execution_node") or "")
-    if not _SAFE_NODE.fullmatch(node):
-        raise ValueError("历史 Job 未冻结执行节点，不能猜测报告挂载位置")
-    return {"execution_node": node, "report_parent_id": ""}
+    parent_id = str(binding.get("report_parent_id") or "")
+    if not _SAFE_NODE.fullmatch(parent_id):
+        raise ValueError("Job 未冻结有效的报告 parent_id")
+    return {"report_parent_id": parent_id}

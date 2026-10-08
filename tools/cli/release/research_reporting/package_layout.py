@@ -1,4 +1,4 @@
-"""Paths for the physical, local representation of a Work Package."""
+"""Paths for the physical, local representation of a Report Workspace."""
 
 from __future__ import annotations
 
@@ -26,11 +26,11 @@ def safe_package_component(value: str, *, field: str) -> str:
 
 
 def ensure_branch_report_tree(package_root: Path, branch_id: str) -> Path:
-    """Materialize one Graph branch's local report tree.
+    """Materialize one ReportBranch's local report tree.
 
-    This is deliberately a normal directory within one Work Package Git
-    repository, not a Git worktree.  The Graph owns fork lineage; Git records
-    atomic snapshots of the package after genuine report writes.
+    This is deliberately a normal directory within one Report Workspace Git
+    repository, not a Git worktree. Git records atomic snapshots of the Report
+    workspace after genuine report writes.
     """
     branch_id = safe_package_component(branch_id, field="branch_id")
     branch_root = Path(package_root) / "branches" / branch_id

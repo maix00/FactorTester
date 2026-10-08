@@ -693,17 +693,20 @@ def run_preview(
 )
 @run_input_option
 @click.option(
-    "--trial-binding-file",
+    "--sample-use-file",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    help="绑定 Research Graph 或 trial-plan create 冻结的 TrialPlan JSON。",
+    help=(
+        "可选的 Run 级样本用途 JSON。sealed 用途须冻结比较 ID 与全部 RunSpec 哈希；"
+        "validation 默认应使用 protection=open。"
+    ),
 )
 @click.option("--profile", "report_profile_id", default="")
-@click.option("--work-package-id", "report_work_package_id", default="")
+@click.option("--report-workspace-id", "report_workspace_id", default="")
 @click.option("--branch-id", "report_branch_id", default="")
 @click.option(
     "--report-parent-id",
     default="",
-    help="图外 Trial 结果挂载到的现有报告组件 ID。",
+    help="Run 结果挂载到的现有报告组件 ID。",
 )
 @click.option(
     "--release-profile",
@@ -712,7 +715,7 @@ def run_preview(
 @click.option(
     "--without-report",
     is_flag=True,
-    help="明确提交不写入研究报告的 Trial Job。",
+    help="明确提交不写入研究报告的 Run。",
 )
 @click.option(
     "--wait-report/--no-wait-report",
@@ -736,9 +739,9 @@ def run_submit(
     flow_profile: bool,
     flow_profile_min_ms: float,
     margin_execution_profile: bool,
-    trial_binding_file: Path | None,
+    sample_use_file: Path | None,
     report_profile_id: str,
-    report_work_package_id: str,
+    report_workspace_id: str,
     report_branch_id: str,
     report_parent_id: str,
     release_profile: Path | None,
@@ -752,28 +755,20 @@ def run_submit(
     as_json: bool,
 ) -> None:
     state = _require_workspace()
-    trial_binding = None
-    if trial_binding_file is not None:
-        trial_binding = json.loads(
-            trial_binding_file.read_text(encoding="utf-8")
-        )
-        if not isinstance(trial_binding, dict):
-            raise click.ClickException(
-                "trial binding JSON must be an object"
-            )
+    sample_use = None
+    if sample_use_file is not None:
+        sample_use = json.loads(sample_use_file.read_text(encoding="utf-8"))
+        if not isinstance(sample_use, dict):
+            raise click.ClickException("sample-use JSON must be an object")
     report_scope_values = (
         report_profile_id,
-        report_work_package_id,
+        report_workspace_id,
         report_branch_id,
     )
     has_report_scope = all(report_scope_values)
-    is_direct_trial = bool(
-        trial_binding
-        and trial_binding.get("binding_origin") == "agent_direct"
-    )
     if any(report_scope_values) and not has_report_scope:
         raise click.ClickException(
-            "--profile、--work-package-id 与 --branch-id 必须同时提供"
+            "--profile、--report-workspace-id 与 --branch-id 必须同时提供"
         )
     if without_report and has_report_scope:
         raise click.ClickException(
@@ -783,19 +778,11 @@ def run_submit(
         raise click.ClickException(
             "--report-parent-id 只能与完整报告范围同时使用"
         )
-    # A run may bind a report without a TrialPlan: the work package, branch and
-    # a report parent component are enough to freeze the mount position, and the
-    # Graph trial identity stays optional.  The parent is what makes an
-    # out-of-graph mount unambiguous, so it is required in both cases.
-    standalone_report_run = has_report_scope and trial_binding is None
-    if (is_direct_trial or standalone_report_run) and not report_parent_id:
+    # A Run may bind a report without a TrialPlan. Every report-bound Run
+    # freezes the same ReportBranch and parent component as its mount location.
+    if has_report_scope and not report_parent_id:
         raise click.ClickException(
             "绑定报告必须提供 --report-parent-id 以冻结挂载位置"
-        )
-    if trial_binding is not None and not has_report_scope and not without_report:
-        raise click.ClickException(
-            "研究 Trial Job 必须绑定报告范围；若该任务明确不写报告，"
-            "请使用 --without-report"
         )
     report_binding = None
     report_scope = None
@@ -803,21 +790,14 @@ def run_submit(
         report_scope = resolve_branch_report_scope(
             client_root=load_profile_root(release_profile),
             profile_id=report_profile_id,
-            work_package_id=report_work_package_id,
+            report_workspace_id=report_workspace_id,
             branch_id=report_branch_id,
         )
         try:
-            if is_direct_trial or trial_binding is None:
-                report_binding = freeze_report_binding(
-                    report_scope,
-                    trial_binding=trial_binding or {},
-                    report_parent_id=report_parent_id,
-                )
-            else:
-                report_binding = freeze_report_binding(
-                    report_scope,
-                    trial_binding=trial_binding or {},
-                )
+            report_binding = freeze_report_binding(
+                report_scope,
+                report_parent_id=report_parent_id,
+            )
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
     submit_kwargs = build_run_request(
@@ -842,7 +822,7 @@ def run_submit(
         load_run_inputs=load_run_input_dependencies,
     )
     submit_kwargs.update({
-        "trial_binding": trial_binding,
+        "sample_use": sample_use,
         "report_binding": report_binding,
     })
     client = client_from_config()
@@ -1074,7 +1054,7 @@ def job_watch(
 @scope_options
 @friendly_errors
 def job_watch_report(
-    job_id: str, after: int, profile_id: str, work_package_id: str,
+    job_id: str, after: int, profile_id: str, report_workspace_id: str,
     branch_id: str, release_profile: Path | None,
 ) -> None:
     """Watch one Job, then collect report-ready outputs into its exact node."""
@@ -1087,7 +1067,7 @@ def job_watch_report(
             click.echo(line, color=True)
     scope = resolve_branch_report_scope(
         client_root=load_profile_root(release_profile), profile_id=profile_id,
-        work_package_id=work_package_id, branch_id=branch_id,
+        report_workspace_id=report_workspace_id, branch_id=branch_id,
     )
     value = collect_job_report(client, job_id=job_id, scope=scope)
     click.echo(_json({"report_collection": value}))
@@ -1289,13 +1269,13 @@ def job_download_all(job_id: str, output: Path | None) -> None:
 @click.option("--json", "as_json", is_flag=True, help="输出机器可读 JSON。")
 @friendly_errors
 def job_collect_report(
-    job_id: str, profile_id: str, work_package_id: str, branch_id: str,
+    job_id: str, profile_id: str, report_workspace_id: str, branch_id: str,
     release_profile: Path | None, as_json: bool,
 ) -> None:
-    """Attach terminal Job tables and images to its exact Work Package node."""
+    """Attach terminal Job tables and images to its exact Report Workspace node."""
     scope = resolve_branch_report_scope(
         client_root=load_profile_root(release_profile), profile_id=profile_id,
-        work_package_id=work_package_id, branch_id=branch_id,
+        report_workspace_id=report_workspace_id, branch_id=branch_id,
     )
     value = collect_job_report(
         client_from_config(), job_id=job_id, scope=scope,

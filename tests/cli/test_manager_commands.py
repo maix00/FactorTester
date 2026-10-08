@@ -216,7 +216,7 @@ def test_manager_help_exposes_application_boundaries_only() -> None:
     assert "server" in manager_help.output
     assert "jobs" in manager_help.output
     assert "artifacts" in manager_help.output
-    assert "research-graph" in manager_help.output
+    assert "research-graph" not in manager_help.output
     assert "restart-fleet" not in manager_help.output
     assert "\n  admin " not in manager_help.output
 

@@ -1,6 +1,6 @@
 ## 何时使用 CLI {#when-to-use-cli}
 
-重复提交、批量检查、研究报告 authoring、研究图推进和任务核对适合使用 FactorTester CLI。先通过 `factortester --help` 或具体子命令的 `--help` 读取当前安装版本披露的合同；不要根据旧文档猜测参数，也不要直接改写服务器数据库、工作区索引或报告存储。
+重复提交、批量检查、研究报告 authoring 和任务核对适合使用 FactorTester CLI。先通过 `factortester --help` 或具体子命令的 `--help` 读取当前安装版本披露的合同；不要根据旧文档猜测参数，也不要直接改写服务器数据库、工作区索引或报告存储。
 
 CLI 命令按业务对象组织：因子库、产品库、测试配置/任务、Research/Report/Evidence 和公开文档。命令返回的稳定 ref、schema version、状态和错误码比人类可读的名称更适合脚本判断。
 

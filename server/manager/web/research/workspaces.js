@@ -3,7 +3,6 @@
     ["researches", "研究"],
     ["evidence", "证据"],
     ["reports", "研究报告"],
-    ["graph", "研究图"],
     ["profiles", "研究身份"],
     ["agent-models", "智能体模型"],
   ];
@@ -75,9 +74,6 @@
         await window.FTStaticLoader?.loadGroups?.(["research-evidence"]);
         if (!isCurrent()) return;
         await FTResearchEvidence.render(context, body);
-      } else if (selected === "graph") {
-        await window.FTStaticLoader?.loadGroups?.(["research-graph"]);
-        await FTResearchGraphList.render(context, body);
       } else {
         await window.FTResearchCatalog.render({...context, content: body}, body);
       }

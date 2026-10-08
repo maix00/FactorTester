@@ -279,7 +279,7 @@ class CoreGetRoutesMixin:
         shell_paths = {
             "/", "/research", "/researches", "/evidence", "/reference",
             "/factor-series", "/jobs", "/factors", "/products",
-            "/profiles", "/settings", "/manager", "/research-graphs",
+            "/profiles", "/settings", "/manager",
             "/strategies",
             "/ic-test", "/backtest", "/test-templates", "/sqlite-web",
             "/sqlite-web/", "/mihomo", "/docs",
@@ -295,7 +295,6 @@ class CoreGetRoutesMixin:
             or parsed.path.startswith("/products/")
             or parsed.path.startswith("/profiles/")
             or parsed.path.startswith("/settings/")
-            or parsed.path.startswith("/research-graphs/")
             or parsed.path.startswith("/strategies/")
             or parsed.path.startswith("/ic-test/")
             or parsed.path.startswith("/backtest/")
@@ -340,7 +339,6 @@ class CoreGetRoutesMixin:
             self._get_page_assistance_routes,
             self._get_agent_routes,
             self._get_server_research_routes,
-            self._get_profile_research_routes,
             self._get_research_catalog_routes,
             self._get_research_object_routes,
             self._get_client_research_routes,

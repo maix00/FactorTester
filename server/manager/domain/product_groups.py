@@ -158,12 +158,19 @@ def _research_index(values: Iterable[Mapping[str, Any]]) -> dict[str, dict[str, 
     result = {}
     for value in values:
         projected = dict(value)
-        for key in ("local_ref", "record_id", "report_id"):
+        for key in ("local_ref", "record_id", "research_id", "report_id"):
             ref = str(value.get(key) or "").strip()
             if ref:
                 result[ref] = projected
-                if key == "record_id":
-                    result[f"work-package:{ref}"] = projected
+                if key == "research_id":
+                    result[f"research:{ref}"] = projected
+                if key == "report_id":
+                    result[f"report:{ref}"] = projected
+                report_workspace_id = str(
+                    value.get("report_workspace_id") or ""
+                ).strip()
+                if report_workspace_id:
+                    result[f"report-workspace:{report_workspace_id}"] = projected
     return result
 
 
@@ -215,11 +222,11 @@ def _research_bindings(
         item = raw if isinstance(raw, dict) else {"research_ref": raw}
         ref = str(
             item.get("research_ref")
-            or item.get("work_package_ref")
             or item.get("local_ref")
             or ""
         ).strip()
-        if not ref:
+        prefix = ref.partition(":")[0]
+        if not ref or prefix not in {"research", "report", "report-workspace"}:
             continue
         record = research.get(ref, {})
         result.append({

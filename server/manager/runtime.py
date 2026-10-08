@@ -48,16 +48,12 @@ from server.manager.http.manager_identity_routes import ManagerIdentityRoutesMix
 from server.manager.http.job_list_routes import JobListRoutesMixin
 from server.manager.http.client_research_routes import ClientResearchRoutesMixin
 from server.manager.http.server_research_routes import ServerResearchRoutesMixin
-from server.manager.http.profile_research_routes import ProfileResearchRoutesMixin
 from server.manager.http.research_object_routes import ResearchObjectRoutesMixin
 from server.manager.http.research_catalog_routes import ResearchCatalogRoutesMixin
 from server.manager.http.agent_routes import AgentRoutesMixin
 from server.manager.http.agent_app_routes import AgentAppServerRoutesMixin
 from server.manager.http.page_assistance_routes import PageAssistanceRoutesMixin
 from server.manager.http.mihomo_routes import MihomoDashboardRoutesMixin
-from server.manager.http.research_graph_catalog_routes import (
-    ResearchGraphCatalogRoutesMixin,
-)
 from server.manager.http.public_research_routes import PublicResearchRoutesMixin
 from server.manager.http.write_routes import WriteRoutesMixin
 from server.manager.http.auth_routes import AuthenticationRoutesMixin
@@ -93,7 +89,6 @@ from server.manager.domain.federation import (
     ServiceRoute,
 )
 from server.manager.services.test_authoring import TestAuthoringService
-from server.manager.services.research_graph_catalog import ResearchGraphCatalog
 from server.manager.services.research_catalog import ResearchCatalog
 from server.services.strategy_library import StrategyLibraryService
 from server.manager.services.mihomo_supervisor import MihomoSupervisor
@@ -348,14 +343,6 @@ class ManagerState(
         )
         self.sessions_path = self.state_root / "sessions.json"
         self.session_store = ManagerSessionStore(self.sessions_db_path)
-        # Graph catalog files and the server's default pointer are Manager
-        # data.  The catalog service creates only its small catalog schema;
-        # branch/evidence/trial runtime schema is still owned by the legacy
-        # compatibility service until its callers are migrated.
-        self.research_graph_catalog = ResearchGraphCatalog(
-            self.sessions_db_path,
-            server_id=self.server_id,
-        )
         # Research ownership, Profile membership, Research Workspaces,
         # report links, and Evidence links share the Manager metadata store.
         # Report and Evidence bytes remain in their existing stores; this
@@ -571,7 +558,6 @@ class Handler(
     FederationRoutesMixin,
     CatalogRoutesMixin,
     StrategyLibraryRoutesMixin,
-    ResearchGraphCatalogRoutesMixin,
     ServiceSelectionRoutesMixin,
     JobProxyRoutesMixin,
     JobTransferRoutesMixin,
@@ -582,7 +568,6 @@ class Handler(
     PageAssistanceRoutesMixin,
     AgentRoutesMixin,
     ServerResearchRoutesMixin,
-    ProfileResearchRoutesMixin,
     ResearchCatalogRoutesMixin,
     ResearchObjectRoutesMixin,
     ClientResearchRoutesMixin,

@@ -83,28 +83,6 @@ def test_replace_runs_component_preflight_and_uses_generated_bindings(
     assert enriched[0]["bindings"] == generated
 
 
-def test_historical_review_enables_historical_requirement_authority(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    scope = _scope(tmp_path)
-    calls: list[dict[str, object]] = []
-
-    def preflight(**values):
-        calls.append(values)
-        return [], []
-
-    monkeypatch.setattr(
-        research_report_submission, "checked_component_preflight", preflight,
-    )
-    begin_batch_submission(
-        scope=scope, requested_sequence=None,
-        operations=[_replace("chapter")], as_json=False,
-        historical_review={"kind": "historical_source_correction"},
-    )
-
-    assert calls[0]["allow_historical_entry_requirement"] is True
-
-
 def test_replace_rejects_even_empty_agent_bindings(tmp_path: Path) -> None:
     scope = _scope(tmp_path)
     operation = {**_replace("chapter"), "bindings": []}

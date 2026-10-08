@@ -36,8 +36,6 @@ def resume_local_agent(
         agent_id,
         role=str(agent["role"]),
         workspace_id=str(scope.get("workspace_id") or ""),
-        instance_id=str(scope.get("instance_id") or ""),
-        branch_id=str(scope.get("branch_id") or ""),
     )
     click.echo(json.dumps(
         packet,

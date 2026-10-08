@@ -328,13 +328,13 @@ final class RenderedMathFormulaViewTests: XCTestCase {
 
     func testWebReferenceMessageAcceptsOnlyTypedResearchLinks() {
         let reference = ResearchDocumentWebReferenceMessage.decode([
-            "href": "factortester://obligation/obligation%3Afees",
-            "label": "手续费覆盖义务",
+            "href": "factortester://evidence/evidence%3Abacktest%3Asha256%3Afees",
+            "label": "手续费后回测",
         ])
 
-        XCTAssertEqual(reference?.kind, "obligation")
-        XCTAssertEqual(reference?.targetRef, "obligation:fees")
-        XCTAssertEqual(reference?.label, "手续费覆盖义务")
+        XCTAssertEqual(reference?.kind, "evidence")
+        XCTAssertEqual(reference?.targetRef, "evidence:backtest:sha256:fees")
+        XCTAssertEqual(reference?.label, "手续费后回测")
         XCTAssertNil(ResearchDocumentWebReferenceMessage.decode([
             "href": "file:///etc/passwd",
             "label": "无效",

@@ -74,7 +74,7 @@ final class ClientTabSelectionTests: XCTestCase {
         {
           "id":"research",
           "title":"研究",
-          "desc":"研究报告、研究图与研究身份",
+          "desc":"研究报告、证据与研究身份",
           "icon":"chart",
           "sfSymbol":"chart.xyaxis.line",
           "path":"/research?section=shared",
@@ -212,10 +212,6 @@ final class ClientTabSelectionTests: XCTestCase {
 
     func testGenericReferenceKindsUseTheSharedSwiftWebTemplate() {
         let cases: [(String, String)] = [
-            ("obligation", "obligation:one"),
-            ("report_requirement", "report.requirement.factor_semantics"),
-            ("entry_requirement", "data.quality_and_continuity"),
-            ("obligation_requirement", "data.source_availability"),
             ("trial_plan", "trial-plan:sha256:\(String(repeating: "a", count: 64))"),
             ("run_spec", "runspec:sha256:\(String(repeating: "b", count: 64))"),
             ("run", "run:run-1"),

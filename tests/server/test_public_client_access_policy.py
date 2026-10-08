@@ -175,38 +175,6 @@ def test_generated_test_field_catalog_reports_missing_registry_dependency(
     assert error.value.code == 503
 
 
-def test_immutable_research_graph_catalog_is_public_without_a_session(
-    tmp_path, monkeypatch,
-) -> None:
-    state = manager.ManagerState(tmp_path, "python", server_id="public-main")
-    state.require_login_for_ui = True
-    state.require_device_auth = True
-    state.public_server = True
-    monkeypatch.setattr(
-        state.research_graph_catalog,
-        "list_versions",
-        lambda graph_id, locale=None: [{
-            "graph_id": graph_id, "version": 1, "locale": locale,
-        }],
-    )
-
-    with _running_manager(state) as base_url:
-        with urlopen(Request(
-            f"{base_url}/api/catalog/research-graphs/"
-            "factor-research/versions",
-            headers=_headers(),
-        )) as response:
-            payload = json.loads(response.read())
-        with pytest.raises(HTTPError) as private_error:
-            urlopen(Request(
-                f"{base_url}/api/catalog/research-graphs/user-library",
-                headers=_headers(),
-            ))
-
-    assert payload["versions"][0]["graph_id"] == "factor-research"
-    assert private_error.value.code == 401
-
-
 def test_redeeming_a_grant_twice_reuses_the_same_session() -> None:
     store = VisitorAccessStore()
     target = "https://101.133.144.27:7998"

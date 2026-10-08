@@ -1,4 +1,4 @@
-"""The submit command mounts reports without demanding a TrialPlan file."""
+"""Report-bound Runs freeze a ReportBranch location independently of plans."""
 
 from __future__ import annotations
 
@@ -14,16 +14,27 @@ def test_submit_no_longer_demands_a_trial_binding_for_report_mounts():
     source = SUBMIT.read_text(encoding="utf-8")
     assert "报告绑定需要 --trial-binding-file" not in source
     assert "--report-parent-id 仅用于 agent_direct TrialPlan" not in source
+    assert '"--report-workspace-id"' in source
     assert "绑定报告必须提供 --report-parent-id" in source
-    assert "standalone_report_run = has_report_scope and trial_binding is None" in source
+    assert "if has_report_scope and not report_parent_id" in source
+    assert 'report_binding = freeze_report_binding(' in source
 
 
-def test_binding_freezer_supports_a_standalone_origin():
+def test_binding_freezer_freezes_report_workspace_branch_and_parent_without_trial_plan():
     source = BINDING.read_text(encoding="utf-8")
-    assert "trial_binding: dict[str, Any] | None = None" in source
-    assert '"report_direct"' in source
+    assert "trial_binding" not in source
+    assert "def freeze_report_binding(" in source
+    assert '"report_workspace_id": scope.report_workspace_id' in source
+    assert '"branch_id": scope.branch_id' in source
+    assert '"report_parent_id": parent_id' in source
+    assert "instance_id" not in source
+    assert "work_package_ref" not in source
 
 
-def test_collect_report_accepts_both_mount_origins():
+def test_collect_report_requires_the_exact_report_workspace_branch_and_parent():
     source = ARTIFACTS.read_text(encoding="utf-8")
-    assert 'in {"agent_direct", "report_direct"}' in source
+    assert 'binding.get("report_workspace_id")' in source
+    assert 'binding.get("branch_id")' in source
+    assert 'binding.get("report_parent_id")' in source
+    assert "work_package_ref" not in source
+    assert "binding_origin" not in source

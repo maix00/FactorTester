@@ -98,7 +98,7 @@ def plan_subtree_copy(source: dict, target: dict, *, component_ids: list[str],
         if old in roots:
             copied_bindings.append({
                 'binding_id': 'copy-origin-' + sha256(f'{copy_id}:{old}'.encode()).hexdigest()[:32],
-                'kind': 'graph_reference', 'target_ref': f'report-copy:{copy_id}',
+                'kind': 'report_copy', 'target_ref': f'report-copy:{copy_id}',
                 'label': 'Copied report subtree',
                 'data': {'source_report_id': source['head']['report_id'],
                          'source_generation': source['head']['generation'],

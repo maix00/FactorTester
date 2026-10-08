@@ -32,27 +32,17 @@ agent_flow.add_command(resume_local_agent)
     ]),
     required=True,
 )
-@click.option("--instance-id", default="")
-@click.option("--branch-id", default="")
 @click.option("--workspace-id", default="")
 def resume_agent(
     agent_id: str,
     role: str,
-    instance_id: str,
-    branch_id: str,
     workspace_id: str,
 ) -> None:
     """获取一个无需模型组装的角色化小型启动/恢复包。"""
-    if role == "research" and (not instance_id or not branch_id):
-        raise click.ClickException(
-            "research 需要 --instance-id 和 --branch-id"
-        )
-    if role == "planning" and not workspace_id:
-        raise click.ClickException("planning 需要 --workspace-id")
+    if not workspace_id:
+        raise click.ClickException(f"{role} 需要 --workspace-id")
     click.echo(_json(client_from_config().resume_agent(
         agent_id,
         role=role,
-        instance_id=instance_id,
-        branch_id=branch_id,
         workspace_id=workspace_id,
     )))

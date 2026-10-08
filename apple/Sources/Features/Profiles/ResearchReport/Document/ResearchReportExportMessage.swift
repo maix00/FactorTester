@@ -11,7 +11,7 @@ enum ResearchReportExportMessage {
     struct Request {
         let publicationID: String
         let profileRef: String
-        let workPackageID: String
+        let reportWorkspaceID: String
         let branchID: String
         let ownerRef: String
         let format: ResearchReportExportFormat
@@ -64,7 +64,7 @@ enum ResearchReportExportMessage {
         return Request(
             publicationID: publicationID,
             profileRef: profileRef,
-            workPackageID: String(payload["work_package_id"] as? String ?? ""),
+            reportWorkspaceID: String(payload["report_workspace_id"] as? String ?? ""),
             branchID: String(payload["branch_id"] as? String ?? ""),
             ownerRef: String(payload["owner_ref"] as? String ?? ""),
             format: format,

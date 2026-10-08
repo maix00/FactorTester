@@ -42,14 +42,12 @@ def create_app():
     from server.jobs.repository import JobRepository
     from server.services.research_configurations import ensure_schema as ensure_research_configuration_schema
     from server.services.research_runs import ensure_schema as ensure_research_run_schema
-    from server.services.research_graphs import ensure_schema as ensure_research_graph_schema
     ensure_account_manager_sqlite_store()
     job_repository = JobRepository()
     job_repository.ensure_schema()
     app.extensions['job_repository'] = job_repository
     ensure_research_configuration_schema()
     ensure_research_run_schema()
-    ensure_research_graph_schema()
 
     # ── 注册 Blueprint ──
     from server.auth import auth_bp

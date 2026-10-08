@@ -8,7 +8,6 @@ import tomllib
 
 _IGNORED_PARTS = {
     "__pycache__",
-    "agent-harness",
     "build",
     "dist",
     "tests",

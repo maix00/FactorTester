@@ -65,24 +65,7 @@
           ? new Date(timestamp)
           : new Date(String(rawDate || ""));
         const dateText = Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
-        const graphBinding = (node.component.binding_ids || [])
-          .map(bindingID => context.bindingByID[bindingID])
-          .filter(binding => binding?.kind === "graph_reference")
-          .find(Boolean);
-        const graphRef = graphBinding
-          ? node.component.graph_version
-            || graphBinding.data?.graph_version
-            || graphBinding.data?.graph_ref
-            || ""
-          : "";
-        const graphVersion = (() => {
-          if (typeof graphRef === "number") return `v${graphRef}`;
-          const value = String(graphRef).trim();
-          if (!value) return "";
-          const suffix = value.includes("@") ? value.slice(value.lastIndexOf("@") + 1) : value;
-          return /^v?\d+$/.test(suffix) ? (suffix.startsWith("v") ? suffix : `v${suffix}`) : "";
-        })();
-        metaNode.textContent = [dateText, graphVersion].filter(Boolean).join(" · ");
+        metaNode.textContent = dateText;
         previewNode.hidden = !previewNode.textContent;
         metaNode.hidden = !metaNode.textContent;
         const itemBox = item.getBoundingClientRect();

@@ -1,4 +1,4 @@
-"""Manager-owned Evidence, TrialPlan, Run and RunSpec object routes."""
+"""Manager-owned Evidence, legacy TrialPlan, Run and RunSpec object routes."""
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ from server.services import (
     research_runs,
     research_workspaces,
 )
-from server.services.direct_trial_plans import create_binding
 from server.services.research_evidence_catalog import (
     attach_tag,
     capture_job_source,
@@ -22,7 +21,6 @@ from server.services.research_evidence_catalog import (
     create_source_fragment,
     create_tag,
     detach_tag,
-    finalize_lifecycle_transition,
     get_evidence_summary,
     list_evidence_page,
     list_evidence_relationship_page,
@@ -30,7 +28,6 @@ from server.services.research_evidence_catalog import (
     list_research_evidence_page,
     list_source_fragments,
     list_tags,
-    prepare_lifecycle_transition,
     propose_tag,
     put_source_capture,
     retire_tag,
@@ -40,7 +37,6 @@ from server.services.research_evidence_catalog import (
 )
 from server.services.research_evidence_registry import (
     admit_evidence,
-    admit_evidence_for_graph,
     get_evidence,
 )
 from server.services.research_evidence_scope import applicability_schema
@@ -299,19 +295,13 @@ class ResearchObjectRoutesMixin:
         owner = self._research_owner()
         if owner is None:
             return True
-        try:
-            data = self._research_object_body(4 * 1024 * 1024)
-            binding = create_binding(
-                trial_plan=data.get("trial_plan"),
-                run_spec_hash=str(data.get("run_spec_hash") or ""),
-                trial_role=str(data.get("trial_role") or ""),
-                comparison_id=str(data.get("comparison_id") or ""),
-            )
-            direct_trial_plan_registry.save(owner=owner, binding=binding)
-        except (KeyError, TypeError, ValueError) as exc:
-            self._research_object_error(exc)
-            return True
-        json_response(self, {"success": True, "trial_binding": binding})
+        json_response(self, {
+            "success": False,
+            "error": (
+                "TrialPlan creation is retired; declare sample_use on the Run "
+                "submission instead"
+            ),
+        }, 410)
         return True
 
     def _clone_run_workspace(self, run_id: str) -> bool:
@@ -376,11 +366,6 @@ class ResearchObjectRoutesMixin:
         fragment = re.fullmatch(r"/api/research-evidence/sources/(.+)/fragments", path)
         retire = re.fullmatch(r"/api/research-evidence/tags/(.+)/retire", path)
         attach = re.fullmatch(r"/api/research-evidence/(.+)/tags", path)
-        prepare = re.fullmatch(r"/api/research-evidence/(.+)/lifecycle/prepare", path)
-        finalize = re.fullmatch(r"/api/research-evidence/lifecycle/(.+)/finalize", path)
-        graph_admit = re.fullmatch(
-            r"/api/research-evidence/(.+)/graph-admissions", path
-        )
         admit = re.fullmatch(r"/api/research-evidence/(.+)/admissions", path)
         if path == "/api/research-evidence/sources":
             value = put_source_capture(
@@ -443,37 +428,6 @@ class ResearchObjectRoutesMixin:
             return {
                 "tag": retire_tag(owner=owner, tag_ref=unquote(retire.group(1)))
             }, 200
-        if prepare:
-            value = prepare_lifecycle_transition(
-                owner=owner,
-                evidence_ref=unquote(prepare.group(1)),
-                action=str(data.get("action") or ""),
-                reason_zh=data.get("reason_zh"),
-                profile_ref=str(data.get("profile_ref") or ""),
-                agent_id=str(data.get("agent_id") or ""),
-                instance_id=str(data.get("instance_id") or ""),
-                branch_id=str(data.get("branch_id") or ""),
-                parent_id=str(data.get("parent_id") or ""),
-            )
-            return {"transition": value}, 201
-        if finalize:
-            return {
-                "lifecycle": finalize_lifecycle_transition(
-                    owner=owner,
-                    transition_ref=unquote(finalize.group(1)),
-                    report_receipt=data.get("report_receipt"),
-                )
-            }, 200
-        if graph_admit:
-            value = admit_evidence_for_graph(
-                owner=owner,
-                evidence_ref=unquote(graph_admit.group(1)),
-                instance_id=str(data.get("instance_id") or ""),
-                branch_id=str(data.get("branch_id") or ""),
-                qualification=str(data.get("qualification") or ""),
-                note=str(data.get("note") or ""),
-            )
-            return {"admission": value}, 201
         if admit:
             value = admit_evidence(
                 owner=owner,

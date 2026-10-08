@@ -23,17 +23,16 @@ from .research_report_scope_identity import (
 
 
 def ensure_authoring(
-    scope: BranchReportScope, *, node_id: str = "", materialize: bool = True,
+    scope: BranchReportScope, *, materialize: bool = True,
     persist: bool = True,
 ) -> dict[str, Any]:
     """Create the exact branch source, then persist its descriptor locally."""
     result = ensure_branch_authoring(
         package_root=scope.package_root,
-        work_package_id=scope.work_package_id,
+        report_workspace_id=scope.report_workspace_id,
         branch_id=scope.branch_id,
-        title=scope.record["title"],
+        title=scope.title,
         branch_ref=scope.branch_ref,
-        node_id=node_id,
         commit=False,
         materialize=materialize,
     )
@@ -56,7 +55,7 @@ def load_current_authoring(scope: BranchReportScope) -> dict[str, Any]:
         **snapshot,
         "descriptor": report_tree_descriptor(
             package_root=scope.package_root,
-            work_package_id=scope.work_package_id,
+            report_workspace_id=scope.report_workspace_id,
             branch_id=scope.branch_id,
             head=snapshot["head"],
             section_refs=section_refs_from_snapshot(snapshot),
@@ -69,22 +68,5 @@ def persist_descriptor(scope: BranchReportScope, descriptor: dict[str, Any]) -> 
 
 
 def _replace_descriptor(scope: BranchReportScope, descriptor: dict[str, Any]) -> None:
-    record = dict(scope.record)
-    existing = next((
-        item for item in record["artifacts"]
-        if item.get("artifact_ref") == descriptor["artifact_ref"]
-    ), None)
-    if isinstance(existing, dict):
-        descriptor = {
-            **descriptor,
-            "section_refs": merge_section_refs(
-                existing.get("section_refs") or [], descriptor["section_refs"],
-            ),
-        }
-    record["artifacts"] = [
-        item for item in record["artifacts"]
-        if item["artifact_ref"] != descriptor["artifact_ref"]
-    ] + [descriptor]
-    LocalProfileStore(scope.client_root).upsert_research_record(
-        scope.profile_id, record,
-    )
+    # The branch HEAD is authoritative; no Profile-side research index is kept.
+    del scope, descriptor

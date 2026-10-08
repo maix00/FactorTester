@@ -15,7 +15,7 @@ _RAW_REFERENCE = re.compile(
     r"(?<![A-Za-z0-9_/-])"
     r"(?P<target>"
     r"(?:factor-family|factor-set|profile-revision|trial-plan|runspec|"
-    r"evidence|obligation|claim|task|job|run|profile|"
+    r"evidence|task|job|run|profile|"
     r"factor|requirement)"
     r":[A-Za-z0-9._~:/|$@+\-\[\]]{1,2048}"
     r")"
@@ -26,8 +26,6 @@ _READER_HASH = re.compile(
 )
 _REFERENCE_KIND = {
     "evidence": ("evidence", "证据"),
-    "obligation": ("obligation", "研究义务"),
-    "claim": ("claim", "研究主张"),
     "task": ("task", "任务"),
     "job": ("job", "测试任务"),
     "run": ("run", "运行"),
@@ -38,7 +36,6 @@ _REFERENCE_KIND = {
     "factor": ("factor", "因子"),
     "factor-family": ("factor", "因子家族"),
     "factor-set": ("factor", "因子集合"),
-    "requirement": ("entry_requirement", "义务小类"),
 }
 
 

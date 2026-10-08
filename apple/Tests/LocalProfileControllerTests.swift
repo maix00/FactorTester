@@ -36,7 +36,7 @@ final class LocalProfileControllerTests: XCTestCase {
         XCTAssertEqual(controller.loadState, .loaded)
     }
 
-    func testLocalProfileStoreSupersedesStaleCachedResearchRecords() throws {
+    func testLocalProfileStoreIgnoresRetiredResearchRecords() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
         let profiles = root.appendingPathComponent("profiles")
@@ -48,10 +48,7 @@ final class LocalProfileControllerTests: XCTestCase {
         let current: [String: Any] = [
             "profile_id": "maxa",
             "display_name": "MaxA",
-            "research_records": [[
-                "record_id": "stable-work-package",
-                "graph_instance_ref": "work-package:stable-work-package",
-            ]],
+            "research_records": [["record_id": "retired-record"]],
         ]
         try JSONSerialization.data(withJSONObject: current).write(
             to: profiles.appendingPathComponent("maxa.json")
@@ -59,10 +56,7 @@ final class LocalProfileControllerTests: XCTestCase {
         let stale: [[String: Any]] = [[
             "profile_id": "maxa",
             "display_name": "MaxA",
-            "research_records": [[
-                "record_id": "old-physical-instance",
-                "graph_instance_ref": "work-package:old-physical-instance",
-            ]],
+            "research_records": [["record_id": "stale-retired-record"]],
         ]]
         let suite = "LocalProfileControllerTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -77,10 +71,8 @@ final class LocalProfileControllerTests: XCTestCase {
             profileDirectory: profiles
         )
 
-        XCTAssertEqual(
-            controller.profiles.first?.researchRecords.map(\.id),
-            ["stable-work-package"]
-        )
+        XCTAssertEqual(controller.profiles.map(\.id), ["maxa"])
+        XCTAssertEqual(controller.profiles.first?.displayName, "MaxA")
     }
 
     func testReloadsProfileWhenCLIReplacesLocalDescriptor() async throws {
@@ -107,21 +99,16 @@ final class LocalProfileControllerTests: XCTestCase {
 
         try JSONSerialization.data(withJSONObject: [
             "profile_id": "maxa",
-            "display_name": "MaxA",
-            "research_records": [[
-                "record_id": "manual-research",
-                "title": "动量因子辅助研究",
-                "graph_instance_ref": "work-package:manual-research",
-            ]],
+            "display_name": "MaxA updated",
         ]).write(to: profileURL, options: .atomic)
 
         for _ in 0..<30 where
-            controller.profiles.first?.researchRecords.first?.title == nil {
+            controller.profiles.first?.displayName != "MaxA updated" {
             try await Task.sleep(for: .milliseconds(100))
         }
         XCTAssertEqual(
-            controller.profiles.first?.researchRecords.first?.title,
-            "动量因子辅助研究"
+            controller.profiles.first?.displayName,
+            "MaxA updated"
         )
     }
 

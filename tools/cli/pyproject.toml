@@ -39,11 +39,9 @@ packages = [
   "tools.cli.release",
   "tools.cli.release.adapters",
   "tools.cli.release.research_evidence_library",
-  "tools.cli.release.research_obligations",
   "tools.cli.release.research_reporting",
   "tools.cli.release.research_reporting.authoring",
   "tools.cli.release.research_reporting.maintenance",
-  "tools.cli.release.research_reporting.publisher",
   "tools.cli.release.research_reporting.public_research",
   "tools.cli.release.research_reporting.references",
 ]
@@ -66,11 +64,9 @@ packages = [
 "tools.cli.release" = "release"
 "tools.cli.release.adapters" = "release/adapters"
 "tools.cli.release.research_evidence_library" = "release/research_evidence_library"
-"tools.cli.release.research_obligations" = "release/research_obligations"
 "tools.cli.release.research_reporting" = "release/research_reporting"
 "tools.cli.release.research_reporting.authoring" = "release/research_reporting/authoring"
 "tools.cli.release.research_reporting.maintenance" = "release/research_reporting/maintenance"
-"tools.cli.release.research_reporting.publisher" = "release/research_reporting/publisher"
 "tools.cli.release.research_reporting.public_research" = "release/research_reporting/public_research"
 "tools.cli.release.research_reporting.references" = "release/research_reporting/references"
 [tool.setuptools.package-data]

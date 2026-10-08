@@ -9,11 +9,11 @@
       {"slug": "prepare-products-and-factors", "title": "准备产品与因子", "summary": "理解数据源范围，选择产品路径并准备可执行因子。", "kind": "guide", "source": "guides/prepare-products-and-factors.md", "related": ["run-tests", "core-objects"]},
       {"slug": "run-tests", "title": "运行 IC 测试与回测", "summary": "从研究对象到运行配置、任务与结果。", "kind": "guide", "source": "guides/run-tests.md", "related": ["runspec-job-artifact"]},
       {"slug": "read-results", "title": "阅读任务结果", "summary": "查看状态、统计、图表、生成物与输入源码。", "kind": "guide", "source": "guides/read-results.md", "related": ["runspec-job-artifact"]},
-      {"slug": "research-workflow", "title": "开展研究", "summary": "使用本地研究、共享研究、研究图与结构化报告。", "kind": "guide", "source": "guides/research-workflow.md", "related": ["research-reports"]},
+      {"slug": "research-workflow", "title": "开展研究", "summary": "使用本地研究、共享研究与结构化报告。", "kind": "guide", "source": "guides/research-workflow.md", "related": ["research-reports"]},
       {"slug": "automation-and-cli", "title": "自动化与 CLI", "summary": "用正式 CLI 和 Agent Skill 自动执行可追溯的平台操作。", "kind": "guide", "source": "guides/automation-and-cli.md", "related": ["research-workflow", "api-cli-reference", "runspec-job-artifact"]}
     ]},
     {"id": "concepts", "title": "理解平台", "pages": [
-      {"slug": "core-objects", "title": "核心对象", "summary": "Workspace、WorkPackage、Branch、RunSpec、Job 与 Artifact 的关系。", "kind": "concept", "source": "concepts/core-objects.md", "related": ["runspec-job-artifact"]},
+      {"slug": "core-objects", "title": "核心对象", "summary": "Workspace、Report、ReportBranch、RunSpec、Job 与 Artifact 的关系。", "kind": "concept", "source": "concepts/core-objects.md", "related": ["runspec-job-artifact"]},
       {"slug": "runspec-job-artifact", "title": "运行配置、任务与生成物", "summary": "区分可复用配置、冻结提交、执行记录和输出。", "kind": "concept", "source": "concepts/runspec-job-artifact.md", "related": ["run-tests", "test-execution", "api-cli-reference"]},
       {"slug": "research-model", "title": "研究、报告与证据", "summary": "理解 Research、Research Workspace、Report、Evidence 与 Profile 的边界。", "kind": "concept", "source": "concepts/research-model.md", "related": ["research-workflow", "research-reports"]}
     ]},

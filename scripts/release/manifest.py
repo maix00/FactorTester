@@ -68,11 +68,7 @@ def _asset(path: Path, base_url: str) -> dict:
 
 def _kind(name: str) -> str:
     if name.endswith(".whl"):
-        return (
-            "harness-wheel"
-            if name.startswith("cli_anything_factortester_research-")
-            else "python-wheel"
-        )
+        return "python-wheel"
     if name in {"FTClient.zip", "FactorTester-Client.zip"}:
         return "macos-app"
     if name == "vibe-trading-adapter.zip":

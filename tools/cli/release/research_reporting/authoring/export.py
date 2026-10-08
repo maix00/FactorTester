@@ -6,8 +6,8 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
-from ..generation import publish_generation, work_package_lock
-from ..git import commit_work_package
+from ..generation import publish_generation, report_workspace_lock
+from ..git import commit_report_workspace
 from ..package_layout import ensure_branch_report_tree
 from .submission_status import require_no_pending
 from .tree_paths import report_tree_paths
@@ -17,7 +17,7 @@ from .tree_store import load_head, tree_lock
 
 
 def export_branch_report(
-    *, package_root: Path, work_package_id: str, branch_id: str,
+    *, package_root: Path, report_workspace_id: str, branch_id: str,
     message: str = "Render branch research report", commit: bool = True,
 ) -> dict[str, Any]:
     """Materialize the current tree as a derived branch ``REPORT.md``.
@@ -28,7 +28,7 @@ def export_branch_report(
     branch_root = ensure_branch_report_tree(package_root, branch_id)
     branch_path = branch_root / "REPORT.md"
     paths = report_tree_paths(package_root, branch_id)
-    with work_package_lock(package_root):
+    with report_workspace_lock(package_root):
         with tree_lock(paths):
             head = load_head(paths)
             require_no_pending(paths, head)
@@ -37,7 +37,7 @@ def export_branch_report(
             content_hash = hashlib.sha256(payload).hexdigest()
             changed = publish_generation([("branch", branch_path, payload)])
             git = (
-                commit_work_package(package_root, message=message)
+                commit_report_workspace(package_root, message=message)
                 if commit else None
             )
     return {
@@ -45,6 +45,6 @@ def export_branch_report(
         "changed": bool(changed["branch"]),
         "content_hash": content_hash,
         "git": git,
-        "work_package_id": work_package_id,
+        "report_workspace_id": report_workspace_id,
         "branch_id": branch_id,
     }

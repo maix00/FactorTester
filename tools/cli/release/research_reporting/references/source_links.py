@@ -1,4 +1,4 @@
-"""Validate report-local Markdown targets inside the current Work Package."""
+"""Validate report-local Markdown targets inside the current Report Workspace."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ def source_link_issues(value: str, *, package_root: Path, branch_root: Path | No
     if branch_root is not None:
         branch = branch_root.resolve()
         if not branch.is_relative_to(root):
-            raise ValueError('report branch escapes Work Package')
+            raise ValueError('report branch escapes Report Workspace')
         roots.insert(0, branch)
     for match in _LINK.finditer(value):
         target = match.group(1)
@@ -38,7 +38,7 @@ def source_link_issues(value: str, *, package_root: Path, branch_root: Path | No
         if not _safe_relative(path):
             issues.append(_issue(
                 match.start(1), "report.markdown.file.unsafe",
-                "研究文件链接必须位于当前 Work Package 内",
+                "研究文件链接必须位于当前 Report Workspace 内",
             ))
             continue
         resolved = [(base / PurePosixPath(path)).resolve() for base in roots]
@@ -64,6 +64,6 @@ def _issue(offset: int, code: str, message: str) -> SourceLinkIssue:
         offset=offset,
         code=code,
         message=message,
-        rule="相对文件链接必须指向当前 Work Package 内已存在的文件",
+        rule="相对文件链接必须指向当前 Report Workspace 内已存在的文件",
         example="[数据审计](assets/data-audits/coverage.md)",
     )

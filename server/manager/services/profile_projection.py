@@ -19,7 +19,7 @@ _PROFILE_BLOCKED_KEYS = {
     "password", "password_hash", "secret", "token", "access_token",
     "workspace_root", "worktree_path", "git_common_dir", "research_root",
     "strategy_root", "path", "absolute_path", "local_path", "source_code",
-    "session_ref",
+    "session_ref", "research_records",
 }
 
 
@@ -29,7 +29,7 @@ def self_profile_projection(principal: str) -> dict[str, Any]:
     if not owner:
         raise ValueError("profile principal is required")
     return {
-        "schema_version": 10,
+        "schema_version": 11,
         "profile_id": SELF_PROFILE_ID,
         "profile_kind": SELF_PROFILE_KIND,
         "status": "active",
@@ -37,7 +37,6 @@ def self_profile_projection(principal: str) -> dict[str, Any]:
         "runtime_kind": "server",
         "workspaces": [],
         "agents": [],
-        "research_records": [],
         "session_binding": {"principal_ref": owner},
     }
 

@@ -61,7 +61,7 @@ struct ProfilesDirectoryView: View {
                 Text(profile.status == "inactive" ? "已停用" : "研究 Agent")
                     .font(.callout)
                     .foregroundStyle(profile.status == "inactive" ? .secondary : .primary)
-                Text(L10n.format("%lld 项研究 · %@", profile.researchRecords.count,
+                Text(L10n.format("%lld 个 Agent · %@", profile.agents.count,
                                  profile.serverURL.isEmpty ? "未绑定服务器" : (URL(string: profile.serverURL)?.host ?? profile.serverURL)))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -79,7 +79,7 @@ struct ProfilesDirectoryView: View {
         HStack(alignment: .firstTextBaseline, spacing: 14) {
             VStack(alignment: .leading, spacing: 5) {
                 Text("Profiles").font(.largeTitle.weight(.semibold))
-                Text("每个 Profile 保持独立的研究 Agent 身份、工作区与研究记录。")
+                Text("每个 Profile 保持独立的 Agent 身份、工作区和初始化来源。")
                     .foregroundStyle(.secondary)
             }
             Spacer()

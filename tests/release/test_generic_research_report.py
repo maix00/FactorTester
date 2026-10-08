@@ -4,73 +4,16 @@ import json
 
 from click.testing import CliRunner
 
-from tools.cli.release.research_reporting.authoring import (
-    ensure_branch_report_chapter,
-)
 from tools.cli.commands.research_report import report as report_cli
 from tools.cli.commands import research_report_authoring
 from tools.cli.commands import research_report_component
 from tools.cli.commands import research_report_inspection
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
-from tools.cli.release.research_reporting.authoring.tree_model import load_snapshot
-from tools.cli.release.research_reporting.authoring.tree_render import render_tree_markdown
 from tools.cli.release.research_reporting.authoring.inline_links import (
     typed_markdown_link,
 )
 from tools.cli.release.research_reporting.references import preflight as preflight_module
-from tools.cli.release.research_reporting.workspace import initialize_work_package
-
-
-def test_profile_report_chapters_follow_node_entry_without_checkpoint(
-    tmp_path,
-) -> None:
-    initialize_work_package(
-        workspace_root=tmp_path,
-        work_package_id="wp-1",
-        branch_id="branch-1",
-        workspace_id="workspace-1",
-        title="动量因子研究",
-        branch_ref="graph-branch:physical-1:branch-1",
-    )
-    first = ensure_branch_report_chapter(
-        workspace_root=tmp_path,
-        work_package_id="wp-1",
-        title="动量因子研究",
-        node_id="hypothesis_preregistration",
-        branch_id="branch-1",
-        branch_ref="graph-branch:physical-1:branch-1",
-    )
-    second = ensure_branch_report_chapter(
-        workspace_root=tmp_path,
-        work_package_id="wp-1",
-        title="动量因子研究",
-        node_id="data_contract",
-        branch_id="branch-1",
-        branch_ref="graph-branch:physical-1:branch-1",
-    )
-    repeated = ensure_branch_report_chapter(
-        workspace_root=tmp_path,
-        work_package_id="wp-1",
-        title="动量因子研究",
-        node_id="data_contract",
-        branch_id="branch-1",
-        branch_ref="graph-branch:physical-1:branch-1",
-    )
-
-    assert repeated["components"] == []
-    assert repeated["bindings"] == []
-    assert first["chapter_sync"]["created_count"] == 1
-    assert second["chapter_sync"]["created_count"] == 1
-    assert repeated["chapter_sync"]["created_count"] == 0
-    assert repeated["descriptor"]["format"] == "report_tree"
-    assert repeated["descriptor"]["section_refs"][-1]["label"] == "数据契约"
-    package = tmp_path / "research" / "wp-1"
-    rendered = render_tree_markdown(load_snapshot(
-        package_root=package, branch_id="branch-1",
-    )).decode()
-    assert "# 假设预注册" in rendered
-    assert "# 数据契约" in rendered
-    assert not (package / "branches" / "branch-1" / "REPORT.md").exists()
+from tools.cli.release.research_reporting.workspace import initialize_report_workspace
 
 
 def _scoped_report(tmp_path):
@@ -83,29 +26,11 @@ def _scoped_report(tmp_path):
         server_url="http://127.0.0.1:8141",
         workspace_root=workspace_root,
     )
-    profile["research_records"] = [{
-        "record_id": "package-1",
-        "title": "CLI 报告",
-        "status": "pending",
-        "scope": {"factor_families": ["SgCCS"]},
-        "factor_family_versions": ["MaxA:SgCCS@1"],
-        "agent_id": "research-maxa",
-        "created_at": 1.0,
-        "updated_at": 1.0,
-        "workspace_ref": "workspace:workspace-1",
-        "run_ref": "",
-        "graph_instance_ref": "work-package:package-1",
-        "graph_branch_ref": "report-branch:branch-1",
-        "checkpoint_ref": "",
-        "evidence_refs": [],
-        "timeline_refs": [],
-        "artifacts": [],
-        "provenance": {"kind": "owned_research"},
-    }]
     store.save(profile)
-    initialize_work_package(
+    initialize_report_workspace(
         workspace_root=workspace_root,
-        work_package_id="package-1",
+        report_workspace_id="package-1",
+        report_id="report-1",
         branch_id="branch-1",
         workspace_id="workspace-1",
         title="CLI 报告",
@@ -116,7 +41,7 @@ def _scoped_report(tmp_path):
 
 def _scope_args() -> list[str]:
     return [
-        "--profile", "maxa", "--work-package-id", "package-1",
+        "--profile", "maxa", "--report-workspace-id", "package-1",
         "--branch-id", "branch-1",
     ]
 

@@ -1,4 +1,4 @@
-"""Read and render branch-owned Work Package report sources."""
+"""Read and render branch-owned Report Workspace report sources."""
 
 from __future__ import annotations
 
@@ -28,7 +28,6 @@ from .research_report_scope import (
 from .research_report_common import output as _output, scope_options
 from .research_report_submission_errors import raise_report_gate_error
 from .research_report_submission_finalize import finalize_report_command
-from .research_report_history_reconciliation import reconcile_graph_history
 
 
 def register_inspection_commands(group: click.Group) -> None:
@@ -38,18 +37,17 @@ def register_inspection_commands(group: click.Group) -> None:
     group.add_command(render_report)
     group.add_command(finalize_pending_report)
     group.add_command(abandon_pending_report)
-    group.add_command(reconcile_graph_history)
 
 
 @click.command("validate")
 @scope_options
 @click.option("--json", "as_json", is_flag=True)
 def validate_report(
-    profile_id: str, work_package_id: str, branch_id: str,
+    profile_id: str, report_workspace_id: str, branch_id: str,
     release_profile: Path | None, as_json: bool,
 ) -> None:
-    """Validate the structured source for one Work Package branch."""
-    scope = _scope(profile_id, work_package_id, branch_id, release_profile)
+    """Validate the structured source for one Report Workspace branch."""
+    scope = _scope(profile_id, report_workspace_id, branch_id, release_profile)
     loaded, pending = _load_status(scope)
     head = loaded["head"]
     status = submission_status(pending)
@@ -70,11 +68,11 @@ def validate_report(
 @scope_options
 @click.option("--json", "as_json", is_flag=True)
 def show_report(
-    profile_id: str, work_package_id: str, branch_id: str,
+    profile_id: str, report_workspace_id: str, branch_id: str,
     release_profile: Path | None, as_json: bool,
 ) -> None:
-    """Show the structured authoring data of one Work Package branch."""
-    scope = _scope(profile_id, work_package_id, branch_id, release_profile)
+    """Show the structured authoring data of one Report Workspace branch."""
+    scope = _scope(profile_id, report_workspace_id, branch_id, release_profile)
     loaded, pending = _load_status(scope)
     if as_json:
         click.echo(json.dumps({
@@ -104,11 +102,11 @@ def show_report(
 @scope_options
 @click.option("--json", "as_json", is_flag=True)
 def manifest_report(
-    profile_id: str, work_package_id: str, branch_id: str,
+    profile_id: str, report_workspace_id: str, branch_id: str,
     release_profile: Path | None, as_json: bool,
 ) -> None:
     """Emit a content-free manifest for a branch-owned report source."""
-    scope = _scope(profile_id, work_package_id, branch_id, release_profile)
+    scope = _scope(profile_id, report_workspace_id, branch_id, release_profile)
     loaded = load_authoring(scope)
     _output({"manifest": {
         "schema_version": 2, "report_id": loaded["head"]["report_id"],
@@ -122,16 +120,16 @@ def manifest_report(
 @scope_options
 @click.option("--json", "as_json", is_flag=True)
 def render_report(
-    profile_id: str, work_package_id: str, branch_id: str,
+    profile_id: str, report_workspace_id: str, branch_id: str,
     release_profile: Path | None, as_json: bool,
 ) -> None:
     """Refresh the single branch REPORT.md from the structured source."""
-    scope = _scope(profile_id, work_package_id, branch_id, release_profile)
+    scope = _scope(profile_id, report_workspace_id, branch_id, release_profile)
     load_authoring(scope)
     try:
         value = export_branch_report(
             package_root=scope.package_root,
-            work_package_id=scope.work_package_id,
+            report_workspace_id=scope.report_workspace_id,
             branch_id=scope.branch_id,
         )
     except ValueError as error:
@@ -143,11 +141,11 @@ def render_report(
 @scope_options
 @click.option("--json", "as_json", is_flag=True)
 def finalize_pending_report(
-    profile_id: str, work_package_id: str, branch_id: str,
+    profile_id: str, report_workspace_id: str, branch_id: str,
     release_profile: Path | None, as_json: bool,
 ) -> None:
     """Finalize already-published content without reconstructing its payload."""
-    scope = _scope(profile_id, work_package_id, branch_id, release_profile)
+    scope = _scope(profile_id, report_workspace_id, branch_id, release_profile)
     loaded, pending = _load_status(scope)
     if pending is None or pending.get("phase") != "published":
         raise click.ClickException("report has no published pending submission")
@@ -179,11 +177,11 @@ def finalize_pending_report(
 @scope_options
 @click.option("--json", "as_json", is_flag=True)
 def abandon_pending_report(
-    profile_id: str, work_package_id: str, branch_id: str,
+    profile_id: str, report_workspace_id: str, branch_id: str,
     release_profile: Path | None, as_json: bool,
 ) -> None:
     """Abandon reserved/rejected content; published content must finalize."""
-    scope = _scope(profile_id, work_package_id, branch_id, release_profile)
+    scope = _scope(profile_id, report_workspace_id, branch_id, release_profile)
     try:
         abandoned = abandon_pending_submission(
             package_root=scope.package_root, branch_id=scope.branch_id,
@@ -207,12 +205,12 @@ def abandon_pending_report(
 
 
 def _scope(
-    profile_id: str, work_package_id: str, branch_id: str,
+    profile_id: str, report_workspace_id: str, branch_id: str,
     release_profile: Path | None,
 ):
     return resolve_branch_report_scope(
         client_root=load_profile_root(release_profile), profile_id=profile_id,
-        work_package_id=work_package_id, branch_id=branch_id,
+        report_workspace_id=report_workspace_id, branch_id=branch_id,
     )
 
 

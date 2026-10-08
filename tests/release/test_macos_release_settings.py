@@ -346,7 +346,7 @@ def test_macos_settings_show_only_active_unified_workspace() -> None:
     assert "PersonalWorkspaceView(openProfiles:" in hub
     assert "LocalProfilesView()" not in hub
     workspace_view = view + (SOURCES / "Features" / "Profiles" / "ProfileWorkspaceView.swift").read_text(encoding="utf-8")
-    assert "Profile、实时研究步骤、Trial Plan、义务与报告" in workspace_view
+    assert "Profile 与独立研究报告工作区" in workspace_view
     assert "Documents/FactorTester/users" in view
     assert "personal-workspace/factor-library" in view
     assert "各个研究现场的独立 worktree" in view
@@ -407,9 +407,6 @@ def test_macos_web_shell_exposes_profiles_account_and_bounded_research() -> None
     sections = (profile_root / "ProfileWorkspaceSections.swift").read_text(
         encoding="utf-8"
     )
-    live = (profile_root / "ProfileLiveProcessView.swift").read_text(
-        encoding="utf-8"
-    )
     login = (SOURCES / "Features" / "Auth" / "LoginView.swift").read_text(
         encoding="utf-8"
     )
@@ -433,17 +430,16 @@ def test_macos_web_shell_exposes_profiles_account_and_bounded_research() -> None
     assert "case .accountSettings:" in tab_view
     assert "List(controller.profiles)" in directory
     assert "MaxA" not in directory and "MaxB" not in directory
-    assert "所有进行中和已完成的研究统一从 Research" in workspace
+    assert "Profile 只管理本地研究身份与工作区配置" in workspace
+    assert "研究目录和报告由独立的 Research 模块管理" in workspace
     for label in ("实时过程", "Trial Plans", "Evidence"):
         assert label not in workspace
-    assert "不轮询完整 trace" in sections + live
+    assert "ResearchGraph" not in sections
     assert "Form {" not in login
     assert "Form {" not in server
     assert "SettingsEditableText" in server
     assert "managerPort = \"7998\"" in server
-    assert '"/api/profile-research"' in projection_service
-    assert 'URLQueryItem(name: "limit", value: "50")' in projection_service
-    assert '"If-None-Match"' in projection_service
+    assert "research_graph" not in projection_service
     assert 'path: "/factors"' in tab_model
     assert 'route = ("/factors/family/", "function", reference.targetRef)' in tab_model
     assert "/custom-factors/editor" not in tab_model
@@ -488,38 +484,22 @@ def test_macos_profile_directory_fails_closed_on_profile_deletion() -> None:
     assert "清理已删除 Profile 的空目录" in receipt
 
 
-def test_live_profile_ui_is_bounded_refreshable_and_source_free() -> None:
-    service = (
-        SOURCES / "Networking" / "ProfileResearchService.swift"
-    ).read_text(encoding="utf-8")
-    controller = (
-        SOURCES / "Stores" / "ProfileLiveProcessController.swift"
-    ).read_text(encoding="utf-8")
-    live_root = SOURCES / "Features" / "Profiles"
-    combined = "\n".join(
+def test_macos_graph_runtime_is_removed_without_removing_report_references() -> None:
+    source_tree = "\n".join(
         path.read_text(encoding="utf-8")
-        for path in sorted(live_root.glob("ProfileLive*.swift"))
+        for path in sorted(SOURCES.rglob("*.swift"))
     )
-    ui_test = (
-        ROOT / "apple" / "UITests" / "SidebarNavigationUITests.swift"
+    profile_root = SOURCES / "Features" / "Profiles"
+    reference_overlay = (
+        profile_root / "ResearchReport" / "Document"
+        / "ResearchDocumentReferenceOverlay.swift"
     ).read_text(encoding="utf-8")
 
-    assert 'URLQueryItem(name: "limit", value: "50")' in service
-    assert '"If-None-Match"' in service
-    assert "statusCode == 304" in service
-    assert 'line.hasPrefix("data:")' in service
-    assert "max(" in controller and "minimumIntervalSeconds" in controller
-    assert "directive.terminal" in controller
-    assert "Task.checkCancellation()" in controller
-    assert "nextTimelineCursor" in controller
-    assert "loadEarlierTimeline" in controller
-    assert "WebPageView(" in combined
-    assert "localReportPath" in combined
-    assert "path: reportPath" in combined
-    assert "initialWorkspaceID: item.workspaceID" in combined
-    assert "selectedBranchID" in combined
-    for forbidden in ("stdout", "full trace", "markdown"):
-        assert forbidden not in service.lower() + controller.lower()
-    assert "WebShellNavigationUITests" in ui_test
-    assert 'app.buttons["sidebar.launch.home"]' in ui_test
-    assert "XCTAssertFalse" in ui_test
+    assert not (profile_root / "ProfileLiveProcessView.swift").exists()
+    assert not (SOURCES / "Stores" / "ProfileLiveProcessController.swift").exists()
+    assert not any("ResearchGraph" in path.name for path in SOURCES.rglob("*.swift"))
+    assert "ResearchGraph" not in source_tree
+    assert "research_graph" not in source_tree
+    assert "frozenObjectJSON" in reference_overlay
+    assert "trial_plan" in reference_overlay
+    assert "run_spec" in reference_overlay

@@ -22,7 +22,6 @@ from tools.cli.release.research_reporting.job_artifact_mounts import (
 )
 from tools.cli.release.research_reporting.job_artifact_tables import table_content
 from tools.cli.release.research_reporting.job_artifacts import collect_job_report
-from tools.cli.release.research_reporting.workspace import initialize_work_package
 
 
 class _Response:
@@ -54,9 +53,9 @@ class _Client:
             "run_spec_hash": "c" * 64,
             "research_binding": {"trial_plan_hash": "b" * 64},
             "report_binding": {
-                "work_package_ref": "work-package:package-1",
-                "instance_id": "instance-1", "branch_id": "branch-1",
-                "execution_node": self.execution_node,
+                "report_workspace_id": "report-one",
+                "branch_id": "main",
+                "report_parent_id": "job-results",
             },
             "evidence": {"job_attempt": {"envelope_hash": "a" * 64}},
         }
@@ -77,9 +76,12 @@ class _DirectClient(_Client):
             "run_spec_hash": "c" * 64,
             "research_binding": {"trial_plan_hash": "b" * 64},
             "report_binding": {
-                "binding_origin": "agent_direct",
-                "work_package_ref": "work-package:package-1",
+                "profile_ref": "profile:maxa",
+                "report_workspace_id": "package-1",
                 "branch_id": "branch-1",
+                "report_id": "report-package-1",
+                "report_generation": 1,
+                "report_head_hash": "b" * 64,
                 "report_parent_id": "direct-trials",
             },
             "evidence": {"job_attempt": {"envelope_hash": "a" * 64}},
@@ -181,372 +183,46 @@ def test_automatic_artifact_mount_is_an_evidence_fragment_section() -> None:
     assert mounted["evidence_fragment_id"] == wrapper["component_id"]
 
 
-def _scope(tmp_path: Path):
-    client_root = tmp_path / "client-root"
-    workspace_root = tmp_path / "workspace-root"
-    store = LocalProfileStore(client_root)
+def test_collect_job_report_uses_frozen_report_parent(tmp_path: Path, monkeypatch):
+    from tools.cli.release.research_reporting.workspace import initialize_report_workspace
+
+    monkeypatch.setenv("FACTORTESTER_JOB_CACHE_ROOT", str(tmp_path / "jobs"))
+    client_root = tmp_path / "client"
+    workspace_root = tmp_path / "workspace"
     profile = new_local_profile(
         profile_id="maxa", display_name="MaxA",
         server_url="http://127.0.0.1:8141", workspace_root=workspace_root,
     )
-    profile["research_records"] = [{
-        "record_id": "package-1", "title": "CLI 报告", "status": "pending",
-        "scope": {"factor_families": ["SgCCS"]},
-        "factor_family_versions": ["MaxA:SgCCS@1"],
-        "agent_id": "research-maxa", "created_at": 1.0, "updated_at": 1.0,
-        "workspace_ref": "workspace:workspace-1", "run_ref": "",
-        "graph_instance_ref": "work-package:package-1",
-        "graph_branch_ref": "graph-branch:instance-1:branch-1",
-        "checkpoint_ref": "", "evidence_refs": [], "timeline_refs": [],
-        "artifacts": [], "provenance": {"kind": "owned_research"},
-    }]
-    store.save(profile)
-    initialize_work_package(
-        workspace_root=workspace_root, work_package_id="package-1",
-        branch_id="branch-1", workspace_id="workspace-1", title="CLI 报告",
-        branch_ref="graph-branch:instance-1:branch-1",
-    )
-    scope = resolve_branch_report_scope(
-        client_root=client_root, profile_id="maxa", work_package_id="package-1",
-        branch_id="branch-1",
-    )
-    ensure_authoring(scope, node_id="trial_execution")
-    return scope
-
-
-def test_scope_resolves_an_owned_historical_report_branch(
-    tmp_path: Path,
-) -> None:
-    client_root = tmp_path / "client-root"
-    workspace_root = tmp_path / "workspace-root"
-    profile = new_local_profile(
-        profile_id="maxa", display_name="MaxA",
-        server_url="http://127.0.0.1:8141", workspace_root=workspace_root,
-    )
-    profile["research_records"] = [{
-        "record_id": "package-1", "title": "CLI 报告", "status": "ready",
-        "scope": {}, "factor_family_versions": [],
-        "agent_id": "research-maxa", "created_at": 1.0, "updated_at": 1.0,
-        "workspace_ref": "workspace:workspace-1", "run_ref": "",
-        "graph_instance_ref": "work-package:package-1",
-        "graph_branch_ref": "graph-branch:instance-new:branch-new",
-        "checkpoint_ref": "", "evidence_refs": [], "timeline_refs": [],
-        "artifacts": [{
-            "artifact_ref": (
-                "artifact:research/package-1/branches/branch-old/"
-                "authoring/HEAD.json"
-            ),
-            "format": "report_tree", "status": "ready",
-            "content_hash": "a" * 64, "local_ref": "file:///old",
-            "index_ref": "", "section_refs": [],
-        }],
-        "provenance": {"kind": "owned_research"},
-    }]
     LocalProfileStore(client_root).save(profile)
-    (workspace_root / "research" / "package-1").mkdir(parents=True)
-
+    initialize_report_workspace(
+        workspace_root=workspace_root,
+        report_workspace_id="report-one", report_id="report-one",
+        branch_id="main", workspace_id="workspace-1", title="Job 报告",
+        branch_ref="report-branch:main",
+    )
     scope = resolve_branch_report_scope(
         client_root=client_root, profile_id="maxa",
-        work_package_id="package-1", branch_id="branch-old",
-    )
-
-    assert scope.record["record_id"] == "package-1"
-    assert scope.branch_ref == "report-branch:branch-old"
-
-
-def test_history_migration_registers_a_materialized_lineage_branch(
-    tmp_path: Path,
-) -> None:
-    scope = _scope(tmp_path)
-    old_branch = "branch-old"
-    old_head = (
-        scope.package_root / "branches" / old_branch / "authoring" / "HEAD.json"
-    )
-    old_head.parent.mkdir(parents=True)
-    old_head.write_text("{}", encoding="utf-8")
-
-    historical = resolve_history_migration_scope(
-        client_root=scope.client_root, profile_id="maxa",
-        work_package_id="package-1", branch_id=old_branch,
-    )
-
-    assert historical.record["record_id"] == "package-1"
-    assert historical.branch_ref == f"report-branch:{old_branch}"
-
-
-def test_collect_job_report_mounts_to_immutable_execution_node(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("FACTORTESTER_JOB_CACHE_ROOT", str(tmp_path / "jobs"))
-    scope = _scope(tmp_path)
-    csv_raw = b"metric,value\nsharpe,1.2\n"
-    image_raw = b"<svg xmlns='http://www.w3.org/2000/svg'></svg>"
-    client = _Client(
-        [
-            {"name": "fee_detail_csv", "file_name": "fee_detail_csv.csv", "content_type": "text/csv", "description": "手续费明细表"},
-            {"name": "equity_curve_report", "file_name": "equity_curve_report.svg", "content_type": "image/svg+xml", "description": "净值曲线图"},
-            {"name": "debug_log", "file_name": "debug_log.log", "content_type": "text/plain", "description": "调试日志"},
-        ],
-        {"fee_detail_csv": csv_raw, "equity_curve_report": image_raw, "debug_log": b"debug"},
-    )
-
-    value = collect_job_report(client, job_id="job-1", scope=scope)
-
-    assert len(value["downloaded"]) == 2
-    assert {item["kind"] for item in value["mounted"]} == {"table", "image"}
-    assert value["execution_node"] == "trial_execution"
-    assert {item["artifact_ref"] for item in value["downloaded"]} == {
-        "job-artifact:job-1:fee_detail_csv",
-        "job-artifact:job-1:equity_curve_report",
-    }
-    assert client.downloads == ["fee_detail_csv", "equity_curve_report"]
-    snapshot = load_snapshot(
-        package_root=scope.package_root, branch_id="branch-1",
-    )
-    special = [item for item in snapshot["components"] if item["kind"] == "special"]
-    result = next(item for item in special if item["display_kind"] == "test_result")
-    fragments = [
-        item for item in special if item["display_kind"] == "evidence_fragment"
-    ]
-    assert len(fragments) == 2
-    chapter = next(item for item in snapshot["components"] if item["kind"] == "chapter")
-    assert result["parent_id"] == chapter["component_id"]
-    result_children = [
-        item for item in snapshot["components"]
-        if item["parent_id"] == result["component_id"]
-    ]
-    assert {item["kind"] for item in result_children} == {"special"}
-    assert {item["display_kind"] for item in result_children} == {
-        "evidence_fragment",
-    }
-    fragment_children = [
-        item for item in snapshot["components"]
-        if item["parent_id"] in {
-            child["component_id"] for child in result_children
-        }
-    ]
-    assert {item["kind"] for item in fragment_children} == {"table", "image"}
-    assert all(not item.get("bindings") for item in fragment_children)
-    assert {
-        item["evidence_fragment_id"] for item in value["mounted"]
-    } == {item["component_id"] for item in result_children}
-    assert value["result_component_id"] == result["component_id"]
-    assert value["report_head"].endswith("/authoring/HEAD.json")
-    assert not (scope.package_root / "branches" / "branch-1" / "REPORT.md").exists()
-    image = next(item for item in snapshot["head"]["assets"] if item["media_type"] == "image/svg+xml")
-    assert image["external_ref"] == "factortester-artifact://jobs/job-1/equity_curve_report"
-    assert image["content_hash"] == hashlib.sha256(image_raw).hexdigest()
-    assert "factortester://job/" in result["body"]
-    job_binding = next(
-        item for item in snapshot["bindings"]
-        if item["component_id"] == result["component_id"]
-        and item["kind"] == "job"
-    )
-    assert job_binding["data"]["server_id"] == "public-main"
-    assert job_binding["data"]["port"] == "8141"
-    assert "factortester://evidence/" not in result["body"]
-    assert (tmp_path / "jobs" / "job-1" / "fee_detail_csv.csv").is_file()
-    assert (tmp_path / "jobs" / "job-1" / "equity_curve_report.svg").is_file()
-
-    add_branch_component(
-        package_root=scope.package_root,
-        work_package_id=scope.work_package_id,
-        branch_id=scope.branch_id,
-        component_id="job-1-analysis",
-        kind="section",
-        title="结果分析",
-        parent_id=value["result_component_id"],
-        body="解释净值、费用和稳定性",
-        content=None,
-        display_kind="",
-    )
-    with_analysis = load_snapshot(
-        package_root=scope.package_root, branch_id="branch-1",
-    )
-    analysis = next(
-        item for item in with_analysis["components"]
-        if item["component_id"] == "job-1-analysis"
-    )
-    assert analysis["parent_id"] == value["result_component_id"]
-
-
-def test_collect_job_report_mounts_one_ic_statistics_table(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("FACTORTESTER_JOB_CACHE_ROOT", str(tmp_path / "jobs"))
-    scope = _scope(tmp_path)
-    payload = json.dumps({
-        "schema_version": 1,
-        "artifact_kind": "ic_statistics_summary",
-        "columns": ["factor", "experiment", "mean_ic", "source"],
-        "rows": [{
-            "factor": "[MmRateOfChg](factortester://factor/factor%3Av2%3Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)",
-            "experiment": "[Job job-ic](factortester://job/job%3Ajob-ic)",
-            "mean_ic": 0.12,
-            "source": "[原始](factortester://artifact/job-artifact%3Ajob-ic%3Aic_statistics_data)",
-        }],
-    }).encode()
-    client = _Client(
-        [
-            {
-                "name": "ic_statistics_csv",
-                "file_name": "ic_statistics_csv.csv",
-                "content_type": "text/csv; charset=utf-8",
-                "description": "IC 统计表（CSV）",
-            },
-            {
-                "name": "ic_statistics_data",
-                "file_name": "ic_statistics_data.json",
-                "content_type": "application/json",
-                "description": "IC 统计数据（JSON）",
-            },
-            {
-                "name": "ic_statistics_summary_data",
-                "file_name": "ic_statistics_summary_data.json",
-                "content_type": "application/json",
-                "description": "IC 统计摘要表（报告 artifact，JSON）",
-            },
-        ],
-        {
-            "ic_statistics_csv": b"factor_alias,factor_ref,mean_ic\nA,ref,0.12\n",
-            "ic_statistics_data": payload,
-            "ic_statistics_summary_data": payload,
-        },
-    )
-
-    value = collect_job_report(client, job_id="job-ic", scope=scope)
-
-    assert [(item["name"], item["kind"]) for item in value["mounted"]] == [
-        ("ic_statistics_summary_data", "table"),
-    ]
-    assert client.downloads == ["ic_statistics_summary_data"]
-    assert {item["name"] for item in value["skipped"]} == {
-        "ic_statistics_csv", "ic_statistics_data",
-    }
-
-
-def test_collect_direct_job_report_mounts_to_explicit_parent(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("FACTORTESTER_JOB_CACHE_ROOT", str(tmp_path / "jobs"))
-    scope = _scope(tmp_path)
-    initial = load_snapshot(
-        package_root=scope.package_root, branch_id="branch-1",
-    )
-    chapter_id = next(
-        item["component_id"] for item in initial["components"]
-        if item["kind"] == "chapter"
+        report_workspace_id="report-one", branch_id="main",
     )
     add_branch_component(
         package_root=scope.package_root,
-        work_package_id=scope.work_package_id,
-        branch_id=scope.branch_id,
-        component_id="direct-trials",
-        kind="section",
-        title="图外试验",
-        parent_id=chapter_id,
-        body="Agent 自主运行但不推动研究图",
-        content=None,
+        report_workspace_id=scope.report_workspace_id,
+        branch_id="main", component_id="job-results", kind="chapter",
+        title="测试结果", parent_id=None, body="", content=None,
         display_kind="",
     )
-    client = _DirectClient([], {})
-
-    value = collect_job_report(client, job_id="job-direct", scope=scope)
-
-    snapshot = load_snapshot(
-        package_root=scope.package_root, branch_id="branch-1",
-    )
-    result = next(
-        item for item in snapshot["components"]
-        if item["component_id"] == value["result_component_id"]
-    )
-    assert value["report_parent_id"] == "direct-trials"
-    assert value["execution_node"] == ""
-    assert result["parent_id"] == "direct-trials"
-    assert "factortester://trial_plan/" in result["body"]
-    assert "factortester://run_spec/" in result["body"]
-
-
-def test_direct_report_binding_freezes_an_existing_parent(tmp_path: Path) -> None:
-    scope = _scope(tmp_path)
-    initial = load_snapshot(
-        package_root=scope.package_root, branch_id="branch-1",
-    )
-    parent_id = next(
-        item["component_id"] for item in initial["components"]
-        if item["kind"] == "chapter"
-    )
-
-    binding = freeze_report_binding(
-        scope,
-        trial_binding={"binding_origin": "agent_direct"},
-        report_parent_id=parent_id,
-    )
-
-    assert binding["binding_origin"] == "agent_direct"
-    assert binding["report_parent_id"] == parent_id
-    assert "instance_id" not in binding
-
-
-def test_direct_report_binding_rejects_a_non_container_parent(tmp_path: Path) -> None:
-    scope = _scope(tmp_path)
-    initial = load_snapshot(
-        package_root=scope.package_root, branch_id="branch-1",
-    )
-    chapter_id = next(
-        item["component_id"] for item in initial["components"]
-        if item["kind"] == "chapter"
-    )
-    add_branch_component(
-        package_root=scope.package_root,
-        work_package_id=scope.work_package_id,
-        branch_id=scope.branch_id,
-        component_id="plain-entry",
-        kind="entry",
-        title="",
-        parent_id=chapter_id,
-        body="普通正文",
-        content=None,
-        display_kind="",
-    )
-
-    with pytest.raises(ValueError, match="container"):
-        freeze_report_binding(
-            scope,
-            trial_binding={"binding_origin": "agent_direct"},
-            report_parent_id="plain-entry",
-        )
-
-
-def test_collect_job_report_is_idempotent(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("FACTORTESTER_JOB_CACHE_ROOT", str(tmp_path / "jobs"))
-    scope = _scope(tmp_path)
-    raw = b'<svg xmlns="http://www.w3.org/2000/svg"></svg>'
+    raw = b"<svg xmlns='http://www.w3.org/2000/svg'></svg>"
     client = _Client(
-        [{"name": "metrics_over_time_report", "file_name": "metrics.svg", "content_type": "image/svg+xml", "description": "指标", "content_hash": hashlib.sha256(raw).hexdigest()}],
-        {"metrics_over_time_report": raw},
+        [{"name": "equity_curve_report", "file_name": "equity.svg",
+          "content_type": "image/svg+xml", "description": "净值曲线"}],
+        {"equity_curve_report": raw},
     )
-    first = collect_job_report(client, job_id="job-2", scope=scope)
-    second = collect_job_report(client, job_id="job-2", scope=scope)
+    first = collect_job_report(client, job_id="job-1", scope=scope)
+    second = collect_job_report(client, job_id="job-1", scope=scope)
+    assert first["report_parent_id"] == "job-results"
     assert len(first["mounted"]) == len(second["mounted"]) == 1
-    snapshot = load_snapshot(
-        package_root=scope.package_root, branch_id="branch-1",
-    )
-    assert len(snapshot["components"]) == 4
-    assert client.downloads == ["metrics_over_time_report"]
     assert second["downloaded"][0]["cache_hit"] is True
-
-
-def test_collect_job_report_rejects_missing_execution_node(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("FACTORTESTER_JOB_CACHE_ROOT", str(tmp_path / "jobs"))
-    scope = _scope(tmp_path)
-    client = _Client([], {}, execution_node="")
-    with pytest.raises(ValueError, match="未冻结执行节点"):
-        collect_job_report(client, job_id="job-legacy", scope=scope)
+    assert client.downloads == ["equity_curve_report"]
 
 
 def test_job_table_mount_keeps_only_preview_and_global_source() -> None:

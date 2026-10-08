@@ -116,7 +116,7 @@ def test_upload_projection_preserves_chapter_timeline_metadata():
         "components": [{
             "component_id": "chapter-1", "parent_id": None, "kind": "chapter",
             "title": "数据契约", "body": "", "content": None,
-            "display_kind": "", "created_at": 123.5, "graph_version": "v10",
+            "display_kind": "", "created_at": 123.5,
         }],
         "bindings": [],
     }
@@ -124,7 +124,7 @@ def test_upload_projection_preserves_chapter_timeline_metadata():
     payload = build_upload_projection(snapshot)
 
     assert payload["components"][0]["created_at"] == 123.5
-    assert payload["components"][0]["graph_version"] == "v10"
+    assert "graph_version" not in payload["components"][0]
 
 
 def test_upload_projection_reads_assets_next_to_authoring_root(tmp_path):
