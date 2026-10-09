@@ -796,7 +796,7 @@ def test_validate_transient_duration_factor_supports_bar_distance_source() -> No
         in payload["math_expr"]
     )
     assert payload["math_expr"].count(":=") == 4
-    assert r"\mathrm{差持续期}_t" in payload["math_expr"]
+    assert r"\text{差持续期}_t" in payload["math_expr"]
     # The bar-distance search body is rendered as a single-column continuation
     # so KaTeX does not move either row into an alignment column.
     assert r"\left\{k\middle|\begin{aligned}X_t:=" in payload["math_expr"]

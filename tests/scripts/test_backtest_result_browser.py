@@ -18,12 +18,19 @@ def _playwright():
     return sync_playwright()
 
 
+def _launch_chromium(playwright):
+    errors = []
+    for options in ({"channel": "chrome"}, {}):
+        try:
+            return playwright.chromium.launch(headless=True, **options)
+        except Exception as exc:  # pragma: no cover - depends on local browser install
+            errors.append(str(exc))
+    pytest.skip(f"Chrome and Playwright Chromium are unavailable: {errors[-1]}")
+
+
 def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> None:
     with _playwright() as playwright:
-        try:
-            browser = playwright.chromium.launch(headless=True)
-        except Exception as exc:  # pragma: no cover - depends on local browser cache
-            pytest.skip(f"playwright chromium is unavailable: {exc}")
+        browser = _launch_chromium(playwright)
         page = browser.new_page()
         errors: list[str] = []
         page.on("pageerror", lambda error: errors.append(str(error)))
@@ -284,7 +291,7 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
 
 def test_strategy_statistics_opens_one_tabbed_analysis_overlay() -> None:
     with _playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
+        browser = _launch_chromium(playwright)
         page = browser.new_page()
         page.set_content("<main></main>")
         for path in (
@@ -338,7 +345,7 @@ def test_strategy_statistics_opens_one_tabbed_analysis_overlay() -> None:
 
 def test_factor_series_stock_chart_renders_visible_navigator() -> None:
     with _playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
+        browser = _launch_chromium(playwright)
         page = browser.new_page(viewport={"width": 1400, "height": 900})
         page.set_content(
             "<div id='chart' style='width:1200px;min-height:650px'></div>"

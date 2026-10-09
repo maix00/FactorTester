@@ -6,14 +6,22 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def _launch_chromium(playwright):
+    errors = []
+    for options in ({"channel": "chrome"}, {}):
+        try:
+            return playwright.chromium.launch(headless=True, **options)
+        except Exception as exc:
+            errors.append(str(exc))
+    pytest.skip(f"Chrome and Playwright Chromium are unavailable: {errors[-1]}")
+
+
 @pytest.mark.parametrize('surface', ['embedded', 'dedicated'])
 @pytest.mark.parametrize('branch_count', [1, 2])
 def test_report_branch_identity_selection_and_content_time(surface, branch_count, tmp_path):
     playwright = pytest.importorskip('playwright.sync_api')
     with playwright.sync_playwright() as p:
-        if not Path(p.chromium.executable_path).exists():
-            pytest.skip('local Playwright Chromium is unavailable')
-        browser = p.chromium.launch()
+        browser = _launch_chromium(p)
         page = browser.new_page(viewport={'width': 1100, 'height': 720})
         errors = []
         page.on('pageerror', lambda error: errors.append(str(error)))

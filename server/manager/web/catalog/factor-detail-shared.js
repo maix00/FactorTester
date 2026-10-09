@@ -1075,33 +1075,6 @@
     return root;
   }
 
-  function sourceVersionHistory(context, value, options = {}) {
-    const root = document.createElement("section");
-    root.className = "factor-source-version-history";
-    const status = document.createElement("small");
-    status.className = "factor-source-version-status";
-    const selected = options.selected || "__current__";
-    const picker = versionPicker(context, value, {
-      ...options,
-      selected,
-      onChange: options.onChange,
-      onLoaded: payload => {
-        status.textContent = payload?.available === false
-          ? context.t("当前服务器没有可用的源码版本历史") : "";
-        options.onLoaded?.(payload);
-      },
-      onError: error => {
-        status.textContent = sourceUnavailableText(context);
-        options.onError?.(error);
-      },
-    });
-    root.append(
-      fieldRow(context, context.t("源码版本"), picker.element),
-      status,
-    );
-    return root;
-  }
-
   // The parameter section/table UI components live in
   // catalog/shared/factor-parameter-section.js; keep the historical
   // FTFactorDetailShared surface working by delegating lazily.
@@ -1128,7 +1101,7 @@
     previewExpression,
     pageClass, provenance, source,
     sourceOptions, sourceVersionHelp,
-    sourceUnavailableText, sourceVersionHistory, versionItems, versionPicker,
+    sourceUnavailableText, versionItems, versionPicker,
     summary,
     sourceVersionsEndpoint, versionEndpoint,
   });
