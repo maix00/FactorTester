@@ -39,6 +39,8 @@ def test_manifest_matches_html_script_order_and_files() -> None:
     assert manifest["external_styles"] == [
         "katex/katex.min.css", "vendor/highlight/github.min.css",
     ]
+    assert manifest["group_set_bundles"] is True
+    assert manifest["shell_styles"] == ["styles/app.css"]
     assert manifest["route_groups"]["docs"] == ["docs"]
     assert "docs" not in manifest["initial_groups"]
     assert all(
@@ -71,15 +73,31 @@ def test_manifest_matches_html_script_order_and_files() -> None:
         for line in html.splitlines()
         if 'href="/research-static/' in line and 'stylesheet' in line
     ]
-    initial_scripts = [
-        *manifest.get("initial_external_scripts", manifest["external_scripts"]),
-        *research_static._initial_scripts(manifest),
-    ]
+    initial_scripts = list(
+        manifest.get("initial_external_scripts", manifest["external_scripts"]),
+    )
+    if manifest.get("group_set_bundles") is True:
+        initial_scripts.append(
+            "__groups__/" + ",".join(manifest["initial_groups"]),
+        )
+    else:
+        initial_scripts.extend(research_static._initial_scripts(manifest))
     assert script_paths == initial_scripts
-    assert set(initial_scripts).issubset({
-        *manifest["scripts"], *manifest["external_scripts"],
-    })
-    assert style_paths == [*manifest["external_styles"], *manifest["styles"]]
+    if manifest.get("group_set_bundles") is True:
+        assert set(manifest.get("initial_external_scripts", [])).issubset(
+            set(manifest["external_scripts"]),
+        )
+    else:
+        assert set(initial_scripts).issubset({
+            *manifest["scripts"], *manifest["external_scripts"],
+        })
+    assert style_paths == manifest["shell_styles"]
+    assigned_styles = {
+        *manifest["shell_styles"],
+        *(item for items in manifest["group_styles"].values() for item in items),
+    }
+    assert assigned_styles == {*manifest["external_styles"], *manifest["styles"]}
+    assert all(group in groups for group in manifest["group_styles"])
 
     discovered_scripts = {
         path.relative_to(WEB_ROOT).as_posix()
@@ -207,6 +225,18 @@ def test_route_script_groups_obey_the_initial_load_contract() -> None:
     groups = manifest["groups"]
     dependencies = manifest["group_dependencies"]
     policy = manifest["architecture"]["route_load_policy"]
+    initial_groups = set(manifest["initial_groups"])
+    initial_files = {
+        script for group in initial_groups for script in groups[group]
+    }
+    initial_bytes = sum(
+        (WEB_ROOT / script).stat().st_size for script in initial_files
+    )
+    initial_budget = policy["default_max_initial_first_party_script_bytes"]
+    assert initial_bytes <= initial_budget, (
+        f"the initial shell loads {initial_bytes} first-party script bytes; "
+        f"budget is {initial_budget}"
+    )
     default_budget = policy["default_max_first_party_script_bytes"]
     overrides = policy["first_party_script_overrides"]
     default_external_budget = policy["default_max_initial_external_scripts"]
@@ -250,7 +280,7 @@ def test_route_script_groups_obey_the_initial_load_contract() -> None:
         )
         scripts = {
             script
-            for group in loaded_groups
+            for group in loaded_groups - initial_groups
             for script in groups[group]
         }
         loaded_bytes = sum((WEB_ROOT / script).stat().st_size for script in scripts)

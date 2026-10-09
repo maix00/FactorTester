@@ -147,6 +147,23 @@ selected workspace then loads one `/api/test-authoring/workspaces/<id>/configura
 payload. Do not put full configurations back into the list response.
 ```
 
+The document shell includes only `shell_styles`. Domain styles are declared in
+`group_styles` and are requested when the matching route group is needed; a
+shared style is assigned to every group that consumes it. For servers that
+support `group_set_bundles`, the browser resolves a route's dependency-first
+group closure, omits groups already loaded in that page, and requests the
+remaining first-party scripts as one immutable bundle. External vendor scripts
+remain separately cacheable and load before that bundle. Older servers fall
+back to per-group bundles and then to the declared individual files. The
+initial shell uses the same ordered bundle path for its core/app groups.
+
+After session restoration, the locale-neutral `/api/modules` request starts
+while preferences and translations load. The initial asset-revision check
+runs alongside route-module loading, so neither a revision round trip nor an
+independent module-directory request sits serially in front of the first route
+bundle. Feature data remains owned by its route and tab loader; route-bundle
+coalescing must not pull hidden tabs' API payloads forward.
+
 The manager renders `research.html` from this manifest. Do not change a script
 path or load order without running the manifest and static-shell tests. A
 future ES-module loader may replace this contract, but until then an implicit
