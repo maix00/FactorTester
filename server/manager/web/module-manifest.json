@@ -2,9 +2,11 @@
  "schema_version": 1,
  "entry": "research.html",
  "group_bundles": true,
+ "group_set_bundles": true,
  "architecture": {
   "module_boundary_policy": "semantic",
   "route_load_policy": {
+   "default_max_initial_first_party_script_bytes": 300000,
    "default_max_first_party_script_bytes": 204800,
    "first_party_script_overrides": {
     "backtest": 512000,
@@ -560,6 +562,72 @@
   "styles/strategy-library.css",
   "styles/task-inputs.css"
  ],
+ "shell_styles": [
+  "styles/app.css"
+ ],
+ "group_styles": {
+  "code-viewer": [
+   "vendor/highlight/github.min.css"
+  ],
+  "report": [
+   "styles/report.css",
+   "katex/katex.min.css"
+  ],
+  "research-reports": [
+   "styles/report.css"
+  ],
+  "job-detail-core": [
+   "styles/jobs/result-tabs.css",
+   "styles/outputs/artifacts.css"
+  ],
+  "job-detail-previews": [
+   "styles/report.css"
+  ],
+  "job-detail-factor-series": [
+   "styles/outputs/backtest-results.css"
+  ],
+  "job-detail-ic": [
+   "styles/outputs/backtest-results.css"
+  ],
+  "job-detail-backtest": [
+   "styles/outputs/backtest-results.css"
+  ],
+  "job-detail-input": [
+   "styles/task-inputs.css",
+   "katex/katex.min.css"
+  ],
+  "workbench-core": [
+   "styles/workbench.css"
+  ],
+  "workbench-settings": [
+   "styles/workbench-settings.css"
+  ],
+  "workbench-source-inputs": [
+   "styles/task-inputs.css"
+  ],
+  "workbench-run-results": [
+   "styles/jobs/result-tabs.css",
+   "styles/outputs/artifacts.css",
+   "styles/outputs/backtest-results.css"
+  ],
+  "docs": [
+   "styles/docs.css"
+  ],
+  "strategy-library-runtime": [
+   "styles/strategy-library.css"
+  ],
+  "factor-catalog-detail-rendering": [
+   "katex/katex.min.css",
+   "vendor/highlight/github.min.css"
+  ],
+  "factor-catalog-editor": [
+   "katex/katex.min.css",
+   "vendor/highlight/github.min.css"
+  ],
+  "catalog": [
+   "katex/katex.min.css"
+  ]
+ },
  "groups": {
   "code-viewer": [],
   "core": [

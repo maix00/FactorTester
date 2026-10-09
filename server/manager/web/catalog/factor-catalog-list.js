@@ -1,13 +1,17 @@
 (() => {
   const catalog = () => window.FTFactorCatalog;
 
-  async function list(context, page = "families", requestedScope = "public") {
+  async function list(
+    context, page = "families", requestedScope = "public", viewState = {},
+  ) {
     context.activeNav("factors");
     context.setHeading(context.t("因子库"), "FactorTester");
     context.toolbar.append(window.FTFactorList.headerTabs(context, page));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取因子库…")));
     let data = await catalog().load(context, {
-      library: page !== "sets", sets: page === "sets",
+      library: page === "factors",
+      families: page === "families",
+      sets: page === "sets",
     });
     if (!catalog().isCurrent(context)) return;
     const root = document.createElement("div");
@@ -33,15 +37,24 @@
       context, page, familyScope,
     );
     search.setAttribute("aria-label", search.placeholder);
+    search.value = String(viewState.query || "");
     controls.append(searchControl(context, search));
     let groupLoad = null;
+    const initialGroupRefs = Array.isArray(viewState.groupRefs)
+      ? viewState.groupRefs : ["*"];
     const group = FTFactorGroupFilter.create(
-      context, data.groups, ["*"], () => resetAndRender(), {
+      context, data.groups, initialGroupRefs, async groupRefs => {
+        const selectedGroups = Array.isArray(groupRefs) ? groupRefs : ["*"];
+        const needsFactorProjection = page === "families"
+          && selectedGroups.length > 0 && !selectedGroups.includes("*");
+        if (needsFactorProjection && !data.factorsLoaded) {
+          data = await catalog().load(context, {factors: true});
+        }
+        if (catalog().isCurrent(context)) resetAndRender();
+      }, {
         onOpen: () => {
           if (data.groupsLoaded || groupLoad) return groupLoad;
-          groupLoad = catalog().load(context, {
-            groups: true, library: page !== "sets",
-          }).then(next => {
+          groupLoad = catalog().load(context, {groups: true}).then(next => {
             data = next;
             group.setItems(data.groups);
             if (catalog().isCurrent(context)) render();
@@ -65,14 +78,22 @@
 
     context.toolbar.append(
       FTUI.refreshButton(context, async () => {
+        const selectedGroups = Array.isArray(group.values) ? group.values : ["*"];
+        const query = search.value;
+        const selectedPage = tablePage;
         await catalog().load(context, {
           refresh: true,
-          library: page !== "sets",
-          sets: true,
-          groups: true,
+          library: page === "factors",
+          families: page === "families",
+          factors: page === "families" && selectedGroups.length > 0
+            && !selectedGroups.includes("*"),
+          sets: page === "sets",
+          groups: data.groupsLoaded,
         });
         if (!catalog().isCurrent(context)) return;
-        await list(context, page, familyScope);
+        await list(context, page, familyScope, {
+          groupRefs: selectedGroups, query, tablePage: selectedPage,
+        });
       }),
     );
     const canModify = Boolean(context.session) && (
@@ -102,7 +123,7 @@
         "factor-catalog-add-action",
       ));
     }
-    let tablePage = 1;
+    let tablePage = Math.max(1, Number(viewState.tablePage) || 1);
     const render = () => window.FTFactorList.render(context, data, results, {
       page,
       scope: familyScope,

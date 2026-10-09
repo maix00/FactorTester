@@ -336,10 +336,14 @@
     treeMount.className = "product-tree-panel";
     results.replaceChildren(categoryMount, treeMount);
     try {
-      const [categoryPayload, sourceDefinitions] = await Promise.all([
-        loadCategories(context, source),
-        loadSources(context, source),
-      ]);
+      // Category controls need only category definitions. Start the source
+      // lookup concurrently, but keep it inside the deferred tree loader so a
+      // slow federated descriptor lookup cannot delay the category filter.
+      const sourceDefinitionsPromise = loadSources(context, source).then(
+        definitions => ({definitions, error: null}),
+        error => ({definitions: [], error}),
+      );
+      const categoryPayload = await loadCategories(context, source);
       if (!isCurrent(context)) return;
       const categoryStorageKey = `ft-product-category:${source}`;
       let selected = localStorage.getItem(categoryStorageKey) || "";
@@ -353,9 +357,8 @@
         selected = canonicalSelected;
         localStorage.setItem(categoryStorageKey, selected);
       }
-      const selectedSources = FTProductCategoryModel.availableSourceIDs(
-        sourceDefinitions,
-      );
+      let sourceDefinitions = [];
+      let selectedSources = [];
       const contractTreePath = (path, params = {}) => {
         const query = new URLSearchParams({path});
         selectedIDs.forEach(value => query.append("category", value));
@@ -367,37 +370,50 @@
           ? `/api/client/contract_tree?${query}`
           : `/api/product-library/contract-tree?${query}`;
       };
+      const treeOptions = {
+        categoryDefinitions: categoryPayload.categories,
+        dataSourceDefinitions: sourceDefinitions,
+        sourceFamilyPath,
+        selectedDataSources: selectedSources,
+        selectedCategory: selected,
+        contractTreePath,
+        categoryMount,
+        source,
+        isCurrent: () => isCurrent(context),
+        loadTree: async () => {
+          const sourceResult = await sourceDefinitionsPromise;
+          if (!isCurrent(context)) return [];
+          if (sourceResult.error) throw sourceResult.error;
+          sourceDefinitions = sourceResult.definitions;
+          selectedSources = FTProductCategoryModel.availableSourceIDs(
+            sourceDefinitions,
+          );
+          // The tree's lazy product-table rows retain this options object, so
+          // publish descriptors before the initial tree is drawn.
+          treeOptions.dataSourceDefinitions = sourceDefinitions;
+          treeOptions.selectedDataSources = selectedSources;
+          return loadTree(context, source, selectedIDs, selectedSources);
+        },
+        onSave: async nextID => {
+          selected = nextID;
+          selectedIDs = FTProductTree.categorySelectionValues(
+            selected, categoryPayload.categories,
+          );
+          localStorage.setItem(categoryStorageKey, selected);
+          treeOptions.selectedCategory = selected;
+          cache.clear();
+          categoryCache.clear();
+          sourceCache.clear();
+          treeCache.clear();
+          await renderTree();
+        },
+      };
       const renderTree = async () => {
         // No selected Category means the stable classifier-only product tree.
         // Category controls remain unchecked until the user explicitly saves
         // a dimension or a composition.
         if (!isCurrent(context)) return;
-        await FTProductTree.render(context, treeMount, null, {
-          categoryDefinitions: categoryPayload.categories,
-          dataSourceDefinitions: sourceDefinitions,
-          sourceFamilyPath,
-          selectedDataSources: selectedSources,
-          selectedCategory: selected,
-          contractTreePath,
-          categoryMount,
-          source,
-          isCurrent: () => isCurrent(context),
-          loadTree: () => loadTree(
-            context, source, selectedIDs, selectedSources,
-          ),
-          onSave: async nextID => {
-            selected = nextID;
-            selectedIDs = FTProductTree.categorySelectionValues(
-              selected, categoryPayload.categories,
-            );
-            localStorage.setItem(categoryStorageKey, selected);
-            cache.clear();
-            categoryCache.clear();
-            sourceCache.clear();
-            treeCache.clear();
-            await renderTree();
-          },
-        });
+        await FTProductTree.render(context, treeMount, null, treeOptions);
         if (!isCurrent(context)) return;
       };
       await renderTree();

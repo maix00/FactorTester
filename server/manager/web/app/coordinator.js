@@ -329,14 +329,11 @@
     const routeToken = ++activeRouteToken;
     routeLifetimes.begin(routeToken);
     tabs?.markActiveViewLoading?.();
+    const assetsChangedPromise = clientAssetsChanged();
     // The header authoring-mode presentation follows the route being
     // rendered: edit/create pages tint the header (page-mode.js).
     const renderedPath = location.pathname + location.search;
     window.FTPageMode?.applyFromPath?.(renderedPath, t);
-    if (await clientAssetsChanged()) {
-      location.reload();
-      return;
-    }
     if (routeToken !== activeRouteToken) return;
     showNotice("");
     document.querySelector(".report-mount")?.__ftLazyCleanup?.();
@@ -344,6 +341,11 @@
     const route = FTNavigation.matchRoute(location.pathname, location.search);
     try {
       if (!state.session && protectedRouteKinds.has(route.kind)) {
+        if (await assetsChangedPromise) {
+          location.reload();
+          return;
+        }
+        if (routeToken !== activeRouteToken) return;
         // routeDispatch applies the same existing auth guard and updates the
         // heading/content.  No feature module is needed for this branch.
         const result = await routeDispatch.render(route, routeToken);
@@ -353,11 +355,20 @@
         }
         return result;
       }
+      let routeModules = Promise.resolve();
       if (window.FTStaticLoader?.ensureRoute) {
         content.replaceChildren(FTUI.loading(t("正在加载模块…")));
-        await window.FTStaticLoader.ensureRoute(route.kind);
-        if (routeToken !== activeRouteToken) return;
+        routeModules = window.FTStaticLoader.ensureRoute(route.kind);
       }
+      const [assetsChanged] = await Promise.all([
+        assetsChangedPromise,
+        routeModules,
+      ]);
+      if (assetsChanged) {
+        location.reload();
+        return;
+      }
+      if (routeToken !== activeRouteToken) return;
       const result = await routeDispatch.render(route, routeToken);
       if (routeToken === activeRouteToken) {
         tabs?.markActiveViewReady?.();
@@ -430,7 +441,8 @@
   }
   const shell = FTAppShell.create({state, api, t, tabs});
   const {
-    loadLanguage, loadModules, localizeShell, initializeSidebarLayout,
+    loadLanguage, prefetchModules, loadModules, localizeShell,
+    initializeSidebarLayout,
   } = shell;
 
   const auth = FTAuth.bind({
@@ -541,8 +553,9 @@
 
   (async () => {
     await restoreSession();
+    const moduleDirectory = prefetchModules();
     await loadLanguage();
-    await loadModules();
+    await loadModules(moduleDirectory);
     initializeSidebarLayout();
     restoreWorkspaceForSession();
     const initial = `${location.pathname}${location.search}`;

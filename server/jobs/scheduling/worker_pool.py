@@ -576,7 +576,6 @@ def _worker_entry(
         task = task_queue.get()
         if task is None:
             return
-        cancel_value.value = 0
         job_id = str(task["job_id"])
         output_queue.put({
             "type": "task_started",
@@ -763,6 +762,12 @@ class LongLivedWorkerPool:
                         -item.worker_id,
                     ),
                 )
+            # Reset before publishing the task. The scheduler marks a job
+            # RUNNING as soon as submit returns, so a cancellation may arrive
+            # before the child has dequeued this task. Resetting in the child
+            # would erase that cancellation if it runs after the parent sets
+            # the shared flag.
+            worker.cancel_value.value = 0
             worker.job_id = str(job_id)
             worker.cancel_requested_at = None
             self._job_to_worker[str(job_id)] = worker.worker_id
