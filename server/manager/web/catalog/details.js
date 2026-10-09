@@ -23,7 +23,9 @@
     const selectedContractName = String(query.get("contract_label") || "").trim();
     const selectedContractHasData = String(query.get("contract_has_data") || "");
     context.activeNav("products");
-    const value = await helpers.load(context, source);
+    // Product details need the product directory only. Product groups are a
+    // secondary lookup for missing product refs and must not delay this route.
+    const value = await helpers.load(context, source, {includeGroups: false});
     if (!current(context)) return;
     const rawTarget = String(target || "");
     const withoutKind = rawTarget.startsWith("product:")
@@ -40,18 +42,6 @@
       });
       return;
     }
-    const membership = value.groups.flatMap(group =>
-      Array.isArray(group.products) ? group.products : []
-    ).find(item => {
-      const ref = String(item.product_ref || item.product_name || "");
-      return [ref, ref.replace(/^product:/, ""), item.display_name, item.name]
-        .filter(Boolean).includes(rawTarget)
-        || ref.split("/_products/").pop() === pathLeaf;
-    });
-    if (!product && membership?.available === false) {
-      unavailableProductDetail(context, membership, source, helpers);
-      return;
-    }
     if (!product) {
       // This is already the product route.  Do not fall back to the generic
       // report-reference resolver: a missing catalog mapping should be
@@ -60,6 +50,26 @@
         display_name: pathLeaf || rawTarget,
         product_ref: rawTarget,
       }, source, helpers);
+      // Only a product miss needs group summaries to explain whether the
+      // missing reference is an unavailable group member. Keep the fallback
+      // visible while that secondary directory request runs, and protect a
+      // later navigation from a stale response.
+      helpers.load(context, source, {
+        includeProducts: false, includeGroups: true,
+      }).then(groupValue => {
+        if (!current(context)) return;
+        const membership = groupValue.groups.flatMap(group =>
+          Array.isArray(group.products) ? group.products : []
+        ).find(item => {
+          const ref = String(item.product_ref || item.product_name || "");
+          return [ref, ref.replace(/^product:/, ""), item.display_name, item.name]
+            .filter(Boolean).includes(rawTarget)
+            || ref.split("/_products/").pop() === pathLeaf;
+        });
+        if (membership?.available === false) {
+          unavailableProductDetail(context, membership, source, helpers);
+        }
+      }).catch(() => {});
       return;
     }
     context.setHeading(product.name || product.code, product.desc || context.t("产品详情"));
