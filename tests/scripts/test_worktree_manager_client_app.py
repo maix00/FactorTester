@@ -4232,6 +4232,105 @@ def test_product_detail_does_not_wait_for_product_group_summaries() -> None:
             browser.close()
 
 
+def test_product_detail_mounts_before_fields_and_loads_sections_independently() -> None:
+    playwright = pytest.importorskip("playwright.sync_api")
+    with playwright.sync_playwright() as p:
+        browser = None
+        for options in ({"channel": "chrome"}, {}):
+            try:
+                browser = p.chromium.launch(headless=True, **options)
+                break
+            except Exception:
+                continue
+        if browser is None:
+            pytest.skip("Chrome and Playwright Chromium are unavailable")
+        try:
+            page = browser.new_page(viewport={"width": 1200, "height": 700})
+            errors: list[str] = []
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.set_content("<header></header><main></main>")
+            page.add_script_tag(path=str(
+                ROOT / "tests/scripts/fixtures/product_detail_fields_first_paint.js",
+            ))
+            page.add_script_tag(path=str(ROOT / "server/manager/web/catalog/details.js"))
+            page.add_script_tag(path=str(ROOT / "server/manager/web/catalog/products.js"))
+            page.evaluate("window.startProductDetailFieldsFirstPaint({deferPrice: true})")
+            page.wait_for_function(
+                "window.__productDetailFieldsFirstPaint.resolveFields !== null "
+                "&& window.__productDetailFieldsFirstPaint.resolvePrice !== null "
+                "&& window.__productDetailFieldsFirstPaint.contractsStarted === true",
+            )
+
+            state = page.evaluate("window.__productDetailFieldsFirstPaint")
+            assert page.locator(".product-detail-page").count() == 1
+            assert "正在读取产品资料" in page.locator(".product-fields-mount").inner_text()
+            assert "正在读取合约列表" in page.locator(".product-term-structure").inner_text()
+            assert state["priceStarted"] is True
+            assert state["completed"] is False
+            assert any("product-fields" in path for path in state["requests"])
+            assert any("contracts?product=" in path for path in state["requests"])
+
+            page.evaluate("window.__productDetailFieldsFirstPaint.resolveFields({fields: [{"
+                          "name: 'Open', description: 'Opening price', value: '100'}]})")
+            page.wait_for_function(
+                "document.querySelector('.product-fields-mount')?.textContent.includes('Open')",
+            )
+            assert "Opening price" in page.locator(".product-fields-mount").inner_text()
+            assert "价格正在读取" in page.locator(".product-price-panel-mount").inner_text()
+
+            page.evaluate("window.__productDetailFieldsFirstPaint.resolvePrice()")
+            page.wait_for_function("window.__productDetailFieldsFirstPaint.completed")
+            assert "价格已读取" in page.locator(".product-price-panel-mount").inner_text()
+            assert "A1" in page.locator(".product-term-structure").inner_text()
+            assert not errors
+            page.close()
+
+            page = browser.new_page(viewport={"width": 1200, "height": 700})
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.set_content("<header></header><main></main>")
+            page.add_script_tag(path=str(
+                ROOT / "tests/scripts/fixtures/product_detail_fields_first_paint.js",
+            ))
+            page.add_script_tag(path=str(ROOT / "server/manager/web/catalog/details.js"))
+            page.add_script_tag(path=str(ROOT / "server/manager/web/catalog/products.js"))
+            page.evaluate("window.startProductDetailFieldsFirstPaint()")
+            page.wait_for_function("window.__productDetailFieldsFirstPaint.resolveFields !== null")
+            page.evaluate("window.__productDetailFieldsFirstPaint.rejectFields(new Error('field API offline'))")
+            page.wait_for_function("window.__productDetailFieldsFirstPaint.completed")
+            assert "产品字段读取失败 field API offline" in page.locator(
+                ".product-fields-mount",
+            ).inner_text()
+            assert "价格已读取" in page.locator(".product-price-panel-mount").inner_text()
+            assert "A1" in page.locator(".product-term-structure").inner_text()
+            assert not errors
+            page.close()
+
+            page = browser.new_page(viewport={"width": 1200, "height": 700})
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.set_content("<header></header><main></main>")
+            page.add_script_tag(path=str(
+                ROOT / "tests/scripts/fixtures/product_detail_fields_first_paint.js",
+            ))
+            page.add_script_tag(path=str(ROOT / "server/manager/web/catalog/details.js"))
+            page.add_script_tag(path=str(ROOT / "server/manager/web/catalog/products.js"))
+            page.evaluate("window.startProductDetailFieldsFirstPaint({deferPrice: true})")
+            page.wait_for_function(
+                "window.__productDetailFieldsFirstPaint.resolveFields !== null "
+                "&& window.__productDetailFieldsFirstPaint.resolvePrice !== null "
+                "&& window.__productDetailFieldsFirstPaint.contractsStarted === true",
+            )
+            page.evaluate("window.__productDetailFieldsFirstPaint.routeCurrent = false; "
+                          "document.querySelector('main').innerHTML = '<p>New route</p>'; "
+                          "window.__productDetailFieldsFirstPaint.resolveFields({fields: [{"
+                          "name: 'Late field', value: 'stale'}]}); "
+                          "window.__productDetailFieldsFirstPaint.resolvePrice()")
+            page.wait_for_function("window.__productDetailFieldsFirstPaint.completed")
+            assert page.locator("main").inner_text() == "New route"
+            assert not errors
+        finally:
+            browser.close()
+
+
 def test_product_detail_ignores_late_group_summary_after_navigation() -> None:
     playwright = pytest.importorskip("playwright.sync_api")
     with playwright.sync_playwright() as p:

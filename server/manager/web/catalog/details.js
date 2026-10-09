@@ -75,17 +75,12 @@
     context.setHeading(product.name || product.code, product.desc || context.t("产品详情"));
     helpers.catalogSwitch(context, "products", source);
     context.updateActiveTab?.({title: product.name || product.code});
-    context.content.replaceChildren(FTUI.loading(context.t("正在读取产品资料…")));
-    const fieldsPayload = await context.api(source === "local"
-      ? `/api/client/product_fields?name=${encodeURIComponent(product.name)}`
-      : `/api/product-library/product-fields?name=${encodeURIComponent(product.name)}`);
-    if (!current(context)) return;
     const root = document.createElement("div"); root.className = "detail-stack product-detail-page";
     root.append(helpers.sourceSummary(context, source));
-    root.append(FTUI.table(
-      [context.t("字段"), context.t("说明"), context.t("当前值")],
-      normalizeFields(fieldsPayload.fields).map(item => [item.name || item.key, item.description || item.desc, item.value]),
-    ).shell);
+    const fieldsMount = document.createElement("div");
+    fieldsMount.className = "product-fields-mount";
+    fieldsMount.append(FTUI.loading(context.t("正在读取产品资料…")));
+    root.append(fieldsMount);
     const priceMount = document.createElement("div");
     priceMount.className = "product-price-panel-mount";
     root.append(priceMount);
@@ -94,6 +89,27 @@
     const termMount = document.createElement("div"); termMount.append(FTUI.loading(context.t("正在读取合约列表…")));
     term.append(termMount); root.append(term);
     context.content.replaceChildren(root);
+
+    // Product identity is enough to mount the page.  Fields, prices, and
+    // continuous contracts are independent requests; let each section update
+    // in place so a slow field service cannot hold the rest of the detail page.
+    const fieldsEndpoint = source === "local"
+      ? `/api/client/product_fields?name=${encodeURIComponent(product.name)}`
+      : `/api/product-library/product-fields?name=${encodeURIComponent(product.name)}`;
+    const fieldsRequest = context.api(fieldsEndpoint).then(fieldsPayload => {
+      if (!current(context) || !fieldsMount.isConnected) return;
+      fieldsMount.replaceChildren(FTUI.table(
+        [context.t("字段"), context.t("说明"), context.t("当前值")],
+        normalizeFields(fieldsPayload.fields).map(item => [
+          item.name || item.key, item.description || item.desc, item.value,
+        ]),
+      ).shell);
+    }).catch(error => {
+      if (!current(context) || !fieldsMount.isConnected) return;
+      fieldsMount.replaceChildren(FTUI.empty(
+        context.t("产品字段读取失败"), error?.message || "",
+      ));
+    });
     const end = new Date(); const start = new Date(end); start.setFullYear(start.getFullYear() - 1);
     const contractsEndpoint = source === "local"
       ? "/api/client/product_contracts" : "/api/product-library/contracts";
@@ -120,7 +136,9 @@
     const contractsRequest = context.api(
       `${contractsEndpoint}?product=${encodeURIComponent(product.name)}`
     ).catch(() => ({}));
-    const [, contracts] = await Promise.all([pricePanelPromise, contractsRequest]);
+    const [, , contracts] = await Promise.all([
+      fieldsRequest, pricePanelPromise, contractsRequest,
+    ]);
     if (!current(context)) return;
     const contractRows = Array.isArray(contracts.contracts)
       ? [...contracts.contracts].reverse()
