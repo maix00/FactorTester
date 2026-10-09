@@ -229,9 +229,11 @@ def test_runtime_restores_nested_factor_from_flattened_frozen_dependencies(
             self.expr = Expr(fingerprint)
             self._source_expr = self.expr
 
+    from tools.parameters import FactorParam
+
     class LeafFamily:
         alias = "Leaf"
-        params = []
+        params = [FactorParam("N", default_value=None)]
         expr = Expr("1" * 64)
 
         def get_factor(self, **_params):
@@ -239,7 +241,7 @@ def test_runtime_restores_nested_factor_from_flattened_frozen_dependencies(
 
     class OuterFamily:
         alias = "Outer"
-        params = []
+        params = [FactorParam("P", default_value=None)]
         expr = Expr("3" * 64)
 
         def get_factor(self, **params):

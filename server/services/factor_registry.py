@@ -76,6 +76,9 @@ _active_portable_source_overrides: ContextVar[dict[str, dict[str, str]]] = Conte
 _active_transient_source_owner: ContextVar[str] = ContextVar(
     "active_transient_factor_source_owner", default=""
 )
+_required_run_factor_sources: ContextVar[frozenset[str]] = ContextVar(
+    "required_run_factor_sources", default=frozenset()
+)
 _authorized_factor_source_owners: ContextVar[frozenset[str]] = ContextVar(
     "authorized_factor_source_owners", default=frozenset()
 )
@@ -138,50 +141,189 @@ def transient_factor_source_scope(
         _active_transient_source_owner.reset(owner_token)
 
 
+@contextmanager
+def required_run_factor_sources(source_refs: object):
+    """Require these frozen families to resolve from the active Run source scope.
+
+    A source-free RunSpec manifest records which families were supplied by the
+    originating client/Manager. During planning and execution those sources
+    must come from the retained, hash-checked scope; using today's catalog
+    source as a fallback would silently change the submitted run.
+    """
+    refs = frozenset(
+        _normalize_run_source_ref(item)
+        for item in (
+            source_refs
+            if isinstance(source_refs, (list, tuple, set, frozenset))
+            else []
+        )
+        if str(item or "").strip()
+    )
+    token = _required_run_factor_sources.set(refs)
+    try:
+        yield
+    finally:
+        _required_run_factor_sources.reset(token)
+
+
+def run_factor_source_refs(policy: object, *, owner: str) -> frozenset[str]:
+    """Extract exact family refs whose source bytes are retained for a Run."""
+    if (
+        not isinstance(policy, dict)
+        or policy.get("mode") != "transient_run_source"
+    ):
+        return frozenset()
+    files = policy.get("files")
+    if not isinstance(files, list):
+        raise ValueError("RunSpec transient factor source manifest is invalid")
+    refs: set[str] = set()
+    for item in files:
+        if not isinstance(item, dict):
+            raise ValueError("RunSpec transient factor source entry is invalid")
+        canonical_ref = str(item.get("canonical_family_ref") or "").strip()
+        if not canonical_ref:
+            factor_id = str(item.get("factor_id") or "").strip()
+            source_owner = str(item.get("source_owner") or owner).strip()
+            if not factor_id or not source_owner:
+                raise ValueError("RunSpec transient factor source identity is incomplete")
+            canonical_ref = f"{source_owner}:{factor_id}"
+        refs.add(_normalize_run_source_ref(canonical_ref))
+    return frozenset(refs)
+
+
+@contextmanager
+def run_factor_source_policy_scope(run_spec: object, *, owner: str):
+    """Activate the retained-source requirements declared by a RunSpec."""
+    policy = (
+        run_spec.get("factor_source_policy")
+        if isinstance(run_spec, dict) else None
+    )
+    with required_run_factor_sources(
+        run_factor_source_refs(policy, owner=owner),
+    ):
+        yield
+
+
+def _normalize_run_source_ref(value: object) -> str:
+    text = str(value or "").strip()
+    if ":" not in text:
+        return text
+    owner, factor_id = text.rsplit(":", 1)
+    owner = owner.removeprefix("principal:")
+    return f"{owner}:{factor_id}" if owner and factor_id else text
+
+
+def _is_required_run_source(canonical_ref: str) -> bool:
+    required = _required_run_factor_sources.get()
+    return (
+        canonical_ref in required
+        or _normalize_run_source_ref(canonical_ref) in required
+    )
+
+
+def resolve_active_run_factor_source(
+    source_kind: str,
+    source_owner: str,
+    factor_id: str,
+) -> dict[str, str | bool] | None:
+    """Return the validated source override active for one Run, if present."""
+    source_code, source_mode, run_scoped = _active_run_source_record(
+        source_kind, source_owner, factor_id,
+    )
+    if not source_code:
+        return None
+    return {
+        "source_code": source_code,
+        "source_mode": source_mode,
+        "run_scoped": run_scoped,
+    }
+
+
 def _active_run_source_record(
     source_kind: str,
     source_owner: str,
     factor_id: str,
-) -> tuple[str, str]:
+) -> tuple[str, str, bool]:
     source_kind = str(source_kind or "").strip()
     source_owner = str(source_owner or "").strip()
     factor_id = str(factor_id or "").strip()
     task_owner = _active_transient_source_owner.get()
-    if not source_kind or not source_owner or not factor_id or not task_owner:
-        return "", ""
+    if not source_kind or not source_owner or not factor_id:
+        return "", "", False
+    normalized_owner = source_owner.removeprefix("principal:")
     canonical_ref = (
         f"public:{factor_id}"
         if source_kind == "public" else f"{source_owner}:{factor_id}"
     )
-    override = _active_portable_source_overrides.get().get(canonical_ref)
+    if not task_owner:
+        if _is_required_run_source(canonical_ref):
+            raise ValueError(
+                "RunSpec retained factor source is unavailable outside its "
+                f"Run scope: {_normalize_run_source_ref(canonical_ref)}"
+            )
+        return "", "", False
+    portable_overrides = _active_portable_source_overrides.get()
+    normalized_ref = _normalize_run_source_ref(canonical_ref)
+    override = (
+        portable_overrides.get(canonical_ref)
+        or portable_overrides.get(normalized_ref)
+    )
     if override:
         policy = str(override.get("source_access_policy") or "")
         source_mode = "" if policy in {"public", "owner_only"} else policy
-        return str(override.get("source_code") or ""), source_mode
-    if source_kind == "custom" and source_owner == task_owner:
+        return str(override.get("source_code") or ""), source_mode, True
+    if source_kind == "custom" and normalized_owner == task_owner:
         override = _active_transient_source_overrides.get().get(factor_id)
         if override:
-            return override, "transient_run_source"
+            return override, "transient_run_source", True
     scope_id = _active_transient_source_scope.get()
     if not scope_id:
-        return "", ""
+        if _is_required_run_source(canonical_ref):
+            raise ValueError(
+                "RunSpec retained factor source is unavailable: "
+                f"{normalized_ref}"
+            )
+        return "", "", False
     try:
         from server.services.transient_factor_sources import load_source_record
 
-        record = load_source_record(
-            scope_id,
-            factor_id,
-            owner=task_owner,
-            source_kind=source_kind,
-            source_owner=source_owner,
-        )
+        record = None
+        for candidate_owner in dict.fromkeys((source_owner, normalized_owner)):
+            record = load_source_record(
+                scope_id,
+                factor_id,
+                owner=task_owner,
+                source_kind=source_kind,
+                source_owner=candidate_owner,
+            )
+            if record:
+                break
         if not record:
-            return "", ""
+            if _is_required_run_source(canonical_ref):
+                raise ValueError(
+                    "RunSpec retained factor source is missing or failed "
+                    f"owner/hash validation: {normalized_ref}"
+                )
+            return "", "", False
         policy = str(record.get("source_access_policy") or "")
         source_mode = "" if policy in {"public", "owner_only"} else policy
-        return str(record.get("source_code") or ""), source_mode
-    except Exception:
-        return "", ""
+        source_code = str(record.get("source_code") or "")
+        if not source_code:
+            if _is_required_run_source(canonical_ref):
+                raise ValueError(
+                    "RunSpec retained factor source is empty: "
+                    f"{normalized_ref}"
+                )
+            return "", "", False
+        return source_code, source_mode, True
+    except Exception as error:
+        if _is_required_run_source(canonical_ref):
+            raise ValueError(
+                "RunSpec retained factor source is missing or failed "
+                "owner/hash validation: "
+                f"{normalized_ref}"
+            ) from error
+        return "", "", False
 
 
 def _active_run_source(
@@ -391,13 +533,13 @@ def resolve_factor_family_source(
     module_name: str,
     *,
     username: str | None,
-) -> dict[str, str]:
+) -> dict[str, str | bool]:
     """Resolve executable source identity without exposing it over HTTP."""
     source_kind, owner, factor_id, _ = _resolve_factor_family_ref(
         module_name,
         username,
     )
-    source_code, source_mode = _active_run_source_record(
+    source_code, source_mode, run_scoped = _active_run_source_record(
         source_kind, owner, factor_id,
     )
     if not source_code:
@@ -421,6 +563,7 @@ def resolve_factor_family_source(
         "factor_id": factor_id,
         "source_code": source_code,
         "source_mode": source_mode,
+        "run_scoped": run_scoped,
     }
 
 
