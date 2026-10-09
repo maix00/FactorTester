@@ -3767,6 +3767,16 @@ def test_product_library_uses_header_switch_and_tree(tmp_path) -> None:
     assert 'const descriptor = entry?.[1]' in source_family_script
 
 
+def test_product_home_renders_category_filter_before_source_descriptors() -> None:
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "product_home_categories_first.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_product_catalog_lazy_page_forwards_search_and_paging(
     tmp_path, monkeypatch,
 ) -> None:
