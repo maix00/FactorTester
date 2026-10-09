@@ -104,7 +104,7 @@ def test_to_latex_does_not_repeat_a_named_root_intermediate():
     latex = expr.to_latex()
 
     assert latex.count(":=") == 1
-    assert r"\mathrm{结果}_t &:=" in latex
+    assert r"\text{结果}_t &:=" in latex
     assert "X_t" not in latex
 
 

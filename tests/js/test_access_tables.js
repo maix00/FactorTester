@@ -3,8 +3,10 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 class Element {
   constructor(tag) {this.tag=tag;this.children=[];this.dataset={};this.listeners={};this.attributes={};this.classList={add:()=>{}};}
-  append(...children) {this.children.push(...children);}
-  replaceChildren(...children) {this.children=children;}
+  append(...children) {this._textContent='';this.children.push(...children);}
+  replaceChildren(...children) {this._textContent='';this.children=children;}
+  get textContent() {return this.children.length ? this.children.map(c=>typeof c==='string'?c:(c?.textContent||'')).join('') : (this._textContent||'');}
+  set textContent(value) {this.children=[];this._textContent=String(value??'');}
   setAttribute(k,v) {this.attributes[k]=v;}
   removeAttribute(k) {delete this.attributes[k];}
   addEventListener(k,f) {this.listeners[k]=f;}

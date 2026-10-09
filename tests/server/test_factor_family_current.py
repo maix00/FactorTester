@@ -103,8 +103,14 @@ def test_factor_set_peer_delete_shadows_stale_authoring_row(tmp_path, monkeypatc
     assert unregister_factor_set('alice', ref)
     right.flush(principal='alice'); left.pull(principal='alice')
     monkeypatch.setattr(settings, 'CACHE_DB_PATH', left.local.path)
-    assert get_factor_set('alice', ref) is None
+    inactive = get_factor_set('alice', ref)
+    assert inactive is not None
+    assert inactive['registration_active'] is False
     assert list_factor_sets('alice') == []
+    from tools.data.sqlite.account_manager.factor_set import factor_set_history
+    assert {event['action'] for event in factor_set_history('alice', ref)['items']} == {
+        'added', 'removed',
+    }
 
 
 def test_current_family_rejects_invisible_owner_before_storage_or_hydration(monkeypatch):

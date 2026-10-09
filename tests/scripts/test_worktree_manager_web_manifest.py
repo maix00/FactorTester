@@ -260,6 +260,7 @@ def test_route_script_groups_obey_the_initial_load_contract() -> None:
             f"budget is {budget}. "
             "Move non-visible tabs and heavy viewers into a lazy group."
         )
+
         external_scripts = {
             script
             for group in loaded_groups
@@ -270,6 +271,13 @@ def test_route_script_groups_obey_the_initial_load_contract() -> None:
             f"{route} initially loads {len(external_scripts)} external runtimes; "
             f"budget is {external_budget}. Move optional viewers into a lazy group."
         )
+
+    assert "catalog-selection-core" not in closure(
+        manifest["route_groups"]["factor-family"],
+    ), "family source-version selection loads only after the user requests it"
+    assert "catalog-product-detail" not in closure(
+        manifest["route_groups"]["product-group"],
+    ), "product-group pages must not preload product/contract charts"
 
 
 def test_factor_series_entry_auto_mounts_factor_ref_before_run_preview() -> None:
@@ -825,7 +833,9 @@ def test_research_shell_defers_heavy_chart_runtime() -> None:
     assert "vendor/highcharts/highstock.min.js" in manifest["group_external_scripts"]["job-detail-backtest"]
     assert manifest["route_groups"]["jobs"] == ["jobs"]
     assert manifest["route_groups"]["job"] == ["job-detail-core"]
-    assert manifest["route_groups"]["job-configuration"] == ["job-detail-core"]
+    assert manifest["route_groups"]["job-configuration"] == [
+        "job-detail-core", "research-reference",
+    ]
     assert manifest["route_groups"]["job-input"] == ["job-detail-input"]
     assert manifest["route_groups"]["ic-test"] == [
         "workbench-test-ui", "workbench-ic-groups",
@@ -1043,7 +1053,7 @@ def test_ic_job_results_load_the_shared_chart_timeline_first() -> None:
         "job-detail-previews", "catalog-core",
     ]
     assert "factor-catalog-core" in manifest["group_dependencies"]["catalog-core"]
-    assert "catalog-selection-core" in manifest["group_dependencies"]["factor-catalog-core"]
+    assert "catalog-selection-core" in manifest["group_dependencies"]["catalog-core"]
     assert "catalog/shared/multi-select-filter/index.js" in manifest["groups"]["catalog-selection-core"]
     assert manifest["groups"]["job-detail-previews"].index(
         "jobs/highcharts-timeline.js",
@@ -1587,6 +1597,7 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
         "factor-catalog-core",
         "factor-detail-widgets",
         "factor-catalog-enrichment",
+        "catalog-selection-core",
         "object-overlay",
     ]
     assert manifest["group_dependencies"]["object-overlay"] == [
@@ -1957,7 +1968,7 @@ def test_backtest_result_group_loads_shared_multi_select_dependency() -> None:
     assert (
         "factor-catalog-core" in manifest["group_dependencies"]["catalog-core"]
     )
-    assert "catalog-selection-core" in manifest["group_dependencies"]["factor-catalog-core"]
+    assert "catalog-selection-core" in manifest["group_dependencies"]["catalog-core"]
     assert (
         "catalog/shared/multi-select-filter/index.js"
         in manifest["groups"]["catalog-selection-core"]
@@ -2788,8 +2799,8 @@ def test_factor_create_editors_use_shared_actions_and_personal_factor_scope() ->
         encoding="utf-8",
     )
 
-    assert 'context.t("上传因子源码")' in editor
-    assert 'FTUI.actionButton(context.t("校验源码")' in editor
+    assert 'FTUI.iconButton(\n        context, "arrow.up.circle", "上传因子源码"' in editor
+    assert 'FTUI.iconButton(context, "checkmark.circle", "校验源码"' in editor
     assert "FTUI.codeEditor(state.sourceCode" in editor
     assert "registered = libraryValue.factors?.[0] || null" in editor
     assert "frozen Factor v2 identity" in editor

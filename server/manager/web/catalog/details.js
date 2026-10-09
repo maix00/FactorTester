@@ -262,10 +262,6 @@
     context.content.replaceChildren(root);
   }
 
-  async function groupDetail(context, target, helpers, mode = "") {
-    return window.FTProductGroupDetail.render(context, target, helpers, mode);
-  }
-
   function unavailableContractDetail(context, targetRef, helpers, displayTitle = targetRef) {
     const source = helpers.sourceOf();
     const title = String(displayTitle || context.t("合约详情"));
@@ -336,5 +332,5 @@
     context.content.replaceChildren(root);
   }
 
-  window.FTProductDetails = {groupDetail, productDetail, referenceDetail};
+  window.FTProductDetails = {productDetail, referenceDetail};
 })();

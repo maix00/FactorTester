@@ -89,7 +89,8 @@
   ],
   "catalog-core": [
    "product-catalog-core",
-   "factor-catalog-core"
+   "factor-catalog-core",
+   "catalog-selection-core"
   ],
   "output-choice": [
    "core"
@@ -156,7 +157,6 @@
   ],
   "job-detail-core": [
    "jobs",
-   "research-reference",
    "output-choice"
   ],
   "job-detail-input": [
@@ -199,7 +199,6 @@
    "catalog-products-base"
   ],
   "catalog-product-group": [
-   "catalog-product-detail",
    "catalog-product-groups",
    "catalog-product-editing-shared"
   ],
@@ -227,11 +226,11 @@
   "factor-catalog-core": [
    "core",
    "factor-model",
-   "catalog-selection-core",
    "catalog-detail-tabs",
    "factor-catalog-runtime"
   ],
   "factor-catalog-list": [
+   "catalog-selection-core",
    "factor-catalog-core"
   ],
   "factor-catalog-enrichment": [
@@ -249,6 +248,7 @@
    "factor-catalog-core",
    "factor-detail-widgets",
    "factor-catalog-enrichment",
+   "catalog-selection-core",
    "object-overlay"
   ],
   "strategy-library-runtime": [
@@ -452,7 +452,8 @@
    "job-detail-core"
   ],
   "job-configuration": [
-   "job-detail-core"
+   "job-detail-core",
+   "research-reference"
   ],
   "job-input": [
    "job-detail-input"
