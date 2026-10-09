@@ -46,6 +46,10 @@
   function create(publicationID, api, options = {}) {
     let source = basePath(publicationID);
     let targetRef = String(options.ownerRef || "");
+    const sourceKind = String(options.sourceKind || "").trim();
+    const sourceKindMatches = (sourceKind === "publication" && !source.isLocal && !source.isServer)
+      || (sourceKind === "client" && source.isLocal)
+      || (sourceKind === "server_agent" && source.isServer);
     function addressed(path) {
       if (!source.isServer || !targetRef) return path;
       return `${path}${path.includes("?") ? "&" : "?"}target_ref=${encodeURIComponent(targetRef)}`;
@@ -89,7 +93,7 @@
 
     async function load() {
       // Restore old independent report tabs from their existing research scope.
-      if (options.researchID && (source.isServer
+      if (options.researchID && !sourceKindMatches && (source.isServer
           || (!source.isOwnerLocal && /^[^:]+:[^:]+:[^:]+$/.test(source.publicationID)))) {
         const catalog = await api(`/api/research/${encodeURIComponent(options.researchID)}/reports`);
         const report = (catalog.reports || []).find(item => (

@@ -2471,6 +2471,9 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
     assert 'relation=superiors' in report_settings
     assert '{readOnly: true}' in report_settings
     assert 'selectedKind === "publication"' in research_reports
+    assert 'url.searchParams.set("report_source_kind", sourceKind)' in research_reports
+    assert 'item?.selected_branch?.source_kind || item?.source_kind' in research_reports
+    assert 'get("report_source_kind")' in report_entry
     assert 'source_kind: branch.source_kind' in research_reports
     assert 'research-report-tab-actions' in research_reports
     assert '["superiors", "authorized", "public"]' in research_reports
@@ -4320,6 +4323,83 @@ def test_report_reader_switches_branches_inside_the_active_report_tab() -> None:
     assert 'reportReadingByBranch[publicationID]' in report_entry
     assert 'context.updateActiveTab({path: target.href})' in report_entry
     assert 'render(targetPublicationID, context)' in report_entry
+
+
+def test_report_link_carries_the_selected_branch_source_kind() -> None:
+    playwright = pytest.importorskip("playwright.sync_api")
+    with playwright.sync_playwright() as p:
+        browser = None
+        for options in ({"channel": "chrome"}, {}):
+            try:
+                browser = p.chromium.launch(headless=True, **options)
+                break
+            except Exception:
+                continue
+        if browser is None:
+            pytest.skip("Chrome and Playwright Chromium are unavailable")
+        try:
+            page = browser.new_page()
+            page.route("**/*", lambda route: route.fulfill(body="<body></body>"))
+            page.goto("http://localhost/")
+            page.add_script_tag(path=str(
+                ROOT / "tests/scripts/fixtures/report_route_source_hint.js",
+            ))
+            page.add_script_tag(path=str(
+                ROOT / "server/manager/web/research/reports.js",
+            ))
+            result = page.evaluate("window.runReportRouteSourceHint()")
+            assert result["sourceKind"] == "server_agent"
+            assert result["reference"] == "server:agent-report-ref"
+            assert result["renderedSource"] == "server:agent-report-ref"
+            assert "research_id=research-1" in result["route"]
+        finally:
+            browser.close()
+
+
+def test_report_entry_renders_from_real_source_before_delayed_catalog() -> None:
+    playwright = pytest.importorskip("playwright.sync_api")
+    with playwright.sync_playwright() as p:
+        browser = None
+        for options in ({"channel": "chrome"}, {}):
+            try:
+                browser = p.chromium.launch(headless=True, **options)
+                break
+            except Exception:
+                continue
+        if browser is None:
+            pytest.skip("Chrome and Playwright Chromium are unavailable")
+        try:
+            page = browser.new_page()
+            page.route("**/*", lambda route: route.fulfill(body="<body></body>"))
+            page.goto(
+                "http://localhost/research/research%3Av1%3Apublished-report"
+                "?research_id=research-1&report_source_kind=publication",
+            )
+            errors: list[str] = []
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.add_script_tag(path=str(
+                ROOT / "server/manager/web/report/source.js",
+            ))
+            page.add_script_tag(path=str(
+                ROOT / "tests/scripts/fixtures/report_entry_real_source_first_paint.js",
+            ))
+            page.add_script_tag(path=str(
+                ROOT / "server/manager/web/report/report-entry.js",
+            ))
+            page.evaluate("window.startReportEntryWithRealSource()")
+            page.wait_for_selector(".real-source-report-body")
+            sample = page.evaluate("window.__reportSourceFirstPaint.sample")
+            assert sample["bodyMountedBeforeCatalog"]
+            assert sample["indexStartedAt"] < sample["catalogStartedAt"]
+            assert sample["bodyMountCount"] == 1
+            assert sample["bodyMountAt"] - sample["startedAt"] < 250
+            page.wait_for_function(
+                "Number.isFinite(window.__reportSourceFirstPaint.sample.catalogResolvedAt)"
+            )
+            page.evaluate("window.__reportSourceFirstPaint.rendering")
+            assert not errors
+        finally:
+            browser.close()
 
 
 def test_product_categories_render_before_source_labels_and_ignore_stale_responses() -> None:
