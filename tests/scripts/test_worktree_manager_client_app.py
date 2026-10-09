@@ -4425,3 +4425,51 @@ def test_product_categories_render_before_source_labels_and_ignore_stale_respons
             assert not errors
         finally:
             browser.close()
+
+
+def test_research_report_body_renders_before_delayed_branch_directory() -> None:
+    playwright = pytest.importorskip("playwright.sync_api")
+    with playwright.sync_playwright() as p:
+        browser = None
+        for options in ({"channel": "chrome"}, {}):
+            try:
+                browser = p.chromium.launch(headless=True, **options)
+                break
+            except Exception:
+                continue
+        if browser is None:
+            pytest.skip("Chrome and Playwright Chromium are unavailable")
+        try:
+            page = browser.new_page(viewport={"width": 1200, "height": 700})
+            errors: list[str] = []
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.set_content("<body></body>")
+            page.add_script_tag(
+                path=str(ROOT / "tests/scripts/fixtures/report_entry_first_paint.js"),
+            )
+            page.add_script_tag(
+                path=str(ROOT / "server/manager/web/report/report-entry.js"),
+            )
+            result = page.evaluate("window.runReportEntryFirstPaint()")
+
+            samples = result["samples"]
+            assert len(samples) == 5
+            assert all(sample["bodyBeforeCatalog"] for sample in samples)
+            assert all(sample["initialBranchOptions"] == 1 for sample in samples)
+            assert all(sample["finalBranchOptions"] == 2 for sample in samples)
+            assert all(sample["bodyMountCount"] == 1 for sample in samples)
+            assert all(
+                sample["elapsedToBodyMs"] < sample["elapsedToCatalogMs"]
+                for sample in samples
+            )
+            assert result["stale"]["finalBranchOptions"] == 1
+            assert result["stale"]["bodyMountCount"] == 1
+            assert not errors
+            print(json.dumps({
+                "cold_mount_count": len(samples),
+                "mocked_branch_catalog_delay_ms": 250,
+                "body_mount_ms": [round(item["elapsedToBodyMs"], 1) for item in samples],
+                "branch_catalog_ms": [round(item["elapsedToCatalogMs"], 1) for item in samples],
+            }))
+        finally:
+            browser.close()
