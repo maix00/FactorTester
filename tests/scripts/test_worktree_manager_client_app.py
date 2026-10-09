@@ -4147,6 +4147,130 @@ def test_product_detail_renderer_is_loaded_as_a_separate_catalog_module(tmp_path
     assert '"/api/product-library/contracts"' in details
 
 
+def test_product_detail_does_not_wait_for_product_group_summaries() -> None:
+    playwright = pytest.importorskip("playwright.sync_api")
+    with playwright.sync_playwright() as p:
+        browser = None
+        for options in ({"channel": "chrome"}, {}):
+            try:
+                browser = p.chromium.launch(headless=True, **options)
+                break
+            except Exception:
+                continue
+        if browser is None:
+            pytest.skip("Chrome and Playwright Chromium are unavailable")
+        try:
+            page = browser.new_page(viewport={"width": 1200, "height": 700})
+            errors: list[str] = []
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.set_content("<header></header><main></main>")
+            page.add_script_tag(path=str(
+                ROOT / "tests/scripts/fixtures/product_detail_groups_lazy.js",
+            ))
+            page.add_script_tag(path=str(ROOT / "server/manager/web/catalog/details.js"))
+            page.add_script_tag(path=str(ROOT / "server/manager/web/catalog/products.js"))
+            page.evaluate("window.startProductDetailFirstPaint(true)")
+            page.wait_for_function("window.__productDetailFirstPaint.completed")
+            assert page.locator(".product-detail-page").count() == 1
+            assert page.evaluate("window.__productDetailFirstPaint.heading.title") == "Product A"
+            assert not any(
+                "/api/product-library/product-groups" in path
+                for path in page.evaluate("window.__productDetailFirstPaint.requests")
+            )
+            assert sum(
+                path == "/api/product-library/products"
+                for path in page.evaluate("window.__productDetailFirstPaint.requests")
+            ) == 1
+            page.close()
+
+            page = browser.new_page(viewport={"width": 1200, "height": 700})
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.set_content("<header></header><main></main>")
+            page.add_script_tag(path=str(
+                ROOT / "tests/scripts/fixtures/product_detail_groups_lazy.js",
+            ))
+            page.add_script_tag(path=str(ROOT / "server/manager/web/catalog/details.js"))
+            page.add_script_tag(path=str(ROOT / "server/manager/web/catalog/products.js"))
+            page.evaluate("window.startProductDetailFirstPaint(false)")
+            page.wait_for_function(
+                "window.__productDetailFirstPaint.resolveGroups !== null",
+            )
+            assert page.locator(".product-detail-page").count() == 1
+            assert "missing-ref" in page.locator(".product-detail-page").inner_text()
+            page.evaluate("window.__productDetailFirstPaint.resolveGroups({groups: [{products: [{"
+                          "display_name: 'Missing group member', product_ref: 'missing-ref', "
+                          "available: false, unavailable_reason: 'Source is unavailable'"
+                          "}]}]})")
+            page.wait_for_function(
+                "document.querySelector('.product-detail-page')?.textContent.includes("
+                "'Source is unavailable')",
+            )
+            assert "Missing group member" in page.locator(".product-detail-page").inner_text()
+            page.close()
+
+            page = browser.new_page(viewport={"width": 1200, "height": 700})
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.set_content("<header></header><main></main>")
+            page.add_script_tag(path=str(
+                ROOT / "tests/scripts/fixtures/product_detail_groups_lazy.js",
+            ))
+            page.add_script_tag(path=str(ROOT / "server/manager/web/catalog/details.js"))
+            page.add_script_tag(path=str(ROOT / "server/manager/web/catalog/products.js"))
+            page.evaluate("window.startProductDetailFirstPaint(false)")
+            page.wait_for_function(
+                "window.__productDetailFirstPaint.rejectGroups !== null",
+            )
+            page.evaluate("window.__productDetailFirstPaint.rejectGroups("
+                          "new Error('product group directory unavailable'))")
+            page.wait_for_function("window.__productDetailFirstPaint.completed")
+            assert "missing-ref" in page.locator(".product-detail-page").inner_text()
+            assert "product group directory unavailable" not in page.locator(
+                ".product-detail-page",
+            ).inner_text()
+            assert not errors
+        finally:
+            browser.close()
+
+
+def test_product_detail_ignores_late_group_summary_after_navigation() -> None:
+    playwright = pytest.importorskip("playwright.sync_api")
+    with playwright.sync_playwright() as p:
+        browser = None
+        for options in ({"channel": "chrome"}, {}):
+            try:
+                browser = p.chromium.launch(headless=True, **options)
+                break
+            except Exception:
+                continue
+        if browser is None:
+            pytest.skip("Chrome and Playwright Chromium are unavailable")
+        try:
+            page = browser.new_page(viewport={"width": 1200, "height": 700})
+            errors: list[str] = []
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.set_content("<header></header><main></main>")
+            page.add_script_tag(path=str(
+                ROOT / "tests/scripts/fixtures/product_detail_groups_lazy.js",
+            ))
+            page.add_script_tag(path=str(ROOT / "server/manager/web/catalog/details.js"))
+            page.add_script_tag(path=str(ROOT / "server/manager/web/catalog/products.js"))
+            page.evaluate("window.startProductDetailFirstPaint(false)")
+            page.wait_for_function(
+                "window.__productDetailFirstPaint.resolveGroups !== null",
+            )
+            page.evaluate("window.__productDetailFirstPaint.routeCurrent = false; "
+                          "document.querySelector('main').innerHTML = '<p>New route</p>'; "
+                          "window.__productDetailFirstPaint.resolveGroups({groups: [{products: [{"
+                          "display_name: 'Late member', product_ref: 'missing-ref', "
+                          "available: false, unavailable_reason: 'Late detail'"
+                          "}]}]})")
+            page.wait_for_timeout(20)
+            assert page.locator("main").inner_text() == "New route"
+            assert not errors
+        finally:
+            browser.close()
+
+
 @pytest.mark.parametrize(
     "path",
     [
