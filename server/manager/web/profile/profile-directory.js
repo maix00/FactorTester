@@ -1,4 +1,5 @@
 (() => {
+  const directoryObservers = new Map();
   const SCOPES = [
     ["mine", "我的研究身份", "只显示当前登录用户创建的研究身份。"],
     ["subordinates", "下级用户研究身份", "只显示直属下级用户的研究身份；详情与 Agent 会话自动只读可见。"],
@@ -7,6 +8,15 @@
 
   function current(context) {
     return context.isRouteCurrent?.() !== false;
+  }
+
+  function tabKey(context) {
+    return String(context.tabID || "__active__");
+  }
+
+  function disconnectObserver(key) {
+    directoryObservers.get(key)?.disconnect();
+    directoryObservers.delete(key);
   }
 
   function text(value) {
@@ -177,7 +187,7 @@
     return view.shell;
   }
 
-  function section(context, scope) {
+  function section(context, scope, observe) {
     const root = document.createElement("section");
     root.className = `job-section profile-directory-section profile-directory-${scope}`;
     const header = document.createElement("div");
@@ -190,24 +200,57 @@
     header.append(title, note);
     const content = document.createElement("div");
     content.className = "profile-directory-section-content";
+    content.style.minHeight = "min(320px, 40vh)";
+    const deferredNote = document.createElement("p");
+    deferredNote.className = "settings-muted";
+    deferredNote.textContent = context.t("滚动到此处时自动读取研究身份目录");
+    content.append(deferredNote);
     const state = {
       scope, page: 1, pageSize: 20, query: "", serverID: "", binding: "", agent: "",
     };
+    let initialLoadRequested = false;
+    let initialLoadPromise = null;
     const load = async () => {
+      if (!current(context)) return false;
       content.replaceChildren(FTUI.loading(context.t("正在读取研究身份…")));
       try {
         const payload = await fetchDirectory(context, state);
-        if (!current(context)) return;
+        if (!current(context)) {
+          content.replaceChildren(deferredNote);
+          initialLoadRequested = false;
+          return false;
+        }
         content.replaceChildren(controls(context, state, load), table(context, state, payload, load));
+        content.style.minHeight = "";
+        return true;
       } catch (error) {
-        if (!current(context)) return;
+        if (!current(context)) {
+          content.replaceChildren(deferredNote);
+          initialLoadRequested = false;
+          return false;
+        }
         content.replaceChildren(FTUI.empty(
           context.t("无法读取"), error.message || context.t("研究身份目录读取失败"),
         ));
+        content.style.minHeight = "";
+        return true;
       }
     };
     root.append(header, content);
-    load();
+    const loadWhenVisible = () => {
+      if (initialLoadRequested) return initialLoadPromise;
+      initialLoadRequested = true;
+      initialLoadPromise = Promise.resolve(load()).then(loaded => {
+        if (!loaded) {
+          initialLoadRequested = false;
+          initialLoadPromise = null;
+        }
+        return loaded;
+      });
+      return initialLoadPromise;
+    };
+    if (observe) observe(root, loadWhenVisible);
+    else loadWhenVisible();
     return root;
   }
 
@@ -217,10 +260,47 @@
     context.toolbar.replaceChildren();
     const sectionTabs = window.FTResearch?.sectionTabs?.(context, "profiles", false);
     if (sectionTabs) context.toolbar.append(sectionTabs);
-    context.toolbar.append(FTUI.refreshButton(context, () => list(context)));
+    context.toolbar.append(FTUI.refreshButton(context, () => {
+      disconnectObserver(tabKey(context));
+      return list(context);
+    }));
     const root = document.createElement("div");
     root.className = "detail-stack profile-directory";
-    SCOPES.forEach(([scope]) => root.append(section(context, scope)));
+    const key = tabKey(context);
+    disconnectObserver(key);
+    const callbacks = new WeakMap();
+    let remaining = SCOPES.length;
+    let observer = null;
+    if (typeof window.IntersectionObserver === "function") {
+      observer = new window.IntersectionObserver(entries => {
+        if (directoryObservers.get(key) !== observer) {
+          observer.disconnect();
+          return;
+        }
+        entries.forEach(entry => {
+          if (!entry.isIntersecting) return;
+          const load = callbacks.get(entry.target);
+          if (!load) return;
+          Promise.resolve(load()).then(loaded => {
+            if (!loaded || directoryObservers.get(key) !== observer
+              || !callbacks.has(entry.target)) return;
+            callbacks.delete(entry.target);
+            observer.unobserve(entry.target);
+            remaining -= 1;
+            if (remaining <= 0) {
+              observer.disconnect();
+              directoryObservers.delete(key);
+            }
+          });
+        });
+      }, {rootMargin: "0px"});
+      directoryObservers.set(key, observer);
+    }
+    const observe = observer ? (element, load) => {
+      callbacks.set(element, load);
+      observer.observe(element);
+    } : null;
+    SCOPES.forEach(([scope]) => root.append(section(context, scope, observe)));
     context.content.replaceChildren(root);
   }
 
