@@ -5,7 +5,7 @@ global.window = global;
 global.location = {search:''};
 let form, picker, button;
 function element(tag='div') {
-  const e = {tag, dataset:{}, children:[], listeners:{}, classList:{add(){}},
+  const e = {tag, dataset:{}, children:[], listeners:{}, isConnected:true, classList:{add(){}},
     append(...children){this.children.push(...children);},
     replaceChildren(...children){this.children=children;},
     addEventListener(name, handler){this.listeners[name]=handler;},
@@ -23,12 +23,14 @@ vm.runInThisContext(fs.readFileSync('server/manager/web/catalog/product-group-de
 (async()=>{
   for(const overlay of [false,true]) {
     let saved;
+    picker = null;
     const context={t:v=>v,session:{username:'test'},content:element(),
       activeNav(){},setHeading(){},testObjectOverlay:overlay,testObjectTemporary:true,
       onSaved:v=>{saved=v;}};
     await FTProductGroupDetail.render(context,'new',{
       sourceOf:()=> 'server',catalogSwitch(){},sourceSummary:()=>element(),
       loadCategories:async()=>({categories:[{id:'day'}]})});
+    while(!picker) await new Promise(resolve=>setTimeout(resolve,0));
     picker.onChange(['day']);
     await form.listeners.submit({preventDefault(){}});
     assert.deepEqual(saved.category_ids,['day']);
