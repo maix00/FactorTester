@@ -3130,9 +3130,12 @@ def test_factor_catalog_list_defers_auxiliary_catalogs_and_heavy_modules() -> No
     assert manifest["group_external_scripts"].get("factor-catalog-list", []) == []
     assert "core/highcharts-range-loader.js" not in manifest["groups"]["factor-catalog-list"]
     assert "catalog/products.js" not in manifest["groups"]["factor-catalog-list"]
-    assert 'library: page !== "sets"' in catalog_list
+    assert 'library: page === "factors"' in catalog_list
+    assert 'families: page === "families"' in catalog_list
     assert 'sets: page === "sets"' in catalog_list
-    assert 'groups: true, library: page !== "sets"' in catalog_list
+    assert 'catalog().load(context, {factors: true})' in catalog_list
+    assert 'catalog().load(context, {groups: true})' in catalog_list
+    assert 'groups: true, library:' not in catalog_list
     assert "onOpen: () =>" in catalog_list
     assert "/api/product-library/product-groups" in runtime
     assert 'context.api("/api/factor-library/factor-sets")' in runtime

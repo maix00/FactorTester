@@ -76,11 +76,36 @@ async function main() {
   ]);
   assert.strictEqual(data.groups[0].group_ref, "group:one");
 
-  data = await window.FTFactorCatalog.load(context, {library: true});
+  data = await window.FTFactorCatalog.load(context, {families: true});
   assert.deepStrictEqual(calls, [
     "/api/factor-library/factor-sets", "/api/product-library/product-groups",
-    "/api/factor-library/families", "/api/factor-library/factors",
+    "/api/factor-library/families",
   ]);
+  assert.strictEqual(data.familiesLoaded, true);
+  assert.strictEqual(data.factorsLoaded, false);
+  assert.strictEqual(data.libraryLoaded, false);
+  assert.strictEqual(data.familyScopes.public.families[0].family_ref, "family:public");
+
+  const pendingFactors = deferred();
+  pending.set("/api/factor-library/factors", pendingFactors);
+  const factorLoadA = window.FTFactorCatalog.load(context, {factors: true});
+  const factorLoadB = window.FTFactorCatalog.load(context, {factors: true});
+  assert.strictEqual(
+    calls.filter(path => path === "/api/factor-library/factors").length, 1,
+    "concurrent demand for factor details must share one request",
+  );
+  pendingFactors.resolve({
+    factors: [{factor_ref: "factor:one"}],
+    family_scopes: {
+      public: {factors: [{factor_ref: "factor:public"}], families: []},
+      mine: {factors: [{factor_ref: "factor:mine"}], families: []},
+    },
+    principal: "alice", visitor: false,
+  });
+  data = await factorLoadA;
+  assert.strictEqual(await factorLoadB, data);
+  assert.strictEqual(data.factorsLoaded, true);
+  assert.strictEqual(data.libraryLoaded, true);
   assert.strictEqual(data.factors[0].factor_ref, "factor:one");
   assert.strictEqual(
     data.familyScopes.public.families[0].family_ref, "family:public",
@@ -90,6 +115,10 @@ async function main() {
   );
   assert.strictEqual(
     data.familyScopes.public.factors[0].factor_ref, "factor:public",
+  );
+  assert.strictEqual(
+    data.familyScopes.mine.families[0].family_ref, "family:mine",
+    "factor projection must merge without erasing cached family rows",
   );
 
   const savedFactor = {
@@ -159,6 +188,43 @@ async function main() {
   await rejection;
   assert.strictEqual((await window.FTFactorCatalog.load(freshContext, {library: true})), fresh);
   assert.strictEqual(fresh.factors[0].factor_ref, "new-factor");
+
+  let factorAttempts = 0;
+  const retryContext = {
+    session: {username: "retry-user"},
+    async api(path) {
+      if (path === "/api/factor-library/families") {
+        return {
+          principal: "retry-user",
+          families: [{family_ref: "family:retry"}],
+          family_scopes: {mine: {families: [{family_ref: "family:retry"}]}},
+        };
+      }
+      if (path === "/api/factor-library/factors") {
+        factorAttempts += 1;
+        if (factorAttempts === 1) throw new Error("temporary factor read failure");
+        return {
+          principal: "retry-user", factors: [{factor_ref: "factor:retry"}],
+          family_scopes: {mine: {factors: [{factor_ref: "factor:retry"}]}},
+        };
+      }
+      throw new Error(`unexpected request: ${path}`);
+    },
+  };
+  const retryFamilyData = await window.FTFactorCatalog.load(
+    retryContext, {families: true},
+  );
+  await assert.rejects(
+    window.FTFactorCatalog.load(retryContext, {factors: true}),
+    /temporary factor read failure/,
+  );
+  const retried = await window.FTFactorCatalog.load(
+    retryContext, {factors: true},
+  );
+  assert.strictEqual(retried, retryFamilyData);
+  assert.strictEqual(factorAttempts, 2);
+  assert.strictEqual(retried.families[0].family_ref, "family:retry");
+  assert.strictEqual(retried.factors[0].factor_ref, "factor:retry");
   console.log("ok");
 }
 

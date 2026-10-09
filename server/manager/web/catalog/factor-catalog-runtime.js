@@ -2,7 +2,8 @@
   let cache = null;
   let generation = 0;
   let accessKey = "";
-  let libraryPromise = null;
+  let familiesPromise = null;
+  let factorsPromise = null;
   let setsPromise = null;
   let groupsPromise = null;
 
@@ -10,7 +11,8 @@
     return {
       factors: [], families: [], familyScopes: {}, principal: "", visitor: false,
       sets: [], setScopes: {}, groups: [],
-      libraryLoaded: false, setsLoaded: false, groupsLoaded: false,
+      familiesLoaded: false, factorsLoaded: false, libraryLoaded: false,
+      setsLoaded: false, groupsLoaded: false,
       pendingFactors: [],
     };
   }
@@ -23,31 +25,70 @@
   function reset() {
     generation += 1;
     cache = null;
-    libraryPromise = null;
+    familiesPromise = null;
+    factorsPromise = null;
     setsPromise = null;
     groupsPromise = null;
   }
 
-  function applyLibrary(library) {
-    const value = library || {};
+  function mergeScopeResource(current, incoming, property) {
+    const result = {};
+    const existing = current || {};
+    const update = incoming || {};
+    for (const key of new Set([...Object.keys(existing), ...Object.keys(update)])) {
+      const before = existing[key] || {};
+      const next = update[key] || {};
+      result[key] = {
+        ...before,
+        ...next,
+        families: property === "families" && Array.isArray(next.families)
+          ? next.families
+          : Array.isArray(before.families) ? before.families : [],
+        factors: property === "factors" && Array.isArray(next.factors)
+          ? next.factors
+          : Array.isArray(before.factors) ? before.factors : [],
+      };
+    }
+    return result;
+  }
+
+  function applyMetadata(data, value) {
+    if (value && value.principal !== undefined) {
+      data.principal = String(value.principal || "");
+    }
+    if (value && value.visitor !== undefined) {
+      data.visitor = Boolean(value.visitor);
+    }
+  }
+
+  function applyFamilies(value) {
+    const response = value || {};
     const data = ensureCache();
-    const factors = mergeFactors(
-      Array.isArray(value.factors) ? value.factors : [],
+    const scopes = response.family_scopes || response.family_tabs || {};
+    // Mutate the shared cache object. Other projections may be loading at the
+    // same time and must merge into this object rather than a detached copy.
+    data.families = Array.isArray(response.families) ? response.families : [];
+    data.familyScopes = mergeScopeResource(data.familyScopes, scopes, "families");
+    applyMetadata(data, response);
+    data.familiesLoaded = true;
+    data.libraryLoaded = data.familiesLoaded && data.factorsLoaded;
+    return data;
+  }
+
+  function applyFactors(value) {
+    const response = value || {};
+    const data = ensureCache();
+    const scopes = response.family_scopes || response.family_tabs || {};
+    data.factors = mergeFactors(
+      Array.isArray(response.factors) ? response.factors : [],
+      data.factors,
       data.pendingFactors,
     );
     data.pendingFactors = [];
-    // Mutate the shared cache object instead of replacing it.  List pages can
-    // request the library and the set/group catalogs concurrently during a
-    // route transition; replacing the object would let one in-flight loader
-    // write into a detached cache and lose its result.
-    Object.assign(data, {
-      factors,
-      families: Array.isArray(value.families) ? value.families : [],
-      familyScopes: value.family_scopes || value.family_tabs || {},
-      principal: String(value.principal || ""),
-      visitor: Boolean(value.visitor),
-      libraryLoaded: true,
-    });
+    data.familyScopes = mergeScopeResource(data.familyScopes, scopes, "factors");
+    applyMetadata(data, response);
+    data.factorsLoaded = true;
+    data.libraryLoaded = data.familiesLoaded && data.factorsLoaded;
     return data;
   }
 
@@ -74,62 +115,48 @@
     const factor = value?.factor || value;
     if (!factorKey(factor)) return data;
     data.factors = mergeFactors(data.factors, [factor]);
-    if (!data.libraryLoaded) data.pendingFactors = mergeFactors(
+    if (!data.factorsLoaded) data.pendingFactors = mergeFactors(
       data.pendingFactors, [factor],
     );
     return data;
   }
 
-  function mergeLibraryResources(familyResource, factorResource) {
-    const familyValue = familyResource || {};
-    const factorValue = factorResource || {};
-    const familyScopes = familyValue.family_scopes || familyValue.family_tabs || {};
-    const factorScopes = factorValue.family_scopes || factorValue.family_tabs || {};
-    const scopes = {};
-    for (const key of new Set([
-      ...Object.keys(familyScopes), ...Object.keys(factorScopes),
-    ])) {
-      const familyScope = familyScopes[key] || {};
-      const factorScope = factorScopes[key] || {};
-      scopes[key] = {
-        ...familyScope,
-        ...factorScope,
-        families: Array.isArray(familyScope.families)
-          ? familyScope.families : [],
-        factors: Array.isArray(factorScope.factors)
-          ? factorScope.factors : [],
-      };
-    }
-    return {
-      ...familyValue,
-      ...factorValue,
-      families: Array.isArray(familyValue.families) ? familyValue.families : [],
-      factors: Array.isArray(factorValue.factors) ? factorValue.factors : [],
-      family_scopes: scopes,
-    };
-  }
-
-  async function loadLibrary(context, refresh = false) {
+  async function loadFamilies(context, refresh = false) {
     const data = ensureCache();
-    if (data.libraryLoaded) return data;
-    if (!libraryPromise) {
+    if (data.familiesLoaded) return data;
+    if (!familiesPromise) {
       const suffix = refresh ? "?refresh=1" : "";
-      const request = Promise.all([
-        context.api(`/api/factor-library/families${suffix}`),
-        context.api(`/api/factor-library/factors${suffix}`),
-      ]).then(([families, factors]) => mergeLibraryResources(families, factors));
       const started = generation;
-      libraryPromise = request
+      familiesPromise = context.api(`/api/factor-library/families${suffix}`)
         .then(value => {
           if (started !== generation) throw new Error("因子目录已刷新，请重试");
-          return applyLibrary(value);
+          return applyFamilies(value);
         })
         .catch(error => {
-          if (started === generation) libraryPromise = null;
+          if (started === generation) familiesPromise = null;
           throw error;
         });
     }
-    return libraryPromise;
+    return familiesPromise;
+  }
+
+  async function loadFactors(context, refresh = false) {
+    const data = ensureCache();
+    if (data.factorsLoaded) return data;
+    if (!factorsPromise) {
+      const suffix = refresh ? "?refresh=1" : "";
+      const started = generation;
+      factorsPromise = context.api(`/api/factor-library/factors${suffix}`)
+        .then(value => {
+          if (started !== generation) throw new Error("因子目录已刷新，请重试");
+          return applyFactors(value);
+        })
+        .catch(error => {
+          if (started === generation) factorsPromise = null;
+          throw error;
+        });
+    }
+    return factorsPromise;
   }
 
   async function loadSets(context) {
@@ -174,6 +201,8 @@
   async function load(context, options = {}) {
     const refresh = options === true || options.refresh === true;
     const includeLibrary = options === true || options.library === true;
+    const includeFamilies = includeLibrary || options.families === true;
+    const includeFactors = includeLibrary || options.factors === true;
     const includeSets = options === true || options.sets === true;
     const includeGroups = options === true || options.groups === true;
     if (refresh && context.session && options.sync !== false) {
@@ -184,11 +213,13 @@
       reset();
       accessKey = key;
     }
-    let data = ensureCache();
-    if (includeLibrary) data = await loadLibrary(context, refresh);
-    if (includeSets) data = await loadSets(context);
-    if (includeGroups) data = await loadGroups(context);
-    return data;
+    await Promise.all([
+      ...(includeFamilies ? [loadFamilies(context, refresh)] : []),
+      ...(includeFactors ? [loadFactors(context, refresh)] : []),
+      ...(includeSets ? [loadSets(context)] : []),
+      ...(includeGroups ? [loadGroups(context)] : []),
+    ]);
+    return ensureCache();
   }
 
   function isCurrent(context) {
