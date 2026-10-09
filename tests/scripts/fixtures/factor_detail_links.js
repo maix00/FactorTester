@@ -620,6 +620,33 @@ assert.ok(
   );
   assert.strictEqual(rendered.at(-1).expression, "P_t-P_{t-1}");
 
+  const pickerFactory = window.FTMultiSelectFilter;
+  window.FTMultiSelectFilter = undefined;
+  let selectionGroupLoaded = false;
+  window.FTStaticLoader = {loadGroups: async groups => {
+    assert.deepStrictEqual(groups, ["catalog-selection-core"]);
+    selectionGroupLoaded = true;
+    window.FTMultiSelectFilter = pickerFactory;
+  }};
+  const lazyFamilyContext = {...familyContext, content: new Element()};
+  await window.FTFactorDetails.familyDetail(
+    lazyFamilyContext, data, "factor-family:sha256:momentum",
+  );
+  const lazyHistory = walk(lazyFamilyContext.content).find(item => (
+    item.className === "factor-source-version-history"
+  ));
+  const loadPickerButton = walk(lazyHistory).find(item => (
+    item.tagName === "BUTTON"
+  ));
+  assert.strictEqual(selectionGroupLoaded, false);
+  assert.strictEqual(loadPickerButton.textContent, "选择源码版本");
+  await loadPickerButton.listeners.click();
+  assert.strictEqual(selectionGroupLoaded, true);
+  assert.ok(walk(lazyHistory).some(item => (
+    item.className === "ft-multi-select-filter"
+  )));
+  window.FTStaticLoader = {loadGroups: async () => {}};
+
   // A test-local family (created inline in a test editor, never persisted)
   // must render its carried frozen value without a catalog round-trip and
   // without a server version picker.

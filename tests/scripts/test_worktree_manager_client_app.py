@@ -2847,7 +2847,8 @@ def test_web_job_detail_keeps_typed_artifact_and_live_progress_features(
     assert "在配置页面打开" in job_detail
     assert "FTRunSpecView.load" in job_detail
     assert "FTRunSpecView.render" in job_detail
-    assert "FTReferencePage.routeFor" in job_detail
+    assert "function referenceRoute" in job_detail
+    assert "new URLSearchParams()" in job_detail
     assert "runspec:sha256:" in job_detail
     assert "FTJobActions.install" in job_detail
     assert "window.FTJobActions" in actions

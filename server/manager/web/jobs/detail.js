@@ -125,13 +125,20 @@
     }
     if (!target) return null;
     const anchor = document.createElement("a");
-    anchor.href = FTReferencePage.routeFor(kind, target, label);
+    anchor.href = referenceRoute(kind, target, label);
     anchor.textContent = raw;
     anchor.title = label;
     anchor.addEventListener("click", event => {
       event.preventDefault(); context.navigate(anchor.getAttribute("href"));
     });
     return anchor;
+  }
+
+  function referenceRoute(kind, target, label = "", serverID = "") {
+    const query = new URLSearchParams({kind: String(kind || ""), target: String(target || "")});
+    if (label) query.set("label", String(label));
+    if (serverID) query.set("server_id", String(serverID));
+    return `/reference?${query.toString()}`;
   }
 
   function runSpecReference(taskDetail, job, context, serverID = "") {
@@ -146,9 +153,7 @@
     return {
       target,
       serverID: targetServerID,
-      path: FTReferencePage.routeFor(
-        "run-spec", target, context.t("运行配置"), targetServerID,
-      ),
+      path: referenceRoute("run-spec", target, context.t("运行配置"), targetServerID),
     };
   }
 
@@ -338,6 +343,14 @@
     const loadConfiguration = async () => {
       if (configurationLoaded) return;
       configurationLoaded = true;
+      try {
+        await window.FTStaticLoader?.loadGroups?.(["research-reference"]);
+      } catch (error) {
+        configuration.replaceChildren(FTUI.empty(
+          context.t("无法加载运行配置模块"), error.message || String(error),
+        ));
+        return;
+      }
       if (runSpec) {
         configuration.replaceChildren(FTUI.loading(context.t("正在读取运行配置…")));
         try {

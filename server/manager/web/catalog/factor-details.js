@@ -210,7 +210,7 @@
       const top = document.createElement("div");
       top.className = "factor-detail-top";
       if (canSelectVersion) {
-        top.append(window.FTFactorDetailShared.sourceVersionHistory(
+        top.append(sourceVersionHistory(
           context, baseFamily, {
             payload: sourceVersions,
             selected: selectedVersion || "__current__",
@@ -305,6 +305,57 @@
     };
 
     renderFamily(baseFamily);
+  }
+
+  function sourceVersionHistory(context, value, options = {}) {
+    const root = document.createElement("section");
+    root.className = "factor-source-version-history";
+    const status = document.createElement("small");
+    status.className = "factor-source-version-status";
+    const control = document.createElement("div");
+    control.className = "factor-source-version-control";
+    const selected = options.selected || "__current__";
+    const mountPicker = () => {
+      const picker = window.FTFactorDetailShared.versionPicker(context, value, {
+        ...options,
+        selected,
+        onLoaded: payload => {
+          status.textContent = payload?.available === false
+            ? context.t("当前服务器没有可用的源码版本历史") : "";
+          options.onLoaded?.(payload);
+        },
+        onError: error => {
+          status.textContent = window.FTFactorDetailShared.sourceUnavailableText(context);
+          options.onError?.(error);
+        },
+      });
+      control.replaceChildren(picker.element);
+    };
+    if (window.FTTestObjectPicker?.create || window.FTMultiSelectFilter?.create) {
+      mountPicker();
+    } else {
+      const button = context.button(context.t("选择源码版本"), async () => {
+        if (button.disabled) return;
+        button.disabled = true;
+        status.textContent = context.t("正在加载源码版本选择器…");
+        try {
+          await window.FTStaticLoader?.loadGroups?.(["catalog-selection-core"]);
+          if (context.isRouteCurrent?.() === false) return;
+          mountPicker();
+          status.textContent = "";
+        } catch (_) {
+          button.disabled = false;
+          status.textContent = context.t("源码版本选择器加载失败");
+        }
+      }, context.t("选择要查看的因子家族源码版本"));
+      button.classList.add("secondary");
+      control.append(button);
+    }
+    root.append(
+      window.FTFactorDetailShared.fieldRow(context, context.t("源码版本"), control),
+      status,
+    );
+    return root;
   }
 
   async function withCurrentFamilySource(context, value) {
