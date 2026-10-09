@@ -145,6 +145,29 @@
     if (mode === "create" && !context.session) {
       throw new Error(context.t("访客模式只能查看产品组"));
     }
+    const inlineView = mode === "view"
+      && context.testObjectTemporary
+      && context.testObjectInitialValue;
+    const categoryState = {status: inlineView ? "ready" : "loading", categories: []};
+    const transientCategories = context.testState?.values?.category_candidates;
+    let categories = [];
+    // A test editor may create a category in its mounted Category tab before
+    // opening this overlay. Keep that temporary catalog available to the
+    // product-tree picker without writing it a second time or hiding it
+    // behind the server catalog cache.
+    for (const category of transientCategories || []) {
+      const id = String(category?.id || category?.category_id || "").trim();
+      if (!id || categories.some(item => String(item?.id || "") === id)) continue;
+      categories.push({...category, id});
+    }
+    // Group details own the first paint. Start the category directory request
+    // alongside the group read, then fill only the controls that need the
+    // complete catalog after the group summary and products are visible.
+    const categoryPromise = inlineView
+      ? Promise.resolve({payload: {categories: []}, error: null})
+      : Promise.resolve()
+          .then(() => helpers.loadCategories(context, source))
+          .then(payload => ({payload, error: null}), error => ({payload: null, error}));
     let group = null;
     if (mode !== "create") {
       if (context.testObjectTemporary && context.testObjectInitialValue) {
@@ -156,25 +179,7 @@
       }
       if (!group) throw new Error(context.t("产品组不存在"));
     }
-    const inlineView = mode === "view"
-      && context.testObjectTemporary
-      && context.testObjectInitialValue;
-    const categoryPayload = inlineView
-      ? {categories: []}
-      : await helpers.loadCategories(context, source);
     if (!current(context)) return;
-    const categories = [...(Array.isArray(categoryPayload.categories)
-      ? categoryPayload.categories : [])];
-    // A test editor may create a category in its mounted Category tab before
-    // opening this overlay.  Keep that temporary catalog available to the
-    // product-tree picker without writing it a second time or hiding it
-    // behind the server catalog cache.
-    const transientCategories = context.testState?.values?.category_candidates;
-    for (const category of transientCategories || []) {
-      const id = String(category?.id || category?.category_id || "").trim();
-      if (!id || categories.some(item => String(item?.id || "") === id)) continue;
-      categories.push({...category, id});
-    }
     const title = group?.name || (mode === "create"
       ? context.t("新增产品组") : target);
     context.setHeading(title, context.t("产品组"));
@@ -276,6 +281,7 @@
     const header = headerValue.root;
     save = save || headerValue.save;
     if (save) save.dataset.productGroupSave = "true";
+    if (save && editing && categoryState.status !== "ready") save.disabled = true;
     surface.append(header, helpers.sourceSummary(context));
 
     const nameField = document.createElement("label");
@@ -290,7 +296,11 @@
     nameInput.placeholder = context.t("例如：日盘主力产品组");
     nameField.append(nameInput);
     surface.append(nameField);
-    if (group) surface.append(metadata(context, group, categories));
+    const metadataMount = document.createElement("div");
+    if (group) {
+      metadataMount.append(metadata(context, group, categories));
+      surface.append(metadataMount);
+    }
 
     const categoryMount = document.createElement("div");
     const pathMount = document.createElement("div");
@@ -308,16 +318,22 @@
       });
       pathMount.append(pathEditor.root);
     };
-    categoryMount.append(categoryPicker(
+    const renderCategoryPicker = () => categoryPicker(
       context, categories, selected, editing, () => {
         if (editing) {
           draftPaths = pathEditor?.paths() || draftPaths;
           renderPathEditor();
         }
       },
-    ));
+    );
+    if (categoryState.status === "ready") {
+      categoryMount.append(renderCategoryPicker());
+      renderPathEditor();
+    } else {
+      categoryMount.replaceChildren(FTUI.loading(context.t("正在读取产品分类…")));
+      pathMount.replaceChildren(FTUI.loading(context.t("正在读取产品分类…")));
+    }
     surface.append(categoryMount);
-    renderPathEditor();
     surface.append(pathMount);
     if (group) surface.append(productsSection(context, group));
     const status = document.createElement("small");
@@ -329,6 +345,35 @@
       pathMount.replaceChildren();
     };
     context.content.replaceChildren(root);
+    void categoryPromise.then(({payload, error}) => {
+      if (!current(context) || !root.isConnected) return;
+      if (error) {
+        categoryState.status = "error";
+        const detail = error.message || context.t("请稍后重试");
+        categoryMount.replaceChildren(FTUI.empty(
+          context.t("产品分类读取失败"), detail,
+        ));
+        pathMount.replaceChildren(FTUI.empty(
+          context.t("产品路径暂不可用"), detail,
+        ));
+        if (save && editing) save.disabled = true;
+        return;
+      }
+      const loadedCategories = Array.isArray(payload?.categories)
+        ? payload.categories.slice() : [];
+      for (const category of transientCategories || []) {
+        const id = String(category?.id || category?.category_id || "").trim();
+        if (!id || loadedCategories.some(item => String(item?.id || "") === id)) continue;
+        loadedCategories.push({...category, id});
+      }
+      categories = loadedCategories;
+      categoryState.categories = categories;
+      categoryState.status = "ready";
+      if (group) metadataMount.replaceChildren(metadata(context, group, categories));
+      categoryMount.replaceChildren(renderCategoryPicker());
+      renderPathEditor();
+      if (save && editing) save.disabled = false;
+    });
     nameInput.addEventListener("input", () => {
       if (creating) context.updateActiveTab?.({
         title: nameInput.value.trim() || context.t("新增产品组"),
@@ -337,6 +382,12 @@
     if (editing) {
       surface.addEventListener("submit", async event => {
         event.preventDefault();
+        if (categoryState.status !== "ready") {
+          status.textContent = categoryState.status === "error"
+            ? context.t("产品分类尚未加载，无法保存")
+            : context.t("正在读取产品分类…");
+          return;
+        }
         const paths = pathEditor?.paths() || draftPaths;
         draftPaths = paths;
         if (!selected.size) {

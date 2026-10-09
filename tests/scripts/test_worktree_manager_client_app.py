@@ -4553,3 +4553,76 @@ def test_research_report_body_renders_before_delayed_branch_directory() -> None:
             }))
         finally:
             browser.close()
+
+
+def test_product_group_detail_renders_before_delayed_category_directory() -> None:
+    playwright = pytest.importorskip("playwright.sync_api")
+    with playwright.sync_playwright() as p:
+        browser = None
+        for options in ({"channel": "chrome"}, {}):
+            try:
+                browser = p.chromium.launch(headless=True, **options)
+                break
+            except Exception:
+                continue
+        if browser is None:
+            pytest.skip("Chrome and Playwright Chromium are unavailable")
+        try:
+            page = browser.new_page(viewport={"width": 1200, "height": 700})
+            errors: list[str] = []
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.set_content("<header></header><main></main>")
+            page.add_script_tag(path=str(
+                ROOT / "tests/scripts/fixtures/product_group_detail_first_paint.js",
+            ))
+            page.add_script_tag(path=str(
+                ROOT / "server/manager/web/catalog/product-group-detail.js",
+            ))
+
+            initial = page.evaluate("window.startProductGroupDetailFirstPaint()")
+            assert initial["categoriesStarted"]
+            assert initial["categoriesStartedBeforeGroup"]
+            assert initial["bodyWaitedForGroup"]
+            assert initial["bodyMounted"]
+            assert initial["productVisible"]
+            assert initial["categoryLoadingVisible"]
+            assert initial["pathEditorRenders"] == 0
+            assert initial["saveDisabled"]
+            page.locator(".product-group-detail-surface").dispatch_event(
+                "submit", {"bubbles": True, "cancelable": True},
+            )
+            assert page.locator(".product-group-form-status").inner_text() == "正在读取产品分类…"
+            assert initial["writeCalls"] == 0
+
+            page.evaluate("window.__productGroupFirstPaint.resolveCategories({categories: [{"
+                          "id: 'category-1', title_zh: '日盘期货' }]})")
+            page.wait_for_selector(".product-group-category-picker", state="attached")
+            page.wait_for_selector(".test-path-editor", state="attached")
+            page.wait_for_function(
+                "window.__productGroupFirstPaint.save.disabled === false",
+            )
+            assert page.locator(".product-group-metadata").inner_text().find("日盘期货") >= 0
+            assert page.locator(".test-category-picker option").count() == 2
+
+            page.evaluate("window.startProductGroupDetailFirstPaint()")
+            page.evaluate("window.__productGroupFirstPaint.rejectCategories("
+                          "new Error('category catalog unavailable'))")
+            page.wait_for_function(
+                "document.querySelector('.test-empty')?.textContent.includes("
+                "'产品分类读取失败')",
+            )
+            assert page.locator(".product-group-detail-page").count() == 1
+            assert page.locator(".product-group-detail-page").inner_text().find("产品一") >= 0
+            assert page.locator(".product-group-form-status").count() == 1
+            assert page.evaluate("window.__productGroupFirstPaint.save.disabled")
+
+            page.evaluate("window.startProductGroupDetailFirstPaint()")
+            page.evaluate("window.__productGroupFirstPaint.routeCurrent = false; "
+                          "document.querySelector('main').replaceChildren(); "
+                          "window.__productGroupFirstPaint.resolveCategories({categories: []})")
+            page.wait_for_timeout(0)
+            assert page.locator(".product-group-detail-page").count() == 0
+            assert page.evaluate("window.__productGroupFirstPaint.pathEditorRenders") == 0
+            assert not errors
+        finally:
+            browser.close()
