@@ -233,7 +233,24 @@
     const url = new URL(route, location.origin);
     url.searchParams.set("research_id", linkedResearchID);
     if (item?.owner_ref) url.searchParams.set("owner_ref", item.owner_ref);
+    const sourceKind = reportSourceKind(item);
+    if (sourceKind) url.searchParams.set("report_source_kind", sourceKind);
     return `${url.pathname}${url.search}${url.hash}`;
+  }
+
+  function reportSourceKind(item) {
+    const selectedKind = String(
+      item?.selected_branch?.source_kind || item?.source_kind || "",
+    ).trim();
+    if (["publication", "client", "server_agent"].includes(selectedKind)) {
+      return selectedKind;
+    }
+    const reference = String(item?.source_ref || item?.publication_id || "").trim();
+    if (reference.startsWith("local:")) return "client";
+    if (reference.startsWith("server:")) return "server_agent";
+    if (item?.build_source === "client") return "client";
+    if (item?.build_source === "server_agent") return "server_agent";
+    return "";
   }
 
   function reportIdentity(item) {
@@ -241,7 +258,9 @@
   }
 
   function publicationID(item) {
-    const selectedKind = String(item?.selected_branch?.source_kind || "").trim();
+    const selectedKind = String(
+      item?.selected_branch?.source_kind || item?.source_kind || "",
+    ).trim();
     const reference = String(
       item?.source_ref || item?.publication_id || item?.report_id || "",
     ).trim();
@@ -253,6 +272,8 @@
     if (selectedKind === "publication" || item?.source_kind === "publication") {
       return reference;
     }
+    if (selectedKind === "client") return `local:${reference}`;
+    if (selectedKind === "server_agent") return `server:${reference}`;
     if (item?.build_source === "client") return `local:${reference}`;
     if (item?.build_source === "server_agent") return `server:${reference}`;
     return reference;

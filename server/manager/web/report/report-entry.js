@@ -8,6 +8,7 @@
     const source = FTReportSource.create(publicationID, api, {
       ownerRef: new URLSearchParams(location.search).get("owner_ref") || "",
       researchID: new URLSearchParams(location.search).get("research_id") || "",
+      sourceKind: new URLSearchParams(location.search).get("report_source_kind") || "",
     });
     // The research feature tab owns the report list. A concrete report owns
     // its actual closable left-sidebar tab, so reading state must stay on
