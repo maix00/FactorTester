@@ -2113,6 +2113,10 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
             research_static._initial_scripts(manifest)
             + manifest.get("initial_external_scripts", [])
         )
+        initial_bundle = (
+            f'/research-static/__groups__/'
+            f'{",".join(manifest["initial_groups"])}?v='
+        )
         for relative in (
                 "core/test-type-registry.js",
                 "workbench/test-settings.js", "workbench/test-setting-fields.js",
@@ -2149,7 +2153,10 @@ def test_unified_shell_loads_shared_test_workbench_components(tmp_path) -> None:
                 )
                 scripts[key] = response.read().decode("utf-8")
             if relative in initial_scripts:
-                assert f'/research-static/{relative}' in shell
+                if manifest.get("group_set_bundles") is True:
+                    assert initial_bundle in shell
+                else:
+                    assert f'/research-static/{relative}' in shell
             else:
                 assert f'/research-static/{relative}' not in shell
 
@@ -2440,7 +2447,15 @@ def test_web_shell_uses_swift_symbol_registry_for_modules_and_references(tmp_pat
         with urlopen(f"{base_url}/research-static/styles/report.css") as response:
             styles += "\n" + response.read().decode("utf-8")
 
-    assert '/research-static/core/icons.js' in shell
+    manifest = json.loads((research_static.WEB_ROOT / "module-manifest.json").read_text())
+    if manifest.get("group_set_bundles") is True:
+        initial_bundle = (
+            f'/research-static/__groups__/'
+            f'{",".join(manifest["initial_groups"])}?v='
+        )
+        assert initial_bundle in shell
+    else:
+        assert '/research-static/core/icons.js' in shell
     assert 'window.FTIcons' in icons
     assert 'chart.xyaxis.line' in icons
     assert 'person.crop.rectangle.stack' in icons

@@ -18,6 +18,7 @@ from server.manager.http.responses import json_response
 from server.manager.web.assets import (
     asset_revision,
     bundle_bytes,
+    bundle_bytes_for_groups,
     shell_bytes,
     static_file,
 )
@@ -118,11 +119,22 @@ class CoreGetRoutesMixin:
             bundle_match = re.fullmatch(
                 r"/research-static/__group__/([A-Za-z0-9._-]{1,64})", parsed.path,
             )
-            if bundle_match:
-                # One request for a whole module group; the browser used to
-                # fetch every file separately on a cold visit.
+            group_set_match = re.fullmatch(
+                r"/research-static/__groups__/([A-Za-z0-9._,-]{1,1024})",
+                parsed.path,
+            )
+            if bundle_match or group_set_match:
+                # A group-set bundle lets the browser fetch a complete route's
+                # missing dependency closure in one request while retaining
+                # the manifest's dependency-first execution order.
                 try:
-                    bundle = bundle_bytes(bundle_match.group(1))
+                    bundle = (
+                        bundle_bytes(bundle_match.group(1))
+                        if bundle_match
+                        else bundle_bytes_for_groups(
+                            group_set_match.group(1).split(","),
+                        )
+                    )
                 except ValueError:
                     self.send_error(404)
                     return True

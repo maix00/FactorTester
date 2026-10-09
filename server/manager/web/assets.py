@@ -9,6 +9,7 @@ import mimetypes
 import os
 import threading
 import time
+from collections import OrderedDict
 from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
@@ -86,6 +87,30 @@ def _parse_module_manifest(
         )
     if len(grouped) != len(set(grouped)):
         raise RuntimeError("web module manifest groups contain duplicate scripts")
+    style_assets = set(manifest.get("external_styles", [])) | set(manifest.get("styles", []))
+    shell_styles = manifest.get(
+        "shell_styles", [*manifest.get("external_styles", []), *manifest.get("styles", [])],
+    )
+    if (
+        not isinstance(shell_styles, list)
+        or not all(isinstance(item, str) and item for item in shell_styles)
+        or len(shell_styles) != len(set(shell_styles))
+        or not set(shell_styles).issubset(style_assets)
+    ):
+        raise RuntimeError("web module manifest shell_styles are invalid")
+    group_styles = manifest.get("group_styles", {})
+    if not isinstance(group_styles, dict):
+        raise RuntimeError("web module manifest group_styles are invalid")
+    for group, values in group_styles.items():
+        if group not in groups:
+            raise RuntimeError(f"web module manifest style group is unknown: {group}")
+        if (
+            not isinstance(values, list)
+            or not all(isinstance(item, str) and item for item in values)
+            or len(values) != len(set(values))
+            or not set(values).issubset(style_assets)
+        ):
+            raise RuntimeError(f"web module manifest group styles are invalid: {group}")
     return manifest
 
 
@@ -150,15 +175,20 @@ def shell_bytes() -> bytes:
     """
     template = (WEB_ROOT / "research.html").read_text(encoding="utf-8")
     manifest = _module_manifest()
-    styles = [*manifest.get("external_styles", []), *manifest.get("styles", [])]
-    scripts = [
-        *manifest.get("initial_external_scripts", manifest.get("external_scripts", [])),
-        # The shell keeps one tag per initial module: those tags are the first
-        # paint and must stay on the proven path.  Groups loaded later by
-        # ``core/module-loader.js`` travel as one bundle and fall back to the
-        # declared files if a container does not serve bundles.
-        *_initial_scripts(manifest),
-    ]
+    styles = list(manifest.get(
+        "shell_styles", [*manifest.get("external_styles", []), *manifest.get("styles", [])],
+    ))
+    scripts = list(
+        manifest.get("initial_external_scripts", manifest.get("external_scripts", [])),
+    )
+    initial_groups = manifest.get("initial_groups") or []
+    if manifest.get("group_set_bundles") is True and initial_groups:
+        # Preserve core → app evaluation order while reducing the parser-blocking
+        # shell from one request per module to one cacheable request.
+        scripts.append("__groups__/" + ",".join(str(item) for item in initial_groups))
+    else:
+        # Older embedded clients/servers keep their ordered file path.
+        scripts.extend(_initial_scripts(manifest))
     revision = asset_revision()
 
     def tag_path(relative: str) -> str:
@@ -195,7 +225,10 @@ def shell_bytes() -> bytes:
 BUNDLE_PREFIX = "__group__"
 _BUNDLE_SEPARATOR = b"\n;\n"
 _bundle_cache: dict[tuple[str, str], bytes] = {}
+_bundle_set_cache: OrderedDict[tuple[str, str], bytes] = OrderedDict()
+_MAX_BUNDLE_SET_CACHE_ENTRIES = 16
 _bundle_lock = threading.Lock()
+_bundle_cache_revision: str | None = None
 
 
 def group_scripts(group: str) -> list[str]:
@@ -215,19 +248,68 @@ def bundle_bytes(group: str) -> bytes:
     the isolation the browser's separate script tags provided while removing
     most of a cold visit's round trips over the public uplink.
     """
+    global _bundle_cache_revision
     name = str(group or "").strip()
     revision = asset_revision()
     with _bundle_lock:
+        if revision != _bundle_cache_revision:
+            _bundle_cache.clear()
+            _bundle_set_cache.clear()
+            _bundle_cache_revision = revision
         cached = _bundle_cache.get((name, revision))
     if cached is not None:
         return cached
     parts = [static_file(relative)[0] for relative in group_scripts(name)]
     payload = _BUNDLE_SEPARATOR.join(parts)
     with _bundle_lock:
-        # Only the live revision is worth keeping; an activated container
-        # changes the revision and the old concatenation is dead weight.
-        _bundle_cache.clear()
-        _bundle_cache[(name, revision)] = payload
+        if revision == _bundle_cache_revision:
+            _bundle_cache[(name, revision)] = payload
+    return payload
+
+
+def bundle_bytes_for_groups(groups: Iterable[str]) -> bytes:
+    """Return one dependency-ordered bundle for a caller-supplied group closure.
+
+    The browser computes the closure from the manifest and omits groups already
+    loaded in that page. Only declared group names and their first-party scripts
+    are accepted; external vendor scripts remain separate requests so the
+    browser can deduplicate them across route transitions.
+    """
+    names = [str(item or "").strip() for item in groups]
+    if not names or any(not item for item in names) or len(names) != len(set(names)):
+        raise ValueError("web module group set is invalid")
+    manifest = _module_manifest()
+    declared_groups = manifest.get("groups")
+    if not isinstance(declared_groups, dict) or any(name not in declared_groups for name in names):
+        raise ValueError("web module group is not declared")
+    cache_name = "__groups_set__:" + ",".join(names)
+    revision = asset_revision()
+    global _bundle_cache_revision
+    with _bundle_lock:
+        if revision != _bundle_cache_revision:
+            _bundle_cache.clear()
+            _bundle_set_cache.clear()
+            _bundle_cache_revision = revision
+        cached = _bundle_set_cache.get((cache_name, revision))
+        if cached is not None:
+            _bundle_set_cache.move_to_end((cache_name, revision))
+    if cached is not None:
+        return cached
+    parts = [
+        static_file(str(relative))[0]
+        for name in names
+        for relative in declared_groups[name]
+    ]
+    if not parts:
+        raise ValueError("web module group set has no scripts")
+    payload = _BUNDLE_SEPARATOR.join(parts)
+    with _bundle_lock:
+        if revision == _bundle_cache_revision:
+            key = (cache_name, revision)
+            _bundle_set_cache[key] = payload
+            _bundle_set_cache.move_to_end(key)
+            while len(_bundle_set_cache) > _MAX_BUNDLE_SET_CACHE_ENTRIES:
+                _bundle_set_cache.popitem(last=False)
     return payload
 
 

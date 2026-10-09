@@ -91,19 +91,27 @@
 
     async function loadLanguage() {
       const requested = new URLSearchParams(location.search).get("lang");
-      let remote = "";
-      if (state.session) {
-        try {
-          const value = await api("/api/client/preferences");
-          remote = value.preferences?.language || "";
-        } catch (_) {}
-      }
+      const cached = FTI18n.storedPreference();
+      const provisional = FTI18n.choosePreference(requested, "", cached);
+      // Localization is independent of the server preference read. Start
+      // both together using the last known preference, then reload only when
+      // the authoritative preference resolves to a different browser locale.
+      const language = FTI18n.load(provisional);
+      const preferenceRequest = state.session
+        ? api("/api/client/preferences").then(
+          value => value.preferences?.language || "",
+          () => "",
+        )
+        : Promise.resolve("");
+      const [loadedLocale, remote] = await Promise.all([language, preferenceRequest]);
       const preference = FTI18n.choosePreference(
-        requested, remote, FTI18n.storedPreference(),
+        requested, remote, cached,
       );
       state.languagePreference = preference;
       FTI18n.rememberPreference(preference);
-      await FTI18n.load(preference);
+      if (FTI18n.resolvedLocale(preference) !== loadedLocale) {
+        await FTI18n.load(preference);
+      }
       localizeShell();
       refreshSidebarToggle();
     }
@@ -147,10 +155,22 @@
       return moduleButton(module);
     }
 
-    async function loadModules() {
+    function prefetchModules() {
+      // The data request needs an authenticated session, but its response is
+      // locale-neutral. Start it beside preference/localization loading; the
+      // rendered labels still use the resolved language below.
+      return api("/api/modules").then(
+        response => ({response}),
+        error => ({error}),
+      );
+    }
+
+    async function loadModules(prefetched = null) {
       hydrateIcons();
       try {
-        const response = await api("/api/modules");
+        const result = await (prefetched || prefetchModules());
+        if (result.error) throw result.error;
+        const response = result.response;
         if (!Array.isArray(response.modules)) throw new Error("模块目录格式无效");
         state.modules = response.modules;
         state.modulesError = null;
@@ -174,6 +194,7 @@
 
     return Object.freeze({
       loadLanguage,
+      prefetchModules,
       loadModules,
       localizeShell,
       initializeSidebarLayout,
