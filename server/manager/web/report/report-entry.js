@@ -16,6 +16,12 @@
       context.tabID || `report:${publicationID}`,
     );
     session.durable ||= {};
+    const renderGeneration = Math.max(
+      0, Number(session.durable.reportRenderGeneration) || 0,
+    ) + 1;
+    session.durable.reportRenderGeneration = renderGeneration;
+    const isRenderCurrent = () => isCurrent()
+      && session.durable.reportRenderGeneration === renderGeneration;
     session.durable.reportReadingByBranch ||= {};
     if (!session.durable.reportReadingByBranch[publicationID]) {
       const isFirstBranch = Object.keys(
@@ -85,7 +91,7 @@
     content.innerHTML = '<div class="empty"><p></p></div>';
     content.querySelector("p").textContent = t("正在读取研究报告…");
     let value = await source.load();
-    if (!isCurrent()) return;
+    if (!isRenderCurrent()) return;
     state.report = value;
     state.activePublicationID = publicationID;
     context.setHeading(value.title, t("研究报告"));
@@ -101,27 +107,36 @@
       || "",
     ).trim();
     let branches = Array.isArray(value.branches) ? value.branches : [];
-    if (researchID) {
-      try {
-        const catalog = await api(
-          `/api/research/${encodeURIComponent(researchID)}/reports`,
-        );
-        const report = (catalog.reports || []).find(item => (
-          String(item.report_id || "") === String(value.report_id || "")
-        ));
-        if (Array.isArray(report?.branches)) branches = report.branches;
-      } catch (_) {
-        // Keep the selected projection readable while sibling metadata is
-        // unavailable; only the Branch selector is omitted.
-      }
-    }
-    if (!isCurrent()) return;
+    const branchDirectoryPromise = researchID
+      ? Promise.resolve()
+          .then(() => api(
+            `/api/research/${encodeURIComponent(researchID)}/reports`,
+          ))
+          .then(catalog => {
+            const report = (catalog.reports || []).find(item => (
+              String(item.report_id || "") === String(value.report_id || "")
+            ));
+            return Array.isArray(report?.branches) && report.branches.length
+              ? report.branches : null;
+          })
+          .catch(() => null)
+      : Promise.resolve(null);
     const reportControls = document.createElement("div");
     reportControls.className = "research-report-actions";
-    if (branches.length) {
-      const branchPicker = document.createElement("select");
-      branchPicker.className = "branch-picker";
-      const currentBranch = branches.find(branch => branch.publication_id === publicationID)
+    let branchPicker = null;
+    const renderBranchPicker = nextBranches => {
+      branches = Array.isArray(nextBranches) ? nextBranches : [];
+      if (!branches.length) {
+        branchPicker?.remove();
+        branchPicker = null;
+        return;
+      }
+      const priorPublicationID = branchPicker?.value || publicationID;
+      const picker = document.createElement("select");
+      picker.className = "branch-picker";
+      const currentBranch = branches.find(branch => (
+        branch.publication_id === priorPublicationID
+      ))
         || branches.find(branch => branch.selected) || branches[0];
       branches.forEach(branch => {
         const option = document.createElement("option");
@@ -129,11 +144,11 @@
         option.textContent = FTUI.reportBranchLabel(branch, value);
         option.title = branch.principal_ref || branch.owner_ref || value.owner_ref || "";
         option.selected = branch === currentBranch;
-        branchPicker.append(option);
+        picker.append(option);
       });
-      branchPicker.setAttribute("aria-label", t("研究路径"));
-      branchPicker.addEventListener("change", () => {
-        const targetPublicationID = branchPicker.value;
+      picker.setAttribute("aria-label", t("研究路径"));
+      picker.addEventListener("change", () => {
+        const targetPublicationID = picker.value;
         if (!targetPublicationID || targetPublicationID === publicationID) return;
         const target = branches.find(branch => (
           branch.publication_id === targetPublicationID
@@ -144,8 +159,11 @@
         }
         render(targetPublicationID, context);
       });
-      reportControls.append(branchPicker);
-    }
+      if (branchPicker) branchPicker.replaceWith(picker);
+      else reportControls.prepend(picker);
+      branchPicker = picker;
+    };
+    renderBranchPicker(branches);
     FTResearchReportSettings.applyReading(context);
     const infoActions = document.createElement("span");
     infoActions.className = "research-report-actions";
@@ -168,6 +186,10 @@
     }
     reportControls.append(infoActions);
     context.toolbar.replaceChildren(reportControls);
+    void branchDirectoryPromise.then(nextBranches => {
+      if (!isRenderCurrent() || !nextBranches) return;
+      renderBranchPicker(nextBranches);
+    });
     const boundProfileID = String(
       value.profile_ref || value.profile_id || value.generation?.profile_id || "",
     ).trim();
