@@ -110,6 +110,8 @@ selection ID；`shared.product_selections` 保存唯一的规范路径，现场�
 
 每个 `sources/<Source>` 模块负责声明自己的可见运行位置、支持产品、数据形态、采样方式、频率、市场深度、交付方式、当前可用性和执行适配器。Manager、客户端目录、可用性审计与测试配置只投影这份声明，不按数据源名称猜测能力，也不在界面或服务层为某个供应商硬编码 MIN1、DAY1、L2 或实时/历史语义。历史 K 线 provider 与实时 connector 可以属于同一声明，但只有具备历史执行适配器的成员才能进入历史 IC/回测数据源选择器。
 
+研究执行以数据源的稳定身份 key 加产品、频率、字段和日期范围标识所选行情输入。同一数据源内部的行情可以追加、修订或实时变化；新计算应读取该源当前提供的数据，不得因源内数据更新而要求平台冻结旧字节。数据源自身管理数据版本、保留、刷新与缓存失效；平台不要求统一 immutable revision、内容哈希或 DataSnapshotManifest。Availability profile 记录某次检查中的 source 身份与覆盖观察，不代表行情内容快照或逐字节可重放。只有当数据源自己提供历史版本读取能力时，才可使用该源自己的版本引用。详见 [ADR-158](docs/adr/158-source-identity-and-source-managed-market-data.md)。
+
 ### 因子族 (FactorFamily)
 
 含参数的表达式模板。两种使用方式：

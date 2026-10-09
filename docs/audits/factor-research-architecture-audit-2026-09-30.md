@@ -11,7 +11,7 @@ FactorTester 已有若干可独立保留的核心边界：因子 DSL 的批量/�
 
 用户已明确决定整体退役 Research Graph，Graph 专属历史无需保留。报告正文、Report Branch 和跨服务器协作继续保留为独立领域对象；ResearchRun、Job、因子与样本正确性只有在能独立于 Graph 工作时才继续保留。不能把 Graph 历史搬进另一套节点/义务系统。
 
-另外，当前可证实的研究证据缺口包括：行情内容版本未绑定到运行身份；保护样本只比较完全相同的产品范围；运行时因子版本校验仍依赖当前目录，即使 RunSpec 已冻结历史公式。这些边界影响可复现性和 holdout 防泄漏，应在 Graph 退役时单独评估与验收。
+另外，当前可证实的研究证据缺口包括：保护样本只比较完全相同的产品范围；运行时因子版本校验仍依赖当前目录，即使 RunSpec 已冻结历史公式。此前将“行情内容版本未绑定到运行身份”列为缺陷，经用户确认后已改为产品决策：平台以稳定 source key 标识数据源，源内数据变化由数据源自己管理；重新计算读取同一来源的当前数据，不要求平台保留旧行情字节。真正需要修正的是 availability profile 曾把文件元数据指纹误标成行情快照并声称可重放。
 
 源码与规范显示 Graph/Branch/TrialPlan 不只是历史关系视图：它们还参与研究路径状态、运行绑定、Evidence admission 和执行检查点。用户决定这些设施整体剥离、Graph 历史不留存；与之相连但有独立价值的报告、Run/Job 和统计正确性必须先落到自己的身份与生命周期，再删除 Graph 代码和数据。
 
@@ -68,7 +68,7 @@ Agent workflow 也不应变成另一张固定图；应先审查现有 ChatKit co
 | --- | --- | --- |
 | A | 确定性 research golden suite 与代表性性能基线 | 未来数据扰动不改变过去信号；信号/可用/成交/标签时间对齐；夜盘、缺 bar、合约展期、平今/平昨及部分成交账本可手算复核；记录数据规模、机器、缓存冷热、样本数、耗时和内存，合成测试不能冒充线上 p95。 |
 | B | #403 一次性完整移除 Research Graph，纳入 #402 普通 Run 的保护样本规则 | Graph UI/API/CLI/Swift/runtime/schema/专属历史均不再被正常路径读取或创建；Research、Report/Branch、Run/Job/Artifact/Evidence、Profile Agent 保留；冻结产品成员与日期交集、幂等和并发检查通过。此包不能拆成线上半成品。 |
-| C | DataSnapshotManifest、MarketCalendarManifest、DataQualityReport 与 PIT 读取契约 | RunSpec、缓存、产物共同引用不可变输入；内容版本变化不会命中旧缓存；区分计划休市、开市缺数、有效与异常/过期观测；旧快照缺失时明确不可复现，不用 mtime 充当内容哈希。 |
+| C | 数据源身份、更新语义与数据质量观察 | RunSpec 绑定稳定 source key 和查询范围；内容刷新、版本留存与 cache freshness 由数据源管理；availability profile 区分来源/覆盖观察与数据内容版本；不得以 mtime 作为内容哈希。 |
 | D | 已注册 IC 附加分析的正式入口与结果链 | Web/CLI 均能配置、冻结、执行、持久化并显示滚动稳定性、分期诊断、自相关、分组统计与前瞻衰减；每个去重核心测试只求值一次，新增统计复用保留输入。 |
 | E | 最小滚动样本外验证与拟合状态冻结 | 训练/验证/测试按时间及标签信息区间隔离；每折的预处理和参数选择只见本折训练数据；保留逐折输入、拟合状态、选择依据和拼接后的 OOS 结果。 |
 | F | 试验族台账与统计校正 | 记录成功、失败和被拒候选，重试不计新假设；预先冻结试验族后实现 FDR 与时间块 bootstrap；DSR/PBO 仅在输入条件可验证时开放，不替代 OOS。 |
@@ -79,7 +79,7 @@ Agent workflow 也不应变成另一张固定图；应先审查现有 ChatKit co
 
 1. **Research Graph 全量移除（Issue #403）**：外部框架比较、静态依赖盘点和 ADR-156 已完成。Graph 历史不迁移保留；Report/Branch、ResearchRun/Job、因子/样本保护、Profile Agent 等正常能力必须在同一集成范围内确认脱离 Graph，再与 Graph UI/API/CLI/Skills/runtime/schema/data 清理一起验收；不得分批发布退役。
 2. **保护样本范围重叠（F-01，Issue #402）**：目标保留为普通 ResearchRun 级样本暴露检查，不再依赖 Graph TrialPlan。独立实现提交 `cbe0781f3` 仍只在本地任务分支，计划随完整 Research Graph 移除工作一并审查和集成；不作为单独发布。
-3. **冻结行情输入身份（F-02，P1）**。
+3. **数据源身份与源内更新语义（F-02，P2）**。
 4. **冻结因子历史解析（F-03，P1）**。
 5. **旧报告 publication fork（F-05，P2，Issue #396）**。
 6. **外部框架交易日透传（F-04，P2，Issue #397）**。
@@ -102,7 +102,7 @@ Agent workflow 也不应变成另一张固定图；应先审查现有 ChatKit co
 | ID / 优先级 | 发现与证据 | 影响与改进方向 | 状态 |
 | --- | --- | --- | --- |
 | F-01 / P1 | **保护样本暴露检查漏掉部分产品范围重叠。** 原查询按 `sample_universe_hash` 完全相等、日期相交来查历史暴露；旧身份模块明确列出 `partial_universe_overlap_not_detected`。 | 一个验证/holdout 运行可以换成部分重叠或超集产品，旧检查不会识别既有暴露。独立 Run 级规则已保存冻结产品成员，并按日期和成员交集判断；旧成员快照缺失/损坏时会明确失败。 | [Issue #402](https://github.com/maix00/FactorTester/issues/402) 的独立提交 `cbe0781f3` 仅在本地分支，须纳入 #403 完整切换审查，不单独合并或发布。 |
-| F-02 / P1 | **RunSpec 没有绑定行情内容版本。** `single_factor_test/planning.py::_backtest_plan` 冻结源标签、产品、频率、字段与日期；`build_execution_plan` 的哈希和缓存键没有行情 revision。`tools/data/availability/parquet_footer.py` 的 `snapshot_ref` 来自文件大小、mtime、行数等元数据；`derive_sample_identity` 明确列出 `data_snapshot_identity_not_bound`。`research_cycle/data_availability_evidence.py` 也将数据 checksum、日历、合约成员 vintage、session/timezone 等列为未决维度。 | 同一 RunSpec 重试时不能保证读取相同 bars，也不能充分证明当时可用的数据版本、调整方式和交易日语义。增加服务端冻结的 Data Input Manifest/分区引用；数据读取、计划哈希、缓存键、重放和证据收据共用该引用。源不支持稳定版本引用时，明确标记不可精确重放并要求确认。当前没有验证到具体线上历史任务发生漂移。 | 待建 Issue 与设计；不得用文件 mtime 冒充内容校验和。 |
+| F-02 / P2 | **Availability 曾将文件元数据误报为行情快照。** `planning.py::_backtest_plan` 与 `build_execution_plan` 使用解析后的数据源 key、产品、频率、字段及日期范围；行情内容 revision、文件 mtime/大小和行数不参与计划身份，这是允许同一来源更新后重新计算的预期行为。旧 `parquet_footer.py` 的 `snapshot_ref` 仅由文件元数据构成，却被标记为 `replayable: true`。 | 继续以稳定 source key 作为平台侧行情身份。新计算从同一数据源读取其当前数据；源内修订、留存和 cache freshness 由数据源负责。不同 source key 或运行范围变化仍会使计划身份改变。平台不承诺数据源演进后的逐字节复现，也不引入全局快照/版本门禁；availability profile 只描述 source 身份和当次覆盖观察。 | Issue #404 修正 profile 声明并增加同源数据更新/换源测试；未发现源内更新导致计算被拒的线上证据。 |
 | F-03 / P1 | **冻结因子历史版本与 RunSpec 校验路径不一致。** `factor_revisions.py::assert_run_spec_factor_revisions_current` 对已经冻结的 RunSpec 再调用 `_assert_factors_current`；`planning.py::build_execution_plan` 在规划/验证时调用它。另一方面，`factor_param_resolver.py::_resolve_frozen_factor` 和 ADR-146 支持按冻结 fingerprint 加载历史源码。当前 `test_factor_revision_manifest.py` 覆盖“当前公式变化后报错”，没有覆盖“冻结 v1、编辑到 v2、旧 Run 仍解析 v1”。 | 当前目录变化可能挡住仍能按历史 fingerprint 精确解析的冻结 RunSpec，削弱重试和复现。新 Run 冻结时检查当前目录；冻结后的执行只按不可变 ref/fingerprint 解析历史源码和依赖，历史字节缺失、哈希不符或身份不完整时才失败。完整重试影响范围尚需回归测试确认。 | 待建 Issue 与冻结后编辑回归测试。 |
 | F-04 / P2 | **`groupby_scope(trading_day)` 在外部回测适配器上没有交易日来源。** `FactorStepAdapter.update` 支持显式接收 `trading_day`，但 Qlib、Backtrader、Zipline 的因子适配器调用没有传入该值。核心现在会显式拒绝缺少交易日的流式计算，避免把夜盘错误归到日历日。 | 三种 worker 后端上无法使用交易日作用域增量因子。应从框架/数据源的权威交易日映射透传；没有权威信息时继续显式拒绝。该项属于 #397 的现有写入范围/Claim，本任务不接管也不修改其文件。 | #397 仍 OPEN，保留现有 Claim，等待该任务结束后再评估。 |
 | F-05 / P2 | **旧 publication 的 fork 兼容尚未完成。** Issue #396 的验收说明指出旧 main publication 没有 authoring bundle，writer branch 表为空，因此无法按新协作协议 fork；Issue #396 仍 OPEN、`ready-for-agent` 且没有 Claim/完成记录。 | 用户无法从某些旧报告准确继承可编辑章节和附件。应提供显式、幂等的兼容准备流程；缺源码或资源时明确拒绝，不能从渲染文本伪造，也不能建空分支冒充 fork。 | 下一项或随后按优先级处理；必须按 #396 Ownership 实施。 |
@@ -112,7 +112,7 @@ Agent workflow 也不应变成另一张固定图；应先审查现有 ChatKit co
 
 按研究结论可信度、回归风险和依赖排序。Graph 完整切换作为一个集成目标；其余独立缺陷另按各自 Issue/Ownership 推进。跨模块 schema、API 或数据迁移先写验收与兼容策略。
 
-1. **冻结行情输入身份（F-02，P1）**：先完成 source/partition revision 能力盘点，再定义 Data Input Manifest；验证源内容原地变化、冷/热缓存、重试、旧数据源和缺少稳定版本时的显式状态。不得宣称元数据 hash 是数据内容 hash。
+1. **行情 source 身份与更新语义（F-02，P2，Issue #404）**：确保 RunSpec 以稳定 source key 和查询范围为身份；同源更新后的新计算继续读取 source 当前数据，换源/改范围则重新规划。availability profile 不得把元数据 marker 宣称成内容版本或精确重放；不建设平台级行情快照协议。
 2. **统一冻结因子解析（F-03，P1）**：先复现 v1 freeze → 当前源码编辑为 v2 → v1 Run 重试；验证嵌套依赖、历史源码缺失和新 Run 的当前版本门禁。
 3. **旧报告 publication fork 兼容（F-05，P2，Issue #396）**：复用独立 ReportBranch 与对象传输协议，验证旧 publication、资源完整性、重试、权限和不同 Profile 身份。
 4. **外部框架交易日透传（F-04，P2，Issue #397）**：等现有 Claim 完成后复核，不与活动写入者重叠。
