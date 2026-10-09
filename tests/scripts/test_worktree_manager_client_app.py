@@ -3186,6 +3186,16 @@ def test_reserved_self_profile_is_marked_only_in_the_outer_directory() -> None:
     assert ".profile-directory-row-self" in styles
 
 
+def test_profile_directory_loads_scopes_as_they_approach_the_viewport() -> None:
+    fixture = ROOT / "tests" / "scripts" / "fixtures" / "profile_directory_lazy.js"
+    result = subprocess.run(
+        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip() == "ok"
+
+
 def test_profile_detail_exposes_skills_and_embeds_runtime_binding_in_overview() -> None:
     profile_root = ROOT / "server" / "manager" / "web" / "profile"
     profiles = (profile_root / "profiles.js").read_text(encoding="utf-8")
