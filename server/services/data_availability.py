@@ -11,7 +11,11 @@ from typing import Any
 import settings as Settings
 from server.modules.shared.price_services import cached_products
 from tools.data.availability import build_availability_profile
-from tools.data.availability.model import canonical_hash, profile_document
+from tools.data.availability.model import (
+    PROFILE_SCHEMA_VERSION,
+    canonical_hash,
+    profile_document,
+)
 from tools.data.availability.registry import (
     availability_connector,
 )
@@ -41,12 +45,13 @@ def availability_for_scope(
     include_historical_fields: bool = False,
     refresh: bool = False,
 ) -> dict[str, Any]:
-    """Return one immutable profile, scanning only on the first request.
+    """Return a request-scoped availability observation, scanning on first use.
 
-    The canonical request is the cache identity. Concurrent clients requesting
-    the same scope share one materialization; later calls only read SQLite.
-    Refresh is intentionally an internal authority operation, not an Agent
-    query option.
+    The request and profile schema are the cache identity. The profile reports
+    the source's observed coverage; it does not pin the source's data bytes.
+    Concurrent clients requesting the same scope share one materialization;
+    later calls only read SQLite. Refresh remains an internal authority
+    operation, not an Agent query option.
     """
     request = _request_document(
         product_names=product_names,
@@ -58,7 +63,7 @@ def availability_for_scope(
         include_field_catalog=include_field_catalog,
         include_historical_fields=include_historical_fields,
     )
-    request_hash = canonical_hash(request)
+    request_hash = _profile_request_cache_identity(request)
     if not refresh:
         cached = _load_by_request_hash(request_hash)
         if cached is not None:
@@ -84,7 +89,7 @@ def availability_for_scope(
 
 
 def load_availability_profile(profile_ref: str) -> dict[str, Any]:
-    """Load a frozen profile without touching any registered data source."""
+    """Load a stored availability observation without probing its data source."""
     normalized = str(profile_ref or "")
     if not normalized.startswith(_PROFILE_PREFIX):
         raise ValueError("invalid data availability profile reference")
@@ -102,7 +107,7 @@ def load_availability_profile(profile_ref: str) -> dict[str, Any]:
 
 
 def data_capability_catalog() -> dict[str, Any]:
-    """Return declared sources and already-materialized coverage snapshots."""
+    """Return declared sources and already-materialized coverage observations."""
     _ensure_sources_registered()
     sources = []
     for declaration in data_source_declarations():
@@ -233,6 +238,13 @@ def _request_document(**values: Any) -> dict[str, Any]:
         "include_historical_fields": bool(values["include_historical_fields"]),
         "inspection_runtime": "server",
     }
+
+
+def _profile_request_cache_identity(request: dict[str, Any]) -> str:
+    return canonical_hash({
+        "profile_schema_version": PROFILE_SCHEMA_VERSION,
+        "request": request,
+    })
 
 
 def _profile_lock(request_hash: str) -> threading.Lock:

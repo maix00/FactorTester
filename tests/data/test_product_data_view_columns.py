@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import pandas as pd
 
 from tools.data.providers.DataProviderProductTS import DataProviderProductTS
@@ -198,3 +200,45 @@ def test_missing_physical_adjustment_columns_fall_back_to_raw_price(request, tmp
     result = view.get_and_adjust_cols(["CLOSE_ADJUSTED"], copy=False, source=source)
 
     assert result["CLOSE_ADJUSTED"].tolist() == [11.0, 12.0]
+
+
+def test_same_source_reads_updated_parquet_for_a_new_calculation(request, tmp_path):
+    path = tmp_path / "live-source.parquet"
+    timestamps = pd.date_range("2026-10-01 09:01", periods=2, freq="1min")
+
+    def write_prices(values):
+        pd.DataFrame({
+            "trade_time": timestamps,
+            "close_price": values,
+        }).to_parquet(path, index=False)
+
+    write_prices([10.0, 11.0])
+    product = Futures("LIVE_SOURCE_UPDATE.FUT")
+    source = DataProviderProductTS(
+        key="LiveUpdatingSourceMIN1",
+        data_freq=DataFreq.MIN1,
+        get_object_path=lambda _product: str(path),
+        timezone=product.timezone,
+        time_cols_mapping={"trade_time": "1min"},
+        data_cols_mapping={"close_price": "CLOSE"},
+    )
+    request.addfinalizer(source.delete)
+    view = ProductDataView(
+        product,
+        data_freq=DataFreq.MIN1,
+        alias="LIVE_SOURCE_UPDATE_MIN1",
+        timezone=product.timezone,
+    )
+
+    first_result = view.get_and_adjust_cols(["CLOSE"], copy=False, source=source)
+    assert first_result["CLOSE"].tolist() == [10.0, 11.0]
+
+    previous_stat = path.stat()
+    write_prices([20.0, 21.0])
+    os.utime(
+        path,
+        ns=(previous_stat.st_atime_ns, previous_stat.st_mtime_ns + 2_000_000_000),
+    )
+    second_result = view.get_and_adjust_cols(["CLOSE"], copy=False, source=source)
+
+    assert second_result["CLOSE"].tolist() == [20.0, 21.0]

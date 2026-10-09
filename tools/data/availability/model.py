@@ -1,4 +1,4 @@
-"""Serialization helpers for request-bound data availability profiles."""
+"""Serialization helpers for source-scoped availability observations."""
 
 from __future__ import annotations
 
@@ -6,6 +6,9 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from typing import Any
+
+
+PROFILE_SCHEMA_VERSION = 4
 
 
 def utc_iso(value: datetime) -> str:
@@ -40,7 +43,7 @@ def profile_document(
 ) -> dict[str, Any]:
     request_bound = source_scope is not None
     body: dict[str, Any] = {
-        "schema_version": 3 if request_bound else 1,
+        "schema_version": PROFILE_SCHEMA_VERSION,
         "as_of": utc_iso(as_of),
         "product_scope": product_scope,
         "entries": entries,

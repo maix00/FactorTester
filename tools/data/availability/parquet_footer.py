@@ -11,7 +11,7 @@ import pyarrow.parquet as pq
 
 from tools.data.types import DataColumn
 
-from .model import canonical_hash, utc_iso
+from .model import utc_iso
 
 
 def inspect_parquet(
@@ -22,9 +22,6 @@ def inspect_parquet(
     required_fields: tuple[str, ...] = (),
     include_field_catalog: bool = False,
     time_columns_mapping: dict[str, str] | None = None,
-    source_key: str,
-    product_name: str,
-    frequency: str,
 ) -> dict[str, Any]:
     path = Path(path_value)
     if not path.is_file() or path.stat().st_size <= 0:
@@ -37,14 +34,6 @@ def inspect_parquet(
     start, end = _footer_bounds(parquet, time_columns)
     stat = path.stat()
     updated_at = utc_iso(datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc))
-    identity = {
-        "source": source_key,
-        "product": product_name,
-        "frequency": frequency,
-        "size": stat.st_size,
-        "mtime_ns": stat.st_mtime_ns,
-        "rows": parquet.metadata.num_rows,
-    }
     coverage = {
         "start": _timestamp_text(start),
         "end": _timestamp_text(end),
@@ -58,7 +47,6 @@ def inspect_parquet(
         "status": "available",
         "coverage": coverage,
         "updated_at": updated_at,
-        "snapshot_ref": f"filemeta:{canonical_hash(identity)}",
     }
     if required_fields:
         value["required_fields"] = _required_field_availability(

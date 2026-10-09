@@ -89,9 +89,6 @@ def _inspect_source(
         required_fields=tuple(required_fields),
         include_field_catalog=include_field_catalog,
         time_columns_mapping=dict(getattr(source, "time_cols_mapping", {})),
-        source_key=source_key,
-        product_name=product_name,
-        frequency=frequency,
     )
     if details.get("status") != "available":
         return {**base, **details}
@@ -101,8 +98,6 @@ def _inspect_source(
         "frequency": frequency,
         "coverage": details["coverage"],
         "updated_at": details["updated_at"],
-        "replayable": True,
-        "snapshot_ref": details["snapshot_ref"],
     }
     if "required_fields" in details:
         result["required_fields"] = details["required_fields"]

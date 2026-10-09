@@ -9,9 +9,12 @@ from flask import Flask
 
 from server.modules.shared import shared_bp
 from server.modules.shared import data_availability as availability_routes
-from server.services.data_availability import availability_for_scope
+from server.services.data_availability import (
+    _profile_request_cache_identity,
+    availability_for_scope,
+)
 from tools.data.availability import build_availability_profile
-from tools.data.availability.model import profile_document
+from tools.data.availability.model import canonical_hash, profile_document
 from tools.data.availability.schema import availability_dimensions
 from tools.data.providers.DataProviderProductTS import DataProviderProductTS
 from tools.data.types import DataColumn
@@ -57,7 +60,7 @@ def test_local_parquet_profile_reports_footer_coverage_without_loading_frame(
     finally:
         source.delete()
 
-    assert profile["schema_version"] == 1
+    assert profile["schema_version"] == 4
     assert profile["product_scope"] == ["AVAILABILITY-TEST.LOCAL"]
     assert profile["as_of"] == "2026-01-03T00:00:00+00:00"
     assert profile["entries"] == [
@@ -76,11 +79,10 @@ def test_local_parquet_profile_reports_footer_coverage_without_loading_frame(
                 "assurance": "parquet_footer_statistics",
             },
             "updated_at": profile["entries"][0]["updated_at"],
-            "replayable": True,
-            "snapshot_ref": profile["entries"][0]["snapshot_ref"],
         }
     ]
-    assert profile["entries"][0]["snapshot_ref"].startswith("filemeta:sha256:")
+    assert "snapshot_ref" not in profile["entries"][0]
+    assert "replayable" not in profile["entries"][0]
     assert profile["profile_hash"].startswith("sha256:")
 
 
@@ -205,7 +207,7 @@ def test_data_availability_endpoint_requires_and_preserves_explicit_scope(
     def fake_profile(**kwargs):
         captured.update(kwargs)
         return {
-            "schema_version": 1,
+            "schema_version": 4,
             "profile_hash": "sha256:profile",
             "product_scope": kwargs["product_names"],
             "entries": [],
@@ -230,6 +232,9 @@ def test_data_availability_endpoint_requires_and_preserves_explicit_scope(
     assert missing.status_code == 400
     assert response.status_code == 200
     assert response.get_json()["product_scope"] == ["A.DCE"]
+    assert response.get_json()["profile_identity_semantics"] == (
+        "source_key_current_source_contents"
+    )
     assert captured == {
         "product_names": ["A.DCE"],
         "source_names": ["Local"],
@@ -261,12 +266,59 @@ def test_profile_identity_includes_source_and_probe_semantics() -> None:
         as_of=as_of,
     )
 
-    assert static["schema_version"] == 3
+    assert static["schema_version"] == 4
     assert static["source_scope"] == ["Local"]
     assert static["frequency_scope"] == []
     assert static["probe"] is False
     assert static["expanded"] is False
     assert static["profile_hash"] != probed["profile_hash"]
+
+
+def test_profile_request_cache_identity_changes_with_schema_version() -> None:
+    request = {
+        "products": ["A.DCE"],
+        "sources": ["Local"],
+        "frequencies": [],
+        "probe": False,
+        "expanded": False,
+        "fields": [],
+        "include_field_catalog": False,
+        "include_historical_fields": False,
+        "inspection_runtime": "server",
+    }
+
+    assert _profile_request_cache_identity(request) != canonical_hash(request)
+
+
+def test_legacy_profile_endpoint_explains_metadata_only_identity(monkeypatch) -> None:
+    legacy_profile = {
+        "schema_version": 3,
+        "profile_hash": "sha256:legacy",
+        "entries": [{
+            "source": "Local",
+            "replayable": True,
+            "snapshot_ref": "filemeta:sha256:metadata-only",
+        }],
+    }
+    monkeypatch.setattr(
+        availability_routes,
+        "load_availability_profile",
+        lambda profile_ref: legacy_profile,
+    )
+    app = Flask(__name__)
+    app.register_blueprint(shared_bp)
+    client = app.test_client()
+
+    response = client.get(
+        "/api/data-availability/profiles/"
+        "data-availability-profile:sha256:legacy"
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["profile_identity_semantics"] == "legacy_metadata_only"
+    assert "does not guarantee" in payload["profile_identity_notice"]
+    assert payload["entries"][0]["snapshot_ref"] == "filemeta:sha256:metadata-only"
 
 
 def test_availability_schema_rejects_market_depth_as_temporal_frequency() -> None:
