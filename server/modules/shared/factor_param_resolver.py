@@ -14,7 +14,10 @@ from server.modules.shared.factor_param_utils import (
     unique_frozen_factor_records,
 )
 from server.services.factor_source_catalog import FactorSourceCatalog
-from server.services.factor_registry import get_factor_family_instance
+from server.services.factor_registry import (
+    get_factor_family_instance,
+    resolve_active_run_factor_source,
+)
 from server.services.session_runtime import current_user
 from tools.factors.factor_param_resolution import register_factor_param_resolver
 from tools.factors.factor_param_resolution import factor_param_resolver_scope
@@ -52,6 +55,8 @@ def resolve_factor_param_value(
     value, *, username: str | None = None,
     frozen_by_ref: dict[str, dict] | None = None,
     _resolving_refs: set[str] | None = None,
+    _resolved_by_ref: dict[str, object] | None = None,
+    _source_cache: dict[tuple[str, str, str, str], dict] | None = None,
 ):
     """Return a Factor for a FactorParam value selected in the UI."""
     if isinstance(value, dict):
@@ -59,6 +64,8 @@ def resolve_factor_param_value(
             return _resolve_frozen_factor(
                 value, username=username, frozen_by_ref=frozen_by_ref,
                 resolving_refs=_resolving_refs,
+                resolved_by_ref=_resolved_by_ref,
+                source_cache=_source_cache,
             )
         item = value
     else:
@@ -72,6 +79,8 @@ def resolve_factor_param_value(
             return _resolve_frozen_factor(
                 frozen, username=username, frozen_by_ref=frozen_by_ref,
                 resolving_refs=_resolving_refs,
+                resolved_by_ref=_resolved_by_ref,
+                source_cache=_source_cache,
             )
         # FactorParam._value_space.alias() 对 dict 用 [...] 包裹；
         # 前端回传的是 display 值，需要去掉方括号再匹配 factor_alias。
@@ -94,13 +103,20 @@ def _resolve_frozen_factor(
     value: dict, *, username: str | None = None,
     frozen_by_ref: dict[str, dict] | None = None,
     resolving_refs: set[str] | None = None,
+    resolved_by_ref: dict[str, object] | None = None,
+    source_cache: dict[tuple[str, str, str, str], dict] | None = None,
 ):
     """Rebuild a nested factor from its exact recorded family source."""
     frozen = require_frozen_factor(value)
     factor_ref = frozen['ref']
     active_refs = resolving_refs if resolving_refs is not None else set()
+    resolved_cache = resolved_by_ref if resolved_by_ref is not None else {}
+    family_source_cache = source_cache if source_cache is not None else {}
     if factor_ref in active_refs:
         raise ValueError(f'FactorParam 依赖形成循环: {factor_ref}')
+    cached_factor = resolved_cache.get(factor_ref)
+    if cached_factor is not None:
+        return cached_factor
     with _resolving_factor(active_refs, factor_ref):
         dependencies = dict(frozen_by_ref or {})
         for dependency in value.get('factor_dependencies') or []:
@@ -134,17 +150,38 @@ def _resolve_frozen_factor(
                 raise ValueError(f'当场创建的嵌套因子缺少冻结源码: {family_alias}')
             source = {'source_code': embedded_source}
         else:
-            catalog = FactorSourceCatalog()
-            current = catalog.version(
-                principal, source_kind, family_alias, 'current',
-                owner_username='' if is_public else owner_username,
+            source_key = (
+                source_kind,
+                '' if is_public else owner_username,
+                family_alias,
+                fingerprint,
             )
-            source = current
-            if str(current.get('family_formula_fingerprint') or '') != fingerprint:
-                source = catalog.version(
-                    principal, source_kind, family_alias, fingerprint,
-                    owner_username='' if is_public else owner_username,
+            source = family_source_cache.get(source_key)
+            if source is None:
+                run_source = resolve_active_run_factor_source(
+                    source_kind,
+                    'public' if is_public else owner_ref,
+                    family_alias,
                 )
+                if run_source is not None:
+                    source = run_source
+                    actual_fingerprint = _source_family_fingerprint(
+                        str(source.get('source_code') or ''), family_alias,
+                    )
+                    if actual_fingerprint != fingerprint:
+                        raise ValueError(
+                            'RunSpec retained factor source does not match its '
+                            f'frozen family fingerprint: {family_alias}'
+                        )
+                else:
+                    source = _frozen_catalog_source(
+                        principal=principal,
+                        source_kind=source_kind,
+                        family_alias=family_alias,
+                        fingerprint=fingerprint,
+                        owner_username='' if is_public else owner_username,
+                    )
+                family_source_cache[source_key] = source
         factor_cls, _ = _load_factor_family_from_source(
             str(source.get('source_code') or ''), family_alias,
         )
@@ -166,14 +203,92 @@ def _resolve_frozen_factor(
         with factor_param_resolver_scope(lambda nested: resolve_factor_param_value(
             nested, username=principal, frozen_by_ref=dependencies,
             _resolving_refs=active_refs,
+            _resolved_by_ref=resolved_cache,
+            _source_cache=family_source_cache,
         )):
             factor = family.get_factor(**normalized)
         expression = getattr(factor, '_source_expr', None) or factor.expr
+        from server.modules.shared.factor_param_utils import (
+            factor_param_value_storage,
+        )
+
+        normalized_storage = {
+            parameter.alias: factor_param_value_storage(
+                parameter, normalized.get(parameter.alias),
+            )
+            for parameter in family.params
+        }
         if str(factor.alias) != frozen['alias']:
             raise ValueError(f'因子 alias 与冻结记录不匹配: {frozen["alias"]}')
         if expression.semantic_fingerprint() != identity['self_formula_fingerprint']:
             raise ValueError(f'因子公式指纹不匹配: {frozen["alias"]}')
+        if normalized_storage != identity.get('params'):
+            raise ValueError(f'因子参数与冻结身份不匹配: {frozen["alias"]}')
+        resolved_cache[factor_ref] = factor
         return factor
+
+
+def _source_family_fingerprint(source_code: str, family_alias: str) -> str:
+    if not source_code.strip():
+        raise ValueError(f'因子家族源码为空: {family_alias}')
+    factor_cls, _ = _load_factor_family_from_source(source_code, family_alias)
+    if factor_cls is None:
+        raise ValueError(f'因子家族源码无法加载: {family_alias}')
+    family = factor_cls()
+    expression = getattr(family, 'expr', None)
+    if expression is None:
+        raise ValueError(f'因子家族公式不可用: {family_alias}')
+    return str(expression.semantic_fingerprint())
+
+
+def _frozen_catalog_source(
+    *,
+    principal: str,
+    source_kind: str,
+    family_alias: str,
+    fingerprint: str,
+    owner_username: str,
+) -> dict:
+    """Prefer a matching current source, then resolve the exact frozen version."""
+    catalog = FactorSourceCatalog()
+    current = None
+    try:
+        current = catalog.version(
+            principal, source_kind, family_alias, 'current',
+            owner_username=owner_username,
+        )
+    except FileNotFoundError:
+        # A deleted family can still have retained formula history. The exact
+        # historical lookup below is independent of current source presence.
+        pass
+    if current is not None:
+        try:
+            if _source_family_fingerprint(
+                str(current.get('source_code') or ''), family_alias,
+            ) == fingerprint:
+                return current
+        except ValueError:
+            # A broken current entry must not mask a valid historical revision.
+            pass
+    try:
+        historical = catalog.version(
+            principal, source_kind, family_alias, fingerprint,
+            owner_username=owner_username,
+        )
+    except FileNotFoundError as error:
+        raise ValueError(
+            '冻结因子源码版本不可用: '
+            f'{family_alias}@{fingerprint}'
+        ) from error
+    actual_fingerprint = _source_family_fingerprint(
+        str(historical.get('source_code') or ''), family_alias,
+    )
+    if actual_fingerprint != fingerprint:
+        raise ValueError(
+            '历史因子源码指纹与冻结身份不匹配: '
+            f'{family_alias}@{fingerprint}'
+        )
+    return historical
 
 
 @contextmanager
