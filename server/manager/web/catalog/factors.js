@@ -69,10 +69,21 @@
   async function setDetail(context, targetRef, mode = "view", options = {}) {
     context.activeNav("factors");
     const inline = context.testObjectTemporary && context.testObjectInitialValue;
+    const canonicalReadOnly = !inline
+      && context.testObjectTemporary !== true
+      && context.testObjectSnapshot !== true
+      && mode === "view"
+      && String(targetRef || "").startsWith("factor-set:v2:");
     let data = inline
       ? {sets: [context.testObjectInitialValue], factors: []}
       : await catalog().load(context, {
-        sets: true, library: mode === "create" || mode === "edit",
+        // A frozen detail request already returns the set's owner, edit
+        // capability and first member page.  Avoid fetching every own and
+        // subordinate set merely to render a cold read-only deep link.
+        // Legacy refs still need the catalog to resolve their canonical ref;
+        // editors need the list projection for access checks and hydration.
+        sets: !canonicalReadOnly,
+        library: mode === "create" || mode === "edit",
       });
     if (!catalog().isCurrent(context)) return;
     if (mode === "create" || mode === "edit") {
