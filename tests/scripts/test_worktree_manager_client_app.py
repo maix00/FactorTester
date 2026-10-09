@@ -4310,3 +4310,108 @@ def test_report_reader_switches_branches_inside_the_active_report_tab() -> None:
     assert 'reportReadingByBranch[publicationID]' in report_entry
     assert 'context.updateActiveTab({path: target.href})' in report_entry
     assert 'render(targetPublicationID, context)' in report_entry
+
+
+def test_product_categories_render_before_source_labels_and_ignore_stale_responses() -> None:
+    playwright = pytest.importorskip("playwright.sync_api")
+    with playwright.sync_playwright() as p:
+        browser = None
+        for options in ({"channel": "chrome"}, {}):
+            try:
+                browser = p.chromium.launch(headless=True, **options)
+                break
+            except Exception:
+                continue
+        if browser is None:
+            pytest.skip("Chrome and Playwright Chromium are unavailable")
+        try:
+            page = browser.new_page(viewport={"width": 1200, "height": 700})
+            errors: list[str] = []
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.set_content("<header></header><main></main>")
+            page.add_script_tag(
+                path=str(ROOT / "tests/scripts/fixtures/product_categories_async.js"),
+            )
+            page.add_script_tag(
+                path=str(ROOT / "server/manager/web/catalog/product-categories.js"),
+            )
+
+            page.evaluate("""() => {
+              window.requests = newProductCategoriesRequests();
+              FTProductCategories.list(context, productCategoriesHelpers(requests));
+              requests.categories.resolve({categories: [{
+                id: 'category-1', title_zh: '分类一', source_ids: ['source-1']
+              }]});
+            }""")
+            page.wait_for_selector(
+                ".product-category-management-results table tbody tr",
+            )
+            source_link = page.locator(".catalog-source-family-link")
+            assert source_link.inner_text() == "source-1"
+            page.evaluate("""requests.sources.resolve([{
+              id: 'source-1', family_id: 'source-1', family_name: '远端行情源'
+            }])""")
+            page.wait_for_function(
+                "document.querySelector('.catalog-source-family-link')?.textContent"
+                " === '远端行情源'",
+            )
+            assert page.locator("main table tbody tr").count() == 1
+
+            page.evaluate("""() => {
+              context.content.replaceChildren();
+              window.failedRequests = newProductCategoriesRequests();
+              FTProductCategories.list(context, productCategoriesHelpers(failedRequests));
+              failedRequests.categories.resolve({categories: [{
+                id: 'category-2', title_zh: '分类二', source_ids: ['source-2']
+              }]});
+            }""")
+            page.wait_for_function(
+                "document.querySelector('.product-category-management-results table tbody tr')"
+                "?.textContent.includes('分类二')",
+            )
+            page.evaluate("failedRequests.sources.reject(new Error('peer unavailable'))")
+            page.wait_for_timeout(0)
+            assert page.locator(
+                ".product-category-management-results table tbody tr",
+            ).count() == 1
+
+            page.evaluate("""() => {
+              context.content.replaceChildren();
+              window.oldRequests = newProductCategoriesRequests();
+              FTProductCategories.list(context, productCategoriesHelpers(oldRequests));
+              oldRequests.categories.resolve({categories: [{
+                id: 'old-category', title_zh: '旧分类', source_ids: ['source-old']
+              }]});
+            }""")
+            page.wait_for_function(
+                "document.querySelector('.catalog-source-family-link')?.textContent"
+                " === 'source-old'",
+            )
+            page.evaluate("""() => {
+              window.currentRequests = newProductCategoriesRequests();
+              FTProductCategories.list(context, productCategoriesHelpers(currentRequests));
+              currentRequests.categories.resolve({categories: [{
+                id: 'current-category', title_zh: '当前分类', source_ids: ['source-current']
+              }]});
+            }""")
+            page.wait_for_function(
+                "document.querySelector('.catalog-source-family-link')?.textContent"
+                " === 'source-current'",
+            )
+            page.evaluate("""oldRequests.sources.resolve([{
+              id: 'source-old', family_id: 'source-old', family_name: '过期来源'
+            }])""")
+            page.wait_for_timeout(0)
+            assert page.locator(
+                ".catalog-source-family-link",
+            ).inner_text() == "source-current"
+            page.evaluate("""currentRequests.sources.resolve([{
+              id: 'source-current', family_id: 'source-current', family_name: '当前来源'
+            }])""")
+            page.wait_for_function(
+                "document.querySelector('.catalog-source-family-link')?.textContent"
+                " === '当前来源'",
+            )
+            assert not errors
+        finally:
+            browser.close()
