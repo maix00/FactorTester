@@ -146,6 +146,14 @@ vm.runInThisContext(
   {filename: "factor-details.js"},
 );
 vm.runInThisContext(
+  fs.readFileSync("server/manager/web/catalog/factor-catalog-runtime.js", "utf8"),
+  {filename: "factor-catalog-runtime.js"},
+);
+vm.runInThisContext(
+  fs.readFileSync("server/manager/web/catalog/factors.js", "utf8"),
+  {filename: "factors.js"},
+);
+vm.runInThisContext(
   fs.readFileSync("server/manager/web/workbench/object-overlay.js", "utf8"),
   {filename: "object-overlay.js"},
 );
@@ -156,10 +164,12 @@ const factorRef = `factor:v2:${"x".repeat(43)}`;
 const setRef = `factor-set:v2:${"y".repeat(43)}`;
 
 const navigated = [];
+const apiPaths = [];
 const content = new Element();
 const toolbar = new Element();
 const context = {
   t: value => value, content, toolbar,
+  activeNav() {},
   button(label, handler) {
     const button = new Element("button");
     button.textContent = label; button.listeners.click = handler; return button;
@@ -169,15 +179,26 @@ const context = {
   navigate(path) { navigated.push(path); },
   isRouteCurrent() { return true; },
   async api(path) {
+    apiPaths.push(path);
+    if (path === "/api/factor-library/factor-sets") {
+      return {items: [{
+        target_ref: setRef, set_ref: "legacy-set", owner_username: "alice",
+      }]};
+    }
     assert.match(path, /factor-sets\/detail/);
+    const query = new URLSearchParams(path.split("?")[1] || "");
+    const offset = Number(query.get("offset") || 0);
     return {
       factor_set: {
         target_ref: setRef,
         title_zh: "动量集合",
-        has_more: false,
-        related_references: [{
+        owner_username: "alice",
+        can_edit: false,
+        has_more: offset === 0,
+        next_offset: 100,
+        related_references: offset === 0 ? [{
           kind: "factor", label: alias, target_ref: factorRef,
-        }],
+        }] : [],
       },
     };
   },
@@ -733,6 +754,39 @@ assert.ok(
   setLink.listeners.click({preventDefault() {}});
   assert.strictEqual(
     navigated.at(-1), `/factors/set/${encodeURIComponent(setRef)}`,
+  );
+
+  // A cold canonical detail route must use the detail projection directly.
+  // Loading the full own+subordinate collection first adds an avoidable RTT.
+  context.testObjectTemporary = false;
+  context.testObjectInitialValue = null;
+  const beforeCanonicalRequests = apiPaths.length;
+  await window.FTFactors.setDetail(context, setRef, "view");
+  assert.deepStrictEqual(
+    apiPaths.slice(beforeCanonicalRequests).map(path => path.split("?")[0]),
+    ["/api/factor-library/factor-sets/detail"],
+    "cold canonical read-only details should not fetch the whole set catalog",
+  );
+  const memberMountForDirectRead = walk(content).find(item => (
+    item.className === "factor-set-members"
+  ));
+  const loadMore = memberMountForDirectRead.children.find(item => (
+    item.textContent === "加载更多"
+  ));
+  assert.ok(loadMore, "the first detail page should keep member pagination");
+  await loadMore.listeners.click();
+  assert.match(
+    apiPaths.at(-1), /owner_username=alice/,
+    "later member pages should reuse the owner returned by the detail projection",
+  );
+
+  // Older references still resolve through the catalog's canonical target.
+  const beforeLegacyRequests = apiPaths.length;
+  await window.FTFactors.setDetail(context, "legacy-set", "view");
+  assert.deepStrictEqual(
+    apiPaths.slice(beforeLegacyRequests).map(path => path.split("?")[0]),
+    ["/api/factor-library/factor-sets", "/api/factor-library/factor-sets/detail"],
+    "legacy references should retain catalog-assisted canonicalization",
   );
   console.log("ok");
 })().catch(error => {

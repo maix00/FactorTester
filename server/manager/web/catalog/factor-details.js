@@ -398,6 +398,11 @@
       : await loadSetPage(context, selected, frozenRef, 0, nativeRequest);
     const value = first.factor_set || first || {};
     if (context.isRouteCurrent?.() === false) return;
+    // A direct deep link has no catalog row to carry the owner into later
+    // member-page requests. The detail projection is authoritative and
+    // already includes owner_username, so reuse it to avoid repeating the
+    // cross-account visibility lookup on every “load more”.
+    const pageSelection = selected || value;
     const fallbackTitle = context.testObjectTemporary ? "因子候选" : "因子集合";
     context.setHeading(value.title_zh || context.t(fallbackTitle), context.t(fallbackTitle));
     context.updateActiveTab?.({title: value.title_zh || context.t(fallbackTitle)});
@@ -479,7 +484,7 @@
     context.content.replaceChildren(root);
     const members = [];
     await appendSetPage(
-      context, selected, frozenRef, first, members, memberMount, nativeRequest,
+      context, pageSelection, frozenRef, first, members, memberMount, nativeRequest,
     );
   }
 
