@@ -70,19 +70,32 @@
     const loadIntoMount = async () => {
       const token = ++loadToken;
       mount.replaceChildren(FTUI.loading(context.t("正在读取产品分类…")));
+      let sourceDefinitions = [];
+      const sourceDefinitionsPromise = Promise.resolve()
+        .then(() => helpers.loadSources?.(context, source) || [])
+        .then(value => {
+          sourceDefinitions = Array.isArray(value) ? value : [];
+          if (isCurrentView(token)) {
+            updateSourceFamilyLabels(mount, helpers, sourceDefinitions, source);
+          }
+          return sourceDefinitions;
+        })
+        .catch(() => []);
       try {
-        const results = await Promise.allSettled([
-          helpers.loadCategories(context, source),
-          helpers.loadSources?.(context, source) || Promise.resolve([]),
-        ]);
+        const categories = await helpers.loadCategories(context, source);
         if (!isCurrentView(token)) return;
-        if (results[0].status === "rejected") throw results[0].reason;
-        const sourceDefinitions = results[1].status === "fulfilled"
-          ? results[1].value : [];
         renderCategories(
-          context, helpers, mount, results[0].value.categories || [], readOnly,
+          context, helpers, mount, categories.categories || [], readOnly,
           source, sourceDefinitions,
         );
+        // If the descriptor request completed before categories, it was used
+        // by the first render. Otherwise its completion only patches source
+        // labels and never replaces the already interactive category table.
+        void sourceDefinitionsPromise.then(definitions => {
+          if (isCurrentView(token)) {
+            updateSourceFamilyLabels(mount, helpers, definitions, source);
+          }
+        });
       } catch (error) {
         if (!isCurrentView(token)) return;
         mount.replaceChildren(FTUI.empty(
@@ -149,13 +162,13 @@
   function sourceFamilyCell(context, helpers, ids, definitions, source) {
     const cell = document.createElement("div");
     cell.className = "catalog-source-lines catalog-source-family-list";
-    const byID = new Map((Array.isArray(definitions) ? definitions : []).map(item => [
-      String(item.id || item.family_id || item.bundle_id || ""), item,
-    ]));
+    const byID = sourceDescriptorMap(definitions);
     (Array.isArray(ids) ? ids : []).forEach(id => {
-      const descriptor = byID.get(String(id));
+      const key = String(id);
+      const descriptor = byID.get(key);
       const link = document.createElement("a");
       link.className = "catalog-source-family-link";
+      link.dataset.sourceFamilyId = key;
       link.textContent = descriptor?.family_name || descriptor?.bundle_name
         || descriptor?.source_name || id;
       if (helpers.sourceFamilyPath) {
@@ -173,6 +186,34 @@
     });
     if (!cell.childElementCount) cell.textContent = "—";
     return cell;
+  }
+
+  function sourceDescriptorMap(definitions) {
+    const byID = new Map();
+    (Array.isArray(definitions) ? definitions : []).forEach(item => {
+      [item.id, item.family_id, item.bundle_id].forEach(value => {
+        const key = String(value || "");
+        if (key && !byID.has(key)) byID.set(key, item);
+      });
+    });
+    return byID;
+  }
+
+  function updateSourceFamilyLabels(mount, helpers, definitions, source) {
+    const byID = sourceDescriptorMap(definitions);
+    mount.querySelectorAll(".catalog-source-family-link").forEach(link => {
+      const key = String(link.dataset.sourceFamilyId || "");
+      const descriptor = byID.get(key);
+      if (!descriptor) return;
+      link.textContent = descriptor.family_name || descriptor.bundle_name
+        || descriptor.source_name || key;
+      if (helpers.sourceFamilyPath) {
+        link.setAttribute("href", helpers.sourceFamilyPath(
+          descriptor.family_id || descriptor.bundle_id || descriptor.id || key,
+          source,
+        ));
+      }
+    });
   }
 
   function ownerSummary(context, category) {
