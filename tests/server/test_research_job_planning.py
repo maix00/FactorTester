@@ -15,6 +15,12 @@ class _Named:
     name: str
 
 
+@dataclass
+class _MutableSource:
+    key: str
+    revision: int
+
+
 class _Selection:
     selection_id = "core"
     products = (_Named("AP.CZCE"),)
@@ -63,7 +69,7 @@ def test_backtest_planner_freezes_term_structure_and_market_data(monkeypatch) ->
         "tools.testers.backtest.modules.market_data._select_required_product_frequency",
         lambda product, available, required: required,
     )
-    source = _Named("LocalCNFutures")
+    source = _MutableSource("LocalCNFutures", revision=1)
     monkeypatch.setattr(
         "tools.testers.backtest.modules.market_data._select_required_product_source",
         lambda product, frequency, required: source,
@@ -98,6 +104,27 @@ def test_backtest_planner_freezes_term_structure_and_market_data(monkeypatch) ->
         },
     ]
     assert plan["notices"][0]["code"] == "term_structure_lifecycle_authority_missing"
+
+    # A source keeps its stable identity while its current data changes. That
+    # does not invalidate a plan or prevent a new calculation against the
+    # source's current contents.
+    source.revision = 2
+    refreshed_source_plan = build_execution_plan("backtest", {"_owner": "alice"})
+    assert refreshed_source_plan["resolved_hash"] == plan["resolved_hash"]
+    verify_execution_plan("backtest", {
+        "_owner": "alice",
+        "execution_plan": plan,
+    })
+
+    # Selecting a different source is a real input change and still requires
+    # replanning.
+    source.key = "OtherMarketDataSource"
+    with pytest.raises(RuntimeError, match="changed after planning"):
+        verify_execution_plan("backtest", {
+            "_owner": "alice",
+            "execution_plan": plan,
+        })
+    source.key = "LocalCNFutures"
 
     prepared["end_dt"] = "2025-03-01"
     with pytest.raises(RuntimeError, match="changed after planning"):

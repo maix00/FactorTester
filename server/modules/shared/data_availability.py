@@ -10,6 +10,7 @@ from server.services.data_availability import (
     load_availability_profile,
     profile_reference,
 )
+from tools.data.availability.model import PROFILE_SCHEMA_VERSION
 
 from . import shared_bp
 
@@ -41,6 +42,8 @@ def data_availability():
     return jsonify(
         success=True,
         profile_ref=profile_reference(profile),
+        profile_identity_semantics=_profile_identity_semantics(profile),
+        profile_identity_notice=_profile_identity_notice(profile),
         **profile,
     )
 
@@ -59,7 +62,35 @@ def data_availability_profile(profile_ref: str):
         return jsonify(success=False, error=str(exc)), 400
     except KeyError as exc:
         return jsonify(success=False, error=str(exc)), 404
-    return jsonify(success=True, profile_ref=profile_ref, **profile)
+    return jsonify(
+        success=True,
+        profile_ref=profile_ref,
+        profile_identity_semantics=_profile_identity_semantics(profile),
+        profile_identity_notice=_profile_identity_notice(profile),
+        **profile,
+    )
+
+
+def _profile_identity_semantics(profile: dict) -> str:
+    version = int(profile.get("schema_version") or 0)
+    if version >= PROFILE_SCHEMA_VERSION:
+        return "source_key_current_source_contents"
+    return "legacy_metadata_only"
+
+
+def _profile_identity_notice(profile: dict) -> str:
+    version = int(profile.get("schema_version") or 0)
+    if version >= PROFILE_SCHEMA_VERSION:
+        return (
+            "This profile records source identity and observed coverage; it does "
+            "not pin market-data bytes. Source contents and their updates are "
+            "managed by the data source."
+        )
+    return (
+        "Legacy profile metadata does not pin market-data bytes. Its snapshot_ref "
+        "is only a file-metadata marker, and replayable=true does not guarantee "
+        "byte-identical replay. Source contents and updates remain source-managed."
+    )
 
 
 def _string_list(value) -> list[str]:
