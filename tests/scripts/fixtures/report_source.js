@@ -54,6 +54,36 @@ vm.runInThisContext(fs.readFileSync(
   assert.equal(remote.reportAssetPath("asset-1"), "/api/public-research/publication-1/assets/asset-1");
   assert.equal(remote.localResourcePath("resource-1"), "/api/public-research/publication-1/local-resources/resource-1?inline=1");
 
+  const hintedCalls = [];
+  const hintedPublication = window.FTReportSource.create(
+    "research:v1:published-report",
+    async path => {
+      hintedCalls.push(path);
+      assert.equal(path, "/api/public-research/research%3Av1%3Apublished-report/index");
+      return {title: "明确发布来源", assets: [], local_resources: [], related_objects: [], attachments: []};
+    },
+    {researchID: "research-one", sourceKind: "publication"},
+  );
+  await hintedPublication.load();
+  assert.deepEqual(hintedCalls, [
+    "/api/public-research/research%3Av1%3Apublished-report/index",
+  ]);
+
+  const hintedServerCalls = [];
+  const hintedServer = window.FTReportSource.create(
+    "server:self:report-package:agent-work",
+    async path => {
+      hintedServerCalls.push(path);
+      assert.equal(path,
+        "/api/server-research/self%3Areport-package%3Aagent-work/index?target_ref=owner",
+      );
+      return {title: "明确服务器来源", assets: [], local_resources: [], related_objects: [], attachments: []};
+    },
+    {researchID: "research-one", ownerRef: "owner", sourceKind: "server_agent"},
+  );
+  await hintedServer.load();
+  assert.equal(hintedServerCalls.length, 1);
+
   const encoded = window.FTReportSource.create("publication%201", async path => {
     assert.equal(path, "/api/public-research/publication%201/index");
     return {title: "编码报告", assets: [], local_resources: [], related_objects: [], attachments: []};
