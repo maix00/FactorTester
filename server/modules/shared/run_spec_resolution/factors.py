@@ -32,6 +32,8 @@ class RunFactorResolver:
         self.external_factor_artifacts = external_factor_artifacts
         self.page_factors = page_factors or {}
         self.page_uuid = str(page_uuid or "")
+        self.resolved_by_ref: dict[str, Any] = {}
+        self.source_cache: dict[tuple[str, str, str, str], dict] = {}
 
     def resolve(self, *, factor_ref: str = "", alias: str = "") -> Any:
         from server.services.external_factor_artifacts import factor_by_alias
@@ -67,6 +69,8 @@ class RunFactorResolver:
                 record,
                 username=factor_owner,
                 frozen_by_ref=self.frozen_by_ref,
+                _resolved_by_ref=self.resolved_by_ref,
+                _source_cache=self.source_cache,
             )
 
         external = factor_by_alias(self.external_factor_artifacts, wanted_alias)

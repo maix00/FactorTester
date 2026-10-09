@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from copy import deepcopy
 from typing import Any
 
@@ -12,7 +13,10 @@ def _factor_runtime_scope(payload: dict[str, Any]):
     from server.modules.shared.factor_param_resolver import (
         register_factor_param_resolver_for_user,
     )
-    from server.services.factor_registry import transient_factor_source_scope
+    from server.services.factor_registry import (
+        run_factor_source_policy_scope,
+        transient_factor_source_scope,
+    )
 
     run_spec = payload.get("run_spec") or {}
     frozen_factors = (run_spec.get("configuration") or {}).get(
@@ -21,10 +25,18 @@ def _factor_runtime_scope(payload: dict[str, Any]):
     register_factor_param_resolver_for_user(
         str(payload.get("_owner") or ""), frozen_factors,
     )
-    return transient_factor_source_scope(
-        str(payload.get("transient_factor_source_scope_id") or ""),
-        owner=str(payload.get("_owner") or "").strip(),
-    )
+    @contextmanager
+    def scope():
+        with transient_factor_source_scope(
+            str(payload.get("transient_factor_source_scope_id") or ""),
+            owner=str(payload.get("_owner") or "").strip(),
+        ):
+            with run_factor_source_policy_scope(
+                run_spec, owner=str(payload.get("_owner") or "").strip(),
+            ):
+                yield
+
+    return scope()
 
 
 def run_group(payload: dict[str, Any], sink: Any, cancel_event: Any) -> None:

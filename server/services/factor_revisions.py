@@ -40,12 +40,12 @@ def freeze_factor_revisions(
     return frozen
 
 
-def assert_run_spec_factor_revisions_current(
+def assert_run_spec_factor_revisions_resolvable(
     run_spec: dict[str, Any],
     *,
     owner: str,
 ) -> None:
-    """Fail closed unless execution resolves the exact frozen formulas."""
+    """Fail closed unless every factor resolves from its frozen identity."""
     if int(run_spec.get("run_spec_version") or 0) < 3:
         raise ValueError("legacy RunSpec factor identity is incompatible")
     configuration = run_spec.get("configuration")
@@ -61,7 +61,32 @@ def assert_run_spec_factor_revisions_current(
     if factors != shared.get("factors"):
         raise ValueError("RunSpec factors must be canonically deduplicated")
     _assert_role_factor_refs_frozen(configuration, factors)
-    _assert_factors_current(factors, owner=owner)
+    from server.services.factor_registry import run_factor_source_policy_scope
+    from server.modules.shared.factor_param_resolver import (
+        resolve_factor_param_value,
+    )
+    from tools.factors.factor_param_resolution import factor_param_resolver_scope
+
+    frozen_by_ref = {item["ref"]: item for item in factors}
+    resolved_by_ref: dict[str, object] = {}
+    source_cache: dict[tuple[str, str, str, str], dict] = {}
+    with run_factor_source_policy_scope(run_spec, owner=owner):
+        with factor_param_resolver_scope(lambda value: resolve_factor_param_value(
+            value, username=owner, frozen_by_ref=frozen_by_ref,
+            _resolved_by_ref=resolved_by_ref,
+            _source_cache=source_cache,
+        )):
+            for factor in factors:
+                resolved = resolve_factor_param_value(
+                    factor, username=owner, frozen_by_ref=frozen_by_ref,
+                    _resolved_by_ref=resolved_by_ref,
+                    _source_cache=source_cache,
+                )
+                if resolved is None:
+                    raise ValueError(
+                        "frozen RunSpec factor could not be resolved: "
+                        f"{factor['ref']}"
+                    )
 
 
 def _assert_factors_current(
@@ -287,6 +312,6 @@ def _load_revision_definition(
 
 
 __all__ = [
-    "assert_run_spec_factor_revisions_current",
+    "assert_run_spec_factor_revisions_resolvable",
     "freeze_factor_revisions",
 ]

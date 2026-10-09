@@ -130,7 +130,7 @@ def test_grouped_ic_planner_uses_only_the_group_owned_frozen_scope(monkeypatch):
         "return_price_basis": "next_open_to_open_adjusted",
     }]}, factor_frequencies={factor_ref: "MIN5"})
     monkeypatch.setattr(
-        "server.services.factor_revisions.assert_run_spec_factor_revisions_current",
+        "server.services.factor_revisions.assert_run_spec_factor_revisions_resolvable",
         lambda *args, **kwargs: None,
     )
     plan = build_execution_plan("ic", {
