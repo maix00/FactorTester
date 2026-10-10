@@ -1258,7 +1258,7 @@ def test_factor_detail_modes_share_page_shell_and_family_only_has_version_picker
     )
     factor_view = details.split("async function familyDetail", 1)[0]
     family_view = details.split("async function familyDetail", 1)[1].split(
-        "async function withSource", 1,
+        "function sourceVersionHistory", 1,
     )[0]
 
     assert "function pageClass" in shared
@@ -1270,6 +1270,9 @@ def test_factor_detail_modes_share_page_shell_and_family_only_has_version_picker
     assert "FTFactorDetailShared.pageClass" in family_view
     assert "sourceVersionHistory" not in factor_view
     assert "sourceVersionHistory" in family_view
+    assert "onActivate: loadMembers" in family_view
+    assert "onActivate: loadCurrentSource" in family_view
+    assert "withCurrentFamilySource" not in details
     assert "FTFactorDetailShared.versionPicker" in editor
     assert 'context.t("读取版本历史")' not in editor
     assert "/api/factor-library/family-sources/" in shared
@@ -3047,7 +3050,10 @@ def test_factor_details_render_latex_and_factor_set_members_open() -> None:
     assert "testObjectInitialValue" in details
     assert "localView" in details
     assert "canSelectVersion" in details
-    assert "withCurrentFamilySource" in details
+    assert "onActivate: loadCurrentSource" in details
+    assert "family detail loads only the family projection" in fixture.read_text(
+        encoding="utf-8",
+    )
 
 
 def test_factor_detail_route_declares_katex_runtime_dependency() -> None:
