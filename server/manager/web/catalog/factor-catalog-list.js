@@ -168,7 +168,10 @@
         + (scope === "public" ? "&visibility=public" : "")
       : page === "sets"
         ? `/factors/set/${encodeURIComponent(ref)}?mode=edit`
-        : `/factors/factor/${encodeURIComponent(ref)}?mode=edit`;
+        : `/factors/factor/${encodeURIComponent(ref)}?${new URLSearchParams({
+          mode: "edit",
+          ...(item?.owner_username ? {owner_username: item.owner_username} : {}),
+        })}`;
     context.navigate(path);
   }
 

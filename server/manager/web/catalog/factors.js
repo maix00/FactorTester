@@ -7,6 +7,23 @@
       || item?.alias === target || item?.factor_alias === target;
   }
 
+  function cachedRows(cache, resource) {
+    const scoped = Object.values(cache.familyScopes || {}).flatMap(scope => (
+      Array.isArray(scope?.[resource]) ? scope[resource] : []
+    ));
+    return [...(cache[resource] || []), ...scoped];
+  }
+
+  function familyForFactor(families, factor) {
+    return families.find(item => (
+      (item.factor_family_alias || item.factor_family_name)
+        === factor.factor_family_alias
+      && item.family_formula_fingerprint === factor.family_formula_fingerprint
+      && (item.factor_owner_ref || item.owner_ref || item.owner_username)
+        === (factor.factor_owner_ref || factor.owner_username)
+    ));
+  }
+
   async function ensureEditor() {
     if (window.FTFactorEditor?.render || !window.FTStaticLoader?.loadGroups) return;
     await window.FTStaticLoader.loadGroups(["factor-catalog-editor"]);
@@ -30,12 +47,55 @@
       return window.FTFactorDetails.factorDetail(context,
         {factors: [payload.factor], families: []}, targetRef, mode, catalog().nativeRequest, options);
     }
-    let data = inline
-      ? {factors: [context.testObjectInitialValue], families: []}
-      : await catalog().load(context, {library: true});
-    if (!inline && mode === "view" && targetRef
-        && !data.factors.some(item => factorMatches(item, targetRef))) {
-      data = await catalog().load(context, {refresh: true, library: true});
+    let data;
+    const canonicalFactorRef = /^factor:v2:[A-Za-z0-9_-]{43}$/.test(String(targetRef || ""));
+    if (inline) {
+      data = {factors: [context.testObjectInitialValue], families: []};
+    } else if (mode === "view" && canonicalFactorRef) {
+      const query = new URLSearchParams({factor_ref: String(targetRef)});
+      const location = globalThis.location || window.location;
+      const owner = new URLSearchParams(location?.search || "").get("owner_username") || "";
+      if (owner) query.set("owner_username", owner);
+      // Factor refs are immutable and indexed in the local account mirror.
+      // Fetch only this row; preserve a matching family already cached by a
+      // catalog screen without causing that catalog to load on cold details.
+      const cached = catalog().peek(context);
+      const cachedFactors = cachedRows(cached, "factors");
+      const cachedFamilies = cachedRows(cached, "families");
+      const cachedFactor = owner
+        ? cachedFactors.find(item => factorMatches(item, targetRef)
+          && String(item.owner_username || "") === owner)
+        : null;
+      const cachedFamily = cachedFactor
+        && familyForFactor(cachedFamilies, cachedFactor);
+      if (cachedFactor && cachedFamily) {
+        data = {factors: [cachedFactor], families: [cachedFamily]};
+      } else {
+        try {
+          const payload = await context.api(
+            `/api/factor-library/factors/detail?${query}`,
+          );
+          if (!payload?.factor) {
+            throw new Error(context.t("因子不存在或当前端口无法解析该引用"));
+          }
+          catalog().upsertFactor(payload.factor);
+          if (payload.family) catalog().upsertFamily(payload.family);
+          const family = payload.family
+            || familyForFactor(cachedFamilies, payload.factor);
+          data = {factors: [payload.factor], families: family ? [family] : []};
+        } catch (error) {
+          if (error?.status === 404) {
+            throw new Error(context.t("因子不存在、已删除或尚未同步到当前服务器"));
+          }
+          throw error;
+        }
+      }
+    } else {
+      data = await catalog().load(context, {library: true});
+      if (mode === "view" && targetRef
+          && !data.factors.some(item => factorMatches(item, targetRef))) {
+        data = await catalog().load(context, {refresh: true, library: true});
+      }
     }
     if (!catalog().isCurrent(context)) return;
     if (mode === "create" || mode === "edit") await ensureEditor();

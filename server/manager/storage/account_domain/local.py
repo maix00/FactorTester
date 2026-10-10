@@ -507,7 +507,14 @@ class LocalAccountDomainStore:
     def factor_catalog(self, principal: str, *, factor_ref: str = "", offset: int = 0, limit: int | None = None) -> list[dict[str, Any]]:
         clauses = ["principal=?", "entity_type='factor_catalog_entry'", "deleted=0"]
         args: list[Any] = [principal]
+        table = "account_domain_entities"
         if factor_ref:
+            # Keep the stable entity_id ordering below, but make SQLite use
+            # the expression index for this exact-ref path. Without the hint,
+            # the primary key often wins because it also satisfies ORDER BY,
+            # scanning every catalog row for the principal before applying
+            # the JSON ref predicate.
+            table += " INDEXED BY account_domain_factor_catalog_ref"
             clauses.append("json_extract(payload_json, '$.factor.factor_ref')=?")
             args.append(factor_ref)
         paging = ""
@@ -516,7 +523,7 @@ class LocalAccountDomainStore:
             args.extend((max(1, min(1000, int(limit))), max(0, int(offset))))
         with connect_sqlite(self.path) as conn:
             rows = conn.execute(
-                "SELECT payload_json FROM account_domain_entities WHERE " + " AND ".join(clauses) +
+                "SELECT payload_json FROM " + table + " WHERE " + " AND ".join(clauses) +
                 " ORDER BY entity_id" + paging, args,
             ).fetchall()
         return [_decode(row["payload_json"])["factor"] for row in rows]

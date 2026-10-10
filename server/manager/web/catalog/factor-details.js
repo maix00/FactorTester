@@ -9,6 +9,13 @@
     return String(value?.factor_ref || value?.ref || "");
   }
 
+  function factorPath(value, ref = factorRef(value)) {
+    const query = new URLSearchParams();
+    if (value?.owner_username) query.set("owner_username", value.owner_username);
+    const suffix = query.toString();
+    return `/factors/factor/${encodeURIComponent(ref)}${suffix ? `?${suffix}` : ""}`;
+  }
+
   function factorMatches(value, targetRef) {
     const target = String(targetRef || "");
     return String(value?.factor_ref || "") === target
@@ -235,9 +242,7 @@
           FTUI.userDisplay(item.owner_ref || item.owner_username, model().owner(item)),
         ]),
       );
-      linkRows(view, members, item =>
-        `/factors/factor/${encodeURIComponent(factorRef(item))}`, context,
-      );
+      linkRows(view, members, item => factorPath(item), context);
       membersPanel.replaceChildren(view.shell);
     };
 
@@ -614,7 +619,7 @@
     if (Object.prototype.hasOwnProperty.call(value || {}, "source_factors")) {
       rows.push([
         context.t("来源因子"),
-        referenceLinks(context, value.source_factors, "factor"),
+        referenceLinks(context, value.source_factors, "factor", value.owner_username || ""),
       ]);
     }
     if (Object.prototype.hasOwnProperty.call(value || {}, "source_factor_sets")) {
@@ -646,7 +651,7 @@
     });
   }
 
-  function referenceLinks(context, raw, kind) {
+  function referenceLinks(context, raw, kind, defaultFactorOwner = "") {
     const root = document.createElement("span");
     root.className = "factor-set-source-links";
     const items = Array.isArray(raw) ? raw.filter(item => item?.target_ref) : [];
@@ -660,14 +665,22 @@
         separator.textContent = "、";
         root.append(separator);
       }
-      const path = `/factors/${kind}/${encodeURIComponent(item.target_ref)}`;
+      const selected = kind === "factor" ? {
+        ...item,
+        owner_username: item.owner_username || defaultFactorOwner,
+      } : item;
+      const query = new URLSearchParams();
+      if (selected.owner_username) query.set("owner_username", selected.owner_username);
+      const encodedQuery = query.toString();
+      const path = `/factors/${kind}/${encodeURIComponent(item.target_ref)}`
+        + (encodedQuery ? `?${encodedQuery}` : "");
       const link = document.createElement("a");
       link.href = path;
       link.className = "catalog-source-family-link";
       link.textContent = item.label || item.target_ref;
       link.addEventListener("click", event => {
         event.preventDefault();
-        navigateReference(context, kind, item, path);
+        navigateReference(context, kind, selected, path);
       });
       root.append(link);
     });
@@ -684,9 +697,14 @@
       [context.t("因子"), context.t("冻结引用")],
       members.map(item => [item.label || item.title_zh, item.target_ref]),
     );
-    linkRows(view, members, item =>
-      `/factors/factor/${encodeURIComponent(item.target_ref)}`, context,
-      (item, path) => navigateReference(context, "factor", item, path),
+    linkRows(view, members, item => factorPath({
+      ...item,
+      owner_username: item.owner_username || selected?.owner_username || "",
+    }, item.target_ref), context,
+      (item, path) => navigateReference(context, "factor", {
+        ...item,
+        owner_username: item.owner_username || selected?.owner_username || "",
+      }, path),
     );
     mount.replaceChildren(view.shell);
     if (!page.has_more) return;
