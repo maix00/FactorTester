@@ -139,12 +139,11 @@
     }
     if (!family) throw new Error(context.t("因子家族不存在或当前端口无法解析该引用"));
     // A test-local family (created inline in a test editor, never persisted)
-    // has no server version history: render its carried frozen value directly
-    // instead of attempting a catalog round-trip for "current" source.
+    // has no server version history: render its carried frozen value directly.
     const localView = (context.testObjectTemporary || context.testObjectSnapshot)
       && context.testObjectInitialValue;
-    if (!localView) family = await withCurrentFamilySource(context, family);
     const baseFamily = family;
+    let detailData = data;
     const canSelectVersion = !localView && Boolean(
       baseFamily.family_ref || baseFamily.factor_family_alias,
     );
@@ -201,8 +200,141 @@
     let selectedVersion = "";
     let sourceVersions = null;
     let renderSequence = 0;
+    let sourceLoad = null;
+    let membersLoad = null;
+    let sourcePanel = null;
+    let membersPanel = null;
+    let summaryPanel = null;
+    let parametersPanel = null;
+    let activeDisplayFamily = baseFamily;
+    let currentFamily = baseFamily;
+    const memberRefs = new Set((baseFamily.factor_refs || []).map(String));
+    const hasMembers = memberRefs.size > 0
+      || Number(baseFamily.factor_count || 0) > 0;
+    let membersLoaded = data.factorsLoaded === true
+      || (data.factorsLoaded !== false && Array.isArray(data.factors)
+        && (data.factors.length > 0 || !hasMembers));
+
+    const renderMembers = () => {
+      if (!membersPanel) return;
+      const members = (detailData.factors || []).filter(item =>
+        memberRefs.has(factorRef(item))
+      );
+      if (!members.length) {
+        const empty = document.createElement("p");
+        empty.className = "factor-family-members-empty";
+        empty.textContent = context.t("暂无已登记的成员因子");
+        membersPanel.replaceChildren(empty);
+        return;
+      }
+      const view = FTUI.table(
+        [context.t("因子"), context.t("来源"), context.t("所有者")],
+        members.map(item => [
+          item.factor_alias,
+          context.t(item.factor_kind === "public" ? "公共" : "用户"),
+          FTUI.userDisplay(item.owner_ref || item.owner_username, model().owner(item)),
+        ]),
+      );
+      linkRows(view, members, item =>
+        `/factors/factor/${encodeURIComponent(factorRef(item))}`, context,
+      );
+      membersPanel.replaceChildren(view.shell);
+    };
+
+    const loadMembers = async () => {
+      if (membersLoaded) {
+        renderMembers();
+        return;
+      }
+      if (membersLoad) return membersLoad;
+      membersPanel?.replaceChildren(FTUI.loading(
+        context.t("正在读取成员因子…"),
+      ));
+      membersLoad = (async () => {
+        try {
+          const next = await window.FTFactorCatalog.load(context, {factors: true});
+          detailData = next;
+          membersLoaded = next.factorsLoaded !== false;
+          renderMembers();
+        } catch (error) {
+          if (!membersPanel) return;
+          const failure = document.createElement("div");
+          failure.className = "factor-family-members-error";
+          const message = document.createElement("p");
+          message.textContent = error.message || context.t("成员因子读取失败");
+          failure.append(message, context.button(
+            context.t("重试"), () => {
+              membersLoad = null;
+              void loadMembers();
+            }, context.t("重试读取成员因子"),
+          ));
+          membersPanel.replaceChildren(failure);
+        } finally {
+          membersLoad = null;
+        }
+      })();
+      return membersLoad;
+    };
+
+    const loadCurrentSource = async () => {
+      if (activeDisplayFamily.source_code) return;
+      if (sourceLoad) return sourceLoad;
+      const selected = selectedVersion || "current";
+      const sequence = renderSequence;
+      sourcePanel?.replaceChildren(FTUI.loading(
+        context.t("正在读取因子家族源码…"),
+      ));
+      let request;
+      request = (async () => {
+        try {
+          const payload = await window.FTFactorDetailShared.loadSourceVersion(
+            context, baseFamily, selected,
+          );
+          if (sequence !== renderSequence) return;
+          activeDisplayFamily = {
+            ...(selected === "current" ? currentFamily : activeDisplayFamily),
+            ...payload,
+            source_unavailable_reason: "",
+          };
+          if (selected === "current") currentFamily = activeDisplayFamily;
+          sourcePanel?.replaceChildren(
+            window.FTFactorDetailShared.source(context, activeDisplayFamily),
+          );
+          if (selected === "current") {
+            summaryPanel?.replaceChildren(
+              window.FTFactorDetailShared.summary(context, currentFamily),
+            );
+            const parameters = window.FTFactorDetailShared.parameterTable(
+              context, currentFamily, {showValue: false},
+            );
+            parametersPanel?.replaceChildren(...(parameters ? [parameters] : []));
+          }
+        } catch (_) {
+          if (sequence !== renderSequence) return;
+          activeDisplayFamily = {
+            ...activeDisplayFamily,
+            source_code: "",
+            source_unavailable_reason:
+              window.FTFactorDetailShared.sourceUnavailableText(context),
+          };
+          const retry = context.button(
+            context.t("重试"), () => { void loadCurrentSource(); },
+            context.t("重试读取因子家族源码"),
+          );
+          sourcePanel?.replaceChildren(
+            window.FTFactorDetailShared.source(context, activeDisplayFamily),
+            retry,
+          );
+        } finally {
+          if (sourceLoad === request) sourceLoad = null;
+        }
+      })();
+      sourceLoad = request;
+      return request;
+    };
 
     const renderFamily = displayFamily => {
+      activeDisplayFamily = displayFamily;
       const root = document.createElement("div");
       root.className = window.FTFactorDetailShared.pageClass(
         "view", "factor-family-page",
@@ -219,28 +351,39 @@
           },
         ));
       }
-      top.append(window.FTFactorDetailShared.summary(context, displayFamily));
+      summaryPanel = document.createElement("div");
+      summaryPanel.className = "factor-family-summary-panel";
+      summaryPanel.append(window.FTFactorDetailShared.summary(context, displayFamily));
+      top.append(summaryPanel);
       root.append(top);
       const provenance = window.FTFactorDetailShared.provenance(
         context, displayFamily,
       );
-      const members = (data.factors || []).filter(item =>
-        baseFamily.factor_refs?.includes(item.factor_ref)
-      );
-      const view = FTUI.table(
-        [context.t("因子"), context.t("来源"), context.t("所有者")],
-        members.map(item => [
-          item.factor_alias,
-          context.t(item.factor_kind === "public" ? "公共" : "用户"),
-          FTUI.userDisplay(item.owner_ref || item.owner_username, model().owner(item)),
-        ]),
-      );
-      linkRows(view, members, item =>
-        `/factors/factor/${encodeURIComponent(item.factor_ref)}`, context,
-      );
       const parameters = window.FTFactorDetailShared.parameterTable(
         context, displayFamily, {showValue: false},
       );
+      parametersPanel = document.createElement("div");
+      parametersPanel.className = "factor-family-parameters-panel";
+      if (parameters) parametersPanel.append(parameters);
+      sourcePanel = document.createElement("div");
+      sourcePanel.className = "factor-family-source-panel";
+      if (displayFamily.source_code || displayFamily.source_unavailable_reason) {
+        sourcePanel.append(
+          window.FTFactorDetailShared.source(context, displayFamily),
+        );
+      } else {
+        const placeholder = document.createElement("p");
+        placeholder.textContent = context.t("选择源码页签后读取当前源码");
+        sourcePanel.append(placeholder);
+      }
+      membersPanel = document.createElement("div");
+      membersPanel.className = "factor-family-members-panel";
+      if (membersLoaded) renderMembers();
+      else {
+        const placeholder = document.createElement("p");
+        placeholder.textContent = context.t("选择成员因子页签后读取成员");
+        membersPanel.append(placeholder);
+      }
       const jobs = objectJobs(
         context, "family", baseFamily.family_ref || targetRef, baseFamily,
       );
@@ -249,17 +392,18 @@
         mode: "view",
         overrides: {
           parameters: {hidden: !parameters},
-          members: {hidden: !members.length},
+          members: {hidden: !hasMembers, onActivate: loadMembers},
           identity: {hidden: !provenance},
+          source: {onActivate: loadCurrentSource},
           jobs: {onActivate: jobs.load},
         },
         panels: {
           overview: FTUI.table(
             [context.t("字段"), context.t("值")], FTUI.fieldRows(displayFamily),
           ).shell,
-          source: window.FTFactorDetailShared.source(context, displayFamily),
-          parameters,
-          members: view.shell,
+          source: sourcePanel,
+          parameters: parametersPanel,
+          members: membersPanel,
           identity: provenance,
           jobs: jobs.mount,
         },
@@ -272,8 +416,9 @@
       const fingerprint = selected === "__current__" ? "" : String(selected || "");
       selectedVersion = fingerprint;
       const sequence = ++renderSequence;
+      sourceLoad = null;
       if (!fingerprint) {
-        renderFamily(baseFamily);
+        renderFamily(currentFamily);
         return;
       }
       context.content.replaceChildren(FTUI.loading(
@@ -281,11 +426,11 @@
       ));
       try {
         const payload = await window.FTFactorDetailShared.loadSourceVersion(
-          context, baseFamily, fingerprint,
+          context, currentFamily, fingerprint,
         );
         if (sequence !== renderSequence || context.isRouteCurrent?.() === false) return;
         renderFamily({
-          ...baseFamily,
+          ...currentFamily,
           ...payload,
           family_formula_fingerprint:
             payload.family_formula_fingerprint || fingerprint,
@@ -294,7 +439,7 @@
       } catch (_) {
         if (sequence !== renderSequence || context.isRouteCurrent?.() === false) return;
         renderFamily({
-          ...baseFamily,
+          ...currentFamily,
           family_formula_fingerprint: fingerprint,
           source_code: "",
           source_unavailable_reason: window.FTFactorDetailShared.sourceUnavailableText(
@@ -356,30 +501,6 @@
       status,
     );
     return root;
-  }
-
-  async function withCurrentFamilySource(context, value) {
-    if (value?.source_code) return value;
-    const options = window.FTFactorDetailShared.sourceOptions(value);
-    if (!["custom", "public"].includes(options.sourceKind)) return value;
-    try {
-      const payload = await window.FTFactorDetailShared.loadSourceVersion(
-        context, value, "current",
-      );
-      return {
-        ...value,
-        ...payload,
-        source_unavailable_reason: "",
-      };
-    } catch (_) {
-      return {
-        ...value,
-        source_code: "",
-        source_unavailable_reason: window.FTFactorDetailShared.sourceUnavailableText(
-          context,
-        ),
-      };
-    }
   }
 
   async function setDetail(context, data, targetRef, nativeRequest) {

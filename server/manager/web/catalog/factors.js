@@ -53,7 +53,9 @@
       && context.testObjectInitialValue;
     let data = inline
       ? {families: [context.testObjectInitialValue]}
-      : await catalog().load(context, {library: true});
+      : await catalog().load(context, mode === "view"
+        ? {families: true}
+        : {library: true});
     if (!inline && mode === "view" && targetRef && !data.families.some(item =>
       item.family_ref === targetRef || item.factor_family_alias === targetRef
     )) {

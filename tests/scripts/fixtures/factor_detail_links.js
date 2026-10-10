@@ -31,6 +31,7 @@ class Element {
     };
   }
   append(...children) { this.children.push(...children); }
+  dispatchEvent(event) { this.dispatched = event; return true; }
   createTHead() { const section = new Element("thead"); this.append(section); return section; }
   createTBody() { const section = new Element("tbody"); this.append(section); return section; }
   insertRow() { const row = new Element("tr"); this.append(row); return row; }
@@ -563,11 +564,13 @@ assert.ok(
   assert.ok(walk(historicalParameter).some(item => item.textContent === "WindowParam"));
   assert.equal(historicalParameter.children[2].textContent, "20d");
 
+  const currentFamilyApiPaths = [];
   const currentFamilyContext = {
     ...context,
     content: new Element(),
     toolbar: new Element(),
     api: async path => {
+      currentFamilyApiPaths.push(path);
       assert.match(path, /family-sources\/custom\/MmRateOfChg\/versions\/current/);
       return {
         success: true,
@@ -590,10 +593,207 @@ assert.ok(
     },
     "factor-family:sha256:momentum",
   );
+  assert.deepStrictEqual(
+    currentFamilyApiPaths, [],
+    "opening a family overview must not wait for its hidden source tab",
+  );
+  const currentSourceTab = walk(currentFamilyContext.content).find(item => (
+    item.dataset?.tabKey === "source"
+  ));
+  assert.ok(currentSourceTab);
+  currentSourceTab.listeners.click();
+  assert.ok(await waitFor(() => currentFamilyApiPaths.length === 1));
+  currentSourceTab.listeners.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.strictEqual(
+    currentFamilyApiPaths.length, 1,
+    "reselecting a loaded source tab must not issue another request",
+  );
   const currentSource = walk(currentFamilyContext.content).find(item => (
     item.className.split(" ").includes("factor-detail-source")
   ));
   assert.match(currentSource.children[1].children[0].textContent, /MmRateOfChg/);
+
+  const familyRoutePaths = [];
+  let memberAttempts = 0;
+  let sourceAttempts = 0;
+  const routedFamilyRef = `factor-family:v2:${"r".repeat(43)}`;
+  const routedFamily = {
+    ...data.families[0],
+    family_ref: routedFamilyRef,
+    source_code: "",
+    factor_count: 1,
+    factor_refs: [factorRef],
+  };
+  const routedFamilyContext = {
+    ...context,
+    content: new Element(),
+    toolbar: new Element(),
+    session: {username: "family-detail-lazy", role: "user"},
+    api: async path => {
+      familyRoutePaths.push(path);
+      if (path === "/api/factor-library/families") {
+        return {success: true, principal: "family-detail-lazy", families: [routedFamily]};
+      }
+      if (path === "/api/factor-library/factors") {
+        memberAttempts += 1;
+        if (memberAttempts === 1) throw new Error("成员目录暂不可用");
+        return {
+          success: true,
+          principal: "family-detail-lazy",
+          factors: [{...data.factors[0], factor_ref: factorRef}],
+        };
+      }
+      if (/family-sources\/custom\/MmRateOfChg\/versions\/current/.test(path)) {
+        sourceAttempts += 1;
+        if (sourceAttempts === 1) throw new Error("源码暂不可用");
+        return {
+          success: true,
+          source_code: "class MmRateOfChg(FactorFamily):\n    pass\n",
+          family_formula_fingerprint: "c".repeat(64),
+        };
+      }
+      throw new Error(`unexpected request: ${path}`);
+    },
+  };
+  await window.FTFactors.familyDetail(
+    routedFamilyContext, routedFamilyRef, "view",
+  );
+  assert.deepStrictEqual(
+    familyRoutePaths, ["/api/factor-library/families"],
+    "a cold family detail loads only the family projection for its overview",
+  );
+  const membersTab = walk(routedFamilyContext.content).find(item => (
+    item.dataset?.tabKey === "members"
+  ));
+  const sourceTab = walk(routedFamilyContext.content).find(item => (
+    item.dataset?.tabKey === "source"
+  ));
+  assert.ok(membersTab, "registered members should have a tab before member data loads");
+  assert.ok(sourceTab);
+  membersTab.listeners.click();
+  membersTab.listeners.click();
+  assert.ok(await waitFor(() => walk(routedFamilyContext.content).some(item => (
+    item.className === "factor-family-members-error"
+  ))));
+  assert.strictEqual(memberAttempts, 1, "duplicate activation coalesces member requests");
+  const retryMembers = walk(routedFamilyContext.content).find(item => (
+    item.textContent === "重试"
+  ));
+  assert.ok(retryMembers);
+  retryMembers.listeners.click();
+  assert.ok(await waitFor(() => walk(routedFamilyContext.content).some(item => (
+    item.headers?.[0] === "因子"
+  ))));
+  assert.strictEqual(memberAttempts, 2, "failed member loads can be retried once");
+  membersTab.listeners.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.strictEqual(memberAttempts, 2, "loaded members remain cached on the page");
+  sourceTab.listeners.click();
+  sourceTab.listeners.click();
+  assert.ok(await waitFor(() => walk(routedFamilyContext.content).some(item => (
+    item.className?.includes("factor-detail-source")
+  ))));
+  assert.strictEqual(sourceAttempts, 1, "duplicate activation coalesces source requests");
+  const retrySource = walk(routedFamilyContext.content).find(item => (
+    item.tagName === "BUTTON" && item.textContent === "重试"
+  ));
+  assert.ok(retrySource);
+  retrySource.listeners.click();
+  assert.ok(await waitFor(() => walk(routedFamilyContext.content).some(item => (
+    item.className?.includes("factor-detail-source")
+      && walk(item).some(child => /class MmRateOfChg/.test(child.textContent || ""))
+  ))));
+  assert.strictEqual(sourceAttempts, 2, "failed source loads can be retried once");
+  const warmFamilyPaths = [];
+  const warmFamilyContext = {
+    ...routedFamilyContext,
+    content: new Element(),
+    toolbar: new Element(),
+    api: async path => {
+      warmFamilyPaths.push(path);
+      throw new Error(`warm family detail must use the cached projections: ${path}`);
+    },
+  };
+  await window.FTFactors.familyDetail(
+    warmFamilyContext, routedFamilyRef, "view",
+  );
+  assert.deepStrictEqual(
+    warmFamilyPaths, [],
+    "a warm family detail uses cached family and member projections",
+  );
+
+  const restoredSourcePaths = [];
+  const restoredSourceContext = {
+    ...context,
+    content: new Element(),
+    toolbar: new Element(),
+    pageState: {
+      saved: key => key === "object-detail-tabs:family"
+        ? {selected: "source"} : null,
+      register() {},
+    },
+    api: async path => {
+      restoredSourcePaths.push(path);
+      return {
+        success: true,
+        source_code: "class MmRateOfChg(FactorFamily):\n    pass\n",
+        family_formula_fingerprint: "c".repeat(64),
+      };
+    },
+  };
+  await window.FTFactorDetails.familyDetail(
+    restoredSourceContext,
+    {
+      ...data,
+      families: [{...routedFamily, source_code: ""}],
+    },
+    routedFamilyRef,
+  );
+  assert.ok(
+    restoredSourcePaths.some(path => path.includes("versions/current")),
+    "restoring the source tab should start its deferred request",
+  );
+  assert.ok(await waitFor(() => walk(restoredSourceContext.content).some(item => (
+    item.className?.includes("factor-detail-source")
+      && walk(item).some(child => /class MmRateOfChg/.test(child.textContent || ""))
+  ))));
+
+  const restoredMembersPaths = [];
+  const restoredMembersContext = {
+    ...context,
+    content: new Element(),
+    toolbar: new Element(),
+    session: {username: "family-detail-restored-members", role: "user"},
+    pageState: {
+      saved: key => key === "object-detail-tabs:family"
+        ? {selected: "members"} : null,
+      register() {},
+    },
+    api: async path => {
+      restoredMembersPaths.push(path);
+      assert.strictEqual(path, "/api/factor-library/factors");
+      return {
+        success: true,
+        principal: "family-detail-restored-members",
+        factors: [{...data.factors[0], factor_ref: factorRef}],
+      };
+    },
+  };
+  await window.FTFactorDetails.familyDetail(
+    restoredMembersContext,
+    {
+      families: [routedFamily], factors: [], factorsLoaded: false,
+    },
+    routedFamilyRef,
+  );
+  assert.deepStrictEqual(
+    restoredMembersPaths, ["/api/factor-library/factors"],
+    "restoring the members tab should start its deferred request",
+  );
+  assert.ok(await waitFor(() => walk(restoredMembersContext.content).some(item => (
+    item.headers?.[0] === "因子"
+  ))));
 
   const familyContext = {...context, api: async path => {
     assert.match(path, /family-sources\/custom\/MmRateOfChg\/versions/);
