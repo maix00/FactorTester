@@ -1030,9 +1030,15 @@
     const ref = state.familyMode
       ? result.family_ref || result.id || result.name || state.factorID
       : result.factor_alias || result.factor_ref || result.name;
+    const owner = !state.familyMode
+      ? String(result.owner_username || state.loaded?.owner_username || "").trim()
+      : "";
+    const query = new URLSearchParams();
+    if (owner) query.set("owner_username", owner);
+    const suffix = query.toString();
     const path = state.familyMode
       ? `/factors/family/${encodeURIComponent(ref)}`
-      : `/factors/factor/${encodeURIComponent(ref)}`;
+      : `/factors/factor/${encodeURIComponent(ref)}${suffix ? `?${suffix}` : ""}`;
     if (typeof context.navigateInPlace === "function") {
       context.navigateInPlace(path);
     } else {
@@ -1434,7 +1440,8 @@
     const viewHref = mode === "edit" && !editingInline
       ? (state.familyMode
         ? `/factors/family/${encodeURIComponent(targetRef)}`
-        : `/factors/factor/${encodeURIComponent(targetRef)}`)
+        : `/factors/factor/${encodeURIComponent(targetRef)}${state.loaded?.owner_username
+          ? `?${new URLSearchParams({owner_username: state.loaded.owner_username})}` : ""}`)
       : "";
     const actions = window.FTObjectModeActions?.mount?.(context, {
       mode,

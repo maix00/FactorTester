@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import re
+import sqlite3
 from typing import Any
+
+
+class AmbiguousFactorReferenceError(ValueError):
+    """A frozen factor reference is registered by multiple visible owners."""
 
 
 class ClientFactorCatalogMixin:
@@ -142,6 +148,178 @@ class ClientFactorCatalogMixin:
         return factor_rows_from_account_entities(self._account_catalog_entities(
             principal, entity_type="factor_param_config", include_shared=False,
         ), principal, owner_account=account)
+
+    def factor_detail(
+        self, principal: str, factor_ref: str, *, owner_username: str = "",
+    ) -> dict[str, Any] | None:
+        """Resolve one registered frozen factor from the local account mirror.
+
+        Factor refs are opaque identities and may be registered by more than
+        one account. Query the exact ref index only in the caller's own and
+        direct-subordinate scopes; callers that omit an owner hint get an
+        explicit ambiguity error rather than an arbitrary account's row.
+        """
+        owner = str(principal or "").strip()
+        reference = str(factor_ref or "").strip()
+        requested_owner = str(owner_username or "").strip()
+        if not owner:
+            raise ValueError("principal is required")
+        if not re.fullmatch(r"factor:v2:[A-Za-z0-9_-]{43}", reference):
+            raise ValueError("因子引用无效")
+
+        account_store = self.local_account_store
+        if account_store is None:
+            try:
+                from server.manager.storage.local_accounts import LocalAccountStore
+
+                account_store = LocalAccountStore()
+            except (ImportError, OSError, RuntimeError, TypeError, ValueError):
+                account_store = None
+        from server.manager.services.subordinate_factor_library import (
+            direct_subordinate_accounts,
+        )
+
+        children = direct_subordinate_accounts(owner, account_store)
+        visible_owners = [owner, *(
+            str(item.get("username") or "").strip()
+            for item in children
+            if str(item.get("username") or "").strip()
+        )]
+        if requested_owner:
+            if requested_owner not in visible_owners:
+                raise PermissionError("无权查看该用户的因子")
+            visible_owners = [requested_owner]
+
+        local = getattr(self.account_domain_sync, "local", None)
+        reader = getattr(local, "factor_catalog", None)
+        if not callable(reader):
+            raise RuntimeError("本机因子详情索引不可用")
+
+        matches: list[tuple[str, dict[str, Any]]] = []
+        accounts_by_owner = {
+            str(item.get("username") or "").strip(): item
+            for item in children if str(item.get("username") or "").strip()
+        }
+        for candidate in visible_owners:
+            try:
+                rows = reader(candidate, factor_ref=reference, limit=1)
+            except sqlite3.Error as exc:
+                raise RuntimeError("本机因子详情索引暂时不可用") from exc
+            if not rows:
+                continue
+            row = rows[0]
+            if not isinstance(row, dict):
+                continue
+            row_ref = str(row.get("factor_ref") or row.get("ref") or "")
+            if row_ref != reference:
+                continue
+            account = accounts_by_owner.get(candidate) or self._local_account(candidate)
+            matches.append((candidate, {
+                **row,
+                "owner_username": candidate,
+                "owner_alias": account.get("alias") or account.get("display_name") or candidate,
+                "owner_organization_id": account.get("organization_id") or "",
+                "owner_organization_name": account.get("organization_name") or "",
+            }))
+
+        if not matches:
+            return None
+        if len(matches) > 1:
+            raise AmbiguousFactorReferenceError(
+                "该因子在多个可见账户中注册，请通过所有者打开详情"
+            )
+
+        registered_owner, row = matches[0]
+        source_owner_ref = str(row.get("factor_owner_ref") or row.get("owner_ref") or "").strip()
+        is_public = (
+            str(row.get("source") or row.get("factor_kind") or "").strip().lower() == "public"
+            or source_owner_ref in {"public", "__public_jobs__"}
+        )
+        source_kind = "public" if is_public else "custom"
+        source_owner = (
+            "" if is_public else
+            source_owner_ref.removeprefix("principal:") or registered_owner
+        )
+        family: dict[str, Any] | None = None
+        metadata_available = False
+        fingerprint = str(row.get("family_formula_fingerprint") or "").strip()
+        family_alias = str(row.get("factor_family_alias") or "").strip()
+        if fingerprint and family_alias:
+            # Read the exact local source version, if present. This is a
+            # single-family lookup; it deliberately does not invoke the
+            # cross-server hydrator used by the source-history endpoint.
+            try:
+                from server.services.factor_source_catalog import FactorSourceCatalog
+
+                source = FactorSourceCatalog().version(
+                    owner,
+                    source_kind,
+                    family_alias,
+                    fingerprint,
+                    owner_username=source_owner,
+                )
+                metadata_available = True
+                family_account = self._local_account(source_owner) if source_owner else {}
+                family = {
+                    "factor_family_alias": family_alias,
+                    "factor_family_name": row.get("factor_family_name") or family_alias,
+                    "chinese_name": source.get("chinese_name") or row.get("chinese_name") or "",
+                    "description": source.get("description") or row.get("description") or "",
+                    "math_expr": source.get("math_expr") or row.get("math_expr") or "",
+                    "category": source.get("category") or row.get("category") or "",
+                    "categories": [source.get("category") or row.get("category")]
+                    if source.get("category") or row.get("category") else [],
+                    "owner_username": "__public_jobs__" if is_public else source_owner,
+                    "owner_alias": "公共因子库" if is_public else (
+                        family_account.get("alias")
+                        or family_account.get("display_name")
+                        or source_owner
+                    ),
+                    "factor_owner_ref": source_owner_ref or registered_owner,
+                    "factor_kind": source_kind,
+                    "source": source_kind,
+                    "family_formula_fingerprint": fingerprint,
+                    "params": source.get("params") or [],
+                    "parameter_definitions": source.get("params") or [],
+                    "factor_count": 1,
+                    "factor_refs": [reference],
+                    "has_source_definition": True,
+                }
+            except (
+                FileNotFoundError,
+                PermissionError,
+                OSError,
+                RuntimeError,
+                sqlite3.Error,
+                ImportError,
+                TypeError,
+                ValueError,
+            ):
+                # Synced account mirrors intentionally omit source bytes. The
+                # safe registration projection still has enough information
+                # to render its frozen identity and current computed formula.
+                family = None
+
+        from server.modules.custom_factors.client_library import (
+            build_client_library_projection,
+        )
+
+        projection = build_client_library_projection({
+            "factors": [row],
+            "families": [family] if family is not None else [],
+            "errors": [],
+        }, principal=owner)
+        factor = next((item for item in projection.get("factors") or []
+                       if item.get("factor_ref") == reference), None)
+        if factor is None:
+            return None
+        return {
+            "factor": factor,
+            "family": next((item for item in projection.get("families") or []
+                            if item.get("factor_family_alias") == family_alias
+                            and item.get("family_formula_fingerprint") == fingerprint), None),
+            "source_metadata_available": metadata_available,
+        }
 
     def factor_library(
         self, principal: str, *, refresh: bool = False,

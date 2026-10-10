@@ -271,10 +271,16 @@
     const view = FTUI.pagedTable(
       headers, items, {...pagingOptions(context, tablePage, onPageChange), renderRow},
     );
-    linkRows(view, items.slice(view.start, view.start + view.pageSize), item => item.kind === "factor"
-      ? `/factors/factor/${encodeURIComponent(item.value.factor_ref)}`
-      : `/factors/set/${encodeURIComponent(item.value.target_ref || item.value.set_ref)}`,
-    context);
+    linkRows(view, items.slice(view.start, view.start + view.pageSize), item => {
+      if (item.kind !== "factor") {
+        return `/factors/set/${encodeURIComponent(item.value.target_ref || item.value.set_ref)}`;
+      }
+      const query = new URLSearchParams();
+      if (item.value.owner_username) query.set("owner_username", item.value.owner_username);
+      const encodedQuery = query.toString();
+      const suffix = encodedQuery ? `?${encodedQuery}` : "";
+      return `/factors/factor/${encodeURIComponent(item.value.factor_ref)}${suffix}`;
+    }, context);
     mount.replaceChildren(view.shell);
   }
 

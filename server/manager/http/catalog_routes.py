@@ -21,6 +21,9 @@ from server.manager.services.public_catalog import (
     visitor_source_descriptors,
 )
 from server.manager.services.test_authoring import TestAuthoringError
+from server.manager.services.client_factor_catalog import (
+    AmbiguousFactorReferenceError,
+)
 from server.modules.products.product_category_views import normalize_category_selection
 
 
@@ -566,6 +569,23 @@ class CatalogRoutesMixin:
                 )
                 json_response(self, value)
                 return True
+            if parsed.path == "/api/factor-library/factors/detail":
+                if visitor is not None:
+                    raise VisitorCatalogAccessError(
+                        "访客模式不能读取用户因子"
+                    )
+                factor_ref = str(query.get("factor_ref", [""])[0] or "")
+                owner = str(query.get("owner_username", [""])[0] or "")
+                value = self.state.client_state.factor_detail(
+                    principal, factor_ref, owner_username=owner,
+                )
+                if value is None:
+                    json_response(self, {
+                        "success": False, "error": "因子不存在或已删除",
+                    }, 404)
+                else:
+                    json_response(self, {"success": True, **value})
+                return True
             if parsed.path in {
                 "/api/factor-library/families",
                 "/api/factor-library/factors",
@@ -725,6 +745,9 @@ class CatalogRoutesMixin:
             return True
         except FileNotFoundError as exc:
             json_response(self, {"success": False, "error": str(exc)}, 404)
+            return True
+        except AmbiguousFactorReferenceError as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 409)
             return True
         except ValueError as exc:
             json_response(self, {"success": False, "error": str(exc)}, 400)
