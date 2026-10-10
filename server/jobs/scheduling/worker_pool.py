@@ -709,6 +709,7 @@ class LongLivedWorkerPool:
         self.output_queue = self.context.Queue()
         self._workers: dict[int, _Worker] = {}
         self._job_to_worker: dict[str, int] = {}
+        self._pending_messages: list[dict[str, Any]] = []
         self._lock = threading.RLock()
         self._closed = False
         for worker_id in range(self.size):
@@ -747,7 +748,7 @@ class LongLivedWorkerPool:
         with self._lock:
             if self._closed:
                 raise WorkerUnavailable("worker pool is closed")
-            self._reconcile_locked()
+            self._pending_messages.extend(self._reconcile_locked())
             idle = [worker for worker in self._workers.values() if not worker.job_id]
             if not idle:
                 raise WorkerUnavailable("no idle execution worker")
@@ -825,7 +826,12 @@ class LongLivedWorkerPool:
                 messages.append(message)
                 self._apply_message(message)
         with self._lock:
-            messages.extend(self._reconcile_locked())
+            self._pending_messages.extend(self._reconcile_locked())
+            remaining = limit - len(messages)
+            if remaining > 0:
+                take = min(remaining, len(self._pending_messages))
+                messages.extend(self._pending_messages[:take])
+                del self._pending_messages[:take]
         return messages
 
     def _apply_message(self, message: dict[str, Any]) -> None:
@@ -900,7 +906,7 @@ class LongLivedWorkerPool:
 
     def worker_snapshot(self) -> list[dict[str, Any]]:
         with self._lock:
-            self._reconcile_locked()
+            self._pending_messages.extend(self._reconcile_locked())
             return [
                 {
                     "worker_id": worker.worker_id,

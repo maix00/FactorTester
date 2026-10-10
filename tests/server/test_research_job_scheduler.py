@@ -65,7 +65,9 @@ def _record(
     )
 
 
-def _drive(scheduler, repository, job_id, statuses, *, timeout=8.0):
+# Scheduler lifecycle assertions do not define a startup SLA; give spawned
+# planner/executor runtimes room to initialize when the full suite is loaded.
+def _drive(scheduler, repository, job_id, statuses, *, timeout=20.0):
     deadline = time.monotonic() + timeout
     seen = []
     while time.monotonic() < deadline:
@@ -266,6 +268,56 @@ def test_pin_only_reorders_its_owner_queue_without_cross_user_priority(tmp_path)
 
         assert repository.require("alice-pinned").status is JobStatus.RUNNING
         assert repository.require("alice-first").status is JobStatus.QUEUED
+
+
+def test_cancelled_worker_reconciled_during_next_submit_updates_job(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    bob = replace(
+        _record("bob-first", owner="bob", runner="uncooperative_runner", seconds=30),
+        created_at=time.time() - 10,
+        entitlement=SchedulingEntitlement(priority_class="standard", weight=1.0),
+    )
+    alice_first = _record("alice-first", owner="alice")
+    alice_pinned = _record("alice-pinned", owner="alice")
+    for job in (bob, alice_first, alice_pinned):
+        repository.create(job)
+        repository.transition(job.job_id, JobStatus.PLANNING, expected=JobStatus.SUBMITTED)
+        repository.set_execution_plan(
+            job.job_id, plan={"cache_keys": []}, notices=[], requires_confirmation=False,
+        )
+    repository.pin("alice-pinned", owner="alice")
+
+    with ResearchJobScheduler(
+        repository=repository,
+        deployment_id="test",
+        planner_workers=1,
+        execution_workers=1,
+        cancel_grace_seconds=0.05,
+    ) as scheduler:
+        scheduler.tick()
+        assert repository.require("bob-first").status is JobStatus.RUNNING
+        assert repository.require("alice-pinned").status is JobStatus.QUEUED
+
+        repository.request_cancel("bob-first", owner="bob", reason="test_complete")
+        scheduler._propagate_cancellation()
+        time.sleep(0.1)
+
+        # Exercise the race where submit reaps Bob's expired worker after the
+        # poll at the start of a tick but before Alice's queued task is sent.
+        scheduler._dispatch_execution()
+        scheduler.tick()
+
+        assert repository.require("bob-first").status is JobStatus.CANCELLED
+        assert repository.require("alice-pinned").status is JobStatus.RUNNING
+        assert repository.require("alice-first").status is JobStatus.QUEUED
+        bob_events = scheduler.broker.read("bob-first")["events"]
+
+    worker_loss_events = [
+        item for item in bob_events
+        if item.get("event") == "error"
+        and item.get("data", {}).get("code") == "worker_terminated"
+    ]
+    assert len(worker_loss_events) == 1
 
 
 def test_scheduler_persists_failure_cancel_and_worker_crash(tmp_path) -> None:
