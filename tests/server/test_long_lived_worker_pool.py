@@ -9,7 +9,9 @@ from server.jobs.scheduling import LongLivedWorkerPool
 RUNNERS = "tests.server.long_lived_worker_fakes"
 
 
-def _collect(pool, predicate, *, timeout: float = 5.0):
+# These are correctness checks, not worker-startup latency assertions; spawned
+# runtimes can take several seconds to import under full-suite CPU contention.
+def _collect(pool, predicate, *, timeout: float = 20.0):
     deadline = time.monotonic() + timeout
     messages = []
     while time.monotonic() < deadline:
@@ -262,6 +264,87 @@ def test_repeated_cancel_does_not_restart_forced_cancel_grace_period() -> None:
         and item.get("job_id") == "forced"
         for item in rows
     )
+
+
+def test_submit_reconciliation_messages_are_delivered_once() -> None:
+    with LongLivedWorkerPool(size=1, cancel_grace_seconds=0.05) as pool:
+        original_pid = pool.submit(
+            job_id="forced",
+            runner_path=f"{RUNNERS}:uncooperative_runner",
+            payload={"seconds": 5},
+        )
+        _collect(
+            pool,
+            lambda rows: any(
+                item.get("type") == "task_started"
+                and item.get("job_id") == "forced"
+                for item in rows
+            ),
+        )
+        assert pool.request_cancel("forced") is True
+        time.sleep(0.1)
+
+        replacement_pid = pool.submit(
+            job_id="next",
+            runner_path=f"{RUNNERS}:cpu_runner",
+            payload={"loops": 1_000},
+        )
+        reconciled = pool.poll()
+        terminated = [
+            item for item in reconciled
+            if item.get("type") == "worker_terminated"
+            and item.get("job_id") == "forced"
+        ]
+        later = _collect(pool, lambda rows: _finished(rows, "next"))
+
+    assert replacement_pid != original_pid
+    assert len(terminated) == 1
+    assert not any(
+        item.get("type") == "worker_terminated"
+        and item.get("job_id") == "forced"
+        for item in later
+    )
+
+
+def test_worker_snapshot_reconciliation_is_delivered_by_poll() -> None:
+    with LongLivedWorkerPool(size=1) as pool:
+        pool.submit(
+            job_id="crash",
+            runner_path=f"{RUNNERS}:uncooperative_runner",
+            payload={"seconds": 30},
+        )
+        worker_process = pool._workers[0].process
+        worker_process.terminate()
+        worker_process.join(timeout=1.0)
+        assert worker_process.exitcode is not None
+
+        snapshot = pool.worker_snapshot()
+        messages = pool.poll()
+        later = pool.poll()
+
+    crashes = [
+        item for item in messages
+        if item.get("type") == "worker_crashed" and item.get("job_id") == "crash"
+    ]
+    assert snapshot[0]["alive"] is True
+    assert len(crashes) == 1
+    assert not any(
+        item.get("type") == "worker_crashed" and item.get("job_id") == "crash"
+        for item in later
+    )
+
+
+def test_poll_delivers_queued_output_before_reconciled_events() -> None:
+    with LongLivedWorkerPool(size=1) as pool:
+        pool.output_queue.put({"type": "queued_output"})
+        pool._pending_messages.append({"type": "reconciled_event"})
+
+        messages = pool.poll(timeout=0.1)
+
+    assert [item["type"] for item in messages] == [
+        "queued_output",
+        "reconciled_event",
+    ]
 
 
 def test_crashed_worker_is_reported_and_replaced() -> None:
