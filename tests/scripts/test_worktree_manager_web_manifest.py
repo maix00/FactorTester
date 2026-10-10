@@ -3040,6 +3040,13 @@ def test_factor_details_render_latex_and_factor_set_members_open() -> None:
     )
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "ok"
+    owner_fixture = ROOT / "tests" / "scripts" / "fixtures" / "factor_list_owner_route.js"
+    owner_result = subprocess.run(
+        ["node", str(owner_fixture)], cwd=ROOT, capture_output=True,
+        text=True, check=False,
+    )
+    assert owner_result.returncode == 0, owner_result.stderr or owner_result.stdout
+    assert owner_result.stdout.strip() == "ok"
     # Family view must render test-local families from their carried frozen
     # value: no catalog round-trip for current source, no server version
     # history picker.  (Family header "?" opens the family view overlay for

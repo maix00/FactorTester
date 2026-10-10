@@ -242,7 +242,7 @@ const data = {
     }],
     factor_refs: [],
   }],
-  sets: [{target_ref: setRef, visibility: "server"}],
+  sets: [{target_ref: setRef, visibility: "server", owner_username: "alice"}],
 };
 
 function walk(root) {
@@ -921,7 +921,7 @@ assert.ok(
   assert.ok(table._row);
   table._row.listeners.click();
   assert.strictEqual(
-    navigated.at(-1), `/factors/factor/${encodeURIComponent(factorRef)}`,
+    navigated.at(-1), `/factors/factor/${encodeURIComponent(factorRef)}?owner_username=alice`,
   );
 
   const temporarySet = {
@@ -988,6 +988,72 @@ assert.ok(
     ["/api/factor-library/factor-sets", "/api/factor-library/factor-sets/detail"],
     "legacy references should retain catalog-assisted canonicalization",
   );
+
+  // A cold immutable factor detail should issue one indexed detail request,
+  // carrying the row owner to disambiguate identical registrations.
+  const directFactorPaths = [];
+  const originalDetails = window.FTFactorDetails;
+  const originalLocation = globalThis.location;
+  const originalWindowLocation = window.location;
+  globalThis.location = {origin: "http://manager.test", search: "?owner_username=alice"};
+  window.location = globalThis.location;
+  window.FTFactorDetails = {
+    async factorDetail(_context, value, ref) {
+      directFactorRender = {value, ref};
+    },
+  };
+  let directFactorRender = null;
+  const directFactorContext = {
+    ...context,
+    session: {username: "alice", role: "user"},
+    async api(path) {
+      directFactorPaths.push(path);
+      const query = new URLSearchParams(path.split("?")[1] || "");
+      assert.strictEqual(query.get("factor_ref"), factorRef);
+      assert.strictEqual(query.get("owner_username"), "alice");
+      return {success: true, factor: {...data.factors[0], owner_username: "alice"},
+        family: data.families[0]};
+    },
+  };
+  await window.FTFactors.factorDetail(directFactorContext, factorRef, "view");
+  assert.strictEqual(directFactorPaths.length, 1);
+  assert.match(directFactorPaths[0], /^\/api\/factor-library\/factors\/detail\?/);
+  assert.deepStrictEqual(directFactorRender.value.factors.map(item => item.factor_ref), [factorRef]);
+  assert.deepStrictEqual(directFactorRender.value.families, [data.families[0]]);
+  assert.strictEqual(directFactorRender.ref, factorRef);
+
+  // The exact response seeds the access-scoped cache, so reopening the same
+  // immutable factor can reuse both its row and family without another read.
+  directFactorRender = null;
+  await window.FTFactors.factorDetail(directFactorContext, factorRef, "view");
+  assert.strictEqual(directFactorPaths.length, 1,
+    "a warm factor and matching family should avoid another detail request");
+  assert.deepStrictEqual(directFactorRender.value.factors.map(item => item.factor_ref), [factorRef]);
+
+  const missingFactorPaths = [];
+  const missingFactorContext = {
+    ...directFactorContext,
+    session: {username: "missing-user", role: "user"},
+    async api(path) {
+      missingFactorPaths.push(path);
+      const error = new Error("missing factor");
+      error.status = 404;
+      throw error;
+    },
+  };
+  await assert.rejects(
+    window.FTFactors.factorDetail(missingFactorContext, factorRef, "view"),
+    /不存在、已删除或尚未同步/,
+  );
+  assert.equal(missingFactorPaths.length, 1,
+    "a missing detail must not trigger a full catalog refresh");
+
+  window.FTFactorDetails = originalDetails;
+  if (originalLocation === undefined) delete globalThis.location;
+  else globalThis.location = originalLocation;
+  if (originalWindowLocation === undefined) delete window.location;
+  else window.location = originalWindowLocation;
+
   console.log("ok");
 })().catch(error => {
   console.error(error);

@@ -13,7 +13,7 @@
       sets: [], setScopes: {}, groups: [],
       familiesLoaded: false, factorsLoaded: false, libraryLoaded: false,
       setsLoaded: false, groupsLoaded: false,
-      pendingFactors: [],
+      pendingFactors: [], pendingFamilies: [],
     };
   }
 
@@ -67,7 +67,12 @@
     const scopes = response.family_scopes || response.family_tabs || {};
     // Mutate the shared cache object. Other projections may be loading at the
     // same time and must merge into this object rather than a detached copy.
-    data.families = Array.isArray(response.families) ? response.families : [];
+    data.families = mergeFamilies(
+      Array.isArray(response.families) ? response.families : [],
+      data.families,
+      data.pendingFamilies,
+    );
+    data.pendingFamilies = [];
     data.familyScopes = mergeScopeResource(data.familyScopes, scopes, "families");
     applyMetadata(data, response);
     data.familiesLoaded = true;
@@ -110,6 +115,26 @@
     return [...byKey.values()];
   }
 
+  function familyKey(value) {
+    return String(value?.family_ref || [
+      value?.factor_family_alias || value?.factor_family_name || "",
+      value?.family_formula_fingerprint || "",
+      value?.factor_owner_ref || value?.owner_ref || value?.owner_username || "",
+    ].join("\u0000")).trim();
+  }
+
+  function mergeFamilies(...lists) {
+    const byKey = new Map();
+    for (const list of lists) {
+      for (const item of Array.isArray(list) ? list : []) {
+        const key = familyKey(item);
+        if (!key) continue;
+        byKey.set(key, {...(byKey.get(key) || {}), ...item});
+      }
+    }
+    return [...byKey.values()];
+  }
+
   function upsertFactor(value) {
     const data = ensureCache();
     const factor = value?.factor || value;
@@ -118,6 +143,17 @@
     if (!data.factorsLoaded) data.pendingFactors = mergeFactors(
       data.pendingFactors, [factor],
     );
+    return data;
+  }
+
+  function upsertFamily(value) {
+    const data = ensureCache();
+    const family = value?.family || value;
+    if (!familyKey(family)) return data;
+    data.families = mergeFamilies(data.families, [family]);
+    if (!data.familiesLoaded) {
+      data.pendingFamilies = mergeFamilies(data.pendingFamilies, [family]);
+    }
     return data;
   }
 
@@ -198,6 +234,26 @@
     return groupsPromise;
   }
 
+  function accessKeyFor(context) {
+    const origin = globalThis.location?.origin || "";
+    const username = context.session?.username || "";
+    const role = context.session?.role || "";
+    return `${origin}:${username}:${role}`;
+  }
+
+  function prepareAccess(context, refresh = false) {
+    const key = accessKeyFor(context);
+    if (refresh || key !== accessKey) {
+      reset();
+      accessKey = key;
+    }
+  }
+
+  function peek(context) {
+    prepareAccess(context);
+    return ensureCache();
+  }
+
   async function load(context, options = {}) {
     const refresh = options === true || options.refresh === true;
     const includeLibrary = options === true || options.library === true;
@@ -208,11 +264,7 @@
     if (refresh && context.session && options.sync !== false) {
       await context.api("/api/catalog/refresh", {method: "POST"});
     }
-    const key = `${globalThis.location?.origin || ""}:${context.session?.username || ""}:${context.session?.role || ""}`;
-    if (refresh || key !== accessKey) {
-      reset();
-      accessKey = key;
-    }
+    prepareAccess(context, refresh);
     await Promise.all([
       ...(includeFamilies ? [loadFamilies(context, refresh)] : []),
       ...(includeFactors ? [loadFactors(context, refresh)] : []),
@@ -227,6 +279,6 @@
   }
 
   window.FTFactorCatalog = Object.freeze({
-    load, isCurrent, upsertFactor,
+    load, peek, isCurrent, upsertFactor, upsertFamily,
   });
 })();
