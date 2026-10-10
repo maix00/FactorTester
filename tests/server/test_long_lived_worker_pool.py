@@ -182,7 +182,9 @@ def test_worker_coalesces_progress_flood_before_terminal_result() -> None:
 
 
 def test_cooperative_cancel_keeps_worker_and_forced_cancel_replaces_it() -> None:
-    with LongLivedWorkerPool(size=1, cancel_grace_seconds=0.05) as pool:
+    # Keep enough time for the spawned runner to observe cancellation when the
+    # full suite is under load; the 50ms forced-cancel tests remain below.
+    with LongLivedWorkerPool(size=1, cancel_grace_seconds=0.5) as pool:
         original_pid = pool.submit(
             job_id="cooperative",
             runner_path=f"{RUNNERS}:blocking_runner",
