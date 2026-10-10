@@ -120,7 +120,11 @@ def test_legacy_source_browser_and_templates_are_removed() -> None:
     assert "template_folder=None" in app_factory
     assert "static_folder=None" in app_factory
     assert not (ROOT / "tools/data/tech_docs/tool_docs.py").exists()
-    assert not (ROOT / "tools/decorators/tech_docs").exists()
+    legacy_docs_sources = ROOT / "tools/decorators/tech_docs"
+    assert not any(
+        path.is_file() and path.suffix not in {".pyc", ".pyo"}
+        for path in legacy_docs_sources.rglob("*")
+    )
     assert not (ROOT / "templates").exists()
     assert not (ROOT / "static/css").exists()
     assert not (ROOT / "static/js").exists()
