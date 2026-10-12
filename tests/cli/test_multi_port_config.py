@@ -39,6 +39,7 @@ def test_server_discovery_uses_declared_port_and_checks_identity(monkeypatch):
         def __init__(self, url, **kwargs):
             self.url = url
         def request(self, *args, **kwargs):
+            assert "extra_headers" not in kwargs
             seen.append(self.url)
             if len(seen) == 1:
                 return {'server_id': 'seed', 'internal_server_targets': [
