@@ -31,6 +31,7 @@ from tools.factors.expr.conditional import apply_where
 from tools.factors.expr.groupby_scope import GroupByScopeOp
 from tools.factors.expr.lookback_scope import BarCountScope
 from tools.factors.expr.pointwise import POINTWISE_OPS, apply_pointwise
+from tools.factors.expr.rolling_skew import RollingSkewState
 from tools.factors.expr.term_structure_math import (
     evaluate_term_curve,
     normalize_term_curve,
@@ -47,7 +48,6 @@ from .group_cross_sectional import GroupCrossSectionalNode
 from .rolling_covariance import RollingCovarianceState
 from .rolling_extrema import RollingArgExtremaState, RollingMinMaxState
 from .rolling_moments import RollingMomentsState
-from .rolling_skew import RollingSkewState
 from .rolling_statistics import ROLLING_STATISTICS, RollingStatisticsNode
 
 if TYPE_CHECKING:
@@ -191,6 +191,10 @@ class RollingWindowNode:
             self._ring = np.full((window, width), np.nan, dtype=float)
             self._ring_cursor = 0
             self._ring_length = 0
+            # Keep the running total centered near each product's latest
+            # finite value. Directly adding and subtracting market-level
+            # values can accumulate large cancellation error over long runs.
+            self._origin = np.zeros(width, dtype=float)
             self._sum = np.zeros(width, dtype=float)
             self._count = np.zeros(width, dtype=np.int64)
             self._histories: list[deque[np.ndarray]] = []
@@ -258,13 +262,29 @@ class RollingWindowNode:
         if self._ring_length == self.window:
             old = self._ring[self._ring_cursor]
             old_finite = np.isfinite(old)
-            self._sum[old_finite] -= old[old_finite]
+            self._sum[old_finite] -= (
+                old[old_finite] - self._origin[old_finite]
+            )
             self._count[old_finite] -= 1
+            emptied = self._count == 0
+            self._sum[emptied] = 0.0
+
+        # Recenter surviving values around the newest finite observation.
+        # This preserves the same sum while keeping the accumulator small for
+        # price-like data with a large level and small bar-to-bar changes.
+        empty = finite & (self._count == 0)
+        self._origin[empty] = value[empty]
+        self._sum[empty] = 0.0
+        reanchor = finite & (self._count > 0)
+        delta = value[reanchor] - self._origin[reanchor]
+        self._sum[reanchor] -= delta * self._count[reanchor]
+        self._origin[reanchor] = value[reanchor]
+
         # Keep the original values in the ring; ``isfinite`` below gives the
         # same NaN/Inf-as-missing semantics as pandas without allocating a
-        # cleaned copy on every bar.
+        # cleaned copy on every bar. The newly inserted observation is the
+        # origin, so its centered contribution to the sum is exactly zero.
         self._ring[self._ring_cursor] = value
-        self._sum[finite] += value[finite]
         self._count[finite] += 1
         self._ring_cursor = (self._ring_cursor + 1) % self.window
         self._ring_length = min(self.window, self._ring_length + 1)
@@ -273,9 +293,14 @@ class RollingWindowNode:
         minimum = max(1, self.window // 2) if self.op == "rolling_mean" else 1
         ready = self._count >= minimum
         if self.op == "rolling_mean":
-            result[ready] = self._sum[ready] / self._count[ready]
+            result[ready] = (
+                self._origin[ready]
+                + self._sum[ready] / self._count[ready]
+            )
         elif self.op == "rolling_sum":
-            result[ready] = self._sum[ready]
+            result[ready] = (
+                self._origin[ready] * self._count[ready] + self._sum[ready]
+            )
         return result
 
     def _aggregate(self) -> np.ndarray:
@@ -764,43 +789,65 @@ class GroupScopeNode:
                 )
         elif trading_day is not None:
             trading_day = pd.Timestamp(trading_day)
+        observed = self._observed_bars(market, values)
         if self._vector:
-            output = self._update_vector(values, timestamp, trading_day)
+            output = self._update_vector(values, timestamp, trading_day, observed)
         else:
             output = np.full(self.width, np.nan, dtype=float)
             for index in range(self.width):
-                observed = index < values.shape[0] and not np.isnan(values[index])
-                partition = self._partition_of(index, timestamp, trading_day, observed)
+                is_observed = observed[index]
+                partition = self._partition_of(index, timestamp, trading_day, is_observed)
                 if partition is not None and (
                     not self._opened[index] or partition != self._key[index]
                 ):
                     self._reset(index, partition)
-                if observed:
+                if is_observed:
                     output[index] = self._consume(index, float(values[index]))
         cache[key] = output
         return output
+
+    def _observed_bars(self, market: MarketSlice, values: np.ndarray) -> np.ndarray:
+        observed = getattr(market, "observed", None)
+        if observed is None:
+            # Older framework-neutral adapters and direct kernel tests only
+            # provide the computed value, so retain their finite-value signal.
+            result = np.zeros(self.width, dtype=bool)
+            result[:min(self.width, values.shape[0])] = ~np.isnan(
+                values[:self.width]
+            )
+            return result
+        result = np.asarray(observed, dtype=bool)
+        if result.shape != (self.width,):
+            raise ValueError("streaming market observed mask width changed unexpectedly")
+        if values.shape[0] < self.width:
+            result = result.copy()
+            result[values.shape[0]:] = False
+        return result
 
     def _consume(self, index: int, value: float) -> float:
         raw = int(self._raw[index])
         self._raw[index] = raw + 1
         if raw < self.trunc_start:
             return np.nan
-        self._count[index] += 1
+        is_arg = self.op in ("argmax", "argmin")
+        valid = not np.isnan(value) if is_arg else np.isfinite(value)
+        if valid:
+            self._count[index] += 1
         # 只维护当前算子真正需要的状态，避免每根做无用的浮点运算
-        if self._track_sum:
+        if valid and self._track_sum:
             self._sum[index] += value
-        if self._track_moments:
+        if valid and self._track_moments:
             count = int(self._count[index])
             delta = value - self._mean[index]
             self._mean[index] += delta / count
             self._m2[index] += delta * (value - self._mean[index])
-        if self._track_extremes:
+        if valid and self._track_extremes:
             self._min[index] = min(self._min[index], value)
             self._max[index] = max(self._max[index], value)
-        if self._track_order:
+        if valid and self._track_order:
             insort(self._sorted[index], value)
-        if self.op in ("argmax", "argmin"):
-            if self.trunc_end is None or raw <= self.trunc_end:
+        if is_arg:
+            if valid and (self.trunc_end is None or raw <= self.trunc_end):
                 best = int(self._best_raw[index])
                 better = (
                     value > self._best_value[index] if self.op == "argmax"
@@ -809,6 +856,8 @@ class GroupScopeNode:
                 if best < 0 or np.isnan(self._best_value[index]) or better:
                     self._best_raw[index] = raw
                     self._best_value[index] = value
+            if not valid:
+                return np.nan
             span = raw - self.trunc_start
             if span <= 0:
                 return 0.0
@@ -850,12 +899,20 @@ class GroupScopeNode:
         return self._session_id
 
     def _update_vector(
-        self, values: np.ndarray, timestamp: Any, trading_day: Any,
+        self,
+        values: np.ndarray,
+        timestamp: Any,
+        trading_day: Any,
+        observed: np.ndarray,
     ) -> np.ndarray:
-        observed = np.isfinite(values)
         if values.shape[0] != self.width:
-            extra = np.zeros(self.width - values.shape[0], dtype=bool)
-            observed = np.r_[observed, extra]
+            input_width = min(self.width, values.shape[0])
+            padded_values = np.full(self.width, np.nan, dtype=float)
+            padded_values[:input_width] = values[:input_width]
+            values = padded_values
+            padded_observed = np.zeros(self.width, dtype=bool)
+            padded_observed[:input_width] = observed[:input_width]
+            observed = padded_observed
         ids = self._partition_ids_vector(timestamp, trading_day, observed)
         reset = observed & (~self._opened | (ids != self._key))
         if reset.any():
@@ -876,7 +933,9 @@ class GroupScopeNode:
             for position in index:
                 self._sorted[position] = []
         position = self._raw.copy()
-        kept = observed & (position >= self.trunc_start)
+        in_range = observed & (position >= self.trunc_start)
+        valid = ~np.isnan(values) if self.op in ("argmax", "argmin") else np.isfinite(values)
+        kept = in_range & valid
         if self._track_sum:
             self._sum += np.where(kept, values, 0.0)
         if self._track_moments:
@@ -892,7 +951,9 @@ class GroupScopeNode:
             for index_position in np.flatnonzero(kept):
                 insort(self._sorted[index_position], float(values[index_position]))
         if self.op in ("argmax", "argmin"):
-            advancing = kept if self.trunc_end is None else kept & (position <= self.trunc_end)
+            advancing = in_range & valid
+            if self.trunc_end is not None:
+                advancing &= position <= self.trunc_end
             current = self._best_value
             if self.op == "argmax":
                 better = values > np.where(np.isnan(current), -np.inf, current)
@@ -905,13 +966,16 @@ class GroupScopeNode:
         self._raw += observed
         result = self._values_vector(position)
         if self.trunc_end is not None and self.op not in ("argmax", "argmin"):
-            freeze_now = kept & (position == self.trunc_end)
+            freeze_now = observed & (position == self.trunc_end)
             if freeze_now.any():
                 self._frozen |= freeze_now
                 self._frozen_value = np.where(freeze_now, result, self._frozen_value)
             after = observed & (position > self.trunc_end) & self._frozen
             result = np.where(after, self._frozen_value, result)
-        return np.where(observed, result, np.nan)
+        output_observed = observed
+        if self.op in ("argmax", "argmin"):
+            output_observed = observed & ~np.isnan(values)
+        return np.where(output_observed, result, np.nan)
 
     def _values_vector(self, position: np.ndarray) -> np.ndarray:
         op = self.op
@@ -1028,6 +1092,7 @@ class _StreamingMarketSlice:
     trading_day: pd.Timestamp | None
     prices: Mapping[Any, _StreamingBarPrice]
     term_curves: Mapping[Any, pd.DataFrame]
+    observed: tuple[bool, ...]
 
 
 class IncrementalFactorExecutor:
@@ -1064,6 +1129,7 @@ class IncrementalFactorExecutor:
                 for product, curve in term_curves_by_product.items()
                 if product in self._plan.products
             },
+            tuple(product in observed_products for product in self._plan.products),
         )
         self._latest = {
             product: float(value)

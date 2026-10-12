@@ -6,6 +6,7 @@ import pandas as pd
 
 from .rolling_mad import rolling_mad_batch
 from .rolling_regression import ROLLING_LINEAR_METRICS, rolling_linear_metric
+from .rolling_skew import rolling_skew_batch
 
 ROLLING_ROBUST_STATISTICS = frozenset(
     {
@@ -26,6 +27,8 @@ def apply_rolling_statistic(
 ) -> pd.DataFrame:
     if op in ROLLING_LINEAR_METRICS:
         return rolling_linear_metric(data, window, op)
+    if op == "rolling_skew":
+        return rolling_skew_batch(data, window)
     minimum = max(1, window // 2)
     if op == "rolling_median":
         return data.rolling(window, min_periods=minimum).median()

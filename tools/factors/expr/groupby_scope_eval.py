@@ -119,27 +119,23 @@ def _prefix_arg_extreme_loop(
     """逐根实现：小分区下比 numpy 调用开销更低，同时作为向量化版的等价参照。"""
     length = len(values)
     output = np.full(length, np.nan, dtype=float)
-    best_index = -1
+    best_index = start
     stop = length - 1 if end is None else min(end, length - 1)
+    scanned_through = start
     for position in range(start, length):
         limit = position if end is None else min(position, stop)
-        if position == start:
-            best_index = start
-        elif limit > best_index:
-            candidates = values[best_index + 1: limit + 1]
-            if len(candidates) and not np.all(np.isnan(candidates)):
-                offset = (np.nanargmax(candidates) if op == "argmax"
-                          else np.nanargmin(candidates))
-                challenger = best_index + 1 + int(offset)
-                best_value, challenger_value = values[best_index], values[challenger]
-                if np.isnan(best_value):
-                    best_index = challenger
-                elif not np.isnan(challenger_value):
-                    # 只有严格更优才推进，保证与 rolling 的「最早出现的极值」一致
-                    if op == "argmax" and challenger_value > best_value:
-                        best_index = challenger
-                    elif op == "argmin" and challenger_value < best_value:
-                        best_index = challenger
+        for challenger in range(scanned_through + 1, limit + 1):
+            challenger_value = values[challenger]
+            if np.isnan(challenger_value):
+                continue
+            best_value = values[best_index] if best_index >= 0 else np.nan
+            # 只有严格更优才推进，保证与 rolling 的「最早出现的极值」一致。
+            if np.isnan(best_value) or (
+                (op == "argmax" and challenger_value > best_value)
+                or (op == "argmin" and challenger_value < best_value)
+            ):
+                best_index = challenger
+        scanned_through = max(scanned_through, limit)
         if np.isnan(values[position]):
             continue
         span = position - start
@@ -173,12 +169,16 @@ def _prefix_arg_extreme(
 
     is_max = op == "argmax"
     window = values[start:stop + 1]
+    valid = ~np.isnan(window)
     filled = np.where(np.isnan(window), -np.inf if is_max else np.inf, window)
     running = np.maximum.accumulate(filled) if is_max else np.minimum.accumulate(filled)
     previous = np.r_[-np.inf if is_max else np.inf, running[:-1]]
     positions = np.arange(start, stop + 1)
     # 严格优于「此前的极值」才记录 → 并列取最早出现（与逐根实现一致）
-    improved = np.isfinite(filled) & (filled > previous if is_max else filled < previous)
+    has_previous = np.r_[False, np.maximum.accumulate(valid[:-1])]
+    improved = valid & (
+        ~has_previous | (filled > previous if is_max else filled < previous)
+    )
     # 回退值是 start（不是 -1）：逐根实现即使在 start 处是 NaN 也把 best 置为 start，
     # 而截断到 start 时 limit > best 不再成立、best 便不再推进，两者必须一致。
     first_at = np.where(improved, positions, start)

@@ -41,7 +41,15 @@ def _legacy(operation: str, inputs: tuple[np.ndarray, ...], window: int) -> np.n
         finite = np.isfinite(values)
         count = finite.sum(axis=0)
         result = output[index]
-        if operation in {"rolling_std", "rolling_var"}:
+        if operation in {"rolling_mean", "rolling_sum"}:
+            minimum = max(1, window // 2) if operation == "rolling_mean" else 1
+            ready = count >= minimum
+            total = np.where(finite, values, 0.0).sum(axis=0)
+            if operation == "rolling_mean":
+                result[ready] = total[ready] / count[ready]
+            else:
+                result[ready] = total[ready]
+        elif operation in {"rolling_std", "rolling_var"}:
             mean = np.divide(
                 np.where(finite, values, 0.0).sum(axis=0), count,
                 out=np.zeros(width), where=count > 0,
@@ -144,7 +152,8 @@ def main() -> None:
 
     for window in (63, 127, 128, 255):
         for operation in (
-            "rolling_std", "rolling_var", "rolling_skew", "rolling_min", "rolling_max",
+            "rolling_mean", "rolling_sum", "rolling_std", "rolling_var",
+            "rolling_skew", "rolling_min", "rolling_max",
             "rolling_argmax", "rolling_cov", "rolling_corr",
         ):
             inputs = (left, right) if operation in {"rolling_cov", "rolling_corr"} else (left,)

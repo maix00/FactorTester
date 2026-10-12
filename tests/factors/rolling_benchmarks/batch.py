@@ -25,6 +25,7 @@ from tools.factors.expr.rolling_regression import (
     linear_metric,
     rolling_linear_metric,
 )
+from tools.factors.expr.rolling_skew import rolling_skew_batch
 
 
 def _measure(
@@ -141,6 +142,35 @@ def main() -> None:
     )
     _report(
         f"batch slope vs scalar OLS {rows}x{width}, W={window}",
+        reference_time,
+        optimized_time,
+    )
+
+    rows, width, window = 20_000, 16, 255
+    values = rng.normal(size=(rows, width))
+    values[::97, 0] = np.nan
+    values[::131, 1] = np.inf
+    frame = pd.DataFrame(values)
+
+    def reference() -> pd.DataFrame:
+        return frame.rolling(window, min_periods=window // 2).skew()
+
+    actual = rolling_skew_batch(frame, window)
+    np.testing.assert_allclose(
+        actual.to_numpy(),
+        reference().to_numpy(),
+        rtol=2e-7,
+        atol=2e-7,
+        equal_nan=True,
+    )
+    reference_time = _measure(reference, warmups=warmups, repeats=repeats)
+    optimized_time = _measure(
+        lambda: rolling_skew_batch(frame, window),
+        warmups=warmups,
+        repeats=repeats,
+    )
+    _report(
+        f"batch skew clean-path check {rows}x{width}, W={window}",
         reference_time,
         optimized_time,
     )

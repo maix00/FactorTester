@@ -8,23 +8,32 @@ import numpy as np
 
 
 class RollingMinMaxState:
-    """Fixed ring plus vectorized reduction, avoiding per-bar history copies."""
+    """Use vectorized scans for short windows and monotonic queues for long ones."""
 
     def __init__(self, op: str, window: int, width: int) -> None:
         self.op = op
         self.window = window
         self.width = width
         self._is_min = op == "rolling_min"
-        sentinel = np.inf if self._is_min else -np.inf
-        self._ring = np.full((window, width), sentinel, dtype=float)
-        self._cursor = 0
-        self._length = 0
-        self._count = np.zeros(width, dtype=np.int64)
+        # Benchmarks show the deque wins consistently once the ring scan is
+        # very large; retain NumPy's vectorized reduction for smaller windows.
+        self._use_deques = window >= 4096 and window >= 32 * max(width, 1)
+        self._index = -1
+        self._queues = [deque[tuple[int, float]]() for _ in range(width)] if self._use_deques else []
+        if not self._use_deques:
+            sentinel = np.inf if self._is_min else -np.inf
+            self._ring = np.full((window, width), sentinel, dtype=float)
+            self._cursor = 0
+            self._length = 0
+            self._count = np.zeros(width, dtype=np.int64)
 
     def update(self, value: np.ndarray) -> np.ndarray:
         value = np.asarray(value, dtype=float)
         if value.shape != (self.width,):
             raise ValueError("streaming rolling input width changed unexpectedly")
+        if self._use_deques:
+            return self._update_deques(value)
+
         if self._length == self.window:
             outgoing = self._ring[self._cursor]
             # Sentinels represent missing values; finite input values alone
@@ -43,6 +52,26 @@ class RollingMinMaxState:
             result[ready] = np.min(self._ring, axis=0)[ready]
         else:
             result[ready] = np.max(self._ring, axis=0)[ready]
+        return result
+
+    def _update_deques(self, value: np.ndarray) -> np.ndarray:
+        self._index += 1
+        oldest = self._index - self.window
+        result = np.full(self.width, np.nan, dtype=float)
+        for column, current in enumerate(value):
+            queue = self._queues[column]
+            while queue and queue[0][0] <= oldest:
+                queue.popleft()
+            if np.isfinite(current):
+                if self._is_min:
+                    while queue and queue[-1][1] >= current:
+                        queue.pop()
+                else:
+                    while queue and queue[-1][1] <= current:
+                        queue.pop()
+                queue.append((self._index, float(current)))
+            if queue:
+                result[column] = queue[0][1]
         return result
 
 

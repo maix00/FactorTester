@@ -112,7 +112,9 @@ def test_incremental_moments_remain_stable_for_large_offsets_and_flat_windows() 
     from tools.testers.backtest.engines.factors.rolling_covariance import (
         RollingCovarianceState,
     )
-    from tools.testers.backtest.engines.factors.rolling_moments import RollingMomentsState
+    from tools.testers.backtest.engines.factors.rolling_moments import (
+        RollingMomentsState,
+    )
 
     window = 7
     base = 1.0e12

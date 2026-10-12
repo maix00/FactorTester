@@ -1,12 +1,13 @@
-"""Incremental rolling skew kernel using centered third moments."""
+"""Stable rolling-skew state and batch fallback for missing-value runs."""
 
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 
 
 class RollingSkewState:
-    """O(products) add/remove updates with a periodic fixed-window rebase."""
+    """O(products) add/remove updates with periodic fixed-window rebasing."""
 
     def __init__(self, window: int, width: int) -> None:
         self.window = window
@@ -26,7 +27,7 @@ class RollingSkewState:
     def update(self, value: np.ndarray) -> np.ndarray:
         value = np.asarray(value, dtype=float)
         if value.shape != (self.width,):
-            raise ValueError("streaming rolling input width changed unexpectedly")
+            raise ValueError("rolling skew input width changed unexpectedly")
 
         self._roundoff_scale.fill(0.0)
         if self._length == self.window:
@@ -116,3 +117,22 @@ class RollingSkewState:
         self._mean = mean
         self._m2 = np.sum(centered * centered, axis=0)
         self._m3 = np.sum(centered * centered * centered, axis=0)
+
+
+def rolling_skew_batch(data: pd.DataFrame, window: int) -> pd.DataFrame:
+    """Use pandas' C kernel unless adjacent missing values poison its state."""
+    minimum = max(1, window // 2)
+    result = data.rolling(window, min_periods=minimum).skew()
+    values = data.to_numpy(dtype=float, copy=False)
+    missing = ~np.isfinite(values)
+    affected = np.flatnonzero(np.any(missing[1:] & missing[:-1], axis=0))
+    if affected.size == 0:
+        return result
+
+    state = RollingSkewState(window, int(affected.size))
+    repaired = np.empty((len(data), affected.size), dtype=float)
+    for row, value in enumerate(values[:, affected]):
+        repaired[row] = state.update(value)
+    output = result.to_numpy(dtype=float, copy=True)
+    output[:, affected] = repaired
+    return pd.DataFrame(output, index=data.index, columns=data.columns)

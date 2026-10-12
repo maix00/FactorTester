@@ -27,6 +27,8 @@ class MarketSlice:
     # 静态标注用字符串，避免依赖该文件里 pandas 的导入位置。
     timestamp: "pd.Timestamp | None" = None
     trading_day: "pd.Timestamp | None" = None
+    # Bar presence is independent of whether a derived FactorExpr evaluates to NaN.
+    observed: tuple[bool, ...] | None = None
 
 from ..factors.incremental import StreamingFactorPlan, compile_streaming_factor
 from .frameworks import IncrementalFactorSource, PrecomputedFactorSource
@@ -103,6 +105,7 @@ class FactorStepAdapter:
             },
             timestamp=timestamp,
             trading_day=None if trading_day is None else pd.Timestamp(trading_day),
+            observed=tuple(instrument in fields for instrument in self.instruments),
         )
         assert self._streaming_plan is not None
         return FactorSignal(

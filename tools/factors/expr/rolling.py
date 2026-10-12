@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 from .core import FactorExpr, EvaluateContext
 from .operands import OperandExpr
 from .leaf import ConstExpr, _to_expr
+from .rolling_arg_extrema import rolling_argmaxmin as _rolling_argmaxmin
 from .rolling_statistics import ROLLING_STATISTICS, apply_rolling_statistic
 
 class RollingExpr(FactorExpr):
@@ -380,13 +381,16 @@ class RollingOp(OperandExpr):
 
         # 有截断时的处理：mask 后做 rolling（仅对支持 NaN 聚合的算子）
         if trunc_start_arr is not None or trunc_end_arr is not None:
+            if self.op == 'rolling_skew':
+                masked = _mask_outside_trunc(dfs[0], window, trunc_start_arr, trunc_end_arr)
+                return apply_rolling_statistic(self.op, masked, window)
             if self.op in self._OP_MAP:
                 masked = _mask_outside_trunc(dfs[0], window, trunc_start_arr, trunc_end_arr)
                 func = self._OP_MAP[self.op]
                 return cast(pd.DataFrame, masked.apply(func, axis=0, args=(window,)))
             raise ValueError(f"Truncation not supported for {self.op}")
 
-        if self.op in ROLLING_STATISTICS:
+        if self.op == 'rolling_skew' or self.op in ROLLING_STATISTICS:
             return apply_rolling_statistic(
                 self.op, dfs[0], window, quantile=self.quantile,
             )
@@ -657,80 +661,6 @@ def _mask_outside_trunc(
 
     return pd.DataFrame(result_arr, index=df.index, columns=df.columns)
 
-
-def _rolling_argmaxmin(
-    df: pd.DataFrame,
-    window: int,
-    op: str,
-    normalize: bool = True,
-    trunc_start: np.ndarray | None = None,
-    trunc_end: np.ndarray | None = None,
-) -> pd.DataFrame:
-    """用 sliding_window_view 对 DataFrame 每列计算滚动 argmax 或 argmin。
-
-    Parameters
-    ----------
-    trunc_start : (n_rows-window+1, n_cols) ndarray or None
-        每行每列的截断起点偏移（0 = 窗口最左），None = 0。
-    trunc_end : (n_rows-window+1, n_cols) ndarray or None
-        每行每列的截断终点偏移（0 = 窗口最左），None = window-1。
-    """
-    if window < 1:
-        raise ValueError(f"window must be >= 1, got {window}")
-
-    n_rows = len(df)
-
-    # 单 bar 窗口的时间重心没有跨度，约定有效观察位置为中性点 0。
-    # 这让时间重心因子形成常数信号，由 IC 层表达其“无排序信息”为 NaN。
-    if window == 1:
-        values = df.to_numpy(dtype=float)
-        result = np.where(np.isnan(values), np.nan, 0.0)
-        return pd.DataFrame(result, index=df.index, columns=df.columns)
-
-    if n_rows < window:
-        return pd.DataFrame(np.full((n_rows, df.shape[1]), np.nan),
-                            index=df.index, columns=df.columns)
-
-    arr = df.to_numpy(dtype=float)
-    # windows shape: (n_rows-window+1, n_cols, window)
-    windows = np.lib.stride_tricks.sliding_window_view(arr, window, axis=0)
-
-    # 如果指定了截断，mask 掉不在 [trunc_start, trunc_end] 范围内的元素
-    if trunc_start is not None or trunc_end is not None:
-        w_idx = np.arange(window).reshape(1, 1, window)  # (1, 1, W)
-        if trunc_start is None:
-            trunc_start = np.zeros(windows.shape[:2], dtype=int)
-        if trunc_end is None:
-            trunc_end = np.full(windows.shape[:2], window - 1, dtype=int)
-        # mask: True where element is OUTSIDE [start, end]
-        mask = (w_idx < trunc_start[..., np.newaxis]) | (w_idx > trunc_end[..., np.newaxis])
-        windows = windows.astype(float)
-        windows[mask] = np.nan
-
-    # reversed: 最近 bar 在 index=0
-    reversed_view = windows[..., ::-1]
-
-    if op in ('rolling_argmax', 'rolling_argmax_raw'):
-        all_nan_cols = np.all(np.isnan(reversed_view), axis=-1)  # (n, n_cols)
-        safe_view = np.where(np.isnan(reversed_view), -np.inf, reversed_view)
-        pos_matrix = np.nanargmax(safe_view, axis=-1)
-        pos_matrix[all_nan_cols] = 0  # 全 NaN 列填充 0，后续被 nan_rows 覆盖
-    elif op in ('rolling_argmin', 'rolling_argmin_raw'):
-        all_nan_cols = np.all(np.isnan(reversed_view), axis=-1)
-        safe_view = np.where(np.isnan(reversed_view), np.inf, reversed_view)
-        pos_matrix = np.nanargmin(safe_view, axis=-1)
-        pos_matrix[all_nan_cols] = 0
-    else:
-        raise ValueError(f"Invalid op: {op}")
-
-    pos = (window - 1) - pos_matrix
-    pos = pos.astype(float)
-    if normalize and window > 1:
-        pos = pos / (window - 1)
-
-    nan_rows = np.full((window - 1, df.shape[1]), np.nan)
-    result = np.vstack([nan_rows, pos])
-    return pd.DataFrame(result, index=df.index, columns=df.columns)
 
 def _resolve_windows(
     window: Any,
