@@ -158,6 +158,75 @@ def test_publication_branch_read_keeps_route_and_offline_failure():
     assert len(calls) == 2
 
 
+def test_server_branch_read_uses_manager_report_workspace_query_contract():
+    from tools.cli.client_research import ResearchClientMixin
+
+    calls = []
+
+    class Session:
+        def get(self, path, *, query):
+            calls.append((path, query))
+            return {"available": True, "generation": 94}
+
+    class Client(ResearchClientMixin):
+        session = Session()
+
+        def _expect_success(self, response):
+            return response
+
+    client = Client()
+    result = client.read_server_branch(
+        target_ref="GTHT@MaxJJW@392452984564",
+        profile_id="maxb",
+        report_workspace_id="report-e51203968fced7b274b57dca",
+        branch_id="main",
+    )
+
+    assert result == {"available": True, "generation": 94}
+    assert calls == [(
+        "/api/server-research/branch",
+        {
+            "target_ref": "GTHT@MaxJJW@392452984564",
+            "profile_id": "maxb",
+            "report_workspace_id": "report-e51203968fced7b274b57dca",
+            "branch_id": "main",
+        },
+    )]
+
+
+def test_server_branch_read_accepts_report_workspace_and_legacy_package_options(
+    monkeypatch,
+):
+    calls = []
+
+    class Client:
+        def read_server_branch(self, **kwargs):
+            calls.append(kwargs)
+            return {"available": True, "generation": 94}
+
+    monkeypatch.setattr(
+        "tools.cli.commands.research_report_branch.client_from_config",
+        lambda: Client(),
+    )
+    runner = CliRunner()
+    for option in ("--report-workspace-id", "--package-id"):
+        result = runner.invoke(cli, [
+            "research", "reports", "branch-read", "GTHT@MaxJJW@392452984564",
+            "--profile-id", "maxb", option, "report-e51203968fced7b274b57dca",
+            "--branch-id", "main",
+        ])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output)["generation"] == 94
+
+    expected = {
+        "target_ref": "GTHT@MaxJJW@392452984564",
+        "profile_id": "maxb",
+        "report_workspace_id": "report-e51203968fced7b274b57dca",
+        "branch_id": "main",
+    }
+    assert calls == [expected, expected]
+
+
 def test_branch_lifecycle_cli_routes_identity_and_expected_version(monkeypatch):
     from types import SimpleNamespace
     calls = []
