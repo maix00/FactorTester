@@ -44,10 +44,171 @@ _JOB_ANALYSIS_PATHS = {
     "/group-snapshot": "/get_group_snapshot",
     "/group-order-flow": "/get_group_order_flow",
 }
+_PRODUCT_DATA_POST_PATHS = frozenset({
+    "/api/data-availability",
+    "/api/product-liquidity",
+})
 
 
 class JobProxyRoutesMixin:
     """Forward execution requests after selection and preserve provenance."""
+
+    def _with_local_service_selector(self, parsed):
+        """Bind unqualified service-port hints to this Manager's server."""
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        if str(query.get("server_id", [""])[0] or "").strip():
+            return parsed
+        query["server_id"] = [str(self.state.server_id)]
+        encoded = urlencode([
+            (key, value)
+            for key, values in query.items()
+            for value in values
+        ])
+        return parsed._replace(query=encoded)
+
+    def _proxy_selected_job_list(self, parsed) -> bool:
+        """Route an explicitly selected job-list service through Manager."""
+        if parsed.path != "/api/jobs":
+            return False
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        raw_port = str(query.get("port", [""])[0] or "").strip()
+        if not raw_port or raw_port.lower() == "all":
+            return False
+        if not raw_port.isdigit():
+            json_response(self, {
+                "success": False,
+                "error": "port must be an integer or all",
+            }, 400)
+            return True
+        raw_server = str(query.get("server_id", [""])[0] or "").strip()
+        if raw_server in {"", "local", self.state.server_id}:
+            if int(raw_port) not in self.state.service_ports():
+                json_response(self, {
+                    "success": False,
+                    "error": "port is not an active service published by this server",
+                }, 400)
+                return True
+
+        session = self._session()
+        visitor = self._visitor_mode()
+        principal = (
+            str(session["username"])
+            if session is not None
+            else (
+                visitor.principal if visitor is not None
+                else "__public_jobs__"
+            )
+        )
+        route = self._service_route(self._with_local_service_selector(parsed))
+        if route is None:
+            return True
+
+        forwarded_path = self._forwarded_service_path(parsed)
+        if not str(query.get("scope", [""])[0] or "").strip():
+            scope = (
+                "server"
+                if session is None or str(session.get("role") or "") == "super_admin"
+                else "mine"
+            )
+            forwarded_path += "&" if "?" in forwarded_path else "?"
+            forwarded_path += f"scope={scope}"
+        try:
+            response = self.state.route_request(
+                route,
+                path=forwarded_path,
+                principal=principal,
+                method="GET",
+                content_type="application/json",
+            )
+        except (ConnectionError, OSError, RuntimeError, ValueError):
+            json_response(self, {
+                "success": False,
+                "error": "selected job service is unavailable",
+                "code": "selected_job_service_unavailable",
+            }, 503)
+            return True
+        self._send_gateway_response(response, route=route)
+        return True
+
+    def _proxy_product_data_service(self, parsed, *, method: str) -> bool:
+        """Forward the small public data API surface through Manager routing."""
+        supported = (
+            method == "GET"
+            and (
+                parsed.path == "/api/data-capabilities"
+                or re.fullmatch(
+                    r"/api/data-availability/profiles/[^/]{1,1024}",
+                    parsed.path,
+                ) is not None
+            )
+        ) or (method == "POST" and parsed.path in _PRODUCT_DATA_POST_PATHS)
+        if not supported:
+            return False
+
+        session = self._session()
+        if session is None:
+            json_response(
+                self, {"success": False, "error": "login required"}, 401,
+            )
+            return True
+
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        raw_port = str(query.get("port", [""])[0] or "").strip()
+        raw_server = str(query.get("server_id", [""])[0] or "").strip()
+        if raw_port and not raw_port.isdigit():
+            json_response(self, {
+                "success": False,
+                "error": "port must be an integer",
+            }, 400)
+            return True
+        if raw_port and raw_server in {"", "local", self.state.server_id}:
+            if int(raw_port) not in self.state.service_ports():
+                json_response(self, {
+                    "success": False,
+                    "error": "port is not an active service published by this server",
+                }, 400)
+                return True
+
+        route = self._service_route(self._with_local_service_selector(parsed))
+        if route is None:
+            return True
+
+        body = None
+        content_type = str(
+            self.headers.get("Content-Type") or "application/json"
+        )
+        if method != "GET":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except (TypeError, ValueError):
+                length = -1
+            if length < 0 or length > 1024 * 1024:
+                json_response(
+                    self,
+                    {"success": False, "error": "invalid request body"},
+                    400,
+                )
+                return True
+            body = self.rfile.read(length) if length else b""
+
+        try:
+            response = self.state.route_request(
+                route,
+                path=self._forwarded_service_path(parsed),
+                principal=str(session["username"]),
+                method=method,
+                body=body,
+                content_type=content_type,
+            )
+        except (ConnectionError, OSError, RuntimeError, ValueError):
+            json_response(self, {
+                "success": False,
+                "error": "business data service is unavailable",
+                "code": "business_data_service_unavailable",
+            }, 503)
+            return True
+        self._send_gateway_response(response, route=route)
+        return True
 
     def _proxy_authenticated_local_service(self, parsed, *, method: str) -> bool:
         """Bridge canonical Manager namespaces to one authenticated service."""

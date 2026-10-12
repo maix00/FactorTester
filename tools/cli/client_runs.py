@@ -28,6 +28,7 @@ class RunsClientMixin(ClientMixinBase):
         factor_subject_descriptors: list[dict[str, Any]] | None = None,
         configuration_snapshot_id: str = "",
         configuration_snapshot_revision: int | None = None,
+        service_port: int | None = None,
     ) -> dict[str, Any]:
         payload = self._run_request_payload(
             workspace_id,
@@ -50,7 +51,12 @@ class RunsClientMixin(ClientMixinBase):
             payload["sample_use"] = sample_use
         if report_binding is not None:
             payload["report_binding"] = report_binding
-        return self._expect_success(self.session.post("/api/runs", payload))
+        return self._expect_success(self.session.request(
+            "POST",
+            "/api/runs",
+            payload=payload,
+            query={"port": service_port} if service_port is not None else None,
+        ))
 
     @staticmethod
     def _run_request_payload(
@@ -122,6 +128,7 @@ class RunsClientMixin(ClientMixinBase):
         factor_subject_descriptors: list[dict[str, Any]] | None = None,
         configuration_snapshot_id: str = "",
         configuration_snapshot_revision: int | None = None,
+        service_port: int | None = None,
     ) -> dict[str, Any]:
         """Derive the exact frozen RunSpec identity without creating a run."""
         payload = self._run_request_payload(
@@ -142,7 +149,13 @@ class RunsClientMixin(ClientMixinBase):
             configuration_snapshot_revision=configuration_snapshot_revision,
         )
         return self._expect_success(
-            self.session.post("/api/runs/preview", payload)
+            self.session.request(
+                "POST",
+                "/api/runs/preview",
+                payload=payload,
+                query={"port": service_port}
+                if service_port is not None else None,
+            )
         )
 
     def get_run(self, run_id: str) -> dict[str, Any]:

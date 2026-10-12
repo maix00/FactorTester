@@ -21,7 +21,7 @@ def requested_ports() -> tuple[int, ...]:
 
 
 def client_from_config(
-    *, port: int | None = None, persist_cookies: bool | None = None,
+    *, persist_cookies: bool | None = None,
 ) -> FactorTesterClient:
     capability = load_capability()
     try:
@@ -35,11 +35,9 @@ def client_from_config(
         # Profile.  It prevents the isolated Agent from falling back to the
         # public endpoint and paying for a network round trip.
         config = ClientConfig(base_url=capability.base_url)
-    selected = port or (requested_ports()[0] if requested_ports() else None)
-    target = config.for_port(selected).base_url if selected else config.base_url
     return FactorTesterClient(
         HttpSession(
-            target,
+            config.base_url,
             agent_capability=capability,
             bearer_token=capability.token if capability else "",
             persist_cookies=(

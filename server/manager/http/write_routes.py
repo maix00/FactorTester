@@ -434,6 +434,8 @@ class WriteRoutesMixin:
             return
         if self._proxy_service_write(parsed, method="POST"):
             return
+        if self._proxy_product_data_service(parsed, method="POST"):
+            return
         if self._proxy_authenticated_local_service(parsed, method="POST"):
             return
         actions = {
