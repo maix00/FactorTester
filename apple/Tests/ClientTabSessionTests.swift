@@ -20,26 +20,27 @@ final class ClientTabSessionTests: XCTestCase {
     func testClosingTabDiscardsItsSession() {
         let store = ClientTabSessionStore()
         let first = store.session(for: "report-workspace:one")
-        first.selectedBranchID = "branch-one"
+        first.researchSection = .reports
 
         store.removeSession(for: "report-workspace:one")
         let reopened = store.session(for: "report-workspace:one")
 
         XCTAssertFalse(first === reopened)
-        XCTAssertEqual(reopened.selectedBranchID, "")
+        XCTAssertEqual(reopened.researchSection, .researches)
     }
 
     func testRemovingTabReleasesWebPageSessionButKeepsTabState() {
         let store = ClientTabSessionStore()
         let session = store.session(for: "research-report:one")
-        session.selectedBranchID = "branch-one"
+        let report = session.reportSession(for: "report-ref")
+        report.selectedChapterID = "chapter-one"
         _ = session.ensureWebPageSession()
 
         store.activate("research-report:one")
         store.removeSession(for: "research-report:one")
 
         XCTAssertNil(session.webPageSession)
-        XCTAssertEqual(session.selectedBranchID, "branch-one")
+        XCTAssertEqual(report.selectedChapterID, "chapter-one")
     }
 
     func testReportsKeepIndependentSelectedChaptersWithinOneTab() {
