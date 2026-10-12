@@ -71,3 +71,6 @@ FactorTester CLI。Research Agent Skill 同时随 App 资源安装并注册到�
 | Manager CLI | FTClient.app 内置并激活的 runtime |
 | 仓库开发/服务器测试 | `GTHT` Conda 环境 |
 | 实际测试任务 | Docker/native runner 环境 |
+
+CLI 的 Manager URL 是用户选中的服务器入口。数据能力、可用性和流动性请求继续经过该入口，
+再由 Manager 按服务器公布的自动业务服务端口和当前身份转发；客户端不需要配置固定业务端口。

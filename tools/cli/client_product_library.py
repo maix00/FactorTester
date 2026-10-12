@@ -11,6 +11,40 @@ from .client_base import ClientMixinBase
 class ProductLibraryClientMixin(ClientMixinBase):
     """Access canonical product metadata and product-scoped data services."""
 
+    def _product_data_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Route product-data APIs through the Manager-selected service."""
+        selection = self._expect_success(
+            self.session.get("/api/jobs/ports")
+        )
+        ports = {
+            int(value)
+            for value in selection.get("ports", ())
+            if isinstance(value, int) and not isinstance(value, bool)
+            and 1 <= value <= 65535
+        }
+        port = selection.get("automatic_port")
+        if (
+            not isinstance(port, int)
+            or isinstance(port, bool)
+            or port not in ports
+        ):
+            raise RuntimeError(
+                "服务器没有公布可用的自动业务服务端口；"
+                "请确认该服务器至少有一个业务服务在线。"
+            )
+        return self._expect_success(self.session.request(
+            method,
+            path,
+            payload=payload,
+            query={"port": port},
+        ))
+
     def product_catalog(self) -> dict[str, Any]:
         return self._expect_success(
             self.session.get("/api/product-library/products")
@@ -117,9 +151,10 @@ class ProductLibraryClientMixin(ClientMixinBase):
         include_field_catalog: bool = False,
         include_historical_fields: bool = False,
     ) -> dict[str, Any]:
-        return self._expect_success(self.session.post(
+        return self._product_data_request(
+            "POST",
             "/api/data-availability",
-            {
+            payload={
                 "products": list(products),
                 "sources": list(sources),
                 "frequencies": list(frequencies),
@@ -129,17 +164,18 @@ class ProductLibraryClientMixin(ClientMixinBase):
                 "include_field_catalog": bool(include_field_catalog),
                 "include_historical_fields": bool(include_historical_fields),
             },
-        ))
+        )
 
     def data_capabilities(self) -> dict[str, Any]:
-        return self._expect_success(
-            self.session.get("/api/data-capabilities")
+        return self._product_data_request(
+            "GET", "/api/data-capabilities",
         )["catalog"]
 
     def data_availability_profile(self, profile_ref: str) -> dict[str, Any]:
-        return self._expect_success(self.session.get(
-            f"/api/data-availability/profiles/{profile_ref}"
-        ))
+        return self._product_data_request(
+            "GET",
+            f"/api/data-availability/profiles/{quote(profile_ref, safe='')}",
+        )
 
     def product_liquidity(
         self,
@@ -149,13 +185,14 @@ class ProductLibraryClientMixin(ClientMixinBase):
         as_of: str,
         window_days: int = 365,
     ) -> dict[str, Any]:
-        return self._expect_success(self.session.post(
+        return self._product_data_request(
+            "POST",
             "/api/product-liquidity",
-            {
+            payload={
                 "products": list(products),
                 "source": str(source),
                 "as_of": str(as_of),
                 "window_days": int(window_days),
             },
-        ))
+        )
 

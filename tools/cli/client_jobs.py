@@ -27,6 +27,7 @@ class JobsClientMixin(ClientMixinBase):
         kind: str = "",
         limit: int = 20,
         all_ports: bool = True,
+        port: int | None = None,
     ) -> list[dict[str, Any]]:
         query = {
             key: value for key, value in {
@@ -35,7 +36,7 @@ class JobsClientMixin(ClientMixinBase):
                 "status": status,
                 "kind": kind,
                 "limit": limit,
-                "port": "all" if all_ports else "",
+                "port": port if port is not None else ("all" if all_ports else ""),
             }.items() if value
         }
         data = self._expect_success(

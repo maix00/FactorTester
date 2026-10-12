@@ -70,6 +70,7 @@ def fake_server() -> Iterator[str]:
 
     @app.post("/api/runs")
     def submit_run():
+        assert request.args.get("port") in {None, "8141"}
         payload = request.get_json()
         assert payload["workspace_id"] == "workspace-1"
         assert payload["configuration_revision"] == 1
@@ -89,6 +90,7 @@ def fake_server() -> Iterator[str]:
 
     @app.post("/api/runs/preview")
     def preview_run():
+        assert request.args.get("port") in {None, "8141"}
         payload = request.get_json()
         assert payload == {
             "workspace_id": "workspace-1",
@@ -127,6 +129,7 @@ def fake_server() -> Iterator[str]:
 
     @app.get("/api/jobs")
     def list_jobs():
+        assert request.args.get("port") in {"all", "8141"}
         return jsonify(success=True, jobs=[{"job_id": "job-1", "status": "queued"}])
 
     artifact_values = {
@@ -233,8 +236,13 @@ def fake_server() -> Iterator[str]:
         assert request.args.get("view") == "summary"
         return jsonify(success=True, groups=[{"id": "pg-1", "name": "中国期货日盘"}])
 
+    @app.get("/api/jobs/ports")
+    def job_ports():
+        return jsonify(success=True, ports=[8141, 8152], automatic_port=8141)
+
     @app.post("/api/data-availability")
     def data_availability():
+        assert request.args.get("port") == "8141"
         payload = request.get_json()
         assert payload == {
             "products": ["A.DCE"],
@@ -256,6 +264,7 @@ def fake_server() -> Iterator[str]:
 
     @app.post("/api/product-liquidity")
     def product_liquidity():
+        assert request.args.get("port") == "8141"
         payload = request.get_json()
         assert payload == {
             "products": ["A.DCE", "RB.SHF"],
@@ -270,6 +279,17 @@ def fake_server() -> Iterator[str]:
             evidence_hash="sha256:liquidity",
             entries=[],
         )
+
+    @app.get("/api/data-capabilities")
+    def data_capabilities():
+        assert request.args.get("port") == "8141"
+        return jsonify(success=True, catalog={"schema_version": 1})
+
+    @app.get("/api/data-availability/profiles/<path:profile_ref>")
+    def data_availability_profile(profile_ref):
+        assert request.args.get("port") == "8141"
+        assert profile_ref == "availability:v1:sample"
+        return jsonify(success=True, profile_ref=profile_ref)
 
     @app.get("/api/factor-library/overview")
     def factor_library():
@@ -398,6 +418,10 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
         source="LocalCNFuturesDAY1",
         as_of="2024-12-31",
     )["evidence_hash"] == "sha256:liquidity"
+    assert client.data_capabilities()["schema_version"] == 1
+    assert client.data_availability_profile("availability:v1:sample")[
+        "profile_ref"
+    ] == "availability:v1:sample"
     assert client.factor_catalog()["family_scopes"]["mine"]["families"][0][
         "factor_family_alias"
     ] == "SgCCS"
@@ -464,6 +488,7 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
         "/research/gtht_handoff.json"
     )["artifact_id"] == "academic_mom:abc"
     assert client.list_jobs(workspace_id="workspace-1")[0]["job_id"] == "job-1"
+    assert client.list_jobs(port=8141, all_ports=False)[0]["job_id"] == "job-1"
     artifact = client.job_artifact("job-1", "equity_curve_report")
     assert artifact.content == b"<svg><title>curve</title></svg>"
     assert artifact.content_type == "image/svg+xml"
@@ -485,6 +510,48 @@ def test_client_uses_real_http_and_cookies(fake_server: str, tmp_path) -> None:
         limit=9,
         cursor="cursor-1",
     )["jobs"][0]["job_id"] == "global-job-1"
+
+
+def test_data_services_require_a_manager_declared_automatic_port() -> None:
+    class PortsOnlySession:
+        def __init__(self):
+            self.calls = []
+
+        def get(self, path, *, query=None):
+            self.calls.append((path, query))
+            return {
+                "success": True,
+                "ports": [8141],
+                "automatic_port": None,
+            }
+
+    client = FactorTesterClient(PortsOnlySession())
+    with pytest.raises(RuntimeError, match="自动业务服务"):
+        client.product_liquidity(
+            products=["A.DCE"],
+            source="LocalCNFuturesDAY1",
+            as_of="2024-12-31",
+        )
+    assert client.session.calls == [("/api/jobs/ports", None)]
+
+
+def test_run_routes_select_service_without_changing_http_origin() -> None:
+    class RecordingSession:
+        def __init__(self):
+            self.calls = []
+
+        def request(self, method, path, *, payload=None, query=None):
+            self.calls.append((method, path, query))
+            return {"success": True}
+
+    client = FactorTesterClient(RecordingSession())
+    client.submit_run("workspace-1", 1, analyses=["backtest"], service_port=8141)
+    client.preview_run("workspace-1", 1, analyses=["backtest"], service_port=8141)
+
+    assert client.session.calls == [
+        ("POST", "/api/runs", {"port": 8141}),
+        ("POST", "/api/runs/preview", {"port": 8141}),
+    ]
 
 
 def test_client_login_persists_across_processes_and_logout_clears_cookie(

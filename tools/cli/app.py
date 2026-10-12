@@ -31,14 +31,14 @@ research = click.Group("research", help="Research reports, evidence, and profile
 @click.group()
 @click.option(
     "--port", "ports", multiple=True, type=click.IntRange(1, 65535),
-    help="目标 FactorTester 端口；可重复指定，job list 会聚合多个端口。",
+    help="Run/Job 的业务服务选择器；由 Manager 校验并路由，不改变服务器入口地址。",
 )
 def cli(ports: tuple[int, ...]) -> None:
     """FactorTester CLI.
 
     \b
     常用路径:
-      factortester configure --host 127.0.0.1 --port 8114
+      factortester configure --base-url https://manager.example:7998
       factortester login --username <username>
       factortester doctor
       factortester factor-plan --factor-family SgCCS --configuration-file research-config.json

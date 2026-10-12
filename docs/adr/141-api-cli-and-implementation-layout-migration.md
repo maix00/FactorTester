@@ -49,6 +49,13 @@ Swift 也必须使用同一领域客户端、同一权限判定和同一结构�
 - `factortester research ...` 对应研究图、报告、证据、Profile 和工作区的各自 API；
 - 测试作者、运行和任务客户端分别使用 `/api/test-authoring/`、`/api/runs` 和 `/api/jobs`。
 
+产品数据服务的能力、可用性和流动性 API（`/api/data-capabilities`、
+`/api/data-availability`、`/api/product-liquidity`）仍从当前选中的 Manager origin 调用。CLI
+先读取该 Manager 的 `/api/jobs/ports` 自动选择结果，再把该服务器公布的业务服务端口作为路由选择器；
+显式 Run/Job 端口也作为 Manager 请求中的选择器传递。Manager 使用现有认证网关转发请求并传递已验证
+principal。CLI 不根据控制端口推算业务端口、不把请求 origin 改写为业务端口、不把 Manager 凭据直接
+发送给业务服务，也不把业务端口持久化为服务器身份。无可用自动服务时请求明确失败。
+
 `catalog` 只保留在具有明确目录语义的研究图路径中，不作为因子库或产品库的顶层公开命令。已从当前公开
 路由树移除的旧入口包括 `/api/catalog/factors`、`/api/catalog/factor-*` 和 `/custom-factors/api/*`；
 旧的 `factor-library-overview`、`factor-library-configs`、`factor-library-scopes` 也不得重新注册为

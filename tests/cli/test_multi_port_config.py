@@ -5,9 +5,21 @@ from pathlib import Path
 from tools.cli.http import ClientConfig, HttpSession, cookie_path_for
 
 
-def test_client_config_replaces_only_listener_port() -> None:
-    config = ClientConfig("http://127.0.0.1:8141/base")
-    assert config.for_port(8142).base_url == "http://127.0.0.1:8142/base"
+def test_cli_service_port_selection_does_not_rewrite_manager_origin(
+    monkeypatch, tmp_path,
+) -> None:
+    from tools.cli.core import context
+    from tools.cli.http import save_config
+
+    monkeypatch.setenv("FACTORTESTER_CONFIG", str(tmp_path / "config.json"))
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    save_config(ClientConfig("https://manager.example:9443"))
+    monkeypatch.setattr(context, "requested_ports", lambda: (8142,))
+    monkeypatch.setattr(context, "load_capability", lambda: None)
+
+    client = context.client_from_config()
+
+    assert client.session.base_url == "https://manager.example:9443"
 
 
 def test_http_sessions_use_distinct_cookie_files(monkeypatch, tmp_path) -> None:
