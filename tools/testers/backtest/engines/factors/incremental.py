@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from operator import add
-from typing import TYPE_CHECKING, Any, Mapping, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
 import pandas as pd
@@ -27,6 +28,7 @@ from tools.factors.expr import (
     WhereOp,
 )
 from tools.factors.expr.conditional import apply_where
+from tools.factors.expr.groupby_scope import GroupByScopeOp
 from tools.factors.expr.lookback_scope import BarCountScope
 from tools.factors.expr.pointwise import POINTWISE_OPS, apply_pointwise
 from tools.factors.expr.term_structure_math import (
@@ -42,8 +44,11 @@ from .bar_search import BarDistanceNode, BarSinceNode, compile_match_predicate
 from .cross_sectional_kernels import ordinal_rank, rank_percent, zscore
 from .cross_sectional_residual import ResidualizeNode
 from .group_cross_sectional import GroupCrossSectionalNode
+from .rolling_covariance import RollingCovarianceState
+from .rolling_extrema import RollingArgExtremaState, RollingMinMaxState
+from .rolling_moments import RollingMomentsState
+from .rolling_skew import RollingSkewState
 from .rolling_statistics import ROLLING_STATISTICS, RollingStatisticsNode
-from tools.factors.expr.groupby_scope import GroupByScopeOp
 
 if TYPE_CHECKING:
     # MarketSlice lived in the now-deleted engines/native/runtime.py
@@ -178,13 +183,10 @@ class RollingWindowNode:
         self.window = window
         self._width = width
         self._fast = len(children) == 1 and op in {
-            # The sum/mean state is a clear win for all window sizes.  A
-            # Python monotonic deque for min/max is slower than NumPy's
-            # vectorized scan for the small windows common in live factors, so
-            # those retain the generic kernel until a width-aware deque is
-            # available.
+            # The sum/mean state is a clear win for all window sizes.
             "rolling_mean", "rolling_sum",
         }
+        self._state: Any | None = None
         if self._fast:
             self._ring = np.full((window, width), np.nan, dtype=float)
             self._ring_cursor = 0
@@ -193,7 +195,35 @@ class RollingWindowNode:
             self._count = np.zeros(width, dtype=np.int64)
             self._histories: list[deque[np.ndarray]] = []
         else:
-            self._histories = [deque(maxlen=window) for _ in children]
+            if (
+                len(children) == 1
+                and op in {"rolling_std", "rolling_var"}
+                and window >= 128
+            ):
+                self._state = RollingMomentsState(
+                    window, width, standard_deviation=(op == "rolling_std"),
+                )
+            elif len(children) == 1 and op == "rolling_skew" and window >= 255:
+                self._state = RollingSkewState(window, width)
+            elif len(children) == 1 and op in {"rolling_min", "rolling_max"}:
+                self._state = RollingMinMaxState(op, window, width)
+            elif len(children) == 1 and op in {
+                "rolling_argmax", "rolling_argmin",
+                "rolling_argmax_raw", "rolling_argmin_raw",
+            }:
+                self._state = RollingArgExtremaState(op, window, width)
+            elif (
+                len(children) == 2
+                and op in {"rolling_cov", "rolling_corr"}
+                and window >= 128
+            ):
+                self._state = RollingCovarianceState(
+                    window, width, correlation=(op == "rolling_corr"),
+                )
+            self._histories = (
+                [] if self._state is not None
+                else [deque(maxlen=window) for _ in children]
+            )
 
     def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
         key = id(self)
@@ -202,6 +232,17 @@ class RollingWindowNode:
         if self._fast:
             value = self.children[0].update(market, cache)
             result = self._update_fast(np.asarray(value, dtype=float))
+            cache[key] = result
+            return result
+        if self._state is not None:
+            values = tuple(
+                np.asarray(child.update(market, cache), dtype=float)
+                for child in self.children
+            )
+            if self.op in {"rolling_cov", "rolling_corr"}:
+                result = self._state.update(values[0], values[1])
+            else:
+                result = self._state.update(values[0])
             cache[key] = result
             return result
         for history, child in zip(self._histories, self.children, strict=True):
@@ -257,19 +298,21 @@ class RollingWindowNode:
         if self.op == "rolling_std":
             ready = (count >= min_periods) & (count > 1)
             mean = np.divide(
-                np.nansum(values, axis=0), count,
+                np.sum(np.where(finite, values, 0.0), axis=0), count,
                 out=np.zeros(self._width, dtype=float), where=count > 0,
             )
-            centered = np.where(finite, values - mean, 0.0)
+            centered = np.zeros_like(values)
+            np.subtract(values, mean, out=centered, where=finite)
             result[ready] = np.sqrt(np.sum(centered * centered, axis=0)[ready] / (count[ready] - 1))
             return result
         if self.op == "rolling_var":
             ready = (count >= min_periods) & (count > 1)
             mean = np.divide(
-                np.nansum(values, axis=0), count,
+                np.sum(np.where(finite, values, 0.0), axis=0), count,
                 out=np.zeros(self._width, dtype=float), where=count > 0,
             )
-            centered = np.where(finite, values - mean, 0.0)
+            centered = np.zeros_like(values)
+            np.subtract(values, mean, out=centered, where=finite)
             result[ready] = np.sum(centered * centered, axis=0)[ready] / (count[ready] - 1)
             return result
         if self.op == "rolling_min":
@@ -286,10 +329,11 @@ class RollingWindowNode:
             return result
         if self.op == "rolling_skew":
             mean = np.divide(
-                np.nansum(values, axis=0), count,
+                np.sum(np.where(finite, values, 0.0), axis=0), count,
                 out=np.zeros(self._width, dtype=float), where=count > 0,
             )
-            centered = np.where(finite, values - mean, 0.0)
+            centered = np.zeros_like(values)
+            np.subtract(values, mean, out=centered, where=finite)
             second = np.sum(centered * centered, axis=0) / np.maximum(count, 1)
             third = np.sum(centered * centered * centered, axis=0) / np.maximum(count, 1)
             valid = (count >= min_periods) & (count >= 3) & (second > 0.0)
@@ -308,18 +352,23 @@ class RollingWindowNode:
             ready = pair_count >= self.window
             if not ready.any():
                 return result
-            left_mean = np.mean(values, axis=0)
-            right_mean = np.mean(right, axis=0)
-            left_centered = values - left_mean
-            right_centered = right - right_mean
+            ready_values = values[:, ready]
+            ready_right = right[:, ready]
+            left_mean = np.mean(ready_values, axis=0)
+            right_mean = np.mean(ready_right, axis=0)
+            left_centered = ready_values - left_mean
+            right_centered = ready_right - right_mean
             covariance = np.sum(left_centered * right_centered, axis=0) / (self.window - 1)
             if self.op == "rolling_cov":
-                result[ready] = covariance[ready]
+                result[ready] = covariance
             else:
                 left_std = np.sqrt(np.sum(left_centered * left_centered, axis=0) / (self.window - 1))
                 right_std = np.sqrt(np.sum(right_centered * right_centered, axis=0) / (self.window - 1))
-                valid = ready & (left_std > 0.0) & (right_std > 0.0)
-                result[valid] = covariance[valid] / (left_std[valid] * right_std[valid])
+                valid = (left_std > 0.0) & (right_std > 0.0)
+                ready_columns = np.flatnonzero(ready)
+                result[ready_columns[valid]] = covariance[valid] / (
+                    left_std[valid] * right_std[valid]
+                )
             return result
         if self.op.startswith("rolling_arg"):
             if self.window > 1 and len(values) < self.window:
@@ -328,7 +377,7 @@ class RollingWindowNode:
             normalize = not self.op.endswith("_raw")
             for column in range(self._width):
                 column_values = values[:, column]
-                valid = np.flatnonzero(np.isfinite(column_values))
+                valid = np.flatnonzero(~np.isnan(column_values))
                 if valid.size == 0:
                     # Match _rolling_argmaxmin: a full all-NaN window gets a
                     # neutral position (the pre-window rows remain NaN).
@@ -336,10 +385,15 @@ class RollingWindowNode:
                     continue
                 if valid.size < min_periods:
                     continue
-                extreme = np.nanmax(column_values) if is_max else np.nanmin(column_values)
+                extreme = (
+                    np.max(column_values[valid])
+                    if is_max else np.min(column_values[valid])
+                )
                 # Batch sliding_window_view reverses each window, so ties use
                 # the most recent occurrence rather than the oldest one.
-                position = np.flatnonzero(np.isfinite(column_values) & (column_values == extreme))[-1]
+                position = np.flatnonzero(
+                    ~np.isnan(column_values) & (column_values == extreme)
+                )[-1]
                 result[column] = position / max(1, self.window - 1) if normalize else position
             return result
         raise UnsupportedStreamingFactor(f"unsupported rolling op: {self.op}")
@@ -741,10 +795,8 @@ class GroupScopeNode:
             self._mean[index] += delta / count
             self._m2[index] += delta * (value - self._mean[index])
         if self._track_extremes:
-            if value < self._min[index]:
-                self._min[index] = value
-            if value > self._max[index]:
-                self._max[index] = value
+            self._min[index] = min(self._min[index], value)
+            self._max[index] = max(self._max[index], value)
         if self._track_order:
             insort(self._sorted[index], value)
         if self.op in ("argmax", "argmin"):
@@ -1137,8 +1189,6 @@ def compile_streaming_factor(
                     len(products),
                 )
         elif isinstance(expr, GroupByScopeOp):
-            from tools.factors.expr.groupby_scope import GroupByScopeOp as _GroupByScopeOp
-
             op_name = expr.op
             operands = expr.operands
             data_operands = tuple(
@@ -1355,7 +1405,7 @@ def _resolve_window_bars(
             raise UnsupportedStreamingFactor(
                 f"window {duration} is not an integer multiple of {frequency}"
             )
-        bars = int(round(ratio))
+        bars = round(ratio)
     else:
         raise UnsupportedStreamingFactor("streaming windows must resolve to fixed bars")
     if bars <= 0:
