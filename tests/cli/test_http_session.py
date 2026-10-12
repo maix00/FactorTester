@@ -43,6 +43,31 @@ def test_successful_response_survives_cookie_persistence_failure(
     assert session.get("/api/products") == {"success": True, "items": [1]}
 
 
+def test_http_session_defaults_cli_marker_for_network_discovery(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    session = HttpSession(
+        "http://127.0.0.1:7998",
+        cookies=tmp_path / "cookies.lwp",
+    )
+    seen = []
+
+    def opened(request, **_kwargs):
+        seen.append(request)
+        return _Response({"success": True})
+
+    monkeypatch.setattr(
+        session._opener,
+        "open",
+        opened,
+    )
+
+    assert session.get("/api/server/network-info") == {"success": True}
+    headers = {key.lower(): value for key, value in seen[0].header_items()}
+    assert headers["x-factortester-client"] == "cli"
+
+
 def test_profile_capability_does_not_persist_manager_cookies(tmp_path: Path) -> None:
     capability = AgentCapability(
         base_url="http://127.0.0.1:7998",
