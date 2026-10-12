@@ -1,16 +1,18 @@
 """Shared rolling time-trend regression metrics."""
+
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
-
-ROLLING_LINEAR_METRICS = frozenset({
-    "rolling_linreg_slope",
-    "rolling_linreg_r2",
-    "rolling_linreg_tstat",
-    "rolling_linreg_resid_std",
-})
+ROLLING_LINEAR_METRICS = frozenset(
+    {
+        "rolling_linreg_slope",
+        "rolling_linreg_r2",
+        "rolling_linreg_tstat",
+        "rolling_linreg_resid_std",
+    }
+)
 
 
 def linear_metric(values: np.ndarray, metric: str, minimum: int) -> float:
@@ -19,16 +21,16 @@ def linear_metric(values: np.ndarray, metric: str, minimum: int) -> float:
     if valid.sum() < minimum:
         return np.nan
     y = values[valid]
+    centered_y = y - y.mean()
     x = np.flatnonzero(valid).astype(float)
     centered_x = x - x.mean()
     sxx = float(centered_x @ centered_x)
     if sxx <= 0:
         return np.nan
     design = np.column_stack([np.ones(len(x)), x])
-    beta, *_ = np.linalg.lstsq(design, y, rcond=None)
-    residuals = y - design @ beta
+    beta, *_ = np.linalg.lstsq(design, centered_y, rcond=None)
+    residuals = centered_y - design @ beta
     sse = float(residuals @ residuals)
-    centered_y = y - y.mean()
     sst = float(centered_y @ centered_y)
 
     if metric == "rolling_linreg_slope":
@@ -51,10 +53,20 @@ def rolling_linear_metric(data: pd.DataFrame, window: int, metric: str) -> pd.Da
     if metric not in ROLLING_LINEAR_METRICS:
         raise ValueError(f"Unknown rolling linear metric: {metric}")
     minimum = max(3, window // 2)
-    valid = data.notna()
-    y = data.fillna(0.0)
+    values = data.to_numpy(dtype=float, copy=False)
+    if values.shape[0] == 0 or values.shape[1] == 0:
+        return pd.DataFrame(index=data.index, columns=data.columns, dtype=float)
+    finite_values = np.isfinite(values)
+    first_valid_rows = finite_values.argmax(axis=0)
+    column_indexes = np.arange(values.shape[1])
+    anchors = values[first_valid_rows, column_indexes]
+    anchors = np.where(finite_values.any(axis=0), anchors, 0.0)
+    centered_values = np.where(finite_values, values - anchors, 0.0)
+    valid = pd.DataFrame(finite_values, index=data.index, columns=data.columns)
+    y = pd.DataFrame(centered_values, index=data.index, columns=data.columns)
     positions = np.broadcast_to(
-        np.arange(len(data), dtype=float)[:, None], data.shape,
+        np.arange(len(data), dtype=float)[:, None],
+        data.shape,
     )
     x = pd.DataFrame(
         np.where(valid, positions, 0.0),
@@ -77,9 +89,7 @@ def rolling_linear_metric(data: pd.DataFrame, window: int, metric: str) -> pd.Da
     centered_xy = sum_xy - sum_x * sum_y / count
     slope = centered_xy / centered_xx
     intercept = (sum_y - slope * sum_x) / count
-    sse = (
-        sum_y2 - intercept * sum_y - slope * sum_xy
-    ).clip(lower=0.0)
+    sse = (sum_y2 - intercept * sum_y - slope * sum_xy).clip(lower=0.0)
     eligible = (count >= minimum) & (centered_xx > 0)
 
     if metric == "rolling_linreg_slope":
