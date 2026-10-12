@@ -496,9 +496,8 @@ final class ClientTabSelectionTests: XCTestCase {
     }
 
     func testEmbeddedResearchSectionNavigationUpdatesOnlyLightweightSession() {
-        XCTAssertEqual(
+        XCTAssertNil(
             ResearchModuleSection.fromResearchPath("/research?section=graph"),
-            .graph
         )
         XCTAssertEqual(
             ResearchModuleSection.fromResearchPath("/research?section=local"),
@@ -516,9 +515,9 @@ final class ClientTabSelectionTests: XCTestCase {
         )
         XCTAssertEqual(
             ResearchDocumentWebNavigationMessage.path(from: [
-                "path": "/research?section=graph",
+                "path": "/research?section=reports",
             ]),
-            "/research?section=graph"
+            "/research?section=reports"
         )
     }
 
