@@ -11,7 +11,7 @@ from http.cookiejar import Cookie
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import urljoin, urlsplit
 from urllib.request import HTTPCookieProcessor, HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
 from .agent_auth import AgentCapability
@@ -37,20 +37,6 @@ class ClientConfig:
         else:
             base = f"http://{host}:{port}"
         return cls(base_url=base.rstrip("/"))
-
-    def for_port(self, port: int) -> "ClientConfig":
-        parsed = urlsplit(self.base_url)
-        if not parsed.hostname:
-            raise ValueError(f"无效服务地址: {self.base_url}")
-        host = parsed.hostname
-        if ":" in host and not host.startswith("["):
-            host = f"[{host}]"
-        netloc = host
-        if parsed.username:
-            netloc = f"{parsed.username}@{netloc}"
-        netloc += f":{int(port)}"
-        return ClientConfig(urlunsplit((parsed.scheme or "http", netloc, parsed.path, parsed.query, "")).rstrip("/"))
-
 
 class HttpClientError(RuntimeError):
     def __init__(self, status: int, url: str, body: str) -> None:

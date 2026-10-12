@@ -69,6 +69,10 @@ class JobListRoutesMixin:
                 ]
             json_response(self, payload)
             return True
+        if self._proxy_selected_job_list(parsed):
+            return True
+        if self._proxy_product_data_service(parsed, method="GET"):
+            return True
         if parsed.path == "/api/jobs":
             session = self._session()
             visitor = self._visitor_mode()

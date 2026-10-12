@@ -46,6 +46,7 @@ class FakeClient:
         performance_profile=None,
         configuration_snapshot_id="",
         configuration_snapshot_revision=None,
+        service_port=None,
     ):
         assert workspace_id == "workspace-1"
         if configuration_snapshot_id:
@@ -58,6 +59,7 @@ class FakeClient:
             "step_mode": step_mode,
             "sample_use": sample_use,
             "report_binding": report_binding,
+            "service_port": service_port,
         }
         self.sample_use = sample_use
         self.report_binding = report_binding
@@ -79,6 +81,23 @@ class FakeClient:
 
     def save_configuration_template(self, workspace_id, *, name):
         return {"configuration_id": "template-1", "name": name}
+
+    def preview_run(
+        self,
+        workspace_id,
+        configuration_revision,
+        *,
+        analyses,
+        service_port=None,
+        **_kwargs,
+    ):
+        self.preview = {
+            "workspace_id": workspace_id,
+            "configuration_revision": configuration_revision,
+            "analyses": analyses,
+            "service_port": service_port,
+        }
+        return {"success": True}
 
     def create_configuration_snapshot(self, workspace_id, **kwargs):
         self.snapshot_create = (workspace_id, kwargs)
@@ -272,6 +291,50 @@ class FakeClient:
                 "input_contract_violations": [],
             },
         }
+
+
+def test_run_commands_keep_manager_origin_and_pass_selected_port(
+    tmp_path, monkeypatch,
+) -> None:
+    fake = FakeClient()
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(
+        "tools.cli.commands.research.client_from_config", lambda: fake,
+    )
+    state = load_state()
+    state.workspace_id = "workspace-1"
+    state.configuration_revision = 2
+    save_state(state)
+
+    runner = CliRunner()
+    submitted = runner.invoke(cli, [
+        "--port", "8141", "run", "submit", "--analysis", "ic",
+    ])
+    previewed = runner.invoke(cli, [
+        "--port", "8141", "run", "preview", "--analysis", "ic",
+    ])
+
+    assert submitted.exit_code == 0, submitted.output
+    assert previewed.exit_code == 0, previewed.output
+    assert fake.submission["service_port"] == 8141
+    assert fake.preview["service_port"] == 8141
+
+
+def test_job_list_uses_manager_port_selector(tmp_path, monkeypatch) -> None:
+    fake = FakeClient()
+    monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(
+        "tools.cli.commands.research.client_from_config", lambda: fake,
+    )
+    state = load_state()
+    state.workspace_id = "workspace-1"
+    save_state(state)
+
+    result = CliRunner().invoke(cli, ["--port", "8141", "job", "list"])
+
+    assert result.exit_code == 0, result.output
+    assert fake.list_job_args["port"] == 8141
+    assert fake.list_job_args["all_ports"] is False
 
 
 def test_multi_factor_configuration_and_run_use_one_contract(tmp_path, monkeypatch) -> None:

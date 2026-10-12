@@ -516,8 +516,15 @@ def workspace_snapshot_list() -> None:
 @click.option("--port", "run_ports", multiple=True, type=click.IntRange(1, 65535), help="提交到指定 FactorTester 端口。")
 def run(run_ports: tuple[int, ...]) -> None:
     """Submit and inspect immutable research runs."""
-    if len(run_ports) > 1:
+    if len(run_ports) > 1 or len(requested_ports()) > 1:
         raise click.UsageError("一次 Run 只能指定一个执行端口")
+
+
+def _requested_run_service_port() -> int | None:
+    ports = requested_ports()
+    if len(ports) > 1:
+        raise click.ClickException("一次 Run 只能指定一个执行端口")
+    return ports[0] if ports else None
 
 
 @run.command("preview")
@@ -630,6 +637,7 @@ def run_preview(
     result = client_from_config().preview_run(
         state.workspace_id,
         None if configuration_snapshot_id else state.configuration_revision,
+        service_port=_requested_run_service_port(),
         **preview_kwargs,
     )
     click.echo(_json(result))
@@ -829,6 +837,7 @@ def run_submit(
     result = client.submit_run(
         state.workspace_id,
         None if configuration_snapshot_id else state.configuration_revision,
+        service_port=_requested_run_service_port(),
         **submit_kwargs,
     )
     if report_scope is not None and wait_report:
@@ -910,9 +919,9 @@ def job_list(
     state = load_state()
     workspace_id = "" if all_workspaces else state.workspace_id
     ports = requested_ports() or (None,)
+    client = client_from_config()
     rows = []
     for port in ports:
-        client = client_from_config() if port is None else client_from_config(port=port)
         kwargs = {
             "workspace_id": workspace_id,
             "status": ",".join(statuses),
@@ -921,6 +930,7 @@ def job_list(
         }
         if port is not None:
             kwargs["all_ports"] = False
+            kwargs["port"] = port
         rows.extend(client.list_jobs(**kwargs))
     rows.sort(key=lambda item: float(item.get("updated_at") or 0), reverse=True)
     rows = rows[:limit * len(ports)]

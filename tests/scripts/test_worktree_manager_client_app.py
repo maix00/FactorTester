@@ -28,6 +28,8 @@ from server.manager.services.test_authoring import (
 from server.manager.storage.control_db import ControlDatabaseUnavailable
 from server.manager.storage.local_accounts import LocalAccountStore
 from server.manager.storage.preferences import UserPreferenceStore
+from server.manager.http.gateway import GatewayResponse
+from server.manager.domain.federation import ServiceRoute
 from server.manager.web import assets as research_static
 from server.modules.custom_factors import factor_set_registry
 from server.services.factor_source_catalog import FactorSourceCatalog
@@ -4526,6 +4528,150 @@ def test_job_port_metadata_includes_automatic_selection(tmp_path, monkeypatch) -
             value = json.loads(response.read())
 
     assert value == {"ports": [8141, 8152], "automatic_port": 8141}
+
+
+@pytest.mark.parametrize(
+    "method,path,payload,expected_path",
+    [
+        ("GET", "/api/data-capabilities", None, "/api/data-capabilities?keep=yes"),
+        (
+            "GET",
+            "/api/data-availability/profiles/availability%3Av1%3Asample",
+            None,
+            "/api/data-availability/profiles/availability%3Av1%3Asample?keep=yes",
+        ),
+        (
+            "POST",
+            "/api/data-availability",
+            {"products": ["A.DCE"]},
+            "/api/data-availability?keep=yes",
+        ),
+        (
+            "POST",
+            "/api/product-liquidity",
+            {"products": ["A.DCE"]},
+            "/api/product-liquidity?keep=yes",
+        ),
+    ],
+)
+def test_manager_proxies_product_data_routes_to_declared_service(
+    tmp_path, method, path, payload, expected_path,
+) -> None:
+    state = authenticated_state(tmp_path)
+    state.service_ports = lambda: [8141, 8152]
+    state.preferred_service_port = lambda: 8141
+    route = ServiceRoute(
+        server_id=state.server_id,
+        role="local",
+        branch="main",
+        revision="test",
+        port=8141,
+    )
+    selected = []
+    forwarded = []
+
+    def route_for(*, server_id="", port=None, **_kwargs):
+        selected.append((server_id, port))
+        return route
+
+    def route_request(_route, **kwargs):
+        forwarded.append(kwargs)
+        return GatewayResponse(
+            200,
+            b'{"success":true,"kind":"product-data"}',
+            "application/json",
+        )
+
+    state.route_for = route_for
+    state.route_request = route_request
+    query_path = f"{path}?port=8141&server_id=local&branch=main&keep=yes"
+    body = json.dumps(payload).encode("utf-8") if payload is not None else None
+    headers = {"Authorization": "Bearer user-token"}
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+    with running_manager(state) as base_url:
+        request = Request(
+            f"{base_url}{query_path}",
+            data=body,
+            headers=headers,
+            method=method,
+        )
+        with urlopen(request) as response:
+            value = json.loads(response.read())
+
+    assert value["success"] is True
+    assert value["kind"] == "product-data"
+    assert selected == [(state.server_id, 8141)]
+    assert forwarded[0]["path"] == expected_path
+    assert forwarded[0]["principal"] == "user@1"
+    assert forwarded[0]["method"] == method
+    assert forwarded[0]["body"] == body
+
+
+def test_manager_rejects_unpublished_product_data_service_port(
+    tmp_path,
+) -> None:
+    state = authenticated_state(tmp_path)
+    state.service_ports = lambda: [8141]
+    state.preferred_service_port = lambda: 8141
+    called = []
+    state.route_for = lambda **_kwargs: called.append("route")
+
+    with running_manager(state) as base_url:
+        request = Request(
+            f"{base_url}/api/data-capabilities?port=9999",
+            headers={"Authorization": "Bearer user-token"},
+        )
+        with pytest.raises(HTTPError) as exc:
+            urlopen(request)
+
+    assert exc.value.code == 400
+    assert called == []
+
+
+def test_manager_routes_selected_job_list_port_without_changing_client_origin(
+    tmp_path,
+) -> None:
+    state = authenticated_state(tmp_path)
+    state.service_ports = lambda: [8141]
+    route = ServiceRoute(
+        server_id=state.server_id,
+        role="local",
+        branch="main",
+        revision="test",
+        port=8141,
+    )
+    selected = []
+    forwarded = []
+
+    def route_for(*, server_id="", port=None, **_kwargs):
+        selected.append((server_id, port))
+        return route
+
+    def route_request(_route, **kwargs):
+        forwarded.append(kwargs)
+        return GatewayResponse(
+            200,
+            b'{"success":true,"jobs":[{"job_id":"job-1"}]}',
+            "application/json",
+        )
+
+    state.route_for = route_for
+    state.route_request = route_request
+    with running_manager(state) as base_url:
+        request = Request(
+            f"{base_url}/api/jobs?port=8141&workspace_id=workspace-1",
+            headers={"Authorization": "Bearer user-token"},
+        )
+        with urlopen(request) as response:
+            value = json.loads(response.read())
+
+    assert value["jobs"][0]["job_id"] == "job-1"
+    assert selected == [(state.server_id, 8141)]
+    assert forwarded[0]["path"] == (
+        "/api/jobs?workspace_id=workspace-1&scope=mine"
+    )
+    assert forwarded[0]["principal"] == "user@1"
 
 
 def test_report_snapshot_reference_reuses_reference_presentation_seam() -> None:
