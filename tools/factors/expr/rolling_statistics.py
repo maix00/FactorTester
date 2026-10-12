@@ -1,17 +1,19 @@
 """Batch kernels for robust and regression-based rolling statistics."""
+
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
+from .rolling_mad import rolling_mad_batch
 from .rolling_regression import ROLLING_LINEAR_METRICS, rolling_linear_metric
 
-
-ROLLING_ROBUST_STATISTICS = frozenset({
-    "rolling_median",
-    "rolling_quantile",
-    "rolling_mad",
-})
+ROLLING_ROBUST_STATISTICS = frozenset(
+    {
+        "rolling_median",
+        "rolling_quantile",
+        "rolling_mad",
+    }
+)
 ROLLING_STATISTICS = ROLLING_ROBUST_STATISTICS | ROLLING_LINEAR_METRICS
 
 
@@ -32,10 +34,5 @@ def apply_rolling_statistic(
             raise ValueError("rolling_quantile requires q")
         return data.rolling(window, min_periods=minimum).quantile(quantile)
     if op == "rolling_mad":
-        return data.rolling(window, min_periods=minimum).apply(
-            lambda values: np.nanmedian(
-                np.abs(values - np.nanmedian(values))
-            ),
-            raw=True,
-        )
+        return rolling_mad_batch(data, window, min_periods=minimum)
     raise ValueError(f"Unknown rolling statistic: {op}")
