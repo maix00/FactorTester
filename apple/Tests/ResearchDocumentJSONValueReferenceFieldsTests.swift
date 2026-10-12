@@ -17,8 +17,8 @@ final class ResearchDocumentJSONValueReferenceFieldsTests: XCTestCase {
         XCTAssertEqual(
             value.referenceFields(prefix: "适用范围"),
             [
-                .init(name: "适用范围.portfolio.assets", value: "equity.csv、rates.csv"),
-                .init(name: "适用范围.portfolio.source", value: "ticks"),
+                .init(name: "适用范围 · portfolio · assets", value: "equity.csv、rates.csv"),
+                .init(name: "适用范围 · portfolio · source", value: "ticks"),
             ]
         )
     }
