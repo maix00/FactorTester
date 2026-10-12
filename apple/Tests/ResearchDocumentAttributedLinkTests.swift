@@ -142,6 +142,63 @@ final class ResearchDocumentAttributedLinkTests: XCTestCase {
         )
     }
 
+    func testTypedReferenceParserAcceptsStoredLocalResourcesAndRejectsUnsafeTargets() throws {
+        let storedResourceURL = try XCTUnwrap(URL(
+            string: "factortester://file/factortester-local%3A%2F%2F0123456789abcdef01234567"
+        ))
+        let storedResource = ResearchDocumentTypedLinkParser.reference(
+            from: storedResourceURL
+        )
+        XCTAssertEqual(storedResource?.kind, "file")
+        XCTAssertEqual(
+            storedResource?.targetRef,
+            "factortester-local://0123456789abcdef01234567"
+        )
+
+        let nestedResourceURL = try XCTUnwrap(URL(
+            string: "factortester://file/factortester-local%3A%2F%2Fassets%2Fnotes.md"
+        ))
+        XCTAssertEqual(
+            ResearchDocumentTypedLinkParser.reference(from: nestedResourceURL)?.targetRef,
+            "factortester-local://assets/notes.md"
+        )
+
+        for target in ["../secrets.md", "%2e%2e/secrets.md", "%252e%252e/secrets.md", "/etc/passwd"] {
+            XCTAssertNil(
+                ResearchDocumentTypedLinkParser.segments(in: "[bad](\(target))")
+                    .compactMap { segment -> ResearchDocumentTypedLink? in
+                        guard case let .reference(reference) = segment else { return nil }
+                        return reference
+                    }
+                    .first,
+                target
+            )
+        }
+    }
+
+    func testReferenceParserOnlyAllowsCredentialFreeHTTPAndHTTPSURLs() throws {
+        XCTAssertTrue(ResearchDocumentTypedLinkParser.isSafeWebURL(
+            "https://example.com/research?q=duration#method"
+        ))
+        for target in [
+            "javascript:alert(1)",
+            "file:///etc/passwd",
+            "https://user:password@example.com/report",
+            "https://example.com/a b",
+            "https://example.com:70000/report",
+        ] {
+            XCTAssertFalse(
+                ResearchDocumentTypedLinkParser.isSafeWebURL(target),
+                target
+            )
+        }
+
+        let credentialedURL = try XCTUnwrap(URL(
+            string: "factortester://url/https%3A%2F%2Fuser%3Apass%40example.com%2F"
+        ))
+        XCTAssertNil(ResearchDocumentTypedLinkParser.reference(from: credentialedURL))
+    }
+
     func testHeadingAndBodyInlineCodeUseTheSameLayoutAttribute() {
         let headingFont = NSFont.systemFont(ofSize: 22, weight: .semibold)
         let rendered = ResearchInlineAttributedString.make(

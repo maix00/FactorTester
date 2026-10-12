@@ -80,17 +80,95 @@ extension ResearchDocumentTypedLinkParser {
         ].contains { value.contains($0) }
     }
 
+    static func isSafeWebURL(_ rawValue: String) -> Bool {
+        guard rawValue == rawValue.trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawValue.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+              !rawValue.unicodeScalars.contains(where: CharacterSet.whitespacesAndNewlines.contains),
+              let components = URLComponents(string: rawValue),
+              let scheme = components.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              let host = components.host,
+              !host.isEmpty,
+              components.user == nil,
+              components.password == nil,
+              components.port.map({ (1...65_535).contains($0) }) ?? true else {
+            return false
+        }
+        return true
+    }
+
+    static func isSafeRelativeFilePath(_ rawValue: String) -> Bool {
+        guard !rawValue.isEmpty,
+              rawValue.utf8.count <= 2_048,
+              rawValue == rawValue.trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawValue.hasPrefix("/"),
+              !rawValue.contains("\\"),
+              !rawValue.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+              rawValue.range(of: #"^[A-Za-z]:"#, options: .regularExpression) == nil else {
+            return false
+        }
+
+        var candidate = rawValue
+        for _ in 0..<8 {
+            guard !candidate.hasPrefix("/"),
+                  !candidate.contains("\\"),
+                  !candidate.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+                return false
+            }
+            let components = candidate.split(separator: "/", omittingEmptySubsequences: false)
+            guard !components.isEmpty,
+                  components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }),
+                  let decoded = candidate.removingPercentEncoding else {
+                return false
+            }
+            if decoded == candidate { return true }
+            candidate = decoded
+        }
+        return false
+    }
+
+    static func reference(from url: URL) -> ResearchDocumentTypedLink? {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme?.lowercased() == "factortester",
+              components.user == nil,
+              components.password == nil,
+              components.port == nil,
+              components.query == nil,
+              components.fragment == nil,
+              let rawKind = components.host,
+              components.percentEncodedPath.hasPrefix("/"),
+              let target = String(components.percentEncodedPath.dropFirst())
+                  .removingPercentEncoding,
+              !target.isEmpty else {
+            return nil
+        }
+        return makeReference(kind: rawKind, target: target, label: target)
+    }
+
+    static func reference(
+        from url: URL,
+        preservingLabelIn text: String
+    ) -> ResearchDocumentTypedLink? {
+        guard let parsed = reference(from: url) else { return nil }
+        return segments(in: text).compactMap { segment -> ResearchDocumentTypedLink? in
+            guard case let .reference(candidate) = segment,
+                  candidate.kind == parsed.kind,
+                  candidate.targetRef == parsed.targetRef else { return nil }
+            return candidate
+        }.first ?? parsed
+    }
+
     private static func reference(
         _ match: NSTextCheckingResult,
         in text: String
     ) -> ResearchDocumentTypedLink? {
         if let target = value(match, group: 1, in: text),
            isSafeWebURL(target) {
-            return .init(kind: "url", targetRef: target, label: target)
+            return makeReference(kind: "url", target: target, label: target)
         }
         let target = value(match, group: 2, in: text)
         guard let target, isSafeRelativeFilePath(target) else { return nil }
-        return .init(kind: "file", targetRef: target, label: target)
+        return makeReference(kind: "file", target: target, label: target)
     }
 
     private static func reference(
@@ -98,21 +176,63 @@ extension ResearchDocumentTypedLinkParser {
         target: String
     ) -> ResearchDocumentTypedLink? {
         guard let url = URL(string: target) else { return nil }
-        if url.scheme?.lowercased() == "factortester",
-           let kind = url.host,
-           ResearchDocumentReferenceCatalog.contains(kind) {
-            return .init(
-                kind: kind,
-                targetRef: String(url.path.dropFirst()).removingPercentEncoding
-                    ?? String(url.path.dropFirst()),
+        if url.scheme?.lowercased() == "factortester" {
+            guard var parsed = reference(from: url) else { return nil }
+            parsed = .init(
+                kind: parsed.kind,
+                targetRef: parsed.targetRef,
                 label: markdownLabel(label)
             )
+            return parsed
         }
         if isSafeWebURL(target) {
-            return .init(kind: "url", targetRef: target, label: markdownLabel(label))
+            return makeReference(
+                kind: "url", target: target, label: markdownLabel(label)
+            )
         }
         guard isSafeRelativeFilePath(target) else { return nil }
-        return .init(kind: "file", targetRef: target, label: markdownLabel(label))
+        return makeReference(
+            kind: "file", target: target, label: markdownLabel(label)
+        )
+    }
+
+    private static func makeReference(
+        kind rawKind: String,
+        target: String,
+        label: String
+    ) -> ResearchDocumentTypedLink? {
+        let kind = ResearchDocumentReferenceCatalog.canonicalKind(rawKind)
+        guard ResearchDocumentReferenceCatalog.contains(kind),
+              !target.isEmpty,
+              !target.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+            return nil
+        }
+        if kind == "url" && !isSafeWebURL(target) { return nil }
+        if kind == "file" && !isSafeFileReference(target) { return nil }
+        return .init(kind: kind, targetRef: target, label: label)
+    }
+
+    private static func isSafeFileReference(_ target: String) -> Bool {
+        if isSafeRelativeFilePath(target) { return true }
+        guard let components = URLComponents(string: target),
+              components.scheme?.lowercased() == "factortester-local",
+              let host = components.host,
+              !host.isEmpty,
+              host.unicodeScalars.allSatisfy({
+                  CharacterSet.alphanumerics.contains($0) || "._-".unicodeScalars.contains($0)
+              }),
+              components.user == nil,
+              components.password == nil,
+              components.port == nil,
+              components.query == nil,
+              components.fragment == nil else {
+            return false
+        }
+        if components.percentEncodedPath.isEmpty { return true }
+        guard components.percentEncodedPath.hasPrefix("/"),
+              let path = String(components.percentEncodedPath.dropFirst())
+                  .removingPercentEncoding else { return false }
+        return isSafeRelativeFilePath(path)
     }
 
     private static func markdownMatches(in text: String) -> [MarkdownLinkMatch] {
