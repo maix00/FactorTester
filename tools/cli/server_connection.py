@@ -5,8 +5,7 @@ from tools.cli.http import ClientConfig, HttpSession
 
 
 def discover_server(seed: ClientConfig, server_id: str) -> ClientConfig:
-    info = HttpSession(seed.base_url).request('GET', '/api/server/network-info',
-        extra_headers={'X-FactorTester-Client': 'cli'})
+    info = HttpSession(seed.base_url).request('GET', '/api/server/network-info')
     if info.get('server_id') == server_id:
         return seed
     targets = info.get('online_public_server_targets', []) + info.get('internal_server_targets', [])
@@ -27,8 +26,9 @@ def discover_server(seed: ClientConfig, server_id: str) -> ClientConfig:
         # No seed credential is passed to a different endpoint. Confirm the
         # destination's identity before adopting its server-provided address.
         try:
-            actual = HttpSession(endpoint, timeout=5).request('GET', '/api/server/network-info',
-                extra_headers={'X-FactorTester-Client': 'cli'})
+            actual = HttpSession(endpoint, timeout=5).request(
+                'GET', '/api/server/network-info',
+            )
         except (OSError, RuntimeError):
             continue
         if actual.get('server_id') == server_id:
