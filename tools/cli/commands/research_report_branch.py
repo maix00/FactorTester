@@ -41,18 +41,21 @@ def branch_list(research_id: str) -> None:
 @click.command("branch-read")
 @click.argument("target_ref", required=False)
 @click.option("--profile-id", default="", help="branch 所属 profile id")
-@click.option("--package-id", default="", help="报告包 id")
+@click.option(
+    "--report-workspace-id", "--package-id", "report_workspace_id",
+    default="", help="报告工作区 ID（--package-id 为兼容别名）",
+)
 @click.option("--branch-id", default="", help="branch id")
 @click.option("--publication-id", default="", help="branch-list 返回的跨服务器或客户端 publication_id")
 @click.option("--chapter-id", default="", help="读取具体章节；省略时只读取目录")
 @friendly_errors
 def branch_read(
-    target_ref: str | None, profile_id: str, package_id: str, branch_id: str,
+    target_ref: str | None, profile_id: str, report_workspace_id: str, branch_id: str,
     publication_id: str = "", chapter_id: str = "",
 ) -> None:
     """读取某个创建者(branch 归属 principal)工作区里的 branch 内容。"""
     if publication_id:
-        if any((target_ref, profile_id, package_id, branch_id)):
+        if any((target_ref, profile_id, report_workspace_id, branch_id)):
             raise click.UsageError("--publication-id 不可与本地服务器分支定位参数混用")
         _json(client_from_config().read_publication_branch(
             publication_id, chapter_id=chapter_id,
@@ -60,12 +63,15 @@ def branch_read(
         return
     if chapter_id:
         raise click.UsageError("--chapter-id 需要 --publication-id")
-    if not all((target_ref, profile_id, package_id, branch_id)):
-        raise click.UsageError("提供 --publication-id，或完整的 target_ref/--profile-id/--package-id/--branch-id")
+    if not all((target_ref, profile_id, report_workspace_id, branch_id)):
+        raise click.UsageError(
+            "提供 --publication-id，或完整的 target_ref/--profile-id/"
+            "--report-workspace-id/--branch-id"
+        )
     _json(client_from_config().read_server_branch(
         target_ref=target_ref,
         profile_id=profile_id,
-        package_id=package_id,
+        report_workspace_id=report_workspace_id,
         branch_id=branch_id,
     ))
 

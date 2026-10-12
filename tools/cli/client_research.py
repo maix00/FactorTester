@@ -209,14 +209,14 @@ class ResearchClientMixin(ClientMixinBase):
         *,
         target_ref: str,
         profile_id: str,
-        package_id: str,
+        report_workspace_id: str,
         branch_id: str,
     ) -> dict[str, Any]:
         """Read one creator branch resolved against the creator's workspace."""
         query = {
             "target_ref": target_ref,
             "profile_id": profile_id,
-            "package_id": package_id,
+            "report_workspace_id": report_workspace_id,
             "branch_id": branch_id,
         }
         return dict(self._expect_success(self.session.get(
