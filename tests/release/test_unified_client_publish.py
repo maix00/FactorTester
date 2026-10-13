@@ -6,6 +6,7 @@ import subprocess
 import sys
 from hashlib import sha256
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from click.testing import CliRunner
@@ -503,7 +504,130 @@ def test_public_cli_exposes_one_main_beta_release_command() -> None:
     assert "--server-ca-file" in result.output
     assert "--notary-profile" in result.output
     assert "--delta-only" in result.output
+    assert "--stage-only" in result.output
     assert "--from-clean-commit" in result.output
+
+
+def test_beta_stage_keeps_signed_artifacts_without_publishing(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo = tmp_path / "repo"
+    app_source = repo / "apple/build/Build/Products/Release/FTClient.app"
+    app_source.mkdir(parents=True)
+    release_root = tmp_path / "published"
+    output = tmp_path / "staged"
+    monkeypatch.setattr(publish, "REPO", repo)
+    monkeypatch.setattr(publish, "_shared_signing_certificate", lambda: publish.SHARED_SIGNING_CERTIFICATE_SHA1)
+    for name in (
+        "_validate_source_checkout", "validate_client_package_layout",
+        "_validate_legacy_release_key", "_validate_legacy_release_key_pair",
+        "_validate_release_trust_root_copies", "validate_embedded_sparkle_key",
+        "_validate_embedded_release_trust_root", "embed_client_runtime",
+        "_sign_embedded_app", "verify_installer", "discard_xcode_app",
+    ):
+        monkeypatch.setattr(publish, name, lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(publish, "xcodebuild_environment", lambda: {})
+    monkeypatch.setattr(
+        publish, "prepare_xcode_build_root", lambda _root: None,
+    )
+    monkeypatch.setattr(
+        publish.subprocess, "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0),
+    )
+
+    def make_dmg(_app: Path, destination: Path) -> Path:
+        destination.write_bytes(b"signed dmg")
+        return destination
+
+    def make_appcast(**options):
+        _appcast(
+            options["output"], version="1.2.3", build=42,
+            channel="beta", url=options["download_url"],
+        )
+        return SimpleNamespace(delta_paths=())
+
+    monkeypatch.setattr(publish, "build_installer_dmg", make_dmg)
+    monkeypatch.setattr(publish, "generate_sparkle_appcast", make_appcast)
+    monkeypatch.setattr(
+        publish, "create_update_manifest",
+        lambda **_options: {"version": "1.2.3", "build": 42},
+    )
+    def write_manifest(path: Path, value: dict) -> Path:
+        path.write_text(json.dumps(value))
+        return path
+
+    monkeypatch.setattr(publish, "write_update_manifest", write_manifest)
+    monkeypatch.setattr(
+        publish, "publish_beta_directory",
+        lambda **_options: pytest.fail("staging must not publish"),
+    )
+    monkeypatch.setattr(
+        publish, "verify_remote_bytes",
+        lambda *_args: pytest.fail("staging must not read back"),
+    )
+    receipt = publish.release_client(
+        channel="beta", version="1.2.3", build=42,
+        source_revision="a" * 40, output=output,
+        signing_identity=publish.SHARED_SIGNING_IDENTITY,
+        sparkle_public_key="public", sparkle_generate_appcast=tmp_path / "appcast-tool",
+        legacy_private_key=tmp_path / "private.pem",
+        legacy_public_key=tmp_path / "public.pem",
+        server_origin="https://factor.example", release_root=release_root,
+        stage_only=True,
+    )
+    assert receipt.publication_state == "staged"
+    assert (output / "FactorTester-Client.dmg").read_bytes() == b"signed dmg"
+    assert (output / "appcast.xml").is_file()
+    assert (output / "beta.json").is_file()
+    assert json.loads((output / "release-receipt.json").read_text())["publication_state"] == "staged"
+    assert not release_root.exists()
+
+
+def test_staging_rejects_stable_and_delta_releases(tmp_path: Path) -> None:
+    options = dict(
+        channel="beta", version="1.2.3", build=42,
+        source_revision="a" * 40, output=tmp_path / "release",
+        signing_identity=publish.SHARED_SIGNING_IDENTITY,
+        sparkle_public_key="public", sparkle_generate_appcast=tmp_path / "tool",
+        legacy_private_key=tmp_path / "private.pem",
+        legacy_public_key=tmp_path / "public.pem",
+        server_origin="https://factor.example", stage_only=True,
+    )
+    with pytest.raises(ValueError, match="only for Beta"):
+        publish.release_client(**{**options, "channel": "stable"})
+    with pytest.raises(ValueError, match="full DMG"):
+        publish.release_client(**{**options, "delta_only": True})
+
+
+def test_manager_cli_forwards_beta_stage_only(tmp_path: Path, monkeypatch) -> None:
+    from tools.cli.release import signing_keys
+
+    (tmp_path / "tool").touch()
+    (tmp_path / "public.pem").touch()
+    observed: dict = {}
+    monkeypatch.setattr(
+        signing_keys, "manifest_private_key",
+        lambda _channel, _private: tmp_path / "private.pem",
+    )
+
+    def capture_release(**options):
+        observed.update(options)
+        return SimpleNamespace(publication_state="staged")
+
+    monkeypatch.setattr(publish, "publish_release", capture_release)
+    result = CliRunner().invoke(operator_client, [
+        "release", "--channel", "beta", "--source-revision", "a" * 40,
+        "--output", str(tmp_path / "release"),
+        "--sparkle-public-key", "public",
+        "--sparkle-generate-appcast", str(tmp_path / "tool"),
+        "--legacy-public-key", str(tmp_path / "public.pem"),
+        "--server-origin", "https://factor.example",
+        "--stage-only",
+    ])
+    assert result.exit_code == 0, result.output
+    assert observed["stage_only"] is True
+    assert observed["release_root"] is None
 
 
 def test_direct_publisher_does_not_expose_server_restart_options() -> None:
