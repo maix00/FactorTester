@@ -8,7 +8,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .authoring.inline_links import typed_link_list
 from .authoring.special_section_operation import add_special_section_operation
 from .job_artifact_tables import table_content
 
@@ -86,7 +85,7 @@ def mount_operations(
 
 def result_container_operation(
     *, component_exists: Callable[[str], bool], parent_id: str, job_id: str,
-    detail: dict[str, Any], status: str,
+    detail: dict[str, Any],
 ) -> tuple[str, list[dict[str, Any]]]:
     """Return a Job's test-result Evidence subsection.
 
@@ -101,7 +100,9 @@ def result_container_operation(
         component_id=component_id,
         title=f"{_job_label(detail)} 运行结果",
         parent_id=parent_id,
-        body=_result_body(job_id, status, bindings),
+        # The live Job panel is the authority for progress and outcome.  A
+        # frozen status here would already be stale for a running Job.
+        body="",
         display_kind="test_result",
         bindings=bindings,
     )]
@@ -278,20 +279,6 @@ def result_bindings(
     return bindings
 
 
-def _result_body(
-    job_id: str, status: str, bindings: list[dict[str, Any]],
-) -> str:
-    links = typed_link_list([{
-        "kind": str(item["kind"]),
-        "target_ref": str(item["target_ref"]),
-        "label": str(item["label"]),
-    } for item in bindings])
-    return (
-        f"测试任务 {job_id} 已结束，状态为 `{status}`"
-        f"\n\n关联：\n{links}"
-    )
-
-
 def _component_id(job_id: str, name: str, digest: str) -> str:
     raw = _SAFE_NAME.sub("-", f"job-{job_id}-{name}").strip("-")
     return (raw[:104] + "-" + digest[:16])[:128]
@@ -331,6 +318,9 @@ def _job_reference_data(
         data["server_id"] = server_id
     if port:
         data["port"] = str(port)
+    kind = _first_text(candidates, ("kind", "job_type", "application"))
+    if kind:
+        data["kind"] = kind
     return data
 
 
