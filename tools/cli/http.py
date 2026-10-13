@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import tempfile
 from dataclasses import dataclass
 from http.cookiejar import CookieJar, LWPCookieJar, LoadError
 from http.cookiejar import Cookie
@@ -59,6 +60,12 @@ def config_path() -> Path:
     return _home_dir() / "config.json"
 
 
+def native_selection_path() -> Path:
+    """Keep FTClient's selected server separate from an explicit CLI choice."""
+    configured = config_path()
+    return configured.with_name(f"{configured.stem}.native.json")
+
+
 def cookie_path() -> Path:
     return _home_dir() / "cookies.lwp"
 
@@ -81,11 +88,23 @@ def _home_dir() -> Path:
 def save_config(config: ClientConfig, path: Path | None = None) -> None:
     target = path or config_path()
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps({"base_url": config.base_url}, ensure_ascii=False, indent=2), encoding="utf-8")
+    fd, temporary = tempfile.mkstemp(dir=target.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump({"base_url": config.base_url}, stream, ensure_ascii=False, indent=2)
+        os.replace(temporary, target)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+def save_native_selection(config: ClientConfig) -> None:
+    save_config(config, path=native_selection_path())
 
 
 def load_config(path: Path | None = None) -> ClientConfig:
     target = path or config_path()
+    if path is None and not target.exists():
+        target = native_selection_path()
     if not target.exists():
         raise FileNotFoundError(f"FactorTester CLI 尚未配置，请先运行 factortester configure")
     raw = json.loads(target.read_text(encoding="utf-8"))

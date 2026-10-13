@@ -12,7 +12,7 @@ import click
 from tools.cli.client import FactorTesterClient
 from tools.cli.core.context import client_from_config
 from tools.cli.core.errors import friendly_errors
-from tools.cli.http import ClientConfig, HttpSession, save_config
+from tools.cli.http import ClientConfig, HttpSession, save_config, save_native_selection
 from tools.cli.release.factor_worktree import (
     CanonicalFactorRepoStore,
     ensure_factor_worktree_binding,
@@ -83,7 +83,7 @@ def import_ui_session(server_url: str, principal_ref: str) -> None:
         clear_session(server_url)
     persisted = HttpSession(server_url)
     persisted.import_cookies(cookies)
-    save_config(ClientConfig(server_url.rstrip("/")))
+    save_native_selection(ClientConfig(server_url.rstrip("/")))
     click.echo(_json({
         "schema_version": 1,
         "principal_ref": observed,

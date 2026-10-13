@@ -845,7 +845,7 @@ def test_ui_session_bridge_uses_stdin_and_verifies_principal(
 
 
 def test_native_token_bridge_is_origin_scoped_and_mismatch_is_non_destructive(tmp_path, monkeypatch):
-    from tools.cli.http import load_config
+    from tools.cli.http import ClientConfig, load_config, native_selection_path, save_config
     from tools.cli.native_session import session_path
     monkeypatch.setenv('FACTORTESTER_HOME', str(tmp_path / 'home'))
     monkeypatch.setenv('FACTORTESTER_CONFIG', str(tmp_path / 'config.json'))
@@ -857,10 +857,24 @@ def test_native_token_bridge_is_origin_scoped_and_mismatch_is_non_destructive(tm
     assert HttpSession('https://manager.example:9443').bearer_token == 'native-secret'
     assert HttpSession('https://manager.example:8443').bearer_token == ''
     assert load_config().base_url == 'https://manager.example:9443'
+    assert not (tmp_path / 'config.json').exists()
     assert session_path('https://manager.example:9443').stat().st_mode & 0o777 == 0o600
     monkeypatch.setattr(FactorTesterClient, 'current_principal', lambda self: {'username': 'bob'})
     denied = CliRunner().invoke(cli, args, input=json.dumps({'token': 'wrong-user'}))
     assert denied.exit_code != 0
+    assert HttpSession('https://manager.example:9443').bearer_token == 'native-secret'
+    assert load_config().base_url == 'https://manager.example:9443'
+
+    save_config(ClientConfig('https://cli.example:7998'))
+    monkeypatch.setattr(FactorTesterClient, 'current_principal', lambda self: {'username': 'alice'})
+    other = CliRunner().invoke(cli, [
+        'client', 'profile', 'import-ui-session', '--server-url',
+        'http://127.0.0.1:8141', '--principal-ref', 'alice',
+    ], input=json.dumps({'token': 'other-native-secret'}))
+    assert other.exit_code == 0, other.output
+    assert load_config().base_url == 'https://cli.example:7998'
+    assert '127.0.0.1:8141' in native_selection_path().read_text()
+    assert HttpSession('http://127.0.0.1:8141').bearer_token == 'other-native-secret'
     assert HttpSession('https://manager.example:9443').bearer_token == 'native-secret'
     HttpSession('https://manager.example:9443').clear_cookies()
     assert HttpSession('https://manager.example:9443').bearer_token == ''

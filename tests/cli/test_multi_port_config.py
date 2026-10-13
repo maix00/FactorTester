@@ -44,6 +44,23 @@ def test_configure_reuses_native_selected_server_without_guessing_port(tmp_path,
     assert load_config().base_url == 'https://manager.example'
 
 
+def test_native_selection_is_a_fallback_and_explicit_config_remains_authoritative(tmp_path, monkeypatch):
+    from click.testing import CliRunner
+    from tools.cli.commands.auth import configure
+    from tools.cli.http import load_config, native_selection_path, save_native_selection
+
+    monkeypatch.setenv('FACTORTESTER_CONFIG', str(tmp_path / 'config.json'))
+    save_native_selection(ClientConfig('https://native.example:7998'))
+    assert load_config().base_url == 'https://native.example:7998'
+    assert not (tmp_path / 'config.json').exists()
+
+    configured = CliRunner().invoke(configure, ['--base-url', 'https://cli.example:7998'])
+    assert configured.exit_code == 0, configured.output
+    save_native_selection(ClientConfig('http://127.0.0.1:8141'))
+    assert load_config().base_url == 'https://cli.example:7998'
+    assert native_selection_path().read_text().count('127.0.0.1:8141') == 1
+
+
 def test_server_discovery_uses_declared_port_and_checks_identity(monkeypatch):
     from tools.cli import server_connection as m
     seen = []
