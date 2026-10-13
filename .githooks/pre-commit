@@ -7,14 +7,33 @@ selection="$(python3 "${ROOT_DIR}/scripts/select_affected_tests.py" commit)"
 mode="${selection%%$'\n'*}"
 case "${mode}" in
   SKIP) echo "[pre-commit] No test-relevant staged changes." ;;
-  FULL) echo "[pre-commit] Shared or unclassified change: full suite."; "${ROOT_DIR}/scripts/test.sh" ;;
+  FULL)
+    echo "[pre-commit] Shared or unclassified change: full suite."
+    "${ROOT_DIR}/scripts/test.sh"
+    "${ROOT_DIR}/scripts/test_js.sh"
+    ;;
   SCOPED)
-    targets=()
+    python_targets=()
+    js_targets=()
     while IFS= read -r target; do
-      [[ -z "${target}" ]] || targets+=("${target}")
+      if [[ "${target}" == tests/js* ]]; then
+        js_targets+=("${target}")
+      elif [[ -n "${target}" ]]; then
+        python_targets+=("${target}")
+      fi
     done <<< "${selection#*$'\n'}"
-    echo "[pre-commit] Running affected tests: ${targets[*]}"
-    "${ROOT_DIR}/scripts/test.sh" "${targets[@]}"
+    if ((${#python_targets[@]} == 0 && ${#js_targets[@]} == 0)); then
+      echo "[pre-commit] Empty scoped selection" >&2
+      exit 1
+    fi
+    if ((${#python_targets[@]})); then
+      echo "[pre-commit] Running affected Python tests: ${python_targets[*]}"
+      "${ROOT_DIR}/scripts/test.sh" "${python_targets[@]}"
+    fi
+    if ((${#js_targets[@]})); then
+      echo "[pre-commit] Running affected JS tests: ${js_targets[*]}"
+      "${ROOT_DIR}/scripts/test_js.sh" "${js_targets[@]}"
+    fi
     ;;
   *) echo "[pre-commit] Invalid test selection: ${mode}" >&2; exit 1 ;;
 esac

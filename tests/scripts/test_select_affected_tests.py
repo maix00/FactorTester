@@ -45,6 +45,32 @@ def test_rename_considers_both_paths():
     assert selector.select(paths) == ("FULL", [])
 
 
+def test_js_only_change_has_no_python_target():
+    assert selector.select({"tests/js/test_report_export.js"}) == (
+        "SCOPED", ["tests/js/test_report_export.js"],
+    )
+
+
+def test_mixed_python_and_js_change_selects_both_runners():
+    mode, targets = selector.select({"tools/cli/app.py", "tests/js/test_report_export.js"})
+    assert mode == "SCOPED"
+    assert "tests/cli" in targets
+    assert "tests/js/test_report_export.js" in targets
+    assert all((selector.ROOT / path).exists() for path in targets)
+
+
+def test_server_web_change_includes_node_suite_and_all_targets_exist():
+    mode, targets = selector.select({"server/manager/web/report/report.js"})
+    assert mode == "SCOPED"
+    assert "tests/js" in targets
+    assert all((selector.ROOT / path).exists() for path in targets)
+
+
+def test_all_declared_module_targets_exist():
+    assert all((selector.ROOT / "tests" / name).is_dir()
+               for group in selector.IMPACT.values() for name in group)
+
+
 def test_staged_and_push_ranges_are_separate(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()

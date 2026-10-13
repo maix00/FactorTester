@@ -56,7 +56,7 @@ git config extensions.worktreeConfig true
 git config --worktree core.hooksPath "$(pwd)/.githooks"
 ```
 
-Hook 用暂存差异（commit）或将推送的提交差异（push）选择受影响的测试模块。已分类的模块按保守的跨模块依赖表运行；公共配置、未知路径以及 selector/hook 自身变更会运行全套测试。只有文档变化时跳过 pytest，Skill 变化仍检查内置 Skill 激活。`scripts/test.sh` 不带参数始终运行全套，可传入 pytest 路径运行指定测试。正式发布仍须遵守独立的发布验证门槛，hook 的范围选择不能替代发布验收。
+Hook 用暂存差异（commit）或将推送的提交差异（push）选择受影响的测试模块。已分类的模块按保守的跨模块依赖表运行；公共配置、未知路径以及 selector/hook 自身变更会运行全套 Python 与 JS 测试。只有文档变化时跳过测试，Skill 变化仍检查内置 Skill 激活。`scripts/test.sh` 不带参数始终运行完整 pytest，可传入 pytest 路径运行指定 Python 测试；`scripts/test_js.sh` 调用现有 Node 测试脚本，不带参数运行全部 JS 测试，也可传入 `tests/js/test_*.js`。正式发布仍须遵守独立的发布验证门槛，hook 的范围选择不能替代发布验收。
 
 关闭：
 

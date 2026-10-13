@@ -116,6 +116,9 @@ def select(paths: set[str] | None) -> tuple[str, list[str]]:
         if parts[0] == "tests":
             if len(parts) < 3 or parts[1] not in TEST_MODULES:
                 return "FULL", []
+            if parts[1] == "js":
+                modules.add(path if parts[-1].startswith("test_") and path.endswith(".js") and (ROOT / path).exists() else "tests/js")
+                continue
             if parts[-1] in {"conftest.py", "__init__.py"}:
                 modules.add(f"tests/{parts[1]}")
             elif parts[-1].startswith("test_") and path.endswith(".py"):
