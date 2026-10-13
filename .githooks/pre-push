@@ -3,5 +3,37 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-echo "[pre-push] Running tests..."
-"${ROOT_DIR}/scripts/test.sh"
+selection="$(python3 "${ROOT_DIR}/scripts/select_affected_tests.py" push)"
+mode="${selection%%$'\n'*}"
+case "${mode}" in
+  SKIP) echo "[pre-push] No test-relevant outgoing changes." ;;
+  FULL)
+    echo "[pre-push] Shared or unclassified change: full suite."
+    "${ROOT_DIR}/scripts/test.sh"
+    "${ROOT_DIR}/scripts/test_js.sh"
+    ;;
+  SCOPED)
+    python_targets=()
+    js_targets=()
+    while IFS= read -r target; do
+      if [[ "${target}" == tests/js* ]]; then
+        js_targets+=("${target}")
+      elif [[ -n "${target}" ]]; then
+        python_targets+=("${target}")
+      fi
+    done <<< "${selection#*$'\n'}"
+    if ((${#python_targets[@]} == 0 && ${#js_targets[@]} == 0)); then
+      echo "[pre-push] Empty scoped selection" >&2
+      exit 1
+    fi
+    if ((${#python_targets[@]})); then
+      echo "[pre-push] Running affected Python tests: ${python_targets[*]}"
+      "${ROOT_DIR}/scripts/test.sh" "${python_targets[@]}"
+    fi
+    if ((${#js_targets[@]})); then
+      echo "[pre-push] Running affected JS tests: ${js_targets[*]}"
+      "${ROOT_DIR}/scripts/test_js.sh" "${js_targets[@]}"
+    fi
+    ;;
+  *) echo "[pre-push] Invalid test selection: ${mode}" >&2; exit 1 ;;
+esac
