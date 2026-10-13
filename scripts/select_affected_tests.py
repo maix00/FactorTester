@@ -118,7 +118,7 @@ def select(paths: set[str] | None) -> tuple[str, list[str]]:
                 return "FULL", []
             if parts[-1] in {"conftest.py", "__init__.py"}:
                 modules.add(f"tests/{parts[1]}")
-            elif path.endswith(".py"):
+            elif parts[-1].startswith("test_") and path.endswith(".py"):
                 modules.add(path if (ROOT / path).exists() else f"tests/{parts[1]}")
             else:
                 modules.add(f"tests/{parts[1]}")

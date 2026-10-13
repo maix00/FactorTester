@@ -31,6 +31,7 @@ def test_shared_and_unclassified_paths_fail_closed():
 
 def test_docs_only_skips_and_deleted_test_falls_back_to_module():
     assert selector.select({"docs/adr/new.md"}) == ("SKIP", [])
+    assert selector.select({"tests/scripts/support.py"}) == ("SCOPED", ["tests/scripts"])
     assert selector.select({"tests/server/test_nonexistent_deleted.py"}) == (
         "SCOPED", ["tests/server"],
     )
