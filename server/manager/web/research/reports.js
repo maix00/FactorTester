@@ -531,6 +531,14 @@
       const renderer = FTReportRenderer.render(value, body, {
         t: context.t,
         chapterRail: rail,
+        // Job result special sections reuse the test configuration page's
+        // live panel, which needs the same request and action context here as
+        // it receives on the standalone report page.
+        api: context.api,
+        session: context.session,
+        button: context.button,
+        showNotice: context.showNotice,
+        navigate: context.navigate,
         loadChapter: source.chapterLazy ? source.loadChapter : null,
         loadComponent: source.loadComponent,
         componentContentLazy: () => source.componentLazy,
