@@ -63,6 +63,16 @@ body.sidebar-collapsed:not(.embedded-presentation) .chapter-rail { left: calc(va
 .component-children { margin-left: 0; padding-left: 0; }
 .component.depth-0 > details > summary { font-size: 15px; }
 .component-body { padding: 2px 0 5px 20px; line-height: 1.65; }
+/* The Job panel is mounted directly under the special section's details, not
+   inside .component-body. Give it the same inset at every nesting depth and
+   constrain wide result tables to the remaining width of this section. */
+.report-mount .component.special.test_result > details > .report-job-result {
+  box-sizing: border-box;
+  width: calc(100% - 20px);
+  min-width: 0;
+  margin: 2px 0 5px 20px;
+  overflow-x: auto;
+}
 .component-body p { margin: 5px 0; }
 .component-body ul, .component-body ol { margin: 6px 0; padding-left: 24px; }
 .inline-math { display: inline-block; margin: 0 .16em; vertical-align: baseline; }
