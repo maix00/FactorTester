@@ -3,5 +3,18 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-echo "[pre-push] Running tests..."
-"${ROOT_DIR}/scripts/test.sh"
+selection="$(python3 "${ROOT_DIR}/scripts/select_affected_tests.py" push)"
+mode="${selection%%$'\n'*}"
+case "${mode}" in
+  SKIP) echo "[pre-push] No test-relevant outgoing changes." ;;
+  FULL) echo "[pre-push] Shared or unclassified change: full suite."; "${ROOT_DIR}/scripts/test.sh" ;;
+  SCOPED)
+    targets=()
+    while IFS= read -r target; do
+      [[ -z "${target}" ]] || targets+=("${target}")
+    done <<< "${selection#*$'\n'}"
+    echo "[pre-push] Running affected tests: ${targets[*]}"
+    "${ROOT_DIR}/scripts/test.sh" "${targets[@]}"
+    ;;
+  *) echo "[pre-push] Invalid test selection: ${mode}" >&2; exit 1 ;;
+esac
