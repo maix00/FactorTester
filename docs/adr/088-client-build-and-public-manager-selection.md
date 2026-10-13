@@ -22,7 +22,11 @@ Swift 客户端还需要默认连接公网 Manager。公网地址可能变化，
 2. `scripts/release/publish.py` 与 `factortester-manager client release` 只负责客户端
    构建、签名、发布和回读，不再要求 `--service-port`，也不调用
    `restart_release_service`。服务器源代码、镜像和服务重载由独立的 Docker/部署
-   入口负责。
+   入口负责。远端 Manager 不共享构建机的发行目录时，Beta 可以显式
+   `--stage-only`：仍按相同流程签名并本地验证完整 DMG 与清单，但不切换任何
+   Manager 频道指针。随后由已有 `client release-upload --release-dir` 使用
+   目标 Manager 授权会话上传，目标再次校验签名、摘要和 appcast 后才切换指针。
+   staged receipt 必须与 published receipt 区分；普通发布仍执行远端逐字节回读。
 3. Manager 的 `/api/server/network-info` 返回服务器排序后的
    `public_server_targets`，以及用于客户端测速的未截断公网候选和带机构范围的
    `internal_server_targets`。客户端的引导地址与选择算法由 ADR 090 规定。

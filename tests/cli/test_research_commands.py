@@ -1201,6 +1201,11 @@ def test_run_submit_freezes_explicit_report_scope(
         "tools.cli.commands.research.freeze_report_binding",
         _freeze,
     )
+    mounted = []
+    monkeypatch.setattr(
+        "tools.cli.commands.research.mount_submitted_job_report",
+        lambda **kwargs: mounted.append(kwargs) or {"job_id": kwargs["job_id"], "created": True},
+    )
     runner = CliRunner()
     assert runner.invoke(
         cli,
@@ -1220,6 +1225,8 @@ def test_run_submit_freezes_explicit_report_scope(
 
     assert submitted.exit_code == 0, submitted.output
     assert fake.report_binding == frozen
+    assert [item["job_id"] for item in mounted] == ["job-ic"]
+    assert mounted[0]["report_binding"] == frozen
 
 
 def test_run_submit_binds_run_to_explicit_report_parent(
@@ -1274,6 +1281,11 @@ def test_run_submit_binds_run_to_explicit_report_parent(
         "tools.cli.commands.research.collect_job_report",
         _collect,
     )
+    mounted = []
+    monkeypatch.setattr(
+        "tools.cli.commands.research.mount_submitted_job_report",
+        lambda **kwargs: mounted.append(kwargs["job_id"]) or {"job_id": kwargs["job_id"], "created": True},
+    )
     runner = CliRunner()
     assert runner.invoke(
         cli,
@@ -1293,6 +1305,7 @@ def test_run_submit_binds_run_to_explicit_report_parent(
 
     assert submitted.exit_code == 0, submitted.output
     assert fake.report_binding == frozen
+    assert mounted == ["job-ic"]
     assert collected == [("job-ic", scope)]
     assert json.loads(submitted.output)["report_collections"][0][
         "report_follow_up"
@@ -1346,6 +1359,11 @@ def test_report_bound_submit_waits_mounts_and_requests_analysis(
         "tools.cli.commands.research.collect_job_report",
         collect,
     )
+    events = []
+    monkeypatch.setattr(
+        "tools.cli.commands.research.mount_submitted_job_report",
+        lambda **kwargs: events.append(("mount", kwargs["job_id"])) or {"job_id": kwargs["job_id"], "created": True},
+    )
     runner = CliRunner()
     assert runner.invoke(
         cli,
@@ -1365,6 +1383,7 @@ def test_report_bound_submit_waits_mounts_and_requests_analysis(
 
     assert submitted.exit_code == 0, submitted.output
     payload = json.loads(submitted.output)
+    assert events == [("mount", "job-ic")]
     assert collected == [("job-ic", scope)]
     assert payload["report_collections"][0]["report_follow_up"] == {
         "status": "analysis_required",

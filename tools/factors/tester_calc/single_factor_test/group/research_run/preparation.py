@@ -67,9 +67,10 @@ def prepare_group_run_spec(data: dict[str, Any]) -> dict[str, Any]:
     market_rule_fallback = execution_settings_by_module.get(
         "market_rules", {}
     ).get("market_rule_fallback", "latest_available")
-    evaluation_split = execution_settings_by_module.get(
-        "evaluation_range", {}
-    ).get("evaluation_split") or None
+    # This run-window setting is overridable per strategy, so the registry's
+    # LOCAL_ONLY projection intentionally omits it. Keep the run-level value
+    # here; result projection reads each resolved strategy override.
+    evaluation_split = execution_settings.get("evaluation_split") or None
     first_group_id = str(flat_groups[0].get("id") or "group-0")
     fallback_group_settings = resolved_backtest_settings.get(first_group_id, {})
     factor_mode = fallback_group_settings.get("factor_mode", "auto")

@@ -6,6 +6,7 @@ import Foundation
 private enum RendererError: LocalizedError {
     case invalidArguments
     case pdfContextUnavailable
+    case imageUnavailable(String)
 
     var errorDescription: String? {
         switch self {
@@ -13,6 +14,8 @@ private enum RendererError: LocalizedError {
             return "usage: factortester-report-renderer --input REPORT.md --output REPORT.pdf"
         case .pdfContextUnavailable:
             return "unable to create PDF document"
+        case .imageUnavailable(let path):
+            return "unable to render report image: \(path)"
         }
     }
 }
@@ -21,16 +24,11 @@ private struct ReportPDFRenderer {
     private let pageSize = CGSize(width: 595, height: 842)
     private let margin: CGFloat = 54
     private let bodySize: CGFloat = 12
+    private static let imageLine = try! NSRegularExpression(
+        pattern: #"^!\[([^\]]*)\]\((file://[^)]+)\)$"#
+    )
 
     func render(markdown: String) throws -> Data {
-        let value = (try? AttributedString(
-            markdown: markdown,
-            options: .init(interpretedSyntax: .full)
-        )) ?? AttributedString(markdown)
-        let attributed = NSMutableAttributedString(
-            attributedString: NSAttributedString(value)
-        )
-        style(attributed, from: value)
         let output = NSMutableData()
         guard let consumer = CGDataConsumer(data: output as CFMutableData) else {
             throw RendererError.pdfContextUnavailable
@@ -43,9 +41,74 @@ private struct ReportPDFRenderer {
         ) else {
             throw RendererError.pdfContextUnavailable
         }
-        draw(attributed, in: context)
+        var textLines: [String] = []
+        var drewPage = false
+        func flushText() {
+            let source = textLines.joined(separator: "\n")
+            textLines.removeAll()
+            guard !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return
+            }
+            let value = (try? AttributedString(
+                markdown: source,
+                options: .init(interpretedSyntax: .full)
+            )) ?? AttributedString(source)
+            let attributed = NSMutableAttributedString(
+                attributedString: NSAttributedString(value)
+            )
+            style(attributed, from: value)
+            draw(attributed, in: context)
+            drewPage = true
+        }
+        for line in markdown.components(separatedBy: "\n") {
+            if let url = Self.imageURL(in: line) {
+                flushText()
+                try drawImage(at: url, in: context)
+                drewPage = true
+            } else {
+                textLines.append(line)
+            }
+        }
+        flushText()
+        if !drewPage {
+            context.beginPDFPage(nil)
+            context.endPDFPage()
+        }
         context.closePDF()
         return output as Data
+    }
+
+    private static func imageURL(in line: String) -> URL? {
+        let full = NSRange(line.startIndex..<line.endIndex, in: line)
+        guard let match = imageLine.firstMatch(in: line, range: full),
+              let range = Range(match.range(at: 2), in: line) else { return nil }
+        let url = URL(string: String(line[range]))
+        return url?.isFileURL == true ? url : nil
+    }
+
+    private func drawImage(at url: URL, in context: CGContext) throws {
+        guard let image = NSImage(contentsOf: url),
+              let cgImage = image.cgImage(
+                forProposedRect: nil, context: nil, hints: nil
+              ) else {
+            throw RendererError.imageUnavailable(url.path)
+        }
+        let width = CGFloat(cgImage.width)
+        let height = CGFloat(cgImage.height)
+        let scale = min(
+            1,
+            (pageSize.width - margin * 2) / width,
+            (pageSize.height - margin * 2) / height
+        )
+        let size = CGSize(width: width * scale, height: height * scale)
+        let rect = CGRect(
+            x: (pageSize.width - size.width) / 2,
+            y: (pageSize.height - size.height) / 2,
+            width: size.width, height: size.height
+        )
+        context.beginPDFPage(nil)
+        context.draw(cgImage, in: rect)
+        context.endPDFPage()
     }
 
     /// Markdown parsing leaves the runs without a font, so CoreText falls back

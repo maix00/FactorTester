@@ -91,6 +91,8 @@
     if (!jobID) return host;
     const reference = jobReference(context, jobID);
     let rendered = false;
+    let state = null;
+    let item = null;
 
     const render = async () => {
       if (rendered) return;
@@ -102,12 +104,18 @@
         }
         const kind = await resolveKind(component, context, jobID);
         // Same call the test configuration page makes: state carries the test
-        // kind, item carries the Job and the run progress bookkeeping.
-        const state = { kind, jobID, port: reference.port, serverID: reference.serverID };
-        const item = {
-          jobID, port: reference.port, serverID: reference.serverID,
-          phase: "", progressStreamClosed: false,
-        };
+        // kind, item carries the Job and the run progress bookkeeping. Keep
+        // both across refresh callbacks: recreating item would restart the
+        // stream and the initial detail request after every response.
+        if (!state) {
+          state = { kind, jobID, port: reference.port, serverID: reference.serverID };
+          item = {
+            jobID, port: reference.port, serverID: reference.serverID,
+            phase: "", progressStreamClosed: false,
+          };
+        } else if (kind && !state.kind) {
+          state.kind = kind;
+        }
         const panel = window.FTTestRunResults.render(
           context, state, item, () => host.__ftReportRerender?.(),
         );

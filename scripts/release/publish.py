@@ -74,6 +74,7 @@ class PublishedRelease:
     legacy_manifest_url: str
     delta_only: bool = False
     source_mode: str = "current-checkout"
+    publication_state: str = "published"
 
 
 def release_client(
@@ -98,6 +99,7 @@ def release_client(
     previous_archive: Path | None = None,
     previous_appcast: Path | None = None,
     delta_only: bool = False,
+    stage_only: bool = False,
     from_clean_commit: str | None = None,
 ) -> PublishedRelease:
     """Build, sign, optionally notarize, publish, and read back one release."""
@@ -134,6 +136,7 @@ def release_client(
                     previous_archive=previous_archive,
                     previous_appcast=previous_appcast,
                     delta_only=delta_only,
+                    stage_only=stage_only,
                 )
             finally:
                 globals()["REPO"] = original_repo
@@ -141,6 +144,10 @@ def release_client(
         return _persist_clean_commit_receipt(output, receipt)
     if channel not in CHANNELS:
         raise ValueError("release channel must be stable or beta")
+    if stage_only and channel != "beta":
+        raise ValueError("Staging is supported only for Beta releases")
+    if stage_only and delta_only:
+        raise ValueError("Staged Beta releases must include the full DMG")
     if delta_only and channel != "beta":
         raise ValueError("Delta-only publishing is supported only for Beta")
     if delta_only and not _is_loopback_release_origin(server_origin):
@@ -156,8 +163,10 @@ def release_client(
             "identity"
         )
     signing_identity = _shared_signing_certificate()
-    if channel == "beta" and (server_origin is None or release_root is None):
-        raise ValueError("Beta requires server origin and release root")
+    if channel == "beta" and (
+        server_origin is None or (release_root is None and not stage_only)
+    ):
+        raise ValueError("Beta requires server origin and, unless staged, release root")
     _validate_legacy_release_key(channel, legacy_public_key)
     _validate_legacy_release_key_pair(
         legacy_private_key,
@@ -240,7 +249,7 @@ def release_client(
             appcast_url = f"{base}/appcast.xml"
             legacy_url = f"{base}/stable.json"
 
-        if channel == "beta" and previous_archive is None:
+        if channel == "beta" and not stage_only and previous_archive is None:
             previous = _discover_previous_beta_release(release_root)
             if previous is not None:
                 previous_archive, previous_archive_url, previous_appcast = previous
@@ -292,7 +301,7 @@ def release_client(
         )
 
         beta_publication = None
-        if channel == "beta":
+        if channel == "beta" and not stage_only:
             beta_publication = publish_beta_directory(
                 dmg=dmg,
                 appcast=appcast,
@@ -302,7 +311,7 @@ def release_client(
                 publish_full=not delta_only,
                 retain_base=delta_only,
             )
-        else:
+        elif channel == "stable":
             publish_main_github(
                 repository=github_repository,
                 tag=f"client-v{version}-b{build}",
@@ -319,11 +328,12 @@ def release_client(
         ]
         if not delta_only:
             readbacks.insert(0, (download_url, dmg))
-        for url, expected in readbacks:
-            verify_remote_bytes(url, expected)
-        delta_prefix = download_url.rsplit("/", 1)[0] + "/"
-        for delta in generated_appcast.delta_paths:
-            verify_remote_bytes(delta_prefix + delta.name, delta)
+        if not stage_only:
+            for url, expected in readbacks:
+                verify_remote_bytes(url, expected)
+            delta_prefix = download_url.rsplit("/", 1)[0] + "/"
+            for delta in generated_appcast.delta_paths:
+                verify_remote_bytes(delta_prefix + delta.name, delta)
         if beta_publication is not None:
             beta_publication.finalize()
         receipt = PublishedRelease(
@@ -338,6 +348,7 @@ def release_client(
             legacy_manifest_url=legacy_url,
             delta_only=delta_only,
             source_mode="current-checkout",
+            publication_state="staged" if stage_only else "published",
         )
         write_release_receipt(output / "release-receipt.json", receipt)
         # Delta-only Beta releases use the full DMG only as a transient input
@@ -930,6 +941,11 @@ def main() -> None:
         "--delta-only",
         action="store_true",
         help="Beta-only: publish only the delta from the previous version.",
+    )
+    parser.add_argument(
+        "--stage-only",
+        action="store_true",
+        help="Build signed Beta artifacts for authenticated release-upload.",
     )
     parser.add_argument(
         "--previous-archive",

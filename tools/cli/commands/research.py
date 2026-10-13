@@ -26,7 +26,10 @@ from tools.cli.core.strategy_spec import load_spec
 from tools.cli.release.artifact_paths import artifact_destination
 from tools.cli.release.job_cache import job_cache_directory
 from tools.cli.release.profile import load_profile_root
-from tools.cli.release.research_reporting.job_artifacts import collect_job_report
+from tools.cli.release.research_reporting.job_artifacts import (
+    collect_job_report,
+    mount_submitted_job_report,
+)
 from tools.cli.state import load_state, save_state
 from tools.cli.step import field_occurrences, render_step_event
 
@@ -840,6 +843,26 @@ def run_submit(
         service_port=_requested_run_service_port(),
         **submit_kwargs,
     )
+    if report_scope is not None:
+        mounts = []
+        mount_errors = []
+        for item in result.get("jobs") or []:
+            job_id = str(item.get("job_id") or "")
+            if not job_id:
+                continue
+            try:
+                mounts.append(mount_submitted_job_report(
+                    job_id=job_id, scope=report_scope,
+                    report_binding=report_binding, submitted_job=item,
+                ))
+            except (OSError, TypeError, ValueError) as exc:
+                # The Job was already accepted by the Manager.  Return its ID
+                # and the mount failure so it can be recovered explicitly;
+                # never make a successful submission look like no Job exists.
+                mount_errors.append({"job_id": job_id, "error": str(exc)})
+        result = {**result, "report_mounts": mounts}
+        if mount_errors:
+            result["report_mount_errors"] = mount_errors
     if report_scope is not None and wait_report:
         collections = []
         for item in result.get("jobs") or []:
@@ -862,6 +885,11 @@ def run_submit(
     click.echo(f"run_id={result.get('run_id')}")
     for item in result.get("jobs") or []:
         click.echo(f"job_id={item.get('job_id')} kind={item.get('kind')} status={item.get('status')}")
+    for item in result.get("report_mount_errors") or []:
+        click.echo(
+            f"report_mount_error job_id={item['job_id']} error={item['error']}",
+            err=True,
+        )
     for collection in result.get("report_collections") or []:
         follow_up = collection.get("report_follow_up") or {}
         click.echo(

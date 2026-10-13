@@ -22,10 +22,65 @@ from .job_artifact_mounts import (
     mount_kind,
     mount_operations,
     result_container_operation,
+    result_component_id,
 )
 
 _SAFE_NODE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _HASH = re.compile(r"^[0-9a-f]{64}$")
+
+
+def mount_submitted_job_report(
+    *, job_id: str, scope: BranchReportScope,
+    report_binding: dict[str, Any], submitted_job: dict[str, Any],
+) -> dict[str, Any]:
+    """Create the live result section as soon as the Manager accepts a Job.
+
+    The Manager has already committed the Job and returned its ID; waiting for
+    terminal artifacts here would hide the progress panel for the whole run.
+    The report tree applies this add under its branch lock, preserving any
+    concurrent edits to other components.
+    """
+    parent_id = _validate_scope({"report_binding": report_binding}, scope)[
+        "report_parent_id"
+    ]
+    presence = ReportTreePresence.load(
+        package_root=scope.package_root, branch_id=scope.branch_id,
+    )
+    if not presence.component_exists(parent_id):
+        raise ValueError("Job 冻结的报告 parent_id 已不存在")
+    component_id = result_component_id(job_id)
+    if presence.component_exists(component_id):
+        return {"job_id": job_id, "result_component_id": component_id,
+                "created": False}
+    detail = {**submitted_job, "job_id": job_id, "report_binding": report_binding}
+    _, operations = result_container_operation(
+        component_exists=presence.component_exists,
+        parent_id=parent_id, job_id=job_id, detail=detail,
+    )
+    try:
+        saved = apply_branch_batch(
+            package_root=scope.package_root,
+            report_workspace_id=scope.report_workspace_id,
+            branch_id=scope.branch_id, operations=operations,
+            materialize=False,
+        )
+    except ValueError:
+        # A concurrent retry may have created exactly this deterministic Job
+        # node since the presence read.  Only that case is idempotent; all
+        # other report validation errors still reach the caller.
+        latest = ReportTreePresence.load(
+            package_root=scope.package_root, branch_id=scope.branch_id,
+        )
+        if not latest.component_exists(component_id):
+            raise
+        return {"job_id": job_id, "result_component_id": component_id,
+                "created": False}
+    persist_descriptor(scope, saved["descriptor"])
+    commit_branch_authoring(
+        scope.package_root, message="Mount live report Job result",
+    )
+    return {"job_id": job_id, "result_component_id": component_id,
+            "created": True}
 
 
 def collect_job_report(
@@ -51,7 +106,6 @@ def collect_job_report(
         parent_id=parent_id,
         job_id=str(job_id),
         detail=detail,
-        status=status,
     )
     if operations:
         new_component_ids.add(result_component_id)
@@ -161,6 +215,13 @@ def _validate_scope(detail: dict[str, Any], scope: BranchReportScope) -> dict[st
         raise ValueError("Job 不属于指定的报告工作区")
     if str(binding.get("branch_id") or "") != scope.branch_id:
         raise ValueError("Job 不属于指定的研究分支")
+    frozen_report_id = str(binding.get("report_id") or "")
+    if frozen_report_id:
+        current_report_id = str(ReportTreePresence.load(
+            package_root=scope.package_root, branch_id=scope.branch_id,
+        ).head["report_id"])
+        if current_report_id != frozen_report_id:
+            raise ValueError("Job 冻结的研究报告已被替换")
     parent_id = str(binding.get("report_parent_id") or "")
     if not _SAFE_NODE.fullmatch(parent_id):
         raise ValueError("Job 未冻结有效的报告 parent_id")

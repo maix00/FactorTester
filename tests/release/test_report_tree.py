@@ -531,17 +531,25 @@ def test_special_job_outputs_project_as_table_and_remote_image(tmp_path: Path) -
             {"op": "add", "component_id": "chapter", "kind": "chapter",
              "title": "结果", "body": "", "content": None,
              "display_kind": "", "bindings": []},
+            {"op": "add", "component_id": "job-1-result", "kind": "special",
+             "title": "动态回测结果", "parent_id": "chapter",
+             "body": "测试任务运行中；此内容只在交互面板显示",
+             "content": {"status": "running"}, "display_kind": "test_result",
+             "bindings": []},
             {"op": "add", "component_id": "table", "kind": "special",
-             "title": "统计表", "parent_id": "chapter", "body": "", "display_kind": "job-artifact-table",
+             "title": "统计表", "parent_id": "job-1-result", "body": "", "display_kind": "job-artifact-table",
              "content": {"columns": ["指标", "值"], "rows": [["Sharpe", "1.2"]]}, "bindings": []},
             {"op": "add", "component_id": "image", "kind": "special",
-             "title": "净值图", "parent_id": "chapter", "body": "", "display_kind": "job-artifact-image",
+             "title": "净值图", "parent_id": "job-1-result", "body": "", "display_kind": "job-artifact-image",
              "content": {"asset_ref": "job-artifact:job-1:equity"}, "bindings": []},
         ],
     )
     rendered = render_tree_markdown(load_snapshot(package_root=package, branch_id="main")).decode()
     assert "| 指标 | 值 |" in rendered
     assert "![净值图](factortester-artifact://jobs/job-1/equity)" in rendered
+    assert "动态回测结果" not in rendered
+    assert "测试任务运行中" not in rendered
+    assert '"status": "running"' not in rendered
 
 
 def test_markdown_export_escapes_table_cell_delimiters(tmp_path: Path) -> None:

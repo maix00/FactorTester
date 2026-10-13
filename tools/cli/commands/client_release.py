@@ -232,6 +232,11 @@ def app_update_restart(as_json: bool) -> None:
     help="Beta-only: publish only the delta from the previous version.",
 )
 @click.option(
+    "--stage-only",
+    is_flag=True,
+    help="Build and verify signed Beta artifacts for later release-upload.",
+)
+@click.option(
     "--previous-archive",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     help="Previous app archive used to create a Sparkle delta.",
