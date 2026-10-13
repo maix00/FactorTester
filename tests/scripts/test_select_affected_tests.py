@@ -60,11 +60,12 @@ def test_staged_and_push_ranges_are_separate(tmp_path, monkeypatch):
     (repo / "tools/cli/app.py").write_text("pushed\n")
     _git(repo, "commit", "-qam", "outgoing")
     head = _git(repo, "rev-parse", "HEAD")
-    (repo / "tools/cli/app.py").write_text("staged\n")
+    (repo / "tools/factors").mkdir(parents=True)
+    (repo / "tools/factors/new.py").write_text("staged\n")
     _git(repo, "add", ".")
     monkeypatch.setattr(selector, "ROOT", repo)
 
-    assert selector.staged_paths() == {"tools/cli/app.py"}
+    assert selector.staged_paths() == {"tools/factors/new.py"}
     assert selector.pushed_paths(f"refs/heads/feat {head} refs/heads/feat {base}\n") == {
         "tools/cli/app.py"
     }
