@@ -181,7 +181,6 @@ def serialize_event_execution(
     metrics = {}
     metrics_by_segment = {}
     comparison_strategies = []
-    split = pd.Timestamp(evaluation_split) if evaluation_split else None
     display_name_counts = Counter(
         str(
             owner.get("display_name")
@@ -227,6 +226,8 @@ def serialize_event_execution(
             else strategy_id
         )
         settings = settings_by_group[strategy_id]
+        strategy_split = settings.get("evaluation_split", evaluation_split)
+        split = pd.Timestamp(strategy_split) if strategy_split else None
         configuration_id = str(
             owner.get("strategy_configuration_id")
             or strategy_configuration_id(owner, settings)

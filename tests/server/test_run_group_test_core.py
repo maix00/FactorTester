@@ -18,6 +18,47 @@ from server.modules.single_factor_test import group as group_module
 from tools.products.Product import Product
 
 
+@pytest.mark.parametrize(
+    ("evaluation_split", "group_split"),
+    [("2025-06-30", None), ("2025-06-30", "2025-09-30"), (None, None)],
+)
+def test_group_run_preserves_configured_evaluation_split(
+    monkeypatch, evaluation_split, group_split,
+):
+    from tools.factors.tester_calc.single_factor_test.group.research_run import preparation
+
+    monkeypatch.setattr(
+        preparation, "resolve_group_strategy_settings", lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        preparation, "build_group_owner_rows",
+        lambda *_args, **_kwargs: [{"group_id": "g1", "strategy_id": "g1"}],
+    )
+    monkeypatch.setattr(
+        preparation, "strategy_configuration_id", lambda *_args: "configuration-1",
+    )
+    execution_settings = {
+        "start_date": "2025-01-01",
+        "end_date": "2025-12-31",
+    }
+    if evaluation_split:
+        execution_settings["evaluation_split"] = evaluation_split
+    group = {"id": "g1"}
+    if group_split:
+        group["evaluation_split"] = group_split
+    payload = {
+        "groups": [group],
+        "execution": {"settings": execution_settings},
+    }
+
+    prepared = preparation.prepare_group_run_spec(payload)
+
+    assert prepared["evaluation_split"] == evaluation_split
+    assert prepared["resolved_backtest_settings"]["g1"]["evaluation_split"] == (
+        group_split or evaluation_split
+    )
+
+
 def _product() -> Product:
     return Product(name=f"P-{uuid.uuid4().hex}", point_value=1, currency="CNY")
 
@@ -361,6 +402,24 @@ def test_serialize_event_execution_accepts_orderflow_trace_list():
     assert serialized["groups"][0]["metrics_key"] == "A1"
     assert "key" not in serialized["groups"][0]
     assert "name" not in serialized["groups"][0]
+
+    segmented = group_module._serialize_event_execution(
+        execution,
+        settings_by_group={
+            "g1": {
+                "allocation_policy": "equal_notional",
+                "rebalance_trigger": "on_factor_signal",
+                "position_policy": "rebalance_to_target",
+                "evaluation_split": "2026-01-01T09:01:00+08:00",
+            },
+        },
+        evaluation_split=None,
+    )
+    assert serialized["metrics_by_segment"] == {}
+    assert set(segmented["metrics_by_segment"]["A1"]) == {
+        "in_sample", "out_of_sample", "full",
+    }
+    assert segmented["metrics_by_segment"]["A1"]["full"] == segmented["metrics"]["A1"]
 
 
 def test_serialize_event_execution_reports_event_notional_turnover():
