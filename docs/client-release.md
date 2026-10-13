@@ -41,8 +41,17 @@ Release operations intentionally have two authorities:
   before the build; only a connection that cannot be established is treated
   as an offline target.
 
-  After a signed Beta package has been built, an administrator can publish it
-  to several online Managers through the application protocol:
+  When the build host cannot write the target Manager's release directory,
+  build a complete signed Beta release with `--stage-only --server-origin` and
+  an output directory. This mode validates the installer and signed manifest,
+  writes `release-receipt.json` with `publication_state: staged`, and does not
+  modify a Manager or claim a successful publication. It requires a full DMG;
+  `--delta-only` is not supported. A release root is not needed in this mode.
+  The remaining signing, Sparkle and source revision options are the same as
+  for a direct Beta release. Use the actual target Manager as the origin.
+
+  After staging, an administrator publishes the same artifacts to online
+  Managers through the authenticated application protocol:
 
   ```bash
   factortester-manager client release-upload \
@@ -57,6 +66,10 @@ Release operations intentionally have two authorities:
   appcast before atomically switching `beta.json` and `beta.xml`. Each target
   receives a manifest signed for its own URL. Unreachable targets are reported
   once and skipped; there is no background retry or implicit republish.
+  `release-upload` checks that the target's Beta pointer advanced to the
+  requested version/build and still uses that Manager's origin. A failed
+  upload leaves the staged output available for a deliberate retry; the
+  Manager retains its previous pointer until it accepts a complete package.
 
   The lower-level module entry point has the same client-only behavior; there
   is no implicit server restart hidden inside the publish entry point.
