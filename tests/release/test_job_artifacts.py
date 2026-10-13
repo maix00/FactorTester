@@ -15,13 +15,17 @@ from tools.cli.commands.research_report_scope import (
 from tools.cli.release.local_profile import LocalProfileStore, new_local_profile
 from tools.cli.release.research_reporting.authoring import add_branch_component
 from tools.cli.release.research_reporting.authoring.tree_model import load_snapshot
+from tools.cli.release.research_reporting.authoring.tree_presence import ReportTreePresence
 from tools.cli.release.research_reporting.job_artifact_mounts import (
     mount_kind,
     mount_operations,
     provenance_bindings,
 )
 from tools.cli.release.research_reporting.job_artifact_tables import table_content
-from tools.cli.release.research_reporting.job_artifacts import collect_job_report
+from tools.cli.release.research_reporting.job_artifacts import (
+    collect_job_report,
+    mount_submitted_job_report,
+)
 
 
 class _Response:
@@ -217,12 +221,53 @@ def test_collect_job_report_uses_frozen_report_parent(tmp_path: Path, monkeypatc
           "content_type": "image/svg+xml", "description": "净值曲线"}],
         {"equity_curve_report": raw},
     )
+    binding = {
+        "report_workspace_id": "report-one", "branch_id": "main",
+        "report_parent_id": "job-results",
+    }
+    with pytest.raises(ValueError, match="研究报告已被替换"):
+        mount_submitted_job_report(
+            job_id="job-1", scope=scope,
+            report_binding={**binding, "report_id": "replaced-report"},
+            submitted_job={"kind": "backtest"},
+        )
+    live = mount_submitted_job_report(
+        job_id="job-1", scope=scope, report_binding=binding,
+        submitted_job={"kind": "backtest", "status": "queued",
+                       "server_id": "public-main"},
+    )
+    repeated = mount_submitted_job_report(
+        job_id="job-1", scope=scope, report_binding=binding,
+        submitted_job={"kind": "backtest", "status": "running"},
+    )
+    before = load_snapshot(package_root=scope.package_root, branch_id="main")
+    result = next(item for item in before["components"]
+                  if item["component_id"] == "job-job-1-result")
+    assert live["created"] is True
+    assert repeated["created"] is False
+    assert result["display_kind"] == "test_result"
+    assert result["body"] == ""
+    bindings = ReportTreePresence.load(
+        package_root=scope.package_root, branch_id="main",
+    ).bindings_for("job-job-1-result")
+    assert bindings[0]["target_ref"] == "job:job-1"
+    assert bindings[0]["data"]["kind"] == "backtest"
+    assert not any(item["kind"] == "image" for item in before["components"])
+    add_branch_component(
+        package_root=scope.package_root,
+        report_workspace_id=scope.report_workspace_id,
+        branch_id="main", component_id="concurrent-note", kind="section",
+        title="同时修改的分析", parent_id="job-results", body="保留",
+        content=None, display_kind="",
+    )
     first = collect_job_report(client, job_id="job-1", scope=scope)
     second = collect_job_report(client, job_id="job-1", scope=scope)
     assert first["report_parent_id"] == "job-results"
     assert len(first["mounted"]) == len(second["mounted"]) == 1
     assert second["downloaded"][0]["cache_hit"] is True
     assert client.downloads == ["equity_curve_report"]
+    after = load_snapshot(package_root=scope.package_root, branch_id="main")
+    assert any(item["component_id"] == "concurrent-note" for item in after["components"])
 
 
 def test_job_table_mount_keeps_only_preview_and_global_source() -> None:

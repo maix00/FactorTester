@@ -56,6 +56,15 @@ def render_tree_markdown(
 
 def _render_children(lines: list[str], children: dict[str | None, list[dict[str, Any]]], assets: dict[str, dict[str, Any]], parent: str | None, depth: int, image_prefix: str) -> None:
     for item in children.get(parent, []):
+        if item.get("kind") == "special" and item.get("display_kind") == "test_result":
+            # The Job's progress/result panel is an interactive projection,
+            # not report prose.  Its mounted image and table evidence remains
+            # exportable below this node, at the surrounding section depth.
+            _render_children(
+                lines, children, assets, item.get("component_id"), depth,
+                image_prefix,
+            )
+            continue
         # Heading hierarchy comes from ancestry, never from a special kind.
         # Markdown has six heading levels; deeper nodes remain in tree order.
         level = min(6, depth + 1)

@@ -94,7 +94,7 @@ function findByClass(root, name) {
 }
 
 // --- stubs of the shared implementations the test page uses ----------------
-const calls = {groups: []};
+const calls = {groups: [], panelItems: []};
 let panelFails = false;
 
 global.FTRichText = {
@@ -134,6 +134,7 @@ function panelStub() {
   return {
   render: (context, state, item, rerender) => {
     if (panelFails) throw new Error('测试运行面板不可用');
+    calls.panelItems.push(item);
     const root = new Element('div');
     root.className = 'test-run-inline-results';
     const progress = new Element('section');
@@ -225,6 +226,13 @@ const jobSection = {
   }
   assert.equal(panel.dataset.panelState, `backtest|${JOB_ID}|8001|srv-1`,
     'the panel is driven by the report binding job kind/port/server');
+  const liveItem = calls.panelItems.at(-1);
+  liveItem.phase = 'running';
+  block.__ftReportRerender();
+  await settle();
+  assert.equal(calls.panelItems.at(-1), liveItem,
+    'refresh keeps the same progress and result bookkeeping');
+  assert.equal(calls.panelItems.at(-1).phase, 'running');
   console.log('PASS: the report panel is the test configuration page panel');
 
   // 2. A section that is not a Job result stays on the ordinary report path.
