@@ -1304,6 +1304,44 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
             })
         return result
 
+    def protected_entity_metadata_usage(self, principal: str) -> dict[str, dict[str, int]]:
+        """Measure authoritative active factor/product JSON metadata only.
+
+        Source bodies and Profile files are separate storage authorities; this
+        read-only query cannot be presented as their physical disk usage.
+        """
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT entity_type, COUNT(*) AS item_count,
+                       COALESCE(SUM(OCTET_LENGTH(payload::text)), 0) AS bytes
+                FROM control_account_domain_entities
+                WHERE principal=%s AND NOT deleted
+                  AND entity_type IN (
+                      'factor_family', 'factor_source', 'factor_source_version',
+                      'factor_param_config', 'factor_set', 'factor_set_event',
+                      'factor_set_head', 'product_group', 'product_category'
+                  )
+                GROUP BY entity_type
+                """, (str(principal),),
+            ).fetchall()
+        result = {
+            "factors": {"bytes": 0, "item_count": 0},
+            "product_groups": {"bytes": 0, "item_count": 0},
+        }
+        for row in rows:
+            category = (
+                "product_groups" if str(_row_value(row, "entity_type", 0, ""))
+                in {"product_group", "product_category"} else "factors"
+            )
+            result[category]["bytes"] += max(
+                0, int(_row_value(row, "bytes", 2, 0) or 0)
+            )
+            result[category]["item_count"] += max(
+                0, int(_row_value(row, "item_count", 1, 0) or 0)
+            )
+        return result
+
     @staticmethod
     def _usage_dict(row: object) -> dict[str, int]:
         return {

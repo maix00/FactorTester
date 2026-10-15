@@ -221,13 +221,20 @@
       const profileStatus = profile
         ? `${quotaBytes(profile.bytes)} · ${context.t("本服务器")} ${profile.storage_server_id}`
         : context.t("计量暂不可用");
+      const protectedMetadata = profile?.protected_metadata || null;
+      const protectedMetadataBytes = protectedMetadata
+        ? Number(protectedMetadata.factors?.bytes || 0) +
+          Number(protectedMetadata.product_groups?.bytes || 0)
+        : 0;
       rows.replaceChildren(
         row(context.t("Job 附件"), context.t(staleServers.length
           ? "跨服务器用量含过期快照，请到来源服务器刷新后再判断实时剩余额度"
           : "全部存储服务器的活跃附件"),
           `${quotaBytes(usage)} / ${quotaBytes(quotaSize)}${data.over_quota ? context.t(" · 已超额") : ""}`),
         row(context.t("报告与 Profile 工作区"), context.t("仅计量本服务器；尚未纳入 Job 配额，其他服务器待统一计量"), profileStatus),
-        row(context.t("基础因子与产品组"), context.t("受保护的业务资料；当前尚未纳入此 Job 配额，不能在此删除"), context.t("待计量 · 受保护")),
+        row(context.t("基础因子与产品组"), context.t("仅含控制库元数据，不含因子源码文件；尚未纳入 Job 配额，不能在此删除"),
+          protectedMetadata ? `${quotaBytes(protectedMetadataBytes)} · ${context.t("元数据")}`
+            : context.t("待计量 · 受保护")),
       );
       bar.replaceChildren();
       let percentage = 0;
@@ -260,10 +267,15 @@
         category: "other_servers", role: "remote", bytes: unresolved,
         artifact_count: "—", displayName: context.t("其他服务器附件 · 未归类"),
       });
-      displayedCategories.push(
-        {category: "protected:factors", role: "protected", measured: false},
-        {category: "protected:product_groups", role: "protected", measured: false},
-      );
+      for (const [category, key] of [
+        ["protected:factors", "factors"], ["protected:product_groups", "product_groups"],
+      ]) {
+        const measured = protectedMetadata?.[key];
+        displayedCategories.push({category, role: "protected",
+          measured: Boolean(measured), bytes: measured?.bytes,
+          artifact_count: measured?.item_count, quota_included: false,
+          displayName: measured ? `${quotaCategoryLabel(context, category)} · ${context.t("元数据")}` : null});
+      }
       if (profile) {
         for (const [category, item] of Object.entries(profile.categories || {})) {
           displayedCategories.push({category: `profile:${category}`, role: "profile",

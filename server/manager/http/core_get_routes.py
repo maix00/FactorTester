@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from urllib.parse import parse_qs, urlparse
 
@@ -26,6 +27,8 @@ from server.manager.web.assets import (
     shell_bytes,
     static_file,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class CoreGetRoutesMixin:
@@ -85,11 +88,29 @@ class CoreGetRoutesMixin:
                     503,
                 )
                 return True
+            control_store = getattr(self.state, "control_store", None)
+            protected = None
+            if control_store is not None:
+                try:
+                    protected = control_store.protected_entity_metadata_usage(
+                        str(session["username"])
+                    )
+                except Exception as exc:
+                    # Local Profile measurements remain usable while the
+                    # authoritative control store is offline.
+                    _LOGGER.warning(
+                        "protected metadata inventory unavailable: %s",
+                        type(exc).__name__,
+                    )
+                    protected = None
             json_response(self, {
                 "success": True,
                 "storage_server_id": self.state.server_id,
                 "principal": str(session["username"]),
                 "quota_included": False,
+                "protected_metadata": protected,
+                "protected_measurement_scope": "metadata_only" if protected is not None
+                else "unavailable",
                 **inventory,
             }, headers={"Cache-Control": "private, no-store"})
             return True

@@ -74,9 +74,10 @@ def test_profile_inventory_route_is_session_scoped(tmp_path) -> None:
         path.write_bytes(value)
 
     class Handler(CoreGetRoutesMixin):
-        def __init__(self, session):
+        def __init__(self, session, store=None):
             self._current_session = session
-            self.state = SimpleNamespace(data_root=tmp_path, server_id="server-a")
+            self.state = SimpleNamespace(data_root=tmp_path, server_id="server-a",
+                                         control_store=store)
             self.headers = {}
             self.wfile = io.BytesIO()
             self.status = None
@@ -98,13 +99,20 @@ def test_profile_inventory_route_is_session_scoped(tmp_path) -> None:
             pass
 
     path = urlparse("/api/storage/profile-inventory?principal=bob")
-    handler = Handler({"username": "alice"})
+    class Control:
+        def protected_entity_metadata_usage(self, principal):
+            assert principal == "alice"
+            return {"factors": {"bytes": 7, "item_count": 1},
+                    "product_groups": {"bytes": 0, "item_count": 0}}
+
+    handler = Handler({"username": "alice"}, Control())
     assert handler._get_entry_routes(path) is True
     response = json.loads(handler.wfile.getvalue())
     assert handler.status == 200
     assert response["principal"] == "alice"
     assert response["bytes"] == 5
     assert response["quota_included"] is False
+    assert response["protected_metadata"]["factors"]["bytes"] == 7
 
     anonymous = Handler(None)
     assert anonymous._get_entry_routes(path) is True
