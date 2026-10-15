@@ -482,3 +482,56 @@ def test_cutover_classifies_legacy_graph_maintenance_receipts_only(tmp_path):
         assert conn.execute(
             "SELECT subject_ref FROM research_evidence_admissions WHERE admission_ref='admission-proposal'"
         ).fetchone()[0] == graph_refs[1]
+
+
+def test_cutover_preserves_nonexpiring_session_float_in_backup(tmp_path):
+    database = tmp_path / "catalog.sqlite"
+    backup = tmp_path / "catalog-before.sqlite"
+    _create_database(database)
+    with sqlite3.connect(database) as conn:
+        conn.execute("CREATE TABLE manager_sessions (token_hash TEXT PRIMARY KEY, expires_at REAL NOT NULL)")
+        conn.execute("INSERT INTO manager_sessions VALUES (?, ?)", ("token-hash", float("inf")))
+
+    result = apply(
+        database, backup, graph_files=tmp_path / "research-graphs",
+        files_backup=tmp_path / "files-before",
+    )
+    assert result["after"]["preserved"] == result["before"]["preserved"]
+    for path in (database, backup):
+        with sqlite3.connect(path) as conn:
+            assert conn.execute(
+                "SELECT expires_at FROM manager_sessions WHERE token_hash='token-hash'"
+            ).fetchone()[0] == float("inf")
+
+
+def test_cutover_and_rollback_preserve_existing_unrelated_orphan(tmp_path):
+    database = tmp_path / "catalog.sqlite"
+    backup = tmp_path / "catalog-before.sqlite"
+    graph_files = tmp_path / "research-graphs"
+    files_backup = tmp_path / "files-before"
+    _create_database(database)
+    with sqlite3.connect(database) as conn:
+        conn.execute(
+            "CREATE TABLE orphan_links (job_id TEXT REFERENCES research_jobs(job_id), note TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO orphan_links VALUES ('missing-job', 'historical')"
+        )
+        before_violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+    assert len(before_violations) == 1
+
+    result = apply(
+        database, backup, graph_files=graph_files,
+        files_backup=files_backup,
+    )
+    assert result["historical_foreign_key_violations_preserved"] == 1
+    with sqlite3.connect(database) as conn:
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == before_violations
+
+    restored = restore_backup(
+        database, backup, graph_files=graph_files,
+        files_backup=files_backup,
+    )
+    assert restored["historical_foreign_key_violations_restored"] == 1
+    with sqlite3.connect(database) as conn:
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == before_violations
