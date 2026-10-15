@@ -73,6 +73,24 @@ _GRAPH_REF_PREFIXES = (
     "research-graph:",
     "work-package:",
 )
+# Maintenance Cases also recorded Graph governance and regression receipts.
+# Keep these separate from _GRAPH_REF_PREFIXES: Evidence admissions have a
+# narrower Graph-owned subject-ref contract and must not be broadened here.
+_MAINTENANCE_GRAPH_REF_PREFIXES = _GRAPH_REF_PREFIXES + (
+    "graph:",
+    "graph-proposal:",
+    "graph-version:",
+    "gate-effect:active-graph:",
+    "gate-effect:graph-continuation:",
+    "gate-grill:docs:research-decision-graph-grill:",
+    "test:research-graph-regression-",
+    "test-receipt:graph-v8-continuation-",
+    "tests:graph-recovery-",
+)
+_MAINTENANCE_GRAPH_REF_EXACT = frozenset({
+    "gate-action:activate_graph",
+    "gate-action:continue_graph_branch",
+})
 _GRAPH_TABLE_PREFIXES = (
     "research_graph_",
     "active_research_graph",
@@ -280,7 +298,10 @@ def _external_graph_foreign_keys(
 
 
 def _is_graph_ref(value: Any) -> bool:
-    return isinstance(value, str) and value.startswith(_GRAPH_REF_PREFIXES)
+    return isinstance(value, str) and (
+        value.startswith(_MAINTENANCE_GRAPH_REF_PREFIXES)
+        or value in _MAINTENANCE_GRAPH_REF_EXACT
+    )
 
 
 def _maintenance_graph_ref_report(conn: sqlite3.Connection, tables: set[str]) -> dict[str, Any]:
