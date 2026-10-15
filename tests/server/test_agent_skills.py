@@ -126,6 +126,55 @@ def test_profile_codex_runtime_rejects_projection_collision(tmp_path):
         runtime.sync([definition])
 
 
+def test_profile_codex_runtime_repoints_only_its_manifest_owned_link(tmp_path):
+    runtime = AgentSkillRuntime(tmp_path / "workspace")
+    old_source = tmp_path / "release-old" / "factortester-research-skill"
+    new_source = tmp_path / "release-new" / "factortester-research-skill"
+    for source in (old_source, new_source):
+        source.mkdir(parents=True)
+        (source / "SKILL.md").write_text("research skill", encoding="utf-8")
+    binding = {
+        "skill_id": "factortester-research",
+        "name": "factortester-research-skill",
+        "path": str(old_source),
+    }
+    runtime.sync([binding])
+    projection = runtime.skills_root / binding["skill_id"]
+    assert projection.resolve() == old_source
+
+    # A release can replace the installed Skill directory while preserving
+    # the Profile workspace and its projection manifest.
+    old_source.rename(old_source.with_name("release-retired"))
+    runtime.sync([{**binding, "path": str(new_source)}])
+
+    assert projection.is_symlink()
+    assert projection.resolve() == new_source
+    assert runtime.selected_bindings()[binding["skill_id"]]["source_path"] == str(new_source)
+
+
+def test_profile_codex_runtime_does_not_repoint_tampered_link(tmp_path):
+    runtime = AgentSkillRuntime(tmp_path / "workspace")
+    sources = [tmp_path / name for name in ("release-old", "release-new", "unowned")]
+    for source in sources:
+        source.mkdir()
+        (source / "SKILL.md").write_text("research skill", encoding="utf-8")
+    binding = {
+        "skill_id": "factortester-research",
+        "name": "factortester-research-skill",
+        "path": str(sources[0]),
+    }
+    runtime.sync([binding])
+    projection = runtime.skills_root / binding["skill_id"]
+    projection.unlink()
+    projection.symlink_to(sources[2], target_is_directory=True)
+
+    with pytest.raises(AgentSkillRuntimeError, match="unexpected Skill projection"):
+        runtime.sync([{**binding, "path": str(sources[1])}])
+
+    assert projection.resolve() == sources[2]
+    assert runtime.selected_bindings()[binding["skill_id"]]["source_path"] == str(sources[0])
+
+
 def test_profile_codex_runtime_refuses_unowned_skill_directory(tmp_path):
     catalog = AgentSkillCatalog(
         REPO_ROOT,
