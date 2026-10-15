@@ -848,6 +848,8 @@ def get_job_storage():
             category=str(request.args.get("category") or ""),
             limit=int(request.args.get("limit") or 50),
             offset=int(request.args.get("offset") or 0),
+            group=str(request.args.get("group") or ""),
+            job_id=str(request.args.get("job_id") or ""),
         )
     except (TypeError, ValueError):
         return jsonify({"success": False, "error": "invalid storage page"}), 400
