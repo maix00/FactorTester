@@ -1276,6 +1276,34 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
             ).fetchone()
         return self._usage_dict(row)
 
+    def usage_by_server(self, principal: str) -> list[dict[str, Any]]:
+        """Read existing Job quota snapshots with their observation times."""
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT server_id, artifact_bytes, input_bytes, output_bytes,
+                       artifact_count, input_count, output_count, updated_at
+                FROM quota_server_usage WHERE principal=%s
+                ORDER BY server_id
+                """, (str(principal),),
+            ).fetchall()
+        result = []
+        for row in rows:
+            observed = _row_value(row, "updated_at", 7)
+            result.append({
+                "storage_server_id": str(_row_value(row, "server_id", 0, "") or ""),
+                **{
+                    key: max(0, int(_row_value(row, key, index, 0) or 0))
+                    for index, key in enumerate((
+                        "artifact_bytes", "input_bytes", "output_bytes",
+                        "artifact_count", "input_count", "output_count",
+                    ), start=1)
+                },
+                "observed_at": observed.isoformat() if hasattr(observed, "isoformat")
+                else str(observed or ""),
+            })
+        return result
+
     @staticmethod
     def _usage_dict(row: object) -> dict[str, int]:
         return {

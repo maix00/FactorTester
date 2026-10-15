@@ -588,6 +588,16 @@ class JobArtifactImplementation:
                 }
         return local
 
+    def storage_servers(self, *, owner: str) -> list[dict[str, Any]]:
+        """Return attributed per-server Job snapshots when the control store is up."""
+        control_store = _control_store()
+        if control_store is not None:
+            try:
+                return control_store.usage_by_server(str(owner))
+            except Exception as exc:
+                _LOGGER.warning("global quota per-server read failed: %s", exc)
+        return []
+
     def _local_storage_breakdown(self, owner: str) -> dict[str, int]:
         with self._connection() as conn:
             row = conn.execute(

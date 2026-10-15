@@ -858,6 +858,7 @@ def get_job_storage():
         "over_quota": usage > quota,
         **breakdown,
         **inventory,
+        "servers": job_repository.storage_servers(owner=owner),
         "unattributed_bytes": max(0, usage - inventory["covered_bytes"]),
         "quota_scope": "job_artifacts",
         "excluded_scopes": ["research_reports", "profile_workspaces"],

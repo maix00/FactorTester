@@ -102,6 +102,11 @@
     return `${(bytes / (1024 ** power)).toFixed(2)} ${units[power - 1]}`;
   }
 
+  function quotaSnapshotStale(observedAt) {
+    const timestamp = Date.parse(observedAt || "");
+    return !Number.isFinite(timestamp) || Date.now() - timestamp > 5 * 60 * 1000;
+  }
+
   function quotaCategoryLabel(context, value) {
     const labels = {
       "input:factor_source": "因子源码快照", "input:strategy_source": "策略源码快照",
@@ -210,11 +215,16 @@
       if (!current(context)) return;
       const usage = Number(data.usage_bytes || 0);
       const quotaSize = Number(data.quota_bytes || 0);
+      const remoteServers = (data.servers || []).filter(item =>
+        item.storage_server_id !== data.storage_server_id);
+      const staleServers = remoteServers.filter(item => quotaSnapshotStale(item.observed_at));
       const profileStatus = profile
         ? `${quotaBytes(profile.bytes)} · ${context.t("本服务器")} ${profile.storage_server_id}`
         : context.t("计量暂不可用");
       rows.replaceChildren(
-        row(context.t("Job 附件"), context.t("全部存储服务器的活跃附件"),
+        row(context.t("Job 附件"), context.t(staleServers.length
+          ? "跨服务器用量含过期快照，请到来源服务器刷新后再判断实时剩余额度"
+          : "全部存储服务器的活跃附件"),
           `${quotaBytes(usage)} / ${quotaBytes(quotaSize)}${data.over_quota ? context.t(" · 已超额") : ""}`),
         row(context.t("报告与 Profile 工作区"), context.t("仅计量本服务器；尚未纳入 Job 配额，其他服务器待统一计量"), profileStatus),
         row(context.t("基础因子与产品组"), context.t("受保护的业务资料；当前尚未纳入此 Job 配额，不能在此删除"), context.t("待计量 · 受保护")),
@@ -228,9 +238,27 @@
       cleanupServerId = String(data.storage_server_id || "");
       cleanupButton.disabled = !Number(cleanupPreview.artifact_count);
       cleanupButton.title = `${cleanupPreview.artifact_count} ${context.t("项")} · ${quotaBytes(cleanupPreview.bytes)}`;
-      if (Number(data.unattributed_bytes || 0) > 0) displayedCategories.push({
-        category: "other_servers", role: "remote", bytes: data.unattributed_bytes,
-        artifact_count: "—",
+      let remoteAttributed = 0;
+      remoteServers.forEach(server => {
+        const stale = quotaSnapshotStale(server.observed_at);
+        for (const [kind, bytesKey, countKey] of [
+          ["提交物", "input_bytes", "input_count"],
+          ["生成物", "output_bytes", "output_count"],
+        ]) {
+          const bytes = Number(server[bytesKey] || 0);
+          if (!bytes && !Number(server[countKey] || 0)) continue;
+          remoteAttributed += bytes;
+          displayedCategories.push({category: `remote:${server.storage_server_id}:${kind}`,
+            displayName: `${server.storage_server_id} · ${context.t(kind)}` +
+              (stale ? ` · ${context.t("快照已过期")}` : ""),
+            role: "remote", bytes, artifact_count: server[countKey], stale,
+            observedAt: server.observed_at});
+        }
+      });
+      const unresolved = Math.max(0, Number(data.unattributed_bytes || 0) - remoteAttributed);
+      if (unresolved > 0) displayedCategories.push({
+        category: "other_servers", role: "remote", bytes: unresolved,
+        artifact_count: "—", displayName: context.t("其他服务器附件 · 未归类"),
       });
       displayedCategories.push(
         {category: "protected:factors", role: "protected", measured: false},
@@ -250,7 +278,7 @@
         const segment = document.createElement("span");
         segment.style.width = `${width}%`;
         segment.style.background = entry.role === "remote" ? "#8a8f98" : colors[index % colors.length];
-        segment.title = `${entry.role === "remote" ? context.t("其他服务器附件") : quotaCategoryLabel(context, entry.category)} · ${quotaBytes(entry.bytes)}`;
+        segment.title = `${entry.displayName || quotaCategoryLabel(context, entry.category)} · ${quotaBytes(entry.bytes)}`;
         bar.append(segment); percentage += width;
       });
       bar.setAttribute("aria-label", `${context.t("Job 附件配额占用")} ${Math.round(usage / Math.max(1, quotaSize) * 100)}%`);
@@ -281,9 +309,10 @@
       searchText: item => `${item.category} ${quotaCategoryLabel(context, item.category)}`,
       cells: item => [() => {
         const label = document.createElement("span"); label.className = "quota-category-label";
+        if (item.observedAt) label.title = `${context.t("观测时间")}: ${item.observedAt}`;
         const swatch = document.createElement("i"); swatch.style.background = item.color;
         const name = document.createElement("span");
-        name.textContent = item.role === "remote" ? context.t("其他服务器附件") : quotaCategoryLabel(context, item.category);
+        name.textContent = item.displayName || quotaCategoryLabel(context, item.category);
         label.append(swatch, name); return label;
       }, item.measured === false ? context.t("待计量") : quotaBytes(item.bytes),
         item.percent === null || item.measured === false ? "未计入" : `${item.percent.toFixed(1)}%`,
