@@ -155,7 +155,7 @@
     const dialogBody = document.createElement("div");
     dialogCard.append(dialogHead, dialogBody); dialog.append(dialogCard);
     body.append(dialog);
-    let servers = [], profile = null, quotaSize = 0, quotaKnown = false;
+    let servers = [], profile = null, pending = [], quotaSize = 0, quotaKnown = false;
     let refreshVersion = 0;
     let liveLoading = false, liveFailed = false;
     const groupColors = {"output:data": "#2775dc", "output:image": "#7455c4",
@@ -179,17 +179,25 @@
     };
     async function clearScope(group = "") {
       const targets = servers.map(server => ({server,
-        preview: group
+        preview: group && group !== "output:historical"
           ? (server.data.cleanup_business_groups || []).find(item => item.group === group)
           : server.data.cleanup_preview,
-      })).filter(item => Number(item.preview?.artifact_count) > 0);
-      if (!targets.length) return;
-      const count = targets.reduce((sum, item) => sum + Number(item.preview.artifact_count), 0);
-      const bytes = targets.reduce((sum, item) => sum + Number(item.preview.bytes), 0);
+      })).filter(item => !item.server.snapshot && group !== "output:historical" &&
+        Number(item.preview?.artifact_count) > 0);
+      const offline = group && group !== "output:historical" ? [] : servers.filter(server =>
+        server.snapshot && Number(server.data.output_bytes) > 0 &&
+        !pending.some(item => item.server_id === server.id &&
+          ["pending", "executing"].includes(item.status)));
+      if (!targets.length && !offline.length) return;
+      const count = targets.reduce((sum, item) => sum + Number(item.preview.artifact_count), 0) +
+        offline.reduce((sum, server) => sum + Number(server.data.output_count || 0), 0);
+      const bytes = targets.reduce((sum, item) => sum + Number(item.preview.bytes), 0) +
+        offline.reduce((sum, server) => sum + Number(server.data.output_bytes), 0);
       const label = group ? quotaGroupLabel(context, group) : context.t("全部可删除类别");
       if (!window.confirm(`${context.t("删除整类")} ${label}：${count} ${context.t("项生成物")}` +
-          `，${quotaBytes(bytes)}？\n${context.t("报告中的任务结果查看器可能失效；提交输入与基础数据保留。")}`)) return;
-      let deleted = 0; const failures = [];
+          `，${quotaBytes(bytes)}？\n${offline.length ? context.t("离线服务器将安排上线后删除，立即从逻辑配额扣除；执行前可取消。") + "\n" : ""}` +
+          context.t("报告中的任务结果查看器可能失效；提交输入与基础数据保留。"))) return;
+      let deleted = 0, queued = 0; const failures = [];
       for (const {server, preview} of targets) {
         try {
           const result = await deleteServer(server.id, preview, group ? {group} : {});
@@ -197,9 +205,24 @@
           if (result.failed_files) failures.push(`${server.id}: ${result.failed_files} ${context.t("个文件未移除")}`);
         } catch (error) { failures.push(`${server.id}: ${error.message}`); }
       }
+      for (const server of offline) {
+        try {
+          const request = await context.api("/api/storage/deferred-job-cleanup", {
+            method: "POST", body: JSON.stringify({
+              server_id: server.id, expected_bytes: server.data.output_bytes,
+              expected_count: server.data.output_count,
+              observed_at: server.observedAt,
+            }),
+          });
+          pending = [request, ...pending.filter(item => item.server_id !== server.id)];
+          queued++;
+        } catch (error) { failures.push(`${server.id}: ${error.message}`); }
+      }
       context.showNotice(`${context.t("已删除")} ${deleted} ${context.t("项")}` +
+        (queued ? `；${context.t("已安排离线清理")} ${queued} ${context.t("台服务器")}` : "") +
         (failures.length ? `；${failures.join("；")}` : ""), Boolean(failures.length));
-      await refresh();
+      if (queued) render();
+      void refresh();
     }
 
     async function openJobs(group) {
@@ -274,15 +297,49 @@
       dialogTitle.textContent = context.t("测试任务生成物 · 最近一次记录");
       const explanation = document.createElement("p");
       explanation.textContent = context.t(
-        "目前只有汇总占用记录，尚未取得这些服务器的实时任务清单和删除预览。实时清单返回后，可按数据或图片分类查看任务并删除；若服务器暂不可达，需等待它恢复连接。",
+        "离线服务器的输出可安排上线后删除。待执行期间只从逻辑配额中扣除，文件仍在原服务器；执行开始前可取消。服务器上线后会重新核对清单，若与历史记录不符则停止删除并恢复计费。",
       );
-      const rows = snapshots.map(server => [
-        server.id, quotaBytes(server.data.output_bytes),
-        server.data.output_count || "—", server.observedAt || "—",
-      ]);
+      const rows = snapshots.map(server => {
+        const request = pending.find(item => item.server_id === server.id &&
+          ["pending", "executing"].includes(item.status));
+        const action = request
+          ? FTUI.iconButton(context, "xmark", request.status === "pending"
+            ? "取消待删除" : "正在执行，无法取消", async () => {
+            if (request.status !== "pending") return;
+            try {
+              await context.api(`/api/storage/deferred-job-cleanup/${request.request_id}`,
+                {method: "DELETE"});
+              pending = pending.filter(item => item.request_id !== request.request_id);
+              dialog.close(); render(); void refresh();
+            } catch (error) { context.showNotice(error.message, true); }
+          })
+          : FTUI.iconButton(context, "trash", "上线后删除此服务器的生成物", async () => {
+            if (!window.confirm(`${context.t("安排上线后删除")} ${server.id} · ` +
+                `${quotaBytes(server.data.output_bytes)}？\n` +
+                context.t("待执行期间逻辑配额立即释放；执行前可取消。报告中的任务结果查看器可能失效。"))) return;
+            try {
+              const request = await context.api("/api/storage/deferred-job-cleanup", {
+                method: "POST", body: JSON.stringify({
+                  server_id: server.id,
+                  expected_bytes: server.data.output_bytes,
+                  expected_count: server.data.output_count,
+                  observed_at: server.observedAt,
+                }),
+              });
+              pending = [request, ...pending.filter(item => item.server_id !== server.id)];
+              dialog.close(); render(); void refresh();
+            } catch (error) { context.showNotice(error.message, true); }
+          });
+        if (request?.status === "executing") action.disabled = true;
+        return [server.id, quotaBytes(server.data.output_bytes),
+          server.data.output_count || "—", server.observedAt || "—",
+          request ? context.t(request.status === "pending"
+            ? "待执行 · 不计配额" : "执行中 · 不计配额") : context.t("计入配额"), action];
+      });
       dialogBody.replaceChildren(explanation, FTUI.table([
         context.t("存储服务器"), context.t("占用"),
         context.t("生成物数"), context.t("最近计量时间"),
+        context.t("状态"), context.t("操作"),
       ], rows).shell);
       dialog.showModal();
     }
@@ -290,21 +347,32 @@
     function render() {
       if (!current(context)) return;
       const categories = new Map();
-      const add = (group, bytes, count, observedAt = "") => {
+      const add = (group, bytes, count, observedAt = "", credit = 0) => {
         if (!Number(bytes || 0) && !Number(count || 0)) return;
-        const item = categories.get(group) || {group, bytes: 0, count: 0,
+        const item = categories.get(group) || {group, bytes: 0, billedBytes: 0, count: 0,
           lastObserved: []};
-        item.bytes += Number(bytes || 0); item.count += Number(count || 0);
+        item.bytes += Number(bytes || 0);
+        item.billedBytes += Math.max(0, Number(bytes || 0) - Number(credit || 0));
+        item.count += Number(count || 0);
         if (observedAt) item.lastObserved.push(observedAt);
         categories.set(group, item);
       };
       servers.forEach(server => {
+        let credit = pending.filter(item => item.server_id === server.id &&
+          ["pending", "executing"].includes(item.status)).reduce((sum, item) =>
+          sum + Number(item.credit_bytes || 0), 0);
         const groups = server.data.business_groups || [];
-        groups.forEach(item => add(item.quota_group, item.bytes, item.job_count,
-          server.observedAt));
+        groups.forEach(item => {
+          const deducted = item.quota_group.startsWith("output:")
+            ? Math.min(credit, Number(item.bytes || 0)) : 0;
+          add(item.quota_group, item.bytes, item.job_count,
+            server.observedAt, deducted);
+          credit -= deducted;
+        });
         if (server.snapshot) {
           add("output:historical", server.data.output_bytes,
-            server.data.output_count, server.observedAt);
+            server.data.output_count, server.observedAt,
+            Math.min(credit, Number(server.data.output_bytes || 0)));
           add("input:other", server.data.input_bytes,
             server.data.input_count, server.observedAt);
         }
@@ -335,7 +403,9 @@
           add(`profile:${key}`, value.bytes, value.file_count,
             server.status === "current" ? "" : server.inventory.observed_at));
       });
-      const measured = [...categories.values()].reduce((sum, item) => sum + item.bytes, 0);
+      const measured = [...categories.values()].reduce((sum, item) => sum + item.billedBytes, 0);
+      const pendingBytes = [...categories.values()].reduce((sum, item) =>
+        sum + item.bytes - item.billedBytes, 0);
       const percent = quotaSize > 0 ? 100 * measured / quotaSize : 0;
       const partial = !profile || !profile.protected_metadata;
       headline.textContent = `${quotaBytes(measured)} / ${quotaBytes(quotaSize)}` +
@@ -344,7 +414,8 @@
         ? `${context.t("已核实用量已超额")} ${quotaBytes(measured - quotaSize)}。`
         : "") + (partial ? context.t("部分存储类别暂时无法计量。") : "") +
         (liveLoading ? context.t("正在更新实时用量…") :
-          liveFailed ? context.t("部分实时读取失败，显示最近一次记录。") : "");
+          liveFailed ? context.t("部分实时读取失败，显示最近一次记录。") : "") +
+        (pendingBytes ? `${context.t("待删除但仍占磁盘：")} ${quotaBytes(pendingBytes)}。` : "");
       bar.replaceChildren();
       bar.classList.toggle("quota-over-limit", quotaSize > 0 && measured > quotaSize);
       bar.setAttribute("aria-valuemax", String(quotaSize || 1));
@@ -352,17 +423,21 @@
       bar.setAttribute("aria-valuetext", `${quotaBytes(measured)} / ${quotaBytes(quotaSize)}`);
       let usedWidth = 0;
       const widthBase = Math.max(quotaSize, measured);
-      [...categories.values()].filter(item => item.bytes).forEach(item => {
+      [...categories.values()].filter(item => item.billedBytes).forEach(item => {
         const width = widthBase > 0 ? Math.max(0, Math.min(100 - usedWidth,
-          100 * item.bytes / widthBase)) : 0;
+          100 * item.billedBytes / widthBase)) : 0;
         if (!width) return;
         const segment = document.createElement("span");
         segment.style.width = `${width}%`;
         segment.style.background = groupColors[item.group] || "#8a8f98";
-        segment.title = `${quotaGroupLabel(context, item.group)} · ${quotaBytes(item.bytes)}`;
+        segment.title = `${quotaGroupLabel(context, item.group)} · ${quotaBytes(item.billedBytes)}`;
         bar.append(segment); usedWidth += width;
       });
-      autoButton.disabled = !servers.some(server => Number(server.data.cleanup_preview?.artifact_count));
+      autoButton.disabled = !servers.some(server =>
+        server.snapshot ? Number(server.data.output_bytes) > 0 &&
+          !pending.some(item => item.server_id === server.id &&
+            ["pending", "executing"].includes(item.status))
+          : Number(server.data.cleanup_preview?.artifact_count) > 0);
       const rows = [...categories.values()].sort((a, b) => b.bytes - a.bytes).map(item => {
         const label = document.createElement("span"); label.className = "quota-category-label";
         const swatch = document.createElement("i");
@@ -374,11 +449,8 @@
           if (item.group === "output:historical") {
             controls.append(FTUI.iconButton(context, "list.bullet.clipboard",
               "查看最近一次占用记录", openHistoricalOutputs));
-            const unavailable = FTUI.iconButton(context, "trash",
-              "实时任务清单尚不可用，暂不能删除", () => {});
-            unavailable.disabled = true;
-            unavailable.title = context.t("实时任务清单返回后才能预览和删除");
-            controls.append(unavailable);
+            controls.append(FTUI.iconButton(context, "trash",
+              "删除整个类别", () => { void clearScope("output:historical"); }));
           }
           if (servers.some(server => !server.snapshot && (server.data.business_groups || [])
               .some(candidate => candidate.quota_group === item.group))) {
@@ -393,7 +465,9 @@
             }));
           }
         } else controls.textContent = context.t("受保护");
-        return [label, quotaBytes(item.bytes), item.lastObserved.length
+        const size = item.billedBytes === item.bytes ? quotaBytes(item.bytes)
+          : `${quotaBytes(item.billedBytes)} / ${quotaBytes(item.bytes)} ${context.t("物理占用")}`;
+        return [label, size, item.lastObserved.length
           ? context.t("含最近一次占用记录") : context.t("当前测量"),
           item.count || "—", controls];
       });
@@ -418,6 +492,7 @@
             id: row.storage_server_id, data: row, snapshot: true,
             observedAt: row.observed_at,
           }));
+          pending = snapshot.deferred_output_cleanups || [];
           if (servers.length || (snapshot.profile_snapshots || []).length ||
               Object.values(snapshot.protected_metadata || {}).some(row => Number(row.bytes))) {
             render();
@@ -433,6 +508,9 @@
           profile = value;
           if (quotaKnown) render();
         })
+        .catch(() => { if (isCurrent()) liveFailed = true; });
+      const pendingRequest = context.api("/api/storage/deferred-job-cleanup")
+        .then(value => { if (isCurrent()) { pending = value.requests || []; if (quotaKnown) render(); } })
         .catch(() => { if (isCurrent()) liveFailed = true; });
       const jobsRequest = context.api("/api/jobs/storage").then(async root => {
         if (!isCurrent()) return;
@@ -464,7 +542,7 @@
         liveFailed = true;
         context.showNotice(error.message, true);
       });
-      await Promise.allSettled([profileRequest, jobsRequest]);
+      await Promise.allSettled([profileRequest, jobsRequest, pendingRequest]);
       if (!isCurrent()) return;
       liveLoading = false; refreshButton.disabled = false;
       if (quotaKnown) render();

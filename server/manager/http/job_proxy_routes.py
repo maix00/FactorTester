@@ -54,6 +54,56 @@ _PRODUCT_DATA_POST_PATHS = frozenset({
 class JobProxyRoutesMixin:
     """Forward execution requests after selection and preserve provenance."""
 
+    def _deferred_job_cleanup_route(self, parsed, *, method: str) -> bool:
+        """Keep reversible offline deletion commands on the quota authority."""
+        base = "/api/storage/deferred-job-cleanup"
+        match = re.fullmatch(rf"{base}/([0-9a-f]{{32}})", parsed.path)
+        if parsed.path != base and match is None:
+            return False
+        if (parsed.path == base and method not in {"GET", "POST"}) or (
+            match is not None and method != "DELETE"
+        ):
+            json_response(self, {"success": False, "error": "method not allowed"}, 405)
+            return True
+        session = self._session()
+        if session is None:
+            json_response(self, {"success": False, "error": "login required"}, 401)
+            return True
+        store = getattr(self.state, "control_store", None)
+        if store is None:
+            json_response(self, {"success": False,
+                                 "error": "quota authority unavailable"}, 503)
+            return True
+        principal = str(session["username"])
+        try:
+            if method == "GET":
+                value = {"requests": store.deferred_output_cleanups(principal)}
+            elif method == "POST":
+                body = self._json_body(4096)
+                if not isinstance(body, dict):
+                    raise ValueError("cleanup request must be an object")
+                value = store.queue_deferred_output_cleanup(
+                    principal=principal,
+                    server_id=str(body.get("server_id") or ""),
+                    expected_bytes=int(body.get("expected_bytes") or 0),
+                    expected_count=int(body.get("expected_count") or 0),
+                    observed_at=str(body.get("observed_at") or ""),
+                )
+            else:
+                value = store.cancel_deferred_output_cleanup(
+                    principal=principal, request_id=match.group(1),
+                )
+        except (TypeError, ValueError) as exc:
+            json_response(self, {"success": False, "error": str(exc)}, 409)
+            return True
+        except Exception:
+            json_response(self, {"success": False,
+                                 "error": "quota authority unavailable"}, 503)
+            return True
+        json_response(self, {"success": True, **value},
+                      headers={"Cache-Control": "private, no-store"})
+        return True
+
     def _with_local_service_selector(self, parsed):
         """Bind unqualified service-port hints to this Manager's server."""
         query = parse_qs(parsed.query, keep_blank_values=True)

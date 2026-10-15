@@ -53,9 +53,19 @@ def test_quota_renders_saved_snapshot_before_live_inventory() -> None:
                 content: document.body,
                 activeNav() {}, setHeading() {}, isRouteCurrent: () => true,
                 showNotice() {},
-                api: path => new Promise((resolve, reject) => {
+                api: (path, options = {}) => {
+                  if (options.method === 'POST') {
+                    const body = JSON.parse(options.body);
+                        return Promise.resolve({request_id: body.server_id === 'local'
+                            ? 'a'.repeat(32) : 'b'.repeat(32),
+                      server_id: body.server_id, status: 'pending',
+                      credit_bytes: body.expected_bytes});
+                  }
+                  if (options.method === 'DELETE') return Promise.resolve({success: true});
+                  return new Promise((resolve, reject) => {
                   quotaRequests[path] = {resolve, reject};
-                }),
+                  });
+                },
               };
             }""")
             page.add_script_tag(path=str(ROOT / "server/manager/web/settings/settings.js"))
@@ -87,13 +97,27 @@ def test_quota_renders_saved_snapshot_before_live_inventory() -> None:
             assert "测试任务生成物（历史未分类）" in page.locator(
                 ".quota-categories"
             ).inner_text()
-            assert page.get_by_role("button", name="实时任务清单尚不可用，暂不能删除").is_disabled()
+            assert page.get_by_role("button", name="删除整个类别").is_enabled()
             page.get_by_role("button", name="查看最近一次占用记录").click()
             assert "remote" in page.locator(".quota-dialog").inner_text()
-            assert "尚未取得这些服务器的实时任务清单" in page.locator(
+            assert "上线后会重新核对清单" in page.locator(
                 ".quota-dialog"
             ).inner_text()
             page.get_by_role("button", name="关闭").click()
+            page.evaluate("() => { window.confirm = () => true; }")
+            page.get_by_role("button", name="查看最近一次占用记录").click()
+            page.get_by_role("button", name="上线后删除此服务器的生成物").first.click()
+            page.get_by_text("35 B / 100 B", exact=False).wait_for()
+            page.get_by_role("button", name="查看最近一次占用记录").click()
+            page.get_by_role("button", name="取消待删除").click()
+            page.get_by_text("105 B / 100 B", exact=False).wait_for()
+            page.get_by_role("button", name="删除整个类别").click()
+            page.get_by_text("25 B / 100 B", exact=False).wait_for(timeout=3000)
+            page.get_by_role("button", name="查看最近一次占用记录").click()
+            page.get_by_role("button", name="取消待删除").first.click()
+            page.get_by_role("button", name="查看最近一次占用记录").click()
+            page.get_by_role("button", name="取消待删除").click()
+            page.get_by_text("105 B / 100 B", exact=False).wait_for()
             # Neither the live scan nor the remote Job request has resolved.
             assert "/api/storage/profile-inventory" in page.evaluate(
                 "Object.keys(quotaRequests)"
@@ -130,7 +154,7 @@ def test_quota_renders_saved_snapshot_before_live_inventory() -> None:
                 ".quota-categories"
             ).inner_text()
             assert page.get_by_role(
-                "button", name="实时任务清单尚不可用，暂不能删除",
+                "button", name="删除整个类别",
             ).count() == 0
         finally:
             browser.close()

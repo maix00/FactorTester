@@ -1630,6 +1630,43 @@ def test_job_cleanup_previews_and_passes_server_identity(monkeypatch) -> None:
     assert protected.exit_code != 0
 
 
+def test_deferred_job_cleanup_cli_previews_queues_and_cancels(monkeypatch) -> None:
+    class Client:
+        def quota_snapshot(self):
+            return {"job_snapshots": [{"storage_server_id": "offline-a",
+                    "output_bytes": 70, "output_count": 2,
+                    "observed_at": "2026-10-15T02:00:00Z"}]}
+
+        def queue_deferred_job_cleanup(self, **kwargs):
+            self.queued = kwargs
+            return {"request_id": "a" * 32, "status": "pending", **kwargs}
+
+        def deferred_job_cleanups(self):
+            return {"requests": [{"request_id": "a" * 32,
+                     "status": "pending", "server_id": "offline-a"}]}
+
+        def cancel_deferred_job_cleanup(self, request_id):
+            self.cancelled = request_id
+            return {"request_id": request_id, "status": "cancelled"}
+
+    fake = Client()
+    monkeypatch.setattr("tools.cli.commands.research.client_from_config", lambda: fake)
+    command = ["job", "cleanup-queue", "--server-id", "offline-a"]
+    preview = CliRunner().invoke(cli, command)
+    assert preview.exit_code == 0, preview.output
+    assert json.loads(preview.output)["dry_run"] is True
+    assert not hasattr(fake, "queued")
+    queued = CliRunner().invoke(cli, [*command, "--yes"])
+    assert queued.exit_code == 0, queued.output
+    assert fake.queued["expected_bytes"] == 70
+    listed = CliRunner().invoke(cli, ["job", "cleanup-requests"])
+    assert listed.exit_code == 0, listed.output
+    assert json.loads(listed.output)["requests"][0]["status"] == "pending"
+    cancelled = CliRunner().invoke(cli, ["job", "cleanup-cancel", "a" * 32, "--yes"])
+    assert cancelled.exit_code == 0, cancelled.output
+    assert fake.cancelled == "a" * 32
+
+
 def test_job_storage_profile_reports_separate_unmetered_inventory(monkeypatch) -> None:
     class StorageClient:
         def profile_storage(self):

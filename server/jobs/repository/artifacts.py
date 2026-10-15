@@ -121,7 +121,8 @@ class JobArtifactImplementation:
             result['business_groups'] = [dict(row) for row in groups]
             eligible_rows = conn.execute(f"""
                 SELECT {label} AS category, artifacts.job_id, artifacts.name,
-                    artifacts.content_hash, artifacts.size_bytes
+                    artifacts.content_hash, artifacts.size_bytes,
+                    artifacts.created_at
                 FROM research_job_artifacts AS artifacts
                 JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
                 WHERE jobs.owner=? AND artifacts.state='active'
@@ -146,6 +147,7 @@ class JobArtifactImplementation:
                 "job_count": len({row["job_id"] for row in eligible_rows}),
                 "bytes": sum(int(row["size_bytes"]) for row in eligible_rows),
                 "token": self._cleanup_token(eligible_rows),
+                "max_created_at": max((float(row["created_at"]) for row in eligible_rows), default=0),
             }
             by_group: dict[str, list[Any]] = {}
             for row in conn.execute(f"""
