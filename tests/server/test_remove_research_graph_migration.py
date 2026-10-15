@@ -429,3 +429,109 @@ def test_cutover_refuses_unclassified_maintenance_graph_reference(tmp_path):
             files_backup=tmp_path / "files-backup",
         )
     assert not backup.exists()
+
+
+def test_cutover_classifies_legacy_graph_maintenance_receipts_only(tmp_path):
+    database = tmp_path / "catalog.sqlite"
+    backup = tmp_path / "catalog-before.sqlite"
+    graph_files = tmp_path / "research-graphs"
+    files_backup = tmp_path / "files-before"
+    _create_database(database)
+    graph_refs = [
+        "graph:factor-research@10#revision",
+        "graph-proposal:factor-research@7:proposal",
+        "graph-version:factor-research@8:revision",
+        "gate-action:activate_graph",
+        "gate-action:continue_graph_branch",
+        "gate-effect:active-graph:factor-research@7",
+        "gate-effect:graph-continuation:factor-research@7",
+        "gate-grill:docs:research-decision-graph-grill:approved",
+        "test:research-graph-regression-127",
+        "test-receipt:graph-v8-continuation-26-passed",
+        "tests:graph-recovery-48+continuation-26",
+    ]
+    with sqlite3.connect(database) as conn:
+        conn.execute(
+            "UPDATE research_maintenance_cases SET affected_refs_json=?, change_refs_json=? WHERE case_id='case-1'",
+            (json.dumps(["job:job-1", *graph_refs]), json.dumps(["evidence:evidence-1"])),
+        )
+        conn.execute(
+            "INSERT INTO research_evidence_admissions VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("admission-proposal", "evidence-1", "env", graph_refs[1], "eligible", "keep", "alice", 4),
+        )
+        before = inspect(conn, graph_files=graph_files)
+    assert before["ready_to_apply"] is True
+    assert before["maintenance_graph_refs"] == {
+        "cases": 1, "refs": len(graph_refs), "unclassified_rows": 0,
+    }
+    # A Maintenance Case ref does not widen the separate Evidence admission
+    # ownership rule: this record remains untouched by the cutover.
+    assert before["graph_evidence_admissions"] == 2
+
+    result = apply(
+        database, backup, graph_files=graph_files,
+        files_backup=files_backup,
+    )
+    assert result["maintenance_graph_refs_removed"] == len(graph_refs)
+    with sqlite3.connect(database) as conn:
+        case = conn.execute(
+            "SELECT affected_refs_json, change_refs_json FROM research_maintenance_cases WHERE case_id='case-1'"
+        ).fetchone()
+        assert json.loads(case[0]) == ["job:job-1"]
+        assert json.loads(case[1]) == ["evidence:evidence-1"]
+        assert conn.execute(
+            "SELECT subject_ref FROM research_evidence_admissions WHERE admission_ref='admission-proposal'"
+        ).fetchone()[0] == graph_refs[1]
+
+
+def test_cutover_preserves_nonexpiring_session_float_in_backup(tmp_path):
+    database = tmp_path / "catalog.sqlite"
+    backup = tmp_path / "catalog-before.sqlite"
+    _create_database(database)
+    with sqlite3.connect(database) as conn:
+        conn.execute("CREATE TABLE manager_sessions (token_hash TEXT PRIMARY KEY, expires_at REAL NOT NULL)")
+        conn.execute("INSERT INTO manager_sessions VALUES (?, ?)", ("token-hash", float("inf")))
+
+    result = apply(
+        database, backup, graph_files=tmp_path / "research-graphs",
+        files_backup=tmp_path / "files-before",
+    )
+    assert result["after"]["preserved"] == result["before"]["preserved"]
+    for path in (database, backup):
+        with sqlite3.connect(path) as conn:
+            assert conn.execute(
+                "SELECT expires_at FROM manager_sessions WHERE token_hash='token-hash'"
+            ).fetchone()[0] == float("inf")
+
+
+def test_cutover_and_rollback_preserve_existing_unrelated_orphan(tmp_path):
+    database = tmp_path / "catalog.sqlite"
+    backup = tmp_path / "catalog-before.sqlite"
+    graph_files = tmp_path / "research-graphs"
+    files_backup = tmp_path / "files-before"
+    _create_database(database)
+    with sqlite3.connect(database) as conn:
+        conn.execute(
+            "CREATE TABLE orphan_links (job_id TEXT REFERENCES research_jobs(job_id), note TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO orphan_links VALUES ('missing-job', 'historical')"
+        )
+        before_violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+    assert len(before_violations) == 1
+
+    result = apply(
+        database, backup, graph_files=graph_files,
+        files_backup=files_backup,
+    )
+    assert result["historical_foreign_key_violations_preserved"] == 1
+    with sqlite3.connect(database) as conn:
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == before_violations
+
+    restored = restore_backup(
+        database, backup, graph_files=graph_files,
+        files_backup=files_backup,
+    )
+    assert restored["historical_foreign_key_violations_restored"] == 1
+    with sqlite3.connect(database) as conn:
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == before_violations
