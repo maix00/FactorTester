@@ -3,7 +3,7 @@
   document.documentElement.classList.toggle("embedded-presentation", embeddedPresentation);
   const runtime = FTAppRuntime.create();
   const {
-    state, content, title, eyebrow, toolbar, notice,
+    state, content, title, eyebrow, toolbar,
     savedToken, api, raw, showNotice, setHeading, button,
   } = runtime;
   const initialAssetRevision = document.querySelector(
@@ -62,6 +62,10 @@
     });
   }
 
+  const routeNotice = routeToken => (message, isError = false) => {
+    if (routeLifetimes.isCurrent(routeToken)) showNotice(message, isError);
+  };
+
   function loginRequiredView() {
     const note = FTUI.empty(
       t("登录后继续"),
@@ -77,7 +81,7 @@
 
   const jobsContext = (routeToken = routeLifetimes.current() ?? activeRouteToken) => ({
     api, raw, navigate, openTab, button, content, toolbar, t,
-    openLogin, showNotice, servicePath,
+    openLogin, showNotice: routeNotice(routeToken), servicePath,
     loginRequiredView, session: state.session, modules: state.modules,
     isRouteCurrent: () => routeLifetimes.isCurrent(routeToken),
     ...routePresentation(routeToken),
@@ -94,7 +98,7 @@
   const appContext = (routeToken = routeLifetimes.current() ?? activeRouteToken) => ({
     api, raw, navigate, button, content, toolbar,
     navigateInPlace: tabs?.navigateInPlace,
-    servicePath, showNotice, openLogin, logout,
+    servicePath, showNotice: routeNotice(routeToken), openLogin, logout,
     activateTab: tabs?.activateTab, closeTab: tabs?.closeTab,
     session: state.session, t, ...currentTabContext(),
     isRouteCurrent: () => routeLifetimes.isCurrent(routeToken),
@@ -263,7 +267,8 @@
       ...currentTabContext(),
       tabID: state.activeTabID, tabSession,
       ...routePresentation(routeToken),
-      saveActiveTabSession, openTab, navigate, showNotice,
+      saveActiveTabSession, openTab, navigate,
+      showNotice: routeNotice(routeToken),
       captureScrollPosition,
       checkpointTabSession: tabs?.scheduleActiveSessionCheckpoint,
       isRouteCurrent: () => routeLifetimes.isCurrent(routeToken),
@@ -335,7 +340,6 @@
     const renderedPath = location.pathname + location.search;
     window.FTPageMode?.applyFromPath?.(renderedPath, t);
     if (routeToken !== activeRouteToken) return;
-    showNotice("");
     document.querySelector(".report-mount")?.__ftLazyCleanup?.();
     document.querySelectorAll(".chapter-rail-tooltip").forEach(item => item.remove());
     const route = FTNavigation.matchRoute(location.pathname, location.search);
@@ -392,7 +396,7 @@
   const tabIcon = path => FTNavigation.tabIcon(path, state.modules);
   tabs = FTTabs.create({
     state, embeddedPresentation, t, renderRoute,
-    content, title, eyebrow, toolbar, notice,
+    content, title, eyebrow, toolbar,
     beforeTabChange: () => { activeRouteToken += 1; },
     onTabActivated: () => window.FTPageAgentDrawer?.activate?.(appContext()),
     onTabEvicted: tabID => {

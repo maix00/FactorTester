@@ -3,7 +3,7 @@
     const {
       state, embeddedPresentation, t, renderRoute,
       modulePath, isPinnedPath, titleForPath, tabIcon,
-      content, title, eyebrow, toolbar, notice, beforeTabChange,
+      content, title, eyebrow, toolbar, beforeTabChange,
       liveViewLimit,
       onTabClosed,
       onTabEvicted,
@@ -14,7 +14,7 @@
     let checkpointTimer = null;
     let draggingTabID = "";
     const viewCache = window.FTTabViewCache.create({
-      state, content, title, eyebrow, toolbar, notice,
+      state, content, title, eyebrow, toolbar,
       persistSession: (tabID, value) => workspace?.saveSession?.(tabID, value),
       restoreSession: tabID => workspace?.restoreSession?.(tabID),
       removeSession: tabID => workspace?.removeSession?.(tabID),
@@ -170,7 +170,7 @@
       button.innerHTML = '<span class="symbol"></span><span class="tab-label"></span>';
       button.querySelector(".symbol").append(FTIcons.node(tab.icon || tabIcon(tab.path)));
       button.querySelector(".tab-label").textContent = tab.title;
-      button.title = document.body.classList.contains("sidebar-collapsed") ? "" : tab.title;
+      button.title = tab.title;
       button.setAttribute("aria-label", tab.title);
       button.addEventListener("click", () => activateTab(tab.id));
       return button;

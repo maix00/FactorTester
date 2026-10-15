@@ -122,11 +122,9 @@
       return response;
     }
 
-    function showNotice(message, isError = false) {
-      notice.hidden = !message;
-      notice.textContent = message || "";
-      notice.style.color = isError ? "var(--danger)" : "inherit";
-    }
+    const noticeQueue = createNoticeQueue(notice);
+    const showNotice = (message, isError = false) =>
+      noticeQueue.enqueue(message, isError);
 
     function setHeading(name, scope = "FTClient") {
       title.textContent = name;
@@ -148,9 +146,68 @@
     });
   }
 
+  function createNoticeQueue(container, options = {}) {
+    const now = options.now || Date.now;
+    const schedule = options.setTimeout || setTimeout;
+    const cancel = options.clearTimeout || clearTimeout;
+    const recent = new Map();
+    const active = [];
+    let nextID = 0;
+    const maxVisible = 5;
+    const repeatWindowMS = 10000;
+
+    function dismiss(id) {
+      const index = active.findIndex(entry => entry.id === id);
+      if (index < 0) return;
+      const [entry] = active.splice(index, 1);
+      cancel(entry.timer);
+      recent.set(entry.key, now());
+      entry.element.remove();
+    }
+
+    function enqueue(message, isError = false) {
+      const value = String(message || "").trim();
+      // Empty messages used to clear the old inline banner. A transient queue
+      // expires independently; clearing it during navigation would lose useful
+      // feedback from the preceding action.
+      if (!value || !container) return null;
+      const key = `${Boolean(isError) ? "error" : "info"}:${value}`;
+      const existing = active.find(entry => entry.key === key);
+      if (existing) return existing.id; // Never extend a repeatedly fired notice.
+      const current = now();
+      if (current - (recent.get(key) ?? -Infinity) < repeatWindowMS) return null;
+      for (const [oldKey, at] of recent) {
+        if (current - at >= repeatWindowMS) recent.delete(oldKey);
+      }
+
+      const element = document.createElement("div");
+      element.className = `notice-item${isError ? " is-error" : ""}`;
+      if (isError) element.setAttribute("role", "alert");
+      const body = document.createElement("span");
+      body.className = "notice-item-text";
+      body.textContent = value;
+      const close = document.createElement("button");
+      close.type = "button";
+      close.className = "notice-item-close";
+      close.setAttribute("aria-label", "关闭消息");
+      close.textContent = "×";
+      const id = ++nextID;
+      close.addEventListener("click", () => dismiss(id));
+      element.append(body, close);
+      container.prepend(element);
+      const timer = schedule(() => dismiss(id), isError ? 8000 : 5000);
+      active.unshift({id, key, element, timer});
+      recent.set(key, current);
+      if (active.length > maxVisible) dismiss(active[active.length - 1].id);
+      return id;
+    }
+
+    return Object.freeze({enqueue, dismiss});
+  }
+
   function hasLocalCatalog() {
     return Boolean(window.webkit?.messageHandlers?.factorTesterLocalCatalog?.postMessage);
   }
 
-  window.FTAppRuntime = Object.freeze({create, hasLocalCatalog});
+  window.FTAppRuntime = Object.freeze({create, hasLocalCatalog, createNoticeQueue});
 })();
