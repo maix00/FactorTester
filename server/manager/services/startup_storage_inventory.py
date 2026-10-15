@@ -3,11 +3,93 @@
 from __future__ import annotations
 
 import threading
+import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlencode
 
 from server.manager.services.profile_storage_inventory import scan_profile_storage
 from tools.cli.release.local_profile_contracts import validate_principal_identifier
+
+
+def apply_deferred_output_cleanups(
+    state: Any, *, log: Callable[[str], None] = print, limit: int = 100,
+) -> dict[str, int]:
+    """Execute a target Manager's queued commands once it can reach authority.
+
+    The saved number is quota credit, not a deletion manifest.  A current
+    terminal-output preview must still equal the recorded server snapshot;
+    otherwise no file is touched and the credit is refunded for review.
+    """
+    store = getattr(state, "control_store", None)
+    if store is None:
+        return {"completed": 0, "needs_review": 0, "failed": 0}
+    from server.jobs.repository import JobRepository
+    from server.manager.services.job_storage_control import job_storage_response
+
+    repo = JobRepository()
+    result = {"completed": 0, "needs_review": 0, "failed": 0}
+    for _ in range(limit):
+        request = store.claim_deferred_output_cleanup(server_id=state.server_id)
+        if request is None:
+            break
+        owner = str(request["principal"])
+        request_id = str(request["request_id"])
+        try:
+            preview = repo.storage_inventory(owner=owner)["cleanup_preview"]
+            snapshot_time = datetime.fromisoformat(
+                str(request["snapshot_observed_at"]).replace("Z", "+00:00")
+            ).timestamp()
+            if (int(preview["artifact_count"]) != request["snapshot_output_count"]
+                    or int(preview["bytes"]) != request["snapshot_output_bytes"]
+                    or float(preview["max_created_at"]) > snapshot_time):
+                store.finish_deferred_output_cleanup(
+                    server_id=state.server_id, request_id=request_id,
+                    status="needs_review",
+                    error="terminal output inventory changed or contains newer files; no files deleted",
+                )
+                result["needs_review"] += 1
+                continue
+            query = urlencode({
+                "cleanup": "eligible", "expected_count": preview["artifact_count"],
+                "expected_bytes": preview["bytes"],
+                "expected_token": preview["token"],
+            })
+            response = job_storage_response(
+                path=f"/api/jobs/artifacts?{query}", principal=owner,
+                method="DELETE", repository=repo,
+            )
+            detail = json.loads(response.body)
+            if response.status != 200 or not detail.get("success"):
+                store.finish_deferred_output_cleanup(
+                    server_id=state.server_id, request_id=request_id,
+                    status="needs_review",
+                    error=str(detail.get("error") or "cleanup preview changed"),
+                )
+                result["needs_review"] += 1
+                continue
+            store.finish_deferred_output_cleanup(
+                server_id=state.server_id, request_id=request_id,
+                status="completed",
+                deleted_artifacts=int(detail.get("deleted_artifacts") or 0),
+                freed_bytes=int(detail.get("freed_bytes") or 0),
+                error=(f"{detail['failed_files']} files need physical removal retry"
+                       if detail.get("failed_files") else ""),
+            )
+            result["completed"] += 1
+        except Exception as exc:
+            result["failed"] += 1
+            log(f"deferred Job output cleanup unavailable: {type(exc).__name__}")
+            try:
+                store.release_deferred_output_cleanup(
+                    server_id=state.server_id, request_id=request_id,
+                    error=type(exc).__name__,
+                )
+            except Exception:
+                pass
+            break
+    return result
 
 
 def sync_local_storage(state: Any, *, log: Callable[[str], None] = print) -> dict[str, int]:
@@ -85,6 +167,9 @@ def start_storage_inventory(
         try:
             if after is not None:
                 after.join(timeout=60)
+            cleanup = apply_deferred_output_cleanups(state, log=log)
+            if any(cleanup.values()):
+                log(f"startup deferred Job cleanup: {cleanup}")
             result = sync_local_storage(state, log=log)
             log(f"startup storage inventory: {result['measured']} profiles, {result['failed']} failures")
         except Exception as exc:

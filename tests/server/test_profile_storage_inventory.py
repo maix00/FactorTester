@@ -215,6 +215,10 @@ def test_quota_snapshot_is_principal_scoped_and_skips_live_scan(tmp_path, monkey
             return [{"storage_server_id": "local", "output_bytes": 7,
                      "input_bytes": 0, "observed_at": "2026-10-15T02:00:00Z"}]
 
+        def deferred_output_cleanups(self, principal):
+            assert principal == "alice"
+            return []
+
         def protected_entity_metadata_usage(self, principal):
             assert principal == "alice"
             return {"factors": {"bytes": 2, "item_count": 1}}

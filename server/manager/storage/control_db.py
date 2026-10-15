@@ -19,8 +19,10 @@ import math
 import os
 import re
 import threading
+import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 from urllib.parse import parse_qs, urlsplit, urlunsplit
@@ -33,7 +35,7 @@ CONTROL_DATABASE_ENV = "FACTORTESTER_CONTROL_DATABASE_URL"
 DEFAULT_CONTROL_DATABASE_PORT = 5432
 DEFAULT_CONTROL_DATABASE_SSLMODE = "require"
 DEFAULT_CONTROL_DATABASE_TIMEOUT = 5
-CONTROL_DATABASE_SCHEMA_VERSION = 9
+CONTROL_DATABASE_SCHEMA_VERSION = 10
 CONTROL_DATABASE_ENCODING = "UTF8"
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40,64}$")
 _CONTENT_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -450,6 +452,34 @@ CONTROL_SCHEMA: tuple[str, ...] = (
     )
     """,
     "CREATE INDEX IF NOT EXISTS quota_server_usage_principal ON quota_server_usage(principal)",
+    """
+    CREATE TABLE IF NOT EXISTS quota_deferred_output_cleanups (
+        request_id TEXT PRIMARY KEY,
+        principal TEXT NOT NULL,
+        server_id TEXT NOT NULL,
+        snapshot_output_bytes BIGINT NOT NULL,
+        snapshot_output_count BIGINT NOT NULL,
+        snapshot_observed_at TIMESTAMPTZ NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        claimed_at TIMESTAMPTZ,
+        finished_at TIMESTAMPTZ,
+        deleted_artifacts BIGINT NOT NULL DEFAULT 0,
+        freed_bytes BIGINT NOT NULL DEFAULT 0,
+        error TEXT NOT NULL DEFAULT '',
+        CHECK (snapshot_output_bytes > 0),
+        CHECK (snapshot_output_count >= 0),
+        CHECK (status IN ('pending', 'executing', 'completed',
+                         'cancelled', 'needs_review'))
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS quota_deferred_output_cleanups_principal "
+    "ON quota_deferred_output_cleanups(principal, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS quota_deferred_output_cleanups_server "
+    "ON quota_deferred_output_cleanups(server_id, status, created_at)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS quota_deferred_output_cleanup_active "
+    "ON quota_deferred_output_cleanups(principal, server_id) "
+    "WHERE status IN ('pending', 'executing')",
     """
     CREATE TABLE IF NOT EXISTS quota_profile_usage (
         server_id TEXT NOT NULL,
@@ -1298,7 +1328,7 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
     @staticmethod
     def _unified_usage_sql() -> str:
         return """
-            SELECT
+            SELECT GREATEST(0,
               COALESCE((SELECT SUM(artifact_bytes) FROM quota_server_usage
                         WHERE principal=%s), 0)
               + COALESCE((SELECT SUM(research_reports_bytes + profile_uploads_bytes
@@ -1306,7 +1336,16 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
                           FROM quota_profile_usage WHERE principal=%s), 0)
               + COALESCE((SELECT SUM(OCTET_LENGTH(payload::text))
                           FROM control_account_domain_entities
-                          WHERE principal=%s AND NOT deleted), 0) AS used_bytes
+                          WHERE principal=%s AND NOT deleted), 0)
+              - COALESCE((SELECT SUM(LEAST(
+                    requests.snapshot_output_bytes, usage.output_bytes))
+                  FROM quota_deferred_output_cleanups AS requests
+                  JOIN quota_server_usage AS usage
+                    ON usage.server_id=requests.server_id
+                   AND usage.principal=requests.principal
+                  WHERE requests.principal=%s
+                    AND requests.status IN ('pending', 'executing')), 0)
+            ) AS used_bytes
         """
 
     def unified_usage_bytes(self, principal: str) -> int:
@@ -1314,7 +1353,7 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
         self.ensure_schema()
         with self._connection() as connection:
             row = connection.execute(
-                self._unified_usage_sql(), (str(principal),) * 3,
+                self._unified_usage_sql(), (str(principal),) * 4,
             ).fetchone()
         return max(0, int(_row_value(row, "used_bytes", 0, 0) or 0))
 
@@ -1345,6 +1384,162 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
                 else str(observed or ""),
             })
         return result
+
+    @staticmethod
+    def _deferred_cleanup_value(row: object) -> dict[str, Any]:
+        names = (
+            "request_id", "principal", "server_id", "snapshot_output_bytes",
+            "snapshot_output_count", "snapshot_observed_at", "status",
+            "created_at", "claimed_at", "finished_at", "deleted_artifacts",
+            "freed_bytes", "error", "credit_bytes",
+        )
+        value = {name: _row_value(row, name, index) for index, name in enumerate(names)}
+        for name in ("snapshot_observed_at", "created_at", "claimed_at", "finished_at"):
+            raw = value[name]
+            value[name] = raw.isoformat() if hasattr(raw, "isoformat") else str(raw or "")
+        for name in ("snapshot_output_bytes", "snapshot_output_count",
+                     "deleted_artifacts", "freed_bytes", "credit_bytes"):
+            value[name] = max(0, int(value[name] or 0))
+        value["error"] = str(value["error"] or "")
+        return value
+
+    def deferred_output_cleanups(self, principal: str) -> list[dict[str, Any]]:
+        """Read only this user's bounded command history and current quota credit."""
+        self.ensure_schema()
+        with self._connection() as connection:
+            rows = connection.execute("""
+                SELECT requests.*, CASE WHEN requests.status IN ('pending', 'executing')
+                    THEN LEAST(requests.snapshot_output_bytes,
+                               COALESCE(usage.output_bytes, 0))
+                    ELSE 0 END AS credit_bytes
+                FROM quota_deferred_output_cleanups AS requests
+                LEFT JOIN quota_server_usage AS usage
+                  ON usage.server_id=requests.server_id
+                 AND usage.principal=requests.principal
+                WHERE requests.principal=%s
+                ORDER BY requests.created_at DESC LIMIT 100
+            """, (str(principal),)).fetchall()
+        return [self._deferred_cleanup_value(row) for row in rows]
+
+    def queue_deferred_output_cleanup(
+        self, *, principal: str, server_id: str, expected_bytes: int,
+        expected_count: int, observed_at: str,
+    ) -> dict[str, Any]:
+        """Atomically anchor one reversible request to a measured server row."""
+        owner, server = str(principal or "").strip(), str(server_id or "").strip()
+        if (not owner or not server or len(server) > 128 or not observed_at
+                or expected_bytes <= 0
+                or expected_count < 0):
+            raise ValueError("valid owner, server and measured output are required")
+        try:
+            if datetime.fromisoformat(str(observed_at).replace("Z", "+00:00")).tzinfo is None:
+                raise ValueError("snapshot observation needs a timezone")
+        except ValueError as exc:
+            raise ValueError("invalid snapshot observation time") from exc
+        self.ensure_schema()
+        with self._connection() as connection:
+            usage = connection.execute("""
+                SELECT output_bytes, output_count, updated_at
+                FROM quota_server_usage
+                WHERE principal=%s AND server_id=%s
+                  AND updated_at=%s::timestamptz FOR UPDATE
+            """, (owner, server, observed_at)).fetchone()
+            if (usage is None or int(_row_value(usage, "output_bytes", 0, 0)) != expected_bytes
+                    or int(_row_value(usage, "output_count", 1, 0)) != expected_count):
+                # The client must refresh rather than scheduling against a
+                # different server generation or stale usage measurement.
+                raise ValueError("storage snapshot changed; refresh before scheduling")
+            existing = connection.execute("""
+                SELECT requests.*, LEAST(requests.snapshot_output_bytes,
+                    %s) AS credit_bytes
+                FROM quota_deferred_output_cleanups AS requests
+                WHERE principal=%s AND server_id=%s
+                  AND status IN ('pending', 'executing') FOR UPDATE
+            """, (expected_bytes, owner, server)).fetchone()
+            if existing is not None:
+                if (int(_row_value(existing, "snapshot_output_bytes", 3, 0)) == expected_bytes
+                        and str(_row_value(existing, "status", 6, "")) == "pending"):
+                    return self._deferred_cleanup_value(existing)
+                raise ValueError("an output cleanup is already in progress for this server")
+            request_id = uuid.uuid4().hex
+            row = connection.execute("""
+                INSERT INTO quota_deferred_output_cleanups(
+                    request_id, principal, server_id, snapshot_output_bytes,
+                    snapshot_output_count, snapshot_observed_at
+                ) VALUES (%s, %s, %s, %s, %s, %s::timestamptz)
+                RETURNING *, snapshot_output_bytes AS credit_bytes
+            """, (request_id, owner, server, expected_bytes, expected_count,
+                  observed_at)).fetchone()
+        return self._deferred_cleanup_value(row)
+
+    def cancel_deferred_output_cleanup(
+        self, *, principal: str, request_id: str,
+    ) -> dict[str, Any]:
+        """Refund quota only while the target has not claimed the request."""
+        self.ensure_schema()
+        with self._connection() as connection:
+            row = connection.execute("""
+                UPDATE quota_deferred_output_cleanups
+                SET status='cancelled', finished_at=CURRENT_TIMESTAMP
+                WHERE principal=%s AND request_id=%s AND status='pending'
+                RETURNING *, 0 AS credit_bytes
+            """, (str(principal), str(request_id))).fetchone()
+        if row is None:
+            raise ValueError("cleanup is unavailable or already executing")
+        return self._deferred_cleanup_value(row)
+
+    def claim_deferred_output_cleanup(self, *, server_id: str) -> dict[str, Any] | None:
+        """Claim one local command; an expired execution is retryable after crash."""
+        self.ensure_schema()
+        with self._connection() as connection:
+            row = connection.execute("""
+                WITH selected AS (
+                    SELECT request_id FROM quota_deferred_output_cleanups
+                    WHERE server_id=%s AND (
+                        status='pending' OR
+                        (status='executing' AND claimed_at <
+                         CURRENT_TIMESTAMP - INTERVAL '60 seconds'))
+                    ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
+                )
+                UPDATE quota_deferred_output_cleanups AS requests
+                SET status='executing', claimed_at=CURRENT_TIMESTAMP
+                FROM selected WHERE requests.request_id=selected.request_id
+                RETURNING requests.*, requests.snapshot_output_bytes AS credit_bytes
+            """, (str(server_id),)).fetchone()
+        return self._deferred_cleanup_value(row) if row is not None else None
+
+    def finish_deferred_output_cleanup(
+        self, *, server_id: str, request_id: str, status: str,
+        deleted_artifacts: int = 0, freed_bytes: int = 0, error: str = "",
+    ) -> dict[str, Any]:
+        if status not in {"completed", "needs_review"}:
+            raise ValueError("invalid cleanup result")
+        self.ensure_schema()
+        with self._connection() as connection:
+            row = connection.execute("""
+                UPDATE quota_deferred_output_cleanups
+                SET status=%s, finished_at=CURRENT_TIMESTAMP,
+                    deleted_artifacts=%s, freed_bytes=%s, error=%s
+                WHERE server_id=%s AND request_id=%s AND status='executing'
+                RETURNING *, 0 AS credit_bytes
+            """, (status, max(0, int(deleted_artifacts)),
+                  max(0, int(freed_bytes)), str(error)[:500],
+                  str(server_id), str(request_id))).fetchone()
+        if row is None:
+            raise ValueError("cleanup is not claimed by this server")
+        return self._deferred_cleanup_value(row)
+
+    def release_deferred_output_cleanup(
+        self, *, server_id: str, request_id: str, error: str,
+    ) -> None:
+        """Return a transient failure to the cancellable pending state."""
+        self.ensure_schema()
+        with self._connection() as connection:
+            connection.execute("""
+                UPDATE quota_deferred_output_cleanups
+                SET status='pending', claimed_at=NULL, error=%s
+                WHERE server_id=%s AND request_id=%s AND status='executing'
+            """, (str(error)[:500], str(server_id), str(request_id)))
 
     def record_profile_usage(
         self, *, server_id: str, principal: str, inventory: Mapping[str, Any],
@@ -1518,7 +1713,7 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
                     "error": "quota reservation is no longer active",
                 }
             usage = connection.execute(
-                self._unified_usage_sql(), (owner,) * 3,
+                self._unified_usage_sql(), (owner,) * 4,
             ).fetchone()
             reserved = connection.execute(
                 """

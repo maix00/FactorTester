@@ -114,7 +114,8 @@ def test_unified_quota_uses_job_profile_and_account_domain_without_double_counti
             assert "SUM(artifact_bytes)" in sql
             assert "SUM(research_reports_bytes + profile_uploads_bytes" in sql
             assert "SUM(OCTET_LENGTH(payload::text))" in sql
-            assert args == ("alice", "alice", "alice")
+            assert "quota_deferred_output_cleanups" in sql
+            assert args == ("alice",) * 4
             return self
 
         def fetchone(self):
