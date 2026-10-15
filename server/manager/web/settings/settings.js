@@ -373,7 +373,7 @@
             item.role === "protected" || item.role === "input" ? "受保护" :
               item.role === "profile" ? "由所属页面管理" : "请在来源服务器查看");
           const actions = document.createElement("span");
-          actions.append(FTUI.iconButton(context, "list.bullet", "查看附件", () => {
+          actions.append(FTUI.iconButton(context, "list.bullet.clipboard", "查看附件", () => {
             selectedCategory = item.category; offset = 0;
             void refreshItems().catch(error => context.showNotice(error.message, true));
           }));
