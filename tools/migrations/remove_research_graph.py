@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import shutil
@@ -73,6 +74,24 @@ _GRAPH_REF_PREFIXES = (
     "research-graph:",
     "work-package:",
 )
+# Maintenance Cases also recorded Graph governance and regression receipts.
+# Keep these separate from _GRAPH_REF_PREFIXES: Evidence admissions have a
+# narrower Graph-owned subject-ref contract and must not be broadened here.
+_MAINTENANCE_GRAPH_REF_PREFIXES = _GRAPH_REF_PREFIXES + (
+    "graph:",
+    "graph-proposal:",
+    "graph-version:",
+    "gate-effect:active-graph:",
+    "gate-effect:graph-continuation:",
+    "gate-grill:docs:research-decision-graph-grill:",
+    "test:research-graph-regression-",
+    "test-receipt:graph-v8-continuation-",
+    "tests:graph-recovery-",
+)
+_MAINTENANCE_GRAPH_REF_EXACT = frozenset({
+    "gate-action:activate_graph",
+    "gate-action:continue_graph_branch",
+})
 _GRAPH_TABLE_PREFIXES = (
     "research_graph_",
     "active_research_graph",
@@ -134,9 +153,19 @@ def _quote(value: str) -> str:
 def _safe_value(value: Any) -> Any:
     if isinstance(value, bytes):
         return {"blob_sha256": hashlib.sha256(value).hexdigest(), "bytes": len(value)}
+    if isinstance(value, float) and not math.isfinite(value):
+        # SQLite can store infinity (for example, a non-expiring Manager
+        # session). JSON disallows it; a tagged value keeps backup and live
+        # database fingerprints comparable without changing either row.
+        return {"nonfinite_float": "nan" if math.isnan(value) else ("+inf" if value > 0 else "-inf")}
     if value is None or isinstance(value, (str, int, float)):
         return value
     return {"type": type(value).__name__, "repr": repr(value)}
+
+
+def _foreign_key_violations(conn: sqlite3.Connection) -> set[tuple[Any, ...]]:
+    """Capture exact historical violations so the cutover cannot add any."""
+    return {tuple(row) for row in conn.execute("PRAGMA foreign_key_check")}
 
 
 def _content_fingerprint(
@@ -280,7 +309,10 @@ def _external_graph_foreign_keys(
 
 
 def _is_graph_ref(value: Any) -> bool:
-    return isinstance(value, str) and value.startswith(_GRAPH_REF_PREFIXES)
+    return isinstance(value, str) and (
+        value.startswith(_MAINTENANCE_GRAPH_REF_PREFIXES)
+        or value in _MAINTENANCE_GRAPH_REF_EXACT
+    )
 
 
 def _maintenance_graph_ref_report(conn: sqlite3.Connection, tables: set[str]) -> dict[str, Any]:
@@ -801,6 +833,7 @@ def apply(
         with connect_sqlite(database) as conn:
             before = inspect(conn, graph_files=files_root)
             _assert_ready(before)
+            before_foreign_keys = _foreign_key_violations(conn)
             before_case_ids = _key_values(
                 conn, "research_maintenance_cases", "case_id",
             ) if "research_maintenance_cases" in _tables(conn) else set()
@@ -852,8 +885,8 @@ def apply(
                 raise RuntimeError("Graph schema remains after migration")
             if after["graph_evidence_admissions"] or after["maintenance_graph_refs"]["refs"]:
                 raise RuntimeError("Graph references remain in shared records")
-            if conn.execute("PRAGMA foreign_key_check").fetchone():
-                raise RuntimeError("foreign-key check failed after Graph removal")
+            if _foreign_key_violations(conn) != before_foreign_keys:
+                raise RuntimeError("foreign-key violations changed after Graph removal")
             if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                 raise RuntimeError("SQLite integrity check failed after Graph removal")
             conn.commit()
@@ -864,6 +897,7 @@ def apply(
                 "assurance_migration": assurance_migration,
                 "graph_evidence_admissions_removed": graph_admissions_removed,
                 "maintenance_graph_refs_removed": maintenance_refs_removed,
+                "historical_foreign_key_violations_preserved": len(before_foreign_keys),
                 "before": before,
                 "after": after,
             }
@@ -914,8 +948,10 @@ def restore_backup(
     with connect_sqlite(backup, readonly=True) as source:
         if source.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
             raise RuntimeError("SQLite rollback backup failed integrity check")
-        if source.execute("PRAGMA foreign_key_check").fetchone() is not None:
-            raise RuntimeError("SQLite rollback backup failed foreign-key check")
+        # A verified backup may contain historical unrelated orphan rows.
+        # Restore its exact content; do not make rollback depend on repairing
+        # those rows as part of a separate Graph schema cutover.
+        historical_foreign_key_violations = len(_foreign_key_violations(source))
         expected_fingerprint = _database_fingerprint(source)
 
     file_state: str | None = None
@@ -1017,6 +1053,7 @@ def restore_backup(
                 displaced_graph_files_retained = True
         return {
             "restored": True,
+            "historical_foreign_key_violations_restored": historical_foreign_key_violations,
             "database_integrity": "ok",
             "graph_files_state": file_state or "not_restored",
             "graph_files_restored": file_state is not None,
@@ -1103,6 +1140,9 @@ def main() -> None:
                 ],
                 "maintenance_graph_refs_removed": result[
                     "maintenance_graph_refs_removed"
+                ],
+                "historical_foreign_key_violations_preserved": result[
+                    "historical_foreign_key_violations_preserved"
                 ],
                 "preserved_before": {
                     table: item["count"] for table, item in before["preserved"].items()
