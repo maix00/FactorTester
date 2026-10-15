@@ -88,6 +88,10 @@
       ? above : Math.min(below, viewportHeight - measured.height - 8);
     popup.style.left = `${left}px`;
     popup.style.top = `${top}px`;
+    popup.dataset.placement = top < rect.top ? "above" : "below";
+    popup.style.setProperty?.("--ft-tooltip-arrow-x", `${Math.max(12, Math.min(
+      measuredWidth - 12, rect.left + rect.width / 2 - left,
+    ))}px`);
   }
 
   // Help surfaces must always paint above the component that triggered them,

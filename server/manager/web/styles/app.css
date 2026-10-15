@@ -190,6 +190,19 @@ main { min-width: 0; }
 .content { width: 100%; min-width: 0; max-width: none; padding: 28px var(--page-inline-padding); margin: 0; }
 .module-frame { display: block; width: 100%; min-height: calc(100vh - 144px); border: 0; background: var(--panel); }
 .notice { margin: 12px 28px 0; padding: 10px 12px; border-radius: 8px; background: #fff3cd; }
+.ft-hover-tooltip {
+  position: fixed; z-index: 100000; max-width: min(320px, calc(100vw - 16px));
+  padding: 7px 11px; border-radius: 9px; background: #151515; color: #fff;
+  box-shadow: 0 4px 12px #0003; font-size: 13px; line-height: 1.35;
+  font-weight: 400; overflow-wrap: anywhere; pointer-events: none;
+}
+.ft-hover-tooltip[hidden] { display: none; }
+.ft-hover-tooltip::before {
+  content: ""; position: absolute; left: var(--ft-tooltip-arrow-x); width: 9px; height: 9px;
+  background: inherit; transform: translateX(-50%) rotate(45deg);
+}
+.ft-hover-tooltip[data-placement="below"]::before { top: -4px; }
+.ft-hover-tooltip[data-placement="above"]::before { bottom: -4px; }
 .hero { margin-bottom: 22px; }
 .hero h2 { font-size: 26px; margin: 0 0 5px; }
 .hero p, .empty p, .dialog-card p, .section-heading p { color: var(--muted); }
@@ -355,12 +368,17 @@ tbody tr[data-href]:hover { background: var(--soft); }
 button.ft-help-icon { display: inline-grid; place-items: center; flex: 0 0 auto; width: 15px; height: 15px; box-sizing: border-box; border: 1px solid currentColor; border-radius: 50%; padding: 0; color: var(--muted); background: transparent; font: inherit; font-size: 10px; font-weight: 700; line-height: 1; cursor: pointer; }
 button.ft-help-icon:hover { color: var(--accent); border-color: var(--accent); }
 button.ft-help-icon:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 2px; }
-.ft-help-bubble { position: fixed; z-index: 10050; width: max-content; max-width: min(360px, calc(100vw - 16px)); box-sizing: border-box; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; color: var(--text); background: var(--panel); box-shadow: 0 12px 28px #0004; font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ft-help-bubble { position: fixed; z-index: 10050; width: max-content; max-width: min(360px, calc(100vw - 16px)); box-sizing: border-box; padding: 9px 11px; border: 0; border-radius: 9px; color: #fff; background: #151515; box-shadow: 0 4px 12px #0003; font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ft-help-bubble::before { content: ""; position: absolute; left: var(--ft-tooltip-arrow-x, 50%); width: 9px; height: 9px; background: inherit; transform: translateX(-50%) rotate(45deg); }
+.ft-help-bubble[data-placement="above"]::before { bottom: -4px; }
+.ft-help-bubble[data-placement="below"]::before { top: -4px; }
 /* Raised with the Popover API so it paints above portaled dropdown menus
    (which are top-layer elements; no z-index can cover them).  Neutralize the
    popover UA defaults that would otherwise re-center or re-style the bubble:
    author inline left/top then position it exactly like the plain bubble. */
-.ft-help-bubble[popover] { margin: 0; inset: auto; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--text); }
+.ft-help-bubble[popover] { margin: 0; inset: auto; border: 0; border-radius: 9px; background: #151515; color: #fff; }
+.highcharts-tooltip-box { fill: #151515 !important; stroke: #151515 !important; }
+.highcharts-tooltip text, .highcharts-tooltip tspan { fill: #fff !important; }
 .ft-help-overlay { position: fixed; inset: 0; z-index: 1000 !important; margin: auto; border: 0; border-radius: 16px; padding: 0; background: transparent; color: inherit; box-shadow: 0 24px 80px #0006; }
 .ft-help-overlay::backdrop { background: #0005; backdrop-filter: blur(3px); }
 .ft-help-overlay-card { width: min(620px, 92vw); max-height: min(720px, calc(100vh - 48px)); overflow: auto; }
