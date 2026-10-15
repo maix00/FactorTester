@@ -268,6 +268,25 @@
       await load();
     }
 
+    function openHistoricalOutputs() {
+      const snapshots = servers.filter(server => server.snapshot &&
+        Number(server.data.output_bytes) > 0);
+      dialogTitle.textContent = context.t("测试任务生成物 · 最近一次记录");
+      const explanation = document.createElement("p");
+      explanation.textContent = context.t(
+        "目前只有汇总占用记录，尚未取得这些服务器的实时任务清单和删除预览。实时清单返回后，可按数据或图片分类查看任务并删除；若服务器暂不可达，需等待它恢复连接。",
+      );
+      const rows = snapshots.map(server => [
+        server.id, quotaBytes(server.data.output_bytes),
+        server.data.output_count || "—", server.observedAt || "—",
+      ]);
+      dialogBody.replaceChildren(explanation, FTUI.table([
+        context.t("存储服务器"), context.t("占用"),
+        context.t("生成物数"), context.t("最近计量时间"),
+      ], rows).shell);
+      dialog.showModal();
+    }
+
     function render() {
       if (!current(context)) return;
       const categories = new Map();
@@ -352,6 +371,15 @@
         if (item.lastObserved.length) label.title = `${context.t("包含最近一次记录：")} ${item.lastObserved.join("、")}`;
         const controls = document.createElement("span"); controls.className = "quota-row-actions";
         if (item.group.startsWith("output:")) {
+          if (item.group === "output:historical") {
+            controls.append(FTUI.iconButton(context, "list.bullet.clipboard",
+              "查看最近一次占用记录", openHistoricalOutputs));
+            const unavailable = FTUI.iconButton(context, "trash",
+              "实时任务清单尚不可用，暂不能删除", () => {});
+            unavailable.disabled = true;
+            unavailable.title = context.t("实时任务清单返回后才能预览和删除");
+            controls.append(unavailable);
+          }
           if (servers.some(server => !server.snapshot && (server.data.business_groups || [])
               .some(candidate => candidate.quota_group === item.group))) {
             controls.append(FTUI.iconButton(context, "list.bullet.clipboard", "查看测试任务", () => {
