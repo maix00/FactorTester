@@ -70,12 +70,8 @@
         metaNode.hidden = !metaNode.textContent;
         const itemBox = item.getBoundingClientRect();
         const panelWidth = Math.min(320, Math.max(0, window.innerWidth - 16));
-        tooltip.style.left = `${Math.max(8, Math.min(itemBox.right + 12, window.innerWidth - panelWidth - 8))}px`;
-        const top = Math.max(8, Math.min(itemBox.top + itemBox.height / 2 - 46, window.innerHeight - 126));
-        tooltip.style.top = `${top}px`;
-        tooltip.style.setProperty?.("--ft-tooltip-arrow-y", `${Math.max(12, Math.min(
-          112, itemBox.top + itemBox.height / 2 - top,
-        ))}px`);
+        tooltip.style.left = `${Math.max(8, Math.min(itemBox.right + 4, window.innerWidth - panelWidth - 8))}px`;
+        tooltip.style.top = `${Math.max(8, Math.min(itemBox.top + itemBox.height / 2 - 46, window.innerHeight - 126))}px`;
         tooltip.hidden = false;
         requestAnimationFrame(() => tooltip.classList.add("visible"));
       }, 80);

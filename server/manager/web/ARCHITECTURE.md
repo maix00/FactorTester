@@ -8,10 +8,9 @@ single source of truth for the script order and semantic module groups.
 ## Module groups
 
 - `core/`: translation, symbols, shared DOM controls, and JSON/table helpers
-  `core/hover-tooltip.js` turns `title` hints and accessible control labels
-  into one black arrow tooltip across Manager and embedded Web pages. Rich
-  chart, chapter-preview, and help content retain their own presenters while
-  sharing the same dark tooltip treatment.
+  `core/hover-tooltip.js` replaces browser-native `title` bubbles with one
+  black arrow tooltip across Manager and embedded Web pages. Chapter previews,
+  help content, and chart data tooltips keep their separate presentation.
 - `report/`: report parsing, component presentation, chapter navigation, and
   the shared lazy-loading runtime
 - `research/`: research references, graph browsing, and research lists; the

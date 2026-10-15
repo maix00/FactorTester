@@ -9,19 +9,19 @@ ROOT = Path(__file__).resolve().parents[2]
 WEB = ROOT / "server" / "manager" / "web"
 
 
-def test_hover_tooltips_cover_native_titles_and_icon_labels() -> None:
+def test_hover_tooltips_replace_native_titles_without_restyling_rich_previews() -> None:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(channel="chrome", headless=True)
         page = browser.new_page(viewport={"width": 400, "height": 300})
         try:
             page.set_content("""
               <button id="titled" title="设置" style="margin: 30px">设置图标</button>
-              <button id="icon" class="icon-action-button" aria-label="刷新"
+              <button id="icon" class="icon-action-button" title="刷新" aria-label="刷新"
                 style="position: fixed; right: 0; bottom: 0">↻</button>
-              <button id="labelled" aria-label="提交当前配置">提交</button>
+              <button id="labelled" title="提交当前配置">提交</button>
+              <button id="aria-only" aria-label="不显示新增提示">仅有无障碍名称</button>
               <div class="chapter-rail-tooltip" role="tooltip" title="预览">预览</div>
-              <svg><g class="highcharts-tooltip"><path class="highcharts-tooltip-box"/>
-                <text>图表值</text></g></svg>
+              <div class="ft-help-bubble" hidden>帮助说明</div>
             """)
             page.add_style_tag(path=str(WEB / "styles" / "app.css"))
             page.add_style_tag(path=str(WEB / "styles" / "report.css"))
@@ -49,6 +49,9 @@ def test_hover_tooltips_cover_native_titles_and_icon_labels() -> None:
             page.locator("#labelled").hover()
             page.wait_for_timeout(260)
             assert hint.inner_text() == "提交当前配置"
+            page.locator("#aria-only").hover()
+            page.wait_for_timeout(260)
+            assert hint.is_hidden()
             page.locator("#titled").focus()
             assert hint.is_visible()
             assert hint.inner_text() == "新的设置"
@@ -60,9 +63,9 @@ def test_hover_tooltips_cover_native_titles_and_icon_labels() -> None:
             assert hint.is_hidden()
             assert page.locator(".chapter-rail-tooltip").evaluate(
                 "node => getComputedStyle(node).backgroundColor"
-            ) == "rgb(21, 21, 21)"
-            assert page.locator(".highcharts-tooltip-box").evaluate(
-                "node => getComputedStyle(node).fill"
-            ) == "rgb(21, 21, 21)"
+            ) != "rgb(21, 21, 21)"
+            assert page.locator(".ft-help-bubble").evaluate(
+                "node => getComputedStyle(node).backgroundColor"
+            ) != "rgb(21, 21, 21)"
         finally:
             browser.close()

@@ -1,8 +1,7 @@
 (() => {
   // Browser title bubbles cannot be themed. Keep the original value on the
   // element only while it is not hovered, so dynamic title updates still work.
-  const LABELLED_CONTROL = "button[aria-label], a[aria-label], input[aria-label], select[aria-label], textarea[aria-label], [role='button'][aria-label]";
-  const EXCLUDED = ".chapter-rail-tooltip, .ft-help-bubble, [role='tooltip']";
+  const EXCLUDED = ".ft-help-icon, .chapter-rail-tooltip, .ft-help-bubble, .highcharts-tooltip, [role='tooltip']";
   const tooltip = document.createElement("div");
   tooltip.id = "ft-hover-tooltip";
   tooltip.className = "ft-hover-tooltip";
@@ -19,16 +18,14 @@
   function labelFor(element) {
     if (!element || element.matches(EXCLUDED) || element.closest(EXCLUDED)) return "";
     if (element.hasAttribute("title")) return element.getAttribute("title")?.trim() || "";
-    if (element.hasAttribute("data-ft-tooltip")) return element.dataset.ftTooltip?.trim() || "";
-    return element.matches(LABELLED_CONTROL) ? element.getAttribute("aria-label")?.trim() || "" : "";
+    return "";
   }
 
   function targetFor(node) {
     for (let element = node?.nodeType === 1 ? node : node?.parentElement;
       element && element !== document.body; element = element.parentElement) {
       if (element.matches(EXCLUDED)) return null;
-      if (element.hasAttribute("title") || element.hasAttribute("data-ft-tooltip")
-          || element.matches(LABELLED_CONTROL)) {
+      if (element.hasAttribute("title")) {
         if (labelFor(element)) return element;
       }
     }
