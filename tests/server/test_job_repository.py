@@ -940,6 +940,36 @@ def test_repository_tracks_artifact_metadata_and_user_storage_quota(tmp_path) ->
     assert repository.storage_usage(owner="alice") == 0
 
 
+def test_storage_inventory_reconciles_categories_and_pages_outputs(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    repository.create(_record("inventory"))
+    for name, role, kind, size in (
+        ("factor_source__test", "input", "factor_source", 7),
+        ("order_audit", "output", "", 25),
+        ("group_execution", "output", "", 100),
+        ("report-output-bundle--one", "output", "", 2),
+        ("report-output-bundle--two", "output", "", 3),
+    ):
+        repository.record_artifact(
+            job_id="inventory", name=name,
+            relative_path=f"inventory/{name}",
+            content_type="application/json", content_hash="abc",
+            size_bytes=size, artifact_role=role, artifact_kind=kind,
+        )
+    value = repository.storage_inventory(owner="alice")
+    categories = {item["category"]: item for item in value["categories"]}
+    assert value["covered_bytes"] == repository.storage_usage(owner="alice") == 137
+    assert categories["input:factor_source"]["bytes"] == 7
+    assert categories["output:report-output-bundle"]["artifact_count"] == 2
+    page = repository.storage_inventory(
+        owner="alice", category="output:report-output-bundle", limit=1, offset=1,
+    )
+    assert page["item_count"] == 2
+    assert len(page["items"]) == 1
+    assert page["items"][0]["role"] == "output"
+    assert repository.storage_inventory(owner="another")["covered_bytes"] == 0
+
+
 def test_repository_records_structured_job_input_metadata(tmp_path) -> None:
     repository = JobRepository(tmp_path / "job-inputs.sqlite")
     repository.create(_record("job-input"))

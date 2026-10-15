@@ -185,6 +185,83 @@ def test_user_can_delete_one_output_without_deleting_other_artifacts(
     assert states == {"equity_curve_data": "deleted", "factor_source": "active"}
 
 
+def test_storage_page_lists_only_owners_artifacts_and_reconciles_total(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+    repository = JobRepository()
+    _create_job(repository, job_id="my-storage", status=JobStatus.RUNNING)
+    _create_job(repository, job_id="other-storage", owner="bob", status=JobStatus.RUNNING)
+    for job_id in ("my-storage", "other-storage"):
+        repository.record_artifact(
+            job_id=job_id, name="order_audit",
+            relative_path=f"{job_id}/order_audit.json",
+            content_type="application/json", content_hash="abc", size_bytes=100,
+        )
+    response = client.get("/api/jobs/storage?category=output:order_audit&limit=1")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["usage_bytes"] == payload["covered_bytes"] == 100
+    assert payload["item_count"] == 1
+    assert [item["job_id"] for item in payload["items"]] == ["my-storage"]
+    assert payload["excluded_scopes"] == ["research_reports", "profile_workspaces"]
+
+
+def test_one_click_cleanup_only_removes_previewed_terminal_outputs(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+    repository = JobRepository()
+    _create_job(repository, job_id="finished", status=JobStatus.RUNNING)
+    _create_job(repository, job_id="running", status=JobStatus.RUNNING)
+    root = tmp_path / "artifacts"
+    for job_id, name, role in (
+        ("finished", "order_audit", "output"),
+        ("finished", "factor_source", "input"),
+        ("running", "order_audit", "output"),
+    ):
+        target = root / job_id / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"1234")
+        repository.record_artifact(
+            job_id=job_id, name=name,
+            relative_path=f"{job_id}/{name}", content_type="text/plain",
+            content_hash=hashlib.sha256(b"1234").hexdigest(),
+            size_bytes=4, artifact_role=role,
+        )
+    repository.transition("finished", JobStatus.SUCCEEDED,
+                          result_summary={"success": True})
+    preview = client.get("/api/jobs/storage").get_json()["cleanup_preview"]
+    assert preview == {"artifact_count": 1, "bytes": 4}
+    stale = client.delete(
+        "/api/jobs/artifacts?cleanup=eligible&expected_count=2&expected_bytes=8"
+    )
+    assert stale.status_code == 409
+    assert (root / "finished" / "order_audit").exists()
+    cleared = client.delete(
+        "/api/jobs/artifacts?cleanup=eligible&expected_count=1&expected_bytes=4"
+    )
+    assert cleared.status_code == 200
+    assert cleared.get_json()["deleted_artifacts"] == 1
+    assert not (root / "finished" / "order_audit").exists()
+    assert (root / "finished" / "factor_source").exists()
+    assert (root / "running" / "order_audit").exists()
+    assert repository.storage_usage(owner="alice") == 8
+
+
 def test_artifact_manifest_preserves_distinct_input_logical_paths(
     tmp_path, monkeypatch,
 ) -> None:

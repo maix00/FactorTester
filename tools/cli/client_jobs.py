@@ -185,6 +185,29 @@ class JobsClientMixin(ClientMixinBase):
             self.session.delete(f"/api/jobs/{job_id}/artifacts")
         )
 
+    def delete_job_artifact(self, job_id: str, name: str) -> dict[str, Any]:
+        from urllib.parse import quote
+
+        return self._expect_success(self.session.delete(
+            f"/api/jobs/{quote(job_id, safe='')}/artifacts/{quote(name, safe='')}"
+        ))
+
+    def cleanup_job_outputs(
+        self, *, expected_count: int, expected_bytes: int, category: str = "",
+        server_id: str = "",
+    ) -> dict[str, Any]:
+        query = {
+            "cleanup": "eligible", "expected_count": expected_count,
+            "expected_bytes": expected_bytes,
+        }
+        if category:
+            query["category"] = category
+        if server_id:
+            query["server_id"] = server_id
+        return self._expect_success(self.session.delete(
+            "/api/jobs/artifacts", query=query,
+        ))
+
     def delete_user_artifacts(
         self,
         *,
@@ -207,8 +230,11 @@ class JobsClientMixin(ClientMixinBase):
             )
         )
 
-    def job_storage(self) -> dict[str, Any]:
-        return self._expect_success(self.session.get("/api/jobs/storage"))
+    def job_storage(
+        self, *, category: str = "", limit: int = 50, offset: int = 0,
+    ) -> dict[str, Any]:
+        query = {"category": category, "limit": limit, "offset": offset} if category else None
+        return self._expect_success(self.session.get("/api/jobs/storage", query=query))
 
     def stream_job_id(self, job_id: str, *, after: int = 0):
         query = {"after": after} if after else None

@@ -82,6 +82,35 @@ def delete_terminal_test_job_history():
 @sft_bp.delete("/api/jobs/artifacts")
 def delete_user_test_job_artifacts():
     owner = require_user()
+    cleanup = str(request.args.get("cleanup") or "").strip()
+    if cleanup:
+        if cleanup != "eligible":
+            return jsonify({"success": False, "error": "invalid cleanup mode"}), 400
+        category = str(request.args.get("category") or "").strip()
+        try:
+            expected_count = int(request.args["expected_count"])
+            expected_bytes = int(request.args["expected_bytes"])
+            job_repository = repository()
+            artifacts = job_repository.mark_cleanup_outputs_deleted(
+                owner=owner, category=category,
+                expected_count=expected_count, expected_bytes=expected_bytes,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            return jsonify({"success": False, "error": str(exc)}), 409
+        root = artifact_root()
+        deleted_files = 0
+        for metadata in artifacts:
+            path = (root / str(metadata["relative_path"])).resolve()
+            if root in path.parents and path.is_file():
+                path.unlink()
+                deleted_files += 1
+        return jsonify({
+            "success": True, "category": category or "all_eligible_outputs",
+            "deleted_artifacts": len(artifacts),
+            "deleted_files": deleted_files,
+            "freed_bytes": sum(int(item["size_bytes"]) for item in artifacts),
+            "usage_bytes": job_repository.storage_usage(owner=owner),
+        })
     workspace_id = str(request.args.get("workspace_id") or "").strip()
     job_repository = repository()
     artifacts = job_repository.mark_owner_artifacts_deleted(

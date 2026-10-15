@@ -994,6 +994,11 @@ form[hidden] { display: none !important; }
 .settings-icon .ft-icon { width: 28px; height: 28px; flex-basis: 28px; }
 .settings-section h3 { margin: 0 0 8px 8px; font-size: 14px; }
 .settings-rows { border: 1px solid var(--line); border-radius: 12px; padding: 0 16px; background: var(--panel); }
+.quota-segments { display: flex; height: 12px; margin-top: 10px; overflow: hidden; border-radius: 999px; background: var(--line); }
+.quota-segments span { height: 100%; flex: 0 0 auto; }
+.quota-category-label { display: inline-flex; align-items: center; gap: 7px; }
+.quota-category-label i { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
+.quota-item-pager { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 8px; }
 .settings-row { min-height: 62px; display: grid; grid-template-columns: minmax(230px, 1fr) minmax(180px, auto); align-items: center; gap: 20px; border-bottom: 1px solid var(--line); }
 .settings-row:last-child { border-bottom: 0; }
 .settings-row > div:first-child { display: grid; gap: 3px; }

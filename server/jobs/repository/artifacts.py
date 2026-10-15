@@ -31,6 +31,124 @@ def _control_server_id() -> str:
 class JobArtifactImplementation:
     """Own artifact lifecycle and quota queries behind JobRepository."""
 
+    _QUOTA_CATEGORY_SQL = """CASE
+        WHEN artifacts.artifact_role='input' THEN
+            'input:' || COALESCE(NULLIF(artifacts.artifact_kind, ''), 'other')
+        WHEN artifacts.name LIKE 'report-output-bundle--%' THEN
+            'output:report-output-bundle'
+        ELSE 'output:' || artifacts.name
+    END"""
+
+    def storage_inventory(
+        self, *, owner: str, category: str = "", limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Page one owner's artifact metadata without opening artifact bytes.
+
+        This is deliberately local: global quota totals come from the control
+        store, while each storage server remains authoritative for its files.
+        """
+        limit = max(1, min(int(limit), 100))
+        offset = max(0, int(offset))
+        category = str(category or "").strip()
+        label = self._QUOTA_CATEGORY_SQL
+        with self._connection() as conn:
+            categories = conn.execute(f"""
+                SELECT {label} AS category, artifacts.artifact_role AS role,
+                    COUNT(*) AS artifact_count,
+                    COALESCE(SUM(artifacts.size_bytes), 0) AS bytes
+                FROM research_job_artifacts AS artifacts
+                JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
+                WHERE jobs.owner=? AND artifacts.state='active'
+                GROUP BY category, artifacts.artifact_role
+                ORDER BY bytes DESC, category
+            """, (str(owner),)).fetchall()
+            result: dict[str, Any] = {
+                "categories": [dict(row) for row in categories],
+                "storage_server_id": _control_server_id(),
+                "covered_bytes": sum(int(row["bytes"]) for row in categories),
+            }
+            eligible = conn.execute(f"""
+                SELECT {label} AS category, COUNT(*) AS artifact_count,
+                    COALESCE(SUM(artifacts.size_bytes), 0) AS bytes
+                FROM research_job_artifacts AS artifacts
+                JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
+                WHERE jobs.owner=? AND artifacts.state='active'
+                  AND artifacts.artifact_role='output'
+                  AND jobs.status IN ({','.join('?' for _ in TERMINAL_STATUSES)})
+                GROUP BY category
+            """, (str(owner), *(status.value for status in TERMINAL_STATUSES))).fetchall()
+            result["cleanup_categories"] = [dict(row) for row in eligible]
+            result["cleanup_preview"] = {
+                "artifact_count": sum(int(row["artifact_count"]) for row in eligible),
+                "bytes": sum(int(row["bytes"]) for row in eligible),
+            }
+            if category:
+                where = f"jobs.owner=? AND artifacts.state='active' AND {label}=?"
+                args = (str(owner), category)
+                count = conn.execute(f"""
+                    SELECT COUNT(*) AS n FROM research_job_artifacts AS artifacts
+                    JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
+                    WHERE {where}
+                """, args).fetchone()
+                rows = conn.execute(f"""
+                    SELECT artifacts.job_id, artifacts.name, artifacts.artifact_role AS role,
+                        artifacts.size_bytes, artifacts.created_at,
+                        jobs.kind AS job_kind, jobs.status AS job_status,
+                        jobs.workspace_id
+                    FROM research_job_artifacts AS artifacts
+                    JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
+                    WHERE {where}
+                    ORDER BY artifacts.size_bytes DESC, artifacts.job_id, artifacts.name
+                    LIMIT ? OFFSET ?
+                """, (*args, limit, offset)).fetchall()
+                result.update({
+                    "category": category,
+                    "item_count": int(count["n"]),
+                    "items": [dict(row) for row in rows],
+                    "limit": limit,
+                    "offset": offset,
+                })
+        return result
+
+    def mark_cleanup_outputs_deleted(
+        self, *, owner: str, category: str = "",
+        expected_count: int, expected_bytes: int,
+    ) -> list[dict[str, Any]]:
+        """Atomically clear a previewed set of terminal output artifacts only."""
+        category = str(category or "").strip()
+        if category and not category.startswith("output:"):
+            raise ValueError("only output categories can be cleared")
+        if expected_count < 0 or expected_bytes < 0:
+            raise ValueError("invalid cleanup preview")
+        label = self._QUOTA_CATEGORY_SQL
+        terminal = tuple(status.value for status in TERMINAL_STATUSES)
+        clauses = ["jobs.owner=?", "artifacts.state='active'",
+                   "artifacts.artifact_role='output'",
+                   f"jobs.status IN ({','.join('?' for _ in terminal)})"]
+        args: list[Any] = [str(owner), *terminal]
+        if category:
+            clauses.append(f"{label}=?")
+            args.append(category)
+        where = " AND ".join(clauses)
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(f"""
+                SELECT artifacts.* FROM research_job_artifacts AS artifacts
+                JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
+                WHERE {where} ORDER BY artifacts.job_id, artifacts.name
+            """, args).fetchall()
+            actual_bytes = sum(int(row["size_bytes"]) for row in rows)
+            if len(rows) != expected_count or actual_bytes != expected_bytes:
+                raise ValueError("cleanup preview changed; refresh before deleting")
+            for row in rows:
+                conn.execute("""
+                    UPDATE research_job_artifacts SET state='deleted', deleted_at=?
+                    WHERE job_id=? AND name=? AND state='active'
+                """, (time.time(), row["job_id"], row["name"]))
+        self._reconcile_control_usage(str(owner))
+        return [dict(row) for row in rows]
+
     def record_artifact(
         self,
         *,

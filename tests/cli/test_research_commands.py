@@ -165,6 +165,10 @@ class FakeClient:
             "role": "output",
         }]
 
+    def delete_job_artifact(self, job_id, name):
+        self.deleted_artifact = (job_id, name)
+        return {"success": True, "job_id": job_id, "artifact_name": name}
+
     def job_artifact_to_path(self, job_id, name, destination):
         response = self.job_artifact(job_id, name)
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -1569,6 +1573,58 @@ def test_job_download_all_uses_individual_data_plane_transfers(
     receipt = json.loads(result.output)
     assert (output / "curve.svg").read_bytes().startswith(b"<svg>")
     assert receipt["files"] == [str((output / "curve.svg").resolve())]
+    assert (output / ".job-backup.json").is_file()
+    verified = CliRunner().invoke(cli, ["job", "verify-backup", str(output)])
+    assert verified.exit_code == 0, verified.output
+    assert json.loads(verified.output)["artifact_count"] == 1
+    (output / "curve.svg").write_bytes(b"tampered")
+    invalid = CliRunner().invoke(cli, ["job", "verify-backup", str(output)])
+    assert invalid.exit_code != 0
+
+
+def test_job_delete_artifact_previews_before_explicit_delete(monkeypatch) -> None:
+    fake = FakeClient()
+    monkeypatch.setattr("tools.cli.commands.research.client_from_config", lambda: fake)
+    command = ["job", "delete-artifact", "job-curve", "equity_curve_report"]
+    preview = CliRunner().invoke(cli, command)
+    assert preview.exit_code == 0, preview.output
+    assert json.loads(preview.output)["dry_run"] is True
+    assert not hasattr(fake, "deleted_artifact")
+    deleted = CliRunner().invoke(cli, [*command, "--yes"])
+    assert deleted.exit_code == 0, deleted.output
+    assert fake.deleted_artifact == ("job-curve", "equity_curve_report")
+
+
+def test_job_cleanup_previews_and_passes_server_identity(monkeypatch) -> None:
+    class CleanupClient:
+        def job_storage(self, *, category="", limit=50, offset=0):
+            return {
+                "storage_server_id": "remote-main",
+                "cleanup_categories": [
+                    {"category": "output:order_audit", "artifact_count": 2, "bytes": 80},
+                ],
+                "cleanup_preview": {"artifact_count": 2, "bytes": 80},
+            }
+
+        def cleanup_job_outputs(self, **kwargs):
+            self.deleted = kwargs
+            return {"success": True, "deleted_artifacts": 2}
+
+    fake = CleanupClient()
+    monkeypatch.setattr("tools.cli.commands.research.client_from_config", lambda: fake)
+    command = ["job", "cleanup", "--category", "output:order_audit"]
+    preview = CliRunner().invoke(cli, command)
+    assert preview.exit_code == 0, preview.output
+    assert json.loads(preview.output)["dry_run"] is True
+    assert not hasattr(fake, "deleted")
+    cleared = CliRunner().invoke(cli, [*command, "--yes"])
+    assert cleared.exit_code == 0, cleared.output
+    assert fake.deleted == {
+        "category": "output:order_audit", "server_id": "remote-main",
+        "expected_count": 2, "expected_bytes": 80,
+    }
+    protected = CliRunner().invoke(cli, ["job", "cleanup", "--category", "input:factor_source", "--yes"])
+    assert protected.exit_code != 0
 
 
 def test_cli_restores_historical_run_and_bulk_clears_current_workspace(tmp_path, monkeypatch) -> None:
