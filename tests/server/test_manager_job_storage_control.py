@@ -28,7 +28,7 @@ class _Repository:
         return []
 
     def storage_usage(self, **kwargs):
-        return 0
+        return 4
 
     def load_artifact(self, **kwargs):
         self.calls.append(("load_artifact", kwargs))
@@ -43,6 +43,8 @@ def test_inventory_scopes_principal_without_worker():
     )
     assert response.status == 200
     assert json.loads(response.body)["usage_bytes"] == 4
+    assert json.loads(response.body)["quota_scope"] == "measured_account_storage"
+    assert json.loads(response.body)["excluded_scopes"] == []
     assert repo.calls == [("inventory", {
         "owner": "alice", "category": "output:result", "limit": 1,
         "offset": 0, "group": "", "job_id": "",

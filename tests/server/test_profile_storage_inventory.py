@@ -15,6 +15,7 @@ from server.manager.services.profile_storage_inventory import (
 )
 from server.manager.http.core_get_routes import CoreGetRoutesMixin
 from server.manager.http.federation.public_data import FederationPublicDataRoutesMixin
+from server.manager.services.startup_storage_inventory import sync_local_storage
 
 
 def test_profile_storage_inventory_classifies_one_principal_without_double_counting(
@@ -68,6 +69,49 @@ def test_profile_storage_inventory_fails_closed_on_limits_or_unsafe_root(
         scan_profile_storage(tmp_path, "alice")
 
 
+def test_startup_records_complete_local_usage_and_keeps_failed_snapshot(tmp_path, monkeypatch):
+    root = tmp_path / "users" / "alice" / "profiles" / "self" / "research"
+    root.mkdir(parents=True)
+    (root / "REPORT.md").write_bytes(b"report")
+    snapshots = []
+
+    (tmp_path / "jobs.sqlite").touch()
+    job_snapshots = []
+
+    class Store:
+        def load_accounts(self):
+            return [{"username": "alice"}]
+
+        def record_profile_usage(self, **kwargs):
+            snapshots.append(kwargs)
+
+        def reconcile_server_usage(self, **kwargs):
+            job_snapshots.append(kwargs)
+
+    class Repo:
+        db_path = tmp_path / "jobs.sqlite"
+
+        def _local_storage_breakdown(self, owner):
+            assert owner == "alice"
+            return {"artifact_bytes": 3, "input_artifact_bytes": 1,
+                    "output_artifact_bytes": 2, "artifact_count": 2,
+                    "input_artifact_count": 1, "output_artifact_count": 1}
+
+    monkeypatch.setattr("server.jobs.repository.JobRepository", Repo)
+    state = SimpleNamespace(data_root=tmp_path, server_id="local", control_store=Store())
+    assert sync_local_storage(state) == {"measured": 1, "failed": 0}
+    assert snapshots[0]["inventory"]["bytes"] == 6
+    assert job_snapshots[0]["artifact_bytes"] == 3
+    (tmp_path / "users" / "alice" / "profiles").rename(
+        tmp_path / "users" / "alice" / "profile-data"
+    )
+    (tmp_path / "users" / "alice" / "profiles").symlink_to("profile-data")
+    assert sync_local_storage(state, log=lambda _message: None) == {
+        "measured": 0, "failed": 1,
+    }
+    assert len(snapshots) == 1
+
+
 def test_profile_inventory_route_is_session_scoped(tmp_path) -> None:
     alice = tmp_path / "users" / "alice" / "profiles" / "self" / "uploads" / "a"
     bob = tmp_path / "users" / "bob" / "profiles" / "self" / "uploads" / "b"
@@ -102,6 +146,18 @@ def test_profile_inventory_route_is_session_scoped(tmp_path) -> None:
 
     path = urlparse("/api/storage/profile-inventory?principal=bob")
     class Control:
+        def record_profile_usage(self, **kwargs):
+            assert kwargs["principal"] == "alice"
+
+        def profile_usage_by_server(self, principal):
+            assert principal == "alice"
+            return [{"storage_server_id": "server-a", "status": "last_observed",
+                     "inventory": {"bytes": 5, "observed_at": "2026-10-15T02:00:00Z",
+                                   "categories": {
+                                       "research_reports": {"bytes": 0, "file_count": 0},
+                                       "profile_uploads": {"bytes": 5, "file_count": 1},
+                                       "profile_workspaces": {"bytes": 0, "file_count": 0}}}}]
+
         def protected_entity_metadata_usage(self, principal):
             assert principal == "alice"
             return {"factors": {"bytes": 7, "item_count": 1},
@@ -113,10 +169,22 @@ def test_profile_inventory_route_is_session_scoped(tmp_path) -> None:
     assert handler.status == 200
     assert response["principal"] == "alice"
     assert response["bytes"] == 5
-    assert response["quota_included"] is False
+    assert response["quota_included"] is True
     assert response["protected_metadata"]["factors"]["bytes"] == 7
     assert response["cross_server"]["coverage_complete"] is False
     assert response["cross_server"]["total_bytes"] is None
+
+    (tmp_path / "users" / "alice" / "profiles").rename(
+        tmp_path / "users" / "alice" / "profile-data"
+    )
+    (tmp_path / "users" / "alice" / "profiles").symlink_to("profile-data")
+    fallback = Handler({"username": "alice"}, Control())
+    assert fallback._get_entry_routes(path) is True
+    cached = json.loads(fallback.wfile.getvalue())
+    assert fallback.status == 200
+    assert cached["local_scan_complete"] is False
+    assert cached["profile_snapshots"][0]["inventory"]["bytes"] == 5
+    assert "bytes" not in cached
 
     anonymous = Handler(None)
     assert anonymous._get_entry_routes(path) is True

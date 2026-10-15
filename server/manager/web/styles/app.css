@@ -1002,12 +1002,9 @@ form[hidden] { display: none !important; }
 .quota-overview-actions, .quota-row-actions { display: inline-flex; align-items: center; gap: 2px; }
 .quota-overview .quota-segments { height: 18px; margin: 0; }
 .quota-segments.quota-over-limit { outline: 2px solid #d33b3b; outline-offset: 2px; }
-.quota-segments.quota-incomplete { background: repeating-linear-gradient(135deg, var(--line), var(--line) 7px, transparent 7px, transparent 14px); }
 .quota-status { margin: 0; color: var(--muted); }
 .quota-dialog .dialog-card { width: min(800px, 94vw); }
 .quota-dialog-heading h2 { margin: 0; }
-.quota-job-link { border: 0; background: none; color: var(--accent); text-align: left; cursor: pointer; }
-.quota-job-link:hover { text-decoration: underline; }
 .quota-category-label { display: inline-flex; align-items: center; gap: 7px; }
 .quota-category-label i { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
 .quota-item-pager { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 8px; }

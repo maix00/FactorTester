@@ -83,15 +83,22 @@ class CoreGetRoutesMixin:
                     self.state.data_root, str(session["username"]),
                 )
             except (ProfileStorageInventoryIncomplete, OSError, ValueError):
-                json_response(
-                    self,
-                    {"success": False, "error": "profile inventory is incomplete"},
-                    503,
-                )
-                return True
+                inventory = None
             control_store = getattr(self.state, "control_store", None)
             protected = None
+            profile_snapshots: list[dict] = []
             if control_store is not None:
+                try:
+                    if inventory is not None:
+                        control_store.record_profile_usage(
+                            server_id=self.state.server_id,
+                            principal=str(session["username"]), inventory=inventory,
+                        )
+                except Exception as exc:
+                    _LOGGER.warning(
+                        "Profile storage snapshot unavailable: %s",
+                        type(exc).__name__,
+                    )
                 try:
                     protected = control_store.protected_entity_metadata_usage(
                         str(session["username"])
@@ -114,9 +121,19 @@ class CoreGetRoutesMixin:
                     )
                 except (ConnectionError, OSError, RuntimeError, TypeError, ValueError):
                     coverage_known = False
-            projection = profile_storage_projection(
+            if control_store is not None:
+                try:
+                    profile_snapshots = control_store.profile_usage_by_server(
+                        str(session["username"])
+                    )
+                except Exception:
+                    pass
+            projection = (profile_storage_projection(
                 self.state.server_id, inventory, peers,
-            )
+            ) if inventory is not None else {
+                "servers": peers, "measured_current_bytes": 0,
+                "total_bytes": None, "coverage_complete": False,
+            })
             if not coverage_known:
                 projection["coverage_complete"] = False
                 projection["total_bytes"] = None
@@ -124,12 +141,14 @@ class CoreGetRoutesMixin:
                 "success": True,
                 "storage_server_id": self.state.server_id,
                 "principal": str(session["username"]),
-                "quota_included": False,
+                "quota_included": True,
                 "protected_metadata": protected,
+                "profile_snapshots": profile_snapshots,
+                "local_scan_complete": inventory is not None,
                 "protected_measurement_scope": "metadata_only" if protected is not None
                 else "unavailable",
                 "cross_server": projection,
-                **inventory,
+                **(inventory or {}),
             }, headers={"Cache-Control": "private, no-store"})
             return True
         if self._mihomo_get(parsed):

@@ -41,7 +41,7 @@ def test_control_schema_keeps_organization_and_level_relations_central() -> None
     assert "client_type" in schema
     assert "enrollment_ip" in schema
     assert "last_seen_ip" in schema
-    assert CONTROL_DATABASE_SCHEMA_VERSION == 8
+    assert CONTROL_DATABASE_SCHEMA_VERSION == 9
 
 
 def test_git_source_version_requires_an_immutable_commit_and_content_identity() -> None:

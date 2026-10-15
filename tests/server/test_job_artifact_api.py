@@ -211,7 +211,7 @@ def test_storage_page_lists_only_owners_artifacts_and_reconciles_total(
     assert payload["usage_bytes"] == payload["covered_bytes"] == 100
     assert payload["item_count"] == 1
     assert [item["job_id"] for item in payload["items"]] == ["my-storage"]
-    assert payload["excluded_scopes"] == ["research_reports", "profile_workspaces"]
+    assert payload["excluded_scopes"] == []
 
 
 def test_one_click_cleanup_only_removes_previewed_terminal_outputs(
