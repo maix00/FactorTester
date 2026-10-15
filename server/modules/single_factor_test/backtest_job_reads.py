@@ -837,7 +837,7 @@ def get_job_storage():
         }), 401
     job_repository = repository()
     breakdown = job_repository.storage_breakdown(owner=owner)
-    usage = breakdown["artifact_bytes"]
+    usage = job_repository.storage_usage(owner=owner, job_bytes=breakdown["artifact_bytes"])
     quota = job_repository.storage_quota(
         owner=owner,
         default_bytes=default_user_quota_bytes(),
@@ -861,9 +861,9 @@ def get_job_storage():
         **breakdown,
         **inventory,
         "servers": job_repository.storage_servers(owner=owner),
-        "unattributed_bytes": max(0, usage - inventory["covered_bytes"]),
-        "quota_scope": "job_artifacts",
-        "excluded_scopes": ["research_reports", "profile_workspaces"],
+        "unattributed_bytes": max(0, breakdown["artifact_bytes"] - inventory["covered_bytes"]),
+        "quota_scope": "measured_account_storage",
+        "excluded_scopes": [],
     })
 
 

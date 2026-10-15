@@ -76,9 +76,21 @@ class FederationPublicDataRoutesMixin:
         if kind == "storage" and operation == "profile-inventory":
             if viewer is None:
                 raise PermissionError("Profile storage requires an account identity")
+            inventory = scan_profile_storage(self.state.data_root, viewer)
+            control_store = getattr(self.state, "control_store", None)
+            if control_store is not None:
+                try:
+                    control_store.record_profile_usage(
+                        server_id=self.state.server_id,
+                        principal=viewer, inventory=inventory,
+                    )
+                except Exception:
+                    # The local complete measurement remains useful even when
+                    # the shared snapshot store cannot be reached.
+                    pass
             return {
                 "storage_server_id": self.state.server_id,
-                **scan_profile_storage(self.state.data_root, viewer),
+                **inventory,
             }
         if kind == "research":
             return self._research_data_value(operation, viewer, payload)

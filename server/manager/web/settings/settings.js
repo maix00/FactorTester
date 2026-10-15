@@ -105,6 +105,7 @@
     return context.t({
       "output:data": "测试任务生成物（数据）",
       "output:image": "测试任务生成物（图片）",
+      "output:historical": "测试任务生成物（历史未分类）",
       "input:factor": "因子数据",
       "input:strategy": "策略数据",
       "input:product": "产品分类与产品组数据",
@@ -114,6 +115,7 @@
       "profile:profile_workspaces": "研究身份工作区",
       "protected:factors": "因子目录元数据",
       "protected:product_groups": "产品组目录元数据",
+      "protected:other": "其他研究资料元数据",
     }[group] || group);
   }
 
@@ -128,8 +130,8 @@
     const headline = document.createElement("strong");
     const actions = document.createElement("div"); actions.className = "quota-overview-actions";
     const refreshButton = FTUI.refreshButton(context, () => refresh());
-    const autoButton = document.createElement("button"); autoButton.type = "button";
-    autoButton.textContent = context.t("自动删除可清理类别");
+    const autoButton = FTUI.actionButton(context.t("自动删除可清理类别"),
+      () => { void clearScope(); });
     actions.append(refreshButton, autoButton);
     heading.append(headline, actions);
     const bar = document.createElement("div"); bar.className = "quota-segments";
@@ -150,10 +152,14 @@
     const dialogBody = document.createElement("div");
     dialogCard.append(dialogHead, dialogBody); dialog.append(dialogCard);
     body.append(dialog);
-    let servers = [], profile = null, quotaSize = 0, missing = [], refreshVersion = 0;
+    let servers = [], profile = null, quotaSize = 0, refreshVersion = 0;
     const groupColors = {"output:data": "#2775dc", "output:image": "#7455c4",
+      "output:historical": "#527dad",
       "input:factor": "#e4a529", "input:strategy": "#39a56d",
-      "input:product": "#d36161", "input:other": "#8a8f98"};
+      "input:product": "#d36161", "input:other": "#8a8f98",
+      "profile:research_reports": "#25a28b",
+      "profile:profile_uploads": "#cf754b",
+      "profile:profile_workspaces": "#a354af"};
     const queryServer = (serverID, params = {}) => {
       const query = new URLSearchParams(params);
       if (serverID) query.set("server_id", serverID);
@@ -176,9 +182,8 @@
       const count = targets.reduce((sum, item) => sum + Number(item.preview.artifact_count), 0);
       const bytes = targets.reduce((sum, item) => sum + Number(item.preview.bytes), 0);
       const label = group ? quotaGroupLabel(context, group) : context.t("全部可删除类别");
-      const offline = missing.length ? `\n${missing.length} ${context.t("个服务器暂不可用，本次不会删除其数据。")}` : "";
       if (!window.confirm(`${context.t("删除整类")} ${label}：${count} ${context.t("项生成物")}` +
-          `，${quotaBytes(bytes)}？\n${context.t("报告中的任务结果查看器可能失效；提交输入与基础数据保留。")}${offline}`)) return;
+          `，${quotaBytes(bytes)}？\n${context.t("报告中的任务结果查看器可能失效；提交输入与基础数据保留。")}`)) return;
       let deleted = 0; const failures = [];
       for (const {server, preview} of targets) {
         try {
@@ -191,25 +196,27 @@
         (failures.length ? `；${failures.join("；")}` : ""), Boolean(failures.length));
       await refresh();
     }
-    autoButton.onclick = () => { void clearScope(); };
 
     async function openJobs(group) {
       dialogTitle.textContent = `${quotaGroupLabel(context, group)} · ${context.t("测试任务")}`;
       dialogBody.replaceChildren(); dialog.showModal();
-      let offsets = Object.fromEntries(servers.map(server => [server.id, 0]));
+      let offsets = Object.fromEntries(servers.filter(server => !server.snapshot)
+        .map(server => [server.id, 0]));
       const done = new Set();
       let jobs = [], hasMore = false;
       const list = document.createElement("div");
-      const more = document.createElement("button"); more.type = "button";
-      more.textContent = context.t("加载更多任务");
+      const more = FTUI.actionButton(context.t("加载更多任务"), () => { void load(); });
       dialogBody.append(list, more);
       const render = () => {
         const rows = jobs.map(({serverID, job}) => {
-          const link = document.createElement("button"); link.className = "quota-job-link";
+          const destination = `/jobs/${encodeURIComponent(job.job_id)}?server_id=${encodeURIComponent(serverID)}`;
+          const link = document.createElement("a");
+          link.href = destination;
           link.textContent = `${job.job_kind || context.t("测试任务")} · ${job.job_id}`;
-          link.onclick = () => {
+          link.onclick = event => {
+            event.preventDefault();
             dialog.close();
-            context.navigate(`/jobs/${encodeURIComponent(job.job_id)}?server_id=${encodeURIComponent(serverID)}`);
+            context.navigate(destination);
           };
           const remove = FTUI.iconButton(context, "trash", "删除此任务的全部生成物", async () => {
             try {
@@ -234,7 +241,7 @@
       };
       const load = async () => {
         more.disabled = true;
-        const pending = servers.filter(server => !done.has(server.id));
+        const pending = servers.filter(server => !server.snapshot && !done.has(server.id));
         const pages = await Promise.allSettled(pending.map(server =>
           queryServer(server.id, {group, limit: 100, offset: offsets[server.id]})));
         hasMore = false;
@@ -253,63 +260,80 @@
         });
         more.disabled = false; render();
       };
-      more.onclick = () => { void load(); };
       await load();
     }
 
     function render() {
       if (!current(context)) return;
       const categories = new Map();
-      const add = (group, bytes, count, quotaIncluded, serverID = "") => {
-        const item = categories.get(group) || {group, bytes: 0, quotaBytes: 0,
-          otherBytes: 0, count: 0, servers: new Set()};
+      const add = (group, bytes, count, observedAt = "") => {
+        if (!Number(bytes || 0) && !Number(count || 0)) return;
+        const item = categories.get(group) || {group, bytes: 0, count: 0,
+          lastObserved: []};
         item.bytes += Number(bytes || 0); item.count += Number(count || 0);
-        if (quotaIncluded) item.quotaBytes += Number(bytes || 0);
-        else item.otherBytes += Number(bytes || 0);
-        if (serverID) item.servers.add(serverID);
+        if (observedAt) item.lastObserved.push(observedAt);
         categories.set(group, item);
       };
-      servers.forEach(server => (server.data.business_groups || []).forEach(item =>
-        add(item.quota_group, item.bytes, item.job_count, true, server.id)));
+      servers.forEach(server => {
+        const groups = server.data.business_groups || [];
+        groups.forEach(item => add(item.quota_group, item.bytes, item.job_count,
+          server.observedAt));
+        if (server.snapshot) {
+          add("output:historical", server.data.output_bytes,
+            server.data.output_count, server.observedAt);
+          add("input:other", server.data.input_bytes,
+            server.data.input_count, server.observedAt);
+        }
+      });
       const protectedMetadata = profile?.protected_metadata || {};
       for (const [key, group] of [["factors", "input:factor"],
-        ["product_groups", "input:product"]]) {
+        ["product_groups", "input:product"], ["strategies", "input:strategy"],
+        ["other", "protected:other"]]) {
         if (protectedMetadata[key]) add(group, protectedMetadata[key].bytes,
-          protectedMetadata[key].item_count, false);
+          protectedMetadata[key].item_count);
       }
-      const profileServers = profile?.cross_server?.servers ||
-        (profile ? [{inventory: profile, status: "current"}] : []);
-      profileServers.forEach(server => {
-        if (!server.inventory || server.status === "stale") return;
-        Object.entries(server.inventory.categories || {}).forEach(([key, value]) =>
-          add(`profile:${key}`, value.bytes, value.file_count, false));
+      const profileServers = new Map();
+      (profile?.profile_snapshots || []).forEach(server => {
+        if (server.inventory) profileServers.set(server.storage_server_id, server);
       });
-      const measured = servers.reduce((sum, server) => sum + Number(server.data.covered_bytes || 0), 0);
+      (profile?.cross_server?.servers || []).forEach(server => {
+        if (!server.inventory) return;
+        const previous = profileServers.get(server.storage_server_id);
+        const observed = value => {
+          const raw = value?.inventory?.observed_at;
+          return typeof raw === "number" ? raw * 1000 : Date.parse(raw || "") || 0;
+        };
+        if (!previous || observed(server) >= observed(previous))
+          profileServers.set(server.storage_server_id, server);
+      });
+      profileServers.forEach(server => {
+        Object.entries(server.inventory.categories || {}).forEach(([key, value]) =>
+          add(`profile:${key}`, value.bytes, value.file_count,
+            server.status === "current" ? "" : server.inventory.observed_at));
+      });
+      const measured = [...categories.values()].reduce((sum, item) => sum + item.bytes, 0);
       const percent = quotaSize > 0 ? 100 * measured / quotaSize : 0;
-      const complete = missing.length === 0;
+      const partial = !profile || !profile.protected_metadata;
       headline.textContent = `${quotaBytes(measured)} / ${quotaBytes(quotaSize)}` +
-        ` · ${complete ? "" : context.t("至少")} ${percent.toFixed(1)}%`;
+        ` · ${partial ? context.t("至少") + " " : ""}${percent.toFixed(1)}%`;
       status.textContent = (measured > quotaSize
         ? `${context.t("已核实用量已超额")} ${quotaBytes(measured - quotaSize)}。`
-        : "") + (missing.length
-        ? `${context.t("以下服务器暂不可计量：")} ${missing.join("、")}。${context.t("旧快照未当作实时占用，实际总量可能更高。")}`
-        : context.t("全部已连接存储服务器已核实。报告与工作区暂不计入 Job 配额。"));
+        : "") + (partial ? context.t("部分存储类别暂时无法计量。") : "");
       bar.replaceChildren();
       bar.classList.toggle("quota-over-limit", quotaSize > 0 && measured > quotaSize);
-      bar.classList.toggle("quota-incomplete", !complete);
       bar.setAttribute("aria-valuemax", String(quotaSize || 1));
       bar.setAttribute("aria-valuenow", String(measured));
-      bar.setAttribute("aria-valuetext", `${quotaBytes(measured)} / ${quotaBytes(quotaSize)}` +
-        (complete ? "" : `，${context.t("仍有服务器未核实")}`));
+      bar.setAttribute("aria-valuetext", `${quotaBytes(measured)} / ${quotaBytes(quotaSize)}`);
       let usedWidth = 0;
-      [...categories.values()].filter(item => item.quotaBytes).forEach(item => {
-        const width = quotaSize > 0 ? Math.max(0, Math.min(100 - usedWidth,
-          100 * item.quotaBytes / quotaSize)) : 0;
+      const widthBase = Math.max(quotaSize, measured);
+      [...categories.values()].filter(item => item.bytes).forEach(item => {
+        const width = widthBase > 0 ? Math.max(0, Math.min(100 - usedWidth,
+          100 * item.bytes / widthBase)) : 0;
         if (!width) return;
         const segment = document.createElement("span");
         segment.style.width = `${width}%`;
         segment.style.background = groupColors[item.group] || "#8a8f98";
-        segment.title = `${quotaGroupLabel(context, item.group)} · ${quotaBytes(item.quotaBytes)}`;
+        segment.title = `${quotaGroupLabel(context, item.group)} · ${quotaBytes(item.bytes)}`;
         bar.append(segment); usedWidth += width;
       });
       autoButton.disabled = !servers.some(server => Number(server.data.cleanup_preview?.artifact_count));
@@ -318,11 +342,15 @@
         const swatch = document.createElement("i");
         swatch.style.background = groupColors[item.group] || "#8a8f98";
         label.append(swatch, document.createTextNode(quotaGroupLabel(context, item.group)));
+        if (item.lastObserved.length) label.title = `${context.t("包含最近一次记录：")} ${item.lastObserved.join("、")}`;
         const controls = document.createElement("span"); controls.className = "quota-row-actions";
         if (item.group.startsWith("output:")) {
-          controls.append(FTUI.iconButton(context, "list.bullet.clipboard", "查看测试任务", () => {
-            void openJobs(item.group).catch(error => context.showNotice(error.message, true));
-          }));
+          if (servers.some(server => !server.snapshot && (server.data.business_groups || [])
+              .some(candidate => candidate.quota_group === item.group))) {
+            controls.append(FTUI.iconButton(context, "list.bullet.clipboard", "查看测试任务", () => {
+              void openJobs(item.group).catch(error => context.showNotice(error.message, true));
+            }));
+          }
           if (servers.some(server => (server.data.cleanup_business_groups || []).some(
               candidate => candidate.group === item.group && candidate.artifact_count))) {
             controls.append(FTUI.iconButton(context, "trash", "删除整个类别", () => {
@@ -330,9 +358,8 @@
             }));
           }
         } else controls.textContent = context.t("受保护");
-        return [label, quotaBytes(item.bytes), item.quotaBytes && item.otherBytes
-          ? context.t("任务快照计入；基础元数据未计入")
-          : item.quotaBytes ? context.t("计入 Job 配额") : context.t("暂未计入 Job 配额"),
+        return [label, quotaBytes(item.bytes), item.lastObserved.length
+          ? context.t("含最近一次占用记录") : context.t("当前测量"),
           item.count || "—", controls];
       });
       tableMount.replaceChildren(FTUI.table([
@@ -351,12 +378,16 @@
       const responses = await Promise.allSettled(ids.map(id => id === root.storage_server_id
         ? Promise.resolve(root) : queryServer(id)));
       if (!current(context) || version !== refreshVersion) return;
-      servers = []; missing = [];
+      servers = [];
       responses.forEach((response, index) => {
         const id = ids[index];
         if (response.status === "fulfilled" && response.value.storage_server_id === id) {
-          servers.push({id, data: response.value});
-        } else missing.push(id);
+          servers.push({id, data: response.value, snapshot: false});
+        } else {
+          const snapshot = (root.servers || []).find(row => row.storage_server_id === id);
+          if (snapshot) servers.push({id, data: snapshot, snapshot: true,
+            observedAt: snapshot.observed_at});
+        }
       });
       profile = profileResult; quotaSize = Number(root.quota_bytes || 0);
       render();
