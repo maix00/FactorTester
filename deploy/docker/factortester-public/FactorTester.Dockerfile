@@ -14,6 +14,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
+# ProfileAgentSandbox uses Bubblewrap's unprivileged user namespace. A setuid
+# bwrap aborts before the Agent starts in this container.
 RUN sed -i \
         -e "s|https\?://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
         -e "s|https\?://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
@@ -32,7 +34,7 @@ RUN sed -i \
         ripgrep \
         tini \
         wireguard-tools \
-    && chmod u+s /usr/bin/bwrap \
+    && chmod 0755 /usr/bin/bwrap \
     && rm -rf /var/lib/apt/lists/*
 
 COPY deploy/requirements-public-linux.txt /tmp/requirements-public-linux.txt
