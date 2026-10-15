@@ -30,6 +30,10 @@ class _Repository:
     def storage_usage(self, **kwargs):
         return 0
 
+    def load_artifact(self, **kwargs):
+        self.calls.append(("load_artifact", kwargs))
+        return {"state": "active", "artifact_role": "input"}
+
 
 def test_inventory_scopes_principal_without_worker():
     repo = _Repository()
@@ -61,3 +65,15 @@ def test_public_principal_cannot_use_storage():
         repository=_Repository(),
     )
     assert response.status == 401
+
+
+def test_single_input_cannot_be_removed_from_storage_control():
+    repo = _Repository()
+    response = job_storage_response(
+        path="/api/jobs/job-1/artifacts/source.py", principal="alice",
+        method="DELETE", repository=repo,
+    )
+    assert response.status == 409
+    assert repo.calls == [("load_artifact", {
+        "job_id": "job-1", "owner": "alice", "name": "source.py",
+    })]

@@ -982,6 +982,16 @@ class JobProxyRoutesMixin:
                 )
             else:
                 routes = self._job_routes(parsed, principal)
+            if method == "DELETE" and (
+                suffix == "/artifacts" or suffix.startswith("/artifacts/")
+            ):
+                selected = str(parse_qs(parsed.query).get("server_id", [""])[0]).strip()
+                if not routes and not selected:
+                    routes = [self.state._local_route(port=0, online=True)]
+                routes = list({
+                    route.server_id: replace(route, port=0)
+                    for route in routes
+                }.values())
         except TargetUnavailable as exc:
             json_response(self, {"success": False, "error": str(exc)}, 503)
             return True

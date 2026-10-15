@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from server.jobs.artifacts import artifact_root, default_user_quota_bytes
 from server.jobs.repository import JobRepository
@@ -50,15 +51,46 @@ def job_storage_response(
     """Handle only storage inventory and previewed cleanup, without a worker port."""
     parsed = urlparse(path)
     query = parse_qs(parsed.query, keep_blank_values=True)
+    item_match = re.fullmatch(
+        r"/api/jobs/([A-Za-z0-9._-]{1,128})/artifacts/([A-Za-z0-9._%+-]{1,512})",
+        parsed.path,
+    )
+    job_match = re.fullmatch(
+        r"/api/jobs/([A-Za-z0-9._-]{1,128})/artifacts", parsed.path,
+    )
     owner = str(principal or "").strip()
     if not owner or owner == "__public_jobs__":
         return _response({"success": False, "error": "login required"}, 401)
     if (parsed.path, method) not in {
         ("/api/jobs/storage", "GET"),
         ("/api/jobs/artifacts", "DELETE"),
-    }:
+    } and not (method == "DELETE" and (item_match or job_match)):
         return _response({"success": False, "error": "unsupported storage request"}, 404)
     repo = repository or JobRepository()
+    if item_match:
+        job_id, name = item_match.group(1), unquote(item_match.group(2))
+        current = repo.load_artifact(job_id=job_id, owner=owner, name=name)
+        if current is None or current.get("state") == "deleted":
+            return _response({"success": False, "error": "artifact was not found"}, 404)
+        if str(current.get("artifact_role") or "output") == "input":
+            return _response({
+                "success": False,
+                "error": "submitted inputs cannot be deleted individually",
+            }, 409)
+        row = repo.mark_artifact_deleted(job_id=job_id, owner=owner, name=name)
+        if row is None:
+            return _response({"success": False, "error": "artifact was not found"}, 404)
+        files = _remove_files(root or artifact_root(), [row])
+        return _response({"success": True, "job_id": job_id, **files})
+    if job_match:
+        job_id = job_match.group(1)
+        job = repo.load(job_id)
+        if job is None or job.owner != owner:
+            return _response({"success": False, "error": "job was not found"}, 404)
+        rows = repo.mark_artifacts_deleted(job_id=job_id, owner=owner)
+        files = _remove_files(root or artifact_root(), rows)
+        return _response({"success": True, "job_id": job_id,
+                          "deleted_artifacts": len(rows), **files})
     if method == "GET":
         try:
             inventory = repo.storage_inventory(

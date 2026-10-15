@@ -58,7 +58,12 @@ class FederationServiceProxyRoutesMixin:
             storage_request = (urlparse(path).path, method) in {
                 ("/api/jobs/storage", "GET"),
                 ("/api/jobs/artifacts", "DELETE"),
-            }
+            } or (
+                method == "DELETE" and re.fullmatch(
+                    r"/api/jobs/[A-Za-z0-9._-]{1,128}/artifacts"
+                    r"(?:/[A-Za-z0-9._%+-]{1,512})?", urlparse(path).path,
+                ) is not None
+            )
             if not (1 <= port <= 65535 or (port == 0 and storage_request)):
                 raise ValueError("federation target port is invalid")
             if not principal:
