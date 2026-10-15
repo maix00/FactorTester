@@ -142,6 +142,9 @@
     const tableMount = document.createElement("div");
     tableSection.append(tableMount);
     body.append(overview, tableSection);
+    headline.textContent = context.t("正在读取配额…");
+    status.textContent = context.t("正在读取最近一次完整计量记录");
+    tableMount.textContent = context.t("正在读取占用分类…");
 
     const dialog = document.createElement("dialog"); dialog.className = "quota-dialog";
     const dialogCard = document.createElement("div"); dialogCard.className = "dialog-card wide";
@@ -152,7 +155,9 @@
     const dialogBody = document.createElement("div");
     dialogCard.append(dialogHead, dialogBody); dialog.append(dialogCard);
     body.append(dialog);
-    let servers = [], profile = null, quotaSize = 0, refreshVersion = 0;
+    let servers = [], profile = null, quotaSize = 0, quotaKnown = false;
+    let refreshVersion = 0;
+    let liveLoading = false, liveFailed = false;
     const groupColors = {"output:data": "#2775dc", "output:image": "#7455c4",
       "output:historical": "#527dad",
       "input:factor": "#e4a529", "input:strategy": "#39a56d",
@@ -318,7 +323,9 @@
         ` · ${partial ? context.t("至少") + " " : ""}${percent.toFixed(1)}%`;
       status.textContent = (measured > quotaSize
         ? `${context.t("已核实用量已超额")} ${quotaBytes(measured - quotaSize)}。`
-        : "") + (partial ? context.t("部分存储类别暂时无法计量。") : "");
+        : "") + (partial ? context.t("部分存储类别暂时无法计量。") : "") +
+        (liveLoading ? context.t("正在更新实时用量…") :
+          liveFailed ? context.t("部分实时读取失败，显示最近一次记录。") : "");
       bar.replaceChildren();
       bar.classList.toggle("quota-over-limit", quotaSize > 0 && measured > quotaSize);
       bar.setAttribute("aria-valuemax", String(quotaSize || 1));
@@ -369,30 +376,76 @@
     }
     async function refresh() {
       const version = ++refreshVersion;
-      const [root, profileResult] = await Promise.all([
-        context.api("/api/jobs/storage"),
-        context.api("/api/storage/profile-inventory").catch(() => null),
-      ]);
-      const ids = [...new Set((root.servers || []).map(item => String(item.storage_server_id || ""))
-        .concat(String(root.storage_server_id || "")).filter(Boolean))];
-      const responses = await Promise.allSettled(ids.map(id => id === root.storage_server_id
-        ? Promise.resolve(root) : queryServer(id)));
-      if (!current(context) || version !== refreshVersion) return;
-      servers = [];
-      responses.forEach((response, index) => {
-        const id = ids[index];
-        if (response.status === "fulfilled" && response.value.storage_server_id === id) {
-          servers.push({id, data: response.value, snapshot: false});
-        } else {
-          const snapshot = (root.servers || []).find(row => row.storage_server_id === id);
-          if (snapshot) servers.push({id, data: snapshot, snapshot: true,
-            observedAt: snapshot.observed_at});
+      const isCurrent = () => current(context) && version === refreshVersion;
+      const firstPaint = !profile && !servers.length;
+      liveLoading = true; liveFailed = false; refreshButton.disabled = true;
+      if (firstPaint) {
+        try {
+          const snapshot = await context.api("/api/storage/profile-inventory?snapshot=1");
+          if (!isCurrent()) return;
+          profile = snapshot;
+          quotaSize = Number(snapshot.quota_bytes || 0);
+          quotaKnown = true;
+          servers = (snapshot.job_snapshots || []).map(row => ({
+            id: row.storage_server_id, data: row, snapshot: true,
+            observedAt: row.observed_at,
+          }));
+          if (servers.length || (snapshot.profile_snapshots || []).length ||
+              Object.values(snapshot.protected_metadata || {}).some(row => Number(row.bytes))) {
+            render();
+          }
+        } catch (_) {
+          // A missing control-store snapshot does not prevent live inventory.
         }
+      }
+      if (!isCurrent()) return;
+      const profileRequest = context.api("/api/storage/profile-inventory")
+        .then(value => {
+          if (!isCurrent()) return;
+          profile = value;
+          if (quotaKnown) render();
+        })
+        .catch(() => { if (isCurrent()) liveFailed = true; });
+      const jobsRequest = context.api("/api/jobs/storage").then(async root => {
+        if (!isCurrent()) return;
+        quotaSize = Number(root.quota_bytes ?? quotaSize);
+        quotaKnown = true;
+        const ids = [...new Set((root.servers || [])
+          .map(item => String(item.storage_server_id || ""))
+          .concat(String(root.storage_server_id || "")).filter(Boolean))];
+        servers = ids.map(id => {
+          if (id === root.storage_server_id) return {id, data: root, snapshot: false};
+          const data = (root.servers || []).find(row => row.storage_server_id === id);
+          return data ? {id, data, snapshot: true, observedAt: data.observed_at} : null;
+        }).filter(Boolean);
+        render();
+        await Promise.allSettled(servers.filter(server => server.snapshot).map(async server => {
+          try {
+            const data = await queryServer(server.id);
+            if (!isCurrent() || data.storage_server_id !== server.id) return;
+            const index = servers.findIndex(item => item.id === server.id);
+            if (index < 0) return;
+            servers[index] = {id: server.id, data, snapshot: false};
+            render();
+          } catch (_) {
+            if (isCurrent()) liveFailed = true;
+          }
+        }));
+      }).catch(error => {
+        if (!isCurrent()) return;
+        liveFailed = true;
+        context.showNotice(error.message, true);
       });
-      profile = profileResult; quotaSize = Number(root.quota_bytes || 0);
-      render();
+      await Promise.allSettled([profileRequest, jobsRequest]);
+      if (!isCurrent()) return;
+      liveLoading = false; refreshButton.disabled = false;
+      if (quotaKnown) render();
+      else {
+        headline.textContent = context.t("暂时无法读取配额");
+        status.textContent = context.t("请稍后重试");
+      }
     }
-    await refresh();
+    void refresh().catch(error => context.showNotice(error.message, true));
   }
 
   async function server(context, body) {

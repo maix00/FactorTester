@@ -192,6 +192,77 @@ def test_profile_inventory_route_is_session_scoped(tmp_path) -> None:
     assert b"bob" not in anonymous.wfile.getvalue()
 
 
+def test_quota_snapshot_is_principal_scoped_and_skips_live_scan(tmp_path, monkeypatch) -> None:
+    def no_scan(*_args, **_kwargs):
+        raise AssertionError("snapshot request must not scan Profile files")
+
+    monkeypatch.setattr(
+        "server.manager.http.core_get_routes.scan_profile_storage", no_scan,
+    )
+
+    class Control:
+        def profile_usage_by_server(self, principal):
+            assert principal == "alice"
+            return [{"storage_server_id": "local", "inventory": {
+                "bytes": 5, "observed_at": "2026-10-15T02:00:00Z",
+                "categories": {"research_reports": {"bytes": 5, "file_count": 1},
+                               "profile_uploads": {"bytes": 0, "file_count": 0},
+                               "profile_workspaces": {"bytes": 0, "file_count": 0}},
+            }}]
+
+        def usage_by_server(self, principal):
+            assert principal == "alice"
+            return [{"storage_server_id": "local", "output_bytes": 7,
+                     "input_bytes": 0, "observed_at": "2026-10-15T02:00:00Z"}]
+
+        def protected_entity_metadata_usage(self, principal):
+            assert principal == "alice"
+            return {"factors": {"bytes": 2, "item_count": 1}}
+
+        def quota_bytes(self, principal, *, default_bytes):
+            assert principal == "alice" and default_bytes > 0
+            return 100
+
+    class Handler(CoreGetRoutesMixin):
+        def __init__(self, session, store):
+            self._current_session = session
+            self.state = SimpleNamespace(data_root=tmp_path, server_id="local",
+                                         control_store=store)
+            self.headers = {}
+            self.wfile = io.BytesIO()
+            self.status = None
+
+        def _public_login_gate(self, _parsed, *, method):
+            return True
+
+        def _session(self):
+            return self._current_session
+
+        def send_response(self, status):
+            self.status = status
+
+        def send_header(self, _name, _value):
+            pass
+
+        def end_headers(self):
+            pass
+
+    path = urlparse("/api/storage/profile-inventory?snapshot=1&principal=bob")
+    handler = Handler({"username": "alice"}, Control())
+    assert handler._get_entry_routes(path) is True
+    response = json.loads(handler.wfile.getvalue())
+    assert handler.status == 200
+    assert response["snapshot_only"] is True
+    assert response["principal"] == "alice"
+    assert response["quota_bytes"] == 100
+    assert response["job_snapshots"][0]["output_bytes"] == 7
+    assert response["profile_snapshots"][0]["inventory"]["bytes"] == 5
+
+    anonymous = Handler(None, Control())
+    assert anonymous._get_entry_routes(path) is True
+    assert anonymous.status == 401
+
+
 def test_profile_projection_never_treats_offline_or_stale_peer_as_zero(tmp_path) -> None:
     local = scan_profile_storage(tmp_path, "alice")
     remote = {"bytes": 9, "observed_at": 1.0, "categories": {
