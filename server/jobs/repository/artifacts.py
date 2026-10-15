@@ -40,6 +40,24 @@ class JobArtifactImplementation:
             'output:report-output-bundle'
         ELSE 'output:' || artifacts.name
     END"""
+    _QUOTA_GROUP_SQL = """CASE
+        WHEN artifacts.artifact_role='output' AND
+             (artifacts.content_type LIKE 'image/%' OR
+              LOWER(artifacts.name) GLOB '*.png' OR
+              LOWER(artifacts.name) GLOB '*.jpg' OR
+              LOWER(artifacts.name) GLOB '*.jpeg' OR
+              LOWER(artifacts.name) GLOB '*.webp' OR
+              LOWER(artifacts.name) GLOB '*.svg') THEN 'output:image'
+        WHEN artifacts.artifact_role='output' THEN 'output:data'
+        WHEN artifacts.artifact_kind='factor_source' THEN 'input:factor'
+        WHEN artifacts.artifact_kind='strategy_source' THEN 'input:strategy'
+        WHEN artifacts.artifact_kind='product_scope' THEN 'input:product'
+        ELSE 'input:other'
+    END"""
+    _QUOTA_GROUPS = frozenset({
+        'output:image', 'output:data', 'input:factor',
+        'input:strategy', 'input:product', 'input:other',
+    })
 
     @staticmethod
     def _cleanup_token(rows: list[Any]) -> str:
@@ -54,7 +72,7 @@ class JobArtifactImplementation:
 
     def storage_inventory(
         self, *, owner: str, category: str = "", limit: int = 50,
-        offset: int = 0,
+        offset: int = 0, group: str = "", job_id: str = "",
     ) -> dict[str, Any]:
         """Page one owner's artifact metadata without opening artifact bytes.
 
@@ -64,7 +82,16 @@ class JobArtifactImplementation:
         limit = max(1, min(int(limit), 100))
         offset = max(0, int(offset))
         category = str(category or "").strip()
+        group = str(group or "").strip()
+        job_id = str(job_id or "").strip()
+        if group and group not in self._QUOTA_GROUPS:
+            raise ValueError("invalid storage group")
+        if job_id and (len(job_id) > 128 or not all(
+            char.isalnum() or char in '._-' for char in job_id
+        )):
+            raise ValueError("invalid job id")
         label = self._QUOTA_CATEGORY_SQL
+        group_label = self._QUOTA_GROUP_SQL
         with self._connection() as conn:
             categories = conn.execute(f"""
                 SELECT {label} AS category, artifacts.artifact_role AS role,
@@ -81,6 +108,17 @@ class JobArtifactImplementation:
                 "storage_server_id": _control_server_id(),
                 "covered_bytes": sum(int(row["bytes"]) for row in categories),
             }
+            groups = conn.execute(f"""
+                SELECT {group_label} AS quota_group,
+                    COUNT(*) AS artifact_count,
+                    COALESCE(SUM(artifacts.size_bytes), 0) AS bytes,
+                    COUNT(DISTINCT artifacts.job_id) AS job_count
+                FROM research_job_artifacts AS artifacts
+                JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
+                WHERE jobs.owner=? AND artifacts.state='active'
+                GROUP BY quota_group
+            """, (str(owner),)).fetchall()
+            result['business_groups'] = [dict(row) for row in groups]
             eligible_rows = conn.execute(f"""
                 SELECT {label} AS category, artifacts.job_id, artifacts.name,
                     artifacts.content_hash, artifacts.size_bytes
@@ -109,6 +147,55 @@ class JobArtifactImplementation:
                 "bytes": sum(int(row["size_bytes"]) for row in eligible_rows),
                 "token": self._cleanup_token(eligible_rows),
             }
+            by_group: dict[str, list[Any]] = {}
+            for row in conn.execute(f"""
+                SELECT {group_label} AS category, artifacts.job_id,
+                    artifacts.name, artifacts.content_hash, artifacts.size_bytes
+                FROM research_job_artifacts AS artifacts
+                JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
+                WHERE jobs.owner=? AND artifacts.state='active'
+                  AND artifacts.artifact_role='output'
+                  AND jobs.status IN ({','.join('?' for _ in TERMINAL_STATUSES)})
+                ORDER BY category, artifacts.job_id, artifacts.name
+            """, (str(owner), *(status.value for status in TERMINAL_STATUSES))).fetchall():
+                by_group.setdefault(str(row['category']), []).append(row)
+            result['cleanup_business_groups'] = [
+                {'group': name, 'artifact_count': len(rows),
+                 'job_count': len({row['job_id'] for row in rows}),
+                 'bytes': sum(int(row['size_bytes']) for row in rows),
+                 'token': self._cleanup_token(rows)}
+                for name, rows in by_group.items()
+            ]
+            if group:
+                where = f"jobs.owner=? AND artifacts.state='active' AND {group_label}=?"
+                args = (str(owner), group)
+                count = conn.execute(f"""
+                    SELECT COUNT(DISTINCT artifacts.job_id) AS n
+                    FROM research_job_artifacts AS artifacts
+                    JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
+                    WHERE {where}
+                """, args).fetchone()
+                jobs = conn.execute(f"""
+                    SELECT artifacts.job_id, jobs.kind AS job_kind,
+                        jobs.status AS job_status, jobs.updated_at,
+                        COUNT(*) AS artifact_count,
+                        SUM(artifacts.size_bytes) AS bytes
+                    FROM research_job_artifacts AS artifacts
+                    JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
+                    WHERE {where}
+                    GROUP BY artifacts.job_id
+                    ORDER BY bytes DESC, artifacts.job_id LIMIT ? OFFSET ?
+                """, (*args, limit, offset)).fetchall()
+                result.update({'group': group, 'job_count': int(count['n']),
+                               'jobs': [dict(row) for row in jobs],
+                               'limit': limit, 'offset': offset})
+            if job_id:
+                scoped = [row for row in eligible_rows if row['job_id'] == job_id]
+                result['job_cleanup_preview'] = {
+                    'artifact_count': len(scoped),
+                    'bytes': sum(int(row['size_bytes']) for row in scoped),
+                    'token': self._cleanup_token(scoped),
+                }
             if category:
                 where = f"jobs.owner=? AND artifacts.state='active' AND {label}=?"
                 args = (str(owner), category)
@@ -138,18 +225,29 @@ class JobArtifactImplementation:
         return result
 
     def mark_cleanup_outputs_deleted(
-        self, *, owner: str, category: str = "",
+        self, *, owner: str, category: str = "", group: str = "",
+        job_id: str = "",
         expected_count: int, expected_bytes: int, expected_token: str,
     ) -> list[dict[str, Any]]:
         """Atomically clear a previewed set of terminal output artifacts only."""
         category = str(category or "").strip()
+        group = str(group or "").strip()
+        job_id = str(job_id or "").strip()
         if category and not category.startswith("output:"):
             raise ValueError("only output categories can be cleared")
+        if group and group not in {'output:data', 'output:image'}:
+            raise ValueError("only output groups can be cleared")
+        if category and group:
+            raise ValueError("choose a category or group")
+        if job_id and (len(job_id) > 128 or not all(
+            char.isalnum() or char in '._-' for char in job_id
+        )):
+            raise ValueError("invalid job id")
         if expected_count < 0 or expected_bytes < 0:
             raise ValueError("invalid cleanup preview")
         if len(expected_token) != 64 or any(char not in "0123456789abcdef" for char in expected_token):
             raise ValueError("invalid cleanup token")
-        label = self._QUOTA_CATEGORY_SQL
+        label = self._QUOTA_GROUP_SQL if group else self._QUOTA_CATEGORY_SQL
         terminal = tuple(status.value for status in TERMINAL_STATUSES)
         clauses = ["jobs.owner=?", "artifacts.state='active'",
                    "artifacts.artifact_role='output'",
@@ -158,6 +256,12 @@ class JobArtifactImplementation:
         if category:
             clauses.append(f"{label}=?")
             args.append(category)
+        if group:
+            clauses.append(f"{label}=?")
+            args.append(group)
+        if job_id:
+            clauses.append('artifacts.job_id=?')
+            args.append(job_id)
         where = " AND ".join(clauses)
         with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")

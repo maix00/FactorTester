@@ -134,13 +134,15 @@ def delete_user_test_job_artifacts():
         if cleanup != "eligible":
             return jsonify({"success": False, "error": "invalid cleanup mode"}), 400
         category = str(request.args.get("category") or "").strip()
+        group = str(request.args.get("group") or "").strip()
+        job_id = str(request.args.get("job_id") or "").strip()
         try:
             expected_count = int(request.args["expected_count"])
             expected_bytes = int(request.args["expected_bytes"])
             expected_token = str(request.args["expected_token"])
             job_repository = repository()
             artifacts = job_repository.mark_cleanup_outputs_deleted(
-                owner=owner, category=category,
+                owner=owner, category=category, group=group, job_id=job_id,
                 expected_count=expected_count, expected_bytes=expected_bytes,
                 expected_token=expected_token,
             )
@@ -148,7 +150,7 @@ def delete_user_test_job_artifacts():
             return jsonify({"success": False, "error": str(exc)}), 409
         files = _remove_retained_files(artifact_root(), artifacts)
         return jsonify({
-            "success": True, "category": category or "all_eligible_outputs",
+            "success": True, "category": category or group or "all_eligible_outputs",
             "deleted_artifacts": len(artifacts),
             **files,
             "freed_bytes": sum(int(item["size_bytes"]) for item in artifacts),

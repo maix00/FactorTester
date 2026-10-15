@@ -98,6 +98,8 @@ def job_storage_response(
                 category=query.get("category", [""])[0],
                 limit=_integer(query, "limit", 50),
                 offset=_integer(query, "offset"),
+                group=query.get("group", [""])[0],
+                job_id=query.get("job_id", [""])[0],
             )
         except (TypeError, ValueError):
             return _response({"success": False, "error": "invalid storage page"}, 400)
@@ -141,9 +143,11 @@ def job_storage_response(
             "next_after": rows[-1]["cleanup_rowid"] if len(rows) == 1000 else None,
         })
     category = query.get("category", [""])[0].strip()
+    group = query.get("group", [""])[0].strip()
+    job_id = query.get("job_id", [""])[0].strip()
     try:
         rows = repo.mark_cleanup_outputs_deleted(
-            owner=owner, category=category,
+            owner=owner, category=category, group=group, job_id=job_id,
             expected_count=_integer(query, "expected_count"),
             expected_bytes=_integer(query, "expected_bytes"),
             expected_token=query["expected_token"][0],
@@ -153,7 +157,7 @@ def job_storage_response(
     files = _remove_files(root or artifact_root(), rows)
     freed = sum(int(row["size_bytes"]) for row in rows)
     return _response({
-        "success": True, "category": category or "all_eligible_outputs",
+        "success": True, "category": category or group or "all_eligible_outputs",
         "deleted_artifacts": len(rows), **files,
         "freed_bytes": freed, "quota_released_bytes": freed,
         "usage_bytes": repo.storage_usage(owner=owner),

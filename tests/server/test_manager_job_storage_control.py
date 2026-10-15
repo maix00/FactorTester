@@ -45,7 +45,20 @@ def test_inventory_scopes_principal_without_worker():
     assert json.loads(response.body)["usage_bytes"] == 4
     assert repo.calls == [("inventory", {
         "owner": "alice", "category": "output:result", "limit": 1,
-        "offset": 0,
+        "offset": 0, "group": "", "job_id": "",
+    })]
+
+
+def test_manager_forwards_business_group_and_job_cleanup_scope():
+    repo = _Repository()
+    response = job_storage_response(
+        path="/api/jobs/storage?group=output%3Aimage&job_id=job-1",
+        principal="alice", method="GET", repository=repo,
+    )
+    assert response.status == 200
+    assert repo.calls == [("inventory", {
+        "owner": "alice", "category": "", "limit": 50, "offset": 0,
+        "group": "output:image", "job_id": "job-1",
     })]
 
 
