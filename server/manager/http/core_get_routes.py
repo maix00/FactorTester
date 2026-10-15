@@ -74,6 +74,9 @@ class CoreGetRoutesMixin:
             return True
         if not self._public_login_gate(parsed, method="GET"):
             return True
+        if (parsed.path == "/api/storage/deferred-job-cleanup"
+                and self._deferred_job_cleanup_route(parsed, method="GET")):
+            return True
         if parsed.path == "/api/storage/profile-inventory":
             session = self._session()
             if session is None:
@@ -91,6 +94,7 @@ class CoreGetRoutesMixin:
                 try:
                     profile_snapshots = control_store.profile_usage_by_server(principal)
                     job_snapshots = control_store.usage_by_server(principal)
+                    deferred = control_store.deferred_output_cleanups(principal)
                     protected = control_store.protected_entity_metadata_usage(principal)
                     quota_bytes = control_store.quota_bytes(
                         principal, default_bytes=default_user_quota_bytes(),
@@ -106,6 +110,7 @@ class CoreGetRoutesMixin:
                     "principal": principal,
                     "quota_bytes": quota_bytes,
                     "job_snapshots": job_snapshots,
+                    "deferred_output_cleanups": deferred,
                     "profile_snapshots": profile_snapshots,
                     "protected_metadata": protected,
                 }, headers={"Cache-Control": "private, no-store"})

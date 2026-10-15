@@ -1450,7 +1450,7 @@ def job_clear_history(current_workspace: bool) -> None:
 @click.option("--category", default="", help="列出此类附件，类别来自无参数的分类清单。")
 @click.option("--limit", default=50, type=click.IntRange(1, 100), show_default=True)
 @click.option("--offset", default=0, type=click.IntRange(min=0), show_default=True)
-@click.option("--profile", is_flag=True, help="查看当前 Manager 的报告、上传与 Profile 工作区占用（尚未计入 Job 配额）。")
+@click.option("--profile", is_flag=True, help="查看当前 Manager 的报告、上传与 Profile 工作区占用。")
 @friendly_errors
 def job_storage(category: str, limit: int, offset: int, profile: bool) -> None:
     client = client_from_config()
@@ -1496,6 +1496,56 @@ def job_cleanup(category: str, yes: bool) -> None:
                           expected_bytes=result["bytes"],
                           expected_token=result["token"],
                       )}))
+
+
+@job.command("cleanup-requests")
+@friendly_errors
+def job_cleanup_requests() -> None:
+    """查看离线服务器待删除与执行结果。"""
+    click.echo(_json(client_from_config().deferred_job_cleanups()))
+
+
+@job.command("cleanup-queue")
+@click.option("--server-id", required=True, help="最近一次占用记录中的存储服务器 ID。")
+@click.option("--yes", is_flag=True, help="确认安排上线后删除；省略时只预览。")
+@friendly_errors
+def job_cleanup_queue(server_id: str, yes: bool) -> None:
+    client = client_from_config()
+    snapshot = client.quota_snapshot()
+    row = next((value for value in snapshot.get("job_snapshots") or []
+                if value.get("storage_server_id") == server_id), None)
+    if row is None or int(row.get("output_bytes") or 0) <= 0:
+        raise click.ClickException("该服务器没有可安排删除的历史输出占用")
+    request = {
+        "server_id": server_id,
+        "expected_bytes": int(row["output_bytes"]),
+        "expected_count": int(row.get("output_count") or 0),
+        "observed_at": str(row["observed_at"]),
+    }
+    if not yes:
+        click.echo(_json({"dry_run": True, **request,
+                          "warning": "待执行期间逻辑配额立即释放；上线前可取消。实际文件仍占磁盘，重连后清单不符则不会删除。"}))
+        return
+    click.echo(_json({"dry_run": False,
+                      **client.queue_deferred_job_cleanup(**request)}))
+
+
+@job.command("cleanup-cancel")
+@click.argument("request_id")
+@click.option("--yes", is_flag=True, help="确认取消待删除并恢复逻辑配额占用。")
+@friendly_errors
+def job_cleanup_cancel(request_id: str, yes: bool) -> None:
+    client = client_from_config()
+    row = next((value for value in client.deferred_job_cleanups().get("requests") or []
+                if value.get("request_id") == request_id), None)
+    if row is None or row.get("status") != "pending":
+        raise click.ClickException("没有可取消的待删除指令")
+    if not yes:
+        click.echo(_json({"dry_run": True, **row,
+                          "warning": "取消后这些字节重新计入逻辑配额；文件保持原样。"}))
+        return
+    click.echo(_json({"dry_run": False,
+                      **client.cancel_deferred_job_cleanup(request_id)}))
 
 
 @job.command("delete-artifact")

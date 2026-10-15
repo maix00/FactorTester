@@ -244,6 +244,32 @@ class JobsClientMixin(ClientMixinBase):
             self.session.get("/api/storage/profile-inventory")
         )
 
+    def quota_snapshot(self) -> dict[str, Any]:
+        return self._expect_success(self.session.get(
+            "/api/storage/profile-inventory", query={"snapshot": 1},
+        ))
+
+    def deferred_job_cleanups(self) -> dict[str, Any]:
+        return self._expect_success(self.session.get(
+            "/api/storage/deferred-job-cleanup",
+        ))
+
+    def queue_deferred_job_cleanup(
+        self, *, server_id: str, expected_bytes: int,
+        expected_count: int, observed_at: str,
+    ) -> dict[str, Any]:
+        return self._expect_success(self.session.post(
+            "/api/storage/deferred-job-cleanup", {
+                "server_id": server_id, "expected_bytes": expected_bytes,
+                "expected_count": expected_count, "observed_at": observed_at,
+            },
+        ))
+
+    def cancel_deferred_job_cleanup(self, request_id: str) -> dict[str, Any]:
+        return self._expect_success(self.session.delete(
+            f"/api/storage/deferred-job-cleanup/{request_id}",
+        ))
+
     def retry_job_file_cleanup(self, *, after: int = 0) -> dict[str, Any]:
         return self._expect_success(self.session.delete(
             "/api/jobs/artifacts", query={"cleanup": "retry-files", "after": after},

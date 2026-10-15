@@ -143,6 +143,9 @@ class WriteRoutesMixin:
             return
         if self._issue_object_transfer_access(parsed):
             return
+        if (parsed.path == "/api/storage/deferred-job-cleanup"
+                and self._deferred_job_cleanup_route(parsed, method="POST")):
+            return
         if self._proxy_job_request(parsed, method="POST"):
             return
         if self.path == "/api/research-publications/sync":
@@ -562,6 +565,9 @@ class WriteRoutesMixin:
         if self._delete_agent_routes(parsed):
             return
         if self._delete_research_catalog_routes(parsed):
+            return
+        if (parsed.path.startswith("/api/storage/deferred-job-cleanup/")
+                and self._deferred_job_cleanup_route(parsed, method="DELETE")):
             return
         if self._proxy_job_request(parsed, method="DELETE"):
             return
