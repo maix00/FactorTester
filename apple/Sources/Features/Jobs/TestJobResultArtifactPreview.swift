@@ -37,7 +37,9 @@ enum TestJobResultArtifactResolver {
             "\(declaration.name)_report", "\(declaration.name)_data",
         ]
         let names = declaredNames.isEmpty ? fallbackNames : declaredNames
-        return artifacts.filter { $0.state == "active" && names.contains($0.name) }
+        return artifacts.filter {
+            ["active", "local"].contains($0.state) && names.contains($0.name)
+        }
     }
 
     private static func imagePriority(_ artifact: TestJobArtifact) -> Int {

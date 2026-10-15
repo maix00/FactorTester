@@ -138,11 +138,12 @@
         : cleanupPreview;
       if (!preview || !Number(preview.artifact_count)) return;
       const label = category ? quotaCategoryLabel(context, category) : context.t("所有可清理类别");
-      const warning = `${context.t("清理")} ${label}: ${preview.artifact_count} ${context.t("项")}, ${quotaBytes(preview.bytes)}?\n${context.t("仅清理已结束 Job 的输出；如报告挂载这些 Job，实时详情可能无法显示。提交输入、基础因子与产品组不会删除。")}`;
+      const warning = `${context.t("清理")} ${label}: ${preview.artifact_count} ${context.t("项")}, ${preview.job_count || 0} ${context.t("个任务")}, ${quotaBytes(preview.bytes)}?\n${context.t("仅清理已结束 Job 的输出；如报告挂载这些 Job，实时详情可能无法显示。提交输入、基础因子与产品组不会删除。")}`;
       if (!window.confirm(warning)) return;
       const params = new URLSearchParams({
         cleanup: "eligible", expected_count: String(preview.artifact_count),
         expected_bytes: String(preview.bytes),
+        expected_token: String(preview.token || ""),
       });
       if (category) params.set("category", category);
       if (cleanupServerId) params.set("server_id", cleanupServerId);

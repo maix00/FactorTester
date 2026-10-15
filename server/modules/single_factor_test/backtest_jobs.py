@@ -90,10 +90,12 @@ def delete_user_test_job_artifacts():
         try:
             expected_count = int(request.args["expected_count"])
             expected_bytes = int(request.args["expected_bytes"])
+            expected_token = str(request.args["expected_token"])
             job_repository = repository()
             artifacts = job_repository.mark_cleanup_outputs_deleted(
                 owner=owner, category=category,
                 expected_count=expected_count, expected_bytes=expected_bytes,
+                expected_token=expected_token,
             )
         except (KeyError, TypeError, ValueError) as exc:
             return jsonify({"success": False, "error": str(exc)}), 409

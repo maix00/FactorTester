@@ -1601,9 +1601,11 @@ def test_job_cleanup_previews_and_passes_server_identity(monkeypatch) -> None:
             return {
                 "storage_server_id": "remote-main",
                 "cleanup_categories": [
-                    {"category": "output:order_audit", "artifact_count": 2, "bytes": 80},
+                    {"category": "output:order_audit", "artifact_count": 2,
+                     "job_count": 1, "bytes": 80, "token": "a" * 64},
                 ],
-                "cleanup_preview": {"artifact_count": 2, "bytes": 80},
+                "cleanup_preview": {"artifact_count": 2, "job_count": 1,
+                                    "bytes": 80, "token": "a" * 64},
             }
 
         def cleanup_job_outputs(self, **kwargs):
@@ -1622,6 +1624,7 @@ def test_job_cleanup_previews_and_passes_server_identity(monkeypatch) -> None:
     assert fake.deleted == {
         "category": "output:order_audit", "server_id": "remote-main",
         "expected_count": 2, "expected_bytes": 80,
+        "expected_token": "a" * 64,
     }
     protected = CliRunner().invoke(cli, ["job", "cleanup", "--category", "input:factor_source", "--yes"])
     assert protected.exit_code != 0

@@ -193,12 +193,14 @@ class JobsClientMixin(ClientMixinBase):
         ))
 
     def cleanup_job_outputs(
-        self, *, expected_count: int, expected_bytes: int, category: str = "",
+        self, *, expected_count: int, expected_bytes: int,
+        expected_token: str, category: str = "",
         server_id: str = "",
     ) -> dict[str, Any]:
         query = {
             "cleanup": "eligible", "expected_count": expected_count,
             "expected_bytes": expected_bytes,
+            "expected_token": expected_token,
         }
         if category:
             query["category"] = category

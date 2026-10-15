@@ -1473,7 +1473,9 @@ def job_cleanup(category: str, yes: bool) -> None:
     result = {
         "category": category or "all_eligible_outputs",
         "artifact_count": int(preview["artifact_count"]),
+        "job_count": int(preview.get("job_count") or 0),
         "bytes": int(preview["bytes"]),
+        "token": str(preview.get("token") or ""),
         "warning": "清理已结束 Job 的输出可能使报告挂载的实时结果详情失效；输入与基础资料保留",
     }
     if not yes or not result["artifact_count"]:
@@ -1485,6 +1487,7 @@ def job_cleanup(category: str, yes: bool) -> None:
                           server_id=str(inventory.get("storage_server_id") or ""),
                           expected_count=result["artifact_count"],
                           expected_bytes=result["bytes"],
+                          expected_token=result["token"],
                       )}))
 
 

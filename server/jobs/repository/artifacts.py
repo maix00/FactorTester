@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import hashlib
+import json
 import os
 import time
 from typing import Any
@@ -39,6 +41,17 @@ class JobArtifactImplementation:
         ELSE 'output:' || artifacts.name
     END"""
 
+    @staticmethod
+    def _cleanup_token(rows: list[Any]) -> str:
+        identity = [
+            [str(row["category"]), str(row["job_id"]), str(row["name"]),
+             str(row["content_hash"]), int(row["size_bytes"])]
+            for row in rows
+        ]
+        return hashlib.sha256(json.dumps(
+            identity, ensure_ascii=False, separators=(",", ":")
+        ).encode("utf-8")).hexdigest()
+
     def storage_inventory(
         self, *, owner: str, category: str = "", limit: int = 50,
         offset: int = 0,
@@ -68,20 +81,33 @@ class JobArtifactImplementation:
                 "storage_server_id": _control_server_id(),
                 "covered_bytes": sum(int(row["bytes"]) for row in categories),
             }
-            eligible = conn.execute(f"""
-                SELECT {label} AS category, COUNT(*) AS artifact_count,
-                    COALESCE(SUM(artifacts.size_bytes), 0) AS bytes
+            eligible_rows = conn.execute(f"""
+                SELECT {label} AS category, artifacts.job_id, artifacts.name,
+                    artifacts.content_hash, artifacts.size_bytes
                 FROM research_job_artifacts AS artifacts
                 JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
                 WHERE jobs.owner=? AND artifacts.state='active'
                   AND artifacts.artifact_role='output'
                   AND jobs.status IN ({','.join('?' for _ in TERMINAL_STATUSES)})
-                GROUP BY category
+                ORDER BY category, artifacts.job_id, artifacts.name
             """, (str(owner), *(status.value for status in TERMINAL_STATUSES))).fetchall()
-            result["cleanup_categories"] = [dict(row) for row in eligible]
+            by_category: dict[str, list[Any]] = {}
+            for row in eligible_rows:
+                by_category.setdefault(str(row["category"]), []).append(row)
+            result["cleanup_categories"] = [
+                {
+                    "category": name, "artifact_count": len(rows),
+                    "job_count": len({row["job_id"] for row in rows}),
+                    "bytes": sum(int(row["size_bytes"]) for row in rows),
+                    "token": self._cleanup_token(rows),
+                }
+                for name, rows in by_category.items()
+            ]
             result["cleanup_preview"] = {
-                "artifact_count": sum(int(row["artifact_count"]) for row in eligible),
-                "bytes": sum(int(row["bytes"]) for row in eligible),
+                "artifact_count": len(eligible_rows),
+                "job_count": len({row["job_id"] for row in eligible_rows}),
+                "bytes": sum(int(row["size_bytes"]) for row in eligible_rows),
+                "token": self._cleanup_token(eligible_rows),
             }
             if category:
                 where = f"jobs.owner=? AND artifacts.state='active' AND {label}=?"
@@ -113,7 +139,7 @@ class JobArtifactImplementation:
 
     def mark_cleanup_outputs_deleted(
         self, *, owner: str, category: str = "",
-        expected_count: int, expected_bytes: int,
+        expected_count: int, expected_bytes: int, expected_token: str,
     ) -> list[dict[str, Any]]:
         """Atomically clear a previewed set of terminal output artifacts only."""
         category = str(category or "").strip()
@@ -121,6 +147,8 @@ class JobArtifactImplementation:
             raise ValueError("only output categories can be cleared")
         if expected_count < 0 or expected_bytes < 0:
             raise ValueError("invalid cleanup preview")
+        if len(expected_token) != 64 or any(char not in "0123456789abcdef" for char in expected_token):
+            raise ValueError("invalid cleanup token")
         label = self._QUOTA_CATEGORY_SQL
         terminal = tuple(status.value for status in TERMINAL_STATUSES)
         clauses = ["jobs.owner=?", "artifacts.state='active'",
@@ -134,12 +162,14 @@ class JobArtifactImplementation:
         with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             rows = conn.execute(f"""
-                SELECT artifacts.* FROM research_job_artifacts AS artifacts
+                SELECT artifacts.*, {label} AS category
+                FROM research_job_artifacts AS artifacts
                 JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
-                WHERE {where} ORDER BY artifacts.job_id, artifacts.name
+                WHERE {where} ORDER BY category, artifacts.job_id, artifacts.name
             """, args).fetchall()
             actual_bytes = sum(int(row["size_bytes"]) for row in rows)
-            if len(rows) != expected_count or actual_bytes != expected_bytes:
+            if (len(rows) != expected_count or actual_bytes != expected_bytes
+                    or self._cleanup_token(rows) != expected_token):
                 raise ValueError("cleanup preview changed; refresh before deleting")
             for row in rows:
                 conn.execute("""

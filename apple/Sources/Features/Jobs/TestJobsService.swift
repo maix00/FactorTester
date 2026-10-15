@@ -63,9 +63,10 @@ struct TestJobArtifact: Identifiable, Hashable {
     let name: String
     let description: String
     let sizeBytes: Int
-    let state: String
+    var state: String
     let contentType: String
     let serverFileName: String?
+    var contentHash: String = ""
 
     var fileName: String {
         if let serverFileName, !serverFileName.isEmpty {
@@ -166,6 +167,7 @@ struct TestJobChartPoint: Identifiable {
 }
 
 final class TestJobsService {
+    var backupPrincipal: String = ""
     private lazy var session: URLSession = {
         let configuration = URLSessionConfiguration.default
         // Keep the same Flask session cookie used by APIClient.  A separate
@@ -343,7 +345,17 @@ final class TestJobsService {
             updatedAt: nil,
             artifactCount: 0
         ))
-        let artifactValues = (artifacts["artifacts"] as? [[String: Any]] ?? []).map(makeArtifact)
+        let artifactValues = (artifacts["artifacts"] as? [[String: Any]] ?? []).map { value in
+            var artifact = makeArtifact(value)
+            if artifact.state == "deleted",
+               TestJobBackupStore.hasBackup(
+                   principal: backupPrincipal, managerURL: ManagerConfig.shared.baseURL,
+                   jobID: jobID, artifact: artifact
+               ) {
+                artifact.state = "local"
+            }
+            return artifact
+        }
         let declaredOutputs = ((unified?["output_declarations"] as? [[String: Any]])
             ?? (response["output_declarations"] as? [[String: Any]] ?? [])).map(makeOutputDeclaration)
         let effectiveOutputs = effectiveOutputDeclarations(declaredOutputs, artifacts: artifactValues)
@@ -375,7 +387,7 @@ final class TestJobsService {
         _ = try await request(path: "/api/jobs/\(jobID)/artifacts", method: "DELETE", port: port)
     }
 
-    private func request(path: String, method: String = "GET", port: Int? = nil, allowAnonymous: Bool = false) async throws -> [String: Any] {
+    func request(path: String, method: String = "GET", port: Int? = nil, allowAnonymous: Bool = false) async throws -> [String: Any] {
         let data = try await requestData(path: path, method: method, port: port, allowAnonymous: allowAnonymous)
         guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw TestJobsRequestError(
@@ -488,7 +500,7 @@ final class TestJobsService {
         )
     }
 
-    private func makeArtifact(_ value: [String: Any]) -> TestJobArtifact {
+    func makeArtifact(_ value: [String: Any]) -> TestJobArtifact {
         let name = value["name"] as? String ?? "artifact"
         return TestJobArtifact(
             id: name,
@@ -499,7 +511,8 @@ final class TestJobsService {
             contentType: value["content_type"] as? String
                 ?? value["media_type"] as? String
                 ?? "application/octet-stream",
-            serverFileName: value["file_name"] as? String
+            serverFileName: value["file_name"] as? String,
+            contentHash: value["content_hash"] as? String ?? ""
         )
     }
 
@@ -523,7 +536,7 @@ final class TestJobsService {
         var names = Set<String>()
         declared.forEach { names.formUnion($0.artifacts) }
         var result = declared
-        for artifact in artifacts where artifact.state == "active" {
+        for artifact in artifacts where ["active", "local"].contains(artifact.state) {
             let fileName = artifact.fileName.lowercased()
             let isImage = artifact.contentType.lowercased().hasPrefix("image/")
                 || ["png", "jpg", "jpeg", "gif", "webp", "svg"].contains(

@@ -245,14 +245,18 @@ def test_one_click_cleanup_only_removes_previewed_terminal_outputs(
     repository.transition("finished", JobStatus.SUCCEEDED,
                           result_summary={"success": True})
     preview = client.get("/api/jobs/storage").get_json()["cleanup_preview"]
-    assert preview == {"artifact_count": 1, "bytes": 4}
+    assert preview["artifact_count"] == 1
+    assert preview["job_count"] == 1
+    assert preview["bytes"] == 4
     stale = client.delete(
         "/api/jobs/artifacts?cleanup=eligible&expected_count=2&expected_bytes=8"
+        f"&expected_token={preview['token']}"
     )
     assert stale.status_code == 409
     assert (root / "finished" / "order_audit").exists()
     cleared = client.delete(
         "/api/jobs/artifacts?cleanup=eligible&expected_count=1&expected_bytes=4"
+        f"&expected_token={preview['token']}"
     )
     assert cleared.status_code == 200
     assert cleared.get_json()["deleted_artifacts"] == 1
@@ -260,6 +264,41 @@ def test_one_click_cleanup_only_removes_previewed_terminal_outputs(
     assert (root / "finished" / "factor_source").exists()
     assert (root / "running" / "order_audit").exists()
     assert repository.storage_usage(owner="alice") == 8
+
+
+def test_cleanup_rejects_same_size_replaced_artifact(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+    repository = JobRepository()
+    for job_id in ("first", "second"):
+        _create_job(repository, job_id=job_id, status=JobStatus.RUNNING)
+    repository.record_artifact(
+        job_id="first", name="result", relative_path="first/result",
+        content_type="text/plain", content_hash="a" * 64, size_bytes=10,
+    )
+    repository.transition("first", JobStatus.SUCCEEDED,
+                          result_summary={"success": True})
+    preview = client.get("/api/jobs/storage").get_json()["cleanup_preview"]
+    repository.mark_artifact_deleted(job_id="first", owner="alice", name="result")
+    repository.record_artifact(
+        job_id="second", name="result", relative_path="second/result",
+        content_type="text/plain", content_hash="b" * 64, size_bytes=10,
+    )
+    repository.transition("second", JobStatus.SUCCEEDED,
+                          result_summary={"success": True})
+    stale = client.delete(
+        "/api/jobs/artifacts?cleanup=eligible&expected_count=1&expected_bytes=10"
+        f"&expected_token={preview['token']}"
+    )
+    assert stale.status_code == 409
+    assert repository.load_artifact(
+        job_id="second", owner="alice", name="result"
+    )["state"] == "active"
 
 
 def test_artifact_manifest_preserves_distinct_input_logical_paths(
