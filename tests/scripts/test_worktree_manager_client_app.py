@@ -2382,7 +2382,8 @@ def test_web_opened_tab_icons_are_separate_from_labels_and_jobs_have_status_time
     assert "button.append(close)" not in tabs
     assert "nav-module-folder" not in shell
     assert "return moduleButton(module);" in shell
-    assert 'button.title = document.body.classList.contains("sidebar-collapsed") ? "" : tab.title;' in tabs
+    assert 'button.title = tab.title;' in tabs
+    assert 'button.setAttribute("aria-label", tab.title);' in tabs
     assert "statusCell(job, context)" in jobs
     list_format = (ROOT / "server" / "manager" / "web" / "jobs" / "list-format.js").read_text(encoding="utf-8")
     assert 'analyzing: "分析中"' in list_format

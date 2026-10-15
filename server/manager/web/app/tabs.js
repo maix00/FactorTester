@@ -170,7 +170,7 @@
       button.innerHTML = '<span class="symbol"></span><span class="tab-label"></span>';
       button.querySelector(".symbol").append(FTIcons.node(tab.icon || tabIcon(tab.path)));
       button.querySelector(".tab-label").textContent = tab.title;
-      button.title = document.body.classList.contains("sidebar-collapsed") ? "" : tab.title;
+      button.title = tab.title;
       button.setAttribute("aria-label", tab.title);
       button.addEventListener("click", () => activateTab(tab.id));
       return button;
