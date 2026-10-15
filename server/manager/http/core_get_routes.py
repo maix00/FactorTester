@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from urllib.parse import parse_qs, urlparse
 
@@ -15,6 +16,11 @@ from server.manager.http.content_encoding import (
 )
 from server.manager.http.localization import web_localization
 from server.manager.http.responses import json_response
+from server.manager.services.profile_storage_inventory import (
+    ProfileStorageInventoryIncomplete,
+    profile_storage_projection,
+    scan_profile_storage,
+)
 from server.manager.web.assets import (
     asset_revision,
     bundle_bytes,
@@ -22,6 +28,8 @@ from server.manager.web.assets import (
     shell_bytes,
     static_file,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class CoreGetRoutesMixin:
@@ -64,6 +72,65 @@ class CoreGetRoutesMixin:
             self._serve_login_page(parsed)
             return True
         if not self._public_login_gate(parsed, method="GET"):
+            return True
+        if parsed.path == "/api/storage/profile-inventory":
+            session = self._session()
+            if session is None:
+                json_response(self, {"success": False, "error": "login required"}, 401)
+                return True
+            try:
+                inventory = scan_profile_storage(
+                    self.state.data_root, str(session["username"]),
+                )
+            except (ProfileStorageInventoryIncomplete, OSError, ValueError):
+                json_response(
+                    self,
+                    {"success": False, "error": "profile inventory is incomplete"},
+                    503,
+                )
+                return True
+            control_store = getattr(self.state, "control_store", None)
+            protected = None
+            if control_store is not None:
+                try:
+                    protected = control_store.protected_entity_metadata_usage(
+                        str(session["username"])
+                    )
+                except Exception as exc:
+                    # Local Profile measurements remain usable while the
+                    # authoritative control store is offline.
+                    _LOGGER.warning(
+                        "protected metadata inventory unavailable: %s",
+                        type(exc).__name__,
+                    )
+                    protected = None
+            federation = getattr(self.state, "federated_public_data", None)
+            peers: list[dict] = []
+            coverage_known = federation is not None
+            if federation is not None:
+                try:
+                    peers = federation.profile_storage_peers(
+                        str(session["username"])
+                    )
+                except (ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+                    coverage_known = False
+            projection = profile_storage_projection(
+                self.state.server_id, inventory, peers,
+            )
+            if not coverage_known:
+                projection["coverage_complete"] = False
+                projection["total_bytes"] = None
+            json_response(self, {
+                "success": True,
+                "storage_server_id": self.state.server_id,
+                "principal": str(session["username"]),
+                "quota_included": False,
+                "protected_metadata": protected,
+                "protected_measurement_scope": "metadata_only" if protected is not None
+                else "unavailable",
+                "cross_server": projection,
+                **inventory,
+            }, headers={"Cache-Control": "private, no-store"})
             return True
         if self._mihomo_get(parsed):
             return True

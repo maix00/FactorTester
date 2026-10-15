@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import hashlib
+import json
 import os
 import time
 from typing import Any
@@ -30,6 +32,175 @@ def _control_server_id() -> str:
 
 class JobArtifactImplementation:
     """Own artifact lifecycle and quota queries behind JobRepository."""
+
+    _QUOTA_CATEGORY_SQL = """CASE
+        WHEN artifacts.artifact_role='input' THEN
+            'input:' || COALESCE(NULLIF(artifacts.artifact_kind, ''), 'other')
+        WHEN artifacts.name LIKE 'report-output-bundle--%' THEN
+            'output:report-output-bundle'
+        ELSE 'output:' || artifacts.name
+    END"""
+
+    @staticmethod
+    def _cleanup_token(rows: list[Any]) -> str:
+        identity = [
+            [str(row["category"]), str(row["job_id"]), str(row["name"]),
+             str(row["content_hash"]), int(row["size_bytes"])]
+            for row in rows
+        ]
+        return hashlib.sha256(json.dumps(
+            identity, ensure_ascii=False, separators=(",", ":")
+        ).encode("utf-8")).hexdigest()
+
+    def storage_inventory(
+        self, *, owner: str, category: str = "", limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Page one owner's artifact metadata without opening artifact bytes.
+
+        This is deliberately local: global quota totals come from the control
+        store, while each storage server remains authoritative for its files.
+        """
+        limit = max(1, min(int(limit), 100))
+        offset = max(0, int(offset))
+        category = str(category or "").strip()
+        label = self._QUOTA_CATEGORY_SQL
+        with self._connection() as conn:
+            categories = conn.execute(f"""
+                SELECT {label} AS category, artifacts.artifact_role AS role,
+                    COUNT(*) AS artifact_count,
+                    COALESCE(SUM(artifacts.size_bytes), 0) AS bytes
+                FROM research_job_artifacts AS artifacts
+                JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
+                WHERE jobs.owner=? AND artifacts.state='active'
+                GROUP BY category, artifacts.artifact_role
+                ORDER BY bytes DESC, category
+            """, (str(owner),)).fetchall()
+            result: dict[str, Any] = {
+                "categories": [dict(row) for row in categories],
+                "storage_server_id": _control_server_id(),
+                "covered_bytes": sum(int(row["bytes"]) for row in categories),
+            }
+            eligible_rows = conn.execute(f"""
+                SELECT {label} AS category, artifacts.job_id, artifacts.name,
+                    artifacts.content_hash, artifacts.size_bytes
+                FROM research_job_artifacts AS artifacts
+                JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
+                WHERE jobs.owner=? AND artifacts.state='active'
+                  AND artifacts.artifact_role='output'
+                  AND jobs.status IN ({','.join('?' for _ in TERMINAL_STATUSES)})
+                ORDER BY category, artifacts.job_id, artifacts.name
+            """, (str(owner), *(status.value for status in TERMINAL_STATUSES))).fetchall()
+            by_category: dict[str, list[Any]] = {}
+            for row in eligible_rows:
+                by_category.setdefault(str(row["category"]), []).append(row)
+            result["cleanup_categories"] = [
+                {
+                    "category": name, "artifact_count": len(rows),
+                    "job_count": len({row["job_id"] for row in rows}),
+                    "bytes": sum(int(row["size_bytes"]) for row in rows),
+                    "token": self._cleanup_token(rows),
+                }
+                for name, rows in by_category.items()
+            ]
+            result["cleanup_preview"] = {
+                "artifact_count": len(eligible_rows),
+                "job_count": len({row["job_id"] for row in eligible_rows}),
+                "bytes": sum(int(row["size_bytes"]) for row in eligible_rows),
+                "token": self._cleanup_token(eligible_rows),
+            }
+            if category:
+                where = f"jobs.owner=? AND artifacts.state='active' AND {label}=?"
+                args = (str(owner), category)
+                count = conn.execute(f"""
+                    SELECT COUNT(*) AS n FROM research_job_artifacts AS artifacts
+                    JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
+                    WHERE {where}
+                """, args).fetchone()
+                rows = conn.execute(f"""
+                    SELECT artifacts.job_id, artifacts.name, artifacts.artifact_role AS role,
+                        artifacts.size_bytes, artifacts.created_at,
+                        jobs.kind AS job_kind, jobs.status AS job_status,
+                        jobs.workspace_id
+                    FROM research_job_artifacts AS artifacts
+                    JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
+                    WHERE {where}
+                    ORDER BY artifacts.size_bytes DESC, artifacts.job_id, artifacts.name
+                    LIMIT ? OFFSET ?
+                """, (*args, limit, offset)).fetchall()
+                result.update({
+                    "category": category,
+                    "item_count": int(count["n"]),
+                    "items": [dict(row) for row in rows],
+                    "limit": limit,
+                    "offset": offset,
+                })
+        return result
+
+    def mark_cleanup_outputs_deleted(
+        self, *, owner: str, category: str = "",
+        expected_count: int, expected_bytes: int, expected_token: str,
+    ) -> list[dict[str, Any]]:
+        """Atomically clear a previewed set of terminal output artifacts only."""
+        category = str(category or "").strip()
+        if category and not category.startswith("output:"):
+            raise ValueError("only output categories can be cleared")
+        if expected_count < 0 or expected_bytes < 0:
+            raise ValueError("invalid cleanup preview")
+        if len(expected_token) != 64 or any(char not in "0123456789abcdef" for char in expected_token):
+            raise ValueError("invalid cleanup token")
+        label = self._QUOTA_CATEGORY_SQL
+        terminal = tuple(status.value for status in TERMINAL_STATUSES)
+        clauses = ["jobs.owner=?", "artifacts.state='active'",
+                   "artifacts.artifact_role='output'",
+                   f"jobs.status IN ({','.join('?' for _ in terminal)})"]
+        args: list[Any] = [str(owner), *terminal]
+        if category:
+            clauses.append(f"{label}=?")
+            args.append(category)
+        where = " AND ".join(clauses)
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(f"""
+                SELECT artifacts.*, {label} AS category
+                FROM research_job_artifacts AS artifacts
+                JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
+                WHERE {where} ORDER BY category, artifacts.job_id, artifacts.name
+            """, args).fetchall()
+            actual_bytes = sum(int(row["size_bytes"]) for row in rows)
+            if (len(rows) != expected_count or actual_bytes != expected_bytes
+                    or self._cleanup_token(rows) != expected_token):
+                raise ValueError("cleanup preview changed; refresh before deleting")
+            for row in rows:
+                conn.execute("""
+                    UPDATE research_job_artifacts SET state='deleted', deleted_at=?
+                    WHERE job_id=? AND name=? AND state='active'
+                """, (time.time(), row["job_id"], row["name"]))
+        self._reconcile_control_usage(str(owner))
+        return [dict(row) for row in rows]
+
+    def deleted_artifact_files(
+        self, *, owner: str, after_rowid: int = 0, limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """Page tombstoned paths for explicit filesystem cleanup retries."""
+        if after_rowid < 0 or not 1 <= limit <= 1000:
+            raise ValueError("invalid deleted artifact page")
+        with self._connection() as conn:
+            rows = conn.execute("""
+                SELECT artifacts.rowid AS cleanup_rowid, artifacts.relative_path,
+                       artifacts.size_bytes,
+                       EXISTS (
+                           SELECT 1 FROM research_job_artifacts AS active
+                           WHERE active.relative_path=artifacts.relative_path
+                             AND active.state='active'
+                       ) AS active_reference
+                FROM research_job_artifacts AS artifacts
+                JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
+                WHERE jobs.owner=? AND artifacts.state='deleted'
+                  AND artifacts.rowid>?
+                ORDER BY artifacts.rowid LIMIT ?
+            """, (str(owner), after_rowid, limit)).fetchall()
+        return [dict(row) for row in rows]
 
     def record_artifact(
         self,
@@ -416,6 +587,16 @@ class JobArtifactImplementation:
                     "input_artifact_bytes": usage["input_bytes"],
                 }
         return local
+
+    def storage_servers(self, *, owner: str) -> list[dict[str, Any]]:
+        """Return attributed per-server Job snapshots when the control store is up."""
+        control_store = _control_store()
+        if control_store is not None:
+            try:
+                return control_store.usage_by_server(str(owner))
+            except Exception as exc:
+                _LOGGER.warning("global quota per-server read failed: %s", exc)
+        return []
 
     def _local_storage_breakdown(self, owner: str) -> dict[str, int]:
         with self._connection() as conn:

@@ -1281,7 +1281,10 @@ def job_download_all(job_id: str, output: Path | None) -> None:
     if output is None:
         output = job_cache_directory(job_id)
     output = output.expanduser().resolve()
+    output.mkdir(parents=True, exist_ok=True)
     files = []
+    manifest_items = []
+    paths = set()
     size_bytes = 0
     for artifact in client.list_job_artifacts(job_id):
         if str(artifact.get("state") or "active") != "active":
@@ -1290,14 +1293,62 @@ def job_download_all(job_id: str, output: Path | None) -> None:
         if not name:
             continue
         target = artifact_destination(output, artifact)
+        if target in paths:
+            raise click.ClickException("多个附件映射到同一目标文件，停止下载以避免覆盖")
+        paths.add(target)
         receipt = client.job_artifact_to_path(job_id, name, target)
         files.append(target)
         size_bytes += int(receipt["size_bytes"])
+        manifest_items.append({
+            "name": name, "relative_path": str(target.relative_to(output)),
+            "content_hash": receipt["content_hash"],
+            "size_bytes": int(receipt["size_bytes"]),
+            "content_type": receipt.get("content_type") or artifact.get("content_type") or "",
+        })
+    manifest = output / ".job-backup.json"
+    staging = output / ".job-backup.json.part"
+    staging.write_text(_json({
+        "schema_version": 1, "job_id": job_id,
+        "artifacts": manifest_items,
+    }), encoding="utf-8")
+    staging.replace(manifest)
     click.echo(_json({
         "job_id": job_id,
         "path": str(output),
         "files": [str(path) for path in files],
         "size_bytes": size_bytes,
+        "manifest": str(manifest),
+    }))
+
+
+@job.command("verify-backup")
+@click.argument("directory", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@friendly_errors
+def job_verify_backup(directory: Path) -> None:
+    """Verify a downloaded Job backup before deleting its server copies."""
+    root = directory.expanduser().resolve()
+    manifest = json.loads((root / ".job-backup.json").read_text(encoding="utf-8"))
+    if manifest.get("schema_version") != 1 or not isinstance(manifest.get("artifacts"), list):
+        raise click.ClickException("Job 备份清单无效")
+    checked = 0
+    size_bytes = 0
+    for item in manifest["artifacts"]:
+        if not isinstance(item, dict):
+            raise click.ClickException("Job 备份清单条目无效")
+        path = (root / str(item.get("relative_path") or "")).resolve()
+        if root not in path.parents or not path.is_file():
+            raise click.ClickException(f"备份附件缺失或路径越界: {item.get('name')}")
+        if path.stat().st_size != int(item.get("size_bytes", -1)):
+            raise click.ClickException(f"备份附件大小不符: {item.get('name')}")
+        with path.open("rb") as source:
+            digest = hashlib.file_digest(source, "sha256").hexdigest()
+        if digest != str(item.get("content_hash") or ""):
+            raise click.ClickException(f"备份附件校验失败: {item.get('name')}")
+        checked += 1
+        size_bytes += path.stat().st_size
+    click.echo(_json({
+        "verified": True, "job_id": manifest.get("job_id"),
+        "artifact_count": checked, "size_bytes": size_bytes,
     }))
 
 
@@ -1396,6 +1447,89 @@ def job_clear_history(current_workspace: bool) -> None:
 
 
 @job.command("storage")
+@click.option("--category", default="", help="列出此类附件，类别来自无参数的分类清单。")
+@click.option("--limit", default=50, type=click.IntRange(1, 100), show_default=True)
+@click.option("--offset", default=0, type=click.IntRange(min=0), show_default=True)
+@click.option("--profile", is_flag=True, help="查看当前 Manager 的报告、上传与 Profile 工作区占用（尚未计入 Job 配额）。")
 @friendly_errors
-def job_storage() -> None:
-    click.echo(_json(client_from_config().job_storage()))
+def job_storage(category: str, limit: int, offset: int, profile: bool) -> None:
+    client = client_from_config()
+    if profile:
+        if category:
+            raise click.ClickException("--profile 与 --category 不能同时使用")
+        click.echo(_json(client.profile_storage()))
+    else:
+        click.echo(_json(client.job_storage(
+            category=category, limit=limit, offset=offset,
+        )))
+
+
+@job.command("cleanup")
+@click.option("--category", default="", help="只清理指定的输出类别；省略则清理所有可清理输出。")
+@click.option("--yes", is_flag=True, help="确认执行；省略时只预览。")
+@friendly_errors
+def job_cleanup(category: str, yes: bool) -> None:
+    client = client_from_config()
+    inventory = client.job_storage(category=category)
+    if category and not category.startswith("output:"):
+        raise click.ClickException("只能清理输出类别")
+    categories = inventory.get("cleanup_categories") or []
+    preview = (next((item for item in categories if item["category"] == category), None)
+               if category else inventory.get("cleanup_preview"))
+    preview = preview or {"artifact_count": 0, "bytes": 0}
+    result = {
+        "category": category or "all_eligible_outputs",
+        "artifact_count": int(preview["artifact_count"]),
+        "job_count": int(preview.get("job_count") or 0),
+        "bytes": int(preview["bytes"]),
+        "token": str(preview.get("token") or ""),
+        "warning": "清理已结束 Job 的输出可能使报告挂载的实时结果详情失效；输入与基础资料保留",
+    }
+    if not yes or not result["artifact_count"]:
+        click.echo(_json({"dry_run": True, **result}))
+        return
+    click.echo(_json({"dry_run": False, **result,
+                      **client.cleanup_job_outputs(
+                          category=category,
+                          server_id=str(inventory.get("storage_server_id") or ""),
+                          expected_count=result["artifact_count"],
+                          expected_bytes=result["bytes"],
+                          expected_token=result["token"],
+                      )}))
+
+
+@job.command("delete-artifact")
+@click.argument("job_id")
+@click.argument("name")
+@click.option("--yes", is_flag=True, help="确认删除此单个输出附件；省略时只预览。")
+@friendly_errors
+def job_delete_artifact(job_id: str, name: str, yes: bool) -> None:
+    client = client_from_config()
+    artifact = next((item for item in client.list_job_artifacts(job_id)
+                     if item.get("name") == name and item.get("state") == "active"), None)
+    if artifact is None:
+        raise click.ClickException("附件不存在或已经删除")
+    if str(artifact.get("role") or artifact.get("artifact_role") or "output") != "output":
+        raise click.ClickException("提交输入不能单独删除")
+    preview = {
+        "job_id": job_id, "name": name,
+        "size_bytes": int(artifact.get("size_bytes") or 0),
+        "warning": "如研究报告挂载此 Job，删除后对应详细结果可能无法显示；Job 摘要仍保留",
+    }
+    if not yes:
+        click.echo(_json({"dry_run": True, **preview}))
+        return
+    click.echo(_json({"dry_run": False, **preview, **client.delete_job_artifact(job_id, name)}))
+
+
+@job.command("prune-files")
+@click.option("--after", default=0, type=click.IntRange(min=0), show_default=True,
+              help="从上次返回的 next_after 继续扫描。")
+@click.option("--yes", is_flag=True, help="确认重试删除已清理附件残留的磁盘文件。")
+@friendly_errors
+def job_prune_files(after: int, yes: bool) -> None:
+    if not yes:
+        click.echo(_json({"dry_run": True, "after": after,
+                          "warning": "仅重试已标记删除的 Job 附件文件；加 --yes 执行"}))
+        return
+    click.echo(_json(client_from_config().retry_job_file_cleanup(after=after)))

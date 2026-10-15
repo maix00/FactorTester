@@ -14,6 +14,7 @@ from server.manager.services.profile_directory import (
     PROFILE_DIRECTORY_PRINCIPAL,
     ProfileDirectoryService,
 )
+from server.manager.services.profile_storage_inventory import scan_profile_storage
 from tools.cli.release.research_reporting.public_research.object_store import (
     PublicResearchObjectStore,
 )
@@ -72,6 +73,13 @@ class FederationPublicDataRoutesMixin:
         payload: dict[str, object],
     ) -> dict[str, object]:
         viewer = None if principal == VISITOR_PRINCIPAL else principal
+        if kind == "storage" and operation == "profile-inventory":
+            if viewer is None:
+                raise PermissionError("Profile storage requires an account identity")
+            return {
+                "storage_server_id": self.state.server_id,
+                **scan_profile_storage(self.state.data_root, viewer),
+            }
         if kind == "research":
             return self._research_data_value(operation, viewer, payload)
         if kind == "job-artifacts":

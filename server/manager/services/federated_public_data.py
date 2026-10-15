@@ -144,6 +144,55 @@ class FederatedPublicDataService(FederatedPeerReadMixin):
             known.add(server_id)
         return routes
 
+    def profile_storage_peers(self, principal: str) -> list[dict[str, Any]]:
+        """Read principal-scoped Profile usage through existing peer control RPC.
+
+        An unreachable peer remains visible as stale/unavailable rather than
+        contributing a fabricated zero to the cross-server total.
+        """
+        owner = str(principal or "").strip()
+        if not owner or owner == VISITOR_PRINCIPAL:
+            raise ValueError("Profile storage requires an account identity")
+        known: set[str] = set()
+        try:
+            known.update(
+                str(item.get("server_id") or "").strip()
+                for item in self.registry.servers(include_offline=True)
+                if isinstance(item, dict)
+            )
+        except (AttributeError, OSError, TypeError, ValueError):
+            pass
+        known.update(route.server_id for route in self._peer_routes())
+        known.discard("")
+        known.discard(self.server_id)
+        responses = self._query_peers(
+            kind="storage", operation="profile-inventory", principal=owner,
+        )
+        fresh: dict[str, dict[str, Any]] = {}
+        for route, response in responses:
+            if str(response.get("storage_server_id") or "") != route.server_id:
+                continue
+            if not isinstance(response.get("categories"), dict):
+                continue
+            fresh[route.server_id] = response
+            known.add(route.server_id)
+            self._store(("profile-storage-peer", owner, route.server_id), response)
+        result: list[dict[str, Any]] = []
+        for server_id in sorted(known):
+            value = fresh.get(server_id)
+            status = "current"
+            if value is None:
+                value = self._stale_cached(
+                    ("profile-storage-peer", owner, server_id)
+                )
+                status = "stale" if value is not None else "unavailable"
+            result.append({
+                "storage_server_id": server_id,
+                "status": status,
+                "inventory": dict(value) if value is not None else None,
+            })
+        return result
+
     def invalidate_research_cache(self) -> None:
         """Drop cached research listings after a local publication mutation."""
         with self._lock:

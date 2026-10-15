@@ -1,8 +1,54 @@
 import Foundation
+import CryptoKit
 import XCTest
 @testable import FTClient
 
 final class TestJobsServiceTests: XCTestCase {
+    func testVerifiedJobBackupIsScopedAndRejectsTampering() throws {
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let bytes = Data("job output".utf8)
+        let digest = SHA256.hash(data: bytes)
+            .map { String(format: "%02x", $0) }.joined()
+        let artifact = TestJobArtifact(
+            id: "result", name: "result", description: "",
+            sizeBytes: bytes.count, state: "deleted",
+            contentType: "text/plain", serverFileName: "result.txt",
+            contentHash: digest
+        )
+        let manager = try XCTUnwrap(URL(string: "https://manager.example:7998"))
+        let root = try TestJobBackupStore.save(
+            principal: "alice", managerURL: manager,
+            storageServerID: "data-a", jobID: "job-1",
+            downloads: [.init(artifact: artifact, data: bytes)],
+            baseDirectory: temporary
+        )
+        XCTAssertTrue(TestJobBackupStore.hasBackup(
+            principal: "alice", managerURL: manager, jobID: "job-1",
+            artifact: artifact, baseDirectory: temporary
+        ))
+        XCTAssertEqual(try TestJobBackupStore.data(
+            principal: "alice", managerURL: manager, jobID: "job-1",
+            artifact: artifact, baseDirectory: temporary
+        ), bytes)
+        XCTAssertFalse(TestJobBackupStore.hasBackup(
+            principal: "bob", managerURL: manager, jobID: "job-1",
+            artifact: artifact, baseDirectory: temporary
+        ))
+        XCTAssertFalse(TestJobBackupStore.hasBackup(
+            principal: "alice", managerURL: URL(string: "https://other.example:7998"),
+            jobID: "job-1", artifact: artifact, baseDirectory: temporary
+        ))
+        let manifestData = try Data(contentsOf: root.appendingPathComponent("backup.json"))
+        let manifest = try JSONDecoder().decode(TestJobBackupStore.Manifest.self, from: manifestData)
+        let file = try XCTUnwrap(manifest.items.first?.file)
+        try Data("tampered".utf8).write(to: root.appendingPathComponent(file))
+        XCTAssertThrowsError(try TestJobBackupStore.data(
+            principal: "alice", managerURL: manager, jobID: "job-1",
+            artifact: artifact, baseDirectory: temporary
+        ))
+    }
     func testArtifactTransferAccessRequiresHTTPURLAndCapability() throws {
         let data = Data(#"{"access":{"url":"https://factor.example:7997/v1/transfers/a/download","bearer":"capability","expected_size":6}}"#.utf8)
 

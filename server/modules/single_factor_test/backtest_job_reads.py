@@ -842,12 +842,26 @@ def get_job_storage():
         owner=owner,
         default_bytes=default_user_quota_bytes(),
     )
+    try:
+        inventory = job_repository.storage_inventory(
+            owner=owner,
+            category=str(request.args.get("category") or ""),
+            limit=int(request.args.get("limit") or 50),
+            offset=int(request.args.get("offset") or 0),
+        )
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "invalid storage page"}), 400
     return jsonify({
         "success": True,
         "usage_bytes": usage,
         "quota_bytes": quota,
         "over_quota": usage > quota,
         **breakdown,
+        **inventory,
+        "servers": job_repository.storage_servers(owner=owner),
+        "unattributed_bytes": max(0, usage - inventory["covered_bytes"]),
+        "quota_scope": "job_artifacts",
+        "excluded_scopes": ["research_reports", "profile_workspaces"],
     })
 
 
