@@ -104,7 +104,7 @@ def job_storage_response(
         except (TypeError, ValueError):
             return _response({"success": False, "error": "invalid storage page"}, 400)
         breakdown = repo.storage_breakdown(owner=owner)
-        usage = int(breakdown["artifact_bytes"])
+        usage = repo.storage_usage(owner=owner, job_bytes=breakdown["artifact_bytes"])
         quota = repo.storage_quota(
             owner=owner, default_bytes=default_user_quota_bytes(),
         )
@@ -112,9 +112,9 @@ def job_storage_response(
             "success": True, "usage_bytes": usage, "quota_bytes": quota,
             "over_quota": usage > quota, **breakdown, **inventory,
             "servers": repo.storage_servers(owner=owner),
-            "unattributed_bytes": max(0, usage - inventory["covered_bytes"]),
-            "quota_scope": "job_artifacts",
-            "excluded_scopes": ["research_reports", "profile_workspaces"],
+            "unattributed_bytes": max(0, breakdown["artifact_bytes"] - inventory["covered_bytes"]),
+            "quota_scope": "measured_account_storage",
+            "excluded_scopes": [],
         })
     cleanup = query.get("cleanup", [""])[0]
     if cleanup not in {"", "eligible", "retry-files"}:

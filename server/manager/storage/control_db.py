@@ -15,6 +15,7 @@ uses the remote PostgreSQL database over TCP (5432 by default).
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import threading
@@ -32,7 +33,7 @@ CONTROL_DATABASE_ENV = "FACTORTESTER_CONTROL_DATABASE_URL"
 DEFAULT_CONTROL_DATABASE_PORT = 5432
 DEFAULT_CONTROL_DATABASE_SSLMODE = "require"
 DEFAULT_CONTROL_DATABASE_TIMEOUT = 5
-CONTROL_DATABASE_SCHEMA_VERSION = 8
+CONTROL_DATABASE_SCHEMA_VERSION = 9
 CONTROL_DATABASE_ENCODING = "UTF8"
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40,64}$")
 _CONTENT_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -449,6 +450,24 @@ CONTROL_SCHEMA: tuple[str, ...] = (
     )
     """,
     "CREATE INDEX IF NOT EXISTS quota_server_usage_principal ON quota_server_usage(principal)",
+    """
+    CREATE TABLE IF NOT EXISTS quota_profile_usage (
+        server_id TEXT NOT NULL,
+        principal TEXT NOT NULL,
+        research_reports_bytes BIGINT NOT NULL,
+        profile_uploads_bytes BIGINT NOT NULL,
+        profile_workspaces_bytes BIGINT NOT NULL,
+        research_reports_count BIGINT NOT NULL,
+        profile_uploads_count BIGINT NOT NULL,
+        profile_workspaces_count BIGINT NOT NULL,
+        observed_at TIMESTAMPTZ NOT NULL,
+        PRIMARY KEY (server_id, principal),
+        CHECK (research_reports_bytes >= 0),
+        CHECK (profile_uploads_bytes >= 0),
+        CHECK (profile_workspaces_bytes >= 0)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS quota_profile_usage_principal ON quota_profile_usage(principal)",
     "CREATE INDEX IF NOT EXISTS quota_reservations_principal_status ON quota_reservations(principal, status)",
     "ALTER TABLE quota_server_usage ADD COLUMN IF NOT EXISTS artifact_count BIGINT NOT NULL DEFAULT 0",
     "ALTER TABLE quota_server_usage ADD COLUMN IF NOT EXISTS input_count BIGINT NOT NULL DEFAULT 0",
@@ -1276,6 +1295,29 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
             ).fetchone()
         return self._usage_dict(row)
 
+    @staticmethod
+    def _unified_usage_sql() -> str:
+        return """
+            SELECT
+              COALESCE((SELECT SUM(artifact_bytes) FROM quota_server_usage
+                        WHERE principal=%s), 0)
+              + COALESCE((SELECT SUM(research_reports_bytes + profile_uploads_bytes
+                                     + profile_workspaces_bytes)
+                          FROM quota_profile_usage WHERE principal=%s), 0)
+              + COALESCE((SELECT SUM(OCTET_LENGTH(payload::text))
+                          FROM control_account_domain_entities
+                          WHERE principal=%s AND NOT deleted), 0) AS used_bytes
+        """
+
+    def unified_usage_bytes(self, principal: str) -> int:
+        """Meter all currently known server and account-domain storage."""
+        self.ensure_schema()
+        with self._connection() as connection:
+            row = connection.execute(
+                self._unified_usage_sql(), (str(principal),) * 3,
+            ).fetchone()
+        return max(0, int(_row_value(row, "used_bytes", 0, 0) or 0))
+
     def usage_by_server(self, principal: str) -> list[dict[str, Any]]:
         """Read existing Job quota snapshots with their observation times."""
         with self._connection() as connection:
@@ -1304,8 +1346,89 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
             })
         return result
 
+    def record_profile_usage(
+        self, *, server_id: str, principal: str, inventory: Mapping[str, Any],
+    ) -> None:
+        """Keep the last complete local scan for use while its server is offline."""
+        categories = inventory.get("categories")
+        names = ("research_reports", "profile_uploads", "profile_workspaces")
+        if not server_id or not principal or not isinstance(categories, Mapping) or set(categories) != set(names):
+            raise ValueError("invalid Profile storage identity or categories")
+        sizes = []
+        counts = []
+        for name in names:
+            value = categories[name]
+            if not isinstance(value, Mapping):
+                raise ValueError("invalid Profile storage category")
+            size, count = value.get("bytes"), value.get("file_count")
+            if type(size) is not int or size < 0 or type(count) is not int or count < 0:
+                raise ValueError("invalid Profile storage category")
+            sizes.append(size)
+            counts.append(count)
+        observed = inventory.get("observed_at")
+        if (type(observed) not in (int, float) or not math.isfinite(observed)
+                or observed <= 0
+                or type(inventory.get("bytes")) is not int
+                or sum(sizes) != inventory["bytes"]):
+            raise ValueError("incomplete Profile storage inventory")
+        self.ensure_schema()
+        with self._connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO quota_profile_usage (
+                    server_id, principal, research_reports_bytes,
+                    profile_uploads_bytes, profile_workspaces_bytes,
+                    research_reports_count, profile_uploads_count,
+                    profile_workspaces_count, observed_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, to_timestamp(%s))
+                ON CONFLICT(server_id, principal) DO UPDATE SET
+                    research_reports_bytes=EXCLUDED.research_reports_bytes,
+                    profile_uploads_bytes=EXCLUDED.profile_uploads_bytes,
+                    profile_workspaces_bytes=EXCLUDED.profile_workspaces_bytes,
+                    research_reports_count=EXCLUDED.research_reports_count,
+                    profile_uploads_count=EXCLUDED.profile_uploads_count,
+                    profile_workspaces_count=EXCLUDED.profile_workspaces_count,
+                    observed_at=EXCLUDED.observed_at
+                WHERE quota_profile_usage.observed_at <= EXCLUDED.observed_at
+                """,
+                (str(server_id), str(principal), *sizes, *counts, float(observed)),
+            )
+
+    def profile_usage_by_server(self, principal: str) -> list[dict[str, Any]]:
+        """Return only servers for which a complete Profile scan was saved."""
+        self.ensure_schema()
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT server_id, research_reports_bytes, profile_uploads_bytes,
+                       profile_workspaces_bytes, research_reports_count,
+                       profile_uploads_count, profile_workspaces_count,
+                       observed_at
+                FROM quota_profile_usage WHERE principal=%s ORDER BY server_id
+                """, (str(principal),),
+            ).fetchall()
+        result = []
+        for row in rows:
+            categories = {}
+            for index, name in enumerate(("research_reports", "profile_uploads", "profile_workspaces")):
+                categories[name] = {
+                    "bytes": max(0, int(_row_value(row, f"{name}_bytes", index + 1, 0) or 0)),
+                    "file_count": max(0, int(_row_value(row, f"{name}_count", index + 4, 0) or 0)),
+                }
+            observed = _row_value(row, "observed_at", 7)
+            result.append({
+                "storage_server_id": str(_row_value(row, "server_id", 0, "") or ""),
+                "status": "last_observed",
+                "inventory": {
+                    "categories": categories,
+                    "bytes": sum(item["bytes"] for item in categories.values()),
+                    "observed_at": observed.isoformat() if hasattr(observed, "isoformat") else str(observed or ""),
+                },
+            })
+        return result
+
     def protected_entity_metadata_usage(self, principal: str) -> dict[str, dict[str, int]]:
-        """Measure authoritative active factor/product JSON metadata only.
+        """Measure authoritative active account-domain JSON metadata.
 
         Source bodies and Profile files are separate storage authorities; this
         read-only query cannot be presented as their physical disk usage.
@@ -1317,23 +1440,22 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
                        COALESCE(SUM(OCTET_LENGTH(payload::text)), 0) AS bytes
                 FROM control_account_domain_entities
                 WHERE principal=%s AND NOT deleted
-                  AND entity_type IN (
-                      'factor_family', 'factor_source', 'factor_source_version',
-                      'factor_param_config', 'factor_set', 'factor_set_event',
-                      'factor_set_head', 'product_group', 'product_category'
-                  )
                 GROUP BY entity_type
                 """, (str(principal),),
             ).fetchall()
         result = {
             "factors": {"bytes": 0, "item_count": 0},
             "product_groups": {"bytes": 0, "item_count": 0},
+            "strategies": {"bytes": 0, "item_count": 0},
+            "other": {"bytes": 0, "item_count": 0},
         }
         for row in rows:
-            category = (
-                "product_groups" if str(_row_value(row, "entity_type", 0, ""))
-                in {"product_group", "product_category"} else "factors"
-            )
+            entity_type = str(_row_value(row, "entity_type", 0, ""))
+            category = ("product_groups" if entity_type in
+                        {"product_group", "product_category"} else
+                        "factors" if entity_type.startswith("factor_") else
+                        "strategies" if entity_type.startswith("strategy_") else
+                        "other")
             result[category]["bytes"] += max(
                 0, int(_row_value(row, "bytes", 2, 0) or 0)
             )
@@ -1396,11 +1518,7 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
                     "error": "quota reservation is no longer active",
                 }
             usage = connection.execute(
-                """
-                SELECT COALESCE(SUM(artifact_bytes), 0) AS artifact_bytes
-                FROM quota_server_usage WHERE principal=%s
-                """,
-                (owner,),
+                self._unified_usage_sql(), (owner,) * 3,
             ).fetchone()
             reserved = connection.execute(
                 """
@@ -1411,7 +1529,7 @@ class PostgresControlStore(AccountDomainControlMixin, VisitorAccessControlMixin)
                 (owner,),
             ).fetchone()
             quota = self.quota_bytes(owner, default_bytes=default_quota_bytes)
-            current = int(_row_value(usage, "artifact_bytes", 0, 0) or 0)
+            current = int(_row_value(usage, "used_bytes", 0, 0) or 0)
             current += int(_row_value(reserved, "reserved_bytes", 0, 0) or 0)
             decision = quota_decision(
                 current_bytes=current,

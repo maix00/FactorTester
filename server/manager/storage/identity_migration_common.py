@@ -55,6 +55,7 @@ POSTGRES_USER_REFERENCES: tuple[tuple[str, str], ...] = (
     ("source_versions", "principal"),
     ("quota_policies", "principal"),
     ("quota_server_usage", "principal"),
+    ("quota_profile_usage", "principal"),
     ("quota_reservations", "principal"),
     ("control_levels", "manager_username"),
 )

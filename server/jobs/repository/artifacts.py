@@ -660,8 +660,16 @@ class JobArtifactImplementation:
         self._reconcile_control_usage(str(owner))
         return job_ids, [dict(row) for row in artifacts]
 
-    def storage_usage(self, *, owner: str) -> int:
-        return self.storage_breakdown(owner=owner)["artifact_bytes"]
+    def storage_usage(self, *, owner: str, job_bytes: int | None = None) -> int:
+        if job_bytes is None:
+            job_bytes = self.storage_breakdown(owner=owner)["artifact_bytes"]
+        control_store = _control_store()
+        if control_store is not None:
+            try:
+                return control_store.unified_usage_bytes(str(owner))
+            except Exception as exc:
+                _LOGGER.warning("unified quota usage unavailable: %s", exc)
+        return job_bytes
 
     def storage_breakdown(self, *, owner: str) -> dict[str, int]:
         """Return active retained bytes split into submitted inputs and outputs."""
