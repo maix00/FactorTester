@@ -1,7 +1,7 @@
 (() => {
   function create(options) {
     const {
-      state, content, title, eyebrow, toolbar, notice,
+      state, content, title, eyebrow, toolbar,
       persistSession, restoreSession, removeSession,
     } = options;
     const onTabEvicted = options.onTabEvicted;
@@ -328,7 +328,6 @@
       const snapshot = {
         title: view.title || "",
         eyebrow: view.eyebrow || "",
-        notice: view.notice || null,
         navRoute: view.navRoute || "",
         scrollY: Number(session.scrollY || 0),
         contentControls: captureControlState(view.content),
@@ -357,9 +356,6 @@
         parkToolbar(view, toolbar);
         view.title = title?.textContent || "";
         view.eyebrow = eyebrow?.textContent || "";
-        view.notice = notice ? {
-          text: notice.textContent || "", color: notice.style?.color || "",
-        } : null;
         view.navRoute = activeNavRoute(state.activeTabID);
         view.ready = session.viewReady !== false;
         view.lastUsedAt = nextActivityAt();
@@ -379,9 +375,6 @@
         content.replaceChildren();
         view.title = title?.textContent || "";
         view.eyebrow = eyebrow?.textContent || "";
-        view.notice = notice ? {
-          text: notice.textContent || "", color: notice.style?.color || "",
-        } : null;
         view.navRoute = activeNavRoute(state.activeTabID);
         view.rerenderOnRestore = true;
         view.ready = false;
@@ -400,9 +393,6 @@
       parkToolbar(view, toolbar);
       view.title = title?.textContent || "";
       view.eyebrow = eyebrow?.textContent || "";
-      view.notice = notice ? {
-        text: notice.textContent || "", color: notice.style?.color || "",
-      } : null;
       view.navRoute = activeNavRoute(state.activeTabID);
       view.ready = session.viewReady !== false;
       view.lastUsedAt = nextActivityAt();
@@ -422,10 +412,6 @@
         restoreChildren(toolbar, view.toolbar);
         if (title && view.title) title.textContent = view.title;
         if (eyebrow && view.eyebrow) eyebrow.textContent = view.eyebrow;
-        if (notice && view.notice) {
-          notice.textContent = view.notice.text;
-          notice.style.color = view.notice.color;
-        }
         restoreActiveNav(view.navRoute);
         restoreOverlays(tabID, session);
         restorePageAgent(tabID);
@@ -454,10 +440,6 @@
       restoreChildren(toolbar, view.toolbar);
       if (title && view.title) title.textContent = view.title;
       if (eyebrow && view.eyebrow) eyebrow.textContent = view.eyebrow;
-      if (notice && view.notice) {
-        notice.textContent = view.notice.text;
-        notice.style.color = view.notice.color;
-      }
       restoreActiveNav(view.navRoute);
       restoreOverlays(tabID, session);
       restorePageAgent(tabID);
@@ -500,10 +482,6 @@
       restoreControlState(toolbar, snapshot.toolbarControls);
       if (title) title.textContent = snapshot.title || title.textContent;
       if (eyebrow) eyebrow.textContent = snapshot.eyebrow || eyebrow.textContent;
-      if (notice && snapshot.notice) {
-        notice.textContent = snapshot.notice.text || "";
-        notice.style.color = snapshot.notice.color || "";
-      }
       restoreActiveNav(snapshot.navRoute);
       deleteColdView(state.activeTabID);
       delete view.coldKey;
@@ -563,7 +541,6 @@
         durable: session.durable || {},
         title: title?.textContent || "",
         eyebrow: eyebrow?.textContent || "",
-        notice: notice ? {text: notice.textContent || "", color: notice.style?.color || ""} : null,
         navRoute: activeNavRoute(state.activeTabID),
         contentControls: captureControlState(content),
         toolbarControls: captureControlState(toolbar),

@@ -189,7 +189,30 @@ main { min-width: 0; }
 .product-catalog-tabs .product-header-tab:not(.active):hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .content { width: 100%; min-width: 0; max-width: none; padding: 28px var(--page-inline-padding); margin: 0; }
 .module-frame { display: block; width: 100%; min-height: calc(100vh - 144px); border: 0; background: var(--panel); }
-.notice { margin: 12px 28px 0; padding: 10px 12px; border-radius: 8px; background: #fff3cd; }
+.notice-stack {
+  position: fixed; top: 12px; left: 50%; z-index: 100001;
+  transform: translateX(-50%); width: min(560px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 8px;
+  pointer-events: none;
+}
+.notice-item {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 11px 12px 11px 14px; border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: 10px;
+  background: var(--panel); color: var(--text);
+  box-shadow: 0 8px 24px #0002; pointer-events: auto;
+}
+.notice-item.is-error { border-left-color: var(--danger); }
+.notice-item-text { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.notice-item-close {
+  flex: none; width: 24px; height: 24px; padding: 0; border: 0;
+  border-radius: 6px; background: transparent; color: var(--muted);
+  font-size: 20px; line-height: 1; cursor: pointer;
+}
+.notice-item-close:hover, .notice-item-close:focus-visible {
+  background: var(--soft); color: var(--text);
+}
 .ft-hover-tooltip {
   position: fixed; z-index: 100000; max-width: min(320px, calc(100vw - 16px));
   padding: 7px 11px; border-radius: 9px; background: #151515; color: #fff;

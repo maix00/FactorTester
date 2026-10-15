@@ -3,7 +3,7 @@
     const {
       state, embeddedPresentation, t, renderRoute,
       modulePath, isPinnedPath, titleForPath, tabIcon,
-      content, title, eyebrow, toolbar, notice, beforeTabChange,
+      content, title, eyebrow, toolbar, beforeTabChange,
       liveViewLimit,
       onTabClosed,
       onTabEvicted,
@@ -14,7 +14,7 @@
     let checkpointTimer = null;
     let draggingTabID = "";
     const viewCache = window.FTTabViewCache.create({
-      state, content, title, eyebrow, toolbar, notice,
+      state, content, title, eyebrow, toolbar,
       persistSession: (tabID, value) => workspace?.saveSession?.(tabID, value),
       restoreSession: tabID => workspace?.restoreSession?.(tabID),
       removeSession: tabID => workspace?.removeSession?.(tabID),
