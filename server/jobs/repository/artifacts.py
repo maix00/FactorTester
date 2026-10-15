@@ -179,6 +179,29 @@ class JobArtifactImplementation:
         self._reconcile_control_usage(str(owner))
         return [dict(row) for row in rows]
 
+    def deleted_artifact_files(
+        self, *, owner: str, after_rowid: int = 0, limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """Page tombstoned paths for explicit filesystem cleanup retries."""
+        if after_rowid < 0 or not 1 <= limit <= 1000:
+            raise ValueError("invalid deleted artifact page")
+        with self._connection() as conn:
+            rows = conn.execute("""
+                SELECT artifacts.rowid AS cleanup_rowid, artifacts.relative_path,
+                       artifacts.size_bytes,
+                       EXISTS (
+                           SELECT 1 FROM research_job_artifacts AS active
+                           WHERE active.relative_path=artifacts.relative_path
+                             AND active.state='active'
+                       ) AS active_reference
+                FROM research_job_artifacts AS artifacts
+                JOIN research_jobs AS jobs ON jobs.job_id=artifacts.job_id
+                WHERE jobs.owner=? AND artifacts.state='deleted'
+                  AND artifacts.rowid>?
+                ORDER BY artifacts.rowid LIMIT ?
+            """, (str(owner), after_rowid, limit)).fetchall()
+        return [dict(row) for row in rows]
+
     def record_artifact(
         self,
         *,

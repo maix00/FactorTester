@@ -244,6 +244,11 @@ class JobsClientMixin(ClientMixinBase):
             self.session.get("/api/storage/profile-inventory")
         )
 
+    def retry_job_file_cleanup(self, *, after: int = 0) -> dict[str, Any]:
+        return self._expect_success(self.session.delete(
+            "/api/jobs/artifacts", query={"cleanup": "retry-files", "after": after},
+        ))
+
     def stream_job_id(self, job_id: str, *, after: int = 0):
         query = {"after": after} if after else None
         yield from self.session.stream_get(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import time
+from pathlib import Path
 
 from flask import Flask
 import orjson
@@ -626,6 +627,83 @@ def test_artifact_cleanup_only_removes_expired_staging_files(tmp_path) -> None:
     assert not old.exists()
     assert recent.is_file()
     assert retained.is_file()
+
+
+def test_preview_cleanup_reports_failed_unlink_and_can_retry(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+    repository = JobRepository()
+    _create_job(repository, job_id="retry-job", status=JobStatus.RUNNING)
+    target = tmp_path / "artifacts" / "retry-job" / "result.json"
+    target.parent.mkdir(parents=True)
+    raw = b'{"result":true}'
+    target.write_bytes(raw)
+    repository.record_artifact(
+        job_id="retry-job", name="result", relative_path="retry-job/result.json",
+        content_type="application/json", content_hash=hashlib.sha256(raw).hexdigest(),
+        size_bytes=len(raw),
+    )
+    repository.transition("retry-job", JobStatus.SUCCEEDED,
+                          result_summary={"success": True})
+    preview = client.get("/api/jobs/storage").get_json()["cleanup_preview"]
+    real_unlink = Path.unlink
+    def fail_once(path, *args, **kwargs):
+        if path == target:
+            raise PermissionError("busy")
+        return real_unlink(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "unlink", fail_once)
+    query = (f"/api/jobs/artifacts?cleanup=eligible&expected_count=1"
+             f"&expected_bytes={len(raw)}&expected_token={preview['token']}")
+    cleared = client.delete(query)
+    assert cleared.status_code == 200
+    assert cleared.get_json()["failed_files"] == 1
+    assert cleared.get_json()["disk_removed_bytes"] == 0
+    assert target.is_file()
+    monkeypatch.setattr(Path, "unlink", real_unlink)
+    retried = client.delete("/api/jobs/artifacts?cleanup=retry-files")
+    assert retried.status_code == 200
+    assert retried.get_json()["deleted_files"] == 1
+    assert retried.get_json()["disk_removed_bytes"] == len(raw)
+    assert not target.exists()
+
+
+def test_retry_cleanup_preserves_path_still_referenced_by_active_artifact(
+    tmp_path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+    repository = JobRepository()
+    for job_id, owner in (("old-job", "alice"), ("new-job", "bob")):
+        _create_job(repository, job_id=job_id, owner=owner,
+                    status=JobStatus.RUNNING)
+    target = tmp_path / "artifacts" / "shared" / "result.json"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"shared")
+    for job_id in ("old-job", "new-job"):
+        repository.record_artifact(
+            job_id=job_id, name="result", relative_path="shared/result.json",
+            content_type="application/json",
+            content_hash=hashlib.sha256(b"shared").hexdigest(), size_bytes=6,
+        )
+    repository.transition("old-job", JobStatus.SUCCEEDED,
+                          result_summary={"success": True})
+    repository.mark_artifact_deleted(job_id="old-job", owner="alice", name="result")
+    response = client.delete("/api/jobs/artifacts?cleanup=retry-files")
+    assert response.status_code == 200
+    assert response.get_json()["deleted_files"] == 0
+    assert target.is_file()
 
 
 def test_terminal_job_stream_resets_when_daemon_lost_live_event_state(tmp_path, monkeypatch) -> None:

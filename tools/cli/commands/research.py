@@ -1520,3 +1520,16 @@ def job_delete_artifact(job_id: str, name: str, yes: bool) -> None:
         click.echo(_json({"dry_run": True, **preview}))
         return
     click.echo(_json({"dry_run": False, **preview, **client.delete_job_artifact(job_id, name)}))
+
+
+@job.command("prune-files")
+@click.option("--after", default=0, type=click.IntRange(min=0), show_default=True,
+              help="从上次返回的 next_after 继续扫描。")
+@click.option("--yes", is_flag=True, help="确认重试删除已清理附件残留的磁盘文件。")
+@friendly_errors
+def job_prune_files(after: int, yes: bool) -> None:
+    if not yes:
+        click.echo(_json({"dry_run": True, "after": after,
+                          "warning": "仅重试已标记删除的 Job 附件文件；加 --yes 执行"}))
+        return
+    click.echo(_json(client_from_config().retry_job_file_cleanup(after=after)))

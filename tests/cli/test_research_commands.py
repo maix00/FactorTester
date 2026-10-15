@@ -1648,6 +1648,23 @@ def test_job_storage_profile_reports_separate_unmetered_inventory(monkeypatch) -
     assert invalid.exit_code != 0
 
 
+def test_job_prune_files_requires_explicit_confirmation(monkeypatch) -> None:
+    class StorageClient:
+        def retry_job_file_cleanup(self, *, after):
+            self.after = after
+            return {"success": True, "deleted_files": 1, "next_after": None}
+
+    fake = StorageClient()
+    monkeypatch.setattr("tools.cli.commands.research.client_from_config", lambda: fake)
+    preview = CliRunner().invoke(cli, ["job", "prune-files"])
+    assert preview.exit_code == 0, preview.output
+    assert json.loads(preview.output)["dry_run"] is True
+    assert not hasattr(fake, "after")
+    retried = CliRunner().invoke(cli, ["job", "prune-files", "--yes", "--after", "42"])
+    assert retried.exit_code == 0, retried.output
+    assert fake.after == 42
+
+
 def test_cli_restores_historical_run_and_bulk_clears_current_workspace(tmp_path, monkeypatch) -> None:
     fake = FakeClient()
     monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))

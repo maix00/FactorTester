@@ -6,6 +6,7 @@ from copy import deepcopy
 import os
 import time
 import uuid
+from pathlib import Path
 
 from flask import jsonify, request
 
@@ -47,6 +48,39 @@ from server.services.transient_strategy_sources import (
 )
 
 
+def _remove_retained_files(root: Path, rows: list[dict]) -> dict[str, int]:
+    """Remove only paths below the artifact root and report filesystem reality.
+
+    Metadata tombstones remain available for an explicit retry if unlink fails.
+    `disk_removed_bytes` is logical file length, not reclaimed filesystem blocks.
+    """
+    resolved_root = root.resolve()
+    removed = 0
+    removed_bytes = 0
+    failed = 0
+    for metadata in rows:
+        if metadata.get("active_reference"):
+            continue
+        try:
+            path = (resolved_root / str(metadata["relative_path"])).resolve()
+            if resolved_root not in path.parents:
+                failed += 1
+                continue
+            if not path.is_file():
+                continue
+            path.unlink()
+        except (OSError, RuntimeError):
+            failed += 1
+            continue
+        removed += 1
+        removed_bytes += int(metadata["size_bytes"])
+    return {
+        "deleted_files": removed,
+        "disk_removed_bytes": removed_bytes,
+        "failed_files": failed,
+    }
+
+
 @sft_bp.delete("/api/jobs")
 def delete_terminal_test_job_history():
     owner = require_user()
@@ -84,6 +118,19 @@ def delete_user_test_job_artifacts():
     owner = require_user()
     cleanup = str(request.args.get("cleanup") or "").strip()
     if cleanup:
+        if cleanup == "retry-files":
+            try:
+                after = int(request.args.get("after") or 0)
+                rows = repository().deleted_artifact_files(
+                    owner=owner, after_rowid=after,
+                )
+            except ValueError as exc:
+                return jsonify({"success": False, "error": str(exc)}), 400
+            files = _remove_retained_files(artifact_root(), rows)
+            return jsonify({
+                "success": True, **files, "scanned": len(rows),
+                "next_after": rows[-1]["cleanup_rowid"] if len(rows) == 1000 else None,
+            })
         if cleanup != "eligible":
             return jsonify({"success": False, "error": "invalid cleanup mode"}), 400
         category = str(request.args.get("category") or "").strip()
@@ -99,18 +146,13 @@ def delete_user_test_job_artifacts():
             )
         except (KeyError, TypeError, ValueError) as exc:
             return jsonify({"success": False, "error": str(exc)}), 409
-        root = artifact_root()
-        deleted_files = 0
-        for metadata in artifacts:
-            path = (root / str(metadata["relative_path"])).resolve()
-            if root in path.parents and path.is_file():
-                path.unlink()
-                deleted_files += 1
+        files = _remove_retained_files(artifact_root(), artifacts)
         return jsonify({
             "success": True, "category": category or "all_eligible_outputs",
             "deleted_artifacts": len(artifacts),
-            "deleted_files": deleted_files,
+            **files,
             "freed_bytes": sum(int(item["size_bytes"]) for item in artifacts),
+            "quota_released_bytes": sum(int(item["size_bytes"]) for item in artifacts),
             "usage_bytes": job_repository.storage_usage(owner=owner),
         })
     workspace_id = str(request.args.get("workspace_id") or "").strip()

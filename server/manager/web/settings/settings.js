@@ -131,6 +131,24 @@
     const cleanupButton = document.createElement("button");
     cleanupButton.type = "button";
     cleanupButton.textContent = context.t("一键清理可清理输出");
+    const retryFilesButton = document.createElement("button");
+    retryFilesButton.type = "button";
+    retryFilesButton.textContent = context.t("重试清理残留文件");
+    let retryAfter = 0;
+    retryFilesButton.onclick = async () => {
+      if (!window.confirm(context.t("仅检查已标记删除的 Job 附件文件，并重试移除仍留在服务器上的文件。继续吗？"))) return;
+      try {
+        const params = new URLSearchParams({cleanup: "retry-files", after: String(retryAfter)});
+        if (cleanupServerId) params.set("server_id", cleanupServerId);
+        const result = await context.api(`/api/jobs/artifacts?${params}`, {method: "DELETE"});
+        retryAfter = Number(result.next_after || 0);
+        context.showNotice(`${context.t("移除残留文件")} ${result.deleted_files} ${context.t("项")}` +
+          (result.failed_files ? ` · ${context.t("失败")} ${result.failed_files}` : "") +
+          (retryAfter ? ` · ${context.t("仍有下一批，点击继续")}` : ""), Boolean(result.failed_files));
+      } catch (error) {
+        context.showNotice(error.message, true);
+      }
+    };
     let cleanupPreview = {artifact_count: 0, bytes: 0};
     let eligibleCategories = [];
     let cleanupServerId = "";
@@ -151,7 +169,9 @@
       if (cleanupServerId) params.set("server_id", cleanupServerId);
       try {
         const result = await context.api(`/api/jobs/artifacts?${params}`, {method: "DELETE"});
-        context.showNotice(`${context.t("已清理")} ${result.deleted_artifacts} ${context.t("项")}`);
+        context.showNotice(`${context.t("已清理")} ${result.deleted_artifacts} ${context.t("项")}` +
+          (result.failed_files ? ` · ${result.failed_files} ${context.t("个磁盘文件未移除，请重试清理残留文件")}` : ""),
+          Boolean(result.failed_files));
         await refresh();
       } catch (error) {
         context.showNotice(error.message, true);
@@ -184,14 +204,9 @@
       next.disabled = offset + 100 >= (data.item_count || 0);
       position.textContent = `${Math.min(offset + 1, data.item_count || 0)}–${Math.min(offset + 100, data.item_count || 0)}`;
     };
-    const refresh = async () => {
-      const [jobResult, profileResult] = await Promise.allSettled([
-        context.api("/api/jobs/storage"),
-        context.api("/api/storage/profile-inventory"),
-      ]);
-      if (jobResult.status !== "fulfilled") throw jobResult.reason;
-      const data = jobResult.value;
-      const profile = profileResult.status === "fulfilled" ? profileResult.value : null;
+    let profile = null;
+    let refreshVersion = 0;
+    const renderQuota = async data => {
       if (!current(context)) return;
       const usage = Number(data.usage_bytes || 0);
       const quotaSize = Number(data.quota_bytes || 0);
@@ -247,6 +262,19 @@
       })));
       if (selectedCategory) await refreshItems();
     };
+    const refresh = async () => {
+      const version = ++refreshVersion;
+      const profileRequest = context.api("/api/storage/profile-inventory")
+        .then(value => ({value}), error => ({error}));
+      const data = await context.api("/api/jobs/storage");
+      if (!current(context) || version !== refreshVersion) return;
+      await renderQuota(data);
+      void profileRequest.then(result => {
+        if (!current(context) || version !== refreshVersion) return;
+        profile = result.value || null;
+        void renderQuota(data).catch(error => context.showNotice(error.message, true));
+      });
+    };
     categoryTable = FTManagerAccessTable.create(context, {
       headers: ["类别", "占用", "配额占比", "数量", "操作"], searchPlaceholder: "筛选类别",
       empty: "暂无保留附件", refresh,
@@ -296,7 +324,7 @@
         });
       }],
     });
-    summary.append(rows, bar, cleanupButton);
+    summary.append(rows, bar, cleanupButton, retryFilesButton);
     categorySection.append(categoryHeading, categoryTable.root);
     itemsSection.append(itemHeading, itemTable.root, pager);
     body.append(summary, categorySection, itemsSection);
