@@ -7,6 +7,7 @@ import logging
 import re
 from urllib.parse import parse_qs, urlparse
 
+from server.jobs.artifacts import default_user_quota_bytes
 from server.manager.config import VIBE_TRADING_PORT
 from server.manager.domain.navigation_registry import navigation_modules
 from server.manager.http.content_encoding import (
@@ -78,13 +79,43 @@ class CoreGetRoutesMixin:
             if session is None:
                 json_response(self, {"success": False, "error": "login required"}, 401)
                 return True
+            principal = str(session["username"])
+            control_store = getattr(self.state, "control_store", None)
+            if parse_qs(parsed.query).get("snapshot") == ["1"]:
+                # The first quota paint uses already recorded complete scans.
+                # A live request below still refreshes local and peer readings.
+                if control_store is None:
+                    json_response(self, {"success": False,
+                                         "error": "quota snapshots unavailable"}, 503)
+                    return True
+                try:
+                    profile_snapshots = control_store.profile_usage_by_server(principal)
+                    job_snapshots = control_store.usage_by_server(principal)
+                    protected = control_store.protected_entity_metadata_usage(principal)
+                    quota_bytes = control_store.quota_bytes(
+                        principal, default_bytes=default_user_quota_bytes(),
+                    )
+                except Exception as exc:
+                    _LOGGER.warning("quota snapshot unavailable: %s", type(exc).__name__)
+                    json_response(self, {"success": False,
+                                         "error": "quota snapshots unavailable"}, 503)
+                    return True
+                json_response(self, {
+                    "success": True, "snapshot_only": True,
+                    "storage_server_id": self.state.server_id,
+                    "principal": principal,
+                    "quota_bytes": quota_bytes,
+                    "job_snapshots": job_snapshots,
+                    "profile_snapshots": profile_snapshots,
+                    "protected_metadata": protected,
+                }, headers={"Cache-Control": "private, no-store"})
+                return True
             try:
                 inventory = scan_profile_storage(
-                    self.state.data_root, str(session["username"]),
+                    self.state.data_root, principal,
                 )
             except (ProfileStorageInventoryIncomplete, OSError, ValueError):
                 inventory = None
-            control_store = getattr(self.state, "control_store", None)
             protected = None
             profile_snapshots: list[dict] = []
             if control_store is not None:
