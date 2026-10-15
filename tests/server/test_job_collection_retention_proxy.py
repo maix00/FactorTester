@@ -13,18 +13,25 @@ import pytest
 
 from server.manager.http import job_proxy_routes
 from server.manager.http.gateway import GatewayResponse
+from server.manager.domain.federation import ServiceRoute
+
+
+def _route(server_id="local", port=7999):
+    return ServiceRoute(server_id=server_id, role="server", branch="feat",
+                        revision="test", port=port, endpoint="", remote=False)
 
 
 class _Handler(job_proxy_routes.JobProxyRoutesMixin):
     """Real mixin so sibling helpers resolve, with routing stubbed out."""
 
-    def __init__(self, calls, *, session=None, routes=("route-1",)):
+    def __init__(self, calls, *, session=None, routes=None):
         self.headers = {}
         self._session_value = session
-        self._routes = list(routes)
+        self._routes = list((_route(),) if routes is None else routes)
         self.sent = []
         self.state = SimpleNamespace(
             server_id="local",
+            _local_route=lambda *, port, online: _route(port=port),
             route_request=lambda *a, **k: calls.append(k) or GatewayResponse(
                 200, b'{"success": true}', "application/json",
             ),
@@ -43,7 +50,7 @@ class _Handler(job_proxy_routes.JobProxyRoutesMixin):
         self.sent.append(kwargs)
 
 
-def _handler(calls, *, session=None, routes=("route-1",)):
+def _handler(calls, *, session=None, routes=None):
     return _Handler(calls, session=session, routes=routes)
 
 
@@ -54,6 +61,25 @@ def test_collection_delete_is_forwarded_with_query(monkeypatch, path):
     handler = _handler(calls, session={"username": "alice"})
     assert handler._proxy_job_request(urlparse(f"{path}?workspace_id=w1"), method="DELETE") is True
     assert calls == [{"path": f"{path}?workspace_id=w1", "principal": "alice", "method": "DELETE"}]
+
+
+def test_storage_read_uses_local_control_plane_without_worker(monkeypatch):
+    calls = []
+    handler = _handler(calls, session={"username": "alice"}, routes=())
+    assert handler._proxy_job_request(urlparse("/api/jobs/storage?limit=2"), method="GET") is True
+    assert calls == [{"path": "/api/jobs/storage?limit=2", "principal": "alice", "method": "GET"}]
+
+
+def test_storage_control_ignores_worker_port_and_selects_storage_server(monkeypatch):
+    calls = []
+    handler = _handler(calls, session={"username": "alice"},
+                       routes=[_route("remote", 8123)])
+    assert handler._proxy_job_request(
+        urlparse("/api/jobs/artifacts?server_id=remote&cleanup=retry-files"),
+        method="DELETE",
+    ) is True
+    assert calls == [{"path": "/api/jobs/artifacts?server_id=remote&cleanup=retry-files",
+                      "principal": "alice", "method": "DELETE"}]
 
 
 @pytest.mark.parametrize("method", ["GET", "POST", "PATCH"])

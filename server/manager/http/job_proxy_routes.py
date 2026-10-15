@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import replace
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, unquote, urlencode
 from urllib.request import Request, urlopen
@@ -1063,11 +1064,13 @@ class JobProxyRoutesMixin:
         this branch the request falls through to the Manager shell and the
         caller receives an HTML page instead of JSON.
         """
-        if parsed.path not in _JOB_COLLECTION_DELETE_PATHS:
+        storage_read = parsed.path == "/api/jobs/storage" and method == "GET"
+        storage_delete = parsed.path == "/api/jobs/artifacts" and method == "DELETE"
+        if parsed.path not in _JOB_COLLECTION_DELETE_PATHS and not storage_read:
             return False
         # These collection paths must never be parsed as a job whose id is
         # "artifacts"; they only support the retention delete.
-        if method != "DELETE":
+        if method != "DELETE" and not storage_read:
             json_response(
                 self,
                 {"success": False, "error": "method not allowed"},
@@ -1083,6 +1086,19 @@ class JobProxyRoutesMixin:
             routes = self._job_routes(
                 parsed, principal, for_artifact_storage=True,
             )
+            if storage_read or storage_delete:
+                selected = str(parse_qs(parsed.query).get("server_id", [""])[0]).strip()
+                if not selected:
+                    routes = [
+                        route for route in routes
+                        if route.server_id == self.state.server_id
+                    ]
+                if not routes and not selected:
+                    routes = [self.state._local_route(port=0, online=True)]
+                routes = list({
+                    route.server_id: replace(route, port=0)
+                    for route in routes
+                }.values())
         except TargetUnavailable as exc:
             json_response(self, {"success": False, "error": str(exc)}, 503)
             return True
@@ -1096,7 +1112,7 @@ class JobProxyRoutesMixin:
         for route in routes:
             try:
                 response = self.state.route_request(
-                    route, path=path, principal=principal, method="DELETE",
+                    route, path=path, principal=principal, method=method,
                 )
             except (ConnectionError, ValueError):
                 continue

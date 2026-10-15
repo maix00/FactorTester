@@ -368,6 +368,14 @@ class RoutingStateMixin:
         content_type: str = "application/json",
         origin_server_id: str = "",
     ) -> GatewayResponse:
+        if not route.remote and route.port == 0:
+            from server.manager.services.job_storage_control import (
+                job_storage_response,
+            )
+
+            return job_storage_response(
+                path=path, principal=principal, method=method or "GET",
+            )
         forwarded: dict[str, object] = {
             "path": path,
             "principal": principal,

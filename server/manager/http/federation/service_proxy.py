@@ -55,7 +55,11 @@ class FederationServiceProxyRoutesMixin:
             origin_server_id = str(payload.get("origin_server_id") or "").strip()
             if server_id != self.state.server_id:
                 raise ValueError("federation target server_id does not match")
-            if not 1 <= port <= 65535:
+            storage_request = (urlparse(path).path, method) in {
+                ("/api/jobs/storage", "GET"),
+                ("/api/jobs/artifacts", "DELETE"),
+            }
+            if not (1 <= port <= 65535 or (port == 0 and storage_request)):
                 raise ValueError("federation target port is invalid")
             if not principal:
                 raise ValueError("federation principal is required")
@@ -69,9 +73,11 @@ class FederationServiceProxyRoutesMixin:
             json_response(self, {"success": False, "error": str(exc)}, 400)
             return
         try:
-            route = self.state.route_for(
-                server_id=self.state.server_id,
-                port=port,
+            route = (
+                self.state._local_route(port=0, online=True)
+                if port == 0 else self.state.route_for(
+                    server_id=self.state.server_id, port=port,
+                )
             )
             response = self.state.route_request(
                 route,
