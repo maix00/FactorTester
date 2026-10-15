@@ -37,14 +37,14 @@ RUN sed -i \
     && chmod u+s /usr/bin/bwrap \
     && rm -rf /var/lib/apt/lists/*
 
-# Keep the dependency layer cached from the previous release; explicitly
-# remove the inherited setuid bit before any Profile Agent is started.
-RUN chmod 0755 /usr/bin/bwrap
-
 COPY deploy/requirements-public-linux.txt /tmp/requirements-public-linux.txt
 RUN python -m pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" --upgrade pip \
     && python -m pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
         -r /tmp/requirements-public-linux.txt
+
+# Keep the dependency layers cached from the previous release; explicitly
+# remove the inherited setuid bit before any Profile Agent is started.
+RUN chmod 0755 /usr/bin/bwrap
 
 FROM factortester-public-deps AS factortester-cli-builder
 
