@@ -155,16 +155,30 @@ class AgentSkillRuntime:
             )
         destination.unlink()
 
-    def _ensure_link(self, binding: dict[str, str]) -> None:
+    def _ensure_link(
+        self,
+        binding: dict[str, str],
+        previous: dict[str, str] | None,
+    ) -> None:
         destination = self.skills_root / binding["skill_id"]
         source = Path(binding["source_path"])
         if os.path.lexists(destination):
             target = self._link_target(destination)
-            if target != source:
+            if target == source:
+                return
+            previous_source = (
+                Path(previous["source_path"]).expanduser().resolve()
+                if previous is not None
+                else None
+            )
+            # A new server release can move the installed Skill while keeping
+            # the Profile's old projection. Repoint only a link that still
+            # matches the source recorded in our own manifest.
+            if target != previous_source or target is None:
                 raise AgentSkillRuntimeError(
                     f"refusing to replace an unexpected Skill projection: {destination}"
                 )
-            return
+            destination.unlink()
         os.symlink(source, destination, target_is_directory=True)
 
     def _write_manifest(self, bindings: list[dict[str, str]]) -> None:
@@ -247,7 +261,7 @@ class AgentSkillRuntime:
                     f"unowned Skill directory is present: {child}"
                 )
         for binding in normalized.values():
-            self._ensure_link(binding)
+            self._ensure_link(binding, previous.get(binding["skill_id"]))
 
         ordered = [normalized[key] for key in sorted(normalized)]
         self._write_manifest(ordered)
