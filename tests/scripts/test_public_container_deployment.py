@@ -222,7 +222,8 @@ def test_public_agent_uses_codex_secure_container_profile() -> None:
     ]
     assert service.get("privileged", False) is not True
     assert "no-new-privileges:true" not in service["security_opt"]
-    assert "chmod u+s /usr/bin/bwrap" in dockerfile
+    assert "chmod 0755 /usr/bin/bwrap" in dockerfile
+    assert "chmod u+s /usr/bin/bwrap" not in dockerfile
     assert "SYS_ADMIN" not in database.get("cap_add", [])
     assert database["security_opt"] == ["no-new-privileges:true"]
 
