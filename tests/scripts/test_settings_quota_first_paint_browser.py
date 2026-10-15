@@ -87,6 +87,13 @@ def test_quota_renders_saved_snapshot_before_live_inventory() -> None:
             assert "测试任务生成物（历史未分类）" in page.locator(
                 ".quota-categories"
             ).inner_text()
+            assert page.get_by_role("button", name="实时任务清单尚不可用，暂不能删除").is_disabled()
+            page.get_by_role("button", name="查看最近一次占用记录").click()
+            assert "remote" in page.locator(".quota-dialog").inner_text()
+            assert "尚未取得这些服务器的实时任务清单" in page.locator(
+                ".quota-dialog"
+            ).inner_text()
+            page.get_by_role("button", name="关闭").click()
             # Neither the live scan nor the remote Job request has resolved.
             assert "/api/storage/profile-inventory" in page.evaluate(
                 "Object.keys(quotaRequests)"
@@ -122,5 +129,8 @@ def test_quota_renders_saved_snapshot_before_live_inventory() -> None:
             assert "测试任务生成物（历史未分类）" not in page.locator(
                 ".quota-categories"
             ).inner_text()
+            assert page.get_by_role(
+                "button", name="实时任务清单尚不可用，暂不能删除",
+            ).count() == 0
         finally:
             browser.close()
