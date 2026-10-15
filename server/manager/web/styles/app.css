@@ -190,6 +190,19 @@ main { min-width: 0; }
 .content { width: 100%; min-width: 0; max-width: none; padding: 28px var(--page-inline-padding); margin: 0; }
 .module-frame { display: block; width: 100%; min-height: calc(100vh - 144px); border: 0; background: var(--panel); }
 .notice { margin: 12px 28px 0; padding: 10px 12px; border-radius: 8px; background: #fff3cd; }
+.ft-hover-tooltip {
+  position: fixed; z-index: 100000; max-width: min(320px, calc(100vw - 16px));
+  padding: 7px 11px; border-radius: 9px; background: #151515; color: #fff;
+  box-shadow: 0 4px 12px #0003; font-size: 13px; line-height: 1.35;
+  font-weight: 400; overflow-wrap: anywhere; pointer-events: none;
+}
+.ft-hover-tooltip[hidden] { display: none; }
+.ft-hover-tooltip::before {
+  content: ""; position: absolute; left: var(--ft-tooltip-arrow-x); width: 9px; height: 9px;
+  background: inherit; transform: translateX(-50%) rotate(45deg);
+}
+.ft-hover-tooltip[data-placement="below"]::before { top: -4px; }
+.ft-hover-tooltip[data-placement="above"]::before { bottom: -4px; }
 .hero { margin-bottom: 22px; }
 .hero h2 { font-size: 26px; margin: 0 0 5px; }
 .hero p, .empty p, .dialog-card p, .section-heading p { color: var(--muted); }
