@@ -27,7 +27,7 @@ button { cursor: pointer; }
 .sidebar-title:hover { color: var(--accent); }
 .sidebar-toggle { width: 28px; height: 28px; flex: 0 0 28px; display: inline-grid; place-items: center; border: 0; border-radius: 7px; background: transparent; color: var(--muted); }
 .sidebar-toggle:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--text); }
-.sidebar-toggle .symbol, .sidebar-toggle .ft-icon { width: 17px; height: 17px; flex-basis: 17px; }
+.sidebar-toggle .symbol, .sidebar-toggle .ft-icon { width: 14px; height: 14px; flex-basis: 14px; }
 .sidebar-resize-handle { position: absolute; z-index: 100; top: 0; right: -7px; bottom: 0; width: 14px; cursor: col-resize; background: transparent; touch-action: none; user-select: none; }
 .sidebar-resize-handle:hover, .sidebar-resize-handle.dragging { background: color-mix(in srgb, var(--accent) 35%, transparent); }
 body.sidebar-collapsed .app-shell { grid-template-columns: var(--sidebar-collapsed-width) 1fr; }
@@ -115,10 +115,10 @@ body.sidebar-collapsed .nav-folder-row > .tab-main { display: grid; grid-templat
 body.sidebar-collapsed .nav-folder-row > .tab-main > .symbol { width: 17px; height: 17px; flex-basis: 17px; justify-self: center; }
 body.sidebar-collapsed .nav-folder-row > .tab-close { display: none; }
 body.sidebar-collapsed .nav-research-detail-folder .nav-folder-toggle { display: none; }
-body.sidebar-collapsed .nav-research-detail-folder > .nav-folder-row { min-height: 30px; }
-body.sidebar-collapsed .nav-research-tab-children { display: grid; margin-left: 8px; padding-left: 4px; }
-body.sidebar-collapsed .nav-research-tab-children .opened-tab { padding-left: 4px; padding-right: 4px; }
-body.sidebar-collapsed .nav-research-tab-children .opened-tab > .tab-main > .symbol { width: 15px; height: 15px; flex-basis: 15px; }
+body.sidebar-collapsed .nav-research-detail-folder > .nav-folder-row { min-height: 30px; padding-right: 0; }
+body.sidebar-collapsed .nav-research-tab-children { display: grid; margin-left: 0; padding-left: 0; border-left: 0; }
+body.sidebar-collapsed .nav-research-tab-children .opened-tab { padding-left: 5px; padding-right: 5px; }
+body.sidebar-collapsed .nav-research-tab-children .opened-tab > .tab-main > .symbol { width: 13px; height: 13px; flex-basis: 13px; }
 .opened-caption { margin-top: 14px; }
 .opened-tabs { display: grid; align-content: start; grid-auto-rows: max-content; gap: 1px; min-width: 0; min-height: 0; flex: 0 1 auto; max-height: calc(100vh - 180px); overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
 .opened-tab { width: 100%; min-width: 0; border: 0; background: transparent; color: inherit; border-radius: 7px; padding: 6px 8px; display: flex; gap: 8px; align-items: center; text-align: left; min-height: 30px; overflow: hidden; }
