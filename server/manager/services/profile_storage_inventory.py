@@ -113,3 +113,51 @@ def scan_profile_storage(
             "Profile inventory could not read all files"
         ) from exc
     return result
+
+
+def profile_storage_projection(
+    local_server_id: str,
+    local_inventory: dict[str, Any],
+    peer_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Project current and stale server observations without false totals."""
+    def valid_inventory(value: object) -> bool:
+        if not isinstance(value, dict) or type(value.get("bytes")) is not int:
+            return False
+        categories = value.get("categories")
+        expected = {"research_reports", "profile_uploads", "profile_workspaces"}
+        if not isinstance(categories, dict) or set(categories) != expected:
+            return False
+        sizes = [item.get("bytes") for item in categories.values()
+                 if isinstance(item, dict)]
+        return (len(sizes) == len(expected)
+                and all(type(size) is int and size >= 0 for size in sizes)
+                and sum(sizes) == value["bytes"])
+
+    servers = [{
+        "storage_server_id": str(local_server_id),
+        "status": "current", "inventory": local_inventory,
+    }]
+    for row in peer_rows:
+        server_id = str(row.get("storage_server_id") or "").strip()
+        if not server_id or server_id == local_server_id:
+            continue
+        status = str(row.get("status") or "unavailable")
+        inventory = row.get("inventory")
+        if status not in {"current", "stale"} or not valid_inventory(inventory):
+            status, inventory = "unavailable", None
+        servers.append({
+            "storage_server_id": server_id,
+            "status": status, "inventory": inventory,
+        })
+    current_bytes = sum(
+        int(row["inventory"]["bytes"])
+        for row in servers if row["status"] == "current"
+    )
+    complete = all(row["status"] == "current" for row in servers)
+    return {
+        "servers": servers,
+        "measured_current_bytes": current_bytes,
+        "total_bytes": current_bytes if complete else None,
+        "coverage_complete": complete,
+    }

@@ -18,6 +18,7 @@ from server.manager.http.localization import web_localization
 from server.manager.http.responses import json_response
 from server.manager.services.profile_storage_inventory import (
     ProfileStorageInventoryIncomplete,
+    profile_storage_projection,
     scan_profile_storage,
 )
 from server.manager.web.assets import (
@@ -103,6 +104,22 @@ class CoreGetRoutesMixin:
                         type(exc).__name__,
                     )
                     protected = None
+            federation = getattr(self.state, "federated_public_data", None)
+            peers: list[dict] = []
+            coverage_known = federation is not None
+            if federation is not None:
+                try:
+                    peers = federation.profile_storage_peers(
+                        str(session["username"])
+                    )
+                except (ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+                    coverage_known = False
+            projection = profile_storage_projection(
+                self.state.server_id, inventory, peers,
+            )
+            if not coverage_known:
+                projection["coverage_complete"] = False
+                projection["total_bytes"] = None
             json_response(self, {
                 "success": True,
                 "storage_server_id": self.state.server_id,
@@ -111,6 +128,7 @@ class CoreGetRoutesMixin:
                 "protected_metadata": protected,
                 "protected_measurement_scope": "metadata_only" if protected is not None
                 else "unavailable",
+                "cross_server": projection,
                 **inventory,
             }, headers={"Cache-Control": "private, no-store"})
             return True

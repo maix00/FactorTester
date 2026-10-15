@@ -218,9 +218,12 @@
       const remoteServers = (data.servers || []).filter(item =>
         item.storage_server_id !== data.storage_server_id);
       const staleServers = remoteServers.filter(item => quotaSnapshotStale(item.observed_at));
-      const profileStatus = profile
-        ? `${quotaBytes(profile.bytes)} · ${context.t("本服务器")} ${profile.storage_server_id}`
-        : context.t("计量暂不可用");
+      const crossProfile = profile?.cross_server || null;
+      const profileStatus = !profile ? context.t("计量暂不可用")
+        : crossProfile?.coverage_complete
+          ? `${quotaBytes(crossProfile.total_bytes)} · ${context.t("全部已连接服务器")}`
+          : `${quotaBytes(crossProfile?.measured_current_bytes ?? profile.bytes)} · ` +
+            context.t("当前可计量；其他服务器不可用或快照过期");
       const protectedMetadata = profile?.protected_metadata || null;
       const protectedMetadataBytes = protectedMetadata
         ? Number(protectedMetadata.factors?.bytes || 0) +
@@ -231,7 +234,7 @@
           ? "跨服务器用量含过期快照，请到来源服务器刷新后再判断实时剩余额度"
           : "全部存储服务器的活跃附件"),
           `${quotaBytes(usage)} / ${quotaBytes(quotaSize)}${data.over_quota ? context.t(" · 已超额") : ""}`),
-        row(context.t("报告与 Profile 工作区"), context.t("仅计量本服务器；尚未纳入 Job 配额，其他服务器待统一计量"), profileStatus),
+        row(context.t("报告与 Profile 工作区"), context.t("按存储服务器计量；尚未纳入 Job 配额，离线/过期读数不当作实时用量"), profileStatus),
         row(context.t("基础因子与产品组"), context.t("仅含控制库元数据，不含因子源码文件；尚未纳入 Job 配额，不能在此删除"),
           protectedMetadata ? `${quotaBytes(protectedMetadataBytes)} · ${context.t("元数据")}`
             : context.t("待计量 · 受保护")),
@@ -276,13 +279,26 @@
           artifact_count: measured?.item_count, quota_included: false,
           displayName: measured ? `${quotaCategoryLabel(context, category)} · ${context.t("元数据")}` : null});
       }
-      if (profile) {
-        for (const [category, item] of Object.entries(profile.categories || {})) {
-          displayedCategories.push({category: `profile:${category}`, role: "profile",
-            bytes: item.bytes, artifact_count: item.file_count,
-            quota_included: false});
+      const profileServers = crossProfile?.servers || (profile ? [{
+        storage_server_id: profile.storage_server_id,
+        status: "current", inventory: profile,
+      }] : []);
+      profileServers.forEach(server => {
+        if (!server.inventory) {
+          displayedCategories.push({category: `profile-server:${server.storage_server_id}`,
+            displayName: `${server.storage_server_id} · ${context.t("Profile 存储不可用")}`,
+            role: "profile", measured: false, quota_included: false});
+          return;
         }
-      }
+        for (const [category, item] of Object.entries(server.inventory.categories || {})) {
+          displayedCategories.push({category: `profile:${server.storage_server_id}:${category}`,
+            displayName: `${server.storage_server_id} · ${quotaCategoryLabel(context, `profile:${category}`)}` +
+              (server.status === "stale" ? ` · ${context.t("快照已过期")}` : ""),
+            role: "profile", bytes: item.bytes, artifact_count: item.file_count,
+            quota_included: false,
+            observedAt: new Date(Number(server.inventory.observed_at) * 1000).toLocaleString()});
+        }
+      });
       displayedCategories.forEach((entry, index) => {
         if (quotaSize <= 0 || entry.measured === false || entry.quota_included === false) return;
         const width = Math.min(100 - percentage, 100 * Number(entry.bytes || 0) / quotaSize);

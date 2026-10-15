@@ -45,6 +45,37 @@ def _service(registry, gateway):
     )
 
 
+def test_profile_storage_peer_read_marks_failed_source_stale() -> None:
+    route = ServiceRoute(
+        server_id="remote-main", role="manager", branch="main",
+        revision="rev-1", port=7998,
+    )
+
+    class StorageGateway(_Gateway):
+        def public_data(self, _route, **kwargs):
+            self.calls += 1
+            assert kwargs["kind"] == "storage"
+            assert kwargs["operation"] == "profile-inventory"
+            assert kwargs["principal"] == "alice"
+            if self.fail:
+                raise ConnectionError("peer is offline")
+            return {"storage_server_id": "remote-main", "bytes": 4,
+                    "observed_at": 1.0, "categories": {
+                        "research_reports": {"bytes": 4, "file_count": 1},
+                        "profile_uploads": {"bytes": 0, "file_count": 0},
+                        "profile_workspaces": {"bytes": 0, "file_count": 0},
+                    }}
+
+    gateway = StorageGateway()
+    service = _service(_Registry(route), gateway)
+    assert service.profile_storage_peers("alice")[0]["status"] == "current"
+    gateway.fail = True
+    stale = service.profile_storage_peers("alice")
+    assert stale[0]["status"] == "stale"
+    assert stale[0]["inventory"]["bytes"] == 4
+    assert gateway.calls == 2
+
+
 def test_remote_history_queries_source_before_using_request_cache():
     route = ServiceRoute(
         server_id="remote-main",
