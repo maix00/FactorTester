@@ -130,6 +130,10 @@
       return;
     }
     const summary = document.createElement("section"); summary.className = "settings-section";
+    const storageServerSelect = document.createElement("select");
+    storageServerSelect.className = "inline-setting";
+    storageServerSelect.setAttribute("aria-label", context.t("Job 存储服务器"));
+    let selectedServerId = "";
     const rows = document.createElement("div"); rows.className = "settings-rows";
     const bar = document.createElement("div"); bar.className = "quota-segments";
     bar.setAttribute("role", "img");
@@ -201,6 +205,7 @@
     const refreshItems = async () => {
       if (!selectedCategory) return;
       const params = new URLSearchParams({category: selectedCategory, limit: "100", offset: String(offset)});
+      if (selectedServerId) params.set("server_id", selectedServerId);
       const data = await context.api(`/api/jobs/storage?${params}`);
       if (!current(context)) return;
       itemHeading.textContent = `${quotaCategoryLabel(context, selectedCategory)} · ${data.item_count || 0} ${context.t("项")}`;
@@ -246,6 +251,17 @@
       cleanupPreview = data.cleanup_preview || {artifact_count: 0, bytes: 0};
       eligibleCategories = data.cleanup_categories || [];
       cleanupServerId = String(data.storage_server_id || "");
+      const serverIds = [...new Set([cleanupServerId,
+        ...(data.servers || []).map(item => String(item.storage_server_id || ""))]
+        .filter(Boolean))];
+      storageServerSelect.replaceChildren(...serverIds.map(serverId => {
+        const option = document.createElement("option");
+        option.value = serverId;
+        option.textContent = serverId === cleanupServerId
+          ? `${serverId} · ${context.t("当前查看")}` : serverId;
+        return option;
+      }));
+      storageServerSelect.value = cleanupServerId;
       cleanupButton.disabled = !Number(cleanupPreview.artifact_count);
       cleanupButton.title = `${cleanupPreview.artifact_count} ${context.t("项")} · ${quotaBytes(cleanupPreview.bytes)}`;
       let remoteAttributed = 0;
@@ -322,7 +338,9 @@
       const version = ++refreshVersion;
       const profileRequest = context.api("/api/storage/profile-inventory")
         .then(value => ({value}), error => ({error}));
-      const data = await context.api("/api/jobs/storage");
+      const params = new URLSearchParams();
+      if (selectedServerId) params.set("server_id", selectedServerId);
+      const data = await context.api(`/api/jobs/storage${params.size ? `?${params}` : ""}`);
       if (!current(context) || version !== refreshVersion) return;
       await renderQuota(data);
       void profileRequest.then(result => {
@@ -330,6 +348,12 @@
         profile = result.value || null;
         void renderQuota(data).catch(error => context.showNotice(error.message, true));
       });
+    };
+    storageServerSelect.onchange = () => {
+      selectedServerId = storageServerSelect.value;
+      selectedCategory = "";
+      offset = 0;
+      void refresh().catch(error => context.showNotice(error.message, true));
     };
     categoryTable = FTManagerAccessTable.create(context, {
       headers: ["类别", "占用", "配额占比", "数量", "操作"], searchPlaceholder: "筛选类别",
@@ -370,7 +394,8 @@
         return FTUI.iconButton(context, "trash", "删除此输出附件", async () => {
           const message = `${context.t("删除附件")} ${item.name} (${quotaBytes(item.size_bytes)})?\n${context.t("如果研究报告挂载此任务，详细结果可能无法显示；Job 摘要仍保留。")}`;
           if (!window.confirm(message)) return;
-          const path = `/api/jobs/${encodeURIComponent(item.job_id)}/artifacts/${encodeURIComponent(item.name)}`;
+          const path = `/api/jobs/${encodeURIComponent(item.job_id)}/artifacts/${encodeURIComponent(item.name)}` +
+            (cleanupServerId ? `?server_id=${encodeURIComponent(cleanupServerId)}` : "");
           try {
             await context.api(path, {method: "DELETE"});
             context.showNotice(context.t("附件已删除"));
@@ -381,7 +406,7 @@
         });
       }],
     });
-    summary.append(rows, bar, cleanupButton, retryFilesButton);
+    summary.append(storageServerSelect, rows, bar, cleanupButton, retryFilesButton);
     categorySection.append(categoryHeading, categoryTable.root);
     itemsSection.append(itemHeading, itemTable.root, pager);
     body.append(summary, categorySection, itemsSection);
