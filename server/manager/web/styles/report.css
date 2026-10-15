@@ -17,11 +17,12 @@ body.sidebar-collapsed:not(.embedded-presentation) .chapter-rail { left: calc(va
 .chapter-rail-item.interaction-target .chapter-rail-marker-fill { color: color-mix(in srgb, var(--text) 75%, transparent); opacity: 1; }
 .chapter-rail-item.nearby .chapter-rail-marker-fill { opacity: 1; }
 .chapter-rail-item.far .chapter-rail-marker-fill { opacity: 1; }
-.chapter-rail-tooltip { position: fixed; z-index: 50; width: 320px; max-width: min(20rem, calc(100vw - 16px)); padding: 10px; border-radius: 12px; background: color-mix(in srgb, var(--panel) 95%, transparent); color: var(--text); box-shadow: 0 14px 32px #0003; border: 1px solid color-mix(in srgb, var(--line) 70%, transparent); backdrop-filter: blur(14px); pointer-events: none; opacity: 0; transform: scale(.98); transform-origin: left center; transition: opacity .15s ease, transform .15s cubic-bezier(.23,1,.32,1); }
+.chapter-rail-tooltip { position: fixed; z-index: 50; width: 320px; max-width: min(20rem, calc(100vw - 16px)); padding: 10px; border-radius: 9px; background: #151515; color: #fff; box-shadow: 0 4px 12px #0003; pointer-events: none; opacity: 0; transform: scale(.98); transform-origin: left center; transition: opacity .15s ease, transform .15s cubic-bezier(.23,1,.32,1); }
+.chapter-rail-tooltip::before { content: ""; position: absolute; left: -4px; top: var(--ft-tooltip-arrow-y, 50%); width: 9px; height: 9px; background: inherit; transform: translateY(-50%) rotate(45deg); }
 .chapter-rail-tooltip.visible { opacity: 1; transform: scale(1); }
 .chapter-rail-tooltip-title { font-size: 13px; line-height: 1.35; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chapter-rail-tooltip-preview { margin-top: 4px; color: var(--text); font-size: 13px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.chapter-rail-tooltip-meta { margin-top: 7px; color: var(--muted); font-size: 11px; line-height: 1.35; }
+.chapter-rail-tooltip-meta { margin-top: 7px; color: #bbb; font-size: 11px; line-height: 1.35; }
 @media (prefers-reduced-motion: reduce) {
   .chapter-rail-marker-fill, .chapter-rail-tooltip { transition: none; }
 }
