@@ -133,9 +133,11 @@ def test_profile_projection_never_treats_offline_or_stale_peer_as_zero(tmp_path)
     }}
     complete = profile_storage_projection("local", local, [
         {"storage_server_id": "remote", "status": "current", "inventory": remote},
+        {"storage_server_id": "remote", "status": "current", "inventory": remote},
     ])
     assert complete["coverage_complete"] is True
     assert complete["total_bytes"] == 9
+    assert len(complete["servers"]) == 2
     stale = profile_storage_projection("local", local, [
         {"storage_server_id": "remote", "status": "stale", "inventory": remote},
         {"storage_server_id": "offline", "status": "unavailable", "inventory": None},

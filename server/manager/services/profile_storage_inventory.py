@@ -138,10 +138,12 @@ def profile_storage_projection(
         "storage_server_id": str(local_server_id),
         "status": "current", "inventory": local_inventory,
     }]
+    seen_servers = {str(local_server_id)}
     for row in peer_rows:
         server_id = str(row.get("storage_server_id") or "").strip()
-        if not server_id or server_id == local_server_id:
+        if not server_id or server_id in seen_servers:
             continue
+        seen_servers.add(server_id)
         status = str(row.get("status") or "unavailable")
         inventory = row.get("inventory")
         if status not in {"current", "stale"} or not valid_inventory(inventory):
