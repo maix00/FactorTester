@@ -996,6 +996,18 @@ form[hidden] { display: none !important; }
 .settings-rows { border: 1px solid var(--line); border-radius: 12px; padding: 0 16px; background: var(--panel); }
 .quota-segments { display: flex; height: 12px; margin-top: 10px; overflow: hidden; border-radius: 999px; background: var(--line); }
 .quota-segments span { height: 100%; flex: 0 0 auto; }
+.quota-overview { display: grid; gap: 10px; }
+.quota-overview-heading, .quota-dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.quota-overview-heading strong { font-size: 18px; }
+.quota-overview-actions, .quota-row-actions { display: inline-flex; align-items: center; gap: 2px; }
+.quota-overview .quota-segments { height: 18px; margin: 0; }
+.quota-segments.quota-over-limit { outline: 2px solid #d33b3b; outline-offset: 2px; }
+.quota-segments.quota-incomplete { background: repeating-linear-gradient(135deg, var(--line), var(--line) 7px, transparent 7px, transparent 14px); }
+.quota-status { margin: 0; color: var(--muted); }
+.quota-dialog .dialog-card { width: min(800px, 94vw); }
+.quota-dialog-heading h2 { margin: 0; }
+.quota-job-link { border: 0; background: none; color: var(--accent); text-align: left; cursor: pointer; }
+.quota-job-link:hover { text-decoration: underline; }
 .quota-category-label { display: inline-flex; align-items: center; gap: 7px; }
 .quota-category-label i { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
 .quota-item-pager { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 8px; }

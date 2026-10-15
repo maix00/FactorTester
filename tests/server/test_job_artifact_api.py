@@ -267,6 +267,67 @@ def test_one_click_cleanup_only_removes_previewed_terminal_outputs(
     assert repository.storage_usage(owner="alice") == 8
 
 
+def test_business_groups_and_whole_job_cleanup_preserve_inputs(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
+    monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["username"] = "alice"
+    repository = JobRepository()
+    _create_job(repository, job_id="mixed", status=JobStatus.RUNNING)
+    _create_job(repository, job_id="other", status=JobStatus.RUNNING)
+    for job_id, name, role, kind, content_type in (
+        ("mixed", "plot.png", "output", "", "image/png"),
+        ("mixed", "results.json", "output", "", "application/json"),
+        ("mixed", "factor.py", "input", "factor_source", "text/x-python"),
+        ("other", "results.json", "output", "", "application/json"),
+    ):
+        path = tmp_path / "artifacts" / job_id / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"1234")
+        repository.record_artifact(
+            job_id=job_id, name=name, relative_path=f"{job_id}/{name}",
+            content_type=content_type, content_hash=hashlib.sha256(b"1234").hexdigest(),
+            size_bytes=4, artifact_role=role, artifact_kind=kind,
+        )
+    repository.transition("mixed", JobStatus.SUCCEEDED,
+                          result_summary={"success": True})
+    repository.transition("other", JobStatus.SUCCEEDED,
+                          result_summary={"success": True})
+    groups = {item["quota_group"]: item for item in
+              client.get("/api/jobs/storage").get_json()["business_groups"]}
+    assert groups["output:image"]["bytes"] == 4
+    assert groups["output:data"]["bytes"] == 8
+    assert groups["input:factor"]["bytes"] == 4
+    page = client.get("/api/jobs/storage?group=output:data&limit=1").get_json()
+    assert page["job_count"] == 2
+    assert len(page["jobs"]) == 1
+    preview = client.get("/api/jobs/storage?job_id=mixed").get_json()["job_cleanup_preview"]
+    assert preview["artifact_count"] == 2
+    response = client.delete(
+        "/api/jobs/artifacts?cleanup=eligible&job_id=mixed"
+        f"&expected_count=2&expected_bytes=8&expected_token={preview['token']}"
+    )
+    assert response.status_code == 200
+    assert repository.load_artifact(job_id="mixed", owner="alice", name="factor.py")["state"] == "active"
+    assert repository.load_artifact(job_id="mixed", owner="alice", name="plot.png")["state"] == "deleted"
+    assert repository.load_artifact(job_id="other", owner="alice", name="results.json")["state"] == "active"
+    group_preview = next(item for item in
+                         client.get("/api/jobs/storage").get_json()["cleanup_business_groups"]
+                         if item["group"] == "output:data")
+    grouped = client.delete(
+        "/api/jobs/artifacts?cleanup=eligible&group=output:data"
+        f"&expected_count={group_preview['artifact_count']}"
+        f"&expected_bytes={group_preview['bytes']}"
+        f"&expected_token={group_preview['token']}"
+    )
+    assert grouped.status_code == 200
+    assert repository.load_artifact(job_id="other", owner="alice", name="results.json")["state"] == "deleted"
+
+
 def test_cleanup_rejects_same_size_replaced_artifact(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
     app = Flask(__name__)
