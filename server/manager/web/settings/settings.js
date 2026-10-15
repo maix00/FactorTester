@@ -111,6 +111,8 @@
       "output:equity_curve_data": "权益曲线数据", "output:equity_curve_report": "权益曲线图片",
       "output:fee_detail_data": "手续费明细", "output:fee_detail_csv": "手续费明细 CSV",
       "output:report-output-bundle": "报告输出清单",
+      "profile:research_reports": "研究报告与草稿", "profile:profile_uploads": "Profile 上传文件",
+      "profile:profile_workspaces": "研究身份工作区",
       "protected:factors": "基础因子", "protected:product_groups": "产品组",
     };
     return context.t(labels[value] || value.replace(/^input:/, "提交物 · ").replace(/^output:/, "生成物 · "));
@@ -183,14 +185,23 @@
       position.textContent = `${Math.min(offset + 1, data.item_count || 0)}–${Math.min(offset + 100, data.item_count || 0)}`;
     };
     const refresh = async () => {
-      const data = await context.api("/api/jobs/storage");
+      const [jobResult, profileResult] = await Promise.allSettled([
+        context.api("/api/jobs/storage"),
+        context.api("/api/storage/profile-inventory"),
+      ]);
+      if (jobResult.status !== "fulfilled") throw jobResult.reason;
+      const data = jobResult.value;
+      const profile = profileResult.status === "fulfilled" ? profileResult.value : null;
       if (!current(context)) return;
       const usage = Number(data.usage_bytes || 0);
       const quotaSize = Number(data.quota_bytes || 0);
+      const profileStatus = profile
+        ? `${quotaBytes(profile.bytes)} · ${context.t("本服务器")} ${profile.storage_server_id}`
+        : context.t("计量暂不可用");
       rows.replaceChildren(
         row(context.t("Job 附件"), context.t("全部存储服务器的活跃附件"),
           `${quotaBytes(usage)} / ${quotaBytes(quotaSize)}${data.over_quota ? context.t(" · 已超额") : ""}`),
-        row(context.t("报告与 Profile 工作区"), context.t("当前尚未纳入此 Job 配额；多服务器占用待统一计量"), context.t("未计入")),
+        row(context.t("报告与 Profile 工作区"), context.t("仅计量本服务器；尚未纳入 Job 配额，其他服务器待统一计量"), profileStatus),
         row(context.t("基础因子与产品组"), context.t("受保护的业务资料；当前尚未纳入此 Job 配额，不能在此删除"), context.t("待计量 · 受保护")),
       );
       bar.replaceChildren();
@@ -210,8 +221,15 @@
         {category: "protected:factors", role: "protected", measured: false},
         {category: "protected:product_groups", role: "protected", measured: false},
       );
+      if (profile) {
+        for (const [category, item] of Object.entries(profile.categories || {})) {
+          displayedCategories.push({category: `profile:${category}`, role: "profile",
+            bytes: item.bytes, artifact_count: item.file_count,
+            quota_included: false});
+        }
+      }
       displayedCategories.forEach((entry, index) => {
-        if (quotaSize <= 0 || entry.measured === false) return;
+        if (quotaSize <= 0 || entry.measured === false || entry.quota_included === false) return;
         const width = Math.min(100 - percentage, 100 * Number(entry.bytes || 0) / quotaSize);
         if (width <= 0) return;
         const segment = document.createElement("span");
@@ -224,7 +242,8 @@
       categoryTable.setRows(displayedCategories.map((entry, index) => ({
         ...entry, color: entry.role === "protected" ? "#8a8f98" :
           entry.role === "remote" ? "#8a8f98" : colors[index % colors.length],
-        percent: quotaSize ? 100 * Number(entry.bytes || 0) / quotaSize : 0,
+        percent: quotaSize && entry.quota_included !== false
+          ? 100 * Number(entry.bytes || 0) / quotaSize : null,
       })));
       if (selectedCategory) await refreshItems();
     };
@@ -239,10 +258,11 @@
         name.textContent = item.role === "remote" ? context.t("其他服务器附件") : quotaCategoryLabel(context, item.category);
         label.append(swatch, name); return label;
       }, item.measured === false ? context.t("待计量") : quotaBytes(item.bytes),
-        item.measured === false ? "—" : `${item.percent.toFixed(1)}%`,
+        item.percent === null || item.measured === false ? "未计入" : `${item.percent.toFixed(1)}%`,
         item.artifact_count ?? "—", () => {
           if (item.role !== "output") return context.t(
-            item.role === "protected" || item.role === "input" ? "受保护" : "请在来源服务器查看");
+            item.role === "protected" || item.role === "input" ? "受保护" :
+              item.role === "profile" ? "由所属页面管理" : "请在来源服务器查看");
           const actions = document.createElement("span");
           actions.append(FTUI.iconButton(context, "list.bullet", "查看附件", () => {
             selectedCategory = item.category; offset = 0;

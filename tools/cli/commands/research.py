@@ -1450,11 +1450,18 @@ def job_clear_history(current_workspace: bool) -> None:
 @click.option("--category", default="", help="列出此类附件，类别来自无参数的分类清单。")
 @click.option("--limit", default=50, type=click.IntRange(1, 100), show_default=True)
 @click.option("--offset", default=0, type=click.IntRange(min=0), show_default=True)
+@click.option("--profile", is_flag=True, help="查看当前 Manager 的报告、上传与 Profile 工作区占用（尚未计入 Job 配额）。")
 @friendly_errors
-def job_storage(category: str, limit: int, offset: int) -> None:
-    click.echo(_json(client_from_config().job_storage(
-        category=category, limit=limit, offset=offset,
-    )))
+def job_storage(category: str, limit: int, offset: int, profile: bool) -> None:
+    client = client_from_config()
+    if profile:
+        if category:
+            raise click.ClickException("--profile 与 --category 不能同时使用")
+        click.echo(_json(client.profile_storage()))
+    else:
+        click.echo(_json(client.job_storage(
+            category=category, limit=limit, offset=offset,
+        )))
 
 
 @job.command("cleanup")

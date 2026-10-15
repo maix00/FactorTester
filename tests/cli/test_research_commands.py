@@ -1630,6 +1630,24 @@ def test_job_cleanup_previews_and_passes_server_identity(monkeypatch) -> None:
     assert protected.exit_code != 0
 
 
+def test_job_storage_profile_reports_separate_unmetered_inventory(monkeypatch) -> None:
+    class StorageClient:
+        def profile_storage(self):
+            return {"storage_server_id": "local", "bytes": 12,
+                    "quota_included": False}
+
+    monkeypatch.setattr("tools.cli.commands.research.client_from_config", StorageClient)
+    result = CliRunner().invoke(cli, ["job", "storage", "--profile"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == {
+        "storage_server_id": "local", "bytes": 12, "quota_included": False,
+    }
+    invalid = CliRunner().invoke(cli, [
+        "job", "storage", "--profile", "--category", "output:result",
+    ])
+    assert invalid.exit_code != 0
+
+
 def test_cli_restores_historical_run_and_bulk_clears_current_workspace(tmp_path, monkeypatch) -> None:
     fake = FakeClient()
     monkeypatch.setenv("FACTORTESTER_HOME", str(tmp_path / "home"))

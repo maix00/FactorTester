@@ -15,6 +15,10 @@ from server.manager.http.content_encoding import (
 )
 from server.manager.http.localization import web_localization
 from server.manager.http.responses import json_response
+from server.manager.services.profile_storage_inventory import (
+    ProfileStorageInventoryIncomplete,
+    scan_profile_storage,
+)
 from server.manager.web.assets import (
     asset_revision,
     bundle_bytes,
@@ -64,6 +68,30 @@ class CoreGetRoutesMixin:
             self._serve_login_page(parsed)
             return True
         if not self._public_login_gate(parsed, method="GET"):
+            return True
+        if parsed.path == "/api/storage/profile-inventory":
+            session = self._session()
+            if session is None:
+                json_response(self, {"success": False, "error": "login required"}, 401)
+                return True
+            try:
+                inventory = scan_profile_storage(
+                    self.state.data_root, str(session["username"]),
+                )
+            except (ProfileStorageInventoryIncomplete, OSError, ValueError):
+                json_response(
+                    self,
+                    {"success": False, "error": "profile inventory is incomplete"},
+                    503,
+                )
+                return True
+            json_response(self, {
+                "success": True,
+                "storage_server_id": self.state.server_id,
+                "principal": str(session["username"]),
+                "quota_included": False,
+                **inventory,
+            }, headers={"Cache-Control": "private, no-store"})
             return True
         if self._mihomo_get(parsed):
             return True

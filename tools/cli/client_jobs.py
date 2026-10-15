@@ -238,6 +238,12 @@ class JobsClientMixin(ClientMixinBase):
         query = {"category": category, "limit": limit, "offset": offset} if category else None
         return self._expect_success(self.session.get("/api/jobs/storage", query=query))
 
+    def profile_storage(self) -> dict[str, Any]:
+        """Read this Manager's Profile/report/upload inventory for the caller."""
+        return self._expect_success(
+            self.session.get("/api/storage/profile-inventory")
+        )
+
     def stream_job_id(self, job_id: str, *, after: int = 0):
         query = {"after": after} if after else None
         yield from self.session.stream_get(
