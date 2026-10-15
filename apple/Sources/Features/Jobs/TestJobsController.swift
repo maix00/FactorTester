@@ -20,6 +20,10 @@ final class TestJobsController: ObservableObject {
     private let service = TestJobsService()
     private var progressTask: Task<Void, Never>?
 
+    func setBackupPrincipal(_ principal: String) {
+        service.backupPrincipal = principal
+    }
+
     func refresh() async {
         isLoading = true
         defer { isLoading = false }

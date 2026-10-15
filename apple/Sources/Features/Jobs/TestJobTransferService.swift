@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 extension TestJobsService {
     struct ArtifactTransferAccess: Equatable {
@@ -92,6 +93,16 @@ extension TestJobsService {
                 responseText: L10n.text("生成物大小与传输授权不一致")
             )
         }
+        if !artifact.contentHash.isEmpty {
+            let digest = SHA256.hash(data: data)
+                .map { String(format: "%02x", $0) }.joined()
+            guard digest == artifact.contentHash.lowercased() else {
+                throw TestJobsRequestError(
+                    statusCode: nil,
+                    responseText: L10n.text("生成物哈希与服务器清单不一致")
+                )
+            }
+        }
         return data
     }
 
@@ -100,11 +111,13 @@ extension TestJobsService {
         port: Int,
         artifact: TestJobArtifact
     ) async throws -> URL {
-        let data = try await artifactTransferData(
+        let data = try await artifactData(
             jobID: jobID, port: port, artifact: artifact
         )
         let root = try artifactDownloadRoot(jobID: jobID)
-        let destination = root.appendingPathComponent(artifact.fileName)
+        let destination = root.appendingPathComponent(
+            URL(fileURLWithPath: artifact.fileName).lastPathComponent
+        )
         try data.write(to: destination, options: .atomic)
         return destination
     }
@@ -114,9 +127,7 @@ extension TestJobsService {
         port: Int,
         artifact: TestJobArtifact
     ) async throws -> TestJobArtifactTable {
-        let data = try await artifactTransferData(
-            jobID: jobID, port: port, artifact: artifact
-        )
+        let data = try await artifactData(jobID: jobID, port: port, artifact: artifact)
         return try Self.decodeArtifactTable(data)
     }
 
@@ -125,35 +136,58 @@ extension TestJobsService {
         port: Int,
         artifact: TestJobArtifact
     ) async throws -> Data {
-        try await artifactTransferData(
-            jobID: jobID, port: port, artifact: artifact
-        )
+        if artifact.state == "local" || artifact.state == "deleted" {
+            return try TestJobBackupStore.data(
+                principal: backupPrincipal, managerURL: ManagerConfig.shared.baseURL,
+                jobID: jobID, artifact: artifact
+            )
+        }
+        do {
+            return try await artifactTransferData(
+                jobID: jobID, port: port, artifact: artifact
+            )
+        } catch {
+            return try TestJobBackupStore.data(
+                principal: backupPrincipal, managerURL: ManagerConfig.shared.baseURL,
+                jobID: jobID, artifact: artifact
+            )
+        }
     }
 
     func downloadAll(
         jobID: String, port: Int, artifacts: [TestJobArtifact]
     ) async throws -> URL {
-        let selected = artifacts.isEmpty
-            ? try await detail(jobID: jobID, port: port).artifacts
-            : artifacts
-        let active = selected.filter { $0.state == "active" }
+        guard !backupPrincipal.isEmpty else {
+            throw TestJobsRequestError(statusCode: nil,
+                responseText: L10n.text("登录后才能建立个人任务备份"))
+        }
+        let encoded = jobID.addingPercentEncoding(
+            withAllowedCharacters: .urlPathAllowed
+        ) ?? jobID
+        let response = try await request(
+            path: "/api/jobs/\(encoded)/artifacts", port: port
+        )
+        let storageServerID = response["storage_server_id"] as? String ?? ""
+        let active = (response["artifacts"] as? [[String: Any]] ?? [])
+            .map(makeArtifact).filter { $0.state == "active" }
         guard !active.isEmpty else {
             throw TestJobsRequestError(
                 statusCode: nil,
                 responseText: L10n.text("该任务没有可下载的生成物")
             )
         }
-        let root = try artifactDownloadRoot(jobID: jobID)
+        var downloads: [TestJobBackupStore.Download] = []
         for artifact in active {
             let data = try await artifactTransferData(
                 jobID: jobID, port: port, artifact: artifact
             )
-            try data.write(
-                to: root.appendingPathComponent(artifact.fileName),
-                options: .atomic
-            )
+            downloads.append(.init(artifact: artifact, data: data))
         }
-        return root
+        return try TestJobBackupStore.save(
+            principal: backupPrincipal, managerURL: ManagerConfig.shared.baseURL,
+            storageServerID: storageServerID, jobID: jobID,
+            downloads: downloads
+        )
     }
 
     private func artifactDownloadRoot(jobID: String) throws -> URL {

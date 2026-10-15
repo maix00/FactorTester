@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TestJobDetailView: View {
     let job: TestJob
+    @EnvironmentObject private var session: SessionStore
     @ObservedObject var tabSession: ClientTabSession
     @StateObject private var controller = TestJobsController()
     @State private var showPriceViewer = false
@@ -34,11 +35,11 @@ struct TestJobDetailView: View {
             }
         }
         .task {
+            controller.setBackupPrincipal(session.user?.username ?? "")
             if let cached = tabSession.jobDetails[job.id] {
                 controller.restore(cached)
-            } else {
-                await load(job)
             }
+            await load(job)
             controller.watchProgress(job)
         }
         .onDisappear {
@@ -332,7 +333,9 @@ struct TestJobDetailView: View {
     private func artifacts(_ detail: TestJobDetail) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("生成物").font(.headline)
-            let active = detail.artifacts.filter { $0.state == "active" }
+            let active = detail.artifacts.filter {
+                ["active", "local"].contains($0.state)
+            }
             if active.isEmpty {
                 Text("暂无生成物").font(.caption).foregroundStyle(.secondary)
             } else {

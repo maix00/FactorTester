@@ -4,6 +4,7 @@
     ["federation", "服务器互联", "server.rack"],
     ["control-database", "控制数据库", "externaldrive.connected.to.line.below"],
     ["devices", "我的设备", "checkmark.seal"],
+    ["quota", "存储配额", "externaldrive"],
     ["workspace", "工作区", "square.grid.2x2"], ["language", "语言", "globe"],
     ["updates", "客户端更新", "arrow.down.circle"],
   ];
@@ -43,6 +44,10 @@
     if (selected === "devices") {
       await window.FTStaticLoader?.loadGroups?.(["settings-devices"]);
       return window.FTSettingsDevices.show(context, body);
+    }
+    if (selected === "quota") {
+      await window.FTStaticLoader?.loadGroups?.(["access-table"]);
+      return quota(context, body);
     }
     if (selected === "workspace") return workspace(context, body);
     if (selected === "language") return language(context, body);
@@ -87,6 +92,325 @@
       [context.t("用户角色"), context.t("由服务器分配，客户端不能修改"), context.session?.role || ""],
       [context.t("服务器管理"), context.t("超级管理员登录后自动获得管理页面"), context.t(context.session?.capabilities?.manager ? "可用" : "不可用")],
     ]));
+  }
+
+  function quotaBytes(value) {
+    const bytes = Math.max(0, Number(value) || 0);
+    if (bytes < 1024) return `${bytes} B`;
+    const units = ["KiB", "MiB", "GiB", "TiB"];
+    const power = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), 4);
+    return `${(bytes / (1024 ** power)).toFixed(2)} ${units[power - 1]}`;
+  }
+
+  function quotaSnapshotStale(observedAt) {
+    const timestamp = Date.parse(observedAt || "");
+    return !Number.isFinite(timestamp) || Date.now() - timestamp > 5 * 60 * 1000;
+  }
+
+  function quotaCategoryLabel(context, value) {
+    const labels = {
+      "input:factor_source": "因子源码快照", "input:strategy_source": "策略源码快照",
+      "input:product_scope": "产品范围快照", "output:group_execution": "回测执行明细",
+      "output:order_audit": "订单审计", "output:strategy_analysis_source": "策略分析明细",
+      "output:net_returns": "收益序列", "output:result": "完整结果",
+      "output:equity_curve_data": "权益曲线数据", "output:equity_curve_report": "权益曲线图片",
+      "output:fee_detail_data": "手续费明细", "output:fee_detail_csv": "手续费明细 CSV",
+      "output:report-output-bundle": "报告输出清单",
+      "profile:research_reports": "研究报告与草稿", "profile:profile_uploads": "Profile 上传文件",
+      "profile:profile_workspaces": "研究身份工作区",
+      "protected:factors": "基础因子", "protected:product_groups": "产品组",
+    };
+    return context.t(labels[value] || value.replace(/^input:/, "提交物 · ").replace(/^output:/, "生成物 · "));
+  }
+
+  async function quota(context, body) {
+    body.append(pageHeader(context.t("存储配额"), context.t("查看保留的 Job 附件，并预览清理范围"), "externaldrive"));
+    if (!context.session) {
+      body.append(card(context.t("存储配额"), [["需要登录", "登录后查看个人配额", "不可用"]]));
+      return;
+    }
+    const summary = document.createElement("section"); summary.className = "settings-section";
+    const storageServerSelect = document.createElement("select");
+    storageServerSelect.className = "inline-setting";
+    storageServerSelect.setAttribute("aria-label", context.t("Job 存储服务器"));
+    let selectedServerId = "";
+    const rows = document.createElement("div"); rows.className = "settings-rows";
+    const bar = document.createElement("div"); bar.className = "quota-segments";
+    bar.setAttribute("role", "img");
+    const cleanupButton = document.createElement("button");
+    cleanupButton.type = "button";
+    cleanupButton.textContent = context.t("一键清理可清理输出");
+    const retryFilesButton = document.createElement("button");
+    retryFilesButton.type = "button";
+    retryFilesButton.textContent = context.t("重试清理残留文件");
+    let retryAfter = 0;
+    retryFilesButton.onclick = async () => {
+      if (!window.confirm(context.t("仅检查已标记删除的 Job 附件文件，并重试移除仍留在服务器上的文件。继续吗？"))) return;
+      try {
+        const params = new URLSearchParams({cleanup: "retry-files", after: String(retryAfter)});
+        if (cleanupServerId) params.set("server_id", cleanupServerId);
+        const result = await context.api(`/api/jobs/artifacts?${params}`, {method: "DELETE"});
+        retryAfter = Number(result.next_after || 0);
+        context.showNotice(`${context.t("移除残留文件")} ${result.deleted_files} ${context.t("项")}` +
+          (result.failed_files ? ` · ${context.t("失败")} ${result.failed_files}` : "") +
+          (retryAfter ? ` · ${context.t("仍有下一批，点击继续")}` : ""), Boolean(result.failed_files));
+      } catch (error) {
+        context.showNotice(error.message, true);
+      }
+    };
+    let cleanupPreview = {artifact_count: 0, bytes: 0};
+    let eligibleCategories = [];
+    let cleanupServerId = "";
+    const clearOutputs = async (category = "") => {
+      const preview = category
+        ? eligibleCategories.find(item => item.category === category)
+        : cleanupPreview;
+      if (!preview || !Number(preview.artifact_count)) return;
+      const label = category ? quotaCategoryLabel(context, category) : context.t("所有可清理类别");
+      const warning = `${context.t("清理")} ${label}: ${preview.artifact_count} ${context.t("项")}, ${preview.job_count || 0} ${context.t("个任务")}, ${quotaBytes(preview.bytes)}?\n${context.t("仅清理已结束 Job 的输出；如报告挂载这些 Job，实时详情可能无法显示。提交输入、基础因子与产品组不会删除。")}`;
+      if (!window.confirm(warning)) return;
+      const params = new URLSearchParams({
+        cleanup: "eligible", expected_count: String(preview.artifact_count),
+        expected_bytes: String(preview.bytes),
+        expected_token: String(preview.token || ""),
+      });
+      if (category) params.set("category", category);
+      if (cleanupServerId) params.set("server_id", cleanupServerId);
+      try {
+        const result = await context.api(`/api/jobs/artifacts?${params}`, {method: "DELETE"});
+        context.showNotice(`${context.t("已清理")} ${result.deleted_artifacts} ${context.t("项")}` +
+          (result.failed_files ? ` · ${result.failed_files} ${context.t("个磁盘文件未移除，请重试清理残留文件")}` : ""),
+          Boolean(result.failed_files));
+        await refresh();
+      } catch (error) {
+        context.showNotice(error.message, true);
+      }
+    };
+    cleanupButton.onclick = () => { void clearOutputs(); };
+    const categorySection = document.createElement("section"); categorySection.className = "settings-section";
+    const categoryHeading = document.createElement("h3"); categoryHeading.textContent = context.t("占用分类");
+    const itemsSection = document.createElement("section"); itemsSection.className = "settings-section";
+    let selectedCategory = "";
+    let offset = 0;
+    let categoryTable;
+    let itemTable;
+    const itemHeading = document.createElement("h3");
+    const pager = document.createElement("div"); pager.className = "quota-item-pager";
+    const previous = document.createElement("button"); previous.textContent = context.t("上一批");
+    const next = document.createElement("button"); next.textContent = context.t("下一批");
+    const position = document.createElement("span");
+    previous.onclick = () => { offset = Math.max(0, offset - 100); void refreshItems(); };
+    next.onclick = () => { offset += 100; void refreshItems(); };
+    pager.append(previous, position, next);
+    const refreshItems = async () => {
+      if (!selectedCategory) return;
+      const params = new URLSearchParams({category: selectedCategory, limit: "100", offset: String(offset)});
+      if (selectedServerId) params.set("server_id", selectedServerId);
+      const data = await context.api(`/api/jobs/storage?${params}`);
+      if (!current(context)) return;
+      itemHeading.textContent = `${quotaCategoryLabel(context, selectedCategory)} · ${data.item_count || 0} ${context.t("项")}`;
+      itemTable.setRows(data.items || []);
+      previous.disabled = offset === 0;
+      next.disabled = offset + 100 >= (data.item_count || 0);
+      position.textContent = `${Math.min(offset + 1, data.item_count || 0)}–${Math.min(offset + 100, data.item_count || 0)}`;
+    };
+    let profile = null;
+    let refreshVersion = 0;
+    const renderQuota = async data => {
+      if (!current(context)) return;
+      const usage = Number(data.usage_bytes || 0);
+      const quotaSize = Number(data.quota_bytes || 0);
+      const remoteServers = (data.servers || []).filter(item =>
+        item.storage_server_id !== data.storage_server_id);
+      const staleServers = remoteServers.filter(item => quotaSnapshotStale(item.observed_at));
+      const crossProfile = profile?.cross_server || null;
+      const profileStatus = !profile ? context.t("计量暂不可用")
+        : crossProfile?.coverage_complete
+          ? `${quotaBytes(crossProfile.total_bytes)} · ${context.t("全部已连接服务器")}`
+          : `${quotaBytes(crossProfile?.measured_current_bytes ?? profile.bytes)} · ` +
+            context.t("当前可计量；其他服务器不可用或快照过期");
+      const protectedMetadata = profile?.protected_metadata || null;
+      const protectedMetadataBytes = protectedMetadata
+        ? Number(protectedMetadata.factors?.bytes || 0) +
+          Number(protectedMetadata.product_groups?.bytes || 0)
+        : 0;
+      rows.replaceChildren(
+        row(context.t("Job 附件"), context.t(staleServers.length
+          ? "跨服务器用量含过期快照，请到来源服务器刷新后再判断实时剩余额度"
+          : "全部存储服务器的活跃附件"),
+          `${quotaBytes(usage)} / ${quotaBytes(quotaSize)}${data.over_quota ? context.t(" · 已超额") : ""}`),
+        row(context.t("报告与 Profile 工作区"), context.t("按存储服务器计量；尚未纳入 Job 配额，离线/过期读数不当作实时用量"), profileStatus),
+        row(context.t("基础因子与产品组"), context.t("仅含控制库元数据，不含因子源码文件；尚未纳入 Job 配额，不能在此删除"),
+          protectedMetadata ? `${quotaBytes(protectedMetadataBytes)} · ${context.t("元数据")}`
+            : context.t("待计量 · 受保护")),
+      );
+      bar.replaceChildren();
+      let percentage = 0;
+      const colors = ["#2775dc", "#7455c4", "#e4a529", "#39a56d", "#d36161"];
+      const displayedCategories = [...(data.categories || [])];
+      cleanupPreview = data.cleanup_preview || {artifact_count: 0, bytes: 0};
+      eligibleCategories = data.cleanup_categories || [];
+      cleanupServerId = String(data.storage_server_id || "");
+      const serverIds = [...new Set([cleanupServerId,
+        ...(data.servers || []).map(item => String(item.storage_server_id || ""))]
+        .filter(Boolean))];
+      storageServerSelect.replaceChildren(...serverIds.map(serverId => {
+        const option = document.createElement("option");
+        option.value = serverId;
+        option.textContent = serverId === cleanupServerId
+          ? `${serverId} · ${context.t("当前查看")}` : serverId;
+        return option;
+      }));
+      storageServerSelect.value = cleanupServerId;
+      cleanupButton.disabled = !Number(cleanupPreview.artifact_count);
+      cleanupButton.title = `${cleanupPreview.artifact_count} ${context.t("项")} · ${quotaBytes(cleanupPreview.bytes)}`;
+      let remoteAttributed = 0;
+      remoteServers.forEach(server => {
+        const stale = quotaSnapshotStale(server.observed_at);
+        for (const [kind, bytesKey, countKey] of [
+          ["提交物", "input_bytes", "input_count"],
+          ["生成物", "output_bytes", "output_count"],
+        ]) {
+          const bytes = Number(server[bytesKey] || 0);
+          if (!bytes && !Number(server[countKey] || 0)) continue;
+          remoteAttributed += bytes;
+          displayedCategories.push({category: `remote:${server.storage_server_id}:${kind}`,
+            displayName: `${server.storage_server_id} · ${context.t(kind)}` +
+              (stale ? ` · ${context.t("快照已过期")}` : ""),
+            role: "remote", bytes, artifact_count: server[countKey], stale,
+            observedAt: server.observed_at});
+        }
+      });
+      const unresolved = Math.max(0, Number(data.unattributed_bytes || 0) - remoteAttributed);
+      if (unresolved > 0) displayedCategories.push({
+        category: "other_servers", role: "remote", bytes: unresolved,
+        artifact_count: "—", displayName: context.t("其他服务器附件 · 未归类"),
+      });
+      for (const [category, key] of [
+        ["protected:factors", "factors"], ["protected:product_groups", "product_groups"],
+      ]) {
+        const measured = protectedMetadata?.[key];
+        displayedCategories.push({category, role: "protected",
+          measured: Boolean(measured), bytes: measured?.bytes,
+          artifact_count: measured?.item_count, quota_included: false,
+          displayName: measured ? `${quotaCategoryLabel(context, category)} · ${context.t("元数据")}` : null});
+      }
+      const profileServers = crossProfile?.servers || (profile ? [{
+        storage_server_id: profile.storage_server_id,
+        status: "current", inventory: profile,
+      }] : []);
+      profileServers.forEach(server => {
+        if (!server.inventory) {
+          displayedCategories.push({category: `profile-server:${server.storage_server_id}`,
+            displayName: `${server.storage_server_id} · ${context.t("Profile 存储不可用")}`,
+            role: "profile", measured: false, quota_included: false});
+          return;
+        }
+        for (const [category, item] of Object.entries(server.inventory.categories || {})) {
+          displayedCategories.push({category: `profile:${server.storage_server_id}:${category}`,
+            displayName: `${server.storage_server_id} · ${quotaCategoryLabel(context, `profile:${category}`)}` +
+              (server.status === "stale" ? ` · ${context.t("快照已过期")}` : ""),
+            role: "profile", bytes: item.bytes, artifact_count: item.file_count,
+            quota_included: false,
+            observedAt: new Date(Number(server.inventory.observed_at) * 1000).toLocaleString()});
+        }
+      });
+      displayedCategories.forEach((entry, index) => {
+        if (quotaSize <= 0 || entry.measured === false || entry.quota_included === false) return;
+        const width = Math.min(100 - percentage, 100 * Number(entry.bytes || 0) / quotaSize);
+        if (width <= 0) return;
+        const segment = document.createElement("span");
+        segment.style.width = `${width}%`;
+        segment.style.background = entry.role === "remote" ? "#8a8f98" : colors[index % colors.length];
+        segment.title = `${entry.displayName || quotaCategoryLabel(context, entry.category)} · ${quotaBytes(entry.bytes)}`;
+        bar.append(segment); percentage += width;
+      });
+      bar.setAttribute("aria-label", `${context.t("Job 附件配额占用")} ${Math.round(usage / Math.max(1, quotaSize) * 100)}%`);
+      categoryTable.setRows(displayedCategories.map((entry, index) => ({
+        ...entry, color: entry.role === "protected" ? "#8a8f98" :
+          entry.role === "remote" ? "#8a8f98" : colors[index % colors.length],
+        percent: quotaSize && entry.quota_included !== false
+          ? 100 * Number(entry.bytes || 0) / quotaSize : null,
+      })));
+      if (selectedCategory) await refreshItems();
+    };
+    const refresh = async () => {
+      const version = ++refreshVersion;
+      const profileRequest = context.api("/api/storage/profile-inventory")
+        .then(value => ({value}), error => ({error}));
+      const params = new URLSearchParams();
+      if (selectedServerId) params.set("server_id", selectedServerId);
+      const data = await context.api(`/api/jobs/storage${params.size ? `?${params}` : ""}`);
+      if (!current(context) || version !== refreshVersion) return;
+      await renderQuota(data);
+      void profileRequest.then(result => {
+        if (!current(context) || version !== refreshVersion) return;
+        profile = result.value || null;
+        void renderQuota(data).catch(error => context.showNotice(error.message, true));
+      });
+    };
+    storageServerSelect.onchange = () => {
+      selectedServerId = storageServerSelect.value;
+      selectedCategory = "";
+      offset = 0;
+      void refresh().catch(error => context.showNotice(error.message, true));
+    };
+    categoryTable = FTManagerAccessTable.create(context, {
+      headers: ["类别", "占用", "配额占比", "数量", "操作"], searchPlaceholder: "筛选类别",
+      empty: "暂无保留附件", refresh,
+      searchText: item => `${item.category} ${quotaCategoryLabel(context, item.category)}`,
+      cells: item => [() => {
+        const label = document.createElement("span"); label.className = "quota-category-label";
+        if (item.observedAt) label.title = `${context.t("观测时间")}: ${item.observedAt}`;
+        const swatch = document.createElement("i"); swatch.style.background = item.color;
+        const name = document.createElement("span");
+        name.textContent = item.displayName || quotaCategoryLabel(context, item.category);
+        label.append(swatch, name); return label;
+      }, item.measured === false ? context.t("待计量") : quotaBytes(item.bytes),
+        item.percent === null || item.measured === false ? "未计入" : `${item.percent.toFixed(1)}%`,
+        item.artifact_count ?? "—", () => {
+          if (item.role !== "output") return context.t(
+            item.role === "protected" || item.role === "input" ? "受保护" :
+              item.role === "profile" ? "由所属页面管理" : "请在来源服务器查看");
+          const actions = document.createElement("span");
+          actions.append(FTUI.iconButton(context, "list.bullet.clipboard", "查看附件", () => {
+            selectedCategory = item.category; offset = 0;
+            void refreshItems().catch(error => context.showNotice(error.message, true));
+          }));
+          if (eligibleCategories.some(entry => entry.category === item.category)) {
+            actions.append(FTUI.iconButton(context, "trash", "清理此类别的已结束 Job 输出", () => {
+              void clearOutputs(item.category);
+            }));
+          }
+          return actions;
+        }],
+    });
+    itemTable = FTManagerAccessTable.create(context, {
+      headers: ["任务", "附件", "大小", "操作"], searchPlaceholder: "筛选当前批次",
+      empty: "此类别暂无附件", refresh: refreshItems,
+      searchText: item => `${item.job_id} ${item.name}`,
+      cells: item => [item.job_id, item.name, quotaBytes(item.size_bytes), () => {
+        if (item.role !== "output") return context.t("受保护");
+        return FTUI.iconButton(context, "trash", "删除此输出附件", async () => {
+          const message = `${context.t("删除附件")} ${item.name} (${quotaBytes(item.size_bytes)})?\n${context.t("如果研究报告挂载此任务，详细结果可能无法显示；Job 摘要仍保留。")}`;
+          if (!window.confirm(message)) return;
+          const path = `/api/jobs/${encodeURIComponent(item.job_id)}/artifacts/${encodeURIComponent(item.name)}` +
+            (cleanupServerId ? `?server_id=${encodeURIComponent(cleanupServerId)}` : "");
+          try {
+            await context.api(path, {method: "DELETE"});
+            context.showNotice(context.t("附件已删除"));
+            await refresh();
+          } catch (error) {
+            context.showNotice(error.message, true);
+          }
+        });
+      }],
+    });
+    summary.append(storageServerSelect, rows, bar, cleanupButton, retryFilesButton);
+    categorySection.append(categoryHeading, categoryTable.root);
+    itemsSection.append(itemHeading, itemTable.root, pager);
+    body.append(summary, categorySection, itemsSection);
+    await refresh();
   }
 
   async function server(context, body) {

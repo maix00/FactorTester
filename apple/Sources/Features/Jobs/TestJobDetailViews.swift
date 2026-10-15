@@ -61,7 +61,13 @@ struct TestJobArtifactGrid: View {
                 Divider().gridCellUnsizedAxes(.horizontal)
                 ForEach(artifacts) { artifact in
                     GridRow {
-                        Text(artifact.description).font(.caption)
+                        HStack(spacing: 5) {
+                            Text(artifact.description)
+                            if artifact.state == "local" {
+                                Text("本地备份")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }.font(.caption)
                         Button(artifact.fileName) { onOpen(artifact) }
                             .buttonStyle(.link)
                             .font(.caption)
