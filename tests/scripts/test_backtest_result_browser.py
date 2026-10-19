@@ -340,13 +340,15 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
           series: window.__assetPlot.display.overlaySeries(
             {__assetEvents: window.__assetPlot.payload.__assetEvents},
             [{timestamp: 1700000000000, close: 100}], () => {},
-          ).map(item => ({name: item.name, count: item.data.length})),
+              ).map(item => ({name: item.name, count: item.data.length,
+                events: item.data.reduce((n, point) => n + point.custom.items.length, 0)})),
         })""")
         assert asset["request"]["product_name"] == "AU.SHF"
         assert asset["events"]["filters"]["product"]["values"] == ["AU.SHF"]
         assert asset["events"]["filters"]["strategy"]["values"] == ["A1"]
         assert "account" not in asset["events"]["filters"]
-        assert asset["series"][0]["count"] == 24
+        assert asset["series"][0]["count"] == 1
+        assert asset["series"][0]["events"] == 25
         assert page.evaluate("window.__assetPlot.display.keepOtherSeriesVisible") is True
         page.evaluate("""() => {
           const series = window.__assetPlot.display.overlaySeries(
@@ -354,15 +356,15 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
             [{timestamp: 1700000000000, close: 100}],
           );
           const order = series.find(item => item.id === 'asset-order');
-          const group = order.data.find(item => item.custom.items.length === 2);
+          const group = order.data.find(item => item.custom.items.length === 25);
           order.point.events.click.call({options: group});
         }""")
-        assert "同一位置的 2 笔事件" in page.locator(
+        assert "同一位置的 25 笔事件" in page.locator(
             ".backtest-asset-group-filter"
         ).inner_text()
-        assert page.locator(".backtest-asset-events tbody tr").count() == 2
+        assert page.locator(".backtest-asset-events tbody tr").count() == 20
         cards = page.locator(".backtest-asset-event-card")
-        assert cards.count() == 2
+        assert cards.count() == 25
         assert cards.first.get_by_text("事件 ID").count() == 1
         assert cards.first.locator("dd").count() >= 6
         assert cards.nth(1).get_attribute("open") is None
@@ -377,7 +379,7 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
           ], [{timestamp: 1700000000000, high: 103, low: 99, close: 100}], () => {});
           return marker.find(series => series.id === 'asset-sell').data[0].y;
         }""")
-        assert fill_marker > 103
+        assert fill_marker == 0.5
         native_fills = page.evaluate("""async () => {
           const state = {artifactsByName: new Map([
             ['order_detail_data', {name: 'order_detail_data'}],
@@ -423,7 +425,7 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
             rerendered: state.rendered};
         }""")
         assert grouped["groups"] == [[105, 2], [106, 1]]
-        assert grouped["markerCount"] == 2
+        assert grouped["markerCount"] == 1
         assert "现金 1,000 → 787" in grouped["detail"]
         assert "手续费 3" in grouped["detail"]
         assert "保证金" not in grouped["detail"]
@@ -656,6 +658,7 @@ def test_asset_plot_same_location_group_keeps_other_markers_visible() -> None:
           const bars = Array.from({length: 10}, (_, index) => ({
             timestamp: start + index * 86400000,
             open: 100, high: 103, low: 99, close: 101, volume: 10,
+            open_interest: 200,
           }));
           const events = [
             {artifact: 'order_detail_data', timestamp: start + 2 * 86400000,
@@ -667,7 +670,7 @@ def test_asset_plot_same_location_group_keeps_other_markers_visible() -> None:
           ];
           const chart = FTPriceChart.render({t: value => value},
             document.querySelector('#chart'), {data: bars, product: 'AU.SHF'}, {
-              keepOtherSeriesVisible: true,
+              keepOtherSeriesVisible: true, eventLane: true,
               overlaySeries(_payload, normalizedBars) {
                 return FTBacktestAssetPlot.markerSeries(events, normalizedBars, () => {});
               },
@@ -678,18 +681,27 @@ def test_asset_plot_same_location_group_keeps_other_markers_visible() -> None:
           return {
             mixedCount: mixed.points[0].options.custom.items.length,
             mixedLabel: mixed.points[0].dataLabel?.text?.textStr || "",
-            mixedAboveCandle: mixed.points[0].y > 103,
-            sellAboveCandle: sell.points[0].y > 103,
+            markerAxis: mixed.yAxis.index,
+            candleAxis: chart.series[0].yAxis.index,
+            laneBottom: mixed.yAxis.top + mixed.yAxis.height,
+            candleTop: chart.series[0].yAxis.top,
             sellCount: sell.points.length,
             inactiveOpacity: sell.options.states.inactive.opacity,
+            markerTime: mixed.points[0].x,
+            candleTime: bars[2].timestamp,
+            tooltip: chart.tooltip.label?.text?.textStr || "",
           };
         }""")
         assert result["mixedCount"] == 2
         assert result["mixedLabel"] == ""
-        assert result["mixedAboveCandle"] is True
-        assert result["sellAboveCandle"] is True
+        assert result["markerAxis"] == 3
+        assert result["candleAxis"] == 0
+        assert result["laneBottom"] < result["candleTop"]
         assert result["sellCount"] == 1
         assert result["inactiveOpacity"] == 1
+        assert result["markerTime"] == result["candleTime"]
+        assert "成交量" in result["tooltip"]
+        assert "持仓量" in result["tooltip"]
         browser.close()
 
 

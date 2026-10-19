@@ -149,13 +149,15 @@
   function optionsOf(context, payload, bars, displayOptions = {}) {
     const t = value => context?.t?.(value) || value;
     const hasOI = bars.some(item => item.openInterest !== null);
+    const eventLane = displayOptions.eventLane === true;
     const title = [payload?.product || payload?.product_name || "", payload?.desc || ""]
       .filter(Boolean).join(" — ");
-    const priceHeight = hasOI ? "50%" : "62%";
+    const priceHeight = hasOI ? (eventLane ? "42%" : "50%")
+      : (eventLane ? "54%" : "62%");
     const volumeTop = hasOI ? "55%" : "67%";
     const volumeHeight = hasOI ? "23%" : "31%";
     const yAxis = [
-      axis(priceHeight, "0%", true),
+      axis(priceHeight, eventLane ? "8%" : "0%", true),
       axis(volumeHeight, volumeTop, false),
     ];
     const series = [
@@ -183,6 +185,11 @@
         tooltip: {pointFormatter: scalarPointFormatter(context, "持仓量")},
       });
     }
+    if (eventLane) yAxis.push({
+      ...axis("6%", "0%", false), min: 0, max: 1,
+      labels: {enabled: false}, lineWidth: 0, gridLineWidth: 0,
+      startOnTick: false, endOnTick: false,
+    });
     const overlay = typeof displayOptions.overlaySeries === "function"
       ? displayOptions.overlaySeries(payload, bars) : [];
     if (Array.isArray(overlay)) series.push(...overlay);
