@@ -146,7 +146,7 @@
     status.textContent = context.t("正在读取最近一次完整计量记录");
     tableMount.textContent = context.t("正在读取占用分类…");
 
-    const dialog = document.createElement("dialog"); dialog.className = "quota-dialog";
+    const dialog = window.FTUI.dialogRoot(context); dialog.className = "quota-dialog";
     const dialogCard = document.createElement("div"); dialogCard.className = "dialog-card wide";
     const dialogHead = document.createElement("div"); dialogHead.className = "quota-dialog-heading";
     const dialogTitle = document.createElement("h2");

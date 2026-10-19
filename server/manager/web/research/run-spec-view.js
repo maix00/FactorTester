@@ -130,7 +130,7 @@
       .map((entry, index) => entryRecord(context, entry, index))
       .filter(entry => entry.target);
     if (!records.length) return null;
-    const dialog = document.createElement("dialog");
+    const dialog = window.FTUI.dialogRoot(context);
     dialog.className = "run-spec-dialog";
     dialog.dataset.ftTabID = context.tabID || "";
     const card = document.createElement("article");

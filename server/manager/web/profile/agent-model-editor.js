@@ -66,7 +66,7 @@
   }
 
   function open(context, item, capabilities, refresh) {
-    const dialog = document.createElement("dialog");
+    const dialog = window.FTUI.dialogRoot(context);
     dialog.dataset.ftTabID = context.tabID || "";
     dialog.className = "ft-dialog agent-model-dialog";
     const card = document.createElement("div");

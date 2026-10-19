@@ -34,7 +34,7 @@
   }
 
   function dialog(context, title, subtitle = "") {
-    const root = document.createElement("dialog");
+    const root = window.FTUI.dialogRoot(context);
     root.dataset.ftTabID = context.tabID || "";
     root.className = "backtest-analysis-dialog";
     const card = document.createElement("article");

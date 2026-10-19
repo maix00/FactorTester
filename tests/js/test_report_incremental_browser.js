@@ -11,7 +11,8 @@ for (const engine of [chromium, webkit]) {
  await page.evaluate(() => {
   window.FTRichText={blocks: text=>document.createTextNode(text),inline:text=>document.createTextNode(text)};
   window.FTIcons={node:()=>document.createElement('i'),section:()=>''};
-  window.FTUI={empty:text=>document.createTextNode(text),loading:text=>document.createTextNode(text)};
+  window.FTUI={empty:text=>document.createTextNode(text),loading:text=>document.createTextNode(text),
+    dialogRoot:()=>document.createElement('dialog')};
   window.FTReportChapterRail={setup:()=>({refresh(){},cleanup(){}})};
  });
  for (const file of ['tree','chapter-cache','lazy-runtime','component-view','report-renderer']) {

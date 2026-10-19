@@ -20,7 +20,7 @@
     const response = await context.api("/api/research/principals");
     const principals = response.principals || [];
     return new Promise(resolve => {
-      const dialog = document.createElement("dialog");
+      const dialog = window.FTUI.dialogRoot(context);
       dialog.className = "ft-dialog research-visibility-dialog";
       const card = document.createElement("div");
       card.className = "dialog-card";
@@ -76,7 +76,7 @@
   }
 
   function shareDialog(context, item, kind) {
-    const dialog = document.createElement("dialog");
+    const dialog = window.FTUI.dialogRoot(context);
     dialog.className = "ft-dialog research-visibility-dialog";
     const card = document.createElement("div");
     card.className = "dialog-card";

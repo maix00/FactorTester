@@ -185,7 +185,7 @@
       context.checkpointTabSession?.();
     };
     window.addEventListener?.("pagehide", checkpoint);
-    const dialog = document.createElement("dialog");
+    const dialog = window.FTUI.dialogRoot(context);
     dialog.className = "ft-object-overlay-dialog";
     dialog.dataset.ftTabID = context.tabID || "";
     const card = document.createElement("section");
