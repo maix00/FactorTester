@@ -47,13 +47,9 @@
 }
 .backtest-asset-filter {
   width: min(520px, 100%);
-  min-height: 38px;
-  padding: 6px 9px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel);
-  color: inherit;
+  max-width: none;
 }
+.backtest-asset-filter .ft-multi-select-summary { min-height: 38px; }
 .backtest-runtime-disclosure {
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -184,6 +180,15 @@
 .backtest-asset-heading span { color: var(--muted); font-size: 13px; }
 .backtest-asset-note { margin: 0; color: var(--muted); font-size: 13px; }
 .backtest-asset-chart { min-width: 0; min-height: 520px; }
+.backtest-asset-inspector-mount:empty { display: none; }
+.backtest-asset-inspector { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
+.backtest-asset-inspector h4 { margin: 0; font-size: 14px; }
+.backtest-asset-event-card { border: 1px solid var(--line); border-radius: 7px; min-width: 0; }
+.backtest-asset-event-card > summary { padding: 9px 11px; cursor: pointer; overflow-wrap: anywhere; }
+.backtest-asset-event-fields { display: grid; grid-template-columns: minmax(110px, 180px) minmax(0, 1fr); gap: 0 12px; margin: 0; padding: 0 11px 9px; }
+.backtest-asset-event-fields dt, .backtest-asset-event-fields dd { margin: 0; padding: 5px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.backtest-asset-event-fields dt { color: var(--muted); }
+@media (max-width: 640px) { .backtest-asset-event-fields { grid-template-columns: minmax(88px, 35%) minmax(0, 1fr); } }
 .backtest-asset-events { min-width: 0; max-width: 100%; }
 .backtest-asset-group-filter { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .backtest-asset-events .table-shell { max-width: 100%; overflow-x: auto; }

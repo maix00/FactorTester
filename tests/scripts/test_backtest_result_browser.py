@@ -283,8 +283,9 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
             "document.querySelector('.backtest-asset-chart')?.dataset.assetPlotReady === 'true'"
         )
         assert page.locator(".backtest-asset-events tbody tr").count() == 20
-        assert page.get_by_label("品种 / 合约").input_value() == "AU.SHF"
-        assert page.get_by_label("账本").input_value() == ""
+        assert page.locator(".backtest-asset-filter").count() == 3
+        assert page.locator(".backtest-asset-filter").last.locator("summary").inner_text() == "AU.SHF"
+        assert page.locator(".backtest-asset-filter").nth(1).locator("summary").inner_text() == "全部账本"
         assert page.locator(".backtest-result-strategy-filter").count() == 0
         page.get_by_role("button", name="事件流", exact=True).click()
         page.locator(".backtest-event-flow strong", has_text="order-25").wait_for()
@@ -324,9 +325,10 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
         page.wait_for_function("document.querySelector('.backtest-asset-chart')?.dataset.assetPlotReady === 'true'")
         assert page.get_by_role("dialog").count() == 0
         assert page.locator(".backtest-asset-events .shared-paged-table tbody tr").count() == 13
-        assert page.get_by_label("账本").input_value() == "account-1"
-        assert page.get_by_label("策略").input_value() == "A1"
-        page.get_by_label("账本").select_option("")
+        assert page.locator(".backtest-asset-filter").nth(1).locator("summary").inner_text() == "account-1"
+        assert page.locator(".backtest-asset-filter").first.locator("summary").inner_text() == "A1"
+        page.locator(".backtest-asset-filter").nth(1).locator("summary").click()
+        page.locator('input[data-filter-value="__all_asset_账本__"]').click()
         page.wait_for_function(
             "document.querySelector('.backtest-asset-chart')?.dataset.assetPlotReady === 'true'"
         )
@@ -359,16 +361,23 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
             ".backtest-asset-group-filter"
         ).inner_text()
         assert page.locator(".backtest-asset-events tbody tr").count() == 2
+        cards = page.locator(".backtest-asset-event-card")
+        assert cards.count() == 2
+        assert cards.first.get_by_text("事件 ID").count() == 1
+        assert cards.first.locator("dd").count() >= 6
+        assert cards.nth(1).get_attribute("open") is None
+        cards.nth(1).locator("summary").click()
+        assert cards.nth(1).get_attribute("open") is not None
         page.get_by_role("button", name="显示全部事件").click()
         assert page.locator(".backtest-asset-events tbody tr").count() == 20
         fill_marker = page.evaluate("""() => {
           const marker = FTBacktestAssetPlot.markerSeries([
             {artifact: 'fill_detail_data', timestamp: 1700000000000,
               row: {side: 'SELL', fill_price: 105, quantity: 2}},
-          ], [{timestamp: 1700000000000, close: 100}], () => {});
+          ], [{timestamp: 1700000000000, high: 103, low: 99, close: 100}], () => {});
           return marker.find(series => series.id === 'asset-sell').data[0].y;
         }""")
-        assert fill_marker == 105
+        assert fill_marker > 103
         native_fills = page.evaluate("""async () => {
           const state = {artifactsByName: new Map([
             ['order_detail_data', {name: 'order_detail_data'}],
@@ -668,13 +677,17 @@ def test_asset_plot_same_location_group_keeps_other_markers_visible() -> None:
           mixed.points[0].onMouseOver();
           return {
             mixedCount: mixed.points[0].options.custom.items.length,
-            mixedLabel: mixed.points[0].dataLabel?.text?.textStr,
+            mixedLabel: mixed.points[0].dataLabel?.text?.textStr || "",
+            mixedAboveCandle: mixed.points[0].y > 103,
+            sellAboveCandle: sell.points[0].y > 103,
             sellCount: sell.points.length,
             inactiveOpacity: sell.options.states.inactive.opacity,
           };
         }""")
         assert result["mixedCount"] == 2
-        assert result["mixedLabel"] == "2"
+        assert result["mixedLabel"] == ""
+        assert result["mixedAboveCandle"] is True
+        assert result["sellAboveCandle"] is True
         assert result["sellCount"] == 1
         assert result["inactiveOpacity"] == 1
         browser.close()
@@ -686,6 +699,7 @@ def test_asset_plot_discovers_scope_and_switches_contract_without_a_selected_ord
         page = browser.new_page()
         page.set_content("<main id='root'></main>")
         for path in (
+            "server/manager/web/catalog/shared/multi-select-filter/index.js",
             "server/manager/web/jobs/artifact-query.js",
             "server/manager/web/core/price-chart.js",
             "server/manager/web/test-modules/backtest/results/strategy-selection.js",
@@ -722,8 +736,8 @@ def test_asset_plot_discovers_scope_and_switches_contract_without_a_selected_ord
           const controls = FTBacktestAssetPlot.controls(context, state);
           controls.forEach(item => document.querySelector('#root').append(item.element));
           const product = controls.find(item => item.label === '品种 / 合约').element;
-          product.value = 'AU.SHF';
-          product.dispatchEvent(new Event('change'));
+          product.querySelector('summary').click();
+          product.querySelector('input[data-filter-value="AU.SHF"]').click();
           await new Promise(resolve => setTimeout(resolve, 0));
           return {initial: found.selected, selected: state.selectedAsset,
             labels: controls.map(item => item.label), renderCount: state.renderCount,
