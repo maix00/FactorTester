@@ -1,6 +1,6 @@
 (() => {
   const tabLabels = Object.freeze({
-    overview: "概览", strategy_stats: "策略统计", time_series: "时变指标",
+    overview: "回测表现", strategy_stats: "策略统计", time_series: "时变指标",
     execution_account: "交易与账户", return_analysis: "收益与风险",
     runtime_summary: "运行摘要",
   });
@@ -319,6 +319,23 @@
       root.className = "backtest-overview-surface";
       root.append(window.FTBacktestResultSurfaces.toolbar(context, state));
       if (state.model.summaryRows.length) root.append(summaryTable(context, state));
+      if (window.FTRuntimeSummary?.rows?.(state.model.summary).length) {
+        const disclosure = document.createElement("details");
+        disclosure.className = "backtest-runtime-disclosure";
+        const heading = document.createElement("summary");
+        heading.textContent = context.t("运行摘要");
+        disclosure.append(heading, window.FTRuntimeSummary.render(
+          context, state.model.summary, {
+            filterRows: rows => state.strategyScope.filterRows(rows),
+            page: state.tablePages.runtime,
+            onPageChange: next => {
+              state.tablePages.runtime = next;
+              renderLoaded(context, state.target, state);
+            },
+          },
+        ));
+        root.append(disclosure);
+      }
       if (window.FTBacktestResultModel.initialSnapshot(state.model.summary)) {
         const actions = document.createElement("div");
         actions.className = "backtest-domain-actions";
@@ -474,10 +491,14 @@
         renderLoaded(context, target, state);
       },
     }) || [];
-    const tabs = FTJobResultTabs.compose({
+    const composedTabs = FTJobResultTabs.compose({
       tabs: state.model.tabs.map(key => ({key, label: tabLabels[key]})),
       resultSummary: state.model.summary, customTabs,
     });
+    const hasOverview = state.model.tabs.includes("overview");
+    const tabs = hasOverview
+      ? composedTabs.filter(tab => tab.key !== "runtime_summary") : composedTabs;
+    if (hasOverview && state.activeTab === "runtime_summary") state.activeTab = "overview";
     state.activeTab = FTJobResultTabs.active(tabs, state.activeTab, "overview");
     const header = window.FTJobResultTabs.create(context, {
       className: "backtest-domain-header",

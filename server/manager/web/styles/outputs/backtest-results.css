@@ -45,6 +45,22 @@
   width: 100%;
   max-width: none;
 }
+.backtest-asset-filter {
+  width: min(520px, 100%);
+  min-height: 38px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: inherit;
+}
+.backtest-runtime-disclosure {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 9px 12px;
+}
+.backtest-runtime-disclosure > summary { cursor: pointer; font-weight: 650; }
+.backtest-runtime-disclosure[open] > summary { margin-bottom: 10px; }
 
 .backtest-result-chart-filter { width: 100%; max-width: none; }
 .backtest-dimension-filters {
@@ -171,7 +187,7 @@
 .backtest-asset-events { min-width: 0; max-width: 100%; }
 .backtest-asset-group-filter { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .backtest-asset-events .table-shell { max-width: 100%; overflow-x: auto; }
-.backtest-asset-events table { min-width: 980px; }
+.backtest-asset-events table { min-width: 1180px; }
 .backtest-asset-events tbody tr { cursor: pointer; }
 .backtest-asset-events tbody tr:hover,
 .backtest-asset-events tbody tr.active { background: var(--soft); }
