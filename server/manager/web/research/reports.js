@@ -370,7 +370,7 @@
       context.showNotice?.(context.t("请先在“研究身份”中添加一个 Profile"), true);
       return;
     }
-    const dialog = document.createElement("dialog");
+    const dialog = window.FTUI.dialogRoot(context);
     dialog.className = "ft-dialog research-visibility-dialog";
     const card = document.createElement("div");
     card.className = "dialog-card";

@@ -99,6 +99,13 @@
     };
   }
 
+  function dialogRoot(context = null) {
+    const root = document.createElement("dialog");
+    root.dataset.ftOverlay = "true";
+    root.dataset.ftTabID = context?.tabID || "";
+    return root;
+  }
+
   function appendRow(body, values) {
     const row = body.insertRow();
     values.forEach(value => {
@@ -386,6 +393,6 @@
     actionButton, appendRow, code, codeEditor, sourcePanel, sourceView, empty, fieldRows, formatDate, helpIcon, iconButton,
     latexSafe, renderMath,
     refreshButton,
-    loading, pagedTable, table, text, userLabel, userDisplay, reportBranchLabel,
+    dialogRoot, loading, pagedTable, table, text, userLabel, userDisplay, reportBranchLabel,
   };
 })();

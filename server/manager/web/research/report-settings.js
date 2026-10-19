@@ -55,7 +55,7 @@
 
   async function open(context, report, onSaved = null) {
     let settings;
-    const dialog = document.createElement("dialog");
+    const dialog = window.FTUI.dialogRoot(context);
     dialog.className = "ft-dialog research-report-settings-dialog";
     const form = document.createElement("form");
     form.className = "dialog-card wide";

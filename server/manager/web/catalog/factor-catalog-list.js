@@ -266,7 +266,7 @@
 
   function confirmFamilyDeletion(context, label, factorCount, impact = {}, transfer = false) {
     return new Promise(resolve => {
-      const dialog = document.createElement("dialog");
+      const dialog = window.FTUI.dialogRoot(context);
       const card = document.createElement("form");
       card.method = "dialog";
       card.className = "dialog-card factor-family-delete-card";

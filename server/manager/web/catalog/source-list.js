@@ -274,7 +274,7 @@
   }
 
   function showProvidersOverlay(context, descriptor) {
-    const dialog = document.createElement("dialog");
+    const dialog = window.FTUI.dialogRoot(context);
     dialog.dataset.ftTabID = context.tabID || "";
     dialog.className = "catalog-source-providers-dialog";
     const card = document.createElement("form");

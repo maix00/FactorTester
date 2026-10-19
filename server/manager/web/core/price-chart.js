@@ -214,7 +214,10 @@
       tooltip: {shared: true, split: false, valueDecimals: 2},
       navigator: {enabled: true, adaptToUpdatedData: false},
       scrollbar: {enabled: true},
-      plotOptions: {series: {animation: false, turboThreshold: 0}},
+      plotOptions: {series: {
+        animation: false, turboThreshold: 0,
+        ...(displayOptions.keepOtherSeriesVisible ? {states: {inactive: {opacity: 1}}} : {}),
+      }},
       credits: {enabled: false},
       series,
     };

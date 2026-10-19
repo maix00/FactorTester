@@ -5,7 +5,9 @@
     "instrument", "product", "contract_uid", "strategy_id", "strategy_ref",
     "strategy", "order_id", "fill_id", "event_id", "event_type", "status",
     "side", "offset", "quantity", "requested_quantity", "filled_quantity",
-    "price", "fill_price", "fee",
+    "price", "fill_price", "fee", "active_leaves", "terminal_unfilled",
+    "cash_before", "cash_after", "cash_change", "margin_before", "margin_after",
+    "margin_change", "account_currency", "position_before", "position_after",
   ];
 
   function first(row, keys) {
@@ -87,8 +89,11 @@
         ), 0),
       }});
     }
+    const orderByID = new Map((orders?.rows || []).filter(row => row.order_id)
+      .map(row => [String(row.order_id), row]));
     const events = results.flatMap(({name, rows}) => rows.map((row, index) => ({
       artifact: name, row, index,
+      order: name === "fill_detail_data" ? orderByID.get(String(row.order_id || "")) : row,
       timestamp: window.FTPriceChart.timestampOf(first(row,
         ["timestamp", "submitted_at", "filled_at", "executed_at", "created_at"])),
     }))).filter(item => Number.isFinite(item.timestamp))
@@ -115,7 +120,73 @@
     }[character]));
   }
 
+  function number(value) {
+    if (value == null || value === "") return "—";
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric.toLocaleString() : String(value);
+  }
+
+  function change(row, before, after) {
+    if (row?.[before] == null || row?.[after] == null) return "未记录";
+    return `${number(row[before])} → ${number(row[after])}`;
+  }
+
+  function eventDetail(item) {
+    const row = item.row;
+    const isFill = item.artifact === "fill_detail_data";
+    const side = first(row, ["side", "offset"]) || "—";
+    const amount = first(row, isFill ? ["quantity", "filled_quantity"]
+      : ["requested_quantity", "quantity"]);
+    const order = item.order || row;
+    const currency = String(first(row, ["account_currency", "currency"]) || "");
+    const remaining = first(row, ["active_leaves"]);
+    const parts = [
+      `${isFill ? "成交" : "订单"} ${first(row, ["fill_id", "order_id"]) || ""} · ${side} · 数量 ${number(amount)}`,
+      `价格 ${number(first(row, ["fill_price", "price"]))}`,
+    ];
+    if (row.status) parts.push(`状态 ${row.status}`);
+    if (isFill && row.fee != null) parts.push(`手续费 ${number(row.fee)} ${currency}`.trim());
+    if (remaining != null) parts.push(`事件后剩余 ${number(remaining)}`);
+    else if (order?.active_leaves != null) {
+      parts.push(`订单最终剩余 ${number(order.active_leaves)}`);
+    }
+    if (order?.terminal_unfilled != null) {
+      parts.push(`终止未成交 ${number(order.terminal_unfilled)}`);
+    }
+    if (row.cash_before != null && row.cash_after != null) {
+      parts.push(`现金 ${change(row, "cash_before", "cash_after")} ${currency}`.trim());
+    }
+    if (row.margin_before != null && row.margin_after != null
+        && (Number(row.margin_before) !== 0 || Number(row.margin_after) !== 0)) {
+      parts.push(`账本保证金 ${change(row, "margin_before", "margin_after")}`);
+    }
+    if (row.position_before != null && row.position_after != null) {
+      parts.push(`持仓 ${change(row, "position_before", "position_after")}`);
+    }
+    return parts.join(" · ");
+  }
+
+  function eventGroupKey(item, price) {
+    // Preserve exact event time; different prices at the same instant stay separate.
+    return `${item.timestamp}\u0000${price}`;
+  }
+
+  function groupedPoints(events, bars) {
+    const groups = new Map();
+    for (const item of events) {
+      const raw = first(item.row, ["fill_price", "price"]);
+      const actual = raw != null ? Number(raw) : Number.NaN;
+      const price = Number.isFinite(actual) ? actual : nearestPrice(bars, item.timestamp);
+      if (price == null) continue;
+      const key = eventGroupKey(item, price);
+      if (!groups.has(key)) groups.set(key, {x: item.timestamp, y: price, items: []});
+      groups.get(key).items.push(item);
+    }
+    return [...groups.values()];
+  }
+
   function markerSeries(events, bars, onSelect) {
+    const groups = groupedPoints(events, bars);
     return [
       ["order", "订单", "#d97706", "diamond", item => item.artifact === "order_detail_data"],
       ["buy", "买入成交", "#16a34a", "triangle", item => item.artifact === "fill_detail_data"
@@ -124,66 +195,60 @@
         && /^(sell|short|s|卖)/i.test(String(item.row.side || ""))],
       ["other", "其他成交", "#2563eb", "circle", item => item.artifact === "fill_detail_data"
         && !/^(buy|long|b|买|sell|short|s|卖)/i.test(String(item.row.side || ""))],
+      ["mixed", "同位置多个事件", "#7c3aed", "circle", () => false],
     ].map(([key, name, color, symbol, include]) => ({
       id: `asset-${key}`, type: "scatter", name, color, yAxis: 0,
-      marker: {enabled: true, radius: 5, symbol, lineColor: "#fff", lineWidth: 1},
+      marker: {enabled: true, radius: 6, symbol, lineColor: "#fff", lineWidth: 1},
+      dataLabels: {enabled: true, useHTML: false, y: -10, formatter() {
+        const count = this.point?.options?.custom?.items?.length || 0;
+        return count > 1 ? String(count) : "";
+      }},
       dataGrouping: {enabled: false},
-      data: events.filter(include).map(item => {
-        const raw = first(item.row, ["fill_price", "price"]);
-        const actual = item.artifact === "fill_detail_data" && raw != null
-          ? Number(raw) : Number.NaN;
-        return {
-          x: item.timestamp,
-          y: Number.isFinite(actual) ? actual : nearestPrice(bars, item.timestamp),
-          custom: {item},
-        };
-      }).filter(point => point.y != null),
-      point: {events: {click() { onSelect(this.options.custom.item); }}},
+      data: groups.filter(group => {
+        const categoryCount = [
+          item => item.artifact === "order_detail_data",
+          item => item.artifact === "fill_detail_data" && /^(buy|long|b|买)/i.test(String(item.row.side || "")),
+          item => item.artifact === "fill_detail_data" && /^(sell|short|s|卖)/i.test(String(item.row.side || "")),
+          item => item.artifact === "fill_detail_data" && !/^(buy|long|b|买|sell|short|s|卖)/i.test(String(item.row.side || "")),
+        ].filter(test => group.items.some(test)).length;
+        return key === "mixed" ? categoryCount > 1
+          : categoryCount === 1 && group.items.every(include);
+      }).map(group => ({x: group.x, y: group.y, custom: {items: group.items}})),
+      point: {events: {click() { onSelect(this.options.custom.items); }}},
       tooltip: {pointFormatter() {
-        const item = this.options.custom.item;
-        const side = String(first(item.row, ["side", "offset", "status"]) || "");
-        const quantity = String(first(item.row,
-          ["filled_quantity", "quantity", "requested_quantity"]) || "");
-        return `${name}: ${escapeHTML(side)} ${escapeHTML(quantity)}`
-          + ` · ${Number(this.y).toLocaleString()}`;
+        const items = this.options.custom.items;
+        const visible = items.slice(0, 6).map(item => escapeHTML(eventDetail(item)));
+        return `<strong>${escapeHTML(name)} · ${items.length} 笔</strong><br>`
+          + visible.join("<br>") + (items.length > visible.length
+            ? `<br>另有 ${items.length - visible.length} 笔，请在事件表查看` : "");
       }},
     }));
   }
 
-  function eventList(context, target, events, onSelect, onHover) {
-    target.replaceChildren();
-    if (!events.length) {
-      const empty = document.createElement("p");
-      empty.textContent = context.t("当前范围没有该合约的订单或成交");
-      target.append(empty); return;
-    }
-    for (const item of events) {
-      const row = item.row;
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "backtest-asset-event";
-      const kind = item.artifact === "fill_detail_data" ? "成交" : "订单";
-      button.textContent = [
-        window.FTUI.formatDate(item.timestamp) || new Date(item.timestamp).toLocaleString(),
-        context.t(kind), first(row, ["side", "offset", "status"]),
-        first(row, ["filled_quantity", "quantity", "requested_quantity"]),
-        first(row, ["fill_price", "price"]),
-      ].filter(value => value != null && value !== "").join(" · ");
-      button.addEventListener("click", () => onSelect(item));
-      button.addEventListener("mouseenter", () => onHover(item));
-      button.addEventListener("mouseleave", () => onHover(null));
-      item.button = button;
-      target.append(button);
-    }
+  function show(state, row) {
+    const selected = identity(row);
+    if (!selected.product || !Number.isFinite(selected.timestamp)) return;
+    state.selectedAsset = selected;
+    state.activeTab = "execution_account";
+    state.executionView = "asset_plot";
+    state.rerender();
   }
 
-  function open(context, state, row) {
-    const selected = identity(row);
-    if (!selected.product || !Number.isFinite(selected.timestamp)) return null;
-    const dialog = window.FTBacktestAnalysisUI.dialog(
-      context, "Asset Plot · 交易图", [selected.product, selected.strategy].filter(Boolean).join(" · "),
-    );
-    dialog.root.classList.add("backtest-asset-dialog");
+  function render(context, state) {
+    const selected = state.selectedAsset;
+    const root = document.createElement("section");
+    root.className = "backtest-asset-result";
+    if (!selected) {
+      root.append(window.FTUI.empty(context.t("请在订单或成交列表选择一笔交易查看交易图"), ""));
+      return root;
+    }
+    const heading = document.createElement("header");
+    heading.className = "backtest-asset-heading";
+    const title = document.createElement("h3");
+    title.textContent = context.t("Asset Plot · 交易图");
+    const subtitle = document.createElement("span");
+    subtitle.textContent = [selected.product, selected.strategy].filter(Boolean).join(" · ");
+    heading.append(title, subtitle);
     const note = document.createElement("p");
     note.className = "backtest-asset-note";
     note.textContent = context.t("价格来自当前行情源；标记来自本次 Job 的订单与成交。行情若更新，图上价格可能与回测时不同。");
@@ -191,20 +256,105 @@
     chartMount.className = "backtest-asset-chart";
     const list = document.createElement("div");
     list.className = "backtest-asset-events";
-    dialog.body.append(note, chartMount, list);
+    root.append(heading, note, chartMount, list);
     let generation = 0;
     let events = [];
     let chart = null;
-    const select = item => {
-      events.forEach(value => value.button?.classList.toggle("active", value === item));
-      item.button?.scrollIntoView?.({block: "nearest"});
+    let removalObserver = null;
+    let page = 1;
+    let selectedItems = [];
+    let groupFilter = null;
+    const renderTable = () => {
+      list.replaceChildren();
+      if (!events.length) {
+        const empty = document.createElement("p");
+        empty.textContent = context.t("当前范围没有该合约的订单或成交");
+        list.append(empty); return;
+      }
+      const shown = groupFilter || events;
+      if (groupFilter) {
+        const filterBar = document.createElement("div");
+        filterBar.className = "backtest-asset-group-filter";
+        const label = document.createElement("strong");
+        label.textContent = context.t(`同一位置的 ${groupFilter.length} 笔事件`);
+        const clear = window.FTUI.actionButton(context.t("显示全部事件"), () => {
+          groupFilter = null;
+          page = 1;
+          renderTable();
+        });
+        filterBar.append(label, clear);
+        list.append(filterBar);
+      }
+      const table = window.FTUI.pagedTable([
+        "时间", "事件 / ID", "方向 / 状态", "数量", "价格", "剩余", "手续费", "账本变化",
+      ].map(context.t), shown, {
+        page, pageSize: 20,
+        onPageChange(next) { page = next; renderTable(); },
+        renderRow(item) {
+          const row = item.row;
+          const isFill = item.artifact === "fill_detail_data";
+          const remaining = first(row, ["active_leaves"]);
+          const finalRemaining = first(item.order, ["active_leaves"]);
+          const terminalUnfilled = first(item.order, ["terminal_unfilled"]);
+          const currency = String(first(row, ["account_currency", "currency"]) || "");
+          const ledger = [
+            row.cash_before != null && row.cash_after != null
+              ? `现金 ${change(row, "cash_before", "cash_after")} ${currency}`.trim() : "",
+            row.margin_before != null && row.margin_after != null
+              && (Number(row.margin_before) !== 0 || Number(row.margin_after) !== 0)
+              ? `保证金 ${change(row, "margin_before", "margin_after")} ${currency}`.trim() : "",
+            row.position_before != null && row.position_after != null
+              ? `持仓 ${change(row, "position_before", "position_after")}` : "",
+          ].filter(Boolean).join("；");
+          return [
+            window.FTUI.formatDate(item.timestamp) || new Date(item.timestamp).toLocaleString(),
+            `${isFill ? "成交" : "订单"} · ${first(row, ["fill_id", "order_id", "event_id"]) || "—"}`,
+            first(row, ["side", "offset", "status"]) || "—",
+            number(first(row, isFill ? ["quantity", "filled_quantity"]
+              : ["requested_quantity", "quantity"])),
+            number(first(row, ["fill_price", "price"])),
+            [remaining != null ? `${number(remaining)}（事件后）`
+              : finalRemaining != null ? `${number(finalRemaining)}（订单最终）` : "未记录",
+              terminalUnfilled != null ? `终止未成交 ${number(terminalUnfilled)}` : "",
+            ].filter(Boolean).join("；"),
+            isFill && row.fee != null ? `${number(row.fee)} ${currency}`.trim() : "—",
+            ledger || "未记录",
+          ];
+        },
+      });
+      table.tableShell.classList.add("backtest-domain-table");
+      [...table.body.rows].forEach((row, index) => {
+        const item = shown[table.start + index];
+        row.tabIndex = 0;
+        row.classList.toggle("active", selectedItems.includes(item));
+        row.addEventListener("click", () => select([item], false));
+        row.addEventListener("keydown", event => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault(); select([item], false);
+          }
+        });
+        row.addEventListener("mouseenter", () => hover(item));
+        row.addEventListener("mouseleave", () => hover(null));
+      });
+      list.append(table.shell);
+    };
+    const select = (items, fromMarker = true) => {
+      selectedItems = items;
+      if (fromMarker) groupFilter = items.length > 1 ? items : null;
+      const firstIndex = (groupFilter || events).indexOf(items[0]);
+      if (firstIndex >= 0) page = Math.floor(firstIndex / 20) + 1;
+      renderTable();
+      const selectedRow = list.querySelector("tr.active");
+      selectedRow?.scrollIntoView?.({block: "nearest"});
       const axis = chart?.xAxis?.[0];
-      if (axis) axis.setExtremes(item.timestamp - DAY, item.timestamp + DAY);
+      if (axis && items[0]) axis.setExtremes(items[0].timestamp - DAY,
+        items[0].timestamp + DAY);
     };
     const hover = item => {
       for (const series of chart?.series || []) {
         for (const point of series.points || []) {
-          const active = item && point.options?.custom?.item === item;
+          if (!point.options?.custom?.items) continue;
+          const active = item && point.options.custom.items.includes(item);
           point.setState?.(active ? "hover" : "");
           if (active) chart.tooltip?.refresh?.(point);
         }
@@ -232,9 +382,11 @@
         loadEvents(context, state, selected, minimum, maximum,
           Math.min(1200, maxPoints)),
       ]);
-      if (dialog.root.open === false || current !== generation) return null;
+      if (!root.isConnected || current !== generation) return null;
       events = matching.events;
-      eventList(context, list, events, select, hover);
+      page = 1;
+      groupFilter = null;
+      renderTable();
       const sampling = matching.sourceCount > events.length
         ? ` · 事件展示 ${events.length}/${matching.sourceCount}` : "";
       note.textContent = context.t("价格来自当前行情源；标记来自本次 Job 的订单与成交。行情若更新，图上价格可能与回测时不同。")
@@ -249,6 +401,7 @@
       .then(payload => {
         if (!payload) return;
         chart = window.FTPriceChart.render(context, chartMount, payload, {
+          keepOtherSeriesVisible: true,
           loadingText: context.t("正在读取当前时间范围…"),
           overlaySeries: (value, bars) => markerSeries(value.__assetEvents || [], bars, select),
           loadRange: (minimum, maximum, range) => load(minimum, maximum, range.maxPoints),
@@ -260,13 +413,24 @@
         message.textContent = error.message || String(error);
         chartMount.append(message);
       });
-    dialog.root.addEventListener("close", () => {
+    state.assetPlotCleanup = () => {
       generation += 1;
+      removalObserver?.disconnect();
       chartMount.__ftPriceChartObserver?.disconnect?.();
       chart?.destroy?.();
+      chart = null;
+    };
+    queueMicrotask(() => {
+      if (!root.isConnected || !window.MutationObserver) return;
+      removalObserver = new MutationObserver(() => {
+        if (!root.isConnected) state.assetPlotCleanup?.();
+      });
+      removalObserver.observe(document.body, {childList: true, subtree: true});
     });
-    return dialog;
+    return root;
   }
 
-  window.FTBacktestAssetPlot = Object.freeze({eventFilters, identity, loadEvents, markerSeries, open});
+  window.FTBacktestAssetPlot = Object.freeze({
+    eventFilters, eventDetail, groupedPoints, identity, loadEvents, markerSeries, render, show,
+  });
 })();

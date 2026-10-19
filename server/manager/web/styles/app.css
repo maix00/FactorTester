@@ -647,6 +647,7 @@ button.ft-help-icon:focus-visible { outline: 2px solid color-mix(in srgb, var(--
 .product-group-products-pager { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding-top: 8px; color: var(--muted); font-size: 12px; }
 .product-group-form-status { min-height: 1.2em; color: var(--danger); }
 dialog { border: 0; border-radius: 16px; padding: 0; box-shadow: 0 24px 80px #0005; }
+dialog[data-ft-overlay="true"] { box-sizing: border-box; max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); }
 dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .dialog-card { position: relative; width: min(420px, 92vw); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); display: grid; gap: 14px; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; padding: 26px; background: var(--panel); }
 .dialog-card.wide { width: min(680px, 94vw); }

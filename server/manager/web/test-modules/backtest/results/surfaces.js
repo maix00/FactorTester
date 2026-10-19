@@ -525,6 +525,8 @@
           {rowFilter: filters.rowFilter},
         );
       }
+    } else if (selected?.[0] === "asset_plot") {
+      content.append(window.FTBacktestAssetPlot.render(context, state));
     } else if (selected?.[2]) {
       if (!state.artifactsByName.has(selected[2])) {
         content.append(missingArtifact(context, state, selected[2]));
@@ -561,6 +563,8 @@
     return innerSurface(context, state, [
       ["event_flow", "事件流", ""],
       ...registeredViews(state, "execution_account"),
+      ...(state.artifactsByName.has("order_detail_data")
+        ? [["asset_plot", "交易图", ""]] : []),
     ], "executionView");
   }
 
