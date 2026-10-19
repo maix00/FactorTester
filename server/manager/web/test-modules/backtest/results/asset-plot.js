@@ -240,7 +240,7 @@
       : ["requested_quantity", "quantity"]);
     const order = item.order || row;
     const currency = String(first(row, ["account_currency", "currency"]) || "");
-    const remaining = first(row, ["active_leaves"]);
+    const remaining = isFill ? first(row, ["active_leaves"]) : null;
     const parts = [
       ["阶段", stageLabel(item)],
       ["事件 ID", first(row, ["fill_id", "attempt_id", "request_id",
@@ -821,13 +821,13 @@
       const table = window.FTUI.pagedTable([
         "时间", "订单阶段 / ID", "策略", "账户 / 资金池", "方向 / 状态", "数量",
         "价格", "剩余", "手续费", "账本变化",
-      ].map(context.t), shown, {
+      ].map(label => context.t(label)), shown, {
         page, pageSize: 20,
         onPageChange(next) { page = next; renderTable(); },
         renderRow(item) {
           const row = item.row;
           const isFill = item.artifact === "fill_detail_data";
-          const remaining = first(row, ["active_leaves"]);
+          const remaining = isFill ? first(row, ["active_leaves"]) : null;
           const finalRemaining = first(item.order, ["active_leaves"]);
           const terminalUnfilled = first(item.order, ["terminal_unfilled"]);
           const currency = String(first(row, ["account_currency", "currency"]) || "");

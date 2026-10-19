@@ -707,6 +707,7 @@ def test_asset_plot_reuses_complete_nested_range_without_requerying() -> None:
               pending--;
               return {rows: path.includes('order_detail_data') ? [{
                 order_id: 'order-1', product: 'AU.SHF', strategy: 'A', timestamp: t,
+                active_leaves: 0, terminal_unfilled: 0,
               }] : [], sampling: {visible_rows: path.includes('order_detail_data') ? 1 : 0}};
             }};
           }};
@@ -735,23 +736,36 @@ def test_asset_plot_reuses_complete_nested_range_without_requerying() -> None:
             ]),
             options: {jobID: 'test', configuration: {}},
           };
-          const root = FTBacktestAssetPlot.render({t:value=>value}, state);
+          const root = FTBacktestAssetPlot.render({t:(value, options) =>
+            options === undefined ? value : String(options)}, state);
           document.querySelector('#root').append(root);
           await new Promise(resolve => setTimeout(resolve, 50));
           const cold = {...calls};
           const nested = await window.__display.loadRange(t - 1000, t + 1000,
             {maxPoints: 1200, visibleMinimum: t - 1000, visibleMaximum: t + 1000});
+          const headings = [...root.querySelectorAll('.backtest-asset-events thead th')]
+            .map(node => node.textContent);
+          const detail = FTBacktestAssetPlot.eventDetail(nested.__assetEvents[0]);
+          const firstRow = root.querySelector('.backtest-asset-events tbody tr').textContent;
           const warm = {...calls};
           await window.__display.loadRange(t + 31 * 86400000, t + 32 * 86400000,
             {maxPoints: 1200});
           return {cold, warm, outside: {...calls},
-            nestedCount: nested.__assetEvents.length, maxConcurrent};
+            nestedCount: nested.__assetEvents.length, maxConcurrent,
+            headings, detail, firstRow};
         }""")
         assert result["cold"] == {"events": 3, "prices": 1}
         assert result["warm"] == result["cold"]
         assert result["outside"] == {"events": 6, "prices": 2}
         assert result["nestedCount"] == 1
         assert result["maxConcurrent"] == 2
+        assert result["headings"] == [
+            "时间", "订单阶段 / ID", "策略", "账户 / 资金池", "方向 / 状态",
+            "数量", "价格", "剩余", "手续费", "账本变化",
+        ]
+        assert "订单最终剩余 0" in result["detail"]
+        assert "0（订单最终）" in result["firstRow"]
+        assert "事件后剩余" not in result["detail"]
         browser.close()
 
 
