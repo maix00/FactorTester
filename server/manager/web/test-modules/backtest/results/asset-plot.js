@@ -8,8 +8,10 @@
   }
 
   function identity(row) {
+    const contractUID = String(first(row, ["contract_uid"]) || "");
     return {
       product: String(first(row, ["instrument", "product", "contract_uid"]) || ""),
+      contractUID,
       strategy: String(first(row, ["strategy_id", "strategy_ref", "strategy"]) || ""),
       timestamp: window.FTPriceChart.timestampOf(first(row,
         ["timestamp", "created_at", "updated_at"])),
@@ -24,7 +26,9 @@
 
   function eventFilters(selected) {
     const filters = {product: {
-      fields: ["instrument", "product", "contract_uid"], values: [selected.product],
+      fields: selected.contractUID ? ["contract_uid"]
+        : ["instrument", "product"],
+      values: [selected.contractUID || selected.product],
     }};
     if (selected.strategy) filters.strategy = {
       fields: ["strategy_id", "strategy_ref", "strategy"],
@@ -182,7 +186,11 @@
     const settings = request.analyses?.backtest?.execution?.settings
       || request.backtest?.execution?.settings || request.execution?.settings || request;
     const frequency = String(settings.freq || settings.frequency || "DAY1");
-    const priceRequest = {product_name: selected.product, freq: frequency, adjusted: false};
+    const priceRequest = {
+      ...(selected.contractUID ? {contract_uid: selected.contractUID}
+        : {product_name: selected.product}),
+      freq: frequency, adjusted: false,
+    };
     const load = async (minimum, maximum, maxPoints = 1200) => {
       const current = ++generation;
       const ranged = window.FTMarketData.rangeRequest(

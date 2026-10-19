@@ -319,6 +319,18 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
         }""")
         assert fill_marker == 105
         page.get_by_role("dialog").get_by_title("关闭").click()
+        page.evaluate("""() => {
+          FTBacktestAssetPlot.open(
+            {t: value => value, api: window.__queryArtifact},
+            {artifactsByName: new Map([['order_detail_data', {name: 'order_detail_data'}]]),
+              options: {jobID: 'job-browser'}},
+            {timestamp: 1700000000000, instrument: 'AU.SHF',
+              contract_uid: 'CN|AU|au2612|SHF', strategy: 'A1'},
+          );
+        }""")
+        page.wait_for_function("window.__assetPriceRequest?.contract_uid === 'CN|AU|au2612|SHF'")
+        assert page.evaluate("window.__assetPriceRequest.product_name") is None
+        page.get_by_role("dialog").get_by_title("关闭").click()
         page.get_by_label("账户", exact=True).click()
         page.locator('input[data-filter-value="account-1"]').first.check()
         # Collapse the open menu (outside click) to commit the multi pick.
