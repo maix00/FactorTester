@@ -128,6 +128,10 @@
   }
 
   function nearestPrice(bars, timestamp) {
+    return nearestBar(bars, timestamp)?.close ?? null;
+  }
+
+  function nearestBar(bars, timestamp) {
     if (!bars.length) return null;
     let nearest = bars[0];
     for (const bar of bars) {
@@ -135,7 +139,7 @@
         nearest = bar;
       }
     }
-    return nearest.close;
+    return nearest;
   }
 
   function escapeHTML(value) {
@@ -156,6 +160,10 @@
   }
 
   function eventDetail(item) {
+    return eventFieldsFor(item).map(([label, value]) => `${label} ${value}`).join(" · ");
+  }
+
+  function eventFieldsFor(item) {
     const row = item.row;
     const isFill = item.artifact === "fill_detail_data";
     const side = first(row, ["side", "offset"]) || "—";
@@ -165,33 +173,69 @@
     const currency = String(first(row, ["account_currency", "currency"]) || "");
     const remaining = first(row, ["active_leaves"]);
     const parts = [
-      `${isFill ? "成交" : "订单"} ${first(row, ["fill_id", "order_id"]) || ""} · ${side} · 数量 ${number(amount)}`,
-      `价格 ${number(first(row, ["fill_price", "price"]))}`,
+      ["类型", isFill ? "成交" : "订单"],
+      ["事件 ID", first(row, ["fill_id", "order_id", "event_id"]) || "未记录"],
+      ["时间", window.FTUI?.formatDate?.(item.timestamp)
+        || new Date(item.timestamp).toLocaleString()],
+      ["方向", side],
+      ["数量", number(amount)],
+      ["价格", number(first(row, ["fill_price", "price"]))],
     ];
     const strategy = first(row, strategyFields) || first(order, strategyFields);
     const account = first(row, accountFields) || first(order, accountFields);
-    if (strategy) parts.push(`策略 ${strategy}`);
-    if (account) parts.push(`账本 ${account}`);
-    if (row.status) parts.push(`状态 ${row.status}`);
-    if (isFill && row.fee != null) parts.push(`手续费 ${number(row.fee)} ${currency}`.trim());
-    if (remaining != null) parts.push(`事件后剩余 ${number(remaining)}`);
+    if (strategy) parts.push(["策略", strategy]);
+    if (account) parts.push(["账本", account]);
+    if (row.status) parts.push(["状态", row.status]);
+    if (isFill) parts.push(["手续费", row.fee != null
+      ? `${number(row.fee)} ${currency}`.trim() : "未记录"]);
+    if (remaining != null) parts.push(["事件后剩余", number(remaining)]);
     else if (order?.active_leaves != null) {
-      parts.push(`订单最终剩余 ${number(order.active_leaves)}`);
+      parts.push(["订单最终剩余", number(order.active_leaves)]);
     }
     if (order?.terminal_unfilled != null) {
-      parts.push(`终止未成交 ${number(order.terminal_unfilled)}`);
+      parts.push(["终止未成交", number(order.terminal_unfilled)]);
     }
     if (row.cash_before != null && row.cash_after != null) {
-      parts.push(`现金 ${change(row, "cash_before", "cash_after")} ${currency}`.trim());
+      parts.push(["现金", `${change(row, "cash_before", "cash_after")} ${currency}`.trim()]);
     }
     if (row.margin_before != null && row.margin_after != null
         && (Number(row.margin_before) !== 0 || Number(row.margin_after) !== 0)) {
-      parts.push(`账本保证金 ${change(row, "margin_before", "margin_after")}`);
+      parts.push(["账本保证金", change(row, "margin_before", "margin_after")]);
     }
     if (row.position_before != null && row.position_after != null) {
-      parts.push(`持仓 ${change(row, "position_before", "position_after")}`);
+      parts.push(["持仓", change(row, "position_before", "position_after")]);
     }
-    return parts.join(" · ");
+    return parts;
+  }
+
+  function eventInspector(context, items) {
+    const panel = document.createElement("section");
+    panel.className = "backtest-asset-inspector";
+    panel.setAttribute("aria-label", context.t("交易事件详情"));
+    const heading = document.createElement("h4");
+    heading.textContent = context.t(`交易事件详情 · ${items.length} 笔`);
+    panel.append(heading);
+    items.forEach((item, index) => {
+      const card = document.createElement("details");
+      card.className = "backtest-asset-event-card";
+      card.open = items.length === 1 || index === 0;
+      const summary = document.createElement("summary");
+      const kind = item.artifact === "fill_detail_data" ? "成交" : "订单";
+      const id = first(item.row, ["fill_id", "order_id", "event_id"]) || "未记录 ID";
+      summary.textContent = `${context.t(kind)} ${index + 1} · ${id}`;
+      const fields = document.createElement("dl");
+      fields.className = "backtest-asset-event-fields";
+      eventFieldsFor(item).forEach(([label, value]) => {
+        const name = document.createElement("dt");
+        name.textContent = context.t(label);
+        const content = document.createElement("dd");
+        content.textContent = String(value);
+        fields.append(name, content);
+      });
+      card.append(summary, fields);
+      panel.append(card);
+    });
+    return panel;
   }
 
   function eventGroupKey(item, price) {
@@ -215,6 +259,22 @@
 
   function markerSeries(events, bars, onSelect) {
     const groups = groupedPoints(events, bars);
+    const prices = bars.flatMap(bar => [bar.high ?? bar.close, bar.low ?? bar.close]);
+    const span = prices.length ? Math.max(...prices) - Math.min(...prices) : 0;
+    const gap = Math.max(span * 0.018, Math.abs(bars[0]?.close || 0) * 0.0005, 0.01);
+    // Keep markers outside each candle, including distinct-price events at one timestamp.
+    const slots = new Map();
+    const placed = new Map(groups.map(group => {
+      const bar = nearestBar(bars, group.x);
+      const isBuy = group.items.every(item => item.artifact === "fill_detail_data"
+        && /^(buy|long|b|买)/i.test(String(item.row.side || "")));
+      const lane = isBuy ? "below" : "above";
+      const key = `${bar?.timestamp || group.x}:${lane}`;
+      const slot = slots.get(key) || 0;
+      slots.set(key, slot + 1);
+      return [group, bar ? (isBuy ? (bar.low ?? bar.close) - gap * (slot + 1)
+        : (bar.high ?? bar.close) + gap * (slot + 1)) : group.y];
+    }));
     return [
       ["order", "订单", "#d97706", "diamond", item => item.artifact === "order_detail_data"],
       ["buy", "买入成交", "#16a34a", "triangle", item => item.artifact === "fill_detail_data"
@@ -227,10 +287,7 @@
     ].map(([key, name, color, symbol, include]) => ({
       id: `asset-${key}`, type: "scatter", name, color, yAxis: 0,
       marker: {enabled: true, radius: 6, symbol, lineColor: "#fff", lineWidth: 1},
-      dataLabels: {enabled: true, useHTML: false, y: -10, formatter() {
-        const count = this.point?.options?.custom?.items?.length || 0;
-        return count > 1 ? String(count) : "";
-      }},
+      dataLabels: {enabled: false},
       dataGrouping: {enabled: false},
       data: groups.filter(group => {
         const categoryCount = [
@@ -241,14 +298,14 @@
         ].filter(test => group.items.some(test)).length;
         return key === "mixed" ? categoryCount > 1
           : categoryCount === 1 && group.items.every(include);
-      }).map(group => ({x: group.x, y: group.y, custom: {items: group.items}})),
+      }).map(group => ({x: group.x, y: placed.get(group),
+        custom: {items: group.items, eventPrice: group.y}})),
       point: {events: {click() { onSelect(this.options.custom.items); }}},
       tooltip: {pointFormatter() {
         const items = this.options.custom.items;
-        const visible = items.slice(0, 6).map(item => escapeHTML(eventDetail(item)));
         return `<strong>${escapeHTML(name)} · ${items.length} 笔</strong><br>`
-          + visible.join("<br>") + (items.length > visible.length
-            ? `<br>另有 ${items.length - visible.length} 笔，请在事件表查看` : "");
+          + `成交价 ${escapeHTML(number(this.options.custom.eventPrice))}<br>`
+          + "点击查看逐笔详情";
       }},
     }));
   }
@@ -313,20 +370,20 @@
   }
 
   function selector(context, label, values, selected, onChange, allLabel = "") {
-    const control = document.createElement("select");
-    control.className = "backtest-asset-filter";
-    control.setAttribute("aria-label", context.t(label));
-    const choices = allLabel ? [["", allLabel], ...values.map(value => [value, value])]
-      : values.map(value => [value, value]);
-    choices.forEach(([value, name]) => {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = context.t(name);
-      control.append(option);
+    const all = `__all_asset_${label}__`;
+    const items = [
+      ...(allLabel ? [{value: all, label: context.t(allLabel), exclusive: true}] : []),
+      ...values.map(value => ({value, label: value})),
+    ];
+    const filter = window.FTMultiSelectFilter.create(context, {
+      title: context.t(label), compact: true, multi: false,
+      className: "backtest-asset-filter", items,
+      selected: [selected || all],
+      searchPlaceholder: context.t(`搜索${label}…`),
+      onChange: choices => onChange(choices[0] === all ? ""
+        : choices[0] || (allLabel ? "" : selected)),
     });
-    control.value = selected;
-    control.addEventListener("change", () => onChange(control.value));
-    return {label, element: control};
+    return {label, element: filter.element};
   }
 
   function controls(context, state) {
@@ -403,9 +460,11 @@
     note.textContent = context.t("价格来自当前行情源；标记来自本次 Job 的订单与成交。行情若更新，图上价格可能与回测时不同。");
     const chartMount = document.createElement("div");
     chartMount.className = "backtest-asset-chart";
+    const inspector = document.createElement("div");
+    inspector.className = "backtest-asset-inspector-mount";
     const list = document.createElement("div");
     list.className = "backtest-asset-events";
-    root.append(heading, note, chartMount, list);
+    root.append(heading, note, chartMount, inspector, list);
     let generation = 0;
     let events = [];
     let chart = null;
@@ -492,15 +551,15 @@
     };
     const select = (items, fromMarker = true) => {
       selectedItems = items;
+      inspector.replaceChildren(eventInspector(context, items));
+      chart?.tooltip?.hide?.();
+      inspector.scrollIntoView?.({block: "nearest"});
       if (fromMarker) groupFilter = items.length > 1 ? items : null;
       const firstIndex = (groupFilter || events).indexOf(items[0]);
       if (firstIndex >= 0) page = Math.floor(firstIndex / 20) + 1;
       renderTable();
       const selectedRow = list.querySelector("tr.active");
       selectedRow?.scrollIntoView?.({block: "nearest"});
-      const axis = chart?.xAxis?.[0];
-      if (axis && items[0]) axis.setExtremes(items[0].timestamp - DAY,
-        items[0].timestamp + DAY);
     };
     const hover = item => {
       for (const series of chart?.series || []) {
@@ -538,6 +597,8 @@
       events = matching.events;
       page = 1;
       groupFilter = null;
+      selectedItems = [];
+      inspector.replaceChildren();
       renderTable();
       const sampling = matching.sourceCount > events.length
         ? ` · 事件展示 ${events.length}/${matching.sourceCount}` : "";
