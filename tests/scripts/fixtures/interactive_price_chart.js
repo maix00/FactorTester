@@ -52,6 +52,7 @@ assert.strictEqual(captured.options.scrollbar.enabled, true);
 assert.strictEqual(captured.options.chart.panning.enabled, true);
 assert.strictEqual(captured.options.chart.height, 650);
 assert.strictEqual(captured.options.chart.zooming.type, "x");
+assert.strictEqual(captured.options.xAxis.minRange, 86400000);
 assert.strictEqual(captured.options.series[0].type, "candlestick");
 assert.strictEqual(captured.options.series[1].name, "成交量");
 assert.strictEqual(captured.options.series[2].name, "持仓量");

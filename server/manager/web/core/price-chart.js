@@ -120,6 +120,61 @@
     return function() { return `${pointLabel(context, label, this.y)}<br/>`; };
   }
 
+  function frequencyIntervalMs(frequency) {
+    const match = /^(SEC|MIN|HOUR|DAY|WEEK)(\d+)$/i.exec(String(frequency || ""));
+    if (!match) return undefined;
+    const unit = {SEC: 1000, MIN: 60000, HOUR: 3600000,
+      DAY: 86400000, WEEK: 604800000}[match[1].toUpperCase()];
+    const count = Number(match[2]);
+    return Number.isSafeInteger(count) && count > 0 ? unit * count : undefined;
+  }
+
+  function assetTooltipFormatter(context, bars, overlay) {
+    const byTime = new Map(bars.map(bar => [bar.timestamp, bar]));
+    const eventsByTime = new Map();
+    for (const series of overlay) {
+      for (const point of series.data || []) {
+        if (point?.custom?.items?.length) {
+          eventsByTime.set(point.x, point.custom.items);
+        }
+      }
+    }
+    return function() {
+      const timestamp = Number(this.x ?? this.point?.x ?? this.points?.[0]?.point?.x);
+      const shared = this.points || [];
+      const plotted = type => shared.find(item => item.point?.series?.type === type)?.point;
+      const candle = plotted("candlestick");
+      const volume = plotted("column");
+      const interest = plotted("line");
+      const bar = byTime.get(timestamp) || (candle && {
+        open: candle.open, high: candle.high, low: candle.low, close: candle.close,
+        volume: volume?.y, openInterest: interest?.y,
+      });
+      if (!bar) return false;
+      const time = new Date(timestamp).toLocaleString(localeTag(context));
+      const lines = [
+        `<strong>${time}</strong>`,
+        pointLabel(context, "开盘价", bar.open),
+        pointLabel(context, "最高价", bar.high),
+        pointLabel(context, "最低价", bar.low),
+        pointLabel(context, "收盘价", bar.close),
+        pointLabel(context, "成交量", bar.volume),
+        pointLabel(context, "持仓量", bar.openInterest),
+      ];
+      const events = eventsByTime.get(timestamp);
+      if (events?.length) {
+        lines.push(`${context?.t?.("交易事件") || "交易事件"}: <b>${events.length} 笔</b>`);
+        const prices = [...new Set(events.map(item =>
+          item.row?.fill_price ?? item.row?.price).filter(value => value != null)
+          .map(Number).filter(Number.isFinite))];
+        if (prices.length) lines.push(`${context?.t?.("事件价格") || "事件价格"}: `
+          + `<b>${prices.map(tooltipNumber).join("、")}</b>`);
+        lines.push(context?.t?.("点击标记查看逐笔详情") || "点击标记查看逐笔详情");
+      }
+      return lines.join("<br/>");
+    };
+  }
+
   function localeTag(context) {
     const documentLocale = typeof document !== "undefined"
       ? document.documentElement?.lang : "";
@@ -215,10 +270,12 @@
       },
       xAxis: {
         type: "datetime", ordinal: true,
+        minRange: frequencyIntervalMs(payload?.freq),
         labels: {formatter: dateLabelFormatter(context)},
       },
       yAxis,
-      tooltip: {shared: true, split: false, valueDecimals: 2},
+      tooltip: {shared: true, split: false, valueDecimals: 2,
+        ...(eventLane ? {formatter: assetTooltipFormatter(context, bars, overlay)} : {})},
       navigator: {enabled: true, adaptToUpdatedData: false},
       scrollbar: {enabled: true},
       plotOptions: {series: {
