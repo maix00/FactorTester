@@ -47,6 +47,8 @@ window.FTICConfigurationGroupModel = {
   selected: current => [current.analysis.configuration_groups[0]],
 };
 
+vm.runInThisContext(read('server/manager/web/workbench/test-configuration-compiler.js'));
+global.FTTestConfigurationCompiler = window.FTTestConfigurationCompiler;
 vm.runInThisContext(read('server/manager/web/workbench/test-configuration.js'));
 
 const factorScopeState = {
