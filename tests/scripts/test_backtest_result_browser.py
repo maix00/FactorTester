@@ -40,6 +40,7 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
             "server/manager/web/catalog/shared/multi-select-filter/index.js",
             "server/manager/web/jobs/result-tabs.js",
             "server/manager/web/jobs/artifact-query.js",
+            "server/manager/web/core/price-chart.js",
             "server/manager/web/jobs/highcharts-timeline.js",
             "server/manager/web/report/table-view.js",
             "server/manager/web/test-modules/shared/results/runtime-summary.js",
@@ -55,11 +56,9 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
           window.FTRichText = {inline(value) { return document.createTextNode(String(value ?? "")); }};
           window.FTBacktestStrategyAnalysis = {open() {}};
           window.FTBacktestSnapshotView = {open() {}};
+          const nativeTimestampOf = window.FTPriceChart.timestampOf;
           window.FTPriceChart = {
-            timestampOf(value) {
-              const numeric = Number(value);
-              return Number.isFinite(numeric) ? numeric : Date.parse(String(value || ''));
-            },
+            timestampOf: nativeTimestampOf,
             render(_context, target, payload, display) {
               window.__assetPlot = {payload, display};
               target.dataset.assetPlotReady = "true";
@@ -120,6 +119,14 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
               columns: ["strategy", "order_id", "product", "timestamp", "side", "quantity", "price"],
               rows: orderRows,
             },
+            fill_detail_data: {
+              rows: [
+                {strategy: 'A1', order_id: 'order-1', fill_id: 'fill-1',
+                  timestamp: 1700000000000000000, side: 'BUY', price: 99},
+                {strategy: 'A1', order_id: 'unrelated', fill_id: 'fill-2',
+                  timestamp: 1700000000000000000, side: 'SELL', price: 99},
+              ],
+            },
           };
           window.FTJobArtifacts = {
             async fetch(_context, path) {
@@ -135,7 +142,7 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
             const request = JSON.parse(options.body || "{}");
             window.__artifactQueries.push({name, request});
             const payload = payloads[name];
-            if (request.mode === "series" || request.mode === "time_rows") {
+            if (request.mode === "series") {
               return {data: payload};
             }
             let rows = [...(payload.rows || [])];
@@ -146,9 +153,12 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
             Object.values(filters).forEach(filter => {
               rows = rows.filter(row => {
                 const value = candidate(row, filter.fields || []);
-                return !value || (filter.values || []).includes(value);
+                return (filter.values || []).includes(value);
               });
             });
+            if (request.mode === 'time_rows') {
+              return {data: {rows, sampling: {visible_rows: rows.length}}};
+            }
             const facets = Object.fromEntries(Object.entries(request.facets || {}).map(
               ([key, fields]) => [key, [...new Set(
                 payload.rows.map(row => candidate(row, fields)).filter(Boolean),
@@ -321,6 +331,26 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
           return marker.find(series => series.id === 'asset-sell').data[0].y;
         }""")
         assert fill_marker == 105
+        native_fills = page.evaluate("""async () => {
+          const state = {artifactsByName: new Map([
+            ['order_detail_data', {name: 'order_detail_data'}],
+            ['fill_detail_data', {name: 'fill_detail_data'}],
+          ]), options: {jobID: 'job-browser'}};
+          const selected = FTBacktestAssetPlot.identity({
+            product: 'AU.SHF', strategy: 'A1', timestamp: 1700000000000,
+          });
+          const value = await FTBacktestAssetPlot.loadEvents(
+            {t: value => value, api: window.__queryArtifact}, state, selected,
+            1699990000000, 1700010000000, 1200,
+          );
+          return {fills: value.events.filter(item => item.artifact === 'fill_detail_data')
+            .map(item => ({id: item.row.fill_id, timestamp: item.timestamp})),
+            filteredByOrder: window.__artifactQueries.some(item =>
+              item.name === 'fill_detail_data' && item.request.filters?.order?.values
+                ?.includes('order-1'))};
+        }""")
+        assert native_fills == {"fills": [{"id": "fill-1", "timestamp": 1700000000000}],
+                                "filteredByOrder": True}
         page.get_by_role("dialog").get_by_title("关闭").click()
         page.evaluate("""() => {
           FTBacktestAssetPlot.open(
