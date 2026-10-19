@@ -79,7 +79,11 @@
 
   function timestampOf(value) {
     const numeric = Number(value);
-    if (Number.isFinite(numeric)) return Math.abs(numeric) < 1e11 ? numeric * 1000 : numeric;
+    if (Number.isFinite(numeric)) {
+      if (Math.abs(numeric) >= 1e18) return numeric / 1e6;
+      if (Math.abs(numeric) >= 1e15) return numeric / 1e3;
+      return Math.abs(numeric) < 1e11 ? numeric * 1000 : numeric;
+    }
     const parsed = Date.parse(String(value || ""));
     return Number.isFinite(parsed) ? parsed : NaN;
   }

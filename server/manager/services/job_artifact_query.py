@@ -437,6 +437,10 @@ def _in_range(value: object, lower: float | None, upper: float | None) -> bool:
 def _timestamp_number(value: object) -> float | None:
     number = _optional_number(value)
     if number is not None:
+        if abs(number) >= 1_000_000_000_000_000_000:
+            return number / 1_000_000
+        if abs(number) >= 1_000_000_000_000_000:
+            return number / 1_000
         if abs(number) > 1_000_000_000 and abs(number) <= 20_000_000_000:
             return number * 1000
         return number
