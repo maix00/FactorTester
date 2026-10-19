@@ -55,6 +55,36 @@ def test_product_chart_sampling_preserves_ohlcv_bucket_semantics() -> None:
     }
 
 
+def test_product_chart_sampling_keeps_event_candle_and_neighbors_aggregated() -> None:
+    rows = [{
+        "timestamp": index * 60_000, "open": index + 1,
+        "high": index + 3, "low": index, "close": index + 2,
+        "volume": 10, "open_interest": 100 + index,
+    } for index in range(300)]
+    sampled, total = bounded_ohlcv_rows(rows, {
+        "max_points": 100,
+        "anchor_timestamps": [101 * 60_000 + 15_000, 102 * 60_000],
+        "anchor_tolerance_ms": 60_000,
+    })
+    assert total == 300
+    assert rows[101] in sampled and rows[102] in sampled
+    assert sampled[0]["volume"] == 30
+    assert len(sampled) <= 104
+    assert [row["timestamp"] for row in sampled] == sorted(
+        row["timestamp"] for row in sampled
+    )
+
+
+def test_product_chart_sampling_does_not_pin_distant_event() -> None:
+    rows = [{"timestamp": index * 60_000, "open": index, "high": index + 1,
+             "low": index - 1, "close": index, "volume": 1}
+            for index in range(200)]
+    sampled, _ = bounded_ohlcv_rows(rows, {"max_points": 100,
+        "anchor_timestamps": [100 * 60_000 + 30_000],
+        "anchor_tolerance_ms": 1_000})
+    assert len(sampled) == 100
+
+
 def test_manager_product_fields_resolves_contracts_for_independent_detail_tabs(
     monkeypatch,
 ) -> None:

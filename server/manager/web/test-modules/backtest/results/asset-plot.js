@@ -275,8 +275,8 @@
   }
 
   function markerSeries(events, bars, onSelect) {
-    // The plotted symbol identifies the candle, not an execution price.  One
-    // symbol per candle keeps bursts of orders/fills from hiding the OHLC path.
+    // Aggregate events of one kind at each candle. Symbols sit outside its
+    // wick; recorded execution prices are shown separately on selection.
     const groups = new Map();
     for (const item of events) {
       const bar = nearestBar(bars, item.timestamp);
@@ -284,37 +284,32 @@
       if (!groups.has(bar.timestamp)) groups.set(bar.timestamp, {bar, items: []});
       groups.get(bar.timestamp).items.push(item);
     }
-    const placed = [...groups.values()].map(group => {
-      const bar = group.bar;
-      return {...group, x: bar.timestamp, y: 0.5};
-    });
-    return [
-      ["order", "订单", "#d97706", "diamond", item => item.artifact === "order_detail_data"],
+    const kinds = [
+      ["order", "订单", "#d97706", "diamond", item => item.artifact === "order_detail_data", 2],
       ["buy", "买入成交", "#16a34a", "triangle", item => item.artifact === "fill_detail_data"
-        && /^(buy|long|b|买)/i.test(String(item.row.side || ""))],
+        && /^(buy|long|b|买)/i.test(String(item.row.side || "")), -1],
       ["sell", "卖出成交", "#dc2626", "triangle-down", item => item.artifact === "fill_detail_data"
-        && /^(sell|short|s|卖)/i.test(String(item.row.side || ""))],
+        && /^(sell|short|s|卖)/i.test(String(item.row.side || "")), 1],
       ["other", "其他成交", "#2563eb", "circle", item => item.artifact === "fill_detail_data"
-        && !/^(buy|long|b|买|sell|short|s|卖)/i.test(String(item.row.side || ""))],
-      ["mixed", "同位置多个事件", "#7c3aed", "circle", () => false],
-    ].map(([key, name, color, symbol, include]) => ({
+        && !/^(buy|long|b|买|sell|short|s|卖)/i.test(String(item.row.side || "")), -2],
+    ];
+    return kinds.map(([key, name, color, symbol, include, direction]) => ({
       id: `asset-${key}`, type: "scatter", name, color,
-      yAxis: bars.some(bar => bar.openInterest != null) ? 3 : 2,
+      yAxis: 0, zIndex: 5,
       marker: {enabled: true, radius: 4, symbol, lineColor: "#fff", lineWidth: 1},
       dataLabels: {enabled: false},
       dataGrouping: {enabled: false},
-      data: placed.filter(group => {
-        const categoryCount = [
-          item => item.artifact === "order_detail_data",
-          item => item.artifact === "fill_detail_data" && /^(buy|long|b|买)/i.test(String(item.row.side || "")),
-          item => item.artifact === "fill_detail_data" && /^(sell|short|s|卖)/i.test(String(item.row.side || "")),
-          item => item.artifact === "fill_detail_data" && !/^(buy|long|b|买|sell|short|s|卖)/i.test(String(item.row.side || "")),
-        ].filter(test => group.items.some(test)).length;
-        return key === "mixed" ? categoryCount > 1
-          : categoryCount === 1 && group.items.every(include);
-      }).map(group => ({x: group.x, y: group.y,
-        custom: {items: group.items, bar: group.bar}})),
-      point: {events: {click() { onSelect(this.options.custom.items); }}},
+      data: [...groups.values()].map(group => {
+        const items = group.items.filter(include);
+        if (!items.length) return null;
+        const bar = group.bar;
+        const gap = Math.max((bar.high - bar.low) * 0.25,
+          Math.abs(bar.close) * 0.001, 0.000001);
+        const y = direction > 0 ? bar.high + gap * direction
+          : bar.low + gap * direction;
+        return {x: bar.timestamp, y, custom: {items, bar}};
+      }).filter(Boolean),
+      point: {events: {click() { onSelect(this.options.custom.items, this); }}},
       tooltip: {pointFormatter() {
         const items = this.options.custom.items;
         const bar = this.options.custom.bar;
@@ -330,6 +325,40 @@
           + "点击查看逐笔详情";
       }},
     }));
+  }
+
+  function tradePriceLines(chart, items) {
+    if (!chart?.yAxis?.[0]) return;
+    for (let index = 0; index < (chart._ftTradePriceLineCount || 0); index += 1) {
+      chart.yAxis[0].removePlotLine(`asset-trade-price-${index}`);
+    }
+    const prices = [...new Set(items.filter(item => item.artifact === "fill_detail_data")
+      .map(item => first(item.row, ["fill_price", "price"]))
+      .filter(value => value != null && value !== "")
+      .map(Number)
+      .filter(Number.isFinite))];
+    chart._ftTradePriceLineCount = prices.length;
+    prices.forEach((price, index) => {
+      chart.yAxis[0].addPlotLine({
+        id: `asset-trade-price-${index}`, value: price,
+        color: "#2563eb", width: 1, dashStyle: "ShortDash", zIndex: 1,
+        label: {text: `成交价 ${number(price)}`, align: "right", x: -8,
+          style: {color: "#2563eb", fontSize: "11px"}},
+      });
+    });
+  }
+
+  function frequencyMs(frequency) {
+    const match = /^(SEC|MIN|HOUR|DAY|WEEK)(\d+)$/i.exec(String(frequency || ""));
+    if (!match) return 86400000;
+    return {SEC: 1000, MIN: 60000, HOUR: 3600000,
+      DAY: 86400000, WEEK: 604800000}[match[1].toUpperCase()] * Number(match[2]);
+  }
+
+  function selectionKey(items) {
+    return items.map(item => [item.artifact, item.timestamp,
+      first(item.row, ["fill_id", "order_id", "event_id"]) || item.index,
+    ].join(":")).sort().join("|");
   }
 
   async function discover(context, state) {
@@ -479,7 +508,7 @@
     heading.append(title, subtitle);
     const note = document.createElement("p");
     note.className = "backtest-asset-note";
-    note.textContent = context.t("价格来自当前行情源；标记轨道按时间汇总成交和未完成订单，已关联成交的完成订单不重复标记。标记高度不代表成交价。行情若更新，图上价格可能与回测时不同。");
+    note.textContent = context.t("价格来自当前行情源；买卖标记位于对应 K 线下方或上方，点击标记打开逐笔事件面板，再选择需要显示的成交价水平线。行情若更新，图上价格可能与回测时不同。");
     const chartMount = document.createElement("div");
     chartMount.className = "backtest-asset-chart";
     const inspector = document.createElement("div");
@@ -493,6 +522,11 @@
     let removalObserver = null;
     let page = 1;
     let selectedItems = [];
+    const selectedGroups = new Map();
+    const selectedPriceEvents = new Map();
+    let tooltipEvents = [];
+    let toolkitItems = [];
+    let toolkitTime = null;
     let groupFilter = null;
     const renderTable = () => {
       list.replaceChildren();
@@ -506,9 +540,15 @@
         const filterBar = document.createElement("div");
         filterBar.className = "backtest-asset-group-filter";
         const label = document.createElement("strong");
-        label.textContent = context.t(`同一位置的 ${groupFilter.length} 笔事件`);
+        label.textContent = context.t(`已选择 ${groupFilter.length} 笔事件`);
         const clear = window.FTUI.actionButton(context.t("显示全部事件"), () => {
+          selectedGroups.clear();
+          selectedItems = [];
           groupFilter = null;
+          toolkitItems = [];
+          toolkitTime = null;
+          chart?.tooltip?.hide?.();
+          inspector.replaceChildren();
           page = 1;
           renderTable();
         });
@@ -560,10 +600,10 @@
         const item = shown[table.start + index];
         row.tabIndex = 0;
         row.classList.toggle("active", selectedItems.includes(item));
-        row.addEventListener("click", () => select([item], false));
+        row.addEventListener("click", () => select([item]));
         row.addEventListener("keydown", event => {
           if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault(); select([item], false);
+            event.preventDefault(); select([item]);
           }
         });
         row.addEventListener("mouseenter", () => hover(item));
@@ -571,18 +611,43 @@
       });
       list.append(table.shell);
     };
-    const select = (items, fromMarker = true) => {
-      selectedItems = items;
-      inspector.replaceChildren(eventInspector(context, items));
-      chart?.tooltip?.hide?.();
-      inspector.scrollIntoView?.({block: "nearest"});
-      if (fromMarker) groupFilter = items.length > 1 ? items : null;
+    const select = (items, point = null) => {
+      const key = selectionKey(items);
+      if (selectedGroups.has(key)) {
+        selectedGroups.delete(key);
+        toolkitItems = [];
+        toolkitTime = null;
+      } else {
+        selectedGroups.set(key, items);
+        toolkitItems = items;
+        toolkitTime = point?.x ?? null;
+      }
+      selectedItems = [...new Set([...selectedGroups.values()].flat())];
+      inspector.replaceChildren();
+      if (selectedItems.length) inspector.append(eventInspector(context, selectedItems));
+      if (toolkitItems.length && point?.x != null) chart?.tooltip?.refresh?.(point);
+      else chart?.tooltip?.hide?.();
+      groupFilter = selectedItems.length ? selectedItems : null;
       const firstIndex = (groupFilter || events).indexOf(items[0]);
       if (firstIndex >= 0) page = Math.floor(firstIndex / 20) + 1;
       renderTable();
-      const selectedRow = list.querySelector("tr.active");
-      selectedRow?.scrollIntoView?.({block: "nearest"});
     };
+    chartMount.addEventListener("click", event => {
+      const button = event.target?.closest?.(".asset-tooltip-price-toggle");
+      if (!button || !chartMount.contains(button)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const item = tooltipEvents[Number(button.getAttribute("data-ft-event-index"))];
+      if (!item) return;
+      const key = selectionKey([item]);
+      if (selectedPriceEvents.has(key)) selectedPriceEvents.delete(key);
+      else selectedPriceEvents.set(key, item);
+      tradePriceLines(chart, [...selectedPriceEvents.values()]);
+      const selected = selectedPriceEvents.has(key);
+      button.setAttribute("aria-pressed", String(selected));
+      button.textContent = `${selected ? "移除价格线" : "显示价格线"} · ${number(
+        first(item.row, ["fill_price", "price"]))}`;
+    });
     const hover = item => {
       for (const series of chart?.series || []) {
         for (const point of series.points || []) {
@@ -607,24 +672,29 @@
     };
     const load = async (minimum, maximum, maxPoints = 1200) => {
       const current = ++generation;
-      const ranged = window.FTMarketData.rangeRequest(
-        priceRequest, minimum, maximum, maxPoints,
-      );
-      const [price, matching] = await Promise.all([
-        window.FTMarketData.prices(context, ranged, "server"),
-        loadEvents(context, state, selected, minimum, maximum,
-          Math.min(1200, maxPoints)),
-      ]);
+      const matching = await loadEvents(context, state, selected, minimum, maximum,
+        Math.min(1200, maxPoints));
+      if (!root.isConnected || current !== generation) return null;
+      const ranged = window.FTMarketData.rangeRequest(priceRequest, minimum, maximum,
+        maxPoints);
+      ranged.anchor_timestamps = [...new Set(matching.events.map(item => item.timestamp))];
+      ranged.anchor_tolerance_ms = frequencyMs(frequency);
+      const price = await window.FTMarketData.prices(context, ranged, "server");
       if (!root.isConnected || current !== generation) return null;
       events = matching.events;
       page = 1;
       groupFilter = null;
       selectedItems = [];
+      selectedGroups.clear();
+      selectedPriceEvents.clear();
+      toolkitItems = [];
+      toolkitTime = null;
+      tradePriceLines(chart, []);
       inspector.replaceChildren();
       renderTable();
       const sampling = matching.sourceCount > events.length
         ? ` · 事件展示 ${events.length}/${matching.sourceCount}` : "";
-      note.textContent = context.t("价格来自当前行情源；标记轨道按时间汇总成交和未完成订单，已关联成交的完成订单不重复标记。标记高度不代表成交价。行情若更新，图上价格可能与回测时不同。")
+      note.textContent = context.t("价格来自当前行情源；买卖标记位于对应 K 线下方或上方，点击标记打开逐笔事件面板，再选择需要显示的成交价水平线。行情若更新，图上价格可能与回测时不同。")
         + ` · ${price.payload.data_source || context.t("自动行情源")}` + sampling;
       return {...price.payload, product: selected.product,
         freq: price.payload.freq || frequency,
@@ -636,7 +706,11 @@
       .then(payload => {
         if (!payload) return;
         chart = window.FTPriceChart.render(context, chartMount, payload, {
-          eventLane: true,
+          assetMode: true, preserveSourceBars: true,
+          eventTooltipFields: eventFieldsFor,
+          tooltipEventItems: timestamp => timestamp === toolkitTime ? toolkitItems : [],
+          onTooltipEvents: items => { tooltipEvents = items; },
+          isPriceSelected: item => selectedPriceEvents.has(selectionKey([item])),
           keepOtherSeriesVisible: true,
           loadingText: context.t("正在读取当前时间范围…"),
           overlaySeries: (value, bars) => markerSeries(value.__assetEvents || [], bars, select),
@@ -668,6 +742,6 @@
 
   window.FTBacktestAssetPlot = Object.freeze({
     controls, discover, eventFilters, eventDetail, groupedPoints, identity,
-    loadEvents, markerSeries, render, show,
+    loadEvents, markerSeries, render, show, tradePriceLines,
   });
 })();
