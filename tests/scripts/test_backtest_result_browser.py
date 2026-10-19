@@ -758,6 +758,58 @@ def test_asset_plot_same_location_group_keeps_other_markers_visible() -> None:
         browser.close()
 
 
+def test_asset_plot_tooltip_retains_market_bar_and_zoom_reaches_source_interval() -> None:
+    with _playwright() as playwright:
+        browser = _launch_chromium(playwright)
+        page = browser.new_page(viewport={"width": 1200, "height": 850})
+        page.set_content("<div id='chart' style='width:1100px;height:700px'></div>")
+        for path in (
+            "static/vendor/highcharts/highstock.min.js",
+            "server/manager/web/core/highcharts-range-loader.js",
+            "server/manager/web/core/price-chart.js",
+            "server/manager/web/test-modules/backtest/results/asset-plot.js",
+        ):
+            page.add_script_tag(path=str(ROOT / path))
+        result = page.evaluate("""() => {
+          const start = Date.UTC(2025, 3, 24);
+          const bars = Array.from({length: 90}, (_, index) => ({
+            timestamp: start + index * 60000, open: 100 + index,
+            high: 102 + index, low: 99 + index, close: 101 + index,
+            volume: 10 + index, open_interest: 20 + index,
+          }));
+          const events = [{artifact: 'fill_detail_data',
+            timestamp: start + 30 * 60000,
+            row: {side: 'buy', fill_price: 131, fill_id: 'f30'}}];
+          const chart = FTPriceChart.render({t: value => value},
+            document.querySelector('#chart'), {data: bars, freq: 'MIN1'}, {
+              eventLane: true, keepOtherSeriesVisible: true,
+              overlaySeries(_payload, normalizedBars) {
+                return FTBacktestAssetPlot.markerSeries(events, normalizedBars, () => {});
+              },
+            });
+          const marker = chart.series.find(series => series.options.id === 'asset-buy')
+            .points[0];
+          marker.onMouseOver();
+          const markerTooltip = chart.tooltip.label?.text?.textStr || '';
+          const candle = chart.series[0].points.find(point => point.x === marker.x);
+          candle.onMouseOver();
+          const candleTooltip = chart.tooltip.label?.text?.textStr || '';
+          chart.xAxis[0].setExtremes(start + 30 * 60000,
+            start + 31 * 60000, true);
+          return {markerTooltip, candleTooltip,
+            minRange: chart.xAxis[0].minRange,
+            zoomSpan: chart.xAxis[0].max - chart.xAxis[0].min};
+        }""")
+        for tooltip in (result["markerTooltip"], result["candleTooltip"]):
+            for label in ("开盘价", "最高价", "最低价", "收盘价", "成交量", "持仓量"):
+                assert label in tooltip
+            assert "130" in tooltip  # event candle open, not an adjacent bar
+        assert "1 笔" in result["markerTooltip"]
+        assert result["minRange"] == 60000
+        assert result["zoomSpan"] == 60000
+        browser.close()
+
+
 def test_asset_plot_discovers_scope_and_switches_contract_without_a_selected_order() -> None:
     with _playwright() as playwright:
         browser = _launch_chromium(playwright)
