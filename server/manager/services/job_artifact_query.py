@@ -210,7 +210,7 @@ def _time_rows_query(
     filters = _filter_groups(request.get("filters"))
     grouped: OrderedDict[str, list[dict[str, object]]] = OrderedDict()
     for row in model["rows"]:
-        timestamp = row.get("timestamp")
+        timestamp = _row_timestamp(row)
         if not _in_range(timestamp, lower, upper):
             continue
         # Asset plots must filter to the actual instrument and strategy before
@@ -234,7 +234,7 @@ def _time_rows_query(
         indices = _sample_indices(list(range(len(rows))), values, maximum)
         selected_rows.extend(_project_row(rows[index], fields) for index in indices)
     selected_rows.sort(key=lambda row: (
-        _timestamp_number(row.get("timestamp")) or 0,
+        _timestamp_number(_row_timestamp(row)) or 0,
         str(row.get("strategy_id") or row.get("strategy") or row.get("series") or ""),
     ))
     return {
@@ -251,6 +251,13 @@ def _time_rows_query(
             "to": upper,
         },
     }
+
+
+def _row_timestamp(row: dict[str, object]) -> object:
+    """Use the event time exposed by retained order and fill artifacts."""
+    return next((row[key] for key in (
+        "timestamp", "submitted_at", "filled_at", "executed_at", "created_at",
+    ) if row.get(key) is not None), None)
 
 
 def _table_model(value: object) -> dict[str, Any]:

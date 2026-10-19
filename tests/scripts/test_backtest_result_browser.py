@@ -56,7 +56,10 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
           window.FTBacktestStrategyAnalysis = {open() {}};
           window.FTBacktestSnapshotView = {open() {}};
           window.FTPriceChart = {
-            timestampOf(value) { return Number(value); },
+            timestampOf(value) {
+              const numeric = Number(value);
+              return Number.isFinite(numeric) ? numeric : Date.parse(String(value || ''));
+            },
             render(_context, target, payload, display) {
               window.__assetPlot = {payload, display};
               target.dataset.assetPlotReady = "true";
@@ -331,6 +334,18 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
         page.wait_for_function("window.__assetPriceRequest?.contract_uid === 'CN|AU|au2612|SHF'")
         assert page.evaluate("window.__assetPriceRequest.product_name") is None
         page.get_by_role("dialog").get_by_title("关闭").click()
+        native_order = page.evaluate("""() => {
+          const order = FTBacktestAssetPlot.identity({
+            submitted_at: '2025-04-10T14:30:00+08:00',
+            product: 'SHFE|F|AU|2506', strategy: 'screen_AU',
+          });
+          return {order, filters: FTBacktestAssetPlot.eventFilters(order)};
+        }""")
+        assert native_order["order"]["contractUID"] == "SHFE|F|AU|2506"
+        assert native_order["order"]["timestamp"] == 1744266600000
+        assert native_order["filters"]["product"]["fields"] == [
+            "contract_uid", "instrument", "product",
+        ]
         page.get_by_label("账户", exact=True).click()
         page.locator('input[data-filter-value="account-1"]').first.check()
         # Collapse the open menu (outside click) to commit the multi pick.
