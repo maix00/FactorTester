@@ -258,25 +258,19 @@
   }
 
   function markerSeries(events, bars, onSelect) {
-    const groups = groupedPoints(events, bars);
-    const prices = bars.flatMap(bar => [bar.high ?? bar.close, bar.low ?? bar.close]);
-    const span = prices.length ? Math.max(...prices) - Math.min(...prices) : 0;
-    // The price pane is about 300 px high; five percent leaves room for the
-    // marker radius and wick even when the axis expands to include markers.
-    const gap = Math.max(span * 0.05, Math.abs(bars[0]?.close || 0) * 0.0005, 0.01);
-    // Keep markers outside each candle, including distinct-price events at one timestamp.
-    const slots = new Map();
-    const placed = new Map(groups.map(group => {
-      const bar = nearestBar(bars, group.x);
-      const isBuy = group.items.every(item => item.artifact === "fill_detail_data"
-        && /^(buy|long|b|买)/i.test(String(item.row.side || "")));
-      const lane = isBuy ? "below" : "above";
-      const key = `${bar?.timestamp || group.x}:${lane}`;
-      const slot = slots.get(key) || 0;
-      slots.set(key, slot + 1);
-      return [group, bar ? (isBuy ? (bar.low ?? bar.close) - gap * (slot + 1)
-        : (bar.high ?? bar.close) + gap * (slot + 1)) : group.y];
-    }));
+    // The plotted symbol identifies the candle, not an execution price.  One
+    // symbol per candle keeps bursts of orders/fills from hiding the OHLC path.
+    const groups = new Map();
+    for (const item of events) {
+      const bar = nearestBar(bars, item.timestamp);
+      if (!bar) continue;
+      if (!groups.has(bar.timestamp)) groups.set(bar.timestamp, {bar, items: []});
+      groups.get(bar.timestamp).items.push(item);
+    }
+    const placed = [...groups.values()].map(group => {
+      const bar = group.bar;
+      return {...group, x: bar.timestamp, y: 0.5};
+    });
     return [
       ["order", "订单", "#d97706", "diamond", item => item.artifact === "order_detail_data"],
       ["buy", "买入成交", "#16a34a", "triangle", item => item.artifact === "fill_detail_data"
@@ -287,11 +281,12 @@
         && !/^(buy|long|b|买|sell|short|s|卖)/i.test(String(item.row.side || ""))],
       ["mixed", "同位置多个事件", "#7c3aed", "circle", () => false],
     ].map(([key, name, color, symbol, include]) => ({
-      id: `asset-${key}`, type: "scatter", name, color, yAxis: 0,
-      marker: {enabled: true, radius: 6, symbol, lineColor: "#fff", lineWidth: 1},
+      id: `asset-${key}`, type: "scatter", name, color,
+      yAxis: bars.some(bar => bar.openInterest != null) ? 3 : 2,
+      marker: {enabled: true, radius: 4, symbol, lineColor: "#fff", lineWidth: 1},
       dataLabels: {enabled: false},
       dataGrouping: {enabled: false},
-      data: groups.filter(group => {
+      data: placed.filter(group => {
         const categoryCount = [
           item => item.artifact === "order_detail_data",
           item => item.artifact === "fill_detail_data" && /^(buy|long|b|买)/i.test(String(item.row.side || "")),
@@ -300,13 +295,21 @@
         ].filter(test => group.items.some(test)).length;
         return key === "mixed" ? categoryCount > 1
           : categoryCount === 1 && group.items.every(include);
-      }).map(group => ({x: group.x, y: placed.get(group),
-        custom: {items: group.items, eventPrice: group.y}})),
+      }).map(group => ({x: group.x, y: group.y,
+        custom: {items: group.items, bar: group.bar}})),
       point: {events: {click() { onSelect(this.options.custom.items); }}},
       tooltip: {pointFormatter() {
         const items = this.options.custom.items;
+        const bar = this.options.custom.bar;
+        const prices = [...new Set(items.map(item => first(item.row,
+          ["fill_price", "price"])).filter(value => value != null)
+          .map(Number).filter(Number.isFinite))];
         return `<strong>${escapeHTML(name)} · ${items.length} 笔</strong><br>`
-          + `成交价 ${escapeHTML(number(this.options.custom.eventPrice))}<br>`
+          + `${escapeHTML("开 / 高 / 低 / 收")} ${[bar.open, bar.high, bar.low,
+            bar.close].map(number).join(" / ")}<br>`
+          + `${escapeHTML("成交量")} ${escapeHTML(number(bar.volume))}<br>`
+          + `${escapeHTML("持仓量")} ${escapeHTML(number(bar.openInterest))}<br>`
+          + (prices.length ? `事件价格 ${escapeHTML(prices.map(number).join("、"))}<br>` : "")
           + "点击查看逐笔详情";
       }},
     }));
@@ -459,7 +462,7 @@
     heading.append(title, subtitle);
     const note = document.createElement("p");
     note.className = "backtest-asset-note";
-    note.textContent = context.t("价格来自当前行情源；标记来自本次 Job 的订单与成交。行情若更新，图上价格可能与回测时不同。");
+    note.textContent = context.t("价格来自当前行情源；K 线上方的标记轨道按时间汇总本次 Job 的订单与成交，标记高度不代表成交价。行情若更新，图上价格可能与回测时不同。");
     const chartMount = document.createElement("div");
     chartMount.className = "backtest-asset-chart";
     const inspector = document.createElement("div");
@@ -604,7 +607,7 @@
       renderTable();
       const sampling = matching.sourceCount > events.length
         ? ` · 事件展示 ${events.length}/${matching.sourceCount}` : "";
-      note.textContent = context.t("价格来自当前行情源；标记来自本次 Job 的订单与成交。行情若更新，图上价格可能与回测时不同。")
+      note.textContent = context.t("价格来自当前行情源；K 线上方的标记轨道按时间汇总本次 Job 的订单与成交，标记高度不代表成交价。行情若更新，图上价格可能与回测时不同。")
         + ` · ${price.payload.data_source || context.t("自动行情源")}` + sampling;
       return {...price.payload, product: selected.product,
         freq: price.payload.freq || frequency,
@@ -616,6 +619,7 @@
       .then(payload => {
         if (!payload) return;
         chart = window.FTPriceChart.render(context, chartMount, payload, {
+          eventLane: true,
           keepOtherSeriesVisible: true,
           loadingText: context.t("正在读取当前时间范围…"),
           overlaySeries: (value, bars) => markerSeries(value.__assetEvents || [], bars, select),
