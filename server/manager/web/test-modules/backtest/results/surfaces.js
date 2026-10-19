@@ -88,11 +88,11 @@
     return row;
   }
 
-  function toolbar(context, state, additions = []) {
+  function toolbar(context, state, additions = [], options = {}) {
     const root = document.createElement("div");
     root.className = "backtest-surface-toolbar";
     const rows = [];
-    const strategy = strategyControl(context, state);
+    const strategy = options.includeStrategy === false ? null : strategyControl(context, state);
     if (strategy) rows.push({label: "策略", element: strategy});
     additions.filter(Boolean).forEach(item => {
       if (item.element && item.label) {
@@ -492,7 +492,11 @@
       button.addEventListener("click", () => { state[stateKey] = key; state.rerender(); });
       navigation.append(button);
     });
-    root.append(toolbar(context, state), navigation);
+    const assetPlot = active === "asset_plot";
+    root.append(toolbar(context, state,
+      assetPlot ? window.FTBacktestAssetPlot.controls(context, state) : [],
+      {includeStrategy: !assetPlot}));
+    if (availableViews.length > 1) root.append(navigation);
     const content = document.createElement("div");
     content.className = "backtest-inner-content";
     const selected = availableViews.find(([key]) => key === active);
