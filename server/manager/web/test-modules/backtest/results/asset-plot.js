@@ -1,6 +1,12 @@
 (() => {
   const DAY = 86400000;
-  const eventArtifacts = ["order_detail_data", "fill_detail_data"];
+  const eventFields = [
+    "timestamp", "submitted_at", "filled_at", "executed_at", "created_at",
+    "instrument", "product", "contract_uid", "strategy_id", "strategy_ref",
+    "strategy", "order_id", "fill_id", "event_id", "event_type", "status",
+    "side", "offset", "quantity", "requested_quantity", "filled_quantity",
+    "price", "fill_price", "fee",
+  ];
 
   function first(row, keys) {
     return keys.map(key => row?.[key]).find(value => value !== null
@@ -41,25 +47,46 @@
   }
 
   async function loadEvents(context, state, selected, minimum, maximum, maxPoints) {
-    const results = await Promise.all(eventArtifacts.filter(name => (
-      state.artifactsByName.has(name)
-    )).map(async name => {
+    const query = async (name, filters) => {
       const source = window.FTJobArtifactQuery.timeSource(
         context, artifactPath(state, name), {mode: "time_rows", maxPoints},
       );
       const value = await source.load({min: minimum, max: maximum, maxPoints}, {
-        filters: eventFilters(selected),
-        fields: [
-          "timestamp", "submitted_at", "filled_at", "executed_at", "created_at",
-          "instrument", "product",
-          "contract_uid", "strategy_id", "strategy_ref", "strategy",
-          "order_id", "fill_id", "event_id", "event_type", "status",
-          "side", "offset", "quantity", "requested_quantity", "filled_quantity",
-          "price", "fill_price", "fee",
-        ],
+        filters, fields: eventFields,
       });
       return {name, rows: value?.rows || [], sampling: value?.sampling || {}};
-    }));
+    };
+    const orders = state.artifactsByName.has("order_detail_data")
+      ? await query("order_detail_data", eventFilters(selected)) : null;
+    const results = orders ? [orders] : [];
+    if (state.artifactsByName.has("fill_detail_data")) {
+      // Native fill rows identify their contract through order_id, not product.
+      // Query both representations so older and newer Job artifacts work alike.
+      const identifiers = [...new Set((orders?.rows || [])
+        .map(row => String(row.order_id || "")).filter(Boolean))];
+      const groups = [];
+      for (let index = 0; index < identifiers.length; index += 256) {
+        groups.push(identifiers.slice(index, index + 256));
+      }
+      const fillResults = await Promise.all([
+        query("fill_detail_data", eventFilters(selected)),
+        ...groups.map(values => query("fill_detail_data", {
+          ...(selected.strategy ? {strategy: eventFilters(selected).strategy} : {}),
+          order: {fields: ["order_id"], values},
+        })),
+      ]);
+      const seen = new Set();
+      const rows = fillResults.flatMap(result => result.rows).filter(row => {
+        const key = String(row.fill_id || row.event_id || JSON.stringify(row));
+        if (seen.has(key)) return false;
+        seen.add(key); return true;
+      });
+      results.push({name: "fill_detail_data", rows, sampling: {
+        visible_rows: fillResults.reduce((count, result) => (
+          count + Number(result.sampling.visible_rows || result.rows.length)
+        ), 0),
+      }});
+    }
     const events = results.flatMap(({name, rows}) => rows.map((row, index) => ({
       artifact: name, row, index,
       timestamp: window.FTPriceChart.timestampOf(first(row,
@@ -241,5 +268,5 @@
     return dialog;
   }
 
-  window.FTBacktestAssetPlot = Object.freeze({eventFilters, identity, markerSeries, open});
+  window.FTBacktestAssetPlot = Object.freeze({eventFilters, identity, loadEvents, markerSeries, open});
 })();

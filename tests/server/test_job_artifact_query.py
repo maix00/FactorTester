@@ -168,6 +168,18 @@ def test_time_rows_uses_native_order_submission_time() -> None:
     assert [row["order_id"] for row in result["rows"]] == ["first"]
 
 
+def test_time_rows_matches_native_nanosecond_fills_by_order_id() -> None:
+    rows = [
+        {"timestamp": 1744266660000000000, "order_id": "selected", "fill_id": "one"},
+        {"timestamp": 1744266660000000000, "order_id": "other", "fill_id": "two"},
+    ]
+    result = query_artifact_value({"rows": rows}, {
+        "mode": "time_rows", "from": 1744266600000, "to": 1744266720000,
+        "filters": {"order": {"fields": ["order_id"], "values": ["selected"]}},
+    })
+    assert [row["fill_id"] for row in result["rows"]] == ["one"]
+
+
 def test_chart_range_uses_milliseconds_for_second_epoch_artifacts() -> None:
     value = {"series": [{
         "label": "A",
