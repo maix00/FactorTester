@@ -261,7 +261,9 @@
     const groups = groupedPoints(events, bars);
     const prices = bars.flatMap(bar => [bar.high ?? bar.close, bar.low ?? bar.close]);
     const span = prices.length ? Math.max(...prices) - Math.min(...prices) : 0;
-    const gap = Math.max(span * 0.018, Math.abs(bars[0]?.close || 0) * 0.0005, 0.01);
+    // The price pane is about 300 px high; five percent leaves room for the
+    // marker radius and wick even when the axis expands to include markers.
+    const gap = Math.max(span * 0.05, Math.abs(bars[0]?.close || 0) * 0.0005, 0.01);
     // Keep markers outside each candle, including distinct-price events at one timestamp.
     const slots = new Map();
     const placed = new Map(groups.map(group => {
