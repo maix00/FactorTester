@@ -47,6 +47,7 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
             "server/manager/web/test-modules/backtest/results/strategy-selection.js",
             "server/manager/web/test-modules/backtest/results/analysis/ui.js",
             "server/manager/web/test-modules/backtest/results/event-flow.js",
+            "server/manager/web/test-modules/backtest/results/asset-plot.js",
             "server/manager/web/test-modules/backtest/results/surfaces.js",
         ):
             page.add_script_tag(path=str(ROOT / path))
@@ -54,6 +55,23 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
           window.FTRichText = {inline(value) { return document.createTextNode(String(value ?? "")); }};
           window.FTBacktestStrategyAnalysis = {open() {}};
           window.FTBacktestSnapshotView = {open() {}};
+          window.FTPriceChart = {
+            timestampOf(value) { return Number(value); },
+            render(_context, target, payload, display) {
+              window.__assetPlot = {payload, display};
+              target.dataset.assetPlotReady = "true";
+              return {destroy() {}, xAxis: [{setExtremes() {}}]};
+            },
+          };
+          window.FTMarketData = {
+            rangeRequest(request, minimum, maximum, maxPoints) {
+              return {...request, minimum, maximum, maxPoints};
+            },
+            async prices(_context, request) {
+              window.__assetPriceRequest = request;
+              return {payload: {data: [[request.minimum, 1, 2, 0, 1, 10]]}};
+            },
+          };
           window.FTJobHighcharts = {
             metricChoices(payload) {
               const rows = payload?.rows || [];
@@ -73,6 +91,7 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
           window.__artifactQueries = [];
           const orderRows = Array.from({length: 25}, (_, index) => ({
             strategy: "A1", order_id: `order-${index + 1}`,
+            product: "AU.SHF", side: "BUY", quantity: 2, price: 99,
             timestamp: 1700000000000 + index * 60000,
             account_id: `account-${(index % 2) + 1}`,
             cash_pool_id: `pool-${(index % 2) + 1}`,
@@ -94,7 +113,10 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
                 {series: "A2", timestamp: "2025-01-02", annual_return: 0.2, sharpe_ratio: 1.3},
               ],
             },
-            order_detail_data: {columns: ["strategy", "order_id"], rows: orderRows},
+            order_detail_data: {
+              columns: ["strategy", "order_id", "product", "timestamp", "side", "quantity", "price"],
+              rows: orderRows,
+            },
           };
           window.FTJobArtifacts = {
             async fetch(_context, path) {
@@ -273,6 +295,42 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
             "document.querySelectorAll('.backtest-result-lazy-target > .backtest-domain-table tbody tr').length === 5"
         )
         assert page.locator(".backtest-domain-content").get_by_text("order-25").count() == 1
+        page.get_by_role("button", name="查看交易图").first.click()
+        page.wait_for_function("document.querySelector('.backtest-asset-chart')?.dataset.assetPlotReady === 'true'")
+        asset = page.evaluate("""() => ({
+          request: window.__assetPriceRequest,
+          events: window.__artifactQueries.filter(item => item.request.mode === 'time_rows'
+            && item.name === 'order_detail_data').at(-1)?.request,
+          series: window.__assetPlot.display.overlaySeries(
+            {__assetEvents: window.__assetPlot.payload.__assetEvents},
+            [{timestamp: 1700000000000, close: 100}], () => {},
+          ).map(item => ({name: item.name, count: item.data.length})),
+        })""")
+        assert asset["request"]["product_name"] == "AU.SHF"
+        assert asset["events"]["filters"]["product"]["values"] == ["AU.SHF"]
+        assert asset["events"]["filters"]["strategy"]["values"] == ["A1"]
+        assert asset["series"][0]["count"] == 25
+        fill_marker = page.evaluate("""() => {
+          const marker = FTBacktestAssetPlot.markerSeries([
+            {artifact: 'fill_detail_data', timestamp: 1700000000000,
+              row: {side: 'SELL', fill_price: 105, quantity: 2}},
+          ], [{timestamp: 1700000000000, close: 100}], () => {});
+          return marker.find(series => series.id === 'asset-sell').data[0].y;
+        }""")
+        assert fill_marker == 105
+        page.get_by_role("dialog").get_by_title("关闭").click()
+        page.evaluate("""() => {
+          FTBacktestAssetPlot.open(
+            {t: value => value, api: window.__queryArtifact},
+            {artifactsByName: new Map([['order_detail_data', {name: 'order_detail_data'}]]),
+              options: {jobID: 'job-browser'}},
+            {timestamp: 1700000000000, instrument: 'AU.SHF',
+              contract_uid: 'CN|AU|au2612|SHF', strategy: 'A1'},
+          );
+        }""")
+        page.wait_for_function("window.__assetPriceRequest?.contract_uid === 'CN|AU|au2612|SHF'")
+        assert page.evaluate("window.__assetPriceRequest.product_name") is None
+        page.get_by_role("dialog").get_by_title("关闭").click()
         page.get_by_label("账户", exact=True).click()
         page.locator('input[data-filter-value="account-1"]').first.check()
         # Collapse the open menu (outside click) to commit the multi pick.
@@ -424,4 +482,46 @@ def test_factor_series_stock_chart_renders_visible_navigator() -> None:
             mount_box["y"] + mount_box["height"]
         )
         assert page.locator(".highcharts-scrollbar").count() > 0
+        browser.close()
+
+
+def test_price_chart_keeps_trade_markers_when_range_is_reloaded() -> None:
+    with _playwright() as playwright:
+        browser = _launch_chromium(playwright)
+        page = browser.new_page(viewport={"width": 1200, "height": 850})
+        page.set_content("<div id='chart' style='width:1100px;height:700px'></div>")
+        for path in (
+            "static/vendor/highcharts/highstock.min.js",
+            "server/manager/web/core/highcharts-range-loader.js",
+            "server/manager/web/core/price-chart.js",
+        ):
+            page.add_script_tag(path=str(ROOT / path))
+        page.evaluate("""() => {
+          const start = Date.UTC(2026, 0, 1);
+          const bars = Array.from({length: 50}, (_, index) => ({
+            timestamp: start + index * 86400000, open: 100, high: 102,
+            low: 99, close: 101, volume: 10,
+          }));
+          window.__rangeLoads = 0;
+          const event = {x: start + 20 * 86400000, y: 105};
+          const chart = FTPriceChart.render({t: value => value},
+            document.querySelector('#chart'), {data: bars, product: 'AU.SHF'}, {
+              overlaySeries(value) { return [{
+                id: 'fills', type: 'scatter', name: '成交',
+                data: value.__event ? [value.__event] : [event],
+              }]; },
+              async loadRange() {
+                window.__rangeLoads += 1;
+                return {data: bars.slice(10, 31), __event: event};
+              },
+            });
+          chart.xAxis[0].setExtremes(start + 10 * 86400000,
+            start + 30 * 86400000, true);
+        }""")
+        page.wait_for_function("window.__rangeLoads > 0")
+        page.wait_for_function("document.querySelector('#chart').__ftPriceChart.series.some(s => s.options.id === 'fills' && s.points.length === 1)")
+        assert page.evaluate("""() => {
+          const chart = document.querySelector('#chart').__ftPriceChart;
+          return chart.series.find(s => s.options.id === 'fills').points[0].y;
+        }""") == 105
         browser.close()

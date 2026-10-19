@@ -124,6 +124,31 @@ def test_time_rows_query_filters_fields_range_and_point_count() -> None:
     )
 
 
+def test_time_rows_filters_instrument_and_strategy_before_sampling() -> None:
+    rows = [
+        {"timestamp": index, "instrument": "AU.SHF", "strategy": "chosen", "price": index}
+        for index in range(100)
+    ] + [
+        {"timestamp": index, "instrument": "RB.SHF", "strategy": "chosen", "price": index}
+        for index in range(100)
+    ] + [
+        {"timestamp": index, "instrument": "AU.SHF", "strategy": "other", "price": index}
+        for index in range(100)
+    ] + [{"timestamp": 50, "strategy": "chosen", "price": 50}]
+    result = query_artifact_value({"rows": rows}, {
+        "mode": "time_rows", "max_points": 20,
+        "filters": {
+            "instrument": {"fields": ["instrument", "product"], "values": ["AU.SHF"]},
+            "strategy": {"fields": ["strategy_id", "strategy"], "values": ["chosen"]},
+        },
+    })
+    assert result["sampling"]["source_rows"] == len(rows)
+    assert result["sampling"]["visible_rows"] == 100
+    assert len(result["rows"]) <= 20
+    assert all(row["instrument"] == "AU.SHF" and row["strategy"] == "chosen"
+               for row in result["rows"])
+
+
 def test_chart_range_uses_milliseconds_for_second_epoch_artifacts() -> None:
     value = {"series": [{
         "label": "A",
