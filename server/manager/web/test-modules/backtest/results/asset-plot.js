@@ -8,7 +8,11 @@
     "price", "fill_price", "fee", "active_leaves", "terminal_unfilled",
     "cash_before", "cash_after", "cash_change", "margin_before", "margin_after",
     "margin_change", "account_currency", "position_before", "position_after",
+    "account_id", "account_ref", "account", "ledger_id", "ledger",
   ];
+  const productFields = ["contract_uid", "instrument", "product"];
+  const strategyFields = ["strategy_id", "strategy_ref", "strategy"];
+  const accountFields = ["account_id", "account_ref", "account", "ledger_id", "ledger"];
 
   function first(row, keys) {
     return keys.map(key => row?.[key]).find(value => value !== null
@@ -24,6 +28,7 @@
       product,
       contractUID,
       strategy: String(first(row, ["strategy_id", "strategy_ref", "strategy"]) || ""),
+      account: String(first(row, accountFields) || ""),
       timestamp: window.FTPriceChart.timestampOf(first(row,
         ["timestamp", "submitted_at", "filled_at", "executed_at", "created_at"])),
     };
@@ -37,15 +42,32 @@
 
   function eventFilters(selected) {
     const filters = {product: {
-      fields: selected.contractUID ? ["contract_uid", "instrument", "product"]
+      fields: selected.contractUID ? productFields
         : ["instrument", "product"],
       values: [selected.contractUID || selected.product],
     }};
     if (selected.strategy) filters.strategy = {
-      fields: ["strategy_id", "strategy_ref", "strategy"],
+      fields: strategyFields,
       values: [selected.strategy],
     };
+    if (selected.account) filters.account = {
+      fields: accountFields, values: [selected.account],
+    };
     return filters;
+  }
+
+  function productKey(selected) {
+    return String(selected?.contractUID || selected?.product || "");
+  }
+
+  function matchesSelection(row, selected, orderIDs = null) {
+    const orderID = String(row?.order_id || "");
+    if (orderIDs?.has(orderID)) return true;
+    const rowProduct = productKey(identity(row));
+    if (!rowProduct || rowProduct !== productKey(selected)) return false;
+    if (selected.strategy && first(row, strategyFields) !== selected.strategy) return false;
+    if (selected.account && first(row, accountFields) !== selected.account) return false;
+    return true;
   }
 
   async function loadEvents(context, state, selected, minimum, maximum, maxPoints) {
@@ -60,6 +82,7 @@
     };
     const orders = state.artifactsByName.has("order_detail_data")
       ? await query("order_detail_data", eventFilters(selected)) : null;
+    if (orders) orders.rows = orders.rows.filter(row => matchesSelection(row, selected));
     const results = orders ? [orders] : [];
     if (state.artifactsByName.has("fill_detail_data")) {
       // Native fill rows identify their contract through order_id, not product.
@@ -73,12 +96,13 @@
       const fillResults = await Promise.all([
         query("fill_detail_data", eventFilters(selected)),
         ...groups.map(values => query("fill_detail_data", {
-          ...(selected.strategy ? {strategy: eventFilters(selected).strategy} : {}),
           order: {fields: ["order_id"], values},
         })),
       ]);
       const seen = new Set();
-      const rows = fillResults.flatMap(result => result.rows).filter(row => {
+      const orderIDs = new Set(identifiers);
+      const rows = fillResults.flatMap(result => result.rows)
+        .filter(row => matchesSelection(row, selected, orderIDs)).filter(row => {
         const key = String(row.fill_id || row.event_id || JSON.stringify(row));
         if (seen.has(key)) return false;
         seen.add(key); return true;
@@ -144,6 +168,10 @@
       `${isFill ? "成交" : "订单"} ${first(row, ["fill_id", "order_id"]) || ""} · ${side} · 数量 ${number(amount)}`,
       `价格 ${number(first(row, ["fill_price", "price"]))}`,
     ];
+    const strategy = first(row, strategyFields) || first(order, strategyFields);
+    const account = first(row, accountFields) || first(order, accountFields);
+    if (strategy) parts.push(`策略 ${strategy}`);
+    if (account) parts.push(`账本 ${account}`);
     if (row.status) parts.push(`状态 ${row.status}`);
     if (isFill && row.fee != null) parts.push(`手续费 ${number(row.fee)} ${currency}`.trim());
     if (remaining != null) parts.push(`事件后剩余 ${number(remaining)}`);
@@ -225,6 +253,116 @@
     }));
   }
 
+  async function discover(context, state) {
+    const source = window.FTJobArtifactQuery.tableSource(
+      context, artifactPath(state, "order_detail_data"), {pageSize: 1},
+    );
+    const data = await source.page(1, {facets: {
+      product: productFields, strategy: strategyFields, account: accountFields,
+    }});
+    const choices = {
+      products: data.facets?.product || [],
+      strategies: data.facets?.strategy || [],
+      accounts: data.facets?.account || [],
+    };
+    let selected = state.selectedAsset;
+    if (!selected || !choices.products.includes(productKey(selected))) {
+      let anchor = data.rows?.[0];
+      const picked = (state.strategySelection || []).filter(value => (
+        value && value !== window.FTBacktestStrategySelection.ALL_STRATEGIES
+      ));
+      if (picked.length === 1) {
+        const match = (state.model?.strategies || []).find(value => (
+          [value.id, value.strategyID, value.strategy_id, value.label, value.name]
+            .some(alias => String(alias || "") === picked[0])
+        ));
+        const aliases = [...new Set([
+          picked[0], match?.id, match?.label, match?.display_name,
+          match?.name, match?.strategy_id,
+        ].map(value => String(value || "").trim()).filter(Boolean))];
+        const scoped = await source.page(1, {filters: {strategy: {
+          fields: strategyFields, values: aliases,
+        }}});
+        if (scoped.rows?.length) anchor = scoped.rows[0];
+      }
+      selected = anchor ? {...identity(anchor), account: ""} : null;
+      if (picked.length !== 1 && selected) selected.strategy = "";
+    }
+    if (selected && !choices.strategies.includes(selected.strategy)) {
+      selected = {...selected, strategy: ""};
+    }
+    if (selected && !choices.accounts.includes(selected.account)) {
+      selected = {...selected, account: ""};
+    }
+    return {choices, selected};
+  }
+
+  function ensureDiscovery(context, state) {
+    if (state.assetPlotDiscovery || !state.artifactsByName.has("order_detail_data")) return;
+    state.assetPlotDiscovery = {status: "loading"};
+    void discover(context, state).then(({choices, selected}) => {
+      if (state.target?.isConnected === false) return;
+      state.assetPlotDiscovery = {status: "ready", ...choices};
+      state.selectedAsset = selected;
+      state.rerender();
+    }).catch(error => {
+      if (state.target?.isConnected === false) return;
+      state.assetPlotDiscovery = {status: "error", message: error.message || String(error)};
+      state.rerender();
+    });
+  }
+
+  function selector(context, label, values, selected, onChange, allLabel = "") {
+    const control = document.createElement("select");
+    control.className = "backtest-asset-filter";
+    control.setAttribute("aria-label", context.t(label));
+    const choices = allLabel ? [["", allLabel], ...values.map(value => [value, value])]
+      : values.map(value => [value, value]);
+    choices.forEach(([value, name]) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = context.t(name);
+      control.append(option);
+    });
+    control.value = selected;
+    control.addEventListener("change", () => onChange(control.value));
+    return {label, element: control};
+  }
+
+  function controls(context, state) {
+    const index = state.assetPlotDiscovery;
+    if (index?.status !== "ready" || !index.products.length) return [];
+    const current = state.selectedAsset || {};
+    const update = change => {
+      state.selectedAsset = {...state.selectedAsset, ...change};
+      state.rerender();
+    };
+    return [
+      ...(index.strategies.length ? [selector(context, "策略", index.strategies,
+        current.strategy || "", strategy => update({strategy}), "全部策略")] : []),
+      ...(index.accounts.length ? [selector(context, "账本", index.accounts,
+        current.account || "", account => update({account}), "全部账本")] : []),
+      selector(context, "品种 / 合约", index.products, productKey(current), product => {
+        const generation = state.assetPlotSelectionGeneration
+          = (state.assetPlotSelectionGeneration || 0) + 1;
+        const source = window.FTJobArtifactQuery.tableSource(
+          context, artifactPath(state, "order_detail_data"), {pageSize: 1},
+        );
+        void source.page(1, {filters: {product: {
+          fields: productFields, values: [product],
+        }}}).then(data => {
+          const row = data.rows?.[0];
+          if (!row || state.target?.isConnected === false
+              || generation !== state.assetPlotSelectionGeneration
+              || state.executionView !== "asset_plot") return;
+          const anchor = identity(row);
+          update({product: anchor.product, contractUID: anchor.contractUID,
+            timestamp: anchor.timestamp});
+        }).catch(error => context.showNotice?.(error.message || String(error), true));
+      }),
+    ];
+  }
+
   function show(state, row) {
     const selected = identity(row);
     if (!selected.product || !Number.isFinite(selected.timestamp)) return;
@@ -235,11 +373,21 @@
   }
 
   function render(context, state) {
-    const selected = state.selectedAsset;
     const root = document.createElement("section");
     root.className = "backtest-asset-result";
+    ensureDiscovery(context, state);
+    const index = state.assetPlotDiscovery;
+    if (index?.status === "loading") {
+      root.append(window.FTUI.loading(context.t("正在查找可绘制的交易…")));
+      return root;
+    }
+    if (index?.status === "error") {
+      root.append(window.FTUI.empty(context.t("无法读取交易图可选范围"), index.message));
+      return root;
+    }
+    const selected = state.selectedAsset;
     if (!selected) {
-      root.append(window.FTUI.empty(context.t("请在订单或成交列表选择一笔交易查看交易图"), ""));
+      root.append(window.FTUI.empty(context.t("本次任务没有可绘制的订单"), ""));
       return root;
     }
     const heading = document.createElement("header");
@@ -247,7 +395,8 @@
     const title = document.createElement("h3");
     title.textContent = context.t("Asset Plot · 交易图");
     const subtitle = document.createElement("span");
-    subtitle.textContent = [selected.product, selected.strategy].filter(Boolean).join(" · ");
+    subtitle.textContent = [selected.product, selected.strategy, selected.account]
+      .filter(Boolean).join(" · ");
     heading.append(title, subtitle);
     const note = document.createElement("p");
     note.className = "backtest-asset-note";
@@ -286,7 +435,8 @@
         list.append(filterBar);
       }
       const table = window.FTUI.pagedTable([
-        "时间", "事件 / ID", "方向 / 状态", "数量", "价格", "剩余", "手续费", "账本变化",
+        "时间", "事件 / ID", "策略", "账本", "方向 / 状态", "数量", "价格",
+        "剩余", "手续费", "账本变化",
       ].map(context.t), shown, {
         page, pageSize: 20,
         onPageChange(next) { page = next; renderTable(); },
@@ -309,6 +459,8 @@
           return [
             window.FTUI.formatDate(item.timestamp) || new Date(item.timestamp).toLocaleString(),
             `${isFill ? "成交" : "订单"} · ${first(row, ["fill_id", "order_id", "event_id"]) || "—"}`,
+            first(row, strategyFields) || first(item.order, strategyFields) || "—",
+            first(row, accountFields) || first(item.order, accountFields) || "—",
             first(row, ["side", "offset", "status"]) || "—",
             number(first(row, isFill ? ["quantity", "filled_quantity"]
               : ["requested_quantity", "quantity"])),
@@ -431,6 +583,7 @@
   }
 
   window.FTBacktestAssetPlot = Object.freeze({
-    eventFilters, eventDetail, groupedPoints, identity, loadEvents, markerSeries, render, show,
+    controls, discover, eventFilters, eventDetail, groupedPoints, identity,
+    loadEvents, markerSeries, render, show,
   });
 })();

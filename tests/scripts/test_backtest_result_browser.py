@@ -201,6 +201,7 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
               {name: "order_detail_data", state: "active"},
             ],
             resultSummary: {
+              runtime_info_rows: [{type: '运行信息', detail: '测试参数已冻结'}],
               groups: [
                 {strategy_id: "strategy-a1", name: "A1", metrics_key: "A1"},
                 {strategy_id: "strategy-a2", name: "A2", metrics_key: "A2"},
@@ -212,6 +213,9 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
         """)
         page.wait_for_function("document.querySelectorAll('.job-result-tabs button').length >= 3")
         assert page.evaluate("window.__artifactFetches") == []
+        assert page.locator(".job-result-tabs button", has_text="运行摘要").count() == 0
+        assert page.locator(".job-result-tabs button", has_text="回测表现").count() == 1
+        assert page.locator(".backtest-runtime-disclosure summary").inner_text() == "运行摘要"
 
         page.get_by_role("button", name="策略统计").click()
         page.get_by_role("button", name="A1").click()
@@ -274,6 +278,14 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
 
         page.get_by_role("button", name="交易与账户").click()
         assert page.locator(".backtest-result-strategy-filter summary").inner_text() == "全部策略"
+        page.get_by_role("button", name="交易图", exact=True).click()
+        page.wait_for_function(
+            "document.querySelector('.backtest-asset-chart')?.dataset.assetPlotReady === 'true'"
+        )
+        assert page.locator(".backtest-asset-events tbody tr").count() == 20
+        assert page.get_by_label("品种 / 合约").input_value() == "AU.SHF"
+        assert page.get_by_label("账本").input_value() == ""
+        assert page.locator(".backtest-result-strategy-filter").count() == 0
         page.get_by_role("button", name="事件流", exact=True).click()
         page.locator(".backtest-event-flow strong", has_text="order-25").wait_for()
         assert page.get_by_role("button", name="上一时刻").is_enabled()
@@ -311,7 +323,14 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
         page.get_by_role("button", name="查看交易图").first.click()
         page.wait_for_function("document.querySelector('.backtest-asset-chart')?.dataset.assetPlotReady === 'true'")
         assert page.get_by_role("dialog").count() == 0
-        assert page.locator(".backtest-asset-events .shared-paged-table tbody tr").count() == 20
+        assert page.locator(".backtest-asset-events .shared-paged-table tbody tr").count() == 13
+        assert page.get_by_label("账本").input_value() == "account-1"
+        assert page.get_by_label("策略").input_value() == "A1"
+        page.get_by_label("账本").select_option("")
+        page.wait_for_function(
+            "document.querySelector('.backtest-asset-chart')?.dataset.assetPlotReady === 'true'"
+        )
+        assert page.locator(".backtest-asset-events tbody tr").count() == 20
         asset = page.evaluate("""() => ({
           request: window.__assetPriceRequest,
           events: window.__artifactQueries.filter(item => item.request.mode === 'time_rows'
@@ -324,6 +343,7 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
         assert asset["request"]["product_name"] == "AU.SHF"
         assert asset["events"]["filters"]["product"]["values"] == ["AU.SHF"]
         assert asset["events"]["filters"]["strategy"]["values"] == ["A1"]
+        assert "account" not in asset["events"]["filters"]
         assert asset["series"][0]["count"] == 24
         assert page.evaluate("window.__assetPlot.display.keepOtherSeriesVisible") is True
         page.evaluate("""() => {
@@ -657,4 +677,65 @@ def test_asset_plot_same_location_group_keeps_other_markers_visible() -> None:
         assert result["mixedLabel"] == "2"
         assert result["sellCount"] == 1
         assert result["inactiveOpacity"] == 1
+        browser.close()
+
+
+def test_asset_plot_discovers_scope_and_switches_contract_without_a_selected_order() -> None:
+    with _playwright() as playwright:
+        browser = _launch_chromium(playwright)
+        page = browser.new_page()
+        page.set_content("<main id='root'></main>")
+        for path in (
+            "server/manager/web/jobs/artifact-query.js",
+            "server/manager/web/core/price-chart.js",
+            "server/manager/web/test-modules/backtest/results/strategy-selection.js",
+            "server/manager/web/test-modules/backtest/results/asset-plot.js",
+        ):
+            page.add_script_tag(path=str(ROOT / path))
+        value = page.evaluate("""async () => {
+          const rows = [
+            {product: 'AU.SHF', strategy: 'A', account_id: 'ledger-1', timestamp: 1700000000000},
+            {product: 'RB.SHF', strategy: 'B', account_id: 'ledger-2', timestamp: 1700000060000},
+          ];
+          const context = {t: value => value, async api(_path, options) {
+            const request = JSON.parse(options.body);
+            let matching = rows;
+            for (const filter of Object.values(request.filters || {})) {
+              matching = matching.filter(row => filter.values.some(value =>
+                filter.fields.some(field => row[field] === value)));
+            }
+            return {data: {rows: matching.slice(0, 1), facets: {
+              product: ['AU.SHF', 'RB.SHF'], strategy: ['A', 'B'],
+              account: ['ledger-1', 'ledger-2'],
+            }}};
+          }};
+          const state = {
+            artifactsByName: new Map([['order_detail_data', {name: 'order_detail_data'}]]),
+            options: {jobID: 'job-test'}, strategySelection: ['B'],
+            model: {strategies: [{id: 'B', label: 'B'}]},
+            executionView: 'asset_plot', target: document.querySelector('#root'),
+            rerender() { this.renderCount = (this.renderCount || 0) + 1; },
+          };
+          const found = await FTBacktestAssetPlot.discover(context, state);
+          state.assetPlotDiscovery = {status: 'ready', ...found.choices};
+          state.selectedAsset = found.selected;
+          const controls = FTBacktestAssetPlot.controls(context, state);
+          controls.forEach(item => document.querySelector('#root').append(item.element));
+          const product = controls.find(item => item.label === '品种 / 合约').element;
+          product.value = 'AU.SHF';
+          product.dispatchEvent(new Event('change'));
+          await new Promise(resolve => setTimeout(resolve, 0));
+          return {initial: found.selected, selected: state.selectedAsset,
+            labels: controls.map(item => item.label), renderCount: state.renderCount,
+            filters: FTBacktestAssetPlot.eventFilters({
+              product: 'AU.SHF', strategy: 'A', account: 'ledger-1',
+            })};
+        }""")
+        assert value["initial"]["product"] == "RB.SHF"
+        assert value["initial"]["strategy"] == "B"
+        assert value["selected"]["product"] == "AU.SHF"
+        assert value["selected"]["timestamp"] == 1700000000000
+        assert value["labels"] == ["策略", "账本", "品种 / 合约"]
+        assert value["renderCount"] == 1
+        assert value["filters"]["account"]["values"] == ["ledger-1"]
         browser.close()
