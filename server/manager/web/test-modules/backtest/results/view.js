@@ -281,7 +281,7 @@
             details.append(summary, window.FTUI.code(value));
             return details;
           }
-          if (options.compactObjectCells && ["timestamp", "created_at", "updated_at"]
+          if (options.compactObjectCells && ["timestamp", "submitted_at", "filled_at", "executed_at", "created_at", "updated_at"]
             .includes(key) && value != null && value !== "") {
             return document.createTextNode(window.FTUI.formatDate(value) || String(value));
           }

@@ -149,6 +149,25 @@ def test_time_rows_filters_instrument_and_strategy_before_sampling() -> None:
                for row in result["rows"])
 
 
+def test_time_rows_uses_native_order_submission_time() -> None:
+    rows = [
+        {"submitted_at": "2025-04-10T14:30:00+08:00", "product": "SHFE|F|AU|2506",
+         "strategy": "screen_AU", "order_id": "first"},
+        {"submitted_at": "2025-04-11T14:30:00+08:00", "product": "SHFE|F|AU|2506",
+         "strategy": "screen_AU", "order_id": "later"},
+    ]
+    result = query_artifact_value({"rows": rows}, {
+        "mode": "time_rows", "from": 1744266600000, "to": 1744266600000,
+        "max_points": 20,
+        "fields": ["submitted_at", "product", "strategy", "order_id"],
+        "filters": {"product": {
+            "fields": ["contract_uid", "instrument", "product"],
+            "values": ["SHFE|F|AU|2506"],
+        }},
+    })
+    assert [row["order_id"] for row in result["rows"]] == ["first"]
+
+
 def test_chart_range_uses_milliseconds_for_second_epoch_artifacts() -> None:
     value = {"series": [{
         "label": "A",
