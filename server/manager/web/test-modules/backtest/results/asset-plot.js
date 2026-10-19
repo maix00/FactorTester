@@ -108,23 +108,33 @@
         seen.add(key); return true;
       });
       results.push({name: "fill_detail_data", rows, sampling: {
-        visible_rows: fillResults.reduce((count, result) => (
-          count + Number(result.sampling.visible_rows || result.rows.length)
+        omitted_rows: fillResults.reduce((count, result) => (
+          count + Math.max(0, Number(result.sampling.visible_rows
+            || result.rows.length) - result.rows.length)
         ), 0),
       }});
     }
     const orderByID = new Map((orders?.rows || []).filter(row => row.order_id)
       .map(row => [String(row.order_id), row]));
+    const filledOrderIDs = new Set(results.filter(result => result.name === "fill_detail_data")
+      .flatMap(result => result.rows).map(row => String(row.order_id || "")).filter(Boolean));
+    const collapseCompletedOrder = item => item.artifact === "order_detail_data"
+      && filledOrderIDs.has(String(item.row.order_id || ""))
+      && /^(filled|complete|completed|executed)$/i.test(String(item.row.status || "").trim())
+      && !(Number(item.row.active_leaves || 0) > 0)
+      && !(Number(item.row.terminal_unfilled || 0) > 0);
     const events = results.flatMap(({name, rows}) => rows.map((row, index) => ({
       artifact: name, row, index,
       order: name === "fill_detail_data" ? orderByID.get(String(row.order_id || "")) : row,
       timestamp: window.FTPriceChart.timestampOf(first(row,
         ["timestamp", "submitted_at", "filled_at", "executed_at", "created_at"])),
-    }))).filter(item => Number.isFinite(item.timestamp))
+    }))).filter(item => Number.isFinite(item.timestamp) && !collapseCompletedOrder(item))
       .sort((a, b) => a.timestamp - b.timestamp);
-    return {events, sourceCount: results.reduce((total, item) => (
-      total + Number(item.sampling.visible_rows || item.rows.length)
-    ), 0)};
+    const omittedOrders = orders ? Math.max(0,
+      Number(orders.sampling.visible_rows || orders.rows.length) - orders.rows.length) : 0;
+    return {events, sourceCount: events.length + omittedOrders
+      + Number(results.find(item => item.name === "fill_detail_data")
+        ?.sampling.omitted_rows || 0)};
   }
 
   function nearestPrice(bars, timestamp) {
@@ -183,6 +193,13 @@
     ];
     const strategy = first(row, strategyFields) || first(order, strategyFields);
     const account = first(row, accountFields) || first(order, accountFields);
+    if (isFill && order?.order_id) {
+      parts.push(["关联订单", order.order_id]);
+      const submitted = first(order, ["submitted_at", "timestamp", "created_at"]);
+      const submittedAt = window.FTPriceChart.timestampOf(submitted);
+      if (Number.isFinite(submittedAt)) parts.push(["下单时间",
+        window.FTUI?.formatDate?.(submittedAt) || new Date(submittedAt).toLocaleString()]);
+    }
     if (strategy) parts.push(["策略", strategy]);
     if (account) parts.push(["账本", account]);
     if (row.status) parts.push(["状态", row.status]);
@@ -462,7 +479,7 @@
     heading.append(title, subtitle);
     const note = document.createElement("p");
     note.className = "backtest-asset-note";
-    note.textContent = context.t("价格来自当前行情源；K 线上方的标记轨道按时间汇总本次 Job 的订单与成交，标记高度不代表成交价。行情若更新，图上价格可能与回测时不同。");
+    note.textContent = context.t("价格来自当前行情源；标记轨道按时间汇总成交和未完成订单，已关联成交的完成订单不重复标记。标记高度不代表成交价。行情若更新，图上价格可能与回测时不同。");
     const chartMount = document.createElement("div");
     chartMount.className = "backtest-asset-chart";
     const inspector = document.createElement("div");
@@ -607,7 +624,7 @@
       renderTable();
       const sampling = matching.sourceCount > events.length
         ? ` · 事件展示 ${events.length}/${matching.sourceCount}` : "";
-      note.textContent = context.t("价格来自当前行情源；K 线上方的标记轨道按时间汇总本次 Job 的订单与成交，标记高度不代表成交价。行情若更新，图上价格可能与回测时不同。")
+      note.textContent = context.t("价格来自当前行情源；标记轨道按时间汇总成交和未完成订单，已关联成交的完成订单不重复标记。标记高度不代表成交价。行情若更新，图上价格可能与回测时不同。")
         + ` · ${price.payload.data_source || context.t("自动行情源")}` + sampling;
       return {...price.payload, product: selected.product,
         freq: price.payload.freq || frequency,

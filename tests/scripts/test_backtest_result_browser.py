@@ -641,6 +641,59 @@ def test_price_chart_keeps_trade_markers_when_range_is_reloaded() -> None:
         browser.close()
 
 
+def test_asset_plot_collapses_only_completed_orders_with_linked_fills() -> None:
+    with _playwright() as playwright:
+        browser = _launch_chromium(playwright)
+        page = browser.new_page()
+        page.set_content("<main></main>")
+        for path in (
+            "server/manager/web/core/price-chart.js",
+            "server/manager/web/test-modules/backtest/results/asset-plot.js",
+        ):
+            page.add_script_tag(path=str(ROOT / path))
+        result = page.evaluate("""async () => {
+          const t = 1700000000000;
+          const orders = [
+            {order_id:'done', product:'AU.SHF', timestamp:t, status:'filled',
+              requested_quantity:1, active_leaves:0},
+            {order_id:'partial', product:'AU.SHF', timestamp:t+1000,
+              status:'partially_filled', requested_quantity:2, active_leaves:1},
+            {order_id:'cancelled', product:'AU.SHF', timestamp:t+2000,
+              status:'cancelled', requested_quantity:1, active_leaves:1},
+            {order_id:'missing-fill', product:'AU.SHF', timestamp:t+3000,
+              status:'filled', requested_quantity:1, active_leaves:0},
+          ];
+          const fills = [
+            {order_id:'done', fill_id:'f1', product:'AU.SHF',
+              timestamp:t+100, quantity:1, fill_price:101},
+            {order_id:'partial', fill_id:'f2', product:'AU.SHF',
+              timestamp:t+1100, quantity:1, fill_price:102},
+          ];
+          window.FTJobArtifactQuery = {timeSource(_context, path) {
+            return {async load() {return {rows:path.includes('fill_detail_data')
+              ? fills : orders};}};
+          }};
+          const state = {artifactsByName:new Map([
+            ['order_detail_data',{name:'order_detail_data'}],
+            ['fill_detail_data',{name:'fill_detail_data'}],
+          ]),options:{jobID:'job'}};
+          const data = await FTBacktestAssetPlot.loadEvents(
+            {}, state, {product:'AU.SHF'}, t-1000, t+5000, 100);
+          const linked = data.events.find(item => item.row.fill_id === 'f1');
+          return {orders:data.events.filter(item =>
+              item.artifact === 'order_detail_data').map(item => item.row.order_id),
+            fills:data.events.filter(item =>
+              item.artifact === 'fill_detail_data').map(item => item.row.fill_id),
+            sourceCount:data.sourceCount,
+            linkedDetail:FTBacktestAssetPlot.eventDetail(linked)};
+        }""")
+        assert result["orders"] == ["partial", "cancelled", "missing-fill"]
+        assert result["fills"] == ["f1", "f2"]
+        assert result["sourceCount"] == 5
+        assert "关联订单 done" in result["linkedDetail"]
+        browser.close()
+
+
 def test_asset_plot_same_location_group_keeps_other_markers_visible() -> None:
     with _playwright() as playwright:
         browser = _launch_chromium(playwright)
