@@ -537,7 +537,7 @@
       const table = state.helpers.remoteDataTable(
         context, state, selected[2], key, tableQueryRequest(state, key),
         assetRows ? {compactObjectCells: true, priorityColumns: [
-          "__asset_plot__", "timestamp", "instrument", "product", "strategy",
+          "__asset_plot__", "timestamp", "submitted_at", "instrument", "product", "strategy",
           "order_id", "fill_id", "side", "offset", "quantity",
           "filled_quantity", "price", "fill_price", "status", "fee",
         ]} : {},

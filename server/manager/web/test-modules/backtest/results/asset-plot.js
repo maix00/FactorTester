@@ -8,13 +8,16 @@
   }
 
   function identity(row) {
-    const contractUID = String(first(row, ["contract_uid"]) || "");
+    const product = String(first(row, ["instrument", "product", "contract_uid"]) || "");
+    const contractUID = String(first(row, ["contract_uid"]) || (
+      /^[^|]+\|[^|]+\|[^|]+\|[^|]+$/.test(product) ? product : ""
+    ));
     return {
-      product: String(first(row, ["instrument", "product", "contract_uid"]) || ""),
+      product,
       contractUID,
       strategy: String(first(row, ["strategy_id", "strategy_ref", "strategy"]) || ""),
       timestamp: window.FTPriceChart.timestampOf(first(row,
-        ["timestamp", "created_at", "updated_at"])),
+        ["timestamp", "submitted_at", "filled_at", "executed_at", "created_at"])),
     };
   }
 
@@ -26,7 +29,7 @@
 
   function eventFilters(selected) {
     const filters = {product: {
-      fields: selected.contractUID ? ["contract_uid"]
+      fields: selected.contractUID ? ["contract_uid", "instrument", "product"]
         : ["instrument", "product"],
       values: [selected.contractUID || selected.product],
     }};
@@ -47,7 +50,8 @@
       const value = await source.load({min: minimum, max: maximum, maxPoints}, {
         filters: eventFilters(selected),
         fields: [
-          "timestamp", "created_at", "updated_at", "instrument", "product",
+          "timestamp", "submitted_at", "filled_at", "executed_at", "created_at",
+          "instrument", "product",
           "contract_uid", "strategy_id", "strategy_ref", "strategy",
           "order_id", "fill_id", "event_id", "event_type", "status",
           "side", "offset", "quantity", "requested_quantity", "filled_quantity",
@@ -59,7 +63,7 @@
     const events = results.flatMap(({name, rows}) => rows.map((row, index) => ({
       artifact: name, row, index,
       timestamp: window.FTPriceChart.timestampOf(first(row,
-        ["timestamp", "created_at", "updated_at"])),
+        ["timestamp", "submitted_at", "filled_at", "executed_at", "created_at"])),
     }))).filter(item => Number.isFinite(item.timestamp))
       .sort((a, b) => a.timestamp - b.timestamp);
     return {events, sourceCount: results.reduce((total, item) => (
