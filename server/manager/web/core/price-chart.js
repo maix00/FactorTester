@@ -13,10 +13,10 @@
     target.__ftPriceChart?.destroy?.();
     target.__ftPriceChartObserver?.disconnect?.();
     target.classList?.add("interactive-price-chart");
-    const chartOptions = optionsOf(context, payload, bars);
+    const chartOptions = optionsOf(context, payload, bars, displayOptions);
     window.FTHighchartsRangeLoader?.attach(chartOptions, {
       ...displayOptions,
-      rangeOptions: incoming => optionsOf(context, incoming, barsOf(incoming)),
+      rangeOptions: incoming => optionsOf(context, incoming, barsOf(incoming), displayOptions),
     });
     const chart = highcharts.stockChart(target, chartOptions);
     target.__ftPriceChart = chart;
@@ -142,7 +142,7 @@
     };
   }
 
-  function optionsOf(context, payload, bars) {
+  function optionsOf(context, payload, bars, displayOptions = {}) {
     const t = value => context?.t?.(value) || value;
     const hasOI = bars.some(item => item.openInterest !== null);
     const title = [payload?.product || payload?.product_name || "", payload?.desc || ""]
@@ -179,6 +179,9 @@
         tooltip: {pointFormatter: scalarPointFormatter(context, "持仓量")},
       });
     }
+    const overlay = typeof displayOptions.overlaySeries === "function"
+      ? displayOptions.overlaySeries(payload, bars) : [];
+    if (Array.isArray(overlay)) series.push(...overlay);
     return {
       chart: {
         animation: false, height: 650,

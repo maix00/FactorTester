@@ -207,10 +207,19 @@ def _time_rows_query(
     lower, upper = _range(request)
     maximum = _bounded_int(request.get("max_points"), 800, 20, MAX_POINTS)
     fields = _fields(request.get("fields"))
+    filters = _filter_groups(request.get("filters"))
     grouped: OrderedDict[str, list[dict[str, object]]] = OrderedDict()
     for row in model["rows"]:
         timestamp = row.get("timestamp")
         if not _in_range(timestamp, lower, upper):
+            continue
+        # Asset plots must filter to the actual instrument and strategy before
+        # sampling. Otherwise unrelated orders consume the point budget and
+        # relevant fills silently disappear from the chart.
+        if any(
+            _first_text(row, definition["fields"]) not in definition["values"]
+            for definition in filters.values()
+        ):
             continue
         group = str(
             row.get("strategy_id") or row.get("strategy")

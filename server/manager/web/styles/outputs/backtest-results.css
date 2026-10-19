@@ -143,7 +143,46 @@
   font-size: 11px;
   white-space: pre-wrap;
 }
-.backtest-domain-table { max-width: 100%; min-width: 0; }
+.backtest-domain-table { max-width: 100%; min-width: 0; overflow-x: auto; }
+.backtest-domain-table table { min-width: max-content; }
+.backtest-domain-table th,
+.backtest-domain-table td { vertical-align: middle; white-space: nowrap; }
+.backtest-domain-table td:has(pre),
+.backtest-domain-table td:has(code) { white-space: normal; }
+.backtest-raw-cell { max-width: 320px; }
+.backtest-raw-cell summary { cursor: pointer; color: var(--accent); }
+.backtest-raw-cell pre { max-height: 240px; overflow: auto; white-space: pre-wrap; }
+.backtest-asset-open {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 8px;
+  background: var(--panel);
+  color: var(--accent);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.backtest-asset-open:hover { border-color: var(--accent); }
+.backtest-asset-dialog .backtest-analysis-card { width: min(1360px, 96vw); }
+.backtest-asset-note { margin: 0; color: var(--muted); font-size: 13px; }
+.backtest-asset-chart { min-width: 0; min-height: 520px; }
+.backtest-asset-events {
+  display: flex;
+  gap: 5px;
+  overflow-x: auto;
+  padding-bottom: 5px;
+}
+.backtest-asset-event {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  padding: 5px 8px;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.backtest-asset-event:hover,
+.backtest-asset-event.active { border-color: var(--accent); color: var(--accent); }
 .backtest-domain-empty { padding: 18px; color: var(--muted); text-align: center; }
 .backtest-runtime-summary { display: grid; gap: 8px; min-width: 0; }
 .backtest-runtime-summary h3 { font-size: 14px; margin: 0; }
