@@ -31,6 +31,12 @@ global.document = {
   createElement: tagName => new Element(tagName),
 };
 global.FTUI = window.FTUI = {
+  dialogRoot(context) {
+    const dialog = new Element("dialog");
+    dialog.dataset.ftOverlay = "true";
+    dialog.dataset.ftTabID = context?.tabID || "";
+    return dialog;
+  },
   actionButton(label, action) {
     const button = new Element("button");
     button.textContent = label;

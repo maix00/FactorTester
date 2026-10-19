@@ -168,6 +168,28 @@ def test_time_rows_uses_native_order_submission_time() -> None:
     assert [row["order_id"] for row in result["rows"]] == ["first"]
 
 
+def test_time_rows_retains_order_with_later_lifecycle_phase() -> None:
+    submitted = 1_744_266_600_000
+    later = submitted + 86_400_000
+    rows = [{
+        "submitted_at": submitted, "product": "SHFE|F|AU|2506",
+        "strategy": "screen_AU", "order_id": "first",
+        "lifecycle": [
+            {"kind": "submitted", "timestamp": submitted},
+            {"kind": "action", "action": "cancel", "timestamp": later},
+        ],
+    }]
+    result = query_artifact_value({"rows": rows}, {
+        "mode": "time_rows", "from": later - 1000, "to": later + 1000,
+        "fields": ["submitted_at", "product", "order_id", "lifecycle"],
+        "filters": {"product": {
+            "fields": ["product"], "values": ["SHFE|F|AU|2506"],
+        }},
+    })
+    assert [row["order_id"] for row in result["rows"]] == ["first"]
+    assert result["rows"][0]["lifecycle"][1]["action"] == "cancel"
+
+
 def test_time_rows_matches_native_nanosecond_fills_by_order_id() -> None:
     rows = [
         {"timestamp": 1744266660000000000, "order_id": "selected", "fill_id": "one"},

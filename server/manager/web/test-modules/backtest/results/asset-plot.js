@@ -9,10 +9,14 @@
     "cash_before", "cash_after", "cash_change", "margin_before", "margin_after",
     "margin_change", "account_currency", "position_before", "position_after",
     "account_id", "account_ref", "account", "ledger_id", "ledger",
+    "cash_pool_id", "cash_pool", "pool_id", "pool", "lifecycle",
   ];
   const productFields = ["contract_uid", "instrument", "product"];
   const strategyFields = ["strategy_id", "strategy_ref", "strategy"];
   const accountFields = ["account_id", "account_ref", "account", "ledger_id", "ledger"];
+  const poolFields = ["cash_pool_id", "cash_pool", "pool_id", "pool"];
+  const selectionMode = selected => selected.filterMode
+    || (selected.cashPool ? "cash_pool" : selected.account ? "account" : "strategy");
 
   function first(row, keys) {
     return keys.map(key => row?.[key]).find(value => value !== null
@@ -29,6 +33,7 @@
       contractUID,
       strategy: String(first(row, ["strategy_id", "strategy_ref", "strategy"]) || ""),
       account: String(first(row, accountFields) || ""),
+      cashPool: String(first(row, poolFields) || ""),
       timestamp: window.FTPriceChart.timestampOf(first(row,
         ["timestamp", "submitted_at", "filled_at", "executed_at", "created_at"])),
     };
@@ -40,7 +45,7 @@
       + `${encodeURIComponent(item.name)}${state.options.artifactQuery || ""}`;
   }
 
-  function eventFilters(selected) {
+  function eventFilters(selected, {dimensions = true} = {}) {
     const filters = {product: {
       fields: selected.contractUID ? productFields
         : ["instrument", "product"],
@@ -50,9 +55,12 @@
       fields: strategyFields,
       values: [selected.strategy],
     };
-    if (selected.account) filters.account = {
+    if (dimensions && selectionMode(selected) === "account" && selected.account) filters.account = {
       fields: accountFields, values: [selected.account],
     };
+    if (dimensions && selectionMode(selected) === "cash_pool" && selected.cashPool) {
+      filters.cash_pool = {fields: poolFields, values: [selected.cashPool]};
+    }
     return filters;
   }
 
@@ -62,12 +70,31 @@
 
   function matchesSelection(row, selected, orderIDs = null) {
     const orderID = String(row?.order_id || "");
-    if (orderIDs?.has(orderID)) return true;
     const rowProduct = productKey(identity(row));
-    if (!rowProduct || rowProduct !== productKey(selected)) return false;
+    if ((!rowProduct || rowProduct !== productKey(selected)) && !orderIDs?.has(orderID)) return false;
     if (selected.strategy && first(row, strategyFields) !== selected.strategy) return false;
-    if (selected.account && first(row, accountFields) !== selected.account) return false;
+    if (selectionMode(selected) === "account" && selected.account
+        && first(row, accountFields) !== selected.account) return false;
+    if (selectionMode(selected) === "cash_pool" && selected.cashPool
+        && first(row, poolFields) !== selected.cashPool) return false;
     return true;
+  }
+
+  function orderFacts(order) {
+    const lifecycle = Array.isArray(order.lifecycle) ? order.lifecycle : [];
+    const facts = lifecycle.flatMap((fact, index) => {
+      const timestamp = window.FTPriceChart.timestampOf(fact.timestamp);
+      if (!Number.isFinite(timestamp)) return [];
+      return [{artifact: "order_lifecycle", order, index, timestamp,
+        row: {...order, ...fact, status: fact.status || "", timestamp}}];
+    });
+    if (facts.length) return facts;
+    // Old Jobs have a final snapshot but no retained phase facts. Mark the
+    // submitted-time row as a snapshot, never as a dated terminal transition.
+    const timestamp = window.FTPriceChart.timestampOf(first(order,
+      ["submitted_at", "timestamp", "created_at"]));
+    return Number.isFinite(timestamp) ? [{artifact: "order_detail_data", order,
+      row: {...order, kind: "legacy_snapshot"}, index: 0, timestamp}] : [];
   }
 
   async function loadEvents(context, state, selected, minimum, maximum, maxPoints) {
@@ -80,11 +107,18 @@
       });
       return {name, rows: value?.rows || [], sampling: value?.sampling || {}};
     };
-    const orders = state.artifactsByName.has("order_detail_data")
-      ? await query("order_detail_data", eventFilters(selected)) : null;
-    if (orders) orders.rows = orders.rows.filter(row => matchesSelection(row, selected));
+    const hasFills = state.artifactsByName.has("fill_detail_data");
+    const [orders, productFills] = await Promise.all([
+      state.artifactsByName.has("order_detail_data")
+        ? query("order_detail_data", eventFilters(selected, {dimensions: false})) : null,
+      hasFills ? query("fill_detail_data", eventFilters(selected)) : null,
+    ]);
+    if (orders) orders.rows = orders.rows.filter(row => (
+      productKey(identity(row)) === productKey(selected)
+      && (!selected.strategy || first(row, strategyFields) === selected.strategy)
+    ));
     const results = orders ? [orders] : [];
-    if (state.artifactsByName.has("fill_detail_data")) {
+    if (hasFills) {
       // Native fill rows identify their contract through order_id, not product.
       // Query both representations so older and newer Job artifacts work alike.
       const identifiers = [...new Set((orders?.rows || [])
@@ -94,9 +128,13 @@
         groups.push(identifiers.slice(index, index + 256));
       }
       const fillResults = await Promise.all([
-        query("fill_detail_data", eventFilters(selected)),
+        productFills,
         ...groups.map(values => query("fill_detail_data", {
           order: {fields: ["order_id"], values},
+          ...(selectionMode(selected) === "account" && selected.account
+            ? {account: {fields: accountFields, values: [selected.account]}} : {}),
+          ...(selectionMode(selected) === "cash_pool" && selected.cashPool
+            ? {cash_pool: {fields: poolFields, values: [selected.cashPool]}} : {}),
         })),
       ]);
       const seen = new Set();
@@ -116,19 +154,30 @@
     }
     const orderByID = new Map((orders?.rows || []).filter(row => row.order_id)
       .map(row => [String(row.order_id), row]));
-    const filledOrderIDs = new Set(results.filter(result => result.name === "fill_detail_data")
+    const matchingFillIDs = new Set(results.filter(result => result.name === "fill_detail_data")
       .flatMap(result => result.rows).map(row => String(row.order_id || "")).filter(Boolean));
-    const collapseCompletedOrder = item => item.artifact === "order_detail_data"
-      && filledOrderIDs.has(String(item.row.order_id || ""))
-      && /^(filled|complete|completed|executed)$/i.test(String(item.row.status || "").trim())
-      && !(Number(item.row.active_leaves || 0) > 0)
-      && !(Number(item.row.terminal_unfilled || 0) > 0);
-    const events = results.flatMap(({name, rows}) => rows.map((row, index) => ({
-      artifact: name, row, index,
-      order: name === "fill_detail_data" ? orderByID.get(String(row.order_id || "")) : row,
-      timestamp: window.FTPriceChart.timestampOf(first(row,
-        ["timestamp", "submitted_at", "filled_at", "executed_at", "created_at"])),
-    }))).filter(item => Number.isFinite(item.timestamp) && !collapseCompletedOrder(item))
+    const visibleOrders = (orders?.rows || []).filter(row => {
+      if (selectionMode(selected) === "account" && selected.account) {
+        return first(row, accountFields) === selected.account
+          || matchingFillIDs.has(String(row.order_id || ""));
+      }
+      if (selectionMode(selected) === "cash_pool" && selected.cashPool) {
+        return first(row, poolFields) === selected.cashPool
+          || matchingFillIDs.has(String(row.order_id || ""));
+      }
+      return true;
+    });
+    const events = [
+      ...visibleOrders.flatMap(orderFacts),
+      ...results.filter(result => result.name === "fill_detail_data")
+        .flatMap(({rows}) => rows.map((row, index) => ({
+          artifact: "fill_detail_data", row, index,
+          order: orderByID.get(String(row.order_id || "")),
+          timestamp: window.FTPriceChart.timestampOf(first(row,
+            ["timestamp", "filled_at", "executed_at", "created_at"])),
+        }))),
+    ].filter(item => Number.isFinite(item.timestamp)
+      && item.timestamp >= minimum && item.timestamp <= maximum)
       .sort((a, b) => a.timestamp - b.timestamp);
     const omittedOrders = orders ? Math.max(0,
       Number(orders.sampling.visible_rows || orders.rows.length) - orders.rows.length) : 0;
@@ -173,6 +222,16 @@
     return eventFieldsFor(item).map(([label, value]) => `${label} ${value}`).join(" · ");
   }
 
+  function stageLabel(item) {
+    if (item.artifact === "fill_detail_data") return "成交执行";
+    const kind = String(item.row.kind || "");
+    if (kind === "submitted") return "订单建立";
+    if (kind === "attempt") return "撮合尝试";
+    if (kind === "action") return ({submit: "提交请求", cancel: "撤单请求",
+      replace: "改单请求"})[String(item.row.action || "")] || "订单请求";
+    return "历史订单快照";
+  }
+
   function eventFieldsFor(item) {
     const row = item.row;
     const isFill = item.artifact === "fill_detail_data";
@@ -183,8 +242,9 @@
     const currency = String(first(row, ["account_currency", "currency"]) || "");
     const remaining = first(row, ["active_leaves"]);
     const parts = [
-      ["类型", isFill ? "成交" : "订单"],
-      ["事件 ID", first(row, ["fill_id", "order_id", "event_id"]) || "未记录"],
+      ["阶段", stageLabel(item)],
+      ["事件 ID", first(row, ["fill_id", "attempt_id", "request_id",
+        "order_id", "event_id"]) || "未记录"],
       ["时间", window.FTUI?.formatDate?.(item.timestamp)
         || new Date(item.timestamp).toLocaleString()],
       ["方向", side],
@@ -202,7 +262,10 @@
     }
     if (strategy) parts.push(["策略", strategy]);
     if (account) parts.push(["账本", account]);
+    const pool = first(row, poolFields) || first(order, poolFields);
+    if (pool) parts.push(["资金池", pool]);
     if (row.status) parts.push(["状态", row.status]);
+    if (!isFill && order?.status) parts.push(["订单最终状态", order.status]);
     if (isFill) parts.push(["手续费", row.fee != null
       ? `${number(row.fee)} ${currency}`.trim() : "未记录"]);
     if (remaining != null) parts.push(["事件后剩余", number(remaining)]);
@@ -225,7 +288,7 @@
     return parts;
   }
 
-  function eventInspector(context, items) {
+  function eventInspector(context, items, allEvents = []) {
     const panel = document.createElement("section");
     panel.className = "backtest-asset-inspector";
     panel.setAttribute("aria-label", context.t("交易事件详情"));
@@ -237,9 +300,9 @@
       card.className = "backtest-asset-event-card";
       card.open = items.length === 1 || index === 0;
       const summary = document.createElement("summary");
-      const kind = item.artifact === "fill_detail_data" ? "成交" : "订单";
-      const id = first(item.row, ["fill_id", "order_id", "event_id"]) || "未记录 ID";
-      summary.textContent = `${context.t(kind)} ${index + 1} · ${id}`;
+      const id = first(item.row, ["fill_id", "attempt_id", "request_id",
+        "order_id", "event_id"]) || "未记录 ID";
+      summary.textContent = `${context.t(stageLabel(item))} ${index + 1} · ${id}`;
       const fields = document.createElement("dl");
       fields.className = "backtest-asset-event-fields";
       eventFieldsFor(item).forEach(([label, value]) => {
@@ -252,6 +315,40 @@
       card.append(summary, fields);
       panel.append(card);
     });
+    const orderIDs = [...new Set(items.map(item => String(item.row.order_id
+      || item.order?.order_id || "")).filter(Boolean))];
+    for (const orderID of orderIDs) {
+      const related = allEvents.filter(item => String(item.row.order_id
+        || item.order?.order_id || "") === orderID);
+      const order = related.find(item => item.order)?.order;
+      const flow = document.createElement("section");
+      flow.className = "backtest-asset-order-flow";
+      const title = document.createElement("h5");
+      title.textContent = context.t(`订单流 · ${orderID}`);
+      const timeline = document.createElement("ol");
+      related.forEach(item => {
+        const step = document.createElement("li");
+        const time = window.FTUI?.formatDate?.(item.timestamp)
+          || new Date(item.timestamp).toLocaleString();
+        const amount = first(item.row, item.artifact === "fill_detail_data"
+          ? ["quantity", "filled_quantity"] : ["requested_quantity", "quantity"]);
+        step.textContent = `${time} · ${context.t(stageLabel(item))}`
+          + (amount == null ? "" : ` · ${context.t("数量")} ${number(amount)}`);
+        timeline.append(step);
+      });
+      if (order?.status) {
+        const final = document.createElement("li");
+        final.textContent = `${context.t("最终快照")} · ${order.status}`
+          + (order.terminal_unfilled == null ? ""
+            : ` · ${context.t("终止未成交")} ${number(order.terminal_unfilled)}`)
+          + ` · ${context.t("状态变更时间未单独记录")}`;
+        timeline.append(final);
+      }
+      const availability = document.createElement("p");
+      availability.textContent = context.t("本任务未记录独立审核事件或逐档订单簿；无法展示审核通过时间、盘口深度或排队位置。撮合尝试不等于交易所审核通过。");
+      flow.append(title, timeline, availability);
+      panel.append(flow);
+    }
     return panel;
   }
 
@@ -275,7 +372,7 @@
   }
 
   function markerSeries(events, bars, onSelect) {
-    // Aggregate events of one kind at each candle. Symbols sit outside its
+    // Only executions belong on the price plot. Symbols sit outside the
     // wick; recorded execution prices are shown separately on selection.
     const groups = new Map();
     for (const item of events) {
@@ -285,7 +382,6 @@
       groups.get(bar.timestamp).items.push(item);
     }
     const kinds = [
-      ["order", "订单", "#d97706", "diamond", item => item.artifact === "order_detail_data", 2],
       ["buy", "买入成交", "#16a34a", "triangle", item => item.artifact === "fill_detail_data"
         && /^(buy|long|b|买)/i.test(String(item.row.side || "")), -1],
       ["sell", "卖出成交", "#dc2626", "triangle-down", item => item.artifact === "fill_detail_data"
@@ -303,12 +399,27 @@
         const items = group.items.filter(include);
         if (!items.length) return null;
         const bar = group.bar;
-        const gap = Math.max((bar.high - bar.low) * 0.25,
-          Math.abs(bar.close) * 0.001, 0.000001);
-        const y = direction > 0 ? bar.high + gap * direction
-          : bar.low + gap * direction;
+        // The price value only anchors the point to the price axis. Its final
+        // position is translated in pixels, so a wide y-range cannot shrink
+        // the visible gap between the symbol and neighboring candles.
+        const y = direction > 0 ? bar.high : bar.low;
         return {x: bar.timestamp, y, custom: {items, bar}};
       }).filter(Boolean),
+      events: {afterTranslate() {
+        const candles = this.chart.series[0]?.points || [];
+        for (const point of this.points) {
+          if (!Number.isFinite(point.plotX)) continue;
+          const neighbors = candles.filter(candle => Number.isFinite(candle.plotX)
+            && Math.abs(candle.plotX - point.plotX) <= 10);
+          if (!neighbors.length) continue;
+          const edges = neighbors.map(candle => direction > 0
+            ? candle.plotHigh : candle.plotLow).filter(Number.isFinite);
+          if (!edges.length) continue;
+          const edge = direction > 0 ? Math.min(...edges) : Math.max(...edges);
+          const distance = 10 + (Math.abs(direction) - 1) * 14;
+          point.plotY = edge + (direction > 0 ? -distance : distance);
+        }
+      }},
       point: {events: {click() { onSelect(this.options.custom.items, this); }}},
       tooltip: {pointFormatter() {
         const items = this.options.custom.items;
@@ -325,6 +436,98 @@
           + "点击查看逐笔详情";
       }},
     }));
+  }
+
+  function orderTimeline(context, events, minimum, maximum, onSelect,
+    {limit = 10, onLoadMore = () => {}} = {}) {
+    const panel = document.createElement("section");
+    panel.className = "backtest-order-timeline";
+    panel.setAttribute("aria-label", context.t("订单历史"));
+    const title = document.createElement("h4");
+    title.textContent = context.t("订单历史 · 与价格图同一时间范围");
+    panel.append(title);
+    const legend = document.createElement("p");
+    legend.className = "backtest-order-timeline-legend";
+    legend.textContent = context.t("提 提交 · 改 改单 · 撮 撮合尝试 · 成 成交 · 撤 撤单请求 · 数字 同时多条记录");
+    panel.append(legend);
+    const orders = new Map();
+    for (const item of events) {
+      const id = String(item.row.order_id || item.order?.order_id || "");
+      if (!id) continue;
+      if (!orders.has(id)) orders.set(id, []);
+      orders.get(id).push(item);
+    }
+    if (!orders.size) {
+      const empty = document.createElement("p");
+      empty.textContent = context.t("当前范围没有订单状态记录");
+      panel.append(empty);
+      return panel;
+    }
+    const ordered = [...orders].sort((left, right) => (
+      Math.max(...right[1].map(item => item.timestamp))
+      - Math.max(...left[1].map(item => item.timestamp))
+    ));
+    const shownCount = Math.min(Math.max(1, limit), ordered.length);
+    const rows = document.createElement("div");
+    rows.className = "backtest-order-timeline-rows";
+    const span = Math.max(1, maximum - minimum);
+    for (const [id, items] of ordered.slice(0, shownCount)) {
+      const row = document.createElement("div");
+      row.className = "backtest-order-timeline-row";
+      const label = document.createElement("button");
+      label.type = "button";
+      label.className = "backtest-order-timeline-id";
+      label.textContent = id;
+      label.setAttribute("aria-label", `${context.t("订单")} ${id}`);
+      label.addEventListener("click", () => onSelect(items));
+      const rail = document.createElement("div");
+      rail.className = "backtest-order-timeline-rail";
+      const at = time => Math.max(0, Math.min(100, (time - minimum) / span * 100));
+      const times = [...new Set(items.map(item => item.timestamp))].sort((a, b) => a - b);
+      const line = document.createElement("span");
+      line.className = "backtest-order-timeline-line";
+      line.style.left = `${at(times[0])}%`;
+      line.style.width = `${Math.max(0, at(times.at(-1)) - at(times[0]))}%`;
+      rail.append(line);
+      for (const time of times) {
+        const group = items.filter(item => item.timestamp === time);
+        const node = document.createElement("button");
+        node.type = "button";
+        node.className = "backtest-order-timeline-node";
+        node.style.left = `${at(time)}%`;
+        const item = group[0];
+        const phase = item.artifact === "fill_detail_data" ? "fill"
+          : item.row.kind === "attempt" ? "attempt"
+            : item.row.action === "replace" ? "update"
+              : item.row.action === "cancel" ? "cancel" : "submit";
+        node.dataset.phase = phase;
+        node.textContent = group.length > 1 ? String(group.length)
+          : ({fill: "成", attempt: "撮", update: "改", cancel: "撤",
+            submit: "提"})[phase];
+        node.setAttribute("aria-label", `${id} · ${new Date(time).toLocaleString()}`
+          + ` · ${group.map(stageLabel).join("、")}`);
+        node.addEventListener("click", () => onSelect(group));
+        rail.append(node);
+      }
+      row.append(label, rail);
+      rows.append(row);
+    }
+    panel.append(rows);
+    if (shownCount < ordered.length) {
+      const footer = document.createElement("div");
+      footer.className = "backtest-order-timeline-more";
+      const pagerButton = (label, action) => window.FTUI?.actionButton
+        ? window.FTUI.actionButton(context.t(label), action)
+        : Object.assign(document.createElement("button"), {
+          type: "button", textContent: context.t(label), onclick: action,
+        });
+      const count = document.createElement("span");
+      count.textContent = `${shownCount} / ${ordered.length} ${context.t("笔订单")}`;
+      const more = pagerButton("加载更多订单", () => onLoadMore(shownCount + 10));
+      footer.append(count, more);
+      panel.append(footer);
+    }
+    return panel;
   }
 
   function tradePriceLines(chart, items) {
@@ -367,11 +570,20 @@
     );
     const data = await source.page(1, {facets: {
       product: productFields, strategy: strategyFields, account: accountFields,
+      cash_pool: poolFields,
     }});
+    const fillFacets = state.artifactsByName.has("fill_detail_data")
+      ? await window.FTJobArtifactQuery.tableSource(context,
+        artifactPath(state, "fill_detail_data"), {pageSize: 1}).page(1, {facets: {
+          account: accountFields, cash_pool: poolFields,
+        }}) : null;
     const choices = {
       products: data.facets?.product || [],
       strategies: data.facets?.strategy || [],
-      accounts: data.facets?.account || [],
+      accounts: [...new Set([...(data.facets?.account || []),
+        ...(fillFacets?.facets?.account || [])])],
+      cashPools: [...new Set([...(data.facets?.cash_pool || []),
+        ...(fillFacets?.facets?.cash_pool || [])])],
     };
     let selected = state.selectedAsset;
     if (!selected || !choices.products.includes(productKey(selected))) {
@@ -393,7 +605,8 @@
         }}});
         if (scoped.rows?.length) anchor = scoped.rows[0];
       }
-      selected = anchor ? {...identity(anchor), account: ""} : null;
+      selected = anchor ? {...identity(anchor), account: "", cashPool: "",
+        filterMode: "strategy"} : null;
       if (picked.length !== 1 && selected) selected.strategy = "";
     }
     if (selected && !choices.strategies.includes(selected.strategy)) {
@@ -401,6 +614,9 @@
     }
     if (selected && !choices.accounts.includes(selected.account)) {
       selected = {...selected, account: ""};
+    }
+    if (selected && !choices.cashPools.includes(selected.cashPool)) {
+      selected = {...selected, cashPool: ""};
     }
     return {choices, selected};
   }
@@ -446,10 +662,21 @@
       state.rerender();
     };
     return [
-      ...(index.strategies.length ? [selector(context, "策略", index.strategies,
-        current.strategy || "", strategy => update({strategy}), "全部策略")] : []),
-      ...(index.accounts.length ? [selector(context, "账本", index.accounts,
-        current.account || "", account => update({account}), "全部账本")] : []),
+      selector(context, "筛选维度", ["按策略", "按账户", "按资金池"],
+        ({strategy: "按策略", account: "按账户", cash_pool: "按资金池"})[
+          current.filterMode || "strategy"], value => update({
+          filterMode: ({"按策略": "strategy", "按账户": "account",
+            "按资金池": "cash_pool"})[value] || "strategy",
+          strategy: "", account: "", cashPool: "",
+        })),
+      ...(current.filterMode === "account"
+        ? [selector(context, "账户", index.accounts, current.account || "",
+          account => update({account}), "全部账户")]
+        : current.filterMode === "cash_pool"
+          ? [selector(context, "资金池", index.cashPools, current.cashPool || "",
+            cashPool => update({cashPool}), "全部资金池")]
+          : [selector(context, "策略", index.strategies,
+            current.strategy || "", strategy => update({strategy}), "全部策略")]),
       selector(context, "品种 / 合约", index.products, productKey(current), product => {
         const generation = state.assetPlotSelectionGeneration
           = (state.assetPlotSelectionGeneration || 0) + 1;
@@ -474,7 +701,8 @@
   function show(state, row) {
     const selected = identity(row);
     if (!selected.product || !Number.isFinite(selected.timestamp)) return;
-    state.selectedAsset = selected;
+    state.selectedAsset = {...selected, filterMode: selected.cashPool ? "cash_pool"
+      : selected.account ? "account" : "strategy"};
     state.activeTab = "execution_account";
     state.executionView = "asset_plot";
     state.rerender();
@@ -503,22 +731,34 @@
     const title = document.createElement("h3");
     title.textContent = context.t("Asset Plot · 交易图");
     const subtitle = document.createElement("span");
-    subtitle.textContent = [selected.product, selected.strategy, selected.account]
+    subtitle.textContent = [selected.product,
+      selected.filterMode === "strategy" ? selected.strategy : "",
+      selected.filterMode === "account" ? selected.account : "",
+      selected.filterMode === "cash_pool" ? selected.cashPool : ""]
       .filter(Boolean).join(" · ");
     heading.append(title, subtitle);
     const note = document.createElement("p");
     note.className = "backtest-asset-note";
-    note.textContent = context.t("价格来自当前行情源；买卖标记位于对应 K 线下方或上方，点击标记打开逐笔事件面板，再选择需要显示的成交价水平线。行情若更新，图上价格可能与回测时不同。");
+    note.textContent = context.t("价格来自当前行情源；点击 K 线查看行情，点击其上下方的买卖标记查看逐笔事件，并可为每笔成交选择价格线。行情若更新，图上价格可能与回测时不同。");
     const chartMount = document.createElement("div");
     chartMount.className = "backtest-asset-chart";
+    const timelineMount = document.createElement("div");
+    chartMount.addEventListener("wheel", event => {
+      if (event.target?.closest?.(".highcharts-tooltip")) {
+        // Let the tooltip scroll itself; do not pass the wheel to Highcharts'
+        // chart-wide mouse-wheel zoom handler.
+        event.stopImmediatePropagation();
+      }
+    }, {capture: true, passive: true});
     const inspector = document.createElement("div");
     inspector.className = "backtest-asset-inspector-mount";
     const list = document.createElement("div");
     list.className = "backtest-asset-events";
-    root.append(heading, note, chartMount, inspector, list);
+    root.append(heading, note, chartMount, timelineMount, inspector, list);
     let generation = 0;
     let events = [];
     let chart = null;
+    let timelineObserver = null;
     let removalObserver = null;
     let page = 1;
     let selectedItems = [];
@@ -528,6 +768,29 @@
     let toolkitItems = [];
     let toolkitTime = null;
     let groupFilter = null;
+    let eventCache = null;
+    let priceCache = null;
+    let orderLimit = 10;
+    let timelineRange = null;
+    const syncTimelineGeometry = () => {
+      if (!Number.isFinite(chart?.plotLeft) || !Number.isFinite(chart?.plotWidth)) return;
+      timelineMount.style.setProperty("--asset-plot-left", `${chart.plotLeft}px`);
+      timelineMount.style.setProperty("--asset-plot-right", `${Math.max(0,
+        chart.chartWidth - chart.plotLeft - chart.plotWidth)}px`);
+    };
+    const renderTimeline = (minimum, maximum) => {
+      if (!timelineRange || timelineRange[0] !== minimum
+          || timelineRange[1] !== maximum) orderLimit = 10;
+      timelineRange = [minimum, maximum];
+      const visible = events.filter(item => item.timestamp >= minimum
+        && item.timestamp <= maximum);
+      timelineMount.replaceChildren(orderTimeline(context, visible, minimum, maximum,
+        items => select(items), {limit: orderLimit, onLoadMore(next) {
+          orderLimit = next;
+          renderTimeline(minimum, maximum);
+        }}));
+      syncTimelineGeometry();
+    };
     const renderTable = () => {
       list.replaceChildren();
       if (!events.length) {
@@ -556,8 +819,8 @@
         list.append(filterBar);
       }
       const table = window.FTUI.pagedTable([
-        "时间", "事件 / ID", "策略", "账本", "方向 / 状态", "数量", "价格",
-        "剩余", "手续费", "账本变化",
+        "时间", "订单阶段 / ID", "策略", "账户 / 资金池", "方向 / 状态", "数量",
+        "价格", "剩余", "手续费", "账本变化",
       ].map(context.t), shown, {
         page, pageSize: 20,
         onPageChange(next) { page = next; renderTable(); },
@@ -579,9 +842,12 @@
           ].filter(Boolean).join("；");
           return [
             window.FTUI.formatDate(item.timestamp) || new Date(item.timestamp).toLocaleString(),
-            `${isFill ? "成交" : "订单"} · ${first(row, ["fill_id", "order_id", "event_id"]) || "—"}`,
+            `${stageLabel(item)} · ${first(row, ["fill_id", "attempt_id", "request_id",
+              "order_id", "event_id"]) || "—"}`,
             first(row, strategyFields) || first(item.order, strategyFields) || "—",
-            first(row, accountFields) || first(item.order, accountFields) || "—",
+            [first(row, accountFields) || first(item.order, accountFields),
+              first(row, poolFields) || first(item.order, poolFields)]
+              .filter(Boolean).join(" / ") || "—",
             first(row, ["side", "offset", "status"]) || "—",
             number(first(row, isFill ? ["quantity", "filled_quantity"]
               : ["requested_quantity", "quantity"])),
@@ -596,6 +862,7 @@
         },
       });
       table.tableShell.classList.add("backtest-domain-table");
+      table.tableShell.setAttribute("aria-label", context.t("交易事件明细"));
       [...table.body.rows].forEach((row, index) => {
         const item = shown[table.start + index];
         row.tabIndex = 0;
@@ -606,8 +873,6 @@
             event.preventDefault(); select([item]);
           }
         });
-        row.addEventListener("mouseenter", () => hover(item));
-        row.addEventListener("mouseleave", () => hover(null));
       });
       list.append(table.shell);
     };
@@ -624,13 +889,21 @@
       }
       selectedItems = [...new Set([...selectedGroups.values()].flat())];
       inspector.replaceChildren();
-      if (selectedItems.length) inspector.append(eventInspector(context, selectedItems));
-      if (toolkitItems.length && point?.x != null) chart?.tooltip?.refresh?.(point);
+      if (selectedItems.length) inspector.append(eventInspector(context, selectedItems, events));
+      if (toolkitItems.length && point?.x != null) {
+        chart?.tooltip?.refresh?.(point);
+      }
       else chart?.tooltip?.hide?.();
       groupFilter = selectedItems.length ? selectedItems : null;
       const firstIndex = (groupFilter || events).indexOf(items[0]);
       if (firstIndex >= 0) page = Math.floor(firstIndex / 20) + 1;
       renderTable();
+    };
+    const openMarket = point => {
+      toolkitItems = [];
+      tooltipEvents = [];
+      toolkitTime = point.x;
+      chart?.tooltip?.refresh?.(point);
     };
     chartMount.addEventListener("click", event => {
       const button = event.target?.closest?.(".asset-tooltip-price-toggle");
@@ -648,17 +921,6 @@
       button.textContent = `${selected ? "移除价格线" : "显示价格线"} · ${number(
         first(item.row, ["fill_price", "price"]))}`;
     });
-    const hover = item => {
-      for (const series of chart?.series || []) {
-        for (const point of series.points || []) {
-          if (!point.options?.custom?.items) continue;
-          const active = item && point.options.custom.items.includes(item);
-          point.setState?.(active ? "hover" : "");
-          if (active) chart.tooltip?.refresh?.(point);
-        }
-      }
-      if (!item) chart?.tooltip?.hide?.();
-    };
     const configuration = state.options.configuration || {};
     const request = configuration.configuration?.payload || configuration.payload
       || configuration;
@@ -670,16 +932,50 @@
         : {product_name: selected.product}),
       freq: frequency, adjusted: false,
     };
-    const load = async (minimum, maximum, maxPoints = 1200) => {
+    const load = async (minimum, maximum, maxPoints = 1200,
+      visibleMinimum = minimum, visibleMaximum = maximum) => {
       const current = ++generation;
-      const matching = await loadEvents(context, state, selected, minimum, maximum,
-        Math.min(1200, maxPoints));
+      let matching;
+      if (eventCache && Date.now() - eventCache.fetchedAt < 15000
+          && minimum >= eventCache.minimum
+          && maximum <= eventCache.maximum) {
+        const cached = eventCache.result.events.filter(item => item.timestamp >= minimum
+          && item.timestamp <= maximum);
+        matching = {events: cached, sourceCount: cached.length};
+      } else {
+        matching = await loadEvents(context, state, selected, minimum, maximum,
+          Math.min(1200, maxPoints));
+        if (matching.sourceCount === matching.events.length) {
+          eventCache = {minimum, maximum, result: matching, fetchedAt: Date.now()};
+        }
+      }
       if (!root.isConnected || current !== generation) return null;
       const ranged = window.FTMarketData.rangeRequest(priceRequest, minimum, maximum,
         maxPoints);
       ranged.anchor_timestamps = [...new Set(matching.events.map(item => item.timestamp))];
       ranged.anchor_tolerance_ms = frequencyMs(frequency);
-      const price = await window.FTMarketData.prices(context, ranged, "server");
+      let price = null;
+      if (priceCache && Date.now() - priceCache.fetchedAt < 15000
+          && minimum >= priceCache.minimum && maximum <= priceCache.maximum) {
+        const rows = (priceCache.price.payload.data || []).filter(row => {
+          const time = window.FTPriceChart.timestampOf(Array.isArray(row)
+            ? row[0] : first(row, ["timestamp", "datetime", "date", "time"]));
+          return time >= minimum && time <= maximum;
+        });
+        if (rows.length && rows.length <= maxPoints) {
+          price = {payload: {...priceCache.price.payload, data: rows,
+            count: rows.length, returned_count: rows.length}};
+        }
+      }
+      if (!price) {
+        price = await window.FTMarketData.prices(context, ranged, "server");
+        const count = Number(price.payload?.count);
+        const returned = Number(price.payload?.returned_count);
+        if (Number.isFinite(count) && count === returned
+            && Array.isArray(price.payload?.data)) {
+          priceCache = {minimum, maximum, price, fetchedAt: Date.now()};
+        }
+      }
       if (!root.isConnected || current !== generation) return null;
       events = matching.events;
       page = 1;
@@ -694,8 +990,9 @@
       renderTable();
       const sampling = matching.sourceCount > events.length
         ? ` · 事件展示 ${events.length}/${matching.sourceCount}` : "";
-      note.textContent = context.t("价格来自当前行情源；买卖标记位于对应 K 线下方或上方，点击标记打开逐笔事件面板，再选择需要显示的成交价水平线。行情若更新，图上价格可能与回测时不同。")
+      note.textContent = context.t("价格来自当前行情源；点击 K 线查看行情，点击买卖标记查看成交，下方订单历史按订单展示已记录的状态变化。成交可单独显示价格线；订单历史不表示盘口深度或排队位置。行情若更新，图上价格可能与回测时不同。")
         + ` · ${price.payload.data_source || context.t("自动行情源")}` + sampling;
+      renderTimeline(visibleMinimum, visibleMaximum);
       return {...price.payload, product: selected.product,
         freq: price.payload.freq || frequency,
         __assetEvents: events};
@@ -707,16 +1004,29 @@
         if (!payload) return;
         chart = window.FTPriceChart.render(context, chartMount, payload, {
           assetMode: true, preserveSourceBars: true,
+          tooltipActiveTime: () => toolkitTime,
+          onMarketClick: openMarket,
           eventTooltipFields: eventFieldsFor,
           tooltipEventItems: timestamp => timestamp === toolkitTime ? toolkitItems : [],
           onTooltipEvents: items => { tooltipEvents = items; },
           isPriceSelected: item => selectedPriceEvents.has(selectionKey([item])),
           keepOtherSeriesVisible: true,
           loadingText: context.t("正在读取当前时间范围…"),
-          overlaySeries: (value, bars) => markerSeries(value.__assetEvents || [], bars, select),
-          loadRange: (minimum, maximum, range) => load(minimum, maximum, range.maxPoints),
+          rangeDebounceMs: 220,
+          overlaySeries: (value, bars) => markerSeries(value.__assetEvents || [], bars,
+            select),
+          loadRange: (minimum, maximum, range) => load(minimum, maximum,
+            range.maxPoints, range.visibleMinimum, range.visibleMaximum),
           onRangeError: error => { note.textContent = error.message || String(error); },
         });
+        if (Number.isFinite(chart?.xAxis?.[0]?.min)
+            && Number.isFinite(chart?.xAxis?.[0]?.max)) {
+          renderTimeline(chart.xAxis[0].min, chart.xAxis[0].max);
+        }
+        if (window.ResizeObserver && chart) {
+          timelineObserver = new ResizeObserver(syncTimelineGeometry);
+          timelineObserver.observe(chartMount);
+        }
       }).catch(error => {
         chartMount.replaceChildren();
         const message = document.createElement("p");
@@ -726,6 +1036,7 @@
     state.assetPlotCleanup = () => {
       generation += 1;
       removalObserver?.disconnect();
+      timelineObserver?.disconnect();
       chartMount.__ftPriceChartObserver?.disconnect?.();
       chart?.destroy?.();
       chart = null;
@@ -742,6 +1053,6 @@
 
   window.FTBacktestAssetPlot = Object.freeze({
     controls, discover, eventFilters, eventDetail, groupedPoints, identity,
-    loadEvents, markerSeries, render, show, tradePriceLines,
+    loadEvents, markerSeries, orderTimeline, render, show, tradePriceLines,
   });
 })();

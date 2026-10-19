@@ -17,6 +17,31 @@ from server.jobs.report_outputs import (
     validate_output_requests,
 )
 from server.jobs.report_outputs.series import metrics_rows
+from server.jobs.report_outputs.execution_tables import order_rows
+
+
+def test_order_rows_keep_recorded_lifecycle_without_inventing_review_or_close_time() -> None:
+    source = {"order_audit": {"strategies": {"S": {
+        "orders": [{"order_id": "o1", "submitted_at": "2025-04-01T09:00:00+08:00",
+                    "status": "cancelled", "terminal_unfilled": 2}],
+        "actions": [
+            {"order_id": "o1", "action": "submit", "request_id": "r1",
+             "submitted_at": "2025-04-01T09:00:00+08:00"},
+            {"order_id": "o1", "action": "cancel", "request_id": "r2",
+             "submitted_at": "2025-04-01T09:02:00+08:00"},
+        ],
+        "attempts": [{"order_id": "o1", "attempt_id": "a1",
+                      "timestamp": "2025-04-01T09:01:00+08:00"}],
+    }}}}
+    rows = order_rows(source)
+    assert len(rows) == 1
+    assert [(fact["kind"], fact["timestamp"]) for fact in rows[0]["lifecycle"]] == [
+        ("action", "2025-04-01T09:00:00+08:00"),
+        ("attempt", "2025-04-01T09:01:00+08:00"),
+        ("action", "2025-04-01T09:02:00+08:00"),
+    ]
+    assert rows[0]["status"] == "cancelled"
+    assert all(fact.get("kind") != "review" for fact in rows[0]["lifecycle"])
 
 
 def _sample():

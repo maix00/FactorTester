@@ -281,205 +281,27 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
         page.get_by_role("dialog").get_by_title("关闭").click()
 
         page.get_by_role("button", name="交易与账户").click()
-        assert page.locator(".backtest-result-strategy-filter summary").inner_text() == "全部策略"
-        page.get_by_role("button", name="交易图", exact=True).click()
         page.wait_for_function(
             "document.querySelector('.backtest-asset-chart')?.dataset.assetPlotReady === 'true'"
         )
+        assert page.locator(".backtest-inner-tabs button").count() == 0
         assert page.locator(".backtest-asset-events tbody tr").count() == 20
         assert page.locator(".backtest-asset-filter").count() == 3
+        assert page.locator(".backtest-order-timeline-row").count() > 0
+        assert page.locator(".backtest-asset-events thead th").all_text_contents() == [
+            "时间", "订单阶段 / ID", "策略", "账户 / 资金池", "方向 / 状态",
+            "数量", "价格", "剩余", "手续费", "账本变化",
+        ]
         assert page.locator(".backtest-asset-filter").last.locator("summary").inner_text() == "AU.SHF"
-        assert page.locator(".backtest-asset-filter").nth(1).locator("summary").inner_text() == "全部账本"
         assert page.locator(".backtest-result-strategy-filter").count() == 0
-        page.get_by_role("button", name="事件流", exact=True).click()
-        page.locator(".backtest-event-flow strong", has_text="order-25").wait_for()
-        assert page.get_by_role("button", name="上一时刻").is_enabled()
-        page.get_by_role("button", name="订单", exact=True).click()
-        page.get_by_text("策略、账户与资金池关系").wait_for()
-        assert page.locator(
-            ".backtest-dimension-filters .backtest-surface-filter-row"
-        ).count() == 4
-        assert page.locator(
-            ".backtest-dimension-filters .backtest-surface-filter-label"
-        ).all_text_contents() == ["账户", "资金池", "账户币种", "资金池基准币种"]
-        assert page.get_by_text("account-1", exact=True).count() >= 1
-        page.get_by_role("button", name="按账户").click()
-        page.locator(".backtest-relation-table").get_by_text(
-            "USD", exact=True,
-        ).wait_for()
-        page.get_by_role("button", name="按资金池").click()
-        page.locator(".backtest-relation-table").get_by_text(
-            "CNY", exact=True,
-        ).first.wait_for()
-        page.wait_for_function(
-            "document.querySelectorAll('.backtest-result-lazy-target > .backtest-domain-table tbody tr').length === 20"
-        )
-        assert page.evaluate("window.__artifactFetches") == []
         assert set(page.evaluate("window.__artifactQueries.map(item => item.name)")) == {
             "equity_curve_data", "metrics_over_time_data", "order_detail_data",
         }
-        page.locator(
-            ".backtest-result-lazy-target > .backtest-domain-table"
-        ).get_by_role("button", name="下一页").click()
-        page.wait_for_function(
-            "document.querySelectorAll('.backtest-result-lazy-target > .backtest-domain-table tbody tr').length === 5"
-        )
-        assert page.locator(".backtest-domain-content").get_by_text("order-25").count() == 1
-        page.get_by_role("button", name="查看交易图").first.click()
-        page.wait_for_function("document.querySelector('.backtest-asset-chart')?.dataset.assetPlotReady === 'true'")
-        assert page.get_by_role("dialog").count() == 0
-        assert page.locator(".backtest-asset-events .shared-paged-table tbody tr").count() == 13
-        assert page.locator(".backtest-asset-filter").nth(1).locator("summary").inner_text() == "account-1"
-        assert page.locator(".backtest-asset-filter").first.locator("summary").inner_text() == "A1"
-        page.locator(".backtest-asset-filter").nth(1).locator("summary").click()
-        page.locator('input[data-filter-value="__all_asset_账本__"]').click()
-        page.wait_for_function(
-            "document.querySelector('.backtest-asset-chart')?.dataset.assetPlotReady === 'true'"
-        )
-        assert page.locator(".backtest-asset-events tbody tr").count() == 20
-        asset = page.evaluate("""() => ({
-          request: window.__assetPriceRequest,
-          events: window.__artifactQueries.filter(item => item.request.mode === 'time_rows'
-            && item.name === 'order_detail_data').at(-1)?.request,
-          series: window.__assetPlot.display.overlaySeries(
-            {__assetEvents: window.__assetPlot.payload.__assetEvents},
-            [{timestamp: 1700000000000, close: 100}], () => {},
-              ).map(item => ({name: item.name, count: item.data.length,
-                events: item.data.reduce((n, point) => n + point.custom.items.length, 0)})),
-        })""")
-        assert asset["request"]["product_name"] == "AU.SHF"
-        assert 1700000000000 in asset["request"]["anchor_timestamps"]
-        assert asset["request"]["anchor_tolerance_ms"] == 86400000
-        assert page.evaluate("window.__assetPlot.display.preserveSourceBars") is True
-        assert asset["events"]["filters"]["product"]["values"] == ["AU.SHF"]
-        assert asset["events"]["filters"]["strategy"]["values"] == ["A1"]
-        assert "account" not in asset["events"]["filters"]
-        assert asset["series"][0]["count"] == 1
-        assert asset["series"][0]["events"] == 25
+        assert page.evaluate("window.__artifactFetches") == []
         assert page.evaluate("window.__assetPlot.display.keepOtherSeriesVisible") is True
-        page.evaluate("""() => {
-          const series = window.__assetPlot.display.overlaySeries(
-            {__assetEvents: window.__assetPlot.payload.__assetEvents},
-            [{timestamp: 1700000000000, close: 100}],
-          );
-          const order = series.find(item => item.id === 'asset-order');
-          const group = order.data.find(item => item.custom.items.length === 25);
-          order.point.events.click.call({options: group});
-        }""")
-        assert "已选择 25 笔事件" in page.locator(
-            ".backtest-asset-group-filter"
-        ).inner_text()
-        assert page.locator(".backtest-asset-events tbody tr").count() == 20
-        cards = page.locator(".backtest-asset-event-card")
-        assert cards.count() == 25
-        assert cards.first.get_by_text("事件 ID").count() == 1
-        assert cards.first.locator("dd").count() >= 6
-        assert cards.nth(1).get_attribute("open") is None
-        cards.nth(1).locator("summary").click()
-        assert cards.nth(1).get_attribute("open") is not None
-        page.evaluate("""() => {
-          const series = window.__assetPlot.display.overlaySeries(
-            {__assetEvents: window.__assetPlot.payload.__assetEvents},
-            [{timestamp: 1700000000000, high: 103, low: 99, close: 100}],
-          );
-          const order = series.find(item => item.id === 'asset-order');
-          order.point.events.click.call({options: order.data[0]});
-        }""")
-        assert page.locator(".backtest-asset-inspector-mount").inner_text() == ""
-        assert page.locator(".backtest-asset-group-filter").count() == 0
-        assert page.locator(".backtest-asset-events tbody tr").count() == 20
-        lines = page.evaluate("""() => {
-          const chart = {yAxis: [{removePlotLine() {}, addPlotLine(line) {
-            window.__assetPriceLines.push(line);
-          }}]};
-          FTBacktestAssetPlot.tradePriceLines(chart, [
-            {artifact: 'fill_detail_data', row: {fill_price: 99}},
-            {artifact: 'fill_detail_data', row: {fill_price: 101}},
-          ]);
-          return window.__assetPriceLines.map(line => ({value: line.value,
-            width: line.width, zIndex: line.zIndex}));
-        }""")
-        assert lines == [{"value": 99, "width": 1, "zIndex": 1},
-                         {"value": 101, "width": 1, "zIndex": 1}]
-        fill_marker = page.evaluate("""() => {
-          const marker = FTBacktestAssetPlot.markerSeries([
-            {artifact: 'fill_detail_data', timestamp: 1700000000000,
-              row: {side: 'SELL', fill_price: 105, quantity: 2}},
-          ], [{timestamp: 1700000000000, high: 103, low: 99, close: 100}], () => {});
-          return marker.find(series => series.id === 'asset-sell').data[0].y;
-        }""")
-        assert fill_marker > 103
-        native_fills = page.evaluate("""async () => {
-          const state = {artifactsByName: new Map([
-            ['order_detail_data', {name: 'order_detail_data'}],
-            ['fill_detail_data', {name: 'fill_detail_data'}],
-          ]), options: {jobID: 'job-browser'}};
-          const selected = FTBacktestAssetPlot.identity({
-            product: 'AU.SHF', strategy: 'A1', timestamp: 1700000000000,
-          });
-          const value = await FTBacktestAssetPlot.loadEvents(
-            {t: value => value, api: window.__queryArtifact}, state, selected,
-            1699990000000, 1700010000000, 1200,
-          );
-          return {fills: value.events.filter(item => item.artifact === 'fill_detail_data')
-            .map(item => ({id: item.row.fill_id, timestamp: item.timestamp})),
-            filteredByOrder: window.__artifactQueries.some(item =>
-              item.name === 'fill_detail_data' && item.request.filters?.order?.values
-                ?.includes('order-1'))};
-        }""")
-        assert native_fills == {"fills": [{"id": "fill-1", "timestamp": 1700000000000}],
-                                "filteredByOrder": True}
-        grouped = page.evaluate("""() => {
-          const a = {artifact: 'fill_detail_data', timestamp: 1700000000000,
-            row: {side: 'BUY', fill_price: 105, quantity: 2, fee: 3,
-              cash_before: 1000, cash_after: 787,
-              margin_before: 0, margin_after: 0}};
-          const b = {artifact: 'fill_detail_data', timestamp: 1700000000000,
-            row: {side: 'SELL', fill_price: 105, quantity: 1}};
-          const c = {artifact: 'fill_detail_data', timestamp: 1700000000000,
-            row: {side: 'BUY', fill_price: 106, quantity: 1}};
-          const groups = FTBacktestAssetPlot.groupedPoints(
-            [a, b, c], [{timestamp: 1700000000000, close: 100}],
-          );
-          const markers = FTBacktestAssetPlot.markerSeries(
-                [a, b, c], [{timestamp: 1700000000000, high: 103,
-                  low: 99, close: 100}], () => {},
-          );
-          const state = {rerender() { this.rendered = true; }};
-          FTBacktestAssetPlot.show(state, {timestamp: 1700000000000,
-            instrument: 'AU.SHF', contract_uid: 'CN|AU|au2612|SHF'});
-          return {groups: groups.map(group => [group.y, group.items.length]),
-            markerCount: markers.reduce((count, item) => count + item.data.length, 0),
-            detail: FTBacktestAssetPlot.eventDetail(a),
-            selected: state.selectedAsset, view: state.executionView,
-            rerendered: state.rendered};
-        }""")
-        assert grouped["groups"] == [[105, 2], [106, 1]]
-        assert grouped["markerCount"] == 2
-        assert "现金 1,000 → 787" in grouped["detail"]
-        assert "手续费 3" in grouped["detail"]
-        assert "保证金" not in grouped["detail"]
-        assert grouped["selected"]["contractUID"] == "CN|AU|au2612|SHF"
-        assert grouped["view"] == "asset_plot"
-        assert grouped["rerendered"] is True
-        native_order = page.evaluate("""() => {
-          const order = FTBacktestAssetPlot.identity({
-            submitted_at: '2025-04-10T14:30:00+08:00',
-            product: 'SHFE|F|AU|2506', strategy: 'screen_AU',
-          });
-          return {order, filters: FTBacktestAssetPlot.eventFilters(order)};
-        }""")
-        assert native_order["order"]["contractUID"] == "SHFE|F|AU|2506"
-        assert native_order["order"]["timestamp"] == 1744266600000
-        assert native_order["filters"]["product"]["fields"] == [
-            "contract_uid", "instrument", "product",
-        ]
-        page.get_by_role("button", name="订单", exact=True).click()
-        page.get_by_label("账户", exact=True).click()
-        page.locator('input[data-filter-value="account-1"]').first.check()
-        # Collapse the open menu (outside click) to commit the multi pick.
-        page.mouse.click(6, 6)
-        page.get_by_text("共 13 行").wait_for()
+        assert page.evaluate("window.__assetPlot.display.preserveSourceBars") is True
+        assert page.evaluate("window.__assetPriceRequest.anchor_tolerance_ms") == 86400000
+        assert errors == []
 
         page.get_by_role("button", name="时变指标").click()
         page.wait_for_function(
@@ -671,7 +493,7 @@ def test_price_chart_keeps_trade_markers_when_range_is_reloaded() -> None:
         browser.close()
 
 
-def test_asset_plot_collapses_only_completed_orders_with_linked_fills() -> None:
+def test_asset_plot_keeps_legacy_order_snapshots_linked_to_fills() -> None:
     with _playwright() as playwright:
         browser = _launch_chromium(playwright)
         page = browser.new_page()
@@ -717,10 +539,219 @@ def test_asset_plot_collapses_only_completed_orders_with_linked_fills() -> None:
             sourceCount:data.sourceCount,
             linkedDetail:FTBacktestAssetPlot.eventDetail(linked)};
         }""")
-        assert result["orders"] == ["partial", "cancelled", "missing-fill"]
+        # Legacy snapshots remain selectable so a fill can lead back to its
+        # originating order; they are labelled as snapshots, not a dated close.
+        assert result["orders"] == ["done", "partial", "cancelled", "missing-fill"]
         assert result["fills"] == ["f1", "f2"]
-        assert result["sourceCount"] == 5
+        assert result["sourceCount"] == 6
         assert "关联订单 done" in result["linkedDetail"]
+        browser.close()
+
+
+def test_asset_plot_order_flow_uses_recorded_phases_and_pool_scope() -> None:
+    with _playwright() as playwright:
+        browser = _launch_chromium(playwright)
+        page = browser.new_page()
+        page.set_content("<main></main>")
+        for path in (
+            "server/manager/web/core/price-chart.js",
+            "server/manager/web/test-modules/backtest/results/asset-plot.js",
+        ):
+            page.add_script_tag(path=str(ROOT / path))
+        result = page.evaluate("""async () => {
+          const t = 1700000000000;
+          const order = {order_id:'o1', product:'AU.SHF', strategy:'S', side:'BUY',
+            submitted_at:t, status:'cancelled', requested_quantity:2,
+            lifecycle:[
+              {kind:'action', action:'submit', order_id:'o1', timestamp:t},
+              {kind:'attempt', attempt_id:'a1', order_id:'o1', timestamp:t+1000},
+              {kind:'action', action:'cancel', order_id:'o1', timestamp:t+2000},
+            ]};
+          const fill = {order_id:'o1', fill_id:'f1', strategy:'S', timestamp:t+1000,
+            side:'BUY', quantity:1, fill_price:101, account_id:'A', cash_pool_id:'P'};
+          window.FTJobArtifactQuery = {timeSource(_context, path) {
+            return {async load() {return {rows:path.includes('fill_detail_data')
+              ? [fill] : [order]};}};
+          }};
+          const state = {artifactsByName:new Map([
+            ['order_detail_data',{name:'order_detail_data'}],
+            ['fill_detail_data',{name:'fill_detail_data'}],
+          ]),options:{jobID:'job'}};
+          const selected = {product:'AU.SHF', strategy:'S', filterMode:'cash_pool',
+            cashPool:'P'};
+          const value = await FTBacktestAssetPlot.loadEvents({}, state, selected,
+            t-1000, t+3000, 100);
+          const bars = [{timestamp:t, high:103, low:99, close:100},
+            {timestamp:t+1000, high:103, low:99, close:100},
+            {timestamp:t+2000, high:103, low:99, close:100}];
+          const fillsOnly = FTBacktestAssetPlot.markerSeries(value.events, bars,
+            () => {});
+          const timeline = FTBacktestAssetPlot.orderTimeline({t:s=>s}, value.events,
+            t-1000, t+3000, () => {});
+          return {
+            kinds:value.events.map(item => item.row.kind || item.artifact),
+            visibleOrders:value.events.filter(item => item.artifact === 'order_lifecycle').length,
+            poolFilter:FTBacktestAssetPlot.eventFilters(selected).cash_pool.values,
+            fillAccount:value.events.find(item => item.row.fill_id === 'f1').row.account_id,
+            defaultMarks:fillsOnly.reduce((n, item) => n + item.data.length, 0),
+            orderRows:timeline.querySelectorAll('.backtest-order-timeline-row').length,
+            orderNodes:timeline.querySelectorAll('.backtest-order-timeline-node').length,
+            noOrderPriceMarkers:fillsOnly.every(item => !item.id.startsWith('asset-cancel')),
+          };
+        }""")
+        assert result["kinds"] == ["action", "attempt", "fill_detail_data", "action"]
+        assert result["visibleOrders"] == 3
+        assert result["poolFilter"] == ["P"]
+        assert result["fillAccount"] == "A"
+        assert result["defaultMarks"] == 1
+        assert result["orderRows"] == 1
+        assert result["orderNodes"] == 3
+        assert result["noOrderPriceMarkers"] is True
+        browser.close()
+
+
+def test_asset_plot_order_history_separates_orders_and_groups_same_time() -> None:
+    with _playwright() as playwright:
+        browser = _launch_chromium(playwright)
+        page = browser.new_page()
+        page.set_content("<main id='root'></main>")
+        for path in (
+            "server/manager/web/core/price-chart.js",
+            "server/manager/web/test-modules/backtest/results/asset-plot.js",
+        ):
+            page.add_script_tag(path=str(ROOT / path))
+        result = page.evaluate("""() => {
+          const t = 1700000000000;
+          const events = [
+            {artifact:'order_lifecycle',timestamp:t,row:{order_id:'A',kind:'action',action:'submit'}},
+            {artifact:'order_lifecycle',timestamp:t+1000,row:{order_id:'A',kind:'attempt'}},
+            {artifact:'fill_detail_data',timestamp:t+1000,row:{order_id:'A',fill_id:'F1',side:'BUY'}},
+            {artifact:'order_lifecycle',timestamp:t+2000,row:{order_id:'B',kind:'action',action:'submit'}},
+          ];
+          let selected = [];
+          const timeline = FTBacktestAssetPlot.orderTimeline({t:v=>v}, events,
+            t, t+3000, items => {selected = items;});
+          document.querySelector('#root').append(timeline);
+          const rows = [...timeline.querySelectorAll('.backtest-order-timeline-row')];
+          rows.find(row => row.querySelector('button').textContent === 'A')
+            .querySelectorAll('.backtest-order-timeline-node')[1].click();
+          return {orderNames:rows.map(row => row.querySelector('button').textContent),
+            nodes:rows.map(row => row.querySelectorAll('.backtest-order-timeline-node').length),
+            selected:selected.map(item => item.row.fill_id || item.row.kind),
+            lineWidth:rows.find(row => row.querySelector('button').textContent === 'A')
+              .querySelector('.backtest-order-timeline-line').style.width};
+        }""")
+        assert result["orderNames"] == ["B", "A"]
+        assert result["nodes"] == [1, 2]
+        assert result["selected"] == ["attempt", "F1"]
+        assert float(result["lineWidth"].rstrip("%")) == pytest.approx(100 / 3, abs=0.001)
+        browser.close()
+
+
+def test_asset_plot_order_history_loads_more_without_mixing_orders() -> None:
+    with _playwright() as playwright:
+        browser = _launch_chromium(playwright)
+        page = browser.new_page()
+        page.set_content("<main id='root'></main>")
+        for path in (
+            "server/manager/web/core/price-chart.js",
+            "server/manager/web/test-modules/backtest/results/asset-plot.js",
+        ):
+            page.add_script_tag(path=str(ROOT / path))
+        value = page.evaluate("""() => {
+          const t = 1700000000000;
+          const events = Array.from({length: 13}, (_, index) => ({
+            artifact:'order_lifecycle', timestamp:t+index*1000,
+            row:{order_id:`order-${index}`,kind:'submitted'},
+          }));
+          let limit = 10;
+          const host = document.querySelector('#root');
+          const render = () => host.replaceChildren(FTBacktestAssetPlot.orderTimeline(
+            {t:v=>v}, events, t, t+15000, () => {},
+            {limit, onLoadMore(next) {limit=next; render();}}));
+          render();
+          const first = host.querySelectorAll('.backtest-order-timeline-row').length;
+          host.querySelector('.backtest-order-timeline-more button').click();
+          return {first, expanded:host.querySelectorAll('.backtest-order-timeline-row').length,
+            unique:new Set([...host.querySelectorAll('.backtest-order-timeline-id')]
+              .map(node=>node.textContent)).size,
+            noMore:!host.querySelector('.backtest-order-timeline-more')};
+        }""")
+        assert value == {"first": 10, "expanded": 13, "unique": 13,
+                         "noMore": True}
+        browser.close()
+
+
+def test_asset_plot_reuses_complete_nested_range_without_requerying() -> None:
+    with _playwright() as playwright:
+        browser = _launch_chromium(playwright)
+        page = browser.new_page()
+        page.set_content("<main id='root'></main>")
+        for path in (
+            "server/manager/web/core/shared-ui.js",
+            "server/manager/web/core/price-chart.js",
+            "server/manager/web/test-modules/backtest/results/asset-plot.js",
+        ):
+            page.add_script_tag(path=str(ROOT / path))
+        result = page.evaluate("""async () => {
+          const t = Date.parse('2025-04-11T10:00:00Z');
+          const calls = {events: 0, prices: 0};
+          let pending = 0;
+          let maxConcurrent = 0;
+          window.FTJobArtifactQuery = {timeSource(_context, path) {
+            return {async load() {
+              calls.events++;
+              pending++;
+              maxConcurrent = Math.max(maxConcurrent, pending);
+              await new Promise(resolve => setTimeout(resolve, 20));
+              pending--;
+              return {rows: path.includes('order_detail_data') ? [{
+                order_id: 'order-1', product: 'AU.SHF', strategy: 'A', timestamp: t,
+              }] : [], sampling: {visible_rows: path.includes('order_detail_data') ? 1 : 0}};
+            }};
+          }};
+          window.FTMarketData = {
+            rangeRequest(request, minimum, maximum, maxPoints) {
+              return {...request, minimum, maximum, maxPoints};
+            },
+            async prices() {
+              calls.prices++;
+              return {payload: {data: [{timestamp: t, open: 1, high: 2,
+                low: 0, close: 1, volume: 10}], count: 1, returned_count: 1}};
+            },
+          };
+          const timestampOf = FTPriceChart.timestampOf;
+          window.FTPriceChart = {timestampOf, render(_context, mount, payload, display) {
+            window.__display = display;
+            mount.dataset.ready = 'true';
+            return {destroy() {}, xAxis: [{}], yAxis: [{}]};
+          }};
+          const state = {
+            selectedAsset: {product: 'AU.SHF', strategy: 'A', timestamp: t},
+            assetPlotDiscovery: {status: 'ready'},
+            artifactsByName: new Map([
+              ['order_detail_data', {name:'order_detail_data'}],
+              ['fill_detail_data', {name:'fill_detail_data'}],
+            ]),
+            options: {jobID: 'test', configuration: {}},
+          };
+          const root = FTBacktestAssetPlot.render({t:value=>value}, state);
+          document.querySelector('#root').append(root);
+          await new Promise(resolve => setTimeout(resolve, 50));
+          const cold = {...calls};
+          const nested = await window.__display.loadRange(t - 1000, t + 1000,
+            {maxPoints: 1200, visibleMinimum: t - 1000, visibleMaximum: t + 1000});
+          const warm = {...calls};
+          await window.__display.loadRange(t + 31 * 86400000, t + 32 * 86400000,
+            {maxPoints: 1200});
+          return {cold, warm, outside: {...calls},
+            nestedCount: nested.__assetEvents.length, maxConcurrent};
+        }""")
+        assert result["cold"] == {"events": 3, "prices": 1}
+        assert result["warm"] == result["cold"]
+        assert result["outside"] == {"events": 6, "prices": 2}
+        assert result["nestedCount"] == 1
+        assert result["maxConcurrent"] == 2
         browser.close()
 
 
@@ -759,18 +790,19 @@ def test_asset_plot_same_location_group_keeps_other_markers_visible() -> None:
                 return FTBacktestAssetPlot.markerSeries(events, normalizedBars, () => {});
               },
             });
-          const order = chart.series.find(series => series.options.id === 'asset-order');
+            const timeline = FTBacktestAssetPlot.orderTimeline({t:v=>v}, events,
+              start, start + 9 * 86400000, () => {});
           const buy = chart.series.find(series => series.options.id === 'asset-buy');
           const sell = chart.series.find(series => series.options.id === 'asset-sell');
           buy.points[0].onMouseOver();
           return {
-            orderCount: order.points[0].options.custom.items.length,
+            orderCount: timeline.querySelectorAll('.backtest-order-timeline-row').length,
             buyCount: buy.points[0].options.custom.items.length,
             markerAxis: buy.yAxis.index,
             candleAxis: chart.series[0].yAxis.index,
-            buyBelowWick: buy.points[0].y < bars[2].low,
-            sellAboveWick: sell.points[0].y > bars[4].high,
-            orderAboveSell: order.points[0].y > bars[2].high,
+            buyBelowWick: buy.points[0].plotY >= chart.series[0].points[2].plotLow + 9,
+            sellAboveWick: sell.points[0].plotY <= chart.series[0].points[4].plotHigh - 9,
+            noOrderSeries: chart.series.every(series => series.options.id !== 'asset-submitted'),
             sellCount: sell.points.length,
             inactiveOpacity: sell.options.states.inactive.opacity,
             markerTime: buy.points[0].x,
@@ -784,12 +816,65 @@ def test_asset_plot_same_location_group_keeps_other_markers_visible() -> None:
         assert result["candleAxis"] == 0
         assert result["buyBelowWick"]
         assert result["sellAboveWick"]
-        assert result["orderAboveSell"]
+        assert result["noOrderSeries"]
         assert result["sellCount"] == 1
         assert result["inactiveOpacity"] == 1
         assert result["markerTime"] == result["candleTime"]
         assert "成交量" in result["tooltip"]
         assert "持仓量" in result["tooltip"]
+        browser.close()
+
+
+def test_asset_plot_markers_keep_a_pixel_gap_from_nearby_candles_at_each_zoom() -> None:
+    with _playwright() as playwright:
+        browser = _launch_chromium(playwright)
+        page = browser.new_page(viewport={"width": 1200, "height": 850})
+        page.set_content("<div id='chart' style='width:1100px;height:700px'></div>")
+        for path in (
+            "static/vendor/highcharts/highstock.min.js",
+            "server/manager/web/core/highcharts-range-loader.js",
+            "server/manager/web/core/price-chart.js",
+            "server/manager/web/test-modules/backtest/results/asset-plot.js",
+        ):
+            page.add_script_tag(path=str(ROOT / path))
+        result = page.evaluate("""() => {
+          const start = Date.UTC(2026, 0, 1);
+          const bars = Array.from({length: 360}, (_, index) => ({
+            timestamp: start + index * 60000,
+            open: 100, high: index === 181 ? 112 : 101,
+            low: index === 179 ? 88 : 99, close: 100, volume: 10,
+          }));
+          const events = ['buy', 'sell'].map((side, index) => ({
+            artifact: 'fill_detail_data', timestamp: bars[180].timestamp,
+            row: {side, fill_price: 100, fill_id: `f${index}`},
+          }));
+          const chart = FTPriceChart.render({t: value => value},
+            document.querySelector('#chart'), {data: bars, freq: 'MIN1'}, {
+              assetMode: true, preserveSourceBars: true,
+              overlaySeries(_payload, normalizedBars) {
+                return FTBacktestAssetPlot.markerSeries(events, normalizedBars, () => {});
+              },
+            });
+          const gaps = () => {
+            const buy = chart.series.find(series => series.options.id === 'asset-buy').points[0];
+            const sell = chart.series.find(series => series.options.id === 'asset-sell').points[0];
+            const nearby = chart.series[0].points.filter(candle =>
+              Math.abs(candle.plotX - buy.plotX) <= 10);
+            return {
+              buy: buy.plotY - Math.max(...nearby.map(item => item.plotLow)),
+              sell: Math.min(...nearby.map(item => item.plotHigh)) - sell.plotY,
+              nearby: nearby.length,
+            };
+          };
+          const wide = gaps();
+          chart.xAxis[0].setExtremes(bars[174].timestamp, bars[186].timestamp, true);
+          return {wide, zoomed: gaps()};
+        }""")
+        assert result["wide"]["nearby"] > 1
+        assert result["wide"]["buy"] >= 9
+        assert result["wide"]["sell"] >= 9
+        assert result["zoomed"]["buy"] >= 9
+        assert result["zoomed"]["sell"] >= 9
         browser.close()
 
 
@@ -1001,7 +1086,7 @@ def test_asset_plot_discovers_scope_and_switches_contract_without_a_selected_ord
         assert value["initial"]["strategy"] == "B"
         assert value["selected"]["product"] == "AU.SHF"
         assert value["selected"]["timestamp"] == 1700000000000
-        assert value["labels"] == ["策略", "账本", "品种 / 合约"]
+        assert value["labels"] == ["筛选维度", "策略", "品种 / 合约"]
         assert value["renderCount"] == 1
         assert value["filters"]["account"]["values"] == ["ledger-1"]
         browser.close()

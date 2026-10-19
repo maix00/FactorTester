@@ -180,7 +180,23 @@
 .backtest-asset-heading span { color: var(--muted); font-size: 13px; }
 .backtest-asset-note { margin: 0; color: var(--muted); font-size: 13px; }
 .backtest-asset-chart { min-width: 0; min-height: 520px; }
-.backtest-asset-chart .highcharts-tooltip > span { white-space: normal !important; min-width: 240px; max-width: min(360px, 80vw); max-height: 48vh; overflow-y: auto; pointer-events: auto; }
+.backtest-order-timeline { min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.backtest-order-timeline h4 { margin: 0; padding: 9px 12px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.backtest-order-timeline > p { margin: 12px; color: var(--muted); }
+.backtest-order-timeline > p.backtest-order-timeline-legend { margin: 0; padding: 6px 12px; border-bottom: 1px solid var(--line); font-size: 11px; }
+.backtest-order-timeline-rows { max-height: 260px; overflow-y: auto; overscroll-behavior: contain; padding-right: var(--asset-plot-right, 0px); }
+.backtest-order-timeline-row { display: block; height: 42px; box-sizing: border-box; padding-left: var(--asset-plot-left, 64px); border-bottom: 1px solid var(--line); }
+.backtest-order-timeline-row:last-child { border-bottom: 0; }
+.backtest-order-timeline-id { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 0; border: 0; background: transparent; color: var(--accent); text-align: left; cursor: pointer; font: 11px/16px inherit; }
+.backtest-order-timeline-rail { position: relative; height: 21px; min-width: 0; }
+.backtest-order-timeline-line { position: absolute; top: 10px; height: 2px; background: #8893a5; }
+.backtest-order-timeline-node { position: absolute; top: 1px; transform: translateX(-50%); width: 20px; height: 20px; padding: 0; border: 1px solid #64748b; border-radius: 50%; background: var(--panel); color: #334155; font: 11px/18px inherit; text-align: center; cursor: pointer; }
+.backtest-order-timeline-node[data-phase="fill"] { border-color: #16a34a; color: #15803d; }
+.backtest-order-timeline-node[data-phase="update"] { border-color: #2563eb; color: #1d4ed8; }
+.backtest-order-timeline-node[data-phase="attempt"] { border-color: #d97706; color: #b45309; }
+.backtest-order-timeline-node:hover, .backtest-order-timeline-node:focus-visible { border-color: var(--accent); color: var(--accent); z-index: 1; }
+.backtest-order-timeline-more { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.backtest-asset-chart .highcharts-tooltip > span { white-space: normal !important; min-width: 240px; max-width: min(360px, 80vw); max-height: 48vh; overflow-y: auto; overscroll-behavior: contain; pointer-events: auto; }
 .asset-tooltip-events { margin-top: 8px; padding-top: 7px; border-top: 1px solid #d8dce4; }
 .asset-tooltip-event { margin-top: 5px; border: 1px solid #e2e5eb; border-radius: 5px; }
 .asset-tooltip-event > summary { cursor: pointer; padding: 5px 7px; white-space: normal; overflow-wrap: anywhere; }
@@ -197,11 +213,17 @@
 .backtest-asset-event-fields { display: grid; grid-template-columns: minmax(110px, 180px) minmax(0, 1fr); gap: 0 12px; margin: 0; padding: 0 11px 9px; }
 .backtest-asset-event-fields dt, .backtest-asset-event-fields dd { margin: 0; padding: 5px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
 .backtest-asset-event-fields dt { color: var(--muted); }
+.backtest-asset-order-flow { border-top: 1px solid var(--line); padding-top: 10px; }
+.backtest-asset-order-flow h5 { margin: 0 0 8px; font-size: 13px; }
+.backtest-asset-order-flow ol { display: grid; gap: 5px; margin: 0; padding-left: 24px; }
+.backtest-asset-order-flow li { line-height: 1.5; }
+.backtest-asset-order-flow p { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
 @media (max-width: 640px) { .backtest-asset-event-fields { grid-template-columns: minmax(88px, 35%) minmax(0, 1fr); } }
 .backtest-asset-events { min-width: 0; max-width: 100%; }
 .backtest-asset-group-filter { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .backtest-asset-events .table-shell { max-width: 100%; overflow-x: auto; }
 .backtest-asset-events table { min-width: 1180px; }
+.backtest-asset-events thead th { position: sticky; top: 0; z-index: 1; background: var(--card); }
 .backtest-asset-events tbody tr { cursor: pointer; }
 .backtest-asset-events tbody tr:hover,
 .backtest-asset-events tbody tr.active { background: var(--soft); }
