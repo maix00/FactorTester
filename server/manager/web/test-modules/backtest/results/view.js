@@ -239,9 +239,52 @@
         });
       }
     } else {
+      const plotAvailable = Boolean(window.FTBacktestAssetPlot && ready.rows?.some(row => {
+        const selected = window.FTBacktestAssetPlot.identity(row);
+        return selected.product && Number.isFinite(selected.timestamp);
+      }));
       target.append(window.FTJobArtifactQuery.pagedTable(context, ready, {
         className: "backtest-domain-table",
-        renderCell(value) {
+        priorityColumns: options.priorityColumns?.filter(key => (
+          key !== "__asset_plot__" || plotAvailable
+        )),
+        renderHeader(key) {
+          if (key === "__asset_plot__") return context.t("交易图");
+          return context.t({
+            timestamp: "时间", instrument: "合约", product: "品种",
+            strategy: "策略", order_id: "订单 ID", fill_id: "成交 ID",
+            side: "方向", offset: "开平", quantity: "数量",
+            filled_quantity: "成交量", requested_quantity: "委托量",
+            price: "价格", fill_price: "成交价", status: "状态", fee: "手续费",
+          }[key] || key);
+        },
+        renderCell(value, row, key) {
+          if (key === "__asset_plot__") {
+            const selected = window.FTBacktestAssetPlot?.identity(row);
+            if (!selected?.product || !Number.isFinite(selected.timestamp)) {
+              return document.createTextNode("—");
+            }
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "backtest-asset-open";
+            button.textContent = context.t("查看交易图");
+            button.addEventListener("click", () => (
+              window.FTBacktestAssetPlot.open(context, state, row)
+            ));
+            return button;
+          }
+          if (options.compactObjectCells && value && typeof value === "object") {
+            const details = document.createElement("details");
+            details.className = "backtest-raw-cell";
+            const summary = document.createElement("summary");
+            summary.textContent = context.t("查看明细");
+            details.append(summary, window.FTUI.code(value));
+            return details;
+          }
+          if (options.compactObjectCells && ["timestamp", "created_at", "updated_at"]
+            .includes(key) && value != null && value !== "") {
+            return document.createTextNode(window.FTUI.formatDate(value) || String(value));
+          }
           return value && typeof value === "object"
             ? window.FTUI.code(value)
             : window.FTRichText.inline(String(value ?? ""), context);

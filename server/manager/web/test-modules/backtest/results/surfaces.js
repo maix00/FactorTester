@@ -532,8 +532,15 @@
         return root;
       }
       const key = `${stateKey}:${selected[0]}`;
+      const assetRows = stateKey === "executionView"
+        && ["orders", "fills"].includes(selected[0]);
       const table = state.helpers.remoteDataTable(
         context, state, selected[2], key, tableQueryRequest(state, key),
+        assetRows ? {compactObjectCells: true, priorityColumns: [
+          "__asset_plot__", "timestamp", "instrument", "product", "strategy",
+          "order_id", "fill_id", "side", "offset", "quantity",
+          "filled_quantity", "price", "fill_price", "status", "fee",
+        ]} : {},
       );
       if (stateKey === "executionView" && table.data) {
         const filters = dimensionFilters(

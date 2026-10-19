@@ -68,7 +68,12 @@
   }
 
   function pagedTable(context, data, options = {}) {
-    const columns = Array.isArray(data?.columns) ? data.columns.map(String) : [];
+    const available = Array.isArray(data?.columns) ? data.columns.map(String) : [];
+    const priority = Array.isArray(options.priorityColumns) ? options.priorityColumns : [];
+    const columns = [
+      ...priority.filter(key => available.includes(key) || key === "__asset_plot__"),
+      ...available.filter(key => !priority.includes(key)),
+    ];
     const rows = Array.isArray(data?.rows) ? data.rows : [];
     const renderCell = options.renderCell || (value => document.createTextNode(
       String(value ?? ""),

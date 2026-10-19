@@ -830,6 +830,7 @@
    "test-modules/backtest/results/analysis/snapshot-view.js",
    "test-modules/backtest/results/analysis/strategy-analysis.js",
    "test-modules/backtest/results/event-flow.js",
+   "test-modules/backtest/results/asset-plot.js",
    "test-modules/backtest/results/surfaces.js",
    "test-modules/backtest/results/view.js"
   ],
@@ -1093,6 +1094,7 @@
   "test-modules/backtest/results/model.js",
   "test-modules/backtest/results/strategy-selection.js",
   "test-modules/backtest/results/event-flow.js",
+  "test-modules/backtest/results/asset-plot.js",
   "test-modules/backtest/results/surfaces.js",
   "jobs/job-artifact-viewers.js",
   "core/shared-ui.js",
