@@ -10,6 +10,21 @@
       target.replaceChildren?.(empty(context, "未找到可绘制的 OHLCV 数据"));
       return null;
     }
+    if (displayOptions.assetMode && highcharts.AST) {
+      // The tooltip is built only from escaped event fields. Highcharts strips
+      // disclosure elements unless explicitly allowed by its HTML sanitizer.
+      for (const tag of ["details", "summary", "dl", "dt", "dd"]) {
+        if (!highcharts.AST.allowedTags.includes(tag)) highcharts.AST.allowedTags.push(tag);
+      }
+      if (!highcharts.AST.allowedAttributes.includes("open")) {
+        highcharts.AST.allowedAttributes.push("open");
+      }
+      for (const attribute of ["data-ft-event-index", "aria-pressed"]) {
+        if (!highcharts.AST.allowedAttributes.includes(attribute)) {
+          highcharts.AST.allowedAttributes.push(attribute);
+        }
+      }
+    }
     target.__ftPriceChart?.destroy?.();
     target.__ftPriceChartObserver?.disconnect?.();
     target.classList?.add("interactive-price-chart");
@@ -105,6 +120,12 @@
     return `${translated}: <b>${tooltipNumber(value)}</b>`;
   }
 
+  function escapeHTML(value) {
+    return String(value).replace(/[&<>"']/g, character => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[character]));
+  }
+
   function ohlcPointFormatter(context) {
     return function() {
       return [
@@ -129,13 +150,15 @@
     return Number.isSafeInteger(count) && count > 0 ? unit * count : undefined;
   }
 
-  function assetTooltipFormatter(context, bars, overlay) {
+  function assetTooltipFormatter(context, bars, overlay, displayOptions) {
     const byTime = new Map(bars.map(bar => [bar.timestamp, bar]));
     const eventsByTime = new Map();
     for (const series of overlay) {
       for (const point of series.data || []) {
         if (point?.custom?.items?.length) {
-          eventsByTime.set(point.x, point.custom.items);
+          eventsByTime.set(point.x, [
+            ...(eventsByTime.get(point.x) || []), ...point.custom.items,
+          ]);
         }
       }
     }
@@ -161,15 +184,31 @@
         pointLabel(context, "成交量", bar.volume),
         pointLabel(context, "持仓量", bar.openInterest),
       ];
-      const events = eventsByTime.get(timestamp);
+      const events = typeof displayOptions.tooltipEventItems === "function"
+        ? displayOptions.tooltipEventItems(timestamp) : eventsByTime.get(timestamp);
+      displayOptions.onTooltipEvents?.(events || []);
       if (events?.length) {
-        lines.push(`${context?.t?.("交易事件") || "交易事件"}: <b>${events.length} 笔</b>`);
-        const prices = [...new Set(events.map(item =>
-          item.row?.fill_price ?? item.row?.price).filter(value => value != null)
-          .map(Number).filter(Number.isFinite))];
-        if (prices.length) lines.push(`${context?.t?.("事件价格") || "事件价格"}: `
-          + `<b>${prices.map(tooltipNumber).join("、")}</b>`);
-        lines.push(context?.t?.("点击标记查看逐笔详情") || "点击标记查看逐笔详情");
+        const cards = events.map((item, index) => {
+          const fields = displayOptions.eventTooltipFields?.(item) || [];
+          const kind = item.artifact === "fill_detail_data" ? "成交" : "订单";
+          const rawPrice = item.artifact === "fill_detail_data"
+            ? item.row?.fill_price ?? item.row?.price : null;
+          const hasPrice = rawPrice !== null && rawPrice !== undefined
+            && rawPrice !== "" && Number.isFinite(Number(rawPrice));
+          const selected = hasPrice && displayOptions.isPriceSelected?.(item);
+          return `<details class="asset-tooltip-event" ${events.length === 1 || index === 0 ? "open" : ""}>`
+            + `<summary>${escapeHTML(context?.t?.(kind) || kind)} ${index + 1}`
+            + ` · ${escapeHTML(item.row?.fill_id || item.row?.order_id || item.row?.event_id || "")}</summary>`
+            + `<dl>${fields.map(([label, value]) => `<dt>${escapeHTML(context?.t?.(label) || label)}</dt>`
+              + `<dd>${escapeHTML(value)}</dd>`).join("")}</dl>`
+            + (hasPrice ? `<button type="button" class="asset-tooltip-price-toggle"`
+              + ` data-ft-event-index="${index}" aria-pressed="${selected ? "true" : "false"}">`
+              + `${selected ? "移除价格线" : "显示价格线"} · ${escapeHTML(tooltipNumber(rawPrice))}</button>` : "")
+            + `</details>`;
+        });
+        lines.push(`<div class="asset-tooltip-events"><strong>${escapeHTML(
+          context?.t?.("交易事件") || "交易事件")}: ${events.length} 笔</strong>`
+          + cards.join("") + `</div>`);
       }
       return lines.join("<br/>");
     };
@@ -220,13 +259,18 @@
         type: "candlestick", name: payload?.product || payload?.product_name || t("价格"),
         data: bars.map(item => [item.timestamp, item.open, item.high, item.low, item.close]),
         color: "#e14d5b", upColor: "#18a572", lineColor: "#e14d5b",
-        upLineColor: "#18a572", dataGrouping: {groupAll: true},
+        upLineColor: "#18a572", dataGrouping: {
+          enabled: !displayOptions.preserveSourceBars, groupAll: true,
+        },
         tooltip: {pointFormatter: ohlcPointFormatter(context)},
       },
       {
         type: "column", name: t("成交量"), yAxis: 1,
         data: bars.map(item => [item.timestamp, item.volume]),
-        color: "#8aa4c8", dataGrouping: {approximation: "sum", groupAll: true},
+        color: "#8aa4c8", dataGrouping: {
+          enabled: !displayOptions.preserveSourceBars,
+          approximation: "sum", groupAll: true,
+        },
         tooltip: {pointFormatter: scalarPointFormatter(context, "成交量")},
       },
     ];
@@ -236,7 +280,8 @@
         type: "line", name: t("持仓量"), yAxis: 2,
         data: bars.map(item => [item.timestamp, item.openInterest]),
         color: "#af52de", lineWidth: 1.4,
-        dataGrouping: {approximation: "average", groupAll: true},
+        dataGrouping: {enabled: !displayOptions.preserveSourceBars,
+          approximation: "average", groupAll: true},
         tooltip: {pointFormatter: scalarPointFormatter(context, "持仓量")},
       });
     }
@@ -275,7 +320,9 @@
       },
       yAxis,
       tooltip: {shared: true, split: false, valueDecimals: 2,
-        ...(eventLane ? {formatter: assetTooltipFormatter(context, bars, overlay)} : {})},
+        ...(eventLane || displayOptions.assetMode
+          ? {useHTML: true, stickOnContact: true, hideDelay: 400,
+            formatter: assetTooltipFormatter(context, bars, overlay, displayOptions)} : {})},
       navigator: {enabled: true, adaptToUpdatedData: false},
       scrollbar: {enabled: true},
       plotOptions: {series: {
