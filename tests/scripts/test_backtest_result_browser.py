@@ -62,7 +62,11 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
             render(_context, target, payload, display) {
               window.__assetPlot = {payload, display};
               target.dataset.assetPlotReady = "true";
-              return {destroy() {}, xAxis: [{setExtremes() {}}]};
+              window.__assetPriceLines = [];
+              return {destroy() {}, xAxis: [{setExtremes() {}}],
+                yAxis: [{removePlotLine() {}, addPlotLine(line) {
+                  window.__assetPriceLines.push(line);
+                }}]};
             },
           };
           window.FTMarketData = {
@@ -344,6 +348,9 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
                 events: item.data.reduce((n, point) => n + point.custom.items.length, 0)})),
         })""")
         assert asset["request"]["product_name"] == "AU.SHF"
+        assert 1700000000000 in asset["request"]["anchor_timestamps"]
+        assert asset["request"]["anchor_tolerance_ms"] == 86400000
+        assert page.evaluate("window.__assetPlot.display.preserveSourceBars") is True
         assert asset["events"]["filters"]["product"]["values"] == ["AU.SHF"]
         assert asset["events"]["filters"]["strategy"]["values"] == ["A1"]
         assert "account" not in asset["events"]["filters"]
@@ -359,7 +366,7 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
           const group = order.data.find(item => item.custom.items.length === 25);
           order.point.events.click.call({options: group});
         }""")
-        assert "同一位置的 25 笔事件" in page.locator(
+        assert "已选择 25 笔事件" in page.locator(
             ".backtest-asset-group-filter"
         ).inner_text()
         assert page.locator(".backtest-asset-events tbody tr").count() == 20
@@ -370,8 +377,30 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
         assert cards.nth(1).get_attribute("open") is None
         cards.nth(1).locator("summary").click()
         assert cards.nth(1).get_attribute("open") is not None
-        page.get_by_role("button", name="显示全部事件").click()
+        page.evaluate("""() => {
+          const series = window.__assetPlot.display.overlaySeries(
+            {__assetEvents: window.__assetPlot.payload.__assetEvents},
+            [{timestamp: 1700000000000, high: 103, low: 99, close: 100}],
+          );
+          const order = series.find(item => item.id === 'asset-order');
+          order.point.events.click.call({options: order.data[0]});
+        }""")
+        assert page.locator(".backtest-asset-inspector-mount").inner_text() == ""
+        assert page.locator(".backtest-asset-group-filter").count() == 0
         assert page.locator(".backtest-asset-events tbody tr").count() == 20
+        lines = page.evaluate("""() => {
+          const chart = {yAxis: [{removePlotLine() {}, addPlotLine(line) {
+            window.__assetPriceLines.push(line);
+          }}]};
+          FTBacktestAssetPlot.tradePriceLines(chart, [
+            {artifact: 'fill_detail_data', row: {fill_price: 99}},
+            {artifact: 'fill_detail_data', row: {fill_price: 101}},
+          ]);
+          return window.__assetPriceLines.map(line => ({value: line.value,
+            width: line.width, zIndex: line.zIndex}));
+        }""")
+        assert lines == [{"value": 99, "width": 1, "zIndex": 1},
+                         {"value": 101, "width": 1, "zIndex": 1}]
         fill_marker = page.evaluate("""() => {
           const marker = FTBacktestAssetPlot.markerSeries([
             {artifact: 'fill_detail_data', timestamp: 1700000000000,
@@ -379,7 +408,7 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
           ], [{timestamp: 1700000000000, high: 103, low: 99, close: 100}], () => {});
           return marker.find(series => series.id === 'asset-sell').data[0].y;
         }""")
-        assert fill_marker == 0.5
+        assert fill_marker > 103
         native_fills = page.evaluate("""async () => {
           const state = {artifactsByName: new Map([
             ['order_detail_data', {name: 'order_detail_data'}],
@@ -413,7 +442,8 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
             [a, b, c], [{timestamp: 1700000000000, close: 100}],
           );
           const markers = FTBacktestAssetPlot.markerSeries(
-            [a, b, c], [{timestamp: 1700000000000, close: 100}], () => {},
+                [a, b, c], [{timestamp: 1700000000000, high: 103,
+                  low: 99, close: 100}], () => {},
           );
           const state = {rerender() { this.rendered = true; }};
           FTBacktestAssetPlot.show(state, {timestamp: 1700000000000,
@@ -425,7 +455,7 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
             rerendered: state.rendered};
         }""")
         assert grouped["groups"] == [[105, 2], [106, 1]]
-        assert grouped["markerCount"] == 1
+        assert grouped["markerCount"] == 2
         assert "现金 1,000 → 787" in grouped["detail"]
         assert "手续费 3" in grouped["detail"]
         assert "保证金" not in grouped["detail"]
@@ -723,33 +753,38 @@ def test_asset_plot_same_location_group_keeps_other_markers_visible() -> None:
           ];
           const chart = FTPriceChart.render({t: value => value},
             document.querySelector('#chart'), {data: bars, product: 'AU.SHF'}, {
-              keepOtherSeriesVisible: true, eventLane: true,
+              keepOtherSeriesVisible: true, assetMode: true,
+              preserveSourceBars: true,
               overlaySeries(_payload, normalizedBars) {
                 return FTBacktestAssetPlot.markerSeries(events, normalizedBars, () => {});
               },
             });
-          const mixed = chart.series.find(series => series.options.id === 'asset-mixed');
+          const order = chart.series.find(series => series.options.id === 'asset-order');
+          const buy = chart.series.find(series => series.options.id === 'asset-buy');
           const sell = chart.series.find(series => series.options.id === 'asset-sell');
-          mixed.points[0].onMouseOver();
+          buy.points[0].onMouseOver();
           return {
-            mixedCount: mixed.points[0].options.custom.items.length,
-            mixedLabel: mixed.points[0].dataLabel?.text?.textStr || "",
-            markerAxis: mixed.yAxis.index,
+            orderCount: order.points[0].options.custom.items.length,
+            buyCount: buy.points[0].options.custom.items.length,
+            markerAxis: buy.yAxis.index,
             candleAxis: chart.series[0].yAxis.index,
-            laneBottom: mixed.yAxis.top + mixed.yAxis.height,
-            candleTop: chart.series[0].yAxis.top,
+            buyBelowWick: buy.points[0].y < bars[2].low,
+            sellAboveWick: sell.points[0].y > bars[4].high,
+            orderAboveSell: order.points[0].y > bars[2].high,
             sellCount: sell.points.length,
             inactiveOpacity: sell.options.states.inactive.opacity,
-            markerTime: mixed.points[0].x,
+            markerTime: buy.points[0].x,
             candleTime: bars[2].timestamp,
             tooltip: chart.tooltip.label?.text?.textStr || "",
           };
         }""")
-        assert result["mixedCount"] == 2
-        assert result["mixedLabel"] == ""
-        assert result["markerAxis"] == 3
+        assert result["orderCount"] == 1
+        assert result["buyCount"] == 1
+        assert result["markerAxis"] == 0
         assert result["candleAxis"] == 0
-        assert result["laneBottom"] < result["candleTop"]
+        assert result["buyBelowWick"]
+        assert result["sellAboveWick"]
+        assert result["orderAboveSell"]
         assert result["sellCount"] == 1
         assert result["inactiveOpacity"] == 1
         assert result["markerTime"] == result["candleTime"]
@@ -777,36 +812,136 @@ def test_asset_plot_tooltip_retains_market_bar_and_zoom_reaches_source_interval(
             high: 102 + index, low: 99 + index, close: 101 + index,
             volume: 10 + index, open_interest: 20 + index,
           }));
-          const events = [{artifact: 'fill_detail_data',
-            timestamp: start + 30 * 60000,
-            row: {side: 'buy', fill_price: 131, fill_id: 'f30'}}];
-          const chart = FTPriceChart.render({t: value => value},
+          const events = [
+            {artifact: 'fill_detail_data', timestamp: start + 30 * 60000,
+              row: {side: 'buy', fill_price: 131, fill_id: 'f30'}},
+            {artifact: 'fill_detail_data', timestamp: start + 30 * 60000,
+              row: {side: 'sell', fill_price: 132, fill_id: 'f31'}},
+          ];
+          let activeTime = null;
+          let chart;
+          chart = FTPriceChart.render({t: value => value},
             document.querySelector('#chart'), {data: bars, freq: 'MIN1'}, {
-              eventLane: true, keepOtherSeriesVisible: true,
+              assetMode: true, preserveSourceBars: true,
+              keepOtherSeriesVisible: true,
+              eventTooltipFields(item) { return [['手续费', item.row.fill_id]]; },
+              tooltipEventItems(timestamp) { return timestamp === activeTime ? events : []; },
               overlaySeries(_payload, normalizedBars) {
-                return FTBacktestAssetPlot.markerSeries(events, normalizedBars, () => {});
+                return FTBacktestAssetPlot.markerSeries(events, normalizedBars,
+                  (_items, point) => { activeTime = point.x; chart.tooltip.refresh(point); });
               },
             });
           const marker = chart.series.find(series => series.options.id === 'asset-buy')
             .points[0];
           marker.onMouseOver();
+          const hoverTooltip = chart.tooltip.label?.text?.textStr || '';
+          marker.firePointEvent('click');
           const markerTooltip = chart.tooltip.label?.text?.textStr || '';
+          const disclosures = [...document.querySelectorAll('.highcharts-tooltip details')];
+          const before = disclosures.map(item => item.open);
+          disclosures[1]?.querySelector('summary')?.click();
+          const after = disclosures.map(item => item.open);
           const candle = chart.series[0].points.find(point => point.x === marker.x);
           candle.onMouseOver();
           const candleTooltip = chart.tooltip.label?.text?.textStr || '';
           chart.xAxis[0].setExtremes(start + 30 * 60000,
             start + 31 * 60000, true);
-          return {markerTooltip, candleTooltip,
+          return {hoverTooltip, markerTooltip, candleTooltip, before, after,
+            actionCount: document.querySelectorAll('.asset-tooltip-price-toggle').length,
             minRange: chart.xAxis[0].minRange,
-            zoomSpan: chart.xAxis[0].max - chart.xAxis[0].min};
+            zoomSpan: chart.xAxis[0].max - chart.xAxis[0].min,
+            candleGrouping: chart.series[0].options.dataGrouping.enabled,
+            volumeGrouping: chart.series[1].options.dataGrouping.enabled};
         }""")
         for tooltip in (result["markerTooltip"], result["candleTooltip"]):
             for label in ("开盘价", "最高价", "最低价", "收盘价", "成交量", "持仓量"):
                 assert label in tooltip
             assert "130" in tooltip  # event candle open, not an adjacent bar
-        assert "1 笔" in result["markerTooltip"]
+        assert "2 笔" in result["markerTooltip"]
+        assert "交易事件" not in result["hoverTooltip"]
+        assert result["actionCount"] == 2
+        assert result["before"] == [True, False]
+        assert result["after"] == [True, True]
+        assert "手续费" in result["markerTooltip"]
         assert result["minRange"] == 60000
         assert result["zoomSpan"] == 60000
+        assert result["candleGrouping"] is False
+        assert result["volumeGrouping"] is False
+        browser.close()
+
+
+def test_asset_plot_clicked_toolkit_toggles_independent_trade_price_lines() -> None:
+    with _playwright() as playwright:
+        browser = _launch_chromium(playwright)
+        page = browser.new_page(viewport={"width": 1200, "height": 850})
+        page.set_content("<main id='root'></main>")
+        for path in (
+            "static/vendor/highcharts/highstock.min.js",
+            "server/manager/web/core/shared-ui.js",
+            "server/manager/web/catalog/shared/multi-select-filter/index.js",
+            "server/manager/web/core/highcharts-range-loader.js",
+            "server/manager/web/core/price-chart.js",
+            "server/manager/web/test-modules/backtest/results/asset-plot.js",
+        ):
+            page.add_script_tag(path=str(ROOT / path))
+        page.evaluate("""() => {
+          const start = Date.UTC(2025, 3, 10, 9);
+          const bars = Array.from({length: 80}, (_, index) => ({
+            timestamp: start + index * 60000, open: 100 + index * .1,
+            high: 102 + index * .1, low: 99 + index * .1,
+            close: 101 + index * .1, volume: 100 + index,
+            open_interest: 200 + index,
+          }));
+          const fills = [
+            {instrument: 'AU', timestamp: start + 20 * 60000,
+              fill_id: 'f1', side: 'BUY', fill_price: 101, quantity: 1},
+            {instrument: 'AU', timestamp: start + 20 * 60000,
+              fill_id: 'f2', side: 'BUY', fill_price: 103, quantity: 1},
+          ];
+          FTJobArtifactQuery = {timeSource() { return {async load() {
+            return {rows: fills, sampling: {}};
+          }}; }};
+          FTMarketData = {
+            rangeRequest(request) { return {...request}; },
+            async prices(_context, request) {
+              window.__requestedAnchors = request.anchor_timestamps;
+              return {payload: {data: bars, freq: 'MIN1'}};
+            },
+          };
+          const state = {
+            target: document.querySelector('#root'),
+            options: {jobID: 'test-job', configuration: {freq: 'MIN1'}},
+            artifactsByName: new Map([['fill_detail_data', {name: 'fill_detail_data'}]]),
+            assetPlotDiscovery: {status: 'ready', products: ['AU'], strategies: [], accounts: []},
+            selectedAsset: {product: 'AU', contractUID: '', timestamp: fills[0].timestamp},
+            rerender() {},
+          };
+          document.querySelector('#root').append(FTBacktestAssetPlot.render(
+            {t: value => value}, state,
+          ));
+        }""")
+        page.wait_for_function("document.querySelector('.backtest-asset-chart')?.__ftPriceChart")
+        assert page.evaluate("window.__requestedAnchors.length") == 1
+        page.evaluate("""() => {
+          const chart = document.querySelector('.backtest-asset-chart').__ftPriceChart;
+          chart.series.find(series => series.options.id === 'asset-buy').points[0]
+            .onMouseOver();
+        }""")
+        assert page.locator(".asset-tooltip-price-toggle").count() == 0
+        page.evaluate("""() => {
+          const chart = document.querySelector('.backtest-asset-chart').__ftPriceChart;
+          chart.series.find(series => series.options.id === 'asset-buy').points[0]
+            .firePointEvent('click');
+        }""")
+        buttons = page.locator(".asset-tooltip-price-toggle")
+        assert buttons.count() == 2
+        buttons.first.click()
+        assert page.evaluate("document.querySelector('.backtest-asset-chart').__ftPriceChart._ftTradePriceLineCount") == 1
+        page.locator(".asset-tooltip-event").nth(1).locator("summary").click()
+        buttons.nth(1).click()
+        assert page.evaluate("document.querySelector('.backtest-asset-chart').__ftPriceChart._ftTradePriceLineCount") == 2
+        buttons.first.click()
+        assert page.evaluate("document.querySelector('.backtest-asset-chart').__ftPriceChart._ftTradePriceLineCount") == 1
         browser.close()
 
 

@@ -180,6 +180,15 @@
 .backtest-asset-heading span { color: var(--muted); font-size: 13px; }
 .backtest-asset-note { margin: 0; color: var(--muted); font-size: 13px; }
 .backtest-asset-chart { min-width: 0; min-height: 520px; }
+.backtest-asset-chart .highcharts-tooltip > span { white-space: normal !important; min-width: 240px; max-width: min(360px, 80vw); max-height: 48vh; overflow-y: auto; pointer-events: auto; }
+.asset-tooltip-events { margin-top: 8px; padding-top: 7px; border-top: 1px solid #d8dce4; }
+.asset-tooltip-event { margin-top: 5px; border: 1px solid #e2e5eb; border-radius: 5px; }
+.asset-tooltip-event > summary { cursor: pointer; padding: 5px 7px; white-space: normal; overflow-wrap: anywhere; }
+.asset-tooltip-event dl { display: grid; grid-template-columns: minmax(70px, 35%) minmax(0, 1fr); gap: 3px 7px; margin: 0; padding: 4px 7px 7px; }
+.asset-tooltip-event dt, .asset-tooltip-event dd { margin: 0; overflow-wrap: anywhere; }
+.asset-tooltip-event dt { color: #667085; }
+.asset-tooltip-price-toggle { display: block; margin: 4px 7px 7px; padding: 4px 8px; border: 1px solid #9db8ec; border-radius: 5px; background: #eef5ff; color: #1d4ed8; cursor: pointer; font: inherit; }
+.asset-tooltip-price-toggle[aria-pressed="true"] { background: #dbeafe; border-color: #2563eb; }
 .backtest-asset-inspector-mount:empty { display: none; }
 .backtest-asset-inspector { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
 .backtest-asset-inspector h4 { margin: 0; font-size: 14px; }
