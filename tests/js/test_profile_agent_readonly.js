@@ -10,6 +10,7 @@ global.sessionStorage = {getItem: () => "", setItem: () => {}, removeItem: () =>
 
 for (const file of [
   "chatkit-protocol.js",
+  "chatkit-conversations.js",
   "chatkit-adapter.js",
 ]) {
   vm.runInThisContext(
@@ -129,7 +130,7 @@ const adapter = window.FTProfileChatKit.create(
   assert.equal(page.after, "older-turn-cursor");
   assert.ok(requestedURLs.some(url => (
     url.includes("limit=7") && url.includes("after=item-1")
-    && url.includes("view=timeline") && url.includes("order=desc")
+    && url.includes("view=outline") && url.includes("order=desc")
   )));
   console.log("PASS: read-only Profile Agent history retains the complete timeline");
 })().catch(error => {

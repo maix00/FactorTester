@@ -16,7 +16,44 @@ def engine_result(source: dict[str, Any]) -> dict[str, Any]:
 
 
 def order_rows(source: dict[str, Any]) -> list[dict[str, Any]]:
-    return _audit_rows(source, "orders")
+    audit = source.get("order_audit") or {}
+    strategies = audit.get("strategies") if isinstance(audit, dict) else {}
+    rows: list[dict[str, Any]] = []
+    for strategy, payload in (strategies or {}).items():
+        if not isinstance(payload, dict):
+            continue
+        by_order: dict[str, list[dict[str, Any]]] = {}
+        for kind, key, date_key in (
+            ("attempt", "attempts", "timestamp"),
+            ("action", "actions", "submitted_at"),
+        ):
+            for fact in payload.get(key) or ():
+                if not isinstance(fact, dict) or not fact.get("order_id"):
+                    continue
+                by_order.setdefault(str(fact["order_id"]), []).append({
+                    "kind": kind, "timestamp": fact.get(date_key),
+                    **{field: value for field, value in fact.items()
+                       if field not in {"timestamp", "submitted_at"}},
+                })
+        for order in payload.get("orders") or ():
+            if not isinstance(order, dict):
+                continue
+            order_id = str(order.get("order_id") or "")
+            submitted = order.get("submitted_at")
+            has_submit = any(fact.get("kind") == "action"
+                             and fact.get("action") == "submit"
+                             for fact in by_order.get(order_id, ()))
+            lifecycle = ([{"kind": "submitted", "timestamp": submitted,
+                           "order_id": order_id}]
+                         if submitted and not has_submit else [])
+            lifecycle.extend(by_order.get(order_id, ()))
+            # Fill detail owns the authoritative execution/settlement rows.
+            # The order projection keeps only the non-fill lifecycle facts so
+            # Asset Plot can join fills without double counting them.
+            lifecycle.sort(key=lambda fact: str(fact.get("timestamp") or ""))
+            rows.append({"strategy": str(strategy), **order,
+                         "lifecycle": lifecycle})
+    return rows
 
 
 def fill_rows(source: dict[str, Any]) -> list[dict[str, Any]]:

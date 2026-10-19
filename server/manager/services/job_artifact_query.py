@@ -211,7 +211,13 @@ def _time_rows_query(
     grouped: OrderedDict[str, list[dict[str, object]]] = OrderedDict()
     for row in model["rows"]:
         timestamp = _row_timestamp(row)
-        if not _in_range(timestamp, lower, upper):
+        lifecycle = row.get("lifecycle")
+        has_dated_phase = isinstance(lifecycle, list) and any(
+            isinstance(phase, dict)
+            and _in_range(phase.get("timestamp"), lower, upper)
+            for phase in lifecycle
+        )
+        if not _in_range(timestamp, lower, upper) and not has_dated_phase:
             continue
         # Asset plots must filter to the actual instrument and strategy before
         # sampling. Otherwise unrelated orders consume the point budget and

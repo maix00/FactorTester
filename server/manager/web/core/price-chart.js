@@ -164,6 +164,8 @@
     }
     return function() {
       const timestamp = Number(this.x ?? this.point?.x ?? this.points?.[0]?.point?.x);
+      if (typeof displayOptions.tooltipActiveTime === "function"
+        && timestamp !== displayOptions.tooltipActiveTime()) return false;
       const shared = this.points || [];
       const plotted = type => shared.find(item => item.point?.series?.type === type)?.point;
       const candle = plotted("candlestick");
@@ -251,7 +253,8 @@
     const volumeTop = hasOI ? "55%" : "67%";
     const volumeHeight = hasOI ? "23%" : "31%";
     const yAxis = [
-      axis(priceHeight, eventLane ? "8%" : "0%", true),
+      {...axis(priceHeight, eventLane ? "8%" : "0%", true),
+        ...(displayOptions.assetMode ? {minPadding: 0.1, maxPadding: 0.1} : {})},
       axis(volumeHeight, volumeTop, false),
     ];
     const series = [
@@ -263,6 +266,8 @@
           enabled: !displayOptions.preserveSourceBars, groupAll: true,
         },
         tooltip: {pointFormatter: ohlcPointFormatter(context)},
+        ...(typeof displayOptions.onMarketClick === "function"
+          ? {point: {events: {click() { displayOptions.onMarketClick(this); }}}} : {}),
       },
       {
         type: "column", name: t("成交量"), yAxis: 1,
@@ -286,7 +291,7 @@
       });
     }
     if (eventLane) yAxis.push({
-      ...axis("6%", "0%", false), min: 0, max: 1,
+      ...axis("6%", "0%", false), min: 0,
       labels: {enabled: false}, lineWidth: 0, gridLineWidth: 0,
       startOnTick: false, endOnTick: false,
     });

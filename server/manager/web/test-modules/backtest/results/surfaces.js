@@ -564,12 +564,11 @@
   }
 
   function executionAccount(context, state) {
-    return innerSurface(context, state, [
-      ["event_flow", "事件流", ""],
-      ...registeredViews(state, "execution_account"),
-      ...(state.artifactsByName.has("order_detail_data")
-        ? [["asset_plot", "交易图", ""]] : []),
-    ], "executionView");
+    // Order, fill and fee facts remain downloadable as Job artifacts and are
+    // inspected together in the plot. Avoid parallel tabs that repeat the
+    // same rows while hiding their order-level relationship.
+    return innerSurface(context, state, [["asset_plot", "交易图", ""]],
+      "executionView");
   }
 
   function returnAnalysis(context, state) {
