@@ -194,7 +194,7 @@
   }
 
   function openOverlay(button, descriptor) {
-    const dialog = document.createElement("dialog");
+    const dialog = window.FTUI?.dialogRoot?.() || document.createElement("dialog");
     dialog.className = "ft-help-overlay";
     dialog.id = `ft-help-overlay-${++state.sequence}`;
     dialog.dataset.ftHelp = "true";

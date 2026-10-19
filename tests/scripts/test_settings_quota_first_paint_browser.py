@@ -20,6 +20,7 @@ def test_quota_renders_saved_snapshot_before_live_inventory() -> None:
               window.FTIcons = {node: () => document.createElement('i')};
               window.FTUI = {
                 text: value => String(value),
+                dialogRoot: () => document.createElement('dialog'),
                 actionButton: (label, callback) => {
                   const button = document.createElement('button');
                   button.textContent = label; button.onclick = callback;

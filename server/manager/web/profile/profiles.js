@@ -230,7 +230,7 @@
 
   async function openCreate(context, options = {}) {
     const embedded = Boolean(options.embedded);
-    const dialog = document.createElement("dialog");
+    const dialog = window.FTUI.dialogRoot(context);
     dialog.className = "profile-create-dialog";
     dialog.dataset.ftTabID = context.tabID || "";
     const card = document.createElement("form");

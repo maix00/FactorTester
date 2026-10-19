@@ -146,7 +146,7 @@
   }
 
   function showDownloadOverlay(context, value) {
-    const dialog = document.createElement("dialog");
+    const dialog = window.FTUI.dialogRoot(context);
     dialog.dataset.ftTabID = context.tabID || "";
     dialog.className = "ft-dialog client-download-dialog";
     const card = document.createElement("div");

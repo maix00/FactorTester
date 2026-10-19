@@ -119,7 +119,7 @@
 
   async function createResearchDialog(context, root) {
     const profiles = await FTPageAgentProfiles.profiles(context);
-    const dialog = document.createElement("dialog");
+    const dialog = window.FTUI.dialogRoot(context);
     dialog.className = "ft-dialog research-visibility-dialog";
     const card = document.createElement("div");
     card.className = "dialog-card";
@@ -355,7 +355,7 @@
       context.showNotice?.(context.t("当前端没有可添加的研究身份"));
       return;
     }
-    const dialog = document.createElement("dialog");
+    const dialog = window.FTUI.dialogRoot(context);
     dialog.className = "ft-dialog research-visibility-dialog";
     const card = document.createElement("div");
     card.className = "dialog-card";

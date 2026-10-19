@@ -45,7 +45,7 @@
   }
 
   function dialog(context, title) {
-    const root = document.createElement("dialog");
+    const root = window.FTUI.dialogRoot(context);
     root.dataset.ftTabID = context.tabID || "";
     root.className = "manager-directory-dialog";
     const form = document.createElement("form");

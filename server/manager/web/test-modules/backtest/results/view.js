@@ -269,7 +269,7 @@
             button.className = "backtest-asset-open";
             button.textContent = context.t("查看交易图");
             button.addEventListener("click", () => (
-              window.FTBacktestAssetPlot.open(context, state, row)
+              window.FTBacktestAssetPlot.show(state, row)
             ));
             return button;
           }
@@ -422,6 +422,8 @@
   }
 
   function renderLoaded(context, target, state) {
+    state.assetPlotCleanup?.();
+    state.assetPlotCleanup = null;
     state.target = target;
     state.strategySelection = window.FTBacktestStrategySelection.normalize(
       state.strategySelections[state.activeTab]
@@ -540,6 +542,7 @@
           ),
           showOutOfSample: false,
           chartSelection: [], executionView: "orders", returnView: "cost_ratios",
+          selectedAsset: null, assetPlotCleanup: null,
           dimensionSelections: {},
           customAnalyses: options.customAnalyses || null,
           requestedSupplemental: options.supplementalRequest || null,
