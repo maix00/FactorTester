@@ -1738,6 +1738,10 @@
   "vendor/xpert-chatkit/pets/steve/pet.json",
   "vendor/xpert-chatkit/pets/steve/spritesheet.webp",
   "vendor/xpert-chatkit/xpert-chatkit.js",
-  "vendor/xpert-chatkit/UPSTREAM"
+  "vendor/xpert-chatkit/UPSTREAM",
+  "vendor/lightweight-charts/lightweight-charts.standalone.production.js",
+  "vendor/lightweight-charts/LICENSE",
+  "vendor/lightweight-charts/NOTICE",
+  "vendor/lightweight-charts/UPSTREAM"
  ]
 }
