@@ -4,6 +4,10 @@
 > 架构决策记录见 `docs/adr/`；因子研究架构的审计证据、缺陷清单与改进队列见
 > [2026-09-30 因子研究架构审计](docs/audits/factor-research-architecture-audit-2026-09-30.md)。
 
+图表工作台采用 FactorTester 引擎与 Job 作为因子、策略、交易及结果的权威来源；
+Lightweight Charts 作为 React 界面的渲染底座，Highcharts 按入口逐步退出。
+依赖、迁移顺序、署名与回退约束见 [ADR-161](docs/adr/161-react-chart-workbench-lightweight-charts.md)。
+
 ---
 
 ## 这是什么

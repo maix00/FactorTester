@@ -288,6 +288,25 @@
     return parts;
   }
 
+  function chartEvent(item) {
+    const rawPrice = item.artifact === "fill_detail_data"
+      ? first(item.row, ["fill_price", "price"]) : null;
+    const price = rawPrice == null ? null : Number(rawPrice);
+    return {
+      timestamp: item.timestamp,
+      artifact: item.artifact,
+      orderID: String(first(item.row, ["order_id"])
+        || first(item.order, ["order_id"]) || ""),
+      side: String(first(item.row, ["side"]) || ""),
+      stage: stageLabel(item),
+      id: String(first(item.row, ["fill_id", "attempt_id", "request_id",
+        "order_id", "event_id"]) || "未记录 ID"),
+      fillPrice: price !== null && Number.isFinite(price) ? price : null,
+      fields: eventFieldsFor(item).map(([label, value]) => [label, String(value)]),
+      raw: item,
+    };
+  }
+
   function eventInspector(context, items, allEvents = []) {
     const panel = document.createElement("section");
     panel.className = "backtest-asset-inspector";
@@ -724,6 +743,8 @@
     let generation = 0;
     let events = [];
     let chart = null;
+    let disposeAssetChart = null;
+    let usingLightweight = false;
     let removalObserver = null;
     let currentPayload = null;
     let page = 1;
@@ -739,6 +760,10 @@
     let orderLimit = 10;
     let timelineRange = null;
     const renderTimeline = (minimum, maximum) => {
+      if (usingLightweight) {
+        timelineControls.replaceChildren();
+        return;
+      }
       if (!timelineRange || timelineRange[0] !== minimum
           || timelineRange[1] !== maximum) orderLimit = 10;
       timelineRange = [minimum, maximum];
@@ -787,7 +812,7 @@
           groupFilter = null;
           toolkitItems = [];
           toolkitTime = null;
-          chart?.tooltip?.hide?.();
+          if (!usingLightweight) chart?.tooltip?.hide?.();
           inspector.replaceChildren();
           page = 1;
           renderTable();
@@ -866,11 +891,13 @@
       }
       selectedItems = [...new Set([...selectedGroups.values()].flat())];
       inspector.replaceChildren();
-      if (selectedItems.length) inspector.append(eventInspector(context, selectedItems, events));
-      if (toolkitItems.length && point?.x != null) {
+      if (selectedItems.length && !usingLightweight) {
+        inspector.append(eventInspector(context, selectedItems, events));
+      }
+      if (!usingLightweight && toolkitItems.length && point?.x != null) {
         chart?.tooltip?.refresh?.(point);
       }
-      else chart?.tooltip?.hide?.();
+      else if (!usingLightweight) chart?.tooltip?.hide?.();
       groupFilter = selectedItems.length ? selectedItems : null;
       const firstIndex = (groupFilter || events).indexOf(items[0]);
       if (firstIndex >= 0) page = Math.floor(firstIndex / 20) + 1;
@@ -962,7 +989,7 @@
       selectedPriceEvents.clear();
       toolkitItems = [];
       toolkitTime = null;
-      tradePriceLines(chart, []);
+      if (!usingLightweight) tradePriceLines(chart, []);
       inspector.replaceChildren();
       renderTable();
       const sampling = matching.sourceCount > events.length
@@ -1004,13 +1031,36 @@
     chartMount.append(window.FTUI.loading(context.t("正在读取行情与交易事件…")));
     const initialSpan = /^(MIN|HOUR)/i.test(frequency) ? 7 * DAY : 30 * DAY;
     load(selected.timestamp - initialSpan, selected.timestamp + initialSpan)
-      .then(payload => {
+      .then(async payload => {
         if (!payload) return;
-        chart = window.FTPriceChart.render(context, chartMount, payload,
-          chartDisplayOptions);
-        if (Number.isFinite(chart?.xAxis?.[0]?.min)
-            && Number.isFinite(chart?.xAxis?.[0]?.max)) {
-          renderTimeline(chart.xAxis[0].min, chart.xAxis[0].max);
+        if (window.FTStaticLoader?.loadGroups) {
+          await window.FTStaticLoader.loadGroups(["chart-workbench-asset"]);
+          if (!root.isConnected) return;
+          if (!window.FTChartWorkbench?.mountAssetChart) {
+            throw new Error(context.t("交易图组件未加载"));
+          }
+          usingLightweight = true;
+          timelineControls.replaceChildren();
+          disposeAssetChart = window.FTChartWorkbench.mountAssetChart(chartMount, {
+            bars: window.FTPriceChart.barsOf(payload),
+            events: events.map(chartEvent),
+            frequencyMs: frequencyMs(frequency),
+            translate: value => context.t(value),
+            onEventClick: selectedEvents => select(selectedEvents),
+            loadRange: async (minimum, maximum, maxPoints) => {
+              const updated = await load(minimum, maximum, maxPoints,
+                minimum, maximum);
+              return updated ? {bars: window.FTPriceChart.barsOf(updated),
+                events: updated.__assetEvents.map(chartEvent)} : null;
+            },
+          });
+        } else {
+          chart = window.FTPriceChart.render(context, chartMount, payload,
+            chartDisplayOptions);
+          if (Number.isFinite(chart?.xAxis?.[0]?.min)
+              && Number.isFinite(chart?.xAxis?.[0]?.max)) {
+            renderTimeline(chart.xAxis[0].min, chart.xAxis[0].max);
+          }
         }
       }).catch(error => {
         chartMount.replaceChildren();
@@ -1021,6 +1071,8 @@
     state.assetPlotCleanup = () => {
       generation += 1;
       removalObserver?.disconnect();
+      disposeAssetChart?.();
+      disposeAssetChart = null;
       chartMount.__ftPriceChartObserver?.disconnect?.();
       chart?.destroy?.();
       chart = null;

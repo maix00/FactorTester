@@ -1,0 +1,3 @@
+[submodule "vendor/lightweight-charts"]
+	path = vendor/lightweight-charts
+	url = https://github.com/maix00/lightweight-charts.git
