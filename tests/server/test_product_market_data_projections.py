@@ -4,7 +4,9 @@ import pandas as pd
 
 from server.modules.shared.price_data_helpers import open_interest_column
 from server.services.product_market_data.products import _price_rows
-from server.services.product_market_data.sampling import bounded_ohlcv_rows
+from server.services.product_market_data.sampling import (
+    bounded_ohlcv_frame, bounded_ohlcv_rows,
+)
 from tools.data.types import DataFreq
 
 
@@ -53,6 +55,68 @@ def test_product_chart_sampling_preserves_ohlcv_bucket_semantics() -> None:
         "open": 1, "high": 4, "low": 0,
         "close": 3, "volume": 20, "open_interest": 101,
     }
+
+
+def test_frame_aggregation_matches_serialized_ohlcv_buckets() -> None:
+    count = 203
+    frame = pd.DataFrame({
+        "OPEN": [float(i) for i in range(count)],
+        "HIGH": [float(i + 2) for i in range(count)],
+        "LOW": [float(i - 3) for i in range(count)],
+        "CLOSE": [float(i + 1) for i in range(count)],
+        "VOLUME": [float(i % 7) for i in range(count)],
+        "OPEN_INTEREST": [float(500 + i) for i in range(count)],
+    }, index=pd.date_range("2025-01-01", periods=count, freq="min"))
+    columns = ("OPEN", "HIGH", "LOW", "CLOSE", "VOLUME")
+    sampled_frame, raw_count = bounded_ohlcv_frame(
+        frame, {"max_points": 100}, columns, "OPEN_INTEREST",
+    )
+    sampled_rows, _ = _price_rows(
+        object(), sampled_frame, adjusted=False, frequency=DataFreq.MIN1,
+    )
+    raw_rows, _ = _price_rows(
+        object(), frame, adjusted=False, frequency=DataFreq.MIN1,
+    )
+    expected, _ = bounded_ohlcv_rows(raw_rows, {"max_points": 100})
+    assert raw_count == count
+    assert sampled_rows == expected
+
+
+def test_frame_aggregation_leaves_anchored_bars_for_exact_row_sampling() -> None:
+    frame = pd.DataFrame({"OPEN": range(200), "HIGH": range(200),
+                          "LOW": range(200), "CLOSE": range(200),
+                          "VOLUME": range(200)},
+                         index=pd.date_range("2025-01-01", periods=200, freq="min"))
+    sampled, count = bounded_ohlcv_frame(frame, {
+        "max_points": 100, "anchor_timestamps": [1735689600000],
+    }, ("OPEN", "HIGH", "LOW", "CLOSE", "VOLUME"))
+    assert count == 200
+    assert sampled is frame
+
+
+def test_contract_frame_aggregation_preserves_time_and_restores_source_bars() -> None:
+    frame = pd.DataFrame({
+        "trade_time": pd.date_range("2025-01-01", periods=210, freq="min"),
+        "open_price": range(210), "highest_price": range(210),
+        "lowest_price": range(210), "close_price": range(210),
+        "volume": [1] * 210, "open_interest": range(210),
+    })
+    columns = ("open_price", "highest_price", "lowest_price", "close_price", "volume")
+    overview, total = bounded_ohlcv_frame(
+        frame, {"max_points": 100}, columns, "open_interest",
+        time_column="trade_time",
+    )
+    assert total == 210
+    assert len(overview) == 70
+    assert overview.iloc[0]["trade_time"] == frame.iloc[0]["trade_time"]
+    assert overview.iloc[0]["open_interest"] == 2
+    assert overview.iloc[0]["volume"] == 3
+    detail, total = bounded_ohlcv_frame(
+        frame.iloc[25:40], {"max_points": 100}, columns, "open_interest",
+        time_column="trade_time",
+    )
+    assert total == 15
+    assert detail.equals(frame.iloc[25:40])
 
 
 def test_product_chart_sampling_keeps_event_candle_and_neighbors_aggregated() -> None:

@@ -166,19 +166,17 @@ vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);
   await settle();
   assert.strictEqual(requests[1].data_source, "LocalCNFuturesMIN1");
   assert.strictEqual(requests[1].freq, undefined);
-  assert.strictEqual(requests[1].max_points, 600);
-  assert.ok(requests[1].start_date);
+  assert.strictEqual(requests[1].max_points, 1000);
+  assert.strictEqual(requests[1].start_date, undefined);
 
   adjustedPicker.select("adjusted");
   await settle();
   assert.strictEqual(requests.some(request =>
     request.data_source === "LocalCNFuturesMIN1" && request.adjusted === true), true);
-  assert.strictEqual(requests.some(request =>
-    request.data_source === "LocalCNFuturesMIN1" && !request.start_date), true,
-  "minute source gets a bounded full-history overview after its first paint");
+  assert.strictEqual(requests.length, 3,
+    "each source or adjustment selection makes one bounded overview request");
   assert.ok(loadedGroups.includes("chart-workbench-price"));
   assert.strictEqual(charts.at(-1).options.bars[0].close, 2);
-  assert.strictEqual(charts.at(-1).overview?.[0].close, 2);
   const showAll = walk(root, node => node.textContent === "显示全部价格")[0];
   showAll.listeners.click();
   assert.strictEqual(charts.at(-1).fitted, true);
