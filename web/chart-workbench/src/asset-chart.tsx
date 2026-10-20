@@ -1,5 +1,6 @@
 import {useEffect, useRef, useState} from "react";
 import {createRoot, type Root} from "react-dom/client";
+import {mergeBars} from "./range-data";
 
 type Bar = {timestamp: number; open: number; high: number; low: number; close: number;
   volume: number | null; openInterest: number | null};
@@ -38,6 +39,15 @@ function orderedBars(source: Bar[]): Bar[] {
   const bySecond = new Map<number, Bar>();
   for (const bar of source) if (valid(bar)) bySecond.set(seconds(bar.timestamp), bar);
   return [...bySecond.entries()].sort(([a], [b]) => a - b).map(([, bar]) => bar);
+}
+
+function mergeEvents(current: Event[], incoming: Event[]): Event[] {
+  const byIdentity = new Map<string, Event>();
+  for (const event of [...current, ...incoming]) {
+    byIdentity.set(JSON.stringify([event.artifact, event.id, event.timestamp,
+      event.orderID, event.stage]), event);
+  }
+  return [...byIdentity.values()].sort((left, right) => left.timestamp - right.timestamp);
 }
 
 function nearestBar(bars: Bar[], timestamp: number, toleranceMs: number): Bar | null {
@@ -197,7 +207,8 @@ function AssetChart({bars, events, frequencyMs, loadRange, onEventClick,
           const result = await request.current(minimum, maximum, 2400);
           if (revision !== generation.current) return;
           if (result) {
-            setData(result);
+            setData(previous => ({bars: mergeBars(previous.bars, result.bars),
+              events: mergeEvents(previous.events, result.events)}));
             setError("");
           } else requestKey.current = "";
         } catch (cause) {
@@ -294,11 +305,15 @@ function AssetChart({bars, events, frequencyMs, loadRange, onEventClick,
       {orderTotal > orderLimit && <button type="button" onClick={() => setOrderLimit(value => value + 10)}>
         {translate("加载更多订单")}</button>}
     </div>
-    {selected?.kind === "market" && selected.bar && <div className="ft-asset-chart-market">
+    {selected?.kind === "market" && selected.bar && <section className="ft-chart-inspector ft-asset-chart-market">
       <strong>{new Date(selected.bar.timestamp).toLocaleString()}</strong>
-      <span>{translate("开 / 高 / 低 / 收")} {selected.bar.open} / {selected.bar.high} / {selected.bar.low} / {selected.bar.close}</span>
-      <span>{translate("成交量")} {selected.bar.volume ?? "—"} · {translate("持仓量")} {selected.bar.openInterest ?? "—"}</span>
-    </div>}
+      <dl>{[["开盘价", selected.bar.open], ["最高价", selected.bar.high],
+        ["最低价", selected.bar.low], ["收盘价", selected.bar.close],
+        ["成交量", selected.bar.volume ?? "—"], ["持仓量", selected.bar.openInterest ?? "—"]]
+        .map(([label, value]) => <div key={label}>
+          <dt>{translate(String(label))}</dt><dd>{value}</dd>
+        </div>)}</dl>
+    </section>}
     {selected?.kind === "event" && <section className="ft-asset-chart-events">
       <header>{translate("交易事件")} · {selected.items?.length ?? 0}</header>
       {selected.items?.map((item, index) => <details key={`${item.id}:${index}`}

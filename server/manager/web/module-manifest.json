@@ -221,6 +221,7 @@
   ],
   "catalog-product-detail": [
    "catalog-products-base",
+   "catalog-selection-core",
    "charts"
   ],
   "catalog": [

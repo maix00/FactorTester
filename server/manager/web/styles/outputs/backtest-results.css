@@ -184,7 +184,7 @@
 .ft-asset-chart-canvas { width: 100%; min-width: 0; height: 640px; }
 .ft-asset-chart-legend { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
 .ft-asset-chart-legend button, .ft-asset-chart-events button { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); cursor: pointer; padding: 5px 9px; }
-.ft-asset-chart-market, .ft-asset-chart-events { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-size: 12px; }
+.ft-asset-chart-events { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-size: 12px; }
 .ft-asset-chart-events { max-height: 45vh; overflow: auto; overscroll-behavior: contain; }
 .ft-asset-chart-events details { border-top: 1px solid var(--line); padding-top: 6px; }
 .ft-asset-chart-events summary { cursor: pointer; font-weight: 600; }
@@ -439,12 +439,7 @@
   background: var(--surface, #fff); font-size: 12px; cursor: pointer; }
 .ft-factor-indicator-swatch { width: 9px; height: 9px; border-radius: 50%; flex: none; }
 .ft-factor-chart-canvas { width: 100%; min-width: 0; }
-.ft-factor-chart-point { margin-top: 8px; padding: 10px 12px;
-  border: 1px solid var(--line); border-radius: 8px; }
-.ft-factor-chart-point dl { display: grid; gap: 4px; margin: 7px 0 0; }
-.ft-factor-chart-point dl div { display: flex; gap: 12px; }
-.ft-factor-chart-point dt { color: var(--muted); min-width: 100px; }
-.ft-factor-chart-point dd { margin: 0; overflow-wrap: anywhere; }
+.ft-factor-chart-point { margin-top: 8px; }
 
 .factor-series-contracts { display: grid; gap: 8px; min-width: 0; }
 .factor-series-contracts h3 { margin: 0; }

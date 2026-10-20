@@ -501,6 +501,140 @@ def test_factor_result_groups_nested_layers_by_product_in_one_chart() -> None:
         browser.close()
 
 
+@pytest.mark.parametrize("view", ["price", "asset", "factor"])
+def test_lightweight_chart_keeps_existing_bars_after_zoom_out(view: str) -> None:
+    """A shorter range response must not erase already loaded history."""
+    with _playwright() as playwright:
+        browser = _launch_chromium(playwright)
+        page = browser.new_page(viewport={"width": 1100, "height": 850})
+        errors: list[str] = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        page.set_content("<main id='root'></main>")
+        page.add_script_tag(path=str(ROOT / "static/vendor/lightweight-charts/lightweight-charts.standalone.production.js"))
+        page.add_script_tag(path=str(ROOT / "static/vendor/chart-workbench/chart-workbench.js"))
+        page.evaluate("""view => {
+          const start = Date.UTC(2025, 0, 1);
+          const bars = Array.from({length: 8}, (_, index) => ({
+            timestamp: start + index * 86400000,
+            open: 100 + index, high: 102 + index,
+            low: 99 + index, close: 101 + index,
+            volume: 1000 + index, openInterest: 500 + index,
+          }));
+          window.__bars = bars;
+          window.__requests = 0;
+          window.__candleTimes = [];
+          const createChart = LightweightCharts.createChart;
+          window.LightweightCharts = {...LightweightCharts, createChart: (...args) => {
+            const chart = createChart(...args);
+            window.__chart = chart;
+            const addSeries = chart.addSeries.bind(chart);
+            chart.addSeries = (...seriesArgs) => {
+              const series = addSeries(...seriesArgs);
+              if (seriesArgs[0] === LightweightCharts.CandlestickSeries) {
+                const setData = series.setData.bind(series);
+                series.setData = rows => {
+                  window.__candleTimes = rows.map(row => row.time);
+                  setData(rows);
+                };
+              }
+              return series;
+            };
+            return chart;
+          }};
+          const loadRange = async () => {
+            window.__requests += 1;
+            const shortened = bars.slice(3, 5);
+            return view === 'asset' ? {bars: shortened, events: []} : shortened;
+          };
+          const root = document.querySelector('#root');
+          if (view === 'price') window.__priceHandle =
+            FTChartWorkbench.mountPriceChart(root, {bars, loadRange});
+          if (view === 'asset') FTChartWorkbench.mountAssetChart(root,
+            {bars, events: [], frequencyMs: 86400000, loadRange});
+          if (view === 'factor') FTChartWorkbench.mountFactorChart(root,
+            {bars, indicators: [{id: 'x', label: 'x', points: []}], product: 'AU.SHF', loadRange});
+        }""", view)
+        page.wait_for_selector("canvas", timeout=5000)
+        assert page.evaluate("Boolean(window.__chart)"), errors
+        assert page.evaluate("window.__candleTimes.length") == 8, errors
+        # The first change initializes the subscriber in the asset/factor charts.
+        page.evaluate("window.__chart.timeScale().setVisibleRange({from: __bars[1].timestamp / 1000, to: __bars[6].timestamp / 1000})")
+        page.evaluate("window.__chart.timeScale().setVisibleRange({from: __bars[3].timestamp / 1000, to: __bars[4].timestamp / 1000})")
+        page.wait_for_function("window.__requests > 0")
+        page.wait_for_function("window.__candleTimes.length === 8")
+        page.evaluate("window.__chart.timeScale().setVisibleRange({from: __bars[0].timestamp / 1000, to: __bars[7].timestamp / 1000})")
+        page.wait_for_function("window.__requests > 1")
+        assert page.evaluate("window.__candleTimes.length") == 8
+        if view == "price":
+            page.evaluate("window.__priceHandle.focusRange(__bars[2].timestamp, __bars[5].timestamp)")
+            page.wait_for_function("""() => {
+              const range = __chart.timeScale().getVisibleRange();
+              return range && Number(range.from) === __bars[2].timestamp / 1000
+                && Number(range.to) === __bars[5].timestamp / 1000;
+            }""")
+        assert errors == []
+        browser.close()
+
+
+def test_product_term_structure_pages_and_focuses_chart_without_navigating() -> None:
+    with _playwright() as playwright:
+        browser = _launch_chromium(playwright)
+        page = browser.new_page(viewport={"width": 1100, "height": 850})
+        errors: list[str] = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        page.set_content("<main id='content'></main>")
+        page.add_script_tag(path=str(ROOT / "server/manager/web/core/shared-ui.js"))
+        page.add_script_tag(path=str(ROOT / "server/manager/web/catalog/details.js"))
+        page.evaluate("""async () => {
+          window.__focused = [];
+          window.__navigated = [];
+          FTProductPricePanel = {render(_context, mount) {
+            const panel = document.createElement('div');
+            panel.focusRange = (...range) => __focused.push(range);
+            mount.append(panel);
+            return new Promise(resolve => { window.__resolvePricePanel = () => resolve(panel); });
+          }};
+          const rows = Array.from({length: 20}, (_, i) => ({
+            uid: `item-${i}`, contract: `标识-${i}`,
+            start: `2025-01-${String(i + 1).padStart(2, '0')}`,
+            end: `2025-02-${String(i + 1).padStart(2, '0')}`,
+            has_data: true,
+          }));
+          const context = {
+            content: document.querySelector('#content'), t: x => x,
+            isRouteCurrent: () => true, activeNav() {}, setHeading() {},
+            updateActiveTab() {}, navigate: path => __navigated.push(path),
+            async api(path) {
+              return path.includes('product-fields') ? {fields: [{name: 'A', value: 1}]}
+                : {supports_term_structure: true, contracts: rows};
+            },
+          };
+          const helpers = {
+            sourceOf: () => 'server',
+            load: async () => ({products: [{name: 'AU.SHF'}]}),
+            catalogSwitch() {}, sourceSummary: () => document.createElement('div'),
+            pathFor: path => path,
+          };
+          await FTProductDetails.productDetail(context, 'AU.SHF', helpers);
+        }""")
+        assert page.locator(".product-fields-section").count() == 1
+        assert page.locator(".product-detail-page > :last-child").evaluate(
+            "element => element.classList.contains('product-fields-section')")
+        assert page.locator(".product-fields-section").evaluate("element => !element.open")
+        assert page.locator(".product-term-structure tbody tr").count() == 15
+        page.locator(".product-term-structure .shared-table-pagination button").last.click()
+        assert page.locator(".product-term-structure tbody tr").count() == 5
+        page.locator(".product-term-structure tbody tr").first.click(position={"x": 300, "y": 18})
+        assert page.evaluate("window.__focused.length") == 0
+        page.evaluate("window.__resolvePricePanel()")
+        page.wait_for_function("window.__focused.length === 1")
+        assert page.evaluate("window.__navigated.length") == 0
+        page.locator(".product-term-structure tbody tr a").first.click()
+        assert page.evaluate("window.__navigated.length") == 1
+        assert errors == []
+        browser.close()
+
+
 def test_price_chart_keeps_trade_markers_when_range_is_reloaded() -> None:
     with _playwright() as playwright:
         browser = _launch_chromium(playwright)

@@ -1,5 +1,6 @@
 import {useEffect, useRef, useState} from "react";
 import {createRoot, type Root} from "react-dom/client";
+import {mergeBars} from "./range-data";
 
 type Bar = {timestamp: number; open: number; high: number; low: number; close: number;
   volume: number | null; openInterest: number | null};
@@ -12,6 +13,7 @@ type Pane = {setStretchFactor: (weight: number) => void};
 type Chart = {addSeries: (type: unknown, options: object, pane?: number) => Series;
   panes: () => Pane[]; timeScale: () => {
     fitContent: () => void; setVisibleRange: (range: Range) => void;
+    getVisibleRange: () => Range | null;
     subscribeVisibleTimeRangeChange: (callback: (range: Range | null) => void) => void;
     unsubscribeVisibleTimeRangeChange: (callback: (range: Range | null) => void) => void;
   }; subscribeClick: (callback: (point: {time?: number}) => void) => void;
@@ -122,8 +124,10 @@ function FactorChart({bars, indicators, product, loadRange, controller,
       const bar = sourceBars.current.find(item => seconds(item.timestamp) === time);
       const rows: [string, string][] = [];
       if (bar) {
-        rows.push([translate("开 / 高 / 低 / 收"),
-          `${bar.open} / ${bar.high} / ${bar.low} / ${bar.close}`]);
+        rows.push([translate("开盘价"), String(bar.open)]);
+        rows.push([translate("最高价"), String(bar.high)]);
+        rows.push([translate("最低价"), String(bar.low)]);
+        rows.push([translate("收盘价"), String(bar.close)]);
         rows.push([translate("成交量"), String(bar.volume ?? "—")]);
         rows.push([translate("持仓量"), String(bar.openInterest ?? "—")]);
       }
@@ -151,8 +155,9 @@ function FactorChart({bars, indicators, product, loadRange, controller,
         try {
           const updated = await request.current(minimum, maximum, 5000);
           if (current !== generation.current || !updated) return;
-          applyBars(updated);
-          instance.timeScale().setVisibleRange(range);
+          const visible = instance.timeScale().getVisibleRange();
+          applyBars(mergeBars(sourceBars.current, updated));
+          if (visible) instance.timeScale().setVisibleRange(visible);
           setError("");
         } catch (cause) {
           if (current === generation.current) {
@@ -193,7 +198,7 @@ function FactorChart({bars, indicators, product, loadRange, controller,
     <div ref={chartNode} className="ft-factor-chart-canvas"
       style={{height: Math.max(620, 340 + indicators.length * 130)}}
       aria-label={`${product} · ${translate("价格与因子指标")}`} />
-    {selected && <section className="ft-factor-chart-point">
+    {selected && <section className="ft-chart-inspector ft-factor-chart-point">
       <strong>{new Date(selected.timestamp).toLocaleString()}</strong>
       <dl>{selected.rows.map(([label, value]) => <div key={label}>
         <dt>{label}</dt><dd>{value}</dd></div>)}</dl>
