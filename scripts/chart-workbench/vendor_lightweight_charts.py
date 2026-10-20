@@ -17,7 +17,7 @@ import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE = ROOT / "third_party" / "lightweight-charts"
+SOURCE = ROOT / "vendor" / "lightweight-charts"
 TARGET = ROOT / "static" / "vendor" / "lightweight-charts"
 MANIFEST = ROOT / "server" / "manager" / "web" / "module-manifest.json"
 VERSION = "5.2.1"
