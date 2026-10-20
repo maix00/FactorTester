@@ -286,9 +286,6 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .product-price-heading h2 { margin: 0 4px 0 0; line-height: 32px; }
 .product-price-heading .icon-action-button { align-self: center; flex: 0 0 30px; }
 .product-price-info-dialog { width: min(680px, calc(100vw - 24px)); max-width: none; }
-.product-price-info-card { width: 100%; height: auto; max-height: calc(100dvh - 24px);
-  grid-template-rows: auto minmax(0, auto); overflow: hidden; }
-.product-price-info-card .table-shell { max-height: min(460px, calc(100dvh - 112px)); overflow: auto; }
 .product-price-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .product-price-controls .ft-multi-select-filter { width: min(260px, 100%); }
 .product-price-frequency { align-self: end; padding: 7px 0; color: var(--muted); font-size: 12px; }
@@ -672,6 +669,12 @@ dialog[data-ft-overlay="true"] { box-sizing: border-box; max-width: calc(100vw -
 dialog::backdrop { background: #0004; backdrop-filter: blur(3px); }
 .dialog-card { position: relative; width: min(420px, 92vw); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); display: grid; gap: 14px; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; padding: 26px; background: var(--panel); }
 .dialog-card.wide { width: min(680px, 94vw); }
+.dialog-card.wide.product-price-info-card { width: 100%; max-height: calc(100dvh - 24px); overflow-y: auto; }
+.product-price-info-card .table-shell { max-height: none; overflow: visible; }
+.product-price-info-card .table-shell table { min-width: 0; table-layout: fixed; }
+.product-price-info-card .table-shell th:first-child,
+.product-price-info-card .table-shell td:first-child { width: 34%; }
+.product-price-info-card .table-shell td { overflow-wrap: anywhere; }
 .reference-detail-card { max-height: min(78vh, 760px); overflow-y: auto; }
 .reference-detail-card .table-shell { max-height: min(38vh, 360px); }
 .reference-detail-card h2 { overflow-wrap: anywhere; }
