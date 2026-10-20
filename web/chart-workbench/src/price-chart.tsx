@@ -35,7 +35,11 @@ type Options = {
   bars: Bar[];
   loadRange?: (minimum: number, maximum: number, maxPoints: number) => Promise<Bar[]>;
   translate?: (value: string) => string;
-  onReady?: (focus: (minimum: number, maximum: number) => void) => void;
+  onReady?: (controls: {
+    focusRange: (minimum: number, maximum: number) => void;
+    mergeOverview: (rows: Bar[]) => void;
+    fitContent: () => void;
+  }) => void;
 };
 
 declare global {
@@ -115,6 +119,11 @@ function MarketChart({bars, loadRange, onReady, translate = value => value}: Opt
     let cached = overview;
     let indexed = apply(cached);
     chart.timeScale().fitContent();
+    let userChangedRange = false;
+    const markInteraction = () => { userChangedRange = true; };
+    node.addEventListener("wheel", markInteraction);
+    node.addEventListener("pointerdown", markInteraction);
+    node.addEventListener("touchstart", markInteraction);
     chart.subscribeClick(point => setSelected(point?.time === undefined
       ? null : indexed.get(Number(point.time)) || null));
 
@@ -153,14 +162,30 @@ function MarketChart({bars, loadRange, onReady, translate = value => value}: Opt
       }, 180);
     };
     chart.timeScale().subscribeVisibleTimeRangeChange(onRange);
-    onReady?.((minimum, maximum) => {
-      if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || maximum <= minimum) return;
-      chart.timeScale().setVisibleRange({from: Math.floor(minimum / 1000),
-        to: Math.ceil(maximum / 1000)});
+    onReady?.({
+      focusRange(minimum, maximum) {
+        if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || maximum <= minimum) return;
+        userChangedRange = true;
+        chart.timeScale().setVisibleRange({from: Math.floor(minimum / 1000),
+          to: Math.ceil(maximum / 1000)});
+      },
+      mergeOverview(rows) {
+        const extra = sortedBars(rows);
+        if (!extra.length) return;
+        const visible = chart.timeScale().getVisibleRange();
+        cached = sortedBars(mergeBars(extra, cached));
+        indexed = apply(cached);
+        if (userChangedRange && visible) chart.timeScale().setVisibleRange(visible);
+        else chart.timeScale().fitContent();
+      },
+      fitContent() { chart.timeScale().fitContent(); },
     });
     return () => {
       revision += 1;
       if (timer) clearTimeout(timer);
+      node.removeEventListener("wheel", markInteraction);
+      node.removeEventListener("pointerdown", markInteraction);
+      node.removeEventListener("touchstart", markInteraction);
       chart.timeScale().unsubscribeVisibleTimeRangeChange(onRange);
       chart.remove();
     };
@@ -184,29 +209,39 @@ function MarketChart({bars, loadRange, onReady, translate = value => value}: Opt
 
 type PriceChartHandle = (() => void) & {
   focusRange: (minimum: number, maximum: number) => void;
+  mergeOverview: (rows: Bar[]) => void;
+  fitContent: () => void;
 };
 
 export function mountPriceChart(target: HTMLElement, options: Options): PriceChartHandle {
   roots.get(target)?.unmount();
   const root = createRoot(target);
   roots.set(target, root);
-  let focus: ((minimum: number, maximum: number) => void) | null = null;
+  let controls: Parameters<NonNullable<Options["onReady"]>>[0] | null = null;
   let pending: [number, number] | null = null;
+  let pendingOverview: Bar[] | null = null;
   root.render(<MarketChart {...options} onReady={ready => {
-    focus = ready;
-    if (pending) { ready(...pending); pending = null; }
+    controls = ready;
+    if (pendingOverview) { ready.mergeOverview(pendingOverview); pendingOverview = null; }
+    if (pending) { ready.focusRange(...pending); pending = null; }
   }} />);
   const dispose = (() => {
     if (roots.get(target) === root) {
       root.unmount();
       roots.delete(target);
     }
-    focus = null;
+    controls = null;
     pending = null;
+    pendingOverview = null;
   }) as PriceChartHandle;
   dispose.focusRange = (minimum, maximum) => {
-    if (focus) focus(minimum, maximum);
+    if (controls) controls.focusRange(minimum, maximum);
     else pending = [minimum, maximum];
   };
+  dispose.mergeOverview = rows => {
+    if (controls) controls.mergeOverview(rows);
+    else pendingOverview = rows;
+  };
+  dispose.fitContent = () => controls?.fitContent();
   return dispose;
 }

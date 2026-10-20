@@ -162,9 +162,10 @@
       "数据源信息", () => {
         if (!metadataPayload) return;
         const dialog = FTUI.dialogRoot(context);
+        dialog.className = "product-price-info-dialog";
         const card = document.createElement("form");
         card.method = "dialog";
-        card.className = "dialog-card wide";
+        card.className = "dialog-card wide product-price-info-card";
         const close = document.createElement("button");
         close.type = "submit";
         close.className = "dialog-close";
@@ -180,6 +181,9 @@
       });
     information.disabled = true;
     heading.append(information);
+    const fit = FTUI.iconButton(context, "arrow.up.left.and.arrow.down.right",
+      "显示全部价格", () => disposePriceChart?.fitContent?.());
+    heading.append(fit);
     root.append(heading);
     const chartMount = document.createElement("div");
     chartMount.className = "product-price-chart-mount";
@@ -218,7 +222,7 @@
       payload[`${prefix}_time`] = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
     }
 
-    function rangePayload(minimum, maximum, maximumPoints) {
+    function rangePayload(minimum, maximum, maximumPoints, fullHistory = false) {
       const payload = {
         ...(contractUID ? {contract_uid: contractUID} : {product_name: product.name}),
         adjusted: Boolean(state.adjusted),
@@ -226,16 +230,16 @@
       };
       if (state.dataSource) payload.data_source = state.dataSource;
       if (Number.isFinite(minimum)) applyBound(payload, "start", minimum);
-      else if (options.startDate) payload.start_date = options.startDate;
+      else if (!fullHistory && options.startDate) payload.start_date = options.startDate;
       if (Number.isFinite(maximum)) applyBound(payload, "end", maximum);
-      else if (options.endDate) payload.end_date = options.endDate;
+      else if (!fullHistory && options.endDate) payload.end_date = options.endDate;
       return payload;
     }
 
-    async function fetchRange(minimum, maximum, maximumPoints) {
+    async function fetchRange(minimum, maximum, maximumPoints, fullHistory = false) {
       const value = await context.api(endpoint(source), {
         method: "POST",
-        body: JSON.stringify(rangePayload(minimum, maximum, maximumPoints)),
+        body: JSON.stringify(rangePayload(minimum, maximum, maximumPoints, fullHistory)),
       });
       if (value?.success === false) {
         throw new Error(value.error || context.t("请求失败"));
@@ -258,13 +262,15 @@
         const recentStart = Math.max(Date.parse(options.startDate || "") || 0,
           end - 14 * 24 * 60 * 60 * 1000);
         let value;
+        let fullOverviewLoaded = !intraday;
         try {
           value = await fetchRange(intraday ? recentStart : undefined,
             intraday ? end : undefined, intraday ? 600 : 1200);
         } catch (error) {
           if (!intraday) throw error;
           // Historical contracts can have sparse data in the last fortnight.
-          value = await fetchRange(undefined, undefined, 600);
+          value = await fetchRange(undefined, undefined, 600, true);
+          fullOverviewLoaded = true;
         }
         if (!current(context) || requestIDForLoad !== requestID) return;
         if (value?.success === false) {
@@ -287,6 +293,17 @@
             ),
           });
           if (pendingFocus) disposePriceChart?.focusRange?.(...pendingFocus);
+          // Give minute sources a fast recent first paint, then extend the
+          // chart with a bounded full-history aggregate. Preserve a range the
+          // user has already selected while the second request is running.
+          if (!fullOverviewLoaded) {
+            void fetchRange(undefined, undefined, 600, true).then(overview => {
+              if (!current(context) || requestIDForLoad !== requestID) return;
+              disposePriceChart?.mergeOverview?.(FTPriceChart.barsOf(overview));
+            }).catch(() => {
+              // The recent chart remains usable; zoom requests still retry.
+            });
+          }
         } else {
           chartMount.replaceChildren(FTUI.empty(
             context.t("价格曲线暂不可用"), context.t("暂无可绘制数据"),

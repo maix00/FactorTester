@@ -102,7 +102,10 @@ context.FTPriceChart = {
 context.FTStaticLoader = {loadGroups: async groups => loadedGroups.push(...groups)};
 context.FTChartWorkbench = {mountPriceChart: (target, options) => {
   charts.push({target, options});
-  return () => { disposed += 1; };
+  const handle = () => { disposed += 1; };
+  handle.mergeOverview = rows => { charts.at(-1).overview = rows; };
+  handle.fitContent = () => { charts.at(-1).fitted = true; };
+  return handle;
 }};
 context.isRouteCurrent = () => true;
 context.t = value => value;
@@ -168,10 +171,17 @@ vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);
 
   adjustedPicker.select("adjusted");
   await settle();
-  assert.strictEqual(requests[2].data_source, "LocalCNFuturesMIN1");
-  assert.strictEqual(requests[2].adjusted, true);
+  assert.strictEqual(requests.some(request =>
+    request.data_source === "LocalCNFuturesMIN1" && request.adjusted === true), true);
+  assert.strictEqual(requests.some(request =>
+    request.data_source === "LocalCNFuturesMIN1" && !request.start_date), true,
+  "minute source gets a bounded full-history overview after its first paint");
   assert.ok(loadedGroups.includes("chart-workbench-price"));
   assert.strictEqual(charts.at(-1).options.bars[0].close, 2);
+  assert.strictEqual(charts.at(-1).overview?.[0].close, 2);
+  const showAll = walk(root, node => node.textContent === "显示全部价格")[0];
+  showAll.listeners.click();
+  assert.strictEqual(charts.at(-1).fitted, true);
   assert.strictEqual(disposed, 2);
   await charts.at(-1).options.loadRange(Date.parse("2025-01-01"),
     Date.parse("2025-01-03"), 2400);
