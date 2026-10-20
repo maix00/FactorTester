@@ -119,6 +119,17 @@ assert.deepEqual(replacedData, [
   [1_700_000_000_000, 110], [1_700_000_001_000, 111],
 ]);
 assert.strictEqual(progressive.navigator.series.data, progressive.series[0].data);
+// Wheel-in, wheel-out and drag-selection reuse a fully loaded range.
+progressiveChart._ftCompleteRange = [20, 40];
+for (const trigger of ["mousewheel", "selection", "navigator"]) {
+  requestedRange = null;
+  progressive.xAxis.events.afterSetExtremes.call(
+    {chart: progressiveChart}, {min: 24, max: 36, trigger},
+  );
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(requestedRange, null, `${trigger} should reuse complete bars`);
+}
+progressiveChart._ftCompleteRange = null;
 requestedRange = {stale: true};
 progressive.xAxis.events.afterSetExtremes.call(
   {chart: progressiveChart}, {

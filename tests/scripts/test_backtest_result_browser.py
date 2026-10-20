@@ -287,7 +287,7 @@ def test_backtest_result_tabs_lazy_load_and_paginate_without_page_errors() -> No
         assert page.locator(".backtest-inner-tabs button").count() == 0
         assert page.locator(".backtest-asset-events tbody tr").count() == 20
         assert page.locator(".backtest-asset-filter").count() == 3
-        assert page.locator(".backtest-order-timeline-row").count() > 0
+        assert page.locator(".backtest-order-track-controls").count() == 1
         assert page.locator(".backtest-asset-events thead th").all_text_contents() == [
             "时间", "订单阶段 / ID", "策略", "账户 / 资金池", "方向 / 状态",
             "数量", "价格", "剩余", "手续费", "账本变化",
@@ -594,8 +594,8 @@ def test_asset_plot_order_flow_uses_recorded_phases_and_pool_scope() -> None:
             poolFilter:FTBacktestAssetPlot.eventFilters(selected).cash_pool.values,
             fillAccount:value.events.find(item => item.row.fill_id === 'f1').row.account_id,
             defaultMarks:fillsOnly.reduce((n, item) => n + item.data.length, 0),
-            orderRows:timeline.querySelectorAll('.backtest-order-timeline-row').length,
-            orderNodes:timeline.querySelectorAll('.backtest-order-timeline-node').length,
+            orderRows:timeline.rows.length,
+            orderNodes:timeline.series.at(-1).data.length,
             noOrderPriceMarkers:fillsOnly.every(item => !item.id.startsWith('asset-cancel')),
           };
         }""")
@@ -631,20 +631,20 @@ def test_asset_plot_order_history_separates_orders_and_groups_same_time() -> Non
           let selected = [];
           const timeline = FTBacktestAssetPlot.orderTimeline({t:v=>v}, events,
             t, t+3000, items => {selected = items;});
-          document.querySelector('#root').append(timeline);
-          const rows = [...timeline.querySelectorAll('.backtest-order-timeline-row')];
-          rows.find(row => row.querySelector('button').textContent === 'A')
-            .querySelectorAll('.backtest-order-timeline-node')[1].click();
-          return {orderNames:rows.map(row => row.querySelector('button').textContent),
-            nodes:rows.map(row => row.querySelectorAll('.backtest-order-timeline-node').length),
+          const node = timeline.series.at(-1).data.find(point =>
+            point.custom.orderID === 'A' && point.custom.items.length === 2);
+          timeline.series.at(-1).point.events.click.call(node);
+          return {orderNames:timeline.rows.map(row => row[0]),
+            nodes:timeline.rows.map(row => timeline.series.at(-1).data.filter(point =>
+              point.custom.orderID === row[0]).length),
             selected:selected.map(item => item.row.fill_id || item.row.kind),
-            lineWidth:rows.find(row => row.querySelector('button').textContent === 'A')
-              .querySelector('.backtest-order-timeline-line').style.width};
+            lineTimes:timeline.series.find(series => series.id === 'asset-order-line-A')
+              .data.map(point => point[0])};
         }""")
         assert result["orderNames"] == ["B", "A"]
         assert result["nodes"] == [1, 2]
         assert result["selected"] == ["attempt", "F1"]
-        assert float(result["lineWidth"].rstrip("%")) == pytest.approx(100 / 3, abs=0.001)
+        assert result["lineTimes"] == [1700000000000, 1700000001000]
         browser.close()
 
 
@@ -664,18 +664,13 @@ def test_asset_plot_order_history_loads_more_without_mixing_orders() -> None:
             artifact:'order_lifecycle', timestamp:t+index*1000,
             row:{order_id:`order-${index}`,kind:'submitted'},
           }));
-          let limit = 10;
-          const host = document.querySelector('#root');
-          const render = () => host.replaceChildren(FTBacktestAssetPlot.orderTimeline(
-            {t:v=>v}, events, t, t+15000, () => {},
-            {limit, onLoadMore(next) {limit=next; render();}}));
-          render();
-          const first = host.querySelectorAll('.backtest-order-timeline-row').length;
-          host.querySelector('.backtest-order-timeline-more button').click();
-          return {first, expanded:host.querySelectorAll('.backtest-order-timeline-row').length,
-            unique:new Set([...host.querySelectorAll('.backtest-order-timeline-id')]
-              .map(node=>node.textContent)).size,
-            noMore:!host.querySelector('.backtest-order-timeline-more')};
+          const first = FTBacktestAssetPlot.orderTimeline({t:v=>v}, events,
+            t, t+15000, () => {}, {limit:10});
+          const expanded = FTBacktestAssetPlot.orderTimeline({t:v=>v}, events,
+            t, t+15000, () => {}, {limit:20});
+          return {first:first.rows.length, expanded:expanded.rows.length,
+            unique:new Set(expanded.rows.map(row=>row[0])).size,
+            noMore:expanded.rows.length === expanded.total};
         }""")
         assert value == {"first": 10, "expanded": 13, "unique": 13,
                          "noMore": True}
@@ -810,7 +805,7 @@ def test_asset_plot_same_location_group_keeps_other_markers_visible() -> None:
           const sell = chart.series.find(series => series.options.id === 'asset-sell');
           buy.points[0].onMouseOver();
           return {
-            orderCount: timeline.querySelectorAll('.backtest-order-timeline-row').length,
+            orderCount: timeline.rows.length,
             buyCount: buy.points[0].options.custom.items.length,
             markerAxis: buy.yAxis.index,
             candleAxis: chart.series[0].yAxis.index,
@@ -966,6 +961,66 @@ def test_asset_plot_tooltip_retains_market_bar_and_zoom_reaches_source_interval(
         assert result["zoomSpan"] == 60000
         assert result["candleGrouping"] is False
         assert result["volumeGrouping"] is False
+        browser.close()
+
+
+def test_asset_order_track_shares_chart_axis_and_range_refreshes_market_tooltip() -> None:
+    with _playwright() as playwright:
+        browser = _launch_chromium(playwright)
+        page = browser.new_page(viewport={"width": 1200, "height": 900})
+        page.set_content("<div id='chart' style='width:1100px'></div>")
+        for path in (
+            "static/vendor/highcharts/highstock.min.js",
+            "server/manager/web/core/highcharts-range-loader.js",
+            "server/manager/web/core/price-chart.js",
+            "server/manager/web/test-modules/backtest/results/asset-plot.js",
+        ):
+            page.add_script_tag(path=str(ROOT / path))
+        result = page.evaluate("""() => {
+          const start = Date.UTC(2025, 3, 24);
+          const bars = offset => Array.from({length: 20}, (_, index) => ({
+            timestamp:start + (offset + index) * 60000,
+            open:100 + index, high:102 + index, low:99 + index, close:101 + index,
+            volume:1000 + offset + index, open_interest:2000 + offset + index,
+          }));
+          const event = {artifact:'order_lifecycle',timestamp:start + 60000,
+            row:{order_id:'order-1',kind:'action',action:'submit'}};
+          const display = {assetMode:true, preserveSourceBars:true,
+            orderTimeline(payload) {
+              return FTBacktestAssetPlot.orderTimeline({t:s=>s},
+                payload.__assetEvents || [], start, start+40*60000, () => {});
+            }};
+          const first = {data:bars(0), freq:'MIN1', __assetEvents:[event]};
+          const chart = FTPriceChart.render({t:s=>s}, document.querySelector('#chart'),
+            first, display);
+          const order = chart.series.find(series => series.options.id === 'asset-order-nodes');
+          const sharedAxis = order.xAxis === chart.series[0].xAxis;
+          const nodeTime = order.points[0].x;
+          const zoom = chart.options.chart.zooming;
+          const next = {data:bars(20), freq:'MIN1', __assetEvents:[]};
+          const nextMount = document.createElement('div');
+          nextMount.style.width = '1100px';
+          document.body.append(nextMount);
+          const nextChart = FTPriceChart.render({t:s=>s}, nextMount, next, display);
+          const options = nextChart.userOptions;
+          FTHighchartsRangeLoader.replaceVisibleSeries(chart,options,
+            start+20*60000,start+39*60000);
+          const formatterUpdated = chart.tooltip.options.formatter.call({x:start+21*60000});
+          chart.xAxis[0].setExtremes(start+30*60000,start+31*60000,true,false,
+            {trigger:'ft-data-refresh'});
+          return {sharedAxis,nodeTime,formatterUpdated,
+            wheelZoom:zoom.mouseWheel.enabled, selectionZoom:zoom.type,
+            minRange:chart.xAxis[0].minRange,
+            span:chart.xAxis[0].max-chart.xAxis[0].min};
+        }""")
+        assert result["sharedAxis"] is True
+        assert result["nodeTime"] == 1745452860000
+        assert result["wheelZoom"] is True
+        assert result["selectionZoom"] == "x"
+        assert "成交量: <b>1,021</b>" in result["formatterUpdated"]
+        assert "持仓量: <b>2,021</b>" in result["formatterUpdated"]
+        assert result["minRange"] == 60000
+        assert result["span"] == 60000
         browser.close()
 
 

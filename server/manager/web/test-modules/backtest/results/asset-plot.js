@@ -439,95 +439,60 @@
   }
 
   function orderTimeline(context, events, minimum, maximum, onSelect,
-    {limit = 10, onLoadMore = () => {}} = {}) {
-    const panel = document.createElement("section");
-    panel.className = "backtest-order-timeline";
-    panel.setAttribute("aria-label", context.t("订单历史"));
-    const title = document.createElement("h4");
-    title.textContent = context.t("订单历史 · 与价格图同一时间范围");
-    panel.append(title);
-    const legend = document.createElement("p");
-    legend.className = "backtest-order-timeline-legend";
-    legend.textContent = context.t("提 提交 · 改 改单 · 撮 撮合尝试 · 成 成交 · 撤 撤单请求 · 数字 同时多条记录");
-    panel.append(legend);
+    {limit = 10} = {}) {
     const orders = new Map();
     for (const item of events) {
+      if (item.timestamp < minimum || item.timestamp > maximum) continue;
       const id = String(item.row.order_id || item.order?.order_id || "");
       if (!id) continue;
       if (!orders.has(id)) orders.set(id, []);
       orders.get(id).push(item);
-    }
-    if (!orders.size) {
-      const empty = document.createElement("p");
-      empty.textContent = context.t("当前范围没有订单状态记录");
-      panel.append(empty);
-      return panel;
     }
     const ordered = [...orders].sort((left, right) => (
       Math.max(...right[1].map(item => item.timestamp))
       - Math.max(...left[1].map(item => item.timestamp))
     ));
     const shownCount = Math.min(Math.max(1, limit), ordered.length);
-    const rows = document.createElement("div");
-    rows.className = "backtest-order-timeline-rows";
-    const span = Math.max(1, maximum - minimum);
-    for (const [id, items] of ordered.slice(0, shownCount)) {
-      const row = document.createElement("div");
-      row.className = "backtest-order-timeline-row";
-      const label = document.createElement("button");
-      label.type = "button";
-      label.className = "backtest-order-timeline-id";
-      label.textContent = id;
-      label.setAttribute("aria-label", `${context.t("订单")} ${id}`);
-      label.addEventListener("click", () => onSelect(items));
-      const rail = document.createElement("div");
-      rail.className = "backtest-order-timeline-rail";
-      const at = time => Math.max(0, Math.min(100, (time - minimum) / span * 100));
+    const rows = ordered.slice(0, shownCount);
+    const series = [];
+    const nodes = [];
+    for (const [index, [id, items]] of rows.entries()) {
+      const y = shownCount - index - 1;
       const times = [...new Set(items.map(item => item.timestamp))].sort((a, b) => a - b);
-      const line = document.createElement("span");
-      line.className = "backtest-order-timeline-line";
-      line.style.left = `${at(times[0])}%`;
-      line.style.width = `${Math.max(0, at(times.at(-1)) - at(times[0]))}%`;
-      rail.append(line);
+      series.push({id: `asset-order-line-${id}`, type: "line", name: id,
+        yAxis: "asset-order-axis", data: times.map(time => [time, y]),
+        color: "#8893a5", lineWidth: 2, marker: {enabled: false},
+        enableMouseTracking: false, showInLegend: false,
+        dataGrouping: {enabled: false}});
       for (const time of times) {
         const group = items.filter(item => item.timestamp === time);
-        const node = document.createElement("button");
-        node.type = "button";
-        node.className = "backtest-order-timeline-node";
-        node.style.left = `${at(time)}%`;
         const item = group[0];
         const phase = item.artifact === "fill_detail_data" ? "fill"
           : item.row.kind === "attempt" ? "attempt"
             : item.row.action === "replace" ? "update"
               : item.row.action === "cancel" ? "cancel" : "submit";
-        node.dataset.phase = phase;
-        node.textContent = group.length > 1 ? String(group.length)
-          : ({fill: "成", attempt: "撮", update: "改", cancel: "撤",
-            submit: "提"})[phase];
-        node.setAttribute("aria-label", `${id} · ${new Date(time).toLocaleString()}`
-          + ` · ${group.map(stageLabel).join("、")}`);
-        node.addEventListener("click", () => onSelect(group));
-        rail.append(node);
+        nodes.push({x: time, y,
+          marker: {symbol: group.length > 1 ? "diamond" : ({fill: "circle", attempt: "square",
+            update: "diamond", cancel: "triangle-down", submit: "circle"})[phase],
+          radius: group.length > 1 ? 6 : 4,
+          fillColor: group.length > 1 ? "#64748b" : ({fill: "#16a34a", attempt: "#d97706",
+            update: "#2563eb", cancel: "#dc2626", submit: "#fff"})[phase],
+          lineColor: group.length > 1 ? "#64748b" : ({fill: "#16a34a", attempt: "#d97706",
+            update: "#2563eb", cancel: "#dc2626", submit: "#64748b"})[phase]},
+          custom: {items: group, orderID: id,
+          phase}});
       }
-      row.append(label, rail);
-      rows.append(row);
     }
-    panel.append(rows);
-    if (shownCount < ordered.length) {
-      const footer = document.createElement("div");
-      footer.className = "backtest-order-timeline-more";
-      const pagerButton = (label, action) => window.FTUI?.actionButton
-        ? window.FTUI.actionButton(context.t(label), action)
-        : Object.assign(document.createElement("button"), {
-          type: "button", textContent: context.t(label), onclick: action,
-        });
-      const count = document.createElement("span");
-      count.textContent = `${shownCount} / ${ordered.length} ${context.t("笔订单")}`;
-      const more = pagerButton("加载更多订单", () => onLoadMore(shownCount + 10));
-      footer.append(count, more);
-      panel.append(footer);
-    }
-    return panel;
+    series.push({id: "asset-order-nodes", type: "scatter",
+      name: context.t("订单变化"), yAxis: "asset-order-axis",
+      data: nodes.sort((left, right) => left.x - right.x),
+      dataGrouping: {enabled: false}, showInLegend: false,
+      marker: {symbol: "circle", radius: 4, lineWidth: 1,
+        lineColor: "#64748b", fillColor: "#fff"},
+      dataLabels: {enabled: false},
+      point: {events: {click() { onSelect(this.custom.items, this); }}},
+      tooltip: {enabled: false}});
+    return {rows, total: ordered.length, series};
   }
 
   function tradePriceLines(chart, items) {
@@ -742,7 +707,8 @@
     note.textContent = context.t("价格来自当前行情源；点击 K 线查看行情，点击其上下方的买卖标记查看逐笔事件，并可为每笔成交选择价格线。行情若更新，图上价格可能与回测时不同。");
     const chartMount = document.createElement("div");
     chartMount.className = "backtest-asset-chart";
-    const timelineMount = document.createElement("div");
+    const timelineControls = document.createElement("div");
+    timelineControls.className = "backtest-order-track-controls";
     chartMount.addEventListener("wheel", event => {
       if (event.target?.closest?.(".highcharts-tooltip")) {
         // Let the tooltip scroll itself; do not pass the wheel to Highcharts'
@@ -754,12 +720,12 @@
     inspector.className = "backtest-asset-inspector-mount";
     const list = document.createElement("div");
     list.className = "backtest-asset-events";
-    root.append(heading, note, chartMount, timelineMount, inspector, list);
+    root.append(heading, note, chartMount, timelineControls, inspector, list);
     let generation = 0;
     let events = [];
     let chart = null;
-    let timelineObserver = null;
     let removalObserver = null;
+    let currentPayload = null;
     let page = 1;
     let selectedItems = [];
     const selectedGroups = new Map();
@@ -772,24 +738,35 @@
     let priceCache = null;
     let orderLimit = 10;
     let timelineRange = null;
-    const syncTimelineGeometry = () => {
-      if (!Number.isFinite(chart?.plotLeft) || !Number.isFinite(chart?.plotWidth)) return;
-      timelineMount.style.setProperty("--asset-plot-left", `${chart.plotLeft}px`);
-      timelineMount.style.setProperty("--asset-plot-right", `${Math.max(0,
-        chart.chartWidth - chart.plotLeft - chart.plotWidth)}px`);
-    };
     const renderTimeline = (minimum, maximum) => {
       if (!timelineRange || timelineRange[0] !== minimum
           || timelineRange[1] !== maximum) orderLimit = 10;
       timelineRange = [minimum, maximum];
       const visible = events.filter(item => item.timestamp >= minimum
         && item.timestamp <= maximum);
-      timelineMount.replaceChildren(orderTimeline(context, visible, minimum, maximum,
-        items => select(items), {limit: orderLimit, onLoadMore(next) {
-          orderLimit = next;
+      const model = orderTimeline(context, visible, minimum, maximum,
+        items => select(items), {limit: orderLimit});
+      timelineControls.replaceChildren();
+      const label = document.createElement("span");
+      label.textContent = `${context.t("订单历史")} · ${model.rows.length}/${model.total}`;
+      timelineControls.append(label);
+      const legend = document.createElement("span");
+      legend.textContent = context.t("○ 提交 · ◇ 改单 · □ 撮合 · ● 成交 · ▾ 撤单 · 灰色◇ 同刻多笔");
+      timelineControls.append(legend);
+      if (model.total > model.rows.length) {
+        timelineControls.append(window.FTUI.actionButton(context.t("加载更多订单"), () => {
+          orderLimit += 10;
           renderTimeline(minimum, maximum);
-        }}));
-      syncTimelineGeometry();
+          if (!currentPayload) return;
+          const previous = chart?.xAxis?.[0];
+          const bounds = [previous?.min, previous?.max];
+          chart = window.FTPriceChart.render(context, chartMount, currentPayload,
+            chartDisplayOptions);
+          if (bounds.every(Number.isFinite)) chart?.xAxis?.[0]?.setExtremes(
+            ...bounds, true, false, {trigger: "ft-data-refresh"});
+          tradePriceLines(chart, [...selectedPriceEvents.values()]);
+        }));
+      }
     };
     const renderTable = () => {
       list.replaceChildren();
@@ -993,39 +970,47 @@
       note.textContent = context.t("价格来自当前行情源；点击 K 线查看行情，点击买卖标记查看成交，下方订单历史按订单展示已记录的状态变化。成交可单独显示价格线；订单历史不表示盘口深度或排队位置。行情若更新，图上价格可能与回测时不同。")
         + ` · ${price.payload.data_source || context.t("自动行情源")}` + sampling;
       renderTimeline(visibleMinimum, visibleMaximum);
-      return {...price.payload, product: selected.product,
+      currentPayload = {...price.payload, product: selected.product,
         freq: price.payload.freq || frequency,
-        __assetEvents: events};
+        __assetEvents: events,
+        __ftEventsComplete: matching.sourceCount === matching.events.length};
+      return currentPayload;
+    };
+    const chartDisplayOptions = {
+      assetMode: true, preserveSourceBars: true, showRangeLoading: false,
+      tooltipActiveTime: () => toolkitTime,
+      onMarketClick: openMarket,
+      eventTooltipFields: eventFieldsFor,
+      tooltipEventItems: timestamp => timestamp === toolkitTime ? toolkitItems : [],
+      onTooltipEvents: items => { tooltipEvents = items; },
+      isPriceSelected: item => selectedPriceEvents.has(selectionKey([item])),
+      keepOtherSeriesVisible: true,
+      reuseSeriesPresentation: true,
+      loadingText: context.t("正在读取当前时间范围…"),
+      rangeDebounceMs: 120,
+      overlaySeries: (value, bars) => markerSeries(value.__assetEvents || [], bars,
+        select),
+      orderTimeline: value => {
+        const rows = value.__assetEvents || [];
+        const minimum = timelineRange?.[0] ?? -Infinity;
+        const maximum = timelineRange?.[1] ?? Infinity;
+        return orderTimeline(context, rows, minimum, maximum,
+          items => select(items), {limit: orderLimit});
+      },
+      loadRange: (minimum, maximum, range) => load(minimum, maximum,
+        range.maxPoints, range.visibleMinimum, range.visibleMaximum),
+      onRangeError: error => { note.textContent = error.message || String(error); },
     };
     chartMount.append(window.FTUI.loading(context.t("正在读取行情与交易事件…")));
     const initialSpan = /^(MIN|HOUR)/i.test(frequency) ? 7 * DAY : 30 * DAY;
     load(selected.timestamp - initialSpan, selected.timestamp + initialSpan)
       .then(payload => {
         if (!payload) return;
-        chart = window.FTPriceChart.render(context, chartMount, payload, {
-          assetMode: true, preserveSourceBars: true,
-          tooltipActiveTime: () => toolkitTime,
-          onMarketClick: openMarket,
-          eventTooltipFields: eventFieldsFor,
-          tooltipEventItems: timestamp => timestamp === toolkitTime ? toolkitItems : [],
-          onTooltipEvents: items => { tooltipEvents = items; },
-          isPriceSelected: item => selectedPriceEvents.has(selectionKey([item])),
-          keepOtherSeriesVisible: true,
-          loadingText: context.t("正在读取当前时间范围…"),
-          rangeDebounceMs: 220,
-          overlaySeries: (value, bars) => markerSeries(value.__assetEvents || [], bars,
-            select),
-          loadRange: (minimum, maximum, range) => load(minimum, maximum,
-            range.maxPoints, range.visibleMinimum, range.visibleMaximum),
-          onRangeError: error => { note.textContent = error.message || String(error); },
-        });
+        chart = window.FTPriceChart.render(context, chartMount, payload,
+          chartDisplayOptions);
         if (Number.isFinite(chart?.xAxis?.[0]?.min)
             && Number.isFinite(chart?.xAxis?.[0]?.max)) {
           renderTimeline(chart.xAxis[0].min, chart.xAxis[0].max);
-        }
-        if (window.ResizeObserver && chart) {
-          timelineObserver = new ResizeObserver(syncTimelineGeometry);
-          timelineObserver.observe(chartMount);
         }
       }).catch(error => {
         chartMount.replaceChildren();
@@ -1036,7 +1021,6 @@
     state.assetPlotCleanup = () => {
       generation += 1;
       removalObserver?.disconnect();
-      timelineObserver?.disconnect();
       chartMount.__ftPriceChartObserver?.disconnect?.();
       chart?.destroy?.();
       chart = null;
