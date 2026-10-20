@@ -541,9 +541,10 @@ def test_lightweight_chart_keeps_existing_bars_after_zoom_out(view: str) -> None
             };
             return chart;
           }};
-          const loadRange = async () => {
+          const loadRange = async (minimum, maximum) => {
             window.__requests += 1;
             const shortened = bars.slice(3, 5);
+            if (view === 'price' && maximum - minimum >= 6 * 86400000) return bars;
             return view === 'asset' ? {bars: shortened, events: []} : shortened;
           };
           const root = document.querySelector('#root');
@@ -557,6 +558,9 @@ def test_lightweight_chart_keeps_existing_bars_after_zoom_out(view: str) -> None
         page.wait_for_selector("canvas", timeout=5000)
         assert page.evaluate("Boolean(window.__chart)"), errors
         assert page.evaluate("window.__candleTimes.length") == 8, errors
+        if view == "price":
+            assert page.evaluate("window.__requests") == 0
+            page.evaluate("document.querySelector('.ft-lightweight-price-canvas').dispatchEvent(new Event('pointerdown'))")
         # The first change initializes the subscriber in the asset/factor charts.
         page.evaluate("window.__chart.timeScale().setVisibleRange({from: __bars[1].timestamp / 1000, to: __bars[6].timestamp / 1000})")
         page.evaluate("window.__chart.timeScale().setVisibleRange({from: __bars[3].timestamp / 1000, to: __bars[4].timestamp / 1000})")

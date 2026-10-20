@@ -26,7 +26,7 @@ from tools.products.product_utils import get_product_contracts
 
 from .errors import ProductMarketDataError
 from .ranges import range_bound
-from .sampling import bounded_ohlcv_rows
+from .sampling import bounded_ohlcv_frame, bounded_ohlcv_rows
 
 
 def contract_listing(
@@ -171,6 +171,9 @@ def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
 
     oi_column = open_interest_column(price_frame.columns)
     has_open_interest = oi_column is not None
+    price_frame, total_count = bounded_ohlcv_frame(
+        price_frame, payload, columns, oi_column, time_column=time_column,
+    )
     timezone = getattr(contract_product, "timezone", None) or "Asia/Shanghai"
     rows = [
         format_price_row(
@@ -187,7 +190,7 @@ def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
         )
         for _, row in price_frame.iterrows()
     ]
-    rows, total_count = bounded_ohlcv_rows(rows, payload)
+    rows, _ = bounded_ohlcv_rows(rows, payload)
     name_parts = contract_uid.split("|")
     return {
         "success": True,
