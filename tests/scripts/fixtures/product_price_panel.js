@@ -63,11 +63,38 @@ context.window = context;
 context.FTUI = {
   empty: () => new Node("div"),
   loading: () => new Node("div"),
+  iconButton: (_context, _symbol, label, action) => {
+    const button = new Node("button");
+    button.className = "icon-action-button";
+    button.textContent = label;
+    button.listeners.click = action;
+    return button;
+  },
+  dialogRoot: () => {
+    const dialog = new Node("dialog");
+    dialog.showModal = () => {};
+    return dialog;
+  },
   table: (headers, rows) => {
     tables.push({headers, rows});
     return {shell: new Node("div")};
   },
 };
+const pickers = [];
+context.FTMultiSelectFilter = {create: (_context, options) => {
+  const element = new Node("section");
+  element.className = options.className;
+  const picker = {
+    element, options, items: options.items || [], values: options.selected || [],
+    setItems(items) { this.items = items; },
+    setValues(values) { this.values = values; },
+    setStatus() {},
+    select(value) { options.onChange([value]); },
+  };
+  pickers.push(picker);
+  return picker;
+}};
+context.document.body = new Node("body");
 context.FTPriceChart = {
   barsOf: payload => payload.data.map(row => ({...row, timestamp: Date.parse(row.timestamp),
     openInterest: row.open_interest ?? null})),
@@ -118,28 +145,28 @@ vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);
     startDate: "2025-01-01",
     endDate: "2025-01-03",
   });
-  const selects = walk(root, node => node.tagName === "SELECT");
-  const sourceSelect = selects.find(node => node.className === "product-price-source-select");
-  const adjustedSelect = selects.find(node => node.className === "product-price-adjusted-select");
-  assert.ok(sourceSelect);
-  assert.ok(adjustedSelect);
-  assert.strictEqual(selects.some(node => node.className.includes("frequency")), false);
-  assert.deepStrictEqual(sourceSelect.options.map(node => node.textContent), [
-    "自动", "LocalCNFuturesDAY1 · DAY1", "LocalCNFuturesMIN1 · MIN1",
+  const sourcePicker = pickers.find(node => node.element.className === "product-price-source-filter");
+  const adjustedPicker = pickers.find(node => node.element.className === "product-price-adjusted-filter");
+  assert.ok(sourcePicker);
+  assert.ok(adjustedPicker);
+  assert.deepStrictEqual(Array.from(sourcePicker.items, node => node.label), [
+    "自动选择", "LocalCNFuturesDAY1 · DAY1", "LocalCNFuturesMIN1 · MIN1",
   ]);
   assert.strictEqual(requests[0].freq, undefined);
   assert.strictEqual(requests[0].data_source, undefined);
   assert.strictEqual(requests[0].adjusted, false);
+  const info = walk(root, node => node.className === "icon-action-button")[0];
+  info.listeners.click();
   assert.strictEqual(tables.at(-1).rows.some(row => row[1] === "未复权"), true);
 
-  sourceSelect.value = "LocalCNFuturesMIN1";
-  sourceSelect.listeners.change();
+  sourcePicker.select("LocalCNFuturesMIN1");
   await settle();
   assert.strictEqual(requests[1].data_source, "LocalCNFuturesMIN1");
   assert.strictEqual(requests[1].freq, undefined);
+  assert.strictEqual(requests[1].max_points, 600);
+  assert.ok(requests[1].start_date);
 
-  adjustedSelect.value = "adjusted";
-  adjustedSelect.listeners.change();
+  adjustedPicker.select("adjusted");
   await settle();
   assert.strictEqual(requests[2].data_source, "LocalCNFuturesMIN1");
   assert.strictEqual(requests[2].adjusted, true);
@@ -149,6 +176,7 @@ vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);
   await charts.at(-1).options.loadRange(Date.parse("2025-01-01"),
     Date.parse("2025-01-03"), 2400);
   assert.strictEqual(requests.at(-1).max_points, 2400);
+  info.listeners.click();
   assert.strictEqual(tables.at(-1).rows.some(row => row[1] === "连续合约换月平滑复权"), true);
   assert.strictEqual(tables.at(-1).rows.some(row => row[1] === "raw × adjustment_mul + adjustment_add"), true);
 
@@ -158,14 +186,13 @@ vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);
     contractName: "A2501",
     source: "server",
   });
-  const contractSelects = walk(contractRoot, node => node.tagName === "SELECT");
+  const contractPickers = pickers.slice(2);
   assert.deepStrictEqual(
-    contractSelects.find(node => node.className === "product-price-source-select")?.options
-      .map(node => node.textContent),
-    ["自动", "LocalCNFuturesMIN1 · MIN1"],
+    Array.from(contractPickers[0].items, node => node.label),
+    ["自动选择", "LocalCNFuturesMIN1 · MIN1"],
   );
   assert.strictEqual(
-    walk(contractRoot, node => node.className.includes("product-price-adjusted"))[0].hidden,
+    contractPickers[1].element.hidden,
     true,
   );
   assert.strictEqual(requests.at(-1).contract_uid, "DCE|F|A|2501");

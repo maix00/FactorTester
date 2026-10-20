@@ -30,13 +30,6 @@
       || context.t("未命名数据源");
   }
 
-  function option(select, value, label) {
-    const item = document.createElement("option");
-    item.value = value;
-    item.textContent = label;
-    select.append(item);
-  }
-
   function priceStateFromLocation() {
     const query = new URLSearchParams(location.search);
     return {
@@ -80,30 +73,29 @@
   function renderControls(context, state, options) {
     const controls = document.createElement("div");
     controls.className = "product-price-controls";
-
-    const sourceField = document.createElement("label");
-    sourceField.className = "product-price-control";
-    sourceField.append(Object.assign(document.createElement("span"), {
-      textContent: context.t("数据源"),
-    }));
-    const sourceSelect = document.createElement("select");
-    sourceSelect.className = "product-price-source-select";
-    sourceSelect.setAttribute("aria-label", context.t("数据源"));
-    sourceField.append(sourceSelect);
-    controls.append(sourceField);
-
-    const adjustedField = document.createElement("label");
-    adjustedField.className = "product-price-control product-price-adjusted";
-    adjustedField.append(Object.assign(document.createElement("span"), {
-      textContent: context.t("价格序列"),
-    }));
-    const adjustedSelect = document.createElement("select");
-    adjustedSelect.className = "product-price-adjusted-select";
-    adjustedSelect.setAttribute("aria-label", context.t("价格序列"));
-    option(adjustedSelect, "raw", context.t("原始价格"));
-    option(adjustedSelect, "adjusted", context.t("复权价格"));
-    adjustedField.append(adjustedSelect);
-    controls.append(adjustedField);
+    const sourcePicker = FTMultiSelectFilter.create(context, {
+      title: context.t("数据源"), multi: false, compact: true,
+      className: "product-price-source-filter", items: [], selected: [""],
+      onChange: values => {
+        state.dataSource = values[0] || "";
+        state.sourceFreq = state.sourceFreqByAlias?.[state.dataSource] || "";
+        options.reload();
+      },
+    });
+    const adjustedPicker = FTMultiSelectFilter.create(context, {
+      title: context.t("价格序列"), multi: false, compact: true,
+      className: "product-price-adjusted-filter",
+      items: [
+        {value: "raw", label: context.t("原始价格")},
+        {value: "adjusted", label: context.t("复权价格")},
+      ],
+      selected: [state.adjusted ? "adjusted" : "raw"],
+      onChange: values => {
+        state.adjusted = values[0] === "adjusted";
+        options.reload();
+      },
+    });
+    controls.append(sourcePicker.element, adjustedPicker.element);
 
     const frequency = document.createElement("span");
     frequency.className = "product-price-frequency";
@@ -116,35 +108,27 @@
 
     function apply(payload) {
       const entries = sourceEntries(payload.available_sources);
+      state.sourceFreqByAlias = Object.fromEntries(entries.map(item => [item.alias, item.freq]));
       const actual = String(payload.data_source || state.dataSource || "").trim();
-      sourceSelect.replaceChildren();
-      option(sourceSelect, "", context.t("自动"));
-      entries.forEach(item => option(
-        sourceSelect, item.alias, sourceLabel(context, item),
-      ));
+      sourcePicker.setItems([
+        {value: "", label: context.t("自动选择"), exclusive: true},
+        ...entries.map(item => ({value: item.alias, label: sourceLabel(context, item)})),
+      ]);
       state.dataSource = actual;
-      sourceSelect.value = entries.some(item => item.alias === actual) ? actual : "";
+      sourcePicker.setValues([entries.some(item => item.alias === actual) ? actual : ""]);
+      state.sourceFreq = entries.find(item => item.alias === actual)?.freq || payload.freq || "";
       state.adjusted = Boolean(payload.supports_adjusted && payload.adjusted);
-      adjustedSelect.value = state.adjusted ? "adjusted" : "raw";
-      adjustedField.hidden = !payload.supports_adjusted;
+      adjustedPicker.setValues([state.adjusted ? "adjusted" : "raw"]);
+      adjustedPicker.element.hidden = !payload.supports_adjusted;
       frequencyValue.textContent = payload.freq || entries.find(
         item => item.alias === actual,
       )?.freq || context.t("暂无频率");
     }
 
     function setBusy(busy) {
-      sourceSelect.disabled = busy || sourceSelect.options.length <= 1;
-      adjustedSelect.disabled = busy;
+      sourcePicker.setStatus({loading: busy});
+      adjustedPicker.setStatus({loading: busy});
     }
-
-    sourceSelect.addEventListener("change", () => {
-      state.dataSource = sourceSelect.value;
-      options.reload();
-    });
-    adjustedSelect.addEventListener("change", () => {
-      state.adjusted = adjustedSelect.value === "adjusted";
-      options.reload();
-    });
 
     apply({
       available_sources: [],
@@ -152,7 +136,7 @@
       adjusted: state.adjusted,
       supports_adjusted: false,
     });
-    return {controls, apply, setBusy};
+    return {controls, apply, setBusy, sourcePicker, adjustedPicker};
   }
 
   async function render(context, mount, options = {}) {
@@ -162,26 +146,59 @@
     const targetName = contractUID || String(product.name || "").trim();
     const state = {
       ...priceStateFromLocation(),
+      sourceFreq: contractUID ? "MIN1" : "",
       ...(options.dataSource ? {dataSource: options.dataSource} : {}),
       ...(options.adjusted !== undefined ? {adjusted: Boolean(options.adjusted)} : {}),
     };
     const root = document.createElement("section");
     root.className = "product-price-panel";
-    root.append(Object.assign(document.createElement("h2"), {
+    const heading = document.createElement("div");
+    heading.className = "product-price-heading";
+    heading.append(Object.assign(document.createElement("h2"), {
       textContent: context.t("价格曲线"),
     }));
-    const metadataMount = document.createElement("div");
-    metadataMount.className = "product-price-metadata";
+    let metadataPayload = null;
+    const information = FTUI.iconButton(context, "doc.text.magnifyingglass",
+      "数据源信息", () => {
+        if (!metadataPayload) return;
+        const dialog = FTUI.dialogRoot(context);
+        const card = document.createElement("form");
+        card.method = "dialog";
+        card.className = "dialog-card wide";
+        const close = document.createElement("button");
+        close.type = "submit";
+        close.className = "dialog-close";
+        close.setAttribute("aria-label", context.t("关闭"));
+        close.textContent = "×";
+        card.append(close, Object.assign(document.createElement("h2"), {
+          textContent: context.t("数据源信息"),
+        }), metadata(context, metadataPayload));
+        dialog.append(card);
+        dialog.addEventListener("close", () => dialog.remove(), {once: true});
+        document.body.append(dialog);
+        dialog.showModal();
+      });
+    information.disabled = true;
+    heading.append(information);
+    root.append(heading);
     const chartMount = document.createElement("div");
     chartMount.className = "product-price-chart-mount";
     const controls = renderControls(context, state, {
       reload: () => load(),
     });
-    root.append(controls.controls, metadataMount, chartMount);
+    root.append(controls.controls, chartMount);
     mount.replaceChildren(root);
 
     let requestID = 0;
     let disposePriceChart = null;
+    let pendingFocus = null;
+    root.focusRange = (start, end) => {
+      const minimum = Date.parse(start);
+      const maximum = Date.parse(end);
+      if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) return;
+      pendingFocus = [minimum, maximum + 24 * 60 * 60 * 1000];
+      disposePriceChart?.focusRange?.(...pendingFocus);
+    };
     let removalObserver = null;
     if (window.MutationObserver) {
       removalObserver = new MutationObserver(() => {
@@ -231,16 +248,31 @@
       disposePriceChart?.();
       disposePriceChart = null;
       controls.setBusy(true);
-      metadataMount.replaceChildren(FTUI.loading(context.t("正在读取数据能力…")));
+      information.disabled = true;
       chartMount.replaceChildren(FTUI.loading(context.t("正在读取价格曲线…")));
       try {
-        const value = await fetchRange(undefined, undefined, 1200);
+        // An intraday source may contain millions of rows. Start with a
+        // bounded recent overview; the chart asks for precise bars on zoom.
+        const intraday = /^(MIN|HOUR)/i.test(state.sourceFreq || "");
+        const end = Date.parse(options.endDate || "") || Date.now();
+        const recentStart = Math.max(Date.parse(options.startDate || "") || 0,
+          end - 14 * 24 * 60 * 60 * 1000);
+        let value;
+        try {
+          value = await fetchRange(intraday ? recentStart : undefined,
+            intraday ? end : undefined, intraday ? 600 : 1200);
+        } catch (error) {
+          if (!intraday) throw error;
+          // Historical contracts can have sparse data in the last fortnight.
+          value = await fetchRange(undefined, undefined, 600);
+        }
         if (!current(context) || requestIDForLoad !== requestID) return;
         if (value?.success === false) {
           throw new Error(value.error || context.t("请求失败"));
         }
         controls.apply(value || {});
-        metadataMount.replaceChildren(metadata(context, value || {}));
+        metadataPayload = value || {};
+        information.disabled = false;
         if (window.FTPriceChart?.barsOf && Array.isArray(value?.data)) {
           await window.FTStaticLoader.loadGroups(["chart-workbench-price"]);
           if (!current(context) || requestIDForLoad !== requestID) return;
@@ -254,6 +286,7 @@
               FTPriceChart.barsOf(await fetchRange(minimum, maximum, maxPoints))
             ),
           });
+          if (pendingFocus) disposePriceChart?.focusRange?.(...pendingFocus);
         } else {
           chartMount.replaceChildren(FTUI.empty(
             context.t("价格曲线暂不可用"), context.t("暂无可绘制数据"),
@@ -261,9 +294,7 @@
         }
       } catch (error) {
         if (!current(context) || requestIDForLoad !== requestID) return;
-        metadataMount.replaceChildren(FTUI.empty(
-          context.t("数据能力读取失败"), error.message || "",
-        ));
+        metadataPayload = null;
         chartMount.replaceChildren(FTUI.empty(
           context.t("价格曲线读取失败"), error.message || "",
         ));
