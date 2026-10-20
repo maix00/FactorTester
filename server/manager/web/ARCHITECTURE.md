@@ -277,6 +277,19 @@ are selected from the frozen task/result identity; they are not loaded for a
 configuration-only task. The `job-detail-previews` group is loaded only when a
 result declaration is expanded, so Highcharts, price data, table viewers, and
 image adapters are not executed merely because a task has artifacts.
+The product catalog price panel requests `chart-workbench-price` only after its
+price data arrives. The backtest Asset Plot requests `chart-workbench-asset`
+only after its first range of bars and Job events arrives. Both groups load the
+same pinned Lightweight Charts runtime and React bundle, rather than two copies
+of React. The Asset Plot keeps the existing event query, filters, audit table,
+and market-range API; its React view draws candles, volume, open interest,
+fills, price lines, and order lifecycles on a shared chart time scale. The
+factor-series result requests `chart-workbench-factor` after its Job result and
+market data arrive; it groups the selected factor's nested layers by product
+and draws each layer as an independently toggleable indicator pane beside
+candles, volume, and open interest. This replaces the factor-series-specific
+Highcharts renderer. Other Job and research chart viewers keep Highcharts until
+their data and interaction contracts pass the same migration checks.
 `job-detail-input` is separate from the normal detail route and is loaded only
 for an explicitly opened input file. The formatter is loaded before the list
 controller, so detail and list pages reuse the stable helper seam without

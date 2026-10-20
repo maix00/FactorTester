@@ -32,6 +32,10 @@
     return layer ? `${name} · ${layer}` : name;
   }
 
+  function productIdentity(item) {
+    return String(item?.product || item?.name || item?.code || "");
+  }
+
   function label(item) {
     const name = identity(item);
     const desc = String(item?.desc || "");
@@ -85,6 +89,7 @@
   }
 
   window.FTFactorSeriesModel = Object.freeze({
-    build, factorIdentity, factorLabel, identity, label, points, priceRequest,
+    build, factorIdentity, factorLabel, identity, productIdentity, label, points,
+    priceRequest,
   });
 })();

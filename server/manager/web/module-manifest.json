@@ -63,13 +63,22 @@
    "katex/katex.min.js"
   ],
   "catalog": [
-   "vendor/highcharts/highstock.min.js",
    "katex/katex.min.js"
   ],
-  "catalog-product-detail": [
-   "vendor/highcharts/highstock.min.js"
+  "catalog-product-detail": [],
+  "profile": [],
+  "chart-workbench-price": [
+   "vendor/lightweight-charts/lightweight-charts.standalone.production.js",
+   "vendor/chart-workbench/chart-workbench.js"
   ],
-  "profile": []
+  "chart-workbench-asset": [
+   "vendor/lightweight-charts/lightweight-charts.standalone.production.js",
+   "vendor/chart-workbench/chart-workbench.js"
+  ],
+  "chart-workbench-factor": [
+   "vendor/lightweight-charts/lightweight-charts.standalone.production.js",
+   "vendor/chart-workbench/chart-workbench.js"
+  ]
  },
  "group_dependencies": {
   "code-viewer": [
@@ -407,6 +416,15 @@
   "factor-catalog-runtime": [],
   "access-table": [
    "core"
+  ],
+  "chart-workbench-price": [
+   "charts"
+  ],
+  "chart-workbench-asset": [
+   "charts"
+  ],
+  "chart-workbench-factor": [
+   "charts"
   ]
  },
  "control_groups": {
@@ -809,7 +827,6 @@
   ],
   "job-detail-factor-series": [
    "test-modules/factor-evaluation/results/model.js",
-   "test-modules/factor-evaluation/results/chart.js",
    "test-modules/factor-evaluation/results/view.js"
   ],
   "job-detail-ic": [
@@ -1047,13 +1064,18 @@
   ],
   "access-table": [
    "manager/access-control-table.js"
-  ]
+  ],
+  "chart-workbench-price": [],
+  "chart-workbench-asset": [],
+  "chart-workbench-factor": []
  },
  "external_scripts": [
   "katex/katex.min.js",
   "vendor/highlight/highlight.min.js",
   "vendor/highcharts/highstock.min.js",
-  "vendor/cytoscape/cytoscape.min.js"
+  "vendor/cytoscape/cytoscape.min.js",
+  "vendor/lightweight-charts/lightweight-charts.standalone.production.js",
+  "vendor/chart-workbench/chart-workbench.js"
  ],
  "scripts": [
   "core/module-loader.js",
@@ -1086,7 +1108,6 @@
   "jobs/highcharts-timeline.js",
   "jobs/highcharts-viewers.js",
   "test-modules/factor-evaluation/results/model.js",
-  "test-modules/factor-evaluation/results/chart.js",
   "jobs/ic-result-model.js",
   "jobs/ic-portfolio-view.js",
   "jobs/ic-result-charts.js",
@@ -1738,6 +1759,9 @@
   "vendor/xpert-chatkit/pets/steve/pet.json",
   "vendor/xpert-chatkit/pets/steve/spritesheet.webp",
   "vendor/xpert-chatkit/xpert-chatkit.js",
-  "vendor/xpert-chatkit/UPSTREAM"
+  "vendor/xpert-chatkit/UPSTREAM",
+  "vendor/lightweight-charts/LICENSE",
+  "vendor/lightweight-charts/NOTICE",
+  "vendor/lightweight-charts/UPSTREAM"
  ]
 }

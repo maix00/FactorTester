@@ -52,6 +52,13 @@
     return root;
   }
 
+  function disposeCharts(target) {
+    target.querySelectorAll?.(".factor-series-chart-mount").forEach(chart => {
+      chart.__ftFactorDispose?.();
+      chart.__ftFactorDispose = null;
+    });
+  }
+
   function embedded(context, options) {
     const target = document.createElement("div");
     target.className = "factor-series-result-content";
@@ -96,6 +103,7 @@
     );
     if (standard) {
       content.append(standard);
+      disposeCharts(target);
       target.replaceChildren(header, content);
       return;
     }
@@ -104,15 +112,18 @@
         onTabsChanged: () => render(context, target, state),
         onDeleted: () => { state.activeTab = "series"; render(context, target, state); },
       });
+      disposeCharts(target);
       target.replaceChildren(header, content);
       return;
     }
     renderSeriesContent(context, content, state);
+    disposeCharts(target);
     target.replaceChildren(header, content);
   }
 
   function renderSeriesContent(context, target, state) {
     const {model, options} = state;
+    disposeCharts(target);
     target.replaceChildren();
     if (!model.series.length) {
       target.append(FTUI.empty(context.t("暂无因子序列"), ""));
@@ -125,7 +136,7 @@
     let selectedFactor = state.selectedFactor
       || window.FTFactorSeriesModel.factorIdentity(model.series[0], model);
     let selectedProduct = state.selectedProduct
-      || window.FTFactorSeriesModel.identity(model.series.find(item => (
+      || window.FTFactorSeriesModel.productIdentity(model.series.find(item => (
         window.FTFactorSeriesModel.factorIdentity(item, model) === selectedFactor
       )) || model.series[0]);
     const source = document.createElement("small");
@@ -157,9 +168,9 @@
     ])).values()];
     const productItems = () => [...new Map(model.series
       .filter(item => window.FTFactorSeriesModel.factorIdentity(item, model) === selectedFactor)
-      .map(item => [window.FTFactorSeriesModel.identity(item), {
-        value: window.FTFactorSeriesModel.identity(item),
-        label: window.FTFactorSeriesModel.label(item),
+      .map(item => [window.FTFactorSeriesModel.productIdentity(item), {
+        value: window.FTFactorSeriesModel.productIdentity(item),
+        label: window.FTFactorSeriesModel.productIdentity(item),
       }])).values()];
     const factorPicker = window.FTMultiSelectFilter.create(context, {
       title: context.t("因子"), compact: true, multi: false,
@@ -218,11 +229,13 @@
     adjustmentField, adjustmentState,
   ) {
     const generation = ++adjustmentState.generation;
-    window.FTFactorSeriesChart.dispose(chart);
-    const item = model.series.find(value => (
-      window.FTFactorSeriesModel.identity(value) === product
+    chart.__ftFactorDispose?.();
+    chart.__ftFactorDispose = null;
+    const items = model.series.filter(value => (
+      window.FTFactorSeriesModel.productIdentity(value) === product
       && window.FTFactorSeriesModel.factorIdentity(value, model) === factor
-    )) || model.series[0];
+    ));
+    const item = items[0] || model.series[0];
     chart.replaceChildren(FTUI.loading(context.t("正在读取价格与因子曲线…")));
     tableMount.replaceChildren();
     note.textContent = "";
@@ -244,29 +257,32 @@
       ? contractPayload.contracts : [];
     adjustmentField.hidden = !supportsPriceAdjustment(contractPayload);
     try {
-      const chartInstance = window.FTFactorSeriesChart.mount(context, chart, {
-        product,
-        factorLabel: window.FTFactorSeriesModel.factorLabel(item, model),
-        factorSeries: item,
-        price: price.payload,
-        contracts: rows,
-      }, {
-        loadingText: context.t("正在读取当前时间范围…"),
-        rangeOverscanBeforeMs: window.FTMarketData.rangeContextMs(request.freq),
-        loadRange: async (minimum, maximum, range = {}) => {
+      await window.FTStaticLoader.loadGroups(["chart-workbench-factor"]);
+      if (generation !== adjustmentState.generation || !chart.isConnected) return;
+      const indicator = (value, index, label) => ({
+        id: `${index}:${label}`,
+        label,
+        points: (value.dates || []).map((date, pointIndex) => ({
+          timestamp: window.FTPriceChart.timestampOf(date),
+          value: value.values?.[pointIndex] == null || value.values[pointIndex] === ""
+            ? null : Number(value.values[pointIndex]),
+        })).filter(point => Number.isFinite(point.timestamp)),
+      });
+      const indicators = (items.length ? items : [item]).map((value, index) =>
+        indicator(value, index, value.layer || window.FTFactorSeriesModel.factorLabel(value, model)));
+      const chartInstance = window.FTChartWorkbench.mountFactorChart(chart, {
+        product, indicators,
+        bars: window.FTPriceChart.barsOf(price.payload),
+        translate: value => context.t(value),
+        loadRange: async (minimum, maximum, maxPoints) => {
           const ranged = window.FTMarketData.rangeRequest(
-            request, minimum, maximum, range.maxPoints,
+            request, minimum, maximum, maxPoints,
           );
           const result = await window.FTMarketData.prices(context, ranged, price.source);
-          return {
-            ...result.payload,
-            __ftRange: {
-              minimum: range.visibleMinimum ?? minimum,
-              maximum: range.visibleMaximum ?? maximum,
-            },
-          };
+          return window.FTPriceChart.barsOf(result.payload);
         },
       });
+      chart.__ftFactorDispose = chartInstance.dispose;
       note.textContent = price.source
         ? `${context.t("行情来源")}：${context.t(price.source === "local" ? "本地" : "服务器")}`
         : context.t("价格不可用，仅显示因子序列");
@@ -295,7 +311,7 @@
         const item = rows[index];
         const from = window.FTPriceChart.timestampOf(item.start || item.start_date);
         const to = window.FTPriceChart.timestampOf(item.end || item.end_date);
-        if (Number.isFinite(from) && Number.isFinite(to)) chart?.xAxis?.[0]?.setExtremes(from, to);
+        if (Number.isFinite(from) && Number.isFinite(to)) chart?.setVisibleRange?.(from, to);
       });
     });
     target.replaceChildren(title, view.shell);

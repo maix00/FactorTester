@@ -289,6 +289,9 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .product-price-frequency { align-self: end; padding: 7px 0; color: var(--muted); font-size: 12px; }
 .product-price-frequency b { font-weight: 600; color: inherit; }
 .product-price-chart-mount { min-width: 0; }
+.ft-lightweight-price-canvas { width: 100%; min-width: 0; height: 460px; }
+.ft-lightweight-price-detail { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-size: 12px; }
+.ft-lightweight-price-error { color: var(--danger, #c1333d); font-size: 12px; }
 .product-category-filter { display: grid; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
 .ft-multi-select-filter { display: grid; gap: 6px; width: 100%; max-width: 440px; min-width: 0; }
 .ft-multi-select-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-width: 0; }
