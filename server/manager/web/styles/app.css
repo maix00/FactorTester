@@ -282,8 +282,13 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .product-category-filter, .product-tree-panel, .product-search-results, .product-group-products,
 .product-detail-metadata, .product-term-structure, .product-price-section { display: grid; gap: 12px; }
 .product-price-panel { display: grid; gap: 12px; min-width: 0; }
-.product-price-heading { display: flex; align-items: center; gap: 8px; }
-.product-price-heading h2 { margin: 0; }
+.product-price-heading { display: flex; align-items: center; min-height: 32px; gap: 4px; }
+.product-price-heading h2 { margin: 0 4px 0 0; line-height: 32px; }
+.product-price-heading .icon-action-button { align-self: center; flex: 0 0 30px; }
+.product-price-info-dialog { width: min(680px, calc(100vw - 24px)); max-width: none; }
+.product-price-info-card { width: 100%; height: auto; max-height: calc(100dvh - 24px);
+  grid-template-rows: auto minmax(0, auto); overflow: hidden; }
+.product-price-info-card .table-shell { max-height: min(460px, calc(100dvh - 112px)); overflow: auto; }
 .product-price-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .product-price-controls .ft-multi-select-filter { width: min(260px, 100%); }
 .product-price-frequency { align-self: end; padding: 7px 0; color: var(--muted); font-size: 12px; }
