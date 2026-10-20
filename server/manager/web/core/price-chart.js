@@ -35,6 +35,7 @@
     });
     const chart = highcharts.stockChart(target, chartOptions);
     target.__ftPriceChart = chart;
+    chart._ftCompleteRange = chartOptions._ftCompleteRange || null;
     if (window.ResizeObserver) {
       const observer = new ResizeObserver(() => chart.reflow?.());
       observer.observe(target);
@@ -110,7 +111,8 @@
   }
 
   function tooltipNumber(value) {
-    return Number.isFinite(Number(value)) ? Number(value).toLocaleString(
+    return value !== null && value !== undefined && value !== ""
+      && Number.isFinite(Number(value)) ? Number(value).toLocaleString(
       undefined, {maximumFractionDigits: 6},
     ) : "—";
   }
@@ -150,8 +152,22 @@
     return Number.isSafeInteger(count) && count > 0 ? unit * count : undefined;
   }
 
-  function assetTooltipFormatter(context, bars, overlay, displayOptions) {
+  function assetTooltipFormatter(context, bars, overlay, displayOptions,
+    sourceIntervalMs) {
     const byTime = new Map(bars.map(bar => [bar.timestamp, bar]));
+    const nearestBar = timestamp => {
+      let low = 0; let high = bars.length;
+      while (low < high) {
+        const middle = (low + high) >>> 1;
+        if (bars[middle].timestamp < timestamp) low = middle + 1;
+        else high = middle;
+      }
+      const next = bars[low]; const previous = bars[low - 1];
+      if (!next) return previous;
+      if (!previous) return next;
+      return timestamp - previous.timestamp <= next.timestamp - timestamp
+        ? previous : next;
+    };
     const eventsByTime = new Map();
     for (const series of overlay) {
       for (const point of series.data || []) {
@@ -171,10 +187,13 @@
       const candle = plotted("candlestick");
       const volume = plotted("column");
       const interest = plotted("line");
+      const nearby = !candle && Number.isFinite(sourceIntervalMs)
+        ? nearestBar(timestamp) : null;
       const bar = byTime.get(timestamp) || (candle && {
         open: candle.open, high: candle.high, low: candle.low, close: candle.close,
         volume: volume?.y, openInterest: interest?.y,
-      });
+      }) || (nearby && Math.abs(nearby.timestamp - timestamp) <= sourceIntervalMs
+        ? nearby : null);
       if (!bar) return false;
       const time = new Date(timestamp).toLocaleString(localeTag(context));
       const lines = [
@@ -231,8 +250,10 @@
       const timestamp = Number(this.value);
       if (!Number.isFinite(timestamp)) return String(this.value ?? "");
       const span = Number(this.axis?.max) - Number(this.axis?.min);
-      const options = Number.isFinite(span) && span <= 3 * 86400000
-        ? {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false}
+      const options = Number.isFinite(span) && span <= 86400000
+        ? {hour: "2-digit", minute: "2-digit", hour12: false}
+        : Number.isFinite(span) && span <= 3 * 86400000
+          ? {month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false}
         : {year: "numeric", month: "short", day: "numeric"};
       try {
         return new Intl.DateTimeFormat(locale, options).format(new Date(timestamp));
@@ -246,12 +267,15 @@
     const t = value => context?.t?.(value) || value;
     const hasOI = bars.some(item => item.openInterest !== null);
     const eventLane = displayOptions.eventLane === true;
+    const orderTimeline = typeof displayOptions.orderTimeline === "function"
+      ? displayOptions.orderTimeline(payload) : null;
+    const hasOrders = Boolean(orderTimeline);
     const title = [payload?.product || payload?.product_name || "", payload?.desc || ""]
       .filter(Boolean).join(" — ");
-    const priceHeight = hasOI ? (eventLane ? "42%" : "50%")
-      : (eventLane ? "54%" : "62%");
-    const volumeTop = hasOI ? "55%" : "67%";
-    const volumeHeight = hasOI ? "23%" : "31%";
+    const priceHeight = hasOrders ? (hasOI ? 245 : 300)
+      : hasOI ? (eventLane ? "42%" : "50%") : (eventLane ? "54%" : "62%");
+    const volumeTop = hasOrders ? (hasOI ? 260 : 315) : hasOI ? "55%" : "67%";
+    const volumeHeight = hasOrders ? (hasOI ? 80 : 105) : hasOI ? "23%" : "31%";
     const yAxis = [
       {...axis(priceHeight, eventLane ? "8%" : "0%", true),
         ...(displayOptions.assetMode ? {minPadding: 0.1, maxPadding: 0.1} : {})},
@@ -280,7 +304,7 @@
       },
     ];
     if (hasOI) {
-      yAxis.push(axis("17%", "82%", false));
+      yAxis.push(axis(hasOrders ? 60 : "17%", hasOrders ? 355 : "82%", false));
       series.push({
         type: "line", name: t("持仓量"), yAxis: 2,
         data: bars.map(item => [item.timestamp, item.openInterest]),
@@ -295,12 +319,32 @@
       labels: {enabled: false}, lineWidth: 0, gridLineWidth: 0,
       startOnTick: false, endOnTick: false,
     });
+    if (hasOrders) {
+      const rows = orderTimeline.rows || [];
+      yAxis.push({id: "asset-order-axis", ...axis(
+        Math.max(36, rows.length * 28 + 8), hasOI ? 430 : 440, false),
+      min: -0.5, max: Math.max(0.5, rows.length - 0.5),
+      tickPositions: rows.map((_, index) => index),
+      labels: {align: "right", x: -4, style: {fontSize: "10px"},
+        formatter() {
+          const row = rows[rows.length - 1 - Number(this.value)];
+          return row ? String(row[0]).slice(-12) : "";
+        }},
+      title: {text: null}, gridLineWidth: 1,
+      startOnTick: false, endOnTick: false});
+      series.push(...orderTimeline.series);
+    }
     const overlay = typeof displayOptions.overlaySeries === "function"
       ? displayOptions.overlaySeries(payload, bars) : [];
     if (Array.isArray(overlay)) series.push(...overlay);
     return {
+      _ftCompleteRange: Number(payload?.count) === Number(payload?.returned_count)
+        && Number(payload?.count) === bars.length
+        && (!displayOptions.assetMode || payload?.__ftEventsComplete === true)
+        ? [bars[0]?.timestamp, bars[bars.length - 1]?.timestamp] : null,
       chart: {
-        animation: false, height: 650,
+        animation: false, height: hasOrders ? 660 + Math.max(1,
+          orderTimeline.rows.length) * 28 : 650,
         panning: {enabled: true, type: "x"}, panKey: "shift",
         zooming: {type: "x", mouseWheel: {enabled: true, type: "x"}},
       },
@@ -321,13 +365,16 @@
       xAxis: {
         type: "datetime", ordinal: true,
         minRange: frequencyIntervalMs(payload?.freq),
-        labels: {formatter: dateLabelFormatter(context)},
+        tickPixelInterval: 140,
+        labels: {formatter: dateLabelFormatter(context),
+          autoRotation: [-45], style: {whiteSpace: "nowrap"}},
       },
       yAxis,
       tooltip: {shared: true, split: false, valueDecimals: 2,
         ...(eventLane || displayOptions.assetMode
           ? {useHTML: true, stickOnContact: true, hideDelay: 400,
-            formatter: assetTooltipFormatter(context, bars, overlay, displayOptions)} : {})},
+            formatter: assetTooltipFormatter(context, bars, overlay, displayOptions,
+              frequencyIntervalMs(payload?.freq))} : {})},
       navigator: {enabled: true, adaptToUpdatedData: false},
       scrollbar: {enabled: true},
       plotOptions: {series: {

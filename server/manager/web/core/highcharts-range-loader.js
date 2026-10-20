@@ -1,5 +1,12 @@
 (() => {
-  function replaceVisibleSeries(chart, nextOptions, minimum, maximum) {
+  function replaceVisibleSeries(chart, nextOptions, minimum, maximum,
+    {reusePresentation = false} = {}) {
+    const orderAxis = nextOptions?.yAxis?.find(axis => axis.id === "asset-order-axis");
+    if (orderAxis) chart.get?.("asset-order-axis")?.update?.(orderAxis, false);
+    if (Number.isFinite(nextOptions?.chart?.height)
+        && nextOptions.chart.height !== chart.chartHeight) {
+      chart.setSize?.(null, nextOptions.chart.height, false);
+    }
     const definitions = Array.isArray(nextOptions?.series) ? nextOptions.series : [];
     const visible = chart.series.filter(series => !series.options?.isInternal);
     const remaining = new Set(visible);
@@ -12,10 +19,14 @@
       if (!current) { chart.addSeries(definition, false); return; }
       remaining.delete(current);
       const {data, ...presentation} = definition;
-      current.update(presentation, false);
+      if (!reusePresentation) current.update(presentation, false);
       current.setData(data || [], false, false, false);
     });
     remaining.forEach(series => series.remove(false));
+    // Tooltip formatters close over the bars in their own range. Replacing only
+    // series leaves the formatter reading the previous range's OHLCV/OI rows.
+    if (nextOptions?.tooltip) chart.tooltip?.update?.(nextOptions.tooltip);
+    chart._ftCompleteRange = nextOptions?._ftCompleteRange || null;
     chart.xAxis[0]?.setExtremes(
       Number.isFinite(minimum) ? minimum : undefined,
       Number.isFinite(maximum) ? maximum : undefined,
@@ -45,11 +56,20 @@
           || !Number.isFinite(Number(event?.min))
           || !Number.isFinite(Number(event?.max))) return;
       const chart = this.chart;
+      const coverage = chart._ftCompleteRange;
+      if (coverage && Number(event.min) >= coverage[0]
+          && Number(event.max) <= coverage[1]) {
+        clearTimeout(chart._ftRangeLoadTimer);
+        chart._ftRangeLoadGeneration = (chart._ftRangeLoadGeneration || 0) + 1;
+        return;
+      }
       clearTimeout(chart._ftRangeLoadTimer);
       const generation = (chart._ftRangeLoadGeneration || 0) + 1;
       chart._ftRangeLoadGeneration = generation;
       chart._ftRangeLoadTimer = setTimeout(async () => {
-        chart.showLoading?.(displayOptions.loadingText || "Loading…");
+        if (displayOptions.showRangeLoading !== false) {
+          chart.showLoading?.(displayOptions.loadingText || "Loading…");
+        }
         try {
           const minimum = Number(event.min);
           const maximum = Number(event.max);
@@ -83,11 +103,13 @@
           replaceVisibleSeries(
             chart, displayOptions.rangeOptions(payload),
             minimum, maximum,
+            {reusePresentation: displayOptions.reuseSeriesPresentation === true},
           );
         } catch (error) {
           if (error?.name !== "AbortError") displayOptions.onRangeError?.(error);
         } finally {
-          if (chart._ftRangeLoadGeneration === generation) chart.hideLoading?.();
+          if (chart._ftRangeLoadGeneration === generation
+              && displayOptions.showRangeLoading !== false) chart.hideLoading?.();
         }
       }, Math.max(0, Number(displayOptions.rangeDebounceMs) || 120));
     }};
