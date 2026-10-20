@@ -103,7 +103,7 @@ function MarketChart({bars, loadRange, onReady, translate = value => value}: Opt
     const openInterest = hasOpenInterest ? chart.addSeries(api.LineSeries, {
       color: "#805bd6", lineWidth: 2, priceLineVisible: false,
     }, hasVolume ? 2 : 1) : null;
-    const overview = sortedBars(bars);
+    let overview = sortedBars(bars);
     const apply = (rows: Bar[]) => {
       candle.setData(rows.map(bar => ({time: toTime(bar), open: bar.open,
         high: bar.high, low: bar.low, close: bar.close})));
@@ -132,7 +132,7 @@ function MarketChart({bars, loadRange, onReady, translate = value => value}: Opt
     let lastRequest = "";
     const onRange = (range: ChartRange | null) => {
       const desiredRevision = ++revision;
-      if (!range || !loadRange) return;
+      if (!range || !loadRange || !userChangedRange) return;
       if (timer) clearTimeout(timer);
       timer = setTimeout(async () => {
         const minimum = Number(range.from);
@@ -142,13 +142,22 @@ function MarketChart({bars, loadRange, onReady, translate = value => value}: Opt
         if (key === lastRequest) return;
         lastRequest = key;
         try {
-          const detailed = sortedBars(await loadRange(minimum * 1000, maximum * 1000, 2400));
+          const pointBudget = Math.min(5000, Math.max(600,
+            Math.round(node.clientWidth * 2) || 2400));
+          const detailed = sortedBars(await loadRange(
+            minimum * 1000, maximum * 1000, pointBudget));
           if (desiredRevision !== revision) return;
           if (!detailed.length) {
             lastRequest = "";
             return;
           }
-          cached = sortedBars(mergeBars(cached, detailed));
+          // An overview candle summarizes multiple source bars. Keep it only
+          // outside the fetched interval, otherwise it would be drawn beside
+          // the finer candles and misrepresent the same period twice.
+          const start = minimum * 1000;
+          const end = maximum * 1000;
+          cached = sortedBars(mergeBars(overview.filter(bar =>
+            bar.timestamp < start || bar.timestamp > end), detailed));
           const visible = chart.timeScale().getVisibleRange();
           indexed = apply(cached);
           if (visible) chart.timeScale().setVisibleRange(visible);
@@ -173,12 +182,20 @@ function MarketChart({bars, loadRange, onReady, translate = value => value}: Opt
         const extra = sortedBars(rows);
         if (!extra.length) return;
         const visible = chart.timeScale().getVisibleRange();
-        cached = sortedBars(mergeBars(extra, cached));
+        overview = sortedBars(mergeBars(extra, overview));
+        cached = sortedBars(mergeBars(overview, cached));
         indexed = apply(cached);
         if (userChangedRange && visible) chart.timeScale().setVisibleRange(visible);
         else chart.timeScale().fitContent();
       },
-      fitContent() { chart.timeScale().fitContent(); },
+      fitContent() {
+        userChangedRange = false;
+        revision += 1;
+        if (timer) clearTimeout(timer);
+        cached = overview;
+        indexed = apply(cached);
+        chart.timeScale().fitContent();
+      },
     });
     return () => {
       revision += 1;

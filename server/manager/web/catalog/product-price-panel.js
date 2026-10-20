@@ -255,23 +255,11 @@
       information.disabled = true;
       chartMount.replaceChildren(FTUI.loading(context.t("正在读取价格曲线…")));
       try {
-        // An intraday source may contain millions of rows. Start with a
-        // bounded recent overview; the chart asks for precise bars on zoom.
-        const intraday = /^(MIN|HOUR)/i.test(state.sourceFreq || "");
-        const end = Date.parse(options.endDate || "") || Date.now();
-        const recentStart = Math.max(Date.parse(options.startDate || "") || 0,
-          end - 14 * 24 * 60 * 60 * 1000);
-        let value;
-        let fullOverviewLoaded = !intraday;
-        try {
-          value = await fetchRange(intraday ? recentStart : undefined,
-            intraday ? end : undefined, intraday ? 600 : 1200);
-        } catch (error) {
-          if (!intraday) throw error;
-          // Historical contracts can have sparse data in the last fortnight.
-          value = await fetchRange(undefined, undefined, 600, true);
-          fullOverviewLoaded = true;
-        }
+        // One bounded full-history overview avoids a second whole-source read
+        // and lets fitContent show the entire series on the first paint.
+        const overviewPoints = Math.min(2400, Math.max(600,
+          Math.round(chartMount.clientWidth || 1000)));
+        const value = await fetchRange(undefined, undefined, overviewPoints, true);
         if (!current(context) || requestIDForLoad !== requestID) return;
         if (value?.success === false) {
           throw new Error(value.error || context.t("请求失败"));
@@ -293,17 +281,6 @@
             ),
           });
           if (pendingFocus) disposePriceChart?.focusRange?.(...pendingFocus);
-          // Give minute sources a fast recent first paint, then extend the
-          // chart with a bounded full-history aggregate. Preserve a range the
-          // user has already selected while the second request is running.
-          if (!fullOverviewLoaded) {
-            void fetchRange(undefined, undefined, 600, true).then(overview => {
-              if (!current(context) || requestIDForLoad !== requestID) return;
-              disposePriceChart?.mergeOverview?.(FTPriceChart.barsOf(overview));
-            }).catch(() => {
-              // The recent chart remains usable; zoom requests still retry.
-            });
-          }
         } else {
           chartMount.replaceChildren(FTUI.empty(
             context.t("价格曲线暂不可用"), context.t("暂无可绘制数据"),

@@ -6,16 +6,61 @@ import math
 from bisect import bisect_left
 from typing import Any, Mapping
 
+import numpy as np
+import pandas as pd
+
+
+def _maximum_points(request: Mapping[str, Any]) -> int:
+    try:
+        return min(5000, max(100, int(request.get("max_points") or 1200)))
+    except (TypeError, ValueError):
+        return 1200
+
+
+def bounded_ohlcv_frame(
+    frame: pd.DataFrame,
+    request: Mapping[str, Any],
+    price_columns: tuple[str, str, str, str, str],
+    oi_column: str | None = None,
+    *,
+    time_column: str | None = None,
+) -> tuple[pd.DataFrame, int]:
+    """Aggregate before Python row conversion; preserve the source bar count.
+
+    The buckets use the same contiguous source-bar boundaries as
+    ``bounded_ohlcv_rows``. Event anchors still use that row-level path so
+    their exact candles and neighbours are never changed by this fast path.
+    """
+    total = len(frame)
+    maximum = _maximum_points(request)
+    if total <= maximum or request.get("anchor_timestamps"):
+        return frame, total
+    width = math.ceil(total / maximum)
+    groups = np.arange(total, dtype=np.int64) // width
+    first = np.arange(0, total, width)
+    last = np.minimum(first + width - 1, total - 1)
+    open_col, high_col, low_col, close_col, volume_col = price_columns
+    result: dict[str, Any] = {
+        open_col: frame[open_col].to_numpy()[first],
+        high_col: frame[high_col].groupby(groups, sort=False).max().to_numpy(),
+        low_col: frame[low_col].groupby(groups, sort=False).min().to_numpy(),
+        close_col: frame[close_col].to_numpy()[last],
+        volume_col: frame[volume_col].groupby(groups, sort=False).sum().to_numpy(),
+    }
+    if oi_column:
+        result[oi_column] = frame[oi_column].to_numpy()[last]
+    if time_column:
+        result[time_column] = frame[time_column].to_numpy()[first]
+    sampled = pd.DataFrame(result, index=frame.index.take(first))
+    return sampled, total
+
 
 def bounded_ohlcv_rows(
     rows: list[dict[str, Any]], request: Mapping[str, Any],
 ) -> tuple[list[dict[str, Any]], int]:
     """Aggregate contiguous bars without corrupting OHLCV semantics."""
     total = len(rows)
-    try:
-        maximum = min(5000, max(100, int(request.get("max_points") or 1200)))
-    except (TypeError, ValueError):
-        maximum = 1200
+    maximum = _maximum_points(request)
     if total <= maximum:
         return rows, total
     width = math.ceil(total / maximum)
