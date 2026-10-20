@@ -1182,6 +1182,9 @@ def test_asset_plot_lazy_mounts_lightweight_chart_with_job_events() -> None:
         assert page.evaluate("window.__chartGroups") == ["chart-workbench-asset"]
         assert page.locator(".backtest-asset-chart .highcharts-container").count() == 0
         assert page.locator(".backtest-asset-events thead th").count() == 10
+        assert page.evaluate("window.__chartApi.panes().length") == 4
+        assert page.evaluate("window.__chartApi.panes()[1].getSeries().length") == 1
+        assert page.evaluate("window.__chartApi.panes()[2].getSeries().length") == 1
         marker = page.evaluate("""() => {
           const time = Date.UTC(2025, 3, 10, 9) / 1000 + 21 * 60;
           const chart = window.__chartApi;
@@ -1194,12 +1197,14 @@ def test_asset_plot_lazy_mounts_lightweight_chart_with_job_events() -> None:
         page.mouse.click(marker["x"], marker["y"])
         page.wait_for_selector(".ft-asset-chart-events details")
         assert page.locator(".ft-asset-chart-events details").count() == 2
+        assert page.locator(".backtest-asset-inspector-mount").inner_html() == ""
         buttons = page.locator(".ft-asset-chart-events button")
         buttons.first.click()
         assert "移除价格线" in buttons.first.inner_text()
         page.locator(".ft-asset-chart-events summary").nth(1).click()
         buttons.nth(1).click()
         assert "移除价格线" in buttons.nth(1).inner_text()
+        assert page.evaluate("window.__chartApi.panes()[0].getSeries()[0].priceLines().length") == 2
         assert errors == []
         browser.close()
 

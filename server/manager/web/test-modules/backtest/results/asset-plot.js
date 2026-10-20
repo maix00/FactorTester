@@ -891,7 +891,9 @@
       }
       selectedItems = [...new Set([...selectedGroups.values()].flat())];
       inspector.replaceChildren();
-      if (selectedItems.length) inspector.append(eventInspector(context, selectedItems, events));
+      if (selectedItems.length && !usingLightweight) {
+        inspector.append(eventInspector(context, selectedItems, events));
+      }
       if (!usingLightweight && toolkitItems.length && point?.x != null) {
         chart?.tooltip?.refresh?.(point);
       }
