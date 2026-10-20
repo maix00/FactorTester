@@ -525,8 +525,10 @@
         ...(Array.isArray(nextItems) ? nextItems : []),
       ]).map(item => ({
         ...item,
+        // Loading temporarily disables the control, not the candidates.
+        // Persisting controlDisabled here leaves rows unclickable after load.
         disabled: item.disabled || (typeof options.disabled === "function"
-          ? Boolean(options.disabled(item)) : controlDisabled),
+          ? Boolean(options.disabled(item)) : configuredDisabled),
       })));
       selected = normalizeChoice(selected);
       if (!multi && selected.length > 1) selected = [selected[selected.length - 1]];

@@ -75,6 +75,7 @@
     "play.circle": '<circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4V8Z"/>',
     "slider.horizontal.3": '<path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="11" cy="18" r="2"/>',
     "arrow.left.arrow.right": '<path d="M4 8h15m-4-4 4 4-4 4M20 16H5m4-4-4 4 4 4"/>',
+    "arrow.up.left.and.arrow.down.right": '<path d="M10 4H4v6M4 4l7 7M14 20h6v-6M20 20l-7-7"/>',
     "arrow.triangle.branch": '<path d="M7 5v8a4 4 0 0 0 4 4h6M11 9h6M17 7l2 2-2 2M17 15l2 2-2 2"/><circle cx="7" cy="5" r="2"/>',
     "wrench.and.screwdriver": '<path d="m5 5 5 5M4 4l3-1 2 2-1 3-2 1-2-2 1-3ZM12 12l7 7M15 14l4-4M16 7a4 4 0 0 1 4-4l-2 3 2 2 3-2a4 4 0 0 1-5 5"/>',
     "checkmark.bubble": '<path d="M5 4h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-4 3v-3H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/><path d="m8 10 2.5 2.5L16 7"/>',
