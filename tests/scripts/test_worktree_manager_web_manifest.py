@@ -1007,21 +1007,17 @@ def test_product_price_chart_is_interactive_ohlcv() -> None:
     assert "max_points:" in panel
 
 
-def test_factor_series_result_restores_the_old_multi_panel_viewer() -> None:
-    import subprocess
-
-    fixture = ROOT / "tests" / "scripts" / "fixtures" / "factor_series_result.js"
-    result = subprocess.run(
-        ["node", str(fixture)], cwd=ROOT, capture_output=True, text=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr or result.stdout
-    assert result.stdout.strip() == "ok"
-
+def test_factor_series_result_uses_the_shared_lightweight_workbench() -> None:
+    manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8"))
+    assert "test-modules/factor-evaluation/results/chart.js" not in manifest["scripts"]
+    assert "chart-workbench-factor" in manifest["group_external_scripts"]
+    assert "vendor/highcharts/highstock.min.js" not in manifest[
+        "group_external_scripts"]["chart-workbench-factor"]
+    assert "test-modules/factor-evaluation/results/view.js" in manifest[
+        "groups"]["job-detail-factor-series"]
     ic_view = (WEB_ROOT / "jobs" / "ic-result-view.js").read_text(encoding="utf-8")
     viewers = (WEB_ROOT / "jobs" / "result-viewers.js").read_text(encoding="utf-8")
     assert 'key: "factor_series", label: "因子序列"' in ic_view
-    assert 'context.t("查看因子序列")' not in ic_view
     assert 'kind === "ic"' in viewers
     assert 'kind === "backtest"' in viewers
 

@@ -432,6 +432,19 @@
   border-radius: 10px;
   overflow: hidden;
 }
+.ft-factor-workbench { min-width: 0; padding: 12px; }
+.ft-factor-indicators { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.ft-factor-indicators label { display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 9px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface, #fff); font-size: 12px; cursor: pointer; }
+.ft-factor-indicator-swatch { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.ft-factor-chart-canvas { width: 100%; min-width: 0; }
+.ft-factor-chart-point { margin-top: 8px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 8px; }
+.ft-factor-chart-point dl { display: grid; gap: 4px; margin: 7px 0 0; }
+.ft-factor-chart-point dl div { display: flex; gap: 12px; }
+.ft-factor-chart-point dt { color: var(--muted); min-width: 100px; }
+.ft-factor-chart-point dd { margin: 0; overflow-wrap: anywhere; }
 
 .factor-series-contracts { display: grid; gap: 8px; min-width: 0; }
 .factor-series-contracts h3 { margin: 0; }

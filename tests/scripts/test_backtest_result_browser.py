@@ -367,87 +367,137 @@ def test_strategy_statistics_opens_one_tabbed_analysis_overlay() -> None:
         browser.close()
 
 
-def test_factor_series_stock_chart_renders_visible_navigator() -> None:
+def test_factor_workbench_shows_all_nested_layers_with_market_panes() -> None:
     with _playwright() as playwright:
         browser = _launch_chromium(playwright)
-        page = browser.new_page(viewport={"width": 1400, "height": 900})
-        page.set_content(
-            "<div id='chart' style='width:1200px;min-height:650px'></div>"
-        )
+        page = browser.new_page(viewport={"width": 1200, "height": 900})
+        errors: list[str] = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        page.set_content("<div id='chart' style='width:1100px'></div>")
+        page.add_script_tag(path=str(ROOT /
+            "static/vendor/lightweight-charts/lightweight-charts.standalone.production.js"))
+        page.evaluate("""() => {
+          const source = window.LightweightCharts;
+          window.LightweightCharts = {...source, createChart(...args) {
+            window.__factorChart = source.createChart(...args);
+            return window.__factorChart;
+          }};
+        }""")
+        page.add_script_tag(path=str(ROOT /
+            "static/vendor/chart-workbench/chart-workbench.js"))
+        page.evaluate("""() => {
+          const start = Date.UTC(2025, 0, 2, 9);
+          const bars = Array.from({length: 20}, (_, index) => ({
+            timestamp: start + index * 60000, open: 100 + index,
+            high: 102 + index, low: 99 + index, close: 101 + index,
+            volume: 1000 + index, openInterest: 500 + index,
+          }));
+          const points = bars.map((bar, index) => ({timestamp: bar.timestamp,
+            value: index === 4 ? null : index / 10}));
+          window.__factorRangeCalls = [];
+          window.__factorController = FTChartWorkbench.mountFactorChart(
+            document.querySelector('#chart'), {
+              product: 'T.CFE', bars,
+              indicators: [
+                {id:'root', label:'最终信号', points},
+                {id:'duration', label:'当日差持续期', points},
+              ],
+              async loadRange(minimum, maximum, maxPoints) {
+                window.__factorRangeCalls.push({minimum, maximum, maxPoints});
+                return bars;
+              },
+            });
+        }""")
+        page.wait_for_selector(".ft-factor-chart-canvas canvas")
+        assert page.evaluate("window.__factorChart.panes().length") == 5
+        factor_data = page.evaluate("""() => window.__factorChart.panes()[1]
+          .getSeries()[0].data()""")
+        assert len(factor_data) == 19
+        assert not any(row["time"] == 1735808640 for row in factor_data)
+        assert page.locator(".ft-factor-indicators label").count() == 2
+        assert page.get_by_label("当日差持续期").is_checked()
+        page.get_by_label("当日差持续期").uncheck()
+        assert not page.get_by_label("当日差持续期").is_checked()
+        assert page.evaluate("""() => window.__factorChart.panes()[2]
+          .getSeries()[0].options().visible""") is False
+        page.evaluate("""() => window.__factorController.setVisibleRange(
+          Date.UTC(2025, 0, 2, 9, 5), Date.UTC(2025, 0, 2, 9, 10))""")
+        page.wait_for_function("window.__factorRangeCalls.length > 0")
+        assert page.evaluate("window.__factorRangeCalls.at(-1).maxPoints") == 5000
+        assert errors == []
+        browser.close()
+
+
+def test_factor_result_groups_nested_layers_by_product_in_one_chart() -> None:
+    with _playwright() as playwright:
+        browser = _launch_chromium(playwright)
+        page = browser.new_page(viewport={"width": 1200, "height": 900})
+        errors: list[str] = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        page.set_content("<main id='root'></main>")
         for path in (
-            "server/manager/web/styles/outputs/artifacts.css",
-            "server/manager/web/styles/outputs/backtest-results.css",
-        ):
-            page.add_style_tag(path=str(ROOT / path))
-        for path in (
-            "static/vendor/highcharts/highstock.min.js",
-            "server/manager/web/jobs/highcharts-timeline.js",
-            "server/manager/web/core/highcharts-range-loader.js",
+            "server/manager/web/core/shared-ui.js",
             "server/manager/web/core/price-chart.js",
             "server/manager/web/test-modules/factor-evaluation/results/model.js",
-            "server/manager/web/jobs/highcharts-viewers.js",
-            "server/manager/web/test-modules/factor-evaluation/results/chart.js",
+            "static/vendor/lightweight-charts/lightweight-charts.standalone.production.js",
+            "static/vendor/chart-workbench/chart-workbench.js",
+            "server/manager/web/test-modules/factor-evaluation/results/view.js",
         ):
             page.add_script_tag(path=str(ROOT / path))
-        page.evaluate("""
-          const dates = Array.from({length: 240}, (_, index) =>
-            new Date(2026, 0, 2, 9, index).toISOString());
-          window.__factorRangeLoads = [];
-          FTFactorSeriesChart.mount(
-            {t: value => value}, document.querySelector('#chart'), {
-              product: 'AP.CZC', factorLabel: 'factor',
-              factorSeries: {dates, values: dates.map((_, index) => index % 3)},
-              price: {data: dates.map((timestamp, index) => ({
-                timestamp, open: 100 + index, high: 102 + index,
-                low: 99 + index, close: 101 + index,
-                volume: 1000 + index,
-              }))},
-              contracts: [],
-            }, {
-              rangeOverscanBeforeMs: 7 * 24 * 60 * 60 * 1000,
-              async loadRange(minimum, maximum, options) {
-                window.__factorRangeLoads.push({minimum, maximum, options});
-                return {
-                  data: dates.slice(100, 141).map((timestamp, index) => ({
-                    timestamp, open: 200 + index, high: 202 + index,
-                    low: 199 + index, close: 201 + index,
-                    volume: 2000 + index,
-                  })),
-                  __ftRange: {minimum, maximum},
-                };
-              },
+        page.evaluate("""() => {
+          window.__loadedGroups = [];
+          FTStaticLoader = {async loadGroups(groups) {
+            window.__loadedGroups.push(...groups);
+          }};
+          FTJobResultTabs = {filterPanel(_context, options) {
+            const element = document.createElement('div');
+            element.append(...options.rows.map(row => row.element));
+            return {element};
+          }};
+          FTMultiSelectFilter = {create(_context, options) {
+            const element = document.createElement('select');
+            element.className = options.className || '';
+            for (const item of options.items) {
+              const choice = document.createElement('option');
+              choice.value = item.value; choice.textContent = item.label;
+              element.append(choice);
+            }
+            element.value = options.selected[0];
+            element.addEventListener('change', () => options.onChange([element.value]));
+            return {element};
+          }};
+          const start = Date.UTC(2025, 0, 2, 9);
+          const dates = Array.from({length: 20}, (_, index) =>
+            new Date(start + index * 60000).toISOString());
+          FTMarketData = {
+            rangeRequest(request, minimum, maximum, maxPoints) {
+              return {...request, minimum, maximum, maxPoints};
             },
-          );
-          document.querySelector('#chart').__ftFactorSeriesChart.xAxis[0].setExtremes(
-            Date.parse(dates[100]), Date.parse(dates[140]), true,
-          );
-        """)
-        page.wait_for_timeout(300)
-        loaded_range = page.evaluate("window.__factorRangeLoads.at(-1)")
-        visible_minimum = page.evaluate(
-            "Date.parse(new Date(2026, 0, 2, 9, 100).toISOString())"
-        )
-        visible_maximum = page.evaluate(
-            "Date.parse(new Date(2026, 0, 2, 9, 140).toISOString())"
-        )
-        assert loaded_range["minimum"] == visible_minimum - 604800000
-        assert loaded_range["maximum"] > visible_maximum
-        assert loaded_range["options"]["maxPoints"] == 5000
-        assert loaded_range["options"]["visibleMinimum"] == visible_minimum
-        assert loaded_range["options"]["visibleMaximum"] == visible_maximum
-        navigator = page.locator(".highcharts-navigator")
-        assert navigator.count() > 0
-        navigator_box = navigator.first.bounding_box()
-        mount_box = page.locator("#chart").bounding_box()
-        canvas_box = page.locator(".interactive-artifact-chart-canvas").bounding_box()
-        svg_box = page.locator(".interactive-artifact-chart-canvas svg").bounding_box()
-        assert abs(svg_box["height"] - canvas_box["height"]) < 1
-        assert navigator_box["height"] > 0
-        assert navigator_box["y"] >= mount_box["y"]
-        assert navigator_box["y"] + navigator_box["height"] <= (
-            mount_box["y"] + mount_box["height"]
-        )
-        assert page.locator(".highcharts-scrollbar").count() > 0
+            async prices() { return {source: 'server', payload: {data:
+              dates.map((timestamp, index) => ({timestamp,
+                open: 100 + index, high: 102 + index, low: 99 + index,
+                close: 101 + index, volume: 1000 + index,
+                open_interest: 500 + index}))}}; },
+            async contracts() { return {payload: {contracts: []}}; },
+          };
+          const resultSummary = {factor: {alias:'TsDurDev', freq:'MIN1'},
+            series: [
+              {product:'T.CFE', dates, values: dates.map((_, i) => i / 10)},
+              {product:'T.CFE', layer:'当日差持续期', dates,
+                values: dates.map((_, i) => i / 20)},
+              {product:'T.CFE', layer:'平滑持续期', dates,
+                values: dates.map((_, i) => i / 30)},
+            ]};
+          document.querySelector('#root').append(FTFactorSeriesResults.embedded(
+            {t:value=>value}, {resultSummary, configuration:{}}));
+        }""")
+        page.wait_for_selector(".ft-factor-chart-canvas canvas")
+        assert page.evaluate("window.__loadedGroups") == ["chart-workbench-factor"]
+        assert page.locator(".factor-series-product-filter option").count() == 1
+        assert page.locator(".ft-factor-indicators label").count() == 3
+        assert page.locator(".factor-series-chart-mount canvas").count() > 0
+        assert page.locator(".highcharts-container").count() == 0
+        assert errors == []
         browser.close()
 
 
