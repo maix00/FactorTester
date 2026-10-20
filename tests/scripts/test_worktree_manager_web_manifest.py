@@ -627,7 +627,9 @@ def test_product_contract_rows_keep_no_data_navigation_and_adjustment_metadata()
     styles = (WEB_ROOT / "styles" / "app.css").read_text(encoding="utf-8")
 
     assert "row.dataset.href = \"true\"" in details
-    assert "contractRows[index].uid || contractRows[index].contract" in details
+    assert "contractRows[table.start + index]" in details
+    assert "FTUI.pagedTable" in details
+    assert 'context.t("交易标识")' in details
     assert "/products/product/${encodeURIComponent(target)}?${query}" in details
     assert "[...contracts.contracts].reverse()" in details
     assert "contract_has_data" in details

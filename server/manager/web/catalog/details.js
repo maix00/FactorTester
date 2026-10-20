@@ -80,7 +80,6 @@
     const fieldsMount = document.createElement("div");
     fieldsMount.className = "product-fields-mount";
     fieldsMount.append(FTUI.loading(context.t("正在读取产品资料…")));
-    root.append(fieldsMount);
     const priceMount = document.createElement("div");
     priceMount.className = "product-price-panel-mount";
     root.append(priceMount);
@@ -88,6 +87,12 @@
     term.append(Object.assign(document.createElement("h2"), {textContent: context.t("期限结构")}));
     const termMount = document.createElement("div"); termMount.append(FTUI.loading(context.t("正在读取合约列表…")));
     term.append(termMount); root.append(term);
+    const fieldsSection = document.createElement("details");
+    fieldsSection.className = "product-fields-section";
+    fieldsSection.append(Object.assign(document.createElement("summary"), {
+      textContent: context.t("产品字段"),
+    }), fieldsMount);
+    root.append(fieldsSection);
     context.content.replaceChildren(root);
 
     // Product identity is enough to mount the page.  Fields, prices, and
@@ -96,7 +101,7 @@
     const fieldsEndpoint = source === "local"
       ? `/api/client/product_fields?name=${encodeURIComponent(product.name)}`
       : `/api/product-library/product-fields?name=${encodeURIComponent(product.name)}`;
-    const fieldsRequest = context.api(fieldsEndpoint).then(fieldsPayload => {
+    void context.api(fieldsEndpoint).then(fieldsPayload => {
       if (!current(context) || !fieldsMount.isConnected) return;
       fieldsMount.replaceChildren(FTUI.table(
         [context.t("字段"), context.t("说明"), context.t("当前值")],
@@ -136,9 +141,20 @@
     const contractsRequest = context.api(
       `${contractsEndpoint}?product=${encodeURIComponent(product.name)}`
     ).catch(() => ({}));
-    const [, , contracts] = await Promise.all([
-      fieldsRequest, pricePanelPromise, contractsRequest,
-    ]);
+    let pricePanel = null;
+    let pendingPriceRange = null;
+    void Promise.resolve(pricePanelPromise).then(panel => {
+      if (!current(context)) return;
+      pricePanel = panel;
+      if (pendingPriceRange) pricePanel?.focusRange?.(...pendingPriceRange);
+      pendingPriceRange = null;
+    }).catch(error => {
+      if (!current(context)) return;
+      priceMount.replaceChildren(FTUI.empty(
+        context.t("价格曲线读取失败"), error?.message || "",
+      ));
+    });
+    const contracts = await contractsRequest;
     if (!current(context)) return;
     const contractRows = Array.isArray(contracts.contracts)
       ? [...contracts.contracts].reverse()
@@ -146,45 +162,64 @@
     if (!contracts.supports_term_structure || !contractRows.length) {
       termMount.replaceChildren(FTUI.empty(context.t("暂无期限结构"), context.t("该产品没有可用的连续合约列表")));
     } else {
-      const table = FTUI.table(
-        [
-          context.t("合约"), context.t("开始"), context.t("结束"),
-          context.t("前复权乘法"), context.t("前复权加法"),
-          context.t("后复权乘法"), context.t("后复权加法"),
-          context.t("换月比值"), context.t("数据"),
-        ],
-        contractRows.map(item => [
-          item.contract || item.uid,
-          item.start || "",
-          item.end || "",
-          item.forward_adjustment_mul ?? context.t("—"),
-          item.forward_adjustment_add ?? context.t("—"),
-          item.backward_adjustment_mul ?? context.t("—"),
-          item.backward_adjustment_add ?? context.t("—"),
-          item.adjustment_ratio ?? context.t("—"),
-          item.has_data ? context.t("可用") : context.t("无数据"),
-        ]),
-      );
-      [...table.body.rows].forEach((row, index) => {
-        row.dataset.href = "true";
-        row.addEventListener("click", () => {
-          const item = contractRows[index];
-          const target = contractRows[index].uid || contractRows[index].contract || "";
-          const query = new URLSearchParams({
-            product: product.name || "",
-            contract: target,
-            contract_label: item.contract || item.uid || "",
-            contract_has_data: item.has_data ? "1" : "0",
-            contract_start: item.start || item.start_date || "",
-            contract_end: item.end || item.end_date || "",
+      const headers = [
+        context.t("交易标识"), context.t("开始"), context.t("结束"),
+        context.t("前复权乘法"), context.t("前复权加法"),
+        context.t("后复权乘法"), context.t("后复权加法"),
+        context.t("换月比值"), context.t("数据"),
+      ];
+      let page = 1;
+      const renderPage = () => {
+        const table = FTUI.pagedTable(
+          headers, contractRows, {
+            page, pageSize: 15,
+            previousLabel: context.t("上一页"), nextLabel: context.t("下一页"),
+            onPageChange: value => { page = value; renderPage(); },
+            renderRow: item => {
+              const target = item.uid || item.contract || "";
+              const query = new URLSearchParams({
+                product: product.name || "",
+                contract: target,
+                contract_label: item.contract || item.uid || "",
+                contract_has_data: item.has_data ? "1" : "0",
+                contract_start: item.start || item.start_date || "",
+                contract_end: item.end || item.end_date || "",
+              });
+              const path = helpers.pathFor(
+                `/products/product/${encodeURIComponent(target)}?${query}`, source,
+              );
+              const link = document.createElement("a");
+              link.href = path;
+              link.textContent = item.contract || item.uid || "";
+              link.addEventListener("click", event => {
+                event.stopPropagation();
+                event.preventDefault();
+                context.navigate(path);
+              });
+              return [
+                link, item.start || "", item.end || "",
+                item.forward_adjustment_mul ?? context.t("—"),
+                item.forward_adjustment_add ?? context.t("—"),
+                item.backward_adjustment_mul ?? context.t("—"),
+                item.backward_adjustment_add ?? context.t("—"),
+                item.adjustment_ratio ?? context.t("—"),
+                item.has_data ? context.t("可用") : context.t("无数据"),
+              ];
+            },
+          },
+        );
+        [...table.body.rows].forEach((row, index) => {
+          const item = contractRows[table.start + index];
+          row.dataset.href = "true";
+          row.addEventListener("click", () => {
+            if (!item?.start || !item?.end) return;
+            if (pricePanel?.focusRange) pricePanel.focusRange(item.start, item.end);
+            else pendingPriceRange = [item.start, item.end];
           });
-          context.navigate(helpers.pathFor(
-            `/products/product/${encodeURIComponent(target)}?${query}`,
-            source,
-          ));
         });
-      });
-      termMount.replaceChildren(table.shell);
+        termMount.replaceChildren(table.shell);
+      };
+      renderPage();
     }
   }
 
@@ -224,7 +259,11 @@
     const root = document.createElement("div");
     root.className = "detail-stack product-detail-page";
     root.append(helpers.sourceSummary(context, source));
-    root.append(FTUI.table(
+    const fieldsSection = document.createElement("details");
+    fieldsSection.className = "product-fields-section";
+    fieldsSection.append(Object.assign(document.createElement("summary"), {
+      textContent: context.t("产品字段"),
+    }), FTUI.table(
       [context.t("字段"), context.t("说明"), context.t("当前值")],
       normalizeFields(fieldsPayload.fields).map(item => [
         item.name || item.key, item.description || item.desc, item.value,
@@ -243,6 +282,7 @@
       context.t("该产品没有可用的连续合约列表"),
     ));
     root.append(term);
+    root.append(fieldsSection);
     context.content.replaceChildren(root);
 
     if (selectedContractHasData === "0") {

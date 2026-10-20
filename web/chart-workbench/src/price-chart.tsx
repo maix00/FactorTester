@@ -1,5 +1,6 @@
 import {useEffect, useRef, useState} from "react";
 import {createRoot, type Root} from "react-dom/client";
+import {mergeBars} from "./range-data";
 
 type Bar = {
   timestamp: number;
@@ -15,6 +16,7 @@ type ChartApi = {
   addSeries: (kind: unknown, options: Record<string, unknown>, paneIndex?: number) => SeriesApi;
   timeScale: () => {
     fitContent: () => void;
+    getVisibleRange: () => ChartRange | null;
     setVisibleRange: (range: ChartRange) => void;
     subscribeVisibleTimeRangeChange: (fn: (range: ChartRange | null) => void) => void;
     unsubscribeVisibleTimeRangeChange: (fn: (range: ChartRange | null) => void) => void;
@@ -33,6 +35,7 @@ type Options = {
   bars: Bar[];
   loadRange?: (minimum: number, maximum: number, maxPoints: number) => Promise<Bar[]>;
   translate?: (value: string) => string;
+  onReady?: (focus: (minimum: number, maximum: number) => void) => void;
 };
 
 declare global {
@@ -63,7 +66,7 @@ function localTick(time: number, kind: number, locale: string): string {
   return new Date(Number(time) * 1000).toLocaleString(locale, options);
 }
 
-function MarketChart({bars, loadRange, translate = value => value}: Options) {
+function MarketChart({bars, loadRange, onReady, translate = value => value}: Options) {
   const chartNode = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState<Bar | null>(null);
   const [error, setError] = useState("");
@@ -109,31 +112,23 @@ function MarketChart({bars, loadRange, translate = value => value}: Options) {
       })));
       return new Map(rows.map(bar => [toTime(bar), bar]));
     };
-    let indexed = apply(overview);
+    let cached = overview;
+    let indexed = apply(cached);
     chart.timeScale().fitContent();
     chart.subscribeClick(point => setSelected(point?.time === undefined
       ? null : indexed.get(Number(point.time)) || null));
 
-    const first = overview[0] && toTime(overview[0]);
-    const last = overview.length && toTime(overview[overview.length - 1]);
-    const overviewSpan = first !== undefined && last ? last - first : 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let revision = 0;
     let lastRequest = "";
     const onRange = (range: ChartRange | null) => {
       const desiredRevision = ++revision;
-      if (!range || !loadRange || !overviewSpan) return;
+      if (!range || !loadRange) return;
       if (timer) clearTimeout(timer);
       timer = setTimeout(async () => {
         const minimum = Number(range.from);
         const maximum = Number(range.to);
         if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || maximum <= minimum) return;
-        if (minimum >= first! && maximum <= last
-            && maximum - minimum >= overviewSpan * 0.9) {
-          indexed = apply(overview);
-          lastRequest = "";
-          return;
-        }
         const key = `${Math.round(minimum)}:${Math.round(maximum)}`;
         if (key === lastRequest) return;
         lastRequest = key;
@@ -144,8 +139,10 @@ function MarketChart({bars, loadRange, translate = value => value}: Options) {
             lastRequest = "";
             return;
           }
-          indexed = apply(detailed);
-          chart.timeScale().setVisibleRange(range);
+          cached = sortedBars(mergeBars(cached, detailed));
+          const visible = chart.timeScale().getVisibleRange();
+          indexed = apply(cached);
+          if (visible) chart.timeScale().setVisibleRange(visible);
           setError("");
         } catch (reason) {
           if (desiredRevision === revision) {
@@ -156,6 +153,11 @@ function MarketChart({bars, loadRange, translate = value => value}: Options) {
       }, 180);
     };
     chart.timeScale().subscribeVisibleTimeRangeChange(onRange);
+    onReady?.((minimum, maximum) => {
+      if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || maximum <= minimum) return;
+      chart.timeScale().setVisibleRange({from: Math.floor(minimum / 1000),
+        to: Math.ceil(maximum / 1000)});
+    });
     return () => {
       revision += 1;
       if (timer) clearTimeout(timer);
@@ -167,24 +169,44 @@ function MarketChart({bars, loadRange, translate = value => value}: Options) {
   return <div className="ft-lightweight-price">
     <div ref={chartNode} className="ft-lightweight-price-canvas"
       aria-label={translate("行情 K 线、成交量和持仓量")} />
-    {selected && <div className="ft-lightweight-price-detail">
+    {selected && <section className="ft-chart-inspector ft-lightweight-price-detail">
       <strong>{new Date(selected.timestamp).toLocaleString()}</strong>
-      <span>{translate("开")} {selected.open} · {translate("高")} {selected.high} · {translate("低")} {selected.low} · {translate("收")} {selected.close}</span>
-      <span>{translate("成交量")} {selected.volume ?? "—"} · {translate("持仓量")} {selected.openInterest ?? "—"}</span>
-    </div>}
+      <dl>{[["开盘价", selected.open], ["最高价", selected.high],
+        ["最低价", selected.low], ["收盘价", selected.close],
+        ["成交量", selected.volume ?? "—"], ["持仓量", selected.openInterest ?? "—"]]
+        .map(([label, value]) => <div key={label}>
+          <dt>{translate(String(label))}</dt><dd>{value}</dd>
+        </div>)}</dl>
+    </section>}
     {error && <p role="status" className="ft-lightweight-price-error">{error}</p>}
   </div>;
 }
 
-export function mountPriceChart(target: HTMLElement, options: Options): () => void {
+type PriceChartHandle = (() => void) & {
+  focusRange: (minimum: number, maximum: number) => void;
+};
+
+export function mountPriceChart(target: HTMLElement, options: Options): PriceChartHandle {
   roots.get(target)?.unmount();
   const root = createRoot(target);
   roots.set(target, root);
-  root.render(<MarketChart {...options} />);
-  return () => {
+  let focus: ((minimum: number, maximum: number) => void) | null = null;
+  let pending: [number, number] | null = null;
+  root.render(<MarketChart {...options} onReady={ready => {
+    focus = ready;
+    if (pending) { ready(...pending); pending = null; }
+  }} />);
+  const dispose = (() => {
     if (roots.get(target) === root) {
       root.unmount();
       roots.delete(target);
     }
+    focus = null;
+    pending = null;
+  }) as PriceChartHandle;
+  dispose.focusRange = (minimum, maximum) => {
+    if (focus) focus(minimum, maximum);
+    else pending = [minimum, maximum];
   };
+  return dispose;
 }
