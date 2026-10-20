@@ -566,6 +566,8 @@ def test_lightweight_chart_keeps_existing_bars_after_zoom_out(view: str) -> None
         page.evaluate("window.__chart.timeScale().setVisibleRange({from: __bars[3].timestamp / 1000, to: __bars[4].timestamp / 1000})")
         page.wait_for_function("window.__requests > 0")
         page.wait_for_function("window.__candleTimes.length === 8")
+        if view == "price":
+            page.evaluate("document.querySelector('.ft-lightweight-price-canvas').dispatchEvent(new Event('pointerdown'))")
         page.evaluate("window.__chart.timeScale().setVisibleRange({from: __bars[0].timestamp / 1000, to: __bars[7].timestamp / 1000})")
         page.wait_for_function("window.__requests > 1")
         assert page.evaluate("window.__candleTimes.length") == 8
@@ -576,6 +578,51 @@ def test_lightweight_chart_keeps_existing_bars_after_zoom_out(view: str) -> None
               return range && Number(range.from) === __bars[2].timestamp / 1000
                 && Number(range.to) === __bars[5].timestamp / 1000;
             }""")
+        assert errors == []
+        browser.close()
+
+
+def test_price_chart_zoom_settles_after_detail_load() -> None:
+    """Replacing coarse bars with finer bars must not recursively reload a settled zoom."""
+    with _playwright() as playwright:
+        browser = _launch_chromium(playwright)
+        page = browser.new_page(viewport={"width": 1100, "height": 850})
+        errors: list[str] = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        page.set_content("<main id='root'></main>")
+        page.add_script_tag(path=str(ROOT / "static/vendor/lightweight-charts/lightweight-charts.standalone.production.js"))
+        page.add_script_tag(path=str(ROOT / "static/vendor/chart-workbench/chart-workbench.js"))
+        page.evaluate("""() => {
+          const start = Date.UTC(2025, 0, 1);
+          const bar = (timestamp, value) => ({timestamp, open: value,
+            high: value + 1, low: value - 1, close: value + 0.5,
+            volume: 100, openInterest: 200});
+          const overview = Array.from({length: 30}, (_, i) =>
+            bar(start + i * 86400000, 100 + i));
+          window.__requests = [];
+          const createChart = LightweightCharts.createChart;
+          window.LightweightCharts = {...LightweightCharts, createChart: (...args) => {
+            const chart = createChart(...args);
+            window.__chart = chart;
+            return chart;
+          }};
+          const loadRange = async (minimum, maximum) => {
+            __requests.push([minimum, maximum]);
+            return Array.from({length: 1440}, (_, i) => {
+              const timestamp = minimum + i * 60000;
+              return bar(timestamp, 110 + i / 1440);
+            });
+          };
+          window.__handle = FTChartWorkbench.mountPriceChart(
+            document.querySelector('#root'), {bars: overview, loadRange});
+          window.__zoom = () => __handle.focusRange(
+            start + 10 * 86400000, start + 12 * 86400000);
+        }""")
+        page.wait_for_selector("canvas", timeout=5000)
+        page.evaluate("window.__zoom()")
+        page.wait_for_function("window.__requests.length > 0")
+        page.wait_for_timeout(1500)
+        assert page.evaluate("window.__requests.length") == 1, errors
         assert errors == []
         browser.close()
 
