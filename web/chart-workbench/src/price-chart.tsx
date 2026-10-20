@@ -120,10 +120,22 @@ function MarketChart({bars, loadRange, onReady, translate = value => value}: Opt
     let indexed = apply(cached);
     chart.timeScale().fitContent();
     let userChangedRange = false;
-    const markInteraction = () => { userChangedRange = true; };
+    let pendingInteraction = false;
+    let pointerActive = false;
+    const markInteraction = () => {
+      userChangedRange = true;
+      pendingInteraction = true;
+    };
+    const pointerDown = () => { pointerActive = true; markInteraction(); };
+    const pointerMove = () => { if (pointerActive) markInteraction(); };
+    const pointerUp = () => { pointerActive = false; };
     node.addEventListener("wheel", markInteraction);
-    node.addEventListener("pointerdown", markInteraction);
+    node.addEventListener("pointerdown", pointerDown);
+    node.addEventListener("pointermove", pointerMove);
+    node.addEventListener("pointerup", pointerUp);
+    node.addEventListener("pointercancel", pointerUp);
     node.addEventListener("touchstart", markInteraction);
+    node.addEventListener("touchmove", markInteraction);
     chart.subscribeClick(point => setSelected(point?.time === undefined
       ? null : indexed.get(Number(point.time)) || null));
 
@@ -131,10 +143,13 @@ function MarketChart({bars, loadRange, onReady, translate = value => value}: Opt
     let revision = 0;
     let lastRequest = "";
     const onRange = (range: ChartRange | null) => {
+      // setData and setVisibleRange also emit range changes. Only a direct
+      // gesture (or focusRange below) may start a data request.
+      if (!range || !loadRange || !pendingInteraction) return;
       const desiredRevision = ++revision;
-      if (!range || !loadRange || !userChangedRange) return;
       if (timer) clearTimeout(timer);
       timer = setTimeout(async () => {
+        pendingInteraction = false;
         const minimum = Number(range.from);
         const maximum = Number(range.to);
         if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || maximum <= minimum) return;
@@ -174,7 +189,7 @@ function MarketChart({bars, loadRange, onReady, translate = value => value}: Opt
     onReady?.({
       focusRange(minimum, maximum) {
         if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || maximum <= minimum) return;
-        userChangedRange = true;
+        markInteraction();
         chart.timeScale().setVisibleRange({from: Math.floor(minimum / 1000),
           to: Math.ceil(maximum / 1000)});
       },
@@ -190,6 +205,7 @@ function MarketChart({bars, loadRange, onReady, translate = value => value}: Opt
       },
       fitContent() {
         userChangedRange = false;
+        pendingInteraction = false;
         revision += 1;
         if (timer) clearTimeout(timer);
         cached = overview;
@@ -201,8 +217,12 @@ function MarketChart({bars, loadRange, onReady, translate = value => value}: Opt
       revision += 1;
       if (timer) clearTimeout(timer);
       node.removeEventListener("wheel", markInteraction);
-      node.removeEventListener("pointerdown", markInteraction);
+      node.removeEventListener("pointerdown", pointerDown);
+      node.removeEventListener("pointermove", pointerMove);
+      node.removeEventListener("pointerup", pointerUp);
+      node.removeEventListener("pointercancel", pointerUp);
       node.removeEventListener("touchstart", markInteraction);
+      node.removeEventListener("touchmove", markInteraction);
       chart.timeScale().unsubscribeVisibleTimeRangeChange(onRange);
       chart.remove();
     };
