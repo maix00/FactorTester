@@ -181,6 +181,18 @@
     mount.replaceChildren(root);
 
     let requestID = 0;
+    let disposePriceChart = null;
+    let removalObserver = null;
+    if (window.MutationObserver) {
+      removalObserver = new MutationObserver(() => {
+        if (root.isConnected) return;
+        requestID += 1;
+        disposePriceChart?.();
+        disposePriceChart = null;
+        removalObserver.disconnect();
+      });
+      removalObserver.observe(document.body, {childList: true, subtree: true});
+    }
     function applyBound(payload, prefix, value) {
       if (!Number.isFinite(value)) return;
       const date = new Date(value);
@@ -216,6 +228,8 @@
 
     async function load() {
       const requestIDForLoad = ++requestID;
+      disposePriceChart?.();
+      disposePriceChart = null;
       controls.setBusy(true);
       metadataMount.replaceChildren(FTUI.loading(context.t("正在读取数据能力…")));
       chartMount.replaceChildren(FTUI.loading(context.t("正在读取价格曲线…")));
@@ -227,15 +241,17 @@
         }
         controls.apply(value || {});
         metadataMount.replaceChildren(metadata(context, value || {}));
-        if (window.FTPriceChart?.render && Array.isArray(value?.data)) {
-          FTPriceChart.render(context, chartMount, {
-            ...value,
-            product: value.contract_name || value.product || options.contractName || targetName,
-            desc: value.desc || product.desc,
-          }, {
-            loadingText: context.t("正在读取当前时间范围…"),
-            loadRange: (minimum, maximum, range = {}) => fetchRange(
-              minimum, maximum, range.maxPoints,
+        if (window.FTPriceChart?.barsOf && Array.isArray(value?.data)) {
+          await window.FTStaticLoader.loadGroups(["chart-workbench-price"]);
+          if (!current(context) || requestIDForLoad !== requestID) return;
+          if (!window.FTChartWorkbench?.mountPriceChart) {
+            throw new Error(context.t("行情图组件未加载"));
+          }
+          disposePriceChart = window.FTChartWorkbench.mountPriceChart(chartMount, {
+            bars: FTPriceChart.barsOf(value),
+            translate: value => context.t(value),
+            loadRange: async (minimum, maximum, maxPoints) => (
+              FTPriceChart.barsOf(await fetchRange(minimum, maximum, maxPoints))
             ),
           });
         } else {

@@ -277,6 +277,11 @@ are selected from the frozen task/result identity; they are not loaded for a
 configuration-only task. The `job-detail-previews` group is loaded only when a
 result declaration is expanded, so Highcharts, price data, table viewers, and
 image adapters are not executed merely because a task has artifacts.
+The product catalog price panel now requests `chart-workbench-price` only after
+its price data arrives. That group loads the pinned Lightweight Charts runtime
+and isolated React price viewer; it does not preload Highcharts. Other Job and
+research chart viewers keep Highcharts until their data and interaction
+contracts pass the same migration checks.
 `job-detail-input` is separate from the normal detail route and is loaded only
 for an explicitly opened input file. The formatter is loaded before the list
 controller, so detail and list pages reuse the stable helper seam without

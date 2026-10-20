@@ -84,7 +84,7 @@ def main() -> None:
     declared = manifest.setdefault("vendor_assets", [])
     for name in ASSETS:
         asset = f"vendor/lightweight-charts/{name}"
-        if asset not in declared:
+        if asset not in declared and asset not in manifest.get("external_scripts", []):
             declared.append(asset)
     MANIFEST.write_text(json.dumps(manifest, ensure_ascii=False, indent=1) + "\n")
 

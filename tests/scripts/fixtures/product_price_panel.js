@@ -49,6 +49,8 @@ function settle() {
 
 const requests = [];
 const charts = [];
+const loadedGroups = [];
+let disposed = 0;
 const tables = [];
 const context = {
   window: {},
@@ -67,10 +69,14 @@ context.FTUI = {
   },
 };
 context.FTPriceChart = {
-  render(_context, _target, payload) {
-    charts.push(payload);
-  },
+  barsOf: payload => payload.data.map(row => ({...row, timestamp: Date.parse(row.timestamp),
+    openInterest: row.open_interest ?? null})),
 };
+context.FTStaticLoader = {loadGroups: async groups => loadedGroups.push(...groups)};
+context.FTChartWorkbench = {mountPriceChart: (target, options) => {
+  charts.push({target, options});
+  return () => { disposed += 1; };
+}};
 context.isRouteCurrent = () => true;
 context.t = value => value;
 context.api = async (_url, options) => {
@@ -137,7 +143,12 @@ vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);
   await settle();
   assert.strictEqual(requests[2].data_source, "LocalCNFuturesMIN1");
   assert.strictEqual(requests[2].adjusted, true);
-  assert.strictEqual(charts.at(-1).adjusted, true);
+  assert.ok(loadedGroups.includes("chart-workbench-price"));
+  assert.strictEqual(charts.at(-1).options.bars[0].close, 2);
+  assert.strictEqual(disposed, 2);
+  await charts.at(-1).options.loadRange(Date.parse("2025-01-01"),
+    Date.parse("2025-01-03"), 2400);
+  assert.strictEqual(requests.at(-1).max_points, 2400);
   assert.strictEqual(tables.at(-1).rows.some(row => row[1] === "连续合约换月平滑复权"), true);
   assert.strictEqual(tables.at(-1).rows.some(row => row[1] === "raw × adjustment_mul + adjustment_add"), true);
 
@@ -158,7 +169,7 @@ vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);
     true,
   );
   assert.strictEqual(requests.at(-1).contract_uid, "DCE|F|A|2501");
-  assert.strictEqual(charts.at(-1).product, "A2501");
+  assert.strictEqual(charts.at(-1).options.bars[0].close, 2);
   console.log("ok");
 })().catch(error => {
   console.error(error);
