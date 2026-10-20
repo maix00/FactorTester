@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "build": "esbuild src/price-chart.tsx --bundle --minify --format=iife --global-name=FTChartWorkbench --target=es2020 --outfile=../../static/vendor/chart-workbench/price-chart.js",
+    "build": "esbuild src/index.ts --bundle --minify --format=iife --global-name=FTChartWorkbench --target=es2020 --outfile=../../static/vendor/chart-workbench/chart-workbench.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

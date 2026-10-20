@@ -606,8 +606,11 @@ def test_product_price_panel_uses_source_frequency_and_adjusted_controls() -> No
 def test_product_price_runtime_is_lazy_and_does_not_preload_highcharts() -> None:
     manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text(encoding="utf-8"))
     price_runtime = "vendor/lightweight-charts/lightweight-charts.standalone.production.js"
-    chart_bundle = "vendor/chart-workbench/price-chart.js"
+    chart_bundle = "vendor/chart-workbench/chart-workbench.js"
     assert manifest["group_external_scripts"]["chart-workbench-price"] == [
+        price_runtime, chart_bundle,
+    ]
+    assert manifest["group_external_scripts"]["chart-workbench-asset"] == [
         price_runtime, chart_bundle,
     ]
     assert "chart-workbench-price" not in manifest["initial_groups"]

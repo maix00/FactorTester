@@ -180,6 +180,18 @@
 .backtest-asset-heading span { color: var(--muted); font-size: 13px; }
 .backtest-asset-note { margin: 0; color: var(--muted); font-size: 13px; }
 .backtest-asset-chart { min-width: 0; min-height: 520px; }
+.ft-asset-chart-workbench { display: grid; gap: 8px; min-width: 0; }
+.ft-asset-chart-canvas { width: 100%; min-width: 0; height: 640px; }
+.ft-asset-chart-legend { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
+.ft-asset-chart-legend button, .ft-asset-chart-events button { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); cursor: pointer; padding: 5px 9px; }
+.ft-asset-chart-market, .ft-asset-chart-events { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-size: 12px; }
+.ft-asset-chart-events { max-height: 45vh; overflow: auto; overscroll-behavior: contain; }
+.ft-asset-chart-events details { border-top: 1px solid var(--line); padding-top: 6px; }
+.ft-asset-chart-events summary { cursor: pointer; font-weight: 600; }
+.ft-asset-chart-events dl { display: grid; gap: 3px; margin: 6px 0; }
+.ft-asset-chart-events dl > div { display: grid; grid-template-columns: minmax(90px, 140px) minmax(0, 1fr); gap: 8px; }
+.ft-asset-chart-events dt { color: var(--muted); }
+.ft-asset-chart-events dd { margin: 0; overflow-wrap: anywhere; }
 .backtest-order-track-controls { display: flex; align-items: center; gap: 10px; min-height: 30px; color: var(--muted); font-size: 12px; }
 .backtest-asset-chart .highcharts-tooltip > span { white-space: normal !important; min-width: 240px; max-width: min(360px, 80vw); max-height: 48vh; overflow-y: auto; overscroll-behavior: contain; pointer-events: auto; }
 .asset-tooltip-events { margin-top: 8px; padding-top: 7px; border-top: 1px solid #d8dce4; }

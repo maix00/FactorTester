@@ -69,7 +69,11 @@
   "profile": [],
   "chart-workbench-price": [
    "vendor/lightweight-charts/lightweight-charts.standalone.production.js",
-   "vendor/chart-workbench/price-chart.js"
+   "vendor/chart-workbench/chart-workbench.js"
+  ],
+  "chart-workbench-asset": [
+   "vendor/lightweight-charts/lightweight-charts.standalone.production.js",
+   "vendor/chart-workbench/chart-workbench.js"
   ]
  },
  "group_dependencies": {
@@ -410,6 +414,9 @@
    "core"
   ],
   "chart-workbench-price": [
+   "charts"
+  ],
+  "chart-workbench-asset": [
    "charts"
   ]
  },
@@ -1052,7 +1059,8 @@
   "access-table": [
    "manager/access-control-table.js"
   ],
-  "chart-workbench-price": []
+  "chart-workbench-price": [],
+  "chart-workbench-asset": []
  },
  "external_scripts": [
   "katex/katex.min.js",
@@ -1060,7 +1068,7 @@
   "vendor/highcharts/highstock.min.js",
   "vendor/cytoscape/cytoscape.min.js",
   "vendor/lightweight-charts/lightweight-charts.standalone.production.js",
-  "vendor/chart-workbench/price-chart.js"
+  "vendor/chart-workbench/chart-workbench.js"
  ],
  "scripts": [
   "core/module-loader.js",

@@ -734,7 +734,15 @@ def test_asset_plot_reuses_complete_nested_range_without_requerying() -> None:
           const root = FTBacktestAssetPlot.render({t:(value, options) =>
             options === undefined ? value : String(options)}, state);
           document.querySelector('#root').append(root);
-          await new Promise(resolve => setTimeout(resolve, 50));
+          await new Promise((resolve, reject) => {
+            const deadline = Date.now() + 3000;
+            const poll = () => {
+              if (window.__display) resolve();
+              else if (Date.now() >= deadline) reject(new Error('asset plot did not load'));
+              else setTimeout(poll, 10);
+            };
+            poll();
+          });
           const cold = {...calls};
           const nested = await window.__display.loadRange(t - 1000, t + 1000,
             {maxPoints: 1200, visibleMinimum: t - 1000, visibleMaximum: t + 1000});
@@ -1096,6 +1104,103 @@ def test_asset_plot_clicked_toolkit_toggles_independent_trade_price_lines() -> N
         assert page.evaluate("document.querySelector('.backtest-asset-chart').__ftPriceChart._ftTradePriceLineCount") == 2
         buttons.first.click()
         assert page.evaluate("document.querySelector('.backtest-asset-chart').__ftPriceChart._ftTradePriceLineCount") == 1
+        browser.close()
+
+
+def test_asset_plot_lazy_mounts_lightweight_chart_with_job_events() -> None:
+    with _playwright() as playwright:
+        browser = _launch_chromium(playwright)
+        page = browser.new_page(viewport={"width": 1200, "height": 900})
+        errors: list[str] = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        page.set_content("<main id='root'></main>")
+        page.add_style_tag(content=".ft-asset-chart-canvas {width:100%;height:640px}")
+        for path in (
+            "server/manager/web/core/shared-ui.js",
+            "server/manager/web/core/price-chart.js",
+            "static/vendor/lightweight-charts/lightweight-charts.standalone.production.js",
+        ):
+            page.add_script_tag(path=str(ROOT / path))
+        page.evaluate("""() => {
+          const source = window.LightweightCharts;
+          window.LightweightCharts = {...source, createChart(...args) {
+            window.__chartApi = source.createChart(...args);
+            return window.__chartApi;
+          }};
+        }""")
+        for path in (
+            "static/vendor/chart-workbench/chart-workbench.js",
+            "server/manager/web/test-modules/backtest/results/asset-plot.js",
+        ):
+            page.add_script_tag(path=str(ROOT / path))
+        page.evaluate("""() => {
+          const start = Date.UTC(2025, 3, 10, 9);
+          const bars = Array.from({length: 80}, (_, i) => ({
+            timestamp: start + i * 60000, open: 100 + i * .1,
+            high: 102 + i * .1, low: 99 + i * .1,
+            close: 101 + i * .1, volume: 100 + i,
+            open_interest: 200 + i,
+          }));
+          const order = {instrument: 'AU', order_id: 'o1', side: 'BUY',
+            timestamp: start + 20 * 60000, status: 'filled',
+            lifecycle: [{timestamp: start + 20 * 60000, kind: 'submitted'}]};
+          const fills = [{instrument: 'AU', order_id: 'o1', fill_id: 'f1',
+            timestamp: start + 21 * 60000, side: 'BUY', fill_price: 103,
+            quantity: 1, fee: 2}, {instrument: 'AU', order_id: 'o1', fill_id: 'f2',
+            timestamp: start + 21 * 60000, side: 'BUY', fill_price: 104,
+            quantity: 1, fee: 2}];
+          window.__chartGroups = [];
+          FTStaticLoader = {async loadGroups(groups) { window.__chartGroups.push(...groups); }};
+          FTJobArtifactQuery = {timeSource(_context, path) { return {async load() {
+            return {rows: path.includes('order_detail_data') ? [order] : fills,
+              sampling: {}};
+          }}; }};
+          FTMarketData = {
+            rangeRequest(request, minimum, maximum, maxPoints) {
+              return {...request, minimum, maximum, maxPoints};
+            },
+            async prices() { return {payload: {data: bars, freq: 'MIN1',
+              count: bars.length, returned_count: bars.length}}; },
+          };
+          const state = {
+            target: document.querySelector('#root'),
+            options: {jobID: 'test-job', configuration: {freq: 'MIN1'}},
+            artifactsByName: new Map([
+              ['order_detail_data', {name:'order_detail_data'}],
+              ['fill_detail_data', {name:'fill_detail_data'}],
+            ]),
+            assetPlotDiscovery: {status:'ready', products:['AU'],
+              strategies:[], accounts:[], cashPools:[]},
+            selectedAsset: {product:'AU', timestamp:start + 21 * 60000},
+            rerender() {},
+          };
+          document.querySelector('#root').append(FTBacktestAssetPlot.render(
+            {t:value=>value}, state));
+        }""")
+        page.wait_for_selector(".ft-asset-chart-canvas canvas")
+        page.wait_for_function("document.querySelector('.ft-asset-chart-legend')?.textContent.includes('1/1')")
+        assert page.evaluate("window.__chartGroups") == ["chart-workbench-asset"]
+        assert page.locator(".backtest-asset-chart .highcharts-container").count() == 0
+        assert page.locator(".backtest-asset-events thead th").count() == 10
+        marker = page.evaluate("""() => {
+          const time = Date.UTC(2025, 3, 10, 9) / 1000 + 21 * 60;
+          const chart = window.__chartApi;
+          const series = chart.panes()[0].getSeries()[0];
+          const canvas = document.querySelector('.ft-asset-chart-canvas')
+            .getBoundingClientRect();
+          return {x:canvas.left + chart.timeScale().timeToCoordinate(time),
+            y:canvas.top + series.priceToCoordinate(99 + 21 * .1) + 12};
+        }""")
+        page.mouse.click(marker["x"], marker["y"])
+        page.wait_for_selector(".ft-asset-chart-events details")
+        assert page.locator(".ft-asset-chart-events details").count() == 2
+        buttons = page.locator(".ft-asset-chart-events button")
+        buttons.first.click()
+        assert "移除价格线" in buttons.first.inner_text()
+        page.locator(".ft-asset-chart-events summary").nth(1).click()
+        buttons.nth(1).click()
+        assert "移除价格线" in buttons.nth(1).inner_text()
+        assert errors == []
         browser.close()
 
 
