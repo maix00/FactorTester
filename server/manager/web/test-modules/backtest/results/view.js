@@ -6,7 +6,10 @@
   });
 
   function relevantArtifacts(artifacts) {
-    const names = new Set(window.FTBacktestResultModel.payloadNames);
+    const names = new Set([
+      ...window.FTBacktestResultModel.payloadNames,
+      "factor_series_data",
+    ]);
     return (artifacts || []).filter(item => (
       item.state === "active" && names.has(String(item.name || ""))
     ));
