@@ -5,7 +5,7 @@
     "instrument", "product", "contract_uid", "strategy_id", "strategy_ref",
     "strategy", "order_id", "fill_id", "event_id", "event_type", "status",
     "side", "offset", "quantity", "requested_quantity", "filled_quantity",
-    "price", "fill_price", "fee", "active_leaves", "terminal_unfilled",
+    "price", "fill_price", "fee", "realized_pnl", "active_leaves", "terminal_unfilled",
     "cash_before", "cash_after", "cash_change", "margin_before", "margin_after",
     "margin_change", "account_currency", "position_before", "position_after",
     "account_id", "account_ref", "account", "ledger_id", "ledger",
@@ -47,9 +47,9 @@
 
   function eventFilters(selected, {dimensions = true} = {}) {
     const filters = {product: {
-      fields: selected.contractUID ? productFields
-        : ["instrument", "product"],
-      values: [selected.contractUID || selected.product],
+      fields: productFields,
+      values: [...new Set([selected.contractUID || selected.product,
+        ...(selected.memberUIDs || [])].filter(Boolean))],
     }};
     if (selected.strategy) filters.strategy = {
       fields: strategyFields,
@@ -68,11 +68,16 @@
     return String(selected?.contractUID || selected?.product || "");
   }
 
+  function matchesProduct(row, selected) {
+    const value = productKey(identity(row));
+    return value === productKey(selected) || (selected.memberUIDs || []).includes(value);
+  }
+
   function matchesSelection(row, selected, orderIDs = null) {
     const orderID = String(row?.order_id || "");
     const linkedOrder = Boolean(orderID && orderIDs?.has(orderID));
     const rowProduct = productKey(identity(row));
-    if ((!rowProduct || rowProduct !== productKey(selected)) && !linkedOrder) return false;
+    if ((!rowProduct || !matchesProduct(row, selected)) && !linkedOrder) return false;
     const rowStrategy = first(row, strategyFields);
     if (selected.strategy && rowStrategy && rowStrategy !== selected.strategy) return false;
     if (selected.strategy && !rowStrategy && !linkedOrder) return false;
@@ -117,7 +122,7 @@
       hasFills ? query("fill_detail_data", eventFilters(selected)) : null,
     ]);
     if (orders) orders.rows = orders.rows.filter(row => (
-      productKey(identity(row)) === productKey(selected)
+      matchesProduct(row, selected)
       && (!selected.strategy || first(row, strategyFields) === selected.strategy)
     ));
     const results = orders ? [orders] : [];
@@ -254,6 +259,9 @@
       ["数量", number(amount)],
       ["价格", number(first(row, ["fill_price", "price"]))],
     ];
+    if (row.offset) parts.push(["开平", ({open: "开仓", close: "平仓",
+      close_today: "平今", close_yesterday: "平昨"})[String(row.offset).toLowerCase()]
+      || String(row.offset)]);
     const strategy = first(row, strategyFields) || first(order, strategyFields);
     const account = first(row, accountFields) || first(order, accountFields);
     if (isFill && order?.order_id) {
@@ -271,6 +279,9 @@
     if (!isFill && order?.status) parts.push(["订单最终状态", order.status]);
     if (isFill) parts.push(["手续费", row.fee != null
       ? `${number(row.fee)} ${currency}`.trim() : "未记录"]);
+    if (isFill && row.realized_pnl != null) {
+      parts.push(["已实现盈亏", `${number(row.realized_pnl)} ${currency}`.trim()]);
+    }
     if (remaining != null) parts.push(["事件后剩余", number(remaining)]);
     else if (order?.active_leaves != null) {
       parts.push(["订单最终剩余", number(order.active_leaves)]);
@@ -279,11 +290,22 @@
       parts.push(["终止未成交", number(order.terminal_unfilled)]);
     }
     if (row.cash_before != null && row.cash_after != null) {
-      parts.push(["现金", `${change(row, "cash_before", "cash_after")} ${currency}`.trim()]);
+      parts.push(["可用现金", `${change(row, "cash_before", "cash_after")} ${currency}`.trim()]);
+      parts.push(["现金变动", `${number(Number(row.cash_after) - Number(row.cash_before))} ${currency}`.trim()]);
     }
     if (row.margin_before != null && row.margin_after != null
         && (Number(row.margin_before) !== 0 || Number(row.margin_after) !== 0)) {
-      parts.push(["账本保证金", change(row, "margin_before", "margin_after")]);
+      parts.push(["账本保证金", `${change(row, "margin_before", "margin_after")} ${currency}`.trim()]);
+      const marginReleased = Number(row.margin_before) - Number(row.margin_after);
+      if (marginReleased > 0) parts.push(["释放保证金", `${number(marginReleased)} ${currency}`.trim()]);
+      if (marginReleased < 0) parts.push(["新增保证金", `${number(-marginReleased)} ${currency}`.trim()]);
+      if (isFill && row.realized_pnl != null && row.fee != null
+          && row.cash_before != null && row.cash_after != null
+          && Math.abs(Number(row.cash_after) - Number(row.cash_before)
+            - Number(row.realized_pnl) + Number(row.fee) - marginReleased) < 0.02) {
+        parts.push(["现金变动构成", `已实现盈亏 − 手续费 ${marginReleased >= 0
+          ? "+ 释放保证金" : "− 新增保证金"}`]);
+      }
     }
     if (row.position_before != null && row.position_after != null) {
       parts.push(["持仓", change(row, "position_before", "position_after")]);
@@ -625,17 +647,17 @@
 
   function ensureFactorSeries(context, state) {
     if (state.assetPlotFactorData || !state.artifactsByName.has("factor_series_data")) return;
-    state.assetPlotFactorData = {status: "loading", series: []};
+    state.assetPlotFactorData = {status: "loading", series: [], factors: []};
     void FTJobArtifacts.fetch(context, artifactPath(state, "factor_series_data"))
       .then(response => response.json()).then(payload => {
         if (state.target?.isConnected === false) return;
         state.assetPlotFactorData = {status: "ready", series: Array.isArray(payload.series)
-          ? payload.series : []};
+          ? payload.series : [], factors: Array.isArray(payload.factors) ? payload.factors : []};
         state.rerender();
       }).catch(error => {
         if (state.target?.isConnected === false) return;
         state.assetPlotFactorData = {status: "error", message: error.message || String(error),
-          series: []};
+          series: [], factors: []};
         state.rerender();
       });
   }
@@ -675,11 +697,25 @@
       window: resolved.run_window || {}};
   }
 
-  function selector(context, label, values, selected, onChange, allLabel = "") {
+  function plannedProducts(state) {
+    const requirements = state.options.payload?.execution_plan?.resolved?.data_requirements || [];
+    const continuous = requirements.map(item => String(item.product || ""))
+      .filter(product => product && !product.includes("|"));
+    const members = {};
+    for (const product of continuous) {
+      const symbol = product.split(".")[0];
+      members[product] = requirements.map(item => String(item.product || ""))
+        .filter(value => value.includes("|") && value.split("|")[2] === symbol);
+    }
+    return {continuous: [...new Set(continuous)], members};
+  }
+
+  function selector(context, label, values, selected, onChange, allLabel = "",
+    labelFor = value => value) {
     const all = `__all_asset_${label}__`;
     const items = [
       ...(allLabel ? [{value: all, label: context.t(allLabel), exclusive: true}] : []),
-      ...values.map(value => ({value, label: value})),
+      ...values.map(value => ({value, label: labelFor(value)})),
     ];
     const filter = window.FTMultiSelectFilter.create(context, {
       title: context.t(label), compact: true, multi: false,
@@ -696,6 +732,7 @@
     const index = state.assetPlotDiscovery;
     if (index?.status !== "ready" || !index.products.length) return [];
     const current = state.selectedAsset || {};
+    const scope = plannedProducts(state);
     const update = change => {
       state.selectedAsset = {...state.selectedAsset, ...change};
       state.rerender();
@@ -731,7 +768,14 @@
             cashPool => update({cashPool}), "全部资金池")]
           : [selector(context, "策略", index.strategies,
             current.strategy || "", strategy => update({strategy}), "全部策略")]),
-      selector(context, "品种 / 合约", index.products, productKey(current), product => {
+      selector(context, "品种 / 合约", [...new Set([...scope.continuous,
+        ...index.products])], productKey(current), product => {
+        if (scope.continuous.includes(product)) {
+          update({product, contractUID: "", memberUIDs: scope.members[product] || [],
+            timestamp: Date.parse(state.options.payload?.execution_plan?.resolved
+              ?.run_window?.start || "")});
+          return;
+        }
         const generation = state.assetPlotSelectionGeneration
           = (state.assetPlotSelectionGeneration || 0) + 1;
         const source = window.FTJobArtifactQuery.tableSource(
@@ -746,9 +790,10 @@
               || state.executionView !== "asset_plot") return;
           const anchor = identity(row);
           update({product: anchor.product, contractUID: anchor.contractUID,
-            timestamp: anchor.timestamp});
+            memberUIDs: [], timestamp: anchor.timestamp});
         }).catch(error => context.showNotice?.(error.message || String(error), true));
-      }),
+      }, "", value => scope.continuous.includes(value)
+        ? `${value} · 连续主力（原始价）` : value),
       ...(factorControl ? [{label: "因子序列", element: factorControl.element}] : []),
     ];
   }
@@ -1008,12 +1053,18 @@
     const settings = request.analyses?.backtest?.execution?.settings
       || request.backtest?.execution?.settings || request.execution?.settings || request;
     const frequency = String(planned.frequency || settings.freq || settings.frequency || "DAY1");
-    const runStart = Date.parse(String(planned.window.start || ""));
-    const runEnd = Date.parse(String(planned.window.end || ""));
+    const runStart = Date.parse(String(planned.window.start || settings.start_date || ""));
+    const plannedEnd = Date.parse(String(planned.window.end || ""));
+    const endTime = String(settings.end_time || "23:59");
+    const configuredEnd = settings.end_date
+      ? Date.parse(`${settings.end_date}T${endTime.length === 5 ? `${endTime}:00` : endTime}`)
+      : NaN;
+    const runEnd = Number.isFinite(plannedEnd) ? plannedEnd : configuredEnd;
     const priceRequest = {
       ...(selected.contractUID ? {contract_uid: selected.contractUID}
         : {product_name: selected.product}),
       freq: frequency, adjusted: false,
+      ...(!selected.contractUID ? {series_variant: "primary_raw"} : {}),
       ...(planned.source && planned.source !== "auto" ? {data_source: planned.source} : {}),
     };
     const load = async (minimum, maximum, maxPoints = 1200,
@@ -1055,7 +1106,13 @@
         }
       }
       if (!price) {
-        price = await window.FTMarketData.prices(context, ranged, "server");
+        try {
+          price = await window.FTMarketData.prices(context, ranged, "server");
+        } catch (error) {
+          if (!/指定范围内无(?:合约)?价格数据/.test(String(error?.message || ""))) throw error;
+          price = {payload: {data: [], count: 0, returned_count: 0,
+            freq: frequency, data_source: planned.source}};
+        }
         const count = Number(price.payload?.count);
         const returned = Number(price.payload?.returned_count);
         if (Number.isFinite(count) && count === returned
@@ -1079,8 +1136,11 @@
         ? ` · 事件展示 ${events.length}/${matching.sourceCount}` : "";
       note.textContent = [
         `${context.t("回测数据源")}：${planned.source || price.payload.data_source || context.t("未记录")}`,
-        `${context.t("回测区间")}：${planned.window.start || "—"} → ${planned.window.end || "—"}`,
+        `${context.t("回测区间")}：${planned.window.start || settings.start_date || "—"} → `
+          + `${planned.window.end || (settings.end_date
+            ? `${settings.end_date} ${endTime}` : "—")}`,
         context.t("图表从同一数据源读取；若源数据更新，价格可能不同于运行时。"),
+        ...(price.payload.data?.length ? [] : [context.t("该范围没有此序列的行情柱")]),
       ].join(" · ") + sampling;
       renderTimeline(visibleMinimum, visibleMaximum);
       currentPayload = {...price.payload, product: selected.product,
@@ -1115,8 +1175,9 @@
       onRangeError: error => { note.textContent = error.message || String(error); },
     };
     chartMount.append(window.FTUI.loading(context.t("正在读取行情与交易事件…")));
-    const initialSpan = /^(MIN|HOUR)/i.test(frequency) ? 7 * DAY : 30 * DAY;
-    load(selected.timestamp - initialSpan, selected.timestamp + initialSpan)
+    const initialStart = Number.isFinite(runStart) ? runStart : selected.timestamp - 30 * DAY;
+    const initialEnd = Number.isFinite(runEnd) ? runEnd : selected.timestamp + 30 * DAY;
+    load(initialStart, initialEnd)
       .then(async payload => {
         if (!payload) return;
         if (window.FTStaticLoader?.loadGroups) {
@@ -1137,6 +1198,9 @@
               id: factorSeriesID(item),
               label: [item.factor_alias || item.factor_ref || "因子", item.layer || "结果"]
                 .filter(Boolean).join(" · "),
+              formula: !item.layer ? String((state.assetPlotFactorData?.factors || [])
+                .find(factor => factor.ref === item.factor_ref)?.resolved_math_expr
+                || item.factor?.resolved_math_expr || "") : "",
               points: (item.dates || []).map((date, index) => ({
                 timestamp: window.FTPriceChart.timestampOf(date),
                 value: item.values?.[index] == null || item.values[index] === ""
@@ -1144,6 +1208,12 @@
               })).filter(point => Number.isFinite(point.timestamp)),
             })),
             frequencyMs: frequencyMs(frequency),
+            runWindow: {start: initialStart, end: initialEnd},
+            rollSwitches: selected.contractUID ? [] : (payload.contracts || [])
+              .map(item => ({timestamp: window.FTPriceChart.timestampOf(
+                item.start_ts || item.start), label: item.contract || item.uid || ""}))
+              .filter(item => Number.isFinite(item.timestamp)
+                && item.timestamp > initialStart && item.timestamp <= initialEnd),
             translate: value => context.t(value),
             loadRange: async (minimum, maximum, maxPoints) => {
               const updated = await load(minimum, maximum, maxPoints,

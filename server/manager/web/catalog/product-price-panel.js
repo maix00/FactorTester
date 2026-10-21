@@ -346,8 +346,10 @@
     const termID = item => String(item.uid || item.contract || `${item.start}:${item.end}`);
     root.setTermRanges = rows => {
       termRanges = (Array.isArray(rows) ? rows : []).map(item => ({
-        id: termID(item), start: Date.parse(item.start),
-        end: Date.parse(item.end) + 24 * 60 * 60 * 1000,
+        id: termID(item), label: item.contract || item.uid || "",
+        start: Date.parse(item.start_ts || item.start),
+        end: Date.parse(item.end_ts || item.end)
+          + (item.end_ts ? 0 : 24 * 60 * 60 * 1000),
       })).filter(item => Number.isFinite(item.start) && Number.isFinite(item.end));
       disposePriceChart?.setRangeBands?.(termRanges);
     };

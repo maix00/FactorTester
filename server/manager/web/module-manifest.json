@@ -73,6 +73,7 @@
   ],
   "chart-workbench-asset": [
    "vendor/lightweight-charts/lightweight-charts.standalone.production.js",
+   "katex/katex.min.js",
    "vendor/chart-workbench/chart-workbench.js"
   ],
   "chart-workbench-factor": [
@@ -609,7 +610,8 @@
    "styles/outputs/backtest-results.css"
   ],
   "job-detail-backtest": [
-   "styles/outputs/backtest-results.css"
+   "styles/outputs/backtest-results.css",
+   "katex/katex.min.css"
   ],
   "job-detail-input": [
    "styles/task-inputs.css",
