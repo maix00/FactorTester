@@ -1,6 +1,7 @@
 import {useEffect, useRef, useState} from "react";
 import {createRoot, type Root} from "react-dom/client";
 import {mergeBars} from "./range-data";
+import {WickPrimitive} from "./wick-primitive";
 
 type Bar = {
   timestamp: number;
@@ -19,6 +20,11 @@ type ChartApi = {
     fitContent: () => void;
     getVisibleRange: () => ChartRange | null;
     setVisibleRange: (range: ChartRange) => void;
+    getVisibleLogicalRange: () => ChartRange | null;
+    setVisibleLogicalRange: (range: ChartRange) => void;
+    coordinateToTime: (x: number) => number | null;
+    coordinateToLogical: (x: number) => number | null;
+    timeToCoordinate: (time: number) => number | null;
     subscribeVisibleTimeRangeChange: (fn: (range: ChartRange | null) => void) => void;
     unsubscribeVisibleTimeRangeChange: (fn: (range: ChartRange | null) => void) => void;
   };
@@ -27,7 +33,11 @@ type ChartApi = {
   unsubscribeCrosshairMove: (fn: (point: {time?: number} | undefined) => void) => void;
   remove: () => void;
 };
-type SeriesApi = {setData: (rows: unknown[]) => void};
+type SeriesApi = {
+  setData: (rows: unknown[]) => void;
+  priceToCoordinate: (price: number) => number | null;
+  attachPrimitive?: (primitive: WickPrimitive) => void;
+};
 type LightweightChartsApi = {
   createChart: (target: HTMLElement, options: Record<string, unknown>) => ChartApi;
   CandlestickSeries: unknown;
@@ -68,6 +78,13 @@ function sortedBars(source: Bar[]): Bar[] {
 }
 
 function toTime(bar: Bar): number { return Math.floor(bar.timestamp / 1000); }
+
+function priceDecimals(bar: Bar): number {
+  return Math.min(12, Math.max(...[bar.open, bar.high, bar.low, bar.close].map(value => {
+    const text = String(value);
+    return text.includes(".") ? text.split(".")[1].length : 0;
+  })));
+}
 
 function localTick(time: number, kind: number, locale: string, timeZone?: string): string {
   const options: Intl.DateTimeFormatOptions = kind === 0 ? {year: "numeric"}
@@ -115,6 +132,8 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
       upColor: "#19a47b", downColor: "#e14f5b",
       borderVisible: false, wickUpColor: "#19a47b", wickDownColor: "#e14f5b",
     });
+    const wick = new WickPrimitive();
+    candle.attachPrimitive?.(wick);
     const hoverMarker = api.createSeriesMarkers?.(candle, [], {autoScale: false});
     let hoveredTime: number | null = null;
     const hasVolume = bars.some(bar => bar.volume !== null);
@@ -132,6 +151,8 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
       hoverMarker?.setMarkers([]);
       candle.setData(rows.map(bar => ({time: toTime(bar), open: bar.open,
         high: bar.high, low: bar.low, close: bar.close})));
+      wick.setRows(rows.map(bar => ({time: toTime(bar), open: bar.open,
+        high: bar.high, low: bar.low, close: bar.close})));
       volume?.setData(rows.filter(bar => bar.volume !== null).map(bar => ({
         time: toTime(bar), value: bar.volume,
         color: bar.close >= bar.open ? "#a9d8c9" : "#efb4b9",
@@ -146,18 +167,28 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
     let userChangedRange = false;
     let pendingInteraction = false;
     let pointerActive = false;
+    let pointerX: number | null = null;
+    const rememberPointer = (event: PointerEvent | WheelEvent) => {
+      pointerX = event.clientX - node.getBoundingClientRect().left;
+    };
     const markInteraction = () => {
       userChangedRange = true;
       pendingInteraction = true;
     };
     const pointerDown = () => { pointerActive = true; markInteraction(); };
-    const pointerMove = () => { if (pointerActive) markInteraction(); };
+    const pointerMove = (event: PointerEvent) => {
+      rememberPointer(event);
+      if (pointerActive) markInteraction();
+    };
     const pointerUp = () => { pointerActive = false; };
-    node.addEventListener("wheel", markInteraction);
+    const wheel = (event: WheelEvent) => { rememberPointer(event); markInteraction(); };
+    const pointerLeave = () => { pointerX = null; };
+    node.addEventListener("wheel", wheel);
     node.addEventListener("pointerdown", pointerDown);
     node.addEventListener("pointermove", pointerMove);
     node.addEventListener("pointerup", pointerUp);
     node.addEventListener("pointercancel", pointerUp);
+    node.addEventListener("pointerleave", pointerLeave);
     node.addEventListener("touchstart", markInteraction);
     node.addEventListener("touchmove", markInteraction);
     const onHover = (point: {time?: number} | undefined) => {
@@ -173,7 +204,7 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
       const bar = point?.time === undefined ? null : indexed.get(Number(point.time));
       if (!bar || !point?.point) { setSelected(null); return; }
       const x = Math.min(Math.max(point.point.x + 14, 8),
-        Math.max(8, node.clientWidth - 250));
+        Math.max(8, node.clientWidth - 320));
       const y = Math.min(Math.max(point.point.y + 14, 8),
         Math.max(8, node.clientHeight - 270));
       setSelected(previous => previous?.bar.timestamp === bar.timestamp
@@ -186,23 +217,85 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
     let lastRequest = "";
     let detailCoverage: ChartRange | null = null;
     let detailViewportSpan = 0;
+    const replaceData = (rows: Bar[], visible: ChartRange | null) => {
+      const scale = chart.timeScale();
+      const anchor = pointerX === null ? null : scale.coordinateToTime(pointerX);
+      indexed = apply(rows);
+      if (visible) scale.setVisibleRange(visible);
+      if (anchor === null || pointerX === null) return;
+      let actualX = scale.timeToCoordinate(anchor);
+      // The old overview timestamp often is not itself a source bar in the
+      // finer response. Interpolate between its neighbouring source bars.
+      if (rows.length > 1 && anchor >= toTime(rows[0])
+        && anchor <= toTime(rows[rows.length - 1])) {
+        let low = 0;
+        let high = rows.length;
+        while (low < high) {
+          const middle = (low + high) >>> 1;
+          if (toTime(rows[middle]) < anchor) low = middle + 1;
+          else high = middle;
+        }
+        const before = rows[Math.max(0, low - 1)];
+        const after = rows[Math.min(rows.length - 1, low)];
+        const beforeTime = toTime(before);
+        const afterTime = toTime(after);
+        const beforeX = scale.timeToCoordinate(beforeTime);
+        const afterX = scale.timeToCoordinate(afterTime);
+        if (beforeX !== null && afterX !== null) {
+          actualX = beforeTime === afterTime ? beforeX
+            : beforeX + (anchor - beforeTime) * (afterX - beforeX) / (afterTime - beforeTime);
+        }
+      }
+      const logicalRange = scale.getVisibleLogicalRange();
+      if (actualX === null || !logicalRange) return;
+      const actualLogical = scale.coordinateToLogical(actualX);
+      const pointerLogical = scale.coordinateToLogical(pointerX);
+      if (actualLogical === null || pointerLogical === null) return;
+      const shift = actualLogical - pointerLogical;
+      if (Math.abs(shift) > 0.01) scale.setVisibleLogicalRange({
+        from: logicalRange.from + shift, to: logicalRange.to + shift,
+      });
+    };
     const stopLoading = () => {
       if (loadingTimer) clearTimeout(loadingTimer);
       loadingTimer = undefined;
       setLoading(false);
+    };
+    const restoreOverview = () => {
+      if (cached === overview) return;
+      const visible = chart.timeScale().getVisibleRange();
+      // setData emits its own range event. Keep the user gesture pending for
+      // the debounce below, but never treat this chart redraw as a gesture.
+      const wasPending = pendingInteraction;
+      pendingInteraction = false;
+      cached = overview;
+      replaceData(cached, visible);
+      pendingInteraction = wasPending;
+      detailCoverage = null;
+      lastRequest = "";
+      stopLoading();
     };
     const onRange = (range: ChartRange | null) => {
       // setData and setVisibleRange also emit range changes. Only a direct
       // gesture (or focusRange below) may start a data request.
       if (!range || !loadRange || !pendingInteraction) return;
       const desiredRevision = ++revision;
+      // A wider viewport exposes the overview/fine-data seam immediately,
+      // before the debounced request could replace it. Switch to one coherent
+      // overview resolution synchronously, then refine the settled viewport.
+      if (detailCoverage && cached !== overview && (
+        Number(range.to) - Number(range.from) > detailViewportSpan * 1.1
+        || Number(range.from) < detailCoverage.from
+        || Number(range.to) > detailCoverage.to
+      )) restoreOverview();
+      const settledRange = chart.timeScale().getVisibleRange() || range;
       if (timer) clearTimeout(timer);
       timer = setTimeout(async () => {
         pendingInteraction = false;
         const first = Number(overview[0]?.timestamp) / 1000;
         const last = Number(overview[overview.length - 1]?.timestamp) / 1000;
-        const minimum = Math.max(Number(range.from), first);
-        const maximum = Math.min(Number(range.to), last);
+        const minimum = Math.max(Number(settledRange.from), first);
+        const maximum = Math.min(Number(settledRange.to), last);
         if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || maximum <= minimum) return;
         // The overview is sufficient for broad ranges. Drop the fine bars as
         // soon as the user zooms back out; otherwise their minimum spacing
@@ -213,12 +306,7 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
           setError("");
           lastRequest = "";
           detailCoverage = null;
-          if (cached !== overview) {
-            const visible = chart.timeScale().getVisibleRange();
-            cached = overview;
-            indexed = apply(cached);
-            if (visible) chart.timeScale().setVisibleRange(visible);
-          }
+          restoreOverview();
           return;
         }
         const span = maximum - minimum;
@@ -259,8 +347,7 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
           detailCoverage = {from: fetchStart, to: fetchEnd};
           detailViewportSpan = span;
           const visible = chart.timeScale().getVisibleRange();
-          indexed = apply(cached);
-          if (visible) chart.timeScale().setVisibleRange(visible);
+          replaceData(cached, visible);
           setError("");
           stopLoading();
         } catch (reason) {
@@ -286,9 +373,8 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
         const visible = chart.timeScale().getVisibleRange();
         overview = sortedBars(mergeBars(extra, overview));
         cached = sortedBars(mergeBars(overview, cached));
-        indexed = apply(cached);
-        if (userChangedRange && visible) chart.timeScale().setVisibleRange(visible);
-        else chart.timeScale().fitContent();
+        if (userChangedRange && visible) replaceData(cached, visible);
+        else { indexed = apply(cached); chart.timeScale().fitContent(); }
       },
       fitContent() {
         userChangedRange = false;
@@ -315,11 +401,12 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
       revision += 1;
       if (timer) clearTimeout(timer);
       if (loadingTimer) clearTimeout(loadingTimer);
-      node.removeEventListener("wheel", markInteraction);
+      node.removeEventListener("wheel", wheel);
       node.removeEventListener("pointerdown", pointerDown);
       node.removeEventListener("pointermove", pointerMove);
       node.removeEventListener("pointerup", pointerUp);
       node.removeEventListener("pointercancel", pointerUp);
+      node.removeEventListener("pointerleave", pointerLeave);
       node.removeEventListener("touchstart", markInteraction);
       node.removeEventListener("touchmove", markInteraction);
       chart.unsubscribeCrosshairMove(onHover);
@@ -341,8 +428,10 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
         displayTimeZone ? {timeZone: displayTimeZone} : undefined)}</strong>
         <button type="button" aria-label={translate("关闭")}
           onClick={() => setSelected(null)}>×</button></header>
-      <dl>{[["开盘价", selected.bar.open], ["最高价", selected.bar.high],
-        ["最低价", selected.bar.low], ["收盘价", selected.bar.close],
+      <dl>{[["开盘价", selected.bar.open.toFixed(priceDecimals(selected.bar))],
+        ["最高价", selected.bar.high.toFixed(priceDecimals(selected.bar))],
+        ["最低价", selected.bar.low.toFixed(priceDecimals(selected.bar))],
+        ["收盘价", selected.bar.close.toFixed(priceDecimals(selected.bar))],
         ["成交量", selected.bar.volume ?? "—"],
         ["持仓量", selected.bar.openInterest ?? "—"]]
         .map(([label, value]) => <div key={label}>
