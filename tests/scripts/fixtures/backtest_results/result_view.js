@@ -21,11 +21,12 @@ const artifacts = [
   {name: "fee_detail_data", state: "superseded"},
   {name: "ic_series_data", state: "active"},
   {name: "order_detail_data", state: "active"},
+  {name: "factor_series_data", state: "active"},
 ];
 assert.equal(window.FTBacktestResults.supports(artifacts), true);
 assert.deepEqual(
   window.FTBacktestResults.relevantArtifacts(artifacts).map(item => item.name),
-  ["equity_curve_data", "order_detail_data"],
+  ["equity_curve_data", "order_detail_data", "factor_series_data"],
 );
 assert.equal(window.FTBacktestResults.supports([
   {name: "ic_series_data", state: "active"},
