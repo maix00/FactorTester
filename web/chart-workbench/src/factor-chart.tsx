@@ -1,6 +1,7 @@
 import {useEffect, useRef, useState} from "react";
 import {createRoot, type Root} from "react-dom/client";
 import {mergeBars} from "./range-data";
+import {ChartPopover, type ChartSelection} from "./chart-popover";
 
 type Bar = {timestamp: number; open: number; high: number; low: number; close: number;
   volume: number | null; openInterest: number | null};
@@ -16,7 +17,7 @@ type Chart = {addSeries: (type: unknown, options: object, pane?: number) => Seri
     getVisibleRange: () => Range | null;
     subscribeVisibleTimeRangeChange: (callback: (range: Range | null) => void) => void;
     unsubscribeVisibleTimeRangeChange: (callback: (range: Range | null) => void) => void;
-  }; subscribeClick: (callback: (point: {time?: number}) => void) => void;
+  }; subscribeClick: (callback: (point: {time?: number; point?: ChartSelection}) => void) => void;
   remove: () => void};
 type Library = {createChart: (node: HTMLElement, options: object) => Chart;
   CandlestickSeries: unknown; HistogramSeries: unknown; LineSeries: unknown};
@@ -60,7 +61,9 @@ function FactorChart({bars, indicators, product, loadRange, controller,
   const interest = useRef<Series | null>(null);
   const indicatorSeries = useRef(new Map<string, Series>());
   const [visible, setVisible] = useState(() => new Set(indicators.map(item => item.id)));
-  const [selected, setSelected] = useState<{timestamp: number; rows: [string, string][]} | null>(null);
+  const [selected, setSelected] = useState<{
+    timestamp: number; rows: [string, string][]; anchor: ChartSelection;
+  } | null>(null);
   const [error, setError] = useState("");
   const generation = useRef(0);
   const requestKey = useRef("");
@@ -123,7 +126,7 @@ function FactorChart({bars, indicators, product, loadRange, controller,
     applyBars(bars);
     instance.timeScale().fitContent();
     instance.subscribeClick(point => {
-      if (point.time === undefined) return;
+      if (point.time === undefined || !point.point) return;
       const time = Number(point.time);
       const bar = sourceBars.current.find(item => seconds(item.timestamp) === time);
       const rows: [string, string][] = [];
@@ -139,7 +142,7 @@ function FactorChart({bars, indicators, product, loadRange, controller,
         const value = item.points.find(value => seconds(value.timestamp) === time);
         if (value) rows.push([item.label, String(value.value ?? "—")]);
       }
-      setSelected({timestamp: time * 1000, rows});
+      if (rows.length) setSelected({timestamp: time * 1000, rows, anchor: point.point});
     });
     let timer: ReturnType<typeof setTimeout> | undefined;
     let initial = true;
@@ -199,14 +202,17 @@ function FactorChart({bars, indicators, product, loadRange, controller,
           style={{backgroundColor: indicatorColors[index % indicatorColors.length]}} />
         {item.label}</label>)}
     </div>
-    <div ref={chartNode} className="ft-factor-chart-canvas"
-      style={{height: Math.max(620, 340 + indicators.length * 130)}}
-      aria-label={`${product} · ${translate("价格与因子指标")}`} />
-    {selected && <section className="ft-chart-inspector ft-factor-chart-point">
-      <strong>{new Date(selected.timestamp).toLocaleString()}</strong>
-      <dl>{selected.rows.map(([label, value]) => <div key={label}>
-        <dt>{label}</dt><dd>{value}</dd></div>)}</dl>
-    </section>}
+    <div className="ft-chart-popover-host">
+      <div ref={chartNode} className="ft-factor-chart-canvas"
+        style={{height: Math.max(620, 340 + indicators.length * 130)}}
+        aria-label={`${product} · ${translate("价格与因子指标")}`} />
+      {selected && <ChartPopover anchor={selected.anchor}
+        title={new Date(selected.timestamp).toLocaleString()}
+        onClose={() => setSelected(null)}>
+        <dl>{selected.rows.map(([label, value]) => <div key={label}>
+          <dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+      </ChartPopover>}
+    </div>
     {error && <p role="status">{error}</p>}
   </div>;
 }

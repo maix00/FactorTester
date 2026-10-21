@@ -61,6 +61,7 @@ def test_day_only_contract_uses_term_snapshot_source(tmp_path, monkeypatch) -> N
     assert not source_module.term_contract_has_day_data("missing", str(path))
     monkeypatch.setattr(projection, "find_contract_product", lambda value: SimpleNamespace(
         timezone="Asia/Shanghai",
+        trading_day_close_time="15:00",
     ))
     monkeypatch.setattr(projection, "contract_available_freqs", lambda value: ["DAY1"])
     monkeypatch.setattr(projection, "available_sources_for_product", lambda value: [
@@ -82,6 +83,9 @@ def test_day_only_contract_uses_term_snapshot_source(tmp_path, monkeypatch) -> N
     assert result["count"] == 1
     assert result["data"][0]["open"] == 10.
     assert result["data"][0]["open_interest"] == 50.
+    assert pd.Timestamp(result["data"][0]["timestamp"], unit="ms", tz="UTC").tz_convert(
+        "Asia/Shanghai"
+    ) == pd.Timestamp("2024-01-04 15:00", tz="Asia/Shanghai")
 
 
 def test_open_interest_column_accepts_canonical_and_provider_aliases() -> None:
@@ -111,6 +115,18 @@ def test_product_price_rows_keeps_open_interest_from_provider_alias() -> None:
 
     assert has_open_interest is True
     assert [row["open_interest"] for row in rows] == [80.0, 90.0]
+
+
+def test_daily_futures_chart_timestamp_uses_declared_session_close() -> None:
+    frame = pd.DataFrame({
+        "OPEN": [10.0], "HIGH": [12.0], "LOW": [9.0],
+        "CLOSE": [11.0], "VOLUME": [100.0],
+    }, index=pd.DatetimeIndex(["2025-04-17"]))
+    product = SimpleNamespace(timezone="Asia/Shanghai", trading_day_close_time="15:00")
+    rows, _ = _price_rows(product, frame, adjusted=False, frequency=DataFreq.DAY1)
+    assert pd.Timestamp(rows[0]["timestamp"], unit="ms", tz="UTC").tz_convert(
+        "Asia/Shanghai"
+    ) == pd.Timestamp("2025-04-17 15:00", tz="Asia/Shanghai")
 
 
 def test_product_chart_sampling_preserves_ohlcv_bucket_semantics() -> None:

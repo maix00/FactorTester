@@ -375,6 +375,7 @@ class FactorEvaluation:
         bars = FactorEvaluation._market_bars(
             name, frame, adjusted, frequency, reason,
             getattr(product, "timezone", None) or "Asia/Shanghai",
+            trading_day_close_time=getattr(product, "trading_day_close_time", None),
         )
         return bars
 
@@ -382,6 +383,7 @@ class FactorEvaluation:
     def _market_bars(
         name: str, frame: Any, adjusted: bool, frequency: Any,
         reason: str, timezone: str, limit: int = 1200, recent: int = 1500,
+        trading_day_close_time: str | None = None,
     ) -> dict[str, Any]:
         from server.modules.shared.price_data_helpers import (
             format_price_row, open_interest_column,
@@ -408,10 +410,12 @@ class FactorEvaluation:
             "freq": str(getattr(frequency, "name", "")),
             "adjusted": adjusted,
             **FactorEvaluation._market_columns(name, full, columns, interest, is_daily, timezone,
-                                   reason=reason, key="bars"),
+                                   reason=reason, key="bars",
+                                   trading_day_close_time=trading_day_close_time),
             **(
                 FactorEvaluation._market_columns(name, recent_frame, columns, interest, is_daily,
-                                     timezone, key="recent_bars")
+                                     timezone, key="recent_bars",
+                                     trading_day_close_time=trading_day_close_time)
                 if len(recent_frame) != len(full) or len(frame) > recent else {}
             ),
         }
@@ -420,6 +424,7 @@ class FactorEvaluation:
     def _market_columns(
         name: str, frame: Any, columns: tuple, interest: Any, is_daily: bool,
         timezone: str, *, key: str, reason: str = "",
+        trading_day_close_time: str | None = None,
     ) -> dict[str, Any]:
         from server.modules.shared.price_data_helpers import format_price_row
 
@@ -434,6 +439,7 @@ class FactorEvaluation:
                 row=row, time_col="__time__", o_col=columns[0], h_col=columns[1],
                 l_col=columns[2], c_col=columns[3], v_col=columns[4],
                 oi_col=interest, freq_is_daily=is_daily, timezone=timezone,
+                trading_day_close_time=trading_day_close_time,
             )
             for _, row in emitted.iterrows()
         ]
