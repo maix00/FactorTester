@@ -75,7 +75,7 @@
     const controls = document.createElement("div");
     controls.className = "product-price-controls";
     const sourcePicker = FTMultiSelectFilter.create(context, {
-      title: context.t("数据源"), multi: false, compact: true,
+      title: context.t("数据源"), multi: false,
       className: "product-price-source-filter", items: [], selected: [""],
       onChange: values => {
         state.dataSource = values[0] || "";
@@ -84,7 +84,7 @@
       },
     });
     const adjustedPicker = FTMultiSelectFilter.create(context, {
-      title: context.t("价格序列"), multi: false, compact: true,
+      title: context.t("价格序列"), multi: false,
       className: "product-price-adjusted-filter",
       items: [
         {value: "raw", label: context.t("原始价格")},
@@ -97,7 +97,7 @@
       },
     });
     const timezonePicker = FTMultiSelectFilter.create(context, {
-      title: context.t("显示时区"), multi: false, compact: true,
+      title: context.t("显示时区"), multi: false,
       className: "product-price-timezone-filter", items: [], selected: ["product"],
       onChange: values => {
         state.timeZoneChoice = values[0] || "product";

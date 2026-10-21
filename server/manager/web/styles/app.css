@@ -282,17 +282,29 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .product-category-filter, .product-tree-panel, .product-search-results, .product-group-products,
 .product-detail-metadata, .product-term-structure, .product-price-section { display: grid; gap: 12px; }
 .product-price-panel { display: grid; gap: 12px; min-width: 0; }
-.product-price-heading { display: flex; align-items: center; min-height: 32px; gap: 4px; }
-.product-price-heading h2 { margin: 0 4px 0 0; line-height: 32px; }
+.product-price-heading { display: flex; align-items: baseline; min-height: 32px; gap: 4px; }
+.product-price-heading h2 { margin: 0 4px 0 0; line-height: 30px; }
 .product-price-timezone-label { margin-right: 4px; color: var(--muted);
-  font-size: 12px; white-space: nowrap; }
-.product-price-heading .icon-action-button { align-self: center; flex: 0 0 30px; }
+  font-size: 12px; line-height: 30px; white-space: nowrap; }
+.product-price-heading .icon-action-button { align-self: flex-end; flex: 0 0 30px; }
 .product-price-info-dialog { width: min(680px, calc(100vw - 24px)); max-width: none; }
 .product-price-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .product-price-controls .ft-multi-select-filter { width: min(260px, 100%); }
-.product-price-info-card .product-price-controls { border: 0; padding: 8px 0;
-  background: transparent; align-items: end; }
-.product-price-info-card .product-price-controls .ft-multi-select-filter { flex: 1 1 190px; }
+.product-price-info-card .product-price-controls { display: grid; gap: 12px;
+  border: 0; padding: 8px 0; background: transparent; }
+.product-price-info-card .product-price-controls .ft-multi-select-filter,
+.product-price-info-card .product-price-frequency { display: grid;
+  grid-template-columns: 112px minmax(0, 1fr); align-items: center; gap: 12px;
+  width: 100%; max-width: none; min-height: 38px; padding: 0; }
+.product-price-info-card .ft-multi-select-heading { display: block; }
+.product-price-info-card .ft-multi-select-heading h2 { font-size: 13px; }
+.product-price-info-card .ft-multi-select-selection { display: none; }
+.product-price-info-card .ft-multi-select-summary { min-height: 38px; }
+.product-price-info-card .product-price-frequency b { font-size: 13px; }
+@media (max-width: 560px) {
+  .product-price-info-card .product-price-controls .ft-multi-select-filter,
+  .product-price-info-card .product-price-frequency { grid-template-columns: 80px minmax(0, 1fr); }
+}
 .product-price-frequency { align-self: end; padding: 7px 0; color: var(--muted); font-size: 12px; }
 .product-price-frequency b { font-weight: 600; color: inherit; }
 .product-fields-section { min-width: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
@@ -315,12 +327,13 @@ tbody tr[data-href]:hover { background: var(--soft); }
   gap: 12px; align-items: baseline; padding: 6px 0; border-top: 1px solid var(--line); }
 .ft-chart-inspector dt { color: var(--muted); }
 .ft-chart-inspector dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
-.ft-lightweight-price-detail { position: absolute; z-index: 3; width: min(232px, calc(100% - 16px));
+.ft-lightweight-price-detail { position: absolute; z-index: 3; width: min(300px, calc(100% - 16px));
   max-height: calc(100% - 16px); overflow: auto; box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
 .ft-lightweight-price-detail header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .ft-lightweight-price-detail header button { border: 0; background: transparent; color: var(--muted);
   font: inherit; font-size: 18px; cursor: pointer; }
-.ft-lightweight-price-detail dl > div { grid-template-columns: minmax(56px, 1fr) auto; gap: 8px; padding: 4px 0; }
+.ft-lightweight-price-detail dl > div { grid-template-columns: minmax(72px, 1fr) max-content; gap: 8px; padding: 4px 0; }
+.ft-lightweight-price-detail dl dd { white-space: nowrap; overflow-wrap: normal; }
 .ft-lightweight-price-error { color: var(--danger, #c1333d); font-size: 12px; }
 .product-category-filter { display: grid; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
 .ft-multi-select-filter { display: grid; gap: 6px; width: 100%; max-width: 440px; min-width: 0; }
