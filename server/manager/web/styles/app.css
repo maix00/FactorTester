@@ -287,6 +287,7 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .product-price-timezone-label { margin-right: 4px; color: var(--muted);
   font-size: 12px; line-height: 30px; white-space: nowrap; }
 .product-price-heading .icon-action-button { align-self: flex-end; flex: 0 0 30px; }
+.product-price-heading .icon-action-button .ft-icon { transform: translateY(-5px); }
 .product-price-info-dialog { width: min(680px, calc(100vw - 24px)); max-width: none; }
 .product-price-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .product-price-controls .ft-multi-select-filter { width: min(260px, 100%); }

@@ -20,11 +20,9 @@ type ChartApi = {
     fitContent: () => void;
     getVisibleRange: () => ChartRange | null;
     setVisibleRange: (range: ChartRange) => void;
-    getVisibleLogicalRange: () => ChartRange | null;
     setVisibleLogicalRange: (range: ChartRange) => void;
+    width: () => number;
     coordinateToTime: (x: number) => number | null;
-    coordinateToLogical: (x: number) => number | null;
-    timeToCoordinate: (time: number) => number | null;
     subscribeVisibleTimeRangeChange: (fn: (range: ChartRange | null) => void) => void;
     unsubscribeVisibleTimeRangeChange: (fn: (range: ChartRange | null) => void) => void;
   };
@@ -78,6 +76,25 @@ function sortedBars(source: Bar[]): Bar[] {
 }
 
 function toTime(bar: Bar): number { return Math.floor(bar.timestamp / 1000); }
+
+// Time ranges are expressed in seconds; logical positions are bar indexes.
+// Interpolate at a missing timestamp so an overview bar can be replaced by
+// source-frequency bars without snapping the pointer to a neighbouring bar.
+function logicalAtTime(rows: Bar[], time: number): number {
+  if (!rows.length) return 0;
+  if (time <= toTime(rows[0])) return 0;
+  if (time >= toTime(rows[rows.length - 1])) return rows.length - 1;
+  let low = 0;
+  let high = rows.length - 1;
+  while (low + 1 < high) {
+    const middle = (low + high) >>> 1;
+    if (toTime(rows[middle]) <= time) low = middle;
+    else high = middle;
+  }
+  const before = toTime(rows[low]);
+  const after = toTime(rows[high]);
+  return low + (time - before) / (after - before);
+}
 
 function priceDecimals(bar: Bar): number {
   return Math.min(12, Math.max(...[bar.open, bar.high, bar.low, bar.close].map(value => {
@@ -220,41 +237,20 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
     const replaceData = (rows: Bar[], visible: ChartRange | null) => {
       const scale = chart.timeScale();
       const anchor = pointerX === null ? null : scale.coordinateToTime(pointerX);
-      indexed = apply(rows);
-      if (visible) scale.setVisibleRange(visible);
-      if (anchor === null || pointerX === null) return;
-      let actualX = scale.timeToCoordinate(anchor);
-      // The old overview timestamp often is not itself a source bar in the
-      // finer response. Interpolate between its neighbouring source bars.
-      if (rows.length > 1 && anchor >= toTime(rows[0])
-        && anchor <= toTime(rows[rows.length - 1])) {
-        let low = 0;
-        let high = rows.length;
-        while (low < high) {
-          const middle = (low + high) >>> 1;
-          if (toTime(rows[middle]) < anchor) low = middle + 1;
-          else high = middle;
-        }
-        const before = rows[Math.max(0, low - 1)];
-        const after = rows[Math.min(rows.length - 1, low)];
-        const beforeTime = toTime(before);
-        const afterTime = toTime(after);
-        const beforeX = scale.timeToCoordinate(beforeTime);
-        const afterX = scale.timeToCoordinate(afterTime);
-        if (beforeX !== null && afterX !== null) {
-          actualX = beforeTime === afterTime ? beforeX
-            : beforeX + (anchor - beforeTime) * (afterX - beforeX) / (afterTime - beforeTime);
-        }
+      let target: ChartRange | null = null;
+      if (visible && rows.length > 1) {
+        const from = logicalAtTime(rows, Number(visible.from));
+        const to = logicalAtTime(rows, Number(visible.to));
+        const span = Math.max(1, to - from);
+        const fraction = pointerX === null ? null
+          : Math.max(0, Math.min(1, pointerX / Math.max(1, scale.width())));
+        const wantedFrom = anchor === null || fraction === null ? from
+          : logicalAtTime(rows, Number(anchor)) - fraction * span;
+        const boundedFrom = Math.max(0, Math.min(rows.length - 1 - span, wantedFrom));
+        target = {from: boundedFrom, to: boundedFrom + span};
       }
-      const logicalRange = scale.getVisibleLogicalRange();
-      if (actualX === null || !logicalRange) return;
-      const actualLogical = scale.coordinateToLogical(actualX);
-      const pointerLogical = scale.coordinateToLogical(pointerX);
-      if (actualLogical === null || pointerLogical === null) return;
-      const shift = actualLogical - pointerLogical;
-      if (Math.abs(shift) > 0.01) scale.setVisibleLogicalRange({
-        from: logicalRange.from + shift, to: logicalRange.to + shift,
-      });
+      indexed = apply(rows);
+      if (target) scale.setVisibleLogicalRange(target);
     };
     const stopLoading = () => {
       if (loadingTimer) clearTimeout(loadingTimer);
