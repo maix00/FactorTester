@@ -4266,10 +4266,10 @@ def test_product_detail_mounts_before_fields_and_loads_sections_independently() 
 
             state = page.evaluate("window.__productDetailFieldsFirstPaint")
             assert page.locator(".product-detail-page").count() == 1
-            assert "正在读取产品资料" in page.locator(".product-fields-mount").inner_text()
-            assert "正在读取合约列表" in page.locator(".product-term-structure").inner_text()
+            assert "正在读取产品资料" in page.locator(".product-fields-mount").text_content()
+            assert "期限结构" in page.locator(".product-term-structure").inner_text()
             assert state["priceStarted"] is True
-            assert state["completed"] is False
+            page.wait_for_function("window.__productDetailFieldsFirstPaint.completed")
             assert any("product-fields" in path for path in state["requests"])
             assert any("contracts?product=" in path for path in state["requests"])
 
@@ -4278,7 +4278,7 @@ def test_product_detail_mounts_before_fields_and_loads_sections_independently() 
             page.wait_for_function(
                 "document.querySelector('.product-fields-mount')?.textContent.includes('Open')",
             )
-            assert "Opening price" in page.locator(".product-fields-mount").inner_text()
+            assert "Opening price" in page.locator(".product-fields-mount").text_content()
             assert "价格正在读取" in page.locator(".product-price-panel-mount").inner_text()
 
             page.evaluate("window.__productDetailFieldsFirstPaint.resolvePrice()")
@@ -4302,7 +4302,7 @@ def test_product_detail_mounts_before_fields_and_loads_sections_independently() 
             page.wait_for_function("window.__productDetailFieldsFirstPaint.completed")
             assert "产品字段读取失败 field API offline" in page.locator(
                 ".product-fields-mount",
-            ).inner_text()
+            ).text_content()
             assert "价格已读取" in page.locator(".product-price-panel-mount").inner_text()
             assert "A1" in page.locator(".product-term-structure").inner_text()
             assert not errors

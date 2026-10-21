@@ -25,7 +25,7 @@ from server.modules.shared.price_services import (
 from tools.products.product_utils import get_product_contracts
 
 from .errors import ProductMarketDataError
-from .ranges import range_bound
+from .ranges import latest_relative_start, range_bound
 from .sampling import bounded_ohlcv_frame, bounded_ohlcv_rows, fixed_chart_frame
 
 
@@ -165,6 +165,15 @@ def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
         price_frame = price_frame[price_frame[time_column] >= start]
     if end is not None:
         price_frame = price_frame[price_frame[time_column] <= end]
+    chart_range = str(payload.get("chart_range") or "").lower()
+    if chart_range:
+        try:
+            index = pd.DatetimeIndex(price_frame[time_column])
+            relative_start = latest_relative_start(index, chart_range)
+        except ValueError as exc:
+            raise ProductMarketDataError("不支持的图表时间范围", 400) from exc
+        if relative_start is not None:
+            price_frame = price_frame[price_frame[time_column] >= relative_start]
     price_frame = cast(pd.DataFrame, price_frame)
     if price_frame.empty:
         raise ProductMarketDataError("指定范围内无合约价格数据", 404)
@@ -173,10 +182,14 @@ def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
     has_open_interest = oi_column is not None
     fixed_chart = payload.get("chart_mode") == "fixed"
     if fixed_chart:
+        selected_source = next((item for item in available_sources
+                                if item.get("alias") == requested_source), None)
         price_frame, total_count = fixed_chart_frame(
             price_frame, payload, columns, frequency, oi_column,
             time_column=time_column,
             trading_day_column="trading_day" if "trading_day" in price_frame else None,
+            source_delivery_mode=(selected_source or {}).get(
+                "delivery_mode", "historical_snapshot"),
         )
     else:
         price_frame, total_count = bounded_ohlcv_frame(
@@ -218,6 +231,10 @@ def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
         "data_source": requested_source or (
             available_sources[0]["alias"] if available_sources else ""
         ),
+        "delivery_mode": next((item.get("delivery_mode", "historical_snapshot")
+                               for item in available_sources
+                               if item.get("alias") == requested_source),
+                              "historical_snapshot"),
         "available_sources": available_sources,
         "available_freqs": available_freqs,
         "count": total_count,

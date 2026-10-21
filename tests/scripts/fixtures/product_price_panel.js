@@ -58,6 +58,7 @@ function settle() {
 const requests = [];
 const charts = [];
 const loadedGroups = [];
+const notices = [];
 let disposed = 0;
 const tables = [];
 const context = {
@@ -80,9 +81,15 @@ context.FTUI = {
     button.listeners.click = action;
     return button;
   },
+  actionButton: label => {
+    const button = new Node("button");
+    button.textContent = label;
+    return button;
+  },
   dialogRoot: () => {
     const dialog = new Node("dialog");
     dialog.showModal = () => {};
+    dialog.close = () => { dialog.closed = true; dialog.listeners.close?.(); };
     return dialog;
   },
   table: (headers, rows) => {
@@ -99,7 +106,7 @@ context.FTMultiSelectFilter = {create: (_context, options) => {
     setItems(items) { this.items = items; },
     setValues(values) { this.values = values; },
     setStatus() {},
-    select(value) { options.onChange([value]); },
+    select(value) { this.values = [value]; options.onChange([value]); },
   };
   pickers.push(picker);
   return picker;
@@ -116,10 +123,13 @@ context.FTChartWorkbench = {mountPriceChart: (target, options) => {
   handle.mergeOverview = rows => { charts.at(-1).overview = rows; };
   handle.fitContent = () => { charts.at(-1).fitted = true; };
   handle.setTimeZone = timeZone => { charts.at(-1).displayTimeZone = timeZone; };
+  handle.setRangeBands = ranges => { charts.at(-1).rangeBands = ranges; };
+  handle.selectRangeBand = id => { charts.at(-1).selectedBand = id; return true; };
   return handle;
 }};
 context.isRouteCurrent = () => true;
 context.t = value => value;
+context.showNotice = (message, isError) => notices.push({message, isError});
 context.api = async (_url, options) => {
   const payload = JSON.parse(options.body);
   requests.push(payload);
@@ -175,12 +185,13 @@ vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);
     "filters live in the shared settings dialog instead of consuming a page row");
   const settings = walk(root, node => node.textContent === "图表设置")[0];
   settings.listeners.click();
+  const settingsDialog = context.document.body.children.at(-1);
+  const save = walk(settingsDialog, node => node.textContent === "保存并加载")[0];
   assert.strictEqual(walk(context.document.body,
     node => node.className === "product-price-controls").length, 1);
   timezonePicker.select("utc");
-  assert.strictEqual(charts.at(-1).displayTimeZone, "UTC");
-  timezonePicker.select("product");
-  assert.strictEqual(charts.at(-1).displayTimeZone, "Asia/Shanghai");
+  assert.strictEqual(charts.at(-1).options.timeZone, "Asia/Shanghai",
+    "time zone remains unchanged until Save");
   assert.deepStrictEqual(Array.from(sourcePicker.items, node => node.label), [
     "自动选择", "LocalCNFuturesDAY1 · DAY1", "LocalCNFuturesMIN1 · MIN1",
   ]);
@@ -195,24 +206,20 @@ vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);
   assert.strictEqual(tables.at(-1).rows.some(row => row[1] === "未复权"), true);
 
   sourcePicker.select("LocalCNFuturesMIN1");
-  await settle();
-  assert.strictEqual(requests[1].data_source, "LocalCNFuturesMIN1");
-  assert.strictEqual(requests[1].freq, undefined);
-  assert.strictEqual(requests[1].max_points, 5000);
-  assert.strictEqual(requests[1].start_date, "2025-01-01");
-
   adjustedPicker.select("adjusted");
-  await settle();
-  assert.strictEqual(requests.some(request =>
-    request.data_source === "LocalCNFuturesMIN1" && request.adjusted === true), true);
-  assert.strictEqual(requests.length, 3,
-    "each source or adjustment selection makes one selected-range request");
   intervalPicker.select("HOUR1");
-  await settle();
-  assert.strictEqual(requests.at(-1).chart_interval, "HOUR1");
   rangePicker.select("all");
+  assert.strictEqual(requests.length, 1,
+    "draft settings must not trigger a request");
+  await save.listeners.click();
   await settle();
+  assert.strictEqual(requests.length, 2);
+  assert.strictEqual(requests.at(-1).data_source, "LocalCNFuturesMIN1");
+  assert.strictEqual(requests.at(-1).adjusted, true);
+  assert.strictEqual(requests.at(-1).chart_interval, "HOUR1");
   assert.strictEqual(requests.at(-1).start_date, undefined);
+  assert.strictEqual(charts.at(-1).options.timeZone, "UTC");
+  assert.strictEqual(settingsDialog.closed, true);
   assert.ok(loadedGroups.includes("chart-workbench-price"));
   assert.strictEqual(charts.at(-1).options.bars[0].close, 2);
   const showAll = walk(root, node => node.textContent === "适配当前时间范围")[0];
@@ -227,21 +234,78 @@ vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);
 
   const existingChartCount = charts.length;
   const normalApi = context.api;
+  settings.listeners.click();
+  const retryDialog = context.document.body.children.at(-1);
+  const retrySave = walk(retryDialog, node => node.textContent === "保存并加载")[0];
   context.api = async () => { throw new Error("temporary source failure"); };
   intervalPicker.select("SOURCE");
+  assert.strictEqual(charts.length, existingChartCount);
+  await retrySave.listeners.click();
   await settle();
   assert.strictEqual(charts.length, existingChartCount,
     "a failed setting request must leave the previous chart visible");
-  assert.strictEqual(intervalPicker.values[0], "HOUR1",
-    "a failed request must restore the setting represented by the visible chart");
-  assert.ok(walk(root, node => node.className.includes("product-price-load-overlay is-error")).length);
+  assert.strictEqual(intervalPicker.values[0], "SOURCE",
+    "a failed request must retain the user's draft selection");
+  assert.strictEqual(retryDialog.closed, undefined);
+  assert.strictEqual(walk(retryDialog, node => node.className ===
+    "product-price-settings-error")[0].textContent, "temporary source failure");
+  assert.deepStrictEqual(notices.at(-1), {
+    message: "temporary source failure", isError: true,
+  });
   context.api = normalApi;
   intervalPicker.select("DAY1");
+  await retrySave.listeners.click();
   await settle();
   assert.strictEqual(charts.length, existingChartCount + 1);
-  assert.strictEqual(walk(root,
-    node => node.className.includes("product-price-load-overlay is-error")).length, 0,
-    "a new request must clear the stale error overlay");
+  assert.strictEqual(retryDialog.closed, true);
+
+  const liveEntries = context.FTProductPricePanel.sourceEntries([
+    {alias: "FutureLiveMIN1", freq: "MIN1", delivery_mode: "live_stream"},
+  ]);
+  assert.strictEqual(liveEntries[0].deliveryMode, "live_stream");
+
+  const recentMount = new Node("div");
+  const recentRoot = await context.FTProductPricePanel.render(context, recentMount, {
+    product: {name: "AU.SHF"}, source: "server",
+  });
+  assert.strictEqual(requests.at(-1).chart_range, undefined);
+  assert.strictEqual(requests.at(-1).start_date, undefined,
+    "product charts initially load all daily history");
+  recentRoot.setTermRanges([{uid: "contract-1", start: "2025-01-01",
+    end: "2025-01-31"}]);
+  recentRoot.selectTermRange({uid: "contract-1"});
+  assert.strictEqual(charts.at(-1).rangeBands.length, 1);
+  assert.strictEqual(charts.at(-1).selectedBand, "contract-1");
+  assert.strictEqual(requests.at(-1).chart_range, undefined,
+    "selecting a term-structure row must not narrow the data request");
+  walk(recentRoot, node => node.textContent === "图表设置")[0].listeners.click();
+  const recentRangePicker = pickers.slice(5)[4];
+  recentRangePicker.select("year");
+  const recentDialog = context.document.body.children.at(-1);
+  await walk(recentDialog, node => node.textContent === "保存并加载")[0].listeners.click();
+  assert.strictEqual(requests.at(-1).chart_range, "year");
+  assert.strictEqual(requests.at(-1).start_date, undefined,
+    "recent periods are resolved against the source's last bar on the server");
+
+  context.api = async (...args) => {
+    const response = await normalApi(...args);
+    response.available_sources.push({alias: "FutureLiveMIN1", freq: "MIN1",
+      delivery_mode: "live_stream"});
+    return response;
+  };
+  const liveMount = new Node("div");
+  const liveRoot = await context.FTProductPricePanel.render(context, liveMount, {
+    product: {name: "AU.SHF"}, source: "server",
+  });
+  const livePickers = pickers.slice(10);
+  walk(liveRoot, node => node.textContent === "图表设置")[0].listeners.click();
+  livePickers[0].select("FutureLiveMIN1");
+  assert.strictEqual(livePickers[3].values[0], "LIVE");
+  assert.ok(livePickers[3].items.some(item => item.label === "实时"));
+  const liveDialog = context.document.body.children.at(-1);
+  await walk(liveDialog, node => node.textContent === "保存并加载")[0].listeners.click();
+  assert.strictEqual(requests.at(-1).chart_interval, "LIVE");
+  context.api = normalApi;
 
   const contractMount = new Node("div");
   const contractRoot = await context.FTProductPricePanel.render(context, contractMount, {
@@ -249,7 +313,7 @@ vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);
     contractName: "A2501",
     source: "server",
   });
-  const contractPickers = pickers.slice(5);
+  const contractPickers = pickers.slice(15);
   assert.deepStrictEqual(
     Array.from(contractPickers[0].items, node => node.label),
     ["自动选择", "LocalCNFuturesMIN1 · MIN1"],

@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import pandas as pd
 import pytest
+from types import SimpleNamespace
 
 from server.modules.shared.price_data_helpers import open_interest_column
 from server.services.product_market_data.errors import ProductMarketDataError
 from server.services.product_market_data.products import _price_rows
+from server.services.product_market_data import products as product_projection
+from server.services.product_market_data.ranges import latest_relative_start
 from server.services.product_market_data.sampling import (
     bounded_ohlcv_frame, bounded_ohlcv_rows, fixed_chart_frame,
 )
@@ -109,6 +112,94 @@ def test_fixed_chart_rejects_oversized_selection_instead_of_changing_frequency()
     with pytest.raises(ProductMarketDataError, match="更粗的频率或更短的范围"):
         fixed_chart_frame(frame, {"chart_interval": "SOURCE", "max_points": 100},
                           ("open", "high", "low", "close", "volume"), DataFreq.MIN1)
+
+
+def test_recent_chart_ranges_follow_last_source_bar_not_wall_clock() -> None:
+    index = pd.date_range("2010-01-04", "2025-05-25", freq="D", tz="Asia/Shanghai")
+    last = index[-1]
+    assert latest_relative_start(index, "day") == last - pd.DateOffset(days=1)
+    assert latest_relative_start(index, "month") == last - pd.DateOffset(months=1)
+    assert latest_relative_start(index, "year") == last - pd.DateOffset(years=1)
+    assert latest_relative_start(index, "ytd") == pd.Timestamp(
+        "2025-01-01", tz="Asia/Shanghai")
+    with pytest.raises(ValueError, match="Unsupported chart range"):
+        latest_relative_start(index, "unknown")
+
+
+def test_live_chart_interval_requires_declared_live_source() -> None:
+    frame = pd.DataFrame({"open": [1], "high": [2], "low": [1],
+                          "close": [2], "volume": [1]},
+                         index=pd.date_range("2025-01-01", periods=1, freq="min"))
+    columns = ("open", "high", "low", "close", "volume")
+    with pytest.raises(ProductMarketDataError, match="不提供实时"):
+        fixed_chart_frame(frame, {"chart_interval": "LIVE"}, columns, DataFreq.MIN1)
+    result, count = fixed_chart_frame(
+        frame, {"chart_interval": "LIVE"}, columns, DataFreq.MIN1,
+        source_delivery_mode="live_stream")
+    assert count == 1 and result.equals(frame)
+
+
+def test_daily_full_history_fits_explicit_chart_budget() -> None:
+    dates = pd.bdate_range("2010-01-04", periods=3980)
+    frame = pd.DataFrame({"open": 1, "high": 2, "low": 1,
+                          "close": 2, "volume": 1}, index=dates)
+    result, count = fixed_chart_frame(
+        frame, {"chart_interval": "DAY1", "max_points": 5000},
+        ("open", "high", "low", "close", "volume"), DataFreq.DAY1)
+    assert count == 3980 and result.index[0] == dates[0]
+
+
+def test_product_recent_range_uses_source_coverage(monkeypatch) -> None:
+    dates = pd.bdate_range("2020-01-01", "2025-05-23")
+    frame = pd.DataFrame({"OPEN": 1.0, "HIGH": 2.0, "LOW": 1.0,
+                          "CLOSE": 2.0, "VOLUME": 1.0}, index=dates)
+    source = SimpleNamespace(key="HistoricalTestDAY1",
+                             delivery_mode="historical_snapshot")
+
+    class DataMeta:
+        current_source = source
+
+        def get_current_source(self):
+            return source
+
+    class Product:
+        name = "TEST.LOCAL"
+        timezone = "Asia/Shanghai"
+        current_freq = DataFreq.DAY1
+        DAY1 = DataMeta()
+
+        def get_series_variants(self):
+            return [SimpleNamespace(variant="primary_raw", adjusted=False,
+                                    backing_product_name=self.name)]
+
+        def set_current_freq(self, frequency):
+            self.current_freq = frequency
+
+        def get_some_data(self, _frequency, copy=False):
+            return frame
+
+        def get_price_data(self, start, end, adjusted=False):
+            return frame.loc[(frame.index >= start) & (frame.index <= end)].copy()
+
+    product = Product()
+    monkeypatch.setattr(product_projection, "cached_products", lambda: [product])
+    monkeypatch.setattr(product_projection, "find_product", lambda _, __: product)
+    monkeypatch.setattr(product_projection, "product_public_fields", lambda _: {})
+    monkeypatch.setattr(product_projection, "supports_term_structure", lambda _: False)
+    monkeypatch.setattr(product_projection, "supports_adjusted_price", lambda _: False)
+    monkeypatch.setattr(product_projection, "available_sources_for_product",
+                        lambda _: [])
+    monkeypatch.setattr(product_projection, "available_freq_names_for_product",
+                        lambda _: ["DAY1"])
+    result = product_projection.product_price_series({
+        "product_name": "TEST.LOCAL", "chart_mode": "fixed",
+        "chart_interval": "DAY1", "chart_range": "year", "max_points": 5000,
+    })
+    assert result["count"] < len(frame)
+    assert result["data"][0]["timestamp"] >= pd.Timestamp(
+        "2024-05-23", tz="Asia/Shanghai").timestamp() * 1000
+    assert result["data"][-1]["timestamp"] == pd.Timestamp(
+        "2025-05-23", tz="Asia/Shanghai").timestamp() * 1000
 
 
 def test_fixed_chart_rejects_interval_finer_than_source() -> None:

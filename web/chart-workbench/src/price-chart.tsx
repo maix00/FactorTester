@@ -13,6 +13,7 @@ type Bar = {
   openInterest: number | null;
 };
 type ChartRange = {from: number; to: number};
+type RangeBand = {id: string; start: number; end: number};
 type ChartApi = {
   applyOptions: (options: Record<string, unknown>) => void;
   addSeries: (kind: unknown, options: Record<string, unknown>, paneIndex?: number) => SeriesApi;
@@ -58,6 +59,8 @@ type Options = {
     mergeOverview: (rows: Bar[]) => void;
     fitContent: () => void;
     setTimeZone: (timeZone: string) => void;
+    setRangeBands: (ranges: RangeBand[]) => void;
+    selectRangeBand: (id: string) => boolean;
   }) => void;
 };
 
@@ -192,7 +195,48 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
     let cached = overview;
     let indexed = apply(cached);
     let displayed = cached;
+    const bandLayer = document.createElement("div");
+    bandLayer.className = "ft-lightweight-range-bands";
+    node.append(bandLayer);
+    let rangeBands: RangeBand[] = [];
+    const bandElements = new Map<string, HTMLDivElement>();
+    let selectedBandID = "";
+    const drawRangeBands = () => {
+      const scale = chart.timeScale();
+      const width = scale.width();
+      bandLayer.style.width = `${width}px`;
+      if (!displayed.length) return;
+      for (const band of rangeBands) {
+        const element = bandElements.get(band.id);
+        if (!element) continue;
+        if (!Number.isFinite(band.start) || !Number.isFinite(band.end)
+          || band.end <= band.start || band.end < displayed[0].timestamp
+          || band.start > displayed[displayed.length - 1].timestamp) {
+          element.hidden = true;
+          continue;
+        }
+        const from = scale.logicalToCoordinate(
+          logicalAtTime(displayed, band.start / 1000));
+        const to = scale.logicalToCoordinate(
+          logicalAtTime(displayed, band.end / 1000));
+        if (from === null || to === null || to <= 0 || from >= width) {
+          element.hidden = true;
+          continue;
+        }
+        const left = Math.max(0, from);
+        const right = Math.min(width, to);
+        if (right <= left) { element.hidden = true; continue; }
+        element.hidden = false;
+        element.className = `ft-lightweight-range-band${band.id === selectedBandID
+          ? " is-selected" : ""}`;
+        element.style.left = `${left}px`;
+        element.style.width = `${right - left}px`;
+      }
+    };
     chart.timeScale().fitContent();
+    const bandResizeObserver = typeof ResizeObserver === "undefined" ? null
+      : new ResizeObserver(drawRangeBands);
+    bandResizeObserver?.observe(node);
     let userChangedRange = false;
     let pendingInteraction = false;
     let pointerActive = false;
@@ -269,6 +313,7 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
       indexed = apply(rows);
       displayed = rows;
       if (target) scale.setVisibleLogicalRange(target);
+      drawRangeBands();
     };
     const stopLoading = () => {
       if (loadingTimer) clearTimeout(loadingTimer);
@@ -290,6 +335,7 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
       stopLoading();
     };
     const onRange = (range: ChartRange | null) => {
+      drawRangeBands();
       // setData and setVisibleRange also emit range changes. Only a direct
       // gesture (or focusRange below) may start a data request.
       if (!range || !loadRange || !pendingInteraction) return;
@@ -411,11 +457,42 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
             localTick(time, kind, locale, activeTimeZone)},
         localization: {timeFormatter: formatTime}});
       },
+      setRangeBands(ranges) {
+        rangeBands = ranges;
+        bandLayer.replaceChildren();
+        bandElements.clear();
+        for (const band of ranges) {
+          const element = document.createElement("div");
+          element.className = "ft-lightweight-range-band";
+          bandLayer.append(element);
+          bandElements.set(band.id, element);
+        }
+        drawRangeBands();
+      },
+      selectRangeBand(id) {
+        selectedBandID = id;
+        drawRangeBands();
+        const band = rangeBands.find(item => item.id === id);
+        if (!band || !displayed.length) return false;
+        const first = toTime(displayed[0]) * 1000;
+        const last = toTime(displayed[displayed.length - 1]) * 1000;
+        if (band.end < first || band.start > last) return false;
+        const visible = chart.timeScale().getVisibleRange();
+        if (visible && band.start / 1000 <= Number(visible.to)
+          && band.end / 1000 >= Number(visible.from)) return true;
+        const from = Math.max(0, logicalAtTime(displayed, band.start / 1000) - 1);
+        const to = Math.min(displayed.length - 1,
+          logicalAtTime(displayed, band.end / 1000) + 1);
+        chart.timeScale().setVisibleLogicalRange({from, to: Math.max(from + 1, to)});
+        return true;
+      },
     });
     return () => {
       revision += 1;
       if (timer) clearTimeout(timer);
       if (loadingTimer) clearTimeout(loadingTimer);
+      bandResizeObserver?.disconnect();
+      bandLayer.remove();
       node.removeEventListener("wheel", wheel);
       node.removeEventListener("pointerdown", pointerDown);
       node.removeEventListener("pointermove", pointerMove);
@@ -462,6 +539,8 @@ type PriceChartHandle = (() => void) & {
   mergeOverview: (rows: Bar[]) => void;
   fitContent: () => void;
   setTimeZone: (timeZone: string) => void;
+  setRangeBands: (ranges: RangeBand[]) => void;
+  selectRangeBand: (id: string) => boolean;
 };
 
 export function mountPriceChart(target: HTMLElement, options: Options): PriceChartHandle {
@@ -471,9 +550,13 @@ export function mountPriceChart(target: HTMLElement, options: Options): PriceCha
   let controls: Parameters<NonNullable<Options["onReady"]>>[0] | null = null;
   let pending: [number, number] | null = null;
   let pendingOverview: Bar[] | null = null;
+  let pendingBands: RangeBand[] | null = null;
+  let pendingBandID = "";
   root.render(<MarketChart {...options} onReady={ready => {
     controls = ready;
     if (pendingOverview) { ready.mergeOverview(pendingOverview); pendingOverview = null; }
+    if (pendingBands) { ready.setRangeBands(pendingBands); pendingBands = null; }
+    if (pendingBandID) { ready.selectRangeBand(pendingBandID); pendingBandID = ""; }
     if (pending) { ready.focusRange(...pending); pending = null; }
   }} />);
   const dispose = (() => {
@@ -484,6 +567,8 @@ export function mountPriceChart(target: HTMLElement, options: Options): PriceCha
     controls = null;
     pending = null;
     pendingOverview = null;
+    pendingBands = null;
+    pendingBandID = "";
   }) as PriceChartHandle;
   dispose.focusRange = (minimum, maximum) => {
     if (controls) controls.focusRange(minimum, maximum);
@@ -495,5 +580,14 @@ export function mountPriceChart(target: HTMLElement, options: Options): PriceCha
   };
   dispose.fitContent = () => controls?.fitContent();
   dispose.setTimeZone = timeZone => controls?.setTimeZone(timeZone);
+  dispose.setRangeBands = ranges => {
+    if (controls) controls.setRangeBands(ranges);
+    else pendingBands = ranges;
+  };
+  dispose.selectRangeBand = id => {
+    if (controls) return controls.selectRangeBand(id);
+    pendingBandID = id;
+    return true;
+  };
   return dispose;
 }

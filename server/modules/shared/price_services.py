@@ -249,6 +249,7 @@ def available_sources_for_product(product, freq=None):
                 sources.append({
                     'alias': source.key,
                     'freq': source.freq.name if hasattr(source.freq, 'name') else str(source.freq),
+                    'delivery_mode': getattr(source, 'delivery_mode', 'historical_snapshot'),
                 })
         unique = {}
         for source in sources:
