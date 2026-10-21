@@ -15,6 +15,75 @@ from server.services.product_market_data.sampling import (
 from tools.data.types import DataFreq
 
 
+def test_contract_frequency_column_uses_registered_sources(monkeypatch) -> None:
+    from server.services.product_market_data import contracts as projection
+
+    monkeypatch.setattr(projection, "cached_products", lambda: (object(),))
+    monkeypatch.setattr(projection, "find_product", lambda products, name: products[0])
+    monkeypatch.setattr(projection, "supports_term_structure", lambda product: True)
+    monkeypatch.setattr(projection, "get_product_contracts", lambda product, **kwargs: [
+        {"uid": "both"}, {"uid": "daily"}, {"uid": "absent"},
+        {"uid": "stream"},
+    ])
+    monkeypatch.setattr(projection, "contract_available_sources", lambda uid: {
+        "both": [{"alias": "minute", "freq": "MIN1"},
+                 {"alias": "daily", "freq": "DAY1"}],
+        "daily": [{"alias": "daily", "freq": "DAY1"}], "absent": [],
+        "stream": [{"alias": "live-level2", "freq": "TICK",
+                    "delivery_mode": "live_stream"}],
+    }[uid])
+    monkeypatch.setattr(projection, "product_public_fields", lambda product: {})
+
+    rows = projection.contract_listing("sample")["contracts"]
+    assert [(row["available_freqs"], row["has_data"]) for row in rows] == [
+        (["MIN1", "DAY1"], True), (["DAY1"], True), ([], False),
+        (["TICK"], True),
+    ]
+    assert [source["alias"] for source in rows[0]["available_sources"]] == [
+        "minute", "daily",
+    ]
+
+
+def test_day_only_contract_uses_term_snapshot_source(tmp_path, monkeypatch) -> None:
+    from server.services.product_market_data import contracts as projection
+    from sources.LocalCNFutures import CNFutures as source_module
+
+    uid = "DCE|F|FB|2402"
+    path = tmp_path / "term.parquet"
+    pd.DataFrame({
+        "CONTRACT_UID": [uid, "another"],
+        "TRADING_DAY": pd.to_datetime(["2024-01-04", "2024-01-04"]),
+        "OPEN": [10., 20.], "HIGH": [12., 22.],
+        "LOW": [9., 19.], "CLOSE": [11., 21.],
+        "VOLUME": [100., 200.], "OPEN_INTEREST": [50., 60.],
+    }).to_parquet(path)
+    assert source_module.term_contract_has_day_data(uid, str(path))
+    assert not source_module.term_contract_has_day_data("missing", str(path))
+    monkeypatch.setattr(projection, "find_contract_product", lambda value: SimpleNamespace(
+        timezone="Asia/Shanghai",
+    ))
+    monkeypatch.setattr(projection, "contract_available_freqs", lambda value: ["DAY1"])
+    monkeypatch.setattr(projection, "available_sources_for_product", lambda value: [
+        {"alias": "LocalCNFuturesContractDAY1", "freq": "DAY1"},
+    ])
+    monkeypatch.setattr(projection, "DataSource", {
+        "LocalCNFuturesContractDAY1": SimpleNamespace(
+            contract_data_layout="term_structure_snapshot",
+            get_path=lambda product: str(path),
+        ),
+    })
+    monkeypatch.setattr(projection, "product_public_fields", lambda value: {})
+
+    result = projection.contract_price_series({
+        "contract_uid": uid, "chart_mode": "fixed", "chart_interval": "DAY1",
+    })
+    assert result["freq"] == "DAY1"
+    assert result["data_source"] == "LocalCNFuturesContractDAY1"
+    assert result["count"] == 1
+    assert result["data"][0]["open"] == 10.
+    assert result["data"][0]["open_interest"] == 50.
+
+
 def test_open_interest_column_accepts_canonical_and_provider_aliases() -> None:
     assert open_interest_column(["OPEN", "OPEN_INTEREST", "CLOSE"]) == "OPEN_INTEREST"
     assert open_interest_column(["open_price", "open_interest", "close_price"]) == "open_interest"

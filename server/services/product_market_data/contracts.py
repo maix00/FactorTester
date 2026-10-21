@@ -12,16 +12,18 @@ from server.modules.shared.price_data_helpers import (
     open_interest_column,
 )
 from server.modules.shared.price_services import (
-    available_freq_names_for_product,
     available_sources_for_product,
     cached_products,
+    contract_available_freqs,
+    contract_available_sources,
     contract_data_path_for,
-    contract_has_data,
     find_contract_product,
     find_product,
     product_public_fields,
     supports_term_structure,
 )
+from tools.data.providers import DataProviderProductTS as DataSource
+from tools.data.types import DataFreq
 from tools.products.product_utils import get_product_contracts
 
 from .errors import ProductMarketDataError
@@ -55,7 +57,12 @@ def contract_listing(
         end_date=end_date,
     )
     for contract in contracts:
-        contract["has_data"] = contract_has_data(contract["uid"])
+        sources = contract_available_sources(contract["uid"])
+        contract["available_sources"] = sources
+        contract["available_freqs"] = list(dict.fromkeys(
+            str(item["freq"]) for item in sources if item.get("freq")
+        ))
+        contract["has_data"] = bool(sources)
     naming_schemes = sorted({
         str(contract.get("naming_scheme") or "").strip()
         for contract in contracts
@@ -77,10 +84,7 @@ def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
     if not contract_uid:
         raise ProductMarketDataError("缺少 contract_uid")
     contract_product = find_contract_product(contract_uid)
-    available_freqs = (
-        available_freq_names_for_product(contract_product)
-        if contract_product else []
-    )
+    available_freqs = contract_available_freqs(contract_uid)
     available_sources = (
         available_sources_for_product(contract_product)
         if contract_product else []
@@ -95,17 +99,41 @@ def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
         raise ProductMarketDataError(
             f"合约不提供所选数据源: {requested_source}", 400,
         )
-    contract_file = contract_data_path_for(
-        contract_uid,
-        contract_product,
-        data_source=requested_source or None,
-    )
-    if not Path(contract_file).is_file():
-        raise ProductMarketDataError(
-            f"合约数据不存在: {contract_uid}", 404,
-        )
     try:
-        price_frame = pd.read_parquet(contract_file)
+        frequency = DataFreq(str(payload.get("freq") or "MIN1"))
+    except Exception:
+        frequency = DataFreq.MIN1
+    if requested_source:
+        frequency = DataSource[requested_source].freq
+    if available_freqs and frequency.name not in available_freqs:
+        frequency = DataFreq(available_freqs[0])
+    selected_alias = requested_source or next(
+        (item["alias"] for item in available_sources
+         if item.get("freq") == frequency.name), "",
+    )
+    selected_source = DataSource[selected_alias] if selected_alias else None
+    from_term_snapshot = (
+        getattr(selected_source, "contract_data_layout", "")
+        == "term_structure_snapshot"
+    )
+    try:
+        if from_term_snapshot:
+            price_frame = pd.read_parquet(
+                selected_source.get_path(contract_product),
+                columns=["TRADING_DAY", "OPEN", "HIGH", "LOW", "CLOSE",
+                         "VOLUME", "OPEN_INTEREST"],
+                filters=[("CONTRACT_UID", "==", contract_uid)],
+            )
+        else:
+            contract_file = contract_data_path_for(
+                contract_uid, contract_product,
+                data_source=requested_source or None,
+            )
+            if not Path(contract_file).is_file():
+                raise ProductMarketDataError(
+                    f"合约数据不存在: {contract_uid}", 404,
+                )
+            price_frame = pd.read_parquet(contract_file)
     except FileNotFoundError as exc:
         raise ProductMarketDataError(
             f"合约数据不存在: {contract_uid}", 404,
@@ -115,16 +143,18 @@ def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
 
     source_oi_column = open_interest_column(price_frame.columns)
 
-    from tools.data.types import DataFreq
-
-    try:
-        frequency = DataFreq(str(payload.get("freq") or "MIN1"))
-    except Exception:
-        frequency = DataFreq("MIN1")
-    if available_freqs and frequency.name not in available_freqs:
-        frequency = DataFreq(available_freqs[0])
     daily = frequency.is_day_multiple()
-    if daily:
+    if from_term_snapshot:
+        price_frame["trading_day"] = pd.to_datetime(price_frame["TRADING_DAY"])
+        price_frame = price_frame.rename(columns={
+            "OPEN": "open", "HIGH": "high", "LOW": "low",
+            "CLOSE": "close", "VOLUME": "volume",
+            "OPEN_INTEREST": "open_interest",
+            "trading_day": "time_idx",
+        })
+        columns = ("open", "high", "low", "close", "volume")
+        time_column = "time_idx"
+    elif daily:
         price_frame["trading_day"] = pd.to_datetime(price_frame["trading_day"])
         aggregation = {
             "open": ("open_price", "first"),
@@ -228,12 +258,10 @@ def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
         "supports_term_structure": False,
         "freq": frequency.name,
         "timezone": str(timezone),
-        "data_source": requested_source or (
-            available_sources[0]["alias"] if available_sources else ""
-        ),
+        "data_source": selected_alias,
         "delivery_mode": next((item.get("delivery_mode", "historical_snapshot")
                                for item in available_sources
-                               if item.get("alias") == requested_source),
+                               if item.get("alias") == selected_alias),
                               "historical_snapshot"),
         "available_sources": available_sources,
         "available_freqs": available_freqs,
