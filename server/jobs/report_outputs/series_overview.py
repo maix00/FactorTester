@@ -93,17 +93,19 @@ def _intraday_slice(frame: pd.DataFrame, days: int = 3) -> pd.DataFrame:
 
 
 def _hourly(frame: pd.DataFrame, value: str) -> pd.DataFrame:
-    """Resample to one hour while keeping every column the panels need."""
+    """Resample end-stamped bars into right-closed hourly candles."""
     if frame.empty:
         return frame
     indexed = frame.set_index("time")
     if value == "value":
-        aggregated = indexed["value"].resample("1h").last()
+        aggregated = indexed["value"].resample("1h", closed="right", label="right").last()
         return aggregated.dropna().reset_index()
-    keep = [column for column in indexed.columns if column != "volume"]
-    aggregated = indexed[keep].resample("1h").last()
-    if "volume" in indexed.columns:
-        aggregated["volume"] = indexed["volume"].resample("1h").sum()
+    operations = {
+        column: {"open": "first", "high": "max", "low": "min",
+                 "volume": "sum"}.get(column, "last")
+        for column in indexed.columns
+    }
+    aggregated = indexed.resample("1h", closed="right", label="right").agg(operations)
     return aggregated.dropna(how="all").reset_index()
 
 
