@@ -27,6 +27,7 @@ def fixed_chart_frame(
     oi_column: str | None = None,
     *, time_column: str | None = None,
     trading_day_column: str | None = None,
+    source_delivery_mode: str = "historical_snapshot",
 ) -> tuple[pd.DataFrame, int]:
     """Aggregate to the explicitly selected calendar/trading interval only.
 
@@ -34,6 +35,10 @@ def fixed_chart_frame(
     selected candle frequency or returning a misleading subset of candles.
     """
     interval = str(request.get("chart_interval") or "SOURCE").upper()
+    if interval == "LIVE":
+        if source_delivery_mode != "live_stream":
+            raise ProductMarketDataError("所选数据源不提供实时 K 线")
+        interval = "SOURCE"
     if interval != "SOURCE" and interval not in _CHART_INTERVALS:
         raise ProductMarketDataError("不支持的图表数据频率")
     interval_duration = (pd.Timedelta(days=7) if interval == "WEEK1"
@@ -79,9 +84,11 @@ def fixed_chart_frame(
             first_positions = frame.groupby(keys, sort=True).head(1).index
             result.index = first_positions
     count = len(result)
-    if count > _maximum_points(request):
+    limit = _maximum_points(request)
+    if count > limit:
         raise ProductMarketDataError(
-            "当前频率与时间范围包含过多 K 线；请选择更粗的频率或更短的范围")
+            f"当前选择包含 {count:,} 根 K 线，超过单次图表上限 {limit:,} 根；"
+            "请选择更粗的频率或更短的范围后保存")
     return result, count
 
 

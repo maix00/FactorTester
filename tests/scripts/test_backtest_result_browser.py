@@ -802,6 +802,32 @@ def test_price_chart_highlights_hovered_candle_and_opens_click_toolkit() -> None
           };
         }""")
         page.wait_for_selector("canvas")
+        page.evaluate("""() => __handle.setRangeBands([
+          {id:'early', start:Date.UTC(2025,0,1), end:Date.UTC(2025,0,4)},
+          {id:'late', start:Date.UTC(2025,0,7), end:Date.UTC(2025,0,10)},
+        ])""")
+        assert page.locator(".ft-lightweight-range-band").count() == 2
+        initial_range = page.evaluate("""() => {
+          const range = __chart.timeScale().getVisibleRange();
+          return [Number(range.from), Number(range.to)];
+        }""")
+        page.evaluate("window.__handle.selectRangeBand('late')")
+        assert page.evaluate("""() => {
+          const range = __chart.timeScale().getVisibleRange();
+          return [Number(range.from), Number(range.to)];
+        }""") == initial_range, "overlapping term selection must not move the viewport"
+        page.evaluate("""() => __handle.focusRange(Date.UTC(2025,0,1), Date.UTC(2025,0,3))""")
+        page.wait_for_function("""() => Number(__chart.timeScale().getVisibleRange()?.to)
+          <= Date.UTC(2025,0,3) / 1000""")
+        page.evaluate("window.__handle.selectRangeBand('late')")
+        page.wait_for_function("""() => Number(__chart.timeScale().getVisibleRange()?.to)
+          >= Date.UTC(2025,0,7) / 1000""")
+        assert page.evaluate("""() => {
+          const range = __chart.timeScale().getVisibleRange();
+          return Number(range.to) >= Date.UTC(2025,0,7) / 1000;
+        }"""), page.evaluate("""() => __chart.timeScale().getVisibleRange()""")
+        page.evaluate("window.__handle.fitContent()")
+        assert page.locator(".ft-lightweight-range-band").count() == 2
         assert page.evaluate("window.__hoverMarker.markers().length") == 0
         point = page.evaluate("window.__candlePoint()")
         page.mouse.move(point["x"], point["y"])
@@ -829,7 +855,7 @@ def test_price_chart_highlights_hovered_candle_and_opens_click_toolkit() -> None
         browser.close()
 
 
-def test_product_term_structure_pages_and_focuses_chart_without_navigating() -> None:
+def test_product_term_structure_marks_chart_without_limiting_loaded_range() -> None:
     with _playwright() as playwright:
         browser = _launch_chromium(playwright)
         page = browser.new_page(viewport={"width": 1100, "height": 850})
@@ -840,10 +866,12 @@ def test_product_term_structure_pages_and_focuses_chart_without_navigating() -> 
         page.add_script_tag(path=str(ROOT / "server/manager/web/catalog/details.js"))
         page.evaluate("""async () => {
           window.__focused = [];
+          window.__ranges = [];
           window.__navigated = [];
           FTProductPricePanel = {render(_context, mount) {
             const panel = document.createElement('div');
-            panel.focusRange = (...range) => __focused.push(range);
+            panel.setTermRanges = ranges => __ranges.push(ranges);
+            panel.selectTermRange = item => __focused.push(item);
             mount.append(panel);
             return new Promise(resolve => { window.__resolvePricePanel = () => resolve(panel); });
           }};
@@ -881,6 +909,8 @@ def test_product_term_structure_pages_and_focuses_chart_without_navigating() -> 
         assert page.evaluate("window.__focused.length") == 0
         page.evaluate("window.__resolvePricePanel()")
         page.wait_for_function("window.__focused.length === 1")
+        assert page.evaluate("window.__ranges.at(-1).length") == 20
+        assert page.evaluate("window.__focused[0].uid") == "item-4"
         assert page.evaluate("window.__navigated.length") == 0
         page.locator(".product-term-structure tbody tr a").first.click()
         assert page.evaluate("window.__navigated.length") == 1

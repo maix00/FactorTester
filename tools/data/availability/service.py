@@ -59,7 +59,7 @@ def _inspect_source(
             frequency=frequency,
             data_kind="ohlcv_bar",
             market_depth="not_applicable",
-            delivery_mode="historical_snapshot",
+            delivery_mode=getattr(source, "delivery_mode", "historical_snapshot"),
         ),
     }
     if not _timezone_matches(product, source):

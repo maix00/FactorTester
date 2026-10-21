@@ -27,7 +27,7 @@ from tools.products.Futures import Futures
 from tools.products.product_utils import get_product_contracts
 
 from .errors import ProductMarketDataError
-from .ranges import range_bound
+from .ranges import latest_relative_start, range_bound
 from .sampling import bounded_ohlcv_frame, bounded_ohlcv_rows, fixed_chart_frame
 
 
@@ -197,6 +197,19 @@ def product_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
             _select_product_data(product, payload)
         )
         try:
+            chart_range = str(payload.get("chart_range") or "").lower()
+            if chart_range:
+                try:
+                    source_frame = product.get_some_data(frequency, copy=False)
+                    source_index = pd.DatetimeIndex(pd.to_datetime(
+                        finest_index(source_frame.index)))
+                    relative_start = latest_relative_start(source_index, chart_range)
+                except ValueError as exc:
+                    raise ProductMarketDataError("不支持的图表时间范围", 400) from exc
+                if relative_start is not None:
+                    if relative_start.tzinfo is not None:
+                        relative_start = relative_start.tz_localize(None)
+                    start = max(start, relative_start)
             frame = product.get_price_data(start, end, adjusted=adjusted)
         finally:
             if old_frequency:
@@ -220,6 +233,7 @@ def product_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
         frame, total_count = fixed_chart_frame(
             frame, payload, price_columns, frequency,
             open_interest_column(frame.columns),
+            source_delivery_mode=getattr(source, "delivery_mode", "historical_snapshot"),
         )
     else:
         frame, total_count = bounded_ohlcv_frame(
@@ -248,6 +262,7 @@ def product_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
             getattr(source, "alias", "")
             or getattr(source, "key", "")
         ),
+        "delivery_mode": getattr(source, "delivery_mode", "historical_snapshot"),
         "available_sources": available_sources_for_product(product),
         "available_freqs": available_freq_names_for_product(product),
         "count": total_count,
