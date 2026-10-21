@@ -318,6 +318,7 @@
     let disposePriceChart = null;
     let pendingFocus = null;
     let overlayTimer = null;
+    let acceptedSelection = null;
     root.focusRange = (start, end) => {
       const minimum = Date.parse(start);
       const maximum = Date.parse(end);
@@ -437,9 +438,6 @@
         const rangeNames = {day: context.t("最近一天"), month: context.t("最近一个月"),
           year: context.t("最近一年"), ytd: context.t("今年以来"),
           all: context.t("全部"), custom: context.t("所选时间段")};
-        selectionLabel.textContent = `${intervalNames[state.chartInterval]} · ${rangeNames[state.timeRange]}`;
-        metadataPayload = value || {};
-        information.disabled = false;
         if (window.FTPriceChart?.barsOf && Array.isArray(value?.data)) {
           await window.FTStaticLoader.loadGroups(["chart-workbench-price"]);
           if (!current(context) || requestIDForLoad !== requestID) return;
@@ -461,8 +459,20 @@
             context.t("价格曲线暂不可用"), context.t("暂无可绘制数据"),
           ));
         }
+        selectionLabel.textContent = `${intervalNames[state.chartInterval]} · ${rangeNames[state.timeRange]}`;
+        metadataPayload = value || {};
+        acceptedSelection = {...state};
+        information.disabled = false;
       } catch (error) {
         if (!current(context) || requestIDForLoad !== requestID) return;
+        if (acceptedSelection) {
+          Object.assign(state, acceptedSelection);
+          controls.apply(metadataPayload);
+          controls.intervalPicker.setValues([state.chartInterval]);
+          controls.rangePicker.setValues([state.timeRange]);
+          information.disabled = false;
+          pendingFocus = null;
+        }
         if (!disposePriceChart) chartHost.replaceChildren(FTUI.empty(
           context.t("价格曲线读取失败"), error.message || ""));
         else {
