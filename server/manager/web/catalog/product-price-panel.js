@@ -59,6 +59,7 @@
     const rows = [
       [context.t("数据源"), payload.data_source || context.t("自动")],
       [context.t("数据频率"), payload.freq || context.t("暂无频率")],
+      [context.t("产品时区"), payload.timezone || "Asia/Shanghai"],
       [context.t("价格序列"), payload.adjusted
         ? context.t("复权价格") : context.t("原始价格")],
       [context.t("复权方式"), adjustmentLabel(context, payload.adjustment_method)],
@@ -95,7 +96,16 @@
         options.reload();
       },
     });
-    controls.append(sourcePicker.element, adjustedPicker.element);
+    const timezonePicker = FTMultiSelectFilter.create(context, {
+      title: context.t("显示时区"), multi: false, compact: true,
+      className: "product-price-timezone-filter", items: [], selected: ["product"],
+      onChange: values => {
+        state.timeZoneChoice = values[0] || "product";
+        options.setTimeZone(displayTimeZone(state));
+        options.showTimeZone(displayTimeZone(state));
+      },
+    });
+    controls.append(sourcePicker.element, adjustedPicker.element, timezonePicker.element);
 
     const frequency = document.createElement("span");
     frequency.className = "product-price-frequency";
@@ -107,6 +117,14 @@
     controls.append(frequency);
 
     function apply(payload) {
+      state.productTimeZone = payload.timezone || state.productTimeZone || "Asia/Shanghai";
+      timezonePicker.setItems([
+        {value: "product", label: `${context.t("产品时区")} · ${state.productTimeZone}`},
+        {value: "system", label: `${context.t("系统时区")} · ${systemTimeZone()}`},
+        {value: "utc", label: "UTC"},
+      ]);
+      timezonePicker.setValues([state.timeZoneChoice || "product"]);
+      options.showTimeZone(displayTimeZone(state));
       const entries = sourceEntries(payload.available_sources);
       state.sourceFreqByAlias = Object.fromEntries(entries.map(item => [item.alias, item.freq]));
       const actual = String(payload.data_source || state.dataSource || "").trim();
@@ -136,7 +154,17 @@
       adjusted: state.adjusted,
       supports_adjusted: false,
     });
-    return {controls, apply, setBusy, sourcePicker, adjustedPicker};
+    return {controls, apply, setBusy, sourcePicker, adjustedPicker, timezonePicker};
+  }
+
+  function systemTimeZone() {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  }
+
+  function displayTimeZone(state) {
+    return state.timeZoneChoice === "system" ? systemTimeZone()
+      : state.timeZoneChoice === "utc" ? "UTC"
+        : state.productTimeZone || "Asia/Shanghai";
   }
 
   async function render(context, mount, options = {}) {
@@ -157,6 +185,9 @@
     heading.append(Object.assign(document.createElement("h2"), {
       textContent: context.t("价格曲线"),
     }));
+    const timezoneLabel = document.createElement("span");
+    timezoneLabel.className = "product-price-timezone-label";
+    heading.append(timezoneLabel);
     let metadataPayload = null;
     const information = FTUI.iconButton(context, "doc.text.magnifyingglass",
       "数据源信息", () => {
@@ -189,8 +220,32 @@
     chartMount.className = "product-price-chart-mount";
     const controls = renderControls(context, state, {
       reload: () => load(),
+      setTimeZone: timeZone => disposePriceChart?.setTimeZone?.(timeZone),
+      showTimeZone: timeZone => {
+        timezoneLabel.textContent = `${context.t("时区")} · ${timeZone}`;
+      },
     });
-    root.append(controls.controls, chartMount);
+    const settings = FTUI.iconButton(context, "gearshape", "图表设置", () => {
+      const dialog = FTUI.dialogRoot(context);
+      dialog.className = "product-price-info-dialog";
+      const card = document.createElement("form");
+      card.method = "dialog";
+      card.className = "dialog-card wide product-price-info-card";
+      const close = document.createElement("button");
+      close.type = "submit";
+      close.className = "dialog-close";
+      close.setAttribute("aria-label", context.t("关闭"));
+      close.textContent = "×";
+      card.append(close, Object.assign(document.createElement("h2"), {
+        textContent: context.t("图表设置"),
+      }), controls.controls);
+      dialog.append(card);
+      dialog.addEventListener("close", () => dialog.remove(), {once: true});
+      document.body.append(dialog);
+      dialog.showModal();
+    });
+    heading.append(settings);
+    root.append(chartMount);
     mount.replaceChildren(root);
 
     let requestID = 0;
@@ -217,9 +272,13 @@
     function applyBound(payload, prefix, value) {
       if (!Number.isFinite(value)) return;
       const date = new Date(value);
-      const pad = item => String(item).padStart(2, "0");
-      payload[`${prefix}_date`] = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-      payload[`${prefix}_time`] = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+      const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+        timeZone: state.productTimeZone || "Asia/Shanghai", year: "numeric",
+        month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+        second: "2-digit", hourCycle: "h23",
+      }).formatToParts(date).map(part => [part.type, part.value]));
+      payload[`${prefix}_date`] = `${parts.year}-${parts.month}-${parts.day}`;
+      payload[`${prefix}_time`] = `${parts.hour}:${parts.minute}:${parts.second}`;
     }
 
     function rangePayload(minimum, maximum, maximumPoints, fullHistory = false) {
@@ -275,10 +334,19 @@
           }
           disposePriceChart = window.FTChartWorkbench.mountPriceChart(chartMount, {
             bars: FTPriceChart.barsOf(value),
+            hasOpenInterest: Boolean(value.has_oi),
+            timeZone: displayTimeZone(state),
             translate: value => context.t(value),
-            loadRange: async (minimum, maximum, maxPoints) => (
-              FTPriceChart.barsOf(await fetchRange(minimum, maximum, maxPoints))
-            ),
+            loadRange: async (minimum, maximum, maxPoints) => {
+              try {
+                return FTPriceChart.barsOf(await fetchRange(minimum, maximum, maxPoints));
+              } catch (error) {
+                if (/指定范围内无(?:合约)?价格数据/.test(String(error?.message || ""))) {
+                  return [];
+                }
+                throw error;
+              }
+            },
           });
           if (pendingFocus) disposePriceChart?.focusRange?.(...pendingFocus);
         } else {
