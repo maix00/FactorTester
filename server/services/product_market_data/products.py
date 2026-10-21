@@ -125,6 +125,7 @@ def _price_rows(product, frame: pd.DataFrame, adjusted: bool, frequency):
             oi_col=oi_column,
             freq_is_daily=frequency.is_day_multiple(),
             timezone=timezone,
+            trading_day_close_time=getattr(product, "trading_day_close_time", None),
         )
         for _, row in emitted.iterrows()
     ]

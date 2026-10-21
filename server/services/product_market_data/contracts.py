@@ -238,6 +238,9 @@ def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
             oi_col=oi_column,
             freq_is_daily=daily,
             timezone=timezone,
+            trading_day_close_time=getattr(contract_product, "trading_day_close_time", None)
+                or getattr(getattr(contract_product, "get_parent_product", lambda: None)(),
+                           "trading_day_close_time", None),
         )
         for _, row in price_frame.iterrows()
     ]

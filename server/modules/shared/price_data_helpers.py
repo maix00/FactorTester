@@ -74,8 +74,14 @@ def row_value_as_float(row, col: str, default=None):
 
 
 def format_price_row(row, time_col: str, o_col: str, h_col: str, l_col: str, c_col: str, v_col: str,
-                     oi_col: str | None, freq_is_daily: bool, timezone: str = 'Asia/Shanghai'):
+                     oi_col: str | None, freq_is_daily: bool, timezone: str = 'Asia/Shanghai',
+                     trading_day_close_time: str | None = None):
     ts: pd.Timestamp = cast(pd.Timestamp, pd.Timestamp(row[time_col]))
+    if freq_is_daily and trading_day_close_time and ts == ts.normalize():
+        # DAY1 indexes identify a trading date. Chart bars represent the end of
+        # that session, not midnight at the beginning of the date.
+        close = pd.Timestamp(f"2000-01-01 {trading_day_close_time}")
+        ts = ts + (close - close.normalize())
     entry: dict = {
         'time': ts.tz_localize(timezone).tz_convert('UTC').isoformat() if ts.tz is None else ts.tz_convert('UTC').isoformat(),
         'timestamp': to_epoch_ms(ts, timezone, use_utc=True),

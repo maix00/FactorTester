@@ -424,6 +424,18 @@ def test_factor_workbench_shows_all_nested_layers_with_market_panes() -> None:
           Date.UTC(2025, 0, 2, 9, 5), Date.UTC(2025, 0, 2, 9, 10))""")
         page.wait_for_function("window.__factorRangeCalls.length > 0")
         assert page.evaluate("window.__factorRangeCalls.at(-1).maxPoints") == 5000
+        candle = page.evaluate("""() => {
+          const time = Date.UTC(2025, 0, 2, 9, 8) / 1000;
+          const canvas = document.querySelector('.ft-factor-chart-canvas')
+            .getBoundingClientRect();
+          const series = window.__factorChart.panes()[0].getSeries()[0];
+          return {x: canvas.left + window.__factorChart.timeScale().timeToCoordinate(time),
+            y: canvas.top + series.priceToCoordinate(109)};
+        }""")
+        page.mouse.click(candle["x"], candle["y"])
+        page.wait_for_selector(".ft-factor-chart-canvas + .ft-chart-popover")
+        assert "当日差持续期" in page.locator(".ft-chart-popover").inner_text()
+        assert page.locator(".ft-factor-workbench > .ft-chart-inspector").count() == 0
         assert errors == []
         browser.close()
 
@@ -1608,7 +1620,7 @@ def test_asset_plot_lazy_mounts_lightweight_chart_with_job_events() -> None:
             close: 101 + i * .1, volume: 100 + i,
             open_interest: 200 + i,
           }));
-          const order = {instrument: 'AU', order_id: 'o1', side: 'BUY',
+          const order = {instrument: 'AU', order_id: 'o1', strategy_id: 's1', side: 'BUY',
             timestamp: start + 20 * 60000, status: 'filled',
             lifecycle: [{timestamp: start + 20 * 60000, kind: 'submitted'}]};
           const fills = [{instrument: 'AU', order_id: 'o1', fill_id: 'f1',
@@ -1631,27 +1643,42 @@ def test_asset_plot_lazy_mounts_lightweight_chart_with_job_events() -> None:
           };
           const state = {
             target: document.querySelector('#root'),
-            options: {jobID: 'test-job', configuration: {freq: 'MIN1'}},
+            options: {jobID: 'test-job', configuration: {payload: {analyses: {backtest: {
+              groups: [{id:'s1', factor_candidate_refs:['factor:one']}],
+            }}}}, payload: {execution_plan: {resolved: {
+              run_window: {start:'2025-04-10T09:00:00Z', end:'2025-04-10T11:00:00Z'},
+              data_requirements: [{product:'AU', frequency:'MIN1', data_source:'source-A'}],
+            }}}},
             artifactsByName: new Map([
               ['order_detail_data', {name:'order_detail_data'}],
               ['fill_detail_data', {name:'fill_detail_data'}],
             ]),
             assetPlotDiscovery: {status:'ready', products:['AU'],
               strategies:[], accounts:[], cashPools:[]},
-            selectedAsset: {product:'AU', timestamp:start + 21 * 60000},
+            selectedAsset: {product:'AU', strategy:'s1', timestamp:start + 21 * 60000},
+            assetPlotFactorData: {status:'ready', series: [
+              {product:'AU', factor_ref:'factor:one', factor_alias:'根因子',
+                dates:[start, start + 60000], values:[1, 2]},
+              {product:'AU', factor_ref:'factor:one', factor_alias:'根因子', layer:'内层',
+                dates:[start, start + 60000], values:[3, 4]},
+              {product:'AU', factor_ref:'factor:other', factor_alias:'其他策略',
+                dates:[start], values:[5]},
+            ]},
             rerender() {},
           };
           document.querySelector('#root').append(FTBacktestAssetPlot.render(
             {t:value=>value}, state));
         }""")
         page.wait_for_selector(".ft-asset-chart-canvas canvas")
-        page.wait_for_function("document.querySelector('.ft-asset-chart-legend')?.textContent.includes('1/1')")
         assert page.evaluate("window.__chartGroups") == ["chart-workbench-asset"]
         assert page.locator(".backtest-asset-chart .highcharts-container").count() == 0
         assert page.locator(".backtest-asset-events thead th").count() == 10
-        assert page.evaluate("window.__chartApi.panes().length") == 4
+        assert page.evaluate("window.__chartApi.panes().length") == 5
         assert page.evaluate("window.__chartApi.panes()[1].getSeries().length") == 1
         assert page.evaluate("window.__chartApi.panes()[2].getSeries().length") == 1
+        assert page.evaluate("window.__chartApi.panes()[3].getSeries()[0].data().length") == 2
+        assert page.evaluate("window.__chartApi.panes()[4].getSeries()[0].data().length") == 2
+        assert "source-A" in page.locator(".backtest-asset-note").inner_text()
         marker = page.evaluate("""() => {
           const time = Date.UTC(2025, 3, 10, 9) / 1000 + 21 * 60;
           const chart = window.__chartApi;
@@ -1662,13 +1689,13 @@ def test_asset_plot_lazy_mounts_lightweight_chart_with_job_events() -> None:
             y:canvas.top + series.priceToCoordinate(99 + 21 * .1) + 12};
         }""")
         page.mouse.click(marker["x"], marker["y"])
-        page.wait_for_selector(".ft-asset-chart-events details")
-        assert page.locator(".ft-asset-chart-events details").count() == 2
+        page.wait_for_selector(".ft-chart-popover details")
+        assert page.locator(".ft-chart-popover details").count() == 2
         assert page.locator(".backtest-asset-inspector-mount").inner_html() == ""
-        buttons = page.locator(".ft-asset-chart-events button")
+        buttons = page.locator(".ft-chart-popover details button")
         buttons.first.click()
         assert "移除价格线" in buttons.first.inner_text()
-        page.locator(".ft-asset-chart-events summary").nth(1).click()
+        page.locator(".ft-chart-popover summary").nth(1).click()
         buttons.nth(1).click()
         assert "移除价格线" in buttons.nth(1).inner_text()
         assert page.evaluate("window.__chartApi.panes()[0].getSeries()[0].priceLines().length") == 2
