@@ -286,8 +286,10 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .product-price-heading h2 { margin: 0 4px 0 0; line-height: 30px; }
 .product-price-timezone-label { margin-right: 4px; color: var(--muted);
   font-size: 12px; line-height: 30px; white-space: nowrap; }
-.product-price-heading .icon-action-button { align-self: flex-end; flex: 0 0 30px; }
-.product-price-heading .icon-action-button .ft-icon { transform: translateY(-5px); }
+.product-price-selection-label { margin-right: 4px; color: var(--muted);
+  font-size: 12px; line-height: 30px; white-space: nowrap; }
+.product-price-heading .icon-action-button { align-self: baseline; flex: 0 0 30px;
+  transform: translateY(2px); }
 .product-price-info-dialog { width: min(680px, calc(100vw - 24px)); max-width: none; }
 .product-price-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .product-price-controls .ft-multi-select-filter { width: min(260px, 100%); }
@@ -314,7 +316,12 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .product-term-structure .shared-paged-table { min-width: 0; }
 .product-term-structure td a { color: var(--accent); text-decoration: none; }
 .product-term-structure td a:hover { text-decoration: underline; }
-.product-price-chart-mount { min-width: 0; }
+.product-price-chart-mount { position: relative; min-width: 0; min-height: 460px; }
+.product-price-load-overlay { position: absolute; inset: 0; z-index: 5; display: grid;
+  place-items: center; padding: 16px; background: rgb(255 255 255 / 50%);
+  backdrop-filter: blur(3px); color: var(--text); font-size: 14px;
+  font-weight: 600; text-align: center; pointer-events: auto; }
+.product-price-load-overlay.is-error { background: rgb(255 245 245 / 75%); color: var(--danger); }
 .ft-lightweight-price { position: relative; }
 .ft-lightweight-price-canvas { width: 100%; min-width: 0; height: 460px; }
 .ft-lightweight-price-loading { position: absolute; inset: 0; display: grid; place-items: center;

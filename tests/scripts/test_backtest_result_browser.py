@@ -630,6 +630,7 @@ def test_price_chart_zoom_settles_after_detail_load() -> None:
             document.querySelector('#root'), {bars: overview, loadRange});
           window.__zoom = () => __handle.focusRange(
             start + 10 * 86400000, start + 12 * 86400000);
+          window.__timeUnderPointer = x => Number(__chart.timeScale().coordinateToTime(x));
         }""")
         page.wait_for_selector("canvas", timeout=5000)
         page.evaluate("window.__zoom()")
@@ -642,8 +643,9 @@ def test_price_chart_zoom_settles_after_detail_load() -> None:
             localX: rect.width * 0.48};
         }""")
         page.mouse.move(pointer["x"], pointer["y"])
-        anchored_time = page.evaluate("""x => Number(
-          __chart.timeScale().coordinateToTime(x))""", pointer["localX"])
+        fractional_anchor = page.evaluate("window.__timeUnderPointer", pointer["localX"])
+        before_logical = page.evaluate("""x => ({point: __chart.timeScale().coordinateToLogical(x),
+          range: __chart.timeScale().getVisibleLogicalRange()})""", pointer["localX"])
         page.evaluate("window.__rangeWrites = []")
         page.wait_for_timeout(1500)
         assert page.evaluate("window.__requests.length") == 1, errors
@@ -651,10 +653,14 @@ def test_price_chart_zoom_settles_after_detail_load() -> None:
             "detail request should include bars before the visible zoom window"
         )
         assert page.locator(".ft-lightweight-price-loading").count() == 0
-        reloaded_time = page.evaluate("""x => Number(
-          __chart.timeScale().coordinateToTime(x))""", pointer["localX"])
-        assert abs(reloaded_time - anchored_time) <= 600, (
-            "reloading finer bars must keep the hovered date under the pointer"
+        fractional_after = page.evaluate("window.__timeUnderPointer", pointer["localX"])
+        after_logical = page.evaluate("""x => ({point: __chart.timeScale().coordinateToLogical(x),
+          range: __chart.timeScale().getVisibleLogicalRange(), writes: __rangeWrites})""", pointer["localX"])
+        # Lightweight Charts snaps the cursor to a source bar. The synthetic
+        # detail is ~240 seconds per bar; half a bar is the useful tolerance.
+        assert abs(fractional_after - fractional_anchor) <= 125, (
+            f"time under pointer moved: {fractional_anchor} → {fractional_after}; "
+            f"before={before_logical}; after={after_logical}"
         )
         assert page.evaluate("window.__rangeWrites.map(write => write.method)") == [
             "setVisibleLogicalRange"
@@ -708,10 +714,14 @@ def test_product_price_heading_aligns_icon_glyphs_to_text_baseline() -> None:
           const baselines = [...document.querySelectorAll('.baseline-probe')]
             .map(probe => probe.getBoundingClientRect().top);
           const icon = document.querySelector('.ft-icon').getBoundingClientRect();
-          return {baselines, glyphBottom: icon.bottom - 2};
+          const button = document.querySelector('.icon-action-button').getBoundingClientRect();
+          return {baselines, glyphBottom: icon.bottom - 2,
+            upperGap: icon.top + 2 - button.top,
+            lowerGap: button.bottom - (icon.bottom - 2)};
         }""")
         assert abs(metrics["baselines"][0] - metrics["baselines"][1]) <= 1
         assert abs(metrics["glyphBottom"] - metrics["baselines"][0]) <= 1
+        assert abs(metrics["upperGap"] - metrics["lowerGap"]) <= 1
         browser.close()
 
 

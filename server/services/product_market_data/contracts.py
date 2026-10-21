@@ -26,7 +26,7 @@ from tools.products.product_utils import get_product_contracts
 
 from .errors import ProductMarketDataError
 from .ranges import range_bound
-from .sampling import bounded_ohlcv_frame, bounded_ohlcv_rows
+from .sampling import bounded_ohlcv_frame, bounded_ohlcv_rows, fixed_chart_frame
 
 
 def contract_listing(
@@ -171,9 +171,17 @@ def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
 
     oi_column = open_interest_column(price_frame.columns)
     has_open_interest = oi_column is not None
-    price_frame, total_count = bounded_ohlcv_frame(
-        price_frame, payload, columns, oi_column, time_column=time_column,
-    )
+    fixed_chart = payload.get("chart_mode") == "fixed"
+    if fixed_chart:
+        price_frame, total_count = fixed_chart_frame(
+            price_frame, payload, columns, frequency, oi_column,
+            time_column=time_column,
+            trading_day_column="trading_day" if "trading_day" in price_frame else None,
+        )
+    else:
+        price_frame, total_count = bounded_ohlcv_frame(
+            price_frame, payload, columns, oi_column, time_column=time_column,
+        )
     timezone = getattr(contract_product, "timezone", None) or "Asia/Shanghai"
     rows = [
         format_price_row(
@@ -190,7 +198,8 @@ def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
         )
         for _, row in price_frame.iterrows()
     ]
-    rows, _ = bounded_ohlcv_rows(rows, payload)
+    if not fixed_chart:
+        rows, _ = bounded_ohlcv_rows(rows, payload)
     name_parts = contract_uid.split("|")
     return {
         "success": True,
