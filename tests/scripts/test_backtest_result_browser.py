@@ -815,10 +815,12 @@ def test_price_chart_highlights_hovered_candle_and_opens_click_toolkit() -> None
         }""")
         page.wait_for_selector("canvas")
         page.evaluate("""() => __handle.setRangeBands([
-          {id:'early', start:Date.UTC(2025,0,1), end:Date.UTC(2025,0,4)},
-          {id:'late', start:Date.UTC(2025,0,7), end:Date.UTC(2025,0,10)},
+          {id:'early', label:'AU2502', start:Date.UTC(2025,0,1), end:Date.UTC(2025,0,4)},
+          {id:'late', label:'AU2504', start:Date.UTC(2025,0,7), end:Date.UTC(2025,0,10)},
         ])""")
         assert page.locator(".ft-lightweight-range-band").count() == 2
+        assert page.locator(".ft-asset-roll-switch").count() == 1
+        assert "AU2504" in page.locator(".ft-asset-roll-switch").inner_text()
         initial_range = page.evaluate("""() => {
           const range = __chart.timeScale().getVisibleRange();
           return [Number(range.from), Number(range.to)];
@@ -839,6 +841,8 @@ def test_price_chart_highlights_hovered_candle_and_opens_click_toolkit() -> None
           return Number(range.to) >= Date.UTC(2025,0,7) / 1000;
         }"""), page.evaluate("""() => __chart.timeScale().getVisibleRange()""")
         page.evaluate("window.__handle.fitContent()")
+        page.evaluate("""() => new Promise(resolve => requestAnimationFrame(
+          () => requestAnimationFrame(resolve)))""")
         assert page.locator(".ft-lightweight-range-band").count() == 2
         assert page.evaluate("window.__hoverMarker.markers().length") == 0
         point = page.evaluate("window.__candlePoint()")
@@ -1086,6 +1090,32 @@ def test_asset_plot_order_flow_uses_recorded_phases_and_pool_scope() -> None:
         assert result["orderRows"] == 1
         assert result["orderNodes"] == 3
         assert result["noOrderPriceMarkers"] is True
+        browser.close()
+
+
+def test_asset_plot_buy_to_cover_explains_released_margin() -> None:
+    with _playwright() as playwright:
+        browser = _launch_chromium(playwright)
+        page = browser.new_page()
+        page.set_content("<main></main>")
+        for path in (
+            "server/manager/web/core/price-chart.js",
+            "server/manager/web/test-modules/backtest/results/asset-plot.js",
+        ):
+            page.add_script_tag(path=str(ROOT / path))
+        detail = page.evaluate("""() => FTBacktestAssetPlot.eventDetail({
+          artifact: 'fill_detail_data', timestamp: Date.UTC(2025, 3, 16),
+          row: {side: 'buy', offset: 'close_yesterday', quantity: 7,
+            fill_price: 766.68, fee: 15.2, realized_pnl: -38500,
+            cash_before: 7340965.48, cash_after: 8368102.28,
+            margin_before: 2283540, margin_after: 1217888,
+            account_currency: 'CNY'},
+        })""")
+        assert "开平 平昨" in detail
+        assert "已实现盈亏 -38,500 CNY" in detail
+        assert "现金变动 1,027,136.8 CNY" in detail
+        assert "释放保证金 1,065,652 CNY" in detail
+        assert "已实现盈亏 − 手续费 + 释放保证金" in detail
         browser.close()
 
 
@@ -1592,10 +1622,11 @@ def test_asset_plot_lazy_mounts_lightweight_chart_with_job_events() -> None:
         page = browser.new_page(viewport={"width": 1200, "height": 900})
         errors: list[str] = []
         page.on("pageerror", lambda error: errors.append(str(error)))
-        page.set_content("<main id='root'></main>")
+        page.set_content("<!doctype html><main id='root'></main>")
         page.add_style_tag(content=".ft-asset-chart-canvas {width:100%;height:640px}")
         for path in (
             "server/manager/web/core/shared-ui.js",
+            "apple/Resources/ThirdParty/KaTeX/katex.min.js",
             "server/manager/web/core/price-chart.js",
             "static/vendor/lightweight-charts/lightweight-charts.standalone.production.js",
         ):
@@ -1636,9 +1667,12 @@ def test_asset_plot_lazy_mounts_lightweight_chart_with_job_events() -> None:
           }}; }};
           FTMarketData = {
             rangeRequest(request, minimum, maximum, maxPoints) {
+              window.__assetPriceRequest = request;
               return {...request, minimum, maximum, maxPoints};
             },
             async prices() { return {payload: {data: bars, freq: 'MIN1',
+              contracts:[{contract:'AU2504',
+                start_ts:'2025-04-10T09:20:00Z'}],
               count: bars.length, returned_count: bars.length}}; },
           };
           const state = {
@@ -1656,7 +1690,9 @@ def test_asset_plot_lazy_mounts_lightweight_chart_with_job_events() -> None:
             assetPlotDiscovery: {status:'ready', products:['AU'],
               strategies:[], accounts:[], cashPools:[]},
             selectedAsset: {product:'AU', strategy:'s1', timestamp:start + 21 * 60000},
-            assetPlotFactorData: {status:'ready', series: [
+            assetPlotFactorData: {status:'ready', factors: [
+              {ref:'factor:one', resolved_math_expr:'\\\\frac{a}{b}'},
+            ], series: [
               {product:'AU', factor_ref:'factor:one', factor_alias:'根因子',
                 dates:[start, start + 60000], values:[1, 2]},
               {product:'AU', factor_ref:'factor:one', factor_alias:'根因子', layer:'内层',
@@ -1671,13 +1707,38 @@ def test_asset_plot_lazy_mounts_lightweight_chart_with_job_events() -> None:
         }""")
         page.wait_for_selector(".ft-asset-chart-canvas canvas")
         assert page.evaluate("window.__chartGroups") == ["chart-workbench-asset"]
+        assert page.evaluate("window.__assetPriceRequest.series_variant") == "primary_raw"
+        assert page.evaluate("window.__assetPriceRequest.adjusted") is False
+        assert page.locator(".ft-asset-roll-switch").count() == 1
+        roll_alignment = page.evaluate("""() => {
+          const marker = document.querySelector('.ft-asset-roll-switch');
+          const expected = __chartApi.timeScale().timeToCoordinate(
+            Date.UTC(2025, 3, 10, 9, 20) / 1000);
+          return Math.abs(parseFloat(marker.style.left) - expected);
+        }""")
+        assert roll_alignment < 2
         assert page.locator(".backtest-asset-chart .highcharts-container").count() == 0
         assert page.locator(".backtest-asset-events thead th").count() == 10
         assert page.evaluate("window.__chartApi.panes().length") == 5
+        range_bounds = page.evaluate("""() => {
+          const range = __chartApi.timeScale().getVisibleRange();
+          return [Number(range.from), Number(range.to)];
+        }""")
+        assert range_bounds == page.evaluate("""() => [
+          Date.UTC(2025, 3, 10, 9) / 1000,
+          Date.UTC(2025, 3, 10, 11) / 1000,
+        ]""")
         assert page.evaluate("window.__chartApi.panes()[1].getSeries().length") == 1
         assert page.evaluate("window.__chartApi.panes()[2].getSeries().length") == 1
         assert page.evaluate("window.__chartApi.panes()[3].getSeries()[0].data().length") == 2
         assert page.evaluate("window.__chartApi.panes()[4].getSeries()[0].data().length") == 2
+        assert page.evaluate("window.__chartApi.panes()[3].getSeries()[0].options().title") == "F1"
+        assert page.evaluate("window.__chartApi.panes()[4].getSeries()[0].options().title") == "F2"
+        page.locator(".ft-asset-indicator-list summary").click()
+        assert page.locator(".ft-asset-indicator-name").all_text_contents() == [
+            "根因子 · 结果", "根因子 · 内层",
+        ]
+        assert page.locator(".ft-asset-indicator-formula .katex").count() == 1
         assert "source-A" in page.locator(".backtest-asset-note").inner_text()
         marker = page.evaluate("""() => {
           const time = Date.UTC(2025, 3, 10, 9) / 1000 + 21 * 60;
@@ -1735,7 +1796,13 @@ def test_asset_plot_discovers_scope_and_switches_contract_without_a_selected_ord
           }};
           const state = {
             artifactsByName: new Map([['order_detail_data', {name: 'order_detail_data'}]]),
-            options: {jobID: 'job-test'}, strategySelection: ['B'],
+            options: {jobID: 'job-test', payload: {execution_plan: {resolved: {
+              run_window: {start:'2025-02-03T00:00:00Z'},
+              data_requirements: [
+                {product:'AU.SHF', data_source:'LocalCNFuturesMIN1'},
+                {product:'SHFE|F|AU|2510', data_source:'LocalCNFuturesContractMIN1'},
+              ],
+            }}}}, strategySelection: ['B'],
             model: {strategies: [{id: 'B', label: 'B'}]},
             executionView: 'asset_plot', target: document.querySelector('#root'),
             rerender() { this.renderCount = (this.renderCount || 0) + 1; },
@@ -1751,6 +1818,7 @@ def test_asset_plot_discovers_scope_and_switches_contract_without_a_selected_ord
           await new Promise(resolve => setTimeout(resolve, 0));
           return {initial: found.selected, selected: state.selectedAsset,
             labels: controls.map(item => item.label), renderCount: state.renderCount,
+            productLabels: [...product.querySelectorAll('label')].map(item => item.textContent),
             filters: FTBacktestAssetPlot.eventFilters({
               product: 'AU.SHF', strategy: 'A', account: 'ledger-1',
             })};
@@ -1758,8 +1826,90 @@ def test_asset_plot_discovers_scope_and_switches_contract_without_a_selected_ord
         assert value["initial"]["product"] == "RB.SHF"
         assert value["initial"]["strategy"] == "B"
         assert value["selected"]["product"] == "AU.SHF"
-        assert value["selected"]["timestamp"] == 1700000000000
+        assert value["selected"]["timestamp"] == page.evaluate(
+            "Date.parse('2025-02-03T00:00:00Z')")
+        assert value["selected"]["contractUID"] == ""
+        assert value["selected"]["memberUIDs"] == ["SHFE|F|AU|2510"]
+        assert any("连续主力（原始价）" in label for label in value["productLabels"])
         assert value["labels"] == ["筛选维度", "策略", "品种 / 合约"]
         assert value["renderCount"] == 1
         assert value["filters"]["account"]["values"] == ["ledger-1"]
+        browser.close()
+
+
+def test_asset_plot_empty_contract_keeps_the_whole_backtest_window() -> None:
+    with _playwright() as playwright:
+        browser = _launch_chromium(playwright)
+        page = browser.new_page(viewport={"width": 1000, "height": 800})
+        errors: list[str] = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        page.set_content("<main id='root'></main>")
+        for path in (
+            "server/manager/web/core/shared-ui.js",
+            "server/manager/web/core/price-chart.js",
+            "static/vendor/lightweight-charts/lightweight-charts.standalone.production.js",
+            "static/vendor/chart-workbench/chart-workbench.js",
+            "server/manager/web/test-modules/backtest/results/asset-plot.js",
+        ):
+            page.add_script_tag(path=str(ROOT / path))
+        page.evaluate("""() => {
+          const api = LightweightCharts;
+          LightweightCharts = {...api, createChart(...args) {
+            window.__chart = api.createChart(...args);
+            return window.__chart;
+          }};
+          FTStaticLoader = {async loadGroups() {}};
+          FTJobArtifactQuery = {timeSource() {return {async load() {
+            return {rows:[], sampling:{}};
+          }}}};
+          FTMarketData = {
+            rangeRequest(request, minimum, maximum) {
+              window.__requested = {request, minimum, maximum};
+              return request;
+            },
+            async prices() {throw new Error('指定范围内无合约价格数据');},
+          };
+          const start = Date.UTC(2025, 1, 3);
+          const state = {
+            target: document.querySelector('#root'),
+            options: {jobID:'job', configuration:{payload:{analyses:{backtest:{
+              execution:{settings:{end_date:'2026-05-27', end_time:'23:59'}}
+            }}}}, payload:{execution_plan:{resolved:{
+              run_window:{start:'2025-02-03T00:00:00Z', end:'2026-05-27T00:00:00Z'},
+              data_requirements:[{product:'SHFE|F|AU|2510',
+                data_source:'LocalCNFuturesContractMIN1', frequency:'MIN1'}],
+            }}}},
+            artifactsByName:new Map([['order_detail_data', {name:'order_detail_data'}]]),
+            assetPlotDiscovery:{status:'ready', products:['SHFE|F|AU|2510']},
+            assetPlotFactorData:{status:'ready', series:[]},
+            selectedAsset:{product:'SHFE|F|AU|2510', contractUID:'SHFE|F|AU|2510',
+              timestamp:Date.UTC(2025, 9, 1)},
+            rerender() {},
+          };
+          document.querySelector('#root').append(FTBacktestAssetPlot.render({t:x=>x}, state));
+        }""")
+        page.wait_for_selector(".ft-asset-chart-canvas canvas")
+        page.wait_for_function("() => __chart.panes()[0].getSeries()[1].data().length === 2")
+        value = page.evaluate("""() => ({
+          requested:__requested,
+          range:__chart.timeScale().getVisibleRange(),
+          candles:__chart.panes()[0].getSeries()[0].data(),
+          axis:__chart.panes()[0].getSeries()[1].data(),
+          atMiddle:__chart.timeScale().coordinateToTime(__chart.timeScale().width()/2),
+          note:document.querySelector('.backtest-asset-note').textContent,
+        })""")
+        assert value["requested"]["minimum"] == page.evaluate(
+            "Date.UTC(2025, 1, 3)")
+        assert value["requested"]["maximum"] == page.evaluate(
+            "Date.UTC(2026, 4, 27)")
+        assert value["range"]["from"] == value["requested"]["minimum"] / 1000
+        assert value["range"]["to"] == value["requested"]["maximum"] / 1000
+        assert all("open" not in row for row in value["candles"])
+        assert len(value["axis"]) == 2
+        assert value["axis"][0]["time"] == value["range"]["from"]
+        assert value["axis"][-1]["time"] == value["range"]["to"]
+        midpoint = (value["range"]["from"] + value["range"]["to"]) / 2
+        assert abs(value["atMiddle"] - midpoint) < 10 * 24 * 60 * 60
+        assert "该范围没有此序列的行情柱" in value["note"]
+        assert errors == []
         browser.close()

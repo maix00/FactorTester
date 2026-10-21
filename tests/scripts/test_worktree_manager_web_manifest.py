@@ -611,7 +611,7 @@ def test_product_price_runtime_is_lazy_and_does_not_preload_highcharts() -> None
         price_runtime, chart_bundle,
     ]
     assert manifest["group_external_scripts"]["chart-workbench-asset"] == [
-        price_runtime, chart_bundle,
+        price_runtime, "katex/katex.min.js", chart_bundle,
     ]
     assert "chart-workbench-price" not in manifest["initial_groups"]
     assert price_runtime not in manifest["initial_external_scripts"]

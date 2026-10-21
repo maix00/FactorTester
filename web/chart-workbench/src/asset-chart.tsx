@@ -9,16 +9,20 @@ type Event = {timestamp: number; artifact: string; orderID: string; side: string
   stage: string; id: string; fillPrice: number | null; fields: [string, string][];
   raw: unknown};
 type Data = {bars: Bar[]; events: Event[]};
-type Indicator = {id: string; label: string; points: {timestamp: number; value: number | null}[]};
+type Indicator = {id: string; label: string; formula?: string;
+  points: {timestamp: number; value: number | null}[]};
 type Range = {from: number; to: number};
+type RollSwitch = {timestamp: number; label: string};
 type Marker = {time: number; position: string; shape: string; color: string;
   id: string; size?: number};
-type Series = {setData: (rows: unknown[]) => void; createPriceLine: (options: object) => unknown;
+type Series = {setData: (rows: unknown[]) => void; data: () => {time: number}[];
+  createPriceLine: (options: object) => unknown;
   removePriceLine: (line: unknown) => void; priceScale: () => {applyOptions: (options: object) => void}};
 type Chart = {addSeries: (kind: unknown, options: object, pane?: number) => Series;
   removeSeries: (series: Series) => void;
   panes: () => {setStretchFactor: (value: number) => void}[];
   timeScale: () => {fitContent: () => void; setVisibleRange: (range: Range) => void;
+    width: () => number; logicalToCoordinate: (logical: number) => number | null;
     subscribeVisibleTimeRangeChange: (handler: (range: Range | null) => void) => void;
     unsubscribeVisibleTimeRangeChange: (handler: (range: Range | null) => void) => void};
   subscribeClick: (handler: (point: {time?: number; point?: ChartSelection;
@@ -29,11 +33,24 @@ type Library = {createChart: (element: HTMLElement, options: object) => Chart;
   createSeriesMarkers: (series: Series, markers: Marker[], options?: object) => MarkerPlugin;
   CandlestickSeries: unknown; HistogramSeries: unknown; LineSeries: unknown};
 type Options = {bars: Bar[]; events: Event[]; indicators?: Indicator[]; frequencyMs: number;
+  runWindow?: {start: number; end: number}; rollSwitches?: RollSwitch[];
   loadRange: (minimum: number, maximum: number, maxPoints: number) => Promise<Data | null>;
   translate?: (value: string) => string};
 
 const roots = new WeakMap<HTMLElement, Root>();
+const indicatorColors = ["#8e44ad", "#2563eb", "#0d9488", "#db2777"];
 const library = () => (window as unknown as {LightweightCharts?: Library}).LightweightCharts;
+function IndicatorFormula({latex}: {latex: string}) {
+  const node = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!node.current) return;
+    const ui = (window as unknown as {FTUI?: {renderMath?: (
+      target: HTMLElement, formula: string, options?: {display?: boolean}) => void}}).FTUI;
+    if (ui?.renderMath) ui.renderMath(node.current, latex);
+    else node.current.textContent = latex;
+  }, [latex]);
+  return <span ref={node} className="ft-asset-indicator-formula" />;
+}
 const seconds = (milliseconds: number) => Math.floor(milliseconds / 1000);
 const valid = (bar: Bar) => Number.isFinite(bar.timestamp)
   && [bar.open, bar.high, bar.low, bar.close].every(Number.isFinite);
@@ -42,6 +59,31 @@ function orderedBars(source: Bar[]): Bar[] {
   const bySecond = new Map<number, Bar>();
   for (const bar of source) if (valid(bar)) bySecond.set(seconds(bar.timestamp), bar);
   return [...bySecond.entries()].sort(([a], [b]) => a - b).map(([, bar]) => bar);
+}
+
+function windowTicks(start: number, end: number, frequencyMs: number) {
+  const span = end - start;
+  const base = Math.max(1000, frequencyMs);
+  const step = Math.ceil(span / 1200 / base) * base;
+  const ticks: {time: number; value?: number}[] = [{time: seconds(start), value: 0}];
+  for (let time = start + step; time < end; time += step) {
+    const tick = seconds(time);
+    if (tick > ticks[ticks.length - 1].time) ticks.push({time: tick});
+  }
+  ticks.push({time: seconds(end), value: 0});
+  return ticks;
+}
+
+function logicalAtTime(times: number[], time: number): number {
+  if (!times.length || time <= times[0]) return 0;
+  if (time >= times[times.length - 1]) return times.length - 1;
+  let low = 0; let high = times.length - 1;
+  while (low + 1 < high) {
+    const middle = (low + high) >>> 1;
+    if (times[middle] <= time) low = middle;
+    else high = middle;
+  }
+  return low + (time - times[low]) / (times[high] - times[low]);
 }
 
 function mergeEvents(current: Event[], incoming: Event[]): Event[] {
@@ -123,11 +165,14 @@ function orderMarkers(bars: Bar[], events: Event[], toleranceMs: number) {
   return {items, markers};
 }
 
-function AssetChart({bars, events, indicators = [], frequencyMs, loadRange,
+function AssetChart({bars, events, indicators = [], frequencyMs, runWindow,
+  rollSwitches = [], loadRange,
   translate = value => value}: Options) {
   const node = useRef<HTMLDivElement>(null);
   const chart = useRef<Chart | null>(null);
   const candle = useRef<Series | null>(null);
+  const windowAxis = useRef<Series | null>(null);
+  const plotTimes = useRef<number[]>([]);
   const volume = useRef<Series | null>(null);
   const interest = useRef<Series | null>(null);
   const fillPlugin = useRef<MarkerPlugin | null>(null);
@@ -144,6 +189,8 @@ function AssetChart({bars, events, indicators = [], frequencyMs, loadRange,
   const view = useRef<Range | null>(null);
   const requestKey = useRef("");
   const generation = useRef(0);
+  const applyingData = useRef(false);
+  const drawRolls = useRef<() => void>(() => {});
   request.current = loadRange;
 
   useEffect(() => {
@@ -167,9 +214,41 @@ function AssetChart({bars, events, indicators = [], frequencyMs, loadRange,
       handleScroll: {mouseWheel: false, pressedMouseMove: true, horzTouchDrag: true},
     });
     chart.current = instance;
+    const rollLayer = document.createElement("div");
+    rollLayer.className = "ft-asset-roll-switches";
+    node.current.append(rollLayer);
+    drawRolls.current = () => {
+      const times = plotTimes.current;
+      const scale = instance.timeScale();
+      rollLayer.style.width = `${scale.width()}px`;
+      rollLayer.replaceChildren();
+      if (times.length < 2) return;
+      for (const item of rollSwitches) {
+        const coordinate = scale.logicalToCoordinate(logicalAtTime(times,
+          seconds(item.timestamp)));
+        if (coordinate === null || coordinate < 0 || coordinate > scale.width()) continue;
+        const marker = document.createElement("div");
+        marker.className = "ft-asset-roll-switch";
+        marker.style.left = `${coordinate}px`;
+        marker.title = `${translate("主力切换至")} ${item.label}`;
+        const label = document.createElement("span");
+        label.textContent = `${translate("换主力")} · ${item.label}`;
+        marker.append(label);
+        rollLayer.append(marker);
+      }
+    };
+    const resizeObserver = typeof ResizeObserver === "undefined" ? null
+      : new ResizeObserver(() => drawRolls.current());
+    resizeObserver?.observe(node.current);
     candle.current = instance.addSeries(api.CandlestickSeries, {
       upColor: "#19a47b", downColor: "#e14f5b", borderVisible: false,
       wickUpColor: "#19a47b", wickDownColor: "#e14f5b",
+    });
+    // Lightweight Charts drops whitespace-only candlestick data. A hidden
+    // series owns the run boundaries so empty contracts still retain the
+    // configured backtest interval without fabricating an OHLC bar.
+    windowAxis.current = instance.addSeries(api.LineSeries, {
+      visible: false, priceLineVisible: false, lastValueVisible: false,
     });
     volume.current = instance.addSeries(api.HistogramSeries, {
       priceFormat: {type: "volume"}, priceLineVisible: false,
@@ -179,8 +258,8 @@ function AssetChart({bars, events, indicators = [], frequencyMs, loadRange,
     }, 2);
     for (const [index, item] of indicators.entries()) {
       const series = instance.addSeries(api.LineSeries, {
-        color: ["#8e44ad", "#2563eb", "#0d9488", "#db2777"][index % 4],
-        lineWidth: 2, priceLineVisible: false, title: item.label,
+        color: indicatorColors[index % indicatorColors.length],
+        lineWidth: 2, priceLineVisible: false, title: `F${index + 1}`,
       }, index + 3);
       series.setData(item.points.filter(point => point.value !== null
         && Number.isFinite(point.value) && Number.isFinite(point.timestamp))
@@ -202,6 +281,8 @@ function AssetChart({bars, events, indicators = [], frequencyMs, loadRange,
     let timer: ReturnType<typeof setTimeout> | undefined;
     let skipInitialRange = true;
     const onRange = (range: Range | null) => {
+      drawRolls.current();
+      if (applyingData.current) return;
       if (timer) clearTimeout(timer);
       if (!range) return;
       view.current = range;
@@ -238,6 +319,8 @@ function AssetChart({bars, events, indicators = [], frequencyMs, loadRange,
       generation.current += 1;
       if (timer) clearTimeout(timer);
       instance.timeScale().unsubscribeVisibleTimeRangeChange(onRange);
+      resizeObserver?.disconnect();
+      rollLayer.remove();
       instance.remove();
       chart.current = null;
     };
@@ -248,8 +331,18 @@ function AssetChart({bars, events, indicators = [], frequencyMs, loadRange,
     if (!instance || !candle.current || !volume.current || !interest.current) return;
     const rows = orderedBars(data.bars);
     const oldView = view.current;
-    candle.current.setData(rows.map(bar => ({time: seconds(bar.timestamp),
-      open: bar.open, high: bar.high, low: bar.low, close: bar.close})));
+    const boundaries = runWindow && Number.isFinite(runWindow.start)
+      && Number.isFinite(runWindow.end) && runWindow.end > runWindow.start
+      ? [seconds(runWindow.start), seconds(runWindow.end)] : [];
+    const candleRows = rows.map(bar => ({time: seconds(bar.timestamp),
+      open: bar.open, high: bar.high, low: bar.low, close: bar.close}));
+    applyingData.current = true;
+    const ticks = boundaries.length === 2
+      ? windowTicks(runWindow!.start, runWindow!.end, frequencyMs) : [];
+    plotTimes.current = [...new Set([...candleRows.map(item => item.time),
+      ...ticks.map(item => item.time)])].sort((a, b) => a - b);
+    windowAxis.current?.setData(ticks);
+    candle.current.setData(candleRows);
     volume.current.setData(rows.filter(bar => bar.volume !== null).map(bar => ({
       time: seconds(bar.timestamp), value: bar.volume,
       color: bar.close >= bar.open ? "#a9d8c9" : "#efb4b9",
@@ -273,8 +366,14 @@ function AssetChart({bars, events, indicators = [], frequencyMs, loadRange,
     }
     markerItems.current = itemMap;
     if (oldView) instance.timeScale().setVisibleRange(oldView);
-    else instance.timeScale().fitContent();
-  }, [data, frequencyMs]);
+    else if (boundaries.length === 2) {
+      const full = {from: boundaries[0], to: boundaries[1]};
+      instance.timeScale().setVisibleRange(full);
+      view.current = full;
+    } else instance.timeScale().fitContent();
+    applyingData.current = false;
+    drawRolls.current();
+  }, [data, frequencyMs, runWindow]);
 
   useEffect(() => {
     const series = candle.current;
@@ -286,6 +385,16 @@ function AssetChart({bars, events, indicators = [], frequencyMs, loadRange,
   }, [selectedPrices, translate]);
 
   return <div className="ft-asset-chart-workbench">
+    {indicators.length > 0 && <details className="ft-asset-indicator-list">
+      <summary>{translate("因子曲线")} · {indicators.length}</summary>
+      <ol>{indicators.map((item, index) => <li key={`${item.id}:${index}`}>
+        <span className="ft-asset-indicator-swatch"
+          style={{backgroundColor: indicatorColors[index % indicatorColors.length]}} />
+        <strong>F{index + 1}</strong>
+        <span className="ft-asset-indicator-name">{item.label}</span>
+        {item.formula && <IndicatorFormula latex={item.formula} />}
+      </li>)}</ol>
+    </details>}
     <div className="ft-chart-popover-host">
       <div ref={node} className="ft-asset-chart-canvas"
         style={{height: Math.max(640, 450 + indicators.length * 120)}}
