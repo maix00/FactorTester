@@ -9,6 +9,79 @@ from typing import Any, Mapping
 import numpy as np
 import pandas as pd
 
+from tools.data.types import DataFreq, finest_index
+
+from .errors import ProductMarketDataError
+
+
+_CHART_INTERVALS = {
+    "MIN5": "5min", "MIN15": "15min", "MIN30": "30min",
+    "HOUR1": "1h", "DAY1": "1D", "WEEK1": "W-SUN",
+}
+
+
+def fixed_chart_frame(
+    frame: pd.DataFrame, request: Mapping[str, Any],
+    price_columns: tuple[str, str, str, str, str],
+    source_frequency: DataFreq,
+    oi_column: str | None = None,
+    *, time_column: str | None = None,
+    trading_day_column: str | None = None,
+) -> tuple[pd.DataFrame, int]:
+    """Aggregate to the explicitly selected calendar/trading interval only.
+
+    A request over the row budget fails rather than silently changing the
+    selected candle frequency or returning a misleading subset of candles.
+    """
+    interval = str(request.get("chart_interval") or "SOURCE").upper()
+    if interval != "SOURCE" and interval not in _CHART_INTERVALS:
+        raise ProductMarketDataError("不支持的图表数据频率")
+    if interval != "SOURCE" and DataFreq(interval).value < source_frequency.value:
+        raise ProductMarketDataError("图表数据频率不能细于数据源频率")
+    if interval == "SOURCE" or frame.empty:
+        result = frame
+    else:
+        stamps = pd.DatetimeIndex(pd.to_datetime(
+            frame[time_column] if time_column else finest_index(frame.index),
+        ))
+        if interval in ("DAY1", "WEEK1") and trading_day_column \
+                and trading_day_column in frame:
+            days = pd.DatetimeIndex(pd.to_datetime(frame[trading_day_column]))
+        elif interval in ("DAY1", "WEEK1") and isinstance(frame.index, pd.MultiIndex):
+            from tools.data.types.time_index import DataIndex
+            days = DataIndex(frame.index).trading_day_index()
+        else:
+            days = stamps.normalize()
+        if interval == "WEEK1":
+            keys = days.tz_localize(None).to_period("W-SUN").start_time
+        elif interval == "DAY1":
+            keys = days
+        else:
+            keys = stamps.floor(_CHART_INTERVALS[interval])
+        open_col, high_col, low_col, close_col, volume_col = price_columns
+        aggregate: dict[str, tuple[str, str]] = {
+            open_col: (open_col, "first"), high_col: (high_col, "max"),
+            low_col: (low_col, "min"), close_col: (close_col, "last"),
+            volume_col: (volume_col, "sum"),
+        }
+        if oi_column:
+            aggregate[oi_column] = (oi_column, "last")
+        if time_column:
+            aggregate[time_column] = (time_column, "first")
+        result = frame.groupby(keys, sort=True).agg(**aggregate)
+        if time_column:
+            result = result.reset_index(drop=True)
+        else:
+            # Keep the first actual source timestamp of each candle. A
+            # trading-day label need not be a tradeable timestamp.
+            first_positions = frame.groupby(keys, sort=True).head(1).index
+            result.index = first_positions
+    count = len(result)
+    if count > _maximum_points(request):
+        raise ProductMarketDataError(
+            "当前频率与时间范围包含过多 K 线；请选择更粗的频率或更短的范围")
+    return result, count
+
 
 def _maximum_points(request: Mapping[str, Any]) -> int:
     try:

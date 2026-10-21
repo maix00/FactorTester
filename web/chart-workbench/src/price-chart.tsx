@@ -20,9 +20,12 @@ type ChartApi = {
     fitContent: () => void;
     getVisibleRange: () => ChartRange | null;
     setVisibleRange: (range: ChartRange) => void;
+    getVisibleLogicalRange: () => ChartRange | null;
     setVisibleLogicalRange: (range: ChartRange) => void;
     width: () => number;
     coordinateToTime: (x: number) => number | null;
+    coordinateToLogical: (x: number) => number | null;
+    logicalToCoordinate: (logical: number) => number | null;
     subscribeVisibleTimeRangeChange: (fn: (range: ChartRange | null) => void) => void;
     unsubscribeVisibleTimeRangeChange: (fn: (range: ChartRange | null) => void) => void;
   };
@@ -76,6 +79,14 @@ function sortedBars(source: Bar[]): Bar[] {
 }
 
 function toTime(bar: Bar): number { return Math.floor(bar.timestamp / 1000); }
+
+function timeAtLogical(rows: Bar[], logical: number): number {
+  if (!rows.length) return 0;
+  const before = Math.max(0, Math.min(rows.length - 1, Math.floor(logical)));
+  const after = Math.min(rows.length - 1, before + 1);
+  return toTime(rows[before]) + (logical - before)
+    * (toTime(rows[after]) - toTime(rows[before]));
+}
 
 // Time ranges are expressed in seconds; logical positions are bar indexes.
 // Interpolate at a missing timestamp so an overview bar can be replaced by
@@ -180,6 +191,7 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
     };
     let cached = overview;
     let indexed = apply(cached);
+    let displayed = cached;
     chart.timeScale().fitContent();
     let userChangedRange = false;
     let pendingInteraction = false;
@@ -236,20 +248,26 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
     let detailViewportSpan = 0;
     const replaceData = (rows: Bar[], visible: ChartRange | null) => {
       const scale = chart.timeScale();
-      const anchor = pointerX === null ? null : scale.coordinateToTime(pointerX);
+      const previousLogical = scale.getVisibleLogicalRange();
+      const pointerLogical = pointerX === null ? null : scale.coordinateToLogical(pointerX);
       let target: ChartRange | null = null;
       if (visible && rows.length > 1) {
-        const from = logicalAtTime(rows, Number(visible.from));
-        const to = logicalAtTime(rows, Number(visible.to));
+        const from = logicalAtTime(rows, previousLogical
+          ? timeAtLogical(displayed, previousLogical.from) : Number(visible.from));
+        const to = logicalAtTime(rows, previousLogical
+          ? timeAtLogical(displayed, previousLogical.to) : Number(visible.to));
         const span = Math.max(1, to - from);
+        // The plot excludes the right price axis. Logical range endpoints do
+        // not map to the full React node width, especially at fine spacing.
         const fraction = pointerX === null ? null
           : Math.max(0, Math.min(1, pointerX / Math.max(1, scale.width())));
-        const wantedFrom = anchor === null || fraction === null ? from
-          : logicalAtTime(rows, Number(anchor)) - fraction * span;
+        const wantedFrom = pointerLogical === null || fraction === null ? from
+          : logicalAtTime(rows, timeAtLogical(displayed, pointerLogical)) - fraction * span;
         const boundedFrom = Math.max(0, Math.min(rows.length - 1 - span, wantedFrom));
         target = {from: boundedFrom, to: boundedFrom + span};
       }
       indexed = apply(rows);
+      displayed = rows;
       if (target) scale.setVisibleLogicalRange(target);
     };
     const stopLoading = () => {
@@ -279,11 +297,10 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
       // A wider viewport exposes the overview/fine-data seam immediately,
       // before the debounced request could replace it. Switch to one coherent
       // overview resolution synchronously, then refine the settled viewport.
-      if (detailCoverage && cached !== overview && (
-        Number(range.to) - Number(range.from) > detailViewportSpan * 1.1
-        || Number(range.from) < detailCoverage.from
-        || Number(range.to) > detailCoverage.to
-      )) restoreOverview();
+      if (detailCoverage && cached !== overview
+        && Number(range.to) - Number(range.from) > detailViewportSpan * 1.1) {
+        restoreOverview();
+      }
       const settledRange = chart.timeScale().getVisibleRange() || range;
       if (timer) clearTimeout(timer);
       timer = setTimeout(async () => {
@@ -307,7 +324,8 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
         }
         const span = maximum - minimum;
         if (detailCoverage && minimum >= detailCoverage.from
-          && maximum <= detailCoverage.to && span >= detailViewportSpan / 2) {
+          && maximum <= detailCoverage.to
+          && span >= detailViewportSpan / 2) {
           stopLoading();
           return;
         }
@@ -382,6 +400,7 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
         detailCoverage = null;
         cached = overview;
         indexed = apply(cached);
+        displayed = cached;
         chart.timeScale().fitContent();
       },
       setTimeZone(nextTimeZone) {
