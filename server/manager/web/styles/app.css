@@ -327,6 +327,11 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .ft-lightweight-price { position: relative; }
 .ft-lightweight-price-canvas { position: relative; width: 100%; min-width: 0; height: 460px; }
 .ft-lightweight-range-bands { position: absolute; inset: 0 auto 0 0; pointer-events: none; overflow: hidden; }
+.ft-asset-roll-switches { position: absolute; inset: 0 auto 24px 0; pointer-events: none; overflow: hidden; z-index: 2; }
+.ft-asset-roll-switch { position: absolute; top: 0; bottom: 0; border-left: 1px dashed #b45309; opacity: .82; }
+.ft-asset-roll-switch span { position: absolute; top: 4px; left: 4px; max-width: 140px; overflow: hidden;
+  white-space: nowrap; text-overflow: ellipsis; padding: 2px 5px; border-radius: 4px;
+  background: #fff7ed; color: #92400e; font-size: 10px; box-shadow: 0 0 0 1px #fed7aa; }
 .ft-lightweight-range-band { position: absolute; top: 0; bottom: 26px;
   background: rgb(37 99 235 / 3%); border-right: 1px solid rgb(37 99 235 / 20%); }
 .ft-lightweight-range-band:nth-child(even) { background: rgb(37 99 235 / 7%); }

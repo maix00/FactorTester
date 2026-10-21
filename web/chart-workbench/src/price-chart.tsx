@@ -13,7 +13,7 @@ type Bar = {
   openInterest: number | null;
 };
 type ChartRange = {from: number; to: number};
-type RangeBand = {id: string; start: number; end: number};
+type RangeBand = {id: string; start: number; end: number; label?: string};
 type ChartApi = {
   applyOptions: (options: Record<string, unknown>) => void;
   addSeries: (kind: unknown, options: Record<string, unknown>, paneIndex?: number) => SeriesApi;
@@ -198,6 +198,9 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
     const bandLayer = document.createElement("div");
     bandLayer.className = "ft-lightweight-range-bands";
     node.append(bandLayer);
+    const switchLayer = document.createElement("div");
+    switchLayer.className = "ft-asset-roll-switches";
+    node.append(switchLayer);
     let rangeBands: RangeBand[] = [];
     const bandElements = new Map<string, HTMLDivElement>();
     let selectedBandID = "";
@@ -205,7 +208,10 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
       const scale = chart.timeScale();
       const width = scale.width();
       bandLayer.style.width = `${width}px`;
+      switchLayer.style.width = `${width}px`;
+      switchLayer.replaceChildren();
       if (!displayed.length) return;
+      const earliest = rangeBands.reduce((value, band) => Math.min(value, band.start), Infinity);
       for (const band of rangeBands) {
         const element = bandElements.get(band.id);
         if (!element) continue;
@@ -231,6 +237,16 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
           ? " is-selected" : ""}`;
         element.style.left = `${left}px`;
         element.style.width = `${right - left}px`;
+        if (band.start > earliest && from >= 0 && from <= width) {
+          const marker = document.createElement("div");
+          marker.className = "ft-asset-roll-switch";
+          marker.style.left = `${from}px`;
+          marker.title = `${translate("主力切换至")} ${band.label || band.id}`;
+          const label = document.createElement("span");
+          label.textContent = `${translate("换主力")} · ${band.label || band.id}`;
+          marker.append(label);
+          switchLayer.append(marker);
+        }
       }
     };
     chart.timeScale().fitContent();
@@ -493,6 +509,7 @@ function MarketChart({bars, hasOpenInterest, timeZone, loadRange, onReady,
       if (loadingTimer) clearTimeout(loadingTimer);
       bandResizeObserver?.disconnect();
       bandLayer.remove();
+      switchLayer.remove();
       node.removeEventListener("wheel", wheel);
       node.removeEventListener("pointerdown", pointerDown);
       node.removeEventListener("pointermove", pointerMove);

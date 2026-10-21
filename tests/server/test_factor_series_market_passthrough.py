@@ -40,7 +40,7 @@ def _record(ref="factor:v2:abc"):
 
 def test_market_series_survives_the_aggregator(monkeypatch):
     _stub(monkeypatch, {
-        "factor": {"freq": "MIN1"},
+        "factor": {"freq": "MIN1", "resolved_math_expr": "\\frac{a}{b}"},
         "series": [{"product": "T.CFE", "layer": "阈值层", "values": [1.0]}],
         "market": [{"product": "T.CFE", "freq": "MIN1", "bars": [{"close": 105.0}]}],
     })
@@ -49,6 +49,7 @@ def test_market_series_survives_the_aggregator(monkeypatch):
     assert [item["layer"] for item in payload["series"]] == ["阈值层"]
     assert payload["market"][0]["product"] == "T.CFE"
     assert payload["market"][0]["bars"] == [{"close": 105.0}]
+    assert payload["factors"][0]["resolved_math_expr"] == "\\frac{a}{b}"
 
 
 def test_market_key_is_absent_when_no_bars_were_loaded(monkeypatch):

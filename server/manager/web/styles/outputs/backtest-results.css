@@ -181,7 +181,18 @@
 .backtest-asset-note { margin: 0; color: var(--muted); font-size: 13px; }
 .backtest-asset-chart { min-width: 0; min-height: 520px; }
 .ft-asset-chart-workbench { display: grid; gap: 8px; min-width: 0; }
-.ft-asset-chart-canvas { width: 100%; min-width: 0; height: 640px; }
+.ft-asset-indicator-list { min-width: 0; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--panel); padding: 8px 12px; font-size: 13px; }
+.ft-asset-indicator-list summary { cursor: pointer; font-weight: 600; }
+.ft-asset-indicator-list ol { display: grid; gap: 8px; padding: 8px 0 0; margin: 0;
+  list-style: none; }
+.ft-asset-indicator-list li { display: flex; align-items: baseline; flex-wrap: wrap;
+  gap: 8px; min-width: 0; border-top: 1px solid var(--line); padding-top: 8px; }
+.ft-asset-indicator-swatch { display: inline-block; flex: 0 0 10px; width: 10px;
+  height: 10px; border-radius: 50%; }
+.ft-asset-indicator-name { overflow-wrap: anywhere; }
+.ft-asset-indicator-formula { max-width: 100%; overflow-x: auto; }
+.ft-asset-chart-canvas { position: relative; width: 100%; min-width: 0; height: 640px; }
 .ft-chart-popover-host { position: relative; min-width: 0; }
 .ft-chart-popover { position: absolute; z-index: 8; width: min(360px, calc(100% - 16px));
   max-height: min(52vh, 420px); overflow: auto; overscroll-behavior: contain;

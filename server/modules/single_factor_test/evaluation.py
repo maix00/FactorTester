@@ -166,6 +166,8 @@ class FactorEvaluation:
         if factor is None:
             raise LookupError("请先提交参数设置，或从模板加载已有因子")
 
+        resolved_math_expr = self._display_formula(factor)
+
         warmup = resolve_factor_warmup_policy(
             self.settings, factor, default_mode="none",
         )
@@ -292,6 +294,7 @@ class FactorEvaluation:
                 "alias": getattr(factor, "alias", self.factor_alias),
                 "name": getattr(factor, "name", self.factor_alias),
                 "freq": getattr(getattr(factor, "freq", None), "name", ""),
+                "resolved_math_expr": resolved_math_expr,
             },
             "products": [product_attrs(product, "name", "desc") for product in selected_products],
             "series": series_items,
@@ -307,6 +310,33 @@ class FactorEvaluation:
                 self.external_factor_artifacts
             ),
         }
+
+    def _display_formula(self, factor: Any) -> str:
+        """Read the concrete formula for the result UI without changing evaluation."""
+        frozen = next((item for item in self.frozen_factors or []
+            if isinstance(item, dict) and item.get("ref") == self.factor_ref), None)
+        family = getattr(factor, "family", None)
+        if frozen and family is not None:
+            try:
+                from server.modules.shared.factor_instance_metadata import (
+                    build_factor_instance_metadata,
+                )
+                identity = require_frozen_factor(frozen)["identity"]
+                metadata = build_factor_instance_metadata(
+                    family, factor, dict(identity.get("params") or {}),
+                    factor_dependencies=self.frozen_factors or [],
+                    username=self.owner,
+                )
+                formula = str(metadata.get("resolved_math_expr") or "")
+                if formula:
+                    return formula
+            except (LookupError, TypeError, ValueError):
+                pass
+        expression = getattr(factor, "_expr", None)
+        if expression is None:
+            expression = getattr(factor, "expr", None)
+        renderer = getattr(expression, "to_latex", None)
+        return str(renderer() or "") if callable(renderer) else ""
 
 
     def _market_series(self, products: list[Any]) -> list[dict[str, Any]]:
@@ -668,6 +698,7 @@ def factor_series_for_run_spec(data: dict[str, Any]) -> dict[str, Any]:
             "ref": ref, "alias": str(record.get("alias") or ""),
             "family_alias": str(identity.get("family_alias") or ""),
             "freq": str((result.get("factor") or {}).get("freq") or ""),
+            "resolved_math_expr": str((result.get("factor") or {}).get("resolved_math_expr") or ""),
         }
         factors.append(descriptor)
         for item in result.get("series") or ():
