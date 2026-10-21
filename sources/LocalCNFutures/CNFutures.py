@@ -1,13 +1,14 @@
 from typing import Any, Dict, List, Optional, Tuple, cast
 import pandas as pd
 import os
+from functools import lru_cache
 from pathlib import Path
 from tools.products.Futures import Futures, FuturesContract
 from tools.data.types import DataColumn
 from tools.data.types import DataFreq
 from tools.data.views.ProductDataView import ProductDataView
 from tools.products.AdjustableTermStructure import TERM_CONTRACT_UID_COL, TERM_TRADING_DAY_COL
-from sources.LocalCNFutures import SOURCE_DATA_DIR
+from sources.LocalCNFutures import SOURCE_DATA_DIR, TERM_STRUCTURE_PATH
 from sources.LocalCNFutures.clearing_rules import register_local_cnfutures_exchange_rules
 from sources.LocalCNFutures.product_catalog import load_product_catalog
 from sources.LocalCNFutures.trading_sessions import infer_trading_day_close_time
@@ -208,13 +209,23 @@ class CNFuturesContract(FuturesContract):
         setattr(self, '_parent_product_loaded', True)
         return parent
 
-    def list_available_freqs(self) -> List[DataFreq]:
-        freqs = list(super().list_available_freqs())
-        parent = self.get_parent_product()
-        path = parent.get_term_structure_path() if parent is not None else None
-        if path and os.path.isfile(path) and DataFreq.DAY1 not in freqs:
-            freqs.append(DataFreq.DAY1)
-        return freqs
+@lru_cache(maxsize=4)
+def _term_contract_uids(path: str, mtime_ns: int, size: int) -> frozenset[str]:
+    """Source-owned availability index; read no OHLC rows for a catalog listing."""
+    import pyarrow.compute as pc
+    import pyarrow.parquet as pq
+
+    values = pq.read_table(path, columns=[TERM_CONTRACT_UID_COL]).column(TERM_CONTRACT_UID_COL)
+    return frozenset(str(value) for value in pc.unique(values).to_pylist()
+                     if value is not None)
+
+
+def term_contract_has_day_data(uid: str, path: str = TERM_STRUCTURE_PATH) -> bool:
+    try:
+        stat = os.stat(path)
+    except FileNotFoundError:
+        return False
+    return str(uid) in _term_contract_uids(path, stat.st_mtime_ns, stat.st_size)
 
 
 class _CNFuturesContractTermStructureView(ProductDataView):
@@ -460,6 +471,25 @@ def get_all_futures_contract() -> List[Product]:
         timezone = 'Asia/Shanghai',
         time_cols_mapping={'trade_time': '1min', 'trading_day': '1day'},
         data_cols_mapping=datacolumn_map_reversed,
+    )
+
+    DataProviderProductTS(
+        key='LocalCNFuturesContractDAY1',
+        data_freq=DataFreq.DAY1,
+        if_object_is_in_source=lambda obj: isinstance(obj, CNFuturesContract)
+        and term_contract_has_day_data(obj.name),
+        get_object_path=lambda obj: TERM_STRUCTURE_PATH,
+        naming_scheme='local_cnfutures_contract_uid_v1',
+        reference_resolver=_resolve_contract_reference,
+        contract_data_layout='term_structure_snapshot',
+        timezone='Asia/Shanghai',
+        time_cols_mapping={'TRADING_DAY': '1day'},
+        data_cols_mapping={
+            'OPEN': DataColumn.OPEN, 'HIGH': DataColumn.HIGH,
+            'LOW': DataColumn.LOW, 'CLOSE': DataColumn.CLOSE,
+            'VOLUME': DataColumn.VOLUME,
+            'OPEN_INTEREST': DataColumn.OPEN_INTEREST,
+        },
     )
 
     contract_list = []

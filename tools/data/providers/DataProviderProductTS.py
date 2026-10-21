@@ -89,6 +89,9 @@ class DataProviderProductTS(DataProvider, metaclass=_DataMultipleProviderMeta):
             self._reference_resolver = kwargs.get('reference_resolver')
             self.timezone = kwargs.get('timezone', None)
             self.delivery_mode = delivery_mode
+            self.contract_data_layout = str(
+                kwargs.get('contract_data_layout') or 'parquet_ohlcv'
+            )
             self.set_time_cols_mapping(kwargs.get('time_cols_mapping', {}))
             self.set_data_cols_mapping(kwargs.get('data_cols_mapping', {}))
 

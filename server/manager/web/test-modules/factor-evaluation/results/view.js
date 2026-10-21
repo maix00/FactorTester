@@ -302,7 +302,9 @@
       [context.t("合约"), context.t("开始"), context.t("结束"), context.t("数据")],
       rows.map(item => [
         item.contract || item.uid, item.start || item.start_date || "",
-        item.end || item.end_date || "", item.has_data === false ? context.t("无数据") : context.t("可用"),
+        item.end || item.end_date || "",
+        Array.isArray(item.available_freqs) && item.available_freqs.length
+          ? item.available_freqs.join(" · ") : context.t("无数据"),
       ]),
     );
     [...view.body.rows].forEach((row, index) => {

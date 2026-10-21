@@ -207,7 +207,8 @@
                 item.backward_adjustment_mul ?? context.t("—"),
                 item.backward_adjustment_add ?? context.t("—"),
                 item.adjustment_ratio ?? context.t("—"),
-                item.has_data ? context.t("可用") : context.t("无数据"),
+                Array.isArray(item.available_freqs) && item.available_freqs.length
+                  ? item.available_freqs.join(" · ") : context.t("无数据"),
               ];
             },
           },
