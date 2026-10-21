@@ -84,7 +84,16 @@ window.startProductDetailFieldsFirstPaint = function(options = {}) {
         state.contractsStarted = true;
         return Promise.resolve({
           supports_term_structure: true,
-          contracts: [{uid: "A1", contract: "A1", has_data: true}],
+          contracts: [
+            {uid: "A1", contract: "A1", has_data: true,
+              available_freqs: ["MIN1", "DAY1"]},
+            {uid: "A2", contract: "A2", has_data: true,
+              available_freqs: ["DAY1"]},
+            {uid: "A3", contract: "A3", has_data: false,
+              available_freqs: []},
+            {uid: "A4", contract: "A4", has_data: true,
+              available_freqs: ["TICK"]},
+          ],
         });
       }
       return Promise.resolve({});

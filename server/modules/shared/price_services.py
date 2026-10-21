@@ -18,6 +18,7 @@ from sources.LocalCNFutures.CNFutures import (
     CNFuturesSectorNightTimeCategory,
     exchange_map,
     get_all_futures_contract,
+    term_contract_has_day_data,
 )
 from tools.data.providers import DataProviderProductTS as DataSource
 from tools.products.AdjustableTermStructure import AdjustableProductMixin
@@ -158,7 +159,23 @@ def contract_data_path(contract_uid: str) -> str:
 
 
 def contract_has_data(contract_uid: str) -> bool:
-    return os.path.isfile(contract_data_path_for(contract_uid))
+    return bool(contract_available_sources(contract_uid))
+
+
+def contract_available_sources(contract_uid: str) -> list[dict[str, str]]:
+    """Resolve a listed contract through the registered source catalog."""
+    product = find_contract_product(contract_uid)
+    if product is None:
+        return []
+    return available_sources_for_product(product)
+
+
+def contract_available_freqs(contract_uid: str) -> list[str]:
+    """Project arbitrary frequencies declared by available contract sources."""
+    return list(dict.fromkeys(
+        str(item["freq"]) for item in contract_available_sources(contract_uid)
+        if item.get("freq")
+    ))
 
 
 def scalar(value: Any) -> Any:
@@ -327,6 +344,10 @@ def find_contract_product(contract_uid):
             product = exact(str(canonical))
             if product is not None:
                 return product
+    # A listed contract can have DAY1 snapshot rows without a minute file.
+    # The minute-file catalog does not instantiate those contracts.
+    if term_contract_has_day_data(wanted):
+        return CNFuturesContract(wanted)
     return None
 
 

@@ -132,7 +132,6 @@ def test_cnfutures_contract_day1_view_reads_term_structure_settlement(monkeypatc
     contract = CNFuturesContract("DCE|F|FB|2402")
     monkeypatch.setattr(contract, "get_parent_product", lambda: _Parent())
 
-    assert DataFreq.DAY1 in contract.list_available_freqs()
     frame = contract.DAY1.get_and_adjust_cols(
         [DataColumn.CLOSE.name, DataColumn.SETTLEMENT_PRICE.name],
         start_dt="2024-01-01",

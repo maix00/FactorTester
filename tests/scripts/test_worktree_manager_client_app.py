@@ -4285,6 +4285,18 @@ def test_product_detail_mounts_before_fields_and_loads_sections_independently() 
             page.wait_for_function("window.__productDetailFieldsFirstPaint.completed")
             assert "价格已读取" in page.locator(".product-price-panel-mount").inner_text()
             assert "A1" in page.locator(".product-term-structure").inner_text()
+            assert page.locator(".product-term-structure tbody tr").nth(0).locator(
+                "td"
+            ).last.inner_text() == "TICK"
+            assert page.locator(".product-term-structure tbody tr").nth(1).locator(
+                "td"
+            ).last.inner_text() == "无数据"
+            assert page.locator(".product-term-structure tbody tr").nth(2).locator(
+                "td"
+            ).last.inner_text() == "DAY1"
+            assert page.locator(".product-term-structure tbody tr").nth(3).locator(
+                "td"
+            ).last.inner_text() == "MIN1 · DAY1"
             assert not errors
             page.close()
 
