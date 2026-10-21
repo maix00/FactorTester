@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from server.modules.shared.price_data_helpers import open_interest_column
+from server.services.product_market_data.errors import ProductMarketDataError
 from server.services.product_market_data.products import _price_rows
 from server.services.product_market_data.sampling import (
-    bounded_ohlcv_frame, bounded_ohlcv_rows,
+    bounded_ohlcv_frame, bounded_ohlcv_rows, fixed_chart_frame,
 )
 from tools.data.types import DataFreq
 
@@ -80,6 +82,77 @@ def test_frame_aggregation_matches_serialized_ohlcv_buckets() -> None:
     expected, _ = bounded_ohlcv_rows(raw_rows, {"max_points": 100})
     assert raw_count == count
     assert sampled_rows == expected
+
+
+def test_fixed_chart_aggregation_respects_selected_interval_and_source_rows() -> None:
+    frame = pd.DataFrame({
+        "open": [10, 11, 12, 13], "high": [12, 13, 14, 15],
+        "low": [9, 10, 11, 12], "close": [11, 12, 13, 14],
+        "volume": [1, 2, 3, 4], "oi": [100, 101, 102, 103],
+    }, index=pd.date_range("2025-01-01 09:00", periods=4, freq="min"))
+    columns = ("open", "high", "low", "close", "volume")
+    raw, count = fixed_chart_frame(frame, {"chart_interval": "SOURCE",
+                                           "max_points": 100}, columns, DataFreq.MIN1, "oi")
+    assert count == 4 and raw.equals(frame)
+    grouped, count = fixed_chart_frame(frame, {"chart_interval": "MIN5",
+                                               "max_points": 100}, columns, DataFreq.MIN1, "oi")
+    assert count == 1
+    assert grouped.iloc[0][["open", "high", "low", "close", "volume", "oi"]].tolist() \
+        == [10, 15, 9, 14, 10, 103]
+
+
+def test_fixed_chart_rejects_oversized_selection_instead_of_changing_frequency() -> None:
+    frame = pd.DataFrame({"open": range(200), "high": range(200),
+                          "low": range(200), "close": range(200),
+                          "volume": [1] * 200},
+                         index=pd.date_range("2025-01-01", periods=200, freq="min"))
+    with pytest.raises(ProductMarketDataError, match="更粗的频率或更短的范围"):
+        fixed_chart_frame(frame, {"chart_interval": "SOURCE", "max_points": 100},
+                          ("open", "high", "low", "close", "volume"), DataFreq.MIN1)
+
+
+def test_fixed_chart_rejects_interval_finer_than_source() -> None:
+    frame = pd.DataFrame({"open": [1], "high": [1], "low": [1],
+                          "close": [1], "volume": [1]},
+                         index=pd.date_range("2025-01-01", periods=1, freq="D"))
+    with pytest.raises(ProductMarketDataError, match="不能细于数据源"):
+        fixed_chart_frame(frame, {"chart_interval": "MIN5"},
+                          ("open", "high", "low", "close", "volume"),
+                          DataFreq.DAY1)
+
+
+def test_fixed_chart_daily_bucket_uses_contract_trading_day() -> None:
+    frame = pd.DataFrame({
+        "trade_time": pd.to_datetime(["2025-01-01 21:00", "2025-01-02 09:00"]),
+        "trading_day": pd.to_datetime(["2025-01-02", "2025-01-02"]),
+        "open": [10, 11], "high": [12, 13], "low": [9, 10],
+        "close": [11, 12], "volume": [1, 2],
+    })
+    result, count = fixed_chart_frame(frame, {"chart_interval": "DAY1",
+                                               "max_points": 100},
+                                      ("open", "high", "low", "close", "volume"),
+                                      DataFreq.MIN1, time_column="trade_time",
+                                      trading_day_column="trading_day")
+    assert count == 1
+    assert result.iloc[0]["trade_time"] == frame.iloc[0]["trade_time"]
+    assert result.iloc[0]["volume"] == 3
+
+
+def test_fixed_chart_daily_bucket_uses_product_trading_day_index() -> None:
+    index = pd.MultiIndex.from_arrays([
+        pd.to_datetime(["2025-01-02", "2025-01-02"]),
+        pd.to_datetime(["2025-01-01 21:00", "2025-01-02 09:00"]),
+    ], names=["trading_day", "_SIGNAL@MIN1"])
+    frame = pd.DataFrame({"open": [10, 11], "high": [12, 13],
+                          "low": [9, 10], "close": [11, 12],
+                          "volume": [1, 2]}, index=index)
+    result, count = fixed_chart_frame(frame, {"chart_interval": "DAY1",
+                                               "max_points": 100},
+                                      ("open", "high", "low", "close", "volume"),
+                                      DataFreq.MIN1)
+    assert count == 1
+    assert result.iloc[0]["volume"] == 3
+    assert result.index[0] == index[0]
 
 
 def test_frame_aggregation_leaves_anchored_bars_for_exact_row_sampling() -> None:

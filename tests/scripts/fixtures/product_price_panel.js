@@ -13,6 +13,12 @@ class Node {
     this.disabled = false;
     this.value = "";
     this.textContent = "";
+    this.classList = {
+      add: value => { this.className += ` ${value}`; },
+      remove: value => { this.className = this.className.split(/\s+/)
+        .filter(item => item !== value).join(" "); },
+      contains: value => this.className.split(/\s+/).includes(value),
+    };
   }
 
   append(...children) {
@@ -22,6 +28,8 @@ class Node {
   replaceChildren(...children) {
     this.children = children.filter(Boolean);
   }
+
+  remove() {}
 
   setAttribute(name, value) {
     this.attributes[name] = String(value);
@@ -57,6 +65,8 @@ const context = {
   document: {createElement: tagName => new Node(tagName)},
   location: {search: "?data_source=Local"},
   URLSearchParams,
+  setTimeout,
+  clearTimeout,
   console,
 };
 context.window = context;
@@ -153,9 +163,13 @@ vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);
   const sourcePicker = pickers.find(node => node.element.className === "product-price-source-filter");
   const adjustedPicker = pickers.find(node => node.element.className === "product-price-adjusted-filter");
   const timezonePicker = pickers.find(node => node.element.className === "product-price-timezone-filter");
+  const intervalPicker = pickers.find(node => node.element.className === "product-price-interval-filter");
+  const rangePicker = pickers.find(node => node.element.className === "product-price-range-filter");
   assert.ok(sourcePicker);
   assert.ok(adjustedPicker);
   assert.ok(timezonePicker);
+  assert.ok(intervalPicker);
+  assert.ok(rangePicker);
   assert.strictEqual(charts.at(-1).options.timeZone, "Asia/Shanghai");
   assert.strictEqual(walk(root, node => node.className === "product-price-controls").length, 0,
     "filters live in the shared settings dialog instead of consuming a page row");
@@ -173,6 +187,9 @@ vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);
   assert.strictEqual(requests[0].freq, undefined);
   assert.strictEqual(requests[0].data_source, undefined);
   assert.strictEqual(requests[0].adjusted, false);
+  assert.strictEqual(requests[0].chart_interval, "DAY1");
+  assert.strictEqual(requests[0].chart_mode, "fixed");
+  assert.strictEqual(requests[0].start_date, "2025-01-01");
   const info = walk(root, node => node.className === "icon-action-button")[0];
   info.listeners.click();
   assert.strictEqual(tables.at(-1).rows.some(row => row[1] === "未复权"), true);
@@ -181,30 +198,48 @@ vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);
   await settle();
   assert.strictEqual(requests[1].data_source, "LocalCNFuturesMIN1");
   assert.strictEqual(requests[1].freq, undefined);
-  assert.strictEqual(requests[1].max_points, 1000);
-  assert.strictEqual(requests[1].start_date, undefined);
+  assert.strictEqual(requests[1].max_points, 5000);
+  assert.strictEqual(requests[1].start_date, "2025-01-01");
 
   adjustedPicker.select("adjusted");
   await settle();
   assert.strictEqual(requests.some(request =>
     request.data_source === "LocalCNFuturesMIN1" && request.adjusted === true), true);
   assert.strictEqual(requests.length, 3,
-    "each source or adjustment selection makes one bounded overview request");
+    "each source or adjustment selection makes one selected-range request");
+  intervalPicker.select("HOUR1");
+  await settle();
+  assert.strictEqual(requests.at(-1).chart_interval, "HOUR1");
+  rangePicker.select("all");
+  await settle();
+  assert.strictEqual(requests.at(-1).start_date, undefined);
   assert.ok(loadedGroups.includes("chart-workbench-price"));
   assert.strictEqual(charts.at(-1).options.bars[0].close, 2);
-  const showAll = walk(root, node => node.textContent === "显示全部价格")[0];
+  const showAll = walk(root, node => node.textContent === "适配当前时间范围")[0];
   showAll.listeners.click();
   assert.strictEqual(charts.at(-1).fitted, true);
-  assert.strictEqual(disposed, 2);
-  await charts.at(-1).options.loadRange(Date.parse("2025-01-01"),
-    Date.parse("2025-01-03"), 2400);
-  assert.strictEqual(requests.at(-1).max_points, 2400);
-  assert.strictEqual(requests.at(-1).start_date, "2025-01-01");
-  assert.strictEqual(requests.at(-1).start_time, "08:00:00",
-    "range bounds must use the source product timezone, even if the display zone changes");
+  assert.strictEqual(disposed, 0);
+  assert.strictEqual(charts.at(-1).options.loadRange, undefined,
+    "fixed-frequency chart zoom must not trigger another source request");
   info.listeners.click();
   assert.strictEqual(tables.at(-1).rows.some(row => row[1] === "连续合约换月平滑复权"), true);
   assert.strictEqual(tables.at(-1).rows.some(row => row[1] === "raw × adjustment_mul + adjustment_add"), true);
+
+  const existingChartCount = charts.length;
+  const normalApi = context.api;
+  context.api = async () => { throw new Error("temporary source failure"); };
+  intervalPicker.select("SOURCE");
+  await settle();
+  assert.strictEqual(charts.length, existingChartCount,
+    "a failed setting request must leave the previous chart visible");
+  assert.ok(walk(root, node => node.className.includes("product-price-load-overlay is-error")).length);
+  context.api = normalApi;
+  intervalPicker.select("DAY1");
+  await settle();
+  assert.strictEqual(charts.length, existingChartCount + 1);
+  assert.strictEqual(walk(root,
+    node => node.className.includes("product-price-load-overlay is-error")).length, 0,
+    "a new request must clear the stale error overlay");
 
   const contractMount = new Node("div");
   const contractRoot = await context.FTProductPricePanel.render(context, contractMount, {
@@ -212,7 +247,7 @@ vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);
     contractName: "A2501",
     source: "server",
   });
-  const contractPickers = pickers.slice(3);
+  const contractPickers = pickers.slice(5);
   assert.deepStrictEqual(
     Array.from(contractPickers[0].items, node => node.label),
     ["自动选择", "LocalCNFuturesMIN1 · MIN1"],
