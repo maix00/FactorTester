@@ -36,7 +36,9 @@ def fixed_chart_frame(
     interval = str(request.get("chart_interval") or "SOURCE").upper()
     if interval != "SOURCE" and interval not in _CHART_INTERVALS:
         raise ProductMarketDataError("不支持的图表数据频率")
-    if interval != "SOURCE" and DataFreq(interval).value < source_frequency.value:
+    interval_duration = (pd.Timedelta(days=7) if interval == "WEEK1"
+                         else DataFreq(interval).value if interval != "SOURCE" else None)
+    if interval_duration is not None and interval_duration < source_frequency.value:
         raise ProductMarketDataError("图表数据频率不能细于数据源频率")
     if interval == "SOURCE" or frame.empty:
         result = frame

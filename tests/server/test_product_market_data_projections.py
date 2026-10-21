@@ -121,6 +121,19 @@ def test_fixed_chart_rejects_interval_finer_than_source() -> None:
                           DataFreq.DAY1)
 
 
+def test_fixed_chart_weekly_aggregation_works_with_daily_source() -> None:
+    frame = pd.DataFrame({"open": [1, 2, 3], "high": [2, 3, 4],
+                          "low": [1, 2, 3], "close": [2, 3, 4],
+                          "volume": [1, 2, 3]},
+                         index=pd.to_datetime(["2025-01-03", "2025-01-06", "2025-01-07"]))
+    result, count = fixed_chart_frame(frame, {"chart_interval": "WEEK1"},
+                                      ("open", "high", "low", "close", "volume"),
+                                      DataFreq.DAY1)
+    assert count == 2
+    assert result.iloc[0]["volume"] == 1
+    assert result.iloc[1]["volume"] == 5
+
+
 def test_fixed_chart_daily_bucket_uses_contract_trading_day() -> None:
     frame = pd.DataFrame({
         "trade_time": pd.to_datetime(["2025-01-01 21:00", "2025-01-02 09:00"]),
