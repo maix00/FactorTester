@@ -60,11 +60,13 @@ def fixed_chart_frame(
         else:
             days = stamps.normalize()
         if interval == "WEEK1":
-            keys = days.tz_localize(None).to_period("W-SUN").start_time
+            keys = days.tz_localize(None).to_period("W-SUN").end_time.normalize()
         elif interval == "DAY1":
             keys = days
         else:
-            keys = stamps.floor(_CHART_INTERVALS[interval])
+            # Source minute bars are end-stamped: 09:01 covers (09:00, 09:01].
+            # A 5-minute candle at 09:05 therefore contains 09:01..09:05.
+            keys = stamps.ceil(_CHART_INTERVALS[interval])
         open_col, high_col, low_col, close_col, volume_col = price_columns
         aggregate: dict[str, tuple[str, str]] = {
             open_col: (open_col, "first"), high_col: (high_col, "max"),
@@ -77,12 +79,8 @@ def fixed_chart_frame(
             aggregate[time_column] = (time_column, "first")
         result = frame.groupby(keys, sort=True).agg(**aggregate)
         if time_column:
+            result[time_column] = result.index
             result = result.reset_index(drop=True)
-        else:
-            # Keep the first actual source timestamp of each candle. A
-            # trading-day label need not be a tradeable timestamp.
-            first_positions = frame.groupby(keys, sort=True).head(1).index
-            result.index = first_positions
     count = len(result)
     limit = _maximum_points(request)
     if count > limit:
@@ -132,8 +130,8 @@ def bounded_ohlcv_frame(
     if oi_column:
         result[oi_column] = frame[oi_column].to_numpy()[last]
     if time_column:
-        result[time_column] = frame[time_column].to_numpy()[first]
-    sampled = pd.DataFrame(result, index=frame.index.take(first))
+        result[time_column] = frame[time_column].to_numpy()[last]
+    sampled = pd.DataFrame(result, index=frame.index.take(last))
     return sampled, total
 
 
@@ -172,8 +170,8 @@ def bounded_ohlcv_rows(
         first, last = bucket[0], bucket[-1]
         entry = {
             **last,
-            "timestamp": first.get("timestamp"),
-            "time": first.get("time", last.get("time")),
+            "timestamp": last.get("timestamp"),
+            "time": last.get("time"),
             "open": first.get("open"),
             "high": max(float(item["high"]) for item in bucket),
             "low": min(float(item["low"]) for item in bucket),
