@@ -613,7 +613,7 @@ def test_price_chart_zoom_settles_after_detail_load() -> None:
             __requests.push([minimum, maximum]);
             await new Promise(resolve => setTimeout(resolve, 650));
             return Array.from({length: 1440}, (_, i) => {
-              const timestamp = minimum + i * 60000;
+              const timestamp = minimum + i * (maximum - minimum) / 1439;
               return bar(timestamp, 110 + i / 1440);
             });
           };
@@ -626,12 +626,26 @@ def test_price_chart_zoom_settles_after_detail_load() -> None:
         page.evaluate("window.__zoom()")
         page.wait_for_function("window.__requests.length > 0")
         page.locator(".ft-lightweight-price-loading").wait_for()
+        pointer = page.evaluate("""() => {
+          const rect = document.querySelector('.ft-lightweight-price-canvas')
+            .getBoundingClientRect();
+          return {x: rect.left + rect.width * 0.48, y: rect.top + 160,
+            localX: rect.width * 0.48};
+        }""")
+        page.mouse.move(pointer["x"], pointer["y"])
+        anchored_time = page.evaluate("""x => Number(
+          __chart.timeScale().coordinateToTime(x))""", pointer["localX"])
         page.wait_for_timeout(1500)
         assert page.evaluate("window.__requests.length") == 1, errors
         assert page.evaluate("window.__requests[0][0]") < 1736553600000, (
             "detail request should include bars before the visible zoom window"
         )
         assert page.locator(".ft-lightweight-price-loading").count() == 0
+        reloaded_time = page.evaluate("""x => Number(
+          __chart.timeScale().coordinateToTime(x))""", pointer["localX"])
+        assert abs(reloaded_time - anchored_time) <= 600, (
+            "reloading finer bars must keep the hovered date under the pointer"
+        )
         page.evaluate("""() => {
           document.querySelector('.ft-lightweight-price-canvas')
             .dispatchEvent(new Event('pointerdown'));
@@ -706,6 +720,7 @@ def test_price_chart_highlights_hovered_candle_and_opens_click_toolkit() -> None
         errors: list[str] = []
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.set_content("<main id='root' style='width:800px'></main>")
+        page.add_style_tag(path=str(ROOT / "server/manager/web/styles/app.css"))
         page.add_script_tag(path=str(ROOT / "static/vendor/lightweight-charts/lightweight-charts.standalone.production.js"))
         page.evaluate("""() => {
           const library = LightweightCharts;
@@ -724,8 +739,8 @@ def test_price_chart_highlights_hovered_candle_and_opens_click_toolkit() -> None
         page.evaluate("""() => {
           const start = Date.UTC(2025, 0, 1);
           const bars = Array.from({length: 10}, (_, i) => ({
-            timestamp: start + i * 86400000, open: 100, high: 102,
-            low: 99, close: 101, volume: 1000, openInterest: 500,
+            timestamp: start + i * 86400000, open: 100, high: 102.72,
+            low: 99.2, close: 101.5, volume: 1000, openInterest: 500,
           }));
           window.__handle = FTChartWorkbench.mountPriceChart(
             document.querySelector('#root'), {bars, timeZone: 'Asia/Shanghai'});
@@ -754,6 +769,11 @@ def test_price_chart_highlights_hovered_candle_and_opens_click_toolkit() -> None
         assert toolkit.locator("header strong").inner_text() == expected_utc
         assert toolkit.get_by_text("1000").count() == 1
         assert toolkit.get_by_text("500").count() == 1
+        assert toolkit.locator("dd").all_inner_texts()[:4] == [
+            "100.00", "102.72", "99.20", "101.50",
+        ]
+        assert toolkit.locator("dd").first.evaluate(
+            "node => getComputedStyle(node).whiteSpace") == "nowrap"
         toolkit.get_by_role("button", name="关闭").click()
         assert toolkit.count() == 0
         assert errors == []
