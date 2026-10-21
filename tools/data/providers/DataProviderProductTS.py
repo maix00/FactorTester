@@ -54,6 +54,9 @@ class DataProviderProductTS(DataProvider, metaclass=_DataMultipleProviderMeta):
                  if_object_is_supported: Optional[Callable[[Any], bool]] = None,
                  label: Optional[str] = None, *args, **kwargs):
         if not hasattr(self, '_initialized'):
+            delivery_mode = str(kwargs.get('delivery_mode') or 'historical_snapshot')
+            if delivery_mode not in {'historical_snapshot', 'live_stream', 'delayed_stream'}:
+                raise ValueError(f'Unsupported market-data delivery mode: {delivery_mode}')
             super().__init__(key=key, label=label or key)
             self.freq = DataFreq(data_freq)    # 数据频率对象
             # 第一个被创建的源自动成为默认源
@@ -85,6 +88,7 @@ class DataProviderProductTS(DataProvider, metaclass=_DataMultipleProviderMeta):
             )
             self._reference_resolver = kwargs.get('reference_resolver')
             self.timezone = kwargs.get('timezone', None)
+            self.delivery_mode = delivery_mode
             self.set_time_cols_mapping(kwargs.get('time_cols_mapping', {}))
             self.set_data_cols_mapping(kwargs.get('data_cols_mapping', {}))
 

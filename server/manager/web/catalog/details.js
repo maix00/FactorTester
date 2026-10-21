@@ -115,7 +115,6 @@
         context.t("产品字段读取失败"), error?.message || "",
       ));
     });
-    const end = new Date(); const start = new Date(end); start.setFullYear(start.getFullYear() - 1);
     const contractsEndpoint = source === "local"
       ? "/api/client/product_contracts" : "/api/product-library/contracts";
     let pricePanelPromise;
@@ -131,10 +130,10 @@
             contractName: selectedContractName,
             startDate: selectedContractUID
               ? query.get("contract_start") || ""
-              : start.toISOString().slice(0, 10),
+              : "",
             endDate: selectedContractUID
               ? query.get("contract_end") || ""
-              : end.toISOString().slice(0, 10),
+              : "",
           })
         : Promise.resolve();
     }
@@ -142,16 +141,19 @@
       `${contractsEndpoint}?product=${encodeURIComponent(product.name)}`
     ).catch(() => ({}));
     let pricePanel = null;
-    let pendingPriceRange = null;
+    let pendingTermRanges = null;
+    let pendingSelectedTerm = null;
     void Promise.resolve(pricePanelPromise).then(panel => {
       if (!current(context)) return;
       pricePanel = panel;
-      if (pendingPriceRange) pricePanel?.focusRange?.(...pendingPriceRange);
-      pendingPriceRange = null;
+      if (pendingTermRanges) pricePanel?.setTermRanges?.(pendingTermRanges);
+      if (pendingSelectedTerm) pricePanel?.selectTermRange?.(pendingSelectedTerm);
+      pendingTermRanges = null;
+      pendingSelectedTerm = null;
     }).catch(error => {
       if (!current(context)) return;
       priceMount.replaceChildren(FTUI.empty(
-        context.t("价格曲线读取失败"), error?.message || "",
+        context.t("行情数据读取失败"), error?.message || "",
       ));
     });
     const contracts = await contractsRequest;
@@ -162,6 +164,8 @@
     if (!contracts.supports_term_structure || !contractRows.length) {
       termMount.replaceChildren(FTUI.empty(context.t("暂无期限结构"), context.t("该产品没有可用的连续合约列表")));
     } else {
+      if (pricePanel?.setTermRanges) pricePanel.setTermRanges(contractRows);
+      else pendingTermRanges = contractRows;
       const headers = [
         context.t("交易标识"), context.t("开始"), context.t("结束"),
         context.t("前复权乘法"), context.t("前复权加法"),
@@ -213,8 +217,8 @@
           row.dataset.href = "true";
           row.addEventListener("click", () => {
             if (!item?.start || !item?.end) return;
-            if (pricePanel?.focusRange) pricePanel.focusRange(item.start, item.end);
-            else pendingPriceRange = [item.start, item.end];
+            if (pricePanel?.selectTermRange) pricePanel.selectTermRange(item);
+            else pendingSelectedTerm = item;
           });
         });
         termMount.replaceChildren(table.shell);
@@ -302,7 +306,7 @@
       });
     } else {
       priceMount.replaceChildren(FTUI.empty(
-        context.t("价格曲线暂不可用"), context.t("价格面板尚未加载"),
+        context.t("行情数据暂不可用"), context.t("行情面板尚未加载"),
       ));
     }
   }
@@ -383,7 +387,7 @@
         });
       } else {
         priceMount.replaceChildren(FTUI.empty(
-          context.t("价格曲线暂不可用"), context.t("价格面板尚未加载"),
+          context.t("行情数据暂不可用"), context.t("行情面板尚未加载"),
         ));
       }
       return;

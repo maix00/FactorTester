@@ -17,6 +17,7 @@
       .map(item => ({
         alias: String(item.alias).trim(),
         freq: String(item.freq || "").trim(),
+        deliveryMode: String(item.delivery_mode || "historical_snapshot"),
       }))
       .filter(item => {
         if (seen.has(item.alias)) return false;
@@ -26,7 +27,9 @@
   }
 
   function sourceLabel(context, item) {
-    return [item.alias, item.freq].filter(Boolean).join(" · ")
+    const delivery = item.deliveryMode === "live_stream" ? context.t("实时")
+      : item.deliveryMode === "delayed_stream" ? context.t("延迟") : "";
+    return [item.alias, delivery, item.freq].filter(Boolean).join(" · ")
       || context.t("未命名数据源");
   }
 
@@ -71,7 +74,7 @@
     return FTUI.table([context.t("项目"), context.t("值")], rows).shell;
   }
 
-  function renderControls(context, state, options) {
+  function renderControls(context, state) {
     const controls = document.createElement("div");
     controls.className = "product-price-controls";
     const intervalMinutes = {MIN1: 1, MIN5: 5, MIN15: 15, MIN30: 30,
@@ -91,8 +94,13 @@
       onChange: values => {
         state.dataSource = values[0] || "";
         state.sourceFreq = state.sourceFreqByAlias?.[state.dataSource] || "";
+        state.sourceDeliveryMode = state.sourceDeliveryModeByAlias?.[state.dataSource]
+          || "historical_snapshot";
+        if (state.sourceDeliveryMode === "live_stream") {
+          state.chartInterval = "LIVE";
+          intervalPicker.setValues(["LIVE"]);
+        }
         refreshIntervals();
-        options.reload();
       },
     });
     const adjustedPicker = FTMultiSelectFilter.create(context, {
@@ -105,7 +113,6 @@
       selected: [state.adjusted ? "adjusted" : "raw"],
       onChange: values => {
         state.adjusted = values[0] === "adjusted";
-        options.reload();
       },
     });
     const timezonePicker = FTMultiSelectFilter.create(context, {
@@ -113,8 +120,6 @@
       className: "product-price-timezone-filter", items: [], selected: ["product"],
       onChange: values => {
         state.timeZoneChoice = values[0] || "product";
-        options.setTimeZone(displayTimeZone(state));
-        options.showTimeZone(displayTimeZone(state));
       },
     });
     const intervalPicker = FTMultiSelectFilter.create(context, {
@@ -124,14 +129,20 @@
       selected: [state.chartInterval],
       onChange: values => {
         state.chartInterval = values[0] || "SOURCE";
-        options.reload();
       },
     });
     function refreshIntervals() {
       const sourceMinutes = intervalMinutes[state.sourceFreq] || 0;
-      intervalPicker.setItems(intervalItems.filter(item => item.value === "SOURCE"
-        || intervalMinutes[item.value] >= sourceMinutes));
-      if (state.chartInterval !== "SOURCE"
+      intervalPicker.setItems([
+        ...(state.sourceDeliveryMode === "live_stream"
+          ? [{value: "LIVE", label: context.t("实时")}] : []),
+        ...intervalItems.filter(item => item.value === "SOURCE"
+          || intervalMinutes[item.value] >= sourceMinutes),
+      ]);
+      if (state.chartInterval === "LIVE" && state.sourceDeliveryMode !== "live_stream") {
+        state.chartInterval = "SOURCE";
+        intervalPicker.setValues(["SOURCE"]);
+      } else if (state.chartInterval !== "SOURCE" && state.chartInterval !== "LIVE"
           && intervalMinutes[state.chartInterval] < sourceMinutes) {
         state.chartInterval = "SOURCE";
         intervalPicker.setValues(["SOURCE"]);
@@ -152,7 +163,6 @@
       onChange: values => {
         state.timeRange = values[0] || "year";
         if (state.timeRange !== "custom") state.focusRange = null;
-        options.reload();
       },
     });
     controls.append(sourcePicker.element, adjustedPicker.element,
@@ -175,9 +185,10 @@
         {value: "utc", label: "UTC"},
       ]);
       timezonePicker.setValues([state.timeZoneChoice || "product"]);
-      options.showTimeZone(displayTimeZone(state));
       const entries = sourceEntries(payload.available_sources);
       state.sourceFreqByAlias = Object.fromEntries(entries.map(item => [item.alias, item.freq]));
+      state.sourceDeliveryModeByAlias = Object.fromEntries(
+        entries.map(item => [item.alias, item.deliveryMode]));
       const actual = String(payload.data_source || state.dataSource || "").trim();
       sourcePicker.setItems([
         {value: "", label: context.t("自动选择"), exclusive: true},
@@ -186,6 +197,8 @@
       state.dataSource = actual;
       sourcePicker.setValues([entries.some(item => item.alias === actual) ? actual : ""]);
       state.sourceFreq = entries.find(item => item.alias === actual)?.freq || payload.freq || "";
+      state.sourceDeliveryMode = entries.find(item => item.alias === actual)?.deliveryMode
+        || payload.delivery_mode || "historical_snapshot";
       refreshIntervals();
       state.adjusted = Boolean(payload.supports_adjusted && payload.adjusted);
       adjustedPicker.setValues([state.adjusted ? "adjusted" : "raw"]);
@@ -230,17 +243,19 @@
     const state = {
       ...priceStateFromLocation(),
       sourceFreq: contractUID ? "MIN1" : "",
+      sourceDeliveryMode: "historical_snapshot",
       chartInterval: "DAY1",
-      timeRange: options.startDate || options.endDate ? "custom" : "year",
+      timeRange: options.startDate || options.endDate ? "custom" : "all",
       ...(options.dataSource ? {dataSource: options.dataSource} : {}),
       ...(options.adjusted !== undefined ? {adjusted: Boolean(options.adjusted)} : {}),
     };
+    const draftState = {...state};
     const root = document.createElement("section");
     root.className = "product-price-panel";
     const heading = document.createElement("div");
     heading.className = "product-price-heading";
     heading.append(Object.assign(document.createElement("h2"), {
-      textContent: context.t("价格曲线"),
+      textContent: context.t("行情数据"),
     }));
     const timezoneLabel = document.createElement("span");
     timezoneLabel.className = "product-price-timezone-label";
@@ -284,27 +299,36 @@
     loadOverlay.className = "product-price-load-overlay";
     loadOverlay.setAttribute("role", "status");
     loadOverlay.textContent = context.t("正在读取所选时间范围的 K 线…");
-    const controls = renderControls(context, state, {
-      reload: () => load(),
-      setTimeZone: timeZone => disposePriceChart?.setTimeZone?.(timeZone),
-      showTimeZone: timeZone => {
-        timezoneLabel.textContent = `${context.t("时区")} · ${timeZone}`;
-      },
-    });
+    const controls = renderControls(context, draftState);
     const settings = FTUI.iconButton(context, "gearshape", "图表设置", () => {
       const dialog = FTUI.dialogRoot(context);
       dialog.className = "product-price-info-dialog";
-      const card = document.createElement("form");
-      card.method = "dialog";
+      const card = document.createElement("div");
       card.className = "dialog-card wide product-price-info-card";
       const close = document.createElement("button");
-      close.type = "submit";
+      close.type = "button";
       close.className = "dialog-close";
       close.setAttribute("aria-label", context.t("关闭"));
       close.textContent = "×";
+      close.addEventListener("click", () => dialog.close());
+      const errorMessage = document.createElement("p");
+      errorMessage.className = "product-price-settings-error";
+      errorMessage.setAttribute("role", "alert");
+      errorMessage.hidden = true;
+      const actions = document.createElement("div");
+      actions.className = "dialog-actions product-price-settings-actions";
+      const save = FTUI.actionButton(context.t("保存并加载"), null, {variant: "primary"});
+      save.addEventListener("click", async () => {
+        errorMessage.hidden = true;
+        save.disabled = true;
+        const succeeded = await load({...draftState}, errorMessage);
+        save.disabled = false;
+        if (succeeded) dialog.close();
+      });
+      actions.append(save);
       card.append(close, Object.assign(document.createElement("h2"), {
         textContent: context.t("图表设置"),
-      }), controls.controls);
+      }), controls.controls, errorMessage, actions);
       dialog.append(card);
       dialog.addEventListener("close", () => dialog.remove(), {once: true});
       document.body.append(dialog);
@@ -316,18 +340,22 @@
 
     let requestID = 0;
     let disposePriceChart = null;
-    let pendingFocus = null;
+    let termRanges = [];
+    let selectedTermID = "";
     let overlayTimer = null;
-    let acceptedSelection = null;
-    root.focusRange = (start, end) => {
-      const minimum = Date.parse(start);
-      const maximum = Date.parse(end);
-      if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) return;
-      pendingFocus = [minimum, maximum + 24 * 60 * 60 * 1000];
-      state.focusRange = pendingFocus;
-      state.timeRange = "custom";
-      controls.rangePicker.setValues(["custom"]);
-      load();
+    const termID = item => String(item.uid || item.contract || `${item.start}:${item.end}`);
+    root.setTermRanges = rows => {
+      termRanges = (Array.isArray(rows) ? rows : []).map(item => ({
+        id: termID(item), start: Date.parse(item.start),
+        end: Date.parse(item.end) + 24 * 60 * 60 * 1000,
+      })).filter(item => Number.isFinite(item.start) && Number.isFinite(item.end));
+      disposePriceChart?.setRangeBands?.(termRanges);
+    };
+    root.selectTermRange = item => {
+      selectedTermID = termID(item);
+      const shown = disposePriceChart?.selectRangeBand?.(selectedTermID);
+      if (shown === false) context.showNotice?.(
+        context.t("该区间不在已加载的行情数据内，请在图表设置中扩大时间范围"), true);
     };
     let removalObserver = null;
     if (window.MutationObserver) {
@@ -353,59 +381,41 @@
       payload[`${prefix}_time`] = `${parts.hour}:${parts.minute}:${parts.second}`;
     }
 
-    function presetStartDate() {
-      if (state.timeRange === "all") return "";
-      if (state.timeRange === "custom") return options.startDate || "";
-      const zone = state.productTimeZone || "Asia/Shanghai";
-      const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
-        timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
-      }).formatToParts(new Date()).map(part => [part.type, part.value]));
-      const year = Number(parts.year);
-      const month = Number(parts.month);
-      const day = Number(parts.day);
-      if (state.timeRange === "ytd") return `${year}-01-01`;
-      const date = new Date(Date.UTC(year, month - 1, day));
-      if (state.timeRange === "day") date.setUTCDate(day - 1);
-      else {
-        const targetYear = year - (state.timeRange === "year" ? 1 : 0);
-        const targetMonth = month - (state.timeRange === "month" ? 1 : 0);
-        const lastDay = new Date(Date.UTC(targetYear, targetMonth, 0)).getUTCDate();
-        date.setTime(Date.UTC(targetYear, targetMonth - 1, Math.min(day, lastDay)));
-      }
-      return date.toISOString().slice(0, 10);
-    }
-
-    function rangePayload(minimum, maximum, maximumPoints, fullHistory = false) {
+    function rangePayload(minimum, maximum, maximumPoints, fullHistory = false,
+      selection = state) {
       const payload = {
         ...(contractUID ? {contract_uid: contractUID} : {product_name: product.name}),
-        adjusted: Boolean(state.adjusted),
+        adjusted: Boolean(selection.adjusted),
         max_points: maximumPoints || 1200,
         chart_mode: "fixed",
-        chart_interval: state.chartInterval,
+        chart_interval: selection.chartInterval,
       };
-      if (state.dataSource) payload.data_source = state.dataSource;
-      if (Number.isFinite(minimum)) applyBound(payload, "start", minimum);
-      else if (state.timeRange === "custom" && state.focusRange) {
-        applyBound(payload, "start", state.focusRange[0]);
+      if (selection.dataSource) payload.data_source = selection.dataSource;
+      if (["day", "month", "year", "ytd"].includes(selection.timeRange)) {
+        payload.chart_range = selection.timeRange;
       }
-      else if (!fullHistory) {
-        const startDate = presetStartDate();
-        if (startDate) payload.start_date = startDate;
+      if (Number.isFinite(minimum)) applyBound(payload, "start", minimum);
+      else if (selection.timeRange === "custom" && selection.focusRange) {
+        applyBound(payload, "start", selection.focusRange[0]);
+      }
+      else if (!fullHistory && selection.timeRange === "custom" && options.startDate) {
+        payload.start_date = options.startDate;
       }
       if (Number.isFinite(maximum)) applyBound(payload, "end", maximum);
-      else if (state.timeRange === "custom" && state.focusRange) {
-        applyBound(payload, "end", state.focusRange[1]);
+      else if (selection.timeRange === "custom" && selection.focusRange) {
+        applyBound(payload, "end", selection.focusRange[1]);
       }
-      else if (!fullHistory && state.timeRange === "custom" && options.endDate) {
+      else if (!fullHistory && selection.timeRange === "custom" && options.endDate) {
         payload.end_date = options.endDate;
       }
       return payload;
     }
 
-    async function fetchRange(minimum, maximum, maximumPoints, fullHistory = false) {
+    async function fetchRange(minimum, maximum, maximumPoints, fullHistory = false,
+      selection = state) {
       const value = await context.api(endpoint(source), {
         method: "POST",
-        body: JSON.stringify(rangePayload(minimum, maximum, maximumPoints, fullHistory)),
+        body: JSON.stringify(rangePayload(minimum, maximum, maximumPoints, fullHistory, selection)),
       });
       if (value?.success === false) {
         throw new Error(value.error || context.t("请求失败"));
@@ -413,25 +423,25 @@
       return value || {};
     }
 
-    async function load() {
+    async function load(selection = state, settingsError = null) {
       const requestIDForLoad = ++requestID;
       if (overlayTimer) clearTimeout(overlayTimer);
       overlayTimer = null;
       loadOverlay.classList.remove("is-error");
       loadOverlay.textContent = context.t("正在读取所选时间范围的 K 线…");
       controls.setBusy(true);
-      information.disabled = true;
-      chartMount.append(loadOverlay);
+      if (!settingsError) chartMount.append(loadOverlay);
       try {
         // The selected interval is authoritative. Never silently change its
         // candle width to satisfy the transport budget.
-        const value = await fetchRange(undefined, undefined, 5000);
-        if (!current(context) || requestIDForLoad !== requestID) return;
+        const value = await fetchRange(undefined, undefined, 5000, false, selection);
+        if (!current(context) || requestIDForLoad !== requestID) return false;
         if (value?.success === false) {
           throw new Error(value.error || context.t("请求失败"));
         }
-        controls.apply(value || {});
-        const intervalNames = {SOURCE: context.t("原始频率"), MIN5: context.t("5 分钟"),
+        const appliedSelection = {...selection,
+          productTimeZone: value.timezone || selection.productTimeZone};
+        const intervalNames = {LIVE: context.t("实时"), SOURCE: context.t("原始频率"), MIN5: context.t("5 分钟"),
           MIN15: context.t("15 分钟"), MIN30: context.t("30 分钟"),
           HOUR1: context.t("1 小时"), DAY1: context.t("1 交易日"),
           WEEK1: context.t("1 周")};
@@ -440,43 +450,49 @@
           all: context.t("全部"), custom: context.t("所选时间段")};
         if (window.FTPriceChart?.barsOf && Array.isArray(value?.data)) {
           await window.FTStaticLoader.loadGroups(["chart-workbench-price"]);
-          if (!current(context) || requestIDForLoad !== requestID) return;
+          if (!current(context) || requestIDForLoad !== requestID) return false;
           if (!window.FTChartWorkbench?.mountPriceChart) {
             throw new Error(context.t("行情图组件未加载"));
           }
           disposePriceChart = window.FTChartWorkbench.mountPriceChart(chartHost, {
             bars: FTPriceChart.barsOf(value),
             hasOpenInterest: Boolean(value.has_oi),
-            timeZone: displayTimeZone(state),
+            timeZone: displayTimeZone(appliedSelection),
             translate: value => context.t(value),
           });
-          if (pendingFocus) {
-            disposePriceChart?.focusRange?.(...pendingFocus);
-            pendingFocus = null;
-          }
+          disposePriceChart?.setRangeBands?.(termRanges);
+          if (selectedTermID) disposePriceChart?.selectRangeBand?.(selectedTermID);
         } else {
           chartHost.replaceChildren(FTUI.empty(
-            context.t("价格曲线暂不可用"), context.t("暂无可绘制数据"),
+            context.t("行情数据暂不可用"), context.t("暂无可绘制数据"),
           ));
         }
+        Object.assign(state, appliedSelection);
+        controls.apply(value || {});
+        state.dataSource = draftState.dataSource;
+        state.sourceFreq = draftState.sourceFreq;
+        state.sourceFreqByAlias = draftState.sourceFreqByAlias;
+        state.sourceDeliveryMode = draftState.sourceDeliveryMode;
+        state.sourceDeliveryModeByAlias = draftState.sourceDeliveryModeByAlias;
+        state.adjusted = draftState.adjusted;
+        state.productTimeZone = draftState.productTimeZone;
         selectionLabel.textContent = `${intervalNames[state.chartInterval]} · ${rangeNames[state.timeRange]}`;
+        timezoneLabel.textContent = `${context.t("时区")} · ${displayTimeZone(state)}`;
         metadataPayload = value || {};
-        acceptedSelection = {...state};
         information.disabled = false;
+        return true;
       } catch (error) {
-        if (!current(context) || requestIDForLoad !== requestID) return;
-        if (acceptedSelection) {
-          Object.assign(state, acceptedSelection);
-          controls.apply(metadataPayload);
-          controls.intervalPicker.setValues([state.chartInterval]);
-          controls.rangePicker.setValues([state.timeRange]);
-          information.disabled = false;
-          pendingFocus = null;
+        if (!current(context) || requestIDForLoad !== requestID) return false;
+        if (settingsError) {
+          settingsError.textContent = error.message || context.t("行情数据读取失败");
+          settingsError.hidden = false;
+          context.showNotice?.(settingsError.textContent, true);
+          return false;
         }
         if (!disposePriceChart) chartHost.replaceChildren(FTUI.empty(
-          context.t("价格曲线读取失败"), error.message || ""));
+          context.t("行情数据读取失败"), error.message || ""));
         else {
-          loadOverlay.textContent = error.message || context.t("价格曲线读取失败");
+          loadOverlay.textContent = error.message || context.t("行情数据读取失败");
           loadOverlay.classList.add("is-error");
           overlayTimer = setTimeout(() => {
             loadOverlay.remove();
@@ -489,6 +505,7 @@
           if (!loadOverlay.classList.contains("is-error")) loadOverlay.remove();
         }
       }
+      return false;
     }
 
     await load();

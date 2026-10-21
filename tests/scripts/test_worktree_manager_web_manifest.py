@@ -1006,7 +1006,7 @@ def test_product_price_chart_is_interactive_ohlcv() -> None:
     chart = (WEB_ROOT / "core" / "price-chart.js").read_text(encoding="utf-8")
     assert "FTHighchartsRangeLoader?.attach" in chart
     assert 'chart_mode: "fixed"' in panel
-    assert 'chart_interval: state.chartInterval' in panel
+    assert 'chart_interval: selection.chartInterval' in panel
     assert "max_points:" in panel
 
 

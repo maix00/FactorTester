@@ -304,6 +304,8 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .product-price-info-card .ft-multi-select-selection { display: none; }
 .product-price-info-card .ft-multi-select-summary { min-height: 38px; }
 .product-price-info-card .product-price-frequency b { font-size: 13px; }
+.product-price-settings-actions { justify-content: flex-end; }
+.product-price-settings-error { margin: 10px 0 0; color: var(--danger); }
 @media (max-width: 560px) {
   .product-price-info-card .product-price-controls .ft-multi-select-filter,
   .product-price-info-card .product-price-frequency { grid-template-columns: 80px minmax(0, 1fr); }
@@ -323,7 +325,12 @@ tbody tr[data-href]:hover { background: var(--soft); }
   font-weight: 600; text-align: center; pointer-events: auto; }
 .product-price-load-overlay.is-error { background: rgb(255 245 245 / 75%); color: var(--danger); }
 .ft-lightweight-price { position: relative; }
-.ft-lightweight-price-canvas { width: 100%; min-width: 0; height: 460px; }
+.ft-lightweight-price-canvas { position: relative; width: 100%; min-width: 0; height: 460px; }
+.ft-lightweight-range-bands { position: absolute; inset: 0 auto 0 0; pointer-events: none; overflow: hidden; }
+.ft-lightweight-range-band { position: absolute; top: 0; bottom: 26px;
+  background: rgb(37 99 235 / 2.5%); border-right: 1px solid rgb(37 99 235 / 8%); }
+.ft-lightweight-range-band.is-selected { background: rgb(37 99 235 / 10%);
+  border-left: 1px solid rgb(37 99 235 / 45%); border-right-color: rgb(37 99 235 / 45%); }
 .ft-lightweight-price-loading { position: absolute; inset: 0; display: grid; place-items: center;
   z-index: 2; background: rgb(255 255 255 / 35%); backdrop-filter: blur(1.5px);
   color: var(--text); font-size: 13px; font-weight: 600; pointer-events: none; }

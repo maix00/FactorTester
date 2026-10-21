@@ -18,9 +18,18 @@ window.FTUI = {
     const body = shell.createTBody();
     rows.forEach(values => {
       const row = body.insertRow();
-      values.forEach(value => row.insertCell().textContent = value ?? "");
+      values.forEach(value => {
+        const cell = row.insertCell();
+        if (value instanceof Node) cell.append(value);
+        else cell.textContent = value ?? "";
+      });
     });
     return {shell, body};
+  },
+  pagedTable(headers, rows, options) {
+    const start = ((options.page || 1) - 1) * options.pageSize;
+    return {...this.table(headers, rows.slice(start, start + options.pageSize)
+      .map(options.renderRow)), start};
   },
 };
 
