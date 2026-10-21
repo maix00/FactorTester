@@ -105,6 +105,7 @@ context.FTChartWorkbench = {mountPriceChart: (target, options) => {
   const handle = () => { disposed += 1; };
   handle.mergeOverview = rows => { charts.at(-1).overview = rows; };
   handle.fitContent = () => { charts.at(-1).fitted = true; };
+  handle.setTimeZone = timeZone => { charts.at(-1).displayTimeZone = timeZone; };
   return handle;
 }};
 context.isRouteCurrent = () => true;
@@ -121,6 +122,7 @@ context.api = async (_url, options) => {
     contract_name: contract ? "A2501" : undefined,
     data_source: alias,
     freq,
+    timezone: "Asia/Shanghai",
     adjusted: Boolean(payload.adjusted),
     adjustment_method: payload.adjusted ? "continuous_futures_roll" : "raw",
     adjustment_formula: payload.adjusted
@@ -150,8 +152,21 @@ vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);
   });
   const sourcePicker = pickers.find(node => node.element.className === "product-price-source-filter");
   const adjustedPicker = pickers.find(node => node.element.className === "product-price-adjusted-filter");
+  const timezonePicker = pickers.find(node => node.element.className === "product-price-timezone-filter");
   assert.ok(sourcePicker);
   assert.ok(adjustedPicker);
+  assert.ok(timezonePicker);
+  assert.strictEqual(charts.at(-1).options.timeZone, "Asia/Shanghai");
+  assert.strictEqual(walk(root, node => node.className === "product-price-controls").length, 0,
+    "filters live in the shared settings dialog instead of consuming a page row");
+  const settings = walk(root, node => node.textContent === "图表设置")[0];
+  settings.listeners.click();
+  assert.strictEqual(walk(context.document.body,
+    node => node.className === "product-price-controls").length, 1);
+  timezonePicker.select("utc");
+  assert.strictEqual(charts.at(-1).displayTimeZone, "UTC");
+  timezonePicker.select("product");
+  assert.strictEqual(charts.at(-1).displayTimeZone, "Asia/Shanghai");
   assert.deepStrictEqual(Array.from(sourcePicker.items, node => node.label), [
     "自动选择", "LocalCNFuturesDAY1 · DAY1", "LocalCNFuturesMIN1 · MIN1",
   ]);
@@ -184,6 +199,9 @@ vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);
   await charts.at(-1).options.loadRange(Date.parse("2025-01-01"),
     Date.parse("2025-01-03"), 2400);
   assert.strictEqual(requests.at(-1).max_points, 2400);
+  assert.strictEqual(requests.at(-1).start_date, "2025-01-01");
+  assert.strictEqual(requests.at(-1).start_time, "08:00:00",
+    "range bounds must use the source product timezone, even if the display zone changes");
   info.listeners.click();
   assert.strictEqual(tables.at(-1).rows.some(row => row[1] === "连续合约换月平滑复权"), true);
   assert.strictEqual(tables.at(-1).rows.some(row => row[1] === "raw × adjustment_mul + adjustment_add"), true);
@@ -194,7 +212,7 @@ vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);
     contractName: "A2501",
     source: "server",
   });
-  const contractPickers = pickers.slice(2);
+  const contractPickers = pickers.slice(3);
   assert.deepStrictEqual(
     Array.from(contractPickers[0].items, node => node.label),
     ["自动选择", "LocalCNFuturesMIN1 · MIN1"],
