@@ -603,9 +603,18 @@ def test_price_chart_zoom_settles_after_detail_load() -> None:
           const overview = Array.from({length: 30}, (_, i) =>
             bar(start + i * 86400000, 100 + i));
           window.__requests = [];
+          window.__rangeWrites = [];
           const createChart = LightweightCharts.createChart;
           window.LightweightCharts = {...LightweightCharts, createChart: (...args) => {
             const chart = createChart(...args);
+            const scale = chart.timeScale();
+            for (const method of ['setVisibleRange', 'setVisibleLogicalRange']) {
+              const original = scale[method].bind(scale);
+              scale[method] = range => {
+                window.__rangeWrites.push({method, range});
+                return original(range);
+              };
+            }
             window.__chart = chart;
             return chart;
           }};
@@ -635,6 +644,7 @@ def test_price_chart_zoom_settles_after_detail_load() -> None:
         page.mouse.move(pointer["x"], pointer["y"])
         anchored_time = page.evaluate("""x => Number(
           __chart.timeScale().coordinateToTime(x))""", pointer["localX"])
+        page.evaluate("window.__rangeWrites = []")
         page.wait_for_timeout(1500)
         assert page.evaluate("window.__requests.length") == 1, errors
         assert page.evaluate("window.__requests[0][0]") < 1736553600000, (
@@ -646,6 +656,9 @@ def test_price_chart_zoom_settles_after_detail_load() -> None:
         assert abs(reloaded_time - anchored_time) <= 600, (
             "reloading finer bars must keep the hovered date under the pointer"
         )
+        assert page.evaluate("window.__rangeWrites.map(write => write.method)") == [
+            "setVisibleLogicalRange"
+        ], "detail replacement should commit one anchored range, not redraw twice"
         page.evaluate("""() => {
           document.querySelector('.ft-lightweight-price-canvas')
             .dispatchEvent(new Event('pointerdown'));
@@ -673,6 +686,32 @@ def test_price_chart_zoom_settles_after_detail_load() -> None:
         assert range_outside_data[0] >= 1735689600
         assert range_outside_data[1] <= 1738195200
         assert errors == []
+        browser.close()
+
+
+def test_product_price_heading_aligns_icon_glyphs_to_text_baseline() -> None:
+    with _playwright() as playwright:
+        browser = _launch_chromium(playwright)
+        page = browser.new_page()
+        page.set_content("""<div class="product-price-heading">
+          <h2>价格曲线<span class="baseline-probe"></span></h2>
+          <span class="product-price-timezone-label">时区 · Asia/Shanghai
+            <span class="baseline-probe"></span></span>
+          <button class="icon-action-button"><span class="ft-icon">
+            <svg class="ft-icon-svg" viewBox="0 0 16 16">
+              <path d="M2 2 L14 14" /></svg></span></button></div>""")
+        page.add_style_tag(path=str(ROOT / "server/manager/web/styles/app.css"))
+        metrics = page.evaluate("""() => {
+          for (const probe of document.querySelectorAll('.baseline-probe')) {
+            probe.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline';
+          }
+          const baselines = [...document.querySelectorAll('.baseline-probe')]
+            .map(probe => probe.getBoundingClientRect().top);
+          const icon = document.querySelector('.ft-icon').getBoundingClientRect();
+          return {baselines, glyphBottom: icon.bottom - 2};
+        }""")
+        assert abs(metrics["baselines"][0] - metrics["baselines"][1]) <= 1
+        assert abs(metrics["glyphBottom"] - metrics["baselines"][0]) <= 1
         browser.close()
 
 
