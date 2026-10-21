@@ -328,9 +328,10 @@ tbody tr[data-href]:hover { background: var(--soft); }
 .ft-lightweight-price-canvas { position: relative; width: 100%; min-width: 0; height: 460px; }
 .ft-lightweight-range-bands { position: absolute; inset: 0 auto 0 0; pointer-events: none; overflow: hidden; }
 .ft-lightweight-range-band { position: absolute; top: 0; bottom: 26px;
-  background: rgb(37 99 235 / 2.5%); border-right: 1px solid rgb(37 99 235 / 8%); }
-.ft-lightweight-range-band.is-selected { background: rgb(37 99 235 / 10%);
-  border-left: 1px solid rgb(37 99 235 / 45%); border-right-color: rgb(37 99 235 / 45%); }
+  background: rgb(37 99 235 / 3%); border-right: 1px solid rgb(37 99 235 / 20%); }
+.ft-lightweight-range-band:nth-child(even) { background: rgb(37 99 235 / 7%); }
+.ft-lightweight-range-band.is-selected { background: rgb(37 99 235 / 16%);
+  border-left: 1px solid rgb(37 99 235 / 65%); border-right-color: rgb(37 99 235 / 65%); }
 .ft-lightweight-price-loading { position: absolute; inset: 0; display: grid; place-items: center;
   z-index: 2; background: rgb(255 255 255 / 35%); backdrop-filter: blur(1.5px);
   color: var(--text); font-size: 13px; font-weight: 600; pointer-events: none; }
