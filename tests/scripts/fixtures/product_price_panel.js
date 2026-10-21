@@ -232,6 +232,8 @@ vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), context);
   await settle();
   assert.strictEqual(charts.length, existingChartCount,
     "a failed setting request must leave the previous chart visible");
+  assert.strictEqual(intervalPicker.values[0], "HOUR1",
+    "a failed request must restore the setting represented by the visible chart");
   assert.ok(walk(root, node => node.className.includes("product-price-load-overlay is-error")).length);
   context.api = normalApi;
   intervalPicker.select("DAY1");
