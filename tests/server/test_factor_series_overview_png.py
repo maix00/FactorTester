@@ -7,14 +7,32 @@ is intraday.  PNG keeps the mounted assets small enough to load quickly.
 
 from __future__ import annotations
 
+import pandas as pd
+
 from server.jobs.report_outputs.series_overview import (
-    available_windows,
+    _hourly, available_windows,
     overview_panels,
     panel_titles,
     render_overview_png,
 )
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+
+def test_hourly_overview_uses_right_closed_end_stamp_for_market_and_factor():
+    times = pd.to_datetime(["2025-01-02 09:01", "2025-01-02 10:00"])
+    market = pd.DataFrame({"time": times, "open": [10, 11],
+                           "high": [12, 14], "low": [9, 8], "close": [10, 12],
+                           "volume": [2, 3], "open_interest": [100, 101]})
+    factor = pd.DataFrame({"time": times, "value": [4, 5]})
+    market_result = _hourly(market, "close")
+    factor_result = _hourly(factor, "value")
+    assert market_result["time"].tolist() == [pd.Timestamp("2025-01-02 10:00")]
+    assert market_result.iloc[0][["open", "high", "low", "close"]].tolist() == [10, 14, 8, 12]
+    assert market_result.iloc[0]["volume"] == 5
+    assert market_result.iloc[0]["open_interest"] == 101
+    assert factor_result["time"].tolist() == market_result["time"].tolist()
+    assert factor_result.iloc[0]["value"] == 5
 
 
 def _bars(count: int = 40, sessions: int = 1) -> list[dict]:

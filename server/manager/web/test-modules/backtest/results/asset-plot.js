@@ -70,9 +70,12 @@
 
   function matchesSelection(row, selected, orderIDs = null) {
     const orderID = String(row?.order_id || "");
+    const linkedOrder = Boolean(orderID && orderIDs?.has(orderID));
     const rowProduct = productKey(identity(row));
-    if ((!rowProduct || rowProduct !== productKey(selected)) && !orderIDs?.has(orderID)) return false;
-    if (selected.strategy && first(row, strategyFields) !== selected.strategy) return false;
+    if ((!rowProduct || rowProduct !== productKey(selected)) && !linkedOrder) return false;
+    const rowStrategy = first(row, strategyFields);
+    if (selected.strategy && rowStrategy && rowStrategy !== selected.strategy) return false;
+    if (selected.strategy && !rowStrategy && !linkedOrder) return false;
     if (selectionMode(selected) === "account" && selected.account
         && first(row, accountFields) !== selected.account) return false;
     if (selectionMode(selected) === "cash_pool" && selected.cashPool
@@ -620,6 +623,58 @@
     });
   }
 
+  function ensureFactorSeries(context, state) {
+    if (state.assetPlotFactorData || !state.artifactsByName.has("factor_series_data")) return;
+    state.assetPlotFactorData = {status: "loading", series: []};
+    void FTJobArtifacts.fetch(context, artifactPath(state, "factor_series_data"))
+      .then(response => response.json()).then(payload => {
+        if (state.target?.isConnected === false) return;
+        state.assetPlotFactorData = {status: "ready", series: Array.isArray(payload.series)
+          ? payload.series : []};
+        state.rerender();
+      }).catch(error => {
+        if (state.target?.isConnected === false) return;
+        state.assetPlotFactorData = {status: "error", message: error.message || String(error),
+          series: []};
+        state.rerender();
+      });
+  }
+
+  function factorSeriesFor(state, selected) {
+    const series = state.assetPlotFactorData?.series || [];
+    const configuration = state.options.configuration?.configuration?.payload
+      || state.options.configuration?.payload || state.options.configuration || {};
+    const groups = configuration.analyses?.backtest?.groups || [];
+    const group = groups.find(item => String(item.id || item.name || "") === selected.strategy);
+    const refs = new Set(group?.factor_candidate_refs || []);
+    const productName = String(selected.product || "");
+    const symbol = String(selected.contractUID || "").split("|")[2];
+    return series.filter(item => {
+      const product = String(item.product || "");
+      const productMatches = product === productName
+        || (symbol && product.split(".")[0] === symbol);
+      const factorMatches = !selected.strategy || (group
+        && refs.has(String(item.factor_ref || "")));
+      return productMatches && factorMatches;
+    });
+  }
+
+  function factorSeriesID(item) {
+    return [item.factor_ref || item.factor_alias || "factor", item.product || "",
+      item.layer || "result"].join("|");
+  }
+
+  function plannedMarket(state, selected) {
+    const resolved = state.options.payload?.execution_plan?.resolved || {};
+    const requirements = resolved.data_requirements || [];
+    const symbol = String(selected.contractUID || "").split("|")[2];
+    const match = requirements.find(item => item.product === selected.product)
+      || requirements.find(item => symbol && String(item.product || "").split(".")[0]
+        === symbol);
+    return {source: match?.data_source || "", frequency: match?.frequency || "",
+      window: resolved.run_window || {}};
+  }
+
   function selector(context, label, values, selected, onChange, allLabel = "") {
     const all = `__all_asset_${label}__`;
     const items = [
@@ -645,6 +700,21 @@
       state.selectedAsset = {...state.selectedAsset, ...change};
       state.rerender();
     };
+    const factorSeries = factorSeriesFor(state, current);
+    const factorIDs = new Set(factorSeries.map(factorSeriesID));
+    const selectedIndicators = Array.isArray(state.assetIndicatorSelection)
+      ? state.assetIndicatorSelection.filter(value => factorIDs.has(value))
+      : [...factorIDs];
+    const factorControl = factorSeries.length ? window.FTMultiSelectFilter.create(context, {
+      title: context.t("因子序列"), compact: true, multi: true,
+      className: "backtest-asset-filter",
+      items: factorSeries.map(item => ({value: factorSeriesID(item),
+        label: [item.factor_alias || item.factor_ref || "因子", item.layer || "结果"]
+          .filter(Boolean).join(" · ")})),
+      selected: selectedIndicators,
+      searchPlaceholder: context.t("搜索因子层级…"),
+      onApply: values => { state.assetIndicatorSelection = values; state.rerender(); },
+    }) : null;
     return [
       selector(context, "筛选维度", ["按策略", "按账户", "按资金池"],
         ({strategy: "按策略", account: "按账户", cash_pool: "按资金池"})[
@@ -679,6 +749,7 @@
             timestamp: anchor.timestamp});
         }).catch(error => context.showNotice?.(error.message || String(error), true));
       }),
+      ...(factorControl ? [{label: "因子序列", element: factorControl.element}] : []),
     ];
   }
 
@@ -696,6 +767,7 @@
     const root = document.createElement("section");
     root.className = "backtest-asset-result";
     ensureDiscovery(context, state);
+    ensureFactorSeries(context, state);
     const index = state.assetPlotDiscovery;
     if (index?.status === "loading") {
       root.append(window.FTUI.loading(context.t("正在查找可绘制的交易…")));
@@ -723,7 +795,12 @@
     heading.append(title, subtitle);
     const note = document.createElement("p");
     note.className = "backtest-asset-note";
-    note.textContent = context.t("价格来自当前行情源；点击 K 线查看行情，点击其上下方的买卖标记查看逐笔事件，并可为每笔成交选择价格线。行情若更新，图上价格可能与回测时不同。");
+    const planned = plannedMarket(state, selected);
+    note.textContent = [
+      `${context.t("回测数据源")}：${planned.source || context.t("未记录")}`,
+      `${context.t("回测区间")}：${planned.window.start || "—"} → ${planned.window.end || "—"}`,
+      context.t("行情由同一数据源读取；若数据源后来更新，图上价格可能与运行时不同。"),
+    ].join(" · ");
     const chartMount = document.createElement("div");
     chartMount.className = "backtest-asset-chart";
     const timelineControls = document.createElement("div");
@@ -930,15 +1007,21 @@
       || configuration;
     const settings = request.analyses?.backtest?.execution?.settings
       || request.backtest?.execution?.settings || request.execution?.settings || request;
-    const frequency = String(settings.freq || settings.frequency || "DAY1");
+    const frequency = String(planned.frequency || settings.freq || settings.frequency || "DAY1");
+    const runStart = Date.parse(String(planned.window.start || ""));
+    const runEnd = Date.parse(String(planned.window.end || ""));
     const priceRequest = {
       ...(selected.contractUID ? {contract_uid: selected.contractUID}
         : {product_name: selected.product}),
       freq: frequency, adjusted: false,
+      ...(planned.source && planned.source !== "auto" ? {data_source: planned.source} : {}),
     };
     const load = async (minimum, maximum, maxPoints = 1200,
       visibleMinimum = minimum, visibleMaximum = maximum) => {
       const current = ++generation;
+      if (Number.isFinite(runStart)) minimum = Math.max(minimum, runStart);
+      if (Number.isFinite(runEnd)) maximum = Math.min(maximum, runEnd);
+      if (maximum <= minimum) return null;
       let matching;
       if (eventCache && Date.now() - eventCache.fetchedAt < 15000
           && minimum >= eventCache.minimum
@@ -994,8 +1077,11 @@
       renderTable();
       const sampling = matching.sourceCount > events.length
         ? ` · 事件展示 ${events.length}/${matching.sourceCount}` : "";
-      note.textContent = context.t("价格来自当前行情源；点击 K 线查看行情，点击买卖标记查看成交，下方订单历史按订单展示已记录的状态变化。成交可单独显示价格线；订单历史不表示盘口深度或排队位置。行情若更新，图上价格可能与回测时不同。")
-        + ` · ${price.payload.data_source || context.t("自动行情源")}` + sampling;
+      note.textContent = [
+        `${context.t("回测数据源")}：${planned.source || price.payload.data_source || context.t("未记录")}`,
+        `${context.t("回测区间")}：${planned.window.start || "—"} → ${planned.window.end || "—"}`,
+        context.t("图表从同一数据源读取；若源数据更新，价格可能不同于运行时。"),
+      ].join(" · ") + sampling;
       renderTimeline(visibleMinimum, visibleMaximum);
       currentPayload = {...price.payload, product: selected.product,
         freq: price.payload.freq || frequency,
@@ -1044,9 +1130,21 @@
           disposeAssetChart = window.FTChartWorkbench.mountAssetChart(chartMount, {
             bars: window.FTPriceChart.barsOf(payload),
             events: events.map(chartEvent),
+            indicators: factorSeriesFor(state, selected).filter(item => {
+              const allowed = state.assetIndicatorSelection;
+              return !Array.isArray(allowed) || allowed.includes(factorSeriesID(item));
+            }).map(item => ({
+              id: factorSeriesID(item),
+              label: [item.factor_alias || item.factor_ref || "因子", item.layer || "结果"]
+                .filter(Boolean).join(" · "),
+              points: (item.dates || []).map((date, index) => ({
+                timestamp: window.FTPriceChart.timestampOf(date),
+                value: item.values?.[index] == null || item.values[index] === ""
+                  ? null : Number(item.values[index]),
+              })).filter(point => Number.isFinite(point.timestamp)),
+            })),
             frequencyMs: frequencyMs(frequency),
             translate: value => context.t(value),
-            onEventClick: selectedEvents => select(selectedEvents),
             loadRange: async (minimum, maximum, maxPoints) => {
               const updated = await load(minimum, maximum, maxPoints,
                 minimum, maximum);

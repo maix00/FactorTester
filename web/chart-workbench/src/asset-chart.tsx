@@ -1,6 +1,7 @@
 import {useEffect, useRef, useState} from "react";
 import {createRoot, type Root} from "react-dom/client";
 import {mergeBars} from "./range-data";
+import {ChartPopover, type ChartSelection} from "./chart-popover";
 
 type Bar = {timestamp: number; open: number; high: number; low: number; close: number;
   volume: number | null; openInterest: number | null};
@@ -8,6 +9,7 @@ type Event = {timestamp: number; artifact: string; orderID: string; side: string
   stage: string; id: string; fillPrice: number | null; fields: [string, string][];
   raw: unknown};
 type Data = {bars: Bar[]; events: Event[]};
+type Indicator = {id: string; label: string; points: {timestamp: number; value: number | null}[]};
 type Range = {from: number; to: number};
 type Marker = {time: number; position: string; shape: string; color: string;
   id: string; size?: number};
@@ -19,15 +21,16 @@ type Chart = {addSeries: (kind: unknown, options: object, pane?: number) => Seri
   timeScale: () => {fitContent: () => void; setVisibleRange: (range: Range) => void;
     subscribeVisibleTimeRangeChange: (handler: (range: Range | null) => void) => void;
     unsubscribeVisibleTimeRangeChange: (handler: (range: Range | null) => void) => void};
-  subscribeClick: (handler: (point: {time?: number; hoveredInfo?: {objectId?: unknown}}) => void) => void;
+  subscribeClick: (handler: (point: {time?: number; point?: ChartSelection;
+    hoveredInfo?: {objectId?: unknown}}) => void) => void;
   remove: () => void};
 type MarkerPlugin = {setMarkers: (markers: Marker[]) => void};
 type Library = {createChart: (element: HTMLElement, options: object) => Chart;
   createSeriesMarkers: (series: Series, markers: Marker[], options?: object) => MarkerPlugin;
   CandlestickSeries: unknown; HistogramSeries: unknown; LineSeries: unknown};
-type Options = {bars: Bar[]; events: Event[]; frequencyMs: number;
+type Options = {bars: Bar[]; events: Event[]; indicators?: Indicator[]; frequencyMs: number;
   loadRange: (minimum: number, maximum: number, maxPoints: number) => Promise<Data | null>;
-  onEventClick?: (events: unknown[]) => void; translate?: (value: string) => string};
+  translate?: (value: string) => string};
 
 const roots = new WeakMap<HTMLElement, Root>();
 const library = () => (window as unknown as {LightweightCharts?: Library}).LightweightCharts;
@@ -93,28 +96,34 @@ function fillMarkers(bars: Bar[], events: Event[], toleranceMs: number) {
   return {markers, items};
 }
 
-function orderRows(events: Event[], limit: number) {
-  const orders = new Map<string, Event[]>();
-  for (const event of events) {
-    if (!event.orderID) continue;
-    if (!orders.has(event.orderID)) orders.set(event.orderID, []);
-    orders.get(event.orderID)!.push(event);
-  }
-  return {total: orders.size, rows: [...orders].sort((a, b) =>
-    Math.max(...b[1].map(item => item.timestamp))
-    - Math.max(...a[1].map(item => item.timestamp))).slice(0, limit)};
-}
-
 function phase(event: Event): {shape: string; color: string} {
-  if (event.artifact === "fill_detail_data") return {shape: "circle", color: "#16a34a"};
   const stage = event.stage;
-  if (stage.includes("撤单")) return {shape: "arrowDown", color: "#dc2626"};
+  if (stage.includes("撤单")) return {shape: "square", color: "#dc2626"};
   if (stage.includes("改单")) return {shape: "square", color: "#2563eb"};
-  if (stage.includes("撮合")) return {shape: "circle", color: "#d97706"};
-  return {shape: "circle", color: "#64748b"};
+  if (stage.includes("撮合")) return {shape: "square", color: "#d97706"};
+  return {shape: "square", color: "#64748b"};
 }
 
-function AssetChart({bars, events, frequencyMs, loadRange, onEventClick,
+function orderMarkers(bars: Bar[], events: Event[], toleranceMs: number) {
+  const groups = new Map<string, {bar: Bar; items: Event[]}>();
+  for (const event of events) {
+    if (event.artifact === "fill_detail_data") continue;
+    const bar = nearestBar(bars, event.timestamp, toleranceMs);
+    if (!bar) continue;
+    const id = `order:${seconds(bar.timestamp)}`;
+    if (!groups.has(id)) groups.set(id, {bar, items: []});
+    groups.get(id)!.items.push(event);
+  }
+  const items = new Map<string, Event[]>();
+  const markers = [...groups].map(([id, group]) => {
+    items.set(id, group.items);
+    return {id, time: seconds(group.bar.timestamp), position: "aboveBar",
+      ...phase(group.items[0]), size: 0.45};
+  });
+  return {items, markers};
+}
+
+function AssetChart({bars, events, indicators = [], frequencyMs, loadRange,
   translate = value => value}: Options) {
   const node = useRef<HTMLDivElement>(null);
   const chart = useRef<Chart | null>(null);
@@ -122,24 +131,20 @@ function AssetChart({bars, events, frequencyMs, loadRange, onEventClick,
   const volume = useRef<Series | null>(null);
   const interest = useRef<Series | null>(null);
   const fillPlugin = useRef<MarkerPlugin | null>(null);
-  const orderSeries = useRef<Series[]>([]);
+  const indicatorSeries = useRef<Series[]>([]);
   const priceLines = useRef<unknown[]>([]);
   const markerItems = useRef(new Map<string, Event[]>());
   const barIndex = useRef(new Map<number, Bar>());
   const [data, setData] = useState<Data>({bars, events});
-  const [orderLimit, setOrderLimit] = useState(10);
   const [selected, setSelected] = useState<{kind: "market" | "event";
-    bar?: Bar; items?: Event[]} | null>(null);
+    bar?: Bar; items?: Event[]; anchor: ChartSelection} | null>(null);
   const [selectedPrices, setSelectedPrices] = useState<number[]>([]);
-  const [orderTotal, setOrderTotal] = useState(0);
   const [error, setError] = useState("");
   const request = useRef(loadRange);
-  const eventClick = useRef(onEventClick);
   const view = useRef<Range | null>(null);
   const requestKey = useRef("");
   const generation = useRef(0);
   request.current = loadRange;
-  eventClick.current = onEventClick;
 
   useEffect(() => {
     const api = library();
@@ -172,16 +177,26 @@ function AssetChart({bars, events, frequencyMs, loadRange, onEventClick,
     interest.current = instance.addSeries(api.LineSeries, {
       color: "#805bd6", lineWidth: 2, priceLineVisible: false,
     }, 2);
+    for (const [index, item] of indicators.entries()) {
+      const series = instance.addSeries(api.LineSeries, {
+        color: ["#8e44ad", "#2563eb", "#0d9488", "#db2777"][index % 4],
+        lineWidth: 2, priceLineVisible: false, title: item.label,
+      }, index + 3);
+      series.setData(item.points.filter(point => point.value !== null
+        && Number.isFinite(point.value) && Number.isFinite(point.timestamp))
+        .map(point => ({time: seconds(point.timestamp), value: point.value})));
+      indicatorSeries.current.push(series);
+    }
     fillPlugin.current = api.createSeriesMarkers(candle.current, [], {autoScale: true});
     instance.subscribeClick(point => {
+      if (!point?.point) return;
       const id = String(point?.hoveredInfo?.objectId ?? "");
       const items = markerItems.current.get(id);
       if (items) {
-        setSelected({kind: "event", items});
-        eventClick.current?.(items.map(item => item.raw));
+        setSelected({kind: "event", items, anchor: point.point});
       } else if (point?.time !== undefined) {
         const bar = barIndex.current.get(Number(point.time));
-        if (bar) setSelected({kind: "market", bar});
+        if (bar) setSelected({kind: "market", bar, anchor: point.point});
       }
     });
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -230,8 +245,7 @@ function AssetChart({bars, events, frequencyMs, loadRange, onEventClick,
 
   useEffect(() => {
     const instance = chart.current;
-    const api = library();
-    if (!instance || !api || !candle.current || !volume.current || !interest.current) return;
+    if (!instance || !candle.current || !volume.current || !interest.current) return;
     const rows = orderedBars(data.bars);
     const oldView = view.current;
     candle.current.setData(rows.map(bar => ({time: seconds(bar.timestamp),
@@ -244,49 +258,23 @@ function AssetChart({bars, events, frequencyMs, loadRange, onEventClick,
       time: seconds(bar.timestamp), value: bar.openInterest,
     })));
     barIndex.current = new Map(rows.map(bar => [seconds(bar.timestamp), bar]));
-    for (const series of orderSeries.current) instance.removeSeries(series);
-    orderSeries.current = [];
     const itemMap = new Map<string, Event[]>();
     const fills = fillMarkers(rows, data.events, frequencyMs);
+    const orders = orderMarkers(rows, data.events, frequencyMs);
     for (const [key, items] of fills.items) itemMap.set(key, items);
-    fillPlugin.current?.setMarkers(fills.markers);
-    const orders = orderRows(data.events, orderLimit);
-    setOrderTotal(orders.total);
-    if (orders.rows.length) {
-      const pane = 3;
-      for (const [index, [orderID, items]] of orders.rows.entries()) {
-        const line = instance.addSeries(api.LineSeries, {color: "#8893a5",
-          lineWidth: 2, priceLineVisible: false, lastValueVisible: false,
-          crosshairMarkerVisible: false}, pane);
-        const byTime = new Map<number, Event[]>();
-        for (const item of items) {
-          const time = seconds(item.timestamp);
-          if (!byTime.has(time)) byTime.set(time, []);
-          byTime.get(time)!.push(item);
-        }
-        const times = [...byTime.keys()].sort((a, b) => a - b);
-        line.setData(times.map(time => ({time, value: orders.rows.length - index})));
-        const markers = times.map(time => {
-          const group = byTime.get(time)!;
-          const id = `order:${orderID}:${time}`;
-          itemMap.set(id, group);
-          const marker = group.length > 1
-            ? {shape: "diamond", color: "#64748b"} : phase(group[0]);
-          return {id, time, position: "inBar", ...marker, size: 1};
-        });
-        api.createSeriesMarkers(line, markers);
-        orderSeries.current.push(line);
-      }
-    }
+    for (const [key, items] of orders.items) itemMap.set(key, items);
+    fillPlugin.current?.setMarkers([...fills.markers, ...orders.markers]
+      .sort((left, right) => left.time - right.time));
     instance.panes()[0]?.setStretchFactor(5.5);
     instance.panes()[1]?.setStretchFactor(1.3);
     instance.panes()[2]?.setStretchFactor(1.3);
-    if (orders.rows.length) instance.panes()[3]?.setStretchFactor(
-      Math.max(1.5, orders.rows.length * 0.25));
+    for (let index = 3; index < instance.panes().length; index += 1) {
+      instance.panes()[index]?.setStretchFactor(1.5);
+    }
     markerItems.current = itemMap;
     if (oldView) instance.timeScale().setVisibleRange(oldView);
     else instance.timeScale().fitContent();
-  }, [data, orderLimit, frequencyMs]);
+  }, [data, frequencyMs]);
 
   useEffect(() => {
     const series = candle.current;
@@ -298,25 +286,24 @@ function AssetChart({bars, events, frequencyMs, loadRange, onEventClick,
   }, [selectedPrices, translate]);
 
   return <div className="ft-asset-chart-workbench">
-    <div ref={node} className="ft-asset-chart-canvas"
-      style={{height: Math.max(640, 450 + Math.min(orderLimit, orderTotal) * 26)}}
-      aria-label={translate("行情、交易和订单历史图")} />
-    <div className="ft-asset-chart-legend">{translate("订单历史")} · {Math.min(orderLimit, orderTotal)}/{orderTotal}
-      {orderTotal > orderLimit && <button type="button" onClick={() => setOrderLimit(value => value + 10)}>
-        {translate("加载更多订单")}</button>}
-    </div>
-    {selected?.kind === "market" && selected.bar && <section className="ft-chart-inspector ft-asset-chart-market">
-      <strong>{new Date(selected.bar.timestamp).toLocaleString()}</strong>
-      <dl>{[["开盘价", selected.bar.open], ["最高价", selected.bar.high],
-        ["最低价", selected.bar.low], ["收盘价", selected.bar.close],
-        ["成交量", selected.bar.volume ?? "—"], ["持仓量", selected.bar.openInterest ?? "—"]]
-        .map(([label, value]) => <div key={label}>
-          <dt>{translate(String(label))}</dt><dd>{value}</dd>
-        </div>)}</dl>
-    </section>}
-    {selected?.kind === "event" && <section className="ft-asset-chart-events">
-      <header>{translate("交易事件")} · {selected.items?.length ?? 0}</header>
-      {selected.items?.map((item, index) => <details key={`${item.id}:${index}`}
+    <div className="ft-chart-popover-host">
+      <div ref={node} className="ft-asset-chart-canvas"
+        style={{height: Math.max(640, 450 + indicators.length * 120)}}
+        aria-label={translate("行情、交易和订单历史图")} />
+      {selected && <ChartPopover anchor={selected.anchor}
+        title={selected.kind === "market" && selected.bar
+          ? new Date(selected.bar.timestamp).toLocaleString()
+          : `${translate("交易事件")} · ${selected.items?.length ?? 0}`}
+        onClose={() => setSelected(null)}>
+      {selected.kind === "market" && selected.bar &&
+        <dl>{[["开盘价", selected.bar.open], ["最高价", selected.bar.high],
+          ["最低价", selected.bar.low], ["收盘价", selected.bar.close],
+          ["成交量", selected.bar.volume ?? "—"], ["持仓量", selected.bar.openInterest ?? "—"]]
+          .map(([label, value]) => <div key={label}>
+            <dt>{translate(String(label))}</dt><dd>{value}</dd>
+          </div>)}</dl>}
+      {selected.kind === "event" && selected.items?.map((item, index) =>
+        <details key={`${item.id}:${index}`}
         ref={element => {
           if (element && !element.dataset.initialized) {
             element.open = index === 0;
@@ -334,7 +321,8 @@ function AssetChart({bars, events, frequencyMs, loadRange, onEventClick,
               ? translate("移除价格线") : translate("显示价格线")} · {item.fillPrice}
           </button>}
       </details>)}
-    </section>}
+      </ChartPopover>}
+    </div>
     {error && <p role="status" className="ft-lightweight-price-error">{error}</p>}
   </div>;
 }

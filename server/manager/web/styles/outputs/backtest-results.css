@@ -182,6 +182,24 @@
 .backtest-asset-chart { min-width: 0; min-height: 520px; }
 .ft-asset-chart-workbench { display: grid; gap: 8px; min-width: 0; }
 .ft-asset-chart-canvas { width: 100%; min-width: 0; height: 640px; }
+.ft-chart-popover-host { position: relative; min-width: 0; }
+.ft-chart-popover { position: absolute; z-index: 8; width: min(360px, calc(100% - 16px));
+  max-height: min(52vh, 420px); overflow: auto; overscroll-behavior: contain;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--panel); box-shadow: 0 6px 24px #0002; font-size: 12px; }
+.ft-chart-popover > header { display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; margin-bottom: 6px; }
+.ft-chart-popover > header button { border: 0; background: transparent; color: var(--muted);
+  font-size: 20px; cursor: pointer; }
+.ft-chart-popover dl { display: grid; gap: 3px; margin: 5px 0; }
+.ft-chart-popover dl > div { display: grid; grid-template-columns: minmax(88px, 130px) minmax(0, 1fr);
+  gap: 8px; border-bottom: 1px solid var(--line); padding: 3px 0; }
+.ft-chart-popover dt { color: var(--muted); }
+.ft-chart-popover dd { margin: 0; overflow-wrap: anywhere; }
+.ft-chart-popover details { border-top: 1px solid var(--line); padding-top: 6px; }
+.ft-chart-popover summary { cursor: pointer; font-weight: 600; overflow-wrap: anywhere; }
+.ft-chart-popover details button { border: 1px solid var(--line); border-radius: 6px;
+  background: var(--panel); color: var(--text); cursor: pointer; padding: 5px 9px; }
 .ft-asset-chart-legend { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
 .ft-asset-chart-legend button, .ft-asset-chart-events button { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); cursor: pointer; padding: 5px 9px; }
 .ft-asset-chart-events { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-size: 12px; }

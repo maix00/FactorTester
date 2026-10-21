@@ -61,6 +61,7 @@ def test_day_only_contract_uses_term_snapshot_source(tmp_path, monkeypatch) -> N
     assert not source_module.term_contract_has_day_data("missing", str(path))
     monkeypatch.setattr(projection, "find_contract_product", lambda value: SimpleNamespace(
         timezone="Asia/Shanghai",
+        trading_day_close_time="15:00",
     ))
     monkeypatch.setattr(projection, "contract_available_freqs", lambda value: ["DAY1"])
     monkeypatch.setattr(projection, "available_sources_for_product", lambda value: [
@@ -82,6 +83,9 @@ def test_day_only_contract_uses_term_snapshot_source(tmp_path, monkeypatch) -> N
     assert result["count"] == 1
     assert result["data"][0]["open"] == 10.
     assert result["data"][0]["open_interest"] == 50.
+    assert pd.Timestamp(result["data"][0]["timestamp"], unit="ms", tz="UTC").tz_convert(
+        "Asia/Shanghai"
+    ) == pd.Timestamp("2024-01-04 15:00", tz="Asia/Shanghai")
 
 
 def test_open_interest_column_accepts_canonical_and_provider_aliases() -> None:
@@ -113,6 +117,18 @@ def test_product_price_rows_keeps_open_interest_from_provider_alias() -> None:
     assert [row["open_interest"] for row in rows] == [80.0, 90.0]
 
 
+def test_daily_futures_chart_timestamp_uses_declared_session_close() -> None:
+    frame = pd.DataFrame({
+        "OPEN": [10.0], "HIGH": [12.0], "LOW": [9.0],
+        "CLOSE": [11.0], "VOLUME": [100.0],
+    }, index=pd.DatetimeIndex(["2025-04-17"]))
+    product = SimpleNamespace(timezone="Asia/Shanghai", trading_day_close_time="15:00")
+    rows, _ = _price_rows(product, frame, adjusted=False, frequency=DataFreq.DAY1)
+    assert pd.Timestamp(rows[0]["timestamp"], unit="ms", tz="UTC").tz_convert(
+        "Asia/Shanghai"
+    ) == pd.Timestamp("2025-04-17 15:00", tz="Asia/Shanghai")
+
+
 def test_product_chart_sampling_preserves_ohlcv_bucket_semantics() -> None:
     rows = [{
         "timestamp": index, "open": index + 1, "high": index + 3,
@@ -125,7 +141,7 @@ def test_product_chart_sampling_preserves_ohlcv_bucket_semantics() -> None:
     assert total == 200
     assert len(sampled) == 100
     assert sampled[0] == {
-        **rows[1], "timestamp": 0, "time": None,
+        **rows[1], "timestamp": 1, "time": None,
         "open": 1, "high": 4, "low": 0,
         "close": 3, "volume": 20, "open_interest": 101,
     }
@@ -161,7 +177,7 @@ def test_fixed_chart_aggregation_respects_selected_interval_and_source_rows() ->
         "open": [10, 11, 12, 13], "high": [12, 13, 14, 15],
         "low": [9, 10, 11, 12], "close": [11, 12, 13, 14],
         "volume": [1, 2, 3, 4], "oi": [100, 101, 102, 103],
-    }, index=pd.date_range("2025-01-01 09:00", periods=4, freq="min"))
+    }, index=pd.date_range("2025-01-01 09:01", periods=4, freq="min"))
     columns = ("open", "high", "low", "close", "volume")
     raw, count = fixed_chart_frame(frame, {"chart_interval": "SOURCE",
                                            "max_points": 100}, columns, DataFreq.MIN1, "oi")
@@ -169,8 +185,47 @@ def test_fixed_chart_aggregation_respects_selected_interval_and_source_rows() ->
     grouped, count = fixed_chart_frame(frame, {"chart_interval": "MIN5",
                                                "max_points": 100}, columns, DataFreq.MIN1, "oi")
     assert count == 1
+    assert grouped.index[0] == pd.Timestamp("2025-01-01 09:05")
     assert grouped.iloc[0][["open", "high", "low", "close", "volume", "oi"]].tolist() \
         == [10, 15, 9, 14, 10, 103]
+
+
+@pytest.mark.parametrize("interval,minute", [
+    ("MIN5", 5), ("MIN15", 15), ("MIN30", 30), ("HOUR1", 60),
+])
+def test_fixed_chart_intraday_bars_use_right_closed_end_labels(interval, minute) -> None:
+    boundary = pd.Timestamp("2025-01-02 09:00") + pd.Timedelta(minutes=minute)
+    stamps = pd.DatetimeIndex([
+        pd.Timestamp("2025-01-02 09:01"), boundary,
+        boundary + pd.Timedelta(minutes=1),
+    ])
+    frame = pd.DataFrame({
+        "open": [10, 11, 12], "high": [12, 13, 14],
+        "low": [9, 8, 7], "close": [11, 12, 13],
+        "volume": [2, 3, 5], "oi": [100, 101, 102],
+    }, index=stamps)
+    columns = ("open", "high", "low", "close", "volume")
+    result, count = fixed_chart_frame(
+        frame, {"chart_interval": interval}, columns, DataFreq.MIN1, "oi")
+    assert count == 2
+    assert list(result.index) == [boundary, boundary + pd.Timedelta(minutes=minute)]
+    assert result.iloc[0][list(columns) + ["oi"]].tolist() == [10, 13, 8, 12, 5, 101]
+    assert result.iloc[1][list(columns) + ["oi"]].tolist() == [12, 14, 7, 13, 5, 102]
+
+
+def test_fixed_chart_contract_time_column_uses_bucket_end() -> None:
+    frame = pd.DataFrame({
+        "trade_time": pd.to_datetime(["2025-01-02 09:01", "2025-01-02 09:05"]),
+        "open": [1, 2], "high": [2, 3], "low": [0, 1],
+        "close": [2, 3], "volume": [4, 5],
+    })
+    result, count = fixed_chart_frame(
+        frame, {"chart_interval": "MIN5"},
+        ("open", "high", "low", "close", "volume"), DataFreq.MIN1,
+        time_column="trade_time")
+    assert count == 1
+    assert result.iloc[0]["trade_time"] == pd.Timestamp("2025-01-02 09:05")
+    assert result.iloc[0]["volume"] == 9
 
 
 def test_fixed_chart_rejects_oversized_selection_instead_of_changing_frequency() -> None:
@@ -290,6 +345,8 @@ def test_fixed_chart_weekly_aggregation_works_with_daily_source() -> None:
                                       ("open", "high", "low", "close", "volume"),
                                       DataFreq.DAY1)
     assert count == 2
+    assert list(result.index) == [pd.Timestamp("2025-01-05"),
+                                  pd.Timestamp("2025-01-12")]
     assert result.iloc[0]["volume"] == 1
     assert result.iloc[1]["volume"] == 5
 
@@ -307,7 +364,7 @@ def test_fixed_chart_daily_bucket_uses_contract_trading_day() -> None:
                                       DataFreq.MIN1, time_column="trade_time",
                                       trading_day_column="trading_day")
     assert count == 1
-    assert result.iloc[0]["trade_time"] == frame.iloc[0]["trade_time"]
+    assert result.iloc[0]["trade_time"] == pd.Timestamp("2025-01-02")
     assert result.iloc[0]["volume"] == 3
 
 
@@ -325,7 +382,7 @@ def test_fixed_chart_daily_bucket_uses_product_trading_day_index() -> None:
                                       DataFreq.MIN1)
     assert count == 1
     assert result.iloc[0]["volume"] == 3
-    assert result.index[0] == index[0]
+    assert result.index[0] == pd.Timestamp("2025-01-02")
 
 
 def test_frame_aggregation_leaves_anchored_bars_for_exact_row_sampling() -> None:
@@ -354,7 +411,7 @@ def test_contract_frame_aggregation_preserves_time_and_restores_source_bars() ->
     )
     assert total == 210
     assert len(overview) == 70
-    assert overview.iloc[0]["trade_time"] == frame.iloc[0]["trade_time"]
+    assert overview.iloc[0]["trade_time"] == frame.iloc[2]["trade_time"]
     assert overview.iloc[0]["open_interest"] == 2
     assert overview.iloc[0]["volume"] == 3
     detail, total = bounded_ohlcv_frame(
