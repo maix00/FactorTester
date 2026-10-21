@@ -569,7 +569,10 @@ def test_lightweight_chart_keeps_existing_bars_after_zoom_out(view: str) -> None
         if view == "price":
             page.evaluate("document.querySelector('.ft-lightweight-price-canvas').dispatchEvent(new Event('pointerdown'))")
         page.evaluate("window.__chart.timeScale().setVisibleRange({from: __bars[0].timestamp / 1000, to: __bars[7].timestamp / 1000})")
-        page.wait_for_function("window.__requests > 1")
+        if view != "price":
+            page.wait_for_function("window.__requests > 1")
+        else:
+            assert page.evaluate("window.__requests") == 1
         assert page.evaluate("window.__candleTimes.length") == 8
         if view == "price":
             page.evaluate("window.__priceHandle.focusRange(__bars[2].timestamp, __bars[5].timestamp)")
@@ -608,6 +611,7 @@ def test_price_chart_zoom_settles_after_detail_load() -> None:
           }};
           const loadRange = async (minimum, maximum) => {
             __requests.push([minimum, maximum]);
+            await new Promise(resolve => setTimeout(resolve, 650));
             return Array.from({length: 1440}, (_, i) => {
               const timestamp = minimum + i * 60000;
               return bar(timestamp, 110 + i / 1440);
@@ -621,8 +625,137 @@ def test_price_chart_zoom_settles_after_detail_load() -> None:
         page.wait_for_selector("canvas", timeout=5000)
         page.evaluate("window.__zoom()")
         page.wait_for_function("window.__requests.length > 0")
+        page.locator(".ft-lightweight-price-loading").wait_for()
         page.wait_for_timeout(1500)
         assert page.evaluate("window.__requests.length") == 1, errors
+        assert page.evaluate("window.__requests[0][0]") < 1736553600000, (
+            "detail request should include bars before the visible zoom window"
+        )
+        assert page.locator(".ft-lightweight-price-loading").count() == 0
+        page.evaluate("""() => {
+          document.querySelector('.ft-lightweight-price-canvas')
+            .dispatchEvent(new Event('pointerdown'));
+          __chart.timeScale().setVisibleRange({
+            from: Date.UTC(2025, 0, 1) / 1000,
+            to: Date.UTC(2025, 0, 30) / 1000,
+          });
+        }""")
+        page.wait_for_function("window.__chart.panes()[0].getSeries()[0].data().length === 30")
+        assert page.evaluate("window.__requests.length") == 1
+        range_after_zoom_out = page.evaluate("""() => {
+          const range = __chart.timeScale().getVisibleRange();
+          return [Number(range.from), Number(range.to)];
+        }""")
+        assert range_after_zoom_out[0] >= 1735689600
+        assert range_after_zoom_out[1] <= 1738195200
+        page.evaluate("""() => __chart.timeScale().setVisibleRange({
+          from: Date.UTC(2024, 11, 1) / 1000,
+          to: Date.UTC(2025, 1, 28) / 1000,
+        })""")
+        range_outside_data = page.evaluate("""() => {
+          const range = __chart.timeScale().getVisibleRange();
+          return [Number(range.from), Number(range.to)];
+        }""")
+        assert range_outside_data[0] >= 1735689600
+        assert range_outside_data[1] <= 1738195200
+        assert errors == []
+        browser.close()
+
+
+def test_price_chart_keeps_open_interest_pane_when_overview_values_are_missing() -> None:
+    with _playwright() as playwright:
+        browser = _launch_chromium(playwright)
+        page = browser.new_page(viewport={"width": 1100, "height": 850})
+        page.set_content("<main id='root'></main>")
+        page.add_script_tag(path=str(ROOT / "static/vendor/lightweight-charts/lightweight-charts.standalone.production.js"))
+        page.add_script_tag(path=str(ROOT / "static/vendor/chart-workbench/chart-workbench.js"))
+        page.evaluate("""() => {
+          const start = Date.UTC(2025, 0, 1);
+          const bars = Array.from({length: 10}, (_, i) => ({
+            timestamp: start + i * 86400000, open: 100, high: 101,
+            low: 99, close: 100, volume: 100, openInterest: null,
+          }));
+          const createChart = LightweightCharts.createChart;
+          window.LightweightCharts = {...LightweightCharts, createChart: (...args) => {
+            const chart = createChart(...args);
+            window.__chart = chart;
+            return chart;
+          }};
+          window.__handle = FTChartWorkbench.mountPriceChart(
+            document.querySelector('#root'), {bars, hasOpenInterest: true,
+              loadRange: async () => bars.slice(2, 4).map(bar =>
+                ({...bar, openInterest: 500}))});
+          window.__zoom = () => __handle.focusRange(
+            start + 2 * 86400000, start + 3 * 86400000);
+        }""")
+        page.wait_for_selector("canvas")
+        assert page.evaluate("window.__chart.panes().length") == 3
+        page.evaluate("window.__zoom()")
+        page.wait_for_function("window.__chart.panes()[2].getSeries()[0].data()"
+                               ".some(row => row.value === 500)")
+        oi = page.evaluate("""() => __chart.panes()[2].getSeries()[0].data()
+          .filter(row => row.value !== undefined).map(row => row.value)""")
+        assert oi == [500, 500]
+        browser.close()
+
+
+def test_price_chart_highlights_hovered_candle_and_opens_click_toolkit() -> None:
+    with _playwright() as playwright:
+        browser = _launch_chromium(playwright)
+        page = browser.new_page(viewport={"width": 1100, "height": 850})
+        errors: list[str] = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        page.set_content("<main id='root' style='width:800px'></main>")
+        page.add_script_tag(path=str(ROOT / "static/vendor/lightweight-charts/lightweight-charts.standalone.production.js"))
+        page.evaluate("""() => {
+          const library = LightweightCharts;
+          window.LightweightCharts = {...library,
+            createChart(...args) {
+              window.__chart = library.createChart(...args);
+              return window.__chart;
+            },
+            createSeriesMarkers(...args) {
+              window.__hoverMarker = library.createSeriesMarkers(...args);
+              return window.__hoverMarker;
+            },
+          };
+        }""")
+        page.add_script_tag(path=str(ROOT / "static/vendor/chart-workbench/chart-workbench.js"))
+        page.evaluate("""() => {
+          const start = Date.UTC(2025, 0, 1);
+          const bars = Array.from({length: 10}, (_, i) => ({
+            timestamp: start + i * 86400000, open: 100, high: 102,
+            low: 99, close: 101, volume: 1000, openInterest: 500,
+          }));
+          window.__handle = FTChartWorkbench.mountPriceChart(
+            document.querySelector('#root'), {bars, timeZone: 'Asia/Shanghai'});
+          window.__candlePoint = () => {
+            const node = document.querySelector('.ft-lightweight-price-canvas');
+            const rect = node.getBoundingClientRect();
+            const series = __chart.panes()[0].getSeries()[0];
+            return {x: rect.left + __chart.timeScale().timeToCoordinate(
+              bars[4].timestamp / 1000), y: rect.top + series.priceToCoordinate(101)};
+          };
+        }""")
+        page.wait_for_selector("canvas")
+        assert page.evaluate("window.__hoverMarker.markers().length") == 0
+        point = page.evaluate("window.__candlePoint()")
+        page.mouse.move(point["x"], point["y"])
+        page.wait_for_function("window.__hoverMarker.markers().length === 1")
+        page.mouse.click(point["x"], point["y"])
+        toolkit = page.get_by_role("dialog", name="蜡烛详情")
+        toolkit.wait_for()
+        expected = page.evaluate("""() => new Date(Date.UTC(2025, 0, 5))
+          .toLocaleString(undefined, {timeZone: 'Asia/Shanghai'})""")
+        assert toolkit.locator("header strong").inner_text() == expected
+        page.evaluate("window.__handle.setTimeZone('UTC')")
+        expected_utc = page.evaluate("""() => new Date(Date.UTC(2025, 0, 5))
+          .toLocaleString(undefined, {timeZone: 'UTC'})""")
+        assert toolkit.locator("header strong").inner_text() == expected_utc
+        assert toolkit.get_by_text("1000").count() == 1
+        assert toolkit.get_by_text("500").count() == 1
+        toolkit.get_by_role("button", name="关闭").click()
+        assert toolkit.count() == 0
         assert errors == []
         browser.close()
 

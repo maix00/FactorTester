@@ -75,7 +75,11 @@ function FactorChart({bars, indicators, product, loadRange, controller,
       layout: {background: {color: "#fff"}, textColor: "#5f6672",
         panes: {enableResize: true}},
       grid: {vertLines: {color: "#edf0f4"}, horzLines: {color: "#edf0f4"}},
-      timeScale: {timeVisible: true, secondsVisible: true, rightOffset: 6},
+      timeScale: {timeVisible: true, secondsVisible: true, rightOffset: 6,
+        tickMarkFormatter: (time: number, kind: number, locale: string) =>
+          new Date(Number(time) * 1000).toLocaleString(locale, kind < 3
+            ? {month: "numeric", day: "numeric"}
+            : {hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false})},
       localization: {timeFormatter: (time: number) =>
         new Date(Number(time) * 1000).toLocaleString()},
       handleScale: {mouseWheel: true, pinch: true, axisPressedMouseMove: true},

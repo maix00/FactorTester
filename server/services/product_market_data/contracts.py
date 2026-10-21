@@ -205,6 +205,7 @@ def contract_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
         "supports_adjusted": False,
         "supports_term_structure": False,
         "freq": frequency.name,
+        "timezone": str(timezone),
         "data_source": requested_source or (
             available_sources[0]["alias"] if available_sources else ""
         ),

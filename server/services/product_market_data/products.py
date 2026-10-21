@@ -235,6 +235,7 @@ def product_price_series(payload: Mapping[str, Any]) -> dict[str, Any]:
         "supports_adjusted": supports_adjusted_price(product),
         "supports_term_structure": term_structure,
         "freq": frequency.name,
+        "timezone": str(getattr(product, "timezone", None) or "Asia/Shanghai"),
         "data_source": (
             getattr(source, "alias", "")
             or getattr(source, "key", "")
