@@ -175,6 +175,18 @@ class WorktreeStateMixin:
                 label=self.fixed_branch or self.server_role,
                 port=self.fixed_port,
             ))
+        known_ports = {item.port for item in result}
+        for port, path in getattr(self, "extra_services", ()):
+            if port in known_ports:
+                continue
+            result.append(Worktree(
+                path=path,
+                branch=f"service-{port}",
+                head=self._revision_for_path()[:8],
+                label=f"service-{port}",
+                port=port,
+            ))
+            known_ports.add(port)
         return sorted(result, key=lambda wt: (
             -1 if wt.port == 0 else wt.port, wt.label
         ))  # no-port worktrees at bottom
