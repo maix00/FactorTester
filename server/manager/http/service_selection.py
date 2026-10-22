@@ -97,6 +97,26 @@ class ServiceSelectionRoutesMixin:
             return value if value in self.state.service_ports() else None
         return self.state.preferred_service_port()
 
+    def _local_job_service_port(self, job_id: str) -> int | None:
+        """Resolve a Job's execution port for detail/stream/artifact reads."""
+        session = self._session()
+        principal = str((session or {}).get("username") or "")
+        rows = self.state.job_index.list(principal)
+        if not rows:
+            try:
+                rows = self.state.aggregate_jobs(principal)
+            except Exception:
+                rows = []
+        for item in rows:
+            if not isinstance(item, dict) or str(item.get("job_id")) != job_id:
+                continue
+            try:
+                port = int(item.get("port") or item.get("service_port") or 0)
+            except (TypeError, ValueError):
+                return None
+            return port or None
+        return None
+
     def _service_route(self, parsed) -> ServiceRoute | None:
         query = parse_qs(parsed.query, keep_blank_values=True)
         raw_port = str(query.get("port", [""])[0] or "").strip()
@@ -106,6 +126,12 @@ class ServiceSelectionRoutesMixin:
             )
             return None
         port = int(raw_port) if raw_port else None
+        if port is None:
+            job_match = re.match(r"/api/jobs/([^/]+)(?:/|$)", parsed.path)
+            if job_match:
+                job_port = self._local_job_service_port(job_match.group(1))
+                if job_port:
+                    port = job_port
         server_id = str(query.get("server_id", [""])[0] or "").strip()
         if self._is_local_agent_request():
             if server_id not in {"", "local", self.state.server_id}:
