@@ -1,0 +1,126 @@
+# ChangeLog
+
+## [0.3.1] - 2026-09-03
+
+### Added
+
+- **New Elementwise & Conditional Algorithms**:
+  - `ABS`: Calculate element-wise absolute value.
+  - `MAX`: Calculate element-wise maximum of two arrays with `skip_nan` support.
+  - `MIN`: Calculate element-wise minimum of two arrays with `skip_nan` support.
+  - `WHERE` (and `IF` in MLang): Conditional element selection (`a if condition else b`).
+- **New Sequential & Signal Filtering Algorithms**:
+  - `ALL`: Check if a condition is continuously satisfied over the last `N` periods (or cumulative from the start if `N=0`).
+  - `ANY` (and alias `EXIST`): Check if a condition is satisfied at least once over the last `N` periods (or cumulative from the start if `N=0`).
+  - `BACKSET`: Set current and preceding `N-1` periods (total `N` bars) to true when condition is satisfied.
+  - `FILTER`: Suppress consecutive signals for `N` periods following a valid signal (or all subsequent bars if `N=0`).
+  - `LAST`: Count the number of consecutive periods where condition is continuously met up to the current bar.
+- **Vector-Period Algorithm Variants**:
+  - Added variable-period versions supporting dynamic period series: `REF_V`, `MA_V`, `EMA_V`, `SMA_V`, `LWMA_V`, `DMA_V`, `COUNT_V`, `HHV_V`, `HHVBARS_V`, `LLV_V`, and `LLVBARS_V`.
+- **Split Factor Calculation**:
+  - `FW_SPLIT_FACTOR` and `BW_SPLIT_FACTOR` for forward and backward split factor array calculations.
+- **JavaScript / WASM Bindings**:
+  - Added `join_asof` with backward, forward, zero, and NaN fill modes.
+- **MLang Runtime Enhancements**:
+  - Expanded `MValue` and VM support for boolean arrays, logical operations, self-referencing patterns, and seamless conversion between boolean arrays and numeric arrays.
+
+### Fixed
+
+- Fixed `REF` and `REF_V` to fill initial bars before period window with `x[0]` when `!is_strictly_cycle()`.
+- Fixed `EMA` initial state and NaN value propagation.
+- Improved float ordering stability for NaN/Inf handling in ranking (`rank.rs`).
+
+## [0.3.0] - 2026-06-04
+
+This project is `Python` based originally, but for some case `Python` is not available, for example
+
+- You build a stock web app, you want draw an indicator on the chart. 
+- Your application will be deployed to customer's computer, it is not easy to install `Python` on the customer's computer. But `lua` can be embeded in your app.
+
+So we add some other language bindings for this project.
+
+### Add
+
+- wasm-bindgen binding, so you can use it in your javascript/typescript environment.
+- lua binding, you can use it in some environments which without `python`
+- FW_SPLIT, BW_SPLIT algorithms that do price split
+
+## [0.2.5] - 2026-05-11
+
+### Added
+
+-  Factor Expression translator now support named arguments
+
+
+
+## [0.2.4] - 2026-04-27
+
+### Added
+
+- ALPHA: calculate alpha for a strategy
+- BETA: calculate beta for a strategy
+- SHARPE: calculate sharpe ratio for a strategy
+- MAX_DRAWDOWN: calculate max drawdown of a series
+
+
+## [0.2.3] - 2026-04-13
+
+### Added
+
+- ExecContext: TS_QUANTILE, SLOPE, INTERCEPT, DMA, SUMBARS, BARSLAST, BARSSINCE, BINS, FRET, RCROSS, RLONGCROSS
+
+## [0.2.2] - 2026-04-11
+
+### Added
+
+- QUANTILE
+
+## [0.2.1] - 2026-04-06
+
+### Fix
+
+- Fixed an internal logic bug in `Context::end` where `_end == 0` incorrectly returned `0` instead of yielding the expected `total` array dimension.
+- Changed Context data truncation (`end` limit) to execute within the closure of each parallel grouped chunk (via `ctx.end()`) rather than globally shrinking arrays ahead of time (`align_end()`). This prevents group size corruption and misaligned cross-sectional indexing when `groups > 1`.
+- Bound internal algorithm iterations and `SkipNanWindow` initializations dynamically to the `end` limit on a per-chunk basis while preserving absolute `start` index zero-alignments.
+- Deprecated and removed legacy `align_end` and `align_end_mut` functions entirely to enforce correct boundary lifecycle patterns across algorithms.
+
+
+## [0.2.0] - 2026-02-26
+
+### Change
+
+- Naming Rules for algorithms
+    - Functions without prefix means it is a rolling window operation
+    - Functions with prefix `CC_` means it is a cross-commodity/cross-security/cross-group operation
+
+### Add 
+
+- Context now have a `end` option, which can be used to specify the end index of the calculation. usually used in iterative back test to improve some performance.
+
+
+## [0.1.3] - 2026-02-22
+
+
+@tic-top had verified the correctness of the computation, it's a great help for us to improve the quality of the alpha library. Thanks @tic-top!
+
+## [0.1.2] - 2026-02-04
+
+### Added
+
+- TS_CORR @zhaojun6969
+
+## [0.1.1] - 2026-02-02
+
+### Added
+
+- BINS @zhaojun6969
+- FRET @zhaojun6969 
+- INTERCEPT @zhaojun6969
+- NEUTRALIZE @zhaojun6969
+- REGBETA
+- REGRESI
+- SUMIF
+
+See [algo.md](python/alpha/algo.md) for details.
+
+Thanks @zhaojun6969, our first contributor!
