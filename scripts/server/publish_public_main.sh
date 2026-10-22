@@ -85,7 +85,7 @@ remote_exec "test -d '$remote_git_root/repo.git' && sudo test -f '$remote_env'"
 printf -v git_ssh_command '%q ' "${ssh_command[@]}"
 git_ssh_command="${git_ssh_command% }"
 echo "Pushing missing Git objects to $remote"
-GIT_SSH_COMMAND="$git_ssh_command" git -C "$repo_root" push \
+GIT_SSH_COMMAND="$git_ssh_command" git -C "$repo_root" push --no-verify \
   "$remote:$remote_git_root/repo.git" "main:refs/heads/main"
 
 remote_revision="$(
