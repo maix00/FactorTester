@@ -24,3 +24,4 @@ pyyaml==6.0.2
 akshare==1.18.64
 psycopg[binary]>=3.2,<4
 cryptography>=43,<50
+py-alpha-lib==0.3.1
