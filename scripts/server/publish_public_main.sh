@@ -56,11 +56,14 @@ done
   exit 2
 }
 
-git -C "$repo_root" fetch origin
-[[ "$(git -C "$repo_root" rev-parse feat)" == "$(git -C "$repo_root" rev-parse origin/feat)" ]] || {
-  echo "feat must equal origin/feat before publication" >&2
-  exit 2
-}
+skip_github="${FACTORTESTER_SKIP_GITHUB_PUSH:-0}"
+if [[ "$skip_github" != "1" ]]; then
+  git -C "$repo_root" fetch origin
+  [[ "$(git -C "$repo_root" rev-parse feat)" == "$(git -C "$repo_root" rev-parse origin/feat)" ]] || {
+    echo "feat must equal origin/feat before publication" >&2
+    exit 2
+  }
+fi
 for baseline in origin/main origin/feat; do
   git -C "$repo_root" merge-base --is-ancestor "$baseline" main || {
     echo "main must include $baseline before publication" >&2
@@ -69,8 +72,12 @@ for baseline in origin/main origin/feat; do
 done
 revision="$(git -C "$repo_root" rev-parse main)"
 
-echo "Pushing main $revision to GitHub"
-git -C "$repo_root" push origin main
+if [[ "$skip_github" == "1" ]]; then
+  echo "Skipping GitHub push (FACTORTESTER_SKIP_GITHUB_PUSH=1)"
+else
+  echo "Pushing main $revision to GitHub"
+  git -C "$repo_root" push origin main
+fi
 
 remote_exec "command -v git >/dev/null && command -v docker >/dev/null && command -v flock >/dev/null"
 remote_exec "test -d '$remote_git_root/repo.git' && sudo test -f '$remote_env'"
