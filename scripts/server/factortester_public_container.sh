@@ -396,7 +396,7 @@ case "$command" in
   config) "${compose[@]}" config "$@" ;;
   container-id) "${compose[@]}" ps --quiet "$@" ;;
   control-table-count) control_table_count ;;
-  build) check_source; "${compose[@]}" build "$@" ;;
+  build) check_source; DOCKER_BUILDKIT=0 "${compose[@]}" build "$@" ;;
   up) "${compose[@]}" up --detach --no-build --remove-orphans --wait "$@" ;;
   restart-app) "${compose[@]}" up --detach --no-build --no-deps --force-recreate --wait factortester-public "$@" ;;
   stop-app) "${compose[@]}" stop factortester-public "$@" ;;
