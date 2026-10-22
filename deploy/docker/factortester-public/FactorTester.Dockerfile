@@ -48,11 +48,20 @@ RUN chmod 0755 /usr/bin/bwrap
 
 FROM python:3.14-slim AS factortester-alpha-builder
 
-RUN apt-get update && apt-get install --yes --no-install-recommends \
+ARG DEBIAN_MIRROR=https://mirrors.aliyun.com/debian
+ARG DEBIAN_SECURITY_MIRROR=https://mirrors.aliyun.com/debian-security
+RUN sed -i \
+        -e "s|https\?://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
+        -e "s|https\?://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
+        /etc/apt/sources.list.d/debian.sources \
+    && apt-get -o Acquire::Retries=5 update \
+    && apt-get -o Acquire::Retries=5 install --yes --no-install-recommends \
         build-essential curl ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-        | sh -s -- -y --profile minimal --default-toolchain stable
+        | RUSTUP_DIST_SERVER=https://mirrors.aliyun.com/rustup \
+          RUSTUP_UPDATE_ROOT=https://mirrors.aliyun.com/rustup/rustup \
+          sh -s -- -y --profile minimal --default-toolchain stable
 ENV PATH="/root/.cargo/bin:${PATH}"
 COPY vendor/py-alpha-lib /src/py-alpha-lib
 RUN python -m pip install --no-cache-dir maturin \
