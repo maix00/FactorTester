@@ -138,10 +138,6 @@ services:
         target: /opt/factortester/releases
         read_only: true
       - type: bind
-        source: ${FACTORTESTER_SETTINGS_FILE:?set FACTORTESTER_SETTINGS_FILE}
-        target: /opt/factortester/releases/.settings
-        read_only: true
-      - type: bind
         source: ${FACTORTESTER_DATA_ROOT:?set FACTORTESTER_DATA_ROOT}
         target: /data
       - type: bind
