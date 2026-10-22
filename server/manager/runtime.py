@@ -211,8 +211,10 @@ class ManagerState(
         fixed_daemon_socket: str | Path | None = None,
         session_db_path: Path | None = None,
         extra_services: tuple[tuple[int, Path], ...] = (),
+        fixed_source: Path | None = None,
     ) -> None:
         self.repo = repo.resolve()
+        self.fixed_source = (fixed_source or repo).resolve()
         self.runtime_source_root = _REPO_ROOT.resolve()
         self.technical_docs = TechnicalDocsLibrary(
             self.runtime_source_root / "product_docs",

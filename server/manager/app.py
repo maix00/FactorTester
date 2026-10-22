@@ -91,6 +91,10 @@ def build_parser(runtime_module: ModuleType | None = None) -> argparse.ArgumentP
     parser.add_argument("--server-id", default=None)
     parser.add_argument("--fixed-port", type=int, default=None)
     parser.add_argument("--fixed-branch", default=None)
+    parser.add_argument(
+        "--fixed-source", default="",
+        help="Source directory executed for --fixed-port (defaults to --repo).",
+    )
     parser.add_argument("--daemon-socket", default="")
     parser.add_argument("--feature", action="append", default=[])
     parser.add_argument(
@@ -157,6 +161,7 @@ def main(
         fixed_daemon_socket=args.daemon_socket or None,
         session_db_path=runtime_module.configured_manager_sqlite_path(),
         extra_services=extra_services,
+        fixed_source=Path(args.fixed_source) if args.fixed_source else None,
     )
     removed = runtime_module.Handler.state.cleanup_detached_worktrees()
     if removed:

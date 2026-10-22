@@ -32,3 +32,18 @@ def test_manager_rejects_extra_service_without_source(tmp_path) -> None:
         assert "service source does not exist" in str(error)
     else:
         raise AssertionError("missing extra service source must be rejected")
+
+
+def test_manager_can_run_fixed_port_from_separate_source(tmp_path, monkeypatch) -> None:
+    manager_source = tmp_path / "manager"
+    old_source = tmp_path / "old-app"
+    manager_source.mkdir()
+    old_source.mkdir()
+    state = manager.ManagerState(
+        manager_source, "python", fixed_port=8000, fixed_branch="main",
+        fixed_source=old_source,
+    )
+    monkeypatch.setattr(state, "_worktree_entries", lambda: [])
+    monkeypatch.setattr(state, "_port_is_in_use", lambda port: port == 8000)
+    fixed = {item.port: item for item in state.worktrees()}[8000]
+    assert fixed.path == old_source
