@@ -58,6 +58,8 @@ RUN python -m compileall -q -b /runtime \
     && grep -F 'FactorTester CLI' /tmp/factortester-help >/dev/null
 
 FROM factortester-public-deps AS factortester-public
+COPY deploy/docker/factortester-public/wheels/py_alpha_lib-0.3.1-cp311-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl /tmp/
+RUN python -m pip install --no-cache-dir --no-deps /tmp/py_alpha_lib-0.3.1-cp311-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl && rm -f /tmp/py_alpha_lib-0.3.1-cp311-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
 
 # The npm package is a small launcher around the platform package. Install
 # only the official native Linux binary, so the image needs neither npm nor a
