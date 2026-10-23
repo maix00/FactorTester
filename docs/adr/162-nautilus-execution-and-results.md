@@ -90,6 +90,18 @@ NautilusTrader CLI 不与 GNOME 的 `/usr/bin/nautilus` 混用，执行时固定
 断言没有同根 K 线的未来成交。回测结果记录信号的生成、可用和首次可执行
 时间，并以真实 T/TL 数据逐项核对。
 
+固定的 NautilusTrader `v2.0.0rc7` 在外部 Bar 的 OHLC 依次更新撮合簿后才
+调用 `on_bar`，零延迟市价单会看到当前 Bar 的收盘簿；它**没有**原生的
+“下一根 Bar 开盘成交”开关，增加延迟后也通常在下一根 Bar 完成其 OHLC
+扫描后结算。旧数据中秒/毫秒混用要先按原字段语义归一到纳秒并保留来源；
+不能把这种编码偏差当作新引擎的交易控制。要复现下一开盘，执行适配器需将
+已完成 Bar 的信号保留至下一根 Bar 的独立开盘事件；开盘代理 Quote/Trade
+只含该时刻已知的开盘价和有声明的流动性假设，完整 OHLC Bar 仍在结束时
+发送。相同边界上的事件要有稳定的因果顺序，不能通过读取下一根完整 Bar
+的 `open` 于上一根 `on_bar` 回调中提前下单。合成引擎测试见
+`tests/server/test_nautilus_bridge_bar_timing.py`；该测试尚不证明中国期货
+开盘竞价、盘口价差或容量成交精度。
+
 现有 `FactorExpr.compile_incremental` 是接入起点，但其 `SignalAlign` 编译器
 目前拒绝日度跨频节点，也不能把所有表达式都视为可逐事件执行。每个冻结
 因子须在提交 Job 前完成能力检查；不支持的节点给出明确错误及缺口，不能
@@ -116,15 +128,15 @@ NautilusTrader CLI 不与 GNOME 的 `/usr/bin/nautilus` 混用，执行时固定
 | `data_source_mode`, `data_source`, `freq_mode`, `freq_fixed`, `historical_field_policy` | FactorTester 解析数据源权限、历史字段与覆盖，冻结实际 catalog、`InstrumentId`、`BarType`，映射 `BacktestDataConfig`。源不存在、缺必需字段、严格历史规则缺失或自动选择无法唯一确定时拒绝。 |
 | `product_path_candidates`, `product_path_selection`, 策略内 `productMask`、分类/产品组 | FactorTester 冻结成员与连续主力到可交易合约映射；NautilusTrader 接收真实合约。缺规格、成员、换月表或合约映射时拒绝。 |
 | `start_date`, `end_date`, `time_precision`, `start_time`, `end_time`, `timezone`, `evaluation_split` | FactorTester 将交易日或精确时刻转成 UTC，映射 `BacktestRunConfig.start/end` 与数据查询边界；样本切分仍是研究合同。交易日收盘、时区或切分不明确时拒绝。 |
-| `signal_freq`, `basepoint`, `daily_basepoint`, `end_session_skip`, `end_session_gap`, `calendar_frequency`, `bar_open_visibility_delay`, `bar_end_visibility_delay` | FactorTester 事件时钟与 `ts_event/ts_init` 可用时刻适配器驱动 NautilusTrader 回调。这些不只是 BarType 别名；夜盘、跨频因果、bar 内可见性未对照的组合拒绝。 |
+| `signal_freq`, `basepoint`, `daily_basepoint`, `end_session_skip`, `end_session_gap`, `calendar_frequency`, `bar_open_visibility_delay`, `bar_end_visibility_delay` | FactorTester 事件时钟与 `ts_event/ts_init` 可用时刻适配器驱动 NautilusTrader 回调。引擎有 Bar 回调、指标更新和定时器，但没有可替代嵌套因子可用时刻的全局开关；夜盘、跨频因果、bar 内可见性未对照的组合拒绝。 |
 | `factor_candidates`, `factor_source_selections`, `factor_set_selections`, `factor_role_bindings`, `factor_mode`, `warmup_mode`, `warmup_window` | 候选/来源属编辑器；冻结因子、角色和预热由 FactorTester 有界增量状态实现。不支持的节点、日度对齐或预热拒绝；`precomputed` 不作为交易信号的静默后备。 |
 | `strategy_intent_mode`, `split_count`, `group_index`, `screen_rule`, `screen_lower`, `screen_upper`, `threshold_mode`, `entry_threshold`, `exit_threshold`, `quantile_entry`, `quantile_exit`, `side_mode`, `term_carry_near_rank`, `term_carry_far_rank`, `term_carry_entry_threshold`, `term_carry_exit_threshold`, `term_carry_gross_weight` | FactorTester 公共策略库的版本化分组、阈值及 Term Carry 模板计算意图，NautilusTrader `Strategy` 发单。模板、因子角色或范围无效时拒绝。 |
 | `position_policy`, `rebalance_trigger`, `allocation_policy`, `sizing_transform`, `volatility_lookback`, `volatility_warmup`, `target_margin_utilization`, `max_margin_utilization`, `margin_utilization_tolerance` | 目标头寸、调仓和预算仍属 FactorTester 策略适配器，读取 NautilusTrader 账户与持仓。未验证杠杆、权重、保证金限额等价时拒绝。 |
-| `initial_capital_major`, `base_currency`, `account_currency`, `currency_conversion_fee_rate`, `use_minor_units`, `strategy_book_mode`, `ledger_session_policy`, `cash_reserve_ratio`, `cash_reserve_major` | FactorTester 冻结账户/账本/资金池拓扑，映射 `BacktestVenueConfig.starting_balances/base_currency/account_type/oms_type`；换汇和预留现金另行适配。多账本、跨币种、自动拆账本无独立统计实现时拒绝。 |
-| `margin_mode`, `fixed_margin_ratio`, `collateral_fraction`, `margin_call_mode`, `liquidation_target_buffer`, `margin_custom_product_fields` | NautilusTrader `MARGIN` 账户、合约保证金、`margin_model` 和强平设置是接入点；历史保证金、抵押和自定义覆写须单独模型。任一活动配置无等价实现则拒绝。 |
-| `fee_mode`, `transaction_fee_source`, `fixed_fee_rate`, `fee_custom_product_fields`, `slippage_mode`, `slippage_bps` | Venue 的 `fee_model/fill_model` 是接入点；平今/平昨、历史费率、经纪商规则和固定 bps 滑点需逐笔对照。不可折成单一费率；缺规则拒绝。 |
-| `order_type`, `matching_model`, `volume_execution_price_basis`, `liquidity_mode`, `participation_rate`, `quantity_rounding_policy` | 订单与合约最小量映射 NautilusTrader；撮合用 `book_type/bar_execution/fill_model` 加自定义容量规则。`bar_volume_limited`、VWAP/TWAP、下一 bar 全额成交无等价实现时拒绝；OHLCV 不宣称 L2 精度。 |
-| `accounting_mode`, `cost_basis_method`, `daily_mark_to_market_enabled`, `use_int_position`, `trading_rule_custom_product_fields`, `force_close_before_expiry`, `rollover_policy`, `rollover_before_expiry` | 记账、成本批次、逐日盯市、到期强平和换月是中国期货规则适配层，不默认等价于通用期货处理。缺逐事件核对时拒绝。 |
+| `initial_capital_major`, `base_currency`, `account_currency`, `currency_conversion_fee_rate`, `use_minor_units`, `strategy_book_mode`, `ledger_session_policy`, `cash_reserve_ratio`, `cash_reserve_major` | 新执行直接使用 NautilusTrader 账户、持仓与 Portfolio，不保留自制 CashPoolStore 作为第二账本。普通单账户映射 `BacktestVenueConfig.starting_balances/base_currency/account_type/oms_type`；旧配置显式要求策略间独立资金池时，要证实账户隔离或拆成独立 Run，不能把共享账户总收益伪称各策略独立收益。 |
+| `margin_mode`, `fixed_margin_ratio`, `collateral_fraction`, `margin_call_mode`, `liquidation_target_buffer`, `margin_custom_product_fields` | NautilusTrader 已有 `MARGIN` 账户、`StandardMarginModel`/`LeveragedMarginModel` 及 `liquidation_enabled/liquidation_trigger_ratio`；优先复用。历史保证金变动和旧缓冲/追缴模式仍须逐事件对照，不能假定参数名称相似即等价。 |
+| `fee_mode`, `transaction_fee_source`, `fixed_fee_rate`, `fee_custom_product_fields`, `slippage_mode`, `slippage_bps` | Venue 的内置 `fee_model/fill_model` 覆盖固定及按手数等模型；自定义 `FeeModel` 有逐笔回调，但回调未直接收到成交时间。平今/平昨与随时间变化的费率须冻结有效期规则，并证明模型在成交时选用正确版本；其他历史字段变动用带事件时刻的 Instrument/规则更新验证。缺历史规则不能拿最新值替代。 |
+| `order_type`, `matching_model`, `volume_execution_price_basis`, `liquidity_mode`, `participation_rate`, `quantity_rounding_policy` | 订单与合约最小量映射 NautilusTrader；L2/L3 数据、`liquidity_consumption` 和填单模型可限制可见深度。Bar 有模拟分配成交量，`VolumeSensitiveFillModel` 的 Python 绑定却没有近期量状态更新接口；不能据此宣称已实现按当根 Bar 成交量固定百分比参与。无逐笔/盘口量时，要么采用声明过的上一根量预算，要么明确标为未支持。 |
+| `accounting_mode`, `cost_basis_method`, `daily_mark_to_market_enabled`, `use_int_position`, `trading_rule_custom_product_fields`, `force_close_before_expiry`, `rollover_policy`, `rollover_before_expiry` | NautilusTrader 已有持续盯市估值和保证金不足自动强平，合约到期也有事件；先复用这些原生路径。中国期货每日结算价产生的**现金变动与持仓成本重置**不等于权益曲线的日度快照，`InstrumentClose(END_OF_SESSION)` 本身也不执行这类入账；需针对交易所规则单独证明或适配。 |
 | `custom_product_fields`, `equity_compute_live` | 自定义合约/有效时段字段先归一化进 Instrument 与规则适配器；净值实时写入变成结果投影/保留选项，不改变最终权益。未知覆写字段拒绝。 |
 
 动态生成的 `fee_custom_product_fields`、`margin_custom_product_fields`、
