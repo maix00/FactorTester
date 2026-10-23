@@ -1,3 +1,6 @@
 [submodule "vendor/lightweight-charts"]
 	path = vendor/lightweight-charts
 	url = https://github.com/maix00/lightweight-charts.git
+[submodule "vendor/nautilus_trader"]
+	path = vendor/nautilus_trader
+	url = https://github.com/nautechsystems/nautilus_trader.git

@@ -494,6 +494,11 @@
       jobs: (pageContext, section) => section === "types"
         ? FTTestTypes.render(pageContext)
         : FTJobs.list(pageContext, null, null, {revalidate: true}),
+      trading: async (pageContext, mode) => {
+        await window.FTStaticLoader?.loadGroups?.(["trading"]);
+        if (!pageContext.isRouteCurrent()) return;
+        return FTTradingWorkbench.render(pageContext, mode);
+      },
       job: (pageContext, port, id, serverID) => FTJobs.detail(
         pageContext, port, id, serverID,
       ),

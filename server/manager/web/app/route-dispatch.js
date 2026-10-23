@@ -74,6 +74,10 @@
             jobsContext(routeToken), route.section || "types",
           );
         }
+        case "trading": return guarded(
+          context(routeToken), {nav: "trading", title: "交易台"},
+          pages.trading, route.mode,
+        );
         case "job": return pages.job?.(
           jobsContext(routeToken), route.port, route.id, route.serverID,
         );

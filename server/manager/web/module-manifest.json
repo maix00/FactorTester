@@ -412,6 +412,9 @@
   "manager-mihomo": [
    "manager"
   ],
+  "trading": [
+   "core"
+  ],
   "docs": [
    "core"
   ],
@@ -558,6 +561,9 @@
   ],
   "manager": [
    "manager"
+  ],
+  "trading": [
+   "trading"
   ],
   "mihomo": [
    "manager-mihomo"
@@ -1042,6 +1048,9 @@
   "manager-mihomo": [
    "manager/mihomo.js"
   ],
+  "trading": [
+   "trading/workbench.js"
+  ],
   "app": [
    "profile/page-agent-lifecycle.js",
    "profile/page-agent-context.js",
@@ -1298,6 +1307,7 @@
   "manager/accounts.js",
   "settings/manager.js",
   "manager/mihomo.js",
+  "trading/workbench.js",
   "app/navigation.js",
   "app/route-dispatch.js",
   "app/tab-workspace.js",

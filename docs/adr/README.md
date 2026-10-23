@@ -40,6 +40,9 @@
 
 ## 更新要求
 
+NautilusTrader 交易内核与原生报告的拟议迁移见 [ADR-162](162-nautilus-execution-and-results.md)；
+当前执行与 Job 边界仍以已接受的 ADR 为准，不能把拟议目标当作已上线能力。
+
 研究根对象及关系的跨服务器复制补充见 [ADR-149](149-research-catalog-replication.md)（实施中）。
 
 修改 ADR 时先核对当前源码、路由注册、CLI 命令树、Web/Swift 调用方、测试和部署 manifest。

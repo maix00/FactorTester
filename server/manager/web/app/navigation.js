@@ -159,6 +159,7 @@
         },
       ],
     },
+    {id: "trading", title: "交易台", title_key: "交易台", description_key: "查看模拟盘、实盘与券商接入状态", sfSymbol: "chart.line.uptrend.xyaxis", path: "/trading?mode=paper", requiresAuth: true, sidebarVisible: true, homeVisible: true, pinned: true},
     {id: "factors", title: "因子库", title_key: "因子库", description_key: "浏览 canonical 与自定义因子", sfSymbol: "function", path: "/factors", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: true},
     {id: "products", title: "产品库", title_key: "产品库", description_key: "查询产品、合约与市场资料", sfSymbol: "shippingbox", path: "/products", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: true},
     {id: "strategies", title: "策略库", title_key: "策略库", description_key: "管理可复用策略、源码版本与共享范围", sfSymbol: "arrow.triangle.branch", path: "/strategies?scope=mine", requiresAuth: true, sidebarVisible: true, homeVisible: true, pinned: true},
@@ -385,6 +386,10 @@
     }
     if (parts[0] === "profiles") return {kind: "profiles"};
     if (parts[0] === "settings") return {kind: "settings", section: parts[1] || "account"};
+    if (parts[0] === "trading") {
+      const mode = new URLSearchParams(search).get("mode");
+      return {kind: "trading", mode: mode === "live" ? "live" : "paper"};
+    }
     if (parts[0] === "manager") {
       const section = new URLSearchParams(search).get("section") || "services";
       return {
