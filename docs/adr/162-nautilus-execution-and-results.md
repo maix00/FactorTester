@@ -102,6 +102,54 @@ NautilusTrader CLI 不与 GNOME 的 `/usr/bin/nautilus` 混用，执行时固定
 先确定差异原因，再决定哪一实现正确。商品期货和实盘不得代替国债期货
 研究复现。仅有 OHLCV 时使用有声明的 bar 撮合假设，不推断 L2 排队。
 
+## 回测配置迁移合同
+
+现有 `group_test` 表单不能只更换数据源。下表逐一覆盖
+`tools/testers/backtest/modules/*` 中公开的 `FieldDefinition`、
+`tools/testers/backtest/modules/group/settings.py` 和
+`tools/testers/settings/applications.py` 中的提交选项。同名字段可能被策略内层
+覆盖，须先解析有效配置再提交。候选列表仅供编辑，不直接传给执行器。
+
+| 字段键 | NautilusTrader / FactorTester 归属与提交门槛 |
+|---|---|
+| `engine`, `engine_mode`, `counterparty_profile` | 引擎选择收敛为 NautilusTrader；旧模式及经纪商预设先展开为显式费用、保证金、撮合及字段可见性规则。旧引擎值或未能完整解析的模式拒绝新 Job；历史 Job 仍可读。 |
+| `data_source_mode`, `data_source`, `freq_mode`, `freq_fixed`, `historical_field_policy` | FactorTester 解析数据源权限、历史字段与覆盖，冻结实际 catalog、`InstrumentId`、`BarType`，映射 `BacktestDataConfig`。源不存在、缺必需字段、严格历史规则缺失或自动选择无法唯一确定时拒绝。 |
+| `product_path_candidates`, `product_path_selection`, 策略内 `productMask`、分类/产品组 | FactorTester 冻结成员与连续主力到可交易合约映射；NautilusTrader 接收真实合约。缺规格、成员、换月表或合约映射时拒绝。 |
+| `start_date`, `end_date`, `time_precision`, `start_time`, `end_time`, `timezone`, `evaluation_split` | FactorTester 将交易日或精确时刻转成 UTC，映射 `BacktestRunConfig.start/end` 与数据查询边界；样本切分仍是研究合同。交易日收盘、时区或切分不明确时拒绝。 |
+| `signal_freq`, `basepoint`, `daily_basepoint`, `end_session_skip`, `end_session_gap`, `calendar_frequency`, `bar_open_visibility_delay`, `bar_end_visibility_delay` | FactorTester 事件时钟与 `ts_event/ts_init` 可用时刻适配器驱动 NautilusTrader 回调。这些不只是 BarType 别名；夜盘、跨频因果、bar 内可见性未对照的组合拒绝。 |
+| `factor_candidates`, `factor_source_selections`, `factor_set_selections`, `factor_role_bindings`, `factor_mode`, `warmup_mode`, `warmup_window` | 候选/来源属编辑器；冻结因子、角色和预热由 FactorTester 有界增量状态实现。不支持的节点、日度对齐或预热拒绝；`precomputed` 不作为交易信号的静默后备。 |
+| `strategy_intent_mode`, `split_count`, `group_index`, `screen_rule`, `screen_lower`, `screen_upper`, `threshold_mode`, `entry_threshold`, `exit_threshold`, `quantile_entry`, `quantile_exit`, `side_mode`, `term_carry_near_rank`, `term_carry_far_rank`, `term_carry_entry_threshold`, `term_carry_exit_threshold`, `term_carry_gross_weight` | FactorTester 公共策略库的版本化分组、阈值及 Term Carry 模板计算意图，NautilusTrader `Strategy` 发单。模板、因子角色或范围无效时拒绝。 |
+| `position_policy`, `rebalance_trigger`, `allocation_policy`, `sizing_transform`, `volatility_lookback`, `volatility_warmup`, `target_margin_utilization`, `max_margin_utilization`, `margin_utilization_tolerance` | 目标头寸、调仓和预算仍属 FactorTester 策略适配器，读取 NautilusTrader 账户与持仓。未验证杠杆、权重、保证金限额等价时拒绝。 |
+| `initial_capital_major`, `base_currency`, `account_currency`, `currency_conversion_fee_rate`, `use_minor_units`, `strategy_book_mode`, `ledger_session_policy`, `cash_reserve_ratio`, `cash_reserve_major` | FactorTester 冻结账户/账本/资金池拓扑，映射 `BacktestVenueConfig.starting_balances/base_currency/account_type/oms_type`；换汇和预留现金另行适配。多账本、跨币种、自动拆账本无独立统计实现时拒绝。 |
+| `margin_mode`, `fixed_margin_ratio`, `collateral_fraction`, `margin_call_mode`, `liquidation_target_buffer`, `margin_custom_product_fields` | NautilusTrader `MARGIN` 账户、合约保证金、`margin_model` 和强平设置是接入点；历史保证金、抵押和自定义覆写须单独模型。任一活动配置无等价实现则拒绝。 |
+| `fee_mode`, `transaction_fee_source`, `fixed_fee_rate`, `fee_custom_product_fields`, `slippage_mode`, `slippage_bps` | Venue 的 `fee_model/fill_model` 是接入点；平今/平昨、历史费率、经纪商规则和固定 bps 滑点需逐笔对照。不可折成单一费率；缺规则拒绝。 |
+| `order_type`, `matching_model`, `volume_execution_price_basis`, `liquidity_mode`, `participation_rate`, `quantity_rounding_policy` | 订单与合约最小量映射 NautilusTrader；撮合用 `book_type/bar_execution/fill_model` 加自定义容量规则。`bar_volume_limited`、VWAP/TWAP、下一 bar 全额成交无等价实现时拒绝；OHLCV 不宣称 L2 精度。 |
+| `accounting_mode`, `cost_basis_method`, `daily_mark_to_market_enabled`, `use_int_position`, `trading_rule_custom_product_fields`, `force_close_before_expiry`, `rollover_policy`, `rollover_before_expiry` | 记账、成本批次、逐日盯市、到期强平和换月是中国期货规则适配层，不默认等价于通用期货处理。缺逐事件核对时拒绝。 |
+| `custom_product_fields`, `equity_compute_live` | 自定义合约/有效时段字段先归一化进 Instrument 与规则适配器；净值实时写入变成结果投影/保留选项，不改变最终权益。未知覆写字段拒绝。 |
+
+动态生成的 `fee_custom_product_fields`、`margin_custom_product_fields`、
+`trading_rule_custom_product_fields` 也必须校验。策略 Hook、附加源码和运行时输入
+须冻结；旧 Python 策略入口不能未经迁移就作为 NautilusTrader 策略运行。
+Run 选项中的 `task_name`、`acting_profile_ref`、`retention_mode`、
+`output_requests` 仍由 Manager 管；`step_mode`、`performance_profile`、
+`margin_execution_profile` 须实现事件级审计/剖析或在新引擎提交时明确拒绝。
+Swift 的 `execution_target`/本地代码包在缺同版本 NautilusTrader 或数据权限时
+拒绝；`service_port` 只能指向既定单业务实例。
+
+界面建议收敛为研究范围与数据、因子与策略、资金与账户、费用/撮合/风险、
+结果与审计五个主区域，复杂覆写在高级区有条件展开。提交前展示完整的
+“有效执行配置”，逐项标注“NT 原生 / FT 适配 / 未支持”，服务端重复验证，
+不允许隐藏但仍生效的旧字段被静默丢弃。T/TL 验收必须逐层比对因子、信号、
+订单、成交、费用、保证金、权益及样本内外，不只看最终收益率。
+
+以上 NT 可用入口来自 pinned 上游
+`vendor/nautilus_trader/python/nautilus_trader/backtest/__init__.pyi`
+（`BacktestDataConfig`、`BacktestRunConfig`、`BacktestVenueConfig`、
+`BacktestEngine.add_venue/add_strategy`）与
+`vendor/nautilus_trader/python/nautilus_trader/execution/__init__.pyi`
+（`FillModel`、`FeeModel`）。可扩展入口**不等于**已实现中国期货平今费、
+逐日结算或旧撮合语义。
+
 ## 分阶段实施与回退
 
 1. 固定开源 NautilusTrader 标签及 commit，作为 submodule；隔离构建环境
