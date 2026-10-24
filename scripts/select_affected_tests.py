@@ -161,6 +161,32 @@ EXACT_PATH_TESTS = {
     "server/manager/http/write_routes.py": (
         "tests/server/test_nautilus_report_route.py",
     ),
+    "server/jobs/repository/queries.py": (
+        "tests/server/test_research_job_scheduler.py",
+    ),
+    "server/jobs/scheduling/daemon.py": (
+        "tests/server/test_research_job_scheduler.py",
+    ),
+    "server/modules/single_factor_test/backtest_jobs.py": (
+        "tests/server/test_research_job_lifecycle.py",
+    ),
+    "server/modules/single_factor_test/group.py": (
+        "tests/server/test_group_research_run_module.py",
+    ),
+    "server/modules/single_factor_test/process_runners.py": (
+        "tests/server/test_group_research_run_module.py",
+        "tests/server/test_research_job_lifecycle.py",
+    ),
+    "server/modules/single_factor_test/research_jobs.py": (
+        "tests/server/test_research_job_lifecycle.py",
+        "tests/server/test_research_run_sample_use.py",
+    ),
+    "server/services/research_run_identity.py": (
+        "tests/server/test_research_run_sample_use.py",
+    ),
+    "server/services/research_runs.py": (
+        "tests/server/test_research_run_sample_use.py",
+    ),
     "server/services/nautilus_bridge/capabilities.py": (
         "tests/server/test_nautilus_source_capabilities.py",
     ),
