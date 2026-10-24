@@ -473,8 +473,8 @@
       }),
       report,
       research,
-      strategyLibrary: (pageContext, scope) => FTStrategyLibraryList.render(
-        pageContext, scope || "public",
+      strategyLibrary: (pageContext, scope, objectKind) => FTStrategyLibraryList.render(
+        pageContext, scope || "public", objectKind || "strategy_family",
       ),
       strategy: (pageContext, id, mode, route) => FTStrategyLibraryDetail.render(
         pageContext, id, mode || "view", route || {},

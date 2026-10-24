@@ -54,6 +54,7 @@ def test_manifest_matches_html_script_order_and_files() -> None:
         "styles/outputs/backtest-results.css",
         "styles/workbench.css", "styles/workbench-settings.css",
         "styles/docs.css", "styles/strategy-library.css",
+        "trading/workbench.css",
         "styles/task-inputs.css",
     ]
     assert "FT_STATIC_STYLES" in template
@@ -1687,6 +1688,7 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
     assert set(manifest["groups"]["workbench-settings"]) == {
         "workbench/tab-chip-content.js",
         "workbench/test-settings.js",
+        "workbench/nautilus-configuration.js",
         "workbench/test-content-adapters.js",
     }
     assert manifest["groups"]["workbench-settings-chips"] == [
@@ -1739,7 +1741,7 @@ def test_test_workbench_defers_catalog_data_until_needed() -> None:
     ]
     assert "workbench-ic-controls" not in manifest["group_dependencies"]["workbench-run"]
     assert manifest["group_dependencies"]["workbench-backtest"] == [
-        "workbench-configuration-groups",
+        "workbench-configuration-groups", "strategy-library-runtime",
     ]
     assert manifest["group_dependencies"]["workbench-configuration-groups"] == [
         "workbench-settings", "workbench-settings-controls",
@@ -2255,32 +2257,19 @@ def test_multi_select_object_rows_open_matching_view_overlays() -> None:
     assert "testObjectTemporary" in factors_page
 
 
-def test_inline_strategy_creation_uses_shared_nested_object_overlay() -> None:
+def test_strategy_binding_panel_only_routes_library_strategies_to_venues() -> None:
     panel = (WEB_ROOT / "workbench" / "strategy-binding-panel.js").read_text(
         encoding="utf-8",
     )
-    overlay = (WEB_ROOT / "workbench" / "object-overlay.js").read_text(
-        encoding="utf-8",
-    )
-    styles = (WEB_ROOT / "styles" / "strategy-library.css").read_text(
-        encoding="utf-8",
-    )
-
-    assert 'kind: "strategy"' in panel
-    assert "FTObjectOverlay.open" in panel
+    assert "策略与 Venue 路由" in panel
+    assert "FTMultiSelectFilter.create" in panel
+    assert "state.analysis.strategy_venue_bindings" in panel
+    assert "FTObjectOverlay.open" not in panel
     assert "FTStrategyLibraryEditor.create" not in panel
-    assert 'temporary: true' in panel
-    assert "strategy-inline-dialog" not in panel
-    assert 'strategy: {' in overlay
-    assert 'load: "strategy-library-editor-core"' in overlay
-    assert 'submitLabel || "保存"' in overlay
-    assert "strategy-inline-dialog" not in styles
-    assert ".strategy-binding-row {" not in styles
+    assert "customStrategyPanel" not in panel
     assert "FTTestFieldRow.create(" in panel
     manifest = json.loads((WEB_ROOT / "module-manifest.json").read_text())
-    assert "strategy-library-editor-core" not in manifest["group_dependencies"][
-        "workbench-strategy-bindings"
-    ]
+    assert "strategy-library-runtime" in manifest["group_dependencies"]["workbench-backtest"]
 
 
 def test_nested_object_overlay_mounts_one_toolbar_per_frame() -> None:

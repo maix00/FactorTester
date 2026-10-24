@@ -1,6 +1,17 @@
 (() => {
   const fields = () => window.FTTestSettingFields;
 
+  function nativeMode(state) {
+    return state?.executionBackend === "nautilus_trader"
+      || state?.analysis?.execution?.backend === "nautilus_trader";
+  }
+
+  function nativeOwnedKeys(state) {
+    const values = state?.nautilusCapabilities?.simulated_venue_config
+      ?.legacy_authoring_keys_hidden;
+    return new Set(Array.isArray(values) ? values : []);
+  }
+
   // The settings shell is intentionally usable before the field-control
   // module arrives.  This keeps the tab bar, chips and manager responsive;
   // the active panel asks for the control implementation only when it needs
@@ -16,17 +27,18 @@
       || declaredFieldsForTab(tabKey, manifest);
   }
 
-  function visibleFields(tab, manifest, values) {
-    return fields()?.visibleFields(tab, manifest, values)
+  function visibleFields(tab, manifest, values, hiddenNativeKeys = new Set()) {
+    const visible = fields()?.visibleFields(tab, manifest, values)
       || fieldsForTab(tab.key, manifest).filter(([, field]) => (
         !field.adapter_managed && FTSettingRules.isVisible(field, values)
       ));
+    return visible.filter(([key]) => !hiddenNativeKeys.has(key));
   }
-  function initialMountedTabs(manifest, saved) {
+  function initialMountedTabs(manifest, saved, hiddenNativeKeys = new Set()) {
     const tabs = manifest?.tab_lists?.["local-settings"] || [];
     const available = new Set(tabs.filter(tab => (
       FTTestContentAdapters.hasContent(tab)
-      || visibleFields(tab, manifest, {}).length
+      || visibleFields(tab, manifest, {}, hiddenNativeKeys).length
     )).map(tab => tab.key));
     if (Array.isArray(saved)) return saved.filter(key => available.has(key));
     const mounted = new Set((manifest?.default_mounted_tabs?.["local-settings"] || [])
@@ -43,13 +55,23 @@
   function render(manifest, values, context, options = {}) {
     const root = document.createElement("div");
     root.className = "backend-settings-shell test-settings-shell";
+    if (options.kind === "backtest" && window.FTNautilusConfiguration) {
+      const review = FTNautilusConfiguration.render(
+        context, options.state, manifest, {refresh: options.refresh},
+      );
+      if (review) root.append(review);
+    }
     const tabs = manifest.tab_lists?.["local-settings"] || [];
+    const hiddenNativeKeys = options.kind === "backtest" && nativeMode(options.state)
+      ? nativeOwnedKeys(options.state) : new Set();
     const available = tabs.map(tab => ({
-      tab, fields: visibleFields(tab, manifest, values),
+      tab, fields: visibleFields(tab, manifest, values, hiddenNativeKeys),
       allFields: fieldsForTab(tab.key, manifest)
-        .filter(([, field]) => !field.adapter_managed),
+        .filter(([key, field]) => !field.adapter_managed
+          && !hiddenNativeKeys.has(key)),
     })).filter(item => item.allFields.length || FTTestContentAdapters.hasContent(item.tab));
-    const mounted = new Set(options.mountedTabs || initialMountedTabs(manifest));
+    const mounted = new Set(options.mountedTabs
+      || initialMountedTabs(manifest, undefined, hiddenNativeKeys));
     const visible = available.filter(item => mounted.has(item.tab.key));
     let tabset = null;
     const items = [];

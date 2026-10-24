@@ -27,7 +27,7 @@
         case "research": return pages.research?.(routeToken);
         case "strategy-library": return guarded(
           context(routeToken), {nav: "strategies", title: "策略库"},
-          pages.strategyLibrary, route.scope || "mine",
+          pages.strategyLibrary, route.scope || "mine", route.objectKind || "strategy_family",
         );
         case "strategy": return guarded(
           context(routeToken), {nav: "strategies", title: "策略库"},

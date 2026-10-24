@@ -257,6 +257,16 @@
           state.manifest, state.values || {},
         )},
       };
+    if (isBacktest) {
+      analysis.execution ||= {};
+      if ((state.executionBackend || state.analysis?.execution?.backend) === "nautilus_trader") {
+        analysis.execution.backend = "nautilus_trader";
+        analysis.execution.contract_version = 4;
+      } else {
+        delete analysis.execution.backend;
+        delete analysis.execution.contract_version;
+      }
+    }
     payload.analyses[state.kind] = analysis;
     payload.ui = payload.ui || {};
     const ui = {
@@ -370,11 +380,20 @@
       const id = item.product_path_selection_id || FTTestProducts.groupID(selection);
       if (id && selection) productSelections[id] = structuredClone(selection);
     }
-    return FTTestConfigurationCompiler.sanitizeExecutionPayload(state.manifest, {
+    const compiled = FTTestConfigurationCompiler.sanitizeExecutionPayload(state.manifest, {
       ...prior, ...settings, execution: {settings}, groups,
       ls_configs: prior.ls_configs || [], product_selections: productSelections,
+      factor_strategy_bindings: structuredClone(prior.factor_strategy_bindings || []),
       strategy_bindings: structuredClone(state.strategyBindings || prior.strategy_bindings || []),
     }, state.values, {stripRootRegistered: true});
+    // Venue account topology is Nautilus execution configuration, rather than
+    // a FactorTester portfolio/subaccount tree. Keep these runtime references
+    // explicit beside the strategy instances so RunSpec can freeze them once.
+    compiled.venues = structuredClone(prior.venues || []);
+    compiled.strategy_venue_bindings = structuredClone(
+      prior.strategy_venue_bindings || [],
+    );
+    return compiled;
   }
 
   window.FTTestConfiguration = Object.freeze({

@@ -4,10 +4,17 @@
   function render(context, state, editor, onFinish) {
     const form = document.createElement("form");
     form.className = "backtest-group-form";
+    const current = editor.groupID ? model().find(state, editor.groupID) : null;
+    const familyMode = editor.mode === "family"
+      || (editor.mode === "edit"
+        && ["factor_template", "library"].includes(current?.strategy_kind));
     const title = document.createElement("h3");
-    title.textContent = titleFor(context, editor.mode);
+    title.textContent = context.t(familyMode
+      ? (current ? "编辑策略" : "添加策略") : titleFor(context, editor.mode));
     form.append(title);
-    if (editor.mode === "rename") {
+    if (familyMode) {
+      renderFamilyStrategy(context, state, editor, form, onFinish, current);
+    } else if (editor.mode === "rename") {
       renderRename(context, state, editor, form, onFinish);
     } else if (editor.mode === "ls") {
       renderLongShort(context, state, editor, form, onFinish);
@@ -15,6 +22,307 @@
       renderGroup(context, state, editor, form, onFinish);
     }
     return form;
+  }
+
+  function renderFamilyStrategy(context, state, editor, form, onFinish, current) {
+    const catalog = state.strategyFamilyCatalog || {};
+    const families = Array.isArray(catalog.families) ? catalog.families : [];
+    const strategies = Array.isArray(catalog.items) ? catalog.items : [];
+    if (!families.length) {
+      form.append(FTUI.empty(
+        context.t("暂时没有可用策略家族"),
+        state.strategyFamilyCatalogError || context.t("策略库没有返回可配置的策略家族"),
+      ));
+      appendActions(context, form, () => {}, onFinish);
+      return;
+    }
+    const priorBinding = (state.analysis.factor_strategy_bindings || []).find(item => (
+      String(item.strategy_id || item.target_strategy_id || "") === String(current?.id || "")
+    )) || {};
+    const priorSourceBinding = (state.strategyBindings || []).find(item => (
+      String(item.target_strategy_id || "") === String(current?.id || "")
+    )) || {};
+    const initialFamilyRef = String(
+      current?.family_ref || priorBinding.family_ref || editor.familyRef || families[0].family_ref,
+    );
+    const name = input("text", current?.name || "");
+    name.placeholder = context.t("策略名称（留空自动生成）");
+    form.append(field(context.t("策略名称"), name));
+
+    const familyControl = selectControl(context, "策略家族", families.map(item => ({
+      value: item.family_ref, label: item.name || item.family_ref,
+    })), initialFamilyRef);
+    form.append(field(context.t("策略家族"), familyControl));
+    const strategyControl = document.createElement("select");
+    strategyControl.setAttribute("aria-label", context.t("策略实现"));
+    form.append(field(context.t("策略实现"), strategyControl));
+    const fieldsHost = document.createElement("div");
+    fieldsHost.className = "backtest-family-strategy-fields";
+    form.append(fieldsHost);
+
+    let controls = new Map();
+    const storedValues = () => ({
+      ...(priorBinding.parameters || {}),
+      ...(priorBinding.factor_bindings || {}),
+      ...(current?.parameters || {}),
+      ...(current?.factor_role_bindings || {}),
+      ...(current?.product_group_ref ? {product_group_ref: current.product_group_ref} : {}),
+    });
+    let values = storedValues();
+
+    function familyForSelection() {
+      return families.find(item => item.family_ref === familyControl.value) || families[0];
+    }
+    function strategyChoices(family) {
+      const wanted = new Set((family.strategy_refs || []).map(String));
+      return strategies.filter(item => wanted.has(String(item.template_ref || item.strategy_ref))
+        || item.family_ref === family.family_ref);
+    }
+    function renderStrategyAndFields() {
+      const family = familyForSelection();
+      const options = strategyChoices(family);
+      strategyControl.replaceChildren();
+      for (const item of options) {
+        const option = document.createElement("option");
+        option.value = String(item.template_ref || item.strategy_ref || "");
+        option.textContent = item.name || option.value;
+        strategyControl.append(option);
+      }
+      const preferred = String(
+        current?.template_ref || current?.strategy_ref || priorBinding.template_ref || "",
+      );
+      strategyControl.value = options.some(item => (
+        String(item.template_ref || item.strategy_ref) === preferred
+      )) ? preferred : String(options[0]?.template_ref || options[0]?.strategy_ref || "");
+      const implementation = options.find(item => (
+        String(item.template_ref || item.strategy_ref) === strategyControl.value
+      ));
+      const schema = implementation?.configuration_schema || family.configuration_schema || {};
+      controls = new Map();
+      fieldsHost.replaceChildren();
+      const sections = new Map();
+      for (const spec of schema.fields || []) {
+        const sectionName = String(spec.section || "参数");
+        let section = sections.get(sectionName);
+        if (!section) {
+          section = document.createElement("fieldset");
+          section.className = "backtest-family-strategy-section";
+          const legend = document.createElement("legend");
+          legend.textContent = context.t(sectionName);
+          section.append(legend);
+          sections.set(sectionName, section);
+          fieldsHost.append(section);
+        }
+        const control = familyField(context, state, spec, values[spec.key]);
+        controls.set(spec.key, control);
+        section.append(field(context.t(spec.label || spec.key), control, spec.help_text || ""));
+      }
+    }
+    familyControl.addEventListener("change", () => {
+      values = {};
+      renderStrategyAndFields();
+    });
+    strategyControl.addEventListener("change", () => {
+      values = {};
+      renderStrategyAndFields();
+    });
+    renderStrategyAndFields();
+
+    appendActions(context, form, () => {
+      try {
+        const family = familyForSelection();
+        const implementation = strategyChoices(family).find(item => (
+          String(item.template_ref || item.strategy_ref) === strategyControl.value
+        ));
+        if (!implementation) throw new Error("请选择策略实现");
+        const schema = implementation.configuration_schema || family.configuration_schema || {};
+        const factorBindings = {};
+        const parameters = {};
+        let productGroupRef = "";
+        for (const spec of schema.fields || []) {
+          const control = controls.get(spec.key);
+          const value = spec.type === "boolean"
+            ? control?.checked === true
+            : String(control?.value ?? "").trim();
+          const missing = spec.type === "boolean" ? !control : value === "";
+          if (spec.required && missing) throw new Error(`${spec.label || spec.key}不能为空`);
+          if (missing) continue;
+          if (spec.type === "factor_ref") factorBindings[spec.key] = value;
+          else if (spec.type === "product_group_ref") productGroupRef = value;
+          else if (spec.type === "boolean") parameters[spec.key] = value;
+          else if (spec.type === "integer") {
+            const number = Number(value);
+            if (!Number.isInteger(number)) throw new Error(`${spec.label || spec.key}必须为整数`);
+            if (spec.minimum != null && number < Number(spec.minimum)) {
+              throw new Error(`${spec.label || spec.key}不能小于 ${spec.minimum}`);
+            }
+            if (spec.maximum != null && number > Number(spec.maximum)) {
+              throw new Error(`${spec.label || spec.key}不能大于 ${spec.maximum}`);
+            }
+            const maxFrom = spec.maximum_from ? Number(controls.get(spec.maximum_from)?.value) : null;
+            if (Number.isFinite(maxFrom) && number > maxFrom) {
+              throw new Error(`${spec.label || spec.key}不能大于 ${maxFrom}`);
+            }
+            parameters[spec.key] = number;
+          } else if (spec.type === "number") {
+            const number = Number(value);
+            if (!Number.isFinite(number) || (spec.minimum != null && number < Number(spec.minimum))) {
+              throw new Error(`${spec.label || spec.key}不是有效数值`);
+            }
+            parameters[spec.key] = number;
+          } else if (spec.type === "enum") {
+            if (!(spec.values || []).map(String).includes(value)) {
+              throw new Error(`${spec.label || spec.key}选项无效`);
+            }
+            parameters[spec.key] = value;
+          } else {
+            throw new Error(`暂不支持策略字段类型：${spec.type}`);
+          }
+        }
+        const id = String(current?.id || strategyID());
+        const isLibraryStrategy = implementation.library_kind === "nautilus_strategy_source";
+        const strategyRef = String(implementation.strategy_ref || implementation.template_ref || "");
+        const revisionRef = String(
+          implementation.revision_ref || implementation.strategy_revision_ref
+            || implementation.current_revision_ref || "",
+        );
+        const templateRef = isLibraryStrategy ? "" : strategyRef;
+        if (!strategyRef || !revisionRef) throw new Error("策略家族没有绑定不可变策略版本");
+        const product = (state.groups || []).find(item => productGroupID(item) === productGroupRef);
+        const group = {
+          ...(current || {}),
+          id,
+          batchId: current?.batchId || `batch:${Date.now()}`,
+          name: name.value.trim() || implementation.name || family.name || id,
+          strategy_kind: isLibraryStrategy ? "library" : "factor_template",
+          family_ref: family.family_ref,
+          family_revision_ref: family.family_revision_ref,
+          strategy_ref: strategyRef,
+          strategy_revision_ref: implementation.strategy_revision_ref || revisionRef,
+          ...(templateRef ? {template_ref: templateRef, revision_ref: revisionRef} : {}),
+          configuration_schema_ref: schema.schema_ref || "",
+          factor_role_bindings: structuredClone(factorBindings),
+          factor_candidate_refs: Object.values(factorBindings),
+          product_group_ref: productGroupRef,
+          product_path_selection_id: productGroupRef,
+          ...(product ? {product_path_selection: FTTestProducts.projection(product)} : {}),
+          parameters: structuredClone(parameters),
+          splitCount: parameters.split_count,
+          groupIndex: parameters.group_index,
+        };
+        state.analysis.factor_strategy_bindings ||= [];
+        state.analysis.factor_strategy_bindings = state.analysis.factor_strategy_bindings
+          .filter(item => String(item.strategy_id || item.target_strategy_id || "") !== id);
+        state.strategyBindings ||= [];
+        state.strategyBindings = state.strategyBindings.filter(item => (
+          String(item.target_strategy_id || "") !== id
+        ));
+        if (isLibraryStrategy) {
+          state.strategyBindings.push({
+            binding_id: priorSourceBinding.binding_id || `${id}:strategy-library`,
+            target_strategy_id: id,
+            source: {
+              kind: "library",
+              strategy_ref: strategyRef,
+              revision_ref: revisionRef,
+              source_sha256: String(
+                implementation.current_revision?.source_sha256
+                  || implementation.source_sha256 || "",
+              ),
+            },
+          });
+        } else {
+          state.analysis.factor_strategy_bindings.push({
+            strategy_id: id,
+            binding_id: priorBinding.binding_id || `${id}:factor-strategy`,
+            template_ref: templateRef,
+            revision_ref: revisionRef,
+            factor_bindings: factorBindings,
+            product_group_ref: productGroupRef,
+            parameters,
+            family_ref: family.family_ref,
+            family_revision_ref: family.family_revision_ref,
+            configuration_schema_ref: schema.schema_ref || "",
+          });
+        }
+        if (current) Object.assign(current, group);
+        else state.analysis.groups.push(group);
+        state.selectedBacktestGroupIDs = [id];
+        state.nautilusReview = null;
+        onFinish();
+      } catch (error) { showError(form, error.message); }
+    }, onFinish);
+  }
+
+  function familyField(context, state, spec, initialValue) {
+    const type = String(spec.type || "");
+    if (["factor_ref", "product_group_ref", "enum"].includes(type)) {
+      const options = type === "factor_ref" ? factorOptions(state)
+        : type === "product_group_ref" ? productOptions(state)
+          : (spec.values || []).map(value => ({value: String(value), label: String(value)}));
+      return selectControl(context, spec.label || spec.key, options, initialValue ?? spec.default ?? "");
+    }
+    if (type === "boolean") {
+      const control = document.createElement("input");
+      control.type = "checkbox";
+      control.checked = Boolean(initialValue ?? spec.default ?? false);
+      control.setAttribute("aria-label", context.t(spec.label || spec.key));
+      return control;
+    }
+    if (type === "integer" || type === "number") {
+      const control = input("number", initialValue ?? spec.default ?? "");
+      control.required = spec.required === true;
+      control.min = spec.minimum == null ? "" : String(spec.minimum);
+      control.max = spec.maximum == null ? "" : String(spec.maximum);
+      control.step = type === "integer" ? "1" : "any";
+      control.setAttribute("aria-label", context.t(spec.label || spec.key));
+      return control;
+    }
+    throw new Error(`暂不支持策略字段类型：${type}`);
+  }
+
+  function selectControl(context, label, options, selected = "") {
+    const control = document.createElement("select");
+    control.setAttribute("aria-label", context.t(label));
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = context.t("请选择");
+    control.append(placeholder);
+    for (const item of options || []) {
+      if (!item.value) continue;
+      const option = document.createElement("option");
+      option.value = String(item.value);
+      option.textContent = String(item.label || item.value);
+      control.append(option);
+    }
+    control.value = String(selected || "");
+    return control;
+  }
+
+  function factorOptions(state) {
+    const unique = new Map();
+    for (const item of [...(state.factors || []), ...(state.savedFactors || []), ...(state.values?.factor_candidates || [])]) {
+      const ref = String(item?.ref || "").trim();
+      if (ref) unique.set(ref, {value: ref, label: item.alias || item.name || ref});
+    }
+    return [...unique.values()];
+  }
+
+  function productOptions(state) {
+    const unique = new Map();
+    for (const item of state.groups || []) {
+      const ref = productGroupID(item);
+      if (ref) unique.set(ref, {value: ref, label: item.title_zh || item.name || item.alias || ref});
+    }
+    return [...unique.values()];
+  }
+
+  function productGroupID(item) {
+    return String(FTTestProducts.groupID(item) || item?.product_group_ref || item?.group_ref || "").trim();
+  }
+
+  function strategyID() {
+    return `strategy_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   }
 
   function renderRename(context, state, editor, form, onFinish) {

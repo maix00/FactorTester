@@ -227,10 +227,14 @@
       };
     }
     if (parts[0] === "strategies") {
-      const scope = new URLSearchParams(search).get("scope") || "mine";
+      const params = new URLSearchParams(search);
+      const scope = params.get("scope") || "mine";
+      const objectKind = params.get("kind") === "strategy"
+        ? "strategy" : "strategy_family";
       return {
         kind: "strategy-library",
-        scope: ["mine", "subordinates", "shared"].includes(scope) ? scope : "mine",
+        scope: ["public", "mine", "subordinates", "shared"].includes(scope) ? scope : "mine",
+        objectKind,
       };
     }
     // A task URL may omit the worker port when it is only a storage/detail
