@@ -55,6 +55,9 @@ EXACT_PATH_TESTS = {
     "tests/factors/bench_groupby_scope_streaming.py": (
         "tests/factors/test_groupby_scope_streaming.py",
     ),
+    "tests/benchmarks/bench_nautilus_historical_fees.py": (
+        "tests/server/test_nautilus_bridge_historical_fees.py",
+    ),
     "tests/factors/rolling_benchmarks/extrema.py": (
         "tests/factors/test_factor_expr_incremental.py",
     ),

@@ -56,7 +56,8 @@ def _rules() -> tuple[EffectiveRule, ...]:
         EffectiveRule("trading_sessions", pd.Timestamp("2025-01-01"), "exchange/calendar/au",
                       "exchange_calendar", {"intervals": [("09:00", "11:30"), ("13:30", "15:00")]}),
         EffectiveRule("daily_settlement", pd.Timestamp("2025-01-01"), "exchange/settlement/au",
-                      "exchange_notice", {"price_field": "settlement_price", "close_time": "15:00"}),
+                      "exchange_notice", {"eligible": True, "price_field": "settlement_price",
+                                           "close_time": "15:00"}),
     )
 
 
@@ -78,6 +79,36 @@ def test_freeze_exact_trading_day_and_timestamp_change() -> None:
     assert next(item for item in frozen[1].fields
                 if item.name == "CloseTodayRatioByVolume").effective_timestamp == "2025-01-02T21:00:00"
     assert frozen[1].daily_settlement.source_key == "exchange/settlement/au"
+    assert frozen[1].daily_settlement_eligible is True
+    assert frozen[1].should_apply_daily_settlement("eligible_products") is True
+    assert frozen[1].should_apply_daily_settlement("disabled") is False
+
+
+def test_noneligible_exchange_rule_does_not_schedule_daily_settlement() -> None:
+    rules = (
+        _rules()[0],
+        EffectiveRule("daily_settlement", pd.Timestamp("2025-01-01"),
+                      "exchange/settlement/au", "exchange_notice", {"eligible": False}),
+    )
+    frozen = resolve_trading_fields_at(
+        source=SOURCE, instrument="AU.SHFE", event=_event(21, 0, date(2025, 1, 3)),
+        provider=_provider(), rules=rules,
+    )
+    assert frozen.daily_settlement_eligible is False
+    assert frozen.should_apply_daily_settlement("eligible_products") is False
+
+
+def test_eligible_settlement_rule_requires_official_price_and_time() -> None:
+    invalid_rules = (
+        _rules()[0],
+        EffectiveRule("daily_settlement", pd.Timestamp("2025-01-01"),
+                      "exchange/settlement/au", "exchange_notice", {"eligible": True}),
+    )
+    with pytest.raises(TradingFieldContractError, match="eligible rules require"):
+        resolve_trading_fields_at(
+            source=SOURCE, instrument="AU.SHFE", event=_event(21, 0, date(2025, 1, 3)),
+            provider=_provider(), rules=invalid_rules,
+        )
 
 
 def test_utc_event_clock_uses_source_exchange_timezone() -> None:

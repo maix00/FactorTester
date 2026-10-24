@@ -288,6 +288,12 @@ def test_factor_expr_streaming_changes_select_bounded_contract_tests():
     }
 
 
+def test_nautilus_fee_benchmark_edit_selects_fee_contract_tests():
+    assert selector.select({"tests/benchmarks/bench_nautilus_historical_fees.py"}) == (
+        "SCOPED", ["tests/server/test_nautilus_bridge_historical_fees.py"],
+    )
+
+
 def test_all_declared_module_targets_exist():
     assert all((selector.ROOT / "tests" / name).is_dir()
                for group in selector.IMPACT.values() for name in group)

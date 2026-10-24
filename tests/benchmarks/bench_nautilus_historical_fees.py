@@ -78,7 +78,6 @@ def _run_one(case: str, bar_count: int) -> dict:
         fee = make_nautilus_fee_model(
             (FeeRuleAt(bars[0].ts_event, Decimal(10000), (zero, zero, zero)),),
             clock=clock,
-            classify_fill=lambda order, instrument: "open",
             currency="CNY",
         )
     started = time.perf_counter()

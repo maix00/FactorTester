@@ -67,7 +67,7 @@ def test_nautilus_fee_model_uses_actual_fill_clock_across_rule_boundary():
     clock = ClockRef()
     fee = make_nautilus_fee_model(
         (_rule(first_ns, "3"), _rule(first_ns + 60_000_000_000, "7")),
-        clock=clock, classify_fill=lambda order, instrument: "open", currency="CNY",
+        clock=clock, currency="CNY",
     )
     engine = _engine(instrument, fee, latency_ns=30_000_000_000)
     probe = _Probe.make(instrument, buy_at=1)
@@ -90,13 +90,44 @@ def test_nautilus_fee_model_rejects_missing_prior_rule():
             return 10
 
     fee = make_nautilus_fee_model(
-        (_rule(11, "3"),), clock=Clock(),
-        classify_fill=lambda order, instrument: "open", currency="CNY",
+        (_rule(11, "3"),), clock=Clock(), currency="CNY",
     )
     from nautilus_trader.model import Price, Quantity
 
     with pytest.raises(ValueError, match="no historical fee rule"):
         fee.get_commission(None, Quantity.from_str("1"), Price.from_str("100"), None)
+
+
+def test_nautilus_fee_model_splits_fifo_close_by_trading_day_bucket():
+    _nt()
+
+    class Clock:
+        def timestamp_ns(self):
+            return 10
+
+    zero = (Decimal(0), Decimal(0))
+    schedule = (
+        FeeRuleAt(
+            1,
+            Decimal(10000),
+            (zero, (Decimal(0), Decimal(2)), (Decimal(0), Decimal(5))),
+        ),
+    )
+    fee = make_nautilus_fee_model(schedule, clock=Clock(), currency="CNY")
+    from nautilus_trader.model import Price, Quantity
+
+    commission = fee.get_commission_with_position_context(
+        None,
+        Quantity.from_str("4"),
+        Price.from_str("100"),
+        None,
+        None,
+        Quantity.from_str("1"),
+        Quantity.from_str("1"),
+        Quantity.from_str("2"),
+    )
+
+    assert str(commission) == "9.00 CNY"
 
 
 def test_fee_schedule_uses_exact_rule_change_boundary():

@@ -191,6 +191,22 @@ class FrozenTradingFields:
     trading_sessions: EffectiveRule
     daily_settlement: EffectiveRule
 
+    @property
+    def daily_settlement_eligible(self) -> bool:
+        """Whether an authoritative exchange rule provides DMTM inputs.
+
+        RunSpec chooses whether NautilusTrader's optional implementation is
+        requested. The effective exchange rule supplies eligibility, official
+        price field, and settlement time; it does not override RunSpec intent.
+        """
+        return self.daily_settlement.value["eligible"] is True
+
+    def should_apply_daily_settlement(self, run_policy: str) -> bool:
+        """Combine the frozen RunSpec policy with this product's rule evidence."""
+        if run_policy not in {"eligible_products", "disabled"}:
+            raise TradingFieldContractError(f"unknown daily settlement policy {run_policy!r}")
+        return run_policy == "eligible_products" and self.daily_settlement_eligible
+
     def value(self, name: str) -> Decimal:
         for item in self.fields:
             if item.name == name:
@@ -232,12 +248,16 @@ def _rule_at(
             raise TradingFieldContractError(f"{kind}: rule lacks exchange provenance/value")
         if kind == "trading_sessions" and not rule.value.get("intervals"):
             raise TradingFieldContractError("trading_sessions: intervals are required")
-        if kind == "daily_settlement" and (
+        if kind == "daily_settlement" and not isinstance(rule.value.get("eligible"), bool):
+            raise TradingFieldContractError(
+                "daily_settlement: eligible must be an explicit exchange-rule boolean"
+            )
+        if kind == "daily_settlement" and rule.value["eligible"] is True and (
             rule.value.get("price_field") != "settlement_price"
             or not rule.value.get("close_time")
         ):
             raise TradingFieldContractError(
-                "daily_settlement: settlement_price and close_time are required"
+                "daily_settlement: eligible rules require settlement_price and close_time"
             )
         at = _local_timestamp(rule.effective_at, timezone)
         if at in seen:

@@ -191,6 +191,54 @@ def test_custom_fee_model_can_observe_fill_time_not_just_submission_time():
         engine.dispose()
 
 
+def test_official_daily_settlement_posts_variation_and_resets_open_cost_basis():
+    _nt()
+    from nautilus_trader.execution import MakerTakerFeeModel
+    from nautilus_trader.model import (
+        Currency, InstrumentClose, InstrumentCloseType, Price,
+    )
+
+    instrument = _instrument()
+    bars = _bars(instrument, count=6)
+    engine = _engine(instrument, MakerTakerFeeModel(
+        maker_rate=Decimal(0), taker_rate=Decimal(0)))
+    probe = _Probe.make(instrument, buy_at=1)
+    engine.add_strategy(probe)
+    settlement = InstrumentClose(
+        instrument_id=instrument.id,
+        close_price=Price.from_str("102.970"),
+        close_type=InstrumentCloseType.DAILY_SETTLEMENT,
+        ts_event=bars[2].ts_event,
+        ts_init=bars[2].ts_init,
+    )
+    cny = Currency.from_str("CNY")
+    try:
+        # Equal timestamps are deliberately ordered with the completed Bar
+        # first, then the exchange settlement event, using the engine's
+        # ordinary event path.
+        engine.add_data([*bars[:3], settlement])
+        engine.run(streaming=True)
+        engine.clear_data()
+        engine.add_data(bars[3:])
+        engine.run(streaming=True)
+        engine.clear_data()
+        engine.end()
+
+        assert len(probe.fills) == 1
+        assert str(probe.fills[0].last_px) == "102.960"
+        positions = engine.cache.positions_open(
+            instrument_id=instrument.id,
+            account_id=engine.cache.account_for_venue(instrument.id.venue).id,
+        )
+        assert len(positions) == 1
+        assert str(positions[0].avg_px_open) == "102.970"
+        assert str(engine.portfolio.unrealized_pnl(instrument.id)) == "300.00 CNY"
+        account = engine.cache.account_for_venue(instrument.id.venue)
+        assert str(account.balance_total(cny)) == "10000100.00 CNY"
+    finally:
+        engine.dispose()
+
+
 @pytest.mark.parametrize("replace_instrument", [False, True])
 def test_historical_tick_change_affects_later_limit_order_validation(replace_instrument):
     _nt()

@@ -10,7 +10,7 @@ is rejected rather than charged at an arbitrary rate.
 from __future__ import annotations
 
 from bisect import bisect_right
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import Decimal
 from itertools import pairwise
@@ -180,13 +180,14 @@ def freeze_fee_schedule_from_history(
 def make_nautilus_fee_model(
     schedule: tuple[FeeRuleAt, ...], *,
     clock: object,
-    classify_fill: Callable[[object, object], FeeAction],
     currency: str,
 ):
     """Use the pinned NautilusTrader extension point at the actual fill time.
 
-    ``classify_fill`` must be backed by the execution ledger. The adapter does
-    not infer opening/closing or close-today from buy/sell direction alone.
+    NautilusTrader supplies the pre-fill FIFO inventory allocation. Carried inventory is closed
+    first; fees are then split across open, close-today and close-yesterday quantities at the
+    historical rate effective at the fill timestamp. The adapter does not infer offsets from
+    buy/sell direction alone.
     """
     from nautilus_trader.execution import FeeModel
     from nautilus_trader.model import Money
@@ -199,14 +200,30 @@ def make_nautilus_fee_model(
     boundaries = tuple(rule.effective_ns for rule in schedule)
 
     class HistoricalFeeModel(FeeModel):
-        def get_commission(self, order, fill_quantity, fill_px, instrument):
+        def _rule_at_fill(self):
             now_ns = int(clock.timestamp_ns())
             offset = bisect_right(boundaries, now_ns) - 1
             if offset < 0:
                 raise ValueError("no historical fee rule effective at fill time")
-            action = classify_fill(order, instrument)
-            amount = schedule[offset].commission(
-                action, Decimal(str(fill_quantity)), Decimal(str(fill_px)),
+            return schedule[offset]
+
+        def get_commission(self, order, fill_quantity, fill_px, instrument):
+            rule = self._rule_at_fill()
+            amount = rule.commission(
+                "open", Decimal(str(fill_quantity)), Decimal(str(fill_px)),
+            )
+            return Money.from_str(f"{amount} {currency}")
+
+        def get_commission_with_position_context(
+            self, order, fill_quantity, fill_px, instrument, underlying_px,
+            open_qty, close_today_qty, close_yesterday_qty,
+        ):
+            rule = self._rule_at_fill()
+            price = Decimal(str(fill_px))
+            amount = (
+                rule.commission("open", Decimal(str(open_qty)), price)
+                + rule.commission("close_today", Decimal(str(close_today_qty)), price)
+                + rule.commission("close", Decimal(str(close_yesterday_qty)), price)
             )
             return Money.from_str(f"{amount} {currency}")
 
