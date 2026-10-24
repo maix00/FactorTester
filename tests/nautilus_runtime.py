@@ -36,7 +36,14 @@ def require_nautilus():
             f"Import error: {exc}",
             pytrace=False,
         )
-    if not Path(native.__file__).resolve().is_relative_to(source.resolve()):
+    native_file = getattr(native, "__file__", None)
+    if not native_file:
+        pytest.fail(
+            "The vendored NautilusTrader native extension is unavailable. Run "
+            "scripts/build_nautilus_extension.sh.",
+            pytrace=False,
+        )
+    if not Path(native_file).resolve().is_relative_to(source.resolve()):
         pytest.fail(
             "Integration tests must load the native extension built from the "
             "vendored NautilusTrader source. Run scripts/build_nautilus_extension.sh.",

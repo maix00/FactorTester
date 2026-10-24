@@ -31,6 +31,7 @@ def test_builder_uses_vendor_toolchain_and_reused_dev_target():
     assert 'CARGO_TARGET_DIR="${NAUTILUS_ROOT}/target"' in builder
     assert 'CARGO_PROFILE_DEV_OPT_LEVEL="${DEV_OPT_LEVEL}"' in builder
     assert "maturin develop --profile dev --locked" in builder
+    assert 'getattr(native, "__file__", None)' in builder
     assert "_libnautilus" in builder
 
 
@@ -47,3 +48,23 @@ def test_built_extension_is_loaded_from_the_pinned_vendor_source():
     from tests.nautilus_runtime import require_nautilus
 
     assert require_nautilus().__version__ == NAUTILUS_VERSION
+
+
+def test_runtime_helper_rejects_a_native_module_without_a_binary_path(monkeypatch):
+    import sys
+    from types import ModuleType
+
+    import pytest
+
+    from tests.nautilus_runtime import require_nautilus
+
+    package = ModuleType("nautilus_trader")
+    package.__file__ = str(ROOT / "vendor/nautilus_trader/python/nautilus_trader/__init__.py")
+    package.__version__ = NAUTILUS_VERSION
+    native = ModuleType("nautilus_trader._libnautilus")
+    native.__file__ = None
+    monkeypatch.setitem(sys.modules, "nautilus_trader", package)
+    monkeypatch.setitem(sys.modules, "nautilus_trader._libnautilus", native)
+
+    with pytest.raises(pytest.fail.Exception, match="native extension is unavailable"):
+        require_nautilus()

@@ -43,7 +43,11 @@ except (ImportError, OSError):
     raise SystemExit(0)
 source = Path(expected_source).resolve()
 package_path = Path(nautilus_trader.__file__).resolve()
-native_path = Path(native.__file__).resolve()
+native_file = getattr(native, "__file__", None)
+if not native_file:
+    print("needs-build")
+    raise SystemExit(0)
+native_path = Path(native_file).resolve()
 if nautilus_trader.__version__ != expected_version:
     print("needs-build")
     raise SystemExit(0)
