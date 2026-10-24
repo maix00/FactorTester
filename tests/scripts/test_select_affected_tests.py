@@ -109,6 +109,7 @@ def test_nautilus_run_spec_and_source_ui_select_focused_tests():
     mode, targets = selector.select({
         "server/services/nautilus_bridge/config.py",
         "server/services/nautilus_bridge/native_configuration.py",
+        "server/services/nautilus_bridge/engine_factory.py",
         "server/services/nautilus_bridge/source_registry.py",
         "server/services/nautilus_bridge/capabilities.py",
         "server/services/product_catalog_projection.py",
@@ -129,6 +130,7 @@ def test_nautilus_run_spec_and_source_ui_select_focused_tests():
     assert set(targets) == {
         "tests/server/test_nautilus_bridge_config.py",
         "tests/server/test_nautilus_native_configuration_contract.py",
+        "tests/server/test_nautilus_bridge_engine_factory.py",
         "tests/server/test_nautilus_source_capabilities.py",
         "tests/server/test_nautilus_source_registry.py",
         "tests/server/test_nautilus_source_declarations.py",

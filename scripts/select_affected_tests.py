@@ -53,6 +53,9 @@ EXACT_PATH_TESTS = {
         "tests/server/test_nautilus_bridge_config.py",
         "tests/server/test_nautilus_native_configuration_contract.py",
     ),
+    "server/services/nautilus_bridge/engine_factory.py": (
+        "tests/server/test_nautilus_bridge_engine_factory.py",
+    ),
     "server/services/nautilus_bridge/capabilities.py": (
         "tests/server/test_nautilus_source_capabilities.py",
     ),
