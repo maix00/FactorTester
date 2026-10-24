@@ -23,8 +23,8 @@ _TEMPLATES: tuple[dict[str, Any], ...] = (
         "description": "在每个已完成的横截面时点按因子值稳定排序并等分产品，生成指定组的目标成员。",
         "factor_roles": [{"key": "signal", "label": "分组因子", "required": True}],
         "parameters": [
-            {"key": "split_count", "label": "分组数", "type": "integer", "minimum": 2, "maximum": 100},
-            {"key": "group_index", "label": "第 N 组", "type": "integer", "minimum": 1, "maximum_from": "split_count"},
+            {"key": "split_count", "label": "分组数", "type": "integer", "minimum": 2, "maximum": 100, "default": 5},
+            {"key": "group_index", "label": "第 N 组", "type": "integer", "minimum": 1, "maximum_from": "split_count", "default": 1},
         ],
         "execution": "nautilus_strategy",
         "batch_optimization": "同一因子、产品范围、时点和分组数只计算一次因子横截面排序；结果分发给各组策略。",
@@ -38,9 +38,9 @@ _TEMPLATES: tuple[dict[str, Any], ...] = (
         "description": "因子达到入场阈值时建立方向仓位，回到退出阈值时退出；中间区域保持现有目标。",
         "factor_roles": [{"key": "signal", "label": "信号因子", "required": True}],
         "parameters": [
-            {"key": "entry_threshold", "label": "入场阈值（绝对值）", "type": "number", "minimum": 0},
-            {"key": "exit_threshold", "label": "退出阈值（绝对值）", "type": "number", "minimum": 0},
-            {"key": "side_mode", "label": "方向", "type": "enum", "values": ["long_short", "long_only", "short_only"]},
+            {"key": "entry_threshold", "label": "入场阈值（绝对值）", "type": "number", "minimum": 0, "default": 1},
+            {"key": "exit_threshold", "label": "退出阈值（绝对值）", "type": "number", "minimum": 0, "default": 0},
+            {"key": "side_mode", "label": "方向", "type": "enum", "values": ["long_short", "long_only", "short_only"], "default": "long_short"},
         ],
         "execution": "nautilus_strategy",
         "batch_optimization": "相同信号因子只发布一次事件时间因子值；各阈值策略在同一发布结果上生成目标。",
@@ -50,21 +50,96 @@ _BY_REF = {item["template_ref"]: item for item in _TEMPLATES}
 _FACTOR_REF = re.compile(r"^factor:v2:[A-Za-z0-9_-]{43}$")
 _ROLE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 
+_FAMILY_DEFINITIONS: dict[str, dict[str, Any]] = {
+    "cross_sectional_group": {
+        "family_ref": "nautilus-strategy-family:factor-cross-sectional-group",
+        "family_revision_ref": "nautilus-strategy-family-revision:factor-cross-sectional-group:1",
+        "name": "因子横截面分组",
+        "description": "按因子横截面排序形成可独立回测的分组策略。",
+    },
+    "threshold": {
+        "family_ref": "nautilus-strategy-family:factor-threshold",
+        "family_revision_ref": "nautilus-strategy-family-revision:factor-threshold:1",
+        "name": "因子阈值交易",
+        "description": "使用因子阈值生成进出场目标。",
+    },
+}
+
+
+def _configuration_schema(template: Mapping[str, Any]) -> dict[str, Any]:
+    """Build the one typed form contract shared by catalog and validation."""
+    factor_fields = [
+        {
+            "key": str(role["key"]),
+            "label": str(role["label"]),
+            "type": "factor_ref",
+            "required": bool(role.get("required", False)),
+            "section": "因子",
+        }
+        for role in template["factor_roles"]
+    ]
+    product_fields = [{
+        "key": "product_group_ref",
+        "label": "产品组",
+        "type": "product_group_ref",
+        "required": True,
+        "section": "产品范围",
+    }]
+    parameter_fields = [
+        {**dict(spec), "required": True, "section": "参数"}
+        for spec in template["parameters"]
+    ]
+    return {
+        "schema_ref": f"{template['template_ref']}:configuration-schema:{template['version']}",
+        "version": int(template["version"]),
+        "fields": [*factor_fields, *product_fields, *parameter_fields],
+    }
+
+
+def _family_catalog() -> list[dict[str, Any]]:
+    families = []
+    for kind, definition in _FAMILY_DEFINITIONS.items():
+        members = [item for item in _TEMPLATES if item["kind"] == kind]
+        if not members:
+            continue
+        families.append({
+            **definition,
+            "object_kind": "strategy_family",
+            "library_scope": "public",
+            "read_only": True,
+            "strategy_refs": [item["template_ref"] for item in members],
+            "configuration_schema": _configuration_schema(members[0]),
+        })
+    return families
+
 
 def factor_strategy_catalog() -> dict[str, Any]:
-    """Return static public templates; this path does not inspect user data."""
+    """Return versioned public families and their strategies without reading user data."""
+    families = _family_catalog()
+    family_by_kind = {
+        kind: definition for kind, definition in _FAMILY_DEFINITIONS.items()
+    }
+    family_refs = {item["family_ref"]: item for item in families}
+    strategies = []
+    for item in _TEMPLATES:
+        family = family_by_kind[item["kind"]]
+        strategies.append({
+            **item,
+            "object_kind": "strategy",
+            "strategy_ref": item["template_ref"],
+            "strategy_revision_ref": item["revision_ref"],
+            "family_ref": family["family_ref"],
+            "family_revision_ref": family["family_revision_ref"],
+            "configuration_schema": family_refs[family["family_ref"]]["configuration_schema"],
+            "library_scope": "public",
+            "library_kind": "factor_strategy_template",
+            "read_only": True,
+        })
     return {
         "success": True,
         "scope": "public",
-        "items": [
-            {
-                **item,
-                "library_scope": "public",
-                "library_kind": "factor_strategy_template",
-                "read_only": True,
-            }
-            for item in _TEMPLATES
-        ],
+        "families": families,
+        "items": strategies,
     }
 
 
@@ -121,6 +196,9 @@ def normalize_factor_strategy_binding(
     if not isinstance(parameters, Mapping):
         raise ValueError("factor strategy parameters must be an object")
     normalized_parameters = _normalize_parameters(template, parameters)
+    product_group_ref = str(raw.get("product_group_ref") or "").strip()
+    if not product_group_ref or len(product_group_ref) > 512:
+        raise ValueError("product_group_ref must identify one selected product group")
     return {
         "strategy_id": strategy_id,
         "binding_id": binding_id,
@@ -129,6 +207,12 @@ def normalize_factor_strategy_binding(
         "template_ref": template_ref,
         "revision_ref": revision_ref,
         "template_version": template["version"],
+        "strategy_ref": template_ref,
+        "strategy_revision_ref": revision_ref,
+        "family_ref": _FAMILY_DEFINITIONS[template["kind"]]["family_ref"],
+        "family_revision_ref": _FAMILY_DEFINITIONS[template["kind"]]["family_revision_ref"],
+        "configuration_schema_ref": _configuration_schema(template)["schema_ref"],
+        "product_group_ref": product_group_ref,
         "factor_bindings": factor_bindings,
         "parameters": normalized_parameters,
         "requirements": {},
@@ -229,6 +313,10 @@ def _normalize_parameters(template: Mapping[str, Any], raw: Mapping[str, Any]) -
             if selected not in spec["values"]:
                 raise ValueError(f"{key} is not an allowed value")
             result[key] = selected
+        elif kind == "boolean":
+            if not isinstance(value, bool):
+                raise ValueError(f"{key} must be a boolean")
+            result[key] = value
     if template["kind"] == "threshold" and result["exit_threshold"] > result["entry_threshold"]:
         raise ValueError("exit_threshold must not exceed entry_threshold")
     if template["kind"] == "cross_sectional_group" and result["group_index"] > result["split_count"]:
