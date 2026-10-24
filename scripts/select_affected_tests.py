@@ -142,14 +142,12 @@ EXACT_PATH_TESTS = {
     ),
     "server/manager/web/jobs/artifacts.js": (
         "tests/scripts/test_nautilus_report_viewer.py",
-        "tests/scripts/test_backtest_result_browser.py",
     ),
     "server/manager/web/jobs/job-artifact-viewers.js": (
         "tests/scripts/test_nautilus_report_viewer.py",
-        "tests/scripts/test_backtest_result_browser.py",
     ),
     "server/manager/web/test-modules/backtest/results/view.js": (
-        "tests/scripts/test_backtest_result_browser.py",
+        "tests/scripts/test_nautilus_report_viewer.py",
     ),
     "server/services/nautilus_bridge/capabilities.py": (
         "tests/server/test_nautilus_source_capabilities.py",

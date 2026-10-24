@@ -220,7 +220,6 @@ def test_nautilus_strategy_review_report_and_trading_ui_select_focused_tests():
         "tests/js/test_strategy_binding_venues.js",
         "tests/scripts/test_nautilus_trading_workbench.py",
         "tests/scripts/test_nautilus_report_viewer.py",
-        "tests/scripts/test_backtest_result_browser.py",
     }
     assert all((selector.ROOT / path.split("::", 1)[0]).is_file() for path in targets)
 
