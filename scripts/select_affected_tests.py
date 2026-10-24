@@ -45,6 +45,61 @@ LEAF_TEST_MODULES = {"calc", "catalog", "group", "backtest", "scripts", "release
 # the repository. Add the directly affected tests here when a domain changes.
 EXACT_PATH_TESTS = {
     "scripts/test_js.sh": ("tests/js/test_playwright_runtime.js",),
+    "server/services/nautilus_bridge/config.py": (
+        "tests/server/test_nautilus_bridge_config.py",
+        "tests/server/test_nautilus_native_configuration_contract.py",
+    ),
+    "server/services/nautilus_bridge/native_configuration.py": (
+        "tests/server/test_nautilus_bridge_config.py",
+        "tests/server/test_nautilus_native_configuration_contract.py",
+    ),
+    "server/services/nautilus_bridge/capabilities.py": (
+        "tests/server/test_nautilus_source_capabilities.py",
+    ),
+    "server/services/nautilus_bridge/source_registry.py": (
+        "tests/server/test_nautilus_source_registry.py",
+        "tests/server/test_nautilus_source_declarations.py",
+    ),
+    "server/services/product_catalog_projection.py": (
+        "tests/products/test_product_source_projection.py",
+    ),
+    "server/manager/web/catalog/source-list.js": (
+        "tests/scripts/test_nautilus_source_overlay.py",
+    ),
+    "server/manager/web/catalog/source-family-detail.js": (
+        "tests/scripts/test_nautilus_source_overlay.py",
+    ),
+    "server/manager/web/workbench/object-overlay.js": (
+        "tests/scripts/test_nautilus_source_overlay.py",
+    ),
+    "server/manager/web/styles/app.css": (
+        "tests/scripts/test_nautilus_source_overlay.py",
+    ),
+    "sources/LocalCNFutures/CNFutures.py": (
+        "tests/server/test_nautilus_source_registry.py",
+        "tests/server/test_nautilus_source_declarations.py",
+        "tests/products/test_product_source_projection.py",
+    ),
+    "sources/LocalCNFutures/nautilus_adapter.py": (
+        "tests/server/test_nautilus_source_registry.py",
+        "tests/server/test_nautilus_source_declarations.py",
+        "tests/products/test_product_source_projection.py",
+    ),
+    "sources/registry.py": (
+        "tests/server/test_nautilus_source_registry.py",
+        "tests/server/test_nautilus_source_declarations.py",
+        "tests/products/test_product_source_projection.py",
+    ),
+    "tools/data/source_catalog.py": (
+        "tests/server/test_nautilus_source_registry.py",
+        "tests/server/test_nautilus_source_declarations.py",
+        "tests/products/test_product_source_projection.py",
+    ),
+    "tools/data/providers/DataProviderProductTS.py": (
+        "tests/server/test_nautilus_source_registry.py",
+        "tests/server/test_nautilus_source_declarations.py",
+        "tests/products/test_product_source_projection.py",
+    ),
     "server/manager/http/strategy_library_routes.py": (
         "tests/server/test_strategy_library.py",
         "tests/scripts/test_worktree_manager_client_app.py::test_strategy_library_patch_uses_manager_application_route",

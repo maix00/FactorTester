@@ -105,6 +105,36 @@ def test_strategy_web_edits_select_individual_contract_tests():
     }
 
 
+def test_nautilus_run_spec_and_source_ui_select_focused_tests():
+    mode, targets = selector.select({
+        "server/services/nautilus_bridge/config.py",
+        "server/services/nautilus_bridge/native_configuration.py",
+        "server/services/nautilus_bridge/source_registry.py",
+        "server/services/nautilus_bridge/capabilities.py",
+        "server/services/product_catalog_projection.py",
+        "server/manager/web/catalog/source-list.js",
+        "server/manager/web/catalog/source-family-detail.js",
+        "server/manager/web/workbench/object-overlay.js",
+        "server/manager/web/styles/app.css",
+        "sources/LocalCNFutures/CNFutures.py",
+        "sources/LocalCNFutures/nautilus_adapter.py",
+        "sources/registry.py",
+        "tools/data/source_catalog.py",
+        "tools/data/providers/DataProviderProductTS.py",
+    })
+    assert mode == "SCOPED"
+    assert set(targets) == {
+        "tests/server/test_nautilus_bridge_config.py",
+        "tests/server/test_nautilus_native_configuration_contract.py",
+        "tests/server/test_nautilus_source_capabilities.py",
+        "tests/server/test_nautilus_source_registry.py",
+        "tests/server/test_nautilus_source_declarations.py",
+        "tests/products/test_product_source_projection.py",
+        "tests/scripts/test_nautilus_source_overlay.py",
+    }
+    assert all((selector.ROOT / path).is_file() for path in targets)
+
+
 def test_selector_change_runs_its_own_contract_test_not_full_suite():
     assert selector.select({"scripts/select_affected_tests.py"}) == (
         "SCOPED", ["tests/scripts/test_select_affected_tests.py"],
