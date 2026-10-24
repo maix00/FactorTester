@@ -107,6 +107,50 @@ EXACT_PATH_TESTS = {
     "server/modules/nautilus_workbench/__init__.py": (
         "tests/server/test_nautilus_manager_preview.py",
     ),
+    "server/manager/web/workbench/backtest-group-form.js": (
+        "tests/scripts/test_worktree_manager_web_manifest.py::test_backtest_group_forms_mount_shared_picker_elements",
+    ),
+    "server/manager/web/workbench/backtest-groups.js": (
+        "tests/scripts/test_worktree_manager_web_manifest.py::test_backtest_strategy_surfaces_follow_backend_adapter_and_selection_contract",
+    ),
+    "server/manager/web/workbench/strategy-binding-panel.js": (
+        "tests/scripts/test_worktree_manager_web_manifest.py::test_strategy_binding_panel_only_routes_library_strategies_to_venues",
+        "tests/js/test_strategy_binding_venues.js",
+    ),
+    "server/manager/web/workbench/nautilus-configuration.js": (
+        "tests/scripts/test_nautilus_config_review.py",
+    ),
+    "server/manager/web/workbench/test-settings.js": (
+        "tests/scripts/test_nautilus_config_review.py",
+        "tests/scripts/test_worktree_manager_web_manifest.py::test_manifest_matches_html_script_order_and_files",
+    ),
+    "server/manager/web/workbench/test-configuration.js": (
+        "tests/scripts/test_nautilus_config_review.py",
+    ),
+    "server/manager/web/module-manifest.json": (
+        "tests/scripts/test_nautilus_config_review.py",
+        "tests/scripts/test_worktree_manager_web_manifest.py::test_manifest_matches_html_script_order_and_files",
+    ),
+    "server/manager/web/styles/workbench-settings.css": (
+        "tests/scripts/test_nautilus_config_review.py",
+    ),
+    "server/manager/web/trading/workbench.js": (
+        "tests/scripts/test_nautilus_trading_workbench.py",
+    ),
+    "server/manager/web/trading/workbench.css": (
+        "tests/scripts/test_nautilus_trading_workbench.py",
+    ),
+    "server/manager/web/jobs/artifacts.js": (
+        "tests/scripts/test_nautilus_report_viewer.py",
+        "tests/scripts/test_backtest_result_browser.py",
+    ),
+    "server/manager/web/jobs/job-artifact-viewers.js": (
+        "tests/scripts/test_nautilus_report_viewer.py",
+        "tests/scripts/test_backtest_result_browser.py",
+    ),
+    "server/manager/web/test-modules/backtest/results/view.js": (
+        "tests/scripts/test_backtest_result_browser.py",
+    ),
     "server/services/nautilus_bridge/capabilities.py": (
         "tests/server/test_nautilus_source_capabilities.py",
     ),

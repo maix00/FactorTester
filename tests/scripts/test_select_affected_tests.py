@@ -194,6 +194,37 @@ def test_nautilus_runspec_freezing_and_preview_select_focused_tests():
     assert all((selector.ROOT / path).is_file() for path in targets)
 
 
+def test_nautilus_strategy_review_report_and_trading_ui_select_focused_tests():
+    mode, targets = selector.select({
+        "server/manager/web/workbench/backtest-group-form.js",
+        "server/manager/web/workbench/backtest-groups.js",
+        "server/manager/web/workbench/strategy-binding-panel.js",
+        "server/manager/web/workbench/nautilus-configuration.js",
+        "server/manager/web/workbench/test-settings.js",
+        "server/manager/web/workbench/test-configuration.js",
+        "server/manager/web/module-manifest.json",
+        "server/manager/web/styles/workbench-settings.css",
+        "server/manager/web/trading/workbench.js",
+        "server/manager/web/trading/workbench.css",
+        "server/manager/web/jobs/artifacts.js",
+        "server/manager/web/jobs/job-artifact-viewers.js",
+        "server/manager/web/test-modules/backtest/results/view.js",
+    })
+    assert mode == "SCOPED"
+    assert set(targets) == {
+        "tests/scripts/test_worktree_manager_web_manifest.py::test_backtest_group_forms_mount_shared_picker_elements",
+        "tests/scripts/test_worktree_manager_web_manifest.py::test_backtest_strategy_surfaces_follow_backend_adapter_and_selection_contract",
+        "tests/scripts/test_worktree_manager_web_manifest.py::test_strategy_binding_panel_only_routes_library_strategies_to_venues",
+        "tests/scripts/test_nautilus_config_review.py",
+        "tests/scripts/test_worktree_manager_web_manifest.py::test_manifest_matches_html_script_order_and_files",
+        "tests/js/test_strategy_binding_venues.js",
+        "tests/scripts/test_nautilus_trading_workbench.py",
+        "tests/scripts/test_nautilus_report_viewer.py",
+        "tests/scripts/test_backtest_result_browser.py",
+    }
+    assert all((selector.ROOT / path.split("::", 1)[0]).is_file() for path in targets)
+
+
 def test_selector_change_runs_its_own_contract_test_not_full_suite():
     assert selector.select({"scripts/select_affected_tests.py"}) == (
         "SCOPED", ["tests/scripts/test_select_affected_tests.py"],
