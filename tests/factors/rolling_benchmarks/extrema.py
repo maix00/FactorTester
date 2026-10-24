@@ -18,7 +18,7 @@ if str(_ROOT) not in sys.path:
 
 import tools.factors.expr.rolling_arg_extrema as rolling_module
 from tools.factors.expr.groupby_scope_eval import _prefix_arg_extreme_loop
-from tools.testers.backtest.engines.factors.rolling_extrema import RollingMinMaxState
+from tools.factors.expr.streaming.rolling_extrema import RollingMinMaxState
 
 
 def _measure(function: Callable[[], np.ndarray], repeats: int = 3) -> float:

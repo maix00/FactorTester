@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from tools.factors.expr.lookback_scope import scope_trading_day
-from tools.testers.backtest.engines.factors.incremental import GroupScopeNode
+from tools.factors.expr.streaming.incremental import GroupScopeNode
 
 BARS = 255 * 5
 
@@ -64,7 +64,7 @@ def rolling_compare(products_n=2, window=255, bars=255 * 20):
     作用域内核只看当前分区已观测到的值，状态 O(width)、与分区长度无关。
     """
     import numpy as np
-    from tools.testers.backtest.engines.factors.incremental import RollingWindowNode
+    from tools.factors.expr.streaming.incremental import RollingWindowNode
 
     products = tuple(f"P{i}" for i in range(products_n))
     rows = np.random.default_rng(3).normal(1000.0, 5.0, size=(bars, products_n))

@@ -276,7 +276,7 @@ class FactorExpr:
         source_freq: DataFreq | str | None = None,
     ) -> Any:
         """Compile this FactorExpr into a run-scoped incremental executor."""
-        from tools.testers.backtest.engines.factors.incremental import (
+        from tools.factors.expr.streaming.incremental import (
             UnsupportedStreamingFactor,
             compile_incremental_factor,
         )

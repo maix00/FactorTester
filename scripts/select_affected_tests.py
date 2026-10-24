@@ -51,7 +51,18 @@ EXACT_PATH_TESTS = {
         "tests/backtest/native/test_factor_incremental_compile.py",
         "tests/backtest/native/test_factor_incremental_rolling_window.py",
         "tests/backtest/native/test_incremental_cross_sectional_kernels.py",
-        "tests/server/test_nautilus_bridge_factor_stream.py",
+    ),
+    "tests/factors/bench_groupby_scope_streaming.py": (
+        "tests/factors/test_groupby_scope_streaming.py",
+    ),
+    "tests/factors/rolling_benchmarks/extrema.py": (
+        "tests/factors/test_factor_expr_incremental.py",
+    ),
+    "tests/factors/rolling_benchmarks/incremental.py": (
+        "tests/factors/test_factor_expr_incremental.py",
+    ),
+    "tests/factors/rolling_benchmarks/window.py": (
+        "tests/factors/test_factor_expr_incremental.py",
     ),
     "scripts/test_js.sh": ("tests/js/test_playwright_runtime.js",),
     "server/services/nautilus_bridge/config.py": (
@@ -355,6 +366,15 @@ EXACT_PATH_TESTS = {
     ),
 }
 PREFIX_PATH_TESTS = {
+    "tools/testers/backtest/engines/factors/": (
+        "tests/factors/test_factor_expr_incremental.py",
+        "tests/factors/test_groupby_scope_derived_missing.py",
+        "tests/factors/test_groupby_scope_infinities.py",
+        "tests/factors/test_groupby_scope_streaming.py",
+        "tests/backtest/native/test_factor_incremental_compile.py",
+        "tests/backtest/native/test_factor_incremental_rolling_window.py",
+        "tests/backtest/native/test_incremental_cross_sectional_kernels.py",
+    ),
     "tools/factors/expr/streaming/": (
         "tests/factors/test_factor_expr_incremental.py",
         "tests/factors/test_groupby_scope_derived_missing.py",
@@ -363,7 +383,6 @@ PREFIX_PATH_TESTS = {
         "tests/backtest/native/test_factor_incremental_compile.py",
         "tests/backtest/native/test_factor_incremental_rolling_window.py",
         "tests/backtest/native/test_incremental_cross_sectional_kernels.py",
-        "tests/server/test_nautilus_bridge_factor_stream.py",
     ),
     "server/services/versioning/": ("tests/server/test_versioning_revisions.py",),
 }

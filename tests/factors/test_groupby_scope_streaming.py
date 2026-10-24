@@ -22,7 +22,7 @@ from tools.factors.expr.lookback_scope import (
     scope_trading_day,
 )
 from tools.factors.expr.timeline import PanelTimeline
-from tools.testers.backtest.engines.factors.incremental import GroupScopeNode
+from tools.factors.expr.streaming.incremental import GroupScopeNode
 
 BARS_PER_DAY = 255
 
@@ -184,10 +184,10 @@ def test_compiled_plan_routes_groupby_scope_to_the_scope_kernel():
     from tools.data.types import DataColumn, DataFreq
     from tools.factors.expr.groupby_scope import GroupByScopeExpr
     from tools.factors.expr.leaf import ColumnRef
-    from tools.testers.backtest.engines.adapters.factor_step import MarketSlice, ProductPrice
-    from tools.testers.backtest.engines.factors.incremental import (
+    from tools.factors.expr.streaming.incremental import (
         GroupScopeNode,
         StreamingFactorPlan,
+        compile_incremental_factor,
         compile_streaming_factor,
     )
 
@@ -199,26 +199,20 @@ def test_compiled_plan_routes_groupby_scope_to_the_scope_kernel():
         f"编译路径没有接到作用域内核，而是 {type(plan._root).__name__}"
     )
 
-    # 两条输入形态各用独立 plan：同一 plan 每根只能喂一次
-    bare_plan = compile_streaming_factor(expression, ("A",), source_freq=DataFreq.MIN1)
-    stamped_plan = compile_streaming_factor(expression, ("A",), source_freq=DataFreq.MIN1)
+    executor = compile_incremental_factor(
+        "trading-day-mean", expression, ("A",), source_freq=DataFreq.MIN1,
+    )
     index = pd.date_range("2026-01-05 09:31", periods=4, freq="min")
-    with_stamp, without_stamp = [], []
+    observed = []
     for position, stamp in enumerate(index):
-        price = ProductPrice(
-            instrument="A", price=float(position), fields={column.name: float(position)},
-        )
-        # 适配器路径构造的是裸 MarketSlice（不带时间），日切分依赖 _with_timestamp 补齐
-        market = MarketSlice({"A": price}, trading_day=pd.Timestamp(stamp).normalize())
-        without_stamp.append(bare_plan.update(pd.Timestamp(stamp), market)["A"])
-        stamped = MarketSlice(
-            {"A": price}, timestamp=pd.Timestamp(stamp),
+        executor.on_bar(
+            pd.Timestamp(stamp),
+            {"A": {column.name: float(position)}},
             trading_day=pd.Timestamp(stamp).normalize(),
         )
-        with_stamp.append(stamped_plan.update(pd.Timestamp(stamp), stamped)["A"])
+        observed.append(executor.on_signal(stamp)["A"])
 
-    assert without_stamp == [0.0, 0.5, 1.0, 1.5], without_stamp
-    assert with_stamp == without_stamp, (with_stamp, without_stamp)
+    assert observed == [0.0, 0.5, 1.0, 1.5], observed
 
 
 def test_compiled_plan_resets_at_the_day_boundary():
@@ -226,19 +220,24 @@ def test_compiled_plan_resets_at_the_day_boundary():
     from tools.data.types import DataColumn, DataFreq
     from tools.factors.expr.groupby_scope import GroupByScopeExpr
     from tools.factors.expr.leaf import ColumnRef
-    from tools.testers.backtest.engines.adapters.factor_step import MarketSlice, ProductPrice
-    from tools.testers.backtest.engines.factors.incremental import compile_streaming_factor
+    from tools.factors.expr.streaming.incremental import compile_streaming_factor
+    from tools.factors.expr.streaming.incremental import compile_incremental_factor
 
     column = DataColumn.CLOSE
     expression = GroupByScopeExpr(scope_trading_day(), ColumnRef(column)).mean()
-    plan = compile_streaming_factor(expression, ("A",), source_freq=DataFreq.MIN1)
+    executor = compile_incremental_factor(
+        "trading-day-mean", expression, ("A",), source_freq=DataFreq.MIN1,
+    )
 
     def feed(day: str, values: list[float]) -> list[float]:
         out = []
         stamps = pd.date_range(f"{day} 09:31", periods=len(values), freq="min")
         for value, stamp in zip(values, stamps, strict=True):
-            price = ProductPrice(instrument="A", price=value, fields={column.name: value})
-            out.append(plan.update(pd.Timestamp(stamp), MarketSlice({"A": price}, trading_day=pd.Timestamp(stamp).normalize()))["A"])
+            executor.on_bar(
+                pd.Timestamp(stamp), {"A": {column.name: value}},
+                trading_day=pd.Timestamp(stamp).normalize(),
+            )
+            out.append(executor.on_signal(stamp)["A"])
         return out
 
     first = feed("2026-01-05", [10.0, 20.0, 30.0])
@@ -309,7 +308,7 @@ def test_trading_day_scope_follows_the_trading_day_not_the_calendar_day():
 
 def test_trading_day_scope_refuses_to_guess_the_trading_day():
     """没有权威交易日时必须显式报错，而不是按日历日猜一个。"""
-    from tools.testers.backtest.engines.factors.incremental import UnsupportedStreamingFactor
+    from tools.factors.expr.streaming.incremental import UnsupportedStreamingFactor
 
     node = GroupScopeNode(
         "mean", _RowNode(np.ones((2, 1))), scope_trading_day(), 1, products=("A",)

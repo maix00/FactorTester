@@ -274,6 +274,7 @@ def test_factor_expr_streaming_changes_select_bounded_contract_tests():
         "tools/factors/expr/core.py",
         "tools/factors/expr/streaming/incremental.py",
         "tools/testers/backtest/modules/factor_signal.py",
+        "tools/testers/backtest/engines/factors/incremental.py",
     })
     assert mode == "SCOPED"
     assert set(targets) == {
@@ -284,7 +285,6 @@ def test_factor_expr_streaming_changes_select_bounded_contract_tests():
         "tests/backtest/native/test_factor_incremental_compile.py",
         "tests/backtest/native/test_factor_incremental_rolling_window.py",
         "tests/backtest/native/test_incremental_cross_sectional_kernels.py",
-        "tests/server/test_nautilus_bridge_factor_stream.py",
     }
 
 

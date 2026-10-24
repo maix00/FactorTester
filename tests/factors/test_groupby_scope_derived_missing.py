@@ -10,8 +10,6 @@ from tools.data.types import DataColumn, DataFreq
 from tools.factors.expr import ColumnRef, EvaluateContext
 from tools.factors.expr.lookback_scope import scope_bars
 from tools.factors.expr.timeline import build_panel_timeline
-from tools.testers.backtest.engines.adapters.factor_step import FactorStepAdapter
-from tools.testers.backtest.engines.adapters.frameworks import IncrementalFactorSource
 
 
 @pytest.mark.parametrize("width", [1, 8])
@@ -66,27 +64,6 @@ def test_incremental_group_scope_counts_bars_with_derived_warmup_nan(
     actual_frame = pd.DataFrame(actual, index=index).reindex(columns=products)
     np.testing.assert_allclose(
         actual_frame.to_numpy(),
-        expected.to_numpy(),
-        equal_nan=True,
-    )
-
-    adapter = FactorStepAdapter(
-        "scope_over_warmup",
-        IncrementalFactorSource(expression),
-        products,
-    )
-    adapted = []
-    for timestamp, value in zip(index, values, strict=True):
-        adapted.append(adapter.update(
-            timestamp,
-            {
-                product: {DataColumn.CLOSE_ADJUSTED.name: value}
-                for product in products
-            },
-        ).values)
-    adapted_frame = pd.DataFrame(adapted, index=index).reindex(columns=products)
-    np.testing.assert_allclose(
-        adapted_frame.to_numpy(),
         expected.to_numpy(),
         equal_nan=True,
     )

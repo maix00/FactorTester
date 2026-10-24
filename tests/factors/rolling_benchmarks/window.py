@@ -16,7 +16,7 @@ _ROOT = Path(__file__).resolve().parents[3]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from tools.testers.backtest.engines.factors.incremental import RollingWindowNode
+from tools.factors.expr.streaming.incremental import RollingWindowNode
 
 
 class _Rows:
