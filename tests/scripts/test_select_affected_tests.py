@@ -116,6 +116,9 @@ def test_nautilus_run_spec_and_source_ui_select_focused_tests():
         "server/manager/web/catalog/source-family-detail.js",
         "server/manager/web/workbench/object-overlay.js",
         "server/manager/web/styles/app.css",
+        "server/manager/http/job_proxy_routes.py",
+        "tests/nautilus_source_fixture.py",
+        "tests/scripts/fixtures/nautilus_source_overlay.js",
         "sources/LocalCNFutures/CNFutures.py",
         "sources/LocalCNFutures/nautilus_adapter.py",
         "sources/registry.py",
@@ -131,6 +134,7 @@ def test_nautilus_run_spec_and_source_ui_select_focused_tests():
         "tests/server/test_nautilus_source_declarations.py",
         "tests/products/test_product_source_projection.py",
         "tests/scripts/test_nautilus_source_overlay.py",
+        "tests/server/test_nautilus_preview_routes.py",
     }
     assert all((selector.ROOT / path).is_file() for path in targets)
 

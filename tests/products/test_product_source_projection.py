@@ -23,6 +23,9 @@ def test_contract_source_member_projects_contract_catalog_and_data() -> None:
     ]
     assert member["availability"]["status"] == "ready"
     assert member["naming_scheme"] == "local_cnfutures_contract_uid_v1"
+    assert member["nautilus_capability"]["adapter_available"] is True
+    assert member["nautilus_capability"]["supported_book_types"] == ["L1_MBP"]
+    assert member["nautilus_capability"]["instrument_scope"] == "physical_contract"
     assert "local_cnfutures_contract_uid_v1" in descriptor["naming_schemes"]
     assert descriptor["product_paths"] == [
         "Product/Futures/CNFutures",

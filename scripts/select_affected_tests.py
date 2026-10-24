@@ -60,11 +60,21 @@ EXACT_PATH_TESTS = {
         "tests/server/test_nautilus_source_registry.py",
         "tests/server/test_nautilus_source_declarations.py",
     ),
+    "tests/nautilus_source_fixture.py": (
+        "tests/server/test_nautilus_source_registry.py",
+        "tests/server/test_nautilus_source_declarations.py",
+    ),
+    "tests/scripts/fixtures/nautilus_source_overlay.js": (
+        "tests/scripts/test_nautilus_source_overlay.py",
+    ),
     "server/services/product_catalog_projection.py": (
         "tests/products/test_product_source_projection.py",
     ),
     "server/manager/web/catalog/source-list.js": (
         "tests/scripts/test_nautilus_source_overlay.py",
+    ),
+    "server/manager/http/job_proxy_routes.py": (
+        "tests/server/test_nautilus_preview_routes.py",
     ),
     "server/manager/web/catalog/source-family-detail.js": (
         "tests/scripts/test_nautilus_source_overlay.py",

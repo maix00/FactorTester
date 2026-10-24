@@ -203,6 +203,7 @@ def _tree_has_products(value: Any) -> bool:
 def _member_descriptor(
     member: DataSourceMember,
     products: tuple[Any, ...],
+    nautilus_capability: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     available = _available_products(member, products)
     supported = _supported_products(member, products)
@@ -218,6 +219,10 @@ def _member_descriptor(
         "dimensions": dict(member.dimensions),
         "data_modes": [mode],
         "naming_scheme": member.naming_scheme,
+        # Preserve the source server's verified NT adapter admission in the
+        # federated catalog snapshot. The UI can still show accurate details
+        # when this member is supplied by another server.
+        "nautilus_capability": dict(nautilus_capability or {}),
         "product_paths": sorted({
             classifier_class_path(type(product)) for product in supported
         }),
@@ -248,10 +253,29 @@ def product_source_descriptors() -> tuple[dict[str, Any], ...]:
     # empty merely because they are not ordinary Product objects.
     catalog_objects = (*products, *tuple(cached_contracts()))
     categories = available_product_categories()
+    try:
+        from server.services.nautilus_bridge.capabilities import (
+            market_data_source_capabilities,
+        )
+
+        nautilus_member_capabilities = {
+            str(item.get("member_key") or ""): item
+            for item in market_data_source_capabilities().get("members", [])
+            if isinstance(item, Mapping) and str(item.get("member_key") or "")
+        }
+    except Exception:
+        # Source metadata remains available if the execution bridge is absent;
+        # its adapter status is then unknown rather than inferred.
+        nautilus_member_capabilities = {}
     result: list[dict[str, Any]] = []
     for source in _visible_source_index().values():
         members = tuple(
-            _member_descriptor(member, catalog_objects)
+            _member_descriptor(
+                member, catalog_objects,
+                _catalog_nautilus_capability(
+                    nautilus_member_capabilities.get(member.key),
+                ),
+            )
             for member in source.members
         )
         naming_schemes = sorted({
@@ -300,6 +324,19 @@ def product_source_descriptors() -> tuple[dict[str, Any], ...]:
             "catalog_product_count": len(supported),
         })
     return tuple(result)
+
+
+def _catalog_nautilus_capability(
+    capability: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Keep federated source metadata compact; full mappings stay in detail API."""
+    if not isinstance(capability, Mapping) or not capability:
+        return {}
+    keys = (
+        "adapter_available", "adapter_id", "supported_book_types", "reason",
+        "instrument_scope", "bar_time_semantics", "raw_timestamp_unit", "layout",
+    )
+    return {key: capability[key] for key in keys if key in capability}
 
 
 @lru_cache(maxsize=1)

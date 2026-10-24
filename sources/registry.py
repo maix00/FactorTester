@@ -23,9 +23,12 @@ def iter_source_modules() -> tuple[str, ...]:
 
 
 def load_all_sources() -> tuple[str, ...]:
-    """Import all registered source modules once."""
+    """Import source modules and register definitions without listing products."""
     loaded: list[str] = []
     for module_name in _SOURCE_MODULES:
-        import_module(module_name)
+        module = import_module(module_name)
+        register = getattr(module, "register_source_declarations", None)
+        if callable(register):
+            register()
         loaded.append(module_name)
     return tuple(loaded)

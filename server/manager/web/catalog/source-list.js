@@ -34,22 +34,16 @@
         const rows = await loadDescriptors(context, helpers);
         if (!isCurrentView(token)) return;
         const table = FTUI.table(
-          [context.t("数据源族"), context.t("数据源"), context.t("服务器提供"),
-            context.t("提供服务器"), context.t("访客访问"),
-            context.t("产品路径"), context.t("产品类别"), context.t("数据形态"),
-            context.t("可用性"), context.t("数据频率")],
+          [context.t("数据源族"), context.t("数据源 / 频率"),
+            context.t("数据类型 / 深度"), context.t("可用性"),
+            context.t("提供服务器"), context.t("Nautilus 属性")],
           rows.map(([, descriptor]) => [
             familyLink(context, helpers, descriptor),
             membersCell(context, descriptor.members),
-            descriptor.server_provided ? context.t("是") : context.t("否"),
+            sourceTypesCell(context, descriptor.members),
+            compactAvailabilityCell(context, descriptor),
             providersCell(context, descriptor),
-            visitorAccessCell(context, descriptor),
-            multilineCell(descriptor.product_paths, "catalog-source-lines catalog-source-paths"),
-            multilineCell((descriptor.categories || []).map(category =>
-              category.title_zh || category.title || category.id || "").filter(Boolean)),
-            dataModesCell(context, descriptor.data_modes),
-            availabilityCell(context, descriptor),
-            frequencyCell(context, descriptor.availability),
+            sourceDetailsButton(context, descriptor),
           ]),
         );
         rows.forEach(([origin, descriptor], index) => {
@@ -228,7 +222,7 @@
     button.title = context.t("查看提供此数据源的服务器");
     button.addEventListener("click", event => {
       event.stopPropagation();
-      showProvidersOverlay(context, descriptor);
+      void openProvidersOverlay(context, descriptor);
     });
     return button;
   }
@@ -263,30 +257,70 @@
     );
   }
 
-  function visitorAccessCell(context, descriptor) {
-    if (descriptor.visitor_data_accessible === true) {
-      return context.t("可获取");
-    }
-    if (descriptor.visitor_data_accessible === false) {
-      return context.t("仅显示，访客不可获取");
-    }
-    return "—";
+  function sourceTypesCell(context, members) {
+    const values = (Array.isArray(members) ? members : []).map(member => {
+      const dimensions = member.dimensions || member.data_modes?.[0] || {};
+      const type = dimensions.data_kind || member.mode?.data_kind || "";
+      const depth = dimensions.market_depth || member.mode?.market_depth || "";
+      return [type, depth].filter(Boolean).join(" · ") || context.t("未声明");
+    });
+    return multilineCell([...new Set(values)], "catalog-source-lines catalog-source-modes");
   }
 
-  function showProvidersOverlay(context, descriptor) {
-    const dialog = window.FTUI.dialogRoot(context);
-    dialog.dataset.ftTabID = context.tabID || "";
-    dialog.className = "catalog-source-providers-dialog";
-    const card = document.createElement("form");
-    card.method = "dialog";
-    card.className = "dialog-card wide catalog-source-providers-card";
-    const close = document.createElement("button");
-    close.type = "submit";
-    close.className = "dialog-close";
-    close.setAttribute("aria-label", context.t("关闭"));
-    close.textContent = "×";
-    const title = document.createElement("h2");
-    title.textContent = `${familyName(descriptor) || context.t("数据源族")} · ${context.t("提供服务器")}`;
+  function compactAvailabilityCell(context, descriptor) {
+    const value = descriptor?.availability || {};
+    const products = value.product_count ?? descriptor?.product_count ?? 0;
+    const visitor = descriptor.visitor_data_accessible === false
+      ? context.t("访客只读") : "";
+    return multilineCell([
+      `${availabilityStatus(context, value.status)} · ${products} ${context.t("个有数据产品")}`,
+      visitor,
+    ], "catalog-source-lines catalog-source-availability");
+  }
+
+  function sourceDetailsButton(context, descriptor) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "catalog-source-providers-button";
+    button.textContent = context.t("查看属性");
+    button.title = context.t("查看数据源声明与 Nautilus 适配能力");
+    button.addEventListener("click", async event => {
+      event.preventDefault();
+      event.stopPropagation();
+      try {
+        await window.FTStaticLoader?.loadGroups?.([
+          "catalog-product-source-family", "object-overlay",
+        ]);
+        if (!window.FTProductSourceFamilyDetail?.openFamilyOverlay) {
+          throw new Error(context.t("数据源详情组件不可用"));
+        }
+        await window.FTProductSourceFamilyDetail.openFamilyOverlay(context, descriptor);
+      } catch (error) {
+        context.showNotice?.(error.message || context.t("数据源详情读取失败"), true);
+      }
+    });
+    return button;
+  }
+
+  async function openProvidersOverlay(context, descriptor) {
+    try {
+      if (!window.FTObjectOverlay?.open) {
+        await window.FTStaticLoader?.loadGroups?.(["object-overlay"]);
+      }
+      if (!window.FTObjectOverlay?.open) throw new Error(context.t("公共详情面板不可用"));
+      return window.FTObjectOverlay.open(context, {
+        kind: "data_source_providers", ref: familyID(descriptor), mode: "view",
+        initialValue: descriptor,
+        draftKey: `data-source-providers:${familyID(descriptor)}`,
+      });
+    } catch (error) {
+      context.showNotice?.(error.message || context.t("提供服务器读取失败"), true);
+      return null;
+    }
+  }
+
+  function providersOverlay(context, _ref, _mode, options = {}) {
+    const descriptor = options.initialValue || {};
     const providers = Array.isArray(descriptor?.server_providers)
       ? descriptor.server_providers : [];
     const table = FTUI.table(
@@ -304,11 +338,13 @@
         `${provider.available_product_count ?? 0}/${provider.catalog_product_count ?? 0}`,
       ]) : [[context.t("暂无服务器信息"), "—", "—", "—", "—", "—"]],
     );
-    card.append(close, title, table.shell);
-    dialog.append(card);
-    dialog.addEventListener("close", () => dialog.remove(), {once: true});
-    document.body.append(dialog);
-    dialog.showModal();
+    const root = document.createElement("div");
+    root.className = "detail-stack catalog-source-providers-overlay";
+    const title = document.createElement("h2");
+    title.textContent = `${familyName(descriptor) || context.t("数据源族")} · ${context.t("提供服务器")}`;
+    root.append(title, table.shell);
+    context.content.replaceChildren(root);
+    return root;
   }
 
   function multilineCell(values, className = "catalog-source-lines") {
@@ -322,25 +358,6 @@
     return cell;
   }
 
-  function dataModesCell(context, modes) {
-    const values = (Array.isArray(modes) ? modes : []).map(item => {
-      const title = item?.title_zh || item?.id || "";
-      return title ? `${title}：${item?.available ? context.t("已提供") : context.t("未提供")}` : "";
-    });
-    return multilineCell(values, "catalog-source-lines catalog-source-modes");
-  }
-
-  function availabilityCell(context, descriptor) {
-    const value = descriptor?.availability || {};
-    return multilineCell([
-      `${context.t("状态")}：${availabilityStatus(context, value.status)}`,
-      `${context.t("目录产品数")}：${
-        descriptor?.catalog_product_count ?? value.product_count ?? 0
-      }`,
-      `${context.t("已有数据产品数")}：${value.product_count ?? 0}`,
-    ], "catalog-source-lines catalog-source-availability");
-  }
-
   function availabilityStatus(context, status) {
     const labels = {
       ready: "可用",
@@ -352,10 +369,5 @@
     return context.t(labels[status] || "未知");
   }
 
-  function frequencyCell(context, availability) {
-    const names = (availability?.frequency_names || []).map(value => String(value));
-    return multilineCell(names.length ? names : [context.t("暂无频率")], "catalog-source-lines catalog-source-frequency");
-  }
-
-  window.FTProductSources = Object.freeze({list, loadDescriptors});
+  window.FTProductSources = Object.freeze({list, loadDescriptors, providersOverlay});
 })();
