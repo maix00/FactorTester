@@ -30,6 +30,15 @@ PLANNER_RUNNER = "server.jobs.planning.runners:plan_job"
 _PRIORITY_CLASS_RANK = {"low": 0, "standard": 10, "high": 20, "admin": 30}
 
 
+def _legacy_backtest_execution_unavailable(job: Any) -> bool:
+    """Keep historical backtest attempts readable without starting their Python runner.
+
+    NautilusTrader Job submission is still fail closed. Once it has its own
+    runner, replace this kind-level gate with an explicit RunSpec/backend check.
+    """
+    return job.kind == "backtest"
+
+
 class ResearchJobScheduler:
     """Drive durable job facts while keeping live events process-local."""
 
@@ -82,8 +91,11 @@ class ResearchJobScheduler:
         interrupted = self.repository.list_for_deployment(
             deployment_id=self.deployment_id,
             statuses=(JobStatus.PLANNING, JobStatus.RUNNING, JobStatus.PAUSED),
+            exclude_kinds=("backtest",),
         )
         for job in interrupted:
+            if _legacy_backtest_execution_unavailable(job):
+                continue
             self.repository.transition(
                 job.job_id,
                 JobStatus.FAILED,
@@ -124,8 +136,11 @@ class ResearchJobScheduler:
         jobs = self.repository.list_for_deployment(
             deployment_id=self.deployment_id,
             statuses=(JobStatus.SUBMITTED,),
+            exclude_kinds=("backtest",),
         )
         for job in jobs:
+            if _legacy_backtest_execution_unavailable(job):
+                continue
             if job.job_role != "primary":
                 continue
             try:
@@ -160,6 +175,7 @@ class ResearchJobScheduler:
         jobs = self.repository.list_for_deployment(
             deployment_id=self.deployment_id,
             statuses=(JobStatus.QUEUED,),
+            exclude_kinds=("backtest",),
         )
         pending = self.repository.list_for_deployment(
             deployment_id=self.deployment_id,
@@ -171,11 +187,17 @@ class ResearchJobScheduler:
                 JobStatus.RUNNING,
                 JobStatus.PAUSED,
             ),
+            exclude_kinds=("backtest",),
         )
         pending_by_owner: dict[str, list[Any]] = {}
         for item in pending:
+            if _legacy_backtest_execution_unavailable(item):
+                continue
             pending_by_owner.setdefault(item.owner, []).append(item)
-        queued_by_id = {job.job_id: job for job in jobs}
+        queued_by_id = {
+            job.job_id: job for job in jobs
+            if not _legacy_backtest_execution_unavailable(job)
+        }
         candidates = []
         for owner, owner_jobs in pending_by_owner.items():
             pinned = queued_by_id.get(self.repository.pinned_job_id(owner=owner))
@@ -405,6 +427,8 @@ class ResearchJobScheduler:
 
     def continue_step(self, job_id: str, command: dict[str, Any]) -> bool:
         job = self.repository.load(job_id)
+        if job is not None and _legacy_backtest_execution_unavailable(job):
+            return False
         if job is None or job.status is not JobStatus.PAUSED or not job.step_mode:
             return False
         self.repository.transition(

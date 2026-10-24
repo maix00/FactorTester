@@ -258,7 +258,15 @@ def cancel_test_job(job_id: str):
 @sft_bp.post("/api/jobs/<job_id>/approve")
 def approve_test_job(job_id: str):
     try:
-        job = repository().approve_plan(job_id, owner=require_user())
+        owner = require_user()
+        existing = repository().require(job_id, owner=owner)
+        if existing.kind == "backtest":
+            return jsonify({
+                "success": False,
+                "error": "historical backtest Jobs are read-only and cannot be approved",
+                "code": "legacy_backtest_approve_unavailable",
+            }), 409
+        job = repository().approve_plan(job_id, owner=owner)
     except KeyError:
         return jsonify({"success": False, "error": "research job not found"}), 404
     except RuntimeError as exc:
@@ -296,6 +304,12 @@ def retry_test_job(job_id: str):
     old, error = require_job(job_id)
     if error:
         return error
+    if old.kind == "backtest":
+        return jsonify({
+            "success": False,
+            "error": "historical backtest Jobs are read-only and cannot be retried",
+            "code": "legacy_backtest_retry_unavailable",
+        }), 409
     if old.status not in TERMINAL_STATUSES:
         return jsonify({"success": False, "error": "only terminal jobs can be retried"}), 409
     factor_scope_id = str(
@@ -553,6 +567,12 @@ def continue_test_job(job_id: str):
     job, error = require_job(job_id)
     if error:
         return error
+    if job.kind == "backtest":
+        return jsonify({
+            "success": False,
+            "error": "historical backtest Jobs are read-only and cannot continue",
+            "code": "legacy_backtest_continue_unavailable",
+        }), 409
     if job.status is not JobStatus.PAUSED or not job.step_mode:
         return jsonify({"success": False, "error": "job is not a paused step job"}), 409
     job_repository = repository()

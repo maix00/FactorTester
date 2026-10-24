@@ -644,13 +644,19 @@ class JobQueryImplementation:
         deployment_id: str,
         statuses: Iterable[JobStatus | str],
         limit: int = 500,
+        exclude_kinds: Iterable[str] = (),
     ) -> list[JobRecord]:
         """Return scheduler-visible jobs without crossing the owner Interface."""
         values = [JobStatus(value).value for value in statuses]
         if not values:
             return []
-        args: list[Any] = [str(deployment_id), *values]
+        excluded = [str(kind) for kind in exclude_kinds]
+        args: list[Any] = [str(deployment_id), *values, *excluded]
         args.append(min(2000, max(1, int(limit))))
+        kind_filter = (
+            f"AND jobs.kind NOT IN ({','.join('?' for _ in excluded)})"
+            if excluded else ""
+        )
         with self._connection() as conn:
             rows = conn.execute(
                 f"""
@@ -660,6 +666,7 @@ class JobQueryImplementation:
                 LEFT JOIN user_job_pins AS pins ON pins.job_id = jobs.job_id
                 WHERE jobs.deployment_id=?
                   AND jobs.status IN ({','.join('?' for _ in values)})
+                  {kind_filter}
                 ORDER BY jobs.created_at, jobs.job_id
                 LIMIT ?
                 """,

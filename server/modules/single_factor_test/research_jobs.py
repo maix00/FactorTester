@@ -394,8 +394,20 @@ def _prepare_local_research_run_request(
             **frozen_configuration,
             "payload": normalized_payload,
         }
+        try:
+            from server.modules.shared.run_spec_resolution.freezing import (
+                freeze_nautilus_execution_policy,
+            )
+
+            frozen_configuration = freeze_nautilus_execution_policy(
+                frozen_configuration,
+            )
+        except ValueError as exc:
+            raise _RunRequestError(str(exc)) from exc
     run_spec = {
-        "run_spec_version": research_runs.RUN_SPEC_VERSION,
+        "run_spec_version": research_runs.run_spec_version_for_configuration(
+            frozen_configuration["payload"], analyses,
+        ),
         "workspace_id": workspace_id,
         "configuration_id": configuration["configuration_id"],
         "configuration_revision": configuration["revision"],
@@ -676,8 +688,48 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         prepared = load_manager_run_context(context, owner=owner)
     else:
         prepared = _prepare_local_research_run_request(data, owner=owner)
+    _reject_unavailable_nautilus_run(prepared)
     _validate_mounted_run_windows(prepared)
     return prepared
+
+
+def _reject_unavailable_nautilus_run(prepared: dict) -> None:
+    """Never execute a Nautilus-marked Run through the legacy job runner.
+
+    This check sits after freezing and applies equally to local requests and
+    Manager-forwarded contexts.  It remains until the Nautilus worker has a
+    separate validated execution path, at which point it must be replaced by
+    an explicit dispatch with the same server-side validation.
+    """
+    frozen = prepared.get("frozen_configuration") or {}
+    payload = frozen.get("payload") if isinstance(frozen, dict) else None
+    analyses = payload.get("analyses") if isinstance(payload, dict) else None
+    if not isinstance(analyses, dict):
+        return
+    if "backtest" not in (prepared.get("analyses") or []):
+        return
+    backtest = analyses.get("backtest")
+    execution = backtest.get("execution") if isinstance(backtest, dict) else None
+    backend = execution.get("backend") if isinstance(execution, dict) else None
+    if backend == "nautilus_trader":
+        if execution.get("contract_version") != 4:
+            raise _RunRequestError(
+                "NautilusTrader backtest requires execution contract version 4",
+                details={"code": "unsupported_execution_contract_version"},
+            )
+        raise _RunRequestError(
+            "NautilusTrader Job execution is not connected on this service",
+            details={"code": "nautilus_execution_unavailable"},
+        )
+    if backend not in (None, "", "legacy"):
+        raise _RunRequestError(
+            f"unsupported backtest execution backend: {backend}",
+            details={"code": "unsupported_backtest_backend"},
+        )
+    raise _RunRequestError(
+        "Legacy backtest execution is retired; select NautilusTrader",
+        details={"code": "legacy_backtest_unavailable"},
+    )
 
 
 def _run_request_error_response(exc: _RunRequestError):
@@ -1370,7 +1422,7 @@ def preview_research_run():
     return jsonify({
         "success": True,
         "run_spec_hash": research_runs.hash_run_spec(run_spec),
-        "run_spec_version": research_runs.RUN_SPEC_VERSION,
+        "run_spec_version": run_spec["run_spec_version"],
         "task_name": prepared["task_name"],
         "acting_profile_ref": prepared["acting_profile_ref"],
         "acting_profile_name": prepared["acting_profile_name"],

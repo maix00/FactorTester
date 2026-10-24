@@ -109,6 +109,67 @@ def test_scheduler_plans_and_executes_real_job_in_child_process(tmp_path) -> Non
     assert events["latest_progress"]["event"] == "progress"
 
 
+def test_legacy_backtest_waiting_jobs_do_not_execute_or_block_same_owner_ic(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    old_submitted = replace(_record("legacy-submitted"), kind="backtest")
+    old_queued = replace(_record("legacy-queued"), kind="backtest")
+    ic = replace(_record("new-ic"), kind="ic")
+    repository.create(old_submitted)
+    repository.create(old_queued)
+    repository.transition(old_queued.job_id, JobStatus.PLANNING)
+    repository.set_execution_plan(
+        old_queued.job_id, plan={"cache_keys": []}, notices=[],
+        requires_confirmation=False,
+    )
+    repository.create(ic)
+    repository.transition(ic.job_id, JobStatus.PLANNING)
+    repository.set_execution_plan(
+        ic.job_id, plan={"cache_keys": []}, notices=[],
+        requires_confirmation=False,
+    )
+    assert [job.job_id for job in repository.list_for_deployment(
+        deployment_id="test", statuses=(JobStatus.QUEUED,), limit=1,
+        exclude_kinds=("backtest",),
+    )] == [ic.job_id]
+
+    with ResearchJobScheduler(
+        repository=repository,
+        deployment_id="test",
+        planner_workers=1,
+        execution_workers=1,
+    ) as scheduler:
+        completed, _ = _drive(
+            scheduler, repository, ic.job_id, {JobStatus.SUCCEEDED},
+        )
+
+    assert completed.kind == "ic"
+    assert repository.require(old_submitted.job_id).status is JobStatus.SUBMITTED
+    assert repository.require(old_queued.job_id).status is JobStatus.QUEUED
+    assert repository.require(old_submitted.job_id).worker_pid is None
+    assert repository.require(old_queued.job_id).worker_pid is None
+
+
+def test_legacy_backtest_paused_job_keeps_history_and_cannot_resume(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    old = replace(_record("legacy-paused"), kind="backtest", step_mode=True)
+    repository.create(old)
+    repository.transition(old.job_id, JobStatus.QUEUED)
+    repository.transition(old.job_id, JobStatus.RUNNING)
+    repository.transition(old.job_id, JobStatus.PAUSED)
+
+    with ResearchJobScheduler(
+        repository=repository,
+        deployment_id="test",
+        planner_workers=1,
+        execution_workers=1,
+    ) as scheduler:
+        assert repository.require(old.job_id).status is JobStatus.PAUSED
+        assert scheduler.continue_step(old.job_id, {"action": "continue"}) is False
+        scheduler.tick()
+
+    assert repository.require(old.job_id).status is JobStatus.PAUSED
+
+
 def test_supplemental_job_skips_planning_and_writes_artifact_to_parent(tmp_path) -> None:
     repository = JobRepository(tmp_path / "jobs.sqlite")
     parent = repository.create(_record("parent"))

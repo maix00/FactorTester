@@ -55,10 +55,6 @@ from tools.factors.tester_calc.single_factor_test.group.detail import (
 )
 from tools.factors.tester_calc.single_factor_test.group.metadata import GROUP_TEST_PHASES, GROUP_TEST_METRICS_META
 from tools.factors.tester_calc.single_factor_test.group.monotonicity import build_group_ranking_detail
-from tools.factors.tester_calc.single_factor_test.group.research_run import (
-    execute_group_run_spec,
-    prepare_group_run_spec,
-)
 from tools.factors.tester_calc.single_factor_test.group.research_run.projection import (
     serialize_event_execution as _serialize_event_execution,
 )
