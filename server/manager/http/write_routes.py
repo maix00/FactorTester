@@ -133,6 +133,8 @@ class WriteRoutesMixin:
             return
         if self._serve_manager_application(parsed, method="POST"):
             return
+        if self._proxy_nautilus_preview(parsed, method="POST"):
+            return
         if self._query_artifact_projection(parsed):
             return
         if self._issue_artifact_transfer_access(parsed):
