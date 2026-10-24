@@ -45,7 +45,7 @@
       description: "Browse and manage product classification trees.",
     },
     {
-      id: "strategy_library", path: "/strategies?scope=mine", title: "Strategy library", access: "authenticated",
+      id: "strategy_library", path: "/strategies?scope=public", title: "Strategy library", access: "authenticated",
       cli: ["strategy-library", "workspace"],
       description: "Manage reusable strategy source, immutable revisions and sharing.",
     },

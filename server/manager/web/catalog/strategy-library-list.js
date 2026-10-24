@@ -1,12 +1,12 @@
 (() => {
   const scopes = [
-    ["mine", "我的策略"],
-    ["subordinates", "下级用户策略"],
-    ["shared", "共享策略"],
+    ["public", "公共策略"],
+    ["mine", "我的自定义策略"],
+    ["subordinates", "下级自定义策略"],
   ];
   const visibilityValues = ["private", "shared", "public"];
 
-  async function render(context, requestedScope = "mine") {
+  async function render(context, requestedScope = "public") {
     const scope = scopes.some(item => item[0] === requestedScope)
       ? requestedScope : "mine";
     context.activeNav("strategies");
@@ -87,11 +87,22 @@
   function table(context, value, scope, redraw) {
     const items = Array.isArray(value?.items) ? value.items : [];
     if (!items.length) return FTUI.empty(
-      context.t(scope === "mine" ? "暂无我的策略"
-        : scope === "subordinates" ? "暂无下级用户策略" : "暂无共享策略"),
+      context.t(scope === "public" ? "暂无公共策略模板"
+        : scope === "mine" ? "暂无我的自定义策略" : "暂无下级自定义策略"),
       context.t("策略库中还没有符合条件的策略"),
     );
-    const rows = items.map(item => [
+    const rows = items.map(item => scope === "public" ? [
+      nameCell(context, item),
+      context.t("FactorTester"),
+      ({
+        cross_sectional_group: context.t("因子横截面分组策略"),
+        threshold: context.t("因子阈值策略"),
+      })[item.kind] || item.kind || "—",
+      (item.factor_roles || []).map(role => role.label || role.key).join("、") || "—",
+      item.version ? `r${item.version}` : "—",
+      context.t("内置 · 只读"),
+      context.t("可供回测配置选择"),
+    ] : [
       nameCell(context, item),
       FTUI.userDisplay(item.owner_ref, item.owner_alias),
       item.current_revision?.entrypoint || "—",
@@ -100,11 +111,16 @@
       visibility(context, item, redraw),
       actions(context, item),
     ]);
-    return FTUI.pagedTable([
-      context.t("策略"), context.t("所有者"), context.t("入口类"),
-      context.t("Hooks"), context.t("当前版本"), context.t("可见性"),
-      context.t("操作"),
-    ], rows, {
+    const headers = scope === "public" ? [
+      context.t("策略"), context.t("归属"), context.t("策略类型"),
+      context.t("Hooks / 因子角色"), context.t("当前版本"),
+      context.t("来源"), context.t("用途"),
+    ] : [
+      context.t("策略"), context.t("所有者"), context.t("策略类型"),
+      context.t("Hooks / 因子角色"), context.t("当前版本"),
+      context.t("共享范围"), context.t("操作"),
+    ];
+    return FTUI.pagedTable(headers, rows, {
       remote: true,
       page: Number(value.page) || 1,
       pageSize: Number(value.limit) || 20,
@@ -119,10 +135,15 @@
     const button = document.createElement("button");
     button.type = "button";
     button.className = "strategy-library-link";
-    button.textContent = item.name || item.strategy_ref;
-    button.addEventListener("click", () => context.navigate(
-      `/strategies/${encodeURIComponent(item.strategy_ref)}`,
-    ));
+    button.textContent = item.name || item.strategy_ref || item.template_ref;
+    if (item.library_kind === "factor_strategy_template") {
+      button.disabled = true;
+      button.title = context.t("公共策略模板由回测配置直接引用");
+    } else {
+      button.addEventListener("click", () => context.navigate(
+        `/strategies/${encodeURIComponent(item.strategy_ref)}`,
+      ));
+    }
     const cell = document.createElement("span");
     cell.className = "strategy-library-name-cell";
     cell.append(button);

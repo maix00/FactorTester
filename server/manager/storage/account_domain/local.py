@@ -33,6 +33,7 @@ ENTITY_TYPES = {
     "research_catalog",
     "strategy",
     "strategy_revision",
+    "versioned_object_revision",
 }
 
 

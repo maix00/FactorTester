@@ -81,6 +81,8 @@ def test_library_scopes_and_immutable_revisions(tmp_path: Path) -> None:
     )
     strategy = create_strategy(service)
     create_strategy(service, owner="bob", source=SOURCE_V2)
+    assert strategy["library_scope"] == "user_custom"
+    assert strategy["library_kind"] == "nautilus_strategy_source"
     assert service.list(principal="alice", scope="mine")["total"] == 1
     assert service.list(principal="alice", scope="subordinates")["total"] == 1
     assert service.list(principal="bob", scope="shared")["total"] == 0
@@ -288,3 +290,17 @@ def _normalize(compiled: dict) -> list[dict]:
 
     paths = [item["path"] for item in compiled["transient_strategy_sources"]]
     return normalize_strategy_plan(compiled["strategy_specs"], uploaded_paths=paths)
+
+
+def test_public_factor_templates_are_a_distinct_read_only_library_scope() -> None:
+    from server.services.factor_strategy_templates import factor_strategy_catalog
+
+    catalog = factor_strategy_catalog()
+    assert catalog["scope"] == "public"
+    assert catalog["items"]
+    assert all(item["library_scope"] == "public" for item in catalog["items"])
+    assert all(item["library_kind"] == "factor_strategy_template" for item in catalog["items"])
+    assert all(item["read_only"] is True for item in catalog["items"])
+    assert {item["kind"] for item in catalog["items"]} == {
+        "cross_sectional_group", "threshold",
+    }

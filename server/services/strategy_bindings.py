@@ -24,6 +24,9 @@ def compile_configuration_strategies(
     """
     document = configuration.get("payload") if isinstance(configuration.get("payload"), dict) else configuration
     state = view(document, include_source=True)
+    payload = document.get("payload") if isinstance(document.get("payload"), dict) else document
+    shared = payload.get("shared") or {}
+    frozen_factor_refs = _frozen_factor_refs(shared)
     temporary = {
         str(item.get("temp_ref") or ""): item
         for item in state["strategies"] if isinstance(item, dict)
@@ -51,6 +54,7 @@ def compile_configuration_strategies(
             origin = "inline"
             name = str(item.get("name") or target)
             requirements = deepcopy(item.get("requirements") or {})
+            _assert_factor_bindings_frozen(requirements, frozen_factor_refs)
             library_ref = ""
             revision_ref = ""
         elif kind == "library":
@@ -71,6 +75,7 @@ def compile_configuration_strategies(
             origin = "library"
             name = library_ref
             requirements = deepcopy(revision.get("requirements") or {})
+            _assert_factor_bindings_frozen(requirements, frozen_factor_refs)
         else:
             raise ValueError("strategy binding source kind must be inline or library")
         # Content-addressed paths deduplicate identical inline and library
@@ -102,8 +107,50 @@ def compile_configuration_strategies(
                 "source_sha256": source_hash,
             },
         })
+    factor_strategy_specs = compile_factor_strategy_bindings(payload)
     return {
-        "strategy_specs": specs,
+        "strategy_specs": [*specs, *factor_strategy_specs],
         "transient_strategy_sources": list(sources_by_hash.values()),
         "strategy_bindings": frozen_bindings,
+        "factor_strategy_bindings": factor_strategy_specs,
     }
+
+
+def _frozen_factor_refs(shared: object) -> set[str]:
+    if not isinstance(shared, dict):
+        return set()
+    factors = shared.get("factors") or []
+    if not isinstance(factors, list):
+        raise ValueError("configuration shared.factors must be an array")
+    return {
+        str(item.get("ref") or "").strip()
+        for item in factors if isinstance(item, dict)
+    }
+
+
+def _assert_factor_bindings_frozen(
+    requirements: object,
+    frozen_factor_refs: set[str],
+) -> None:
+    from server.services.factor_strategy_templates import normalize_factor_bindings
+
+    if not isinstance(requirements, dict):
+        raise ValueError("strategy requirements must be an object")
+    raw = requirements.get("factor_bindings")
+    if raw is None:
+        return
+    bindings = normalize_factor_bindings(raw, field="strategy requirements factor_bindings")
+    missing = set(bindings.values()) - frozen_factor_refs
+    if missing:
+        raise ValueError(
+            "strategy revision references factors not frozen in this configuration: "
+            + ", ".join(sorted(missing))
+        )
+
+
+def compile_factor_strategy_bindings(configuration: dict[str, Any]) -> list[dict[str, Any]]:
+    from server.services.factor_strategy_templates import (
+        compile_factor_strategy_bindings as compile_templates,
+    )
+
+    return compile_templates(configuration)

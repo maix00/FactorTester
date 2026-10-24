@@ -474,7 +474,7 @@
       report,
       research,
       strategyLibrary: (pageContext, scope) => FTStrategyLibraryList.render(
-        pageContext, scope || "mine",
+        pageContext, scope || "public",
       ),
       strategy: (pageContext, id, mode, route) => FTStrategyLibraryDetail.render(
         pageContext, id, mode || "view", route || {},
