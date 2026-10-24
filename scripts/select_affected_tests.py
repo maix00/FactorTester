@@ -187,6 +187,9 @@ EXACT_PATH_TESTS = {
     "server/services/research_runs.py": (
         "tests/server/test_research_run_sample_use.py",
     ),
+    "tools/testers/settings/applications.py": (
+        "tests/backtest/test_setting_surfaces.py",
+    ),
     "server/services/nautilus_bridge/capabilities.py": (
         "tests/server/test_nautilus_source_capabilities.py",
     ),

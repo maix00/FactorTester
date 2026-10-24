@@ -263,6 +263,12 @@ def test_isolated_nautilus_report_routes_select_their_boundary_test():
     assert targets == ["tests/server/test_nautilus_report_route.py"]
 
 
+def test_strategy_group_setting_registry_selects_its_contract_test():
+    assert selector.select({"tools/testers/settings/applications.py"}) == (
+        "SCOPED", ["tests/backtest/test_setting_surfaces.py"],
+    )
+
+
 def test_all_declared_module_targets_exist():
     assert all((selector.ROOT / "tests" / name).is_dir()
                for group in selector.IMPACT.values() for name in group)
