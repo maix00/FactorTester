@@ -247,7 +247,32 @@ EXACT_PATH_TESTS = {
         "tests/scripts/test_worktree_manager_web_manifest.py::test_strategy_list_keeps_compact_batch_and_inline_name_interactions",
     ),
     "server/manager/web/catalog/strategy-library-runtime.js": (
-        "tests/scripts/test_worktree_manager_web_manifest.py::test_inline_strategy_creation_uses_shared_nested_object_overlay",
+        "tests/scripts/test_worktree_manager_web_manifest.py::test_strategy_list_keeps_compact_batch_and_inline_name_interactions",
+        "tests/scripts/test_worktree_manager_web_manifest.py::test_strategy_binding_panel_only_routes_library_strategies_to_venues",
+    ),
+    "tests/scripts/test_worktree_manager_web_manifest.py": (
+        "tests/scripts/test_worktree_manager_web_manifest.py::test_manifest_matches_html_script_order_and_files",
+        "tests/scripts/test_worktree_manager_web_manifest.py::test_backtest_strategy_surfaces_follow_backend_adapter_and_selection_contract",
+        "tests/scripts/test_worktree_manager_web_manifest.py::test_backtest_group_forms_mount_shared_picker_elements",
+        "tests/scripts/test_worktree_manager_web_manifest.py::test_strategy_binding_panel_only_routes_library_strategies_to_venues",
+        "tests/scripts/test_worktree_manager_web_manifest.py::test_test_workbench_defers_catalog_data_until_needed",
+        "tests/scripts/test_worktree_manager_web_manifest.py::test_strategy_list_keeps_compact_batch_and_inline_name_interactions",
+    ),
+    "tests/scripts/fixtures/backtest_group_form.js": (
+        "tests/scripts/test_worktree_manager_web_manifest.py::test_backtest_group_forms_mount_shared_picker_elements",
+    ),
+    "tests/scripts/fixtures/backtest_group_surfaces.js": (
+        "tests/scripts/test_worktree_manager_web_manifest.py::test_backtest_strategy_surfaces_follow_backend_adapter_and_selection_contract",
+        "tests/scripts/test_worktree_manager_web_manifest.py::test_strategy_binding_panel_only_routes_library_strategies_to_venues",
+    ),
+    "tests/scripts/fixtures/nautilus_config_review.js": (
+        "tests/scripts/test_nautilus_config_review.py",
+    ),
+    "tests/scripts/fixtures/nautilus_report_viewer.js": (
+        "tests/scripts/test_nautilus_report_viewer.py",
+    ),
+    "tests/scripts/fixtures/nautilus_trading_workbench.js": (
+        "tests/scripts/test_nautilus_trading_workbench.py",
     ),
     "server/services/factor_strategy_templates.py": (
         "tests/server/test_strategy_library.py",
