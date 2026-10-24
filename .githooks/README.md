@@ -16,5 +16,5 @@ git config --unset core.hooksPath
 
 Notes:
 - Hooks are **local** to your clone.
-- Python tests run via `scripts/test.sh` in conda env `GTHT` (override with `FT_ENV_NAME`). JS tests run via `scripts/test_js.sh` and Node.js.
+- Python tests run via `scripts/test.sh` in conda env `GTHT` (override with `FT_ENV_NAME`). JS tests run via `scripts/test_js.sh` using the Playwright Node driver bundled in that same environment, so browser tests resolve the pinned Playwright runtime.
 - The commit hook reads staged changes; the push hook reads outgoing commits. Docs-only changes skip tests; Skill changes retain the bundled activation check.

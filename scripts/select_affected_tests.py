@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Conservatively select pytest modules for a Git hook.
+"""Select focused pytest and JavaScript tests for a Git hook.
 
-The mapping is deliberately coarse. A path not classified here runs the full
-suite; this is preferable to silently omitting a test when ownership changes.
+Mappings stay explicit at domain boundaries. Unknown production paths run the
+full suite; known paths should select the narrowest tests that exercise them.
 """
 
 from __future__ import annotations
@@ -24,8 +24,6 @@ TEST_MODULES = {
 # the changed package. Keep these groups broad until dependency coverage can
 # justify a narrower selection.
 IMPACT = {
-    "server": ("server", "scripts", "release", "cli", "catalog", "backtest",
-               "data", "factors", "group", "migrations", "products", "templates"),
     "cli": ("cli", "release", "scripts", "server", "catalog"),
     "factors": ("factors", "calc", "group", "backtest", "testers", "server",
                 "catalog", "data", "migrations", "release", "scripts"),
@@ -43,10 +41,87 @@ IMPACT = {
     "js": ("js", "server", "release"),
 }
 LEAF_TEST_MODULES = {"calc", "catalog", "group", "backtest", "scripts", "release"}
+# Precise ownership mappings for modules that previously expanded to most of
+# the repository. Add the directly affected tests here when a domain changes.
+EXACT_PATH_TESTS = {
+    "scripts/test_js.sh": ("tests/js/test_playwright_runtime.js",),
+    "server/manager/http/strategy_library_routes.py": (
+        "tests/server/test_strategy_library.py",
+        "tests/scripts/test_worktree_manager_client_app.py::test_strategy_library_patch_uses_manager_application_route",
+    ),
+    "server/manager/storage/account_domain/factor_version_sync.py": (
+        "tests/server/test_versioning_revisions.py",
+        "tests/server/test_strategy_catalog_sync.py",
+    ),
+    "server/manager/storage/account_domain/local.py": (
+        "tests/server/test_versioning_revisions.py",
+        "tests/server/test_strategy_catalog_sync.py",
+        "tests/server/test_account_domain_compact_identity.py",
+    ),
+    "server/manager/storage/account_domain/service.py": (
+        "tests/server/test_versioning_revisions.py",
+        "tests/server/test_strategy_catalog_sync.py",
+        "tests/scripts/test_worktree_manager_account_domain_sync.py",
+    ),
+    "server/manager/storage/account_domain/strategy_sync.py": (
+        "tests/server/test_strategy_catalog_sync.py",
+    ),
+    "server/manager/web/app/coordinator.js": (
+        "tests/js/test_route_dispatch_nav.js",
+    ),
+    "server/manager/web/app/navigation.js": (
+        "tests/js/test_route_dispatch_nav.js",
+        "tests/js/test_tab_nav_highlight.js",
+    ),
+    "server/manager/web/app/webmcp.js": (
+        "tests/js/test_app_shell_startup.js",
+    ),
+    "server/manager/web/catalog/strategy-library-list.js": (
+        "tests/scripts/test_worktree_manager_web_manifest.py::test_strategy_list_keeps_compact_batch_and_inline_name_interactions",
+    ),
+    "server/manager/web/catalog/strategy-library-runtime.js": (
+        "tests/scripts/test_worktree_manager_web_manifest.py::test_inline_strategy_creation_uses_shared_nested_object_overlay",
+    ),
+    "server/services/factor_strategy_templates.py": (
+        "tests/server/test_strategy_library.py",
+        "tests/server/test_strategy_plans.py",
+    ),
+    "server/services/frozen_product_scope.py": (
+        "tests/server/test_frozen_product_scope.py",
+        "tests/server/test_strategy_plans.py",
+    ),
+    "server/services/strategy_bindings.py": (
+        "tests/server/test_strategy_library.py",
+        "tests/server/test_strategy_plans.py",
+    ),
+    "server/services/strategy_library/service.py": (
+        "tests/server/test_strategy_library.py",
+        "tests/server/test_strategy_catalog_sync.py",
+    ),
+    "server/services/strategy_plans.py": (
+        "tests/server/test_strategy_plans.py",
+    ),
+    "server/services/strategy_source_inspection.py": (
+        "tests/server/test_strategy_library.py",
+        "tests/server/test_strategy_plans.py",
+    ),
+    "tools/data/sqlite/account_manager/product_group.py": (
+        "tests/products/test_product_group_revisions.py",
+        "tests/products/test_product_group_subjects.py",
+        "tests/server/test_manager_catalog_product_group_write.py",
+    ),
+    "tools/data/sqlite/factor_source_versions.py": (
+        "tests/server/test_versioning_revisions.py",
+        "tests/data/test_factor_source_versions.py",
+    ),
+}
+PREFIX_PATH_TESTS = {
+    "server/services/versioning/": ("tests/server/test_versioning_revisions.py",),
+}
 FULL_PATHS = {
     "AGENTS.md", "CONTEXT.md", "conftest.py", "environment.yml", "pytest.ini",
     "pyproject.toml", "setup.cfg", "requirements.txt", "scripts/test.sh",
-    "scripts/select_affected_tests.py", ".githooks/pre-commit", ".githooks/pre-push",
+    ".githooks/pre-commit", ".githooks/pre-push",
 }
 
 
@@ -109,6 +184,20 @@ def select(paths: set[str] | None) -> tuple[str, list[str]]:
         parts = Path(path).parts
         if not parts:
             return "FULL", []
+        if path == "scripts/select_affected_tests.py":
+            modules.add("tests/scripts/test_select_affected_tests.py")
+            continue
+        exact_tests = EXACT_PATH_TESTS.get(path)
+        if exact_tests:
+            modules.update(exact_tests)
+            continue
+        prefix_tests = next(
+            (targets for prefix, targets in PREFIX_PATH_TESTS.items() if path.startswith(prefix)),
+            None,
+        )
+        if prefix_tests:
+            modules.update(prefix_tests)
+            continue
         if path in FULL_PATHS or parts[-1] == "AGENTS.md" or parts[0] in {".github", "deploy", "environments", "third_party"}:
             return "FULL", []
         if parts[0] == "docs" or (path.endswith((".md", ".rst")) and parts[0] != "skills"):
@@ -127,11 +216,9 @@ def select(paths: set[str] | None) -> tuple[str, list[str]]:
                 modules.add(f"tests/{parts[1]}")
             continue
         if parts[0] == "server" and len(parts) > 1:
-            modules.update(f"tests/{name}" for name in IMPACT["server"])
-            modules.add("tests/test_sse_progress.py")
-            if "web" in parts:
-                modules.add("tests/js")
-            continue
+            # Unknown server ownership is intentionally fail-closed. Do not
+            # turn one Manager edit into a dozen unrelated test directories.
+            return "FULL", []
         if parts[0] == "tools" and len(parts) > 2:
             name = parts[1]
             if name in IMPACT:

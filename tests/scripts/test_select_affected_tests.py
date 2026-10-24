@@ -59,16 +59,65 @@ def test_mixed_python_and_js_change_selects_both_runners():
     assert all((selector.ROOT / path).exists() for path in targets)
 
 
-def test_server_web_change_includes_node_suite_and_all_targets_exist():
-    mode, targets = selector.select({"server/manager/web/report/report.js"})
+def test_unmapped_server_change_fails_closed_instead_of_expanding_to_many_suites():
+    assert selector.select({"server/manager/web/report/report.js"}) == ("FULL", [])
+
+
+def test_versioning_and_strategy_change_selects_only_direct_domain_tests():
+    paths = {
+        "server/services/versioning/revisions.py",
+        "server/manager/storage/account_domain/strategy_sync.py",
+        "server/services/strategy_plans.py",
+        "tools/data/sqlite/account_manager/product_group.py",
+    }
+    mode, targets = selector.select(paths)
     assert mode == "SCOPED"
-    assert "tests/js" in targets
-    assert all((selector.ROOT / path).exists() for path in targets)
+    assert set(targets) == {
+        "tests/server/test_versioning_revisions.py",
+        "tests/server/test_strategy_catalog_sync.py",
+        "tests/server/test_strategy_plans.py",
+        "tests/products/test_product_group_revisions.py",
+        "tests/products/test_product_group_subjects.py",
+        "tests/server/test_manager_catalog_product_group_write.py",
+    }
+    assert len(targets) == 6
+    assert all((selector.ROOT / path.split("::", 1)[0]).is_file() for path in targets)
+
+
+def test_js_runner_change_checks_conda_playwright_module_resolution():
+    assert selector.select({"scripts/test_js.sh"}) == (
+        "SCOPED", ["tests/js/test_playwright_runtime.js"],
+    )
+
+
+def test_strategy_web_edits_select_individual_contract_tests():
+    mode, targets = selector.select({
+        "server/manager/web/catalog/strategy-library-list.js",
+        "server/manager/web/catalog/strategy-library-runtime.js",
+        "server/manager/http/strategy_library_routes.py",
+    })
+    assert mode == "SCOPED"
+    assert set(targets) == {
+        "tests/scripts/test_worktree_manager_web_manifest.py::test_strategy_list_keeps_compact_batch_and_inline_name_interactions",
+        "tests/scripts/test_worktree_manager_web_manifest.py::test_inline_strategy_creation_uses_shared_nested_object_overlay",
+        "tests/scripts/test_worktree_manager_client_app.py::test_strategy_library_patch_uses_manager_application_route",
+        "tests/server/test_strategy_library.py",
+    }
+
+
+def test_selector_change_runs_its_own_contract_test_not_full_suite():
+    assert selector.select({"scripts/select_affected_tests.py"}) == (
+        "SCOPED", ["tests/scripts/test_select_affected_tests.py"],
+    )
 
 
 def test_all_declared_module_targets_exist():
     assert all((selector.ROOT / "tests" / name).is_dir()
                for group in selector.IMPACT.values() for name in group)
+    assert all((selector.ROOT / path.split("::", 1)[0]).is_file()
+               for group in selector.EXACT_PATH_TESTS.values() for path in group)
+    assert all((selector.ROOT / path.split("::", 1)[0]).is_file()
+               for group in selector.PREFIX_PATH_TESTS.values() for path in group)
 
 
 def test_staged_and_push_ranges_are_separate(tmp_path, monkeypatch):
