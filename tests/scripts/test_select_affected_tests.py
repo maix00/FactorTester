@@ -145,6 +145,7 @@ def test_nautilus_execution_bridge_selects_only_its_focused_tests():
     paths = {
         "server/services/nautilus_bridge/market_data.py",
         "server/services/nautilus_bridge/catalog.py",
+        "tests/benchmarks/bench_nautilus_catalog_staging.py",
         "server/services/nautilus_bridge/backtest_runner.py",
         "server/services/nautilus_bridge/factor_stream.py",
         "server/services/nautilus_bridge/rule_transition.py",

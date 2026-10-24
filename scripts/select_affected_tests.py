@@ -63,6 +63,9 @@ EXACT_PATH_TESTS = {
     "server/services/nautilus_bridge/catalog.py": (
         "tests/server/test_nautilus_bridge_catalog.py",
     ),
+    "tests/benchmarks/bench_nautilus_catalog_staging.py": (
+        "tests/server/test_nautilus_bridge_catalog.py",
+    ),
     "server/services/nautilus_bridge/backtest_runner.py": (
         "tests/server/test_nautilus_bridge_backtest_runner.py",
         "tests/server/test_nautilus_bridge_reports.py",
