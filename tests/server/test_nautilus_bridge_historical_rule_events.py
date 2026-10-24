@@ -13,13 +13,12 @@ import pytest
 from server.services.nautilus_bridge.market_data import (
     FuturesContractSpec, to_nautilus_instrument,
 )
+from tests.nautilus_runtime import require_nautilus
 from tests.nautilus_source_fixture import resolved_contract_minute_source
 
 
 def _nt():
-    nt = pytest.importorskip("nautilus_trader")
-    assert nt.__version__ == "2.0.0rc7"
-    return nt
+    return require_nautilus()
 
 
 def _instrument(*, tick="0.005", multiplier="10000", margin="0.02"):

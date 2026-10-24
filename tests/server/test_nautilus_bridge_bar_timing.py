@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.nautilus_runtime import require_nautilus
+
 
 @pytest.mark.parametrize(
     ("submit_at_open", "expected_price"),
@@ -17,8 +19,7 @@ def test_completed_bar_signal_needs_open_event_for_next_open_fill(
     submit_at_open, expected_price
 ):
     """A zero-latency on_bar order fills at close; a distinct open tick can defer it."""
-    nt = pytest.importorskip("nautilus_trader")
-    assert nt.__version__ == "2.0.0rc7"
+    require_nautilus()
 
     from nautilus_trader.backtest import BacktestEngine
     from nautilus_trader.config import BacktestEngineConfig
@@ -32,8 +33,7 @@ def test_completed_bar_signal_needs_open_event_for_next_open_fill(
 
     example = (Path(__file__).resolve().parents[2] / "vendor/nautilus_trader"
                / "examples/backtest/synthetic_data_pnl_test.py")
-    if not example.exists():
-        pytest.skip("NautilusTrader submodule is not initialized")
+    assert example.is_file(), "Initialize vendor/nautilus_trader before running integration tests."
     spec = spec_from_file_location("upstream_bar_timing_example", example)
     module = module_from_spec(spec)
     spec.loader.exec_module(module)

@@ -44,6 +44,30 @@ LEAF_TEST_MODULES = {"calc", "catalog", "group", "backtest", "scripts", "release
 # Precise ownership mappings for modules that previously expanded to most of
 # the repository. Add the directly affected tests here when a domain changes.
 EXACT_PATH_TESTS = {
+    "vendor/nautilus_trader": ("tests/scripts/test_nautilus_extension_build.py",),
+    "environment.yml": ("tests/scripts/test_nautilus_extension_build.py",),
+    "scripts/test.sh": ("tests/scripts/test_nautilus_extension_build.py",),
+    "scripts/build_nautilus_extension.sh": ("tests/scripts/test_nautilus_extension_build.py",),
+    "server/services/nautilus_bridge/version.py": (
+        "tests/server/test_nautilus_bridge_version.py",
+    ),
+    "tests/server/test_nautilus_bridge_version.py": (
+        "tests/server/test_nautilus_bridge_version.py",
+    ),
+    "tests/scripts/test_nautilus_extension_build.py": (
+        "tests/scripts/test_nautilus_extension_build.py",
+    ),
+    "tests/nautilus_runtime.py": (
+        "tests/server/test_nautilus_bridge_backtest_runner.py",
+        "tests/server/test_nautilus_bridge_bar_timing.py",
+        "tests/server/test_nautilus_bridge_catalog.py",
+        "tests/server/test_nautilus_bridge_data_contract.py",
+        "tests/server/test_nautilus_bridge_factor_stream.py",
+        "tests/server/test_nautilus_bridge_historical_fees.py",
+        "tests/server/test_nautilus_bridge_historical_rule_events.py",
+        "tests/server/test_nautilus_bridge_integration.py",
+        "tests/server/test_nautilus_bridge_rule_transition.py",
+    ),
     "tools/factors/expr/core.py": (
         "tests/factors/test_factor_expr_incremental.py",
     ),

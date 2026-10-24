@@ -14,6 +14,7 @@ from server.services.nautilus_bridge.catalog import stage_contract_minute_catalo
 from server.services.nautilus_bridge.market_data import (
     FuturesContractSpec, iter_minute_bars,
 )
+from tests.nautilus_runtime import require_nautilus
 from tests.nautilus_source_fixture import resolved_contract_minute_source
 
 
@@ -27,9 +28,8 @@ ROOT = Path("/Users/maxdeux/Documents/GTHT/data/sources/LocalCNFutures")
 def test_real_three_bar_native_catalog_readback_and_receipt(
     tmp_path, code, month, tick, precision
 ):
-    nt = pytest.importorskip("nautilus_trader")
+    require_nautilus()
     pytest.importorskip("pyarrow")
-    assert nt.__version__ == "2.0.0rc7"
     from nautilus_trader.persistence import ParquetDataCatalog
 
     source = ROOT / f"data_mink_product/CFFEX_F_{code}_{month}.parquet"
@@ -81,7 +81,7 @@ def test_real_three_bar_native_catalog_readback_and_receipt(
 
 
 def test_budget_failure_does_not_publish_partial_catalog(tmp_path):
-    pytest.importorskip("nautilus_trader")
+    require_nautilus()
     pytest.importorskip("pyarrow")
     source = ROOT / "data_mink_product/CFFEX_F_T_2403.parquet"
     if not source.is_file():

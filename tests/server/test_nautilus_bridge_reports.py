@@ -12,6 +12,7 @@ import pytest
 from flask import Flask
 
 from server.services.nautilus_bridge import reports
+from server.services.nautilus_bridge.version import NAUTILUS_VERSION
 from server.modules.nautilus_workbench import nautilus_workbench_bp
 
 
@@ -48,7 +49,7 @@ def _stub_visualization(monkeypatch, *, html: str = "<html>native</html>"):
     analysis.create_tearsheet = create_tearsheet
     monkeypatch.setitem(sys.modules, "nautilus_trader", types.ModuleType("nautilus_trader"))
     monkeypatch.setitem(sys.modules, "nautilus_trader.analysis", analysis)
-    monkeypatch.setattr(reports.metadata, "version", lambda _: "2.0.0rc7")
+    monkeypatch.setattr(reports.metadata, "version", lambda _: NAUTILUS_VERSION)
 
 
 def test_native_reports_are_published_with_verified_receipt(tmp_path, monkeypatch):
@@ -57,7 +58,7 @@ def test_native_reports_are_published_with_verified_receipt(tmp_path, monkeypatc
 
     receipt = reports.export_backtest_reports(_Engine(), output, venue="CFFEX")
 
-    assert receipt["engine_version"] == "2.0.0rc7"
+    assert receipt["engine_version"] == NAUTILUS_VERSION
     assert {item["name"] for item in receipt["artifacts"]} == {
         "tearsheet.html", "orders.csv", "fills.csv", "positions.csv", "account.csv"
     }

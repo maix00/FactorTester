@@ -13,6 +13,7 @@ from server.services.nautilus_bridge.backtest_runner import (
 )
 from server.services.nautilus_bridge.catalog import stage_contract_minute_catalog
 from server.services.nautilus_bridge.market_data import FuturesContractSpec, iter_minute_bars
+from tests.nautilus_runtime import require_nautilus
 from tests.nautilus_source_fixture import resolved_contract_minute_source
 
 
@@ -48,9 +49,8 @@ def _real_catalog(tmp_path, code="T", month="2403", count=8):
 
 @pytest.mark.parametrize("code,month", [("T", "2403"), ("TL", "2406")])
 def test_real_small_window_market_replay_and_native_reports(tmp_path, code, month):
-    nt = pytest.importorskip("nautilus_trader")
+    require_nautilus()
     pytest.importorskip("pyarrow")
-    assert nt.__version__ == "2.0.0rc7"
     item = _real_catalog(tmp_path, code, month)
     out = tmp_path / "reports"
     result = run_small_catalog_replay((item,), out, max_input_bars=8, batch_minutes=3)
@@ -65,7 +65,7 @@ def test_real_small_window_market_replay_and_native_reports(tmp_path, code, mont
 
 
 def test_synthetic_order_probe_is_labeled_and_never_claims_factor_result(tmp_path):
-    pytest.importorskip("nautilus_trader")
+    require_nautilus()
     pytest.importorskip("pyarrow")
     item = _real_catalog(tmp_path)
     result = run_small_catalog_replay(
@@ -83,7 +83,7 @@ def test_synthetic_order_probe_is_labeled_and_never_claims_factor_result(tmp_pat
 
 
 def test_t_and_tl_share_one_native_replay_clock_without_second_panel(tmp_path):
-    pytest.importorskip("nautilus_trader")
+    require_nautilus()
     pytest.importorskip("pyarrow")
     (tmp_path / "t").mkdir()
     (tmp_path / "tl").mkdir()

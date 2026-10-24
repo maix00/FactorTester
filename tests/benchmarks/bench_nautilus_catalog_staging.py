@@ -20,6 +20,7 @@ from pathlib import Path
 
 from server.services.nautilus_bridge.catalog import stage_contract_minute_catalog
 from server.services.nautilus_bridge.market_data import FuturesContractSpec
+from server.services.nautilus_bridge.version import NAUTILUS_VERSION
 from tests.nautilus_source_fixture import resolved_contract_minute_source
 
 DATA_ROOT = Path("/Users/maxdeux/Documents/GTHT/data/sources/LocalCNFutures/data_mink_product")
@@ -105,7 +106,7 @@ def main() -> None:
         }
     print(json.dumps({
         "runtime": f"Python {platform.python_version()} / {platform.machine()}",
-        "nautilus_version": "NautilusTrader 2.0.0rc7",
+        "nautilus_version": f"NautilusTrader {NAUTILUS_VERSION}",
         "cache": "fresh process/catalog per sample; first sample discarded",
         "batch_bars": args.batch_bars,
         "metadata": "placeholder contract settings; performance only",

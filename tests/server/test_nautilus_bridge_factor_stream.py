@@ -18,6 +18,7 @@ from server.services.nautilus_bridge.market_data import BarClock, minute_clock
 from tools.data.types import DataFreq
 from tools.factors.expr import CLOSE, ConstExpr, SignalAlign
 from tools.factors.expr.streaming.incremental import UnsupportedStreamingFactor
+from tests.nautilus_runtime import require_nautilus
 
 
 REF = "factor:v2:nupERUpfhFNGFIB4AT3UfJiJaTRbaC0r5V1nUU9R6aM"
@@ -192,8 +193,7 @@ def test_nautilus_strategy_buffers_one_complete_cross_sectional_slice(monkeypatc
 
 
 def test_nautilus_on_bar_drives_factor_calculation_without_a_market_panel():
-    nt = pytest.importorskip("nautilus_trader")
-    assert nt.__version__ == "2.0.0rc7"
+    require_nautilus()
     from datetime import UTC, datetime
     from importlib.util import module_from_spec, spec_from_file_location
     from pathlib import Path
@@ -208,8 +208,7 @@ def test_nautilus_on_bar_drives_factor_calculation_without_a_market_panel():
 
     example = (Path(__file__).resolve().parents[2] / "vendor/nautilus_trader"
                / "examples/backtest/synthetic_data_pnl_test.py")
-    if not example.exists():
-        pytest.skip("NautilusTrader submodule is not initialized")
+    assert example.is_file(), "Initialize vendor/nautilus_trader before running integration tests."
     spec = spec_from_file_location("upstream_factor_stream_example", example)
     module = module_from_spec(spec)
     spec.loader.exec_module(module)

@@ -24,6 +24,22 @@ conda activate GTHT
 | matplotlib | 3.10.7 |
 | tqdm | 4.67.1 |
 | pyarrow | 22.0.0 |
+| maturin | 1.15.0 |
+
+## NautilusTrader 本地扩展
+
+NautilusTrader 由 `vendor/nautilus_trader` 固定版本提供。第一次运行完整
+测试或 Nautilus 集成测试前，统一测试入口会在 `GTHT` 中构建对应的 Python
+扩展；也可以手动执行：
+
+```bash
+./scripts/build_nautilus_extension.sh
+```
+
+构建使用 vendor 仓库锁定的 Rust toolchain、`maturin==1.15.0` 和开发 profile
+（默认 `opt-level=1`，降低 macOS Python 扩展链接体积），复用
+`vendor/nautilus_trader/target`。测试会拒绝静默跳过扩展缺失、加载其他
+wheel 或版本不匹配的情况。
 
 ## SQLite 并发版本
 

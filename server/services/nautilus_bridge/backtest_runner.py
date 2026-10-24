@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Literal
 
 from server.services.nautilus_bridge.reports import export_backtest_reports
+from server.services.nautilus_bridge.version import NAUTILUS_VERSION
 
 MINUTE_NS = 60_000_000_000
 
@@ -67,7 +68,7 @@ def _load_input(item: ReplayInput):
     folder = Path(item.catalog_dir).resolve(strict=True)
     receipt_path = folder / "factor_tester_catalog_receipt.json"
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-    if receipt.get("engine") != "NautilusTrader 2.0.0rc7":
+    if receipt.get("engine") != f"NautilusTrader {NAUTILUS_VERSION}":
         raise ValueError("catalog was not staged with pinned NautilusTrader")
     if receipt.get("contract_uid") != item.expected_contract_uid:
         raise ValueError("catalog contract UID does not match the requested identity")
@@ -134,7 +135,7 @@ def run_small_catalog_replay(
         Venue,
     )
 
-    if nt_version != "2.0.0rc7":
+    if nt_version != NAUTILUS_VERSION:
         raise RuntimeError(f"NautilusTrader pin mismatch: {nt_version}")
     cost_basis = PositionCostBasis.from_str(position_cost_basis)
     opened = tuple(_load_input(item) for item in inputs)

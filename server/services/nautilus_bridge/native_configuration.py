@@ -1,6 +1,6 @@
 """Pinned Nautilus simulated-venue configuration contract.
 
-The serialized shape follows NautilusTrader 2.0.0rc7's
+The serialized shape follows the vendored NautilusTrader source version's
 ``BacktestEngine.add_venue`` / ``SimulatedVenueConfig`` surface.  It contains
 only JSON values; runtime model objects are constructed at the engine edge.
 The same schema is returned to the workbench so authoring and freezing do not
@@ -15,6 +15,7 @@ import math
 from typing import Any
 
 from server.services.nautilus_bridge.config import UnsupportedExecutionConfig
+from server.services.nautilus_bridge.version import NAUTILUS_VERSION
 
 _FILL_MODELS = (
     "default", "best_price", "one_tick_slippage", "probabilistic", "two_tier",
@@ -27,7 +28,7 @@ _FEE_MODELS = (
     "maker_taker", "probability_price", "capped_option",
     "tiered_notional_option", "historical_schedule",
 )
-_NATIVE_VERSION = "2.0.0rc7"
+_NATIVE_VERSION = NAUTILUS_VERSION
 
 _DEFAULTS: dict[str, Any] = {
     "book_type": "L1_MBP",

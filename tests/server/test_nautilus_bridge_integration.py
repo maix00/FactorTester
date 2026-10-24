@@ -6,18 +6,15 @@ from datetime import UTC, datetime
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
-import pytest
-
 from server.services.nautilus_bridge import export_backtest_reports
+from tests.nautilus_runtime import require_nautilus
 
 
 def test_real_engine_exports_execution_and_margin_history(tmp_path):
-    nt = pytest.importorskip("nautilus_trader")
-    assert nt.__version__ == "2.0.0rc7"
+    require_nautilus()
     example = (Path(__file__).resolve().parents[2] / "vendor/nautilus_trader"
                / "examples/backtest/synthetic_data_pnl_test.py")
-    if not example.exists():
-        pytest.skip("NautilusTrader submodule is not initialized")
+    assert example.is_file(), "Initialize vendor/nautilus_trader before running integration tests."
 
     from nautilus_trader.backtest import BacktestEngine
     from nautilus_trader.config import BacktestEngineConfig

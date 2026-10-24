@@ -16,6 +16,7 @@ from server.services.nautilus_bridge.market_data import (
     to_nautilus_bar, to_nautilus_daily_settlement, to_nautilus_instrument,
     to_nautilus_open_quote,
 )
+from tests.nautilus_runtime import require_nautilus
 from tests.nautilus_source_fixture import resolved_contract_minute_source
 
 
@@ -110,7 +111,7 @@ def test_official_daily_settlement_requires_frozen_rule_and_calendar(tmp_path):
 
 
 def test_official_settlement_maps_to_native_daily_settlement_close(tmp_path):
-    nt = pytest.importorskip("nautilus_trader")
+    require_nautilus()
     from nautilus_trader.model import InstrumentCloseType
 
     spec = FuturesContractSpec(
@@ -137,7 +138,6 @@ def test_official_settlement_maps_to_native_daily_settlement_close(tmp_path):
     close = to_nautilus_daily_settlement(
         record, instrument=instrument, instrument_spec=spec,
     )
-    assert nt.__version__ == "2.0.0rc7"
     assert close.close_type == InstrumentCloseType.DAILY_SETTLEMENT
     assert close.ts_event == record.timestamp_ns
 
@@ -209,8 +209,7 @@ def test_real_t_contract_small_read_only_sample():
 
 
 def test_nt_objects_use_supplied_frozen_spec_and_bar_close_time():
-    nt = pytest.importorskip("nautilus_trader")
-    assert nt.__version__ == "2.0.0rc7"
+    require_nautilus()
     with pytest.raises(ValueError, match="provenance"):
         FuturesContractSpec(
             instrument_code="T2403", venue="CFFEX", underlying="T",
@@ -262,8 +261,7 @@ def test_nt_objects_use_supplied_frozen_spec_and_bar_close_time():
      ("RB", "SHFE", "COMMODITY"), ("SC", "INE", "COMMODITY")],
 )
 def test_contract_asset_class_is_declared_by_verified_source(code, venue, expected):
-    nt = pytest.importorskip("nautilus_trader")
-    assert nt.__version__ == "2.0.0rc7"
+    require_nautilus()
     from nautilus_trader.model import AssetClass
 
     spec = FuturesContractSpec(

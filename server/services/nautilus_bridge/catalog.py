@@ -26,6 +26,7 @@ from server.services.nautilus_bridge.market_data import (
     to_nautilus_bar,
     to_nautilus_instrument,
 )
+from server.services.nautilus_bridge.version import NAUTILUS_VERSION
 
 
 def _sha256_file(path: Path) -> str:
@@ -121,7 +122,7 @@ def stage_contract_minute_catalog(
     from nautilus_trader.model import BarType
     from nautilus_trader.persistence import ParquetDataCatalog
 
-    if nt_version != "2.0.0rc7":
+    if nt_version != NAUTILUS_VERSION:
         raise RuntimeError(f"NautilusTrader pin mismatch: {nt_version}")
     instrument = to_nautilus_instrument(instrument_spec)
     bar_type = BarType.from_str(f"{instrument.id}-1-MINUTE-LAST-EXTERNAL")

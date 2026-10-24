@@ -24,7 +24,9 @@ def test_skill_change_checks_activation_and_skill_tests():
 
 
 def test_shared_and_unclassified_paths_fail_closed():
-    assert selector.select({"environment.yml"}) == ("FULL", [])
+    assert selector.select({"environment.yml"}) == (
+        "SCOPED", ["tests/scripts/test_nautilus_extension_build.py"],
+    )
     assert selector.select({"tools/parameters/base.py"}) == ("FULL", [])
     assert selector.select({"tools/cli/app.py", "mystery/new.py"}) == ("FULL", [])
 
@@ -291,6 +293,32 @@ def test_factor_expr_streaming_changes_select_bounded_contract_tests():
 def test_nautilus_fee_benchmark_edit_selects_fee_contract_tests():
     assert selector.select({"tests/benchmarks/bench_nautilus_historical_fees.py"}) == (
         "SCOPED", ["tests/server/test_nautilus_bridge_historical_fees.py"],
+    )
+
+
+def test_nautilus_extension_paths_select_build_and_runtime_contracts():
+    for path in (
+        "environment.yml",
+        "scripts/test.sh",
+        "scripts/build_nautilus_extension.sh",
+        "vendor/nautilus_trader",
+        "tests/scripts/test_nautilus_extension_build.py",
+    ):
+        assert selector.select({path}) == (
+            "SCOPED", ["tests/scripts/test_nautilus_extension_build.py"],
+        )
+    assert selector.select({"tests/nautilus_runtime.py"}) == (
+        "SCOPED", [
+            "tests/server/test_nautilus_bridge_backtest_runner.py",
+            "tests/server/test_nautilus_bridge_bar_timing.py",
+            "tests/server/test_nautilus_bridge_catalog.py",
+            "tests/server/test_nautilus_bridge_data_contract.py",
+            "tests/server/test_nautilus_bridge_factor_stream.py",
+            "tests/server/test_nautilus_bridge_historical_fees.py",
+            "tests/server/test_nautilus_bridge_historical_rule_events.py",
+            "tests/server/test_nautilus_bridge_integration.py",
+            "tests/server/test_nautilus_bridge_rule_transition.py",
+        ],
     )
 
 

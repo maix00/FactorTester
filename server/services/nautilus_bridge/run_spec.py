@@ -22,6 +22,7 @@ from server.services.nautilus_bridge.source_registry import (
     UnsupportedNautilusSource,
     from_server_sources,
 )
+from server.services.nautilus_bridge.version import NAUTILUS_VERSION
 
 
 def freeze_execution_contract(
@@ -36,7 +37,7 @@ def freeze_execution_contract(
     """
     contract: dict[str, Any] = {
         "contract_version": 2,
-        "native_configuration_version": "2.0.0rc7",
+        "native_configuration_version": NAUTILUS_VERSION,
         "settings": {
             "product_scope_refs": list(product_scope_refs),
             "venues": [dict(item) for item in native_venue_plan["venues"]],
