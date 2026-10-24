@@ -44,6 +44,15 @@ LEAF_TEST_MODULES = {"calc", "catalog", "group", "backtest", "scripts", "release
 # Precise ownership mappings for modules that previously expanded to most of
 # the repository. Add the directly affected tests here when a domain changes.
 EXACT_PATH_TESTS = {
+    "tools/factors/expr/core.py": (
+        "tests/factors/test_factor_expr_incremental.py",
+    ),
+    "tools/testers/backtest/modules/factor_signal.py": (
+        "tests/backtest/native/test_factor_incremental_compile.py",
+        "tests/backtest/native/test_factor_incremental_rolling_window.py",
+        "tests/backtest/native/test_incremental_cross_sectional_kernels.py",
+        "tests/server/test_nautilus_bridge_factor_stream.py",
+    ),
     "scripts/test_js.sh": ("tests/js/test_playwright_runtime.js",),
     "server/services/nautilus_bridge/config.py": (
         "tests/server/test_nautilus_bridge_config.py",
@@ -346,6 +355,16 @@ EXACT_PATH_TESTS = {
     ),
 }
 PREFIX_PATH_TESTS = {
+    "tools/factors/expr/streaming/": (
+        "tests/factors/test_factor_expr_incremental.py",
+        "tests/factors/test_groupby_scope_derived_missing.py",
+        "tests/factors/test_groupby_scope_infinities.py",
+        "tests/factors/test_groupby_scope_streaming.py",
+        "tests/backtest/native/test_factor_incremental_compile.py",
+        "tests/backtest/native/test_factor_incremental_rolling_window.py",
+        "tests/backtest/native/test_incremental_cross_sectional_kernels.py",
+        "tests/server/test_nautilus_bridge_factor_stream.py",
+    ),
     "server/services/versioning/": ("tests/server/test_versioning_revisions.py",),
 }
 FULL_PATHS = {

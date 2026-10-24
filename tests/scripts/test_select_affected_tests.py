@@ -269,6 +269,25 @@ def test_strategy_group_setting_registry_selects_its_contract_test():
     )
 
 
+def test_factor_expr_streaming_changes_select_bounded_contract_tests():
+    mode, targets = selector.select({
+        "tools/factors/expr/core.py",
+        "tools/factors/expr/streaming/incremental.py",
+        "tools/testers/backtest/modules/factor_signal.py",
+    })
+    assert mode == "SCOPED"
+    assert set(targets) == {
+        "tests/factors/test_factor_expr_incremental.py",
+        "tests/factors/test_groupby_scope_derived_missing.py",
+        "tests/factors/test_groupby_scope_infinities.py",
+        "tests/factors/test_groupby_scope_streaming.py",
+        "tests/backtest/native/test_factor_incremental_compile.py",
+        "tests/backtest/native/test_factor_incremental_rolling_window.py",
+        "tests/backtest/native/test_incremental_cross_sectional_kernels.py",
+        "tests/server/test_nautilus_bridge_factor_stream.py",
+    }
+
+
 def test_all_declared_module_targets_exist():
     assert all((selector.ROOT / "tests" / name).is_dir()
                for group in selector.IMPACT.values() for name in group)
