@@ -99,6 +99,14 @@ EXACT_PATH_TESTS = {
     "server/services/nautilus_bridge/position_offsets.py": (
         "tests/server/test_nautilus_bridge_position_offsets.py",
     ),
+    "server/modules/shared/run_spec_resolution/freezing.py": (
+        "tests/server/test_nautilus_bridge_run_spec.py",
+        "tests/server/test_research_runspec_field_contract.py",
+        "tests/server/test_strategy_plans.py",
+    ),
+    "server/modules/nautilus_workbench/__init__.py": (
+        "tests/server/test_nautilus_manager_preview.py",
+    ),
     "server/services/nautilus_bridge/capabilities.py": (
         "tests/server/test_nautilus_source_capabilities.py",
     ),

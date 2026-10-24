@@ -176,6 +176,24 @@ def test_nautilus_execution_bridge_selects_only_its_focused_tests():
     assert all((selector.ROOT / path).is_file() for path in targets)
 
 
+def test_nautilus_runspec_freezing_and_preview_select_focused_tests():
+    mode, targets = selector.select({
+        "server/modules/shared/run_spec_resolution/freezing.py",
+        "server/modules/nautilus_workbench/__init__.py",
+        "server/services/nautilus_bridge/run_spec.py",
+        "server/services/nautilus_bridge/venues.py",
+    })
+    assert mode == "SCOPED"
+    assert set(targets) == {
+        "tests/server/test_nautilus_bridge_run_spec.py",
+        "tests/server/test_research_runspec_field_contract.py",
+        "tests/server/test_strategy_plans.py",
+        "tests/server/test_nautilus_manager_preview.py",
+        "tests/server/test_nautilus_bridge_engine_factory.py",
+    }
+    assert all((selector.ROOT / path).is_file() for path in targets)
+
+
 def test_selector_change_runs_its_own_contract_test_not_full_suite():
     assert selector.select({"scripts/select_affected_tests.py"}) == (
         "SCOPED", ["tests/scripts/test_select_affected_tests.py"],
