@@ -241,6 +241,16 @@ def test_selector_change_runs_its_own_contract_test_not_full_suite():
     )
 
 
+def test_isolated_nautilus_report_routes_select_their_boundary_test():
+    mode, targets = selector.select({
+        "server/manager/http/job_list_routes.py",
+        "server/manager/http/job_transfer_routes.py",
+        "server/manager/http/write_routes.py",
+    })
+    assert mode == "SCOPED"
+    assert targets == ["tests/server/test_nautilus_report_route.py"]
+
+
 def test_all_declared_module_targets_exist():
     assert all((selector.ROOT / "tests" / name).is_dir()
                for group in selector.IMPACT.values() for name in group)

@@ -152,6 +152,15 @@ EXACT_PATH_TESTS = {
     "server/manager/web/test-modules/backtest/results/view.js": (
         "tests/scripts/test_nautilus_report_viewer.py",
     ),
+    "server/manager/http/job_list_routes.py": (
+        "tests/server/test_nautilus_report_route.py",
+    ),
+    "server/manager/http/job_transfer_routes.py": (
+        "tests/server/test_nautilus_report_route.py",
+    ),
+    "server/manager/http/write_routes.py": (
+        "tests/server/test_nautilus_report_route.py",
+    ),
     "server/services/nautilus_bridge/capabilities.py": (
         "tests/server/test_nautilus_source_capabilities.py",
     ),
