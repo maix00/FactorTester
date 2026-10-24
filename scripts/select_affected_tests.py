@@ -56,6 +56,46 @@ EXACT_PATH_TESTS = {
     "server/services/nautilus_bridge/engine_factory.py": (
         "tests/server/test_nautilus_bridge_engine_factory.py",
     ),
+    "server/services/nautilus_bridge/market_data.py": (
+        "tests/server/test_nautilus_bridge_data_contract.py",
+        "tests/server/test_nautilus_bridge_historical_rule_events.py",
+    ),
+    "server/services/nautilus_bridge/catalog.py": (
+        "tests/server/test_nautilus_bridge_catalog.py",
+    ),
+    "server/services/nautilus_bridge/backtest_runner.py": (
+        "tests/server/test_nautilus_bridge_backtest_runner.py",
+        "tests/server/test_nautilus_bridge_reports.py",
+    ),
+    "server/services/nautilus_bridge/factor_stream.py": (
+        "tests/server/test_nautilus_bridge_factor_stream.py",
+    ),
+    "server/services/nautilus_bridge/rule_transition.py": (
+        "tests/server/test_nautilus_bridge_rule_transition.py",
+        "tests/server/test_nautilus_bridge_historical_rule_events.py",
+    ),
+    "server/services/nautilus_bridge/reports.py": (
+        "tests/server/test_nautilus_bridge_reports.py",
+        "tests/server/test_nautilus_bridge_backtest_runner.py",
+    ),
+    "server/services/nautilus_bridge/historical_fees.py": (
+        "tests/server/test_nautilus_bridge_historical_fees.py",
+        "tests/server/test_nautilus_bridge_historical_rule_events.py",
+    ),
+    "server/services/nautilus_bridge/trading_fields.py": (
+        "tests/server/test_nautilus_bridge_trading_fields.py",
+    ),
+    "server/services/nautilus_bridge/run_spec.py": (
+        "tests/server/test_nautilus_bridge_run_spec.py",
+        "tests/server/test_research_runspec_field_contract.py",
+    ),
+    "server/services/nautilus_bridge/venues.py": (
+        "tests/server/test_nautilus_bridge_run_spec.py",
+        "tests/server/test_nautilus_bridge_engine_factory.py",
+    ),
+    "server/services/nautilus_bridge/position_offsets.py": (
+        "tests/server/test_nautilus_bridge_position_offsets.py",
+    ),
     "server/services/nautilus_bridge/capabilities.py": (
         "tests/server/test_nautilus_source_capabilities.py",
     ),

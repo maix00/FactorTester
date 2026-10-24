@@ -141,6 +141,40 @@ def test_nautilus_run_spec_and_source_ui_select_focused_tests():
     assert all((selector.ROOT / path).is_file() for path in targets)
 
 
+def test_nautilus_execution_bridge_selects_only_its_focused_tests():
+    paths = {
+        "server/services/nautilus_bridge/market_data.py",
+        "server/services/nautilus_bridge/catalog.py",
+        "server/services/nautilus_bridge/backtest_runner.py",
+        "server/services/nautilus_bridge/factor_stream.py",
+        "server/services/nautilus_bridge/rule_transition.py",
+        "server/services/nautilus_bridge/reports.py",
+        "server/services/nautilus_bridge/historical_fees.py",
+        "server/services/nautilus_bridge/trading_fields.py",
+        "server/services/nautilus_bridge/run_spec.py",
+        "server/services/nautilus_bridge/venues.py",
+        "server/services/nautilus_bridge/position_offsets.py",
+    }
+    mode, targets = selector.select(paths)
+    assert mode == "SCOPED"
+    assert set(targets) == {
+        "tests/server/test_nautilus_bridge_data_contract.py",
+        "tests/server/test_nautilus_bridge_historical_rule_events.py",
+        "tests/server/test_nautilus_bridge_catalog.py",
+        "tests/server/test_nautilus_bridge_backtest_runner.py",
+        "tests/server/test_nautilus_bridge_reports.py",
+        "tests/server/test_nautilus_bridge_factor_stream.py",
+        "tests/server/test_nautilus_bridge_rule_transition.py",
+        "tests/server/test_nautilus_bridge_historical_fees.py",
+        "tests/server/test_nautilus_bridge_trading_fields.py",
+        "tests/server/test_nautilus_bridge_run_spec.py",
+        "tests/server/test_research_runspec_field_contract.py",
+        "tests/server/test_nautilus_bridge_engine_factory.py",
+        "tests/server/test_nautilus_bridge_position_offsets.py",
+    }
+    assert all((selector.ROOT / path).is_file() for path in targets)
+
+
 def test_selector_change_runs_its_own_contract_test_not_full_suite():
     assert selector.select({"scripts/select_affected_tests.py"}) == (
         "SCOPED", ["tests/scripts/test_select_affected_tests.py"],
