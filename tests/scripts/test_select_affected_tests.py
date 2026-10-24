@@ -202,8 +202,10 @@ def test_nautilus_strategy_review_report_and_trading_ui_select_focused_tests():
         "server/manager/web/workbench/nautilus-configuration.js",
         "server/manager/web/workbench/test-settings.js",
         "server/manager/web/workbench/test-configuration.js",
+        "server/manager/web/app/route-dispatch.js",
         "server/manager/web/module-manifest.json",
         "server/manager/web/styles/workbench-settings.css",
+        "server/manager/web/styles/workbench.css",
         "server/manager/web/trading/workbench.js",
         "server/manager/web/trading/workbench.css",
         "server/manager/web/jobs/artifacts.js",
@@ -218,6 +220,7 @@ def test_nautilus_strategy_review_report_and_trading_ui_select_focused_tests():
         "tests/scripts/test_nautilus_config_review.py",
         "tests/scripts/test_worktree_manager_web_manifest.py::test_manifest_matches_html_script_order_and_files",
         "tests/js/test_strategy_binding_venues.js",
+        "tests/js/test_route_dispatch_nav.js",
         "tests/scripts/test_nautilus_trading_workbench.py",
         "tests/scripts/test_nautilus_report_viewer.py",
     }

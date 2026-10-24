@@ -134,6 +134,9 @@ EXACT_PATH_TESTS = {
     "server/manager/web/styles/workbench-settings.css": (
         "tests/scripts/test_nautilus_config_review.py",
     ),
+    "server/manager/web/styles/workbench.css": (
+        "tests/scripts/test_nautilus_config_review.py",
+    ),
     "server/manager/web/trading/workbench.js": (
         "tests/scripts/test_nautilus_trading_workbench.py",
     ),
@@ -233,6 +236,9 @@ EXACT_PATH_TESTS = {
     "server/manager/web/app/navigation.js": (
         "tests/js/test_route_dispatch_nav.js",
         "tests/js/test_tab_nav_highlight.js",
+    ),
+    "server/manager/web/app/route-dispatch.js": (
+        "tests/js/test_route_dispatch_nav.js",
     ),
     "server/manager/web/app/webmcp.js": (
         "tests/js/test_app_shell_startup.js",
