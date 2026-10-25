@@ -687,6 +687,7 @@ def get_test_job(job_id: str):
         "submission_context": _submission_context(job),
         "caller": task_detail["caller"],
         "task_detail": task_detail,
+        "progress": detail.get("progress"),
         "evidence": evidence,
         **job_urls(job.job_id),
     }
