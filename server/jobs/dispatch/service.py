@@ -12,6 +12,7 @@ import logging
 import os
 
 from server import branding
+from server.jobs.repository.sqlite import JobRepository
 import time
 from pathlib import Path
 
@@ -36,8 +37,6 @@ def build_runner() -> DispatchRunner:
     db_path = Path(os.environ.get(DB_ENV, "") or Settings.CACHE_DB_PATH)
     outbox = DispatchOutbox(db_path)
     outbox.ensure_schema()
-    from server.jobs.repository.sqlite import JobRepository
-
     repository = JobRepository(db_path)
     repository.recover_expired_leases()
     return DispatchRunner(
