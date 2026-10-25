@@ -10,8 +10,8 @@ not the same as a fully migrated detail/editor route.
 | `/research` | native landing; detail editor bridge |
 | `/jobs` | native list; native detail + run configuration drawer; input still legacy |
 | `/backtest` | native strategy-family landing; workbench bridge |
-| `/products` | native catalog with product/factor/strategy tabs; editors bridge |
-| `/settings` | native overlay; several sections still placeholders |
+| `/products` | native catalog with products/groups/factors/families/sets/strategies/sources/categories tabs; editors bridge |
+| `/settings` | native overlay; language/workspace/account/server native; other sections still placeholders |
 | `/account` | native |
 
 ## Hidden/legacy routes still to migrate
@@ -23,10 +23,9 @@ not the same as a fully migrated detail/editor route.
 /jobs/:port/:id/input/:name
 /ic
 /factor-series
-/factor-families, /factor-sets
 /factor-families/:id, /factor-sets/:id
 /product-category/:id
-/products/:id, /product-groups/:id, /product-sources, /product-reference/:kind/:id
+/products/:id, /product-reference/:kind/:id
 /profiles, /profiles/:id
 /settings/:section (non-language/workspace sections)
 /manager
