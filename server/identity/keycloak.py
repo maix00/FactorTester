@@ -186,3 +186,47 @@ def oidc_authorization_url(
         f"{base_url.rstrip('/')}/realms/{realm.strip('/')}"
         f"/protocol/openid-connect/auth?{query}"
     )
+
+
+class OIDCClient:
+    """Authorization-code token exchange for browser/Swift sessions."""
+
+    def __init__(self, base_url: str, realm: str, client_id: str,
+                 *, client_secret: str = "", timeout: float = 10.0) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.realm = realm.strip("/")
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.timeout = timeout
+
+    def _token(self, form: dict[str, str]) -> dict:
+        import json
+        import urllib.parse
+        import urllib.request
+
+        if self.client_secret:
+            form = {**form, "client_secret": self.client_secret}
+        request = urllib.request.Request(
+            f"{self.base_url}/realms/{self.realm}/protocol/openid-connect/token",
+            data=urllib.parse.urlencode(form).encode(),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            return json.loads(response.read())
+
+    def exchange_code(self, code: str, redirect_uri: str, *,
+                      code_verifier: str = "") -> dict:
+        form = {
+            "grant_type": "authorization_code", "code": code,
+            "redirect_uri": redirect_uri, "client_id": self.client_id,
+        }
+        if code_verifier:
+            form["code_verifier"] = code_verifier
+        return self._token(form)
+
+    def refresh(self, refresh_token: str) -> dict:
+        return self._token({
+            "grant_type": "refresh_token", "refresh_token": refresh_token,
+            "client_id": self.client_id,
+        })
