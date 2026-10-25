@@ -95,3 +95,22 @@ signal for a live trading process.
   and result-write-before-ACK are covered by tests.
 - API, worker claim and capability preview agree on runnable/rejected Jobs.
 - No legacy backtest runner entry point remains at final cutover.
+
+## Implementation progress (2026-10-25, local only)
+
+- Added `server/jobs/dispatch/contract.py`: JSON-only `DispatchMessage`
+  with schema version, safe job id, sha256 RunSpec/JobSpec references.
+- Added `server/jobs/dispatch/outbox.py`: `research_job_dispatch_outbox`
+  lease/claim/backoff/dead handling; duplicate-safe `(job_id, attempt)` key.
+- Job creation/transition/approval now enqueue the dispatch row inside the
+  same SQLite transaction. Jobs without `run_spec_hash` or `deployment_id`
+  (legacy/demo paths) are not queued.
+- Added `JobRepository.claim_attempt`: duplicate Celery deliveries cannot
+  claim the same JobAttempt twice.
+- Added `dispatcher.py`: lease -> RabbitMQ publish (Kombu) -> `sent`, or
+  failure backoff; broker URL is `FACTORTESTER_BROKER_URL`.
+- Focused tests: `tests/server/test_job_dispatch_outbox.py`,
+  `tests/server/test_job_dispatch_runner.py` (14 passed at this commit).
+- Celery app/worker task is intentionally not registered until the Nautilus
+  vertical slice can consume a claimed attempt; a fake task would be worse
+  than no task.
