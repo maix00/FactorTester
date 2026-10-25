@@ -66,3 +66,15 @@
 - Public image builds now use BuildKit inline cache; PostgreSQL container and
   data were preserved. The fixed-service symlinks under
   `/opt/factortester-container/services` must point to existing release dirs.
+
+
+## Public root disk
+
+- `/opt/factortester-container/state/job-index.sqlite` is 4.1G because
+  `control_events` holds ~650k rows (about 4.0G of that file).
+- `/opt/factortester-container/state-debug` was a stale duplicate of the
+  same 4.1G index; it was not mounted or open and was removed, freeing 4.3G.
+- Docker images/build cache and journals were pruned separately.
+- Root disk after cleanup: 21G free on a 40G volume.
+- Future work: add a bounded retention policy for `control_events`; do not
+  delete event history while a peer cursor still needs it.
