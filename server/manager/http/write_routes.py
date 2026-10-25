@@ -461,6 +461,20 @@ class WriteRoutesMixin:
         ):
             self._require_capability()
             return
+        browser_session = self._session()
+        if browser_session is not None:
+            from server.manager.http.core_get_routes import _admin_capabilities
+
+            capabilities = _admin_capabilities(
+                str(browser_session.get("username") or ""),
+                str(browser_session.get("role") or ""),
+            )
+            if "admin_console:manage" not in capabilities:
+                json_response(self, {
+                    "success": False,
+                    "error": "admin console manage permission required",
+                }, 403)
+                return
         length = int(self.headers.get("Content-Length", "0"))
         params = parse_qs(self.rfile.read(length).decode("utf-8"))
         if set(params) != {"instance_id"} or len(params["instance_id"]) != 1:
