@@ -1016,6 +1016,51 @@ def get_report_attachment(report_ref: str, name: str):
     return Response(data, mimetype=mime, headers={"Content-Disposition": f'inline; filename="{name}"'})
 
 
+@sft_bp.get("/api/research-reports/<publication_id>/conflicts")
+def get_research_report_conflicts(publication_id: str):
+    actor = require_user()
+    import os
+    from server.jobs.storage.couchdb_research_reports import document_id, get_research_report
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "research report store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = get_research_report(store, publication_id)
+    except Exception:
+        return jsonify({"success": False, "error": "research report not found"}), 404
+    if document.get("owner_ref") != actor:
+        return jsonify({"success": False, "error": "only the research report owner may inspect conflicts"}), 403
+    return jsonify({"success": True, "conflicts": store.conflicts(document_id(publication_id))})
+
+
+@sft_bp.post("/api/research-reports/<publication_id>/conflicts/resolve")
+def resolve_research_report_conflicts(publication_id: str):
+    actor = require_user()
+    import os
+    from flask import request
+    from server.jobs.storage.couchdb_research_reports import document_id, get_research_report
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "research report store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = get_research_report(store, publication_id)
+    except Exception:
+        return jsonify({"success": False, "error": "research report not found"}), 404
+    if document.get("owner_ref") != actor:
+        return jsonify({"success": False, "error": "only the research report owner may resolve conflicts"}), 403
+    keep_rev = str((request.get_json(silent=True) or {}).get("keep_rev") or "")
+    if not keep_rev:
+        return jsonify({"success": False, "error": "keep_rev is required"}), 400
+    remaining = store.resolve_conflicts(document_id(publication_id), keep_rev=keep_rev)
+    return jsonify({"success": True, "conflicts": remaining})
+
+
 @sft_bp.get("/api/research-reports/<publication_id>/projection")
 def get_research_report_projection(publication_id: str):
     actor = require_user()
