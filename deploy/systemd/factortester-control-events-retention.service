@@ -1,0 +1,8 @@
+[Unit]
+Description=FactorTester control-event retention
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=ecs-user
+ExecStart=/usr/local/sbin/factortester-prune-control-events /data/state/job-index.sqlite --older-than-days 90 --apply --vacuum
