@@ -14,7 +14,7 @@ function recentIds(): string[] {
   }
 }
 
-export function WorkspacePage(): React.ReactElement {
+export function WorkspacePage({ onOpen }: { onOpen?: (id: string) => void }): React.ReactElement {
   const { t } = useTranslation();
   const recent = recentIds();
   const pages = pagesForScope("mobile")
@@ -35,11 +35,11 @@ export function WorkspacePage(): React.ReactElement {
       </header>
       <div className="tr-mobile-open-list">
         {pages.map((page) => (
-          <a key={page.id} href={`/m/${page.id}`} className="tr-mobile-open-row">
+          <button key={page.id} type="button" className="tr-mobile-open-row" onClick={() => onOpen?.(page.id)}>
             <span className="tr-mobile-open-icon"><PageIcon name={page.icon} /></span>
-            <span>{t(`nav.${page.id}`, { defaultValue: page.title })}</span>
+            <span>{t(`common.nav.${page.id}`, { defaultValue: page.title })}</span>
             <span className="tr-mobile-open-route">{page.route.split("?")[0]}</span>
-          </a>
+          </button>
         ))}
       </div>
     </section>

@@ -217,3 +217,10 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-mobile-settings-card { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .tr-mobile-settings-card b { display: block; font-size: 13px; }
 .tr-mobile-settings-card small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; max-width: 230px; }
+.tr-mobile-page { display: flex; flex-direction: column; min-height: 100vh; background: var(--bg); }
+.tr-mobile-page-header { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 8px; min-height: 52px; padding: env(safe-area-inset-top, 0px) 10px 0; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 96%, transparent); backdrop-filter: blur(12px); }
+.tr-mobile-page-header strong { font-size: 16px; }
+.tr-mobile-back { width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 8px; color: var(--text); background: transparent; }
+.tr-mobile-back:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.tr-mobile-page-body { flex: 1; min-height: 0; }
+.tr-mobile-page-body .tr-page-frame { height: calc(100vh - 52px); min-height: 0; }
