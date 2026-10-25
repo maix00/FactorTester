@@ -26,6 +26,7 @@ export function SettingsOverlay({
   const { t } = useTranslation();
   const [section, setSection] = useState<string>("account");
   const [session, setSession] = useState<{ username?: string; role?: string } | null>(null);
+  const [serverInfo, setServerInfo] = useState<Record<string, unknown> | null>(null);
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -35,6 +36,13 @@ export function SettingsOverlay({
       .catch(() => undefined);
     return () => { cancelled = true; };
   }, [open]);
+  useEffect(() => {
+    if (!open || section !== "server") return;
+    fetch("/api/server/network-info", { credentials: "same-origin" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((value) => setServerInfo(value))
+      .catch(() => setServerInfo(null));
+  }, [open, section]);
   const current = SECTIONS.find((item) => item.id === section) ?? SECTIONS[0];
   return (
     <Modal
@@ -84,6 +92,11 @@ export function SettingsOverlay({
                 <div><b>{t("settingsPanel.layout")}</b><small>{t("settingsPanel.layoutHint")}</small></div>
                 <button type="button" className="tr-toolbar-button" onClick={onResetLayout}>{t("resetLayout")}</button>
               </div>
+            </div>
+          ) : current.id === "server" ? (
+            <div className="tr-settings-card">
+              <h3>{t("settingsPanel.sections.server")}</h3>
+              {serverInfo ? <pre className="tr-job-detail">{JSON.stringify(serverInfo, null, 2)}</pre> : <p>{t("loading")}</p>}
             </div>
           ) : current.id === "account" ? (
             <div className="tr-settings-card">
