@@ -18,7 +18,7 @@ export function CatalogPage(): React.ReactElement {
     fetch("/api/product-library/product-groups?view=summary", { credentials: "same-origin" })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
       .then((payload: Payload<Group>) => setGroups(payload.groups ?? []))
-      .catch((error: Error) => notify({ code: "catalog.groups", type: "error", message: t("loadFailed"), description: error.message }));
+      .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }));
   }, [t]);
 
   useEffect(() => {
@@ -27,7 +27,7 @@ export function CatalogPage(): React.ReactElement {
     fetch(`/api/product-library/products${query}`, { credentials: "same-origin" })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
       .then((payload: Payload<Product>) => setProducts(payload.products ?? []))
-      .catch((error: Error) => notify({ code: "catalog.products", type: "error", message: t("loadFailed"), description: error.message }))
+      .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }))
       .finally(() => setLoading(false));
   }, [selected, t]);
 
