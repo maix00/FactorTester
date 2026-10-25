@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import base64
 import binascii
 import time
@@ -695,6 +697,33 @@ def get_test_job(job_id: str):
     if warnings:
         payload["detail_warning"] = "；".join(warnings)
     return jsonify(payload)
+
+
+@sft_bp.get("/api/dispatch/status")
+def dispatch_status():
+    """Read-only dispatch/worker projection for the operations panel."""
+    require_user()
+    from server.jobs.dispatch.outbox import DispatchOutbox
+
+    job_repository = repository()
+    db_path = getattr(job_repository, "db_path", None)
+    if db_path is None:
+        return jsonify({"success": False, "error": "job repository unavailable"}), 503
+    outbox = DispatchOutbox(db_path)
+    deployment = os.environ.get("FACTORTESTER_DEPLOYMENT_ID", "").strip()
+    raw_port = os.environ.get("FACTORTESTER_SERVICE_PORT", "").strip()
+    port = int(raw_port) if raw_port.isdigit() else 0
+    return jsonify({
+        "success": True,
+        "deployment_id": deployment,
+        "service_port": port,
+        "queue": (
+            f"factortester.jobs.{deployment}.{port}"
+            if deployment and port else ""
+        ),
+        "outbox": outbox.counts(),
+        "workers": job_repository.list_worker_targets(),
+    })
 
 
 @sft_bp.get("/api/jobs/<job_id>/stream")
