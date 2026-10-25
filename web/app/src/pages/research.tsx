@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { notify } from "../notifications/core.ts";
 import { formatDate } from "../format.ts";
+import { ReportEditor } from "../components/report-editor.tsx";
 
 type Research = { research_id?: string; title?: string; visibility?: string; updated_at?: string; owner?: string };
 type Report = { publication_id?: string; report_id?: string; title?: string; summary?: string; updated_at?: string };
@@ -80,7 +81,8 @@ export function ResearchPage(): React.ReactElement {
       {reportID ? (
         <div className="tr-legacy-overlay" role="dialog" aria-label={reportID}>
           <div className="tr-legacy-bar"><strong>{reportID}</strong><button type="button" onClick={() => setReportID("")}>{t("notifications.close")}</button></div>
-          <pre className="tr-job-detail">{reportContent || t("loading")}</pre>
+          <ReportEditor publicationID={reportID} />
+          {reportContent ? <details className="tr-report-markdown"><summary>{t("report.markdown")}</summary><pre className="tr-job-detail">{reportContent}</pre></details> : null}
         </div>
       ) : null}
       {legacy ? (
