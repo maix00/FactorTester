@@ -72,6 +72,21 @@ def _write(store, document: dict, revision: str, logical: str, payload: dict,
     return json.loads(body)["rev"]
 
 
+def _refresh_chapters(store, document: dict, revision: str, projection_hash: str,
+                      generation: int, updates: dict[str, dict]) -> str:
+    for logical, meta in sorted((document.get("attachments") or {}).items()):
+        if not (logical.startswith("chapters/") and logical.endswith(".json")):
+            continue
+        name = str((updates.get(logical) or {}).get("name") or (meta or {}).get("name") or "")
+        if not name:
+            continue
+        payload = json.loads(store.get_attachment(document["_id"], name))
+        payload["projection_hash"] = projection_hash
+        payload["generation"] = generation
+        revision = _write(store, document, revision, logical, payload, updates)
+    return revision
+
+
 def apply_projection_operation(store, document: dict[str, Any], *, base_rev: str,
                                operation: dict[str, Any]) -> dict[str, Any]:
     if str(document.get("_rev") or "") != str(base_rev or ""):
@@ -162,11 +177,15 @@ def apply_projection_operation(store, document: dict[str, Any], *, base_rev: str
     if chapter is not None:
         chapter["generation"] = generation
         chapter["projection_hash"] = projection["projection_hash"]
-        revision = _write(store, document, revision,
-                          chapter_attachment_path(str(operation.get("chapter_id") or operation.get("operations", [{}])[0].get("chapter_id") or "")),
-                          chapter, updates)
+        target_logical = chapter_attachment_path(str(
+            operation.get("chapter_id") or
+            (operation.get("operations") or [{}])[0].get("chapter_id") or ""
+        ))
+        revision = _write(store, document, revision, target_logical, chapter, updates)
     revision = _write(store, document, revision, "projection.json", projection, updates)
     revision = _write(store, document, revision, "index.json", index, updates)
+    revision = _refresh_chapters(store, document, revision,
+                                 projection["projection_hash"], generation, updates)
     _, body = store._request("GET", document["_id"])
     fresh = json.loads(body)
     fresh.setdefault("attachments", {}).update(updates)
