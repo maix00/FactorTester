@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import urllib.error
 from typing import Any
 
 
@@ -40,10 +41,15 @@ def apply_index_operation(store, document: dict[str, Any], *, base_rev: str,
         raise ValueError("unsupported operation")
     raw = json.dumps(index, ensure_ascii=False, sort_keys=True).encode()
     name = hashlib.sha256(raw).hexdigest() + ".json"
-    status, body = store._request(
-        "PUT", f"{document['_id']}/{name}?rev={base_rev}", raw,
-        content_type="application/json",
-    )
+    try:
+        status, body = store._request(
+            "PUT", f"{document['_id']}/{name}?rev={base_rev}", raw,
+            content_type="application/json",
+        )
+    except urllib.error.HTTPError as exc:
+        if exc.code == 409:
+            raise ValueError("revision conflict") from exc
+        raise
     if status not in {201, 202}:
         raise ValueError("index write failed")
     revision = json.loads(body)["rev"]
@@ -52,10 +58,15 @@ def apply_index_operation(store, document: dict[str, Any], *, base_rev: str,
     fresh.setdefault("attachments", {})["index.json"] = {
         "name": name, "content_type": "application/json", "size_bytes": len(raw),
     }
-    status, body = store._request(
-        "PUT", f"{document['_id']}?rev={fresh['_rev']}",
-        json.dumps(fresh, ensure_ascii=False).encode(), content_type="application/json",
-    )
+    try:
+        status, body = store._request(
+            "PUT", f"{document['_id']}?rev={fresh['_rev']}",
+            json.dumps(fresh, ensure_ascii=False).encode(), content_type="application/json",
+        )
+    except urllib.error.HTTPError as exc:
+        if exc.code == 409:
+            raise ValueError("revision conflict") from exc
+        raise
     if status not in {201, 202}:
         raise ValueError("document write failed")
     return {"rev": json.loads(body)["rev"], "index": index, "attachment": name}
