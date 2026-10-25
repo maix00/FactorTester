@@ -7,6 +7,13 @@ publish.
 
 It is a development/test topology, not a production deployment.
 
+Before starting, run the target preflight inside the worker image (it checks broker,
+deployment/port, writable WAL directory, and executor availability):
+
+```bash
+python -m server.jobs.dispatch.preflight --check-executor --json
+```
+
 ```bash
 cp deploy/docker/job-dispatch/env.example deploy/docker/job-dispatch/.env
 # edit .env: broker password, job DB path, state/data roots
