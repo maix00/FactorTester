@@ -422,6 +422,38 @@
           try {
             const response = await api(`/api/research-reports/${encodeURIComponent(publicationID)}/chapters/${encodeURIComponent(chapter.chapter_id)}`);
             const components = (response.chapter?.components || []).filter(item => item.kind !== "chapter");
+            const rootComponent = (response.chapter?.components || []).find(item => item.kind === "chapter");
+            const rootID = rootComponent?.component_id || chapter.chapter_id;
+            const addRowInner = document.createElement("div");
+            addRowInner.className = "report-edit-row";
+            const addTitleInner = document.createElement("input");
+            addTitleInner.placeholder = t("新组件标题");
+            const addBodyInner = document.createElement("textarea");
+            addBodyInner.placeholder = t("组件正文");
+            const addKindInner = document.createElement("select");
+            ["paragraph", "section"].forEach(kind => {
+              const option = document.createElement("option");
+              option.value = kind; option.textContent = kind;
+              addKindInner.append(option);
+            });
+            const addComponent = document.createElement("button");
+            addComponent.textContent = t("新增组件");
+            addComponent.onclick = () => {
+              const siblings = (response.chapter?.components || []).filter(item => item.parent_id === rootID);
+              apply({
+                op: "insert_component", chapter_id: chapter.chapter_id,
+                parent_id: rootID,
+                after_component_id: siblings[siblings.length - 1]?.component_id || rootID,
+                component: {
+                  component_id: `component-${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`,
+                  kind: addKindInner.value,
+                  title: addTitleInner.value.trim(),
+                  body: addBodyInner.value,
+                },
+              });
+            };
+            addRowInner.append(addTitleInner, addKindInner, addBodyInner, addComponent);
+            componentBox.append(addRowInner);
             components.forEach(component => {
               const line = document.createElement("div");
               line.className = "report-edit-row";
