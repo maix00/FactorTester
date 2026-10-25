@@ -6,6 +6,7 @@ import { PageIcon } from "./icon.tsx";
 import { PageFrame } from "./frame.tsx";
 import { WorkspacePage } from "./pages/workspace.tsx";
 import { MobileSettingDetail, MobileSettingsPage, type MobileSettingSection } from "./pages/mobile-settings.tsx";
+import { MobileJobsPage } from "./pages/mobile-jobs.tsx";
 import { MobileNotificationHost } from "./notifications/mobile-host.tsx";
 
 for (const page of BUILTIN_PAGES) registerPage(page);
@@ -53,6 +54,8 @@ export function MobileShell(): React.ReactElement {
         <div className="tr-mobile-shell">
           {page?.id === "workspace" ? (
             <WorkspacePage onOpen={selectTab} />
+          ) : page?.id === "jobs" ? (
+            <MobileJobsPage />
           ) : page?.id === "settings" ? (
             <MobileSettingsPage onOpen={openSetting} />
           ) : (
