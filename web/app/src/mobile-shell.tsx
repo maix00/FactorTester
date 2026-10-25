@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { PageFrame } from "./frame.tsx";
 import { MobileNotificationHost } from "./notifications/mobile-host.tsx";
 import { WorkspacePage } from "./pages/workspace.tsx";
+import { MobileSettingsPage } from "./pages/mobile-settings.tsx";
 
 for (const page of BUILTIN_PAGES) registerPage(page);
 
@@ -28,7 +29,7 @@ export function MobileShell(): React.ReactElement {
     <IonApp>
       <MobileNotificationHost />
       <div className="tr-mobile-shell">
-        {page?.id === "workspace" ? <WorkspacePage /> : <PageFrame pageId={page?.id ?? "research"} />}
+        {page?.id === "workspace" ? <WorkspacePage /> : page?.id === "settings" ? <MobileSettingsPage /> : <PageFrame pageId={page?.id ?? "research"} />}
         <IonTabBar className="tr-mobile-tabs" slot="bottom">
           {tabs.map((item) => (
             <IonTabButton

@@ -214,3 +214,6 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-dock-close { width: 20px; height: 20px; font-size: 14px; }
 .dv-inactive-tab .tr-dock-tab { min-width: 22px; justify-content: center; }
 .dv-inactive-tab .tr-dock-tab .tr-icon { width: 15px; height: 15px; flex-basis: 15px; }
+.tr-mobile-settings-card { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.tr-mobile-settings-card b { display: block; font-size: 13px; }
+.tr-mobile-settings-card small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; max-width: 230px; }

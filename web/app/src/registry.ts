@@ -40,6 +40,7 @@ export const BUILTIN_PAGES: PageDefinition[] = [
   { id: "jobs", route: "/jobs?section=types", title: "运行", scope: "both", mobileTab: "runs", icon: "runs" },
   { id: "trading", route: "/backtest", title: "交易", scope: "both", mobileTab: "trading", icon: "trading" },
   { id: "workspace", route: "/research?section=researches", title: "工作区", scope: "mobile", mobileTab: "workspace", icon: "workspace" },
+  { id: "settings", route: "/settings", title: "设置", scope: "mobile", mobileTab: "settings", icon: "account" },
   { id: "catalog", route: "/products", title: "目录", scope: "desktop", icon: "catalog" },
   { id: "account", route: "/settings", title: "账户", scope: "desktop", icon: "account" },
 ];
