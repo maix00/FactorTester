@@ -222,4 +222,5 @@
   }
 
   window.FTManager = {show};
+  window.TRManager = window.FTManager;
 })();
