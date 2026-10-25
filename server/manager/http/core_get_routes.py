@@ -44,23 +44,10 @@ def _admin_capabilities(username: str, role: str) -> list[str]:
     )
     if not db:
         return []
-    store = PermissionStore(db)
-    subjects = [f"user:{username}"]
-    base_url = os.environ.get("TRADERESEARCH_KEYCLOAK_URL", "") or os.environ.get("FACTORTESTER_KEYCLOAK_URL", "")
-    realm = os.environ.get("TRADERESEARCH_KEYCLOAK_REALM", "") or os.environ.get("FACTORTESTER_KEYCLOAK_REALM", "")
-    if base_url and realm:
-        try:
-            from server.identity.keycloak import KeycloakAdminAdapter, permission_subjects
+    from server.permissions.subjects import subjects_for_user
 
-            identity = KeycloakAdminAdapter(
-                base_url, realm,
-                client_id=os.environ.get("TRADERESEARCH_KEYCLOAK_CLIENT_ID", "admin-cli"),
-                client_secret=os.environ.get("TRADERESEARCH_KEYCLOAK_CLIENT_SECRET", ""),
-            ).user(username)
-            if identity is not None:
-                subjects = list(permission_subjects(identity))
-        except Exception:
-            pass
+    store = PermissionStore(db)
+    subjects = subjects_for_user(username)
     allowed = []
     for capability in ("read", "manage"):
         if any(store.allows(
