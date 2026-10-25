@@ -49,6 +49,8 @@ services:
       FACTORTESTER_MIHOMO_BIN: /usr/local/bin/mihomo
       FACTORTESTER_MIHOMO_CONFIG_FILE: /state/mihomo.yaml
       FACTORTESTER_MANAGED_ORGANIZATIONS: ${FACTORTESTER_MANAGED_ORGANIZATIONS:-default}
+      FACTORTESTER_COUCHDB_URL: ${FACTORTESTER_COUCHDB_URL:-}
+      FACTORTESTER_COUCHDB_DB: ${FACTORTESTER_COUCHDB_DB:-ft_objects}
       # The job pool keeps 1 planner + 2 execution workers alive, and each
       # worker only recycles after its peak RSS passes this ceiling (upstream
       # default 3 GiB, i.e. 9 GiB for the pool alone).  On a small public host
