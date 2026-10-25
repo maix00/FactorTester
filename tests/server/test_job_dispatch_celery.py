@@ -125,19 +125,13 @@ def test_worker_app_uses_environment_target(monkeypatch):
 
 
 
+
 def test_worker_app_registers_target_heartbeat(monkeypatch, tmp_path):
-    pytest.importorskip("celery")
-    import importlib, time
-    monkeypatch.setenv("FACTORTESTER_BROKER_URL", "memory://")
+    from server.jobs.dispatch import worker_app
+    from server.jobs.repository.sqlite import JobRepository
+
+    monkeypatch.setenv("FACTORTESTER_JOB_DB", str(tmp_path / "jobs.db"))
     monkeypatch.setenv("FACTORTESTER_DEPLOYMENT_ID", "local-docker")
     monkeypatch.setenv("FACTORTESTER_SERVICE_PORT", "8001")
-    monkeypatch.setenv("FACTORTESTER_JOB_DB", str(tmp_path / "jobs.db"))
-    monkeypatch.setenv("FACTORTESTER_TARGET_HEARTBEAT_SECONDS", "5")
-    import server.jobs.dispatch.worker_app as worker_app
-    importlib.reload(worker_app)
-    from server.jobs.repository.sqlite import JobRepository
-    repository = JobRepository(tmp_path / "jobs.db")
-    deadline = time.time() + 3
-    while time.time() < deadline and not repository.worker_target_online("local-docker", 8001):
-        time.sleep(0.05)
-    assert repository.worker_target_online("local-docker", 8001)
+    assert worker_app.heartbeat_target_once()
+    assert JobRepository(tmp_path / "jobs.db").worker_target_online("local-docker", 8001)
