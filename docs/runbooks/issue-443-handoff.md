@@ -122,3 +122,12 @@ The Manager binds `0.0.0.0:8770`; open `/app` on the LAN address printed at
 startup. This instance uses `/tmp/ft-manager-state` and `/tmp/ft-manager-data`
 so it does not touch production state. Verified: `/app` returned 200, desktop
 Dockview rendered, mobile rendered 5 bottom tabs, and the page list loaded.
+
+Health check for that instance:
+
+```bash
+./scripts/server/check_local_test.sh
+```
+
+It verifies `/app` returns 200 and reports the three local dependency
+containers (`ft-couchdb`, `ft-rabbit`, `ft-keycloak`).
