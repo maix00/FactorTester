@@ -287,7 +287,8 @@ class DispatchOutbox:
             conn.execute(
                 """
                 UPDATE research_job_dispatch_outbox
-                SET status='pending', available_at=?, lease_until=NULL
+                SET status='pending', available_at=?, lease_until=NULL,
+                    attempts=CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END
                 WHERE job_id=? AND attempt=? AND status='publishing'
                 """,
                 (timestamp + max(0.0, float(delay)), identity[0], identity[1]),

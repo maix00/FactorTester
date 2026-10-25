@@ -102,3 +102,4 @@ def test_offline_target_is_deferred_not_published(tmp_path):
     assert publisher.messages == []
     row = outbox.get(("job-offline", 1))
     assert row.status == "pending"
+    assert row.attempts == 0
