@@ -4,6 +4,7 @@ import { IonReactRouter } from "@ionic/react-router";
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { BUILTIN_PAGES, pagesForScope, registerPage } from "./registry.ts";
 import { PageSurface } from "./surface.tsx";
+import { PageIcon } from "./icon.tsx";
 
 for (const page of BUILTIN_PAGES) registerPage(page);
 
@@ -28,7 +29,8 @@ export function MobileShell(): React.ReactElement {
           </IonRouterOutlet>
           <IonTabBar slot="bottom" className="tr-mobile-tabs">
             {tabs.map((page) => (
-              <IonTabButton key={page.id} tab={page.id} href={`/m/${page.id}`}>
+              <IonTabButton key={page.id} tab={page.id} href={`/m/${page.id}`} aria-label={page.title}>
+                <PageIcon name={page.icon} />
                 <span>{page.title}</span>
               </IonTabButton>
             ))}

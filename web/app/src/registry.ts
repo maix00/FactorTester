@@ -6,6 +6,7 @@ export interface PageDefinition {
   title: string;
   scope: PageScope;
   mobileTab?: string;
+  icon?: string;
 }
 
 const pages = new Map<string, PageDefinition>();
@@ -35,10 +36,10 @@ export function pagesForScope(scope: "desktop" | "mobile"): PageDefinition[] {
 }
 
 export const BUILTIN_PAGES: PageDefinition[] = [
-  { id: "research", route: "/research", title: "研究", scope: "both", mobileTab: "research" },
-  { id: "jobs", route: "/runs", title: "运行", scope: "both", mobileTab: "runs" },
-  { id: "trading", route: "/trading", title: "交易", scope: "both", mobileTab: "trading" },
-  { id: "workspace", route: "/workspace", title: "工作区", scope: "mobile", mobileTab: "workspace" },
-  { id: "catalog", route: "/catalog", title: "目录", scope: "desktop" },
-  { id: "account", route: "/account", title: "账户", scope: "desktop" },
+  { id: "research", route: "/research", title: "研究", scope: "both", mobileTab: "research", icon: "research" },
+  { id: "jobs", route: "/runs", title: "运行", scope: "both", mobileTab: "runs", icon: "runs" },
+  { id: "trading", route: "/trading", title: "交易", scope: "both", mobileTab: "trading", icon: "trading" },
+  { id: "workspace", route: "/workspace", title: "工作区", scope: "mobile", mobileTab: "workspace", icon: "workspace" },
+  { id: "catalog", route: "/catalog", title: "目录", scope: "desktop", icon: "catalog" },
+  { id: "account", route: "/account", title: "账户", scope: "desktop", icon: "account" },
 ];
