@@ -388,13 +388,26 @@
     if (reportRef) {
       const report = document.createElement("div");
       report.className = "job-report-link";
-      const link = document.createElement("a");
-      link.href = `/api/reports/${encodeURIComponent(reportRef)}/attachments/tearsheet.html`;
-      link.target = "_blank";
-      link.rel = "noopener";
-      link.textContent = context.t("打开 CouchDB 报告");
-      report.append(link);
       resultsPanel.append(report);
+      context.api(`/api/reports/${encodeURIComponent(reportRef)}/attachments`).then(payload => {
+        const attachments = Array.isArray(payload.attachments) ? payload.attachments : [];
+        if (!attachments.length) return;
+        for (const attachment of attachments) {
+          const link = document.createElement("a");
+          link.href = `/api/reports/${encodeURIComponent(reportRef)}/attachments/${encodeURIComponent(attachment.name)}`;
+          link.target = "_blank";
+          link.rel = "noopener";
+          link.textContent = attachment.name;
+          report.append(link);
+        }
+      }).catch(() => {
+        const link = document.createElement("a");
+        link.href = `/api/reports/${encodeURIComponent(reportRef)}/attachments/tearsheet.html`;
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.textContent = context.t("打开 CouchDB 报告");
+        report.append(link);
+      });
     }
     const resultHost = document.createElement("div");
     resultHost.className = "job-result-host";
