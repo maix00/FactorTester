@@ -35,7 +35,7 @@ class _Executor:
         self.crash = crash
         self.calls = 0
 
-    def execute(self, record, message):
+    def execute(self, record, message, context):
         self.calls += 1
         if self.crash:
             raise RuntimeError("engine crashed")
@@ -101,7 +101,7 @@ def test_worker_heartbeats_during_long_executor(tmp_path):
     _queued_job(repository, "job-beat")
 
     class SlowExecutor:
-        def execute(self, record, message):
+        def execute(self, record, message, context):
             time.sleep(0.12)
             return ExecutionOutcome({"ok": True})
 
@@ -117,3 +117,57 @@ def test_worker_heartbeats_during_long_executor(tmp_path):
         ).fetchone()
     # The terminal transition removes the lease.
     assert row is None
+
+
+def test_worker_writes_cancelled_outcome(tmp_path):
+    repository = JobRepository(tmp_path / "jobs.db")
+    _queued_job(repository, "job-cancel-worker")
+
+    class CancelExecutor:
+        def execute(self, record, message, context):
+            return ExecutionOutcome({"bars": 10}, cancelled=True)
+
+    result = DispatchWorker(repository).execute(
+        _message("job-cancel-worker"), CancelExecutor(),
+    )
+    assert result["status"] == "cancelled"
+    assert repository.require("job-cancel-worker").status is JobStatus.CANCELLED
+
+
+def test_cancel_requested_visible_to_executor(tmp_path):
+    repository = JobRepository(tmp_path / "jobs.db")
+    _queued_job(repository, "job-cancel-flag")
+    repository.request_cancel("job-cancel-flag", owner="owner", reason="stop")
+
+    class Cancelled(Exception):
+        pass
+
+    class Exploding:
+        def execute(self, record, message, context):
+            assert context.cancel_requested()
+            raise Cancelled("stopped")
+
+    # request_cancel on a queued job already marked it cancelled, so this claim
+    # is a duplicate; the executor must not run.
+    result = DispatchWorker(repository).execute(_message("job-cancel-flag"), Exploding())
+    assert result["status"] == "duplicate"
+    assert repository.require("job-cancel-flag").status is JobStatus.CANCELLED
+
+
+def test_running_job_cancel_request_is_observed_at_batch_boundary(tmp_path):
+    repository = JobRepository(tmp_path / "jobs.db")
+    _queued_job(repository, "job-running-cancel")
+
+    class BoundaryCancel:
+        def execute(self, record, message, context):
+            repository.request_cancel(record.job_id, owner="owner", reason="user")
+            assert context.cancel_requested()
+            return ExecutionOutcome({"bars": 10}, cancelled=True)
+
+    result = DispatchWorker(repository).execute(
+        _message("job-running-cancel"), BoundaryCancel(),
+    )
+    assert result["status"] == "cancelled"
+    record = repository.require("job-running-cancel")
+    assert record.status is JobStatus.CANCELLED
+    assert record.cancel_requested_at is not None

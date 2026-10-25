@@ -26,14 +26,29 @@ class ExecutionOutcome:
 
     result_summary: dict[str, Any]
     error: dict[str, Any] | None = None
+    cancelled: bool = False
 
     @property
     def succeeded(self) -> bool:
-        return self.error is None
+        return self.error is None and not self.cancelled
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionContext:
+    """Read-only controls the executor must consult at batch boundaries."""
+
+    repository: JobRepository
+    job_id: str
+    attempt: int
+
+    def cancel_requested(self) -> bool:
+        return self.repository.cancel_requested(self.job_id, self.attempt)
 
 
 class JobExecutor(Protocol):
-    def execute(self, record: JobRecord, message: DispatchMessage) -> ExecutionOutcome: ...
+    def execute(
+        self, record: JobRecord, message: DispatchMessage, context: ExecutionContext,
+    ) -> ExecutionOutcome: ...
 
 
 class DispatchWorker:
@@ -71,8 +86,17 @@ class DispatchWorker:
         beat = threading.Thread(target=heartbeat, name="job-lease-heartbeat", daemon=True)
         beat.start()
         try:
-            outcome = executor.execute(record, message)
+            outcome = executor.execute(
+                record, message,
+                ExecutionContext(self.repository, record.job_id, record.attempt),
+            )
         except Exception as exc:
+            if self.repository.cancel_requested(record.job_id, record.attempt):
+                self.repository.transition(
+                    record.job_id, JobStatus.CANCELLED, expected=JobStatus.RUNNING,
+                    cancel_reason="cancelled during execution",
+                )
+                return {"status": "cancelled", "job_id": record.job_id}
             self.repository.transition(
                 record.job_id,
                 JobStatus.FAILED,
@@ -91,6 +115,15 @@ class DispatchWorker:
         finally:
             stop.set()
             beat.join(timeout=1.0)
+        if outcome.cancelled:
+            updated = self.repository.transition(
+                record.job_id,
+                JobStatus.CANCELLED,
+                expected=JobStatus.RUNNING,
+                result_summary=outcome.result_summary,
+                cancel_reason="cancelled by user",
+            )
+            return {"status": updated.status.value, "job_id": updated.job_id}
         if outcome.succeeded:
             updated = self.repository.transition(
                 record.job_id,

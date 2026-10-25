@@ -44,7 +44,7 @@ def _payload(job_id: str = "job-celery") -> dict:
 
 
 class _Executor:
-    def execute(self, record, message):
+    def execute(self, record, message, context):
         return ExecutionOutcome({"total_return": 0.2})
 
 

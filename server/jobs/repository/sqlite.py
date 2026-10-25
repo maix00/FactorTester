@@ -403,6 +403,17 @@ class JobRepository(
             )
         return self._record(updated) if updated is not None else None
 
+    def cancel_requested(self, job_id: str, attempt: int) -> bool:
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT cancel_requested_at, status FROM research_jobs "
+                "WHERE job_id=? AND attempt=?",
+                (str(job_id), int(attempt)),
+            ).fetchone()
+        if row is None:
+            return False
+        return row["cancel_requested_at"] is not None or JobStatus(row["status"]) is JobStatus.CANCELLED
+
     def heartbeat_attempt(
         self, job_id: str, attempt: int, worker_id: str,
         *, lease_seconds: float | None = None,
