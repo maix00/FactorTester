@@ -29,7 +29,22 @@ export type Language = keyof typeof resources;
 export function preferredLanguage(): Language {
   const saved = localStorage.getItem("tr.language");
   if (saved === "zh" || saved === "en") return saved;
+  const legacy = localStorage.getItem("ft-language");
+  if (legacy === "en") return "en";
+  if (legacy === "zh-Hans") return "zh";
   return navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en";
+}
+
+export function persistLanguage(language: Language): void {
+  localStorage.setItem("tr.language", language);
+  localStorage.setItem("ft-language", language === "en" ? "en" : "zh-Hans");
+  document.documentElement.lang = language === "en" ? "en" : "zh-Hans";
+  void fetch("/api/client/preferences", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ language: language === "en" ? "en" : "zh-Hans" }),
+  }).catch(() => undefined);
 }
 
 i18n.use(initReactI18next).init({

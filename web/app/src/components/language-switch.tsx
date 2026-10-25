@@ -1,7 +1,7 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { Select } from "antd";
-import i18n from "../i18n.ts";
+import i18n, { persistLanguage } from "../i18n.ts";
 
 export function LanguageSwitch({ compact = false }: { compact?: boolean }): React.ReactElement {
   const { t } = useTranslation();
@@ -13,8 +13,7 @@ export function LanguageSwitch({ compact = false }: { compact?: boolean }): Reac
       options={[{ value: "zh", label: "中文" }, { value: "en", label: "English" }]}
       onChange={(value) => {
         i18n.changeLanguage(value);
-        localStorage.setItem("tr.language", value);
-        document.documentElement.lang = value === "en" ? "en" : "zh-Hans";
+        persistLanguage(value === "en" ? "en" : "zh");
       }}
       style={{ width: compact ? 88 : 110 }}
     />
