@@ -728,8 +728,11 @@ def oidc_start():
     import secrets
     from flask import session, url_for
     from server import branding
+    from server.identity.auth_mode import keycloak_enabled
     from server.identity.keycloak import oidc_authorization_url
 
+    if not keycloak_enabled():
+        return jsonify({"success": False, "error": "Keycloak login is disabled"}), 503
     base_url = branding.env("KEYCLOAK_URL")
     realm = branding.env("KEYCLOAK_REALM")
     client_id = branding.env("KEYCLOAK_CLIENT_ID")
@@ -749,8 +752,11 @@ def oidc_callback():
     """Complete the authorization-code flow and establish the session."""
     from flask import redirect, request, session
     from server import branding
+    from server.identity.auth_mode import keycloak_enabled
     from server.identity.keycloak import OIDCClient, oidc_userinfo
 
+    if not keycloak_enabled():
+        return jsonify({"success": False, "error": "Keycloak login is disabled"}), 503
     code = str(request.args.get("code") or "")
     state = str(request.args.get("state") or "")
     expected = str(session.pop("oidc_state", "") or "")

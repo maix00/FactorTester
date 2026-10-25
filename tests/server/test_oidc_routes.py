@@ -1,5 +1,11 @@
+import pytest
 from flask import Flask
 from server.modules.single_factor_test import sft_bp
+
+
+@pytest.fixture(autouse=True)
+def _dual_mode(monkeypatch):
+    monkeypatch.setenv("TRADERESEARCH_AUTH_MODE", "dual")
 
 
 def _client():
