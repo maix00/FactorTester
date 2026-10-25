@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from server.services.nautilus_bridge.backtest_runner import _load_input, ReplayInput
-from server.services.nautilus_bridge.factor_stream import build_nautilus_factor_strategy
+from server.services.nautilus_bridge.factor_stream import build_factor_expr_bar_adapter
 from server.services.nautilus_bridge.reports import export_backtest_reports
 from tools.factors.expr.core import FactorExpr
 from tools.data.types.time_freq import DataFreq
@@ -50,7 +50,7 @@ def run_strategy_replay(
         def __init__(self) -> None:
             super().__init__()
             self.factors = {
-                role: build_nautilus_factor_strategy(
+                role: build_factor_expr_bar_adapter(
                     factor_ref="factor:v2:" + role.encode().hex().ljust(43, "0")[:43],
                     expression=expression, products=(product,),
                     bar_types_by_product={product: bar_type}, source_freq=DataFreq.MIN1,
@@ -144,7 +144,7 @@ def run_strategy_family_replay(
         def __init__(self) -> None:
             super().__init__()
             self.factors = {
-                role: build_nautilus_factor_strategy(
+                role: build_factor_expr_bar_adapter(
                     factor_ref="factor:v2:" + role.encode().hex().ljust(43, "0")[:43],
                     expression=expression, products=tuple(opened),
                     bar_types_by_product=bar_types, source_freq=DataFreq.MIN1,

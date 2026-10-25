@@ -100,7 +100,7 @@ class EventTimeFactorStream:
                      if pub.first_executable_at_ns <= event_time_ns), None)
 
 
-def build_nautilus_factor_strategy(
+def build_factor_expr_bar_adapter(
     *,
     factor_ref: str,
     expression: FactorExpr,
@@ -133,8 +133,6 @@ def build_nautilus_factor_strategy(
     if not callable(first_executable_at) or not callable(on_publication):
         raise TypeError("execution-time and publication callbacks are required")
 
-    from nautilus_trader.trading import Strategy
-
     stream = EventTimeFactorStream(
         factor_ref=factor_ref,
         expression=expression,
@@ -148,16 +146,12 @@ def build_nautilus_factor_strategy(
             raise ValueError(f"duplicate bar instrument id: {instrument_id}")
         product_by_instrument[instrument_id] = product
 
-    class FactorExprStrategy(Strategy):
+    class FactorExprBarAdapter:
         def __init__(self) -> None:
-            super().__init__()
+            self.subscriptions = list(bar_types_by_product.values())
             self._pending_end_ns: int | None = None
             self._pending_clocks: dict[Any, BarClock] = {}
             self._pending_fields: dict[Any, Mapping[str, float]] = {}
-
-        def on_start(self) -> None:
-            for value in bar_types_by_product.values():
-                self.subscribe_bars(value)
 
         def on_bar(self, bar: Any) -> None:
             instrument_id = str(bar.bar_type.instrument_id)
@@ -207,4 +201,4 @@ def build_nautilus_factor_strategy(
             self._pending_clocks.clear()
             self._pending_fields.clear()
 
-    return FactorExprStrategy()
+    return FactorExprBarAdapter()

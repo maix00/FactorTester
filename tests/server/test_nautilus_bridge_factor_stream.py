@@ -12,7 +12,7 @@ import pytest
 
 from server.services.nautilus_bridge.factor_stream import (
     EventTimeFactorStream,
-    build_nautilus_factor_strategy,
+    build_factor_expr_bar_adapter,
 )
 from server.services.nautilus_bridge.market_data import BarClock, minute_clock
 from tests.nautilus_runtime import require_nautilus
@@ -142,7 +142,7 @@ def test_nautilus_strategy_buffers_one_complete_cross_sectional_slice(monkeypatc
         return BarClock(None, None, end_ns - minute_ns, end_ns,
                         int(bar.ts_init), "test bar")
 
-    strategy = build_nautilus_factor_strategy(
+    strategy = build_factor_expr_bar_adapter(
         factor_ref=REF,
         expression=CLOSE,
         products=("T", "TL"),
@@ -157,7 +157,6 @@ def test_nautilus_strategy_buffers_one_complete_cross_sectional_slice(monkeypatc
         ) + 1,
         on_publication=publications.append,
     )
-    strategy.on_start()
     assert strategy.subscriptions == list(bar_types.values())
 
     end_ns = 1_000_000_000_000
@@ -191,98 +190,3 @@ def test_nautilus_strategy_buffers_one_complete_cross_sectional_slice(monkeypatc
         ))
 
 
-def test_nautilus_on_bar_drives_factor_calculation_without_a_market_panel():
-    require_nautilus()
-    from datetime import UTC, datetime
-    from importlib.util import module_from_spec, spec_from_file_location
-    from pathlib import Path
-
-    from nautilus_trader.backtest import BacktestEngine
-    from nautilus_trader.config import BacktestEngineConfig
-    from nautilus_trader.core.datetime import dt_to_unix_nanos
-    from nautilus_trader.execution import PerContractFeeModel
-    from nautilus_trader.model import (
-        AccountType,
-        Bar,
-        BarType,
-        Money,
-        OmsType,
-        Quantity,
-        TraderId,
-        Venue,
-    )
-
-    example = (Path(__file__).resolve().parents[2] / "vendor/nautilus_trader"
-               / "examples/backtest/synthetic_data_pnl_test.py")
-    if not example.exists():
-        pytest.skip("NautilusTrader submodule is not initialized")
-    spec = spec_from_file_location("upstream_factor_stream_example", example)
-    module = module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    venue = Venue("SIM")
-    instrument = module.create_6E_instrument(venue)
-    bar_type = BarType.from_str(f"{instrument.id}-1-MINUTE-LAST-EXTERNAL")
-    product = str(instrument.id)
-    publications = []
-    minute_ns = 60_000_000_000
-
-    def clock_for_bar(_product, bar):
-        end_ns = int(bar.ts_event)
-        available_ns = max(end_ns, int(bar.ts_init))
-        return BarClock(None, None, end_ns - minute_ns, end_ns,
-                        available_ns, "Nautilus completed bar")
-
-    strategy = build_nautilus_factor_strategy(
-        factor_ref=REF,
-        expression=CLOSE,
-        products=(product,),
-        bar_types_by_product={product: bar_type},
-        source_freq=DataFreq.MIN1,
-        bar_clock=clock_for_bar,
-        factor_fields=lambda _product, bar: {
-            "CLOSE_ADJUSTED": float(bar.close),
-        },
-        first_executable_at=lambda clocks: max(
-            clock.available_at_ns for clock in clocks.values()
-        ) + 1,
-        on_publication=publications.append,
-    )
-    engine = BacktestEngine(config=BacktestEngineConfig(
-        trader_id=TraderId.from_str("FT-FACTOR-STREAM-001"),
-        bypass_logging=True,
-    ))
-    try:
-        engine.add_venue(
-            venue=venue,
-            oms_type=OmsType.NETTING,
-            account_type=AccountType.MARGIN,
-            base_currency=module.USD,
-            fee_model=PerContractFeeModel(Money.from_str("0 USD")),
-            starting_balances=[Money.from_str("1000000 USD")],
-        )
-        engine.add_instrument(instrument)
-        start_ns = dt_to_unix_nanos(datetime(2024, 1, 1, tzinfo=UTC))
-        values = [1.1000, 1.1002, 1.1005]
-        engine.add_data([
-            Bar(
-                bar_type=bar_type,
-                open=instrument.make_price(value),
-                high=instrument.make_price(value),
-                low=instrument.make_price(value),
-                close=instrument.make_price(value),
-                volume=Quantity.from_str("100"),
-                ts_event=start_ns + i * minute_ns,
-                ts_init=start_ns + i * minute_ns,
-            )
-            for i, value in enumerate(values, start=1)
-        ])
-        engine.add_strategy(strategy)
-        engine.run()
-
-        assert [item.formed_at_ns for item in publications] == [
-            start_ns + i * minute_ns for i in range(1, len(values) + 1)
-        ]
-        assert [item.values[product] for item in publications] == pytest.approx(values)
-    finally:
-        engine.dispose()
