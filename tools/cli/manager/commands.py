@@ -139,6 +139,9 @@ def dispatch_status(as_json: bool) -> None:
     click.echo(f"outbox: {json.dumps(value.get('outbox') or {}, ensure_ascii=False)}")
     for server in value.get("servers") or []:
         click.echo(f"{server.get('server_id')} online={server.get('online')}")
+        remote_outbox = server.get("remote_outbox")
+        if remote_outbox:
+            click.echo(f"  outbox {json.dumps(remote_outbox, ensure_ascii=False)}")
         for target in server.get("ports") or []:
             online = target.get("worker_online")
             click.echo(f"  {target.get('port')}  {target.get('queue')}  worker={online}")
