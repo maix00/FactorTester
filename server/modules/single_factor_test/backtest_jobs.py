@@ -553,6 +553,15 @@ def retry_test_job(job_id: str):
         cleanup_factor_source_scope(retry_factor_scope_id)
         cleanup_strategy_source_scope(retry_strategy_scope_id)
         raise
+    try:
+        from server.jobs.dispatch.audit import append_audit
+
+        append_audit(
+            job_repository.db_path, action="job_retry", actor=old.owner,
+            job_id=job.job_id, attempt=job.attempt, detail=old.job_id,
+        )
+    except Exception:
+        pass
     return jsonify({
         "success": True,
         **job.summary(),
