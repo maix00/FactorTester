@@ -178,6 +178,19 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
                 'queued', 'running', 'paused'
             );
 
+        CREATE TABLE IF NOT EXISTS research_job_worker_targets (
+            deployment_id TEXT NOT NULL,
+            service_port INTEGER NOT NULL,
+            worker_id TEXT NOT NULL,
+            heartbeat_at REAL NOT NULL,
+            expires_at REAL NOT NULL,
+            capabilities_json TEXT NOT NULL DEFAULT '{}',
+            PRIMARY KEY (deployment_id, service_port),
+            CHECK (service_port >= 1 AND service_port <= 65535)
+        );
+        CREATE INDEX IF NOT EXISTS idx_research_job_worker_target_expiry
+            ON research_job_worker_targets(expires_at);
+
         CREATE TABLE IF NOT EXISTS research_job_progress (
             job_id TEXT NOT NULL,
             attempt INTEGER NOT NULL,

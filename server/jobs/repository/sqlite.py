@@ -468,6 +468,46 @@ class JobRepository(
             "message": row["message"],
         }
 
+    def heartbeat_worker_target(
+        self, deployment_id: str, service_port: int, worker_id: str,
+        *, capabilities: dict[str, Any] | None = None,
+        ttl_seconds: float = 60.0,
+    ) -> None:
+        now = time.time()
+        ttl = max(10.0, float(ttl_seconds))
+        with self._connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO research_job_worker_targets (
+                    deployment_id, service_port, worker_id, heartbeat_at,
+                    expires_at, capabilities_json
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(deployment_id, service_port) DO UPDATE SET
+                    worker_id=excluded.worker_id,
+                    heartbeat_at=excluded.heartbeat_at,
+                    expires_at=excluded.expires_at,
+                    capabilities_json=excluded.capabilities_json
+                """,
+                (
+                    str(deployment_id), int(service_port), str(worker_id), now,
+                    now + ttl, _dumps(capabilities or {}),
+                ),
+            )
+
+    def worker_target_online(
+        self, deployment_id: str, service_port: int, *, now: float | None = None,
+    ) -> bool:
+        timestamp = time.time() if now is None else float(now)
+        with self._connection() as conn:
+            row = conn.execute(
+                """
+                SELECT expires_at FROM research_job_worker_targets
+                WHERE deployment_id=? AND service_port=?
+                """,
+                (str(deployment_id), int(service_port)),
+            ).fetchone()
+        return row is not None and float(row["expires_at"]) >= timestamp
+
     def cancel_requested(self, job_id: str, attempt: int) -> bool:
         with self._connection() as conn:
             row = conn.execute(

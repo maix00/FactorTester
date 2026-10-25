@@ -197,3 +197,14 @@ def test_progress_is_monotonic_and_visible_to_job_owner(tmp_path):
         "sequence": 2, "phase": "done", "completed": 2, "total": 2,
         "percent": 100.0, "message": "",
     }
+
+
+def test_worker_target_heartbeat_is_port_scoped(tmp_path):
+    repository = JobRepository(tmp_path / "jobs.db")
+    repository.heartbeat_worker_target(
+        "local-docker", 8001, "worker-a", capabilities={"engine": "fake"}, ttl_seconds=30,
+    )
+    assert repository.worker_target_online("local-docker", 8001)
+    assert not repository.worker_target_online("local-docker", 8000)
+    assert not repository.worker_target_online("other", 8001)
+    assert not repository.worker_target_online("local-docker", 8001, now=10**12)
