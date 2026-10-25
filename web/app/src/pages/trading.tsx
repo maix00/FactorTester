@@ -39,7 +39,7 @@ export function TradingPage(): React.ReactElement {
     <section className="tr-trading-page">
       <header><div><h1>{t("nav.trading")}</h1><p>{t("trading.hint")}</p></div></header>
       <div className="tr-trading-tests">
-        <button type="button" onClick={() => openLegacy("/ic", t("trading.ic"))}>{t("trading.ic")}</button>
+        <button type="button" onClick={() => openLegacy("/ic-test", t("trading.ic"))}>{t("trading.ic")}</button>
         <button type="button" onClick={() => openLegacy("/factor-series", t("trading.factorSeries"))}>{t("trading.factorSeries")}</button>
       </div>
       <div className="tr-trading-families">
