@@ -10,6 +10,8 @@ export function ResearchPage(): React.ReactElement {
   const { t } = useTranslation();
   const [items, setItems] = useState<Research[]>([]);
   const [selected, setSelected] = useState<Research | null>(null);
+  const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
+  const [editor, setEditor] = useState(false);
   const [legacy, setLegacy] = useState(false);
   const [tab, setTab] = useState<"researches" | "reports">("researches");
   const [reports, setReports] = useState<Report[]>([]);
@@ -22,6 +24,15 @@ export function ResearchPage(): React.ReactElement {
       .then((payload: { researches?: Research[]; items?: Research[] }) => setItems(payload.researches ?? payload.items ?? []))
       .catch((error: Error) => notify({ code: "research.load", type: "error", message: t("loadFailed"), description: error.message }));
   }, [t]);
+
+  useEffect(() => {
+    if (!selected?.research_id) { setDetail(null); return; }
+    setDetail(null);
+    fetch(`/api/research/${encodeURIComponent(selected.research_id)}`, { credentials: "same-origin" })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+      .then((value) => setDetail(value))
+      .catch((error: Error) => notify({ code: "research.detail", type: "error", message: t("loadFailed"), description: error.message }));
+  }, [selected, t]);
 
   useEffect(() => {
     if (tab !== "reports") return;
@@ -78,9 +89,16 @@ export function ResearchPage(): React.ReactElement {
           <iframe title={t("research.legacy")} src="/research?section=researches&presentation=embedded" />
         </div>
       ) : null}
-      {selected ? (
+      {selected && !editor ? (
         <div className="tr-legacy-overlay" role="dialog" aria-label={selected.title ?? selected.research_id}>
           <div className="tr-legacy-bar"><strong>{selected.title ?? selected.research_id}</strong><button type="button" onClick={() => setSelected(null)}>{t("notifications.close")}</button></div>
+          {detail ? <pre className="tr-job-detail">{JSON.stringify(detail, null, 2)}</pre> : <p className="tr-catalog-detail-loading">{t("loading")}</p>}
+          <div className="tr-legacy-actions"><button type="button" className="tr-toolbar-button" onClick={() => setEditor(true)}>{t("research.openEditor")}</button></div>
+        </div>
+      ) : null}
+      {selected && editor ? (
+        <div className="tr-legacy-overlay" role="dialog" aria-label={selected.title ?? selected.research_id}>
+          <div className="tr-legacy-bar"><strong>{selected.title ?? selected.research_id}</strong><button type="button" onClick={() => { setEditor(false); setSelected(null); }}>{t("notifications.close")}</button></div>
           <iframe title={selected.title ?? "research"} src={`/researches/${encodeURIComponent(selected.research_id ?? "")}?presentation=embedded`} />
         </div>
       ) : null}
