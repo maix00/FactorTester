@@ -299,7 +299,24 @@ def run_strategy_family_run_spec(
         bindings[str(role)] = expression
     catalogs = plan.get("catalog_inputs")
     if not isinstance(catalogs, dict) or not catalogs:
-        raise ValueError("strategy plan has no product catalogs")
+        from server.services.nautilus_bridge.catalog_plan import catalog_staging_requests
+        from server.services.nautilus_bridge.catalog_staging import stage_run_spec_catalogs
+
+        run_spec_value = job_spec.get("run_spec") if isinstance(job_spec, dict) else None
+        if not isinstance(run_spec_value, dict):
+            raise ValueError("strategy plan has no product catalogs and no RunSpec")
+        source_adapter = plan.get("source_adapter") or {}
+        window = plan.get("run_window") or {}
+        catalogs = stage_run_spec_catalogs(
+            staging_requests=plan.get("catalog_staging")
+            or catalog_staging_requests(run_spec_value),
+            source_key=str(source_adapter.get("member_key") or ""),
+            frequency=str(source_adapter.get("frequency") or ""),
+            start_utc=str(window.get("start") or ""),
+            end_utc=str(window.get("end") or ""),
+            target_root=Path(output_dir) / "catalogs",
+        )
+        plan = {**plan, "catalog_inputs": catalogs}
     inputs = {
         product: ReplayInput(
             Path(str(value["catalog_dir"])).resolve(),
