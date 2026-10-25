@@ -674,4 +674,5 @@
   }
 
   window.FTResearchCatalog = Object.freeze({render, detail: renderDetail});
+window.TRResearchCatalog = window.FTResearchCatalog;
 })();
