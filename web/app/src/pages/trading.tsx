@@ -10,6 +10,8 @@ export function TradingPage(): React.ReactElement {
   const [families, setFamilies] = useState<Family[]>([]);
   const [family, setFamily] = useState<string>("");
   const [legacy, setLegacy] = useState(false);
+  const [legacyRoute, setLegacyRoute] = useState("/backtest?presentation=embedded");
+  const [legacyTitle, setLegacyTitle] = useState("");
 
   useEffect(() => {
     const fallback = [
@@ -22,10 +24,24 @@ export function TradingPage(): React.ReactElement {
       .catch(() => setFamilies(fallback));
   }, [t]);
 
-  const open = (id: string): void => { setFamily(id); setLegacy(true); };
+  const openLegacy = (route: string, title: string): void => {
+    setLegacyRoute(`${route}?presentation=embedded`);
+    setLegacyTitle(title);
+    setLegacy(true);
+  };
+  const open = (id: string): void => {
+    setFamily(id);
+    setLegacyRoute(`/backtest?presentation=embedded&family=${encodeURIComponent(id)}`);
+    setLegacyTitle(t("trading.legacy"));
+    setLegacy(true);
+  };
   return (
     <section className="tr-trading-page">
       <header><div><h1>{t("nav.trading")}</h1><p>{t("trading.hint")}</p></div></header>
+      <div className="tr-trading-tests">
+        <button type="button" onClick={() => openLegacy("/ic", t("trading.ic"))}>{t("trading.ic")}</button>
+        <button type="button" onClick={() => openLegacy("/factor-series", t("trading.factorSeries"))}>{t("trading.factorSeries")}</button>
+      </div>
       <div className="tr-trading-families">
         {families.length === 0 ? <p>{t("empty")}</p> : families.map((item) => {
           const id = String(item.id ?? item.family_id ?? item.name ?? "");
@@ -40,8 +56,8 @@ export function TradingPage(): React.ReactElement {
       </div>
       {legacy ? (
         <div className="tr-legacy-overlay" role="dialog" aria-label={t("trading.legacy")}>
-          <div className="tr-legacy-bar"><strong>{t("trading.legacy")}</strong><button type="button" onClick={() => setLegacy(false)}>{t("notifications.close")}</button></div>
-          <iframe title={t("trading.legacy")} src={`/backtest?presentation=embedded${family ? `&family=${encodeURIComponent(family)}` : ""}`} />
+          <div className="tr-legacy-bar"><strong>{legacyTitle || t("trading.legacy")}</strong><button type="button" onClick={() => setLegacy(false)}>{t("notifications.close")}</button></div>
+          <iframe title={legacyTitle || t("trading.legacy")} src={legacyRoute} />
         </div>
       ) : null}
     </section>
