@@ -27,6 +27,7 @@ export function SettingsOverlay({
   const [section, setSection] = useState<string>("account");
   const [session, setSession] = useState<{ username?: string; role?: string } | null>(null);
   const [serverInfo, setServerInfo] = useState<Record<string, unknown> | null>(null);
+  const [sectionData, setSectionData] = useState<Record<string, unknown> | null>(null);
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -36,6 +37,21 @@ export function SettingsOverlay({
       .catch(() => undefined);
     return () => { cancelled = true; };
   }, [open]);
+  useEffect(() => {
+    const endpoints: Record<string, string> = {
+      federation: "/api/federation/config",
+      devices: "/api/devices",
+      quota: "/api/jobs/storage",
+      updates: "/api/client/releases/beta.json",
+    };
+    const endpoint = endpoints[section];
+    if (!open || !endpoint) { setSectionData(null); return; }
+    fetch(endpoint, { credentials: "same-origin" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((value) => setSectionData(value))
+      .catch(() => setSectionData(null));
+  }, [open, section]);
+
   useEffect(() => {
     if (!open || section !== "server") return;
     fetch("/api/server/network-info", { credentials: "same-origin" })
@@ -97,6 +113,11 @@ export function SettingsOverlay({
             <div className="tr-settings-card">
               <h3>{t("settingsPanel.sections.server")}</h3>
               {serverInfo ? <pre className="tr-job-detail">{JSON.stringify(serverInfo, null, 2)}</pre> : <p>{t("loading")}</p>}
+            </div>
+          ) : ["federation", "devices", "quota", "updates"].includes(current.id) ? (
+            <div className="tr-settings-card">
+              <h3>{t(`settingsPanel.sections.${current.id}`)}</h3>
+              {sectionData ? <pre className="tr-job-detail">{JSON.stringify(sectionData, null, 2)}</pre> : <p>{t("loading")}</p>}
             </div>
           ) : current.id === "account" ? (
             <div className="tr-settings-card">
