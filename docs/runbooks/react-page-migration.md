@@ -17,7 +17,7 @@ not the same as a fully migrated detail/editor route.
 ## Hidden/legacy routes still to migrate
 
 ```text
-/researches/:id
+/researches/:id (native read; editor bridge)
 /reports/:id (agent markdown is native; report editor remains legacy)
 /jobs/:port/:id/input/:name
 /ic
