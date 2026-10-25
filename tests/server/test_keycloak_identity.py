@@ -25,3 +25,11 @@ def test_oidc_authorization_url_contains_state_and_redirect():
     assert url.startswith("https://id.example/realms/trade/protocol/openid-connect/auth?")
     assert "state=s1" in url
     assert "redirect_uri=https%3A%2F%2Fapp.example%2Fcallback" in url
+
+
+
+def test_jwt_claims_decodes_payload():
+    import base64, json
+    from server.identity.keycloak import jwt_claims
+    payload = base64.urlsafe_b64encode(json.dumps({"preferred_username": "alice"}).encode()).rstrip(b"=")
+    assert jwt_claims("x." + payload.decode() + ".y")["preferred_username"] == "alice"
