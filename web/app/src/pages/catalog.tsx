@@ -13,9 +13,11 @@ export function CatalogPage(): React.ReactElement {
   const [selected, setSelected] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [legacy, setLegacy] = useState(false);
-  const [tab, setTab] = useState<"products" | "factors" | "strategies" | "sources" | "categories">("products");
+  const [tab, setTab] = useState<"products" | "factors" | "families" | "sets" | "strategies" | "sources" | "categories">("products");
   const [sources, setSources] = useState<{ id: string; name?: string; visitor_data_accessible?: boolean }[]>([]);
   const [categories, setCategories] = useState<{ id?: string; name?: string; title?: string }[]>([]);
+  const [families, setFamilies] = useState<Record<string, unknown>[]>([]);
+  const [sets, setSets] = useState<Record<string, unknown>[]>([]);
   const [strategies, setStrategies] = useState<Record<string, unknown>[]>([]);
   const [strategyPage, setStrategyPage] = useState(1);
   const [strategyTotal, setStrategyTotal] = useState(0);
@@ -33,6 +35,19 @@ export function CatalogPage(): React.ReactElement {
       .then((payload: Payload<Group>) => setGroups(payload.groups ?? []))
       .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }));
   }, [t]);
+
+  useEffect(() => {
+    if (tab !== "families" && tab !== "sets") return;
+    setLoading(true);
+    const path = tab === "families" ? "/api/factor-library/families" : "/api/factor-library/factor-sets";
+    fetch(path, { credentials: "same-origin" })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+      .then((payload: { families?: Record<string, unknown>[]; items?: Record<string, unknown>[] }) => {
+        if (tab === "families") setFamilies(payload.families ?? []); else setSets(payload.items ?? []);
+      })
+      .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }))
+      .finally(() => setLoading(false));
+  }, [tab, t]);
 
   useEffect(() => {
     if (tab !== "sources" && tab !== "categories") return;
@@ -118,6 +133,8 @@ export function CatalogPage(): React.ReactElement {
         <button type="button" className={tab === "products" ? "is-active" : ""} onClick={() => setTab("products")}>{t("catalog.products")}</button>
         <button type="button" className={tab === "factors" ? "is-active" : ""} onClick={() => setTab("factors")}>{t("catalog.factors")}</button>
         <button type="button" className={tab === "strategies" ? "is-active" : ""} onClick={() => { setTab("strategies"); setStrategyPage(1); }}>{t("catalog.strategies")}</button>
+        <button type="button" className={tab === "families" ? "is-active" : ""} onClick={() => setTab("families")}>{t("catalog.families")}</button>
+        <button type="button" className={tab === "sets" ? "is-active" : ""} onClick={() => setTab("sets")}>{t("catalog.sets")}</button>
         <button type="button" className={tab === "sources" ? "is-active" : ""} onClick={() => setTab("sources")}>{t("catalog.sources")}</button>
         <button type="button" className={tab === "categories" ? "is-active" : ""} onClick={() => setTab("categories")}>{t("catalog.categories")}</button>
       </div>
@@ -137,7 +154,15 @@ export function CatalogPage(): React.ReactElement {
         })}
       </div> : null}
       <div className="tr-catalog-products">
-        {tab === "sources" ? (
+        {tab === "families" ? (
+          families.length === 0 ? <p>{t("empty")}</p> : families.map((item, index) => (
+            <article key={String(item.family_ref ?? item.id ?? index)}><b>{String(item.name ?? item.title ?? item.family_ref ?? "—")}</b><small>{String(item.description ?? "")}</small></article>
+          ))
+        ) : tab === "sets" ? (
+          sets.length === 0 ? <p>{t("empty")}</p> : sets.map((item, index) => (
+            <article key={String(item.set_ref ?? item.id ?? index)}><b>{String(item.name ?? item.title ?? item.set_ref ?? "—")}</b><small>{String(item.description ?? "")}</small></article>
+          ))
+        ) : tab === "sources" ? (
           sources.length === 0 ? <p>{t("empty")}</p> : sources.map((source) => (
             <article key={source.id}><b>{source.name ?? source.id}</b><small>{source.id}</small></article>
           ))
