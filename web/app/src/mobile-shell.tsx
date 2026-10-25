@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { IonApp, IonTabBar, IonTabButton } from "@ionic/react";
 import { useTranslation } from "react-i18next";
 import { BUILTIN_PAGES, pagesForScope, registerPage } from "./registry.ts";
@@ -18,22 +18,38 @@ export function MobileShell(): React.ReactElement {
   const [setting, setSetting] = useState<MobileSettingSection | null>(null);
   const page = tabs.find((item) => item.id === active) ?? tabs[0];
 
+  useEffect(() => {
+    const onPop = (): void => setSetting(null);
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
   const selectTab = (id: string): void => {
     setActive(id);
     setSetting(null);
+  };
+
+  const openSetting = (section: MobileSettingSection): void => {
+    setSetting(section);
+    window.history.pushState({ trSettings: section }, "", location.href);
+  };
+
+  const backSetting = (): void => {
+    if (window.history.state?.trSettings) window.history.back();
+    else setSetting(null);
   };
 
   return (
     <IonApp>
       <MobileNotificationHost />
       {page?.id === "settings" && setting ? (
-        <MobileSettingDetail section={setting} onBack={() => setSetting(null)} />
+        <MobileSettingDetail section={setting} onBack={backSetting} />
       ) : (
         <div className="tr-mobile-shell">
           {page?.id === "workspace" ? (
             <WorkspacePage onOpen={selectTab} />
           ) : page?.id === "settings" ? (
-            <MobileSettingsPage onOpen={setSetting} />
+            <MobileSettingsPage onOpen={openSetting} />
           ) : (
             <PageFrame pageId={page?.id ?? "research"} />
           )}
