@@ -27,6 +27,7 @@ export function CatalogPage(): React.ReactElement {
   const [factorData, setFactorData] = useState<Record<string, unknown> | null>(null);
   const [groupDetail, setGroupDetail] = useState<string>("");
   const [groupData, setGroupData] = useState<Record<string, unknown> | null>(null);
+  const [productSelected, setProductSelected] = useState<Record<string, unknown> | null>(null);
   const [factors, setFactors] = useState<Record<string, unknown>[]>([]);
 
   useEffect(() => {
@@ -200,6 +201,12 @@ export function CatalogPage(): React.ReactElement {
       </div>
       {tab === "strategies" && strategies.length < strategyTotal ? (
         <button type="button" className="tr-mobile-load-more" disabled={loading} onClick={() => setStrategyPage((value) => value + 1)}>{t("more")}</button>
+      ) : null}
+      {productSelected ? (
+        <div className="tr-legacy-overlay" role="dialog" aria-label={String(productSelected.name ?? productSelected.id ?? "")}>
+          <div className="tr-legacy-bar"><strong>{String(productSelected.name ?? productSelected.id ?? "")}</strong><button type="button" onClick={() => setProductSelected(null)}>{t("notifications.close")}</button></div>
+          <pre className="tr-job-detail">{JSON.stringify(productSelected, null, 2)}</pre>
+        </div>
       ) : null}
       {groupDetail ? (
         <div className="tr-legacy-overlay" role="dialog" aria-label={groupDetail}>
