@@ -22,7 +22,8 @@ VISIBILITIES = {"private", "superiors", "authorized", "public"}
 class PublicResearchLibrary:
     """Persist uploaded projections without resolving the owner's local files."""
 
-    def __init__(self, root: Path, *, storage_server_id: str = "", read_authorizer=None, authoring_authorizer=None) -> None:
+    def __init__(self, root: Path, *, storage_server_id: str = "", read_authorizer=None, authoring_authorizer=None, couchdb_reader=None) -> None:
+        self.couchdb_reader = couchdb_reader
         self.read_authorizer = read_authorizer
         self.authoring_authorizer = authoring_authorizer
         self.root = root.resolve()
@@ -465,6 +466,11 @@ class PublicResearchLibrary:
         return str(record["publication_id"]) if record else None
 
     def _record(self, publication_id: str) -> dict[str, Any]:
+        if self.couchdb_reader is not None:
+            try:
+                return self.couchdb_reader.record(publication_id)
+            except Exception:
+                pass
         record = next((
             item for item in self._registry()["publications"]
             if item["publication_id"] == publication_id
@@ -474,6 +480,11 @@ class PublicResearchLibrary:
         return record
 
     def _projection(self, publication_id: str) -> dict[str, Any]:
+        if self.couchdb_reader is not None:
+            try:
+                return self.couchdb_reader.projection(publication_id)
+            except Exception:
+                pass
         value = read_json(self._mirror_path(publication_id), "research mirror")
         if value.get("schema_version") != 2:
             raise ValueError("research mirror is invalid")
