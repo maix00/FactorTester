@@ -224,3 +224,7 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-mobile-back:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); }
 .tr-mobile-page-body { flex: 1; min-height: 0; }
 .tr-mobile-page-body .tr-page-frame { height: calc(100vh - 52px); min-height: 0; }
+.tr-mobile-settings-detail { min-height: 100vh; background: var(--bg); }
+.tr-mobile-settings-body { padding: 16px; }
+.tr-mobile-settings-stack { display: grid; gap: 14px; }
+.tr-mobile-settings-stack small { display: block; margin-top: 2px; color: var(--muted); }
