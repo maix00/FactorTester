@@ -52,6 +52,10 @@ class JobDetailQueryImplementation:
             "identity_refs": _identity_refs(row, trial_binding),
             "active_artifacts": active_artifacts,
             "progress": _progress(row),
+            "report_ref": (
+                str(record.result_summary.get("report_ref") or "")
+                if isinstance(record.result_summary, dict) else ""
+            ),
         }
 
 

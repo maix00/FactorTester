@@ -799,6 +799,10 @@ def get_test_job_result(job_id: str):
         "status": job.status.value,
         "evidence": evidence,
         "compatibility": _compatibility(job),
+        "report_ref": (
+            str(job.result_summary.get("report_ref") or "")
+            if isinstance(job.result_summary, dict) else ""
+        ),
     }
     if evidence_warning:
         base["detail_warning"] = evidence_warning
