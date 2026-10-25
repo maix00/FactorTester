@@ -125,6 +125,11 @@ signal for a live trading process.
   by `GTHT_JOB_LEASE_SECONDS`); the worker heartbeats during execution. The
   dispatcher startup fails expired RUNNING Jobs with `worker_lease_expired`
   instead of replaying them automatically.
+- Added `ExecutionContext`: executors can read cancellation at batch boundaries
+  and write monotonic progress snapshots (`research_job_progress`).
+- A cancellation observed before terminal execution writes `cancelled`, not a
+  false failure; an executor exception after a cancel request also closes as
+  cancelled.
 - `task_acks_late=False` is provisional. It avoids a permanently RUNNING Job
   when a worker dies after claim, at the cost of losing a message if the
   process dies before ACK; the outbox/dispatcher and worker-loss gate must be
