@@ -18,6 +18,7 @@ export function CatalogPage(): React.ReactElement {
   const [strategyPage, setStrategyPage] = useState(1);
   const [strategyTotal, setStrategyTotal] = useState(0);
   const [strategyDetail, setStrategyDetail] = useState<string>("");
+  const [strategyData, setStrategyData] = useState<Record<string, unknown> | null>(null);
   const [factors, setFactors] = useState<Record<string, unknown>[]>([]);
 
   useEffect(() => {
@@ -39,6 +40,15 @@ export function CatalogPage(): React.ReactElement {
       .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }))
       .finally(() => setLoading(false));
   }, [tab, strategyPage, t]);
+
+  useEffect(() => {
+    if (!strategyDetail) { setStrategyData(null); return; }
+    setStrategyData(null);
+    fetch(`/api/strategy-library/strategies/${encodeURIComponent(strategyDetail)}`, { credentials: "same-origin" })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+      .then((value) => setStrategyData(value))
+      .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }));
+  }, [strategyDetail, t]);
 
   useEffect(() => {
     if (tab !== "factors") return;
@@ -117,7 +127,7 @@ export function CatalogPage(): React.ReactElement {
       {strategyDetail ? (
         <div className="tr-legacy-overlay" role="dialog" aria-label={t("catalog.strategies")}>
           <div className="tr-legacy-bar"><strong>{strategyDetail}</strong><button type="button" onClick={() => setStrategyDetail("")}>{t("notifications.close")}</button></div>
-          <iframe title={strategyDetail} src={`/strategies/${encodeURIComponent(strategyDetail)}?presentation=embedded`} />
+          {strategyData ? <pre className="tr-job-detail">{JSON.stringify(strategyData, null, 2)}</pre> : <p className="tr-catalog-detail-loading">{t("loading")}</p>}
         </div>
       ) : null}
       {legacy ? (
