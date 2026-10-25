@@ -163,7 +163,7 @@
     {id: "factors", title: "因子库", title_key: "因子库", description_key: "浏览 canonical 与自定义因子", sfSymbol: "function", path: "/factors", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: true},
     {id: "products", title: "产品库", title_key: "产品库", description_key: "查询产品、合约与市场资料", sfSymbol: "shippingbox", path: "/products", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: true},
     {id: "strategies", title: "策略库", title_key: "策略库", description_key: "管理公共策略、本人及下级的自定义策略", sfSymbol: "arrow.triangle.branch", path: "/strategies?scope=public", requiresAuth: true, sidebarVisible: true, homeVisible: true, pinned: true},
-    {id: "manager", title: "服务器管理", title_key: "服务器管理", description_key: "查看端口状态并控制本机服务", sfSymbol: "server.rack", path: "/manager", requiresAuth: true, roles: ["super_admin"], sidebarVisible: true, homeVisible: true, pinned: false, tab_behavior: "singleton"},
+    {id: "manager", title: "服务器管理", title_key: "服务器管理", description_key: "查看端口状态并控制本机服务", sfSymbol: "server.rack", path: "/manager", requiresAuth: true, permissions: ["admin_console:read"], sidebarVisible: true, homeVisible: true, pinned: false, tab_behavior: "singleton"},
     {id: "mihomo", title: "Mihomo Dashboard", title_key: "Mihomo Dashboard", description_key: "打开官方 Mihomo Dashboard", sfSymbol: "network", path: "/mihomo", requiresAuth: true, roles: ["super_admin"], sidebarVisible: true, homeVisible: true, pinned: false, tab_behavior: "singleton"},
     {id: "sqlite_web", title: "数据库", title_key: "数据库", description_key: "浏览统一 SQLite 数据库", sfSymbol: "cylinder.split.1x2", path: "/sqlite-web/", requiresAuth: true, roles: ["super_admin"], sidebarVisible: true, homeVisible: true, pinned: false, tab_behavior: "singleton"},
     {id: "docs", title: "技术文档", title_key: "技术文档", description_key: "阅读 FactorTester 技术文档", sfSymbol: "book", path: "/docs", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: false, tab_behavior: "singleton"},
@@ -175,6 +175,10 @@
     if (module.requiresAuth !== false && !authenticated) return null;
     if (Array.isArray(module.roles) && module.roles.length
         && !module.roles.includes(session?.role)) return null;
+    if (Array.isArray(module.permissions) && module.permissions.length
+        && !module.permissions.every(permission =>
+             Array.isArray(session?.admin_capabilities)
+             && session.admin_capabilities.includes(permission))) return null;
     const children = Array.isArray(module.children)
       ? module.children.map(child => visibleFallbackModule(child, session)).filter(Boolean)
       : undefined;

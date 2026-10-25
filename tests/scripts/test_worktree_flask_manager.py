@@ -241,7 +241,7 @@ def test_manager_serves_localhost_over_ipv6(tmp_path, monkeypatch) -> None:
     with _running_dual_loopback_manager(state) as port:
         with urlopen(f"http://[::1]:{port}/") as response:
             assert response.status == 200
-            assert b"<title>FTClient</title>" in response.read()
+            assert b"<title>TradeResearch</title>" in response.read()
 
 
 def test_direct_remote_client_cannot_spoof_loopback_forwarded_address() -> None:
@@ -1385,7 +1385,7 @@ def test_public_manager_login_returns_the_authenticated_shell(
         )
         with urlopen(shell) as response:
             assert response.status == 200
-            assert b"<title>FTClient</title>" in response.read()
+            assert b"<title>TradeResearch</title>" in response.read()
 
 
 def test_public_unregistered_device_goes_directly_to_compliance_page(
@@ -1668,7 +1668,7 @@ def test_visitor_entry_redirects_to_ip_and_limits_anonymous_capabilities(
         )
         with urlopen(shell) as response:
             assert response.status == 200
-            assert b"<title>FTClient</title>" in response.read()
+            assert b"<title>TradeResearch</title>" in response.read()
 
         jobs = Request(
             f"{base_url}/api/jobs?scope=server&limit=100",

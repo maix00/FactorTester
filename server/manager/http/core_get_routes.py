@@ -33,6 +33,28 @@ from server.manager.web.assets import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _admin_capabilities(username: str, role: str) -> list[str]:
+    if str(role or "") == "super_admin":
+        return ["admin_console:read", "admin_console:manage"]
+    import os
+    from server.permissions.entries import PermissionStore
+
+    db = os.environ.get("TRADERESEARCH_PERMISSIONS_DB", "") or os.environ.get(
+        "FACTORTESTER_PERMISSIONS_DB", ""
+    )
+    if not db:
+        return []
+    store = PermissionStore(db)
+    allowed = []
+    for capability in ("read", "manage"):
+        if store.allows(
+            subject=f"user:{username}", resource_type="admin_console",
+            resource_ref="dispatch", action=capability,
+        ):
+            allowed.append(f"admin_console:{capability}")
+    return allowed
+
+
 class CoreGetRoutesMixin:
     """Order focused GET route families without owning their implementations."""
 
@@ -374,18 +396,28 @@ class CoreGetRoutesMixin:
             if session is None:
                 json_response(self, {"success": False, "error": "login required"}, 401)
                 return True
-            json_response(self, {"success": True, **session})
+            capability_session = dict(session)
+            capability_session["admin_capabilities"] = _admin_capabilities(
+                str(session.get("username") or ""), str(session.get("role") or ""),
+            )
+            json_response(self, {"success": True, **capability_session})
             return True
         if parsed.path == "/api/dispatch/overview":
             if not self._has_api_authorization():
                 self._require_capability()
                 return True
-            if self._session() is not None and not self._has_super_admin_session():
-                json_response(self, {
-                    "success": False,
-                    "error": "super administrator permission required",
-                }, 403)
-                return True
+            browser_session = self._session()
+            if browser_session is not None:
+                capabilities = _admin_capabilities(
+                    str(browser_session.get("username") or ""),
+                    str(browser_session.get("role") or ""),
+                )
+                if "admin_console:read" not in capabilities:
+                    json_response(self, {
+                        "success": False,
+                        "error": "admin console permission required",
+                    }, 403)
+                    return True
             from server.jobs.repository import JobRepository
             from server.manager.services.dispatch_overview import dispatch_overview
 
