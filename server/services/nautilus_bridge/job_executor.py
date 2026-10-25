@@ -337,7 +337,12 @@ class NautilusJobExecutor:
             plan_kind = str((record.execution_plan or {}).get("kind") or "")
             if plan_kind == "nautilus_catalog_replay":
                 runner = _ReplayRunner(record, context)
-            elif plan_kind == "nautilus_strategy_family":
+            elif plan_kind == "nautilus_strategy_family" or (
+                plan_kind == "backtest"
+                and (((run_spec.get("configuration") or {}).get("analyses") or {})
+                     .get("backtest", {}).get("execution", {}).get("backend")
+                     == "nautilus_trader")
+            ):
                 runner = _StrategyRunner(record, context)
             else:
                 from server.modules.single_factor_test.process_runners import run_group
