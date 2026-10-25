@@ -49,7 +49,7 @@ targets:
     info:
       path: Resources/iOS/Info.plist
       properties:
-        CFBundleDisplayName: FTClient
+        CFBundleDisplayName: TradeResearch
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -94,11 +94,11 @@ targets:
     info:
       path: Resources/macOS/Info.plist
       properties:
-        CFBundleDisplayName: FTClient
+        CFBundleDisplayName: TradeResearch
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSMinimumSystemVersion: "13.0"
-        NSDocumentsFolderUsageDescription: FTClient 需要读取你在个人工作区中生成的中文研究报告；不会因此上传因子源码。
+        NSDocumentsFolderUsageDescription: TradeResearch 需要读取你在个人工作区中生成的中文研究报告；不会因此上传因子源码。
         SUPublicEDKey: $(SPARKLE_PUBLIC_ED_KEY)
         CFBundleURLTypes:
           - CFBundleURLName: com.gtht.client.app-update

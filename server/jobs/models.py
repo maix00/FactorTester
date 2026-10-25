@@ -75,6 +75,7 @@ class JobRecord:
     execution_plan_hash: str = ""
     plan_notices: list[dict[str, Any]] = field(default_factory=list)
     result_summary: dict[str, Any] | None = None
+    report_ref: str = ""
     error: dict[str, Any] | None = None
     terminal_assurance: TerminalAssuranceSummary | None = None
     created_at: float = 0.0

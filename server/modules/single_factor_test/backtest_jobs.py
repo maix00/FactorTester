@@ -10,7 +10,6 @@ from pathlib import Path
 
 from flask import jsonify, request
 
-from server.jobs.ipc import DaemonUnavailable
 from server.jobs.artifacts import artifact_root, default_user_quota_bytes
 from server.jobs.product_scope_inputs import retain_product_scope, product_scope_content
 from server.jobs.input_artifacts import (
@@ -34,7 +33,6 @@ from server.modules.single_factor_test.backtest_job_support import (
     require_job,
 )
 from server.modules.single_factor_test.research_jobs import (
-    _daemon_client,
     _deployment_id,
 )
 from server.services.session_runtime import require_user
@@ -248,25 +246,25 @@ def cancel_test_job(job_id: str):
         )
     except KeyError:
         return jsonify({"success": False, "error": "research job not found"}), 404
-    try:
-        _daemon_client().cancel(job_id)
-    except DaemonUnavailable:
-        pass
     return jsonify({"success": True, "job_id": job_id, "status": job.status.value})
 
 
 @sft_bp.post("/api/jobs/<job_id>/approve")
 def approve_test_job(job_id: str):
     try:
-        job = repository().approve_plan(job_id, owner=require_user())
+        owner = require_user()
+        existing = repository().require(job_id, owner=owner)
+        if existing.kind == "backtest":
+            return jsonify({
+                "success": False,
+                "error": "historical backtest Jobs are read-only and cannot be approved",
+                "code": "legacy_backtest_approve_unavailable",
+            }), 409
+        job = repository().approve_plan(job_id, owner=owner)
     except KeyError:
         return jsonify({"success": False, "error": "research job not found"}), 404
     except RuntimeError as exc:
         return jsonify({"success": False, "error": str(exc)}), 409
-    try:
-        _daemon_client().wake()
-    except DaemonUnavailable:
-        pass
     return jsonify({
         "success": True,
         **job.summary(),
@@ -296,6 +294,14 @@ def retry_test_job(job_id: str):
     old, error = require_job(job_id)
     if error:
         return error
+    if old.kind == "backtest":
+        plan_kind = str((old.execution_plan or {}).get("kind") or "")
+        if plan_kind not in {"nautilus_catalog_replay", "nautilus_strategy_family"}:
+            return jsonify({
+                "success": False,
+                "error": "historical backtest Jobs are read-only and cannot be retried",
+                "code": "legacy_backtest_retry_unavailable",
+            }), 409
     if old.status not in TERMINAL_STATUSES:
         return jsonify({"success": False, "error": "only terminal jobs can be retried"}), 409
     factor_scope_id = str(
@@ -521,9 +527,15 @@ def retry_test_job(job_id: str):
             owner=job.owner,
             entries=run_input_dependencies,
         )
-        _daemon_client().wake()
-    except DaemonUnavailable:
-        pass
+        if old.kind == "backtest":
+            job_repository.transition(
+                job.job_id, JobStatus.PLANNING, expected=JobStatus.SUBMITTED,
+            )
+            job = job_repository.set_execution_plan(
+                job.job_id, plan=deepcopy(old.execution_plan or {}),
+                notices=list(old.plan_notices or []),
+                requires_confirmation=False,
+            )
     except Exception as exc:
         if job is not None:
             try:
@@ -541,6 +553,15 @@ def retry_test_job(job_id: str):
         cleanup_factor_source_scope(retry_factor_scope_id)
         cleanup_strategy_source_scope(retry_strategy_scope_id)
         raise
+    try:
+        from server.jobs.dispatch.audit import append_audit
+
+        append_audit(
+            job_repository.db_path, action="job_retry", actor=old.owner,
+            job_id=job.job_id, attempt=job.attempt, detail=old.job_id,
+        )
+    except Exception:
+        pass
     return jsonify({
         "success": True,
         **job.summary(),
@@ -550,38 +571,18 @@ def retry_test_job(job_id: str):
 
 @sft_bp.post("/api/jobs/<job_id>/continue")
 def continue_test_job(job_id: str):
+    """Step continuation belonged to the retired in-process worker pool."""
     job, error = require_job(job_id)
     if error:
         return error
-    if job.status is not JobStatus.PAUSED or not job.step_mode:
-        return jsonify({"success": False, "error": "job is not a paused step job"}), 409
-    job_repository = repository()
-    quota = job_repository.storage_quota(
-        owner=job.owner, default_bytes=default_user_quota_bytes()
-    )
-    if job_repository.storage_usage(owner=job.owner) > quota:
+    if job.kind == "backtest":
         return jsonify({
             "success": False,
-            "error": "retained result quota exceeded; paused job cannot continue",
-            "code": "storage_quota_exceeded",
-        }), 507
-    data = request.get_json(silent=True) or {}
-    action = str(data.get("action") or "continue").strip()
-    if action not in {"continue", "end"}:
-        return jsonify({"success": False, "error": "unsupported step action"}), 400
-    command = {"action": action}
-    until = str(data.get("until") or "").strip()
-    if until:
-        command["until"] = until
-    try:
-        continued = _daemon_client().continue_step(job_id, command)
-    except DaemonUnavailable as exc:
-        return jsonify({"success": False, "error": str(exc)}), 503
-    if not continued:
-        return jsonify({"success": False, "error": "paused worker is unavailable"}), 409
-    current = job_repository.require(job_id, owner=job.owner)
+            "error": "historical backtest Jobs are read-only and cannot continue",
+            "code": "legacy_backtest_continue_unavailable",
+        }), 409
     return jsonify({
-        "success": True,
-        **current.summary(),
-        **job_urls(job_id),
-    })
+        "success": False,
+        "error": "step continuation is not supported by Celery workers",
+        "code": "step_continuation_retired",
+    }), 409

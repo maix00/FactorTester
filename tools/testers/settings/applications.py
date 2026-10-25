@@ -412,48 +412,24 @@ def group_test_settings() -> ApplicationSettings:
         ("test_template", "engine", "time"),
     )
 
-    # 分组测试：本地设置面板 + 分组列表（多选、一次运行所有选中、点击行编辑）。
+    # Backtest strategies are configured from one strategy-group surface. The
+    # selected strategy family supplies the parameter schema for each row.
     app.register_surface(SettingsSurface(
         "local", "本地设置", TabMountPoint.LOCAL_SETTINGS, kind="panel", order=10,
     ))
     app.register_surface(SettingsSurface(
-        "groups", "分组策略", TabMountPoint.GROUP_SETTINGS, kind="list", order=20,
-        selection="multi", run_mode="run_all", editable=True, item_label="分组",
+        "groups", "策略组", TabMountPoint.GROUP_SETTINGS, kind="list", order=20,
+        selection="multi", run_mode="run_all", editable=True, item_label="策略",
         content_adapter="backtest_groups",
     ))
-    app.register_surface(SettingsSurface(
-        "long_short", "分组多空策略", TabMountPoint.GROUP_SETTINGS, kind="list", order=30,
-        selection="single", run_mode="run_all", editable=True,
-        item_label="Long-Short 组合", content_adapter="backtest_long_short",
-    ))
-    from tools.testers.run_input_contracts import CUSTOM_STRATEGY_INPUTS
-    app.register_surface(SettingsSurface(
-        "custom_strategy", "自定义策略", TabMountPoint.GROUP_SETTINGS,
-        kind="list", order=40, selection="single", run_mode="run_all",
-        editable=True, item_label="自定义策略",
-        content_adapter="backtest_custom_strategies",
-        content_options={"inputs": CUSTOM_STRATEGY_INPUTS},
-    ))
-    # 分组列表支持的 flow（声明元数据；行为仍由前端 GT.modes 提供）。
+    # One add action opens the family selector; family-owned schemas generate
+    # the fields instead of separate group/custom strategy authoring buttons.
     for flow in (
-        SurfaceFlow("groups", "add_group", "新增分组", "create", order=0, form_tab="add-group"),
-        SurfaceFlow("groups", "create_derived", "派生组", "derive", order=10,
-                    form_tab="add-derived", min_selected=1, max_selected=1),
-        SurfaceFlow("groups", "create_ls", "创建 Long-Short 组合", "compose", order=20,
-                    min_selected=2, max_selected=2),
-        SurfaceFlow("groups", "edit", "编辑", "edit", order=30, min_selected=1, max_selected=1),
-        SurfaceFlow("groups", "rename", "重命名", "rename", order=35, min_selected=1, max_selected=1),
-        SurfaceFlow("groups", "delete", "删除", "delete", order=40, min_selected=1,
+        SurfaceFlow("groups", "add_strategy", "添加策略", "create", order=0, form_tab="add-strategy"),
+        SurfaceFlow("groups", "edit_strategy", "编辑", "edit", order=10, min_selected=1, max_selected=1),
+        SurfaceFlow("groups", "rename_strategy", "重命名", "rename", order=15, min_selected=1, max_selected=1),
+        SurfaceFlow("groups", "delete_strategy", "删除", "delete", order=20, min_selected=1,
                     button_class="btn-outline-danger"),
-        SurfaceFlow("long_short", "rename_long_short", "重命名", "rename", order=5,
-                    min_selected=1, max_selected=1),
-        SurfaceFlow("long_short", "add_long_short", "新增 Long-Short 组合", "create", order=1),
-        SurfaceFlow("long_short", "edit_long_short", "编辑", "edit", order=4,
-                    min_selected=1, max_selected=1),
-        SurfaceFlow("long_short", "swap_long_short", "交换多空", "swap", order=6,
-                    min_selected=1, max_selected=1),
-        SurfaceFlow("long_short", "delete_long_short", "删除", "delete", order=0,
-                    min_selected=1, button_class="btn-outline-danger"),
     ):
         app.register_flow(flow)
     return app

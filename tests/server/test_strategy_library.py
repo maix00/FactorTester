@@ -81,6 +81,8 @@ def test_library_scopes_and_immutable_revisions(tmp_path: Path) -> None:
     )
     strategy = create_strategy(service)
     create_strategy(service, owner="bob", source=SOURCE_V2)
+    assert strategy["library_scope"] == "user_custom"
+    assert strategy["library_kind"] == "nautilus_strategy_source"
     assert service.list(principal="alice", scope="mine")["total"] == 1
     assert service.list(principal="alice", scope="subordinates")["total"] == 1
     assert service.list(principal="bob", scope="shared")["total"] == 0
@@ -288,3 +290,65 @@ def _normalize(compiled: dict) -> list[dict]:
 
     paths = [item["path"] for item in compiled["transient_strategy_sources"]]
     return normalize_strategy_plan(compiled["strategy_specs"], uploaded_paths=paths)
+
+
+def test_public_factor_templates_are_a_distinct_read_only_library_scope() -> None:
+    from server.services.factor_strategy_templates import factor_strategy_catalog
+
+    catalog = factor_strategy_catalog()
+    assert catalog["scope"] == "public"
+    assert catalog["families"]
+    assert catalog["items"]
+    assert all(item["object_kind"] == "strategy_family" for item in catalog["families"])
+    assert all(item["object_kind"] == "strategy" for item in catalog["items"])
+    assert all(item["library_scope"] == "public" for item in catalog["items"])
+    assert all(item["library_kind"] == "factor_strategy_template" for item in catalog["items"])
+    assert all(item["read_only"] is True for item in catalog["items"])
+    assert {item["kind"] for item in catalog["items"]} == {
+        "cross_sectional_group", "threshold",
+    }
+    group = next(item for item in catalog["families"]
+                 if item["family_ref"] == "nautilus-strategy-family:factor-cross-sectional-group")
+    fields = group["configuration_schema"]["fields"]
+    assert [(field["key"], field["type"]) for field in fields] == [
+        ("signal", "factor_ref"),
+        ("product_group_ref", "product_group_ref"),
+        ("split_count", "integer"),
+        ("group_index", "integer"),
+    ]
+
+
+def test_group_strategy_binding_freezes_family_schema_and_required_product_group() -> None:
+    from server.services.factor_strategy_templates import normalize_factor_strategy_binding
+
+    base = {
+        "template_ref": "nautilus-factor-strategy:cross-sectional-group",
+        "revision_ref": "nautilus-factor-strategy-revision:cross-sectional-group:1",
+        "strategy_id": "strategy-group-1", "binding_id": "binding-1",
+        "factor_bindings": {"signal": f"factor:v2:{'A' * 43}"},
+        "parameters": {"split_count": 5, "group_index": 2},
+    }
+    with pytest.raises(ValueError, match="product_group_ref"):
+        normalize_factor_strategy_binding(base)
+
+    result = normalize_factor_strategy_binding({**base, "product_group_ref": "products:agriculture"})
+    assert result["family_ref"] == "nautilus-strategy-family:factor-cross-sectional-group"
+    assert result["strategy_ref"] == base["template_ref"]
+    assert result["configuration_schema_ref"].endswith("configuration-schema:1")
+    assert result["product_group_ref"] == "products:agriculture"
+
+
+def test_registered_strategy_boolean_parameter_keeps_false_as_a_value() -> None:
+    from server.services.factor_strategy_templates import _normalize_parameters
+
+    template = {
+        "kind": "test",
+        "parameters": [{
+            "key": "allow_short", "type": "boolean", "default": False,
+        }],
+    }
+    assert _normalize_parameters(template, {"allow_short": False}) == {
+        "allow_short": False,
+    }
+    with pytest.raises(ValueError, match="boolean"):
+        _normalize_parameters(template, {"allow_short": "false"})

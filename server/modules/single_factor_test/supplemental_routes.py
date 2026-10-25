@@ -8,13 +8,11 @@ import uuid
 from flask import jsonify, request, session
 
 from server.jobs.artifacts import artifact_root
-from server.jobs.ipc import DaemonUnavailable
 from server.jobs.states import JobStatus
 from server.jobs.supplemental import SupplementalRequest, request_supplemental
 from server.modules.single_factor_test import sft_bp
 from server.modules.single_factor_test.backtest_job_support import repository
 from server.modules.single_factor_test.research_jobs import (
-    _daemon_client,
     _deployment_id,
 )
 from server.services.session_runtime import require_user
@@ -244,11 +242,6 @@ def create_job_supplemental(parent_job_id: str):
                 deployment_id=_deployment_id(),
             ),
         )
-        if result["job"] is not None:
-            try:
-                _daemon_client().wake()
-            except DaemonUnavailable:
-                pass
     except LookupError as exc:
         return jsonify({"success": False, "error": str(exc)}), 409
     except (TypeError, ValueError) as exc:

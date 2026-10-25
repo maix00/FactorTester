@@ -109,10 +109,10 @@ def test_incremental_window_statistics_match_batch_with_missing_and_large_values
 
 
 def test_incremental_moments_remain_stable_for_large_offsets_and_flat_windows() -> None:
-    from tools.testers.backtest.engines.factors.rolling_covariance import (
+    from tools.factors.expr.streaming.rolling_covariance import (
         RollingCovarianceState,
     )
-    from tools.testers.backtest.engines.factors.rolling_moments import (
+    from tools.factors.expr.streaming.rolling_moments import (
         RollingMomentsState,
     )
 

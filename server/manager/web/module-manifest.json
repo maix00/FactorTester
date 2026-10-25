@@ -383,7 +383,8 @@
    "catalog-selection-remote"
   ],
   "workbench-backtest": [
-   "workbench-configuration-groups"
+   "workbench-configuration-groups",
+   "strategy-library-runtime"
   ],
   "workbench-templates": [
    "workbench-core",
@@ -411,6 +412,9 @@
   ],
   "manager-mihomo": [
    "manager"
+  ],
+  "trading": [
+   "core"
   ],
   "docs": [
    "core"
@@ -559,6 +563,9 @@
   "manager": [
    "manager"
   ],
+  "trading": [
+   "trading"
+  ],
   "mihomo": [
    "manager-mihomo"
   ],
@@ -580,12 +587,16 @@
   "styles/workbench-settings.css",
   "styles/docs.css",
   "styles/strategy-library.css",
+  "trading/workbench.css",
   "styles/task-inputs.css"
  ],
  "shell_styles": [
   "styles/app.css"
  ],
  "group_styles": {
+  "trading": [
+   "trading/workbench.css"
+  ],
   "code-viewer": [
    "vendor/highlight/github.min.css"
   ],
@@ -908,6 +919,7 @@
   "workbench-settings": [
    "workbench/tab-chip-content.js",
    "workbench/test-settings.js",
+   "workbench/nautilus-configuration.js",
    "workbench/test-content-adapters.js"
   ],
   "workbench-settings-chips": [
@@ -1041,6 +1053,9 @@
   ],
   "manager-mihomo": [
    "manager/mihomo.js"
+  ],
+  "trading": [
+   "trading/workbench.js"
   ],
   "app": [
    "profile/page-agent-lifecycle.js",
@@ -1219,6 +1234,7 @@
   "workbench/setting-rules.js",
   "workbench/test-input-state.js",
   "workbench/test-configuration-compiler.js",
+  "workbench/nautilus-configuration.js",
   "workbench/test-lazy-code.js",
   "workbench/test-object-picker.js",
   "workbench/object-overlay.js",
@@ -1298,6 +1314,7 @@
   "manager/accounts.js",
   "settings/manager.js",
   "manager/mihomo.js",
+  "trading/workbench.js",
   "app/navigation.js",
   "app/route-dispatch.js",
   "app/tab-workspace.js",

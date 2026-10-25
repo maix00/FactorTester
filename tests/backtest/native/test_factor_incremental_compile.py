@@ -41,7 +41,7 @@ from tools.products.AdjustableTermStructure import (
     AdjustableProductMixin,
 )
 from tools.products.categories.Category import Category
-from tools.testers.backtest.engines.factors.incremental import (
+from tools.factors.expr.streaming.incremental import (
     UnsupportedStreamingFactor,
 )
 

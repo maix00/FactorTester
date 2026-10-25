@@ -117,7 +117,7 @@
         body.replaceChildren(message(
           context,
           "服务器镜像缺少研究 Skill",
-          "请让服务器管理员重新发布包含研究 Skill 的 FactorTester 镜像。",
+          "请让服务器管理员重新发布包含研究 Skill 的 TradeResearch 镜像。",
         ));
       } else {
         body.replaceChildren(message(context, "无法读取服务器 Skill", detail));

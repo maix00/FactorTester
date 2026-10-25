@@ -193,6 +193,10 @@ def test_catalog_product_group_is_resolved_authoritatively_by_owner(monkeypatch)
         },
     )
     monkeypatch.setattr(
+        "tools.data.sqlite.account_manager.product_group.current_product_group_revision_ref",
+        lambda owner, group: "product-group-revision:pg-day-r1",
+    )
+    monkeypatch.setattr(
         "server.services.frozen_product_scope._freeze_categories",
         lambda **_kwargs: {},
     )
@@ -207,6 +211,7 @@ def test_catalog_product_group_is_resolved_authoritatively_by_owner(monkeypatch)
     ]
     assert selection["label"] == "CNFuturesDay"
     assert selection["origin"] == "catalog"
+    assert selection["product_group_revision_ref"] == "product-group-revision:pg-day-r1"
 
 
 def test_product_group_index_includes_authoritative_domain_mirror(
@@ -330,6 +335,7 @@ def test_grouped_ic_scope_is_resolved_to_shared_owner_authority(monkeypatch) -> 
                 "id": "pg-day",
                 "name": "CNFuturesDay",
                 "paths": ["Product/Futures/CNFutures/_products/AP.CZC"],
+                "current_revision_ref": "product-group-revision:pg-day-r1",
             },
         },
     )
@@ -349,6 +355,7 @@ def test_grouped_ic_scope_is_resolved_to_shared_owner_authority(monkeypatch) -> 
             "paths": ["Product/Futures/CNFutures/_products/AP.CZC"],
             "origin": "catalog",
             "product_group_template_id": "pg-day",
+            "product_group_revision_ref": "product-group-revision:pg-day-r1",
         },
     }
 

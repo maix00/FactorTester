@@ -24,7 +24,7 @@ from tools.factors.expr.rolling_regression import (
     ROLLING_LINEAR_METRICS,
     linear_metric,
 )
-from tools.testers.backtest.engines.factors.rolling_statistics import (
+from tools.factors.expr.streaming.rolling_statistics import (
     RollingStatisticsNode,
 )
 

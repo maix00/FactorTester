@@ -54,6 +54,61 @@ _PRODUCT_DATA_POST_PATHS = frozenset({
 class JobProxyRoutesMixin:
     """Forward execution requests after selection and preserve provenance."""
 
+    def _proxy_nautilus_preview(self, parsed, *, method: str) -> bool:
+        """Forward only read-only Nautilus capability/configuration previews.
+
+        Keep this allowlist separate from the broad execution proxy: the
+        Nautilus namespace must not become an accidental live-order tunnel.
+        """
+        allowed = {
+            ("GET", "/api/nautilus/capabilities"),
+            ("POST", "/api/nautilus/config/preview"),
+        }
+        if (method, parsed.path) not in allowed:
+            return False
+        session = self._session()
+        if session is None:
+            json_response(self, {"success": False, "error": "login required"}, 401)
+            return True
+        body = None
+        if method == "POST":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except (TypeError, ValueError):
+                length = -1
+            if length < 0 or length > 1024 * 1024:
+                json_response(self, {"success": False, "error": "invalid request body"}, 400)
+                return True
+            body = self.rfile.read(length) if length else b""
+        try:
+            # This staged feature is local to the selected Manager's business
+            # instance.  Explicit remote/unknown server IDs are not accepted.
+            requested = str(parse_qs(parsed.query).get("server_id", [""])[0]).strip()
+            if requested not in {"", "local", self.state.server_id}:
+                json_response(self, {"success": False, "error": "local service required"}, 403)
+                return True
+            route = self._service_route(parsed)
+            if route is None:
+                return True
+            if route.server_id != self.state.server_id:
+                json_response(self, {
+                    "success": False, "error": "local service required",
+                }, 403)
+                return True
+            response = self.state.route_request(
+                route, path=parsed.path,
+                principal=str(session["username"]), method=method,
+                body=body,
+                content_type=str(self.headers.get("Content-Type") or "application/json"),
+            )
+        except (ConnectionError, OSError, RuntimeError, ValueError):
+            json_response(self, {
+                "success": False, "error": "business service is unavailable",
+            }, 503)
+            return True
+        self._send_gateway_response(response, route=route)
+        return True
+
     def _deferred_job_cleanup_route(self, parsed, *, method: str) -> bool:
         """Keep reversible offline deletion commands on the quota authority."""
         base = "/api/storage/deferred-job-cleanup"

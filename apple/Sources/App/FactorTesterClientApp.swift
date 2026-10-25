@@ -50,7 +50,7 @@ struct FactorTesterClientApp: App {
 
     var body: some Scene {
         #if os(macOS)
-        Window("FTClient", id: "main") {
+        Window("TradeResearch", id: "main") {
             #if DEBUG
             windowRoot
             #else

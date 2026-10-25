@@ -177,14 +177,17 @@ def test_ic_runspec_contains_exactly_its_registered_run_controls(client) -> None
 def test_backtest_runspec_contains_exactly_its_registered_run_controls(client) -> None:
     workspace = _create_workspace(client)
     _update(client, workspace)
-    response = client.post("/api/runs", json={
+    request_payload = {
         "workspace_id": workspace["workspace_id"],
         "configuration_revision": workspace["configuration"]["revision"],
         "analyses": ["backtest"],
-    })
-
-    assert response.status_code == 202, response.get_data(as_text=True)
-    run_spec = response.get_json()["run"]["run_spec"]
+    }
+    # Freeze-only compilation remains inspectable without starting a retired
+    # v4 backtest Job or writing a ResearchRun.
+    prepared = research_jobs._prepare_local_research_run_request(
+        request_payload, owner="alice",
+    )
+    run_spec = prepared["run_spec"]
     controls = {"retention_mode", "step_mode", "output_requests"}
     assert {key for key in run_spec if key in controls} == _run_control_keys("group_test")
     assert run_spec["step_mode"] is False
@@ -198,3 +201,91 @@ def test_backtest_runspec_contains_exactly_its_registered_run_controls(client) -
     execution_settings = run_spec["configuration"]["analyses"]["backtest"]["execution"]["settings"]
     assert execution_settings["account_currency"] == "USD"
     assert execution_settings["base_currency"] == "CNY"
+    response = client.post("/api/runs", json=request_payload)
+    assert response.status_code == 400
+    assert response.get_json()["code"] == "legacy_backtest_unavailable"
+
+
+def test_nautilus_runspec_freezes_compact_defaults_groups_and_sparse_contract_exceptions():
+    from server.modules.shared.run_spec_resolution.freezing import (
+        freeze_nautilus_execution_policy,
+    )
+
+    configuration = {"payload": {
+        "shared": {"product_selections": {
+            "selection-a": {"selected_paths": ["rates"]},
+            "selection-b": {"selected_paths": ["metals"]},
+        }},
+        "analyses": {"backtest": {
+            "execution": {"backend": "nautilus_trader", "contract_version": 4,
+                "settings": {
+                    "engine_mode": "custom",
+                    "accounting_mode": "Custom",
+                    "initial_capital_major": "1000000",
+                    "base_currency": "CNY",
+                    "daily_mark_to_market_enabled": "auto",
+                    "cost_basis_method": "auto",
+                    "instrument_execution_policy_overrides": {
+                        "daily_settlement_instrument_overrides": {
+                            "T2506.CFFEX": True,
+                        },
+                    },
+                    "custom_product_fields": [
+                        {"product": "TL2506.CFFEX", "field": "DailyMarkToMarketEnabled",
+                         "value": False},
+                        {"product": "T2506.CFFEX", "field": "CostBasisMethod",
+                         "value": "HIFO"},
+                        {"product": "T2506.CFFEX", "field": "LongMarginRatioByMoney",
+                         "value": "0.03"},
+                    ],
+                }},
+            "groups": [
+                    {"id": "account-a", "name": "Rates",
+                     "product_path_selection_id": "selection-a",
+                 "execution_policy_overrides": {
+                     "daily_settlement_enabled": False,
+                     "position_cost_basis": "FIFO",
+                 }},
+                    {"id": "account-b", "name": "Metals",
+                     "product_path_selection_id": "selection-b"},
+            ],
+                "venues": [
+                    {"name": "CFFEX", "account_type": "MARGIN",
+                     "starting_balances": ["700000 CNY"]},
+                    {"name": "SHFE", "account_type": "MARGIN",
+                     "starting_balances": ["300000 CNY"]},
+                ],
+                "strategy_venue_bindings": [
+                    {"strategy_id": "account-a", "venue_ids": ["CFFEX"]},
+                    {"strategy_id": "account-b", "venue_ids": ["SHFE"]},
+                ],
+        }},
+    }}
+
+    frozen = freeze_nautilus_execution_policy(configuration)
+    settings = frozen["payload"]["analyses"]["backtest"]["execution"]["settings"]
+    policy = settings["instrument_execution_policy"]
+
+    assert settings["product_scope_refs"] == ["selection-a", "selection-b"]
+    assert "instrument_ids" not in settings
+    assert "engine_mode" not in settings
+    assert "accounting_mode" not in settings
+    assert "daily_mark_to_market_enabled" not in settings
+    assert "cost_basis_method" not in settings
+    assert policy["settlement_rule_set_ref"] is None
+    assert policy["daily_settlement"] == {
+        "default": "eligible_products",
+        "scope_overrides": {"selection-a": False},
+        "instrument_overrides": {
+            "TL2506.CFFEX": False, "T2506.CFFEX": True,
+        },
+        "eligible_products_use_official_close": True,
+    }
+    assert policy["position_cost_basis"] == {
+        "default": "WEIGHTED_AVERAGE",
+        "scope_overrides": {"selection-a": "FIFO"},
+        "instrument_overrides": {"T2506.CFFEX": "HIFO"},
+    }
+    assert settings["custom_product_fields"] == [{
+        "product": "T2506.CFFEX", "field": "LongMarginRatioByMoney", "value": "0.03",
+    }]

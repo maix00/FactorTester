@@ -18,6 +18,8 @@ dependencies = [
 [project.scripts]
 factortester = "factortester_cli_bootstrap:main"
 factortester-manager = "factortester_cli_bootstrap:manager_main"
+traderesearch = "factortester_cli_bootstrap:main"
+traderesearch-manager = "factortester_cli_bootstrap:manager_main"
 
 [tool.setuptools]
 include-package-data = false

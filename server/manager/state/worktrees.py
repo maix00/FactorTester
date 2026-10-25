@@ -14,7 +14,6 @@ from server.manager.state.models import (
     ServiceBundle,
     Worktree,
 )
-from server.manager.state.processes import job_daemon_socket_path
 from server.manager.system import extract_issue_number as _extract_issue_number, safe_name
 
 
@@ -88,7 +87,7 @@ class WorktreeStateMixin:
                 continue
             bundle = self.processes.get(self.key(worktree_path))
             if bundle and (
-                bundle.api.poll() is None or bundle.daemon.poll() is None
+                bundle.api.poll() is None
             ):
                 continue
             if worktree_path.exists():
@@ -263,33 +262,25 @@ class WorktreeStateMixin:
         """
         path = path.resolve()
         deployment_id = f"{safe_name(path.name)}-{port}"
-        socket_path = job_daemon_socket_path(path, deployment_id)
+        socket_path = Path()
         api_pid: int | None = None
-        daemon_pid: int | None = None
         for pid, command in self._process_listing():
             is_api_candidate = (
                 "start_server.py" in command and f"--port {port}" in command
             )
-            is_daemon_candidate = (
-                "scripts/research_job_daemon.py" in command
-                and f"--deployment-id {deployment_id}" in command
-                and f"--socket {socket_path}" in command
-            )
-            if not is_api_candidate and not is_daemon_candidate:
+            if not is_api_candidate:
                 continue
             cwd = self._process_cwd(pid)
             same_worktree = cwd is not None and cwd.resolve() == path
             if api_pid is None and is_api_candidate and same_worktree:
                 api_pid = pid
-            if daemon_pid is None and is_daemon_candidate and same_worktree:
-                daemon_pid = pid
-            if api_pid is not None and daemon_pid is not None:
+            if api_pid is not None:
                 break
-        if api_pid is None or daemon_pid is None:
+        if api_pid is None:
             return None
         return ServiceBundle(
             api=_ExternalProcess(api_pid),
-            daemon=_ExternalProcess(daemon_pid),
+            daemon=None,
             socket_path=socket_path,
             deployment_id=deployment_id,
         )
@@ -343,8 +334,8 @@ class WorktreeStateMixin:
         return True
 
     def daemon_running(self, path: Path) -> bool:
-        bundle = self._bundle_for_path(path)
-        return bool(bundle and bundle.daemon.poll() is None)
+        """Planning is owned by the Celery dispatcher, not a sidecar."""
+        return False
 
     def vibe_running(self) -> bool:
         return bool(

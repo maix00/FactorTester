@@ -20,6 +20,9 @@ assert.deepStrictEqual(match("/jobs", ""), {kind: "jobs", section: "types"});
 assert.deepStrictEqual(match("/jobs", "?scope=mine"), {kind: "jobs", section: "tasks"});
 assert.deepStrictEqual(match("/jobs", "?section=tasks"), {kind: "jobs", section: "tasks"});
 assert.deepStrictEqual(match("/jobs", "?section=unknown"), {kind: "jobs", section: "types"});
+assert.deepStrictEqual(match("/trading", ""), {kind: "trading", mode: "paper"});
+assert.deepStrictEqual(match("/trading", "?mode=live"), {kind: "trading", mode: "live"});
+assert.deepStrictEqual(match("/trading", "?mode=unknown"), {kind: "trading", mode: "paper"});
 assert.deepStrictEqual(match("/mihomo", ""), {kind: "mihomo"});
 assert.deepStrictEqual(match("/docs", ""), {kind: "docs", slug: ""});
 assert.deepStrictEqual(match("/docs/system-overview", ""), {

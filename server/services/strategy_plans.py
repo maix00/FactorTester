@@ -38,6 +38,18 @@ def normalize_strategy_plan(
     for raw in raw_specs:
         if not isinstance(raw, dict):
             raise ValueError("each strategy spec must be an object")
+        if raw.get("strategy_kind") == "factor_template":
+            from server.services.factor_strategy_templates import (
+                normalize_factor_template_plan,
+            )
+
+            normalized = normalize_factor_template_plan(raw)
+            identity = str(normalized["strategy_id"])
+            if identity in seen_ids:
+                raise ValueError(f"duplicate strategy_id: {identity}")
+            seen_ids.add(identity)
+            result.append(normalized)
+            continue
         try:
             spec = StrategySpec.from_mapping(raw)
         except ValueError as exc:
@@ -122,7 +134,7 @@ def _normalize_requirements(value: Any) -> dict[str, Any]:
         return {}
     if not isinstance(value, dict):
         raise ValueError("strategy requirements must be an object")
-    allowed = _REQUIREMENT_FLAGS | {"feed_events", "fields", "data"}
+    allowed = _REQUIREMENT_FLAGS | {"feed_events", "fields", "data", "factor_bindings"}
     unknown = sorted(set(value) - allowed)
     if unknown:
         raise ValueError("unknown strategy requirement: " + ", ".join(unknown))
@@ -146,4 +158,10 @@ def _normalize_requirements(value: Any) -> dict[str, Any]:
         if not isinstance(items, (list, tuple, set)):
             raise ValueError(f"strategy requirements {key} must be an array")
         result[key] = sorted({str(item) for item in items if str(item).strip()})
+    if "factor_bindings" in value:
+        from server.services.factor_strategy_templates import normalize_factor_bindings
+
+        result["factor_bindings"] = normalize_factor_bindings(
+            value["factor_bindings"], field="strategy requirements factor_bindings",
+        )
     return result

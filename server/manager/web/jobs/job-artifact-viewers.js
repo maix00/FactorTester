@@ -3,7 +3,23 @@
     return `/api/jobs/${encodeURIComponent(jobID)}/artifacts/${encodeURIComponent(artifact.name)}${artifactQuery}`;
   }
 
+  function isolatedReportPath(jobID, artifact, artifactQuery) {
+    const query = new URLSearchParams(String(artifactQuery || "").replace(/^\?/, ""));
+    query.set("view", "isolated");
+    return artifactPath(jobID, artifact, `?${query}`);
+  }
+
   async function mount(context, target, options) {
+    const filename = String(options.artifact.file_name || options.artifact.name || "").toLowerCase();
+    const viewer = String(options.declaration?.viewer || "").toLowerCase();
+    if (viewer === "nautilus_tearsheet") {
+      if (filename !== "tearsheet.html") {
+        throw new Error(context.t("回测报告生成物名称不匹配"));
+      }
+      return nautilusTearsheet(context, target, isolatedReportPath(
+        options.jobID, options.artifact, options.artifactQuery,
+      ));
+    }
     target.replaceChildren(message(context.t("正在读取生成物…")));
     const response = await FTJobArtifacts.fetch(
       context,
@@ -15,8 +31,6 @@
     );
     const type = String(options.artifact.content_type || options.artifact.media_type
       || response.headers.get("Content-Type") || "").toLowerCase();
-    const filename = String(options.artifact.file_name || options.artifact.name || "").toLowerCase();
-    const viewer = String(options.declaration?.viewer || "").toLowerCase();
     if (type.startsWith("image/") || /\.(png|jpe?g|gif|webp|svg)$/.test(filename)) {
       const raw = await response.blob();
       // Older transfer Attempts and non-updated peer data planes may still
@@ -52,6 +66,21 @@
   function message(value) {
     const element = document.createElement("p"); element.className = "artifact-message";
     element.textContent = value; return element;
+  }
+
+  function nautilusTearsheet(context, target, path) {
+    // A separately authenticated Manager response carries the report CSP.
+    // srcdoc and blob: inherit the shell's CSP, which blocks Plotly's inline
+    // scripts; the independent response must be isolated server-side too.
+    const frame = document.createElement("iframe");
+    frame.className = "artifact-nautilus-tearsheet";
+    frame.title = context.t("NautilusTrader 回测报告");
+    frame.setAttribute("sandbox", "allow-scripts");
+    frame.setAttribute("referrerpolicy", "no-referrer");
+    frame.style.cssText = "display:block;width:100%;height:min(780px,72vh);"
+      + "min-height:420px;border:1px solid var(--line);border-radius:9px;background:white";
+    frame.src = path;
+    target.replaceChildren(frame);
   }
 
   function image(context, target, blob, type) {

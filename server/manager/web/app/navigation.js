@@ -159,13 +159,14 @@
         },
       ],
     },
+    {id: "trading", title: "交易台", title_key: "交易台", description_key: "查看模拟盘、实盘与券商接入状态", sfSymbol: "chart.line.uptrend.xyaxis", path: "/trading?mode=paper", requiresAuth: true, sidebarVisible: true, homeVisible: true, pinned: true},
     {id: "factors", title: "因子库", title_key: "因子库", description_key: "浏览 canonical 与自定义因子", sfSymbol: "function", path: "/factors", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: true},
     {id: "products", title: "产品库", title_key: "产品库", description_key: "查询产品、合约与市场资料", sfSymbol: "shippingbox", path: "/products", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: true},
-    {id: "strategies", title: "策略库", title_key: "策略库", description_key: "管理可复用策略、源码版本与共享范围", sfSymbol: "arrow.triangle.branch", path: "/strategies?scope=mine", requiresAuth: true, sidebarVisible: true, homeVisible: true, pinned: true},
-    {id: "manager", title: "服务器管理", title_key: "服务器管理", description_key: "查看端口状态并控制本机服务", sfSymbol: "server.rack", path: "/manager", requiresAuth: true, roles: ["super_admin"], sidebarVisible: true, homeVisible: true, pinned: false, tab_behavior: "singleton"},
+    {id: "strategies", title: "策略库", title_key: "策略库", description_key: "管理公共策略、本人及下级的自定义策略", sfSymbol: "arrow.triangle.branch", path: "/strategies?scope=public", requiresAuth: true, sidebarVisible: true, homeVisible: true, pinned: true},
+    {id: "manager", title: "服务器管理", title_key: "服务器管理", description_key: "查看端口状态并控制本机服务", sfSymbol: "server.rack", path: "/manager", requiresAuth: true, permissions: ["admin_console:read"], sidebarVisible: true, homeVisible: true, pinned: false, tab_behavior: "singleton"},
     {id: "mihomo", title: "Mihomo Dashboard", title_key: "Mihomo Dashboard", description_key: "打开官方 Mihomo Dashboard", sfSymbol: "network", path: "/mihomo", requiresAuth: true, roles: ["super_admin"], sidebarVisible: true, homeVisible: true, pinned: false, tab_behavior: "singleton"},
     {id: "sqlite_web", title: "数据库", title_key: "数据库", description_key: "浏览统一 SQLite 数据库", sfSymbol: "cylinder.split.1x2", path: "/sqlite-web/", requiresAuth: true, roles: ["super_admin"], sidebarVisible: true, homeVisible: true, pinned: false, tab_behavior: "singleton"},
-    {id: "docs", title: "技术文档", title_key: "技术文档", description_key: "阅读 FactorTester 技术文档", sfSymbol: "book", path: "/docs", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: false, tab_behavior: "singleton"},
+    {id: "docs", title: "技术文档", title_key: "技术文档", description_key: "阅读 TradeResearch 技术文档", sfSymbol: "book", path: "/docs", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: false, tab_behavior: "singleton"},
     {id: "settings", title: "设置", title_key: "设置", path: "/settings/account", requiresAuth: false, sidebarVisible: false, homeVisible: false, pinned: true},
   ];
 
@@ -174,6 +175,10 @@
     if (module.requiresAuth !== false && !authenticated) return null;
     if (Array.isArray(module.roles) && module.roles.length
         && !module.roles.includes(session?.role)) return null;
+    if (Array.isArray(module.permissions) && module.permissions.length
+        && !module.permissions.every(permission =>
+             Array.isArray(session?.admin_capabilities)
+             && session.admin_capabilities.includes(permission))) return null;
     const children = Array.isArray(module.children)
       ? module.children.map(child => visibleFallbackModule(child, session)).filter(Boolean)
       : undefined;
@@ -226,10 +231,14 @@
       };
     }
     if (parts[0] === "strategies") {
-      const scope = new URLSearchParams(search).get("scope") || "mine";
+      const params = new URLSearchParams(search);
+      const scope = params.get("scope") || "mine";
+      const objectKind = params.get("kind") === "strategy"
+        ? "strategy" : "strategy_family";
       return {
         kind: "strategy-library",
-        scope: ["mine", "subordinates", "shared"].includes(scope) ? scope : "mine",
+        scope: ["public", "mine", "subordinates", "shared"].includes(scope) ? scope : "mine",
+        objectKind,
       };
     }
     // A task URL may omit the worker port when it is only a storage/detail
@@ -385,6 +394,10 @@
     }
     if (parts[0] === "profiles") return {kind: "profiles"};
     if (parts[0] === "settings") return {kind: "settings", section: parts[1] || "account"};
+    if (parts[0] === "trading") {
+      const mode = new URLSearchParams(search).get("mode");
+      return {kind: "trading", mode: mode === "live" ? "live" : "paper"};
+    }
     if (parts[0] === "manager") {
       const section = new URLSearchParams(search).get("section") || "services";
       return {

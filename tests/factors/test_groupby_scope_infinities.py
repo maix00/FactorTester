@@ -17,7 +17,7 @@ from tools.factors.expr.groupby_scope_eval import (
 )
 from tools.factors.expr.lookback_scope import scope_bars
 from tools.factors.expr.timeline import PanelTimeline
-from tools.testers.backtest.engines.factors.incremental import GroupScopeNode
+from tools.factors.expr.streaming.incremental import GroupScopeNode
 
 
 class _Rows:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from types import SimpleNamespace
 
 import pytest
 
@@ -8,336 +8,158 @@ from server.modules.single_factor_test.planning import (
     build_execution_plan,
     verify_execution_plan,
 )
+from server.services.research_run_identity import NAUTILUS_RUN_SPEC_VERSION
 
 
-@dataclass(frozen=True)
-class _Named:
-    name: str
-
-
-@dataclass
-class _MutableSource:
-    key: str
-    revision: int
-
-
-class _Selection:
-    selection_id = "core"
-    products = (_Named("AP.CZCE"),)
-
-
-class _OtherSelection:
-    selection_id = "other"
-    products = (_Named("CU.SHF"),)
-
-
-def test_backtest_planner_freezes_term_structure_and_market_data(monkeypatch) -> None:
-    prepared = {
-        "start_dt": "2025-01-02",
-        "end_dt": "2025-02-14",
-        "resolved_settings_by_alias": {
-            "A1": {"product_path_selection": _Selection(), "factor": object()},
+def _run_spec():
+    adapter = {
+        "adapter_id": "local_cnfutures_contract_minute_parquet_v1",
+        "frequency": "MIN1",
+        "feed_kind": "bar",
+        "clock_policy": "end_label_utc_ns_validated_from_exchange_wall_time",
+    }
+    return {
+        "run_spec_version": NAUTILUS_RUN_SPEC_VERSION,
+        "configuration": {
+            "shared": {
+                "factors": [{"ref": "factor:v2:abc"}],
+                "product_selections": {
+                    "scope:t": {
+                        "paths": ["Product/Futures/CNFutures/_products/T.CFE"],
+                        "resolution_sha256": "scope-resolution-sha256",
+                    },
+                },
+            },
+            "analyses": {
+                "backtest": {
+                    "groups": [{
+                        "id": "strategy:t",
+                        "product_path_selection_id": "scope:t",
+                    }],
+                    "execution": {
+                        "backend": "nautilus_trader",
+                        "contract_version": 4,
+                        "settings": {},
+                        "nautilus_contract": {
+                            "contract_version": 2,
+                            "blockers": [],
+                            "source_adapter": adapter,
+                            "settings": {
+                                "data_source_ref": "LocalCNFuturesContractMIN1",
+                                "product_scope_refs": ["scope:t"],
+                                "start_utc": "2025-04-01T01:00:00+00:00",
+                                "end_utc": "2025-05-01T07:15:00+00:00",
+                                "strategy_venue_bindings": [{
+                                    "strategy_id": "strategy:t",
+                                    "venue_ids": ["CFFEX"],
+                                }],
+                            },
+                        },
+                    },
+                },
+            },
         },
     }
-    monkeypatch.setattr(
-        (
-            "tools.factors.tester_calc.single_factor_test.group.research_run."
-            "prepare_group_run_spec"
-        ),
-        lambda data: prepared,
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.engine.engine_mode_for", lambda config: "auto"
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.market_data._required_frequency_for_strategy",
-        lambda config, products: _Named("DAY1"),
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.market_data._required_data_source_for_strategy",
-        lambda config: (),
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.market_data._factor_required_columns",
-        lambda factor: ("open", "close"),
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.market_data._product_available_freqs",
-        lambda product: [_Named("DAY1")],
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.market_data._select_required_product_frequency",
-        lambda product, available, required: required,
-    )
-    source = _MutableSource("LocalCNFutures", revision=1)
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.market_data._select_required_product_source",
-        lambda product, frequency, required: source,
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.term_structure._expand_product_contracts",
-        lambda product, **kwargs: (
-            [_Named("AP501.CZCE")],
-            [{"contract_product": "AP501.CZCE", "is_identity": False}],
-        ),
-    )
 
-    plan = build_execution_plan("backtest", {"_owner": "alice"})
 
-    assert plan["resolved"]["strategies"]["A1"]["contracts"] == ["AP501.CZCE"]
-    assert plan["resolved"]["data_requirements"] == [
-        {
-            "product": "AP.CZCE",
-            "frequency": "DAY1",
-            "data_source": "LocalCNFutures",
-            "factor_columns": ["close", "open"],
-            "start": "2025-01-02T00:00:00",
-            "end": "2025-02-14T00:00:00",
-        },
-        {
-            "product": "AP501.CZCE",
-            "frequency": "DAY1",
-            "data_source": "LocalCNFutures",
-            "factor_columns": ["close", "open"],
-            "start": "2025-01-02T00:00:00",
-            "end": "2025-02-14T00:00:00",
-        },
-    ]
-    assert plan["notices"][0]["code"] == "term_structure_lifecycle_authority_missing"
+def _install_compiler_mocks(monkeypatch):
+    from server.services.nautilus_bridge import config, source_registry
+    from server.services import factor_revisions
 
-    # A source keeps its stable identity while its current data changes. That
-    # does not invalidate a plan or prevent a new calculation against the
-    # source's current contents.
-    source.revision = 2
-    refreshed_source_plan = build_execution_plan("backtest", {"_owner": "alice"})
-    assert refreshed_source_plan["resolved_hash"] == plan["resolved_hash"]
-    verify_execution_plan("backtest", {
-        "_owner": "alice",
-        "execution_plan": plan,
-    })
+    adapter = SimpleNamespace(
+        adapter_id="local_cnfutures_contract_minute_parquet_v1",
+        frequency="MIN1",
+        instrument_scope="physical_contract",
+        clock_policy="end_label_utc_ns_validated_from_exchange_wall_time",
+    )
+    registry = SimpleNamespace(adapter_for=lambda **_: adapter)
+    monkeypatch.setattr(source_registry, "from_server_sources", lambda: registry)
+    monkeypatch.setattr(
+        factor_revisions, "assert_run_spec_factor_revisions_resolvable",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(config, "compile_frozen_execution_plan", lambda *_args, **_kwargs:
+                        SimpleNamespace(
+                            start_utc="2025-04-01T01:00:00+00:00",
+                            end_utc="2025-05-01T07:15:00+00:00",
+                            manifest=lambda: {"timing": "next_bar_open"},
+                        ))
 
-    # Selecting a different source is a real input change and still requires
-    # replanning.
-    source.key = "OtherMarketDataSource"
+
+def test_backtest_plan_uses_only_immutable_nautilus_runspec(monkeypatch):
+    _install_compiler_mocks(monkeypatch)
+    run_spec = _run_spec()
+
+    plan = build_execution_plan("backtest", {"_owner": "alice", "run_spec": run_spec})
+
+    assert plan["resolved"]["run_spec_version"] == NAUTILUS_RUN_SPEC_VERSION
+    assert plan["resolved"]["run_spec_sha256"]
+    assert plan["resolved"]["source_adapter"] == {
+        "member_key": "LocalCNFuturesContractMIN1",
+        "adapter_id": "local_cnfutures_contract_minute_parquet_v1",
+        "frequency": "MIN1",
+        "instrument_scope": "physical_contract",
+        "clock_policy": "end_label_utc_ns_validated_from_exchange_wall_time",
+    }
+    assert plan["resolved"]["strategies"] == [{
+        "strategy_id": "strategy:t",
+        "product_scope_ref": "scope:t",
+        "venue_ids": ["CFFEX"],
+    }]
+    assert plan["resolved"]["factor_refs"] == ["factor:v2:abc"]
+    assert plan["resolved"]["data_requirements"] == [{
+        "product_scope_ref": "scope:t",
+        "resolution_sha256": "scope-resolution-sha256",
+        "path_count": 1,
+        "source_member": "LocalCNFuturesContractMIN1",
+        "adapter_id": "local_cnfutures_contract_minute_parquet_v1",
+        "frequency": "MIN1",
+        "start_utc": "2025-04-01T01:00:00+00:00",
+        "end_utc": "2025-05-01T07:15:00+00:00",
+    }]
+
+    payload = {"_owner": "alice", "run_spec": run_spec, "execution_plan": plan}
+    verify_execution_plan("backtest", payload)
+    run_spec["configuration"]["shared"]["product_selections"]["scope:t"]["paths"].append(
+        "Product/Futures/CNFutures/_products/TL.CFE",
+    )
     with pytest.raises(RuntimeError, match="changed after planning"):
-        verify_execution_plan("backtest", {
-            "_owner": "alice",
-            "execution_plan": plan,
-        })
-    source.key = "LocalCNFutures"
-
-    prepared["end_dt"] = "2025-03-01"
-    with pytest.raises(RuntimeError, match="changed after planning"):
-        verify_execution_plan("backtest", {
-            "_owner": "alice",
-            "execution_plan": plan,
-        })
+        verify_execution_plan("backtest", payload)
 
 
-def test_backtest_planner_merges_compatible_strategy_factor_columns(monkeypatch) -> None:
-    first_factor = object()
-    second_factor = object()
-    prepared = {
-        "start_dt": "2025-01-02",
-        "end_dt": "2025-02-14",
-        "resolved_settings_by_alias": {
-            "A1": {"product_path_selection": _Selection(), "factor": first_factor},
-            "B1": {"product_path_selection": _Selection(), "factor": second_factor},
-        },
-    }
-    monkeypatch.setattr(
-        (
-            "tools.factors.tester_calc.single_factor_test.group.research_run."
-            "prepare_group_run_spec"
-        ),
-        lambda data: prepared,
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.engine.engine_mode_for", lambda config: "auto"
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.market_data._required_frequency_for_strategy",
-        lambda config, products: _Named("DAY1"),
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.market_data._required_data_source_for_strategy",
-        lambda config: (),
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.market_data._factor_required_columns",
-        lambda factor: (
-            ("open", "close") if factor is first_factor else ("close", "volume")
-        ),
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.market_data._product_available_freqs",
-        lambda product: [_Named("DAY1")],
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.market_data._select_required_product_frequency",
-        lambda product, available, required: required,
-    )
-    source = _Named("LocalCNFutures")
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.market_data._select_required_product_source",
-        lambda product, frequency, required: source,
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.term_structure._expand_product_contracts",
-        lambda product, **kwargs: ([], []),
-    )
-
-    plan = build_execution_plan("backtest", {"_owner": "alice"})
-
-    assert plan["resolved"]["data_requirements"] == [
-        {
-            "product": "AP.CZCE",
-            "frequency": "DAY1",
-            "data_source": "LocalCNFutures",
-            "factor_columns": ["close", "open", "volume"],
-            "start": "2025-01-02T00:00:00",
-            "end": "2025-02-14T00:00:00",
-        },
-    ]
+@pytest.mark.parametrize("run_spec", [None, {
+    "run_spec_version": 4,
+    "configuration": {"shared": {"factors": []}},
+}])
+def test_backtest_plan_rejects_retired_or_missing_runspec(run_spec):
+    with pytest.raises(ValueError, match="frozen NautilusTrader RunSpec|read-only"):
+        build_execution_plan("backtest", {"run_spec": run_spec})
 
 
-def test_backtest_planner_expands_shared_product_once(monkeypatch) -> None:
-    prepared = {
-        "start_dt": "2025-01-02",
-        "end_dt": "2025-02-14",
-        "resolved_settings_by_alias": {
-            "A1": {
-                "product_path_selection": _Selection(),
-                "factor": object(),
-                "engine_mode": "auto",
-            },
-            "A1.AP": {
-                "product_path_selection": _Selection(),
-                "factor": object(),
-                "engine_mode": "auto",
-            },
-            "A1.legacy": {
-                "product_path_selection": _Selection(),
-                "factor": object(),
-                "engine_mode": "legacy",
-            },
-        },
-    }
-    monkeypatch.setattr(
-        (
-            "tools.factors.tester_calc.single_factor_test.group.research_run."
-            "prepare_group_run_spec"
-        ),
-        lambda data: prepared,
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.engine.engine_mode_for",
-        lambda config: config["engine_mode"],
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.market_data._required_frequency_for_strategy",
-        lambda config, products: _Named("DAY1"),
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.market_data._required_data_source_for_strategy",
-        lambda config: (),
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.market_data._factor_required_columns",
-        lambda factor: ("close",),
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.market_data._product_available_freqs",
-        lambda product: [_Named("DAY1")],
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.market_data._select_required_product_frequency",
-        lambda product, available, required: required,
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.market_data._select_required_product_source",
-        lambda product, frequency, required: _Named("LocalCNFutures"),
-    )
-    expansion_calls = []
+def test_backtest_plan_rejects_scope_that_was_not_frozen(monkeypatch):
+    _install_compiler_mocks(monkeypatch)
+    run_spec = _run_spec()
+    run_spec["configuration"]["shared"]["product_selections"] = {}
 
-    def expand(product, **kwargs):
-        expansion_calls.append((product, kwargs))
-        return ([_Named("AP501.CZCE")], [])
-
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.term_structure._expand_product_contracts",
-        expand,
-    )
-
-    build_execution_plan("backtest", {"_owner": "alice"})
-
-    assert [kwargs["engine_mode"] for _, kwargs in expansion_calls] == [
-        "auto",
-        "legacy",
-    ]
+    with pytest.raises(ValueError, match="product scope is not frozen"):
+        build_execution_plan("backtest", {"run_spec": run_spec})
 
 
-def test_backtest_planner_preserves_strategy_product_and_frequency_requirements(monkeypatch) -> None:
-    prepared = {
-        "start_dt": "2025-01-02",
-        "end_dt": "2025-02-14",
-        "resolved_settings_by_alias": {
-            "daily": {
-                "product_path_selection": _Selection(),
-                "factor": _Named("daily"),
-            },
-            "minute": {
-                "product_path_selection": _OtherSelection(),
-                "factor": _Named("minute"),
-            },
-        },
-    }
-    monkeypatch.setattr(
-        (
-            "tools.factors.tester_calc.single_factor_test.group.research_run."
-            "prepare_group_run_spec"
-        ),
-        lambda data: prepared,
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.engine.engine_mode_for", lambda config: "auto"
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.market_data._required_frequency_for_strategy",
-        lambda config, products: _Named(
-            "DAY1" if config["factor"].name == "daily" else "MIN1"
-        ),
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.market_data._required_data_source_for_strategy",
-        lambda config: (),
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.market_data._factor_required_columns",
-        lambda factor: ("close",),
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.market_data._product_available_freqs",
-        lambda product: [_Named("DAY1"), _Named("MIN1")],
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.market_data._select_required_product_frequency",
-        lambda product, available, required: required,
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.market_data._select_required_product_source",
-        lambda product, frequency, required: _Named(f"Local{frequency.name}"),
-    )
-    monkeypatch.setattr(
-        "tools.testers.backtest.modules.term_structure._expand_product_contracts",
-        lambda product, **kwargs: ([], []),
-    )
+def test_backtest_plan_rejects_source_adapter_drift(monkeypatch):
+    _install_compiler_mocks(monkeypatch)
+    run_spec = _run_spec()
+    run_spec["configuration"]["analyses"]["backtest"]["execution"][
+        "nautilus_contract"]["source_adapter"]["adapter_id"] = "other-adapter"
 
-    plan = build_execution_plan("backtest", {"_owner": "alice"})
+    with pytest.raises(ValueError, match="differs from the registered adapter"):
+        build_execution_plan("backtest", {"run_spec": run_spec})
 
-    assert [
-        (row["frequency"], row["data_source"])
-        for row in plan["resolved"]["data_requirements"]
-    ] == [("DAY1", "LocalDAY1"), ("MIN1", "LocalMIN1")]
-    assert plan["resolved"]["strategies"]["daily"]["products"] == ["AP.CZCE"]
-    assert plan["resolved"]["strategies"]["minute"]["products"] == ["CU.SHF"]
+
+def test_backtest_plan_fails_closed_on_frozen_execution_blockers(monkeypatch):
+    _install_compiler_mocks(monkeypatch)
+    run_spec = _run_spec()
+    run_spec["configuration"]["analyses"]["backtest"]["execution"][
+        "nautilus_contract"]["blockers"] = [{"reason": "official settlement rules missing"}]
+
+    with pytest.raises(ValueError, match="official settlement rules missing"):
+        build_execution_plan("backtest", {"run_spec": run_spec})

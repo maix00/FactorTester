@@ -8,6 +8,8 @@ tools/factors/FactorFamily.py rely on via duck typing).
 
 from __future__ import annotations
 
+import pytest
+
 from tools.factors.FactorTester import FactorTester
 from tools.products.Product import Product
 
@@ -47,6 +49,12 @@ def test_dispatch_resolve_factor_unknown_alias_returns_none():
     tester = _tester()
     assert tester.dispatch("resolve_factor", factor_alias="nope") is None
     assert tester.resolve_factor("nope") is None
+
+
+def test_backtest_dispatch_cannot_fall_back_to_factor_tester_executor():
+    tester = _tester()
+    with pytest.raises(RuntimeError, match="no longer owns backtest execution"):
+        tester.dispatch("backtest")
 
 
 def test_account_slot_defaults_to_none_and_is_settable():

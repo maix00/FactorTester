@@ -84,6 +84,20 @@
       load: "catalog",
       render: (context, ref, mode) => window.FTProducts.categoryDetail(context, ref, mode),
     },
+    data_source_family: {
+      title: "数据源能力",
+      load: "catalog-product-source-family",
+      render: (context, ref, mode, options) => (
+        window.FTProductSourceFamilyDetail.familyOverlay(context, ref, mode, options)
+      ),
+    },
+    data_source_providers: {
+      title: "提供服务器",
+      load: "catalog-product-sources",
+      render: (context, ref, mode, options) => (
+        window.FTProductSources.providersOverlay(context, ref, mode, options)
+      ),
+    },
     strategy: {
       title: "策略",
       load: "strategy-library-editor-core",

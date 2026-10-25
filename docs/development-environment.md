@@ -24,6 +24,22 @@ conda activate GTHT
 | matplotlib | 3.10.7 |
 | tqdm | 4.67.1 |
 | pyarrow | 22.0.0 |
+| maturin | 1.15.0 |
+
+## NautilusTrader 本地扩展
+
+NautilusTrader 由 `vendor/nautilus_trader` 固定版本提供。第一次运行完整
+测试或 Nautilus 集成测试前，统一测试入口会在 `GTHT` 中构建对应的 Python
+扩展；也可以手动执行：
+
+```bash
+./scripts/build_nautilus_extension.sh
+```
+
+构建使用 vendor 仓库锁定的 Rust toolchain、`maturin==1.15.0` 和开发 profile
+（默认 `opt-level=1`，降低 macOS Python 扩展链接体积），复用
+`vendor/nautilus_trader/target`。测试会拒绝静默跳过扩展缺失、加载其他
+wheel 或版本不匹配的情况。
 
 ## SQLite 并发版本
 
@@ -56,7 +72,7 @@ git config extensions.worktreeConfig true
 git config --worktree core.hooksPath "$(pwd)/.githooks"
 ```
 
-Hook 用暂存差异（commit）或将推送的提交差异（push）选择受影响的测试模块。已分类的模块按保守的跨模块依赖表运行；公共配置、未知路径以及 selector/hook 自身变更会运行全套 Python 与 JS 测试。只有文档变化时跳过测试，Skill 变化仍检查内置 Skill 激活。`scripts/test.sh` 不带参数始终运行完整 pytest，可传入 pytest 路径运行指定 Python 测试；`scripts/test_js.sh` 调用现有 Node 测试脚本，不带参数运行全部 JS 测试，也可传入 `tests/js/test_*.js`。正式发布仍须遵守独立的发布验证门槛，hook 的范围选择不能替代发布验收。
+Hook 根据暂存差异（commit）或待推送提交差异（push）选择聚焦测试：已明确映射的源码只运行对应测试，未知源码路径和公共配置仍运行完整测试；修改 selector 时运行 selector 自身的合同测试，修改 Git hook 时仍运行完整测试。只有文档变化时跳过测试，Skill 变化仍检查内置 Skill 激活。`scripts/test.sh` 不带参数始终运行完整 pytest，可传入 pytest 路径运行指定 Python 测试；`scripts/test_js.sh` 使用 `GTHT` Conda 环境中随 Python Playwright 捆绑的 Node 驱动，不依赖主机全局 npm 模块，不带参数运行全部 JS 测试，也可传入 `tests/js/test_*.js`。正式发布仍须遵守独立的发布验证门槛，hook 的范围选择不能替代发布验收。
 
 关闭：
 

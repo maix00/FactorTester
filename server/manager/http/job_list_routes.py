@@ -329,6 +329,10 @@ class JobListRoutesMixin:
             return True
         if self._serve_manager_application(parsed, method="GET"):
             return True
+        if self._serve_isolated_nautilus_report(parsed):
+            return True
+        if self._proxy_nautilus_preview(parsed, method="GET"):
+            return True
         if self._proxy_authenticated_local_service(parsed, method="GET"):
             return True
         if self._proxy_job_stream(parsed):

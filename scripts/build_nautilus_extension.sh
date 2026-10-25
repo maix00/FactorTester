@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+NAUTILUS_ROOT="${ROOT_DIR}/vendor/nautilus_trader"
+PYTHON_SOURCE="${NAUTILUS_ROOT}/python"
+ENV_NAME="${FT_ENV_NAME:-GTHT}"
+BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
+DEV_OPT_LEVEL="${CARGO_PROFILE_DEV_OPT_LEVEL:-1}"
+
+if [[ ! -f "${NAUTILUS_ROOT}/rust-toolchain.toml" || ! -f "${PYTHON_SOURCE}/pyproject.toml" ]]; then
+  echo "NautilusTrader submodule is missing; initialize vendor/nautilus_trader first." >&2
+  exit 1
+fi
+
+EXPECTED_VERSION="$(conda run -n "${ENV_NAME}" python -c \
+  'import tomllib, sys; print(tomllib.load(open(sys.argv[1], "rb"))["project"]["version"])' \
+  "${PYTHON_SOURCE}/pyproject.toml")"
+BRIDGE_VERSION="$(conda run -n "${ENV_NAME}" python -c \
+  'import runpy, sys; print(runpy.run_path(sys.argv[1])["NAUTILUS_VERSION"])' \
+  "${ROOT_DIR}/server/services/nautilus_bridge/version.py" \
+  2>/dev/null || true)"
+
+if [[ "${BRIDGE_VERSION}" != "${EXPECTED_VERSION}" ]]; then
+  echo "FactorTester pins Nautilus ${BRIDGE_VERSION:-<unavailable>}, but the vendored source is ${EXPECTED_VERSION}." >&2
+  echo "Update server/services/nautilus_bridge/version.py before building." >&2
+  exit 1
+fi
+
+runtime_is_ready() {
+  local state
+  state="$(conda run --no-capture-output -n "${ENV_NAME}" python -c '
+import importlib
+from pathlib import Path
+import sys
+
+expected_version, expected_source = sys.argv[1:]
+try:
+    import nautilus_trader
+    native = importlib.import_module("nautilus_trader._libnautilus")
+except (ImportError, OSError):
+    print("needs-build")
+    raise SystemExit(0)
+source = Path(expected_source).resolve()
+package_path = Path(nautilus_trader.__file__).resolve()
+native_file = getattr(native, "__file__", None)
+if not native_file:
+    print("needs-build")
+    raise SystemExit(0)
+native_path = Path(native_file).resolve()
+if nautilus_trader.__version__ != expected_version:
+    print("needs-build")
+    raise SystemExit(0)
+if not package_path.is_relative_to(source) or not native_path.is_relative_to(source):
+    print("needs-build")
+    raise SystemExit(0)
+print(f"ready: NautilusTrader {expected_version}: {native_path}")
+' "${EXPECTED_VERSION}" "${PYTHON_SOURCE}")"
+  [[ "${state}" == ready:* ]]
+}
+
+if runtime_is_ready; then
+  echo "NautilusTrader extension is already built from the pinned vendor source."
+  exit 0
+fi
+
+if ! conda run -n "${ENV_NAME}" maturin --version >/dev/null 2>&1; then
+  echo "maturin is missing from ${ENV_NAME}; update it with: conda env update -n ${ENV_NAME} -f environment.yml" >&2
+  exit 1
+fi
+
+echo "Building vendored NautilusTrader ${EXPECTED_VERSION} in ${ENV_NAME} (dev profile, opt=${DEV_OPT_LEVEL}, ${BUILD_JOBS} jobs)."
+echo "Cargo artifacts are reused from ${NAUTILUS_ROOT}/target."
+cd "${PYTHON_SOURCE}"
+CARGO_BUILD_JOBS="${BUILD_JOBS}" \
+CARGO_PROFILE_DEV_OPT_LEVEL="${DEV_OPT_LEVEL}" \
+CARGO_TARGET_DIR="${NAUTILUS_ROOT}/target" \
+  conda run --no-capture-output -n "${ENV_NAME}" maturin develop --profile dev --locked
+
+runtime_is_ready || {
+  echo "NautilusTrader build completed, but the pinned native extension did not load from the vendor source." >&2
+  exit 1
+}

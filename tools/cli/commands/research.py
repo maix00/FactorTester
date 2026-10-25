@@ -992,6 +992,45 @@ def job_status(job_id: str) -> None:
     click.echo(_json(client_from_config().get_job(job_id)))
 
 
+@job.command("queue")
+@click.argument("job_id")
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def job_queue(job_id: str, as_json: bool) -> None:
+    """Show this Job's dispatch target queue, port and persisted progress."""
+    detail = client_from_config().get_job(job_id)
+    canonical = detail.get("task_detail") or detail
+    job_value = canonical.get("job") or detail
+    context = job_value.get("server_context") or detail.get("server_context") or {}
+    server_id = str(context.get("server_id") or "")
+    port = int(context.get("port") or job_value.get("port") or 0)
+    payload = {
+        "job_id": job_id,
+        "status": job_value.get("status") or detail.get("status"),
+        "attempt": job_value.get("attempt") or detail.get("attempt"),
+        "server_id": server_id,
+        "service_port": port,
+        "queue": (
+            f"factortester.jobs.{server_id}.{port}"
+            if server_id and port else ""
+        ),
+        "progress": detail.get("progress") or canonical.get("progress"),
+    }
+    if as_json:
+        click.echo(_json(payload))
+        return
+    click.echo(
+        f"{payload['job_id']} {payload['status']} attempt={payload['attempt']} "
+        f"queue={payload['queue'] or 'unknown'}"
+    )
+    progress = payload.get("progress") or {}
+    if progress:
+        click.echo(
+            f"progress seq={progress.get('sequence')} phase={progress.get('phase')} "
+            f"{progress.get('completed')}/{progress.get('total')} {progress.get('percent')}%"
+        )
+
+
 @job.command("config")
 @click.argument("job_id")
 @friendly_errors

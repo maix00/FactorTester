@@ -26,7 +26,7 @@ struct LoginView: View {
                     AccountCredentialAuthorizationView(
                         fixedUsername: nil,
                         submitTitle: L10n.text("登录"),
-                        reason: L10n.text("使用 Touch ID 登录 FTClient"),
+                        reason: L10n.text("使用 Touch ID 登录 TradeResearch"),
                         isWorking: session.isWorking,
                         submit: { username, password in
                             let ok = await session.login(
@@ -93,7 +93,7 @@ struct LoginView: View {
                 .frame(width: 56, height: 56)
                 .background(.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
             VStack(alignment: .leading, spacing: 4) {
-                Text("欢迎使用 FTClient")
+                Text("欢迎使用 TradeResearch")
                     .font(.title2.weight(.semibold))
                 Text("连接研究工作区，继续你的因子研究。")
                     .foregroundStyle(.secondary)

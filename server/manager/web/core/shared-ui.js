@@ -395,4 +395,5 @@
     refreshButton,
     dialogRoot, loading, pagedTable, table, text, userLabel, userDisplay, reportBranchLabel,
   };
+  window.TRUI = window.FTUI;
 })();

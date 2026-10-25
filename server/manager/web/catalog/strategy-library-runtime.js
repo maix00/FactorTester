@@ -10,6 +10,28 @@
   }
 
   async function list(context, options = {}) {
+    if (options.scope === "public") {
+      const response = await factorStrategies(context);
+      const objectKind = options.objectKind === "strategy" ? "strategy" : "strategy_family";
+      const source = objectKind === "strategy"
+        ? response?.items : response?.families;
+      const items = Array.isArray(source) ? source : [];
+      const query = String(options.query || "").trim().toLocaleLowerCase();
+      const filtered = query
+        ? items.filter(item => `${item.name || ""} ${item.strategy_ref || item.family_ref || ""} ${item.description || ""}`
+          .toLocaleLowerCase().includes(query))
+        : items;
+      return {
+        ...response,
+        scope: "public",
+        object_kind: objectKind,
+        page: 1,
+        limit: filtered.length || 20,
+        total: filtered.length,
+        total_pages: 1,
+        items: filtered,
+      };
+    }
     const params = new URLSearchParams({
       scope: scopes.includes(options.scope) ? options.scope : "mine",
       page: String(Math.max(1, Number(options.page) || 1)),
@@ -24,6 +46,10 @@
       scope: "all", page: 1, limit: 40, query,
     });
     return Array.isArray(value?.items) ? value.items : [];
+  }
+
+  function factorStrategies(context) {
+    return request(context, "/api/strategy-library/factor-strategies");
   }
 
   function withSource(url, includeSource) {
@@ -75,6 +101,6 @@
   }
 
   window.FTStrategyLibraryRuntime = Object.freeze({
-    create, get, getRevision, grant, list, remove, revoke, search, shares, update,
+    create, factorStrategies, get, getRevision, grant, list, remove, revoke, search, shares, update,
   });
 })();

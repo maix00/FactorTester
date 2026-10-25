@@ -114,6 +114,71 @@ class StrategyLibraryStore:
         limit: int = 20,
     ) -> tuple[list[dict[str, Any]], int]:
         """Page visible summaries with one SQL read for entries and revisions."""
+        import os
+        from server.jobs.storage.couchdb_authority import libraries_read_enabled
+
+        if scope in {"mine", "public", "superiors", "authorized"} and libraries_read_enabled():
+            url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+            if url:
+                try:
+                    from server.jobs.storage.couchdb_library_reader import CouchDBLibraryReader
+                    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+                    docs = CouchDBLibraryReader(CouchDBObjectStore(
+                        url, os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects",
+                    )).strategies(principal if scope == "mine" else "")
+                    needle = str(query or "").strip().lower()
+                    shares = set()
+                    if scope == "authorized":
+                        try:
+                            shares = set(CouchDBLibraryReader(CouchDBObjectStore(
+                                url, os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects",
+                            )).shared_strategies(principal))
+                        except Exception:
+                            shares = set()
+                        if not shares:
+                            with self._lock, connect_sqlite(self.db_path, readonly=True) as db:
+                                shares = {str(row["strategy_ref"]) for row in db.execute(
+                                    "SELECT strategy_ref FROM strategy_library_shares WHERE principal_ref=?",
+                                    (principal,),
+                                ).fetchall()}
+                    rows = []
+                    for doc in docs:
+                        payload = doc.get("payload") or {}
+                        entry = dict(payload.get("entry") or {})
+                        revision = dict(payload.get("revision") or {})
+                        owner = str(entry.get("owner_ref") or "")
+                        visibility = str(entry.get("visibility") or "private")
+                        if scope == "public" and visibility != "public":
+                            continue
+                        if scope == "superiors" and not (
+                            owner in subordinate_users and visibility in {"public", "superiors"}
+                        ):
+                            continue
+                        if scope == "authorized":
+                            if str(entry.get("strategy_ref") or "") not in shares:
+                                continue
+                        if needle and needle not in str(entry.get("name") or "").lower() \
+                                and needle not in str(entry.get("strategy_ref") or "").lower():
+                            continue
+                        rows.append({**entry,
+                                     "revision_ref": revision.get("revision_ref"),
+                                     "revision_number": revision.get("revision_number"),
+                                     "source_sha256": revision.get("source_sha256"),
+                                     "entrypoint": revision.get("entrypoint"),
+                                     "hooks": revision.get("hooks") or [],
+                                     "requirements": revision.get("requirements") or {},
+                                     "created_by": revision.get("created_by"),
+                                     "revision_created_at": revision.get("created_at"),
+                                     "shared_strategy_ref": None})
+                    rows.sort(key=lambda item: (-float(item.get("updated_at") or 0),
+                                                str(item.get("strategy_ref") or "")))
+                    total = len(rows)
+                    page = max(1, int(page)); limit = max(1, min(100, int(limit)))
+                    start = (page - 1) * limit
+                    return rows[start:start + limit], total
+                except Exception:
+                    pass
         scope_sql, scope_params = self._scope_sql(
             scope, principal, subordinate_users,
         )
@@ -220,7 +285,48 @@ class StrategyLibraryStore:
             "explicitly_shared": row["shared_strategy_ref"] is not None,
         }
 
+    def _sync_couchdb(self, strategy_ref: str) -> None:
+        import os
+        from server.jobs.storage.couchdb_authority import libraries_write_enabled
+
+        if not libraries_write_enabled():
+            return
+        url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+        if not url:
+            return
+        try:
+            entry = self.get_entry(strategy_ref)
+            if entry is None:
+                return
+            revision = self.get_revision(entry.get("current_revision_ref") or "")
+            from server.jobs.storage.couchdb_library_reader import CouchDBLibraryWriter
+            from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+            CouchDBLibraryWriter(CouchDBObjectStore(
+                url, os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects",
+            )).upsert_strategy(strategy_ref, entry, revision)
+        except Exception:
+            pass
+
     def get_entry(self, strategy_ref: str) -> dict[str, Any] | None:
+        import os
+        from server.jobs.storage.couchdb_authority import libraries_read_enabled
+
+        if libraries_read_enabled():
+            url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+            if url:
+                try:
+                    from server.jobs.storage.couchdb_library_reader import CouchDBLibraryReader
+                    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+                    document = CouchDBLibraryReader(CouchDBObjectStore(
+                        url, os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects",
+                    )).strategy(strategy_ref)
+                    entry = ((document or {}).get("payload") or {}).get("entry")
+                    if isinstance(entry, dict):
+                        return entry
+                except Exception:
+                    pass
         with self._lock, connect_sqlite(self.db_path, readonly=True) as db:
             row = db.execute(
                 "SELECT * FROM strategy_library_entries WHERE strategy_ref=? AND deleted_at=0",
@@ -264,6 +370,7 @@ class StrategyLibraryStore:
                  entrypoint, json.dumps(hooks, ensure_ascii=False),
                  json.dumps(requirements, ensure_ascii=False), created_by, now),
             )
+        self._sync_couchdb(strategy_ref)
         return {"strategy_ref": strategy_ref, "revision_ref": revision_ref}
 
     def update_entry_with_revision(
@@ -330,6 +437,7 @@ class StrategyLibraryStore:
             )
             if result.rowcount != 1:
                 raise ValueError("strategy revision changed")
+        self._sync_couchdb(strategy_ref)
         return {
             "revision_ref": revision_ref,
             "revision_number": revision_number,
@@ -338,6 +446,24 @@ class StrategyLibraryStore:
     def get_revision(
         self, revision_ref: str, *, include_source: bool = True,
     ) -> dict[str, Any] | None:
+        import os
+        from server.jobs.storage.couchdb_authority import libraries_read_enabled
+
+        if libraries_read_enabled():
+            url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+            if url:
+                try:
+                    from server.jobs.storage.couchdb_library_reader import CouchDBLibraryReader
+                    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+                    document = CouchDBLibraryReader(CouchDBObjectStore(
+                        url, os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects",
+                    )).revision(revision_ref)
+                    revision = ((document or {}).get("payload") or {})
+                    if isinstance(revision, dict) and revision:
+                        return revision
+                except Exception:
+                    pass
         with self._lock, connect_sqlite(self.db_path, readonly=True) as db:
             row = db.execute(
                 "SELECT * FROM strategy_library_revisions WHERE revision_ref=?",
@@ -346,6 +472,27 @@ class StrategyLibraryStore:
         return self._revision(row, include_source=include_source) if row is not None else None
 
     def list_revisions(self, strategy_ref: str) -> list[dict[str, Any]]:
+        import os
+        from server.jobs.storage.couchdb_authority import libraries_read_enabled
+
+        if libraries_read_enabled():
+            url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+            if url:
+                try:
+                    from server.jobs.storage.couchdb_library_reader import CouchDBLibraryReader
+                    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+                    values = CouchDBLibraryReader(CouchDBObjectStore(
+                        url, os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects",
+                    )).revisions(strategy_ref)
+                    if values:
+                        return sorted(values, key=lambda item: (
+                            -int(item.get("revision_number") or 0),
+                            -float(item.get("created_at") or 0),
+                            str(item.get("revision_ref") or ""),
+                        ))
+                except Exception:
+                    pass
         with self._lock, connect_sqlite(self.db_path, readonly=True) as db:
             rows = db.execute(
                 "SELECT * FROM strategy_library_revisions WHERE strategy_ref=? ORDER BY revision_number DESC, created_at DESC, revision_ref",
@@ -353,15 +500,53 @@ class StrategyLibraryStore:
             ).fetchall()
         return [self._revision(row, include_source=False) for row in rows]
 
+    def _sync_delete(self, strategy_ref: str) -> None:
+        import os
+        from server.jobs.storage.couchdb_authority import libraries_write_enabled
+
+        if not libraries_write_enabled():
+            return
+        url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+        if not url:
+            return
+        try:
+            from server.jobs.storage.couchdb_library_reader import CouchDBLibraryWriter
+            from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+            CouchDBLibraryWriter(CouchDBObjectStore(
+                url, os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects",
+            )).delete_strategy(strategy_ref)
+        except Exception:
+            pass
+
     def delete(self, strategy_ref: str) -> bool:
         with self._lock, connect_sqlite(self.db_path, timeout=10) as db:
             result = db.execute(
                 "UPDATE strategy_library_entries SET deleted_at=?, updated_at=? WHERE strategy_ref=? AND deleted_at=0",
                 (time.time(), time.time(), strategy_ref),
             )
+        if result.rowcount == 1:
+            self._sync_delete(strategy_ref)
         return result.rowcount == 1
 
     def shares(self, strategy_ref: str) -> list[str]:
+        import os
+        from server.jobs.storage.couchdb_authority import libraries_read_enabled
+
+        if libraries_read_enabled():
+            url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+            if url:
+                try:
+                    from server.jobs.storage.couchdb_library_reader import CouchDBLibraryReader
+                    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+                    values = CouchDBLibraryReader(CouchDBObjectStore(
+                        url, os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects",
+                    )).strategy_shares(strategy_ref)
+                    if values:
+                        return values
+                except Exception:
+                    pass
         with self._lock, connect_sqlite(self.db_path, readonly=True) as db:
             rows = db.execute(
                 "SELECT principal_ref FROM strategy_library_shares WHERE strategy_ref=? ORDER BY principal_ref",
@@ -375,6 +560,7 @@ class StrategyLibraryStore:
                 "INSERT OR IGNORE INTO strategy_library_shares(strategy_ref, principal_ref, created_at) VALUES (?, ?, ?)",
                 (strategy_ref, principal_ref, time.time()),
             )
+        self._sync_share(strategy_ref, principal_ref, grant=True)
 
     def revoke(self, strategy_ref: str, principal_ref: str) -> bool:
         with self._lock, connect_sqlite(self.db_path, timeout=10) as db:
@@ -382,4 +568,29 @@ class StrategyLibraryStore:
                 "DELETE FROM strategy_library_shares WHERE strategy_ref=? AND principal_ref=?",
                 (strategy_ref, principal_ref),
             )
+        if result.rowcount == 1:
+            self._sync_share(strategy_ref, principal_ref, grant=False)
         return result.rowcount == 1
+
+    def _sync_share(self, strategy_ref: str, principal_ref: str, *, grant: bool) -> None:
+        import os
+        from server.jobs.storage.couchdb_authority import libraries_write_enabled
+
+        if not libraries_write_enabled():
+            return
+        url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+        if not url:
+            return
+        try:
+            from server.jobs.storage.couchdb_library_reader import CouchDBLibraryWriter
+            from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+            writer = CouchDBLibraryWriter(CouchDBObjectStore(
+                url, os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects",
+            ))
+            if grant:
+                writer.grant_strategy_share(strategy_ref, principal_ref)
+            else:
+                writer.revoke_strategy_share(strategy_ref, principal_ref)
+        except Exception:
+            pass

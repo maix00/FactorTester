@@ -64,6 +64,9 @@ def _backfill_job_subjects(conn: sqlite3.Connection) -> None:
 
 
 def ensure_job_schema(conn: sqlite3.Connection) -> None:
+    from server.jobs.dispatch.outbox import ensure_dispatch_schema
+
+    ensure_dispatch_schema(conn)
     legacy_assurance = conn.execute(
         """
         SELECT 1 FROM sqlite_master
@@ -115,6 +118,7 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
             execution_plan_hash TEXT NOT NULL DEFAULT '',
             plan_notices_json TEXT NOT NULL DEFAULT '[]',
             result_summary_json TEXT,
+            report_ref TEXT NOT NULL DEFAULT '',
             error_json TEXT,
             terminal_assurance_json TEXT,
             created_at REAL NOT NULL,
@@ -174,6 +178,51 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
                 'submitted', 'planning', 'awaiting_confirmation',
                 'queued', 'running', 'paused'
             );
+
+        CREATE TABLE IF NOT EXISTS research_job_worker_targets (
+            deployment_id TEXT NOT NULL,
+            service_port INTEGER NOT NULL,
+            worker_id TEXT NOT NULL,
+            heartbeat_at REAL NOT NULL,
+            expires_at REAL NOT NULL,
+            capabilities_json TEXT NOT NULL DEFAULT '{}',
+            PRIMARY KEY (deployment_id, service_port),
+            CHECK (service_port >= 1 AND service_port <= 65535)
+        );
+        CREATE INDEX IF NOT EXISTS idx_research_job_worker_target_expiry
+            ON research_job_worker_targets(expires_at);
+
+        CREATE TABLE IF NOT EXISTS research_job_progress (
+            job_id TEXT NOT NULL,
+            attempt INTEGER NOT NULL,
+            sequence INTEGER NOT NULL,
+            phase TEXT NOT NULL,
+            completed INTEGER NOT NULL DEFAULT 0,
+            total INTEGER NOT NULL DEFAULT 0,
+            percent REAL NOT NULL DEFAULT 0,
+            message TEXT NOT NULL DEFAULT '',
+            updated_at REAL NOT NULL,
+            PRIMARY KEY (job_id, attempt),
+            FOREIGN KEY (job_id) REFERENCES research_jobs(job_id) ON DELETE CASCADE,
+            CHECK (attempt >= 1),
+            CHECK (sequence >= 0),
+            CHECK (completed >= 0),
+            CHECK (total >= 0),
+            CHECK (percent >= 0 AND percent <= 100)
+        );
+
+        CREATE TABLE IF NOT EXISTS research_job_worker_leases (
+            job_id TEXT PRIMARY KEY,
+            attempt INTEGER NOT NULL,
+            worker_id TEXT NOT NULL,
+            lease_until REAL NOT NULL,
+            heartbeat_at REAL NOT NULL,
+            created_at REAL NOT NULL,
+            FOREIGN KEY (job_id) REFERENCES research_jobs(job_id) ON DELETE CASCADE,
+            CHECK (attempt >= 1)
+        );
+        CREATE INDEX IF NOT EXISTS idx_research_job_worker_lease_expiry
+            ON research_job_worker_leases(lease_until);
 
         CREATE TABLE IF NOT EXISTS user_job_pins (
             owner TEXT PRIMARY KEY,
@@ -248,6 +297,10 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
     if "service_port" not in columns:
         conn.execute(
             "ALTER TABLE research_jobs ADD COLUMN service_port INTEGER NOT NULL DEFAULT 0"
+        )
+    if "report_ref" not in columns:
+        conn.execute(
+            "ALTER TABLE research_jobs ADD COLUMN report_ref TEXT NOT NULL DEFAULT ''"
         )
     supplemental_columns = {
         "job_role", "parent_job_id", "supplemental_kind",

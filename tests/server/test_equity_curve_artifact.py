@@ -7,7 +7,7 @@ from server.jobs.equity_curve_artifact import (
     _current_drawdowns,
     build_equity_curve_artifact,
 )
-from server.jobs.scheduling.worker_pool import _WorkerSink
+from server.jobs.dispatch.artifact_sink import _WorkerSink
 
 
 def test_equity_curve_artifact_is_small_deterministic_and_self_describing() -> None:

@@ -435,11 +435,24 @@ class ManagerState(
             self,
             PublicFactorReplicationStore(self.sessions_db_path),
         )
+        research_report_reader = None
+        from server.jobs.storage.couchdb_authority import research_reports_read_enabled
+
+        if research_reports_read_enabled():
+            couch_url = str(os.environ.get("FACTORTESTER_COUCHDB_URL") or "").strip()
+            if couch_url:
+                from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+                from server.jobs.storage.couchdb_research_reader import CouchDBResearchReader
+
+                research_report_reader = CouchDBResearchReader(CouchDBObjectStore(
+                    couch_url, str(os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects"),
+                ))
         self.public_research = PublicResearchLibrary(
             self.data_root / "public-research",
             storage_server_id=self.server_id,
             read_authorizer=self.research_catalog.can_read_publication,
             authoring_authorizer=self.research_catalog.can_read_authoring_publication,
+            couchdb_reader=research_report_reader,
         )
         self.client_state = ClientStateService(
             control_store=self.control_store,

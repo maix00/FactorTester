@@ -58,6 +58,7 @@ def create_app():
     from server.modules.single_factor_test import sft_bp
     from server.modules.products.cn_futures import cn_futures_bp
     from server.modules.custom_factors import factor_library_internal_bp
+    from server.modules.nautilus_workbench import nautilus_workbench_bp
     from server.modules.custom_factors import register_routes as register_custom_factor_routes
     from server.admin import admin_bp
     from server.server_operations import server_operations_bp
@@ -74,6 +75,7 @@ def create_app():
     app.register_blueprint(sft_bp)
     app.register_blueprint(cn_futures_bp)
     app.register_blueprint(factor_library_internal_bp)
+    app.register_blueprint(nautilus_workbench_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(server_operations_bp)
 

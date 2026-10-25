@@ -288,12 +288,30 @@
     const declared = new Set(result.flatMap(item => item.artifacts || []).map(reference => (
       artifactReference(artifacts, reference)?.name || reference
     )));
+    // The exporter writes both files atomically. Require its receipt before
+    // offering an HTML preview; an unrelated uploaded HTML file remains a
+    // download and never acquires the NautilusTrader viewer implicitly.
+    const hasNautilusReceipt = artifacts.some(item => item.state === "active"
+      && [item.name, item.file_name].includes("nautilus_receipt.json"));
     artifacts.filter(item => item.state === "active").forEach(item => {
+      const filename = String(item.file_name || item.name || "").toLowerCase();
+      if (hasNautilusReceipt && filename === "tearsheet.html"
+          && !declared.has(item.name)) {
+        result.push({
+          id: `implicit:${item.name}`,
+          name: item.name,
+          label: context.t("NautilusTrader 回测报告"),
+          presentation: "report",
+          viewer: "nautilus_tearsheet",
+          formats: ["html"],
+          artifacts: [item.name],
+        });
+        return;
+      }
       const type = artifactContentType(item);
       if (!isImageArtifact(item, type) || declared.has(item.name)) return;
-      const name = String(item.name || item.file_name || "").toLowerCase();
-      const label = name.includes("equity_curve")
-        ? context.t("净值曲线") : name.includes("ic_series")
+      const label = filename.includes("equity_curve")
+        ? context.t("净值曲线") : filename.includes("ic_series")
           ? context.t("IC 序列图") : item.description || item.name;
       result.push({
         id: `implicit:${item.name}`,

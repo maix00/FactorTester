@@ -5,9 +5,9 @@
 
   const surfaces = Object.freeze([
     {
-      id: "home", path: "/", title: "FactorTester home", access: "public",
+      id: "home", path: "/", title: "TradeResearch home", access: "public",
       cli: ["list", "doctor", "protocol"],
-      description: "Discover servers and open FactorTester feature areas.",
+      description: "Discover servers and open TradeResearch feature areas.",
     },
     {
       id: "ic_test", path: "/ic-test", title: "IC test workbench", access: "public",
@@ -45,7 +45,7 @@
       description: "Browse and manage product classification trees.",
     },
     {
-      id: "strategy_library", path: "/strategies?scope=mine", title: "Strategy library", access: "authenticated",
+      id: "strategy_library", path: "/strategies?scope=public", title: "Strategy library", access: "authenticated",
       cli: ["strategy-library", "workspace"],
       description: "Manage reusable strategy source, immutable revisions and sharing.",
     },
@@ -87,7 +87,7 @@
     {
       id: "technical_docs", path: "/docs", title: "Technical documentation", access: "public",
       cli: ["protocol"],
-      description: "Read FactorTester technical and protocol documentation.",
+      description: "Read TradeResearch technical and protocol documentation.",
     },
   ]);
 
@@ -276,8 +276,8 @@
 
     register({
       name: "factortester_capabilities",
-      title: "FactorTester capabilities",
-      description: "List FactorTester Web surfaces, their matching CLI command families, Web-only operations and access requirements.",
+      title: "TradeResearch capabilities",
+      description: "List TradeResearch Web surfaces, their matching CLI command families, Web-only operations and access requirements.",
       inputSchema: {
         type: "object", additionalProperties: false,
         properties: {query: {type: "string", maxLength: 120}},
@@ -291,8 +291,8 @@
     });
     register({
       name: "factortester_open_surface",
-      title: "Open FactorTester surface",
-      description: "Open a known FactorTester Web feature in the visible application. Use capabilities first to choose a surface.",
+      title: "Open TradeResearch surface",
+      description: "Open a known TradeResearch Web feature in the visible application. Use capabilities first to choose a surface.",
       inputSchema: {
         type: "object", additionalProperties: false, required: ["surface"],
         properties: {surface: {type: "string", enum: surfaces.map(item => item.id)}},
@@ -307,8 +307,8 @@
     });
     register({
       name: "factortester_inspect_surface",
-      title: "Inspect FactorTester surface",
-      description: "Read the visible FactorTester page and return bounded field/action identifiers for subsequent UI operations. Password values are never returned.",
+      title: "Inspect TradeResearch surface",
+      description: "Read the visible TradeResearch page and return bounded field/action identifiers for subsequent UI operations. Password values are never returned.",
       inputSchema: {
         type: "object", additionalProperties: false,
         properties: {include_text: {type: "boolean", default: true}},
@@ -318,7 +318,7 @@
     });
     register({
       name: "factortester_fill_form",
-      title: "Fill FactorTester form",
+      title: "Fill TradeResearch form",
       description: "Fill visible fields using identifiers from factortester_inspect_surface. This updates the same form shown to the user and does not submit it.",
       inputSchema: {
         type: "object", additionalProperties: false, required: ["fields"],
@@ -333,7 +333,7 @@
     });
     register({
       name: "factortester_activate",
-      title: "Activate FactorTester action",
+      title: "Activate TradeResearch action",
       description: "Click one visible action from factortester_inspect_surface. This can submit tests or change server data, so confirmed must be true.",
       inputSchema: {
         type: "object", additionalProperties: false, required: ["action", "confirmed"],

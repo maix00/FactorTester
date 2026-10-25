@@ -403,6 +403,19 @@ def _canonical_selection(
         template_id = str(stored_group.get("id") or selection_id).strip()
     if template_id:
         result["product_group_template_id"] = template_id
+    if stored_group:
+        revision_ref = str(stored_group.get("current_revision_ref") or "").strip()
+        if not revision_ref:
+            # Older catalog rows predate immutable product-group revisions.
+            # Snapshot their current definition once so the RunSpec still pins
+            # the exact group used for this execution.
+            from tools.data.sqlite.account_manager.product_group import (
+                current_product_group_revision_ref,
+            )
+
+            revision_ref = current_product_group_revision_ref(owner, stored_group)
+        if revision_ref:
+            result["product_group_revision_ref"] = revision_ref
     return result
 
 

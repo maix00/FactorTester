@@ -70,6 +70,7 @@ def test_run_spec_endpoint_returns_an_owned_immutable_run_spec(
     run_spec = {
         "run_spec_version": research_runs.RUN_SPEC_VERSION,
         "configuration": {"shared": {}},
+        "analyses": ["ic"],
     }
     run = research_runs.create_run(
         owner="owner-1",
@@ -95,8 +96,8 @@ def test_run_spec_endpoint_returns_an_owned_immutable_run_spec(
     assert value["run_spec_hash"] == run["run_spec_hash"]
     assert value["run_spec"] == run_spec
     assert value["configuration_revision"] == 3
-    assert value["alias_zh"] == "研究运行"
-    assert value["summary_zh"].startswith("研究运行；")
+    assert value["alias_zh"] == "截面 IC"
+    assert value["summary_zh"].startswith("截面 IC；")
 
 
 def test_run_spec_endpoint_does_not_expose_another_users_run_spec(
@@ -111,6 +112,7 @@ def test_run_spec_endpoint_does_not_expose_another_users_run_spec(
         run_spec={
             "run_spec_version": research_runs.RUN_SPEC_VERSION,
             "configuration": {"shared": {}},
+            "analyses": ["ic"],
         },
     )
     app = Flask(__name__)

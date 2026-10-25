@@ -29,7 +29,7 @@
     target.__ftPriceChartObserver?.disconnect?.();
     target.classList?.add("interactive-price-chart");
     const chartOptions = optionsOf(context, payload, bars, displayOptions);
-    window.FTHighchartsRangeLoader?.attach(chartOptions, {
+    window.TRHighchartsRangeLoader?.attach(chartOptions, {
       ...displayOptions,
       rangeOptions: incoming => optionsOf(context, incoming, barsOf(incoming), displayOptions),
     });

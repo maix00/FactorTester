@@ -1,5 +1,11 @@
 # ADR-030：外部回测框架的执行桥（非 native 引擎不进 native event queue）
 
+> **已废弃（2026-10-24）**：此前讨论的 Backtrader、QLib、Zipline、
+> FactorTester Native EventQueue 和 worker bridge 已从运行路径移除。新回测
+> 只允许 NautilusTrader RunSpec；增量 FactorExpr 由 Nautilus `on_bar` 事件
+> 驱动。当前 Nautilus Job runner 尚未完成，Worker 对旧/未接通任务失败关闭。
+> 现行设计与缺口见 [ADR-162](162-nautilus-execution-and-results.md)。
+
 - **日期**：2026-07-02
 - **状态**：已接受，实施中
 - **决策者**：FactorTester 团队

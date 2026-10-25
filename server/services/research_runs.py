@@ -16,7 +16,12 @@ import settings as Settings
 from server.services.research_run_schema import (
     ensure_schema as ensure_research_run_schema,
 )
-from server.services.research_run_identity import RUN_SPEC_VERSION, hash_run_spec
+from server.services.research_run_identity import (
+    NAUTILUS_RUN_SPEC_VERSION,
+    RUN_SPEC_VERSION,
+    hash_run_spec,
+    run_spec_version_for_configuration,
+)
 from server.services.research_sample_exposure import (
     validate_sample_use_exposure,
 )
@@ -73,8 +78,79 @@ def create_run(
     report_binding: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     run_spec_version = int(run_spec.get("run_spec_version") or 0)
-    if run_spec_version != RUN_SPEC_VERSION:
+    configuration = run_spec.get("configuration")
+    analyses = run_spec.get("analyses")
+    if not isinstance(configuration, dict) or run_spec_version not in {
+        RUN_SPEC_VERSION, NAUTILUS_RUN_SPEC_VERSION,
+    }:
         raise ValueError("unsupported run_spec_version")
+    if not isinstance(analyses, list) or not all(
+        isinstance(kind, str) for kind in analyses
+    ):
+        raise ValueError("RunSpec analyses must be an array of names")
+    if run_spec_version != run_spec_version_for_configuration(
+        configuration, analyses,
+    ):
+        raise ValueError("run_spec_version does not match execution backend")
+    if run_spec_version == RUN_SPEC_VERSION and "backtest" in analyses:
+        raise ValueError("legacy backtest RunSpec v4 is read-only")
+    if run_spec_version == NAUTILUS_RUN_SPEC_VERSION:
+        configured_analyses = configuration.get("analyses")
+        backtest = (
+            configured_analyses.get("backtest")
+            if isinstance(configured_analyses, dict) else None
+        )
+        execution = backtest.get("execution") if isinstance(backtest, dict) else None
+        if (
+            "backtest" not in analyses
+            or not isinstance(execution, dict)
+            or execution.get("contract_version") != 4
+        ):
+            raise ValueError("NautilusTrader RunSpec requires backtest contract version 4")
+        from server.services.nautilus_bridge.config import (
+            UnsupportedExecutionConfig,
+            compile_frozen_execution_plan,
+        )
+
+        settings = execution.get("settings")
+        if not isinstance(settings, dict) or "instrument_ids" in settings:
+            raise ValueError(
+                "NautilusTrader RunSpec requires compact frozen product-scope references"
+            )
+        scopes = settings.get("product_scope_refs")
+        if not isinstance(scopes, list) or not scopes or any(
+            not isinstance(scope, str) or not scope.strip() for scope in scopes
+        ):
+            raise ValueError("NautilusTrader RunSpec requires frozen product_scope_refs")
+        nautilus_contract = execution.get("nautilus_contract")
+        if (
+            not isinstance(nautilus_contract, dict)
+            or nautilus_contract.get("contract_version") != 2
+        ):
+            raise ValueError("NautilusTrader RunSpec requires frozen nautilus_contract v2")
+        blockers = nautilus_contract.get("blockers")
+        if not isinstance(blockers, list) or blockers:
+            first = blockers[0] if isinstance(blockers, list) and blockers else {}
+            reason = first.get("reason") if isinstance(first, dict) else None
+            raise ValueError(
+                "NautilusTrader RunSpec has unresolved execution settings"
+                + (f": {reason}" if reason else "")
+            )
+        canonical = nautilus_contract.get("settings")
+        source_adapter = nautilus_contract.get("source_adapter")
+        if (
+            not isinstance(canonical, dict)
+            or not isinstance(source_adapter, dict)
+            or source_adapter.get("feed_kind") != "bar"
+        ):
+            raise ValueError("NautilusTrader RunSpec requires a frozen Bar source adapter")
+        try:
+            compile_frozen_execution_plan(
+                canonical, feed_kind="bar",
+                adapter_capabilities=frozenset({"native_bar_open_market_orders"}),
+            )
+        except UnsupportedExecutionConfig as exc:
+            raise ValueError(f"invalid NautilusTrader execution contract: {exc}") from exc
     run_id = uuid.uuid4().hex
     # Persist the schema's insertion order for human inspection.  The hash
     # function canonicalizes a temporary encoding independently and must not

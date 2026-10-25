@@ -64,6 +64,19 @@ class FactorTesterClient(
         finally:
             self.session.clear_cookies()
 
+    def research_report(self, publication_id: str) -> dict[str, Any]:
+        return self._expect_success(self.session.get(
+            f"/api/research-reports/{publication_id}",
+        ))
+
+    def apply_research_report_operation(
+        self, publication_id: str, *, base_rev: str, operation: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._expect_success(self.session.post(
+            f"/api/research-reports/{publication_id}/operations",
+            {"base_rev": base_rev, **operation},
+        ))
+
     def _expect_success(self, data: dict[str, Any]) -> dict[str, Any]:
         if data.get("success") is False:
             raise RuntimeError(str(data.get("error") or data))

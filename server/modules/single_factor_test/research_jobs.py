@@ -20,7 +20,6 @@ from server.jobs.input_artifacts import (
     retain_strategy_specs,
     strategy_spec_input_bytes,
 )
-from server.jobs.ipc import DaemonUnavailable, JobDaemonClient
 from server.jobs.models import JobRecord
 from server.jobs.ports import detect_port
 from server.jobs.report_outputs import (
@@ -394,8 +393,20 @@ def _prepare_local_research_run_request(
             **frozen_configuration,
             "payload": normalized_payload,
         }
+        try:
+            from server.modules.shared.run_spec_resolution.freezing import (
+                freeze_nautilus_execution_policy,
+            )
+
+            frozen_configuration = freeze_nautilus_execution_policy(
+                frozen_configuration,
+            )
+        except ValueError as exc:
+            raise _RunRequestError(str(exc)) from exc
     run_spec = {
-        "run_spec_version": research_runs.RUN_SPEC_VERSION,
+        "run_spec_version": research_runs.run_spec_version_for_configuration(
+            frozen_configuration["payload"], analyses,
+        ),
         "workspace_id": workspace_id,
         "configuration_id": configuration["configuration_id"],
         "configuration_revision": configuration["revision"],
@@ -676,8 +687,55 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
         prepared = load_manager_run_context(context, owner=owner)
     else:
         prepared = _prepare_local_research_run_request(data, owner=owner)
+    _reject_unavailable_nautilus_run(prepared)
     _validate_mounted_run_windows(prepared)
     return prepared
+
+
+def _reject_unavailable_nautilus_run(prepared: dict) -> None:
+    """Allow only the registered Nautilus v4 runner; reject retired backtests.
+
+    This check sits after freezing and applies equally to local requests and
+    Manager-forwarded contexts.  A v4 Run is admitted only when the dedicated
+    process-runner readiness contract confirms the execution path is usable.
+    """
+    frozen = prepared.get("frozen_configuration") or {}
+    payload = frozen.get("payload") if isinstance(frozen, dict) else None
+    analyses = payload.get("analyses") if isinstance(payload, dict) else None
+    if not isinstance(analyses, dict):
+        return
+    if "backtest" not in (prepared.get("analyses") or []):
+        return
+    backtest = analyses.get("backtest")
+    execution = backtest.get("execution") if isinstance(backtest, dict) else None
+    backend = execution.get("backend") if isinstance(execution, dict) else None
+    if backend == "nautilus_trader":
+        if execution.get("contract_version") != 4:
+            raise _RunRequestError(
+                "NautilusTrader backtest requires execution contract version 4",
+                details={"code": "unsupported_execution_contract_version"},
+            )
+        from server.services.nautilus_bridge.capabilities import (
+            nautilus_backtest_submission_capability,
+        )
+
+        capability = nautilus_backtest_submission_capability()
+        if capability.get("available") is not True:
+            raise _RunRequestError(
+                str(capability.get("reason") or
+                    "NautilusTrader Job execution is unavailable on this service"),
+                details={"code": "nautilus_execution_unavailable"},
+            )
+        return
+    if backend not in (None, "", "legacy"):
+        raise _RunRequestError(
+            f"unsupported backtest execution backend: {backend}",
+            details={"code": "unsupported_backtest_backend"},
+        )
+    raise _RunRequestError(
+        "Legacy backtest execution is retired; select NautilusTrader",
+        details={"code": "legacy_backtest_unavailable"},
+    )
 
 
 def _run_request_error_response(exc: _RunRequestError):
@@ -822,14 +880,6 @@ def _submission_context() -> dict[str, str]:
     }
 
 
-def _daemon_client() -> JobDaemonClient:
-    socket_path = os.environ.get(
-        "GTHT_JOB_DAEMON_SOCKET",
-        str(Settings.CACHE_DIR / "runtime" / f"research-jobs-{_deployment_id()}.sock"),
-    )
-    return JobDaemonClient(socket_path)
-
-
 def _submit_kind(
     kind: str,
     payload: dict,
@@ -840,8 +890,12 @@ def _submit_kind(
     strategy_specs: list[dict] | None = None,
     run_input_dependencies: list[dict] | None = None,
 ):
+    from server.services.nautilus_bridge.capabilities import (
+        NAUTILUS_BACKTEST_RUNNER_PATH,
+    )
+
     process_runners = {
-        "backtest": "server.modules.single_factor_test.process_runners:run_group",
+        "backtest": NAUTILUS_BACKTEST_RUNNER_PATH,
         "ic": "server.modules.single_factor_test.process_runners:run_ic",
         "factor_evaluation": "server.modules.single_factor_test.process_runners:run_factor_evaluation",
         "factor_type_analysis": "server.modules.single_factor_test.process_runners:run_factor_type_analysis",
@@ -901,8 +955,6 @@ def _submit_kind(
             owner=job.owner,
             entries=run_input_dependencies or [],
         )
-        _daemon_client().wake()
-    except DaemonUnavailable:
         pass
     except Exception as exc:
         repository.transition(
@@ -1370,7 +1422,7 @@ def preview_research_run():
     return jsonify({
         "success": True,
         "run_spec_hash": research_runs.hash_run_spec(run_spec),
-        "run_spec_version": research_runs.RUN_SPEC_VERSION,
+        "run_spec_version": run_spec["run_spec_version"],
         "task_name": prepared["task_name"],
         "acting_profile_ref": prepared["acting_profile_ref"],
         "acting_profile_name": prepared["acting_profile_name"],
