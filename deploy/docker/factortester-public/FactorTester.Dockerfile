@@ -152,6 +152,8 @@ RUN set -eu; \
     rm -f /tmp/mihomo.gz
 
 ARG FACTORTESTER_REVISION
+ARG FACTORTESTER_UID=1000
+ARG FACTORTESTER_GID=1000
 RUN set -eu; \
     case "${FACTORTESTER_REVISION:-}" in \
         *[!0-9a-f]*|'') echo 'FACTORTESTER_REVISION must be a full Git SHA' >&2; exit 2 ;; \
