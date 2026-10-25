@@ -68,3 +68,15 @@ def test_component_batch_validates_single_chapter():
         assert "one chapter" in str(exc)
     else:
         raise AssertionError("mixed chapters should fail")
+
+
+def test_chapter_block_move_keeps_subtree():
+    from server.jobs.storage.research_report_projection_ops import _reorder_chapter_blocks
+    components = [
+        {"component_id": "x", "kind": "chapter"},
+        {"component_id": "xA", "kind": "section"},
+        {"component_id": "y", "kind": "chapter"},
+        {"component_id": "yA", "kind": "section"},
+    ]
+    moved = _reorder_chapter_blocks(components, "y", None)
+    assert [item["component_id"] for item in moved] == ["y", "yA", "x", "xA"]
