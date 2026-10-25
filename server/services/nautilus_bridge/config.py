@@ -686,6 +686,28 @@ class FrozenExecutionPlan:
     venues: tuple[dict[str, Any], ...]
     strategy_venue_bindings: tuple[dict[str, Any], ...]
 
+    def local_nautilus_features(self) -> dict[str, str]:
+        """Explicit status of the vendored Nautilus additions in this plan."""
+        bar_volume = any(
+            venue.get("native_config", {}).get("liquidity_consumption")
+            or venue.get("native_config", {}).get("bar_volume_weights_bps")
+            for venue in self.venues
+        )
+        settlement = self.instrument_execution_policy.daily_settlement_default
+        return {
+            "next_bar_open_market": "supported",
+            "ohlc_bar_volume_allocation": "supported" if bar_volume else "not_requested",
+            "position_cost_basis_by_instrument": "supported",
+            "lot_aware_settlement_basis": "supported",
+            "daily_settlement_event_stream": (
+                "blocked_requires_official_event_stream"
+                if settlement == "eligible_products" else "not_requested"
+            ),
+            "fund_transfers": "blocked_not_in_run_spec",
+            "dynamic_instrument_updates": "adapter_only_not_wired",
+            "trading_day_inventory_roll": "adapter_only_not_wired",
+        }
+
     def manifest(self) -> dict[str, object]:
         return {
             "data_source_ref": self.data_source_ref,
@@ -719,6 +741,7 @@ class FrozenExecutionPlan:
                 "rule_set_ref": self.instrument_execution_policy.settlement_rule_set_ref,
                 "event": "NautilusTrader InstrumentCloseType::DailySettlement",
             },
+            "local_nautilus_features": self.local_nautilus_features(),
         }
 
 
