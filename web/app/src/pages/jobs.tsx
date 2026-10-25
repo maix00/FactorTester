@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Drawer, Tag, Typography } from "antd";
+import { Drawer, Tabs, Tag, Typography } from "antd";
 import type { TableProps } from "antd";
 import { useTranslation } from "react-i18next";
 import { TRDataTable } from "../components/data-table.tsx";
@@ -126,7 +126,14 @@ export function JobsPage(): React.ReactElement {
         <span className="tr-antd-total">{t("total", { count: total })}</span>
       </div>
       <Drawer title={selected?.task_name || selected?.job_id || t("jobs.detail")} placement="right" width={620} open={Boolean(selected)} onClose={() => setSelected(null)}>
-        {detail ? <pre className="tr-job-detail">{JSON.stringify(detail, null, 2)}</pre> : <p>{t("loading")}</p>}
+        {detail ? (
+          <Tabs
+            items={[
+              { key: "summary", label: t("jobs.detail"), children: <pre className="tr-job-detail">{JSON.stringify(detail, null, 2)}</pre> },
+              { key: "configuration", label: t("jobs.configuration"), children: <pre className="tr-job-detail">{JSON.stringify(detail.execution_plan ?? detail.job_spec ?? detail.run_spec ?? null, null, 2)}</pre> },
+            ]}
+          />
+        ) : <p>{t("loading")}</p>}
       </Drawer>
       <TRDataTable<JobRow>
         rowKey={(row) => row.job_id || JSON.stringify(row)}
