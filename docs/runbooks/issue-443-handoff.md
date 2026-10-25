@@ -54,15 +54,71 @@
 - Unset `TRADERESEARCH_COUCHDB_AUTHORITY` -> SQLite/JSON/mirror.
 - `TRADERESEARCH_AUTH_MODE=legacy` -> old password login.
 
-## Vendored Nautilus feature status
 
-`FrozenExecutionPlan.manifest()["local_nautilus_features"]` now records:
+## Public deployment (2026-10-25)
 
-- supported: next-bar open, OHLC bar-volume allocation, per-instrument cost basis, lot settlement basis;
-- blocker: daily-settlement event stream, fund transfers;
-- adapter-only/not wired: dynamic instrument updates, trading-day inventory roll.
+- Production revision `ae67b22a0f98b37454bc8a8ef03682eb7b1a4162` verified.
+- Public CouchDB authority enabled; app-level smoke: 15 product groups,
+  126 factor-family documents, 144 Research Reports.
+- Root disk was 90% full and an in-place Docker build crashed the host.
+  Cleaned Docker images/build cache and journals; added
+  `scripts/server/check_public_build_capacity.sh`.
+- Public image builds now use BuildKit inline cache; PostgreSQL container and
+  data were preserved. The fixed-service symlinks under
+  `/opt/factortester-container/services` must point to existing release dirs.
 
-The strategy-family replay still uses a local hard-coded CFFEX venue; it must be
-switched to `engine_factory` before these statuses can become execution paths.
-The submodule commit is local (`6800ea1150`) and is not yet pushed/built into the
-public image.
+
+## Public root disk
+
+- `/opt/factortester-container/state/job-index.sqlite` is 4.1G because
+  `control_events` holds ~650k rows (about 4.0G of that file).
+- `/opt/factortester-container/state-debug` was a stale duplicate of the
+  same 4.1G index; it was not mounted or open and was removed, freeing 4.3G.
+- Docker images/build cache and journals were pruned separately.
+- Root disk after cleanup: 21G free on a 40G volume.
+- Future work: add a bounded retention policy for `control_events`; do not
+  delete event history while a peer cursor still needs it.
+
+
+## Public state storage move (2026-10-25)
+
+- `/data` is a separate 60G ext4 volume; `/` is only 40G.
+- Moved the live Manager state (`job-index.sqlite`, transfers, releases,
+  logs) from `/opt/factortester-container/state` to `/data/state` and
+  updated `FACTORTESTER_STATE_ROOT`.
+- Removed the old 4.1G state copy and the stale `state-debug` copy.
+- Root filesystem is now 13G used / 25G free; `/data` has 31G free.
+- The 4.1G `control_events` history now lives on `/data`; use
+  `scripts/server/prune_control_events.py` (dry-run by default) if it grows.
+
+
+## Public capacity check (2026-10-25)
+
+```text
+root_free_gb=24 data_free_gb=30 mem_available_mb=3592
+job_index_gb=4 control_events=650492
+```
+
+`scripts/server/check_public_capacity.sh` exits non-zero below
+10G root, 10G `/data`, or 1024MB MemAvailable.
+
+## React shell i18n and local containers (2026-10-25)
+
+- React shell now uses i18next/react-i18next with shared `tr.language`.
+- Desktop Ant Design locale follows the same language; mobile uses native
+  language select to avoid shipping Ant Design.
+- Local Docker cleanup: removed the duplicate stopped `ft-couchdb-b` container;
+  kept `ft-couchdb`, `ft-rabbit`, `ft-keycloak` and their volumes.
+
+## Local intranet React-shell test
+
+Run from the integration checkout:
+
+```bash
+./scripts/server/start_local_manager.sh
+```
+
+The Manager binds `0.0.0.0:8770`; open `/app` on the LAN address printed at
+startup. This instance uses `/tmp/ft-manager-state` and `/tmp/ft-manager-data`
+so it does not touch production state. Verified: `/app` returned 200, desktop
+Dockview rendered, mobile rendered 5 bottom tabs, and the page list loaded.
