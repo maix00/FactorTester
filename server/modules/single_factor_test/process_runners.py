@@ -207,3 +207,16 @@ def run_ic(payload: dict[str, Any], sink: Any, cancel_event: Any) -> None:
             sink=sink,
             cancel_event=cancel_event,
         )
+
+def nautilus_backtest_runner_status() -> dict[str, Any]:
+    """Advertise the registered Nautilus Job executor for submission capability."""
+    try:
+        from server.services.nautilus_bridge.job_executor import execute_nautilus_job
+    except Exception as exc:
+        return {
+            "available": False,
+            "reason": f"Nautilus Job executor is unavailable: {type(exc).__name__}: {exc}",
+        }
+    if not hasattr(execute_nautilus_job, "execute"):
+        return {"available": False, "reason": "Nautilus Job executor has no execute method"}
+    return {"available": True, "reason": ""}
