@@ -28,6 +28,8 @@ export function CatalogPage(): React.ReactElement {
   const [groupDetail, setGroupDetail] = useState<string>("");
   const [groupData, setGroupData] = useState<Record<string, unknown> | null>(null);
   const [productSelected, setProductSelected] = useState<Record<string, unknown> | null>(null);
+  const [sourceSelected, setSourceSelected] = useState<Record<string, unknown> | null>(null);
+  const [categorySelected, setCategorySelected] = useState<Record<string, unknown> | null>(null);
   const [factors, setFactors] = useState<Record<string, unknown>[]>([]);
 
   useEffect(() => {
@@ -165,11 +167,16 @@ export function CatalogPage(): React.ReactElement {
           ))
         ) : tab === "sources" ? (
           sources.length === 0 ? <p>{t("empty")}</p> : sources.map((source) => (
-            <article key={source.id}><b>{source.name ?? source.id}</b><small>{source.id}</small></article>
+            <article key={source.id}>
+              <button type="button" className="tr-catalog-card-link" onClick={() => setSourceSelected(source as unknown as Record<string, unknown>)}><b>{source.name ?? source.id}</b></button>
+              <small>{source.id}</small>
+            </article>
           ))
         ) : tab === "categories" ? (
           categories.length === 0 ? <p>{t("empty")}</p> : categories.map((category, index) => (
-            <article key={String(category.id ?? index)}><b>{category.name ?? category.title ?? category.id ?? "—"}</b></article>
+            <article key={String(category.id ?? index)}>
+              <button type="button" className="tr-catalog-card-link" onClick={() => setCategorySelected(category as unknown as Record<string, unknown>)}><b>{category.name ?? category.title ?? category.id ?? "—"}</b></button>
+            </article>
           ))
         ) : tab === "strategies" ? (
           strategies.length === 0 ? <p>{t("empty")}</p> : strategies.map((item, index) => {
@@ -201,6 +208,18 @@ export function CatalogPage(): React.ReactElement {
       </div>
       {tab === "strategies" && strategies.length < strategyTotal ? (
         <button type="button" className="tr-mobile-load-more" disabled={loading} onClick={() => setStrategyPage((value) => value + 1)}>{t("more")}</button>
+      ) : null}
+      {sourceSelected ? (
+        <div className="tr-legacy-overlay" role="dialog" aria-label={String(sourceSelected.name ?? sourceSelected.id ?? "")}>
+          <div className="tr-legacy-bar"><strong>{String(sourceSelected.name ?? sourceSelected.id ?? "")}</strong><button type="button" onClick={() => setSourceSelected(null)}>{t("notifications.close")}</button></div>
+          <pre className="tr-job-detail">{JSON.stringify(sourceSelected, null, 2)}</pre>
+        </div>
+      ) : null}
+      {categorySelected ? (
+        <div className="tr-legacy-overlay" role="dialog" aria-label={String(categorySelected.name ?? categorySelected.id ?? "")}>
+          <div className="tr-legacy-bar"><strong>{String(categorySelected.name ?? categorySelected.id ?? "")}</strong><button type="button" onClick={() => setCategorySelected(null)}>{t("notifications.close")}</button></div>
+          <pre className="tr-job-detail">{JSON.stringify(categorySelected, null, 2)}</pre>
+        </div>
       ) : null}
       {productSelected ? (
         <div className="tr-legacy-overlay" role="dialog" aria-label={String(productSelected.name ?? productSelected.id ?? "")}>
