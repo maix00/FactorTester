@@ -1023,7 +1023,7 @@ def apply_research_report_operation(publication_id: str):
     from flask import request
     from server.jobs.storage.couchdb_research_reports import get_research_report
     from server.jobs.storage.couchdb_reports import CouchDBObjectStore
-    from server.jobs.storage.research_report_operations import apply_index_operation
+    from server.jobs.storage.research_report_operations import apply_component_move, apply_index_operation
 
     payload = request.get_json(silent=True) or {}
     base_rev = str(payload.get("base_rev") or "")
@@ -1041,7 +1041,16 @@ def apply_research_report_operation(publication_id: str):
     if document.get("owner_ref") != actor:
         return jsonify({"success": False, "error": "only the research report owner may edit"}), 403
     try:
-        result = apply_index_operation(store, document, base_rev=base_rev, operation=operation)
+        if str(operation.get("op") or "") == "move_component":
+            result = apply_component_move(
+                store, document, base_rev=base_rev,
+                chapter_id=str(operation.get("chapter_id") or ""),
+                component_id=str(operation.get("component_id") or ""),
+                parent_id=str(operation.get("parent_id") or ""),
+                after_component_id=str(operation.get("after_component_id") or ""),
+            )
+        else:
+            result = apply_index_operation(store, document, base_rev=base_rev, operation=operation)
     except ValueError as exc:
         code = 409 if "conflict" in str(exc) else 400
         return jsonify({"success": False, "error": str(exc)}), code
@@ -1054,9 +1063,13 @@ def apply_research_report_operation(publication_id: str):
                      detail=str(operation.get("op") or ""))
     except Exception:
         pass
+    if "index" in result:
+        return jsonify({"success": True, "rev": result["rev"],
+                        "attachment": result["attachment"],
+                        "chapters": result["index"].get("chapters") or []})
     return jsonify({"success": True, "rev": result["rev"],
                     "attachment": result["attachment"],
-                    "chapters": result["index"].get("chapters") or []})
+                    "components": result["chapter"].get("components") or []})
 
 
 @sft_bp.get("/api/research-reports/<publication_id>/conflicts")
