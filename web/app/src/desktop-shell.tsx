@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { DockviewReact, type DockviewReadyEvent, type IDockviewPanelProps } from "dockview-react";
 import { BUILTIN_PAGES, pagesForScope, registerPage } from "./registry.ts";
 import { PageSurface } from "./surface.tsx";
+import { PageIcon } from "./icon.tsx";
 
 for (const page of BUILTIN_PAGES) registerPage(page);
 
@@ -44,9 +45,13 @@ export function DesktopShell(): React.ReactElement {
               key={page.id}
               type="button"
               className={`tr-nav-item${active === page.id ? " is-active" : ""}`}
+              data-tooltip={page.title}
+              aria-label={page.title}
+              title={page.title}
               onClick={() => open(page.id)}
             >
-              {page.title}
+              <PageIcon name={page.icon} />
+              <span>{page.title}</span>
             </button>
           ))}
         </nav>
