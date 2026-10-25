@@ -31,6 +31,8 @@ export function SettingsOverlay({
   const [session, setSession] = useState<{ username?: string; role?: string; capabilities?: { manager?: boolean } } | null>(null);
   const [serverInfo, setServerInfo] = useState<Record<string, unknown> | null>(null);
   const [sectionData, setSectionData] = useState<Record<string, unknown> | null>(null);
+  const [docPage, setDocPage] = useState<string>("");
+  const [docContent, setDocContent] = useState<string>("");
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -58,6 +60,14 @@ export function SettingsOverlay({
       .then((value) => setSectionData(value))
       .catch(() => setSectionData(null));
   }, [open, section]);
+
+  useEffect(() => {
+    if (!open || section !== "docs" || !docPage) { setDocContent(""); return; }
+    fetch(`/api/docs/pages/${encodeURIComponent(docPage)}`, { credentials: "same-origin" })
+      .then((response) => response.ok ? response.text() : Promise.reject(new Error(`HTTP ${response.status}`)))
+      .then((value) => setDocContent(value))
+      .catch(() => setDocContent(""));
+  }, [open, section, docPage]);
 
   useEffect(() => {
     if (!open || section !== "server") return;
@@ -122,7 +132,20 @@ export function SettingsOverlay({
               <h3>{t("settingsPanel.sections.server")}</h3>
               {serverInfo ? <pre className="tr-job-detail">{JSON.stringify(serverInfo, null, 2)}</pre> : <p>{t("loading")}</p>}
             </div>
-          ) : ["controlDatabase", "federation", "devices", "quota", "updates", "manager", "docs", "profiles"].includes(current.id) ? (
+          ) : current.id === "docs" ? (
+            <div className="tr-settings-card">
+              <h3>{t("settingsPanel.sections.docs")}</h3>
+              {sectionData ? (
+                <div className="tr-doc-pages">
+                  {((sectionData.pages ?? sectionData.items ?? []) as Record<string, unknown>[]).map((doc, index) => {
+                    const slug = String(doc.slug ?? doc.path ?? doc.id ?? index);
+                    return <button key={slug} type="button" className={docPage === slug ? "is-active" : ""} onClick={() => setDocPage(slug)}>{String(doc.title ?? doc.name ?? slug)}</button>;
+                  })}
+                </div>
+              ) : <p>{t("loading")}</p>}
+              {docPage ? <pre className="tr-job-detail">{docContent || t("loading")}</pre> : null}
+            </div>
+          ) : ["controlDatabase", "federation", "devices", "quota", "updates", "manager", "profiles"].includes(current.id) ? (
             <div className="tr-settings-card">
               <h3>{t(`settingsPanel.sections.${current.id}`)}</h3>
               {sectionData ? <pre className="tr-job-detail">{JSON.stringify(sectionData, null, 2)}</pre> : <p>{t("loading")}</p>}
