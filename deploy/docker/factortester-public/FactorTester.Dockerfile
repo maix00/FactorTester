@@ -1,5 +1,7 @@
 FROM python:3.14-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4 AS factortester-public-deps
 
+# Persist layer metadata so cache_from can reuse the apt/pip dependency layers.
+ARG BUILDKIT_INLINE_CACHE=1
 ARG FACTORTESTER_UID=1000
 ARG FACTORTESTER_GID=1000
 ARG DEBIAN_MIRROR=https://deb.debian.org/debian
@@ -58,8 +60,8 @@ RUN python -m compileall -q -b /runtime \
     && grep -F 'FactorTester CLI' /tmp/factortester-help >/dev/null
 
 FROM factortester-public-deps AS factortester-public
-COPY deploy/docker/factortester-public/wheels/py_alpha_lib-0.3.1-cp314-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl /tmp/py_alpha_lib.whl
-RUN python -m pip install --no-cache-dir --no-deps /tmp/py_alpha_lib.whl && rm -f /tmp/py_alpha_lib.whl
+COPY deploy/docker/factortester-public/wheels/py_alpha_lib-0.3.1-cp314-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl /tmp/py_alpha_lib-0.3.1-cp314-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+RUN python -m pip install --no-cache-dir --no-deps /tmp/py_alpha_lib-0.3.1-cp314-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl && rm -f /tmp/py_alpha_lib-0.3.1-cp314-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
 
 # The npm package is a small launcher around the platform package. Install
 # only the official native Linux binary, so the image needs neither npm nor a
