@@ -41,6 +41,15 @@ class ReportDocument:
 class CouchDBObjectStore:
     def __init__(self, base_url: str, database: str, *, username="", password="",
                  timeout: float = 10.0) -> None:
+        import urllib.parse
+        parsed = urllib.parse.urlparse(base_url)
+        if parsed.username is not None:
+            username = urllib.parse.unquote(parsed.username)
+            password = urllib.parse.unquote(parsed.password or "")
+            base_url = urllib.parse.urlunparse((
+                parsed.scheme, f"{parsed.hostname}:{parsed.port}" if parsed.port else parsed.hostname,
+                parsed.path, "", "", "",
+            ))
         self.base_url = base_url.rstrip("/")
         self.database = database.strip("/")
         self.username = username
