@@ -5,6 +5,7 @@ import { PageFrame } from "./frame.tsx";
 import { AccountPage } from "./pages/account.tsx";
 import { CatalogPage } from "./pages/catalog.tsx";
 import { ResearchPage } from "./pages/research.tsx";
+import { TradingPage } from "./pages/trading.tsx";
 
 
 export function PageSurface({ pageId }: { pageId: string }): React.ReactElement {
@@ -13,5 +14,6 @@ export function PageSurface({ pageId }: { pageId: string }): React.ReactElement 
   if (pageId === "account") return <AccountPage />;
   if (pageId === "catalog") return <CatalogPage />;
   if (pageId === "research") return <ResearchPage />;
+  if (pageId === "trading") return <TradingPage />;
   return <PageFrame pageId={pageId} />;
 }

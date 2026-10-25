@@ -283,3 +283,11 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-research-list b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tr-research-list span { grid-row: 1; grid-column: 2; color: var(--accent); font-size: 11px; }
 .tr-research-list small { grid-column: 1 / -1; color: var(--muted); font-size: 11px; }
+.tr-trading-page { padding: 24px 28px; overflow: auto; height: 100%; }
+.tr-trading-page h1 { margin: 0; font-size: 22px; }
+.tr-trading-page header p { margin: 3px 0 16px; color: var(--muted); font-size: 12px; }
+.tr-trading-families { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.tr-trading-families article { display: grid; gap: 8px; align-content: start; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.tr-trading-families b { font-size: 14px; }
+.tr-trading-families p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; min-height: 38px; }
+.tr-trading-families button { justify-self: start; }
