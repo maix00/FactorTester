@@ -299,3 +299,4 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-catalog-tabs button.is-active { color: var(--accent); border-bottom-color: var(--accent); }
 .tr-catalog-card-link { border: 0; padding: 0; background: transparent; color: var(--text); font: inherit; text-align: left; }
 .tr-catalog-card-link:hover { color: var(--accent); }
+.tr-catalog-detail-loading { padding: 20px; color: var(--muted); font-size: 12px; }
