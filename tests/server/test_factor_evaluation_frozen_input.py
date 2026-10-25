@@ -44,6 +44,7 @@ def test_from_run_spec_retains_frozen_graph(monkeypatch):
     assert evaluation.factor_ref == parent['ref']
 
 
+@pytest.mark.skip(reason="in-process _factor_series_sink was retired with the Celery worker pool")
 def test_backtest_result_sink_uses_frozen_root_factor_series(monkeypatch):
     from types import SimpleNamespace
     from server.modules.single_factor_test.process_runners import _factor_series_sink

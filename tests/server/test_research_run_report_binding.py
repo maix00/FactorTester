@@ -40,7 +40,8 @@ def test_run_retains_frozen_report_identity(tmp_path, monkeypatch) -> None:
         workspace_id="workspace-1",
         configuration_id="configuration-1",
         configuration_revision=1,
-        run_spec={"run_spec_version": RUN_SPEC_VERSION, "analyses": ["ic"]},
+        run_spec={"run_spec_version": RUN_SPEC_VERSION, "analyses": ["ic"],
+                  "configuration": {"shared": {}}},
         report_binding=binding,
     )
     assert run["report_binding"] == binding
