@@ -1,0 +1,2 @@
+# Celery worker/dispatcher dependency; broker (RabbitMQ) is a service, not a wheel.
+celery>=5.4,<6
