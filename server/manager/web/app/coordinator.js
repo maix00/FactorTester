@@ -221,7 +221,7 @@
       const release = await FTResearchLocal.loadClientRelease(appContext(routeToken));
       if (routeToken !== activeRouteToken) return;
       root.append(homeNetworkRow(
-        "FactorTester 客户端",
+        "TradeResearch 客户端",
         FTResearchLocal.clientDownloadButton(appContext(routeToken), release, "下载"),
       ));
     } catch (error) {
@@ -233,7 +233,7 @@
   function home() {
     activeNav("home"); setHeading(t("主页"));
     const routeToken = activeRouteToken;
-    content.innerHTML = '<div class="hero"><h2>FactorTester</h2><p></p></div><section class="home-network"><h3></h3><div class="home-network-grid"></div></section><div class="card-grid" id="home-cards"></div>';
+    content.innerHTML = '<div class="hero"><h2>TradeResearch</h2><p></p></div><section class="home-network"><h3></h3><div class="home-network-grid"></div></section><div class="card-grid" id="home-cards"></div>';
     content.querySelector(".hero p").textContent = t("选择研究模块；每个工作现场会在左侧保持");
     content.querySelector(".home-network h3").textContent = t("服务器网络信息");
     const network = content.querySelector(".home-network-grid");

@@ -166,7 +166,7 @@
     {id: "manager", title: "服务器管理", title_key: "服务器管理", description_key: "查看端口状态并控制本机服务", sfSymbol: "server.rack", path: "/manager", requiresAuth: true, permissions: ["admin_console:read"], sidebarVisible: true, homeVisible: true, pinned: false, tab_behavior: "singleton"},
     {id: "mihomo", title: "Mihomo Dashboard", title_key: "Mihomo Dashboard", description_key: "打开官方 Mihomo Dashboard", sfSymbol: "network", path: "/mihomo", requiresAuth: true, roles: ["super_admin"], sidebarVisible: true, homeVisible: true, pinned: false, tab_behavior: "singleton"},
     {id: "sqlite_web", title: "数据库", title_key: "数据库", description_key: "浏览统一 SQLite 数据库", sfSymbol: "cylinder.split.1x2", path: "/sqlite-web/", requiresAuth: true, roles: ["super_admin"], sidebarVisible: true, homeVisible: true, pinned: false, tab_behavior: "singleton"},
-    {id: "docs", title: "技术文档", title_key: "技术文档", description_key: "阅读 FactorTester 技术文档", sfSymbol: "book", path: "/docs", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: false, tab_behavior: "singleton"},
+    {id: "docs", title: "技术文档", title_key: "技术文档", description_key: "阅读 TradeResearch 技术文档", sfSymbol: "book", path: "/docs", requiresAuth: false, sidebarVisible: true, homeVisible: true, pinned: false, tab_behavior: "singleton"},
     {id: "settings", title: "设置", title_key: "设置", path: "/settings/account", requiresAuth: false, sidebarVisible: false, homeVisible: false, pinned: true},
   ];
 

@@ -5,7 +5,7 @@
     context, page = "families", requestedScope = "public", viewState = {},
   ) {
     context.activeNav("factors");
-    context.setHeading(context.t("因子库"), "FactorTester");
+    context.setHeading(context.t("因子库"), "TradeResearch");
     context.toolbar.append(window.FTFactorList.headerTabs(context, page));
     context.content.replaceChildren(FTUI.loading(context.t("正在读取因子库…")));
     let data = await catalog().load(context, {
