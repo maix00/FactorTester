@@ -54,6 +54,19 @@ python -m server.jobs.dispatch.cli retry <job_id> <attempt>
 `retry` only accepts failed/dead rows and resets attempts; it does not bypass a
 worker capability check.
 
+One-host public acceptance (existing app image, isolated DB, fake executor):
+
+```bash
+FACTORTESTER_TEST_RELEASE_SHA=<full-sha> \
+FACTORTESTER_TEST_DEPLOYMENT=public-test \
+FACTORTESTER_TEST_PORTS="8000 8001" \
+bash scripts/server/deploy_dispatch_test.sh
+```
+
+This starts an isolated RabbitMQ container, two target workers in the existing
+app container, and runs the probe.  It does not touch the production Job DB or
+Manager configuration.
+
 Acceptance probe (isolated DB; the worker executor must accept the probe):
 
 ```bash
