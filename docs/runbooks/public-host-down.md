@@ -27,3 +27,10 @@ Prevention:
 - Prefer a separate builder host; the public host should only pull a finished
   wheel.
 - Keep the 3 GiB limit and codegen-units=16; monitor memory while building.
+
+## Hard rule after the 2026-10-25 outage
+
+The public app host must **never** run the Nautilus wheel builder. The builder
+now refuses when it detects the public app container, or when MemAvailable is
+below 5 GiB, unless `NAUTILUS_BUILD_ALLOW_SHARED=1` is set explicitly. Build on
+the intranet builder and copy only the finished wheel to the public release.
