@@ -850,10 +850,13 @@ def put_versioned_object():
     if not url:
         return jsonify({"success": False, "error": "object store unavailable"}), 503
     store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
-    put_object(store, VersionedObject(
-        ref=ref, kind=kind, owner=actor, payload=payload,
-        links=dict(body.get("links") or {}),
-    ))
+    try:
+        put_object(store, VersionedObject(
+            ref=ref, kind=kind, owner=actor, payload=payload,
+            links=dict(body.get("links") or {}),
+        ))
+    except Exception as exc:
+        return jsonify({"success": False, "error": "object already exists or write failed"}), 409
     return jsonify({"success": True, "ref": ref, "owner": actor})
 
 
