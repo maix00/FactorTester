@@ -15,6 +15,7 @@ const SECTIONS = [
   { id: "language", icon: "research" },
   { id: "updates", icon: "runs" },
   { id: "manager", icon: "runs" },
+  { id: "docs", icon: "research" },
 ] as const;
 
 export function SettingsOverlay({
@@ -42,6 +43,7 @@ export function SettingsOverlay({
     const endpoints: Record<string, string> = {
       controlDatabase: "/api/control-database/config",
       manager: "/api/worktrees",
+      docs: "/api/docs/index",
       federation: "/api/federation/config",
       devices: "/api/devices",
       quota: "/api/jobs/storage",
@@ -118,7 +120,7 @@ export function SettingsOverlay({
               <h3>{t("settingsPanel.sections.server")}</h3>
               {serverInfo ? <pre className="tr-job-detail">{JSON.stringify(serverInfo, null, 2)}</pre> : <p>{t("loading")}</p>}
             </div>
-          ) : ["controlDatabase", "federation", "devices", "quota", "updates", "manager"].includes(current.id) ? (
+          ) : ["controlDatabase", "federation", "devices", "quota", "updates", "manager", "docs"].includes(current.id) ? (
             <div className="tr-settings-card">
               <h3>{t(`settingsPanel.sections.${current.id}`)}</h3>
               {sectionData ? <pre className="tr-job-detail">{JSON.stringify(sectionData, null, 2)}</pre> : <p>{t("loading")}</p>}
