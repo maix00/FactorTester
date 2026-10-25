@@ -39,6 +39,7 @@ export function SettingsOverlay({
   }, [open]);
   useEffect(() => {
     const endpoints: Record<string, string> = {
+      controlDatabase: "/api/control-database/config",
       federation: "/api/federation/config",
       devices: "/api/devices",
       quota: "/api/jobs/storage",
@@ -114,7 +115,7 @@ export function SettingsOverlay({
               <h3>{t("settingsPanel.sections.server")}</h3>
               {serverInfo ? <pre className="tr-job-detail">{JSON.stringify(serverInfo, null, 2)}</pre> : <p>{t("loading")}</p>}
             </div>
-          ) : ["federation", "devices", "quota", "updates"].includes(current.id) ? (
+          ) : ["controlDatabase", "federation", "devices", "quota", "updates"].includes(current.id) ? (
             <div className="tr-settings-card">
               <h3>{t(`settingsPanel.sections.${current.id}`)}</h3>
               {sectionData ? <pre className="tr-job-detail">{JSON.stringify(sectionData, null, 2)}</pre> : <p>{t("loading")}</p>}
