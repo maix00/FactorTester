@@ -120,3 +120,27 @@ def test_worker_app_uses_environment_target(monkeypatch):
 
     module = importlib.reload(worker_app)
     assert module.app.conf.task_default_queue == "factortester.jobs.remote-main.8001"
+
+
+def test_celery_task_forwards_payload_and_target(monkeypatch):
+    pytest.importorskip("celery")
+    import server.jobs.dispatch.celery_app as module
+
+    captured = {}
+
+    def fake_execute(payload, *, target_deployment=None, target_port=None):
+        captured.update(payload=payload, deployment=target_deployment, port=target_port)
+        return {"status": "ok"}
+
+    monkeypatch.setattr(module, "execute_dispatch_payload", fake_execute)
+    app = module.create_app(
+        broker_url="memory://", target_deployment="remote-main", target_port=8001,
+    )
+    app.conf.task_always_eager = True
+    result = app.tasks[module.TASK_NAME].apply(args=[_payload()])
+    assert result.get() == {"status": "ok"}
+    assert captured == {
+        "payload": _payload(),
+        "deployment": "remote-main",
+        "port": 8001,
+    }
