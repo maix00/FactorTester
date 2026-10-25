@@ -1,0 +1,91 @@
+from __future__ import annotations
+
+import pytest
+
+from server.jobs.dispatch.celery_app import (
+    DispatchExecutorUnavailable,
+    create_app,
+    execute_dispatch_payload,
+    resolve_executor,
+)
+from server.jobs.dispatch.worker import ExecutionOutcome
+from server.jobs.models import JobRecord
+from server.jobs.repository.sqlite import JobRepository
+from server.jobs.states import JobStatus
+
+
+def _queued(repository: JobRepository, job_id: str = "job-celery") -> None:
+    repository.create(
+        JobRecord(
+            job_id=job_id,
+            run_id="run-celery",
+            owner="owner",
+            workspace_id="workspace",
+            kind="backtest",
+            status=JobStatus.SUBMITTED,
+            deployment_id="remote-main",
+            run_spec_hash="a" * 64,
+            job_spec={},
+        )
+    )
+    repository.transition(job_id, JobStatus.PLANNING)
+    repository.transition(job_id, JobStatus.QUEUED)
+
+
+def _payload(job_id: str = "job-celery") -> dict:
+    return {
+        "schema_version": 1,
+        "job_id": job_id,
+        "attempt": 1,
+        "deployment_id": "remote-main",
+        "run_spec_hash": "a" * 64,
+        "job_spec_hash": "b" * 64,
+    }
+
+
+class _Executor:
+    def execute(self, record, message):
+        return ExecutionOutcome({"total_return": 0.2})
+
+
+def test_celery_app_is_single_concurrency_and_json_only():
+    pytest.importorskip("celery")
+    app = create_app(broker_url="memory://", queue="q")
+    assert app.conf.worker_prefetch_multiplier == 1
+    assert app.conf.worker_concurrency == 1
+    assert app.conf.task_acks_late is False
+    assert app.conf.task_serializer == "json"
+    assert "factortester.execute_job" in app.tasks
+
+
+def test_payload_reaches_worker_and_writes_result(tmp_path):
+    repository = JobRepository(tmp_path / "jobs.db")
+    _queued(repository)
+    result = execute_dispatch_payload(
+        _payload(), executor=_Executor(), repository=repository,
+    )
+    assert result["status"] == "succeeded"
+    assert repository.require("job-celery").result_summary == {"total_return": 0.2}
+
+
+def test_missing_executor_fails_before_job_claim(tmp_path, monkeypatch):
+    repository = JobRepository(tmp_path / "jobs.db")
+    _queued(repository)
+    monkeypatch.setenv("FACTORTESTER_NAUTILUS_EXECUTOR", "missing.module:execute")
+    with pytest.raises(DispatchExecutorUnavailable):
+        execute_dispatch_payload(_payload(), repository=repository)
+    assert repository.require("job-celery").status is JobStatus.QUEUED
+
+
+def test_duplicate_task_is_idempotent(tmp_path):
+    repository = JobRepository(tmp_path / "jobs.db")
+    _queued(repository)
+    execute_dispatch_payload(_payload(), executor=_Executor(), repository=repository)
+    duplicate = execute_dispatch_payload(_payload(), executor=_Executor(), repository=repository)
+    assert duplicate["status"] == "duplicate"
+
+
+def test_resolve_executor_rejects_non_executor(monkeypatch):
+    monkeypatch.setenv("FACTORTESTER_NAUTILUS_EXECUTOR", "server.jobs.dispatch.worker:ExecutionOutcome")
+    with pytest.raises(DispatchExecutorUnavailable):
+        resolve_executor()
