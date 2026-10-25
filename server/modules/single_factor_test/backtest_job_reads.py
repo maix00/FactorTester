@@ -827,6 +827,36 @@ def oidc_callback():
     return redirect("/")
 
 
+@sft_bp.post("/api/objects")
+def put_versioned_object():
+    actor = require_user()
+    import os
+    from flask import request
+    from server.jobs.storage.couchdb_objects import VersionedObject, put_object
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    body = request.get_json(silent=True) or {}
+    kind = str(body.get("kind") or "")
+    ref = str(body.get("ref") or "")
+    payload = body.get("payload")
+    if kind not in {"factor_version", "strategy_version"}:
+        return jsonify({"success": False, "error": "unsupported object kind"}), 400
+    if not ref or not isinstance(payload, dict):
+        return jsonify({"success": False, "error": "ref and payload are required"}), 400
+    expected = "factor:v2:" if kind == "factor_version" else "strategy:v2:"
+    if not ref.startswith(expected):
+        return jsonify({"success": False, "error": "object ref does not match kind"}), 400
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "object store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    put_object(store, VersionedObject(
+        ref=ref, kind=kind, owner=actor, payload=payload,
+        links=dict(body.get("links") or {}),
+    ))
+    return jsonify({"success": True, "ref": ref, "owner": actor})
+
+
 @sft_bp.get("/api/objects/<path:object_ref>")
 def get_versioned_object(object_ref: str):
     actor = require_user()

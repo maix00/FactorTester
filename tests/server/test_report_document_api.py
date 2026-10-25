@@ -90,3 +90,23 @@ def test_versioned_object_api_reads_factor_document(monkeypatch):
     response = client.get("/api/objects/factor:v2:abc")
     assert response.status_code == 200
     assert response.get_json()["document"]["kind"] == "factor_version"
+
+
+def test_versioned_object_write_sets_owner(monkeypatch):
+    written = {}
+
+    class Store:
+        def __init__(self, *args, **kwargs): pass
+        def _request(self, method, path, body=None, content_type="application/json"):
+            written[path] = body; return 201, b"{}"
+
+    monkeypatch.setenv("FACTORTESTER_COUCHDB_URL", "http://couch")
+    monkeypatch.setattr("server.jobs.storage.couchdb_reports.CouchDBObjectStore", Store)
+    app = Flask(__name__); app.secret_key = "test"; app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session: session["username"] = "alice"
+    response = client.post("/api/objects", json={
+        "kind": "factor_version", "ref": "factor:v2:abc", "payload": {"x": 1},
+    })
+    assert response.status_code == 200
+    assert b'"owner": "alice"' in written["factor:v2:abc"]
