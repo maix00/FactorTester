@@ -1,7 +1,7 @@
 import React from "react";
 import { pagesForScope } from "../registry.ts";
 import { useTranslation } from "react-i18next";
-import i18n from "../i18n.ts";
+import i18n, { persistLanguage } from "../i18n.ts";
 import { PageIcon } from "../icon.tsx";
 
 const RECENT_KEY = "tr.mobile.recent";
@@ -37,8 +37,9 @@ export function WorkspacePage(): React.ReactElement {
           aria-label={t("language")}
           value={i18n.language.startsWith("en") ? "en" : "zh"}
           onChange={(event) => {
-            i18n.changeLanguage(event.target.value);
-            localStorage.setItem("tr.language", event.target.value);
+            const language = event.target.value === "en" ? "en" : "zh";
+            i18n.changeLanguage(language);
+            persistLanguage(language);
           }}
         >
           <option value="zh">中文</option>
