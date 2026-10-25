@@ -20,7 +20,6 @@ not the same as a fully migrated detail/editor route.
 /researches/:id
 /research reports
 /reports/:id
-/strategies/:id
 /jobs/:port/:id/input/:name
 /ic
 /factor-series
