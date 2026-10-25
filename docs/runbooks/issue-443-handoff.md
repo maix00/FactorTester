@@ -53,3 +53,16 @@
 
 - Unset `TRADERESEARCH_COUCHDB_AUTHORITY` -> SQLite/JSON/mirror.
 - `TRADERESEARCH_AUTH_MODE=legacy` -> old password login.
+
+
+## Public deployment (2026-10-25)
+
+- Production revision `ae67b22a0f98b37454bc8a8ef03682eb7b1a4162` verified.
+- Public CouchDB authority enabled; app-level smoke: 15 product groups,
+  126 factor-family documents, 144 Research Reports.
+- Root disk was 90% full and an in-place Docker build crashed the host.
+  Cleaned Docker images/build cache and journals; added
+  `scripts/server/check_public_build_capacity.sh`.
+- Public image builds now use BuildKit inline cache; PostgreSQL container and
+  data were preserved. The fixed-service symlinks under
+  `/opt/factortester-container/services` must point to existing release dirs.
