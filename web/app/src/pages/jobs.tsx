@@ -36,6 +36,7 @@ export function JobsPage(): React.ReactElement {
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<JobRow | null>(null);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
+  const [downloading, setDownloading] = useState<string>("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -142,7 +143,32 @@ export function JobsPage(): React.ReactElement {
             items={[
               { key: "summary", label: t("jobs.detail"), children: <pre className="tr-job-detail">{JSON.stringify(detail, null, 2)}</pre> },
               { key: "configuration", label: t("jobs.configuration"), children: <pre className="tr-job-detail">{JSON.stringify(detail.execution_plan ?? detail.job_spec ?? detail.run_spec ?? null, null, 2)}</pre> },
-              { key: "inputs", label: t("jobs.inputs"), children: <pre className="tr-job-detail">{JSON.stringify(detail.artifacts ?? detail.inputs ?? [], null, 2)}</pre> },
+              { key: "inputs", label: t("jobs.inputs"), children: (
+                <div className="tr-job-artifacts">
+                  {((detail.artifacts ?? detail.inputs ?? []) as Record<string, unknown>[]).length === 0 ? <p>{t("empty")}</p> : ((detail.artifacts ?? detail.inputs ?? []) as Record<string, unknown>[]).map((artifact, index) => {
+                    const name = String(artifact.name ?? index);
+                    return (
+                      <div key={name} className="tr-job-artifact">
+                        <div><b>{String(artifact.file_name ?? name)}</b><small>{String(artifact.role ?? artifact.state ?? "")}</small></div>
+                        <button type="button" disabled={downloading === name || String(artifact.state ?? "active") !== "active"} onClick={() => {
+                          if (!selected?.job_id) return;
+                          setDownloading(name);
+                          fetch(`/api/jobs/${encodeURIComponent(selected.job_id)}/artifacts/${encodeURIComponent(name)}/access`, {
+                            method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: "{}",
+                          }).then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+                            .then((payload) => {
+                              const url = payload.access?.url || payload.access?.download_url || payload.url;
+                              if (!url) throw new Error(t("jobs.downloadUnavailable"));
+                              window.open(url, "_blank", "noopener,noreferrer");
+                            })
+                            .catch((reason: Error) => notify({ code: "jobs.download", type: "error", message: t("loadFailed"), description: reason.message }))
+                            .finally(() => setDownloading(""));
+                        }}>{downloading === name ? t("loading") : t("jobs.download")}</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) },
             ]}
           />
         </>) : <p>{t("loading")}</p>}
