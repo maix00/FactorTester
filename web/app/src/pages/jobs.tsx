@@ -131,6 +131,7 @@ export function JobsPage(): React.ReactElement {
             items={[
               { key: "summary", label: t("jobs.detail"), children: <pre className="tr-job-detail">{JSON.stringify(detail, null, 2)}</pre> },
               { key: "configuration", label: t("jobs.configuration"), children: <pre className="tr-job-detail">{JSON.stringify(detail.execution_plan ?? detail.job_spec ?? detail.run_spec ?? null, null, 2)}</pre> },
+              { key: "inputs", label: t("jobs.inputs"), children: <pre className="tr-job-detail">{JSON.stringify(detail.artifacts ?? detail.inputs ?? [], null, 2)}</pre> },
             ]}
           />
         ) : <p>{t("loading")}</p>}
