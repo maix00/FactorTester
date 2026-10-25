@@ -71,6 +71,15 @@ pending -> publishing -> sent
 - JSON serialization only, never pickle;
 - retry count is bounded; exhausted rows become `dead`, not infinite retries.
 
+## Local multi-port harness
+
+`deploy/docker/job-dispatch/compose.yaml` runs one RabbitMQ broker and two
+workers for `local-docker` ports 8000/8001.  Queues are target-scoped; the
+workers share a state/data mount only because they are the same server.  The
+harness is optional and not a production deployment.  Compose validation:
+`docker compose ... config` exits 0.  A live run still requires Docker daemon
+and the approved Nautilus executor.
+
 ## Worker boundary
 
 Celery worker configuration starts with `prefetch_multiplier=1`, one process,
