@@ -38,7 +38,12 @@ export function JobsPage(): React.ReactElement {
   if (!jobs.length) return <p className="tr-page-placeholder">暂无运行记录。</p>;
 
   return (
-    <div className="tr-job-list">
+    <section className="tr-panel">
+      <header className="tr-panel-header">
+        <h2>最近运行</h2>
+        <span>{jobs.length} 条</span>
+      </header>
+      <div className="tr-job-list">
       {jobs.map((job, index) => (
         <a className="tr-job-row" key={job.job_id || index} href={`/jobs/${encodeURIComponent(job.job_id || "")}`}>
           <span className="tr-job-title">{job.task_name || job.kind || job.job_id || "运行"}</span>
@@ -46,6 +51,7 @@ export function JobsPage(): React.ReactElement {
           <span className="tr-job-id">{job.job_id || ""}</span>
         </a>
       ))}
-    </div>
+      </div>
+    </section>
   );
 }
