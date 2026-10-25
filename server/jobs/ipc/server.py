@@ -51,12 +51,6 @@ class _UnixServer(socketserver.ThreadingUnixStreamServer):
             job_id = str(request.get("job_id") or "")
             notify = getattr(self.scheduler, "cancel", None)
             return {"notified": bool(notify(job_id)) if notify else False}
-        if action == "continue_step":
-            job_id = str(request.get("job_id") or "")
-            command = request.get("command")
-            if not isinstance(command, dict):
-                raise ValueError("step command is required")
-            return {"continued": self.scheduler.continue_step(job_id, command)}
         if action == "events":
             job_id = str(request.get("job_id") or "")
             if not job_id:

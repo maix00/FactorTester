@@ -564,6 +564,7 @@ def retry_test_job(job_id: str):
 
 @sft_bp.post("/api/jobs/<job_id>/continue")
 def continue_test_job(job_id: str):
+    """Step continuation belonged to the retired in-process worker pool."""
     job, error = require_job(job_id)
     if error:
         return error
@@ -573,35 +574,8 @@ def continue_test_job(job_id: str):
             "error": "historical backtest Jobs are read-only and cannot continue",
             "code": "legacy_backtest_continue_unavailable",
         }), 409
-    if job.status is not JobStatus.PAUSED or not job.step_mode:
-        return jsonify({"success": False, "error": "job is not a paused step job"}), 409
-    job_repository = repository()
-    quota = job_repository.storage_quota(
-        owner=job.owner, default_bytes=default_user_quota_bytes()
-    )
-    if job_repository.storage_usage(owner=job.owner) > quota:
-        return jsonify({
-            "success": False,
-            "error": "retained result quota exceeded; paused job cannot continue",
-            "code": "storage_quota_exceeded",
-        }), 507
-    data = request.get_json(silent=True) or {}
-    action = str(data.get("action") or "continue").strip()
-    if action not in {"continue", "end"}:
-        return jsonify({"success": False, "error": "unsupported step action"}), 400
-    command = {"action": action}
-    until = str(data.get("until") or "").strip()
-    if until:
-        command["until"] = until
-    try:
-        continued = _daemon_client().continue_step(job_id, command)
-    except DaemonUnavailable as exc:
-        return jsonify({"success": False, "error": str(exc)}), 503
-    if not continued:
-        return jsonify({"success": False, "error": "paused worker is unavailable"}), 409
-    current = job_repository.require(job_id, owner=job.owner)
     return jsonify({
-        "success": True,
-        **current.summary(),
-        **job_urls(job_id),
-    })
+        "success": False,
+        "error": "step continuation is not supported by Celery workers",
+        "code": "step_continuation_retired",
+    }), 409
