@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SRC="${NAUTILUS_SRC:-$ROOT/vendor/nautilus_trader}"
 TARGET="${NAUTILUS_BUILD_TARGET:-launch-advisor:/data/nautilus-build}"
-[ -f "$SRC/python/Cargo.toml" ] || { echo "missing $SRC/python/Cargo.toml" >&2; exit 1; }
+[ -f "$SRC/python/pyproject.toml" ] || { echo "missing $SRC/python/pyproject.toml" >&2; exit 1; }
 git -C "$SRC" diff --quiet || { echo "vendor/nautilus_trader has uncommitted changes" >&2; exit 1; }
 echo "syncing $(git -C "$SRC" rev-parse HEAD) to $TARGET"
 rsync -az --delete \
