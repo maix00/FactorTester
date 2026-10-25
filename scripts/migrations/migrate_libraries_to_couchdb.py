@@ -51,7 +51,26 @@ def factor_documents(db: Path) -> list[dict]:
                 "description": r["description"],
             })
     context = lambda row: (row["source_kind"], row["owner_username"], row["factor_id"])
-    return [{
+    heads = []
+    for r in conn.execute("SELECT principal, entity_id, payload_json, deleted FROM account_domain_entities WHERE entity_type='factor_family'"):
+        entity_id = str(r["entity_id"] or "")
+        if ":" not in entity_id:
+            continue
+        kind, factor_id = entity_id.split(":", 1)
+        if kind != "factor":
+            # source_kind may be custom/public; entity_id prefix is the source kind
+            pass
+        heads.append({
+            "_id": f"factor-family-head:{r['principal']}:{entity_id}",
+            "schema_version": 1,
+            "kind": "factor_family_head",
+            "source_kind": kind,
+            "factor_id": factor_id,
+            "owner_ref": "" if r["principal"] == "__public__" else r["principal"],
+            "deleted": bool(r["deleted"]),
+            "payload": json.loads(r["payload_json"]) if r["payload_json"] else {},
+        })
+    catalog_docs = [{
         "_id": f"factor-family:{row['owner_username'] or 'public'}:{row['factor_id']}",
         "schema_version": 1,
         "kind": "factor_family",
@@ -67,6 +86,7 @@ def factor_documents(db: Path) -> list[dict]:
         "params": params.get(context(row), []),
         "source_sha256": row["source_sha256"] or "",
     } for row in rows]
+    return catalog_docs + heads
 
 
 def product_group_documents(db: Path) -> list[dict]:

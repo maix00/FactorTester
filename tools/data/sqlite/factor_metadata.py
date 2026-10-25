@@ -246,6 +246,40 @@ def store_factor_summary(conn: sqlite3.Connection, source_kind: str, owner: str,
 
 def list_factor_summaries(source_kind: str, owner: str | None = "", *, include_heads: bool = True) -> list[dict[str, Any]]:
     """Read existing projections only; never import, repair, or write on a GET."""
+    import os
+    if str(os.environ.get("TRADERESEARCH_LIBRARIES_COUCHDB_READ", "")).lower() in {"1", "true", "yes"}:
+        try:
+            from server.jobs.storage.couchdb_library_reader import CouchDBLibraryReader
+            from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+            url = str(os.environ.get("FACTORTESTER_COUCHDB_URL") or "").strip()
+            if url:
+                reader = CouchDBLibraryReader(CouchDBObjectStore(
+                    url, str(os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects"),
+                ))
+                docs = reader.factor_families(source_kind, owner or "")
+                merged = {}
+                for doc in docs:
+                    value = {**dict(doc.get("catalog") or {}),
+                             **dict(doc.get("metadata") or {})}
+                    value.update({"owner_username": doc.get("owner_ref") or "",
+                                  "factor_id": doc.get("factor_id") or "",
+                                  "source_kind": source_kind})
+                    merged[(value["owner_username"], value["factor_id"])] = value
+                for doc in reader.factor_family_heads(source_kind, owner or ""):
+                    head_owner = doc.get("owner_ref") or ""
+                    if head_owner == "__public__":
+                        head_owner = ""
+                    key = (head_owner, doc.get("factor_id") or "")
+                    if doc.get("deleted"):
+                        merged.pop(key, None)
+                    else:
+                        payload = dict(doc.get("payload") or {})
+                        merged[key] = {**dict(payload.get("catalog") or {}), **payload,
+                                       "owner_username": key[0], "factor_id": key[1]}
+                return list(merged.values())
+        except Exception:
+            pass
     try:
         with connect_sqlite(Settings.CACHE_DB_PATH) as conn:
             rows = conn.execute(

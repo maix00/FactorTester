@@ -28,3 +28,9 @@ class CouchDBLibraryReader:
         if owner_ref:
             selector["owner_ref"] = owner_ref
         return self._find(selector)
+
+    def factor_family_heads(self, source_kind: str, owner_ref: str = "") -> list[dict]:
+        selector = {"kind": "factor_family_head", "source_kind": source_kind}
+        if owner_ref:
+            selector["owner_ref"] = owner_ref
+        return self._find(selector)
