@@ -1027,6 +1027,7 @@ def apply_research_report_operation(publication_id: str):
         apply_component_batch, apply_component_insert, apply_component_move,
         apply_component_remove, apply_index_operation,
     )
+    from server.jobs.storage.research_report_projection_ops import apply_projection_operation
 
     payload = request.get_json(silent=True) or {}
     base_rev = str(payload.get("base_rev") or "")
@@ -1044,11 +1045,26 @@ def apply_research_report_operation(publication_id: str):
     if document.get("owner_ref") != actor:
         return jsonify({"success": False, "error": "only the research report owner may edit"}), 403
     if document.get("projection_hash"):
-        return jsonify({
-            "success": False,
-            "error": "projection-aware edits are not enabled",
-            "code": "projection_consistency_required",
-        }), 409
+        try:
+            result = apply_projection_operation(
+                store, document, base_rev=base_rev, operation=operation,
+            )
+        except ValueError as exc:
+            code = 409 if "conflict" in str(exc) else 400
+            return jsonify({"success": False, "error": str(exc)}), code
+        try:
+            from server.jobs.dispatch.audit import append_audit
+            import settings as Settings
+
+            append_audit(Settings.CACHE_DB_PATH, action="research_report_operation",
+                         actor=actor, job_id=publication_id,
+                         detail=str(operation.get("op") or ""))
+        except Exception:
+            pass
+        return jsonify({"success": True, "rev": result["rev"],
+                        "projection_hash": result["projection_hash"],
+                        "generation": result["generation"],
+                        "components": (result.get("chapter") or {}).get("components") or []})
     try:
         op = str(operation.get("op") or "")
         if op == "move_component":
