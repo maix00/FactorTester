@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 import zhCN from "antd/locale/zh_CN";
 import enUS from "antd/locale/en_US";
 import { SettingsOverlay } from "./components/settings-overlay.tsx";
+import { PageErrorBoundary } from "./error-boundary.tsx";
 import { DesktopNotificationHost } from "./notifications/antd-host.tsx";
 
 for (const page of BUILTIN_PAGES) registerPage(page);
@@ -20,7 +21,7 @@ for (const page of BUILTIN_PAGES) registerPage(page);
 function Panel(props: IDockviewPanelProps<{ pageId: string }>): React.ReactElement {
   return (
     <div className="tr-tab-layer" data-tab-layer={props.params.pageId}>
-      <PageSurface pageId={props.params.pageId} />
+      <PageErrorBoundary label={props.params.pageId}><PageSurface pageId={props.params.pageId} /></PageErrorBoundary>
     </div>
   );
 }
