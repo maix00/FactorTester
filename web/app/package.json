@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "test": "node --test src/*.test.ts",
+    "test": "node --test src/*.test.ts src/notifications/*.test.ts",
     "typecheck": "tsc --noEmit",
     "build": "npm run build:desktop && npm run build:mobile && npm run build:loader",
     "build:desktop": "esbuild src/desktop-entry.tsx --bundle --minify --format=iife --target=es2020 --outfile=../../static/vendor/web-app/desktop.js",
