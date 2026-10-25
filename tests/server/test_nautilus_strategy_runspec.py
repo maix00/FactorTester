@@ -85,3 +85,26 @@ def test_strategy_family_compiles_run_spec_execution_plan(monkeypatch, tmp_path)
     }
     strategy_backtest.run_strategy_family_run_spec(job_spec=job_spec, plan=plan, output_dir=tmp_path)
     assert captured["execution_plan"] is not None
+
+
+def test_strategy_family_engine_uses_frozen_venue(monkeypatch):
+    from types import SimpleNamespace
+    from server.services.nautilus_bridge import strategy_backtest
+
+    plan = SimpleNamespace(
+        venues=[{"name": "CFFEX"}, {"name": "SHFE"}],
+        strategy_venue_bindings=[
+            {"strategy_id": "s1", "venue_ids": ["CFFEX", "SHFE"]},
+        ],
+    )
+    calls = {}
+    monkeypatch.setattr(
+        "server.services.nautilus_bridge.engine_factory.build_backtest_engine",
+        lambda plan, instruments, trader_id: calls.update(
+            plan=plan, instruments=instruments, trader_id=trader_id,
+        ) or "engine",
+    )
+    engine, venue = strategy_backtest._build_strategy_family_engine(plan, ["i"])
+    assert engine == "engine"
+    assert str(venue) == "CFFEX"
+    assert calls["instruments"] == {"s1": ["i"]}
