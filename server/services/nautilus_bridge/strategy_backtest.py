@@ -55,7 +55,7 @@ def run_strategy_replay(
                     expression=expression, products=(product,),
                     bar_types_by_product={product: bar_type}, source_freq=DataFreq.MIN1,
                     bar_clock=lambda _p, bar: _clock(bar),
-                    factor_fields=lambda _p, bar: {factor_field: float(bar.close)},
+                    factor_fields=lambda _p, bar: _bar_fields(bar),
                     first_executable_at=lambda clocks: max(
                         clock.available_at_ns for clock in clocks.values()) + 1,
                     on_publication=publications[role].append,
@@ -96,6 +96,16 @@ def run_strategy_replay(
         "reports": reports,
         "order_count": engine.get_result().total_orders,
         "catalog": str(folder),
+    }
+
+
+def _bar_fields(bar: Any) -> dict[str, float]:
+    return {
+        "OPEN_ADJUSTED": float(bar.open),
+        "HIGH_ADJUSTED": float(bar.high),
+        "LOW_ADJUSTED": float(bar.low),
+        "CLOSE_ADJUSTED": float(bar.close),
+        "VOLUME": float(getattr(bar, "volume", 0)),
     }
 
 
@@ -149,7 +159,7 @@ def run_strategy_family_replay(
                     expression=expression, products=tuple(opened),
                     bar_types_by_product=bar_types, source_freq=DataFreq.MIN1,
                     bar_clock=lambda _p, bar: _clock(bar),
-                    factor_fields=lambda _p, bar: {factor_field: float(bar.close)},
+                    factor_fields=lambda _p, bar: _bar_fields(bar),
                     first_executable_at=lambda clocks: max(
                         clock.available_at_ns for clock in clocks.values()) + 1,
                     on_publication=publications[role].append,
