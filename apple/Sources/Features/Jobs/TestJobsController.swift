@@ -175,6 +175,14 @@ final class TestJobsController: ObservableObject {
 
     private var currentPort: Int { Int(ServerConfig.shared.port) ?? 0 }
 
+    func reportAttachments(reportRef: String, from job: TestJob) async throws -> [TestJobReportAttachment] {
+        do {
+            return try await service.reportAttachments(reportRef: reportRef, port: job.port)
+        } catch where job.port != currentPort {
+            return try await service.reportAttachments(reportRef: reportRef, port: currentPort)
+        }
+    }
+
     func openReportAttachment(
         reportRef: String, name: String, from job: TestJob
     ) async throws {

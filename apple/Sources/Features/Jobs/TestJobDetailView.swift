@@ -17,6 +17,7 @@ struct TestJobDetailView: View {
     @State private var artifactTableErrors: [String: String] = [:]
     @State private var presentedReference: ResearchDocumentTypedLink?
     @State private var reportError: String?
+    @State private var reportAttachments: [TestJobReportAttachment] = []
 
     var body: some View {
         Group {
@@ -212,16 +213,29 @@ struct TestJobDetailView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("CouchDB 报告").font(.headline)
                     Text(detail.reportRef).font(.caption.monospaced()).textSelection(.enabled)
-                    Button("打开 tearsheet.html") {
+                    Button("加载报告附件") {
                         Task {
                             do {
-                                try await controller.openReportAttachment(
-                                    reportRef: detail.reportRef,
-                                    name: "tearsheet.html",
-                                    from: job
+                                reportAttachments = try await controller.reportAttachments(
+                                    reportRef: detail.reportRef, from: job
                                 )
                             } catch {
                                 reportError = error.localizedDescription
+                            }
+                        }
+                    }
+                    ForEach(reportAttachments) { attachment in
+                        Button(attachment.name) {
+                            Task {
+                                do {
+                                    try await controller.openReportAttachment(
+                                        reportRef: detail.reportRef,
+                                        name: attachment.name,
+                                        from: job
+                                    )
+                                } catch {
+                                    reportError = error.localizedDescription
+                                }
                             }
                         }
                     }
