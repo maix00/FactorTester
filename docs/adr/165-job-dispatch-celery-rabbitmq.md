@@ -214,3 +214,24 @@ Redeployed through `scripts/server/deploy_dispatch_test.sh` at release
 script initially passed the host release path to `docker exec -w`; that bug was
 fixed by mapping the host worktree to `/opt/factortester/releases/...` inside
 the app container.
+
+## 2026-10-25 real Nautilus replay through Celery
+
+A real NautilusTrader 2.0.0rc8 catalog replay was executed through the
+Celery/RabbitMQ worker locally:
+
+```text
+8 CFFEX T2403 minute bars -> Nautilus BacktestEngine
+reports: tearsheet.html, account.csv, orders.csv, fills.csv, positions.csv
+result.engine = nautilus_trader
+result.engine_version = 2.0.0rc8
+Job status = succeeded
+```
+
+`NautilusJobExecutor` accepts an execution plan with
+`kind=nautilus_catalog_replay`; catalog paths are confined to
+`FACTORTESTER_NAUTILUS_CATALOG_ROOT`, receipts and hashes are verified by the
+existing replay runner, and the Job result stores the replay receipt plus the
+artifact directory. This is a real engine replay, not a factor-strategy
+backtest and not a claim of factor performance. The public app image does not
+ship the Nautilus runtime, so public acceptance of this path remains pending.
