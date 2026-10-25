@@ -30,6 +30,8 @@ export function CatalogPage(): React.ReactElement {
   const [productSelected, setProductSelected] = useState<Record<string, unknown> | null>(null);
   const [sourceSelected, setSourceSelected] = useState<Record<string, unknown> | null>(null);
   const [categorySelected, setCategorySelected] = useState<Record<string, unknown> | null>(null);
+  const [familySelected, setFamilySelected] = useState<Record<string, unknown> | null>(null);
+  const [factorSetSelected, setFactorSetSelected] = useState<Record<string, unknown> | null>(null);
   const [factors, setFactors] = useState<Record<string, unknown>[]>([]);
 
   useEffect(() => {
@@ -159,11 +161,17 @@ export function CatalogPage(): React.ReactElement {
       <div className="tr-catalog-products">
         {tab === "families" ? (
           families.length === 0 ? <p>{t("empty")}</p> : families.map((item, index) => (
-            <article key={String(item.family_ref ?? item.id ?? index)}><b>{String(item.name ?? item.title ?? item.family_ref ?? "—")}</b><small>{String(item.description ?? "")}</small></article>
+            <article key={String(item.family_ref ?? item.id ?? index)}>
+              <button type="button" className="tr-catalog-card-link" onClick={() => setFamilySelected(item)}><b>{String(item.name ?? item.title ?? item.family_ref ?? "—")}</b></button>
+              <small>{String(item.description ?? "")}</small>
+            </article>
           ))
         ) : tab === "sets" ? (
           sets.length === 0 ? <p>{t("empty")}</p> : sets.map((item, index) => (
-            <article key={String(item.set_ref ?? item.id ?? index)}><b>{String(item.name ?? item.title ?? item.set_ref ?? "—")}</b><small>{String(item.description ?? "")}</small></article>
+            <article key={String(item.set_ref ?? item.id ?? index)}>
+              <button type="button" className="tr-catalog-card-link" onClick={() => setFactorSetSelected(item)}><b>{String(item.name ?? item.title ?? item.set_ref ?? "—")}</b></button>
+              <small>{String(item.description ?? "")}</small>
+            </article>
           ))
         ) : tab === "sources" ? (
           sources.length === 0 ? <p>{t("empty")}</p> : sources.map((source) => (
@@ -208,6 +216,18 @@ export function CatalogPage(): React.ReactElement {
       </div>
       {tab === "strategies" && strategies.length < strategyTotal ? (
         <button type="button" className="tr-mobile-load-more" disabled={loading} onClick={() => setStrategyPage((value) => value + 1)}>{t("more")}</button>
+      ) : null}
+      {familySelected ? (
+        <div className="tr-legacy-overlay" role="dialog" aria-label="factor-family">
+          <div className="tr-legacy-bar"><strong>{String(familySelected.name ?? familySelected.family_ref ?? "")}</strong><button type="button" onClick={() => setFamilySelected(null)}>{t("notifications.close")}</button></div>
+          <pre className="tr-job-detail">{JSON.stringify(familySelected, null, 2)}</pre>
+        </div>
+      ) : null}
+      {factorSetSelected ? (
+        <div className="tr-legacy-overlay" role="dialog" aria-label="factor-set">
+          <div className="tr-legacy-bar"><strong>{String(factorSetSelected.name ?? factorSetSelected.set_ref ?? "")}</strong><button type="button" onClick={() => setFactorSetSelected(null)}>{t("notifications.close")}</button></div>
+          <pre className="tr-job-detail">{JSON.stringify(factorSetSelected, null, 2)}</pre>
+        </div>
       ) : null}
       {sourceSelected ? (
         <div className="tr-legacy-overlay" role="dialog" aria-label={String(sourceSelected.name ?? sourceSelected.id ?? "")}>
