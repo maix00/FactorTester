@@ -960,6 +960,30 @@ def resolve_report_conflicts(report_ref: str):
     return jsonify({"success": True, "conflicts": remaining})
 
 
+@sft_bp.get("/api/reports/<report_ref>/attachments")
+def list_report_attachments(report_ref: str):
+    actor = require_user()
+    import os
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "report store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = store.get_report(report_ref)
+    except Exception:
+        return jsonify({"success": False, "error": "report not found"}), 404
+    if not _can_read_report(actor, document, report_ref):
+        return jsonify({"success": False, "error": "report access denied"}), 403
+    attachments = document.get("_attachments") if isinstance(document.get("_attachments"), dict) else {}
+    return jsonify({"success": True, "attachments": [
+        {"name": name, "content_type": str(meta.get("content_type") or ""),
+         "length": int(meta.get("length") or 0)}
+        for name, meta in sorted(attachments.items())
+    ]})
+
+
 @sft_bp.get("/api/reports/<report_ref>/attachments/<path:name>")
 def get_report_attachment(report_ref: str, name: str):
     """Stream one content-addressed CouchDB report attachment."""

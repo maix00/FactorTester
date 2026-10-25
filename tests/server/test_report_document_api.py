@@ -110,3 +110,21 @@ def test_versioned_object_write_sets_owner(monkeypatch):
     })
     assert response.status_code == 200
     assert b'"owner": "alice"' in written["factor:v2:abc"]
+
+
+def test_report_attachment_list_is_scoped(monkeypatch):
+    class Store:
+        def __init__(self, *args, **kwargs): pass
+        def get_report(self, ref):
+            return {"_id": ref, "owner": "alice", "_attachments": {
+                "tearsheet.html": {"content_type": "text/html", "length": 10},
+            }}
+
+    monkeypatch.setenv("FACTORTESTER_COUCHDB_URL", "http://couch")
+    monkeypatch.setattr("server.jobs.storage.couchdb_reports.CouchDBObjectStore", Store)
+    app = Flask(__name__); app.secret_key = "test"; app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session: session["username"] = "alice"
+    response = client.get("/api/reports/report:job:1/attachments")
+    assert response.status_code == 200
+    assert response.get_json()["attachments"][0]["name"] == "tearsheet.html"
