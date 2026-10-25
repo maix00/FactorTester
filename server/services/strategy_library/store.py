@@ -220,6 +220,29 @@ class StrategyLibraryStore:
             "explicitly_shared": row["shared_strategy_ref"] is not None,
         }
 
+    def _sync_couchdb(self, strategy_ref: str) -> None:
+        import os
+        from server.jobs.storage.couchdb_authority import libraries_write_enabled
+
+        if not libraries_write_enabled():
+            return
+        url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+        if not url:
+            return
+        try:
+            entry = self.get_entry(strategy_ref)
+            if entry is None:
+                return
+            revision = self.get_revision(entry.get("current_revision_ref") or "")
+            from server.jobs.storage.couchdb_library_reader import CouchDBLibraryWriter
+            from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+            CouchDBLibraryWriter(CouchDBObjectStore(
+                url, os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects",
+            )).upsert_strategy(strategy_ref, entry, revision)
+        except Exception:
+            pass
+
     def get_entry(self, strategy_ref: str) -> dict[str, Any] | None:
         with self._lock, connect_sqlite(self.db_path, readonly=True) as db:
             row = db.execute(
@@ -264,6 +287,7 @@ class StrategyLibraryStore:
                  entrypoint, json.dumps(hooks, ensure_ascii=False),
                  json.dumps(requirements, ensure_ascii=False), created_by, now),
             )
+        self._sync_couchdb(strategy_ref)
         return {"strategy_ref": strategy_ref, "revision_ref": revision_ref}
 
     def update_entry_with_revision(
@@ -330,6 +354,7 @@ class StrategyLibraryStore:
             )
             if result.rowcount != 1:
                 raise ValueError("strategy revision changed")
+        self._sync_couchdb(strategy_ref)
         return {
             "revision_ref": revision_ref,
             "revision_number": revision_number,
@@ -353,12 +378,33 @@ class StrategyLibraryStore:
             ).fetchall()
         return [self._revision(row, include_source=False) for row in rows]
 
+    def _sync_delete(self, strategy_ref: str) -> None:
+        import os
+        from server.jobs.storage.couchdb_authority import libraries_write_enabled
+
+        if not libraries_write_enabled():
+            return
+        url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+        if not url:
+            return
+        try:
+            from server.jobs.storage.couchdb_library_reader import CouchDBLibraryWriter
+            from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+            CouchDBLibraryWriter(CouchDBObjectStore(
+                url, os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects",
+            )).delete_strategy(strategy_ref)
+        except Exception:
+            pass
+
     def delete(self, strategy_ref: str) -> bool:
         with self._lock, connect_sqlite(self.db_path, timeout=10) as db:
             result = db.execute(
                 "UPDATE strategy_library_entries SET deleted_at=?, updated_at=? WHERE strategy_ref=? AND deleted_at=0",
                 (time.time(), time.time(), strategy_ref),
             )
+        if result.rowcount == 1:
+            self._sync_delete(strategy_ref)
         return result.rowcount == 1
 
     def shares(self, strategy_ref: str) -> list[str]:
