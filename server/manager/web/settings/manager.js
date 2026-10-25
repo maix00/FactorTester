@@ -1,4 +1,13 @@
 (() => {
+  let dispatchRefreshTimer = null;
+
+  function clearDispatchRefresh() {
+    if (dispatchRefreshTimer !== null) {
+      clearInterval(dispatchRefreshTimer);
+      dispatchRefreshTimer = null;
+    }
+  }
+
   function statusPill(context, status) {
     const pill = document.createElement("span");
     pill.className = `pill manager-status ${status}`;
@@ -95,6 +104,7 @@
   }
 
   async function dispatchView(context, body) {
+    clearDispatchRefresh();
     body.replaceChildren(FTUI.loading(context.t("正在读取任务队列…")));
     const payload = await context.api("/api/dispatch/overview");
     const wrapper = document.createElement("div");
@@ -133,6 +143,13 @@
     });
     wrapper.append(view.shell);
     body.replaceChildren(wrapper);
+    dispatchRefreshTimer = setInterval(() => {
+      if (!body.isConnected) {
+        clearDispatchRefresh();
+        return;
+      }
+      void dispatchView(context, body).catch(() => {});
+    }, 5000);
   }
 
   function selectTab(context, value) {
@@ -149,6 +166,7 @@
   }
 
   async function show(context, selected = "services") {
+    clearDispatchRefresh();
     context.activeNav("manager");
     context.setHeading(context.t("服务器管理"), "Manager 7998");
     const wrapper = document.createElement("div");
