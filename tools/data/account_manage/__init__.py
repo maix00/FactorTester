@@ -620,14 +620,17 @@ def save_product_groups(username: str, groups: list) -> None:
     from server.jobs.storage.couchdb_authority import libraries_write_enabled
 
     if libraries_write_enabled():
-        from server.jobs.storage.couchdb_library_reader import CouchDBLibraryWriter
-        from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+        try:
+            from server.jobs.storage.couchdb_library_reader import CouchDBLibraryWriter
+            from server.jobs.storage.couchdb_reports import CouchDBObjectStore
 
-        url = str(os.environ.get("FACTORTESTER_COUCHDB_URL") or "").strip()
-        if url:
-            CouchDBLibraryWriter(CouchDBObjectStore(
-                url, str(os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects"),
-            )).replace_product_groups(username, groups)
+            url = str(os.environ.get("FACTORTESTER_COUCHDB_URL") or "").strip()
+            if url:
+                CouchDBLibraryWriter(CouchDBObjectStore(
+                    url, str(os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects"),
+                )).replace_product_groups(username, groups)
+        except Exception:
+            pass
     _replace_domain_entities(
         username, "product_group", groups, id_key="id",
     )
