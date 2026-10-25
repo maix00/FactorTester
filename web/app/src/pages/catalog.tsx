@@ -19,6 +19,8 @@ export function CatalogPage(): React.ReactElement {
   const [strategyTotal, setStrategyTotal] = useState(0);
   const [strategyDetail, setStrategyDetail] = useState<string>("");
   const [strategyData, setStrategyData] = useState<Record<string, unknown> | null>(null);
+  const [factorDetail, setFactorDetail] = useState<string>("");
+  const [factorData, setFactorData] = useState<Record<string, unknown> | null>(null);
   const [factors, setFactors] = useState<Record<string, unknown>[]>([]);
 
   useEffect(() => {
@@ -40,6 +42,15 @@ export function CatalogPage(): React.ReactElement {
       .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }))
       .finally(() => setLoading(false));
   }, [tab, strategyPage, t]);
+
+  useEffect(() => {
+    if (!factorDetail) { setFactorData(null); return; }
+    setFactorData(null);
+    fetch(`/api/factor-library/factors/detail?factor_ref=${encodeURIComponent(factorDetail)}`, { credentials: "same-origin" })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+      .then((value) => setFactorData(value))
+      .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }));
+  }, [factorDetail, t]);
 
   useEffect(() => {
     if (!strategyDetail) { setStrategyData(null); return; }
@@ -110,7 +121,9 @@ export function CatalogPage(): React.ReactElement {
         ) : tab === "factors" ? (
           factors.length === 0 ? <p>{t("empty")}</p> : factors.map((factor, index) => (
             <article key={String(factor.ref ?? factor.factor_ref ?? factor.alias ?? index)}>
-              <b>{String(factor.name ?? factor.alias ?? factor.ref ?? "—")}</b>
+              <button type="button" className="tr-catalog-card-link" onClick={() => setFactorDetail(String(factor.ref ?? factor.factor_ref ?? factor.alias ?? ""))}>
+                <b>{String(factor.name ?? factor.alias ?? factor.ref ?? "—")}</b>
+              </button>
               <small>{String(factor.family_ref ?? factor.family ?? "")}</small>
             </article>
           ))
@@ -123,6 +136,12 @@ export function CatalogPage(): React.ReactElement {
       </div>
       {tab === "strategies" && strategies.length < strategyTotal ? (
         <button type="button" className="tr-mobile-load-more" disabled={loading} onClick={() => setStrategyPage((value) => value + 1)}>{t("more")}</button>
+      ) : null}
+      {factorDetail ? (
+        <div className="tr-legacy-overlay" role="dialog" aria-label={factorDetail}>
+          <div className="tr-legacy-bar"><strong>{factorDetail}</strong><button type="button" onClick={() => setFactorDetail("")}>{t("notifications.close")}</button></div>
+          {factorData ? <pre className="tr-job-detail">{JSON.stringify(factorData, null, 2)}</pre> : <p className="tr-catalog-detail-loading">{t("loading")}</p>}
+        </div>
       ) : null}
       {strategyDetail ? (
         <div className="tr-legacy-overlay" role="dialog" aria-label={t("catalog.strategies")}>
