@@ -176,3 +176,13 @@ signal for a live trading process.
   when a worker dies after claim, at the cost of losing a message if the
   process dies before ACK; the outbox/dispatcher and worker-loss gate must be
   revisited before enabling acks_late or automatic redelivery.
+
+## 2026-10-25 Nautilus executor availability
+
+`server/services/nautilus_bridge/job_executor.py` now provides
+`NautilusJobExecutor`, the default target for
+`FACTORTESTER_NAUTILUS_EXECUTOR`.  It validates Job identity, deployment,
+service port, job-spec hash, RunSpec hash/version and execution-plan hash
+before invoking the approved process runner.  The dispatch preflight therefore
+resolves the real executor instead of failing closed.  The fake executor probe
+remains a transport/routing test and is not a Nautilus backtest.
