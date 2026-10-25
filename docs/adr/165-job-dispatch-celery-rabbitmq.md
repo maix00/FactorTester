@@ -235,3 +235,13 @@ existing replay runner, and the Job result stores the replay receipt plus the
 artifact directory. This is a real engine replay, not a factor-strategy
 backtest and not a claim of factor performance. The public app image does not
 ship the Nautilus runtime, so public acceptance of this path remains pending.
+
+## 2026-10-25 Celery planning cutover
+
+Manager-started services now set `FACTORTESTER_CELERY_PLANNING=1` and
+`FACTORTESTER_CELERY_EXECUTION=1`.  Under those flags the legacy scheduler
+does not plan, execute, or recover Jobs; `PlanningDispatcher` claims submitted
+JobAttempts and publishes `factortester.jobs.plan` to the same target queue.
+The plan task persists the execution plan and queues execution transactionally.
+The legacy scheduler process remains only as a compatibility shell while its
+remaining IPC operations are removed.
