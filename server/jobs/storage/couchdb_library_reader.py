@@ -104,7 +104,7 @@ class CouchDBLibraryWriter:
         self.store._request("PUT", doc_id, json.dumps(document).encode())
 
 
-class CouchDBLibraryWriter:
+
     def upsert_strategy(self, strategy_ref: str, entry: dict, revision: dict | None) -> None:
         import json
 
@@ -114,16 +114,19 @@ class CouchDBLibraryWriter:
             "strategy_ref": strategy_ref, "owner_ref": entry.get("owner_ref") or "",
             "payload": {"entry": entry, "revision": revision},
         }
-        status, body = self.store._request("GET", doc_id)
-        if status == 200:
+        try:
+            _, body = self.store._request("GET", doc_id)
             document["_rev"] = json.loads(body)["_rev"]
+        except Exception:
+            pass
         self.store._request("PUT", doc_id, json.dumps(document).encode())
 
     def delete_strategy(self, strategy_ref: str) -> None:
         import json
 
-        status, body = self.store._request("GET", strategy_ref)
-        if status != 200:
+        try:
+            _, body = self.store._request("GET", strategy_ref)
+        except Exception:
             return
         document = json.loads(body)
         document.update({"_deleted": True, "_rev": document["_rev"]})
