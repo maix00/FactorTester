@@ -12,9 +12,9 @@ class Store:
 def test_manifest_and_markdown_are_agent_readable():
     document = {"_id": "research-report:p1", "publication_id": "p1", "title": "T",
                 "attachments": {chapter_attachment_path("chapter-1"): {"name": "x.json", "content_type": "application/json"}}}
-    projection = {"chapters": [{"component_id": "chapter-1", "title": "One"}]}
-    manifest = agent_manifest(document, projection)
+    index = {"chapters": [{"component_id": "chapter-1", "title": "One"}]}
+    manifest = agent_manifest(document, index)
     assert manifest["report"]["title"] == "T"
     assert manifest["entrypoints"]["markdown"].endswith("/agent.md")
-    markdown = agent_markdown(Store(), document, projection)
+    markdown = agent_markdown(Store(), document, index)
     assert "hello" in markdown

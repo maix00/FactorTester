@@ -14,10 +14,18 @@ def chapter_attachment_path(chapter_id: str) -> str:
     return f"chapters/{digest}.json"
 
 
-def agent_manifest(document: dict[str, Any], projection: dict[str, Any]) -> dict[str, Any]:
+def load_index(store, document: dict[str, Any]) -> dict[str, Any]:
+    meta = (document.get("attachments") or {}).get("index.json") or {}
+    name = str(meta.get("name") or "")
+    if not name:
+        raise FileNotFoundError("index attachment is missing")
+    return json.loads(store.get_attachment(str(document.get("_id") or ""), name))
+
+
+def agent_manifest(document: dict[str, Any], index: dict[str, Any]) -> dict[str, Any]:
     attachments = document.get("attachments") or {}
     chapters = []
-    for item in projection.get("chapters") or []:
+    for item in index.get("chapters") or []:
         chapter_id = str(item.get("component_id") or "")
         logical = chapter_attachment_path(chapter_id)
         meta = attachments.get(logical) or {}
@@ -69,10 +77,10 @@ def _component_markdown(component: dict[str, Any]) -> str:
     return "\n".join(lines).strip()
 
 
-def agent_markdown(store, document: dict[str, Any], projection: dict[str, Any]) -> str:
+def agent_markdown(store, document: dict[str, Any], index: dict[str, Any]) -> str:
     attachments = document.get("attachments") or {}
-    lines = [f"# {document.get('title') or projection.get('title') or 'Research Report'}", ""]
-    for chapter in projection.get("chapters") or []:
+    lines = [f"# {document.get('title') or index.get('title') or 'Research Report'}", ""]
+    for chapter in index.get("chapters") or []:
         chapter_id = str(chapter.get("component_id") or "")
         meta = attachments.get(chapter_attachment_path(chapter_id)) or {}
         name = str(meta.get("name") or "")

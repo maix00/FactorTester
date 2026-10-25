@@ -1075,7 +1075,7 @@ def get_research_report_agent(publication_id: str):
     import os
     from server.jobs.storage.couchdb_research_reports import get_research_report, projection
     from server.jobs.storage.couchdb_reports import CouchDBObjectStore
-    from server.jobs.storage.research_report_agent import agent_manifest, agent_markdown
+    from server.jobs.storage.research_report_agent import agent_manifest, agent_markdown, load_index
 
     url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
     if not url:
@@ -1084,11 +1084,12 @@ def get_research_report_agent(publication_id: str):
     try:
         document = get_research_report(store, publication_id)
         value = projection(store, document)
+        index_value = load_index(store, document)
     except Exception:
         return jsonify({"success": False, "error": "research report not found"}), 404
     if document.get("owner_ref") != actor and str(document.get("visibility") or "private") != "public":
         return jsonify({"success": False, "error": "research report access denied"}), 403
-    return jsonify({"success": True, "manifest": agent_manifest(document, value), "markdown": agent_markdown(store, document, value)})
+    return jsonify({"success": True, "manifest": agent_manifest(document, index_value), "markdown": agent_markdown(store, document, index_value)})
 
 
 @sft_bp.get("/api/research-reports/<publication_id>/agent.md")
@@ -1106,11 +1107,12 @@ def get_research_report_agent_markdown(publication_id: str):
     try:
         document = get_research_report(store, publication_id)
         value = projection(store, document)
+        index_value = load_index(store, document)
     except Exception:
         return jsonify({"success": False, "error": "research report not found"}), 404
     if document.get("owner_ref") != actor and str(document.get("visibility") or "private") != "public":
         return jsonify({"success": False, "error": "research report access denied"}), 403
-    return Response(agent_markdown(store, document, value), mimetype="text/markdown")
+    return Response(agent_markdown(store, document, index_value), mimetype="text/markdown")
 
 
 @sft_bp.get("/api/research-reports/<publication_id>/projection")
