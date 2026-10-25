@@ -279,6 +279,23 @@ class DispatchOutbox:
             conn.commit()
         return status
 
+    def requeue(self, identity: tuple[str, int], *, now: float | None = None) -> None:
+        """Manually return a failed/dead row to the dispatcher."""
+        timestamp = time.time() if now is None else float(now)
+        with connect_sqlite(self.db_path) as conn:
+            ensure_dispatch_schema(conn)
+            cursor = conn.execute(
+                """
+                UPDATE research_job_dispatch_outbox
+                SET status='pending', available_at=?, lease_until=NULL,
+                    last_error='', attempts=0
+                WHERE job_id=? AND attempt=? AND status IN ('failed', 'dead')
+                """,
+                (timestamp, identity[0], identity[1]),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("only failed or dead dispatch rows can be requeued")
+
     def get(self, identity: tuple[str, int]) -> OutboxRecord | None:
         conn = connect_sqlite(self.db_path)
         try:
