@@ -242,6 +242,19 @@ def store_factor_summary(conn: sqlite3.Connection, source_kind: str, owner: str,
     _ensure_schema(conn)
     _insert_factor_rows(conn, [row], source_kind=source_kind, owner_username=owner,
                         owner_alias="", now=time.time())
+    import os
+    if str(os.environ.get("TRADERESEARCH_LIBRARIES_COUCHDB_WRITE", "")).lower() in {"1", "true", "yes"}:
+        try:
+            from server.jobs.storage.couchdb_library_reader import CouchDBLibraryWriter
+            from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+            url = str(os.environ.get("FACTORTESTER_COUCHDB_URL") or "").strip()
+            if url:
+                CouchDBLibraryWriter(CouchDBObjectStore(
+                    url, str(os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects"),
+                )).upsert_factor_family(source_kind, owner, row)
+        except Exception:
+            pass
 
 
 def list_factor_summaries(source_kind: str, owner: str | None = "", *, include_heads: bool = True) -> list[dict[str, Any]]:

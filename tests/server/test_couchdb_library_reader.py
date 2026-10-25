@@ -32,3 +32,17 @@ def test_product_group_writer_upserts_and_deletes():
     ids = [doc["_id"] for doc in store.body["docs"]]
     assert "product-group:alice:g1" in ids
     assert "product-group:alice:old" in ids
+
+
+def test_factor_family_write_upserts_catalog():
+    from server.jobs.storage.couchdb_library_reader import CouchDBLibraryWriter
+
+    class Store:
+        def _request(self, method, path, body=None):
+            if method == "GET": return 404, b"{}"
+            self.saved = json.loads(body); return 201, b"{}"
+
+    store = Store()
+    CouchDBLibraryWriter(store).upsert_factor_family("custom", "alice", {"factor_id": "F", "name": "F"})
+    assert store.saved["kind"] == "factor_family"
+    assert store.saved["catalog"]["factor_id"] == "F"
