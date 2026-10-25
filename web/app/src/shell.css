@@ -310,3 +310,5 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-legacy-actions { position: fixed; right: 18px; bottom: 18px; z-index: 2; }
 .tr-trading-tests { display: flex; gap: 6px; margin-bottom: 14px; }
 .tr-trading-tests button { padding: 6px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--text); font: inherit; font-size: 12px; }
+.tr-catalog-reference { display: grid; gap: 8px; grid-column: 1 / -1; }
+.tr-catalog-reference select, .tr-catalog-reference input { padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--text); font: inherit; font-size: 12px; }
