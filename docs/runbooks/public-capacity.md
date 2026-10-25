@@ -46,3 +46,15 @@ systemctl list-timers factortester-capacity-check.timer
 sudo journalctl -u factortester-capacity-check.service -n 5
 cat /data/state/CAPACITY_ALERT
 ```
+
+
+## Control-event retention
+
+Installed `factortester-control-events-retention.timer` (daily 03:30). It runs:
+
+```text
+factortester-prune-control-events /data/state/job-index.sqlite   --older-than-days 90 --apply --vacuum
+```
+
+The tool refuses to delete when `control_sync_cursors` is behind. It
+currently reports `candidates=0` because all events are younger than 90 days.
