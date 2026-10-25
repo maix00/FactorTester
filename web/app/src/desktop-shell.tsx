@@ -30,7 +30,7 @@ function Tab(props: IDockviewPanelHeaderProps<{ pageId: string }>): React.ReactE
   const { t } = useTranslation();
   const title = page ? t(`nav.${page.id}`, { defaultValue: page.title }) : (props.api.title ?? props.params.pageId);
   return (
-    <span className="tr-dock-tab">
+    <span className="tr-dock-tab" title={title}>
       <PageIcon name={page?.icon} />
       <span className="tr-dock-tab-title" title={title}>{title}</span>
       <button type="button" className="tr-dock-close" aria-label="关闭" onClick={() => props.api.close()}>×</button>
