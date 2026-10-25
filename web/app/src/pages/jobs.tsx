@@ -126,7 +126,18 @@ export function JobsPage(): React.ReactElement {
         <span className="tr-antd-total">{t("total", { count: total })}</span>
       </div>
       <Drawer title={selected?.task_name || selected?.job_id || t("jobs.detail")} placement="right" width={620} open={Boolean(selected)} onClose={() => setSelected(null)}>
-        {detail ? (
+        {detail ? (<>
+          <div className="tr-job-actions">
+            {selected?.status === "running" || selected?.status === "queued" ? (
+              <button type="button" className="tr-toolbar-button" disabled={loading} onClick={() => {
+                if (!selected?.job_id) return;
+                fetch(`/api/jobs/${encodeURIComponent(selected.job_id)}/cancel`, { method: "POST", credentials: "same-origin" })
+                  .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+                  .then(() => notify({ code: "jobs.cancelled", type: "success", message: t("jobs.cancelled"), duration: 4 }))
+                  .catch((reason: Error) => notify({ code: "jobs.cancel_failed", type: "error", message: t("loadFailed"), description: reason.message }));
+              }}>{t("jobs.cancel")}</button>
+            ) : null}
+          </div>
           <Tabs
             items={[
               { key: "summary", label: t("jobs.detail"), children: <pre className="tr-job-detail">{JSON.stringify(detail, null, 2)}</pre> },
@@ -134,7 +145,7 @@ export function JobsPage(): React.ReactElement {
               { key: "inputs", label: t("jobs.inputs"), children: <pre className="tr-job-detail">{JSON.stringify(detail.artifacts ?? detail.inputs ?? [], null, 2)}</pre> },
             ]}
           />
-        ) : <p>{t("loading")}</p>}
+        </>) : <p>{t("loading")}</p>}
       </Drawer>
       <TRDataTable<JobRow>
         rowKey={(row) => row.job_id || JSON.stringify(row)}
