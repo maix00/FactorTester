@@ -48,3 +48,40 @@ def test_strategy_family_resolves_multiple_factor_roles(monkeypatch, tmp_path):
     assert result == {"ok": True}
     assert sorted(captured["factor_bindings"]) == ["confirm", "signal"]
     assert captured["family"].members({"T": 1.0}) == ()
+
+
+def test_strategy_family_compiles_run_spec_execution_plan(monkeypatch, tmp_path):
+    from tests.server.test_nautilus_bridge_config import _minimal_frozen
+
+    class Resolver:
+        def __init__(self, **kwargs): pass
+        def resolve(self, *, factor_ref="", alias=""):
+            return SimpleNamespace(expr=CLOSE)
+
+    monkeypatch.setattr(
+        "server.modules.shared.run_spec_resolution.factors.RunFactorResolver", Resolver,
+    )
+    captured = {}
+    monkeypatch.setattr(
+        strategy_backtest, "run_strategy_family_replay",
+        lambda **kwargs: captured.update(kwargs) or {"ok": True},
+    )
+    settings = _minimal_frozen()
+    job_spec = {
+        "run_spec": {"configuration": {
+            "shared": {"factors": [{"ref": "a"}]},
+            "analyses": {"backtest": {"execution": {
+                "nautilus_contract": {"settings": settings},
+            }}},
+        }},
+    }
+    plan = {
+        "strategy": {
+            "kind": "threshold", "parameters": {"entry_threshold": 1, "exit_threshold": 0},
+            "factor_roles": {"signal": {"ref": "factor:v2:" + "a" * 43}},
+        },
+        "catalog_inputs": {"T": {"catalog_dir": str(tmp_path / "T"), "contract_uid": "CFFEX|F|T|2403"}},
+        "max_input_bars": 8,
+    }
+    strategy_backtest.run_strategy_family_run_spec(job_spec=job_spec, plan=plan, output_dir=tmp_path)
+    assert captured["execution_plan"] is not None
