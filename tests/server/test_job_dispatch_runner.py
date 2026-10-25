@@ -11,6 +11,7 @@ def _message(job_id: str = "job-1") -> DispatchMessage:
         deployment_id="remote-main",
         run_spec_hash="a" * 64,
         job_spec_hash="b" * 64,
+        service_port=8001,
     )
 
 
@@ -60,3 +61,30 @@ def test_preflight_failure_does_not_claim_or_publish(tmp_path):
     assert publisher.messages == []
     assert outbox.get(("job-1", 1)).status == "pending"
     assert outbox.get(("job-1", 1)).attempts == 0
+
+
+def test_kombu_publisher_uses_celery_protocol_and_target_queue(monkeypatch):
+    import celery
+
+    from server.jobs.dispatch.dispatcher import KombuPublisher
+
+    captured = {}
+
+    class FakeApp:
+        def __init__(self, name, broker):
+            captured["broker"] = broker
+
+        def send_task(self, task, **kwargs):
+            captured["task"] = task
+            captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(celery, "Celery", FakeApp)
+    publisher = KombuPublisher("amqp://guest:guest@localhost//", queue="factortester.jobs")
+    message = _message("job-publish")
+    publisher.publish(message)
+    assert captured["task"] == "factortester.execute_job"
+    kwargs = captured["kwargs"]
+    assert kwargs["queue"].name == "factortester.jobs.remote-main.8001"
+    assert kwargs["routing_key"] == "factortester.jobs.remote-main.8001"
+    assert kwargs["exchange"].name == "factortester"
+    assert kwargs["serializer"] == "json"

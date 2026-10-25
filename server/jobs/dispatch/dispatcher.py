@@ -29,21 +29,24 @@ class KombuPublisher:
         return f"{self.queue}.{message.deployment_id}.{message.service_port}"
 
     def publish(self, message: DispatchMessage) -> None:
-        from kombu import Connection, Exchange, Producer, Queue
+        from celery import Celery
+        from kombu import Exchange, Queue
 
         name = self.target_queue(message)
-        queue = Queue(name, Exchange("factortester", type="direct"), routing_key=name)
-        with Connection(self.broker_url, connect_timeout=self.confirm_timeout) as connection:
-            channel = connection.channel()
-            producer = Producer(channel, exchange=queue.exchange, routing_key=name)
-            producer.publish(
-                message.to_dict(),
-                declare=[queue],
-                serializer="json",
-                delivery_mode=2,
-                retry=False,
-            )
-
+        exchange = Exchange("factortester", type="direct")
+        queue = Queue(name, exchange, routing_key=name)
+        app = Celery("factortester.dispatch-publisher", broker=self.broker_url)
+        app.send_task(
+            "factortester.execute_job",
+            args=[message.to_dict()],
+            queue=queue,
+            exchange=exchange,
+            routing_key=name,
+            declare=[queue],
+            serializer="json",
+            retry=False,
+            ignore_result=True,
+        )
 
 class DispatchRunner:
     """One dispatcher tick: lease -> publish -> mark sent/failed."""
