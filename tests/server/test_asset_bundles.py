@@ -232,6 +232,8 @@ def test_react_shell_assets_are_served_and_manifest_gated():
 
     html, kind = static_file("vendor/web-app/index.html")
     assert b"data-tr-web-app" in html
+    assert b"/research-static/vendor/web-app/loader.js" in html
+    assert b"/research-static/styles/app.css" in html
     assert kind.startswith("text/html")
     for name in ("loader.js", "desktop.js", "desktop.css", "mobile.js", "mobile.css"):
         body, content_type = static_file(f"vendor/web-app/{name}")
@@ -239,6 +241,7 @@ def test_react_shell_assets_are_served_and_manifest_gated():
         assert content_type
     sw, sw_type = static_file("sw.js")
     assert b"tr-shell-v1" in sw
+    assert b"/research-static/vendor/web-app/desktop.js" in sw
     assert "javascript" in sw_type
     manifest, manifest_type = static_file("vendor/web-app/manifest.webmanifest")
     assert json.loads(manifest)["start_url"] == "/app"
