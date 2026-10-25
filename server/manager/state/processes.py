@@ -108,6 +108,10 @@ class ProcessStateMixin:
             "GTHT_JOB_ARTIFACT_ROOT": str(self.data_root / "job-results"),
             "FACTORTESTER_SERVER_ID": self.server_id,
             "FACTORTESTER_SERVER_ROLE": self.server_role,
+            # Job planning and execution run on Celery workers; the legacy
+            # in-process scheduler remains only for compatibility flags.
+            "FACTORTESTER_CELERY_PLANNING": "1",
+            "FACTORTESTER_CELERY_EXECUTION": "1",
         })
         self._inject_control_database_env(env)
         return env, deployment_id, socket_path

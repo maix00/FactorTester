@@ -105,6 +105,8 @@ class ResearchJobScheduler:
         self._recover_interrupted_jobs()
 
     def _recover_interrupted_jobs(self) -> None:
+        if os.environ.get("FACTORTESTER_CELERY_PLANNING") == "1":
+            return
         interrupted = self.repository.list_for_deployment(
             deployment_id=self.deployment_id,
             statuses=(JobStatus.PLANNING, JobStatus.RUNNING, JobStatus.PAUSED),
@@ -149,6 +151,8 @@ class ResearchJobScheduler:
             self._dispatch_execution()
 
     def _dispatch_planning(self) -> None:
+        if os.environ.get("FACTORTESTER_CELERY_PLANNING") == "1":
+            return
         jobs = self.repository.list_for_deployment(
             deployment_id=self.deployment_id,
             statuses=(JobStatus.SUBMITTED,),
@@ -187,6 +191,8 @@ class ResearchJobScheduler:
             self.broker.publish(job.job_id, "status", {"status": "planning"})
 
     def _dispatch_execution(self) -> None:
+        if os.environ.get("FACTORTESTER_CELERY_EXECUTION") == "1":
+            return
         jobs = self.repository.list_for_deployment(
             deployment_id=self.deployment_id,
             statuses=(JobStatus.QUEUED,),
