@@ -23,15 +23,17 @@ fi
 # Never build on the public application host. It must pull a finished wheel
 # from the intranet builder; a 3 GiB Rust build alongside CouchDB/app caused an
 # unreachable public host.
-if docker ps --format '{{.Names}}' | grep -q 'factortester-public-factortester-public' \
+if { docker ps --format '{{.Names}}' | grep -q 'factortester-public-factortester-public' \
+     || docker ps --format '{{.Names}}' | grep -q 'factortester-couchdb'; } \
    && [ "${NAUTILUS_BUILD_ALLOW_SHARED:-0}" != "1" ]; then
   echo "refusing to build Nautilus on the public application host" >&2
-  echo "use an intranet builder or set NAUTILUS_BUILD_ALLOW_SHARED=1 explicitly" >&2
+  echo "CouchDB/app must both be stopped; use an intranet builder instead" >&2
+  echo "or set NAUTILUS_BUILD_ALLOW_SHARED=1 explicitly" >&2
   exit 1
 fi
 if [ -r /proc/meminfo ]; then
   available_kb="$(awk '/MemAvailable/ {print $2}' /proc/meminfo)"
-  if [ -n "${available_kb:-}" ] && [ "$available_kb" -lt 5242880 ]; then
+  if [ -n "${available_kb:-}" ] && [ "$available_kb" -lt 6291456 ]; then
     echo "refusing Nautilus build: less than 5 GiB available memory" >&2
     exit 1
   fi
