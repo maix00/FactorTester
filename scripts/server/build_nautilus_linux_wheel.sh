@@ -12,7 +12,7 @@ BUILDER="${NAUTILUS_BUILDER_IMAGE:-traderesearch/nautilus-builder:py314}"
 # nautilus-model is a large staticlib; codegen-units=1 exceeded a 3 GiB
 # container. Sixteen units keep the peak below that budget on the public host.
 mkdir -p "$OUT" "$CACHE/cargo/registry" "$CACHE/cargo/git"
-[ -f "$SRC/python/Cargo.toml" ] || { echo "missing $SRC/python/Cargo.toml" >&2; exit 1; }
+[ -f "$SRC/python/pyproject.toml" ] || { echo "missing $SRC/python/pyproject.toml" >&2; exit 1; }
 git -C "$SRC" diff --quiet || { echo "vendor/nautilus_trader has uncommitted changes" >&2; exit 1; }
 REVISION="$(git -C "$SRC" rev-parse HEAD)"
 CACHED="$OUT/nautilus_trader-$REVISION.whl"
