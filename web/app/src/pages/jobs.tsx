@@ -4,6 +4,7 @@ import type { TableProps } from "antd";
 import { useTranslation } from "react-i18next";
 import { TRDataTable } from "../components/data-table.tsx";
 import { TRMultiSelectFilter } from "../components/multi-select.tsx";
+import { notify } from "../notifications/core.ts";
 
 type JobRow = {
   job_id?: string;
@@ -56,6 +57,13 @@ export function JobsPage(): React.ReactElement {
       .finally(() => setLoading(false));
     return () => controller.abort();
   }, [page, pageSize, statuses]);
+
+  useEffect(() => {
+    if (error) notify({
+      code: "jobs.load_failed", type: "error",
+      message: t("loadFailed"), description: error, duration: 8,
+    });
+  }, [error, t]);
 
   const columns: TableProps<JobRow>["columns"] = [
     {
