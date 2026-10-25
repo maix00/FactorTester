@@ -116,6 +116,27 @@ def _clock(bar: Any):
     return BarClock(None, None, end - minute, end, int(bar.ts_init), "factor bar")
 
 
+def _build_strategy_family_engine(execution_plan: Any, instruments: list[Any]):
+    from nautilus_trader.model import Venue
+    from server.services.nautilus_bridge.engine_factory import build_backtest_engine
+
+    configured = {str(item["name"]).upper() for item in execution_plan.venues}
+    matching = [
+        route for route in execution_plan.strategy_venue_bindings
+        if {str(value).upper() for value in route["venue_ids"]} == configured
+    ]
+    if len(matching) != 1:
+        raise ValueError(
+            "strategy family replay requires exactly one strategy route "
+            "covering every frozen Venue",
+        )
+    engine = build_backtest_engine(
+        execution_plan, {str(matching[0]["strategy_id"]): instruments},
+        trader_id="FT-STRATEGY-001",
+    )
+    return engine, Venue.from_str(sorted(configured)[0])
+
+
 def run_strategy_family_replay(
     *, inputs: dict[Any, ReplayInput], factor_bindings: dict[str, FactorExpr],
     family: Any, output_dir: Path, max_bars: int = 8,
@@ -138,25 +159,7 @@ def run_strategy_family_replay(
     }
     instruments = [row[3] for row in opened.values()]
     if execution_plan is not None:
-        from server.services.nautilus_bridge.engine_factory import build_backtest_engine
-
-        routes = list(execution_plan.strategy_venue_bindings)
-        configured = {str(item["name"]).upper() for item in execution_plan.venues}
-        matching = [
-            route for route in routes
-            if {str(value).upper() for value in route["venue_ids"]} == configured
-        ]
-        if len(matching) != 1:
-            raise ValueError(
-                "strategy family replay requires exactly one strategy route "
-                "covering every frozen Venue",
-            )
-        engine = build_backtest_engine(
-            execution_plan,
-            {str(matching[0]["strategy_id"]): instruments},
-            trader_id="FT-STRATEGY-001",
-        )
-        venue = Venue.from_str(sorted(configured)[0])
+        engine, venue = _build_strategy_family_engine(execution_plan, instruments)
     else:
         engine = BacktestEngine(config=BacktestEngineConfig(
             trader_id=TraderId.from_str("FT-STRATEGY-001"),
