@@ -712,10 +712,26 @@ def _can_read_report(actor: str, document: dict, report_ref: str) -> bool:
     )
     if not db:
         return False
-    return PermissionStore(db).allows(
-        subject=f"user:{actor}", resource_type="report",
+    subjects = [f"user:{actor}"]
+    base_url = os.environ.get("TRADERESEARCH_KEYCLOAK_URL", "") or os.environ.get("FACTORTESTER_KEYCLOAK_URL", "")
+    realm = os.environ.get("TRADERESEARCH_KEYCLOAK_REALM", "") or os.environ.get("FACTORTESTER_KEYCLOAK_REALM", "")
+    if base_url and realm:
+        try:
+            from server.identity.keycloak import KeycloakAdminAdapter, permission_subjects
+            identity = KeycloakAdminAdapter(
+                base_url, realm,
+                client_id=os.environ.get("TRADERESEARCH_KEYCLOAK_CLIENT_ID", "admin-cli"),
+                client_secret=os.environ.get("TRADERESEARCH_KEYCLOAK_CLIENT_SECRET", ""),
+            ).user(actor)
+            if identity is not None:
+                subjects = list(permission_subjects(identity))
+        except Exception:
+            pass
+    store = PermissionStore(db)
+    return any(store.allows(
+        subject=subject, resource_type="report",
         resource_ref=report_ref, action="read",
-    )
+    ) for subject in subjects)
 
 
 @sft_bp.get("/api/reports/<report_ref>/attachments/<path:name>")
