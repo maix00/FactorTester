@@ -23,6 +23,7 @@ docker run --rm \
   --memory="$MEMORY" --memory-swap="$MEMORY" --cpus="${NAUTILUS_BUILD_CPUS:-2}" \
   -e RUSTUP_DIST_SERVER=https://rsproxy.cn \
   -e RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup \
+  -e CARGO_PROFILE_RELEASE_CODEGEN_UNITS="${NAUTILUS_CODEGEN_UNITS:-16}" \
   -v "$SRC:/src" -v "$OUT:/wheels" \
   -v "$CACHE/cargo:/root/.cargo" -v "$CACHE/rustup:/root/.rustup" \
   python:3.14-slim bash -lc '
