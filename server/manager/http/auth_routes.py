@@ -28,6 +28,16 @@ class AuthenticationRoutesMixin:
 
     def _login(self) -> None:
         visitor_mode = self._visitor_mode()
+        if visitor_mode is None:
+            from server.identity.auth_mode import legacy_enabled
+
+            if not legacy_enabled():
+                json_response(self, {
+                    "success": False,
+                    "error": "password login is disabled; use Keycloak",
+                    "code": "keycloak_login_required",
+                }, 403)
+                return
         if (
             visitor_mode is None
             and self.state.require_device_auth
