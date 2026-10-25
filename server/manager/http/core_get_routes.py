@@ -376,6 +376,23 @@ class CoreGetRoutesMixin:
                 return True
             json_response(self, {"success": True, **session})
             return True
+        if parsed.path == "/api/dispatch/overview":
+            if not self._has_api_authorization():
+                self._require_capability()
+                return True
+            from server.jobs.repository import JobRepository
+            from server.manager.services.dispatch_overview import dispatch_overview
+
+            try:
+                payload = dispatch_overview(self.state, JobRepository())
+            except Exception as exc:
+                json_response(self, {
+                    "success": False,
+                    "error": f"dispatch overview unavailable: {type(exc).__name__}",
+                }, 503)
+                return True
+            json_response(self, payload)
+            return True
         if parsed.path == "/api/worktrees":
             if not self._has_api_authorization():
                 self._require_capability()

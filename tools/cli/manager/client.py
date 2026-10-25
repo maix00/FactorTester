@@ -388,6 +388,10 @@ class ManagerClient:
             form={"instance_id": str(instance_id or "").strip()},
         )
 
+    def dispatch_overview(self) -> dict[str, Any]:
+        """Read the super-admin Job dispatch overview."""
+        return self._request("GET", "/api/dispatch/overview")
+
     def _request(
         self,
         method: str,

@@ -94,6 +94,40 @@
     body.replaceChildren(wrapper);
   }
 
+  async function dispatchView(context, body) {
+    body.replaceChildren(FTUI.loading(context.t("正在读取任务队列…")));
+    const payload = await context.api("/api/dispatch/overview");
+    const wrapper = document.createElement("div");
+    wrapper.className = "detail-stack manager-page";
+    const intro = document.createElement("div");
+    intro.className = "manager-intro";
+    intro.innerHTML = `<b></b><small></small>`;
+    intro.querySelector("b").textContent = context.t("任务队列与 worker");
+    const outbox = payload.outbox || {};
+    intro.querySelector("small").textContent = `${context.t("本机 outbox")}: pending ${outbox.pending ?? 0} · sent ${outbox.sent ?? 0} · failed ${outbox.failed ?? 0} · dead ${outbox.dead ?? 0}`;
+    wrapper.append(intro);
+    const view = FTUI.table([
+      context.t("服务器"), context.t("端口"), context.t("队列"),
+      context.t("worker"), context.t("状态"),
+    ], []);
+    (payload.servers || []).forEach(server => {
+      (server.ports || []).forEach(target => {
+        const worker = target.worker_online;
+        const workerText = worker === true ? context.t("在线") : worker === false ? context.t("离线") : context.t("未知");
+        const status = server.online ? (worker === false ? "degraded" : "running") : "stopped";
+        FTUI.appendRow(view.body, [
+          `${server.server_id}${server.is_local ? " (本机)" : ""}`,
+          target.port,
+          target.queue,
+          workerText,
+          statusPill(context, status),
+        ]);
+      });
+    });
+    wrapper.append(view.shell);
+    body.replaceChildren(wrapper);
+  }
+
   function selectTab(context, value) {
     const path = `/manager?section=${encodeURIComponent(value)}`;
     if (context.openTab && context.tabID) {
@@ -116,6 +150,7 @@
     const body = document.createElement("div"); body.className = "manager-tab-content";
     const options = [
       ["services", "服务"],
+      ["dispatch", "任务队列"],
       ["allowlist", "公网访客白名单"],
       ["devices", "已认证设备"],
       ["accounts", "用户与机构"],
@@ -133,7 +168,9 @@
       context, () => show(context, selected),
     ));
     context.content.replaceChildren(wrapper);
-    if (selected === "allowlist" || selected === "devices") {
+    if (selected === "dispatch") {
+      await dispatchView(context, body);
+    } else if (selected === "allowlist" || selected === "devices") {
       await window.FTStaticLoader?.loadGroups?.(["manager-access"]);
       await FTManagerAccessControl.show(context, body, selected);
     } else if (selected === "accounts") {
