@@ -88,14 +88,16 @@ class CouchDBLibraryWriter:
         if not factor_id:
             return
         doc_id = f"factor-family:{owner_ref or 'public'}:{factor_id}"
-        status, body = self.store._request("GET", doc_id)
-        document = json.loads(body) if status == 200 else {
-            "_id": doc_id, "schema_version": 1, "kind": "factor_family",
-            "source_kind": source_kind, "factor_id": factor_id,
-            "owner_ref": owner_ref,
-        }
-        if status == 200:
-            document["_rev"] = json.loads(body)["_rev"]
+        try:
+            status, body = self.store._request("GET", doc_id)
+            document = json.loads(body)
+            document["_rev"] = document["_rev"]
+        except Exception:
+            document = {
+                "_id": doc_id, "schema_version": 1, "kind": "factor_family",
+                "source_kind": source_kind, "factor_id": factor_id,
+                "owner_ref": owner_ref,
+            }
         document["catalog"] = dict(row.get("catalog") or row)
         document["source_kind"] = source_kind
         document["owner_ref"] = owner_ref
