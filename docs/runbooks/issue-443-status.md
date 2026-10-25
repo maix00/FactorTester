@@ -1,6 +1,6 @@
 # Issue 443 status snapshot
 
-Last verified: local Manager at `http://10.118.197.132:8770/app`.
+Last verified: public ECS `71b7ba268bad9edf845e6330f1971164ad4335c1`, local Manager `http://10.118.197.132:8770/app`.
 
 ## Implemented and verified
 
@@ -18,24 +18,23 @@ Last verified: local Manager at `http://10.118.197.132:8770/app`.
   notification center on mobile; uncaught errors routed to it.
 - PWA manifest and shell-only service worker; API/auth responses are not
   cached.
-- Native pages: account, desktop/mobile runs, settings.
-- Legacy pages still embedded for research, trading and catalog; all registered
-  routes return 200 through the local Manager.
-- Local Docker stack health script; duplicate stopped CouchDB container removed.
+- Native pages: account, desktop/mobile runs, settings, research/report read and report component operations, catalog lists/details, job artifact download/cancel.
+- Public image `factortester-public:71b7ba268bad9edf845e6330f1971164ad4335c1` is healthy and contains the local Nautilus wheel plus the committed cp314 `py_alpha_lib` wheel.
+- Nautilus wheel built from the local submodule source; public import reports `2.0.0rc8`; `alpha` imports from the cp314 wheel.
+- Server suite: `1518 passed, 2 skipped`; web tests: `10 passed`; typecheck passes.
 
 ## Not complete
 
-- Nautilus wheel has not yet been produced for the local submodule commit.
-- The public production revision has not been changed to this shell.
-- Research/trading/catalog are not native React migrations.
-- Research Report tables do not yet use `TRDataTable`.
-- Real strategy-family RunSpec public acceptance is still pending.
+- Research editor, trading workbench and IC/factor-series workbench still use bridges.
+- Research Report tables do not yet all use `TRDataTable`.
+- Real strategy-family RunSpec public acceptance still needs an authenticated public run.
+- Interactive/mobile page screenshots after the public image switch have not been refreshed.
 
 ## Do not claim
 
-Do not claim Nautilus is installed, the strategy-family chain is accepted, or
-that all pages are native React. The legacy iframe bridge remains intentional
-during migration.
+Do not claim real strategy-family public acceptance or that all pages are
+native React. Nautilus is installed in the public image; the strategy-family
+acceptance run is still pending.
 
 ## Desktop page render check
 
