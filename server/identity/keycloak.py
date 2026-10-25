@@ -141,18 +141,48 @@ class KeycloakAdminAdapter:
             path = str(group.get("path") or "")
             if path:
                 groups.append(path)
-        try:
-            org_rows = self._get(f"users/{user_id}/organizations") or []
-        except urllib.error.HTTPError as exc:
-            if exc.code not in {403, 404}:
-                raise
-            org_rows = []
-        orgs = [
-            str(item.get("name") or "")
-            for item in org_rows
-            if item.get("name")
-        ]
+        orgs = self._organizations_for_user(user_id, str(raw.get("username") or ""))
         return self._identity(raw, groups, orgs)
+
+    def _organizations_for_user(self, user_id: str, username: str) -> list[str]:
+        """Keycloak 26 has no /users/{id}/organizations; scan org members."""
+        try:
+            organizations = self._get("organizations") or []
+        except urllib.error.HTTPError as exc:
+            if exc.code in {403, 404}:
+                return []
+            raise
+        names = []
+        for organization in organizations:
+            org_id = str(organization.get("id") or "")
+            if not org_id:
+                continue
+            try:
+                members = self._get(f"organizations/{org_id}/members") or []
+            except urllib.error.HTTPError as exc:
+                if exc.code in {403, 404}:
+                    continue
+                raise
+            if any(str(item.get("username") or "") == username for item in members):
+                names.append(str(organization.get("name") or organization.get("alias") or ""))
+        return [name for name in names if name]
+
+    def add_organization_member(self, organization: str, user_id: str) -> None:
+        import json
+        import urllib.request
+
+        orgs = self._get("organizations") or []
+        target = next((item for item in orgs if item.get("name") == organization), None)
+        if target is None:
+            raise ValueError(f"organization not found: {organization}")
+        request = urllib.request.Request(
+            f"{self.base_url}/admin/realms/{self.realm}/organizations/{target['id']}/members",
+            data=json.dumps(str(user_id)).encode(), method="POST",
+            headers={"Authorization": f"Bearer {self._token()}", "Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            if response.status not in {201, 204}:
+                raise RuntimeError(f"organization member add failed: {response.status}")
 
     def _all_groups(self, parent: str = "") -> list[dict]:
         path = f"groups/{parent}/children" if parent else "groups"

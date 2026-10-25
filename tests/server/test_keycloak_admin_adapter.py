@@ -7,7 +7,8 @@ class Fake(KeycloakAdminAdapter):
         return {
             "users?username=alice&exact=true": [{"username": "alice", "id": "u1"}],
             "users/u1/groups": [{"path": "/team/a"}],
-            "users/u1/organizations": [{"name": "org-a"}],
+            "organizations": [{"id": "o1", "name": "org-a"}],
+            "organizations/o1/members": [{"username": "alice"}],
         }[path]
 
 
