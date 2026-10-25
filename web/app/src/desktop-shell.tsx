@@ -12,7 +12,7 @@ import { ConfigProvider } from "antd";
 import { useTranslation } from "react-i18next";
 import zhCN from "antd/locale/zh_CN";
 import enUS from "antd/locale/en_US";
-import { LanguageSwitch } from "./components/language-switch.tsx";
+import { SettingsOverlay } from "./components/settings-overlay.tsx";
 import { DesktopNotificationHost } from "./notifications/antd-host.tsx";
 
 for (const page of BUILTIN_PAGES) registerPage(page);
@@ -48,6 +48,7 @@ export function DesktopShell(): React.ReactElement {
   const [api, setApi] = useState<DockviewApi | null>(null);
   const [active, setActive] = useState(pages[0]?.id ?? "research");
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("tr.sidebar.collapsed") === "1");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const value = Number(localStorage.getItem("tr.sidebar.width"));
     return Number.isFinite(value) && value >= 180 && value <= 360 ? value : 230;
@@ -138,6 +139,7 @@ export function DesktopShell(): React.ReactElement {
       fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
     } }}>
     <DesktopNotificationHost />
+    <SettingsOverlay open={settingsOpen} onClose={() => setSettingsOpen(false)} onResetLayout={resetLayout} />
     <div className={`tr-app-shell${collapsed ? " is-collapsed" : ""}`} style={{ "--tr-sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}>
       <aside className="tr-sidebar" aria-label="主导航">
         <div className="tr-sidebar-header">
@@ -185,9 +187,8 @@ export function DesktopShell(): React.ReactElement {
           ))}
         </nav>
         <div className="tr-sidebar-spacer" />
-        <LanguageSwitch />
-        <button type="button" className="tr-sidebar-reset" onClick={resetLayout}>{t("resetLayout")}</button>
-        <button type="button" className="tr-account-button" onClick={() => open("account")}>
+        <button type="button" className="tr-sidebar-reset" onClick={() => setSettingsOpen(true)}>{t("settings")}</button>
+        <button type="button" className="tr-account-button" onClick={() => setSettingsOpen(true)}>
           <PageIcon name="account" />
           <span className="tr-nav-label">{t("settings")}</span>
         </button>
