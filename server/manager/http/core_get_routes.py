@@ -484,7 +484,7 @@ class CoreGetRoutesMixin:
             })
             return True
         if parsed.path in {"/app", "/app/"}:
-            body, content_type = static_file("web-app.html")
+            body, content_type = static_file("vendor/web-app/index.html")
             self.send_response(200)
             self.send_header("Content-Type", content_type)
             self.send_header(
