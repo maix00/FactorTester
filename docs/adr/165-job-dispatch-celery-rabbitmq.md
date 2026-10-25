@@ -86,6 +86,13 @@ target queues; the 8001 worker consumed only the 8001 message, wrote
 `succeeded` and progress, while 8000 remained queued with one message.  This
 proves broker routing/target isolation, not Nautilus execution.
 
+Additional live checks (fake executor only): publishing the same message twice
+produced one `succeeded` execution and one `duplicate` result; killing the
+worker during a 30s task left the Job RUNNING until its 8s lease expired, then
+`recover_expired_leases` marked it `failed/worker_lease_expired`; cancelling a
+running Job made the executor observe the boundary and close as `cancelled`
+without a false failure.
+
 ## Worker boundary
 
 Celery worker configuration starts with `prefetch_multiplier=1`, one process,
