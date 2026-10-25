@@ -323,3 +323,5 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-report-component button { border: 0; background: transparent; color: #b42318; font: inherit; font-size: 11px; }
 .tr-report-markdown { padding: 0 16px 16px; }
 .tr-report-markdown summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.tr-report-component-actions { display: flex; gap: 4px; align-items: flex-start; }
+.tr-report-component-actions button { min-width: 24px; color: var(--muted); }
