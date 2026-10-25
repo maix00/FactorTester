@@ -1,0 +1,10 @@
+[Unit]
+Description=Prune FactorTester control events older than 90 days
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+Unit=factortester-control-events-retention.service
+
+[Install]
+WantedBy=timers.target
