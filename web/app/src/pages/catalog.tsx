@@ -13,7 +13,7 @@ export function CatalogPage(): React.ReactElement {
   const [selected, setSelected] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [legacy, setLegacy] = useState(false);
-  const [tab, setTab] = useState<"products" | "factors" | "families" | "sets" | "strategies" | "sources" | "categories">("products");
+  const [tab, setTab] = useState<"products" | "factors" | "families" | "sets" | "strategies" | "sources" | "categories" | "reference">("products");
   const [sources, setSources] = useState<{ id: string; name?: string; visitor_data_accessible?: boolean }[]>([]);
   const [categories, setCategories] = useState<{ id?: string; name?: string; title?: string }[]>([]);
   const [families, setFamilies] = useState<Record<string, unknown>[]>([]);
@@ -30,6 +30,9 @@ export function CatalogPage(): React.ReactElement {
   const [productSelected, setProductSelected] = useState<Record<string, unknown> | null>(null);
   const [sourceSelected, setSourceSelected] = useState<Record<string, unknown> | null>(null);
   const [categorySelected, setCategorySelected] = useState<Record<string, unknown> | null>(null);
+  const [referenceKind, setReferenceKind] = useState("contract");
+  const [referenceRef, setReferenceRef] = useState("");
+  const [referenceData, setReferenceData] = useState<Record<string, unknown> | null>(null);
   const [familySelected, setFamilySelected] = useState<Record<string, unknown> | null>(null);
   const [factorSetSelected, setFactorSetSelected] = useState<Record<string, unknown> | null>(null);
   const [factors, setFactors] = useState<Record<string, unknown>[]>([]);
@@ -40,6 +43,16 @@ export function CatalogPage(): React.ReactElement {
       .then((payload: Payload<Group>) => setGroups(payload.groups ?? []))
       .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }));
   }, [t]);
+
+  useEffect(() => {
+    if (tab !== "reference" || !referenceRef) { setReferenceData(null); return; }
+    setLoading(true);
+    fetch(`/api/report-references/validate?kind=${encodeURIComponent(referenceKind)}&target_ref=${encodeURIComponent(referenceRef)}`, { credentials: "same-origin" })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+      .then((value) => setReferenceData(value))
+      .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }))
+      .finally(() => setLoading(false));
+  }, [tab, referenceKind, referenceRef, t]);
 
   useEffect(() => {
     if (tab !== "families" && tab !== "sets") return;
@@ -142,6 +155,7 @@ export function CatalogPage(): React.ReactElement {
         <button type="button" className={tab === "sets" ? "is-active" : ""} onClick={() => setTab("sets")}>{t("catalog.sets")}</button>
         <button type="button" className={tab === "sources" ? "is-active" : ""} onClick={() => setTab("sources")}>{t("catalog.sources")}</button>
         <button type="button" className={tab === "categories" ? "is-active" : ""} onClick={() => setTab("categories")}>{t("catalog.categories")}</button>
+        <button type="button" className={tab === "reference" ? "is-active" : ""} onClick={() => setTab("reference")}>{t("catalog.reference")}</button>
       </div>
       {tab === "products" ? <div className="tr-catalog-groups">
         <button type="button" className={selected ? "" : "is-active"} onClick={() => setSelected("")}>{t("catalog.all")}</button>
@@ -159,7 +173,18 @@ export function CatalogPage(): React.ReactElement {
         })}
       </div> : null}
       <div className="tr-catalog-products">
-        {tab === "families" ? (
+        {tab === "reference" ? (
+          <div className="tr-catalog-reference">
+            <select value={referenceKind} onChange={(event) => setReferenceKind(event.target.value)}>
+              <option value="contract">contract</option>
+              <option value="continuous-contract">continuous-contract</option>
+              <option value="factor">factor</option>
+              <option value="strategy">strategy</option>
+            </select>
+            <input value={referenceRef} onChange={(event) => setReferenceRef(event.target.value)} placeholder={t("catalog.referenceHint")} />
+            {referenceData ? <pre className="tr-job-detail">{JSON.stringify(referenceData, null, 2)}</pre> : loading ? <p>{t("loading")}</p> : null}
+          </div>
+        ) : tab === "families" ? (
           families.length === 0 ? <p>{t("empty")}</p> : families.map((item, index) => (
             <article key={String(item.family_ref ?? item.id ?? index)}>
               <button type="button" className="tr-catalog-card-link" onClick={() => setFamilySelected(item)}><b>{String(item.name ?? item.title ?? item.family_ref ?? "—")}</b></button>
