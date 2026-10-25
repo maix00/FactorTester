@@ -53,9 +53,20 @@ def execute_dispatch_payload(
     *,
     executor: JobExecutor | None = None,
     repository: JobRepository | None = None,
+    target_deployment: str | None = None,
+    target_port: int | None = None,
 ) -> dict[str, Any]:
-    """Execute one Celery payload; safe to call directly in tests."""
+    """Execute one Celery payload; safe to call directly in tests.
+
+    A worker bound to another deployment/port must return ``wrong_target``
+    without claiming; the exchange routes by target, but this is defense in
+    depth against a misbound consumer.
+    """
     message = DispatchMessage.from_dict(payload)
+    if target_deployment is not None and message.deployment_id != target_deployment:
+        return {"status": "wrong_target", "job_id": message.job_id}
+    if target_port is not None and message.service_port != int(target_port):
+        return {"status": "wrong_target", "job_id": message.job_id}
     resolved = executor if executor is not None else resolve_executor()
     repo = repository or JobRepository()
     return DispatchWorker(repo).execute(message, resolved)
@@ -65,15 +76,23 @@ def create_app(
     *,
     broker_url: str | None = None,
     queue: str = DEFAULT_QUEUE,
+    target_deployment: str | None = None,
+    target_port: int | None = None,
 ):
     from celery import Celery
 
     broker = broker_url or os.environ.get("FACTORTESTER_BROKER_URL", "").strip()
     if not broker:
         raise RuntimeError("FACTORTESTER_BROKER_URL is required to create the Celery app")
+    resolved_deployment = target_deployment or os.environ.get("FACTORTESTER_DEPLOYMENT_ID", "").strip() or None
+    raw_port = target_port if target_port is not None else os.environ.get("FACTORTESTER_SERVICE_PORT", "").strip()
+    resolved_port = int(raw_port) if raw_port not in (None, "") else None
+    queue_name = queue
+    if resolved_deployment and resolved_port:
+        queue_name = f"{queue}.{resolved_deployment}.{resolved_port}"
     app = Celery("factortester.jobs", broker=broker)
     app.conf.update(
-        task_default_queue=queue,
+        task_default_queue=queue_name,
         task_serializer="json",
         result_serializer="json",
         accept_content=["json"],
@@ -89,6 +108,10 @@ def create_app(
 
     @app.task(name=TASK_NAME, bind=True)
     def execute_job(self, payload: Mapping[str, Any]) -> dict[str, Any]:
-        return execute_dispatch_payload(payload)
+        return execute_dispatch_payload(
+            payload,
+            target_deployment=resolved_deployment,
+            target_port=resolved_port,
+        )
 
     return app

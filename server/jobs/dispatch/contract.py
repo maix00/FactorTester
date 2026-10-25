@@ -11,7 +11,7 @@ import hashlib
 import re
 from typing import Any, Mapping
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 _JOB_ID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -43,6 +43,7 @@ class DispatchMessage:
     deployment_id: str
     run_spec_hash: str
     job_spec_hash: str
+    service_port: int
     schema_version: int = SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -58,6 +59,10 @@ class DispatchMessage:
         ):
             if not _SHA256.fullmatch(value):
                 raise DispatchSchemaError(f"{name} must be sha256 hex")
+        if isinstance(self.service_port, bool) or not isinstance(self.service_port, int):
+            raise DispatchSchemaError("service_port must be an integer")
+        if not 1 <= self.service_port <= 65535:
+            raise DispatchSchemaError("service_port is out of range")
         if self.schema_version != SCHEMA_VERSION:
             raise DispatchSchemaError(
                 f"unsupported dispatch schema: {self.schema_version}"
@@ -75,6 +80,7 @@ class DispatchMessage:
             "deployment_id": self.deployment_id,
             "run_spec_hash": self.run_spec_hash,
             "job_spec_hash": self.job_spec_hash,
+            "service_port": self.service_port,
         }
 
     def digest(self) -> str:
@@ -95,6 +101,7 @@ class DispatchMessage:
             deployment_id=_required_text(payload, "deployment_id"),
             run_spec_hash=_required_text(payload, "run_spec_hash"),
             job_spec_hash=_required_text(payload, "job_spec_hash"),
+            service_port=_positive_int(payload, "service_port"),
             schema_version=version,
         )
 

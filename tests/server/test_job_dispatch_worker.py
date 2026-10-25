@@ -17,6 +17,7 @@ def _queued_job(repository: JobRepository, job_id: str = "job-worker") -> None:
             kind="backtest",
             status=JobStatus.SUBMITTED,
             deployment_id="remote-main",
+            service_port=8001,
             run_spec_hash="e" * 64,
             job_spec={},
         )
@@ -26,7 +27,7 @@ def _queued_job(repository: JobRepository, job_id: str = "job-worker") -> None:
 
 
 def _message(job_id: str = "job-worker") -> DispatchMessage:
-    return DispatchMessage(job_id, 1, "remote-main", "e" * 64, "f" * 64)
+    return DispatchMessage(job_id, 1, "remote-main", "e" * 64, "f" * 64, 8001)
 
 
 class _Executor:

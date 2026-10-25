@@ -24,6 +24,7 @@ def _queued(repository: JobRepository, job_id: str = "job-celery") -> None:
             kind="backtest",
             status=JobStatus.SUBMITTED,
             deployment_id="remote-main",
+            service_port=8001,
             run_spec_hash="a" * 64,
             job_spec={},
         )
@@ -34,12 +35,13 @@ def _queued(repository: JobRepository, job_id: str = "job-celery") -> None:
 
 def _payload(job_id: str = "job-celery") -> dict:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "job_id": job_id,
         "attempt": 1,
         "deployment_id": "remote-main",
         "run_spec_hash": "a" * 64,
         "job_spec_hash": "b" * 64,
+        "service_port": 8001,
     }
 
 
@@ -89,3 +91,20 @@ def test_resolve_executor_rejects_non_executor(monkeypatch):
     monkeypatch.setenv("FACTORTESTER_NAUTILUS_EXECUTOR", "server.jobs.dispatch.worker:ExecutionOutcome")
     with pytest.raises(DispatchExecutorUnavailable):
         resolve_executor()
+
+
+def test_wrong_target_is_rejected_before_claim(tmp_path):
+    repository = JobRepository(tmp_path / "jobs.db")
+    _queued(repository)
+    result = execute_dispatch_payload(
+        _payload(), executor=_Executor(), repository=repository,
+        target_deployment="remote-main", target_port=8002,
+    )
+    assert result["status"] == "wrong_target"
+    assert repository.require("job-celery").status is JobStatus.QUEUED
+
+
+def test_app_queue_is_scoped_to_deployment_and_port():
+    pytest.importorskip("celery")
+    app = create_app(broker_url="memory://", queue="q", target_deployment="remote-main", target_port=8001)
+    assert app.conf.task_default_queue == "q.remote-main.8001"

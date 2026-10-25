@@ -215,6 +215,8 @@ class JobRepository(
         deployment_id = str(row["deployment_id"] or "")
         if not run_spec_hash or not deployment_id:
             return
+        if int(row["service_port"] or 0) < 1:
+            return
         enqueue(
             conn,
             DispatchMessage(
@@ -223,6 +225,7 @@ class JobRepository(
                 deployment_id=deployment_id,
                 run_spec_hash=run_spec_hash,
                 job_spec_hash=str(row["job_spec_hash"] or ""),
+                service_port=max(1, int(row["service_port"] or 0)),
             ),
         )
 

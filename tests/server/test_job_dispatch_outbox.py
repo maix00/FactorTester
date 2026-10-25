@@ -19,16 +19,17 @@ def _message(job_id: str = "job-1", attempt: int = 1) -> DispatchMessage:
         deployment_id="remote-main",
         run_spec_hash="a" * 64,
         job_spec_hash="b" * 64,
+        service_port=8001,
     )
 
 
 def test_dispatch_message_rejects_unsafe_or_unversioned_payload():
     with pytest.raises(DispatchSchemaError):
-        DispatchMessage("bad/id", 1, "remote-main", "a" * 64, "b" * 64)
+        DispatchMessage("bad/id", 1, "remote-main", "a" * 64, "b" * 64, 8001)
     with pytest.raises(DispatchSchemaError):
-        DispatchMessage("job", 0, "remote-main", "a" * 64, "b" * 64)
+        DispatchMessage("job", 0, "remote-main", "a" * 64, "b" * 64, 8001)
     with pytest.raises(DispatchSchemaError):
-        DispatchMessage("job", 1, "remote-main", "not-a-hash", "b" * 64)
+        DispatchMessage("job", 1, "remote-main", "not-a-hash", "b" * 64, 8001)
     payload = _message().to_dict()
     payload["schema_version"] = SCHEMA_VERSION + 1
     with pytest.raises(DispatchSchemaError):
@@ -125,6 +126,7 @@ def test_repository_queues_dispatch_in_same_transaction(tmp_path):
         kind="backtest",
         status=JobStatus.SUBMITTED,
         deployment_id="remote-main",
+        service_port=8001,
         run_spec_hash="c" * 64,
         job_spec={"analysis": "backtest"},
     )
@@ -155,6 +157,7 @@ def test_repository_does_not_queue_legacy_job_without_run_spec(tmp_path):
             kind="backtest",
             status=JobStatus.SUBMITTED,
             deployment_id="remote-main",
+            service_port=8001,
             run_spec_hash="",
             job_spec={},
         )
@@ -180,6 +183,7 @@ def test_claim_attempt_is_idempotent(tmp_path):
             kind="backtest",
             status=JobStatus.SUBMITTED,
             deployment_id="remote-main",
+            service_port=8001,
             run_spec_hash="d" * 64,
             job_spec={},
         )
@@ -209,6 +213,7 @@ def test_cancelling_queued_job_closes_outbox_row(tmp_path):
             kind="backtest",
             status=JobStatus.SUBMITTED,
             deployment_id="remote-main",
+            service_port=8001,
             run_spec_hash="e" * 64,
             job_spec={},
         )
@@ -236,6 +241,7 @@ def test_non_backtest_job_is_not_dispatched(tmp_path):
             kind="ic",
             status=JobStatus.SUBMITTED,
             deployment_id="remote-main",
+            service_port=8001,
             run_spec_hash="f" * 64,
             job_spec={},
         )
@@ -260,6 +266,7 @@ def test_worker_lease_heartbeat_and_expiry_fails_job(tmp_path):
             kind="backtest",
             status=JobStatus.SUBMITTED,
             deployment_id="remote-main",
+            service_port=8001,
             run_spec_hash="1" * 64,
             job_spec={},
         )

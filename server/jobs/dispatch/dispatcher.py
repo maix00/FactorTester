@@ -25,13 +25,17 @@ class KombuPublisher:
     queue: str = DEFAULT_QUEUE
     confirm_timeout: float = 10.0
 
+    def target_queue(self, message: DispatchMessage) -> str:
+        return f"{self.queue}.{message.deployment_id}.{message.service_port}"
+
     def publish(self, message: DispatchMessage) -> None:
         from kombu import Connection, Exchange, Producer, Queue
 
-        queue = Queue(self.queue, Exchange("factortester", type="direct"), routing_key=self.queue)
+        name = self.target_queue(message)
+        queue = Queue(name, Exchange("factortester", type="direct"), routing_key=name)
         with Connection(self.broker_url, connect_timeout=self.confirm_timeout) as connection:
             channel = connection.channel()
-            producer = Producer(channel, exchange=queue.exchange, routing_key=self.queue)
+            producer = Producer(channel, exchange=queue.exchange, routing_key=name)
             producer.publish(
                 message.to_dict(),
                 declare=[queue],
