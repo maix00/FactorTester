@@ -57,12 +57,28 @@ export function ReportEditor({ publicationID }: { publicationID: string }): Reac
         return (
           <section key={chapterID} className="tr-report-chapter">
             <h3>{chapter.title || chapterID}</h3>
-            {(chapter.components ?? []).map((component) => (
+            {(chapter.components ?? []).map((component, index, list) => (
               <div className="tr-report-component" key={String(component.component_id)}>
                 <div><b>{component.title || component.kind || component.component_id}</b>{component.body ? <p>{component.body}</p> : null}</div>
-                {component.component_id ? <button type="button" disabled={busy} onClick={() => apply({
-                  op: "remove_component", chapter_id: chapterID, component_id: component.component_id,
-                })}>{t("report.remove")}</button> : null}
+                <div className="tr-report-component-actions">
+                  {component.component_id && index > 0 ? (
+                    <button type="button" disabled={busy} onClick={() => apply({
+                      op: "move_component", chapter_id: chapterID, component_id: component.component_id,
+                      parent_id: component.parent_id || "root",
+                      after_component_id: index > 1 ? list[index - 2]?.component_id || "" : "",
+                    })}>↑</button>
+                  ) : null}
+                  {component.component_id && index < list.length - 1 ? (
+                    <button type="button" disabled={busy} onClick={() => apply({
+                      op: "move_component", chapter_id: chapterID, component_id: component.component_id,
+                      parent_id: component.parent_id || "root",
+                      after_component_id: list[index + 1]?.component_id || "",
+                    })}>↓</button>
+                  ) : null}
+                  {component.component_id ? <button type="button" disabled={busy} onClick={() => apply({
+                    op: "remove_component", chapter_id: chapterID, component_id: component.component_id,
+                  })}>{t("report.remove")}</button> : null}
+                </div>
               </div>
             ))}
           </section>
