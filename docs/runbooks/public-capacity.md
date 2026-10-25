@@ -34,3 +34,15 @@ Thresholds (overridable):
 1. Stop the app only.
 2. Set `FACTORTESTER_STATE_ROOT` back to the previous path.
 3. Start the app and verify `/state/job-index.sqlite` and health.
+
+
+## Installed monitor
+
+`factortester-capacity-check.timer` runs every 15 minutes and writes
+`/data/state/CAPACITY_ALERT` on failure (removed on recovery). Check:
+
+```bash
+systemctl list-timers factortester-capacity-check.timer
+sudo journalctl -u factortester-capacity-check.service -n 5
+cat /data/state/CAPACITY_ALERT
+```
