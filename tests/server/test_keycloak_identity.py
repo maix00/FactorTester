@@ -14,3 +14,14 @@ def test_nested_group_and_org_membership():
     assert group_subject("/team/a/") == "group:team/a"
     assert permission_subjects(adapter.user("alice"))[0] == "user:alice"
     assert organization_subject("org-a") == "org:org-a"
+
+
+def test_oidc_authorization_url_contains_state_and_redirect():
+    from server.identity.keycloak import oidc_authorization_url
+    url = oidc_authorization_url(
+        base_url="https://id.example", realm="trade", client_id="web",
+        redirect_uri="https://app.example/callback", state="s1",
+    )
+    assert url.startswith("https://id.example/realms/trade/protocol/openid-connect/auth?")
+    assert "state=s1" in url
+    assert "redirect_uri=https%3A%2F%2Fapp.example%2Fcallback" in url

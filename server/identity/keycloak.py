@@ -166,3 +166,23 @@ class KeycloakAdminAdapter:
             return []
         members = self._get(f"organizations/{target['id']}/members") or []
         return [self._identity(item, [], [organization]) for item in members]
+
+
+def oidc_authorization_url(
+    *, base_url: str, realm: str, client_id: str, redirect_uri: str,
+    state: str, scope: str = "openid profile email",
+) -> str:
+    """Build the browser authorization-code URL for a Keycloak realm."""
+    import urllib.parse
+
+    query = urllib.parse.urlencode({
+        "client_id": client_id,
+        "response_type": "code",
+        "scope": scope,
+        "redirect_uri": redirect_uri,
+        "state": state,
+    })
+    return (
+        f"{base_url.rstrip('/')}/realms/{realm.strip('/')}"
+        f"/protocol/openid-connect/auth?{query}"
+    )
