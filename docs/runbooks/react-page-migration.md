@@ -11,7 +11,7 @@ not the same as a fully migrated detail/editor route.
 | `/jobs` | native list; native detail + run configuration drawer; input still legacy |
 | `/backtest` | native strategy-family landing; workbench bridge |
 | `/products` | native catalog with products/groups/factors/families/sets/strategies/sources/categories tabs; editors bridge |
-| `/settings` | native overlay; language/workspace/account/server/federation/devices/quota/updates read natively; control database still a placeholder |
+| `/settings` | native overlay; language/workspace/account/server/control-database/federation/devices/quota/updates read natively |
 | `/account` | native |
 
 ## Hidden/legacy routes still to migrate
@@ -27,7 +27,6 @@ not the same as a fully migrated detail/editor route.
 /product-category/:id
 /products/:id, /product-reference/:kind/:id
 /profiles, /profiles/:id
-/settings/control-database
 /manager
 /mihomo
 /docs/:slug
