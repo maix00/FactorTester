@@ -6,8 +6,8 @@ export const resources = {
     common: {
       resetLayout: "重置布局", settings: "设置", close: "关闭", pages: "{{count}} 个页面",
       loading: "正在加载…", loadFailed: "读取失败", empty: "暂无数据", language: "语言",
-      filter: "筛选", total: "共 {{count}} 条", collapse: "收起侧栏", expand: "展开侧栏",
-      nav: { research: "研究", jobs: "运行", trading: "交易", workspace: "工作区", catalog: "目录", account: "账户" },
+      filter: "筛选", total: "共 {{count}} 条", collapse: "收起侧栏", expand: "展开侧栏", back: "返回",
+      nav: { research: "研究", jobs: "运行", trading: "交易", workspace: "工作区", settings: "设置", catalog: "目录", account: "账户" },
       jobs: { task: "任务", status: "状态", jobId: "Job ID", updated: "更新时间", statusFilter: "按状态筛选", recent: "最近运行" },
       workspace: { title: "工作区", desc: "已打开和最近访问的页面" },
       settingsPanel: {
@@ -24,8 +24,8 @@ export const resources = {
     common: {
       resetLayout: "Reset layout", settings: "Settings", close: "Close", pages: "{{count}} pages",
       loading: "Loading…", loadFailed: "Load failed", empty: "No data", language: "Language",
-      filter: "Filter", total: "{{count}} items", collapse: "Collapse sidebar", expand: "Expand sidebar",
-      nav: { research: "Research", jobs: "Runs", trading: "Trading", workspace: "Workspace", catalog: "Catalog", account: "Account" },
+      filter: "Filter", total: "{{count}} items", collapse: "Collapse sidebar", expand: "Expand sidebar", back: "Back",
+      nav: { research: "Research", jobs: "Runs", trading: "Trading", workspace: "Workspace", settings: "Settings", catalog: "Catalog", account: "Account" },
       jobs: { task: "Task", status: "Status", jobId: "Job ID", updated: "Updated", statusFilter: "Filter by status", recent: "Recent runs" },
       workspace: { title: "Workspace", desc: "Open and recently visited pages" },
       settingsPanel: {
@@ -74,3 +74,4 @@ i18n.use(initReactI18next).init({
 document.documentElement.lang = i18n.language === "en" ? "en" : "zh-Hans";
 
 export default i18n;
+// no-op placeholder

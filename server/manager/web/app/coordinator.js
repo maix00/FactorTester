@@ -1,6 +1,8 @@
 (() => {
-  const embeddedPresentation = new URLSearchParams(location.search).get("presentation") === "embedded";
+  const presentation = new URLSearchParams(location.search).get("presentation");
+  const embeddedPresentation = presentation === "embedded" || presentation === "canvas";
   document.documentElement.classList.toggle("embedded-presentation", embeddedPresentation);
+  document.documentElement.classList.toggle("embedded-canvas", presentation === "canvas");
   const runtime = FTAppRuntime.create();
   const {
     state, content, title, eyebrow, toolbar,
