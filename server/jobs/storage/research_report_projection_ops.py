@@ -52,6 +52,18 @@ def _reorder_chapter_blocks(components: list[dict], chapter_id: str,
     return rest[:target_end] + block + rest[target_end:]
 
 
+def _remove_chapter_block(components: list[dict], chapter_id: str) -> list[dict]:
+    starts = [index for index, item in enumerate(components)
+              if str(item.get("component_id")) == chapter_id]
+    if not starts:
+        raise ValueError("chapter not found")
+    start = starts[0]
+    later = [index for index, item in enumerate(components)
+             if index > start and str(item.get("kind") or "") == "chapter"]
+    end = later[0] if later else len(components)
+    return components[:start] + components[end:]
+
+
 def _insert_chapter_block(components: list[dict], chapter_id: str,
                           after_chapter_id: str | None) -> list[dict]:
     if any(str(item.get("component_id")) == chapter_id for item in components):
@@ -117,7 +129,18 @@ def apply_projection_operation(store, document: dict[str, Any], *, base_rev: str
     revision = base_rev
     chapter = None
     op = str(operation.get("op") or "")
-    if op == "insert_chapter":
+    if op == "remove_chapter":
+        chapter_id = str(operation.get("chapter_id") or "")
+        chapters = list(index.get("chapters") or [])
+        filtered = [item for item in chapters
+                    if str(item.get("component_id")) != chapter_id]
+        if len(filtered) == len(chapters):
+            raise ValueError("chapter not found")
+        index = {**index, "chapters": filtered}
+        projection["components"] = _remove_chapter_block(
+            list(projection.get("components") or []), chapter_id)
+        removed_logical = chapter_attachment_path(chapter_id)
+    elif op == "insert_chapter":
         chapter_id = str(operation.get("chapter_id") or "")
         after = operation.get("after_chapter_id")
         index = move_chapter({
@@ -224,6 +247,8 @@ def apply_projection_operation(store, document: dict[str, Any], *, base_rev: str
     _, body = store._request("GET", document["_id"])
     fresh = json.loads(body)
     fresh.setdefault("attachments", {}).update(updates)
+    if "removed_logical" in locals():
+        fresh["attachments"].pop(removed_logical, None)
     fresh["projection_hash"] = projection["projection_hash"]
     fresh["generation"] = generation
     try:
