@@ -14,6 +14,7 @@ const SECTIONS = [
   { id: "workspace", icon: "workspace" },
   { id: "language", icon: "research" },
   { id: "updates", icon: "runs" },
+  { id: "manager", icon: "runs" },
 ] as const;
 
 export function SettingsOverlay({
@@ -25,7 +26,7 @@ export function SettingsOverlay({
 }): React.ReactElement {
   const { t } = useTranslation();
   const [section, setSection] = useState<string>("account");
-  const [session, setSession] = useState<{ username?: string; role?: string } | null>(null);
+  const [session, setSession] = useState<{ username?: string; role?: string; capabilities?: { manager?: boolean } } | null>(null);
   const [serverInfo, setServerInfo] = useState<Record<string, unknown> | null>(null);
   const [sectionData, setSectionData] = useState<Record<string, unknown> | null>(null);
   useEffect(() => {
@@ -40,6 +41,7 @@ export function SettingsOverlay({
   useEffect(() => {
     const endpoints: Record<string, string> = {
       controlDatabase: "/api/control-database/config",
+      manager: "/api/worktrees",
       federation: "/api/federation/config",
       devices: "/api/devices",
       quota: "/api/jobs/storage",
@@ -60,7 +62,8 @@ export function SettingsOverlay({
       .then((value) => setServerInfo(value))
       .catch(() => setServerInfo(null));
   }, [open, section]);
-  const current = SECTIONS.find((item) => item.id === section) ?? SECTIONS[0];
+  const visibleSections = SECTIONS.filter((item) => item.id !== "manager" || Boolean(session?.capabilities?.manager));
+  const current = visibleSections.find((item) => item.id === section) ?? visibleSections[0];
   return (
     <Modal
       open={open}
@@ -74,7 +77,7 @@ export function SettingsOverlay({
     >
       <div className="tr-settings-hub">
         <nav className="tr-settings-nav" aria-label={t("settingsPanel.title")}>
-          {SECTIONS.map((item) => (
+          {visibleSections.map((item) => (
             <button
               key={item.id}
               type="button"
@@ -115,7 +118,7 @@ export function SettingsOverlay({
               <h3>{t("settingsPanel.sections.server")}</h3>
               {serverInfo ? <pre className="tr-job-detail">{JSON.stringify(serverInfo, null, 2)}</pre> : <p>{t("loading")}</p>}
             </div>
-          ) : ["controlDatabase", "federation", "devices", "quota", "updates"].includes(current.id) ? (
+          ) : ["controlDatabase", "federation", "devices", "quota", "updates", "manager"].includes(current.id) ? (
             <div className="tr-settings-card">
               <h3>{t(`settingsPanel.sections.${current.id}`)}</h3>
               {sectionData ? <pre className="tr-job-detail">{JSON.stringify(sectionData, null, 2)}</pre> : <p>{t("loading")}</p>}
