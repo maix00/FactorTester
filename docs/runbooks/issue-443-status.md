@@ -42,11 +42,11 @@ during migration.
 Verified with Playwright against the local Manager:
 
 ```text
-Research  -> embedded frame
+Research  -> native landing page + legacy detail bridge
 Runs      -> native page
 Trading   -> embedded frame
 Catalog   -> native page with a legacy editor bridge
 Account   -> native account page
 ```
 
-All five entries render; Runs, Catalog and Account are native today.
+All five entries render; Research, Runs, Catalog and Account are native today.
