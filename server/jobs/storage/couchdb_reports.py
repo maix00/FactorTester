@@ -87,6 +87,23 @@ class CouchDBObjectStore:
     def get_attachment(self, report_ref: str, name: str) -> bytes:
         return self._request("GET", f"{report_ref}/{name}")[1]
 
+    def start_replication(self, target_url: str, *, continuous: bool = True,
+                          filter: str = "") -> dict[str, Any]:
+        body = self.replication_config(
+            target_url, continuous=continuous, filter=filter,
+        )
+        request = urllib.request.Request(
+            f"{self.base_url}/_replicate", data=json.dumps(body).encode(),
+            method="POST", headers={"Content-Type": "application/json"},
+        )
+        if self.username:
+            token = base64.b64encode(
+                f"{self.username}:{self.password}".encode()
+            ).decode()
+            request.add_header("Authorization", f"Basic {token}")
+        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            return json.loads(response.read())
+
     def replication_config(self, target_url: str, *, continuous: bool = True,
                            filter: str = "") -> dict[str, Any]:
         source = f"{self.base_url}/{self.database}"
