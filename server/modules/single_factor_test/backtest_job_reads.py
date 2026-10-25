@@ -697,6 +697,27 @@ def get_test_job(job_id: str):
     return jsonify(payload)
 
 
+def _can_read_report(actor: str, document: dict, report_ref: str) -> bool:
+    if document.get("owner") == actor:
+        return True
+    from tools.data.account_manage import get_account, is_super_admin_account
+
+    if is_super_admin_account(get_account(actor)):
+        return True
+    import os
+    from server.permissions.entries import PermissionStore
+
+    db = os.environ.get("TRADERESEARCH_PERMISSIONS_DB", "") or os.environ.get(
+        "FACTORTESTER_PERMISSIONS_DB", ""
+    )
+    if not db:
+        return False
+    return PermissionStore(db).allows(
+        subject=f"user:{actor}", resource_type="report",
+        resource_ref=report_ref, action="read",
+    )
+
+
 @sft_bp.get("/api/reports/<report_ref>/attachments/<path:name>")
 def get_report_attachment(report_ref: str, name: str):
     """Stream one content-addressed CouchDB report attachment."""
@@ -717,10 +738,8 @@ def get_report_attachment(report_ref: str, name: str):
         document = store.get_report(report_ref)
     except Exception:
         return jsonify({"success": False, "error": "report not found"}), 404
-    if document.get("owner") != actor:
-        from tools.data.account_manage import get_account, is_super_admin_account
-        if not is_super_admin_account(get_account(actor)):
-            return jsonify({"success": False, "error": "report access denied"}), 403
+    if not _can_read_report(actor, document, report_ref):
+        return jsonify({"success": False, "error": "report access denied"}), 403
     attachment = (document.get("attachments") or {}).get(name)
     if not attachment:
         return jsonify({"success": False, "error": "attachment not found"}), 404
@@ -748,10 +767,8 @@ def get_report_document(report_ref: str):
         document = store.get_report(report_ref)
     except Exception:
         return jsonify({"success": False, "error": "report not found"}), 404
-    if document.get("owner") != actor:
-        from tools.data.account_manage import get_account, is_super_admin_account
-        if not is_super_admin_account(get_account(actor)):
-            return jsonify({"success": False, "error": "report access denied"}), 403
+    if not _can_read_report(actor, document, report_ref):
+        return jsonify({"success": False, "error": "report access denied"}), 403
     return jsonify({"success": True, "document": document})
 
 

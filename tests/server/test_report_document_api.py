@@ -34,3 +34,24 @@ def test_report_attachment_api_checks_owner(monkeypatch):
     response = client.get("/api/reports/report:job:1/attachments/tearsheet.html")
     assert response.status_code == 200
     assert response.data == b"<html/>"
+
+
+def test_report_document_api_uses_managed_permission(monkeypatch, tmp_path):
+    class Store:
+        def __init__(self, *args, **kwargs): pass
+        def get_report(self, ref): return {"_id": ref, "owner": "bob"}
+
+    monkeypatch.setenv("FACTORTESTER_COUCHDB_URL", "http://couch")
+    db = tmp_path / "permissions.db"
+    monkeypatch.setenv("FACTORTESTER_PERMISSIONS_DB", str(db))
+    monkeypatch.setattr("server.jobs.storage.couchdb_reports.CouchDBObjectStore", Store)
+    from server.permissions.entries import PermissionEntry, PermissionStore
+    PermissionStore(db).add(PermissionEntry(
+        subject="user:alice", resource_type="report",
+        resource_ref="report:job:1", action="read", created_by="admin",
+    ))
+    app = Flask(__name__); app.secret_key = "test"; app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session: session["username"] = "alice"
+    response = client.get("/api/reports/report:job:1")
+    assert response.status_code == 200
