@@ -207,6 +207,12 @@ struct TestJobDetailView: View {
                     )
                 }
             }
+            if !detail.reportRef.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("CouchDB 报告").font(.headline)
+                    Text(detail.reportRef).font(.caption.monospaced()).textSelection(.enabled)
+                }
+            }
             ForEach(detail.resultSections) { section in
                 TestJobResultSectionView(
                     section: section,

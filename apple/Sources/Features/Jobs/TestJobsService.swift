@@ -158,6 +158,7 @@ struct TestJobDetail {
     let submissionContextFields: [TestJobField]
     let submissionContextJSON: String
     let resultSections: [TestJobResultSection]
+    let reportRef: String
 }
 
 struct TestJobChartPoint: Identifiable {
@@ -379,7 +380,8 @@ final class TestJobsService {
             researchBindingJSON: residualJSON(detail["research_binding"] ?? response["research_binding"]),
             submissionContextFields: scalarFieldRows(detail["caller"] ?? response["submission_context"], prefix: "调用方"),
             submissionContextJSON: residualJSON(detail["caller"] ?? response["submission_context"]),
-            resultSections: resultSections(rows: rows, chart: chart, resultText: prettyJSON(result))
+            resultSections: resultSections(rows: rows, chart: chart, resultText: prettyJSON(result)),
+            reportRef: response["report_ref"] as? String ?? ""
         )
     }
 
