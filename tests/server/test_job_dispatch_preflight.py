@@ -46,3 +46,18 @@ def test_preflight_rejects_file_level_bind_mount(monkeypatch, tmp_path):
     report = preflight.check_deployment()
     assert report["ok"] is False
     assert any("file bind mount" in error for error in report["errors"])
+
+
+def test_preflight_can_require_online_worker_target(monkeypatch, tmp_path):
+    from server.jobs.repository.sqlite import JobRepository
+
+    _env(monkeypatch, tmp_path)
+    report = preflight.check_deployment(check_target=True)
+    assert report["ok"] is False
+    assert report["target_online"] is False
+    JobRepository(tmp_path / "jobs.db").heartbeat_worker_target(
+        "local-docker", 8001, "worker-a", ttl_seconds=60,
+    )
+    report = preflight.check_deployment(check_target=True)
+    assert report["ok"] is True, report["errors"]
+    assert report["target_online"] is True

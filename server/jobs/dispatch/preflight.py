@@ -14,7 +14,7 @@ from tools.data.sqlite.db import connect_sqlite
 REQUIRED_ENV = ("FACTORTESTER_BROKER_URL", "FACTORTESTER_JOB_DB", "FACTORTESTER_DEPLOYMENT_ID", "FACTORTESTER_SERVICE_PORT")
 
 
-def check_deployment(*, check_executor: bool = False) -> dict[str, Any]:
+def check_deployment(*, check_executor: bool = False, check_target: bool = False) -> dict[str, Any]:
     errors: list[str] = []
     broker = os.environ.get("FACTORTESTER_BROKER_URL", "").strip()
     if not broker:
@@ -53,6 +53,13 @@ def check_deployment(*, check_executor: bool = False) -> dict[str, Any]:
                 errors.append(f"job DB journal_mode is {journal_mode!r}, expected WAL")
         except sqlite3.Error as exc:
             errors.append(f"job DB cannot be opened: {exc}")
+    target_online = None
+    if check_target and db_path is not None and deployment and port:
+        from server.jobs.repository.sqlite import JobRepository
+
+        target_online = JobRepository(db_path).worker_target_online(deployment, port)
+        if not target_online:
+            errors.append(f"worker target is offline: {deployment}:{port}")
     executor = None
     if check_executor:
         try:
@@ -72,6 +79,7 @@ def check_deployment(*, check_executor: bool = False) -> dict[str, Any]:
         },
         "job_db": str(db_path) if db_path else "",
         "journal_mode": journal_mode,
+        "target_online": target_online,
         "executor": executor,
     }
 
@@ -80,8 +88,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--check-executor", action="store_true")
+    parser.add_argument("--check-target", action="store_true")
     args = parser.parse_args(argv)
-    report = check_deployment(check_executor=args.check_executor)
+    report = check_deployment(
+        check_executor=args.check_executor, check_target=args.check_target,
+    )
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if report["ok"] else 1
 
