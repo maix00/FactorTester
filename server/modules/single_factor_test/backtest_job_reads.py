@@ -712,21 +712,9 @@ def _can_read_report(actor: str, document: dict, report_ref: str) -> bool:
     )
     if not db:
         return False
-    subjects = [f"user:{actor}"]
-    base_url = os.environ.get("TRADERESEARCH_KEYCLOAK_URL", "") or os.environ.get("FACTORTESTER_KEYCLOAK_URL", "")
-    realm = os.environ.get("TRADERESEARCH_KEYCLOAK_REALM", "") or os.environ.get("FACTORTESTER_KEYCLOAK_REALM", "")
-    if base_url and realm:
-        try:
-            from server.identity.keycloak import KeycloakAdminAdapter, permission_subjects
-            identity = KeycloakAdminAdapter(
-                base_url, realm,
-                client_id=os.environ.get("TRADERESEARCH_KEYCLOAK_CLIENT_ID", "admin-cli"),
-                client_secret=os.environ.get("TRADERESEARCH_KEYCLOAK_CLIENT_SECRET", ""),
-            ).user(actor)
-            if identity is not None:
-                subjects = list(permission_subjects(identity))
-        except Exception:
-            pass
+    from server.permissions.subjects import subjects_for_user
+
+    subjects = subjects_for_user(actor)
     store = PermissionStore(db)
     return any(store.allows(
         subject=subject, resource_type="report",
@@ -826,10 +814,12 @@ def resolve_report_conflicts(report_ref: str):
             import os as _os
             from server.permissions.entries import PermissionStore
             db = _os.environ.get("TRADERESEARCH_PERMISSIONS_DB", "") or _os.environ.get("FACTORTESTER_PERMISSIONS_DB", "")
-            if not (db and PermissionStore(db).allows(
-                subject=f"user:{actor}", resource_type="admin_console",
+            from server.permissions.subjects import subjects_for_user
+
+            if not (db and any(PermissionStore(db).allows(
+                subject=subject, resource_type="admin_console",
                 resource_ref="dispatch", action="manage",
-            )):
+            ) for subject in subjects_for_user(actor))):
                 return jsonify({"success": False, "error": "report owner or admin manage permission required"}), 403
     keep_rev = str((request.get_json(silent=True) or {}).get("keep_rev") or "")
     if not keep_rev:
