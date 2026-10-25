@@ -6,7 +6,7 @@ class Adapter:
         class I:
             def __init__(self):
                 self.username = username.lower()
-                self.attributes = {"legacy_username": (username,), "legacy_role": ("user",)}
+                self.attributes = {"legacy_username": ("",), "legacy_role": ("user",)}
         return I()
 
 

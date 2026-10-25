@@ -192,6 +192,24 @@ class KeycloakAdminAdapter:
             urllib.request.urlopen(request, timeout=self.timeout).close()
         return user_id
 
+    def set_user_attributes(self, user_id: str, attributes: dict[str, str]) -> None:
+        import json
+        import urllib.request
+
+        users = self._get(f"users/{user_id}") or {}
+        current = {k: list(v) if isinstance(v, list) else [v]
+                   for k, v in (users.get("attributes") or {}).items()}
+        current.update({k: [v] for k, v in attributes.items()})
+        users["attributes"] = current
+        request = urllib.request.Request(
+            f"{self.base_url}/admin/realms/{self.realm}/users/{user_id}",
+            data=json.dumps(users).encode(), method="PUT",
+            headers={"Authorization": f"Bearer {self._token()}", "Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            if response.status not in {204, 200}:
+                raise RuntimeError(f"user update failed: {response.status}")
+
     def _organizations_for_user(self, user_id: str, username: str) -> list[str]:
         """Keycloak 26 has no /users/{id}/organizations; scan org members."""
         try:

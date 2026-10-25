@@ -18,7 +18,7 @@ def compare_accounts(accounts: list[dict], adapter) -> dict:
             continue
         legacy = (getattr(identity, "attributes", {}) or {}).get("legacy_username")
         legacy = legacy[0] if isinstance(legacy, (tuple, list)) else legacy
-        if identity.username != username or legacy != username:
+        if legacy != username:
             report["case_folded"].append({
                 "legacy": username, "keycloak": identity.username,
                 "legacy_username": legacy or "",
