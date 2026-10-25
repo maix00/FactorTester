@@ -384,6 +384,18 @@
     const resultGroupName = FTJobResultViewers.group(
       job, activeArtifacts, results,
     );
+    const reportRef = String(payload.report_ref || "");
+    if (reportRef) {
+      const report = document.createElement("div");
+      report.className = "job-report-link";
+      const link = document.createElement("a");
+      link.href = `/api/reports/${encodeURIComponent(reportRef)}/attachments/tearsheet.html`;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.textContent = context.t("打开 CouchDB 报告");
+      report.append(link);
+      resultsPanel.append(report);
+    }
     const resultHost = document.createElement("div");
     resultHost.className = "job-result-host";
     if (!localRun) resultHost.append(FTUI.loading(context.t("正在加载结果查看器…")));
