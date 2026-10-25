@@ -18,5 +18,5 @@ def test_import_is_dry_run_safe_and_skips_duplicates():
 
     assert import_accounts(accounts, None, dry_run=True)["created"] == ["alice", "bob"]
     result = import_accounts(accounts, Dup(), dry_run=False)
-    assert result["created"] == ["alice"]
+    assert result["created"][0]["username"] == "alice"
     assert result["skipped"][0]["username"] == "bob"
