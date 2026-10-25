@@ -19,7 +19,6 @@ not the same as a fully migrated detail/editor route.
 ```text
 /researches/:id (native read; editor bridge)
 /reports/:id (native read; chapter/component insert/move/remove/batch via operation API)
-/jobs/:port/:id/input/:name
 /ic-test
 /factor-series
 /product-category/:id
