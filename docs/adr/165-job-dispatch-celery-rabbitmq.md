@@ -245,3 +245,30 @@ JobAttempts and publishes `factortester.jobs.plan` to the same target queue.
 The plan task persists the execution plan and queues execution transactionally.
 The legacy scheduler process remains only as a compatibility shell while its
 remaining IPC operations are removed.
+
+## 2026-10-25 real frozen-factor strategy through Celery
+
+A real strategy-family Job was submitted through RabbitMQ and executed by a
+Celery worker locally:
+
+```text
+factor: factor:v2:uMJYqbDQtQY81veVLREH51M3mnI0sskOFrh0wfyAT-A
+alias: Mm|H:HA|L:LA|$F:1m
+products: T2403, TL2406
+strategy: cross_sectional_group split=2 group=1
+```
+
+Result:
+
+```text
+Job status: succeeded
+bars: 16
+publications.signal: 8
+orders: 1
+engine: nautilus_trader 2.0.0rc8
+reports: tearsheet.html, orders.csv, fills.csv, positions.csv, account.csv
+```
+
+This used the public factor row/exported factor-library subset and the real
+Nautilus engine; no synthetic factor or synthetic result was substituted.
+The worker ran with a factor-library database path and the strategy executor.
