@@ -52,3 +52,18 @@
   .tr-desktop-shell { display: block; }
   .tr-page-surface { padding: 18px 16px; }
 }
+.tr-page-error { color: #b42318; }
+.tr-job-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.tr-job-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(90px, auto);
+  align-items: center; gap: 12px; min-height: 40px; padding: 0 12px;
+  border: 1px solid var(--line); border-radius: 9px; color: var(--text);
+  background: var(--panel); text-decoration: none;
+}
+.tr-job-row:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.tr-job-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 560; }
+.tr-job-id { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.tr-job-status { border-radius: 999px; padding: 2px 8px; font-size: 11px; background: var(--sidebar); color: var(--muted); }
+.tr-job-status.is-succeeded { color: #067647; background: #ecfdf3; }
+.tr-job-status.is-running { color: #175cd3; background: #eff8ff; }
+.tr-job-status.is-failed { color: #b42318; background: #fef3f2; }
