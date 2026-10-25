@@ -78,3 +78,15 @@
 - Root disk after cleanup: 21G free on a 40G volume.
 - Future work: add a bounded retention policy for `control_events`; do not
   delete event history while a peer cursor still needs it.
+
+
+## Public state storage move (2026-10-25)
+
+- `/data` is a separate 60G ext4 volume; `/` is only 40G.
+- Moved the live Manager state (`job-index.sqlite`, transfers, releases,
+  logs) from `/opt/factortester-container/state` to `/data/state` and
+  updated `FACTORTESTER_STATE_ROOT`.
+- Removed the old 4.1G state copy and the stale `state-debug` copy.
+- Root filesystem is now 13G used / 25G free; `/data` has 31G free.
+- The 4.1G `control_events` history now lives on `/data`; use
+  `scripts/server/prune_control_events.py` (dry-run by default) if it grows.
