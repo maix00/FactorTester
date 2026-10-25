@@ -38,7 +38,7 @@ export function DesktopShell(): React.ReactElement {
   const pages = pagesForScope("desktop");
   const [api, setApi] = useState<DockviewApi | null>(null);
   const [active, setActive] = useState(pages[0]?.id ?? "research");
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem("tr.sidebar.collapsed") === "1");
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const value = Number(localStorage.getItem("tr.sidebar.width"));
     return Number.isFinite(value) && value >= 180 && value <= 360 ? value : 230;
@@ -134,7 +134,13 @@ export function DesktopShell(): React.ReactElement {
           <button type="button" className="tr-sidebar-brand" onClick={() => open(pages[0]?.id ?? "research")}>
             <span className="tr-sidebar-title">TradeResearch</span>
           </button>
-          <button type="button" className="tr-sidebar-toggle" aria-label={collapsed ? "展开侧栏" : "收起侧栏"} title={collapsed ? "展开侧栏" : "收起侧栏"} onClick={() => setCollapsed((value) => !value)}>
+          <button type="button" className="tr-sidebar-toggle" aria-label={collapsed ? "展开侧栏" : "收起侧栏"} title={collapsed ? "展开侧栏" : "收起侧栏"} onClick={() => {
+              setCollapsed((value) => {
+                const next = !value;
+                localStorage.setItem("tr.sidebar.collapsed", next ? "1" : "0");
+                return next;
+              });
+            }}>
             <PageIcon name="sidebar" />
           </button>
         </div>
