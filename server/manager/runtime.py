@@ -424,7 +424,9 @@ class ManagerState(
             PublicFactorReplicationStore(self.sessions_db_path),
         )
         research_report_reader = None
-        if str(os.environ.get("TRADERESEARCH_RESEARCH_REPORTS_COUCHDB_READ", "")).lower() in {"1", "true", "yes"}:
+        from server.jobs.storage.couchdb_authority import research_reports_read_enabled
+
+        if research_reports_read_enabled():
             couch_url = str(os.environ.get("FACTORTESTER_COUCHDB_URL") or "").strip()
             if couch_url:
                 from server.jobs.storage.couchdb_reports import CouchDBObjectStore

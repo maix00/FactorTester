@@ -595,7 +595,9 @@ def can_manage_level(current_username: str | None, level_id: str | None) -> bool
 
 def load_product_groups(username: str) -> list:
     ensure_account_manager_sqlite_store()
-    if str(os.environ.get("TRADERESEARCH_LIBRARIES_COUCHDB_READ", "")).lower() in {"1", "true", "yes"}:
+    from server.jobs.storage.couchdb_authority import libraries_read_enabled
+
+    if libraries_read_enabled():
         try:
             from server.jobs.storage.couchdb_library_reader import CouchDBLibraryReader
             from server.jobs.storage.couchdb_reports import CouchDBObjectStore
@@ -615,7 +617,9 @@ def load_product_groups(username: str) -> list:
 def save_product_groups(username: str, groups: list) -> None:
     ensure_account_manager_sqlite_store()
     _save_product_groups(username, groups)
-    if str(os.environ.get("TRADERESEARCH_LIBRARIES_COUCHDB_WRITE", "")).lower() in {"1", "true", "yes"}:
+    from server.jobs.storage.couchdb_authority import libraries_write_enabled
+
+    if libraries_write_enabled():
         from server.jobs.storage.couchdb_library_reader import CouchDBLibraryWriter
         from server.jobs.storage.couchdb_reports import CouchDBObjectStore
 

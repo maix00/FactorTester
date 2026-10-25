@@ -243,7 +243,9 @@ def store_factor_summary(conn: sqlite3.Connection, source_kind: str, owner: str,
     _insert_factor_rows(conn, [row], source_kind=source_kind, owner_username=owner,
                         owner_alias="", now=time.time())
     import os
-    if str(os.environ.get("TRADERESEARCH_LIBRARIES_COUCHDB_WRITE", "")).lower() in {"1", "true", "yes"}:
+    from server.jobs.storage.couchdb_authority import libraries_write_enabled
+
+    if libraries_write_enabled():
         try:
             from server.jobs.storage.couchdb_library_reader import CouchDBLibraryWriter
             from server.jobs.storage.couchdb_reports import CouchDBObjectStore
@@ -260,7 +262,9 @@ def store_factor_summary(conn: sqlite3.Connection, source_kind: str, owner: str,
 def list_factor_summaries(source_kind: str, owner: str | None = "", *, include_heads: bool = True) -> list[dict[str, Any]]:
     """Read existing projections only; never import, repair, or write on a GET."""
     import os
-    if str(os.environ.get("TRADERESEARCH_LIBRARIES_COUCHDB_READ", "")).lower() in {"1", "true", "yes"}:
+    from server.jobs.storage.couchdb_authority import libraries_read_enabled
+
+    if libraries_read_enabled():
         try:
             from server.jobs.storage.couchdb_library_reader import CouchDBLibraryReader
             from server.jobs.storage.couchdb_reports import CouchDBObjectStore
