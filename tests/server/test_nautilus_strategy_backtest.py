@@ -12,12 +12,14 @@ def test_real_nautilus_strategy_run(tmp_path):
     pytest.importorskip("pyarrow")
     item = _real_catalog(tmp_path, count=8)
     result = run_strategy_replay(
-        input=item, factor_ref="factor:v2:" + "a" * 64,
-        expression=CLOSE, product="T", output_dir=tmp_path / "factor-reports",
+        input=item, strategy_kind="threshold",
+        factor_bindings={"signal": CLOSE, "confirm": CLOSE},
+        product="T", output_dir=tmp_path / "factor-reports",
         max_bars=8,
     )
     assert result["bars"] == 8
-    assert result["publications"] == 8
+    assert result["factor_roles"] == ["confirm", "signal"]
+    assert result["publications"] == {"signal": 8, "confirm": 8}
     assert result["order_count"] >= 1
     assert (tmp_path / "factor-reports" / "tearsheet.html").is_file()
     assert (tmp_path / "factor-reports" / "orders.csv").is_file()

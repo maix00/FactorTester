@@ -14,7 +14,8 @@ from tools.data.types.time_freq import DataFreq
 
 
 def run_strategy_replay(
-    *, input: ReplayInput, factor_ref: str, expression: FactorExpr,
+    *, input: ReplayInput, strategy_kind: str,
+    factor_bindings: dict[str, FactorExpr],
     product: Any, output_dir: Path, max_bars: int = 8,
     factor_field: str = "CLOSE_ADJUSTED",
 ) -> dict[str, Any]:
@@ -42,27 +43,32 @@ def run_strategy_replay(
             maker_rate=Decimal(0), taker_rate=Decimal(0)),
     )
     engine.add_instrument(instrument)
-    publications: list[Any] = []
+    publications: dict[str, list[Any]] = {role: [] for role in factor_bindings}
 
     class Trader(Strategy):
         def __init__(self) -> None:
             super().__init__()
-            self.factor = build_nautilus_factor_strategy(
-                factor_ref=factor_ref, expression=expression, products=(product,),
-                bar_types_by_product={product: bar_type}, source_freq=DataFreq.MIN1,
-                bar_clock=lambda _p, bar: _clock(bar),
-                factor_fields=lambda _p, bar: {factor_field: float(bar.close)},
-                first_executable_at=lambda clocks: max(
-                    clock.available_at_ns for clock in clocks.values()) + 1,
-                on_publication=publications.append,
-            )
+            self.factors = {
+                role: build_nautilus_factor_strategy(
+                    factor_ref="factor:v2:" + role.encode().hex().ljust(43, "0")[:43],
+                    expression=expression, products=(product,),
+                    bar_types_by_product={product: bar_type}, source_freq=DataFreq.MIN1,
+                    bar_clock=lambda _p, bar: _clock(bar),
+                    factor_fields=lambda _p, bar: {factor_field: float(bar.close)},
+                    first_executable_at=lambda clocks: max(
+                        clock.available_at_ns for clock in clocks.values()) + 1,
+                    on_publication=publications[role].append,
+                )
+                for role, expression in factor_bindings.items()
+            }
             self.seen = 0
 
         def on_start(self) -> None:
             self.subscribe_bars(bar_type)
 
         def on_bar(self, bar) -> None:
-            self.factor.on_bar(bar)
+            for factor in self.factors.values():
+                factor.on_bar(bar)
             self.seen += 1
             if self.seen == 2:
                 self.submit_order(self.order_factory.market(
@@ -83,8 +89,9 @@ def run_strategy_replay(
     return {
         "engine": "nautilus_trader",
         "bars": len(bars),
-        "publications": len(publications),
-        "factor_ref": factor_ref,
+        "strategy_kind": strategy_kind,
+        "factor_roles": sorted(factor_bindings),
+        "publications": {role: len(rows) for role, rows in publications.items()},
         "reports": reports,
         "order_count": engine.get_result().total_orders,
         "catalog": str(folder),
