@@ -15,3 +15,10 @@ def test_export_accounts_without_password(tmp_path):
     assert rows == [{"username": "alice", "alias": "A", "role": "user",
                      "is_admin": False, "organization": "Org",
                      "parent_username": ""}]
+
+
+def test_case_collisions_are_reported():
+    from scripts.migrations.keycloak_accounts import case_collisions
+    assert case_collisions([
+        {"username": "Alice"}, {"username": "alice"}, {"username": "bob"},
+    ]) == {"alice": ["Alice", "alice"]}

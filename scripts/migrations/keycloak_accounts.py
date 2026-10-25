@@ -32,6 +32,15 @@ def export_accounts(db_path: str | Path) -> list[dict]:
     ]
 
 
+def case_collisions(accounts: list[dict]) -> dict[str, list[str]]:
+    buckets: dict[str, list[str]] = {}
+    for account in accounts:
+        username = str(account.get("username") or "")
+        if username:
+            buckets.setdefault(username.lower(), []).append(username)
+    return {key: values for key, values in buckets.items() if len(values) > 1}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--db", type=Path, required=True)
@@ -39,7 +48,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
     accounts = export_accounts(args.db)
-    payload = {"accounts": accounts, "count": len(accounts)}
+    payload = {
+        "accounts": accounts, "count": len(accounts),
+        "case_collisions": case_collisions(accounts),
+    }
     if args.dry_run:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
