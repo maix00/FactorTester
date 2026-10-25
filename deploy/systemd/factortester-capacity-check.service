@@ -1,0 +1,10 @@
+[Unit]
+Description=FactorTester public capacity check
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=ecs-user
+Environment=FACTORTESTER_STATE_ROOT=/data/state
+Environment=FACTORTESTER_CAPACITY_ALERT_FILE=/data/state/CAPACITY_ALERT
+ExecStart=/usr/local/sbin/factortester-capacity-check

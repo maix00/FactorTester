@@ -6,6 +6,7 @@ root_min_gb="${FACTORTESTER_MIN_ROOT_FREE_GB:-10}"
 data_min_gb="${FACTORTESTER_MIN_DATA_FREE_GB:-10}"
 mem_min_mb="${FACTORTESTER_MIN_MEM_AVAILABLE_MB:-1024}"
 status=0
+alert_file="${FACTORTESTER_CAPACITY_ALERT_FILE:-}"
 
 free_gb() { df -Pk "$1" | awk 'NR==2 {print int($4/1024/1024)}'; }
 root_free="$(free_gb /)"
@@ -32,4 +33,12 @@ printf 'root_free_gb=%s data_free_gb=%s mem_available_mb=%s job_index_gb=%s cont
 (( root_free >= root_min_gb )) || { echo "root free space below ${root_min_gb}G" >&2; status=1; }
 (( data_free >= data_min_gb )) || { echo "data free space below ${data_min_gb}G" >&2; status=1; }
 (( mem_available >= mem_min_mb )) || { echo "MemAvailable below ${mem_min_mb}MB" >&2; status=1; }
+if [[ -n "$alert_file" ]]; then
+  if (( status != 0 )); then
+    mkdir -p "$(dirname "$alert_file")"
+    date -u +%Y-%m-%dT%H:%M:%SZ > "$alert_file"
+  else
+    rm -f "$alert_file"
+  fi
+fi
 exit "$status"
