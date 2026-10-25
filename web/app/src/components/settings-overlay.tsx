@@ -17,6 +17,7 @@ const SECTIONS = [
   { id: "manager", icon: "runs" },
   { id: "docs", icon: "research" },
   { id: "profiles", icon: "account" },
+  { id: "mihomo", icon: "runs" },
 ] as const;
 
 export function SettingsOverlay({
@@ -48,6 +49,7 @@ export function SettingsOverlay({
       manager: "/api/worktrees",
       docs: "/api/docs/index",
       profiles: "/api/client/profiles",
+      mihomo: "/api/admin/mihomo",
       federation: "/api/federation/config",
       devices: "/api/devices",
       quota: "/api/jobs/storage",
@@ -76,7 +78,9 @@ export function SettingsOverlay({
       .then((value) => setServerInfo(value))
       .catch(() => setServerInfo(null));
   }, [open, section]);
-  const visibleSections = SECTIONS.filter((item) => item.id !== "manager" || Boolean(session?.capabilities?.manager));
+  const visibleSections = SECTIONS.filter((item) => (
+    item.id !== "manager" && item.id !== "mihomo"
+  ) || Boolean(session?.capabilities?.manager));
   const current = visibleSections.find((item) => item.id === section) ?? visibleSections[0];
   return (
     <Modal
