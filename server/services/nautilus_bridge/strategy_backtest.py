@@ -119,7 +119,7 @@ def _clock(bar: Any):
 def run_strategy_family_replay(
     *, inputs: dict[Any, ReplayInput], factor_bindings: dict[str, FactorExpr],
     family: Any, output_dir: Path, max_bars: int = 8,
-    factor_field: str = "CLOSE_ADJUSTED",
+    factor_field: str = "CLOSE_ADJUSTED", execution_plan: Any = None,
 ) -> dict[str, Any]:
     """Run one strategy family across multiple frozen product catalogs."""
     from nautilus_trader.backtest import BacktestEngine
@@ -136,18 +136,40 @@ def run_strategy_family_replay(
         product: BarType.from_str(str(row[2]["bar_type"]))
         for product, row in opened.items()
     }
-    engine = BacktestEngine(config=BacktestEngineConfig(
-        trader_id=TraderId.from_str("FT-STRATEGY-001"),
-    ))
-    venue = Venue("CFFEX")
-    engine.add_venue(
-        venue=venue, oms_type=OmsType.NETTING,
-        account_type=AccountType.MARGIN, base_currency=Currency.from_str("CNY"),
-        starting_balances=[Money.from_str("1000000 CNY")],
-        fee_model=MakerTakerFeeModel(maker_rate=Decimal(0), taker_rate=Decimal(0)),
-    )
-    for _, _, _, instrument in opened.values():
-        engine.add_instrument(instrument)
+    instruments = [row[3] for row in opened.values()]
+    if execution_plan is not None:
+        from server.services.nautilus_bridge.engine_factory import build_backtest_engine
+
+        routes = list(execution_plan.strategy_venue_bindings)
+        configured = {str(item["name"]).upper() for item in execution_plan.venues}
+        matching = [
+            route for route in routes
+            if {str(value).upper() for value in route["venue_ids"]} == configured
+        ]
+        if len(matching) != 1:
+            raise ValueError(
+                "strategy family replay requires exactly one strategy route "
+                "covering every frozen Venue",
+            )
+        engine = build_backtest_engine(
+            execution_plan,
+            {str(matching[0]["strategy_id"]): instruments},
+            trader_id="FT-STRATEGY-001",
+        )
+        venue = Venue.from_str(sorted(configured)[0])
+    else:
+        engine = BacktestEngine(config=BacktestEngineConfig(
+            trader_id=TraderId.from_str("FT-STRATEGY-001"),
+        ))
+        venue = Venue("CFFEX")
+        engine.add_venue(
+            venue=venue, oms_type=OmsType.NETTING,
+            account_type=AccountType.MARGIN, base_currency=Currency.from_str("CNY"),
+            starting_balances=[Money.from_str("1000000 CNY")],
+            fee_model=MakerTakerFeeModel(maker_rate=Decimal(0), taker_rate=Decimal(0)),
+        )
+        for instrument in instruments:
+            engine.add_instrument(instrument)
     publications: dict[str, list[Any]] = {role: [] for role in factor_bindings}
 
     class FamilyTrader(Strategy):
@@ -282,7 +304,27 @@ def run_strategy_family_run_spec(
         )
         for product, value in catalogs.items()
     }
+    execution_plan = None
+    run_spec = job_spec.get("run_spec") if isinstance(job_spec, dict) else None
+    if isinstance(run_spec, dict):
+        analyses = (run_spec.get("configuration") or {}).get("analyses") or {}
+        backtest = analyses.get("backtest") or {}
+        execution = backtest.get("execution") or {}
+        contract = execution.get("nautilus_contract") or {}
+        settings = contract.get("settings") if isinstance(contract, dict) else None
+        if isinstance(settings, dict):
+            from server.services.nautilus_bridge.config import compile_frozen_execution_plan
+
+            execution_plan = compile_frozen_execution_plan(
+                settings, feed_kind="bar",
+                adapter_capabilities=frozenset({
+                    "native_bar_open_market_orders",
+                    "native_bar_volume_consumption",
+                    "daily_settlement",
+                }),
+            )
     return run_strategy_family_replay(
         inputs=inputs, factor_bindings=bindings, family=family,
         output_dir=Path(output_dir), max_bars=int(plan.get("max_input_bars") or 8),
+        execution_plan=execution_plan,
     )
