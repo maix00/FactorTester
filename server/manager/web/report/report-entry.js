@@ -263,6 +263,18 @@
     const rail = document.createElement("nav"); rail.className = "chapter-rail";
     const mount = document.createElement("div"); mount.className = "report-mount";
     layout.append(mount); content.replaceChildren(layout, rail);
+    if (context.session && !source.isOwnerLocal) {
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "report-edit-entry";
+      edit.textContent = t("编辑报告");
+      edit.onclick = () => {
+        const params = new URLSearchParams(location.search);
+        params.set("edit", "1");
+        location.href = `${location.pathname}?${params.toString()}`;
+      };
+      rail.prepend(edit);
+    }
     let refreshScrollY = null;
     const renderContent = () => FTReportRenderer.render(value, mount, {
       chapterRail: rail,
