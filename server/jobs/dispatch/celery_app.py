@@ -98,6 +98,9 @@ def create_app(
     app = Celery("factortester.jobs", broker=broker)
     app.conf.update(
         task_default_queue=queue_name,
+        task_default_exchange="factortester",
+        task_default_exchange_type="direct",
+        task_default_routing_key=queue_name,
         task_serializer="json",
         result_serializer="json",
         accept_content=["json"],
@@ -105,6 +108,10 @@ def create_app(
         task_reject_on_worker_lost=False,
         worker_prefetch_multiplier=1,
         worker_concurrency=1,
+        worker_max_tasks_per_child=max(1, int(os.environ.get("FACTORTESTER_WORKER_MAX_TASKS", "1"))),
+        worker_max_memory_per_child=max(
+            1, int(os.environ.get("FACTORTESTER_WORKER_MAX_MEMORY_KB", "3500000"))
+        ),
         task_track_started=True,
         broker_connection_retry_on_startup=True,
         timezone="UTC",

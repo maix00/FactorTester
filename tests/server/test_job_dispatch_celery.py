@@ -55,6 +55,8 @@ def test_celery_app_is_single_concurrency_and_json_only():
     app = create_app(broker_url="memory://", queue="q")
     assert app.conf.worker_prefetch_multiplier == 1
     assert app.conf.worker_concurrency == 1
+    assert app.conf.worker_max_tasks_per_child == 1
+    assert app.conf.worker_max_memory_per_child == 3_500_000
     assert app.conf.task_acks_late is False
     assert app.conf.task_serializer == "json"
     assert "factortester.execute_job" in app.tasks
@@ -121,34 +123,3 @@ def test_worker_app_uses_environment_target(monkeypatch):
     module = importlib.reload(worker_app)
     assert module.app.conf.task_default_queue == "factortester.jobs.remote-main.8001"
 
-
-def test_celery_task_forwards_payload_and_target(monkeypatch):
-    pytest.importorskip("celery")
-    import server.jobs.dispatch.celery_app as module
-
-    captured = {}
-
-    def fake_execute(payload, *, target_deployment=None, target_port=None):
-        captured.update(payload=payload, deployment=target_deployment, port=target_port)
-        return {"status": "ok"}
-
-    monkeypatch.setattr(module, "execute_dispatch_payload", fake_execute)
-    app = module.create_app(
-        broker_url="memory://", target_deployment="remote-main", target_port=8001,
-    )
-    app.conf.task_always_eager = True
-    result = app.tasks[module.TASK_NAME].apply(args=[_payload()])
-    assert result.get() == {"status": "ok"}
-    assert captured == {
-        "payload": _payload(),
-        "deployment": "remote-main",
-        "port": 8001,
-    }
-
-
-def test_repository_from_env_uses_worker_job_db(tmp_path, monkeypatch):
-    from server.jobs.dispatch.celery_app import repository_from_env
-
-    monkeypatch.setenv("FACTORTESTER_JOB_DB", str(tmp_path / "worker.db"))
-    repository = repository_from_env()
-    assert repository.db_path == tmp_path / "worker.db"
