@@ -14,7 +14,7 @@
 - CouchDB authority readiness: intranet true, public true.
 - Keycloak OIDC login/logout, account import/backfill/dual-read, permission subjects, admin console permissions.
 - Full server tests: 1505 passed / 2 skipped.
-- Manager Web tests: 88 passed.
+- Manager Web tests: 86 passed.
 - Web Research Report editor (`?edit=1`): chapter insert/move/remove and component insert/move/remove.
 - Swift uses the same WebView editor and has native operation API methods.
 - CLI `research report-operation` and `report-document`.
