@@ -90,3 +90,14 @@
 - Root filesystem is now 13G used / 25G free; `/data` has 31G free.
 - The 4.1G `control_events` history now lives on `/data`; use
   `scripts/server/prune_control_events.py` (dry-run by default) if it grows.
+
+
+## Public capacity check (2026-10-25)
+
+```text
+root_free_gb=24 data_free_gb=30 mem_available_mb=3592
+job_index_gb=4 control_events=650492
+```
+
+`scripts/server/check_public_capacity.sh` exits non-zero below
+10G root, 10G `/data`, or 1024MB MemAvailable.
