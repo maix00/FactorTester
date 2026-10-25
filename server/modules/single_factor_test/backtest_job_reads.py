@@ -1016,6 +1016,28 @@ def get_report_attachment(report_ref: str, name: str):
     return Response(data, mimetype=mime, headers={"Content-Disposition": f'inline; filename="{name}"'})
 
 
+@sft_bp.get("/api/research-reports/<publication_id>/projection")
+def get_research_report_projection(publication_id: str):
+    actor = require_user()
+    import os
+    from server.jobs.storage.couchdb_research_reports import get_research_report, projection
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "research report store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = get_research_report(store, publication_id)
+        value = projection(store, document)
+    except Exception:
+        return jsonify({"success": False, "error": "research report projection not found"}), 404
+    visibility = str(document.get("visibility") or "private")
+    if document.get("owner_ref") != actor and visibility != "public":
+        return jsonify({"success": False, "error": "research report access denied"}), 403
+    return jsonify({"success": True, "projection": value})
+
+
 @sft_bp.get("/api/research-reports/<publication_id>/attachments")
 def list_research_report_attachments(publication_id: str):
     actor = require_user()
