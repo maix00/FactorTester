@@ -180,3 +180,27 @@ def test_research_report_attachments_are_listed_and_streamed(monkeypatch):
     listing = client.get("/api/research-reports/p1/attachments").get_json()
     assert listing["attachments"][0]["name"] == "abc.json"
     assert client.get("/api/research-reports/p1/attachments/abc.json").data == b"x"
+
+
+def test_research_report_agent_endpoints(monkeypatch):
+    class Store:
+        def __init__(self, *args, **kwargs): pass
+        def _request(self, method, path):
+            import json
+            return 200, json.dumps({"_id": "research-report:p1", "kind": "research_report",
+                                    "publication_id": "p1", "owner_ref": "alice",
+                                    "title": "T", "visibility": "private",
+                                    "attachments": {"projection.json": {"name": "p.json"}}}).encode()
+        def get_attachment(self, ref, name):
+            import hashlib, json
+            if name == "p.json":
+                return json.dumps({"chapters": []}).encode()
+            return json.dumps({"components": []}).encode()
+
+    monkeypatch.setenv("FACTORTESTER_COUCHDB_URL", "http://couch")
+    monkeypatch.setattr("server.jobs.storage.couchdb_reports.CouchDBObjectStore", Store)
+    app = Flask(__name__); app.secret_key = "t"; app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session: session["username"] = "alice"
+    assert client.get("/api/research-reports/p1/agent").get_json()["success"] is True
+    assert client.get("/api/research-reports/p1/agent.md").mimetype == "text/markdown"

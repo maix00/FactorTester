@@ -133,9 +133,13 @@ def migrate(root: Path, couchdb_url: str, database: str, *, dry_run: bool,
                 doc["attachments"][relative] = {"name": name, "content_type": content_type,
                                                 "size_bytes": len(data)}
                 attachments += 1
+            _, fresh = _json_request(
+                f"{base}/{urllib.parse.quote(doc['_id'])}", method="GET", auth=auth,
+            )
+            fresh["attachments"] = doc["attachments"]
             status, payload = _json_request(
-                f"{base}/{urllib.parse.quote(doc['_id'])}?rev={revision}",
-                method="PUT", body=json.dumps(doc).encode(), auth=auth,
+                f"{base}/{urllib.parse.quote(doc['_id'])}?rev={fresh['_rev']}",
+                method="PUT", body=json.dumps(fresh).encode(), auth=auth,
             )
             if status not in {201, 202}:
                 failed.append({"id": publication_id, "final": status, "error": payload})

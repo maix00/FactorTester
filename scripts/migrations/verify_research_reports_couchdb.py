@@ -45,6 +45,12 @@ def main(argv: list[str] | None = None) -> int:
             continue
         if document.get("kind") != "research_report" or not document.get("attachments"):
             no_attachments.append(publication_id)
+        actual = document.get("_attachments") or {}
+        for logical, meta in (document.get("attachments") or {}).items():
+            name = str((meta or {}).get("name") or "")
+            if not name or name not in actual:
+                mismatches.append({"publication_id": publication_id,
+                                   "field": "attachment_data", "path": logical})
         publication = document.get("publication") or {}
         for field in ("title", "owner_ref", "visibility", "projection_hash"):
             if str(publication.get(field) or "") != str(record.get(field) or ""):
@@ -63,6 +69,17 @@ def main(argv: list[str] | None = None) -> int:
                 local_projection = json.loads(local.read_text()) if local.is_file() else {}
                 if projection.get("projection_hash") != local_projection.get("projection_hash"):
                     mismatches.append({"publication_id": publication_id, "field": "projection_hash"})
+                import hashlib
+                stored_attachments = document.get("attachments") or {}
+                for chapter in projection.get("chapters") or []:
+                    chapter_id = str(chapter.get("component_id") or "")
+                    storage = hashlib.sha256(chapter_id.encode()).hexdigest()[:32]
+                    if f"chapters/{storage}.json" not in stored_attachments:
+                        mismatches.append({"publication_id": publication_id,
+                                           "field": "chapter", "chapter": chapter_id})
+                    elif str((stored_attachments.get(f"chapters/{storage}.json") or {}).get("name") or "") not in actual:
+                        mismatches.append({"publication_id": publication_id,
+                                           "field": "chapter_data", "chapter": chapter_id})
         except Exception:
             mismatches.append({"publication_id": publication_id, "field": "projection"})
         mirror = args.root / "mirrors" / publication_id
