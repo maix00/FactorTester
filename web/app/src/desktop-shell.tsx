@@ -8,6 +8,7 @@ import {
 import { BUILTIN_PAGES, getPage, pagesForScope, registerPage } from "./registry.ts";
 import { PageIcon } from "./icon.tsx";
 import { PageSurface } from "./surface.tsx";
+import { ConfigProvider } from "antd";
 
 for (const page of BUILTIN_PAGES) registerPage(page);
 
@@ -122,6 +123,11 @@ export function DesktopShell(): React.ReactElement {
   };
 
   return (
+    <ConfigProvider theme={{ token: {
+      colorPrimary: "#087cff", colorBorder: "#d9d9de", borderRadius: 8,
+      colorBgContainer: "#ffffff", colorText: "#1d1d1f", colorTextSecondary: "#74747a",
+      fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+    } }}>
     <div className={`tr-app-shell${collapsed ? " is-collapsed" : ""}`} style={{ "--tr-sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}>
       <aside className="tr-sidebar" aria-label="主导航">
         <div className="tr-sidebar-header">
@@ -175,5 +181,6 @@ export function DesktopShell(): React.ReactElement {
         </section>
       </main>
     </div>
+    </ConfigProvider>
   );
 }

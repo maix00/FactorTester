@@ -148,3 +148,8 @@ body { margin: 0; }
 .tr-mobile-open-row:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
 .tr-mobile-open-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .tr-mobile-open-route { color: var(--muted); font-size: 10px; }
+.tr-antd-panel { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 12px 14px 4px; box-shadow: 0 1px 2px #00000008; }
+.tr-antd-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 2px 0 12px; }
+.tr-antd-total { color: var(--muted); font-size: 11px; }
+.tr-table-link { color: var(--accent); text-decoration: none; }
+.tr-table-link:hover { text-decoration: underline; }
