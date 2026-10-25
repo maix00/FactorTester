@@ -20,7 +20,11 @@ for (const page of BUILTIN_PAGES) registerPage(page);
 type OpenPanel = { id: string; pageId: string; title: string };
 
 function Panel(props: IDockviewPanelProps<{ pageId: string }>): React.ReactElement {
-  return <PageSurface pageId={props.params.pageId} />;
+  return (
+    <div className="tr-tab-layer" data-tab-layer={props.params.pageId}>
+      <PageSurface pageId={props.params.pageId} />
+    </div>
+  );
 }
 
 function Tab(props: IDockviewPanelHeaderProps<{ pageId: string }>): React.ReactElement {
