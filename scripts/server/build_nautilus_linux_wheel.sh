@@ -10,6 +10,9 @@ JOBS="${CARGO_BUILD_JOBS:-1}"
 MEMORY="${NAUTILUS_BUILD_MEMORY:-3g}"
 mkdir -p "$OUT" "$CACHE/cargo" "$CACHE/rustup"
 [ -f "$SRC/python/Cargo.toml" ] || { echo "missing $SRC/python/Cargo.toml" >&2; exit 1; }
+git -C "$SRC" diff --quiet || { echo "vendor/nautilus_trader has uncommitted changes" >&2; exit 1; }
+REVISION="$(git -C "$SRC" rev-parse HEAD)"
+echo "building nautilus_trader from local commit $REVISION"
 
 docker run --rm \
   --memory="$MEMORY" --memory-swap="$MEMORY" --cpus="${NAUTILUS_BUILD_CPUS:-2}" \
