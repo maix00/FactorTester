@@ -1,7 +1,9 @@
 # Local multi-port Celery/RabbitMQ test harness
 
-This harness runs one RabbitMQ broker and two target-scoped workers for the
-`local-docker` deployment: one bound to service port 8000, one to 8001.
+This harness runs one RabbitMQ broker, one dispatcher, and two target-scoped
+workers for the `local-docker` deployment: one bound to service port 8000, one
+to 8001.  The dispatcher owns the shared outbox -> broker loop; workers never
+publish.
 
 It is a development/test topology, not a production deployment.
 
