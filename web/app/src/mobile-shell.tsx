@@ -4,6 +4,7 @@ import { BUILTIN_PAGES, pagesForScope, registerPage } from "./registry.ts";
 import { PageIcon } from "./icon.tsx";
 import { useTranslation } from "react-i18next";
 import { PageFrame } from "./frame.tsx";
+import { MobileNotificationHost } from "./notifications/mobile-host.tsx";
 import { WorkspacePage } from "./pages/workspace.tsx";
 
 for (const page of BUILTIN_PAGES) registerPage(page);
@@ -25,6 +26,7 @@ export function MobileShell(): React.ReactElement {
   }, [page]);
   return (
     <IonApp>
+      <MobileNotificationHost />
       <div className="tr-mobile-shell">
         {page?.id === "workspace" ? <WorkspacePage /> : <PageFrame pageId={page?.id ?? "research"} />}
         <IonTabBar className="tr-mobile-tabs" slot="bottom">

@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 import zhCN from "antd/locale/zh_CN";
 import enUS from "antd/locale/en_US";
 import { LanguageSwitch } from "./components/language-switch.tsx";
+import { DesktopNotificationHost } from "./notifications/antd-host.tsx";
 
 for (const page of BUILTIN_PAGES) registerPage(page);
 
@@ -136,6 +137,7 @@ export function DesktopShell(): React.ReactElement {
       colorBgContainer: "#ffffff", colorText: "#1d1d1f", colorTextSecondary: "#74747a",
       fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
     } }}>
+    <DesktopNotificationHost />
     <div className={`tr-app-shell${collapsed ? " is-collapsed" : ""}`} style={{ "--tr-sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}>
       <aside className="tr-sidebar" aria-label="主导航">
         <div className="tr-sidebar-header">
