@@ -43,3 +43,20 @@ def test_runner_failure_backs_off_not_sent(tmp_path):
     record = outbox.get(("job-1", 1))
     assert record.status == "failed"
     assert record.attempts == 1
+
+
+def test_preflight_failure_does_not_claim_or_publish(tmp_path):
+    import pytest
+
+    outbox = DispatchOutbox(tmp_path / "jobs.db")
+    outbox.enqueue(_message(), now=100.0)
+
+    def unavailable() -> None:
+        raise RuntimeError("no Nautilus executor")
+
+    publisher = _Publisher()
+    with pytest.raises(RuntimeError):
+        DispatchRunner(outbox, publisher, preflight=unavailable).run_once(limit=1)
+    assert publisher.messages == []
+    assert outbox.get(("job-1", 1)).status == "pending"
+    assert outbox.get(("job-1", 1)).attempts == 0

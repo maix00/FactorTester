@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
-from typing import Protocol
+from typing import Callable, Protocol
 
 from .contract import DispatchMessage
 from .outbox import DispatchOutbox, OutboxRecord
@@ -44,11 +44,20 @@ class KombuPublisher:
 class DispatchRunner:
     """One dispatcher tick: lease -> publish -> mark sent/failed."""
 
-    def __init__(self, outbox: DispatchOutbox, publisher: DispatchPublisher) -> None:
+    def __init__(
+        self,
+        outbox: DispatchOutbox,
+        publisher: DispatchPublisher,
+        *,
+        preflight: Callable[[], None] | None = None,
+    ) -> None:
         self.outbox = outbox
         self.publisher = publisher
+        self.preflight = preflight
 
     def run_once(self, *, limit: int = 10) -> dict[str, int]:
+        if self.preflight is not None:
+            self.preflight()
         result = {"claimed": 0, "sent": 0, "failed": 0}
         for record in self.outbox.claim(limit=limit):
             result["claimed"] += 1
