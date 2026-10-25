@@ -10,7 +10,6 @@ from pathlib import Path
 
 from flask import jsonify, request
 
-from server.jobs.ipc import DaemonUnavailable
 from server.jobs.artifacts import artifact_root, default_user_quota_bytes
 from server.jobs.product_scope_inputs import retain_product_scope, product_scope_content
 from server.jobs.input_artifacts import (
@@ -34,7 +33,6 @@ from server.modules.single_factor_test.backtest_job_support import (
     require_job,
 )
 from server.modules.single_factor_test.research_jobs import (
-    _daemon_client,
     _deployment_id,
 )
 from server.services.session_runtime import require_user
@@ -248,10 +246,6 @@ def cancel_test_job(job_id: str):
         )
     except KeyError:
         return jsonify({"success": False, "error": "research job not found"}), 404
-    try:
-        _daemon_client().cancel(job_id)
-    except DaemonUnavailable:
-        pass
     return jsonify({"success": True, "job_id": job_id, "status": job.status.value})
 
 
@@ -271,10 +265,6 @@ def approve_test_job(job_id: str):
         return jsonify({"success": False, "error": "research job not found"}), 404
     except RuntimeError as exc:
         return jsonify({"success": False, "error": str(exc)}), 409
-    try:
-        _daemon_client().wake()
-    except DaemonUnavailable:
-        pass
     return jsonify({
         "success": True,
         **job.summary(),
@@ -535,8 +525,6 @@ def retry_test_job(job_id: str):
             owner=job.owner,
             entries=run_input_dependencies,
         )
-        _daemon_client().wake()
-    except DaemonUnavailable:
         pass
     except Exception as exc:
         if job is not None:

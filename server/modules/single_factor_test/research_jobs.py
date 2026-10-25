@@ -20,7 +20,6 @@ from server.jobs.input_artifacts import (
     retain_strategy_specs,
     strategy_spec_input_bytes,
 )
-from server.jobs.ipc import DaemonUnavailable, JobDaemonClient
 from server.jobs.models import JobRecord
 from server.jobs.ports import detect_port
 from server.jobs.report_outputs import (
@@ -881,14 +880,6 @@ def _submission_context() -> dict[str, str]:
     }
 
 
-def _daemon_client() -> JobDaemonClient:
-    socket_path = os.environ.get(
-        "GTHT_JOB_DAEMON_SOCKET",
-        str(Settings.CACHE_DIR / "runtime" / f"research-jobs-{_deployment_id()}.sock"),
-    )
-    return JobDaemonClient(socket_path)
-
-
 def _submit_kind(
     kind: str,
     payload: dict,
@@ -964,8 +955,6 @@ def _submit_kind(
             owner=job.owner,
             entries=run_input_dependencies or [],
         )
-        _daemon_client().wake()
-    except DaemonUnavailable:
         pass
     except Exception as exc:
         repository.transition(

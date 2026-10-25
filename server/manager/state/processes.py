@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import signal
-import socket
 import subprocess
-import tempfile
 import time
 from pathlib import Path
 
@@ -78,7 +75,7 @@ class ProcessStateMixin:
 
     def _service_env(self, path: Path, port: int) -> tuple[dict[str, str], str, Path]:
         deployment_id = f"{safe_name(path.name)}-{port}"
-        socket_path = job_daemon_socket_path(path, deployment_id)
+        socket_path = Path()
         env = os.environ.copy()
         python_path = [
             item
@@ -103,7 +100,6 @@ class ProcessStateMixin:
             "PYTHONUNBUFFERED": "1",
             "PYTHONPATH": os.pathsep.join(python_path),
             "GTHT_DEPLOYMENT_ID": deployment_id,
-            "GTHT_JOB_DAEMON_SOCKET": str(socket_path),
             "GTHT_SOURCE_REVISION": source_revision,
             "GTHT_JOB_ARTIFACT_ROOT": str(self.data_root / "job-results"),
             "FACTORTESTER_SERVER_ID": self.server_id,
@@ -134,10 +130,9 @@ class ProcessStateMixin:
             self.service_intents.mark_running(path, port)
             return "already running"
         existing = self.processes.get(self.key(path))
-        if existing is not None and existing.daemon.poll() is None:
-            message = self.restart_api(path, port)
+        if existing is not None and existing.api.poll() is None:
             self.service_intents.mark_running(path, port)
-            return message
+            return "already running"
         if existing is not None:
             self.processes.pop(self.key(path), None)
         if not (path / "start_server.py").exists():
@@ -150,31 +145,15 @@ class ProcessStateMixin:
         log_file = self.log_dir / f"{safe_name(path.name)}-{port}.log"
         log = log_file.open("ab", buffering=0)
         env, deployment_id, socket_path = self._service_env(path, port)
-        if self.fixed_port and port == self.fixed_port and self.fixed_daemon_socket:
-            socket_path = Path(self.fixed_daemon_socket).expanduser().resolve()
-            env["GTHT_JOB_DAEMON_SOCKET"] = str(socket_path)
-        daemon = subprocess.Popen(
-            [
-                self.python,
-                "scripts/research_job_planner.py",
-                "--deployment-id", deployment_id,
-                "--socket", str(socket_path),
-            ],
-            cwd=path,
-            env=env,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
         api = self._start_api(path, port, env, log)
         self.processes[self.key(path)] = ServiceBundle(
             api=api,
-            daemon=daemon,
+            daemon=None,
             socket_path=socket_path,
             deployment_id=deployment_id,
         )
         self.service_intents.mark_running(path, port)
-        return f"started api pid {api.pid}, daemon pid {daemon.pid}"
+        return f"started api pid {api.pid}"
 
     def restore_desired_services(self) -> list[dict[str, object]]:
         """Reconcile persisted intent with current, executable worktrees."""
@@ -221,19 +200,15 @@ class ProcessStateMixin:
     def restart_api(self, path: Path, port: int) -> str:
         path = path.resolve()
         bundle = self._bundle_for_path(path)
-        if bundle is None or bundle.daemon.poll() is not None:
-            raise RuntimeError("research daemon is not running")
+        if bundle is None:
+            raise RuntimeError("service is not running")
         if bundle.api.poll() is None:
             self._terminate(bundle.api)
         log_file = self.log_dir / f"{safe_name(path.name)}-{port}.log"
         log = log_file.open("ab", buffering=0)
         env, _, _ = self._service_env(path, port)
-        if self.fixed_port and port == self.fixed_port and self.fixed_daemon_socket:
-            env["GTHT_JOB_DAEMON_SOCKET"] = str(
-                Path(self.fixed_daemon_socket).expanduser().resolve()
-            )
         bundle.api = self._start_api(path, port, env, log)
-        return f"restarted api pid {bundle.api.pid}; daemon pid {bundle.daemon.pid} preserved"
+        return f"restarted api pid {bundle.api.pid}"
 
     @staticmethod
     def _terminate(proc: subprocess.Popen) -> None:
@@ -254,44 +229,12 @@ class ProcessStateMixin:
         digest = hashlib.sha256(str(resolved).encode()).hexdigest()[:24]
         return Path(tempfile.gettempdir()) / "factortester-jobs" / f"{digest}.sock"
 
-    def _daemon_request(self, bundle: ServiceBundle, action: str) -> dict:
-        address = self._normalized_socket_path(bundle.socket_path)
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-            sock.settimeout(5)
-            sock.connect(str(address))
-            sock.sendall(json.dumps({"action": action}).encode() + b"\n")
-            raw = sock.makefile("rb").readline()
-        payload = json.loads(raw.decode())
-        if not payload.get("success"):
-            raise RuntimeError(payload.get("error") or "job daemon request failed")
-        return payload
-
     def restart_bundle(self, path: Path, port: int, *, timeout: float = 120.0) -> str:
         path = path.resolve()
         bundle = self._bundle_for_path(path)
         if bundle is None:
             return self.start(path, port)
-        if bundle.daemon.poll() is not None:
-            self._terminate(bundle.api)
-            self._terminate(bundle.daemon)
-            self.processes.pop(self.key(path), None)
-            return self.start(path, port)
-        health = self._daemon_request(bundle, "drain")
-        if health.get("paused_jobs"):
-            self._daemon_request(bundle, "resume")
-            raise RuntimeError("paused step jobs block bundle restart; cancel them or use Force Stop")
-        deadline = time.monotonic() + max(1.0, float(timeout))
-        while int(health.get("active_planners") or 0) or int(health.get("active_executors") or 0):
-            if time.monotonic() >= deadline:
-                self._daemon_request(bundle, "resume")
-                raise TimeoutError("timed out draining research workers")
-            time.sleep(0.2)
-            health = self._daemon_request(bundle, "health")
-            if health.get("paused_jobs"):
-                self._daemon_request(bundle, "resume")
-                raise RuntimeError("job paused during drain; cancel it or use Force Stop")
         self._terminate(bundle.api)
-        self._terminate(bundle.daemon)
         self.processes.pop(self.key(path), None)
         return self.start(path, port)
 
@@ -309,13 +252,7 @@ class ProcessStateMixin:
             if not preserve_intent:
                 self.service_intents.mark_stopped(path)
             return "not running"
-        if not force and bundle.daemon.poll() is None:
-            health = self._daemon_request(bundle, "health")
-            active = int(health.get("active_planners") or 0) + int(health.get("active_executors") or 0)
-            if active:
-                raise RuntimeError("active research jobs block Stop; use Restart Bundle or Force Stop")
         self._terminate(bundle.api)
-        self._terminate(bundle.daemon)
         self.processes.pop(self.key(path), None)
         if not preserve_intent:
             self.service_intents.mark_stopped(path)

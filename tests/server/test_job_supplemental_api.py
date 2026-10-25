@@ -76,11 +76,6 @@ def _parent(repository: JobRepository, root) -> None:
 def test_supplemental_routes_create_single_flight_and_page(tmp_path, monkeypatch):
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "jobs.sqlite")
     monkeypatch.setenv("GTHT_JOB_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
-    daemon = _Daemon()
-    monkeypatch.setattr(
-        "server.modules.single_factor_test.supplemental_routes._daemon_client",
-        lambda: daemon,
-    )
     repository = JobRepository()
     _parent(repository, tmp_path / "artifacts")
     app = Flask(__name__)
@@ -108,7 +103,6 @@ def test_supplemental_routes_create_single_flight_and_page(tmp_path, monkeypatch
     assert duplicate.status_code == 202
     assert created.get_json()["job"]["status"] == "queued"
     assert duplicate.get_json()["job"]["job_id"] == created.get_json()["job"]["job_id"]
-    assert daemon.wakes == 2
     payload = listed.get_json()
     assert payload["total"] == 1
     assert payload["jobs"][0]["supplemental_kind"] == "backtest_strategy_analysis"
