@@ -82,7 +82,14 @@ class CouchDBObjectStore:
                     doc["_attachments"] = current["_attachments"]
             except Exception:
                 pass
-        self._request("PUT", report.report_ref, json.dumps(doc).encode())
+        try:
+            self._request("PUT", report.report_ref, json.dumps(doc).encode())
+        except urllib.error.HTTPError as exc:
+            if exc.code != 409:
+                raise
+            if not overwrite:
+                return self.put_report(report, overwrite=True)
+            raise
 
     def put_attachment(self, report_ref: str, name: str, data: bytes,
                        content_type: str) -> None:
