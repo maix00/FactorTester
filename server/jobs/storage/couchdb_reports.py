@@ -107,5 +107,4 @@ def write_report(store: CouchDBObjectStore, *, job_id: str, owner: str,
         stored = content_name(data, name.rsplit(".", 1)[-1] if "." in name else "bin")
         report.attachments[name] = stored
         store.put_attachment(report.report_ref, stored, data, content_type)
-    store.put_report(report, overwrite=True)
     return report
