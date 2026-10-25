@@ -295,11 +295,13 @@ def retry_test_job(job_id: str):
     if error:
         return error
     if old.kind == "backtest":
-        return jsonify({
-            "success": False,
-            "error": "historical backtest Jobs are read-only and cannot be retried",
-            "code": "legacy_backtest_retry_unavailable",
-        }), 409
+        plan_kind = str((old.execution_plan or {}).get("kind") or "")
+        if plan_kind not in {"nautilus_catalog_replay", "nautilus_strategy_family"}:
+            return jsonify({
+                "success": False,
+                "error": "historical backtest Jobs are read-only and cannot be retried",
+                "code": "legacy_backtest_retry_unavailable",
+            }), 409
     if old.status not in TERMINAL_STATUSES:
         return jsonify({"success": False, "error": "only terminal jobs can be retried"}), 409
     factor_scope_id = str(
@@ -525,7 +527,15 @@ def retry_test_job(job_id: str):
             owner=job.owner,
             entries=run_input_dependencies,
         )
-        pass
+        if old.kind == "backtest":
+            job_repository.transition(
+                job.job_id, JobStatus.PLANNING, expected=JobStatus.SUBMITTED,
+            )
+            job = job_repository.set_execution_plan(
+                job.job_id, plan=deepcopy(old.execution_plan or {}),
+                notices=list(old.plan_notices or []),
+                requires_confirmation=False,
+            )
     except Exception as exc:
         if job is not None:
             try:
