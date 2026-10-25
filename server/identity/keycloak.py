@@ -144,6 +144,53 @@ class KeycloakAdminAdapter:
         orgs = self._organizations_for_user(user_id, str(raw.get("username") or ""))
         return self._identity(raw, groups, orgs)
 
+    def _post(self, path: str, payload: Any) -> tuple[int, str]:
+        import json
+        import urllib.request
+
+        request = urllib.request.Request(
+            f"{self.base_url}/admin/realms/{self.realm}/{path.lstrip('/')}",
+            data=json.dumps(payload).encode(), method="POST",
+            headers={"Authorization": f"Bearer {self._token()}", "Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                return response.status, response.headers.get("Location", "")
+        except urllib.error.HTTPError as exc:
+            if exc.code == 409:
+                raise ValueError("Keycloak user already exists") from exc
+            raise
+
+    def create_user(self, *, username: str, email: str = "", groups: tuple[str, ...] = (),
+                    attributes: dict[str, tuple[str, ...]] | None = None) -> str:
+        import urllib.request
+
+        body = {
+            "username": username, "enabled": True,
+            "email": email or f"{username}@invalid.local",
+            "requiredActions": ["UPDATE_PASSWORD"],
+            "attributes": {key: list(value) for key, value in (attributes or {}).items()},
+        }
+        status, location = self._post("users", body)
+        if status not in {201, 204}:
+            raise RuntimeError(f"user create failed: {status}")
+        user_id = location.rstrip("/").rsplit("/", 1)[-1]
+        for group in groups:
+            target = next(
+                (item for item in self._all_groups()
+                 if str(item.get("path") or "") == group),
+                None,
+            )
+            if target is None:
+                raise ValueError(f"group not found: {group}")
+            request = urllib.request.Request(
+                f"{self.base_url}/admin/realms/{self.realm}/users/{user_id}/groups/{target['id']}",
+                data=b"{}", method="PUT",
+                headers={"Authorization": f"Bearer {self._token()}", "Content-Type": "application/json"},
+            )
+            urllib.request.urlopen(request, timeout=self.timeout).close()
+        return user_id
+
     def _organizations_for_user(self, user_id: str, username: str) -> list[str]:
         """Keycloak 26 has no /users/{id}/organizations; scan org members."""
         try:
