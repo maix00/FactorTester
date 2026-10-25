@@ -616,3 +616,18 @@
     await renderRoute();
   })();
 })();
+
+(() => {
+  function mirrorLegacyGlobals() {
+    for (const key of Object.keys(window)) {
+      if (!key.startsWith("FT") || key.length < 3) continue;
+      const alias = `TR${key.slice(2)}`;
+      if (!(alias in window)) window[alias] = window[key];
+    }
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", mirrorLegacyGlobals, {once: true});
+  } else {
+    mirrorLegacyGlobals();
+  }
+})();
