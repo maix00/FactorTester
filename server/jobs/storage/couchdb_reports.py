@@ -100,6 +100,10 @@ class CouchDBObjectStore:
             content_type=content_type,
         )
 
+    def get_report(self, report_ref: str) -> dict[str, Any]:
+        _, raw = self._request("GET", report_ref)
+        return json.loads(raw)
+
     def conflicts(self, report_ref: str) -> list[str]:
         _, raw = self._request("GET", f"{report_ref}?conflicts=true")
         return list(json.loads(raw).get("_conflicts") or [])

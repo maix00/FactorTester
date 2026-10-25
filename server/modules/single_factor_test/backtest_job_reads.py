@@ -697,6 +697,32 @@ def get_test_job(job_id: str):
     return jsonify(payload)
 
 
+@sft_bp.get("/api/reports/<path:report_ref>")
+def get_report_document(report_ref: str):
+    """Read one CouchDB report document, scoped to its owner."""
+    actor = require_user()
+    import os
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "report store unavailable"}), 503
+    store = CouchDBObjectStore(
+        url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip(),
+        username=os.environ.get("FACTORTESTER_COUCHDB_USER", ""),
+        password=os.environ.get("FACTORTESTER_COUCHDB_PASSWORD", ""),
+    )
+    try:
+        document = store.get_report(report_ref)
+    except Exception:
+        return jsonify({"success": False, "error": "report not found"}), 404
+    if document.get("owner") != actor:
+        from tools.data.account_manage import get_account, is_super_admin_account
+        if not is_super_admin_account(get_account(actor)):
+            return jsonify({"success": False, "error": "report access denied"}), 403
+    return jsonify({"success": True, "document": document})
+
+
 @sft_bp.get("/api/dispatch/status")
 def dispatch_status():
     """Read-only dispatch/worker projection for the operations panel."""
