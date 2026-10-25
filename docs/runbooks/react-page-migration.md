@@ -10,7 +10,7 @@ not the same as a fully migrated detail/editor route.
 | `/research` | native landing; detail editor bridge |
 | `/jobs` | native list; native detail + run configuration drawer; input still legacy |
 | `/backtest` | native strategy-family landing; workbench bridge |
-| `/products` | native catalog with product/factor tabs; group/product/factor editors bridge |
+| `/products` | native catalog with product/factor/strategy tabs; editors bridge |
 | `/settings` | native overlay; several sections still placeholders |
 | `/account` | native |
 
@@ -20,7 +20,7 @@ not the same as a fully migrated detail/editor route.
 /researches/:id
 /research reports
 /reports/:id
-/strategies, /strategies/:id
+/strategies/:id
 /jobs/:port/:id/input/:name
 /ic
 /factor-series
