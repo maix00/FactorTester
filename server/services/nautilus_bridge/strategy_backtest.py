@@ -220,9 +220,17 @@ def run_strategy_family_run_spec(
 ) -> dict[str, Any]:
     """Resolve frozen factor roles and product catalogs from one Job RunSpec."""
     from server.modules.shared.run_spec_resolution.factors import RunFactorResolver
+    from server.services.nautilus_bridge.runtime_status import nautilus_runtime_status
     from server.services.nautilus_bridge.strategy_families import (
         CrossSectionalGroup, ThresholdState,
     )
+
+    runtime = nautilus_runtime_status()
+    if not runtime["compatible"]:
+        raise ValueError(
+            "Nautilus runtime unavailable or version-mismatched: "
+            f"found={runtime['version'] or 'missing'} expected={runtime['expected']}"
+        )
 
     template = plan.get("strategy")
     if not isinstance(template, dict):
