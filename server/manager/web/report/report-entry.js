@@ -330,6 +330,9 @@
       t,
     });
     const renderer = renderContent();
+    if (new URLSearchParams(location.search).get("edit") === "1") {
+      attachChapterEditor(publicationID, content, context, api).catch(() => {});
+    }
     const stopWatching = source.watch({
       isCurrent,
       onChange: next => {
@@ -344,6 +347,61 @@
     });
     context.pageState?.register?.("research-report-updates", {dispose: stopWatching});
     session.publicationID = publicationID;
+  }
+
+
+  async function attachChapterEditor(publicationID, content, context, api) {
+    const {t} = context;
+    const documentValue = await api(`/api/research-reports/${encodeURIComponent(publicationID)}`);
+    const agent = await api(`/api/research-reports/${encodeURIComponent(publicationID)}/agent`);
+    let chapters = agent?.manifest?.chapters || [];
+    const baseRev = documentValue?.document?._rev || "";
+    if (!baseRev || !chapters.length) return;
+    const panel = document.createElement("section");
+    panel.className = "report-edit-panel";
+    const title = document.createElement("h3");
+    title.textContent = t("章节顺序编辑");
+    panel.append(title);
+    const apply = async operation => {
+      try {
+        await api(`/api/research-reports/${encodeURIComponent(publicationID)}/operations`, {
+          method: "POST", body: JSON.stringify({base_rev: baseRev, ...operation}),
+        });
+        location.reload();
+      } catch (error) {
+        context.showNotice(error?.message || t("保存失败"), true);
+      }
+    };
+    chapters.forEach((chapter, index) => {
+      const row = document.createElement("div");
+      row.className = "report-edit-row";
+      const label = document.createElement("span");
+      label.textContent = chapter.title || chapter.chapter_id;
+      const up = document.createElement("button");
+      up.textContent = t("上移");
+      up.disabled = index === 0;
+      up.onclick = () => apply({
+        op: "move_chapter", chapter_id: chapter.chapter_id,
+        after_chapter_id: chapters[index - 2]?.chapter_id || null,
+      });
+      const down = document.createElement("button");
+      down.textContent = t("下移");
+      down.disabled = index === chapters.length - 1;
+      down.onclick = () => apply({
+        op: "move_chapter", chapter_id: chapter.chapter_id,
+        after_chapter_id: chapters[index + 1]?.chapter_id || null,
+      });
+      const remove = document.createElement("button");
+      remove.textContent = t("删除");
+      remove.onclick = () => {
+        if (window.confirm(`${t("删除章节")}: ${label.textContent}?`)) {
+          apply({op: "remove_chapter", chapter_id: chapter.chapter_id});
+        }
+      };
+      row.append(label, up, down, remove);
+      panel.append(row);
+    });
+    content.append(panel);
   }
 
   function openReference(target, context, labelOverride = "") {
