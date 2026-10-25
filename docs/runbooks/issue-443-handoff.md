@@ -101,3 +101,11 @@ job_index_gb=4 control_events=650492
 
 `scripts/server/check_public_capacity.sh` exits non-zero below
 10G root, 10G `/data`, or 1024MB MemAvailable.
+
+## React shell i18n and local containers (2026-10-25)
+
+- React shell now uses i18next/react-i18next with shared `tr.language`.
+- Desktop Ant Design locale follows the same language; mobile uses native
+  language select to avoid shipping Ant Design.
+- Local Docker cleanup: removed the duplicate stopped `ft-couchdb-b` container;
+  kept `ft-couchdb`, `ft-rabbit`, `ft-keycloak` and their volumes.
