@@ -126,7 +126,7 @@
     const showNotice = (message, isError = false) =>
       noticeQueue.enqueue(message, isError);
 
-    function setHeading(name, scope = "FTClient") {
+    function setHeading(name, scope = "TradeResearch") {
       title.textContent = name;
       eyebrow.textContent = scope;
       toolbar.replaceChildren();
