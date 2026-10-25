@@ -12,6 +12,7 @@ export const resources = {
       jobs: { task: "任务", status: "状态", jobId: "Job ID", updated: "更新时间", statusFilter: "按状态筛选", recent: "最近运行" },
       workspace: { title: "工作区", desc: "已打开和最近访问的页面" },
       notifications: { title: "通知", close: "关闭", empty: "暂无通知", new: "新", bell: "通知中心" },
+      more: "加载更多",
       settingsPanel: {
         title: "设置", language: "语言", languageHint: "界面语言与数字/日期格式，时区独立。",
         layout: "工作区布局", layoutHint: "重置 Dockview 标签、分组和分栏。",
@@ -32,6 +33,7 @@ export const resources = {
       jobs: { task: "Task", status: "Status", jobId: "Job ID", updated: "Updated", statusFilter: "Filter by status", recent: "Recent runs" },
       workspace: { title: "Workspace", desc: "Open and recently visited pages" },
       notifications: { title: "Notifications", close: "Close", empty: "No notifications", new: "new", bell: "Notification center" },
+      more: "Load more",
       settingsPanel: {
         title: "Settings", language: "Language", languageHint: "Interface language and number/date formats; time zone is separate.",
         layout: "Workspace layout", layoutHint: "Reset Dockview tabs, groups and splits.",

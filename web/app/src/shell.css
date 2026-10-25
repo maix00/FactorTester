@@ -241,3 +241,16 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-account-card > div { display: flex; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
 .tr-account-card > div:last-child { border-bottom: 0; }
 .tr-account-card span { color: var(--muted); }
+.tr-mobile-jobs { padding: 18px 14px 96px; }
+.tr-mobile-jobs header h1 { margin: 0; font-size: 22px; }
+.tr-mobile-jobs header p { margin: 3px 0 14px; color: var(--muted); font-size: 12px; }
+.tr-mobile-job-list { display: grid; gap: 8px; }
+.tr-mobile-job-card { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.tr-mobile-job-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tr-mobile-job-top strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tr-mobile-job-status { padding: 2px 7px; border-radius: 99px; font-size: 10px; background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); }
+.tr-mobile-job-status.is-failed { background: #fee4e2; color: #b42318; }
+.tr-mobile-job-status.is-succeeded { background: #d1fadf; color: #067647; }
+.tr-mobile-job-card small { color: var(--muted); font-size: 11px; }
+.tr-mobile-jobs-empty, .tr-mobile-jobs-error { color: var(--muted); font-size: 12px; text-align: center; padding: 24px 0; }
+.tr-mobile-load-more { width: 100%; margin-top: 12px; padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font: inherit; font-size: 12px; }
