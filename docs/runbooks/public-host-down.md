@@ -34,3 +34,14 @@ The public app host must **never** run the Nautilus wheel builder. The builder
 now refuses when it detects the public app container, or when MemAvailable is
 below 5 GiB, unless `NAUTILUS_BUILD_ALLOW_SHARED=1` is set explicitly. Build on
 the intranet builder and copy only the finished wheel to the public release.
+
+## 2026-10-25 recovery result
+
+The ECS instance was rebooted from the console. PostgreSQL initially failed
+with `Address already in use` because the standalone CouchDB container had
+taken its static `172.30.185.3` address. CouchDB was recreated on the same
+volume with a pinned `172.30.185.5`; PostgreSQL then started healthy.
+
+Final state: app, PostgreSQL, CouchDB and RabbitMQ healthy. The abandoned
+wheel build container was removed. The build script now refuses to run while
+the public app container exists or when MemAvailable is below 5 GiB.
