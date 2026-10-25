@@ -90,9 +90,18 @@ def dispatch_overview(
         for item in servers:
             if item["server_id"] == server_id:
                 item["ports"] = local_targets
+    try:
+        from server.services.nautilus_bridge.capabilities import (
+            nautilus_backtest_submission_capability,
+        )
+
+        nautilus = nautilus_backtest_submission_capability()
+    except Exception as exc:
+        nautilus = {"available": False, "reason": type(exc).__name__}
     return {
         "success": True,
         "server_id": server_id,
+        "nautilus": nautilus,
         "outbox": outbox.counts(),
         "local_targets": local_targets,
         "servers": sorted(servers, key=lambda item: item["server_id"]),

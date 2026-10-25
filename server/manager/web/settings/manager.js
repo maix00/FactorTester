@@ -114,7 +114,11 @@
     intro.innerHTML = `<b></b><small></small>`;
     intro.querySelector("b").textContent = context.t("任务队列与 worker");
     const outbox = payload.outbox || {};
-    intro.querySelector("small").textContent = `${context.t("本机 outbox")}: pending ${outbox.pending ?? 0} · sent ${outbox.sent ?? 0} · failed ${outbox.failed ?? 0} · dead ${outbox.dead ?? 0}`;
+    const nautilus = payload.nautilus || {};
+    const engine = nautilus.available
+      ? context.t("Nautilus 已就绪")
+      : `${context.t("Nautilus 未就绪")}: ${nautilus.reason || ""}`;
+    intro.querySelector("small").textContent = `${context.t("本机 outbox")}: pending ${outbox.pending ?? 0} · sent ${outbox.sent ?? 0} · failed ${outbox.failed ?? 0} · dead ${outbox.dead ?? 0} · ${engine}`;
     wrapper.append(intro);
     const view = FTUI.table([
       context.t("服务器"), context.t("端口"), context.t("队列"),
