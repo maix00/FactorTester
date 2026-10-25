@@ -35,11 +35,13 @@ def build_runner() -> DispatchRunner:
     outbox.ensure_schema()
     from server.jobs.repository.sqlite import JobRepository
 
-    JobRepository(db_path).recover_expired_leases()
+    repository = JobRepository(db_path)
+    repository.recover_expired_leases()
     return DispatchRunner(
         outbox,
         publisher_from_env(),
         preflight=resolve_executor,
+        target_online=repository.worker_target_online,
     )
 
 

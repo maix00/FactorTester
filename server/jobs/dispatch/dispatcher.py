@@ -57,17 +57,25 @@ class DispatchRunner:
         publisher: DispatchPublisher,
         *,
         preflight: Callable[[], None] | None = None,
+        target_online: Callable[[str, int], bool] | None = None,
     ) -> None:
         self.outbox = outbox
         self.publisher = publisher
         self.preflight = preflight
+        self.target_online = target_online
 
     def run_once(self, *, limit: int = 10) -> dict[str, int]:
         if self.preflight is not None:
             self.preflight()
-        result = {"claimed": 0, "sent": 0, "failed": 0}
+        result = {"claimed": 0, "sent": 0, "failed": 0, "deferred": 0}
         for record in self.outbox.claim(limit=limit):
             result["claimed"] += 1
+            if self.target_online is not None and not self.target_online(
+                record.deployment_id, record.message.service_port,
+            ):
+                self.outbox.defer(record.identity)
+                result["deferred"] += 1
+                continue
             try:
                 self.publisher.publish(record.message)
             except Exception as exc:  # broker/network/protocol failure

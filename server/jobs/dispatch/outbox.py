@@ -279,6 +279,20 @@ class DispatchOutbox:
             conn.commit()
         return status
 
+    def defer(self, identity: tuple[str, int], *, delay: float = 5.0) -> None:
+        """Return a claimed row to pending without counting a broker failure."""
+        timestamp = time.time()
+        with connect_sqlite(self.db_path) as conn:
+            ensure_dispatch_schema(conn)
+            conn.execute(
+                """
+                UPDATE research_job_dispatch_outbox
+                SET status='pending', available_at=?, lease_until=NULL
+                WHERE job_id=? AND attempt=? AND status='publishing'
+                """,
+                (timestamp + max(0.0, float(delay)), identity[0], identity[1]),
+            )
+
     def requeue(self, identity: tuple[str, int], *, now: float | None = None) -> None:
         """Manually return a failed/dead row to the dispatcher."""
         timestamp = time.time() if now is None else float(now)

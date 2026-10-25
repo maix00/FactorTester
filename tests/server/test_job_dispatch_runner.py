@@ -31,7 +31,7 @@ def test_runner_publishes_then_marks_sent(tmp_path):
     outbox.enqueue(_message(), now=100.0)
     publisher = _Publisher()
     result = DispatchRunner(outbox, publisher).run_once(limit=1)
-    assert result == {"claimed": 1, "sent": 1, "failed": 0}
+    assert result == {"claimed": 1, "sent": 1, "failed": 0, "deferred": 0}
     assert publisher.messages == [_message()]
     assert outbox.get(("job-1", 1)).status == "sent"
 
@@ -88,3 +88,17 @@ def test_kombu_publisher_uses_celery_protocol_and_target_queue(monkeypatch):
     assert kwargs["routing_key"] == "factortester.jobs.remote-main.8001"
     assert kwargs["exchange"].name == "factortester"
     assert kwargs["serializer"] == "json"
+
+
+def test_offline_target_is_deferred_not_published(tmp_path):
+    outbox = DispatchOutbox(tmp_path / "jobs.db")
+    outbox.enqueue(_message("job-offline"), now=100.0)
+    publisher = _Publisher()
+    runner = DispatchRunner(
+        outbox, publisher, target_online=lambda deployment, port: False,
+    )
+    result = runner.run_once(limit=1)
+    assert result["deferred"] == 1
+    assert publisher.messages == []
+    row = outbox.get(("job-offline", 1))
+    assert row.status == "pending"
