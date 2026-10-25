@@ -168,3 +168,6 @@ body { margin: 0; }
 .tr-mobile-notice.is-error { background: #b42318; }
 .tr-mobile-notice.is-success { background: #067647; }
 .tr-mobile-notice.is-warning { background: #b54708; }
+.tr-settings-section { padding: 4px 0 18px; border-bottom: 1px solid var(--line); margin-bottom: 18px; }
+.tr-settings-section h3 { margin: 0 0 4px; font-size: 13px; }
+.tr-settings-section p { margin: 0 0 10px; color: var(--muted); font-size: 12px; line-height: 1.5; }
