@@ -33,7 +33,7 @@ class JobTestReportDocument:
         return {
             "_id": self.report_ref,
             "schema_version": self.schema_version,
-            "kind": "report",
+            "kind": "job_test_report",  # legacy docs use "report"
             "job_id": self.job_id,
             "owner": self.owner,
             "metadata": dict(self.metadata),
