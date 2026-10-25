@@ -135,13 +135,21 @@ const descriptor = {
   };
   findTable(pageContext.content);
   assert.deepEqual(sourceTable.headers, [
-    "数据源族", "数据源 / 频率", "数据类型 / 深度", "可用性", "提供服务器", "Nautilus 属性",
+    "数据源族", "数据能力", "数据覆盖", "操作",
   ]);
-  assert.equal(sourceTable.rows[0][5].textContent, "查看属性");
-  sourceTable.rows[0][5].click();
+  assert.deepEqual(
+    sourceTable.rows[0][1].children.map(item => item.textContent),
+    ["1 个数据源", "MIN1"],
+  );
+  assert.deepEqual(
+    sourceTable.rows[0][2].children.map(item => item.textContent),
+    ["可用", "有数据 1 / 1 个产品"],
+  );
+  assert.equal(sourceTable.rows[0][3].children[1].textContent, "属性");
+  sourceTable.rows[0][3].children[1].click();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(sharedOverlayCalls[0].kind, "data_source_family");
-  sourceTable.rows[0][4].click();
+  sourceTable.rows[0][3].children[0].click();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(sharedOverlayCalls[1].kind, "data_source_providers");
 

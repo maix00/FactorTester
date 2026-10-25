@@ -34,16 +34,13 @@
         const rows = await loadDescriptors(context, helpers);
         if (!isCurrentView(token)) return;
         const table = FTUI.table(
-          [context.t("数据源族"), context.t("数据源 / 频率"),
-            context.t("数据类型 / 深度"), context.t("可用性"),
-            context.t("提供服务器"), context.t("Nautilus 属性")],
+          [context.t("数据源族"), context.t("数据能力"),
+            context.t("数据覆盖"), context.t("操作")],
           rows.map(([, descriptor]) => [
             familyLink(context, helpers, descriptor),
-            membersCell(context, descriptor.members),
-            sourceTypesCell(context, descriptor.members),
-            compactAvailabilityCell(context, descriptor),
-            providersCell(context, descriptor),
-            sourceDetailsButton(context, descriptor),
+            compactMembersCell(context, descriptor.members),
+            compactCoverageCell(context, descriptor),
+            sourceActionsCell(context, descriptor),
           ]),
         );
         rows.forEach(([origin, descriptor], index) => {
@@ -246,43 +243,46 @@
     return link;
   }
 
-  function membersCell(context, members) {
+  function compactMembersCell(context, members) {
+    const values = Array.isArray(members) ? members : [];
+    const frequencies = [...new Set(values
+      .map(member => String(member.frequency || "").trim())
+      .filter(Boolean))];
     return multilineCell(
-      (Array.isArray(members) ? members : []).map(member => {
-        const label = member.label || member.id || context.t("未命名数据源");
-        const frequency = member.frequency || context.t("暂无频率");
-        return `${label} · ${frequency}`;
-      }),
+      [
+        `${values.length} ${context.t("个数据源")}`,
+        frequencies.length ? frequencies.join(" · ") : context.t("未声明频率"),
+      ],
       "catalog-source-lines catalog-source-members",
     );
   }
 
-  function sourceTypesCell(context, members) {
-    const values = (Array.isArray(members) ? members : []).map(member => {
-      const dimensions = member.dimensions || member.data_modes?.[0] || {};
-      const type = dimensions.data_kind || member.mode?.data_kind || "";
-      const depth = dimensions.market_depth || member.mode?.market_depth || "";
-      return [type, depth].filter(Boolean).join(" · ") || context.t("未声明");
-    });
-    return multilineCell([...new Set(values)], "catalog-source-lines catalog-source-modes");
-  }
-
-  function compactAvailabilityCell(context, descriptor) {
+  function compactCoverageCell(context, descriptor) {
     const value = descriptor?.availability || {};
-    const products = value.product_count ?? descriptor?.product_count ?? 0;
+    const available = value.product_count ?? descriptor?.product_count ?? 0;
+    const catalog = descriptor?.catalog_product_count ?? available;
     const visitor = descriptor.visitor_data_accessible === false
       ? context.t("访客只读") : "";
     return multilineCell([
-      `${availabilityStatus(context, value.status)} · ${products} ${context.t("个有数据产品")}`,
+      availabilityStatus(context, value.status),
+      `${context.t("有数据")} ${available} / ${catalog} ${context.t("个产品")}`,
       visitor,
     ], "catalog-source-lines catalog-source-availability");
+  }
+
+  function sourceActionsCell(context, descriptor) {
+    const actions = document.createElement("div");
+    actions.className = "catalog-source-actions";
+    actions.append(providersCell(context, descriptor));
+    actions.append(sourceDetailsButton(context, descriptor));
+    return actions;
   }
 
   function sourceDetailsButton(context, descriptor) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "catalog-source-providers-button";
-    button.textContent = context.t("查看属性");
+    button.textContent = context.t("属性");
     button.title = context.t("查看数据源声明与 Nautilus 适配能力");
     button.addEventListener("click", async event => {
       event.preventDefault();
