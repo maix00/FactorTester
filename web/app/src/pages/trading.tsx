@@ -12,10 +12,14 @@ export function TradingPage(): React.ReactElement {
   const [legacy, setLegacy] = useState(false);
 
   useEffect(() => {
+    const fallback = [
+      { id: "threshold", title: t("trading.familyThreshold"), description: t("trading.familyThresholdHint") },
+      { id: "cross_sectional_group", title: t("trading.familyGroup"), description: t("trading.familyGroupHint") },
+    ];
     fetch("/api/strategy-families", { credentials: "same-origin" })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
-      .then((payload: Payload) => setFamilies(payload.families ?? []))
-      .catch((error: Error) => notify({ code: "trading.families", type: "error", message: t("loadFailed"), description: error.message }));
+      .then((payload: Payload) => setFamilies(payload.families?.length ? payload.families : fallback))
+      .catch(() => setFamilies(fallback));
   }, [t]);
 
   const open = (id: string): void => { setFamily(id); setLegacy(true); };
