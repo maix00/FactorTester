@@ -1016,6 +1016,49 @@ def get_report_attachment(report_ref: str, name: str):
     return Response(data, mimetype=mime, headers={"Content-Disposition": f'inline; filename="{name}"'})
 
 
+@sft_bp.post("/api/research-reports/<publication_id>/operations")
+def apply_research_report_operation(publication_id: str):
+    actor = require_user()
+    import os
+    from flask import request
+    from server.jobs.storage.couchdb_research_reports import get_research_report
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+    from server.jobs.storage.research_report_operations import apply_index_operation
+
+    payload = request.get_json(silent=True) or {}
+    base_rev = str(payload.get("base_rev") or "")
+    operation = payload.get("operation") if isinstance(payload.get("operation"), dict) else payload
+    if not base_rev:
+        return jsonify({"success": False, "error": "base_rev is required"}), 400
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "research report store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = get_research_report(store, publication_id)
+    except Exception:
+        return jsonify({"success": False, "error": "research report not found"}), 404
+    if document.get("owner_ref") != actor:
+        return jsonify({"success": False, "error": "only the research report owner may edit"}), 403
+    try:
+        result = apply_index_operation(store, document, base_rev=base_rev, operation=operation)
+    except ValueError as exc:
+        code = 409 if "conflict" in str(exc) else 400
+        return jsonify({"success": False, "error": str(exc)}), code
+    try:
+        from server.jobs.dispatch.audit import append_audit
+        import settings as Settings
+
+        append_audit(Settings.CACHE_DB_PATH, action="research_report_operation",
+                     actor=actor, job_id=publication_id,
+                     detail=str(operation.get("op") or ""))
+    except Exception:
+        pass
+    return jsonify({"success": True, "rev": result["rev"],
+                    "attachment": result["attachment"],
+                    "chapters": result["index"].get("chapters") or []})
+
+
 @sft_bp.get("/api/research-reports/<publication_id>/conflicts")
 def get_research_report_conflicts(publication_id: str):
     actor = require_user()
@@ -1098,7 +1141,7 @@ def get_research_report_agent_markdown(publication_id: str):
     import os
     from server.jobs.storage.couchdb_research_reports import get_research_report, projection
     from server.jobs.storage.couchdb_reports import CouchDBObjectStore
-    from server.jobs.storage.research_report_agent import agent_manifest, agent_markdown
+    from server.jobs.storage.research_report_agent import agent_manifest, agent_markdown, load_index
 
     url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
     if not url:

@@ -190,10 +190,13 @@ def test_research_report_agent_endpoints(monkeypatch):
             return 200, json.dumps({"_id": "research-report:p1", "kind": "research_report",
                                     "publication_id": "p1", "owner_ref": "alice",
                                     "title": "T", "visibility": "private",
-                                    "attachments": {"projection.json": {"name": "p.json"}}}).encode()
+                                    "attachments": {"projection.json": {"name": "p.json"},
+                                                    "index.json": {"name": "i.json"}}}).encode()
         def get_attachment(self, ref, name):
-            import hashlib, json
+            import json
             if name == "p.json":
+                return json.dumps({"chapters": []}).encode()
+            if name == "i.json":
                 return json.dumps({"chapters": []}).encode()
             return json.dumps({"components": []}).encode()
 
@@ -204,3 +207,29 @@ def test_research_report_agent_endpoints(monkeypatch):
     with client.session_transaction() as session: session["username"] = "alice"
     assert client.get("/api/research-reports/p1/agent").get_json()["success"] is True
     assert client.get("/api/research-reports/p1/agent.md").mimetype == "text/markdown"
+
+
+def test_research_report_move_chapter_uses_base_rev(monkeypatch):
+    class Store:
+        def __init__(self, *args, **kwargs): pass
+        def _request(self, method, path, body=None, content_type="application/json"):
+            import json
+            if method == "GET" and not path.endswith(".json"):
+                return 200, json.dumps({"_id": "research-report:p1", "_rev": "1-a",
+                                        "kind": "research_report", "owner_ref": "alice",
+                                        "attachments": {"index.json": {"name": "idx.json"}}}).encode()
+            if method == "GET": return 200, b'{"chapters":[{"component_id":"a"},{"component_id":"b"}]}'
+            if "/idx" in path or path.endswith(".json"): return 201, b'{"rev":"2-b"}'
+            return 201, b'{"rev":"2-b"}'
+        def get_attachment(self, ref, name):
+            return b'{"chapters":[{"component_id":"a"},{"component_id":"b"}]}'
+
+    monkeypatch.setenv("FACTORTESTER_COUCHDB_URL", "http://couch")
+    monkeypatch.setattr("server.jobs.storage.couchdb_reports.CouchDBObjectStore", Store)
+    app = Flask(__name__); app.secret_key = "t"; app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session: session["username"] = "alice"
+    response = client.post("/api/research-reports/p1/operations", json={
+        "base_rev": "1-a", "op": "move_chapter", "chapter_id": "b", "after_chapter_id": "a",
+    })
+    assert response.status_code == 200, response.get_data(as_text=True)
