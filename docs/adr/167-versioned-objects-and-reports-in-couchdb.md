@@ -80,3 +80,15 @@ content-addressed attachments.  The migration ran inside the app container
 against `/opt/factortester/releases/audit-dispatch-<sha>`; the old directories
 remain untouched as read-only source until dual-read verification and client
 cutover.  CouchDB `doc_count` reached 307.
+
+## Verification
+
+`scripts/migrations/verify_job_reports_couchdb.py` checked all 427 legacy
+directories under `/data/job-results`; 307 contained report files and matched
+CouchDB documents/attachments, 120 contained only nested inputs and were
+correctly skipped. Result:
+
+```text
+checked: 427
+failed: 0
+```
