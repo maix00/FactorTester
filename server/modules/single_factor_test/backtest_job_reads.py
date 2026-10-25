@@ -960,6 +960,7 @@ def resolve_report_conflicts(report_ref: str):
     return jsonify({"success": True, "conflicts": remaining})
 
 
+@sft_bp.get("/api/job-test-reports/<report_ref>/attachments")
 @sft_bp.get("/api/reports/<report_ref>/attachments")
 def list_report_attachments(report_ref: str):
     actor = require_user()
@@ -984,6 +985,7 @@ def list_report_attachments(report_ref: str):
     ]})
 
 
+@sft_bp.get("/api/job-test-reports/<report_ref>/attachments/<path:name>")
 @sft_bp.get("/api/reports/<report_ref>/attachments/<path:name>")
 def get_report_attachment(report_ref: str, name: str):
     """Stream one content-addressed CouchDB report attachment."""
@@ -1014,6 +1016,7 @@ def get_report_attachment(report_ref: str, name: str):
     return Response(data, mimetype=mime, headers={"Content-Disposition": f'inline; filename="{name}"'})
 
 
+@sft_bp.get("/api/job-test-reports/<path:report_ref>")
 @sft_bp.get("/api/reports/<path:report_ref>")
 def get_report_document(report_ref: str):
     """Read one CouchDB report document, scoped to its owner."""
