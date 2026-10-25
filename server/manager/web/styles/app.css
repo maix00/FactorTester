@@ -1477,3 +1477,21 @@ td :is(.icon-action-button, .agent-model-icon-action) { --ft-icon-action-size: 1
 :is(.opened-tab, .nav-folder-row, .nav-singleton) > .tab-close { --ft-icon-action-size: 20px; }
 .nav-singleton[hidden] { display: none; }
 :is(.icon-action-button, .tab-close, .dialog-close, .agent-model-icon-action, .job-result-tab-close)[hidden] { display: none !important; }
+
+.report-edit-panel {
+  margin: 2rem 0;
+  padding: 1rem;
+  border: 1px solid var(--border, #d0d7de);
+  border-radius: 8px;
+}
+.report-edit-row {
+  display: flex;
+  gap: .5rem;
+  align-items: center;
+  margin: .35rem 0;
+  flex-wrap: wrap;
+}
+.report-edit-row span { min-width: 10rem; }
+.report-edit-row input, .report-edit-row textarea, .report-edit-row select {
+  min-width: 8rem;
+}
