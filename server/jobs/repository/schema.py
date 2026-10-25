@@ -64,6 +64,9 @@ def _backfill_job_subjects(conn: sqlite3.Connection) -> None:
 
 
 def ensure_job_schema(conn: sqlite3.Connection) -> None:
+    from server.jobs.dispatch.outbox import ensure_dispatch_schema
+
+    ensure_dispatch_schema(conn)
     legacy_assurance = conn.execute(
         """
         SELECT 1 FROM sqlite_master

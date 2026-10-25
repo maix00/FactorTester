@@ -163,6 +163,13 @@ class JobRepository(
                     ),
                 )
                 index_job_subjects(conn, record.job_id, record.job_spec)
+                if record.status is JobStatus.QUEUED:
+                    queued_row = conn.execute(
+                        "SELECT * FROM research_jobs WHERE job_id=?",
+                        (record.job_id,),
+                    ).fetchone()
+                    if queued_row is not None:
+                        self._enqueue_dispatch(conn, queued_row)
             except sqlite3.IntegrityError as exc:
                 if record.step_mode and "research_jobs.owner" in str(exc):
                     raise ValueError("step job already active") from exc
@@ -194,6 +201,27 @@ class JobRepository(
             if existing is None:
                 raise
             return existing, False
+
+    @staticmethod
+    def _enqueue_dispatch(conn: sqlite3.Connection, row: sqlite3.Row) -> None:
+        """Write the dispatch row in the same transaction as the Job state."""
+        from server.jobs.dispatch.contract import DispatchMessage
+        from server.jobs.dispatch.outbox import enqueue
+
+        run_spec_hash = str(row["run_spec_hash"] or "")
+        deployment_id = str(row["deployment_id"] or "")
+        if not run_spec_hash or not deployment_id:
+            return
+        enqueue(
+            conn,
+            DispatchMessage(
+                job_id=str(row["job_id"]),
+                attempt=max(1, int(row["attempt"] or 1)),
+                deployment_id=deployment_id,
+                run_spec_hash=run_spec_hash,
+                job_spec_hash=str(row["job_spec_hash"] or ""),
+            ),
+        )
 
     def transition(
         self,
@@ -291,6 +319,8 @@ class JobRepository(
                 """,
                 values,
             ).fetchone()
+            if target is JobStatus.QUEUED and updated is not None:
+                self._enqueue_dispatch(conn, updated)
             if target is JobStatus.RUNNING:
                 conn.execute(
                     "DELETE FROM user_job_pins WHERE owner=? AND job_id=?",
@@ -352,6 +382,13 @@ class JobRepository(
                     str(job_id),
                 ),
             )
+            if target is JobStatus.QUEUED:
+                queued_row = conn.execute(
+                    "SELECT * FROM research_jobs WHERE job_id=?",
+                    (str(job_id),),
+                ).fetchone()
+                if queued_row is not None:
+                    self._enqueue_dispatch(conn, queued_row)
         return self.require(job_id)
 
     def approve_plan(self, job_id: str, *, owner: str) -> JobRecord:
@@ -368,6 +405,12 @@ class JobRepository(
             )
             if cursor.rowcount != 1:
                 raise RuntimeError("job is not awaiting confirmation")
+            queued_row = conn.execute(
+                "SELECT * FROM research_jobs WHERE job_id=?",
+                (str(job_id),),
+            ).fetchone()
+            if queued_row is not None:
+                self._enqueue_dispatch(conn, queued_row)
         return self.require(job_id, owner=owner)
 
     def request_cancel(self, job_id: str, *, owner: str, reason: str) -> JobRecord:

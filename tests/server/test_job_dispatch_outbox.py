@@ -109,3 +109,57 @@ def test_mark_failed_unknown_identity_raises(tmp_path):
     outbox = DispatchOutbox(tmp_path / "jobs.db")
     with pytest.raises(KeyError):
         outbox.mark_failed(("missing", 1), "boom")
+
+
+def test_repository_queues_dispatch_in_same_transaction(tmp_path):
+    from server.jobs.models import JobRecord
+    from server.jobs.repository.sqlite import JobRepository
+    from server.jobs.states import JobStatus
+
+    repository = JobRepository(tmp_path / "jobs.db")
+    record = JobRecord(
+        job_id="job-tx",
+        run_id="run-tx",
+        owner="owner",
+        workspace_id="workspace",
+        kind="backtest",
+        status=JobStatus.SUBMITTED,
+        deployment_id="remote-main",
+        run_spec_hash="c" * 64,
+        job_spec={"analysis": "backtest"},
+    )
+    repository.create(record)
+    repository.transition("job-tx", JobStatus.PLANNING)
+    repository.transition("job-tx", JobStatus.QUEUED)
+
+    outbox = DispatchOutbox(tmp_path / "jobs.db")
+    row = outbox.get(("job-tx", 1))
+    assert row is not None
+    assert row.status == "pending"
+    assert row.message.run_spec_hash == "c" * 64
+    assert row.message.deployment_id == "remote-main"
+
+
+def test_repository_does_not_queue_legacy_job_without_run_spec(tmp_path):
+    from server.jobs.models import JobRecord
+    from server.jobs.repository.sqlite import JobRepository
+    from server.jobs.states import JobStatus
+
+    repository = JobRepository(tmp_path / "jobs.db")
+    repository.create(
+        JobRecord(
+            job_id="job-legacy",
+            run_id="run-legacy",
+            owner="owner",
+            workspace_id="workspace",
+            kind="backtest",
+            status=JobStatus.SUBMITTED,
+            deployment_id="remote-main",
+            run_spec_hash="",
+            job_spec={},
+        )
+    )
+    repository.transition("job-legacy", JobStatus.PLANNING)
+    repository.transition("job-legacy", JobStatus.QUEUED)
+    outbox = DispatchOutbox(tmp_path / "jobs.db")
+    assert outbox.get(("job-legacy", 1)) is None
