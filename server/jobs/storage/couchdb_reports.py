@@ -69,6 +69,8 @@ class CouchDBObjectStore:
                 _, raw = self._request("GET", report.report_ref)
                 current = json.loads(raw)
                 doc["_rev"] = current["_rev"]
+                if "_attachments" in current:
+                    doc["_attachments"] = current["_attachments"]
             except Exception:
                 pass
         self._request("PUT", report.report_ref, json.dumps(doc).encode())
@@ -107,4 +109,35 @@ def write_report(store: CouchDBObjectStore, *, job_id: str, owner: str,
         stored = content_name(data, name.rsplit(".", 1)[-1] if "." in name else "bin")
         report.attachments[name] = stored
         store.put_attachment(report.report_ref, stored, data, content_type)
+    store.put_report(report, overwrite=True)
     return report
+
+
+def publish_job_report(*, job_id: str, attempt: int, owner: str,
+                       reports_dir: str, metadata: dict[str, Any] | None = None,
+                       store: CouchDBObjectStore | None = None) -> str | None:
+    """Publish a completed Job report directory; None when CouchDB is not configured."""
+    import os
+    from pathlib import Path
+
+    if store is None:
+        url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+        if not url:
+            return None
+        store = CouchDBObjectStore(
+            url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip(),
+            username=os.environ.get("FACTORTESTER_COUCHDB_USER", ""),
+            password=os.environ.get("FACTORTESTER_COUCHDB_PASSWORD", ""),
+        )
+    root = Path(reports_dir)
+    files = {}
+    for path in sorted(root.iterdir()):
+        if path.is_file() and path.name != "nautilus_receipt.json":
+            files[path.name] = (path.read_bytes(), "text/html" if path.suffix == ".html" else "text/csv")
+    if not files:
+        return None
+    report = write_report(
+        store, job_id=job_id, owner=owner, revision=max(1, int(attempt)),
+        metadata={"kind": "nautilus_report", **(metadata or {})}, files=files,
+    )
+    return report.report_ref

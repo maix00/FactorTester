@@ -235,6 +235,15 @@ class _ReplayRunner:
             return
         result = asdict(receipt)
         result["reports_dir"] = str(output)
+        from server.jobs.storage.couchdb_reports import publish_job_report
+
+        report_ref = publish_job_report(
+            job_id=self.record.job_id, attempt=self.record.attempt,
+            owner=self.record.owner, reports_dir=str(output),
+            metadata={"engine": "nautilus_trader", "mode": "catalog_replay"},
+        )
+        if report_ref:
+            result["report_ref"] = report_ref
         sink.emit_result(result)
 
 
@@ -274,6 +283,15 @@ class _StrategyRunner:
             )
             return
         result["reports_dir"] = str(output)
+        from server.jobs.storage.couchdb_reports import publish_job_report
+
+        report_ref = publish_job_report(
+            job_id=self.record.job_id, attempt=self.record.attempt,
+            owner=self.record.owner, reports_dir=str(output),
+            metadata={"engine": "nautilus_trader", "mode": "strategy_family"},
+        )
+        if report_ref:
+            result["report_ref"] = report_ref
         sink.emit_result(result)
 
 
