@@ -734,6 +734,58 @@ def _can_read_report(actor: str, document: dict, report_ref: str) -> bool:
     ) for subject in subjects)
 
 
+@sft_bp.get("/api/auth/oidc/start")
+def oidc_start():
+    """Begin the Keycloak authorization-code flow for browser clients."""
+    import secrets
+    from flask import session, url_for
+    from server import branding
+    from server.identity.keycloak import oidc_authorization_url
+
+    base_url = branding.env("KEYCLOAK_URL")
+    realm = branding.env("KEYCLOAK_REALM")
+    client_id = branding.env("KEYCLOAK_CLIENT_ID")
+    if not (base_url and realm and client_id):
+        return jsonify({"success": False, "error": "OIDC is not configured"}), 503
+    state = secrets.token_urlsafe(24)
+    session["oidc_state"] = state
+    redirect_uri = url_for("sft.oidc_callback", _external=True)
+    return jsonify({"success": True, "authorization_url": oidc_authorization_url(
+        base_url=base_url, realm=realm, client_id=client_id,
+        redirect_uri=redirect_uri, state=state,
+    )})
+
+
+@sft_bp.get("/api/auth/oidc/callback")
+def oidc_callback():
+    """Complete the authorization-code flow and establish the session."""
+    from flask import redirect, request, session
+    from server import branding
+    from server.identity.keycloak import OIDCClient, oidc_userinfo
+
+    code = str(request.args.get("code") or "")
+    state = str(request.args.get("state") or "")
+    expected = str(session.pop("oidc_state", "") or "")
+    if not code or not state or state != expected:
+        return jsonify({"success": False, "error": "invalid OIDC state"}), 400
+    redirect_uri = request.url_root.rstrip("/") + "/api/auth/oidc/callback"
+    client = OIDCClient(
+        branding.env("KEYCLOAK_URL"), branding.env("KEYCLOAK_REALM"),
+        branding.env("KEYCLOAK_CLIENT_ID"),
+        client_secret=branding.env("KEYCLOAK_CLIENT_SECRET"),
+    )
+    tokens = client.exchange_code(code, redirect_uri)
+    profile = oidc_userinfo(
+        base_url=branding.env("KEYCLOAK_URL"), realm=branding.env("KEYCLOAK_REALM"),
+        access_token=str(tokens.get("access_token") or ""),
+    )
+    username = str(profile.get("preferred_username") or profile.get("sub") or "")
+    if not username:
+        return jsonify({"success": False, "error": "OIDC profile has no username"}), 401
+    session["username"] = username
+    return redirect("/")
+
+
 @sft_bp.get("/api/reports/<report_ref>/attachments/<path:name>")
 def get_report_attachment(report_ref: str, name: str):
     """Stream one content-addressed CouchDB report attachment."""

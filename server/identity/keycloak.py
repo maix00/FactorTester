@@ -230,3 +230,16 @@ class OIDCClient:
             "grant_type": "refresh_token", "refresh_token": refresh_token,
             "client_id": self.client_id,
         })
+
+
+def oidc_userinfo(*, base_url: str, realm: str, access_token: str,
+                  timeout: float = 10.0) -> dict:
+    import json
+    import urllib.request
+
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}/realms/{realm.strip('/')}/protocol/openid-connect/userinfo",
+        headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read())
