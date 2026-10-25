@@ -380,6 +380,12 @@ class CoreGetRoutesMixin:
             if not self._has_api_authorization():
                 self._require_capability()
                 return True
+            if self._session() is not None and not self._has_super_admin_session():
+                json_response(self, {
+                    "success": False,
+                    "error": "super administrator permission required",
+                }, 403)
+                return True
             from server.jobs.repository import JobRepository
             from server.manager.services.dispatch_overview import dispatch_overview
 
