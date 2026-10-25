@@ -17,7 +17,7 @@
   background: var(--sidebar);
 }
 .tr-brand { font-size: 15px; font-weight: 700; letter-spacing: .01em; padding: 2px 8px 12px; display: flex; align-items: center; gap: 9px; }
-.tr-brand-mark { width: 22px; height: 22px; border-radius: 7px; background: linear-gradient(145deg, var(--accent), #55a6ff); box-shadow: 0 3px 8px color-mix(in srgb, var(--accent) 26%, transparent); }
+.tr-brand-mark { display: block; flex: 0 0 22px; width: 22px; height: 22px; border-radius: 7px; background: linear-gradient(145deg, var(--accent), #55a6ff); box-shadow: 0 3px 8px color-mix(in srgb, var(--accent) 26%, transparent); }
 .tr-nav { display: flex; flex-direction: column; gap: 3px; }
 .tr-nav-item {
   appearance: none; border: 0; border-radius: 8px; padding: 8px 10px;
@@ -95,3 +95,7 @@
 .tr-job-status.is-succeeded { color: #067647; background: #ecfdf3; }
 .tr-job-status.is-running { color: #175cd3; background: #eff8ff; }
 .tr-job-status.is-failed { color: #b42318; background: #fef3f2; }
+.tr-dock-tab { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.tr-dock-tab .tr-icon { width: 13px; height: 13px; flex-basis: 13px; }
+.tr-dock-close { border: 0; background: transparent; color: var(--muted); width: 18px; height: 18px; border-radius: 4px; line-height: 1; padding: 0; }
+.tr-dock-close:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--text); }

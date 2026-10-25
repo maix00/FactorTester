@@ -1,6 +1,6 @@
 import React, { useState } from "react";
-import { DockviewReact, type DockviewReadyEvent, type IDockviewPanelProps } from "dockview-react";
-import { BUILTIN_PAGES, pagesForScope, registerPage } from "./registry.ts";
+import { DockviewReact, type DockviewReadyEvent, type IDockviewPanelHeaderProps, type IDockviewPanelProps } from "dockview-react";
+import { BUILTIN_PAGES, getPage, pagesForScope, registerPage } from "./registry.ts";
 import { PageSurface } from "./surface.tsx";
 import { PageIcon } from "./icon.tsx";
 
@@ -10,7 +10,20 @@ function Panel(props: IDockviewPanelProps<{ pageId: string }>): React.ReactEleme
   return <PageSurface pageId={props.params.pageId} />;
 }
 
+function Tab(props: IDockviewPanelHeaderProps<{ pageId: string }>): React.ReactElement {
+  const page = getPage(props.params.pageId);
+  return (
+    <span className="tr-dock-tab">
+      <PageIcon name={page?.icon} />
+      <span>{page?.title ?? props.api.title ?? props.params.pageId}</span>
+      <button type="button" className="tr-dock-close" aria-label="关闭" onClick={() => props.api.close()}>×</button>
+    </span>
+  );
+}
+
 const components = { page: Panel };
+const tabComponents = { page: Tab };
+const LAYOUT_KEY = "tr.workspace.layout.v1";
 type DockviewApi = DockviewReadyEvent["api"];
 
 export function DesktopShell(): React.ReactElement {
@@ -25,14 +38,29 @@ export function DesktopShell(): React.ReactElement {
     if (!page) return;
     const panel = api.getPanel(page.id);
     if (panel) panel.api.setActive();
-    else api.addPanel({ id: page.id, component: "page", title: page.title, params: { pageId: page.id } });
+    else api.addPanel({ id: page.id, component: "page", tabComponent: "page", title: page.title, params: { pageId: page.id } });
   };
 
   const onReady = (event: DockviewReadyEvent): void => {
     setApi(event.api);
-    for (const page of pages.filter((item) => ["research", "jobs", "trading"].includes(item.id))) {
-      event.api.addPanel({ id: page.id, component: "page", title: page.title, params: { pageId: page.id } });
+    let restored = false;
+    try {
+      const raw = localStorage.getItem(LAYOUT_KEY);
+      if (raw) {
+        event.api.fromJSON(JSON.parse(raw));
+        restored = true;
+      }
+    } catch {
+      restored = false;
     }
+    if (!restored) {
+      for (const page of pages.filter((item) => ["research", "jobs", "trading"].includes(item.id))) {
+        event.api.addPanel({ id: page.id, component: "page", tabComponent: "page", title: page.title, params: { pageId: page.id } });
+      }
+    }
+    event.api.onDidLayoutChange(() => {
+      try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(event.api.toJSON())); } catch { /* storage disabled */ }
+    });
   };
 
   return (
@@ -58,7 +86,7 @@ export function DesktopShell(): React.ReactElement {
         <div className="tr-rail-footer">TradeResearch Workbench</div>
       </aside>
       <div className="tr-desktop-workspace dockview-theme-light">
-        <DockviewReact className="dockview-theme-light" components={components} onReady={onReady} />
+        <DockviewReact className="dockview-theme-light" components={components} tabComponents={tabComponents} onReady={onReady} />
       </div>
     </div>
   );
