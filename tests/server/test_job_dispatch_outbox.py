@@ -192,3 +192,30 @@ def test_claim_attempt_is_idempotent(tmp_path):
     assert first.worker_pid == 123
     assert repository.claim_attempt("job-claim", 1, worker_pid=456) is None
     assert repository.claim_attempt("job-claim", 2, worker_pid=456) is None
+
+
+def test_cancelling_queued_job_closes_outbox_row(tmp_path):
+    from server.jobs.models import JobRecord
+    from server.jobs.repository.sqlite import JobRepository
+    from server.jobs.states import JobStatus
+
+    repository = JobRepository(tmp_path / "jobs.db")
+    repository.create(
+        JobRecord(
+            job_id="job-cancel",
+            run_id="run-cancel",
+            owner="owner",
+            workspace_id="workspace",
+            kind="backtest",
+            status=JobStatus.SUBMITTED,
+            deployment_id="remote-main",
+            run_spec_hash="e" * 64,
+            job_spec={},
+        )
+    )
+    repository.transition("job-cancel", JobStatus.PLANNING)
+    repository.transition("job-cancel", JobStatus.QUEUED)
+    outbox = DispatchOutbox(tmp_path / "jobs.db")
+    assert outbox.get(("job-cancel", 1)).status == "pending"
+    repository.request_cancel("job-cancel", owner="owner", reason="user")
+    assert outbox.get(("job-cancel", 1)).status == "dead"

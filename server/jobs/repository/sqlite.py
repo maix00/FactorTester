@@ -515,6 +515,11 @@ class JobRepository(
                     "DELETE FROM user_job_pins WHERE owner=? AND job_id=?",
                     (str(owner), str(job_id)),
                 )
+                from server.jobs.dispatch.outbox import cancel_job_in_connection
+
+                cancel_job_in_connection(
+                    conn, str(job_id), max(1, int(row["attempt"] or 1)),
+                )
         record = self._record(updated)
         if record is None:
             raise RuntimeError("cancel request returned no record")

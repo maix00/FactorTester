@@ -94,6 +94,21 @@ def enqueue(
     )
 
 
+def cancel_job_in_connection(
+    conn: sqlite3.Connection, job_id: str, attempt: int,
+    *, reason: str = "job_cancelled",
+) -> None:
+    """Cancel inside an existing Job transaction (same commit boundary)."""
+    conn.execute(
+        """
+        UPDATE research_job_dispatch_outbox
+        SET status='dead', lease_until=NULL, last_error=?
+        WHERE job_id=? AND attempt=? AND status IN ('pending', 'failed', 'publishing')
+        """,
+        (str(reason)[:2000], str(job_id), int(attempt)),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class OutboxRecord:
     job_id: str
@@ -193,6 +208,19 @@ class DispatchOutbox:
         finally:
             conn.close()
         return records
+
+    def cancel_job(self, job_id: str, attempt: int, *, reason: str = "job_cancelled") -> None:
+        """Terminally close an unsent row when the Job is cancelled."""
+        with connect_sqlite(self.db_path) as conn:
+            ensure_dispatch_schema(conn)
+            conn.execute(
+                """
+                UPDATE research_job_dispatch_outbox
+                SET status='dead', lease_until=NULL, last_error=?
+                WHERE job_id=? AND attempt=? AND status IN ('pending', 'failed', 'publishing')
+                """,
+                (str(reason)[:2000], str(job_id), int(attempt)),
+            )
 
     def mark_sent(
         self, identity: tuple[str, int], *, now: float | None = None,
