@@ -25,7 +25,7 @@ not the same as a fully migrated detail/editor route.
 /factor-series
 /factor-families, /factor-sets
 /factor-families/:id, /factor-sets/:id
-/product-groups, /product-categories, /product-category/:id
+/product-category/:id
 /products/:id, /product-groups/:id, /product-sources, /product-reference/:kind/:id
 /profiles, /profiles/:id
 /settings/:section (non-language/workspace sections)
