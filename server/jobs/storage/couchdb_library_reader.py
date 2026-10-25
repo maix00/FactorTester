@@ -36,6 +36,36 @@ class CouchDBLibraryReader:
         return self._find(selector)
 
 
+    def strategies(self, owner_ref: str = "") -> list[dict]:
+        selector = {"kind": "strategy_version"}
+        if owner_ref:
+            selector["owner_ref"] = owner_ref
+        return self._find(selector)
+
+    def strategy(self, strategy_ref: str) -> dict | None:
+        import json
+
+        try:
+            _, body = self.store._request("GET", strategy_ref)
+        except Exception:
+            return None
+        document = json.loads(body)
+        return document if document.get("kind") == "strategy_version" else None
+
+    def revisions(self, strategy_ref: str) -> list[dict]:
+        documents = self._find({"kind": "strategy_revision", "strategy_ref": strategy_ref})
+        return [dict(doc.get("payload") or {}) for doc in documents]
+
+    def revision(self, revision_ref: str) -> dict | None:
+        import json
+
+        try:
+            _, body = self.store._request("GET", revision_ref)
+        except Exception:
+            return None
+        document = json.loads(body)
+        return document if document.get("kind") == "strategy_revision" else None
+
 class CouchDBLibraryWriter:
     def __init__(self, store) -> None:
         self.store = store
@@ -144,6 +174,12 @@ class CouchDBLibraryWriter:
         document = json.loads(body)
         document.update({"_deleted": True, "_rev": document["_rev"]})
         self.store._request("PUT", strategy_ref, json.dumps(document).encode())
+
+    def strategies(self, owner_ref: str = "") -> list[dict]:
+        selector = {"kind": "strategy_version"}
+        if owner_ref:
+            selector["owner_ref"] = owner_ref
+        return self._find(selector)
 
     def strategy(self, strategy_ref: str) -> dict | None:
         import json

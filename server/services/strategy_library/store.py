@@ -114,6 +114,46 @@ class StrategyLibraryStore:
         limit: int = 20,
     ) -> tuple[list[dict[str, Any]], int]:
         """Page visible summaries with one SQL read for entries and revisions."""
+        import os
+        from server.jobs.storage.couchdb_authority import libraries_read_enabled
+
+        if scope == "mine" and libraries_read_enabled():
+            url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+            if url:
+                try:
+                    from server.jobs.storage.couchdb_library_reader import CouchDBLibraryReader
+                    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+                    docs = CouchDBLibraryReader(CouchDBObjectStore(
+                        url, os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects",
+                    )).strategies(principal)
+                    needle = str(query or "").strip().lower()
+                    rows = []
+                    for doc in docs:
+                        payload = doc.get("payload") or {}
+                        entry = dict(payload.get("entry") or {})
+                        revision = dict(payload.get("revision") or {})
+                        if needle and needle not in str(entry.get("name") or "").lower() \
+                                and needle not in str(entry.get("strategy_ref") or "").lower():
+                            continue
+                        rows.append({**entry,
+                                     "revision_ref": revision.get("revision_ref"),
+                                     "revision_number": revision.get("revision_number"),
+                                     "source_sha256": revision.get("source_sha256"),
+                                     "entrypoint": revision.get("entrypoint"),
+                                     "hooks": revision.get("hooks") or [],
+                                     "requirements": revision.get("requirements") or {},
+                                     "created_by": revision.get("created_by"),
+                                     "revision_created_at": revision.get("created_at"),
+                                     "shared_strategy_ref": None})
+                    rows.sort(key=lambda item: (-float(item.get("updated_at") or 0),
+                                                str(item.get("strategy_ref") or "")))
+                    total = len(rows)
+                    page = max(1, int(page)); limit = max(1, min(100, int(limit)))
+                    start = (page - 1) * limit
+                    return rows[start:start + limit], total
+                except Exception:
+                    pass
         scope_sql, scope_params = self._scope_sql(
             scope, principal, subordinate_users,
         )
