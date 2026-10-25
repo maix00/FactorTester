@@ -14,14 +14,17 @@ export function ReportEditor({ publicationID }: { publicationID: string }): Reac
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
+  const [attachments, setAttachments] = useState<Record<string, unknown>[]>([]);
 
   const load = (): void => {
     Promise.all([
       fetch(`/api/research-reports/${encodeURIComponent(publicationID)}`, { credentials: "same-origin" }).then((r) => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
       fetch(`/api/research-reports/${encodeURIComponent(publicationID)}/projection`, { credentials: "same-origin" }).then((r) => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
-    ]).then(([doc, proj]) => {
+      fetch(`/api/research-reports/${encodeURIComponent(publicationID)}/attachments`, { credentials: "same-origin" }).then((r) => r.ok ? r.json() : { attachments: [] }),
+    ]).then(([doc, proj, files]) => {
       setDocument(doc.document ?? doc);
       setProjection(proj.projection ?? proj);
+      setAttachments(files.attachments ?? files.items ?? []);
     }).catch((error: Error) => notify({ code: "report.load", type: "error", message: t("loadFailed"), description: error.message }));
   };
   useEffect(load, [publicationID]);
@@ -66,6 +69,15 @@ export function ReportEditor({ publicationID }: { publicationID: string }): Reac
         }}>{t("report.addParagraph")}</button>
       </div>
       {selected.length ? <button type="button" className="tr-toolbar-button" disabled={busy} onClick={batchDelete}>{t("report.removeSelected", { count: selected.length })}</button> : null}
+      {attachments.length ? (
+        <section className="tr-report-chapter">
+          <h3>{t("report.attachments")}</h3>
+          {attachments.map((file, index) => {
+            const name = String(file.path ?? file.name ?? index);
+            return <div className="tr-report-component" key={name}><span>{String(file.path ?? file.name ?? name)}</span><a href={`/api/research-reports/${encodeURIComponent(publicationID)}/attachments/${encodeURIComponent(name)}`} target="_blank" rel="noreferrer">{t("report.open")}</a></div>;
+          })}
+        </section>
+      ) : null}
       {chapters.map((chapter) => {
         const chapterID = String(chapter.chapter_id ?? chapter.component_id ?? "");
         return (
