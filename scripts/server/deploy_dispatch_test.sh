@@ -9,7 +9,8 @@ DEPLOYMENT="${FACTORTESTER_TEST_DEPLOYMENT:-public-test}"
 PORTS="${FACTORTESTER_TEST_PORTS:-8000 8001}"
 RELEASE_SHA="${FACTORTESTER_TEST_RELEASE_SHA:?set FACTORTESTER_TEST_RELEASE_SHA}"
 ROOT=/opt/factortester-container/job-dispatch-test
-RELEASE=/opt/factortester-container/releases/audit-dispatch-${RELEASE_SHA:0:12}
+RELEASE_HOST=/opt/factortester-container/releases/audit-dispatch-${RELEASE_SHA:0:12}
+RELEASE_CONTAINER=/opt/factortester/releases/audit-dispatch-${RELEASE_SHA:0:12}
 DB=/state/job-dispatch-test/jobs.db
 BROKER="amqp://guest:guest@${RABBIT_CONTAINER}:5672//"
 
@@ -26,25 +27,25 @@ for _ in $(seq 1 30); do
   sleep 2
 done
 
-sudo git --git-dir=/opt/factortester/repo.git worktree add --detach "$RELEASE" "$RELEASE_SHA" >/dev/null 2>&1 || true
+sudo git --git-dir=/opt/factortester/repo.git worktree add --detach "$RELEASE_HOST" "$RELEASE_SHA" >/dev/null 2>&1 || true
 sudo docker exec "$APP_CONTAINER" mkdir -p /state/job-dispatch-test
 sudo docker cp scripts/test/fake_executor.py "$APP_CONTAINER:/tmp/fake_executor.py"
-sudo docker exec -u factortester -e PYTHONPATH="$RELEASE" -w "$RELEASE" "$APP_CONTAINER" \
+sudo docker exec -u factortester -e PYTHONPATH="$RELEASE_CONTAINER" -w "$RELEASE_CONTAINER" "$APP_CONTAINER" \
   python -c "from server.jobs.repository.sqlite import JobRepository; r=JobRepository('$DB'); r.ensure_schema(); [r.heartbeat_worker_target('$DEPLOYMENT', int(p), f'worker-{p}', ttl_seconds=300) for p in '$PORTS'.split()]"
 
 for port in $PORTS; do
   sudo docker exec -d -u factortester \
-    -e PYTHONPATH="$RELEASE:/tmp" \
+    -e PYTHONPATH="$RELEASE_CONTAINER:/tmp" \
     -e FACTORTESTER_BROKER_URL="$BROKER" \
     -e FACTORTESTER_JOB_QUEUE=factortester.jobs \
     -e FACTORTESTER_JOB_DB="$DB" \
     -e FACTORTESTER_DEPLOYMENT_ID="$DEPLOYMENT" \
     -e FACTORTESTER_SERVICE_PORT="$port" \
     -e FACTORTESTER_NAUTILUS_EXECUTOR=fake_executor:executor \
-    -w "$RELEASE" "$APP_CONTAINER" sh -lc \
+    -w "$RELEASE_CONTAINER" "$APP_CONTAINER" sh -lc \
     "celery -A server.jobs.dispatch.worker_app:app worker --hostname test-$port@%h --pool=solo --concurrency=1 --prefetch-multiplier=1 --loglevel=INFO > /tmp/public-test-$port.log 2>&1"
 done
 sleep 3
-sudo docker exec -u factortester -e PYTHONPATH="$RELEASE" -w "$RELEASE" "$APP_CONTAINER" \
+sudo docker exec -u factortester -e PYTHONPATH="$RELEASE_CONTAINER" -w "$RELEASE_CONTAINER" "$APP_CONTAINER" \
   python scripts/test/job_dispatch_smoke.py --db "$DB" --broker "$BROKER" \
   --deployment "$DEPLOYMENT" $(for p in $PORTS; do printf -- '--port %s ' "$p"; done) --timeout 60
