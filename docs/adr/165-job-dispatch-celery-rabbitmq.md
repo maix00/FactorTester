@@ -121,7 +121,11 @@ signal for a live trading process.
   claim, so the Job stays queued.
 - Added `service.py`: guarded dispatcher loop; preflight refuses to publish
   unless the same deployment has a complete executor.
-- `task_acks_late=False` is provisional. It avoids the stuck-running case when
-  a worker dies after claim, at the cost of losing a message if the process
-  dies before ACK; the outbox/dispatcher and worker-loss gate must be revisited
-  before enabling acks_late or worker-loss redelivery.
+- Added `research_job_worker_leases`: claim inserts a 120s lease (configurable
+  by `GTHT_JOB_LEASE_SECONDS`); the worker heartbeats during execution. The
+  dispatcher startup fails expired RUNNING Jobs with `worker_lease_expired`
+  instead of replaying them automatically.
+- `task_acks_late=False` is provisional. It avoids a permanently RUNNING Job
+  when a worker dies after claim, at the cost of losing a message if the
+  process dies before ACK; the outbox/dispatcher and worker-loss gate must be
+  revisited before enabling acks_late or automatic redelivery.
