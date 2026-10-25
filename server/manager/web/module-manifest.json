@@ -1788,6 +1788,7 @@
     "vendor/web-app/desktop.css",
     "vendor/web-app/mobile.js",
     "vendor/web-app/mobile.css",
-    "vendor/web-app/manifest.webmanifest"
+    "vendor/web-app/manifest.webmanifest",
+    "sw.js"
   ]
 }

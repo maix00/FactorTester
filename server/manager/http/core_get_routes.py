@@ -483,6 +483,16 @@ class CoreGetRoutesMixin:
                 },
             })
             return True
+        if parsed.path == "/sw.js":
+            body, content_type = static_file("sw.js")
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Service-Worker-Allowed", "/")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return True
         if parsed.path in {"/app", "/app/"}:
             body, content_type = static_file("vendor/web-app/index.html")
             self.send_response(200)

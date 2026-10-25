@@ -7,3 +7,7 @@ document.head.append(link);
 const script = document.createElement("script");
 script.src = `${prefix}/${mobile ? "mobile" : "desktop"}.js`;
 document.body.append(script);
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => undefined);
+}
