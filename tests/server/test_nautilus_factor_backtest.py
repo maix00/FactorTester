@@ -1,0 +1,23 @@
+from __future__ import annotations
+
+from tests.nautilus_runtime import require_nautilus
+from tests.server.test_nautilus_bridge_backtest_runner import _real_catalog
+from server.services.nautilus_bridge.factor_backtest import run_factor_strategy_replay
+from tools.factors.expr import CLOSE
+
+
+def test_real_nautilus_factor_strategy_run(tmp_path):
+    require_nautilus()
+    import pytest
+    pytest.importorskip("pyarrow")
+    item = _real_catalog(tmp_path, count=8)
+    result = run_factor_strategy_replay(
+        input=item, factor_ref="factor:v2:" + "a" * 64,
+        expression=CLOSE, product="T", output_dir=tmp_path / "factor-reports",
+        max_bars=8,
+    )
+    assert result["bars"] == 8
+    assert result["publications"] == 8
+    assert result["order_count"] >= 1
+    assert (tmp_path / "factor-reports" / "tearsheet.html").is_file()
+    assert (tmp_path / "factor-reports" / "orders.csv").is_file()
