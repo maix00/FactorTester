@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { TRDataTable } from "../components/data-table.tsx";
 import { TRMultiSelectFilter } from "../components/multi-select.tsx";
 import { notify } from "../notifications/core.ts";
+import { formatDate } from "../format.ts";
 
 type JobRow = {
   job_id?: string;
@@ -83,6 +84,13 @@ export function JobsPage(): React.ReactElement {
       key: "status",
       width: 120,
       render: (value: string) => <Tag color={statusColor(value)}>{value || "unknown"}</Tag>,
+    },
+    {
+      title: t("jobs.updated"),
+      dataIndex: "updated_at",
+      key: "updated_at",
+      width: 180,
+      render: (value: string) => value ? formatDate(value, { dateStyle: "medium", timeStyle: "short" }) : "—",
     },
     {
       title: t("jobs.jobId"),
