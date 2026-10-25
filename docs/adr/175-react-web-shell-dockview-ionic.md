@@ -2,6 +2,11 @@
 
 Status: proposed migration; existing IIFE pages remain the fallback.
 
+Visual rule: this is a shell/runtime migration, not a redesign. Reuse the
+existing FactorTester tokens, typography, navigation density, spacing, chart
+chrome and dark/light behavior. A page may move into React only after its
+desktop, mobile and macOS WebView appearances match the current page.
+
 ## Decision
 
 Use one React application and one React runtime for the web client.
@@ -50,3 +55,11 @@ compiles only affected artifacts. A failed release keeps the previous image.
 4. Add Ionic tabs and the mobile open-page list.
 5. Migrate routes with desktop/mobile/macOS viewport acceptance.
 6. Add PWA/Capacitor and remove legacy IIFE pages only after parity.
+
+
+## ADR hygiene
+
+When a page or boundary changes, update the ADR that owns it. Mark superseded
+sections explicitly instead of leaving contradictory instructions. Do not keep
+an old "independent runtime" or "legacy page is authoritative" statement after
+the replacement has passed parity.
