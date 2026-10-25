@@ -144,3 +144,11 @@ def test_celery_task_forwards_payload_and_target(monkeypatch):
         "deployment": "remote-main",
         "port": 8001,
     }
+
+
+def test_repository_from_env_uses_worker_job_db(tmp_path, monkeypatch):
+    from server.jobs.dispatch.celery_app import repository_from_env
+
+    monkeypatch.setenv("FACTORTESTER_JOB_DB", str(tmp_path / "worker.db"))
+    repository = repository_from_env()
+    assert repository.db_path == tmp_path / "worker.db"

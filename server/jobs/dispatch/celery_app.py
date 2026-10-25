@@ -27,6 +27,11 @@ class DispatchExecutorUnavailable(RuntimeError):
     """No complete Nautilus Job executor is installed in this worker image."""
 
 
+def repository_from_env() -> JobRepository:
+    path = os.environ.get("FACTORTESTER_JOB_DB", "").strip()
+    return JobRepository(path) if path else JobRepository()
+
+
 def resolve_executor() -> JobExecutor:
     target = os.environ.get(EXECUTOR_ENV, DEFAULT_EXECUTOR).strip()
     module_name, _, attribute = target.partition(":")
@@ -68,7 +73,7 @@ def execute_dispatch_payload(
     if target_port is not None and message.service_port != int(target_port):
         return {"status": "wrong_target", "job_id": message.job_id}
     resolved = executor if executor is not None else resolve_executor()
-    repo = repository or JobRepository()
+    repo = repository or repository_from_env()
     return DispatchWorker(repo).execute(message, resolved)
 
 
