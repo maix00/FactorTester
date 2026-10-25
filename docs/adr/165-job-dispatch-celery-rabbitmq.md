@@ -32,6 +32,26 @@ run_spec_hash, job_spec_hash
 It must never contain market arrays, DataFrames, FactorExpr objects, full RunSpec
 payloads or result artifacts. Workers read frozen references from storage.
 
+## Multi-server and multi-port routing
+
+One shared RabbitMQ broker may serve local Docker and public servers, but each
+Job is owned by exactly one `(deployment_id, service_port)` target.  The
+message carries both fields (schema v2).  The dispatcher publishes to a direct
+exchange with routing key/queue:
+
+```text
+factortester.jobs.<deployment_id>.<service_port>
+```
+
+Each target binds its own worker queue on the shared broker.  The worker also
+checks the message target before claiming and returns `wrong_target` without a
+DB claim.  This is defense in depth; a misbound consumer must not execute
+another server's Job against the wrong SQLite/RunSpec store.
+
+A single logical queue with consumers filtering after dequeue is rejected for
+multi-server deployment: a wrong consumer would have to reject/requeue and
+could starve the correct target.
+
 ## Outbox contract
 
 `research_job_dispatch_outbox` is written in the same transaction as the Job's
