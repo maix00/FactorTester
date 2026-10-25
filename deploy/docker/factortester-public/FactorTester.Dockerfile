@@ -1,5 +1,7 @@
 FROM python:3.14-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4 AS factortester-public-deps
 
+# Persist layer metadata so cache_from can reuse the apt/pip dependency layers.
+ARG BUILDKIT_INLINE_CACHE=1
 ARG FACTORTESTER_UID=1000
 ARG FACTORTESTER_GID=1000
 ARG DEBIAN_MIRROR=https://deb.debian.org/debian
