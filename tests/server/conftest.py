@@ -5,8 +5,12 @@ import pytest
 def _restore_manager_handler_state():
     from server.manager import runtime as manager
 
-    previous = manager.Handler.state
+    had_state = hasattr(manager.Handler, "state")
+    previous = getattr(manager.Handler, "state", None)
     try:
         yield
     finally:
-        manager.Handler.state = previous
+        if had_state:
+            manager.Handler.state = previous
+        elif hasattr(manager.Handler, "state"):
+            del manager.Handler.state
