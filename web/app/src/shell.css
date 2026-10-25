@@ -307,3 +307,4 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-doc-pages { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
 .tr-doc-pages button { border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; background: var(--panel); color: var(--text); font: inherit; font-size: 11px; }
 .tr-doc-pages button.is-active { border-color: var(--accent); color: var(--accent); }
+.tr-legacy-actions { position: fixed; right: 18px; bottom: 18px; z-index: 2; }
