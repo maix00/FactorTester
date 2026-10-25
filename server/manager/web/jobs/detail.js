@@ -412,7 +412,7 @@
     const resultHost = document.createElement("div");
     resultHost.className = "job-result-host";
     if (!localRun) resultHost.append(FTUI.loading(context.t("正在加载结果查看器…")));
-    resultsPanel.append(resultHost);
+    if (!reportRef) resultsPanel.append(resultHost);
     // Domain result viewers own their result tabs and load canonical JSON on
     // demand. Generic artifact previews here would duplicate those tabs and
     // eagerly introduce a second, inconsistent rendering path.
@@ -491,7 +491,7 @@
     context.content.replaceChildren(root);
     let resultsLoaded = false;
     const loadResults = () => {
-      if (resultsLoaded || localRun) return;
+      if (reportRef || resultsLoaded || localRun) return;
       resultsLoaded = true;
       Promise.all([
         resultGroupName
