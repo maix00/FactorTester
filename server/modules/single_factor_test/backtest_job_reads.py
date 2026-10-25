@@ -843,7 +843,7 @@ def put_versioned_object():
         return jsonify({"success": False, "error": "unsupported object kind"}), 400
     if not ref or not isinstance(payload, dict):
         return jsonify({"success": False, "error": "ref and payload are required"}), 400
-    expected = "factor:v2:" if kind == "factor_version" else "strategy:v2:"
+    expected = "factor:v2:" if kind == "factor_version" else "strategy:"
     if not ref.startswith(expected):
         return jsonify({"success": False, "error": "object ref does not match kind"}), 400
     url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
