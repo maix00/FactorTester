@@ -238,3 +238,6 @@ web/chart-workbench/node_modules/
 
 !deploy/docker/factortester-public/wheels/
 !deploy/docker/factortester-public/wheels/README.md
+
+# local build outputs
+.artifacts/
