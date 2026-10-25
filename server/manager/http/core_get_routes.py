@@ -483,6 +483,23 @@ class CoreGetRoutesMixin:
                 },
             })
             return True
+        if parsed.path in {"/app", "/app/"}:
+            body, content_type = static_file("web-app.html")
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'self'; img-src 'self' blob: data: https:; "
+                "style-src 'self' 'unsafe-inline'; script-src 'self'; "
+                "frame-src 'self'; connect-src 'self' http: https:",
+            )
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return True
         shell_paths = {
             "/", "/research", "/researches", "/evidence", "/reference",
             "/factor-series", "/jobs", "/factors", "/products",
