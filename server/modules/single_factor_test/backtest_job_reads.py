@@ -697,6 +697,38 @@ def get_test_job(job_id: str):
     return jsonify(payload)
 
 
+@sft_bp.get("/api/reports/<report_ref>/attachments/<path:name>")
+def get_report_attachment(report_ref: str, name: str):
+    """Stream one content-addressed CouchDB report attachment."""
+    actor = require_user()
+    import os
+    from flask import Response
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "report store unavailable"}), 503
+    store = CouchDBObjectStore(
+        url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip(),
+        username=os.environ.get("FACTORTESTER_COUCHDB_USER", ""),
+        password=os.environ.get("FACTORTESTER_COUCHDB_PASSWORD", ""),
+    )
+    try:
+        document = store.get_report(report_ref)
+    except Exception:
+        return jsonify({"success": False, "error": "report not found"}), 404
+    if document.get("owner") != actor:
+        from tools.data.account_manage import get_account, is_super_admin_account
+        if not is_super_admin_account(get_account(actor)):
+            return jsonify({"success": False, "error": "report access denied"}), 403
+    attachment = (document.get("attachments") or {}).get(name)
+    if not attachment:
+        return jsonify({"success": False, "error": "attachment not found"}), 404
+    data = store.get_attachment(report_ref, attachment)
+    mime = "text/html" if name.endswith(".html") else "text/csv" if name.endswith(".csv") else "application/octet-stream"
+    return Response(data, mimetype=mime, headers={"Content-Disposition": f'inline; filename="{name}"'})
+
+
 @sft_bp.get("/api/reports/<path:report_ref>")
 def get_report_document(report_ref: str):
     """Read one CouchDB report document, scoped to its owner."""
