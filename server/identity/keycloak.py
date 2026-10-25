@@ -59,3 +59,12 @@ def group_subject(path: str) -> str:
 
 def organization_subject(name: str) -> str:
     return f"org:{name.strip()}"
+
+
+def permission_subjects(identity: Identity) -> tuple[str, ...]:
+    """Subjects checked by PermissionStore, most specific first."""
+    return (
+        user_subject(identity.username),
+        *(group_subject(path) for path in identity.groups),
+        *(organization_subject(name) for name in identity.organizations),
+    )
