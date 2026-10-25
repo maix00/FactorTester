@@ -35,6 +35,7 @@ def _backtest_plan(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str,
     The RunSpec hash covers the complete product/factor/strategy definitions;
     this compact projection is only the execution cache key and review view.
     """
+    from server.services.nautilus_bridge.catalog_plan import catalog_staging_requests
     from server.services.nautilus_bridge.config import (
         UnsupportedExecutionConfig,
         compile_frozen_execution_plan,
@@ -188,6 +189,7 @@ def _backtest_plan(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str,
         "strategies": sorted(strategies, key=lambda item: item["strategy_id"]),
         "factor_refs": factor_refs,
         "data_requirements": sorted(requirements, key=lambda item: item["product_scope_ref"]),
+        "catalog_staging": catalog_staging_requests(run_spec),
         "external_factor_artifacts": _artifact_plan_rows(data),
     }
     return resolved, []
