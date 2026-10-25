@@ -83,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
             ], ensure_ascii=False, indent=2))
             return 0 if all(r.status is JobStatus.SUCCEEDED for r in records) else 1
         time.sleep(2)
-    print(json.dumps({"error": "timeout", "jobs": ids}), ensure_ascii=False)
+    print(json.dumps({"error": "timeout", "jobs": ids}, ensure_ascii=False))
     return 2
 
 
