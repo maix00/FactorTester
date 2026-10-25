@@ -2,21 +2,21 @@ import React from "react";
 import { Alert, Empty, Table } from "antd";
 import type { TableProps } from "antd";
 
-export type FTPagination = {
+export type TRPagination = {
   page: number;
   pageSize: number;
   total: number;
   onChange: (page: number, pageSize: number) => void;
 };
 
-export function FTDataTable<T extends object>({
+export function TRDataTable<T extends object>({
   columns, rows, rowKey, loading = false, pagination, error = "", empty = "暂无数据",
 }: {
   columns: TableProps<T>["columns"];
   rows: T[];
   rowKey: TableProps<T>["rowKey"];
   loading?: boolean;
-  pagination: FTPagination;
+  pagination: TRPagination;
   error?: string;
   empty?: string;
 }): React.ReactElement {
@@ -39,3 +39,7 @@ export function FTDataTable<T extends object>({
     />
   );
 }
+
+
+/** @deprecated use TRDataTable */
+export const FTDataTable = TRDataTable;
