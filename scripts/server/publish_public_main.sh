@@ -70,6 +70,9 @@ for baseline in origin/main origin/feat; do
     exit 2
   }
 done
+nautilus_revision="$(bash "$repo_root/scripts/server/nautilus_vendor_revision.sh")"
+export FACTORTESTER_NAUTILUS_VENDOR_REVISION="$nautilus_revision"
+
 revision="$(git -C "$repo_root" rev-parse main)"
 
 if [[ "$skip_github" == "1" ]]; then

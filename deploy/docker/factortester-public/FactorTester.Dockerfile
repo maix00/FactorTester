@@ -3,6 +3,7 @@ FROM python:3.14-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9
 # Persist layer metadata so cache_from can reuse the apt/pip dependency layers.
 ARG BUILDKIT_INLINE_CACHE=1
 ARG FACTORTESTER_UID=1000
+ARG NAUTILUS_VENDOR_REVISION=unknown
 ARG FACTORTESTER_GID=1000
 ARG DEBIAN_MIRROR=https://deb.debian.org/debian
 ARG DEBIAN_SECURITY_MIRROR=https://deb.debian.org/debian-security
@@ -60,6 +61,8 @@ RUN python -m compileall -q -b /runtime \
     && grep -F 'FactorTester CLI' /tmp/factortester-help >/dev/null
 
 FROM factortester-public-deps AS factortester-public
+ARG NAUTILUS_VENDOR_REVISION
+LABEL org.traderesearch.nautilus.revision="${NAUTILUS_VENDOR_REVISION}"
 COPY deploy/docker/factortester-public/wheels/py_alpha_lib-0.3.1-cp314-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl /tmp/py_alpha_lib-0.3.1-cp314-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
 RUN python -m pip install --no-cache-dir --no-deps /tmp/py_alpha_lib-0.3.1-cp314-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl && rm -f /tmp/py_alpha_lib-0.3.1-cp314-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
 
