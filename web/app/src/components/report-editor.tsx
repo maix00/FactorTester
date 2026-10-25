@@ -13,6 +13,7 @@ export function ReportEditor({ publicationID }: { publicationID: string }): Reac
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
+  const [selected, setSelected] = useState<string[]>([]);
 
   const load = (): void => {
     Promise.all([
@@ -42,6 +43,18 @@ export function ReportEditor({ publicationID }: { publicationID: string }): Reac
 
   const chapters = projection?.chapters ?? [];
   const firstChapter = chapters[0]?.chapter_id ?? chapters[0]?.component_id ?? "";
+  const batchDelete = (): void => {
+    const operations = chapters.flatMap((chapter) => {
+      const chapterID = String(chapter.chapter_id ?? chapter.component_id ?? "");
+      return (chapter.components ?? [])
+        .filter((component) => component.component_id && selected.includes(component.component_id))
+        .map((component) => ({
+          op: "remove_component", chapter_id: chapterID, component_id: component.component_id,
+        }));
+    });
+    if (operations.length) { apply({ op: "batch", operations }); setSelected([]); }
+  };
+
   return (
     <div className="tr-report-editor">
       <div className="tr-report-add">
@@ -52,6 +65,7 @@ export function ReportEditor({ publicationID }: { publicationID: string }): Reac
           setTitle(""); setBody("");
         }}>{t("report.addParagraph")}</button>
       </div>
+      {selected.length ? <button type="button" className="tr-toolbar-button" disabled={busy} onClick={batchDelete}>{t("report.removeSelected", { count: selected.length })}</button> : null}
       {chapters.map((chapter) => {
         const chapterID = String(chapter.chapter_id ?? chapter.component_id ?? "");
         return (
@@ -59,7 +73,10 @@ export function ReportEditor({ publicationID }: { publicationID: string }): Reac
             <h3>{chapter.title || chapterID}</h3>
             {(chapter.components ?? []).map((component, index, list) => (
               <div className="tr-report-component" key={String(component.component_id)}>
-                <div><b>{component.title || component.kind || component.component_id}</b>{component.body ? <p>{component.body}</p> : null}</div>
+                <div>
+                  {component.component_id ? <input type="checkbox" checked={selected.includes(component.component_id)} onChange={() => setSelected((current) => current.includes(component.component_id!) ? current.filter((value) => value !== component.component_id) : [...current, component.component_id!])} /> : null}
+                  <b>{component.title || component.kind || component.component_id}</b>{component.body ? <p>{component.body}</p> : null}
+                </div>
                 <div className="tr-report-component-actions">
                   {component.component_id && index > 0 ? (
                     <button type="button" disabled={busy} onClick={() => apply({
