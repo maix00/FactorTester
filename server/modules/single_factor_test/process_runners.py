@@ -50,7 +50,9 @@ def run_group(payload: dict[str, Any], sink: Any, cancel_event: Any) -> None:
             return
         run_spec = payload.get("run_spec") or {}
         configuration = run_spec.get("configuration") or {}
-        analyses = (configuration.get("payload") or {}).get("analyses") or {}
+        analyses = (
+            (configuration.get("payload") or configuration).get("analyses") or {}
+        )
         backtest = analyses.get("backtest") or {}
         execution = backtest.get("execution") or {}
         if (execution.get("backend") != "nautilus_trader"
