@@ -43,6 +43,7 @@ def factor_documents(db: Path) -> list[dict]:
         "_id": f"factor-family:{row['owner_username'] or 'public'}:{row['factor_id']}",
         "schema_version": 1,
         "kind": "factor_family",
+        "source_kind": row["source_kind"],
         "factor_id": row["factor_id"],
         "owner_ref": row["owner_username"] or "",
         "name": row["factor_name"] or "",

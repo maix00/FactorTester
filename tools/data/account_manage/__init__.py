@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import os
 import re
 import secrets
 import threading
@@ -594,6 +595,20 @@ def can_manage_level(current_username: str | None, level_id: str | None) -> bool
 
 def load_product_groups(username: str) -> list:
     ensure_account_manager_sqlite_store()
+    if str(os.environ.get("TRADERESEARCH_LIBRARIES_COUCHDB_READ", "")).lower() in {"1", "true", "yes"}:
+        try:
+            from server.jobs.storage.couchdb_library_reader import CouchDBLibraryReader
+            from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+            import settings as Settings
+
+            url = str(os.environ.get("FACTORTESTER_COUCHDB_URL") or "").strip()
+            if url:
+                reader = CouchDBLibraryReader(CouchDBObjectStore(
+                    url, str(os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects"),
+                ))
+                return reader.product_groups(username)
+        except Exception:
+            pass
     return _load_product_groups(username)
 
 
