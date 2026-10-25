@@ -100,8 +100,11 @@ def dispatch_overview(
         nautilus = {"available": False, "reason": type(exc).__name__}
     from server.jobs.dispatch.audit import list_audit
 
+    from server.jobs.storage.couchdb_authority import authority_enabled
+
     return {
         "success": True,
+        "couchdb_authority": authority_enabled(),
         "server_id": server_id,
         "audit": list_audit(repository.db_path, limit=20),
         "nautilus": nautilus,

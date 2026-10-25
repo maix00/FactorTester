@@ -176,6 +176,16 @@
       });
     });
     wrapper.append(view.shell);
+    if (payload.couchdb_authority !== undefined) {
+      const authority = document.createElement("div");
+      authority.className = "manager-intro";
+      const label = document.createElement("b");
+      label.textContent = context.t("CouchDB 权威模式");
+      const value = document.createElement("small");
+      value.textContent = payload.couchdb_authority ? context.t("已启用") : context.t("未启用");
+      authority.append(label, value);
+      wrapper.append(authority);
+    }
     if (Array.isArray(payload.audit) && payload.audit.length) {
       const audit = document.createElement("div");
       audit.className = "manager-intro";
