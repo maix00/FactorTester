@@ -1957,3 +1957,25 @@ def test_view_lifecycle_is_not_a_research_job_api(client) -> None:
         "view_uuid": "view-a", "workspace_id": workspace["workspace_id"],
     })
     assert response.status_code == 404
+
+
+def test_nautilus_backtest_retry_copies_frozen_execution_plan(client):
+    repository = JobRepository()
+    job = repository.create(JobRecord(
+        job_id="nautilus-retry-source", run_id="run-nautilus",
+        owner="alice", workspace_id="workspace-nautilus", kind="backtest",
+        status=JobStatus.SUBMITTED, job_spec={"run_spec": {"run_spec_version": 10}},
+        runner_path="server.jobs.dispatch.executors:ProcessRunnerExecutor",
+    ))
+    repository.transition(job.job_id, "planning", expected="submitted")
+    repository.set_execution_plan(
+        job.job_id, plan={"kind": "nautilus_strategy_family", "jobs": []},
+        notices=[], requires_confirmation=False,
+    )
+    repository.transition(job.job_id, "running", expected="queued")
+    repository.transition(job.job_id, "failed", expected="running")
+    response = client.post(f"/api/jobs/{job.job_id}/retry")
+    assert response.status_code == 202, response.get_data(as_text=True)
+    retried = repository.require(response.get_json()["job_id"], owner="alice")
+    assert retried.retry_of == job.job_id
+    assert retried.execution_plan["kind"] == "nautilus_strategy_family"
