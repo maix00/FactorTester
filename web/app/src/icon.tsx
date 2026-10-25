@@ -7,6 +7,7 @@ const paths: Record<string, React.ReactNode> = {
   catalog: <><path d="M4 7l8-4 8 4-8 4z"/><path d="M4 7v10l8 4 8-4V7M12 11v10"/></>,
   account: <><circle cx="12" cy="8" r="3"/><path d="M5 20c0-4 3-6 7-6s7 2 7 6"/></>,
   workspace: <><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></>,
+  sidebar: <><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></>,
 };
 
 export function PageIcon({ name, className = "" }: { name?: string; className?: string }): React.ReactElement {

@@ -43,7 +43,6 @@ export function DesktopShell(): React.ReactElement {
     return Number.isFinite(value) && value >= 180 && value <= 360 ? value : 230;
   });
   const [openPanels, setOpenPanels] = useState<OpenPanel[]>([]);
-  const activePage = getPage(active) ?? pages[0];
 
   const startResize = (event: React.PointerEvent<HTMLDivElement>): void => {
     event.preventDefault();
@@ -130,7 +129,7 @@ export function DesktopShell(): React.ReactElement {
             <span className="tr-sidebar-title">TradeResearch</span>
           </button>
           <button type="button" className="tr-sidebar-toggle" aria-label={collapsed ? "展开侧栏" : "收起侧栏"} title={collapsed ? "展开侧栏" : "收起侧栏"} onClick={() => setCollapsed((value) => !value)}>
-            {collapsed ? "»" : "«"}
+            <PageIcon name="sidebar" />
           </button>
         </div>
         <div className="tr-sidebar-resize" role="separator" aria-orientation="vertical" aria-label="调整侧栏宽度" onPointerDown={startResize} />
@@ -164,22 +163,13 @@ export function DesktopShell(): React.ReactElement {
           ))}
         </nav>
         <div className="tr-sidebar-spacer" />
+        <button type="button" className="tr-sidebar-reset" onClick={resetLayout}>重置布局</button>
         <button type="button" className="tr-account-button" onClick={() => open("account")}>
           <PageIcon name="account" />
           <span className="tr-nav-label">设置</span>
         </button>
       </aside>
       <main className="tr-main">
-        <header className="tr-topbar">
-          <div className="tr-topbar-title">
-            <div className="tr-eyebrow">TradeResearch</div>
-            <h1>{activePage?.title ?? ""}</h1>
-          </div>
-          <div className="tr-toolbar">
-            <span className="tr-toolbar-meta">{openPanels.length} 个页面</span>
-            <button type="button" className="tr-toolbar-button" onClick={resetLayout}>重置布局</button>
-          </div>
-        </header>
         <section className="tr-workspace dockview-theme-light">
           <DockviewReact className="dockview-theme-light" components={components} tabComponents={tabComponents} onReady={onReady} />
         </section>
