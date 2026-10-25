@@ -6,7 +6,10 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
-from server.services.nautilus_bridge.capabilities import native_capabilities
+from server.services.nautilus_bridge.capabilities import (
+    native_capabilities,
+    nautilus_backtest_submission_capability,
+)
 from server.services.nautilus_bridge.config import (
     UnsupportedExecutionConfig,
     compile_frozen_execution_plan,
@@ -26,12 +29,7 @@ def capabilities():
 
 @nautilus_workbench_bp.post("/api/nautilus/config/preview")
 def preview_configuration():
-    """Show the new execution contract without creating a Run or a Job.
-
-    This endpoint deliberately remains fail-closed until the frozen contract
-    is connected to a NautilusTrader worker.  The browser preview is advisory;
-    the durable Run endpoints must independently enforce engine selection.
-    """
+    """Show the frozen execution contract and registered runner readiness."""
     if current_user() is None:
         return jsonify({"error": "authentication required"}), 401
     body = request.get_json(silent=True)
@@ -106,17 +104,22 @@ def preview_configuration():
                 "path": f"execution.settings.{exc.field}", "label": exc.field,
                 "status": "unsupported", "reason": exc.reason,
             })
-    blockers.append({
-        "path": "execution.engine",
-        "reason": "NautilusTrader Job execution is not connected on this service",
-    })
-    fields.append({
-        "path": "execution.engine", "label": "回测引擎",
-        "status": "unsupported",
-        "reason": "NautilusTrader Job execution is not connected on this service",
-    })
+    submission = nautilus_backtest_submission_capability()
+    if submission.get("available") is not True:
+        reason = str(submission.get("reason") or
+                     "NautilusTrader Job runner is not registered or ready")
+        blockers.append({"path": "execution.engine", "reason": reason})
+        fields.append({
+            "path": "execution.engine", "label": "回测引擎",
+            "status": "unsupported", "reason": reason,
+        })
+    else:
+        fields.append({
+            "path": "execution.engine", "label": "回测引擎",
+            "status": "available",
+        })
     return jsonify({
-        "engine": "nautilus_trader", "ready": False,
+        "engine": "nautilus_trader", "ready": not blockers,
         "effective_configuration": manifest,
         "fields": fields, "blockers": blockers,
     })

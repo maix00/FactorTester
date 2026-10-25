@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from flask import Flask
 
 from server.modules.nautilus_workbench import nautilus_workbench_bp
@@ -24,7 +26,12 @@ def _client():
     return app.test_client()
 
 
-def test_preview_requires_login_and_never_claims_execution_ready():
+def test_preview_requires_login_and_reflects_runner_readiness(monkeypatch):
+    import server.modules.nautilus_workbench as workbench
+
+    monkeypatch.setattr(workbench, "nautilus_backtest_submission_capability", lambda: {
+        "available": False, "reason": "test runner is not ready",
+    })
     client = _client()
     body = {
         "analysis_kind": "backtest",
@@ -50,21 +57,65 @@ def test_preview_requires_login_and_never_claims_execution_ready():
     assert response.status_code == 200
     assert response.json["ready"] is False
     assert response.json["engine"] == "nautilus_trader"
-    assert any(item["path"] == "execution.engine" for item in response.json["blockers"])
+    assert any(
+        item["path"] == "execution.engine"
+        and item["reason"] == "test runner is not ready"
+        for item in response.json["blockers"]
+    )
 
 
-def test_frozen_nautilus_backend_cannot_fall_through_legacy_runner():
+def test_preview_does_not_add_unconditional_runner_blocker(monkeypatch):
+    import server.modules.nautilus_workbench as workbench
+
+    monkeypatch.setattr(workbench, "nautilus_backtest_submission_capability", lambda: {
+        "available": True, "reason": "",
+    })
+    monkeypatch.setattr(
+        workbench,
+        "compile_frozen_execution_plan",
+        lambda *args, **kwargs: SimpleNamespace(manifest=lambda: {"engine": "nautilus_trader"}),
+    )
+    client = _client()
+    with client.session_transaction() as session:
+        session["username"] = "tester"
+    response = client.post("/api/nautilus/config/preview", json={
+        "analysis_kind": "backtest",
+        "configuration": {"analyses": {"backtest": {"execution": {
+            "backend": "nautilus_trader", "contract_version": 4,
+            "settings": {"data_source_ref": "T/MIN1"},
+        }}}},
+    })
+
+    assert response.status_code == 200
+    assert response.json["ready"] is True
+    assert not any(item["path"] == "execution.engine" for item in response.json["blockers"])
+
+
+def test_frozen_nautilus_backend_is_admitted_only_when_runner_is_ready(monkeypatch):
+    from server.services.nautilus_bridge import capabilities
+
     prepared = {"analyses": ["backtest"], "frozen_configuration": {"payload": {"analyses": {
         "backtest": {"execution": {
             "backend": "nautilus_trader", "contract_version": 4, "settings": {},
         }},
     }}}}
+    monkeypatch.setattr(
+        capabilities, "nautilus_backtest_submission_capability",
+        lambda: {"available": False, "reason": "runner unavailable"},
+    )
     try:
         _reject_unavailable_nautilus_run(prepared)
     except _RunRequestError as exc:
         assert exc.details["code"] == "nautilus_execution_unavailable"
+        assert str(exc) == "runner unavailable"
     else:
-        raise AssertionError("Nautilus backend fell through to the legacy runner")
+        raise AssertionError("Nautilus Run was admitted without a ready runner")
+
+    monkeypatch.setattr(
+        capabilities, "nautilus_backtest_submission_capability",
+        lambda: {"available": True, "reason": ""},
+    )
+    _reject_unavailable_nautilus_run(prepared)
 
 
 def test_run_spec_version_follows_selected_backtest_backend():

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from server.services.nautilus_bridge.capabilities import (
     market_data_source_capabilities,
+    nautilus_backtest_submission_capability,
     native_capabilities,
 )
 
@@ -56,3 +57,64 @@ def test_native_capabilities_expose_source_owned_book_type_contracts(monkeypatch
         "LocalCNFuturesContractMIN1"
     )
     assert result["market_data_sources"]["members"][0]["supported_book_types"] == ["L1_MBP"]
+
+
+def test_backtest_submission_requires_explicit_runner_readiness(monkeypatch):
+    import server.services.nautilus_bridge.capabilities as capabilities
+
+    monkeypatch.setattr(
+        capabilities.metadata, "version", lambda _name: "2.0.0rc7",
+    )
+    monkeypatch.setattr(
+        capabilities, "native_configuration_schema",
+        lambda: {"native_version": "2.0.0rc7"},
+    )
+    monkeypatch.setattr(
+        "server.modules.single_factor_test.process_runners.nautilus_backtest_runner_status",
+        lambda: SimpleNamespace(available=False, reason="worker dependencies missing"),
+        raising=False,
+    )
+
+    unavailable = nautilus_backtest_submission_capability()
+    assert unavailable["available"] is False
+    assert unavailable["reason"] == "worker dependencies missing"
+    assert unavailable["runner_path"] == (
+        "server.modules.single_factor_test.process_runners:run_group"
+    )
+
+    monkeypatch.setattr(
+        "server.modules.single_factor_test.process_runners.nautilus_backtest_runner_status",
+        lambda: SimpleNamespace(available=True, reason=""),
+        raising=False,
+    )
+    available = nautilus_backtest_submission_capability()
+    assert available["available"] is True
+    assert available["reason"] == ""
+
+
+def test_native_capabilities_do_not_advertise_unregistered_backtest_runner(monkeypatch):
+    import server.services.nautilus_bridge.capabilities as capabilities
+
+    monkeypatch.setattr(
+        capabilities.metadata, "version", lambda _name: "2.0.0rc7",
+    )
+    monkeypatch.setattr(
+        capabilities, "native_configuration_schema",
+        lambda: {"native_version": "2.0.0rc7", "available": True},
+    )
+    monkeypatch.setattr(
+        capabilities, "market_data_source_capabilities",
+        lambda: {"available": True, "members": []},
+    )
+    monkeypatch.setattr(
+        "server.modules.single_factor_test.process_runners.nautilus_backtest_runner_status",
+        lambda: SimpleNamespace(available=False, reason="runner not registered"),
+        raising=False,
+    )
+
+    result = native_capabilities()
+    assert result["backtest_submission"] == {
+        "available": False,
+        "runner_path": "server.modules.single_factor_test.process_runners:run_group",
+        "reason": "runner not registered",
+    }

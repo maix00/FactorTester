@@ -5,7 +5,13 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from server.services.nautilus_bridge.native_configuration import native_configuration_schema
+import pytest
+
+from server.services.nautilus_bridge.config import UnsupportedExecutionConfig
+from server.services.nautilus_bridge.native_configuration import (
+    freeze_native_venue_config,
+    native_configuration_schema,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -61,6 +67,15 @@ def test_model_handles_are_marked_as_serialization_adapters() -> None:
     for parameter in ("margin_model", "fill_model", "fee_model", "latency_model"):
         assert coverage[parameter]["status"] == "ft_adapter"
         assert coverage[parameter]["runspec_path"].startswith("venues[].native_config.")
+
+
+def test_volume_sensitive_fill_model_is_not_exposed_without_market_volume_updates() -> None:
+    schema = native_configuration_schema()
+    fill_type = next(item for item in schema["fields"] if item["path"] == "fill_model.type")
+    assert "volume_sensitive" not in fill_type["options"]
+    assert "近期成交量更新入口" in schema["excluded"]["VolumeSensitiveFillModel"]
+    with pytest.raises(UnsupportedExecutionConfig, match="fill_model.type"):
+        freeze_native_venue_config({"fill_model": {"type": "volume_sensitive"}})
 
 
 def test_execution_policy_capabilities_match_native_engine_configuration() -> None:
