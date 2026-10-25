@@ -23,7 +23,7 @@ not the same as a fully migrated detail/editor route.
 /ic-test
 /factor-series
 /product-category/:id
-/products/:id, /product-reference/:kind/:id
+/products/:id
 /mihomo
 /docs/:slug
 ```
