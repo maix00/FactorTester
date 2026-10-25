@@ -27,6 +27,10 @@ def check_deployment(*, check_executor: bool = False) -> dict[str, Any]:
         errors.append(f"job DB directory does not exist: {db_path.parent}")
     elif not os.access(db_path.parent, os.W_OK):
         errors.append(f"job DB directory is not writable: {db_path.parent}")
+    if db_path is not None and db_path.exists() and os.path.ismount(db_path):
+        errors.append(
+            "job DB is a file bind mount; mount its parent directory so SQLite WAL files are shared"
+        )
     deployment = os.environ.get("FACTORTESTER_DEPLOYMENT_ID", "").strip()
     if not deployment:
         errors.append("FACTORTESTER_DEPLOYMENT_ID is required")

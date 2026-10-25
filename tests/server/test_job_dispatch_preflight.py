@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from server.jobs.dispatch import preflight
 
 
@@ -34,3 +36,13 @@ def test_preflight_reports_missing_executor(monkeypatch, tmp_path):
     report = preflight.check_deployment(check_executor=True)
     assert report["ok"] is False
     assert report["executor"] == "unavailable"
+
+
+def test_preflight_rejects_file_level_bind_mount(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    db = tmp_path / "jobs.db"
+    db.write_bytes(b"")
+    monkeypatch.setattr(os.path, "ismount", lambda value: str(value) == str(db))
+    report = preflight.check_deployment()
+    assert report["ok"] is False
+    assert any("file bind mount" in error for error in report["errors"])
