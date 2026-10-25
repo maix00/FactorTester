@@ -13,6 +13,8 @@ export function CatalogPage(): React.ReactElement {
   const [selected, setSelected] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [legacy, setLegacy] = useState(false);
+  const [tab, setTab] = useState<"products" | "factors">("products");
+  const [factors, setFactors] = useState<Record<string, unknown>[]>([]);
 
   useEffect(() => {
     fetch("/api/product-library/product-groups?view=summary", { credentials: "same-origin" })
@@ -22,6 +24,17 @@ export function CatalogPage(): React.ReactElement {
   }, [t]);
 
   useEffect(() => {
+    if (tab !== "factors") return;
+    setLoading(true);
+    fetch("/api/factor-library/factors", { credentials: "same-origin" })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+      .then((payload: { factors?: Record<string, unknown>[] }) => setFactors(payload.factors ?? []))
+      .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }))
+      .finally(() => setLoading(false));
+  }, [tab, t]);
+
+  useEffect(() => {
+    if (tab !== "products") return;
     setLoading(true);
     const query = selected ? `?group_ref=${encodeURIComponent(selected)}` : "";
     fetch(`/api/product-library/products${query}`, { credentials: "same-origin" })
@@ -29,7 +42,7 @@ export function CatalogPage(): React.ReactElement {
       .then((payload: Payload<Product>) => setProducts(payload.products ?? []))
       .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }))
       .finally(() => setLoading(false));
-  }, [selected, t]);
+  }, [selected, tab, t]);
 
   return (
     <section className="tr-catalog-page">
@@ -37,7 +50,11 @@ export function CatalogPage(): React.ReactElement {
         <div><h1>{t("nav.catalog")}</h1><p>{t("catalog.hint")}</p></div>
         <button type="button" className="tr-toolbar-button" onClick={() => setLegacy(true)}>{t("catalog.legacy")}</button>
       </header>
-      <div className="tr-catalog-groups">
+      <div className="tr-catalog-tabs">
+        <button type="button" className={tab === "products" ? "is-active" : ""} onClick={() => setTab("products")}>{t("catalog.products")}</button>
+        <button type="button" className={tab === "factors" ? "is-active" : ""} onClick={() => setTab("factors")}>{t("catalog.factors")}</button>
+      </div>
+      {tab === "products" ? <div className="tr-catalog-groups">
         <button type="button" className={selected ? "" : "is-active"} onClick={() => setSelected("")}>{t("catalog.all")}</button>
         {groups.map((group) => {
           const id = String(group.id ?? group.name ?? "");
@@ -48,9 +65,16 @@ export function CatalogPage(): React.ReactElement {
             </button>
           );
         })}
-      </div>
+      </div> : null}
       <div className="tr-catalog-products">
-        {loading ? <p>{t("loading")}</p> : products.length === 0 ? <p>{t("empty")}</p> : products.map((product, index) => (
+        {tab === "factors" ? (
+          factors.length === 0 ? <p>{t("empty")}</p> : factors.map((factor, index) => (
+            <article key={String(factor.ref ?? factor.factor_ref ?? factor.alias ?? index)}>
+              <b>{String(factor.name ?? factor.alias ?? factor.ref ?? "—")}</b>
+              <small>{String(factor.family_ref ?? factor.family ?? "")}</small>
+            </article>
+          ))
+        ) : loading ? <p>{t("loading")}</p> : products.length === 0 ? <p>{t("empty")}</p> : products.map((product, index) => (
           <article key={String(product.id ?? product.name ?? index)}>
             <b>{product.name ?? product.title ?? product.id}</b>
             <small>{product.data_source ?? ""}</small>
