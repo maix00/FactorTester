@@ -1,0 +1,25 @@
+{
+  "name": "@factortester/web-app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test src/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ionic/react": "9.0.9",
+    "@ionic/react-router": "9.0.9",
+    "dockview-react": "8.6.1",
+    "ionicons": "8.0.13",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "react-router-dom": "7.9.4"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "esbuild": "0.25.12",
+    "typescript": "5.9.3"
+  }
+}
