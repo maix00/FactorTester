@@ -45,8 +45,8 @@ Verified with Playwright against the local Manager:
 Research  -> embedded frame
 Runs      -> native page
 Trading   -> embedded frame
-Catalog   -> embedded frame
+Catalog   -> native page with a legacy editor bridge
 Account   -> native account page
 ```
 
-All five entries render; only Runs and Account are native today.
+All five entries render; Runs, Catalog and Account are native today.
