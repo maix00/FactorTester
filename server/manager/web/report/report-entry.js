@@ -263,7 +263,8 @@
     const rail = document.createElement("nav"); rail.className = "chapter-rail";
     const mount = document.createElement("div"); mount.className = "report-mount";
     layout.append(mount); content.replaceChildren(layout, rail);
-    if (context.session && !source.isOwnerLocal) {
+    if (context.session && !source.isOwnerLocal
+        && (value.access?.access_basis === "owner" || value.access?.can_manage === true)) {
       const edit = document.createElement("button");
       edit.type = "button";
       edit.className = "report-edit-entry";
