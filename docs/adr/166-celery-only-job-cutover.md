@@ -12,14 +12,20 @@
 - 执行任务按 `(job_id, attempt)` claim，写 Job/progress/result。
 - SSE 从 SQLite 进度读取，不依赖 EventBroker。
 
+## 已删除
+
+1. `scripts/research_job_daemon.py`、旧 `JobDaemon` 调度器；
+2. `server/jobs/scheduling/daemon.py`；
+3. `LongLivedWorkerPool` 与 `server/jobs/scheduling/worker_pool.py`；
+4. artifact sink 已迁移到 `server/jobs/dispatch/artifact_sink.py`；
+5. `step continue` IPC 接口已退役。
+
 ## 仍需删除
 
-1. `scripts/research_job_daemon.py` 与 Manager 的 daemon 子进程启动；
-2. `server/jobs/ipc` 及 `server/jobs/scheduling/daemon.py`；
-3. `LongLivedWorkerPool` 中的执行/规划路径；
-4. `server/jobs/scheduling/worker_pool.py::_WorkerSink` 的 artifact 写入职责，提取为 Celery 侧 sink 后删除该模块；
-5. `step continue` IPC 接口（Celery 不支持暂停步进）；
-6. 旧 Job 详情/结果 Web 渲染。
+1. `server/jobs/ipc` 的 health/wake/cancel 生命周期兼容层；
+2. Manager 的 planning sidecar 子进程（planning 已在 dispatcher）；
+3. `server/jobs/scheduling/result_projection.py` 兼容模块；
+4. 旧 Job 详情/结果 Web 渲染。
 
 ## 约束
 
