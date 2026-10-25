@@ -115,3 +115,7 @@
 .tr-job-status.is-failed { color: #b42318; background: #fef3f2; }
 .tr-sidebar { padding-bottom: 12px; }
 .tr-account-button { position: sticky; bottom: 0; background: var(--sidebar); }
+.tr-sidebar { position: sticky; }
+.tr-sidebar-resize { position: absolute; z-index: 100; top: 0; right: -7px; bottom: 0; width: 14px; cursor: col-resize; touch-action: none; }
+.tr-sidebar-resize:hover, .tr-sidebar-resize:active { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+.tr-app-shell.is-collapsed .tr-sidebar-resize { display: none; }
