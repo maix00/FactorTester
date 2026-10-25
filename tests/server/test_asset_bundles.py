@@ -240,7 +240,7 @@ def test_react_shell_assets_are_served_and_manifest_gated():
         assert body
         assert content_type
     sw, sw_type = static_file("sw.js")
-    assert b"tr-shell-v1" in sw
+    assert b"tr-shell-v2" in sw
     assert b"/research-static/vendor/web-app/desktop.js" in sw
     assert "javascript" in sw_type
     manifest, manifest_type = static_file("vendor/web-app/manifest.webmanifest")

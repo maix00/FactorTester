@@ -1,4 +1,4 @@
-const CACHE = "tr-shell-v1";
+const CACHE = "tr-shell-v2";
 const SHELL = [
   "/app",
   "/research-static/vendor/web-app/loader.js",
