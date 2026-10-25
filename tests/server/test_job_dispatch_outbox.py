@@ -163,3 +163,32 @@ def test_repository_does_not_queue_legacy_job_without_run_spec(tmp_path):
     repository.transition("job-legacy", JobStatus.QUEUED)
     outbox = DispatchOutbox(tmp_path / "jobs.db")
     assert outbox.get(("job-legacy", 1)) is None
+
+
+def test_claim_attempt_is_idempotent(tmp_path):
+    from server.jobs.models import JobRecord
+    from server.jobs.repository.sqlite import JobRepository
+    from server.jobs.states import JobStatus
+
+    repository = JobRepository(tmp_path / "jobs.db")
+    repository.create(
+        JobRecord(
+            job_id="job-claim",
+            run_id="run-claim",
+            owner="owner",
+            workspace_id="workspace",
+            kind="backtest",
+            status=JobStatus.SUBMITTED,
+            deployment_id="remote-main",
+            run_spec_hash="d" * 64,
+            job_spec={},
+        )
+    )
+    repository.transition("job-claim", JobStatus.PLANNING)
+    repository.transition("job-claim", JobStatus.QUEUED)
+    first = repository.claim_attempt("job-claim", 1, worker_pid=123)
+    assert first is not None
+    assert first.status is JobStatus.RUNNING
+    assert first.worker_pid == 123
+    assert repository.claim_attempt("job-claim", 1, worker_pid=456) is None
+    assert repository.claim_attempt("job-claim", 2, worker_pid=456) is None

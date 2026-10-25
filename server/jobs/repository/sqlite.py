@@ -337,6 +337,44 @@ class JobRepository(
             cleanup_for_terminal_job(self, record)
         return record
 
+    def claim_attempt(
+        self, job_id: str, attempt: int, *, worker_pid: int | None = None,
+    ) -> JobRecord | None:
+        """Atomically claim one queued JobAttempt for a broker worker.
+
+        Duplicate Celery deliveries for the same (job_id, attempt) return None
+        after the first claim; a later attempt must be a new Job record.
+        """
+        now = time.time()
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM research_jobs WHERE job_id=?",
+                (str(job_id),),
+            ).fetchone()
+            if row is None:
+                raise KeyError("research job not found")
+            if int(row["attempt"] or 1) != int(attempt):
+                return None
+            if JobStatus(row["status"]) is not JobStatus.QUEUED:
+                return None
+            assignments = ["status='running'", "started_at=?", "updated_at=?"]
+            values: list[Any] = [now, now]
+            if worker_pid is not None:
+                assignments.append("worker_pid=?")
+                values.append(int(worker_pid))
+            values.append(str(job_id))
+            updated = conn.execute(
+                f"UPDATE research_jobs SET {', '.join(assignments)} "
+                "WHERE job_id=? RETURNING *",
+                values,
+            ).fetchone()
+            conn.execute(
+                "DELETE FROM user_job_pins WHERE owner=? AND job_id=?",
+                (str(row["owner"]), str(job_id)),
+            )
+        return self._record(updated) if updated is not None else None
+
     def set_execution_plan(
         self,
         job_id: str,
