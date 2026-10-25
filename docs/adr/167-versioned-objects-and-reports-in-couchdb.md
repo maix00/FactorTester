@@ -4,6 +4,15 @@
 
 已接受，迁移进行中（2026-10-25）。
 
+## 术语
+
+- **Job test report / 测试报告**：某个 JobAttempt 的回测输出（tearsheet、
+  orders、fills、positions、account）。由 `ReportDocument` 表示，不可编辑。
+- **Research Report / 研究报告**：研究空间内独立撰写的研究文档（Research
+  Graph/Evidence/报告块），由 ResearchReport 客户端与后续研究文档存储负责。
+
+两者不能互相替代；本 ADR 的 `ReportDocument` 仅指 Job test report。
+
 ## 决策
 
 - PostgreSQL 继续保存用户、权限、Job/Run/Attempt 状态、调度 outbox 等关系数据。

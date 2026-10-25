@@ -211,9 +211,9 @@ struct TestJobDetailView: View {
             }
             if !detail.reportRef.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("CouchDB 报告").font(.headline)
+                    Text("测试报告").font(.headline)
                     Text(detail.reportRef).font(.caption.monospaced()).textSelection(.enabled)
-                    Button("加载报告附件") {
+                    Button("加载测试报告附件") {
                         Task {
                             do {
                                 reportAttachments = try await controller.reportAttachments(

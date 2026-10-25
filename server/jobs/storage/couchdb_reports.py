@@ -1,4 +1,9 @@
-"""CouchDB-backed report documents and content-addressed attachments."""
+"""CouchDB-backed **Job test/backtest reports**, not Research Reports.
+
+A Job report is the immutable output of one JobAttempt (tearsheet, orders,
+fills, ...).  A Research Report is the independently authored research-space
+document under ``apple/.../ResearchReport`` and is not stored here.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +21,7 @@ def content_name(data: bytes, suffix: str) -> str:
 
 @dataclass
 class ReportDocument:
+    """One JobAttempt's test/backtest report document (not a Research Report)."""
     report_ref: str
     job_id: str
     owner: str

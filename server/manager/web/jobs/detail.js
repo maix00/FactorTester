@@ -405,7 +405,7 @@
         link.href = `/api/reports/${encodeURIComponent(reportRef)}/attachments/tearsheet.html`;
         link.target = "_blank";
         link.rel = "noopener";
-        link.textContent = context.t("打开 CouchDB 报告");
+        link.textContent = context.t("打开测试报告");
         report.append(link);
       });
     }
