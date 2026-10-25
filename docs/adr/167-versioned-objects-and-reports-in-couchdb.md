@@ -71,3 +71,12 @@ attachments[]
 ## 回滚
 
 迁移期保留只读导出；CouchDB 不可用时 Job 结果读取失败关闭，不回退到旧双写。
+
+## 2026-10-25 public legacy report migration
+
+Migrated all 307 legacy directories under `/data/job-results` into the public
+CouchDB `ft_objects` database as `report:<job_id>:1` documents with
+content-addressed attachments.  The migration ran inside the app container
+against `/opt/factortester/releases/audit-dispatch-<sha>`; the old directories
+remain untouched as read-only source until dual-read verification and client
+cutover.  CouchDB `doc_count` reached 307.
