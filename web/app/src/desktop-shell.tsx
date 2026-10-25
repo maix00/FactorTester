@@ -122,7 +122,7 @@ export function DesktopShell(): React.ReactElement {
     <ConfigProvider locale={i18n.language.startsWith("en") ? enUS : zhCN} theme={{ token: {
       colorPrimary: "#087cff", colorBorder: "#d9d9de", borderRadius: 8,
       colorBgContainer: "#ffffff", colorText: "#1d1d1f", colorTextSecondary: "#74747a",
-      fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+      fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif",
     } }}>
     <DesktopNotificationHost />
     <SettingsOverlay open={settingsOpen} onClose={() => setSettingsOpen(false)} onResetLayout={resetLayout} />
@@ -143,7 +143,6 @@ export function DesktopShell(): React.ReactElement {
           </button>
         </div>
         <div className="tr-sidebar-resize" role="separator" aria-orientation="vertical" aria-label="调整侧栏宽度" onPointerDown={startResize} />
-        <div className="tr-sidebar-caption">功能入口</div>
         <nav className="tr-module-nav">
           {pages.map((page) => (
             <button
