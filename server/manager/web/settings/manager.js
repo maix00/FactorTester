@@ -176,6 +176,19 @@
       });
     });
     wrapper.append(view.shell);
+    if (payload.nautilus_runtime) {
+      const runtime = document.createElement("div");
+      runtime.className = "manager-intro";
+      const label = document.createElement("b");
+      label.textContent = context.t("Nautilus 运行时");
+      const value = document.createElement("small");
+      const item = payload.nautilus_runtime;
+      value.textContent = item.compatible
+        ? context.t("已安装")
+        : `${context.t("未就绪")} (${item.version || item.expected})`;
+      runtime.append(label, value);
+      wrapper.append(runtime);
+    }
     if (payload.couchdb_authority !== undefined) {
       const authority = document.createElement("div");
       authority.className = "manager-intro";
