@@ -153,3 +153,10 @@ body { margin: 0; }
 .tr-antd-total { color: var(--muted); font-size: 11px; }
 .tr-table-link { color: var(--accent); text-decoration: none; }
 .tr-table-link:hover { text-decoration: underline; }
+
+.tr-dock-tab-title { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tr-mobile-shell { background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 7%, var(--bg)) 0, var(--bg) 180px); }
+.tr-mobile-tabs { box-shadow: 0 -1px 0 var(--line), 0 -8px 24px #0000000a; }
+.tr-mobile-tabs ion-tab-button { color: var(--muted); }
+.tr-mobile-tabs ion-tab-button.tab-selected { color: var(--accent); }
+.tr-mobile-tabs .tr-icon { width: 18px; height: 18px; margin-bottom: 2px; }

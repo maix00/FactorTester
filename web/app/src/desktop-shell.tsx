@@ -23,7 +23,7 @@ function Tab(props: IDockviewPanelHeaderProps<{ pageId: string }>): React.ReactE
   return (
     <span className="tr-dock-tab">
       <PageIcon name={page?.icon} />
-      <span>{page?.title ?? props.api.title ?? props.params.pageId}</span>
+      <span className="tr-dock-tab-title" title={page?.title ?? props.api.title ?? ""}>{page?.title ?? props.api.title ?? props.params.pageId}</span>
       <button type="button" className="tr-dock-close" aria-label="关闭" onClick={() => props.api.close()}>×</button>
     </span>
   );

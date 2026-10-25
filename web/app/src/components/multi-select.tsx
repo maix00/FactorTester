@@ -1,13 +1,13 @@
 import React from "react";
 import { Select } from "antd";
 
-export type FTOption = { value: string; label: string };
+export type TROption = { value: string; label: string };
 
-export function FTMultiSelectFilter({
+export function TRMultiSelectFilter({
   value, options, onChange, placeholder = "筛选", label = "筛选",
 }: {
   value: string[];
-  options: FTOption[];
+  options: TROption[];
   onChange: (value: string[]) => void;
   placeholder?: string;
   label?: string;
@@ -26,3 +26,7 @@ export function FTMultiSelectFilter({
     />
   );
 }
+
+
+/** @deprecated use TRMultiSelectFilter */
+export const FTMultiSelectFilter = TRMultiSelectFilter;
