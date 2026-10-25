@@ -50,7 +50,7 @@ export function DesktopShell(): React.ReactElement {
             </button>
           ))}
         </nav>
-        <div className="tr-rail-footer">FactorTester Workbench</div>
+        <div className="tr-rail-footer">TradeResearch Workbench</div>
       </aside>
       <div className="tr-desktop-workspace dockview-theme-light">
         <DockviewReact className="dockview-theme-light" components={components} onReady={onReady} />
