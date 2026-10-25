@@ -232,3 +232,5 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-mobile-bell { position: fixed; z-index: 900; top: calc(10px + env(safe-area-inset-top, 0px)); right: 10px; width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; color: var(--text); background: color-mix(in srgb, var(--panel) 92%, transparent); box-shadow: 0 4px 14px #00000014; backdrop-filter: blur(10px); }
 .tr-mobile-bell svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .tr-mobile-bell ion-badge { position: absolute; top: -5px; right: -5px; font-size: 9px; }
+.tr-page-error { display: grid; place-content: center; gap: 8px; height: 100%; padding: 24px; color: var(--text); background: var(--bg); text-align: center; }
+.tr-page-error button { justify-self: center; padding: 6px 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); }
