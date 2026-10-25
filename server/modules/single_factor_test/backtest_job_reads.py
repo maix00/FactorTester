@@ -855,8 +855,16 @@ def put_versioned_object():
             ref=ref, kind=kind, owner=actor, payload=payload,
             links=dict(body.get("links") or {}),
         ))
-    except Exception as exc:
+    except Exception:
         return jsonify({"success": False, "error": "object already exists or write failed"}), 409
+    try:
+        from server.jobs.dispatch.audit import append_audit
+        import settings as Settings
+
+        append_audit(Settings.CACHE_DB_PATH, action="object_write", actor=actor,
+                     job_id=ref, detail=kind)
+    except Exception:
+        pass
     return jsonify({"success": True, "ref": ref, "owner": actor})
 
 
