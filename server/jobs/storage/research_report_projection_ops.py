@@ -52,6 +52,24 @@ def _reorder_chapter_blocks(components: list[dict], chapter_id: str,
     return rest[:target_end] + block + rest[target_end:]
 
 
+def _insert_chapter_block(components: list[dict], chapter_id: str,
+                          after_chapter_id: str | None) -> list[dict]:
+    if any(str(item.get("component_id")) == chapter_id for item in components):
+        raise ValueError("chapter already exists")
+    block = [{"component_id": chapter_id, "kind": "chapter", "parent_id": None}]
+    if after_chapter_id is None:
+        return block + components
+    indices = [index for index, item in enumerate(components)
+               if str(item.get("component_id")) == after_chapter_id]
+    if not indices or str(components[indices[0]].get("kind")) != "chapter":
+        raise ValueError("after chapter not found")
+    start = indices[0]
+    later = [index for index, item in enumerate(components)
+             if index > start and str(item.get("kind") or "") == "chapter"]
+    end = later[0] if later else len(components)
+    return components[:end] + block + components[end:]
+
+
 def _write(store, document: dict, revision: str, logical: str, payload: dict,
            updates: dict[str, dict]) -> str:
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()
@@ -99,7 +117,21 @@ def apply_projection_operation(store, document: dict[str, Any], *, base_rev: str
     revision = base_rev
     chapter = None
     op = str(operation.get("op") or "")
-    if op == "move_chapter":
+    if op == "insert_chapter":
+        chapter_id = str(operation.get("chapter_id") or "")
+        after = operation.get("after_chapter_id")
+        index = move_chapter({
+            "chapters": [*index.get("chapters", []),
+                         {"component_id": chapter_id,
+                          "title": str(operation.get("title") or "")}],
+        }, chapter_id, after)
+        projection["components"] = _insert_chapter_block(
+            list(projection.get("components") or []), chapter_id, after)
+        chapter = {"title": str(operation.get("title") or ""),
+                   "generation": int(projection.get("generation") or 0) + 1,
+                   "components": [{"component_id": chapter_id, "kind": "chapter",
+                                   "parent_id": None}]}
+    elif op == "move_chapter":
         chapter_id = str(operation.get("chapter_id") or "")
         after = operation.get("after_chapter_id")
         index = move_chapter(index, chapter_id, after)
@@ -181,6 +213,9 @@ def apply_projection_operation(store, document: dict[str, Any], *, base_rev: str
             operation.get("chapter_id") or
             (operation.get("operations") or [{}])[0].get("chapter_id") or ""
         ))
+        if target_logical not in updates:
+            updates[target_logical] = {"name": "", "content_type": "application/json",
+                                       "size_bytes": 0}
         revision = _write(store, document, revision, target_logical, chapter, updates)
     revision = _write(store, document, revision, "projection.json", projection, updates)
     revision = _write(store, document, revision, "index.json", index, updates)
