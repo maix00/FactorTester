@@ -410,6 +410,43 @@ class JobRepository(
             )
         return self._record(updated) if updated is not None else None
 
+    def claim_planning(
+        self, job_id: str, attempt: int,
+    ) -> JobRecord | None:
+        """Atomically claim one submitted JobAttempt for Celery planning."""
+        now = time.time()
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM research_jobs WHERE job_id=?",
+                (str(job_id),),
+            ).fetchone()
+            if row is None:
+                raise KeyError("research job not found")
+            if int(row["attempt"] or 1) != int(attempt):
+                return None
+            if JobStatus(row["status"]) is not JobStatus.SUBMITTED:
+                return None
+            updated = conn.execute(
+                """
+                UPDATE research_jobs
+                SET status='planning', updated_at=?
+                WHERE job_id=? AND status='submitted'
+                RETURNING *
+                """,
+                (now, str(job_id)),
+            ).fetchone()
+        return self._record(updated) if updated is not None else None
+
+    def reset_planning(self, job_id: str) -> None:
+        """Return a planning row to submitted after a publish failure."""
+        with self._connection() as conn:
+            conn.execute(
+                "UPDATE research_jobs SET status='submitted', updated_at=? "
+                "WHERE job_id=? AND status='planning'",
+                (time.time(), str(job_id)),
+            )
+
     def record_progress(
         self,
         job_id: str,

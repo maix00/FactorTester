@@ -13,12 +13,14 @@ import os
 from typing import Any, Mapping
 
 from server.jobs.repository.sqlite import JobRepository
+from server.jobs.states import JobStatus
 
 from .contract import DispatchMessage
 from .dispatcher import DEFAULT_QUEUE
 from .worker import DispatchWorker, JobExecutor
 
 TASK_NAME = "factortester.execute_job"
+PLAN_TASK_NAME = "factortester.jobs.plan"
 EXECUTOR_ENV = "FACTORTESTER_NAUTILUS_EXECUTOR"
 DEFAULT_EXECUTOR = "server.services.nautilus_bridge.job_executor:execute_nautilus_job"
 
@@ -77,6 +79,94 @@ def execute_dispatch_payload(
     return DispatchWorker(repo).execute(message, resolved)
 
 
+class _PlanSink:
+    def __init__(self) -> None:
+        self.plan: dict[str, Any] | None = None
+        self.notices: list[dict[str, Any]] = []
+        self.error: dict[str, Any] | None = None
+        self.cancelled = False
+
+    def emit_plan(self, value: dict[str, Any]) -> None:
+        plan = value.get("plan") if isinstance(value, dict) else None
+        if not isinstance(plan, dict):
+            raise ValueError("planner emitted no plan")
+        self.plan = plan
+        self.notices = list(value.get("notices") or [])
+
+    def emit_error(self, message: str, *, cancelled: bool = False, **extra: Any) -> None:
+        if cancelled:
+            self.cancelled = True
+            return
+        self.error = {
+            "code": str(extra.get("error_code") or "planning_failed"),
+            "message": str(message),
+        }
+
+
+def execute_plan_payload(
+    payload: Mapping[str, Any],
+    *,
+    repository: JobRepository | None = None,
+    planner: Any = None,
+    target_deployment: str | None = None,
+    target_port: int | None = None,
+) -> dict[str, Any]:
+    """Plan one submitted JobAttempt on a Celery worker."""
+    message = DispatchMessage.from_dict(payload)
+    if target_deployment is not None and message.deployment_id != target_deployment:
+        return {"status": "wrong_target", "job_id": message.job_id}
+    if target_port is not None and message.service_port != int(target_port):
+        return {"status": "wrong_target", "job_id": message.job_id}
+    repo = repository or repository_from_env()
+    record = repo.load(message.job_id)
+    if record is None or record.attempt != message.attempt:
+        return {"status": "stale", "job_id": message.job_id}
+    if record.status is not JobStatus.PLANNING:
+        return {"status": "duplicate", "job_id": message.job_id}
+    if planner is None:
+        from server.jobs.planning.runners import plan_job
+
+        planner = plan_job
+    payload_value = dict(record.job_spec)
+    payload_value.update({
+        "job_spec": record.job_spec,
+        "kind": record.kind,
+        "runner_path": record.runner_path,
+        "_owner": record.owner,
+    })
+    sink = _PlanSink()
+    try:
+        planner(payload_value, sink, _NeverCancelled())
+    except Exception as exc:
+        repo.transition(
+            record.job_id, JobStatus.FAILED, expected=JobStatus.PLANNING,
+            error={"code": "planning_failed", "message": f"{type(exc).__name__}: {exc}"},
+        )
+        return {"status": "failed", "job_id": record.job_id}
+    if sink.error is not None:
+        repo.transition(
+            record.job_id, JobStatus.FAILED, expected=JobStatus.PLANNING,
+            error=sink.error,
+        )
+        return {"status": "failed", "job_id": record.job_id}
+    if sink.plan is None:
+        repo.transition(
+            record.job_id, JobStatus.FAILED, expected=JobStatus.PLANNING,
+            error={"code": "planning_no_plan", "message": "planner returned no plan"},
+        )
+        return {"status": "failed", "job_id": record.job_id}
+    repo.set_execution_plan(
+        record.job_id, plan=sink.plan, notices=sink.notices,
+        requires_confirmation=bool(sink.plan.get("requires_confirmation")),
+    )
+    return {"status": "planned", "job_id": record.job_id}
+
+
+class _NeverCancelled:
+    def is_set(self) -> bool:
+        return False
+
+
 def create_app(
     *,
     broker_url: str | None = None,
@@ -121,6 +211,14 @@ def create_app(
     @app.task(name=TASK_NAME, bind=True)
     def execute_job(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         return execute_dispatch_payload(
+            payload,
+            target_deployment=resolved_deployment,
+            target_port=resolved_port,
+        )
+
+    @app.task(name=PLAN_TASK_NAME, bind=True)
+    def plan_job(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        return execute_plan_payload(
             payload,
             target_deployment=resolved_deployment,
             target_port=resolved_port,

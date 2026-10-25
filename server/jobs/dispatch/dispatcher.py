@@ -29,6 +29,12 @@ class KombuPublisher:
         return f"{self.queue}.{message.deployment_id}.{message.service_port}"
 
     def publish(self, message: DispatchMessage) -> None:
+        self._send("factortester.execute_job", message)
+
+    def publish_plan(self, message: DispatchMessage) -> None:
+        self._send("factortester.jobs.plan", message)
+
+    def _send(self, task: str, message: DispatchMessage) -> None:
         from celery import Celery
         from kombu import Exchange, Queue
 
@@ -37,7 +43,7 @@ class KombuPublisher:
         queue = Queue(name, exchange, routing_key=name)
         app = Celery("factortester.dispatch-publisher", broker=self.broker_url)
         app.send_task(
-            "factortester.execute_job",
+            task,
             args=[message.to_dict()],
             queue=queue,
             exchange=exchange,

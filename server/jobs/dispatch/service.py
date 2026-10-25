@@ -18,6 +18,7 @@ import settings as Settings
 from .celery_app import resolve_executor
 from .dispatcher import DispatchRunner, publisher_from_env
 from .outbox import DispatchOutbox
+from .planning import PlanningDispatcher
 
 LOGGER = logging.getLogger("factortester.job-dispatcher")
 DB_ENV = "FACTORTESTER_JOB_DB"
@@ -53,8 +54,16 @@ def run_forever(*, interval: float | None = None) -> None:
     if seconds <= 0:
         raise ValueError("dispatch interval must be > 0")
     runner = build_runner()
+    repository = JobRepository(Path(os.environ.get(DB_ENV, "") or Settings.CACHE_DB_PATH))
+    planner = PlanningDispatcher(
+        repository, publisher_from_env(),
+        target_online=repository.worker_target_online,
+    )
     LOGGER.info("job dispatcher started interval=%.2fs", seconds)
     while True:
+        planning = planner.run_once(limit=10)
+        if planning["claimed"]:
+            LOGGER.info("job planning %s", planning)
         result = runner.run_once(limit=10)
         if result["claimed"]:
             LOGGER.info("job dispatch %s", result)
