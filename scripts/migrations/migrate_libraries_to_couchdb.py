@@ -39,6 +39,18 @@ def factor_documents(db: Path) -> list[dict]:
     with sqlite3.connect(db) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute("SELECT * FROM factor_family_catalog").fetchall()
+        sources = {(r["source_kind"], r["owner_username"], r["factor_id"]): r["source_code"]
+                   for r in conn.execute("SELECT * FROM factor_family_sources")}
+        metadata = {(r["source_kind"], r["owner_username"], r["factor_id"]): {
+            "chinese_name": r["chinese_name"], "description": r["description"], "category": r["category"],
+        } for r in conn.execute("SELECT * FROM factor_family_source_metadata")}
+        params: dict[tuple, list] = {}
+        for r in conn.execute("SELECT * FROM factor_family_catalog_params ORDER BY param_index"):
+            params.setdefault((r["source_kind"], r["owner_username"], r["factor_id"]), []).append({
+                "alias": r["alias"], "type": r["type"], "default": r["default_value"],
+                "description": r["description"],
+            })
+    context = lambda row: (row["source_kind"], row["owner_username"], row["factor_id"])
     return [{
         "_id": f"factor-family:{row['owner_username'] or 'public'}:{row['factor_id']}",
         "schema_version": 1,
@@ -50,6 +62,9 @@ def factor_documents(db: Path) -> list[dict]:
         "family": row["factor_family"] or "",
         "is_public": bool(row["is_public"]),
         "catalog": json.loads(row["catalog_json"]) if row["catalog_json"] else {},
+        "source_code": sources.get(context(row), ""),
+        "metadata": metadata.get(context(row), {}),
+        "params": params.get(context(row), []),
         "source_sha256": row["source_sha256"] or "",
     } for row in rows]
 
