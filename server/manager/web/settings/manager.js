@@ -56,6 +56,33 @@
     intro.querySelector("b").textContent = context.t("并行服务与工作树");
     intro.querySelector("small").textContent = `${context.t("本机")} 127.0.0.1 · ${context.t("局域网")} ${manager.lan_ip || context.t("不可用")} · ${context.t("VS Code 调试前请先停止同端口服务")}`;
     wrapper.append(intro);
+    const canManage = Array.isArray(context.session?.admin_capabilities)
+      && context.session.admin_capabilities.includes("admin_console:manage");
+    const requeue = document.createElement("div");
+    requeue.className = "row-actions manager-actions";
+    const jobInput = document.createElement("input");
+    jobInput.placeholder = context.t("job_id");
+    const attemptInput = document.createElement("input");
+    attemptInput.placeholder = context.t("attempt");
+    attemptInput.type = "number";
+    attemptInput.min = "1";
+    const requeueButton = document.createElement("button");
+    requeueButton.textContent = context.t("重新投递");
+    requeueButton.disabled = !canManage;
+    requeueButton.onclick = async () => {
+      await context.api("/api/dispatch/requeue", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          job_id: jobInput.value.trim(),
+          attempt: Number(attemptInput.value),
+        }),
+      });
+      context.showNotice(context.t("已重新投递"));
+      await dispatchView(context, body);
+    };
+    requeue.append(jobInput, attemptInput, requeueButton);
+    wrapper.append(requeue);
     const view = FTUI.table([
       context.t("工作树 / 服务"), context.t("实例"), context.t("端口"),
       context.t("状态"), context.t("操作"),
