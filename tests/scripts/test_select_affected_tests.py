@@ -1,5 +1,5 @@
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 from scripts import select_affected_tests as selector
 
@@ -296,13 +296,12 @@ def test_nautilus_fee_benchmark_edit_selects_fee_contract_tests():
     )
 
 
-def test_nautilus_extension_paths_select_build_and_runtime_contracts():
+def test_nautilus_extension_build_inputs_select_bounded_contract_tests():
     for path in (
         "environment.yml",
         "scripts/test.sh",
         "scripts/build_nautilus_extension.sh",
         "vendor/nautilus_trader",
-        "tests/scripts/test_nautilus_extension_build.py",
     ):
         assert selector.select({path}) == (
             "SCOPED", ["tests/scripts/test_nautilus_extension_build.py"],

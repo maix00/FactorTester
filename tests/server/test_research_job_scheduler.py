@@ -170,6 +170,64 @@ def test_legacy_backtest_paused_job_keeps_history_and_cannot_resume(tmp_path) ->
     assert repository.require(old.job_id).status is JobStatus.PAUSED
 
 
+def test_nautilus_v4_backtest_enters_planner_and_execution_dispatch(tmp_path, monkeypatch):
+    repository = JobRepository(tmp_path / "jobs.sqlite")
+    base = _record("nautilus-v4")
+    nautilus_spec = {
+        **base.job_spec,
+        "run_spec": {
+            "configuration": {"payload": {"analyses": {"backtest": {
+                "execution": {
+                    "backend": "nautilus_trader",
+                    "contract_version": 4,
+                },
+            }}}},
+        },
+    }
+    job = replace(
+        base,
+        kind="backtest",
+        job_spec=nautilus_spec,
+        runner_path=(
+            "server.modules.single_factor_test.process_runners:run_group"
+        ),
+    )
+    repository.create(job)
+
+    with ResearchJobScheduler(
+        repository=repository,
+        deployment_id="test",
+        planner_workers=1,
+        execution_workers=1,
+    ) as scheduler:
+        planned = []
+        monkeypatch.setattr(
+            scheduler.planners, "submit",
+            lambda **kwargs: planned.append(kwargs),
+        )
+        scheduler._dispatch_planning()
+
+        assert repository.require(job.job_id).status is JobStatus.PLANNING
+        assert planned and planned[0]["job_id"] == job.job_id
+
+        repository.set_execution_plan(
+            job.job_id,
+            plan={"resolved_hash": "test-plan", "cache_keys": []},
+            notices=[],
+            requires_confirmation=False,
+        )
+        executed = []
+        monkeypatch.setattr(
+            scheduler.executors, "submit",
+            lambda **kwargs: executed.append(kwargs) or 12345,
+        )
+        scheduler._dispatch_execution()
+
+    assert repository.require(job.job_id).status is JobStatus.RUNNING
+    assert repository.require(job.job_id).worker_pid == 12345
+    assert executed[0]["runner_path"] == job.runner_path
+
+
 def test_supplemental_job_skips_planning_and_writes_artifact_to_parent(tmp_path) -> None:
     repository = JobRepository(tmp_path / "jobs.sqlite")
     parent = repository.create(_record("parent"))

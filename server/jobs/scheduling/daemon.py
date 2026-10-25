@@ -31,12 +31,29 @@ _PRIORITY_CLASS_RANK = {"low": 0, "standard": 10, "high": 20, "admin": 30}
 
 
 def _legacy_backtest_execution_unavailable(job: Any) -> bool:
-    """Keep historical backtest attempts readable without starting their Python runner.
+    """Keep historical/legacy backtests readable without executing them.
 
-    NautilusTrader Job submission is still fail closed. Once it has its own
-    runner, replace this kind-level gate with an explicit RunSpec/backend check.
+    Backtest kind alone is not a reason to skip a Job: only an immutable
+    NautilusTrader v4 RunSpec may enter the current worker pipeline. Missing,
+    malformed, and legacy RunSpecs stay out of the scheduler.
     """
-    return job.kind == "backtest"
+    if str(getattr(job, "kind", "")) != "backtest":
+        return False
+    job_spec = getattr(job, "job_spec", None)
+    run_spec = job_spec.get("run_spec") if isinstance(job_spec, dict) else None
+    configuration = run_spec.get("configuration") if isinstance(run_spec, dict) else None
+    payload = configuration.get("payload") if isinstance(configuration, dict) else None
+    # Some early v4 drafts stored analyses directly on configuration. Accept
+    # that frozen shape too; both paths still require the exact engine/version.
+    source = payload if isinstance(payload, dict) else configuration
+    analyses = source.get("analyses") if isinstance(source, dict) else None
+    backtest = analyses.get("backtest") if isinstance(analyses, dict) else None
+    execution = backtest.get("execution") if isinstance(backtest, dict) else None
+    return not (
+        isinstance(execution, dict)
+        and execution.get("backend") == "nautilus_trader"
+        and execution.get("contract_version") == 4
+    )
 
 
 class ResearchJobScheduler:
@@ -91,7 +108,6 @@ class ResearchJobScheduler:
         interrupted = self.repository.list_for_deployment(
             deployment_id=self.deployment_id,
             statuses=(JobStatus.PLANNING, JobStatus.RUNNING, JobStatus.PAUSED),
-            exclude_kinds=("backtest",),
         )
         for job in interrupted:
             if _legacy_backtest_execution_unavailable(job):
@@ -136,7 +152,6 @@ class ResearchJobScheduler:
         jobs = self.repository.list_for_deployment(
             deployment_id=self.deployment_id,
             statuses=(JobStatus.SUBMITTED,),
-            exclude_kinds=("backtest",),
         )
         for job in jobs:
             if _legacy_backtest_execution_unavailable(job):
@@ -175,7 +190,6 @@ class ResearchJobScheduler:
         jobs = self.repository.list_for_deployment(
             deployment_id=self.deployment_id,
             statuses=(JobStatus.QUEUED,),
-            exclude_kinds=("backtest",),
         )
         pending = self.repository.list_for_deployment(
             deployment_id=self.deployment_id,
@@ -187,7 +201,6 @@ class ResearchJobScheduler:
                 JobStatus.RUNNING,
                 JobStatus.PAUSED,
             ),
-            exclude_kinds=("backtest",),
         )
         pending_by_owner: dict[str, list[Any]] = {}
         for item in pending:

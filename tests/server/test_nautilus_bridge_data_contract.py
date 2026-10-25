@@ -10,10 +10,20 @@ from pathlib import Path
 import pytest
 
 from server.services.nautilus_bridge.market_data import (
-    DailySettlementRule, FuturesContractSpec, MarketBar, RollMarker, SHANGHAI,
-    daily_clock, iter_daily_bars, iter_daily_settlement_records,
-    iter_minute_bars, minute_clock, next_open_event_time,
-    to_nautilus_bar, to_nautilus_daily_settlement, to_nautilus_instrument,
+    SHANGHAI,
+    DailySettlementRule,
+    FuturesContractSpec,
+    MarketBar,
+    RollMarker,
+    daily_clock,
+    iter_daily_bars,
+    iter_daily_settlement_records,
+    iter_minute_bars,
+    minute_clock,
+    next_open_event_time,
+    to_nautilus_bar,
+    to_nautilus_daily_settlement,
+    to_nautilus_instrument,
     to_nautilus_open_quote,
 )
 from tests.nautilus_runtime import require_nautilus

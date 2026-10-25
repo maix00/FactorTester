@@ -2,10 +2,64 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+import importlib
 from importlib import metadata
 from typing import Any
 
 from server.services.nautilus_bridge.native_configuration import native_configuration_schema
+
+
+NAUTILUS_BACKTEST_RUNNER_PATH = (
+    "server.modules.single_factor_test.process_runners:run_group"
+)
+
+
+def nautilus_backtest_submission_capability() -> dict[str, object]:
+    """Report Job submission only when the registered runner declares readiness.
+
+    Importability of the legacy ``run_group`` wrapper is not enough: it used
+    to exist while intentionally rejecting Nautilus Runs.  The process-runner
+    module owns the readiness contract and must explicitly report that its
+    Nautilus execution path and runtime dependencies are available.
+    """
+    reason = "NautilusTrader Job runner is not registered or ready"
+    available = False
+    try:
+        runners = importlib.import_module(
+            "server.modules.single_factor_test.process_runners"
+        )
+        status_provider = getattr(runners, "nautilus_backtest_runner_status", None)
+        if callable(status_provider):
+            status = status_provider()
+            if isinstance(status, Mapping):
+                ready = status.get("available")
+                reason = str(status.get("reason") or reason)
+            else:
+                ready = getattr(status, "available", None)
+                reason = str(getattr(status, "reason", None) or reason)
+            available = ready is True
+    except Exception:
+        # Capability discovery must fail closed and must not make Manager
+        # startup depend on optional execution imports.
+        pass
+
+    try:
+        version = metadata.version("nautilus_trader")
+    except metadata.PackageNotFoundError:
+        version = None
+    schema = native_configuration_schema()
+    engine_ready = version == schema.get("native_version")
+    if not engine_ready:
+        available = False
+        reason = (
+            "NautilusTrader package does not match the configured engine version"
+        )
+    return {
+        "available": available,
+        "runner_path": NAUTILUS_BACKTEST_RUNNER_PATH,
+        "reason": "" if available else reason,
+    }
 
 
 def market_data_source_capabilities() -> dict[str, Any]:
@@ -72,6 +126,7 @@ def native_capabilities() -> dict[str, object]:
         "engine_version": version,
         "installed": version is not None,
         "backtest_reports": version is not None,
+        "backtest_submission": nautilus_backtest_submission_capability(),
         "simulated_venue_config": schema,
         "market_data_sources": market_data_sources,
         "sandbox": {"available": False, "reason": "live data adapter not configured"},

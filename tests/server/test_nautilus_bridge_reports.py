@@ -11,9 +11,9 @@ from pathlib import Path
 import pytest
 from flask import Flask
 
+from server.modules.nautilus_workbench import nautilus_workbench_bp
 from server.services.nautilus_bridge import reports
 from server.services.nautilus_bridge.version import NAUTILUS_VERSION
-from server.modules.nautilus_workbench import nautilus_workbench_bp
 
 
 class _Report:

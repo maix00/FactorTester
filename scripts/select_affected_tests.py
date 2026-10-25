@@ -128,6 +128,15 @@ EXACT_PATH_TESTS = {
         "tests/server/test_nautilus_bridge_reports.py",
         "tests/server/test_nautilus_bridge_backtest_runner.py",
     ),
+    "server/services/nautilus_bridge/job_executor.py": (
+        "tests/server/test_nautilus_job_executor.py",
+    ),
+    "tests/server/test_nautilus_job_executor.py": (
+        "tests/server/test_nautilus_job_executor.py",
+    ),
+    "tests/server/test_job_dispatch_celery.py": (
+        "tests/server/test_job_dispatch_celery.py",
+    ),
     "server/services/nautilus_bridge/historical_fees.py": (
         "tests/server/test_nautilus_bridge_historical_fees.py",
         "tests/server/test_nautilus_bridge_historical_rule_events.py",

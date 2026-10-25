@@ -152,9 +152,11 @@ class FactorTester(UniqueNameObject):
             )
 
     def dispatch(self, task_name: str, **kwargs: Any) -> Any:
-        if task_name == "backtest" and "backtest" not in self._TASK_HANDLERS:
-            from tools.testers.backtest.engines.native.backtester import run_backtest_task
-            FactorTester._TASK_HANDLERS["backtest"] = run_backtest_task
+        if task_name == "backtest":
+            raise RuntimeError(
+                "FactorTester no longer owns backtest execution; submit a frozen "
+                "NautilusTrader RunSpec through the server Job interface"
+            )
         handler = self._TASK_HANDLERS[task_name]
         return handler(self.state, **kwargs)
 

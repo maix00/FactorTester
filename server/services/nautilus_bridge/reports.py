@@ -10,7 +10,6 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
-
 _REPORT_METHODS = {
     "orders.csv": "generate_orders_report",
     "fills.csv": "generate_fills_report",

@@ -51,7 +51,25 @@ class JobDetailQueryImplementation:
             "report_binding": _report_binding(row),
             "identity_refs": _identity_refs(row, trial_binding),
             "active_artifacts": active_artifacts,
+            "progress": _progress(row),
         }
+
+
+def _progress(row: Any) -> dict[str, Any] | None:
+    try:
+        sequence = row["progress_sequence"]
+    except (IndexError, KeyError):
+        return None
+    if sequence is None:
+        return None
+    return {
+        "sequence": int(sequence),
+        "phase": str(row["progress_phase"] or ""),
+        "completed": int(row["progress_completed"] or 0),
+        "total": int(row["progress_total"] or 0),
+        "percent": float(row["progress_percent"] or 0.0),
+        "message": str(row["progress_message"] or ""),
+    }
 
 
 def _trial_binding(row: Any) -> dict[str, Any] | None:
@@ -141,6 +159,8 @@ _DETAIL_QUERY = f"""
       ON pins.job_id=jobs.job_id AND pins.owner=jobs.owner
     LEFT JOIN research_runs AS runs
       ON runs.run_id=jobs.run_id AND runs.owner=jobs.owner
+    LEFT JOIN research_job_progress AS progress
+      ON progress.job_id=jobs.job_id AND progress.attempt=jobs.attempt
     WHERE jobs.job_id=? AND jobs.owner=?
 """
 
@@ -161,9 +181,17 @@ _LEGACY_DETAIL_QUERY = """
            NULL AS run_report_binding_json,
            NULL AS run_run_spec_hash,
            NULL AS run_sample_use_hash,
-           '[]' AS detail_artifacts_json
+           '[]' AS detail_artifacts_json,
+           progress.sequence AS progress_sequence,
+           progress.phase AS progress_phase,
+           progress.completed AS progress_completed,
+           progress.total AS progress_total,
+           progress.percent AS progress_percent,
+           progress.message AS progress_message
     FROM research_jobs AS jobs
     LEFT JOIN user_job_pins AS pins
       ON pins.job_id=jobs.job_id AND pins.owner=jobs.owner
+    LEFT JOIN research_job_progress AS progress
+      ON progress.job_id=jobs.job_id AND progress.attempt=jobs.attempt
     WHERE jobs.job_id=? AND jobs.owner=?
 """

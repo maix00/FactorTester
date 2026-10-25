@@ -11,8 +11,10 @@ from decimal import Decimal
 import pytest
 
 from server.services.nautilus_bridge.market_data import (
-    FuturesContractSpec, to_nautilus_instrument,
+    FuturesContractSpec,
+    to_nautilus_instrument,
 )
+from server.services.nautilus_bridge.rule_transition import apply_instrument_rule_transition
 from tests.nautilus_runtime import require_nautilus
 from tests.nautilus_source_fixture import resolved_contract_minute_source
 
@@ -52,7 +54,14 @@ def _engine(instrument, fee_model, *, latency_ns=0):
     from nautilus_trader.backtest import BacktestEngine
     from nautilus_trader.config import BacktestEngineConfig
     from nautilus_trader.execution import StaticLatencyModel
-    from nautilus_trader.model import AccountType, Currency, Money, OmsType, TraderId, Venue
+    from nautilus_trader.model import (
+        AccountType,
+        Currency,
+        Money,
+        OmsType,
+        TraderId,
+        Venue,
+    )
 
     engine = BacktestEngine(BacktestEngineConfig(
         trader_id=TraderId.from_str("FT-HISTORY-001"),
@@ -71,8 +80,14 @@ def _engine(instrument, fee_model, *, latency_ns=0):
 class _Probe:
     @staticmethod
     def make(instrument, *, buy_at=1, sell_at=None, limit_at=None,
-             limit_price="102.955"):
-        from nautilus_trader.model import BarType, OrderSide, Price, Quantity, TimeInForce
+             limit_price="102.955", market_time_in_force=None):
+        from nautilus_trader.model import (
+            BarType,
+            OrderSide,
+            Price,
+            Quantity,
+            TimeInForce,
+        )
         from nautilus_trader.trading import Strategy
 
         class Probe(Strategy):
@@ -106,7 +121,8 @@ class _Probe:
                     return
                 order = self.order_factory.market(
                     instrument_id=instrument.id, order_side=side,
-                    quantity=Quantity.from_str("1"), time_in_force=TimeInForce.GTC)
+                    quantity=Quantity.from_str("1"),
+                    time_in_force=market_time_in_force or TimeInForce.GTC)
                 self.submitted_at.append((str(order.client_order_id), self.clock.timestamp_ns()))
                 self.submit_order(order)
 
@@ -116,37 +132,45 @@ class _Probe:
         return Probe()
 
 
-def test_readding_same_instrument_updates_cache_but_must_preserve_open_position():
+def test_historical_margin_update_preserves_open_position_and_recalculates_margin():
     _nt()
     from nautilus_trader.execution import MakerTakerFeeModel
-    from nautilus_trader.model import Currency
+    from nautilus_trader.model import Currency, Money
 
     original = _instrument()
-    updated = _instrument(tick="0.010", multiplier="20000", margin="0.04")
+    updated = _instrument(tick="0.010", margin="0.04")
     engine = _engine(original, MakerTakerFeeModel(
         maker_rate=Decimal("0"), taker_rate=Decimal("0")))
     probe = _Probe.make(original, buy_at=1, sell_at=5)
     engine.add_strategy(probe)
     cny = Currency.from_str("CNY")
     try:
-        engine.add_data(_bars(original, count=3))
+        first = _bars(original, count=3)
+        engine.add_data(first)
         engine.run(streaming=True)
         engine.clear_data()
         assert len(probe.fills) == 1
         locked_before = engine.cache.account_for_venue(original.id.venue).balance_locked(cny)
-        engine.add_instrument(updated)
+        later = _bars(updated, first_index=3, count=4)
+        apply_instrument_rule_transition(
+            engine, updated,
+            effective_ns=first[-1].ts_event + 1,
+            processed_through_ns=first[-1].ts_event,
+            next_event_ns=later[0].ts_event,
+        )
         assert str(engine.cache.instrument(original.id).price_increment) == "0.010"
         locked_after_update = engine.cache.account_for_venue(original.id.venue).balance_locked(cny)
-        engine.add_data(_bars(updated, first_index=3, count=4))
+        assert locked_before == Money.from_str("2059.00 CNY")
+        assert locked_after_update == Money.from_str("4118.00 CNY")
+        engine.add_data(later)
         engine.run(streaming=True)
         engine.clear_data()
         engine.end()
-        # This is the contract we need before treating historical metadata
-        # events as supported.  Existing exposure is not repriced merely by
-        # re-registering a new Instrument with the same id.
+        # The effective-dated update preserves position identity while applying
+        # the new margin rule to existing exposure.
         assert len(probe.fills) == 2
         assert engine.get_result().total_positions == 1
-        assert locked_before == locked_after_update
+        assert locked_after_update > locked_before
         assert str(engine.portfolio.realized_pnl(original.id)) == "400.00 CNY"
     finally:
         engine.dispose()
@@ -190,18 +214,24 @@ def test_custom_fee_model_can_observe_fill_time_not_just_submission_time():
         engine.dispose()
 
 
-def test_official_daily_settlement_posts_variation_and_resets_open_cost_basis():
+def test_official_daily_settlement_posts_variation_and_rebases_open_cost_basis():
     _nt()
     from nautilus_trader.execution import MakerTakerFeeModel
     from nautilus_trader.model import (
-        Currency, InstrumentClose, InstrumentCloseType, Price,
+        Currency,
+        InstrumentClose,
+        InstrumentCloseType,
+        Price,
+        TimeInForce,
     )
 
     instrument = _instrument()
     bars = _bars(instrument, count=6)
     engine = _engine(instrument, MakerTakerFeeModel(
         maker_rate=Decimal(0), taker_rate=Decimal(0)))
-    probe = _Probe.make(instrument, buy_at=1)
+    probe = _Probe.make(
+        instrument, buy_at=1, market_time_in_force=TimeInForce.AT_THE_OPEN,
+    )
     engine.add_strategy(probe)
     settlement = InstrumentClose(
         instrument_id=instrument.id,
@@ -230,7 +260,13 @@ def test_official_daily_settlement_posts_variation_and_resets_open_cost_basis():
             account_id=engine.cache.account_for_venue(instrument.id.venue).id,
         )
         assert len(positions) == 1
-        assert str(positions[0].avg_px_open) == "102.970"
+        # Nautilus keeps avg_px_open as the original entry-price analytics field;
+        # settlement rebases the effective cost basis used for PnL separately.
+        assert str(positions[0].avg_px_open) == "102.96"
+        assert str(
+            positions[0].unrealized_pnl(Price.from_str("102.970"))
+        ) == "0.00 CNY"
+        assert str(positions[0].adjustments()[0].settlement_price) == "102.970"
         assert str(engine.portfolio.unrealized_pnl(instrument.id)) == "300.00 CNY"
         account = engine.cache.account_for_venue(instrument.id.venue)
         assert str(account.balance_total(cny)) == "10000100.00 CNY"
@@ -254,8 +290,18 @@ def test_historical_tick_change_affects_later_limit_order_validation(replace_ins
         engine.run(streaming=True)
         engine.clear_data()
         if replace_instrument:
-            engine.add_instrument(_instrument(tick="0.010", multiplier="20000", margin="0.04"))
-        engine.add_data(_bars(original, first_index=3, count=3))
+            updated = _instrument(tick="0.010", margin="0.04")
+            first = _bars(original, count=3)
+            later = _bars(updated, first_index=3, count=3)
+            apply_instrument_rule_transition(
+                engine, updated,
+                effective_ns=first[-1].ts_event + 1,
+                processed_through_ns=first[-1].ts_event,
+                next_event_ns=later[0].ts_event,
+            )
+        else:
+            later = _bars(original, first_index=3, count=3)
+        engine.add_data(later)
         engine.run(streaming=True)
         engine.clear_data()
         engine.end()
@@ -269,7 +315,7 @@ def test_historical_tick_change_affects_later_limit_order_validation(replace_ins
 
 
 @pytest.mark.parametrize("replace_instrument", [False, True])
-def test_historical_multiplier_and_margin_affect_new_position(replace_instrument):
+def test_historical_margin_update_affects_new_position(replace_instrument):
     _nt()
     from nautilus_trader.execution import MakerTakerFeeModel
     from nautilus_trader.model import Currency
@@ -284,17 +330,27 @@ def test_historical_multiplier_and_margin_affect_new_position(replace_instrument
         engine.run(streaming=True)
         engine.clear_data()
         if replace_instrument:
-            engine.add_instrument(_instrument(tick="0.010", multiplier="20000", margin="0.04"))
-        engine.add_data(_bars(original, first_index=3, count=4))
+            updated = _instrument(tick="0.010", margin="0.04")
+            first = _bars(original, count=3)
+            later = _bars(updated, first_index=3, count=4)
+            apply_instrument_rule_transition(
+                engine, updated,
+                effective_ns=first[-1].ts_event + 1,
+                processed_through_ns=first[-1].ts_event,
+                next_event_ns=later[0].ts_event,
+            )
+        else:
+            later = _bars(original, first_index=3, count=4)
+        engine.add_data(later)
         engine.run(streaming=True)
         engine.clear_data()
         engine.end()
         assert len(probe.fills) == 1
         locked = engine.cache.account_for_venue(original.id.venue).balance_locked(
             Currency.from_str("CNY"))
-        assert str(locked) == ("8238.40 CNY" if replace_instrument else "2059.60 CNY")
+        assert str(locked) == ("4119.20 CNY" if replace_instrument else "2059.60 CNY")
         assert str(engine.portfolio.unrealized_pnl(original.id)) == (
-            "600.00 CNY" if replace_instrument else "300.00 CNY")
+            "300.00 CNY" if replace_instrument else "300.00 CNY")
     finally:
         engine.dispose()
 
@@ -310,7 +366,7 @@ def test_readding_instrument_with_resting_order_does_not_silently_preserve_match
     original = _instrument()
     engine = _engine(original, MakerTakerFeeModel(
         maker_rate=Decimal("0"), taker_rate=Decimal("0")))
-    probe = _Probe.make(original, buy_at=99, limit_at=1, limit_price="102.900")
+    probe = _Probe.make(original, buy_at=99, limit_at=1, limit_price="102.905")
     engine.add_strategy(probe)
     try:
         engine.add_data(_bars(original, count=3))
@@ -320,8 +376,17 @@ def test_readding_instrument_with_resting_order_does_not_silently_preserve_match
         old_status = engine.cache.order(probe.limit_order.client_order_id).status
         assert old_status == OrderStatus.ACCEPTED
         if replace_instrument:
-            engine.add_instrument(_instrument(tick="0.010", multiplier="20000", margin="0.04"))
-        future = _bars(original, first_index=3, count=2)
+            updated = _instrument(tick="0.010", margin="0.04")
+            first = _bars(original, count=3)
+            future = _bars(updated, first_index=3, count=2)
+            apply_instrument_rule_transition(
+                engine, updated,
+                effective_ns=first[-1].ts_event + 1,
+                processed_through_ns=first[-1].ts_event,
+                next_event_ns=future[0].ts_event,
+            )
+        else:
+            future = _bars(original, first_index=3, count=2)
         crossed = Price.from_str("102.900")
         original_bar = future[0]
         future[0] = Bar(original_bar.bar_type, crossed, crossed, crossed, crossed,
@@ -332,13 +397,10 @@ def test_readding_instrument_with_resting_order_does_not_silently_preserve_match
         engine.end()
         current = engine.cache.order(probe.limit_order.client_order_id)
         assert current is not None
-        # NT's add_instrument replaces the matching engine for the same ID.
-        # The cache still says ACCEPTED, but the resting order disappears from
-        # the new matcher and cannot fill when the price crosses.  This
-        # negative test is the reason a historical-rule adapter must not call
-        # add_instrument while orders are open without explicit reconciliation.
+        # Nautilus applies an effective-dated tick update on the existing
+        # matcher and cancels an incompatible resting order.
         assert current.status == (
-            OrderStatus.ACCEPTED if replace_instrument else OrderStatus.FILLED)
+            OrderStatus.CANCELED if replace_instrument else OrderStatus.FILLED)
         assert len(probe.fills) == (0 if replace_instrument else 1)
     finally:
         engine.dispose()

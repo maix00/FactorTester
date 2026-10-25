@@ -27,11 +27,34 @@ FactorTester 仍拥有 FactorExpr 的定义、冻结引用、跨频无未来对�
 物化一份完整因子矩阵供交易读取。NautilusTrader 原生指标可用于等价且已
 验证的普通指标，但不能悄悄替代 FactorExpr 的嵌套/跨频算子。预计算序列
 仅作逐层对照的离线 oracle，不成为策略运行的另一份权威信号。
-同一投资组合中的多个策略可在一个节点共享行情回放；具有相同冻结表达式、
-参数、产品和时间可用性合同的因子节点应由一个共享发布者计算一次，再向
-策略分发只读值。独立参数试验需要各自独立的现金、保证金和收益统计，不能
-把同一账户中的多策略总报告拆作独立 Job。可在低层引擎保留已加载行情后
-逐组 `reset()` 重跑；大样本使用 catalog 分块加载，并测量重复读盘和峰值内存。
+回测 RunSpec 以 Nautilus `Venue` 为账户配置边界：每个配置的 Venue 创建一份
+模拟账户，持有独立的初始余额、订单、持仓和撮合状态。多个策略可以绑定同一
+Venue 并共享这份账户状态；一个 Strategy 也可以向多个 Venue 路由订单。
+策略与 Venue 是多对多路由关系，策略不是账户所有者。Nautilus `Portfolio`
+提供按 Venue/Account 查询账户和组合状态，不会把各 Venue 的现金自动合并成
+可跨场所使用的资金池。
+
+固定的 NautilusTrader `v2.0.0rc7` 每个 `BacktestEngine.add_venue` 注册一个
+模拟账户和一套场所撮合状态。一个 RunSpec 使用一个 BacktestEngine，并把行情
+与每个 `InstrumentId` 只注册一次；策略按产品的真实 Venue 路由订单。同一
+Venue 下的多个策略因此共享余额、保证金、撮合器和流动性消耗，不能各自配置
+互相冲突的撮合规则。不同 Venue 各有账户与撮合状态，但行情源仍是同一份输入，
+不按策略复制。Venue 初始余额需显式合计到 RunSpec 总资金；目前只支持基础币种，
+多 Venue 不会把总资金重复复制到每个账户。
+
+标准 Strategy API 没有跨 Venue 现金转账方法。回测 `SimulationModule` 能为其
+所属的一个 Venue 账户提交余额调整，但这只是单账户调整原语，不是跨 Venue
+原子转账。当前 RunSpec 不定义自动或策略驱动的跨 Venue 调拨。实盘转账只有在
+券商 API 与 Nautilus 对应适配器明确支持时才能执行；策略下单路由本身不等于
+资金转账。模拟交易和实盘沿用 Strategy/订单执行接口，但其账户映射来自 Live
+ExecutionClient 与适配器：同一 Venue 可以存在多个客户端，账户隔离能力须按
+具体适配器和路由验证，不能从回测“一 Venue 一模拟账户”推导为实盘永远一对一。
+
+因子节点只有在相同冻结表达式、参数、产品和时间可用性合同下，才可由一个
+共享发布者计算一次并向多个策略分发只读值。回测共享一份行情批次和单一引擎，
+避免为账户/策略复制行情和撮合状态；不同 Venue 保留 Nautilus 必需的独立账户
+与撮合对象。独立参数试验的账户配置必须显式建成不同 Venue 才会得到独立模拟
+账户，但不得伪造 Venue 名称来复制交易所流动性。
 
 现有 ADR-143 策略库是唯一持久策略目录，继续保留所有者、共享权限、不可变
 版本、配置内临时策略和 Run 冻结引用。分组/多空、因子阈值、因子交叉等
@@ -82,6 +105,14 @@ NautilusTrader CLI 不与 GNOME 的 `/usr/bin/nautilus` 混用，执行时固定
 及 signal available-at 不得互相替代。主力连续行情只用于研究/信号，
 实际订单需映射到当时可交易合约。
 
+行情 adapter contract 由具体 `DataSourceMember` 提供；通用 Nautilus source
+registry 仅校验并解析该契约，不维护供应商名称、列映射或时间语义白名单。
+例如 LocalCNFutures 的合约 DAY1 term-structure 文件以 `TRADING_DAY` 日期标签
+索引，并在其来源适配器中映射结算价，再用该来源的交易日历得到事件时刻。
+此实现只声明 LocalCNFutures 能力，不代表 Nautilus 或其他 FactorTester 来源
+都具有相同列、结算价或交易日历。RunSpec 冻结选中的 adapter 身份；不能通过
+已验证契约的来源成员必须在提交前失败关闭。
+
 分钟内层因子只在其完整周期的结束事件后更新；外层频率在下一次更新前
 只能读取最后一个已完成内层周期的值。日度节点按交易日历给出的真实收盘
 时刻发布，不把日期零点或尚未结束的日 K 线当成可用值。NautilusTrader 在
@@ -91,16 +122,24 @@ NautilusTrader CLI 不与 GNOME 的 `/usr/bin/nautilus` 混用，执行时固定
 时间，并以真实 T/TL 数据逐项核对。
 
 固定的 NautilusTrader `v2.0.0rc7` 在外部 Bar 的 OHLC 依次更新撮合簿后才
-调用 `on_bar`，零延迟市价单会看到当前 Bar 的收盘簿；它**没有**原生的
-“下一根 Bar 开盘成交”开关，增加延迟后也通常在下一根 Bar 完成其 OHLC
-扫描后结算。旧数据中秒/毫秒混用要先按原字段语义归一到纳秒并保留来源；
-不能把这种编码偏差当作新引擎的交易控制。要复现下一开盘，执行适配器需将
-已完成 Bar 的信号保留至下一根 Bar 的独立开盘事件；开盘代理 Quote/Trade
-只含该时刻已知的开盘价和有声明的流动性假设，完整 OHLC Bar 仍在结束时
-发送。相同边界上的事件要有稳定的因果顺序，不能通过读取下一根完整 Bar
-的 `open` 于上一根 `on_bar` 回调中提前下单。合成引擎测试见
-`tests/server/test_nautilus_bridge_bar_timing.py`；该测试尚不证明中国期货
-开盘竞价、盘口价差或容量成交精度。
+调用 `on_bar`，普通零延迟市价单会立即按当前簿撮合。FactorTester 在 Nautilus
+撮合器中接通 `AT_THE_OPEN` 市价单：策略在已完成的 Bar 回调中发出信号并提交
+订单，撮合器保存待开盘单，在下一根外部 Bar 的原生 open 撮合腿执行；不额外
+合成 QuoteTick，也不构造无限深度。旧数据中秒/毫秒混用要先按原字段语义归一
+到纳秒并保留来源，不能把这种编码偏差当成新引擎的交易控制。
+
+开盘腿使用 NautilusTrader 从该 Bar 总成交量分配出的本腿成交量，并由
+`liquidity_consumption` 让同一开盘腿上的订单共享可用量；撮合继续走现有
+FillModel，因此滑点可沿用 Nautilus 模型。这个路径对 OHLC Bar 的四段成交量
+分配进行限制，**不等同于可配置的整根 Bar 参与率上限**；RunSpec 当前仍拒绝把
+旧 `participation_rate` 静默映射为该机制。执行报告按 Nautilus 的 Bar 到达/处理
+时间记录成交事件，同时使用 open 腿的价格，不伪造早于完整 Bar 到达的事件时间。
+需要真实价差、开盘竞价、完整 Bar 参与率或排队精度时，必须接入对应报价/深度或
+另行扩展容量规则。Bar 按小批次送入，不另存 Quote 面板，也不在前一根 `on_bar`
+中读取下一根 Bar。集成验证见 `tests/server/test_nautilus_bridge_bar_timing.py`、
+`tests/server/test_nautilus_bridge_backtest_runner.py` 和 Nautilus 子模块的
+`crates/execution/tests/integration/matching_engine.rs`；它们不证明中国期货开盘
+竞价或真实盘口容量，也不代表通用 Job worker 已接通。
 
 现有 `FactorExpr.compile_incremental` 是接入起点，但其 `SignalAlign` 编译器
 目前拒绝日度跨频节点，也不能把所有表达式都视为可逐事件执行。每个冻结
@@ -114,7 +153,81 @@ NautilusTrader CLI 不与 GNOME 的 `/usr/bin/nautilus` 混用，执行时固定
 先确定差异原因，再决定哪一实现正确。商品期货和实盘不得代替国债期货
 研究复现。仅有 OHLCV 时使用有声明的 bar 撮合假设，不推断 L2 排队。
 
+### 随时间变化的交易规则
+
+中国期货的价格跳动、合约乘数、限价下单量、开仓/平仓/平今手续费及多空
+保证金须来自数据源登记的权威历史记录，按事件时刻与交易日冻结，并保存
+生效时间、公告及数据版本。最新快照、从成交记录反推的交易时段和缺失字段
+都不能充当历史规则。费用由实际成交时刻选择；订单创建时刻不能代替成交
+时刻。交易时段与逐日结算政策也要有独立的历史版本来源。
+
+具体合约的乘数在运行前逐合约核验并冻结。本机 2026-10-15 的 FieldHistory
+快照中，T、TL 在本轮 2025-02 至 2026-05 的区间内均只有 10,000 的
+基线记录，没有乘数变更；这不是公网 Job 的数据版本证明，也不能推广到
+其他品种。同一具体合约若出现不同乘数，先拒绝运行并核实合约定义；
+不在回测中动态切换持仓乘数。
+
+固定上游 `v2.0.0rc7` 的 `BacktestEngine.add_instrument` 对同一合约 ID
+仍会新建撮合器。隔离引擎实验证实旧挂单可能保留在缓存中却再不成交；
+已有持仓的保证金不会因重登记自动重估。因此可变交易规则事件必须在
+回放边界**原子**处理：先结束更早事件，按新精度保留合法旧单并以可审计
+事件取消不合法旧单，按生效前已完成的可信行情刷新初始/维持保证金及
+账户状态，最后放行同一时刻的行情和新订单。预校验失败须保持旧状态并
+中止该 Run；提交期间失败不能继续使用可能只更新一部分的状态。若内核
+无法事务回滚规则事件，任何
+持久化或回调失败必须使本次回测不可恢复地中止并丢弃运行态，禁止继续撮合
+或导出正式结果。
+
+分工以现有扩展点为先：FactorTester 冻结规则及生效时间，利用原有
+`FeeModel` 在真实成交时刻选费率；逐笔开仓/平仓/平今类别必须由执行账本
+明确给出，不能由买卖方向猜测。同一 ID 的 Instrument 更新需要内核保留
+撮合器而非重建；任务分支仅针对这一缺口加了最小修正，并复用已有的
+`OrderMatchingEngine::update_instrument`。已有持仓的保证金重估与账户事件
+尚未完成，FactorTester 在此期间继续拒绝这类切换。不能靠重复调用
+`add_instrument`、直接改缓存或以最新字段覆盖历史来绕开拒绝。
+有关实测与待完成验收见 Issue #443。
+
+费用时间轴只在费率变化时保留一条规则；若后续行情快照首次观察到
+费率变化的时间晚于公告中的精确生效时间，执行前拒绝该时间轴，不能把
+变化误推迟到行情时刻。只有交易日、没有精确时刻的变化尚缺权威交易时段
+边界映射，也不能被猜成自然日零点。现有流式冻结入口可使费用时间轴只
+保留变化点，避免在内存中保留每根 Bar 的 14 字段快照；
+`freeze_fee_schedule_from_history` 进一步只在历史规则精确生效时刻、
+交易日切换及区间端点查规则，行情事件仅顺序扫描。仓库合成基准的
+1,000 个事件、两条费率版本中，逐事件冻结的单个热样本为
+16,396.819 ms，稀疏冻结三个热样本的中位数为 71.238 ms；
+该比值只反映小型规则表的 Python 冻结开销，不是整场回测加速比。
+同一稀疏路径顺序扫描 100,000 个合成事件的三个热样本中位数为
+1,297.278 ms，进程峰值约 138 MB（含 Python、pandas 和规则表）。
+真实 T/TL 多合约数据的耗时、峰值内存及源字段完整性仍属切换前
+验收门槛。
+
+目录转换的本地数据基线由 `tests/benchmarks/bench_nautilus_catalog_staging.py`
+测得：Apple arm64、Python 3.13.9、NT 2.0.0rc7，每次使用新进程和临时
+catalog，丢弃首样本，各测 3 个热样本。输入为仓库外的真实
+`CFFEX_F_T_2403.parquet`（10,965 根、548,228 bytes）与
+`CFFEX_F_TL_2406.parquet`（27,285 根、1,337,803 bytes）；比较每批 512
+根和 4,096 根。4,096 根批量在 T/TL 上的中位转换时间分别为 221.021/528.413 ms，
+512 根时为 249.454/621.804 ms，分别快约 11%/15%；目录字节减少约 47%/46%。
+峰值 RSS 为 4,096 根时约 184/197 MiB，512 根时约 183/204 MiB，未见批量扩大
+造成的明显内存增长。因此边界默认采用 4,096 根；
+调用者仍可按内存预算调小批量。该测试用占位合约元数据，只验证数据读取、
+分批写入与回读成本，不验证交易结果，也不代表完整 Job、生产 p95 或多合约
+峰值；正式迁移还须在权威历史字段和真实运行配置下复测。
+
+手续费回调的第一轮隔离基线使用仓库脚本
+`tests/benchmarks/bench_nautilus_historical_fees.py`：Apple arm64、Python 3.13.9、
+NT 2.0.0rc7，每次新建引擎，首样本丢弃；10,000 根合成 1m Bar、同一合约
+10,000 笔交替市价成交、3 个样本。本轮重跑内置零费模型中位 317.744 ms，
+FactorTester 历史零费模型中位 340.864 ms，分别约 273.3/273.3 MB 峰值 RSS。
+这只量化最密集成交情况下的 Python 回调开销，不是 T/TL 真实数据峰值、
+生产 p95 或浏览器耗时；真实冻结数据和资金/持仓事件仍须单独验收。
+
 ## 回测配置迁移合同
+
+配置能力的权威流向为 **固定版本的 Nautilus API/配置类型 → FactorTester 能力目录与 RunSpec 编译器 → 前端**。前端只能呈现当前服务返回的能力目录；不能自行维护第二份 Nautilus 参数列表，也不能凭旧字段名称推断等价语义。RunSpec 冻结解析后的参数值与 Nautilus 版本，执行器必须消费这些冻结值；不能消费的参数应标明 `unsupported` 并阻止提交，服务进程负责的运维选项应标明 `service-owned`，不得伪装成用户可选配置。
+
+`BacktestEngine.add_venue` 是 Venue 配置能力面；执行语义另列能力映射。当前 RunSpec 的 `execution_timing=next_bar_open` 由 FactorTester Bar 回调适配为 Nautilus `TimeInForce.AT_THE_OPEN`，并有真实引擎合成成交测试；Nautilus `ExecutionEngineConfig.position_cost_basis` 与 `position_cost_basis_by_instrument` 承载全局 FIFO/LIFO/HIFO/加权平均及稀疏 Instrument 例外。DMTM 的默认、适用产品和例外仍冻结在 RunSpec，但官方结算事件注入与账户入账路径未接通，执行器会拒绝启用。能力目录、RunSpec 审查字段和前端都应显示各自状态，不能把“字段已冻结”当成“执行已支持”。契约测试对照固定 submodule 的 Python stub、RunSpec 映射及执行器构造调用；Rust 配置结构里存在、但 Python 执行入口未暴露的字段不自动算作可用能力。其余 Nautilus 配置类型仍须按同一流向逐项盘点。
 
 现有 `group_test` 表单不能只更换数据源。下表逐一覆盖
 `tools/testers/backtest/modules/*` 中公开的 `FieldDefinition`、
@@ -132,11 +245,11 @@ NautilusTrader CLI 不与 GNOME 的 `/usr/bin/nautilus` 混用，执行时固定
 | `factor_candidates`, `factor_source_selections`, `factor_set_selections`, `factor_role_bindings`, `factor_mode`, `warmup_mode`, `warmup_window` | 候选/来源属编辑器；冻结因子、角色和预热由 FactorTester 有界增量状态实现。不支持的节点、日度对齐或预热拒绝；`precomputed` 不作为交易信号的静默后备。 |
 | `strategy_intent_mode`, `split_count`, `group_index`, `screen_rule`, `screen_lower`, `screen_upper`, `threshold_mode`, `entry_threshold`, `exit_threshold`, `quantile_entry`, `quantile_exit`, `side_mode`, `term_carry_near_rank`, `term_carry_far_rank`, `term_carry_entry_threshold`, `term_carry_exit_threshold`, `term_carry_gross_weight` | FactorTester 公共策略库的版本化分组、阈值及 Term Carry 模板计算意图，NautilusTrader `Strategy` 发单。模板、因子角色或范围无效时拒绝。 |
 | `position_policy`, `rebalance_trigger`, `allocation_policy`, `sizing_transform`, `volatility_lookback`, `volatility_warmup`, `target_margin_utilization`, `max_margin_utilization`, `margin_utilization_tolerance` | 目标头寸、调仓和预算仍属 FactorTester 策略适配器，读取 NautilusTrader 账户与持仓。未验证杠杆、权重、保证金限额等价时拒绝。 |
-| `initial_capital_major`, `base_currency`, `account_currency`, `currency_conversion_fee_rate`, `use_minor_units`, `strategy_book_mode`, `ledger_session_policy`, `cash_reserve_ratio`, `cash_reserve_major` | 新执行直接使用 NautilusTrader 账户、持仓与 Portfolio，不保留自制 CashPoolStore 作为第二账本。普通单账户映射 `BacktestVenueConfig.starting_balances/base_currency/account_type/oms_type`；旧配置显式要求策略间独立资金池时，要证实账户隔离或拆成独立 Run，不能把共享账户总收益伪称各策略独立收益。 |
+| `initial_capital_major`, `base_currency`, `venues`, `strategy_venue_bindings` | RunSpec 固定 Nautilus 原生 Venue、账户类型、OMS 类型、每个 Venue 的 `starting_balances`，以及策略到 Venue 的多对多路由。每个回测 Venue 一份模拟账户；全 Run 使用一个 BacktestEngine，共享行情输入。同 Venue 策略共用账户与撮合状态。Venue 初始余额之和必须等于总资金；跨币种估值及跨 Venue 现金划转当前不支持。 |
 | `margin_mode`, `fixed_margin_ratio`, `collateral_fraction`, `margin_call_mode`, `liquidation_target_buffer`, `margin_custom_product_fields` | NautilusTrader 已有 `MARGIN` 账户、`StandardMarginModel`/`LeveragedMarginModel` 及 `liquidation_enabled/liquidation_trigger_ratio`；优先复用。历史保证金变动和旧缓冲/追缴模式仍须逐事件对照，不能假定参数名称相似即等价。 |
-| `fee_mode`, `transaction_fee_source`, `fixed_fee_rate`, `fee_custom_product_fields`, `slippage_mode`, `slippage_bps` | Venue 的内置 `fee_model/fill_model` 覆盖固定及按手数等模型；自定义 `FeeModel` 有逐笔回调，但回调未直接收到成交时间。平今/平昨与随时间变化的费率须冻结有效期规则，并证明模型在成交时选用正确版本；其他历史字段变动用带事件时刻的 Instrument/规则更新验证。缺历史规则不能拿最新值替代。 |
+| `fee_mode`, `transaction_fee_source`, `fixed_fee_rate`, `fee_custom_product_fields`, `slippage_mode`, `slippage_bps` | Venue 的内置 `fee_model/fill_model` 覆盖固定及按手数等模型；自定义 `FeeModel` 有逐笔回调，但回调未直接收到成交时间。Nautilus 的概率滑点/单跳滑点不等于 FactorTester 旧的固定 bps 滑点，当前 RunSpec 不接受未映射的 `slippage_mode/slippage_bps`；需选用或实现与旧语义一致的 FillModel 并冻结参数后才能启用。平今/平昨与随时间变化的费率须冻结有效期规则，并证明模型在成交时选用正确版本；其他历史字段变动用带事件时刻的 Instrument/规则更新验证。缺历史规则不能拿最新值替代。 |
 | `order_type`, `matching_model`, `volume_execution_price_basis`, `liquidity_mode`, `participation_rate`, `quantity_rounding_policy` | 订单与合约最小量映射 NautilusTrader；L2/L3 数据、`liquidity_consumption` 和填单模型可限制可见深度。Bar 有模拟分配成交量，`VolumeSensitiveFillModel` 的 Python 绑定却没有近期量状态更新接口；不能据此宣称已实现按当根 Bar 成交量固定百分比参与。无逐笔/盘口量时，要么采用声明过的上一根量预算，要么明确标为未支持。 |
-| `accounting_mode`, `cost_basis_method`, `daily_mark_to_market_enabled`, `use_int_position`, `trading_rule_custom_product_fields`, `force_close_before_expiry`, `rollover_policy`, `rollover_before_expiry` | NautilusTrader 已有持续盯市估值和保证金不足自动强平，合约到期也有事件；先复用这些原生路径。中国期货每日结算价产生的**现金变动与持仓成本重置**不等于权益曲线的日度快照，`InstrumentClose(END_OF_SESSION)` 本身也不执行这类入账；需针对交易所规则单独证明或适配。 |
+| `accounting_mode`, `cost_basis_method`, `daily_mark_to_market_enabled`, `use_int_position`, `trading_rule_custom_product_fields`, `force_close_before_expiry`, `rollover_policy`, `rollover_before_expiry` | `cost_basis_method` 已冻结为版本化逐品种政策，并映射 Nautilus `ExecutionEngineConfig.position_cost_basis` / `position_cost_basis_by_instrument`；支持加权平均、FIFO、LIFO、HIFO 默认值及稀疏例外。DMTM 的 Auto/Custom 资格、默认和例外也冻结，但官方结算事件注入、期货变动保证金入账和成本重置尚未连通，`engine_factory` 会拒绝 DMTM 启用的运行；Basic 默认关闭。Nautilus 可处理 `InstrumentClose`，但 FactorTester 仍须从权威数据源提供对应合约、交易日和官方结算价。平今/平昨库存滚动是另一项未完成的持仓/撮合扩展，不能用 DMTM 成本基准替代；未接通时不得宣称该功能已覆盖。 |
 | `custom_product_fields`, `equity_compute_live` | 自定义合约/有效时段字段先归一化进 Instrument 与规则适配器；净值实时写入变成结果投影/保留选项，不改变最终权益。未知覆写字段拒绝。 |
 
 动态生成的 `fee_custom_product_fields`、`margin_custom_product_fields`、
@@ -153,6 +266,20 @@ Swift 的 `execution_target`/本地代码包在缺同版本 NautilusTrader 或�
 “有效执行配置”，逐项标注“NT 原生 / FT 适配 / 未支持”，服务端重复验证，
 不允许隐藏但仍生效的旧字段被静默丢弃。T/TL 验收必须逐层比对因子、信号、
 订单、成交、费用、保证金、权益及样本内外，不只看最终收益率。
+
+T/TL 冻结证据的当前界限：本地研究稿
+`/Users/maxdeux/Documents/GTHT/reports/ft_ht_duration_T_TL.md` 记录研究范围
+2024-01-02 至 2026-05-27、样本内截止 2025-06-30、样本外始于
+2025-07-01，但其回测章节仍标“待跑”。
+`ft_run/ft_dayscope_index.json` 中 DFP:10d 的冻结引用为
+`factor:v2:nupERUpfhFNGFIB4AT3UfJiJaTRbaC0r5V1nUU9R6aM`，别名包含
+`TsDurDevDayScope`、内层 `SgChgDurDay` / `SgChgPct`、`M:0.6`、
+`B:1`、`N:250d` 和外层 `N:10d`、`$F:30m`。
+`run/matrix_results_all.json` 中 T 10d Job `48e49b3569804312a47b2333ca6804cf`
+及 TL 10d Job `31b43a58677d43f5bcab41e1d81c9ddc` 为成功状态，
+但该摘要不含 Job 冻结配置、数据源字节版本或逐层因子值；不能据此认定
+二者使用了上述引用、确切样本分割或已复现原研报。取得权威 Job 快照后
+才建立逐层 T/TL oracle 与 NautilusTrader 差异回归。
 
 以上 NT 可用入口来自 pinned 上游
 `vendor/nautilus_trader/python/nautilus_trader/backtest/__init__.pyi`

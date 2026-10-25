@@ -1,4 +1,4 @@
-"""Optional real-engine smoke test; run with the pinned NT wheel installed."""
+"""Real-engine smoke test against the extension built from the pinned submodule."""
 
 from __future__ import annotations
 
@@ -21,7 +21,14 @@ def test_real_engine_exports_execution_and_margin_history(tmp_path):
     from nautilus_trader.core.datetime import dt_to_unix_nanos
     from nautilus_trader.execution import PerContractFeeModel
     from nautilus_trader.model import (
-        AccountType, Bar, BarType, Money, OmsType, Quantity, TraderId, Venue,
+        AccountType,
+        Bar,
+        BarType,
+        Money,
+        OmsType,
+        Quantity,
+        TraderId,
+        Venue,
     )
 
     spec = spec_from_file_location("upstream_synthetic_example", example)

@@ -12,11 +12,11 @@ import pytest
 
 from server.services.nautilus_bridge.catalog import stage_contract_minute_catalog
 from server.services.nautilus_bridge.market_data import (
-    FuturesContractSpec, iter_minute_bars,
+    FuturesContractSpec,
+    iter_minute_bars,
 )
 from tests.nautilus_runtime import require_nautilus
 from tests.nautilus_source_fixture import resolved_contract_minute_source
-
 
 ROOT = Path("/Users/maxdeux/Documents/GTHT/data/sources/LocalCNFutures")
 

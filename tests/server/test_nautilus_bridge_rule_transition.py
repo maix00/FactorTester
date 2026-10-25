@@ -57,7 +57,7 @@ def test_rule_transition_cancels_resting_order_incompatible_with_new_tick():
     original = _instrument()
     engine = _engine(original, MakerTakerFeeModel(
         maker_rate=Decimal("0"), taker_rate=Decimal("0")))
-    probe = _Probe.make(original, buy_at=99, limit_at=1, limit_price="102.955")
+    probe = _Probe.make(original, buy_at=99, limit_at=1, limit_price="102.905")
     engine.add_strategy(probe)
     try:
         first = _bars(original, count=3)
@@ -107,7 +107,7 @@ def test_open_positions_are_revalued_and_bad_boundary_is_rejected():
             engine, updated, effective_ns=first[-1].ts_event + 1,
             processed_through_ns=first[-1].ts_event, next_event_ns=next_ns)
         assert engine.cache.account_for_venue(original.id.venue).balance_locked(
-            Currency.from_str("CNY")) == locked_before
+            Currency.from_str("CNY")) > locked_before
         assert str(engine.cache.instrument(original.id).multiplier) == "10000"
         margins_after = engine.portfolio.instrument_maintenance_margins(
             venue=original.id.venue)

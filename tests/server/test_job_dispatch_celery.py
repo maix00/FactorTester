@@ -127,6 +127,7 @@ def test_worker_app_uses_environment_target(monkeypatch):
 
 
 def test_worker_app_registers_target_heartbeat(monkeypatch, tmp_path):
+    pytest.importorskip("celery")
     from server.jobs.dispatch import worker_app
     from server.jobs.repository.sqlite import JobRepository
 

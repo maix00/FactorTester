@@ -7,4 +7,4 @@ The package is optional until a dedicated execution service enables this bridge.
 from .capabilities import native_capabilities
 from .reports import export_backtest_reports
 
-__all__ = ["native_capabilities", "export_backtest_reports"]
+__all__ = ["export_backtest_reports", "native_capabilities"]

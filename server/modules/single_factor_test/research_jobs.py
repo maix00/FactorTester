@@ -694,12 +694,11 @@ def _prepare_research_run_request(data: dict, *, owner: str) -> dict:
 
 
 def _reject_unavailable_nautilus_run(prepared: dict) -> None:
-    """Never execute a Nautilus-marked Run through the legacy job runner.
+    """Allow only the registered Nautilus v4 runner; reject retired backtests.
 
     This check sits after freezing and applies equally to local requests and
-    Manager-forwarded contexts.  It remains until the Nautilus worker has a
-    separate validated execution path, at which point it must be replaced by
-    an explicit dispatch with the same server-side validation.
+    Manager-forwarded contexts.  A v4 Run is admitted only when the dedicated
+    process-runner readiness contract confirms the execution path is usable.
     """
     frozen = prepared.get("frozen_configuration") or {}
     payload = frozen.get("payload") if isinstance(frozen, dict) else None
@@ -717,10 +716,18 @@ def _reject_unavailable_nautilus_run(prepared: dict) -> None:
                 "NautilusTrader backtest requires execution contract version 4",
                 details={"code": "unsupported_execution_contract_version"},
             )
-        raise _RunRequestError(
-            "NautilusTrader Job execution is not connected on this service",
-            details={"code": "nautilus_execution_unavailable"},
+        from server.services.nautilus_bridge.capabilities import (
+            nautilus_backtest_submission_capability,
         )
+
+        capability = nautilus_backtest_submission_capability()
+        if capability.get("available") is not True:
+            raise _RunRequestError(
+                str(capability.get("reason") or
+                    "NautilusTrader Job execution is unavailable on this service"),
+                details={"code": "nautilus_execution_unavailable"},
+            )
+        return
     if backend not in (None, "", "legacy"):
         raise _RunRequestError(
             f"unsupported backtest execution backend: {backend}",
@@ -892,8 +899,12 @@ def _submit_kind(
     strategy_specs: list[dict] | None = None,
     run_input_dependencies: list[dict] | None = None,
 ):
+    from server.services.nautilus_bridge.capabilities import (
+        NAUTILUS_BACKTEST_RUNNER_PATH,
+    )
+
     process_runners = {
-        "backtest": "server.modules.single_factor_test.process_runners:run_group",
+        "backtest": NAUTILUS_BACKTEST_RUNNER_PATH,
         "ic": "server.modules.single_factor_test.process_runners:run_ic",
         "factor_evaluation": "server.modules.single_factor_test.process_runners:run_factor_evaluation",
         "factor_type_analysis": "server.modules.single_factor_test.process_runners:run_factor_type_analysis",
