@@ -25,6 +25,11 @@ export function MobileShell(): React.ReactElement {
   }, []);
 
   const selectTab = (id: string): void => {
+    try {
+      const recent = JSON.parse(localStorage.getItem("tr.mobile.recent") ?? "[]");
+      const next = [id, ...(Array.isArray(recent) ? recent : []).filter((value) => value !== id)].slice(0, 8);
+      localStorage.setItem("tr.mobile.recent", JSON.stringify(next));
+    } catch { /* ignore unavailable storage */ }
     setActive(id);
     setSetting(null);
   };
