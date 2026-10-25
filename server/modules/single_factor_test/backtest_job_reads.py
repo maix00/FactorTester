@@ -398,6 +398,7 @@ def _task_detail(
             "error": job.error,
             "evidence": evidence,
         },
+        "progress": detail.get("progress"),
         "output_declarations": declarations,
         "input_artifacts": visible_inputs,
         "artifacts": artifacts,

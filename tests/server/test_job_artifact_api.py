@@ -129,6 +129,7 @@ def test_user_can_read_and_clear_full_result_without_deleting_job(tmp_path, monk
     assert task_detail["research_binding"] == {}
     assert task_detail["caller"]["channel"] == "unknown"
     assert task_detail["results"]["summary"] == {"success": True}
+    assert task_detail["progress"] is None
     assert task_detail["artifacts"][0]["content_type"] == "application/json"
     assert job.get_json()["has_terminal_assurance"] is True
     assert "terminal_assurance" not in job.get_json()
