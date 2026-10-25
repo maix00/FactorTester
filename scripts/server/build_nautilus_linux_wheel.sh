@@ -8,10 +8,10 @@ OUT="${NAUTILUS_WHEEL_DIR:-$ROOT/.artifacts/nautilus-wheels}"
 CACHE="${NAUTILUS_CACHE:-$ROOT/.artifacts/nautilus-build}"
 JOBS="${CARGO_BUILD_JOBS:-1}"
 MEMORY="${NAUTILUS_BUILD_MEMORY:-3g}"
+BUILDER="${NAUTILUS_BUILDER_IMAGE:-traderesearch/nautilus-builder:py314}"
 # nautilus-model is a large staticlib; codegen-units=1 exceeded a 3 GiB
 # container. Sixteen units keep the peak below that budget on the public host.
-
-mkdir -p "$OUT" "$CACHE/cargo" "$CACHE/rustup"
+mkdir -p "$OUT" "$CACHE/cargo/registry" "$CACHE/cargo/git"
 [ -f "$SRC/python/Cargo.toml" ] || { echo "missing $SRC/python/Cargo.toml" >&2; exit 1; }
 git -C "$SRC" diff --quiet || { echo "vendor/nautilus_trader has uncommitted changes" >&2; exit 1; }
 REVISION="$(git -C "$SRC" rev-parse HEAD)"
@@ -22,25 +22,21 @@ if [ -f "$CACHED" ]; then
 fi
 echo "building nautilus_trader from local commit $REVISION"
 
+if ! docker image inspect "$BUILDER" >/dev/null 2>&1; then
+  docker build -t "$BUILDER" \
+    -f "$ROOT/deploy/docker/factortester-public/NautilusBuilder.Dockerfile" \
+    "$ROOT/deploy/docker/factortester-public"
+fi
+
 docker run --rm \
   --memory="$MEMORY" --memory-swap="$MEMORY" --cpus="${NAUTILUS_BUILD_CPUS:-2}" \
-  -e RUSTUP_DIST_SERVER=https://rsproxy.cn \
-  -e RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup \
   -e CARGO_PROFILE_RELEASE_CODEGEN_UNITS="${NAUTILUS_CODEGEN_UNITS:-16}" \
   -v "$SRC:/src" -v "$OUT:/wheels" \
-  -v "$CACHE/cargo:/root/.cargo" -v "$CACHE/rustup:/root/.rustup" \
-  python:3.14-slim bash -lc '
+  -v "$CACHE/cargo/registry:/root/.cargo/registry" \
+  -v "$CACHE/cargo/git:/root/.cargo/git" \
+  "$BUILDER" bash -lc '
     set -euo pipefail
-    sed -i s/deb.debian.org/mirrors.aliyun.com/g /etc/apt/sources.list.d/debian.sources
-    apt-get update
-    apt-get install -y --no-install-recommends build-essential curl pkg-config libssl-dev patchelf cmake clang
-    if [ ! -x /root/.cargo/bin/rustup ]; then
-      curl --proto "=https" --tlsv1.2 -sSf https://rsproxy.cn/rustup-init.sh | sh -s -- -y --default-toolchain 1.99.0 --profile minimal
-    fi
     . /root/.cargo/env
-    python -m pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple maturin==1.15.0
-    mkdir -p /root/.cargo
-    printf "[source.crates-io]\nreplace-with = \"rsproxy-sparse\"\n[source.rsproxy-sparse]\nregistry = \"sparse+https://rsproxy.cn/index/\"\n" > /root/.cargo/config.toml
     cd /src/python
     CARGO_BUILD_JOBS='"$JOBS"' maturin build --release --out /wheels -i python3.14
   '
