@@ -45,3 +45,18 @@ volume with a pinned `172.30.185.5`; PostgreSQL then started healthy.
 Final state: app, PostgreSQL, CouchDB and RabbitMQ healthy. The abandoned
 wheel build container was removed. The build script now refuses to run while
 the public app container exists or when MemAvailable is below 5 GiB.
+
+## 2026-10-25 repeat outage
+
+Cause: a manual Nautilus wheel build was started with a 4 GiB cgroup while
+CouchDB and the app were restarted during the build to shorten downtime. The
+combined memory pressure made the host unresponsive; the container was not
+OOM-killed (exit 255 after host reboot). This was not disk exhaustion.
+
+Recovery: rebooted the instance, removed `nautilus-wheel-build`, restarted
+CouchDB/app/RabbitMQ, and pinned PostgreSQL to `172.30.185.6` because RabbitMQ
+had taken `.3` during the reboot.
+
+Rule: never start a public wheel build manually. Use the guarded builder only,
+and if a maintenance window is unavoidable, keep CouchDB and the app stopped
+for the whole build. Do not restart services mid-build.
