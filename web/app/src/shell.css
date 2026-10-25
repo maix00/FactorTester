@@ -273,3 +273,13 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-legacy-bar { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .tr-legacy-bar button { border: 0; background: transparent; color: var(--accent); font: inherit; }
 .tr-legacy-overlay iframe { width: 100%; height: 100%; border: 0; }
+.tr-research-page { padding: 24px 28px; overflow: auto; height: 100%; }
+.tr-research-page header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.tr-research-page h1 { margin: 0; font-size: 22px; }
+.tr-research-page header p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+.tr-research-list { display: grid; gap: 8px; }
+.tr-research-list button { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--text); font: inherit; text-align: left; }
+.tr-research-list button:hover { border-color: var(--accent); }
+.tr-research-list b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tr-research-list span { grid-row: 1; grid-column: 2; color: var(--accent); font-size: 11px; }
+.tr-research-list small { grid-column: 1 / -1; color: var(--muted); font-size: 11px; }
