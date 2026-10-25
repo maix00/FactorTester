@@ -38,7 +38,7 @@ export function DesktopShell(): React.ReactElement {
   return (
     <div className="tr-desktop-shell">
       <aside className="tr-desktop-rail" aria-label="主导航">
-        <div className="tr-brand">TradeResearch</div>
+        <div className="tr-brand"><span className="tr-brand-mark" aria-hidden="true" />TradeResearch</div>
         <nav className="tr-nav">
           {pages.map((page) => (
             <button
