@@ -241,3 +241,5 @@ web/chart-workbench/node_modules/
 
 # local build outputs
 .artifacts/
+
+deploy/docker/factortester-public/wheels/nautilus_trader-*.whl
