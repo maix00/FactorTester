@@ -1,7 +1,20 @@
-import React from "react";
+import React, { useState } from "react";
 import { Modal } from "antd";
 import { useTranslation } from "react-i18next";
 import { LanguageSwitch } from "./language-switch.tsx";
+import { PageIcon } from "../icon.tsx";
+
+const SECTIONS = [
+  { id: "account", icon: "account" },
+  { id: "server", icon: "catalog" },
+  { id: "federation", icon: "workspace" },
+  { id: "controlDatabase", icon: "runs" },
+  { id: "devices", icon: "trading" },
+  { id: "quota", icon: "research" },
+  { id: "workspace", icon: "workspace" },
+  { id: "language", icon: "research" },
+  { id: "updates", icon: "runs" },
+] as const;
 
 export function SettingsOverlay({
   open, onClose, onResetLayout,
@@ -11,26 +24,72 @@ export function SettingsOverlay({
   onResetLayout: () => void;
 }): React.ReactElement {
   const { t } = useTranslation();
+  const [section, setSection] = useState<string>("account");
+  const current = SECTIONS.find((item) => item.id === section) ?? SECTIONS[0];
   return (
     <Modal
-      title={t("settingsPanel.title")}
       open={open}
       onCancel={onClose}
       footer={null}
       centered
-      width={480}
+      width={820}
       className="tr-settings-overlay"
       destroyOnClose
+      title={null}
     >
-      <div className="tr-settings-section">
-        <h3>{t("settingsPanel.language")}</h3>
-        <p>{t("settingsPanel.languageHint")}</p>
-        <LanguageSwitch />
-      </div>
-      <div className="tr-settings-section">
-        <h3>{t("settingsPanel.layout")}</h3>
-        <p>{t("settingsPanel.layoutHint")}</p>
-        <button type="button" className="tr-toolbar-button" onClick={onResetLayout}>{t("resetLayout")}</button>
+      <div className="tr-settings-hub">
+        <nav className="tr-settings-nav" aria-label={t("settingsPanel.title")}>
+          {SECTIONS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={section === item.id ? "is-active" : ""}
+              onClick={() => setSection(item.id)}
+            >
+              <PageIcon name={item.icon} />
+              <span>{t(`settingsPanel.sections.${item.id}`)}</span>
+            </button>
+          ))}
+        </nav>
+        <section className="tr-settings-content">
+          <header className="tr-settings-page-header">
+            <span className="tr-settings-page-icon"><PageIcon name={current.icon} /></span>
+            <div>
+              <h2>{t(`settingsPanel.sections.${current.id}`)}</h2>
+              <p>{t(`settingsPanel.descriptions.${current.id}`)}</p>
+            </div>
+          </header>
+          {current.id === "language" ? (
+            <div className="tr-settings-card">
+              <h3>{t("settingsPanel.language")}</h3>
+              <div className="tr-settings-row">
+                <div><b>{t("settingsPanel.language")}</b><small>{t("settingsPanel.languageHint")}</small></div>
+                <LanguageSwitch />
+              </div>
+            </div>
+          ) : current.id === "workspace" ? (
+            <div className="tr-settings-card">
+              <h3>{t("settingsPanel.layout")}</h3>
+              <div className="tr-settings-row">
+                <div><b>{t("settingsPanel.layout")}</b><small>{t("settingsPanel.layoutHint")}</small></div>
+                <button type="button" className="tr-toolbar-button" onClick={onResetLayout}>{t("resetLayout")}</button>
+              </div>
+            </div>
+          ) : current.id === "account" ? (
+            <div className="tr-settings-card">
+              <h3>{t("settingsPanel.sections.account")}</h3>
+              <div className="tr-settings-row">
+                <div><b>{t("settingsPanel.accountSession")}</b><small>{t("settingsPanel.accountHint")}</small></div>
+                <span className="tr-settings-value">{t("settingsPanel.managedByServer")}</span>
+              </div>
+            </div>
+          ) : (
+            <div className="tr-settings-card tr-settings-migrating">
+              <h3>{t(`settingsPanel.sections.${current.id}`)}</h3>
+              <p>{t("settingsPanel.migrating")}</p>
+            </div>
+          )}
+        </section>
       </div>
     </Modal>
   );

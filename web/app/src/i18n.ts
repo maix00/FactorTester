@@ -10,7 +10,14 @@ export const resources = {
       nav: { research: "研究", jobs: "运行", trading: "交易", workspace: "工作区", catalog: "目录", account: "账户" },
       jobs: { task: "任务", status: "状态", jobId: "Job ID", updated: "更新时间", statusFilter: "按状态筛选", recent: "最近运行" },
       workspace: { title: "工作区", desc: "已打开和最近访问的页面" },
-      settingsPanel: { title: "设置", language: "语言", languageHint: "界面语言与数字/日期格式，时区独立。", layout: "工作区布局", layoutHint: "重置 Dockview 标签、分组和分栏。" },
+      settingsPanel: {
+        title: "设置", language: "语言", languageHint: "界面语言与数字/日期格式，时区独立。",
+        layout: "工作区布局", layoutHint: "重置 Dockview 标签、分组和分栏。",
+        accountSession: "登录账户", accountHint: "当前用于访问研究、任务与工作区的账户", managedByServer: "由服务器会话管理",
+        migrating: "该设置页仍在旧页面迁移中，完成对应路由后在此启用。",
+        sections: { account: "账户", server: "服务器", federation: "服务器互联", controlDatabase: "控制数据库", devices: "我的设备", quota: "存储配额", workspace: "工作区", language: "语言", updates: "客户端更新" },
+        descriptions: { account: "登录、身份与账户安全", server: "服务器连接与运行状态", federation: "服务器之间的互联与复制", controlDatabase: "控制数据库结构与备份", devices: "设备授权与会话", quota: "存储使用与配额", workspace: "工作区布局与页面", language: "界面语言与格式", updates: "客户端版本与更新" },
+      },
     },
   },
   en: {
@@ -21,7 +28,14 @@ export const resources = {
       nav: { research: "Research", jobs: "Runs", trading: "Trading", workspace: "Workspace", catalog: "Catalog", account: "Account" },
       jobs: { task: "Task", status: "Status", jobId: "Job ID", updated: "Updated", statusFilter: "Filter by status", recent: "Recent runs" },
       workspace: { title: "Workspace", desc: "Open and recently visited pages" },
-      settingsPanel: { title: "Settings", language: "Language", languageHint: "Interface language and number/date formats; time zone is separate.", layout: "Workspace layout", layoutHint: "Reset Dockview tabs, groups and splits." },
+      settingsPanel: {
+        title: "Settings", language: "Language", languageHint: "Interface language and number/date formats; time zone is separate.",
+        layout: "Workspace layout", layoutHint: "Reset Dockview tabs, groups and splits.",
+        accountSession: "Signed-in account", accountHint: "Account used to access research, runs and workspaces", managedByServer: "Managed by the server session",
+        migrating: "This settings page is still migrating from the legacy route.",
+        sections: { account: "Account", server: "Server", federation: "Federation", controlDatabase: "Control database", devices: "Devices", quota: "Storage quota", workspace: "Workspace", language: "Language", updates: "Client updates" },
+        descriptions: { account: "Login, identity and account security", server: "Server connection and runtime", federation: "Server federation and replication", controlDatabase: "Control database schema and backups", devices: "Device authorization and sessions", quota: "Storage usage and limits", workspace: "Workspace layout and pages", language: "Interface language and formats", updates: "Client version and updates" },
+      },
     },
   },
 } as const;
