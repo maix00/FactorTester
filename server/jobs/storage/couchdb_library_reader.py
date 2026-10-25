@@ -52,6 +52,14 @@ class CouchDBLibraryReader:
         document = json.loads(body)
         return document if document.get("kind") == "strategy_version" else None
 
+    def strategy_shares(self, strategy_ref: str) -> list[str]:
+        documents = self._find({"kind": "strategy_share", "strategy_ref": strategy_ref})
+        return sorted(str(doc.get("principal_ref") or "") for doc in documents)
+
+    def shared_strategies(self, principal_ref: str) -> list[str]:
+        documents = self._find({"kind": "strategy_share", "principal_ref": principal_ref})
+        return [str(doc.get("strategy_ref") or "") for doc in documents]
+
     def revisions(self, strategy_ref: str) -> list[dict]:
         documents = self._find({"kind": "strategy_revision", "strategy_ref": strategy_ref})
         return [dict(doc.get("payload") or {}) for doc in documents]
@@ -163,6 +171,26 @@ class CouchDBLibraryWriter:
             except Exception:
                 pass
             self.store._request("PUT", revision_ref, json.dumps(revision_doc).encode())
+
+    def grant_strategy_share(self, strategy_ref: str, principal_ref: str) -> None:
+        import json
+
+        doc_id = f"strategy-share:{strategy_ref}:{principal_ref}"
+        document = {"_id": doc_id, "schema_version": 1, "kind": "strategy_share",
+                    "strategy_ref": strategy_ref, "principal_ref": principal_ref}
+        self.store._request("PUT", doc_id, json.dumps(document).encode())
+
+    def revoke_strategy_share(self, strategy_ref: str, principal_ref: str) -> None:
+        import json
+
+        doc_id = f"strategy-share:{strategy_ref}:{principal_ref}"
+        try:
+            _, body = self.store._request("GET", doc_id)
+        except Exception:
+            return
+        document = json.loads(body)
+        document.update({"_deleted": True, "_rev": document["_rev"]})
+        self.store._request("PUT", doc_id, json.dumps(document).encode())
 
     def delete_strategy(self, strategy_ref: str) -> None:
         import json

@@ -130,11 +130,18 @@ class StrategyLibraryStore:
                     needle = str(query or "").strip().lower()
                     shares = set()
                     if scope == "authorized":
-                        with self._lock, connect_sqlite(self.db_path, readonly=True) as db:
-                            shares = {str(row["strategy_ref"]) for row in db.execute(
-                                "SELECT strategy_ref FROM strategy_library_shares WHERE principal_ref=?",
-                                (principal,),
-                            ).fetchall()}
+                        try:
+                            shares = set(CouchDBLibraryReader(CouchDBObjectStore(
+                                url, os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects",
+                            )).shared_strategies(principal))
+                        except Exception:
+                            shares = set()
+                        if not shares:
+                            with self._lock, connect_sqlite(self.db_path, readonly=True) as db:
+                                shares = {str(row["strategy_ref"]) for row in db.execute(
+                                    "SELECT strategy_ref FROM strategy_library_shares WHERE principal_ref=?",
+                                    (principal,),
+                                ).fetchall()}
                     rows = []
                     for doc in docs:
                         payload = doc.get("payload") or {}
@@ -523,6 +530,23 @@ class StrategyLibraryStore:
         return result.rowcount == 1
 
     def shares(self, strategy_ref: str) -> list[str]:
+        import os
+        from server.jobs.storage.couchdb_authority import libraries_read_enabled
+
+        if libraries_read_enabled():
+            url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+            if url:
+                try:
+                    from server.jobs.storage.couchdb_library_reader import CouchDBLibraryReader
+                    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+                    values = CouchDBLibraryReader(CouchDBObjectStore(
+                        url, os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects",
+                    )).strategy_shares(strategy_ref)
+                    if values:
+                        return values
+                except Exception:
+                    pass
         with self._lock, connect_sqlite(self.db_path, readonly=True) as db:
             rows = db.execute(
                 "SELECT principal_ref FROM strategy_library_shares WHERE strategy_ref=? ORDER BY principal_ref",
@@ -536,6 +560,7 @@ class StrategyLibraryStore:
                 "INSERT OR IGNORE INTO strategy_library_shares(strategy_ref, principal_ref, created_at) VALUES (?, ?, ?)",
                 (strategy_ref, principal_ref, time.time()),
             )
+        self._sync_share(strategy_ref, principal_ref, grant=True)
 
     def revoke(self, strategy_ref: str, principal_ref: str) -> bool:
         with self._lock, connect_sqlite(self.db_path, timeout=10) as db:
@@ -543,4 +568,29 @@ class StrategyLibraryStore:
                 "DELETE FROM strategy_library_shares WHERE strategy_ref=? AND principal_ref=?",
                 (strategy_ref, principal_ref),
             )
+        if result.rowcount == 1:
+            self._sync_share(strategy_ref, principal_ref, grant=False)
         return result.rowcount == 1
+
+    def _sync_share(self, strategy_ref: str, principal_ref: str, *, grant: bool) -> None:
+        import os
+        from server.jobs.storage.couchdb_authority import libraries_write_enabled
+
+        if not libraries_write_enabled():
+            return
+        url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+        if not url:
+            return
+        try:
+            from server.jobs.storage.couchdb_library_reader import CouchDBLibraryWriter
+            from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+            writer = CouchDBLibraryWriter(CouchDBObjectStore(
+                url, os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects",
+            ))
+            if grant:
+                writer.grant_strategy_share(strategy_ref, principal_ref)
+            else:
+                writer.revoke_strategy_share(strategy_ref, principal_ref)
+        except Exception:
+            pass
