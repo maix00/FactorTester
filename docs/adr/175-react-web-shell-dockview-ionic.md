@@ -2,6 +2,10 @@
 
 Status: proposed migration; existing IIFE pages remain the fallback.
 
+Brand rule: the new shell is TradeResearch. FactorTester remains the name of the
+factor-testing sub-capability and of compatibility aliases only; do not add new
+user-visible FactorTester labels to React pages.
+
 Visual rule: this is a shell/runtime migration, not a redesign. Reuse the
 existing FactorTester tokens, typography, navigation density, spacing, chart
 chrome and dark/light behavior. A page may move into React only after its
