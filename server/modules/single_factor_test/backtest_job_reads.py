@@ -11,7 +11,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import orjson
-from flask import Response, jsonify, request, session, stream_with_context
+from flask import Response, jsonify, make_response, request, session, stream_with_context
 
 from server.jobs.artifacts import default_user_quota_bytes
 from server.jobs.product_scope_inputs import product_scope_snapshot
@@ -1014,6 +1014,78 @@ def get_report_attachment(report_ref: str, name: str):
     data = store.get_attachment(report_ref, attachment)
     mime = "text/html" if name.endswith(".html") else "text/csv" if name.endswith(".csv") else "application/octet-stream"
     return Response(data, mimetype=mime, headers={"Content-Disposition": f'inline; filename="{name}"'})
+
+
+@sft_bp.get("/api/research-reports/<publication_id>/attachments")
+def list_research_report_attachments(publication_id: str):
+    actor = require_user()
+    import os
+    from server.jobs.storage.couchdb_research_reports import get_research_report
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "research report store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = get_research_report(store, publication_id)
+    except Exception:
+        return jsonify({"success": False, "error": "research report not found"}), 404
+    visibility = str(document.get("visibility") or "private")
+    allowed = document.get("owner_ref") == actor or visibility == "public"
+    if not allowed:
+        from server.permissions.entries import PermissionStore
+        from server.permissions.subjects import subjects_for_user
+        db = os.environ.get("TRADERESEARCH_PERMISSIONS_DB", "") or os.environ.get("FACTORTESTER_PERMISSIONS_DB", "")
+        allowed = bool(db and any(PermissionStore(db).allows(
+            subject=subject, resource_type="research_report",
+            resource_ref=publication_id, action="read",
+        ) for subject in subjects_for_user(actor)))
+    if not allowed:
+        return jsonify({"success": False, "error": "research report access denied"}), 403
+    attachments = document.get("attachments") if isinstance(document.get("attachments"), dict) else {}
+    return jsonify({"success": True, "attachments": [
+        {"path": path, **meta} for path, meta in sorted(attachments.items())
+    ]})
+
+
+@sft_bp.get("/api/research-reports/<publication_id>/attachments/<path:name>")
+def get_research_report_attachment(publication_id: str, name: str):
+    actor = require_user()
+    import os
+    from server.jobs.storage.couchdb_research_reports import document_id, get_research_report
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "research report store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = get_research_report(store, publication_id)
+    except Exception:
+        return jsonify({"success": False, "error": "research report not found"}), 404
+    visibility = str(document.get("visibility") or "private")
+    allowed = document.get("owner_ref") == actor or visibility == "public"
+    if not allowed:
+        from server.permissions.entries import PermissionStore
+        from server.permissions.subjects import subjects_for_user
+        db = os.environ.get("TRADERESEARCH_PERMISSIONS_DB", "") or os.environ.get("FACTORTESTER_PERMISSIONS_DB", "")
+        allowed = bool(db and any(PermissionStore(db).allows(
+            subject=subject, resource_type="research_report",
+            resource_ref=publication_id, action="read",
+        ) for subject in subjects_for_user(actor)))
+    if not allowed:
+        return jsonify({"success": False, "error": "research report access denied"}), 403
+    attachments = document.get("attachments") if isinstance(document.get("attachments"), dict) else {}
+    meta = next((item for item in attachments.values()
+                 if isinstance(item, dict) and item.get("name") == name), None)
+    if meta is None:
+        return jsonify({"success": False, "error": "attachment not found"}), 404
+    data = store.get_attachment(document_id(publication_id), name)
+    response = make_response(data)
+    response.headers["Content-Type"] = str(meta.get("content_type") or "application/octet-stream")
+    response.headers["Content-Disposition"] = f'inline; filename="{name}"'
+    return response
 
 
 @sft_bp.get("/api/research-reports/<publication_id>")

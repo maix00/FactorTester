@@ -158,3 +158,25 @@ def test_research_report_api_uses_publication_namespace(monkeypatch):
     client = app.test_client()
     with client.session_transaction() as session: session["username"] = "alice"
     assert client.get("/api/research-reports/p1").get_json()["document"]["kind"] == "research_report"
+
+
+def test_research_report_attachments_are_listed_and_streamed(monkeypatch):
+    class Store:
+        def __init__(self, *args, **kwargs): pass
+        def _request(self, method, path):
+            import json
+            return 200, json.dumps({"kind": "research_report", "publication_id": "p1",
+                                    "owner_ref": "alice", "visibility": "private",
+                                    "attachments": {"chapters/a.json": {
+                                        "name": "abc.json", "content_type": "application/json",
+                                        "size_bytes": 1}}}).encode()
+        def get_attachment(self, ref, name): return b"x"
+
+    monkeypatch.setenv("FACTORTESTER_COUCHDB_URL", "http://couch")
+    monkeypatch.setattr("server.jobs.storage.couchdb_reports.CouchDBObjectStore", Store)
+    app = Flask(__name__); app.secret_key = "test"; app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session: session["username"] = "alice"
+    listing = client.get("/api/research-reports/p1/attachments").get_json()
+    assert listing["attachments"][0]["name"] == "abc.json"
+    assert client.get("/api/research-reports/p1/attachments/abc.json").data == b"x"
