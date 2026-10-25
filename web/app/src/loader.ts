@@ -1,5 +1,5 @@
 const mobile = window.matchMedia("(max-width: 760px)").matches;
-const prefix = "/static/vendor/web-app";
+const prefix = "/research-static/vendor/web-app";
 const link = document.createElement("link");
 link.rel = "stylesheet";
 link.href = `${prefix}/${mobile ? "mobile" : "desktop"}.css`;
