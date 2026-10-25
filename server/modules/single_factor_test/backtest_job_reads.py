@@ -1023,7 +1023,10 @@ def apply_research_report_operation(publication_id: str):
     from flask import request
     from server.jobs.storage.couchdb_research_reports import get_research_report
     from server.jobs.storage.couchdb_reports import CouchDBObjectStore
-    from server.jobs.storage.research_report_operations import apply_component_move, apply_index_operation
+    from server.jobs.storage.research_report_operations import (
+        apply_component_insert, apply_component_move, apply_component_remove,
+        apply_index_operation,
+    )
 
     payload = request.get_json(silent=True) or {}
     base_rev = str(payload.get("base_rev") or "")
@@ -1041,13 +1044,29 @@ def apply_research_report_operation(publication_id: str):
     if document.get("owner_ref") != actor:
         return jsonify({"success": False, "error": "only the research report owner may edit"}), 403
     try:
-        if str(operation.get("op") or "") == "move_component":
+        op = str(operation.get("op") or "")
+        if op == "move_component":
             result = apply_component_move(
                 store, document, base_rev=base_rev,
                 chapter_id=str(operation.get("chapter_id") or ""),
                 component_id=str(operation.get("component_id") or ""),
                 parent_id=str(operation.get("parent_id") or ""),
                 after_component_id=str(operation.get("after_component_id") or ""),
+            )
+        elif op == "insert_component":
+            result = apply_component_insert(
+                store, document, base_rev=base_rev,
+                chapter_id=str(operation.get("chapter_id") or ""),
+                component=dict(operation.get("component") or {}),
+                parent_id=str(operation.get("parent_id") or ""),
+                after_component_id=str(operation.get("after_component_id") or ""),
+            )
+        elif op == "remove_component":
+            result = apply_component_remove(
+                store, document, base_rev=base_rev,
+                chapter_id=str(operation.get("chapter_id") or ""),
+                component_id=str(operation.get("component_id") or ""),
+                include_children=bool(operation.get("include_children")),
             )
         else:
             result = apply_index_operation(store, document, base_rev=base_rev, operation=operation)

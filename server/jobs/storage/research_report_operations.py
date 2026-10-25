@@ -105,18 +105,58 @@ def move_component(chapter: dict[str, Any], component_id: str, parent_id: str,
     return {**chapter, "components": components}
 
 
-def apply_component_move(store, document: dict[str, Any], *, base_rev: str,
-                         chapter_id: str, component_id: str, parent_id: str,
-                         after_component_id: str) -> dict[str, Any]:
-    if str(document.get("_rev") or "") != str(base_rev or ""):
-        raise ValueError("revision conflict")
+def insert_component(chapter: dict[str, Any], component: dict[str, Any],
+                     parent_id: str, after_component_id: str) -> dict[str, Any]:
+    components = list(chapter.get("components") or [])
+    ids = {str(item.get("component_id") or "") for item in components}
+    component_id = str(component.get("component_id") or "").strip()
+    if not component_id or component_id in ids:
+        raise ValueError("component_id is missing or duplicated")
+    if parent_id not in ids:
+        raise ValueError("parent not found")
+    if after_component_id not in ids:
+        raise ValueError("after component not found")
+    value = dict(component)
+    value["parent_id"] = parent_id
+    components.insert(next(index for index, item in enumerate(components)
+                           if str(item.get("component_id")) == after_component_id) + 1, value)
+    return {**chapter, "components": components}
+
+
+def remove_component(chapter: dict[str, Any], component_id: str,
+                     include_children: bool = False) -> dict[str, Any]:
+    components = list(chapter.get("components") or [])
+    ids = {str(item.get("component_id") or ""): item for item in components}
+    if component_id not in ids:
+        raise ValueError("component not found")
+    if str(ids[component_id].get("kind") or "") == "chapter":
+        raise ValueError("chapter root cannot be removed as a component")
+    children = [item for item in components
+                if str(item.get("parent_id") or "") == component_id]
+    if children and not include_children:
+        raise ValueError("component has children")
+    removed = {component_id}
+    changed = True
+    while changed:
+        changed = False
+        for item in components:
+            if str(item.get("parent_id") or "") in removed:
+                value = str(item.get("component_id") or "")
+                if value not in removed:
+                    removed.add(value); changed = True
+    if not include_children:
+        removed = {component_id}
+    return {**chapter, "components": [item for item in components
+                                      if str(item.get("component_id")) not in removed]}
+
+
+def _save_chapter(store, document: dict[str, Any], base_rev: str,
+                  chapter_id: str, chapter: dict[str, Any]) -> dict[str, Any]:
     logical = chapter_attachment_path(chapter_id)
     meta = (document.get("attachments") or {}).get(logical) or {}
     name = str(meta.get("name") or "")
     if not name:
         raise ValueError("chapter attachment is missing")
-    chapter = json.loads(store.get_attachment(str(document["_id"]), name))
-    chapter = move_component(chapter, component_id, parent_id, after_component_id)
     raw = json.dumps(chapter, ensure_ascii=False, sort_keys=True).encode()
     new_name = hashlib.sha256(raw).hexdigest() + ".json"
     try:
@@ -134,8 +174,7 @@ def apply_component_move(store, document: dict[str, Any], *, base_rev: str,
     _, fresh_body = store._request("GET", str(document["_id"]))
     fresh = json.loads(fresh_body)
     fresh.setdefault("attachments", {})[logical] = {
-        "name": new_name, "content_type": "application/json",
-        "size_bytes": len(raw),
+        "name": new_name, "content_type": "application/json", "size_bytes": len(raw),
     }
     try:
         status, body = store._request(
@@ -148,8 +187,49 @@ def apply_component_move(store, document: dict[str, Any], *, base_rev: str,
         raise
     if status not in {201, 202}:
         raise ValueError("document write failed")
-    return {"rev": json.loads(body)["rev"], "chapter": chapter,
-            "attachment": new_name}
+    return {"rev": json.loads(body)["rev"], "chapter": chapter, "attachment": new_name}
+
+
+def apply_component_move(store, document: dict[str, Any], *, base_rev: str,
+                         chapter_id: str, component_id: str, parent_id: str,
+                         after_component_id: str) -> dict[str, Any]:
+    if str(document.get("_rev") or "") != str(base_rev or ""):
+        raise ValueError("revision conflict")
+    meta = (document.get("attachments") or {}).get(chapter_attachment_path(chapter_id)) or {}
+    name = str(meta.get("name") or "")
+    if not name:
+        raise ValueError("chapter attachment is missing")
+    chapter = json.loads(store.get_attachment(str(document["_id"]), name))
+    chapter = move_component(chapter, component_id, parent_id, after_component_id)
+    return _save_chapter(store, document, base_rev, chapter_id, chapter)
+
+
+def apply_component_insert(store, document: dict[str, Any], *, base_rev: str,
+                           chapter_id: str, component: dict[str, Any],
+                           parent_id: str, after_component_id: str) -> dict[str, Any]:
+    if str(document.get("_rev") or "") != str(base_rev or ""):
+        raise ValueError("revision conflict")
+    meta = (document.get("attachments") or {}).get(chapter_attachment_path(chapter_id)) or {}
+    name = str(meta.get("name") or "")
+    if not name:
+        raise ValueError("chapter attachment is missing")
+    chapter = json.loads(store.get_attachment(str(document["_id"]), name))
+    chapter = insert_component(chapter, component, parent_id, after_component_id)
+    return _save_chapter(store, document, base_rev, chapter_id, chapter)
+
+
+def apply_component_remove(store, document: dict[str, Any], *, base_rev: str,
+                           chapter_id: str, component_id: str,
+                           include_children: bool = False) -> dict[str, Any]:
+    if str(document.get("_rev") or "") != str(base_rev or ""):
+        raise ValueError("revision conflict")
+    meta = (document.get("attachments") or {}).get(chapter_attachment_path(chapter_id)) or {}
+    name = str(meta.get("name") or "")
+    if not name:
+        raise ValueError("chapter attachment is missing")
+    chapter = json.loads(store.get_attachment(str(document["_id"]), name))
+    chapter = remove_component(chapter, component_id, include_children)
+    return _save_chapter(store, document, base_rev, chapter_id, chapter)
 
 
 from .research_report_agent import chapter_attachment_path

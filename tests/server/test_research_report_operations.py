@@ -31,3 +31,16 @@ def test_move_component_reparents_and_rejects_cycle():
         pass
     else:
         raise AssertionError("cycle should fail")
+
+
+def test_insert_and_remove_components():
+    from server.jobs.storage.research_report_operations import insert_component, remove_component
+    chapter = {"components": [
+        {"component_id": "root", "kind": "chapter", "parent_id": None},
+        {"component_id": "a", "kind": "section", "parent_id": "root"},
+    ]}
+    inserted = insert_component(chapter, {"component_id": "b", "kind": "paragraph"},
+                                "root", "a")
+    assert [c["component_id"] for c in inserted["components"]] == ["root", "a", "b"]
+    removed = remove_component(inserted, "b")
+    assert [c["component_id"] for c in removed["components"]] == ["root", "a"]
