@@ -30,7 +30,7 @@ from server.jobs.report_outputs import (
     normalize_output_requests,
     source_artifacts_for,
 )
-from server.jobs.scheduling.result_projection import (
+from server.jobs.result_projection import (
     _bounded_summary,
     persisted_result_summary,  # noqa: F401 - scheduling compatibility export
 )

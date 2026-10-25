@@ -182,5 +182,5 @@ def test_warmup_excludes_only_short_product_and_records_summary():
     assert rows[0]["status"] == "已移除"
     assert "PS.GFE" in rows[0]["detail"]
     assert "2024-12-13" in rows[0]["detail"]
-    from server.jobs.scheduling.result_projection import persisted_result_summary
+    from server.jobs.result_projection import persisted_result_summary
     assert persisted_result_summary({"success": True, "runtime_info_rows": rows})["runtime_info_rows"] == rows
