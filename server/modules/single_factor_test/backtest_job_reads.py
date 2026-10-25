@@ -827,6 +827,34 @@ def oidc_callback():
     return redirect("/")
 
 
+@sft_bp.get("/api/objects/<path:object_ref>")
+def get_versioned_object(object_ref: str):
+    actor = require_user()
+    import os
+    from server.jobs.storage.couchdb_objects import get_object
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "object store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = get_object(store, object_ref)
+    except Exception:
+        return jsonify({"success": False, "error": "object not found"}), 404
+    if document.get("owner") != actor:
+        from server.permissions.subjects import subjects_for_user
+        from server.permissions.entries import PermissionStore
+
+        db = os.environ.get("TRADERESEARCH_PERMISSIONS_DB", "") or os.environ.get("FACTORTESTER_PERMISSIONS_DB", "")
+        if not (db and any(PermissionStore(db).allows(
+            subject=subject, resource_type=str(document.get("kind") or ""),
+            resource_ref=object_ref, action="read",
+        ) for subject in subjects_for_user(actor))):
+            return jsonify({"success": False, "error": "object access denied"}), 403
+    return jsonify({"success": True, "document": document})
+
+
 @sft_bp.get("/api/reports/<report_ref>/conflicts")
 def get_report_conflicts(report_ref: str):
     actor = require_user()

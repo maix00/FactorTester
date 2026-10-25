@@ -73,3 +73,20 @@ def test_report_conflicts_are_owner_resolvable(monkeypatch):
     response = client.post("/api/reports/report:job:1/conflicts/resolve", json={"keep_rev": "2-a"})
     assert response.status_code == 200
     assert response.get_json()["conflicts"] == ["2-a"]
+
+
+def test_versioned_object_api_reads_factor_document(monkeypatch):
+    class Store:
+        def __init__(self, *args, **kwargs): pass
+        def _request(self, method, path, body=None, content_type="application/json"):
+            import json
+            return 200, json.dumps({"_id": path, "kind": "factor_version", "owner": "alice", "payload": {}}).encode()
+
+    monkeypatch.setenv("FACTORTESTER_COUCHDB_URL", "http://couch")
+    monkeypatch.setattr("server.jobs.storage.couchdb_reports.CouchDBObjectStore", Store)
+    app = Flask(__name__); app.secret_key = "test"; app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session: session["username"] = "alice"
+    response = client.get("/api/objects/factor:v2:abc")
+    assert response.status_code == 200
+    assert response.get_json()["document"]["kind"] == "factor_version"
