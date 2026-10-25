@@ -43,5 +43,16 @@ Requirements:
 - `FACTORTESTER_NAUTILUS_EXECUTOR` must resolve to the approved Nautilus Job
   executor; otherwise tasks fail before claiming.
 
+Inspect or requeue outbox rows without connecting to the broker:
+
+```bash
+python -m server.jobs.dispatch.cli status
+python -m server.jobs.dispatch.cli show <job_id> <attempt>
+python -m server.jobs.dispatch.cli retry <job_id> <attempt>
+```
+
+`retry` only accepts failed/dead rows and resets attempts; it does not bypass a
+worker capability check.
+
 The target queue names are not a substitute for a shared Job database. A worker
 on another server must never be given this server's Job DB path.
