@@ -16,6 +16,7 @@ test("duplicate page ids are rejected", () => {
 test("every registered page has a title, icon and route", () => {
   for (const page of BUILTIN_PAGES) {
     assert.ok(page.title.length > 0);
+    assert.ok(page.icon);
     assert.ok(page.icon.length > 0);
     assert.match(page.route, /^\//);
   }
