@@ -325,3 +325,4 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-report-markdown summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 .tr-report-component-actions { display: flex; gap: 4px; align-items: flex-start; }
 .tr-report-component-actions button { min-width: 24px; color: var(--muted); }
+.tr-report-component input[type="checkbox"] { margin-right: 6px; vertical-align: middle; }
