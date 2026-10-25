@@ -176,6 +176,19 @@
       });
     });
     wrapper.append(view.shell);
+    if (Array.isArray(payload.audit) && payload.audit.length) {
+      const audit = document.createElement("div");
+      audit.className = "manager-intro";
+      const title = document.createElement("b");
+      title.textContent = context.t("最近调度审计");
+      const list = document.createElement("small");
+      list.textContent = payload.audit
+        .slice(0, 10)
+        .map(row => `${row.action} ${row.job_id}#${row.attempt} ${row.actor}`)
+        .join(" · ");
+      audit.append(title, list);
+      wrapper.append(audit);
+    }
     body.replaceChildren(wrapper);
     dispatchRefreshTimer = setInterval(() => {
       if (!body.isConnected) {

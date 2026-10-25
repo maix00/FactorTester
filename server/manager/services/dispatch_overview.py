@@ -98,9 +98,12 @@ def dispatch_overview(
         nautilus = nautilus_backtest_submission_capability()
     except Exception as exc:
         nautilus = {"available": False, "reason": type(exc).__name__}
+    from server.jobs.dispatch.audit import list_audit
+
     return {
         "success": True,
         "server_id": server_id,
+        "audit": list_audit(repository.db_path, limit=20),
         "nautilus": nautilus,
         "outbox": outbox.counts(),
         "local_targets": local_targets,

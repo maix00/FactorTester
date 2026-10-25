@@ -41,6 +41,7 @@ def test_dispatch_overview_includes_servers_ports_and_local_outbox(tmp_path):
     payload = dispatch_overview(_state(), repository)
     assert payload["outbox"]["pending"] == 1
     assert "available" in payload["nautilus"]
+    assert isinstance(payload["audit"], list)
     assert payload["local_targets"] == [
         {"port": 8000, "queue": "factortester.jobs.local.8000", "worker_online": False},
         {"port": 8001, "queue": "factortester.jobs.local.8001", "worker_online": True},
