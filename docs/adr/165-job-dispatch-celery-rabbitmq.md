@@ -115,6 +115,13 @@ signal for a live trading process.
   deliveries return `duplicate` without a second execution.
 - Cancelling a queued Job terminally closes its unsent outbox row in the same
   transaction.
-- Celery app/worker task is intentionally not registered until the Nautilus
-  vertical slice can consume a claimed attempt; a fake task would be worse
-  than no task.
+- Added `celery_app.py`: JSON task `factortester.execute_job`, one process,
+  prefetch=1, no pickle. It resolves `FACTORTESTER_NAUTILUS_EXECUTOR`
+  (`module:attribute`) before claiming a Job. A missing executor raises before
+  claim, so the Job stays queued.
+- Added `service.py`: guarded dispatcher loop; preflight refuses to publish
+  unless the same deployment has a complete executor.
+- `task_acks_late=False` is provisional. It avoids the stuck-running case when
+  a worker dies after claim, at the cost of losing a message if the process
+  dies before ACK; the outbox/dispatcher and worker-loss gate must be revisited
+  before enabling acks_late or worker-loss redelivery.
