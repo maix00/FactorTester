@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import importlib
 import os
+
+from server import branding
 from typing import Any, Mapping
 
 from server.jobs.repository.sqlite import JobRepository
@@ -30,7 +32,7 @@ class DispatchExecutorUnavailable(RuntimeError):
 
 
 def repository_from_env() -> JobRepository:
-    path = os.environ.get("FACTORTESTER_JOB_DB", "").strip()
+    path = branding.env("JOB_DB", "").strip()
     return JobRepository(path) if path else JobRepository()
 
 
@@ -176,11 +178,11 @@ def create_app(
 ):
     from celery import Celery
 
-    broker = broker_url or os.environ.get("FACTORTESTER_BROKER_URL", "").strip()
+    broker = broker_url or branding.env("BROKER_URL", "").strip()
     if not broker:
         raise RuntimeError("FACTORTESTER_BROKER_URL is required to create the Celery app")
-    resolved_deployment = target_deployment or os.environ.get("FACTORTESTER_DEPLOYMENT_ID", "").strip() or None
-    raw_port = target_port if target_port is not None else os.environ.get("FACTORTESTER_SERVICE_PORT", "").strip()
+    resolved_deployment = target_deployment or branding.env("DEPLOYMENT_ID", "").strip() or None
+    raw_port = target_port if target_port is not None else branding.env("SERVICE_PORT", "").strip()
     resolved_port = int(raw_port) if raw_port not in (None, "") else None
     queue_name = queue
     if resolved_deployment and resolved_port:

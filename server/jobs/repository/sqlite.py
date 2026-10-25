@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import os
+
+from server import branding
 import sqlite3
 import threading
 import time
@@ -211,7 +213,7 @@ class JobRepository(
 
         kind = str(row["kind"] or "")
         if kind == "dispatch_probe":
-            if os.environ.get("FACTORTESTER_ALLOW_DISPATCH_PROBE") != "1":
+            if branding.env("ALLOW_DISPATCH_PROBE") != "1":
                 return
         elif kind != "backtest":
             return

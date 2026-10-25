@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+
+from server import branding
 from typing import Callable, Protocol
 
 from .contract import DispatchMessage
@@ -100,5 +102,5 @@ def publisher_from_env() -> KombuPublisher:
     broker_url = os.environ.get(BROKER_ENV, "").strip()
     if not broker_url:
         raise RuntimeError(f"{BROKER_ENV} is required for the dispatch dispatcher")
-    queue = os.environ.get("FACTORTESTER_JOB_QUEUE", DEFAULT_QUEUE).strip() or DEFAULT_QUEUE
+    queue = branding.env("JOB_QUEUE", DEFAULT_QUEUE).strip() or DEFAULT_QUEUE
     return KombuPublisher(broker_url=broker_url, queue=queue)

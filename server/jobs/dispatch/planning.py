@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+
+from server import branding
 from typing import Any, Callable
 
 from server.jobs.repository.sqlite import JobRepository
@@ -59,6 +61,4 @@ class PlanningDispatcher:
 
 
 def _deployment_id() -> str:
-    import os
-
-    return os.environ.get("FACTORTESTER_DEPLOYMENT_ID", "").strip()
+    return branding.env("DEPLOYMENT_ID", "").strip()

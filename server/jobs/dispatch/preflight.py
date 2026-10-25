@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+
+from server import branding
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -16,10 +18,10 @@ REQUIRED_ENV = ("FACTORTESTER_BROKER_URL", "FACTORTESTER_JOB_DB", "FACTORTESTER_
 
 def check_deployment(*, check_executor: bool = False, check_target: bool = False) -> dict[str, Any]:
     errors: list[str] = []
-    broker = os.environ.get("FACTORTESTER_BROKER_URL", "").strip()
+    broker = branding.env("BROKER_URL", "").strip()
     if not broker:
         errors.append("FACTORTESTER_BROKER_URL is required")
-    db_raw = os.environ.get("FACTORTESTER_JOB_DB", "").strip()
+    db_raw = branding.env("JOB_DB", "").strip()
     db_path = Path(db_raw) if db_raw else None
     if db_path is None:
         errors.append("FACTORTESTER_JOB_DB is required")
@@ -31,10 +33,10 @@ def check_deployment(*, check_executor: bool = False, check_target: bool = False
         errors.append(
             "job DB is a file bind mount; mount its parent directory so SQLite WAL files are shared"
         )
-    deployment = os.environ.get("FACTORTESTER_DEPLOYMENT_ID", "").strip()
+    deployment = branding.env("DEPLOYMENT_ID", "").strip()
     if not deployment:
         errors.append("FACTORTESTER_DEPLOYMENT_ID is required")
-    raw_port = os.environ.get("FACTORTESTER_SERVICE_PORT", "").strip()
+    raw_port = branding.env("SERVICE_PORT", "").strip()
     try:
         port = int(raw_port)
         if not 1 <= port <= 65535:
