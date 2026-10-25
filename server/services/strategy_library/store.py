@@ -117,7 +117,7 @@ class StrategyLibraryStore:
         import os
         from server.jobs.storage.couchdb_authority import libraries_read_enabled
 
-        if scope == "mine" and libraries_read_enabled():
+        if scope in {"mine", "public", "superiors"} and libraries_read_enabled():
             url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
             if url:
                 try:
@@ -126,13 +126,21 @@ class StrategyLibraryStore:
 
                     docs = CouchDBLibraryReader(CouchDBObjectStore(
                         url, os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects",
-                    )).strategies(principal)
+                    )).strategies(principal if scope == "mine" else "")
                     needle = str(query or "").strip().lower()
                     rows = []
                     for doc in docs:
                         payload = doc.get("payload") or {}
                         entry = dict(payload.get("entry") or {})
                         revision = dict(payload.get("revision") or {})
+                        owner = str(entry.get("owner_ref") or "")
+                        visibility = str(entry.get("visibility") or "private")
+                        if scope == "public" and visibility != "public":
+                            continue
+                        if scope == "superiors" and not (
+                            owner in subordinate_users and visibility in {"public", "superiors"}
+                        ):
+                            continue
                         if needle and needle not in str(entry.get("name") or "").lower() \
                                 and needle not in str(entry.get("strategy_ref") or "").lower():
                             continue
