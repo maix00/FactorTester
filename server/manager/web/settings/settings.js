@@ -772,4 +772,5 @@
   }
 
   window.FTSettings = {show};
+window.TRSettings = window.FTSettings;
 })();

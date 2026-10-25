@@ -76,4 +76,5 @@
   }
 
   window.FTPageState = Object.freeze({create, schemaVersion});
+window.TRPageState = window.FTPageState;
 })();

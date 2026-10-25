@@ -51,4 +51,5 @@
     browserLocale, choosePreference, format, load, rememberPreference,
     resolvedLocale, storedPreference, t,
   };
+  window.TRI18n = window.FTI18n;
 })();

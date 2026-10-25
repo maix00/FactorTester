@@ -168,4 +168,5 @@
   }
 
   window.FTIcons = {module, node, reference, section, moduleSymbols, referenceSymbols};
+window.TRIcons = window.FTIcons;
 })();
