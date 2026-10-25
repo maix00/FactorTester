@@ -44,9 +44,9 @@ Verified with Playwright against the local Manager:
 ```text
 Research  -> native landing page + legacy detail bridge
 Runs      -> native page
-Trading   -> embedded frame
+Trading   -> native strategy-family landing + legacy workbench bridge
 Catalog   -> native page with a legacy editor bridge
 Account   -> native account page
 ```
 
-All five entries render; Research, Runs, Catalog and Account are native today.
+All five entries render; Research, Runs, Trading, Catalog and Account have React landing pages. The legacy trading workbench remains a bridge.
