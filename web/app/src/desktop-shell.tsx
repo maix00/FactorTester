@@ -17,8 +17,6 @@ import { DesktopNotificationHost } from "./notifications/antd-host.tsx";
 
 for (const page of BUILTIN_PAGES) registerPage(page);
 
-type OpenPanel = { id: string; pageId: string; title: string };
-
 function Panel(props: IDockviewPanelProps<{ pageId: string }>): React.ReactElement {
   return (
     <div className="tr-tab-layer" data-tab-layer={props.params.pageId}>
@@ -57,7 +55,6 @@ export function DesktopShell(): React.ReactElement {
     const value = Number(localStorage.getItem("tr.sidebar.width"));
     return Number.isFinite(value) && value >= 180 && value <= 360 ? value : 230;
   });
-  const [openPanels, setOpenPanels] = useState<OpenPanel[]>([]);
 
   const startResize = (event: React.PointerEvent<HTMLDivElement>): void => {
     event.preventDefault();
@@ -76,14 +73,6 @@ export function DesktopShell(): React.ReactElement {
     window.addEventListener("pointerup", stop, { once: true });
   };
 
-  const syncPanels = (container: DockviewApi): void => {
-    setOpenPanels(container.panels.map((panel) => ({
-      id: panel.id,
-      pageId: String(panel.params?.pageId ?? panel.id),
-      title: panel.title ?? "",
-    })));
-  };
-
   const open = (pageId: string): void => {
     setActive(pageId);
     if (!api) return;
@@ -92,10 +81,6 @@ export function DesktopShell(): React.ReactElement {
     const panel = api.getPanel(page.id);
     if (panel) panel.api.setActive();
     else api.addPanel({ id: page.id, component: "page", tabComponent: "page", title: page.title, params: { pageId: page.id } });
-  };
-
-  const close = (panelId: string): void => {
-    api?.getPanel(panelId)?.api.close();
   };
 
   const resetLayout = (): void => {
@@ -124,9 +109,6 @@ export function DesktopShell(): React.ReactElement {
         event.api.addPanel({ id: page.id, component: "page", tabComponent: "page", title: page.title, params: { pageId: page.id } });
       }
     }
-    syncPanels(event.api);
-    event.api.onDidAddPanel(() => syncPanels(event.api));
-    event.api.onDidRemovePanel(() => syncPanels(event.api));
     event.api.onDidActivePanelChange(({ panel }) => {
       const pageId = String(panel?.params?.pageId ?? "");
       if (pageId) setActive(pageId);
@@ -176,18 +158,6 @@ export function DesktopShell(): React.ReactElement {
               <PageIcon name={page.icon} />
               <span className="tr-nav-label">{label(page)}</span>
             </button>
-          ))}
-        </nav>
-        <div className="tr-sidebar-caption tr-opened-caption" hidden={openPanels.length === 0}>已打开</div>
-        <nav className="tr-opened-tabs" aria-label="已打开">
-          {openPanels.map((panel) => (
-            <div key={panel.id} className={`tr-opened-tab${active === panel.pageId ? " is-active" : ""}`}>
-              <button type="button" className="tr-opened-main" onClick={() => { setActive(panel.pageId); api?.getPanel(panel.id)?.api.setActive(); }}>
-                <PageIcon name={getPage(panel.pageId)?.icon} />
-                <span>{t(`nav.${panel.pageId}`, { defaultValue: panel.title })}</span>
-              </button>
-              <button type="button" className="tr-opened-close" aria-label="关闭" onClick={() => close(panel.id)}>×</button>
-            </div>
           ))}
         </nav>
         <div className="tr-sidebar-spacer" />

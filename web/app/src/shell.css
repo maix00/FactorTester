@@ -197,3 +197,7 @@ body { margin: 0; }
   .tr-settings-nav { flex-direction: row; overflow-x: auto; }
   .tr-settings-nav button span { display: none; }
 }
+.dv-inactive-tab .tr-dock-tab-title,
+.dv-inactive-tab .tr-dock-close { display: none; }
+.dv-inactive-tab .tr-dock-tab { gap: 0; }
+.dv-inactive-tab .tr-dock-tab .tr-icon { margin: 0; }
