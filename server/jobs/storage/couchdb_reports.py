@@ -84,6 +84,10 @@ class CouchDBObjectStore:
             content_type=content_type,
         )
 
+    def conflicts(self, report_ref: str) -> list[str]:
+        _, raw = self._request("GET", f"{report_ref}?conflicts=true")
+        return list(json.loads(raw).get("_conflicts") or [])
+
     def get_attachment(self, report_ref: str, name: str) -> bytes:
         return self._request("GET", f"{report_ref}/{name}")[1]
 
