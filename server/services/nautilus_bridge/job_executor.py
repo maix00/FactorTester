@@ -238,6 +238,45 @@ class _ReplayRunner:
         sink.emit_result(result)
 
 
+class _StrategyRunner:
+    def __init__(self, record: JobRecord, context: ExecutionContext) -> None:
+        self.record = record
+        self.context = context
+
+    def __call__(self, payload: dict[str, Any], sink: Any, cancel_event: Any) -> None:
+        from server.services.nautilus_bridge.strategy_backtest import (
+            run_strategy_family_run_spec,
+        )
+
+        plan = self.record.execution_plan or {}
+        root = Path(os.environ.get("FACTORTESTER_NAUTILUS_CATALOG_ROOT", "/data")).resolve()
+        for value in (plan.get("catalog_inputs") or {}).values():
+            folder = Path(str(value.get("catalog_dir") or "")).resolve()
+            if not folder.is_relative_to(root):
+                sink.emit_error(
+                    "strategy catalog is outside the configured catalog root",
+                    error_code="nautilus_replay_forbidden_path",
+                )
+                return
+        output = (
+            Path(artifact_root()) / self.record.job_id
+            / f"nautilus-strategy-{self.record.attempt}-{uuid.uuid4().hex[:8]}"
+        )
+        output.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            result = run_strategy_family_run_spec(
+                job_spec=self.record.job_spec, plan=plan, output_dir=output,
+            )
+        except Exception as exc:
+            sink.emit_error(
+                f"Nautilus strategy failed: {type(exc).__name__}: {exc}",
+                error_code="nautilus_strategy_failed",
+            )
+            return
+        result["reports_dir"] = str(output)
+        sink.emit_result(result)
+
+
 class NautilusJobExecutor:
     """Execute one verified Nautilus RunSpec through FactorTester's runner API."""
 
@@ -277,8 +316,11 @@ class NautilusJobExecutor:
         runner_sink = _RunnerSinkAdapter(sink)
         runner = self._runner
         if runner is None:
-            if str((record.execution_plan or {}).get("kind") or "") == "nautilus_catalog_replay":
+            plan_kind = str((record.execution_plan or {}).get("kind") or "")
+            if plan_kind == "nautilus_catalog_replay":
                 runner = _ReplayRunner(record, context)
+            elif plan_kind == "nautilus_strategy_family":
+                runner = _StrategyRunner(record, context)
             else:
                 from server.modules.single_factor_test.process_runners import run_group
 
