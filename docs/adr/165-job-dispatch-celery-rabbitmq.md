@@ -291,3 +291,20 @@ The earlier empty report_ref was caused by a stale second worker without
 CouchDB environment consuming the same queue; after stopping both old workers
 and running one correctly configured worker, the full Celery -> Nautilus ->
 CouchDB -> PostgreSQL projection passed.
+
+## 2026-10-25 Nautilus retry from frozen plan
+
+A failed Nautilus strategy Job was retried through the real retry API.  The
+new Job copied the frozen execution plan, entered the queue, and executed on
+a real Celery worker:
+
+```text
+retry_of: mm-celery-job
+new job: 6cc81050031b440fb4a6e8e28b1cd448
+status: succeeded
+report_ref: report:6cc81050031b440fb4a6e8e28b1cd448:2
+CouchDB GET -> 200
+```
+
+This validates retry for new Nautilus Jobs without re-planning the strategy
+catalog.  Legacy backtests without a frozen plan still return 409.
