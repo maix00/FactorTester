@@ -383,8 +383,23 @@ class CoreGetRoutesMixin:
             from server.jobs.repository import JobRepository
             from server.manager.services.dispatch_overview import dispatch_overview
 
+            session = self._session()
+            principal = str((session or {}).get("username") or "")
+            def remote_status(server_id: str):
+                routes = [
+                    route for route in self.state.federation_registry.routes(include_offline=False)
+                    if str(route.server_id) == str(server_id)
+                ]
+                if not routes:
+                    return None
+                route = next((item for item in routes if int(item.port) == 8000), routes[0])
+                return self.state.federation_gateway.json(
+                    route, path="/api/dispatch/status", principal=principal,
+                )
             try:
-                payload = dispatch_overview(self.state, JobRepository())
+                payload = dispatch_overview(
+                    self.state, JobRepository(), remote_status=remote_status,
+                )
             except Exception as exc:
                 json_response(self, {
                     "success": False,

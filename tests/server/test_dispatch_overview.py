@@ -47,3 +47,24 @@ def test_dispatch_overview_includes_servers_ports_and_local_outbox(tmp_path):
     remote = next(item for item in payload["servers"] if item["server_id"] == "remote")
     assert remote["online"] is False
     assert remote["ports"][0]["queue"] == "factortester.jobs.remote.8000"
+
+
+def test_dispatch_overview_merges_remote_status(tmp_path):
+    repository = JobRepository(tmp_path / "jobs.db")
+    def remote(server_id):
+        assert server_id == "remote"
+        return {
+            "outbox": {"pending": 4},
+            "workers": [{"service_port": 8000, "online": True}],
+        }
+    state = _state()
+    state.federation_registry.servers = lambda include_offline=True: [
+        {"server_id": "local", "role": "feat", "online": True,
+         "ports": [{"port": 8000}, {"port": 8001}]},
+        {"server_id": "remote", "role": "main", "online": True,
+         "ports": [{"port": 8000}]},
+    ]
+    payload = dispatch_overview(state, repository, remote_status=remote)
+    item = next(row for row in payload["servers"] if row["server_id"] == "remote")
+    assert item["remote_outbox"] == {"pending": 4}
+    assert item["ports"][0]["worker_online"] is True

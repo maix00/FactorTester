@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from server.jobs.dispatch.outbox import DispatchOutbox
@@ -11,7 +12,10 @@ def _queue(server_id: str, port: int) -> str:
     return f"factortester.jobs.{server_id}.{port}"
 
 
-def dispatch_overview(state: Any, repository: Any) -> dict[str, Any]:
+def dispatch_overview(
+    state: Any, repository: Any,
+    *, remote_status: Callable[[str], dict[str, Any] | None] | None = None,
+) -> dict[str, Any]:
     server_id = str(getattr(state, "server_id", "") or "local")
     outbox = DispatchOutbox(repository.db_path)
     local_ports = sorted({
@@ -46,11 +50,31 @@ def dispatch_overview(state: Any, repository: Any) -> dict[str, Any]:
                         "queue": _queue(sid, port),
                         "worker_online": None,
                     })
+            remote = None
+            if sid != server_id and remote_status is not None and bool(server.get("online")):
+                try:
+                    remote = remote_status(sid)
+                except Exception:
+                    remote = None
+            if isinstance(remote, dict):
+                for target in ports:
+                    target["worker_online"] = next(
+                        (
+                            bool(item.get("online"))
+                            for item in remote.get("workers") or []
+                            if int(item.get("service_port") or 0) == target["port"]
+                        ),
+                        None,
+                    )
+                ports_remote = remote.get("outbox")
+            else:
+                ports_remote = None
             servers.append({
                 "server_id": sid,
                 "role": str(server.get("role") or ""),
                 "online": bool(server.get("online")),
                 "is_local": sid == server_id,
+                "remote_outbox": ports_remote,
                 "ports": sorted(ports, key=lambda item: item["port"]),
             })
     # Always include the local server even when no registry row is present.
