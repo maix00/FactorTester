@@ -365,3 +365,20 @@ def jwt_claims(token: str) -> dict:
     payload = token.split(".")[1]
     payload += "=" * (-len(payload) % 4)
     return json.loads(base64.urlsafe_b64decode(payload.encode()).decode())
+
+
+def oidc_logout_url(
+    *, base_url: str, realm: str, client_id: str,
+    post_logout_redirect_uri: str = "", id_token_hint: str = "",
+) -> str:
+    import urllib.parse
+
+    query = {"client_id": client_id}
+    if post_logout_redirect_uri:
+        query["post_logout_redirect_uri"] = post_logout_redirect_uri
+    if id_token_hint:
+        query["id_token_hint"] = id_token_hint
+    return (
+        f"{base_url.rstrip('/')}/realms/{realm.strip('/')}"
+        f"/protocol/openid-connect/logout?{urllib.parse.urlencode(query)}"
+    )

@@ -49,3 +49,17 @@ def test_oidc_callback_restores_legacy_username_and_role(monkeypatch):
     assert response.status_code == 302
     with client.session_transaction() as session:
         assert session["username"] == "GTHT@Alice"
+
+
+def test_oidc_logout_clears_session_and_redirects(monkeypatch):
+    monkeypatch.setenv("TRADERESEARCH_KEYCLOAK_URL", "http://kc")
+    monkeypatch.setenv("TRADERESEARCH_KEYCLOAK_REALM", "trade")
+    monkeypatch.setenv("TRADERESEARCH_KEYCLOAK_CLIENT_ID", "web")
+    app = Flask(__name__); app.secret_key = "test"; app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session: session["username"] = "alice"
+    response = client.get("/api/auth/oidc/logout")
+    assert response.status_code == 302
+    assert "/protocol/openid-connect/logout" in response.headers["Location"]
+    with client.session_transaction() as session:
+        assert "username" not in session

@@ -747,6 +747,24 @@ def oidc_start():
     )})
 
 
+@sft_bp.get("/api/auth/oidc/logout")
+def oidc_logout():
+    from flask import redirect, session, url_for
+    from server import branding
+    from server.identity.auth_mode import keycloak_enabled
+    from server.identity.keycloak import oidc_logout_url
+
+    session.clear()
+    if not keycloak_enabled():
+        return redirect("/")
+    url = oidc_logout_url(
+        base_url=branding.env("KEYCLOAK_URL"), realm=branding.env("KEYCLOAK_REALM"),
+        client_id=branding.env("KEYCLOAK_CLIENT_ID"),
+        post_logout_redirect_uri=url_for("sft.oidc_logout", _external=True),
+    )
+    return redirect(url)
+
+
 @sft_bp.get("/api/auth/oidc/callback")
 def oidc_callback():
     """Complete the authorization-code flow and establish the session."""
