@@ -354,3 +354,14 @@ def oidc_userinfo(*, base_url: str, realm: str, access_token: str,
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read())
+
+
+
+def jwt_claims(token: str) -> dict:
+    """Decode JWT claims; used only for tokens received directly from Keycloak."""
+    import base64
+    import json
+
+    payload = token.split(".")[1]
+    payload += "=" * (-len(payload) % 4)
+    return json.loads(base64.urlsafe_b64decode(payload.encode()).decode())

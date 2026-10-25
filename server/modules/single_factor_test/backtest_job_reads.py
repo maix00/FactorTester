@@ -763,10 +763,17 @@ def oidc_callback():
         client_secret=branding.env("KEYCLOAK_CLIENT_SECRET"),
     )
     tokens = client.exchange_code(code, redirect_uri)
-    profile = oidc_userinfo(
-        base_url=branding.env("KEYCLOAK_URL"), realm=branding.env("KEYCLOAK_REALM"),
-        access_token=str(tokens.get("access_token") or ""),
-    )
+    try:
+        profile = oidc_userinfo(
+            base_url=branding.env("KEYCLOAK_URL"), realm=branding.env("KEYCLOAK_REALM"),
+            access_token=str(tokens.get("access_token") or ""),
+        )
+    except Exception:
+        from server.identity.keycloak import jwt_claims
+
+        profile = jwt_claims(
+            str(tokens.get("id_token") or tokens.get("access_token") or "")
+        )
     username = str(profile.get("preferred_username") or profile.get("sub") or "")
     if not username:
         return jsonify({"success": False, "error": "OIDC profile has no username"}), 401
