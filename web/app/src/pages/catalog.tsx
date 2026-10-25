@@ -13,7 +13,11 @@ export function CatalogPage(): React.ReactElement {
   const [selected, setSelected] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [legacy, setLegacy] = useState(false);
-  const [tab, setTab] = useState<"products" | "factors">("products");
+  const [tab, setTab] = useState<"products" | "factors" | "strategies">("products");
+  const [strategies, setStrategies] = useState<Record<string, unknown>[]>([]);
+  const [strategyPage, setStrategyPage] = useState(1);
+  const [strategyTotal, setStrategyTotal] = useState(0);
+  const [strategyDetail, setStrategyDetail] = useState<string>("");
   const [factors, setFactors] = useState<Record<string, unknown>[]>([]);
 
   useEffect(() => {
@@ -22,6 +26,19 @@ export function CatalogPage(): React.ReactElement {
       .then((payload: Payload<Group>) => setGroups(payload.groups ?? []))
       .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }));
   }, [t]);
+
+  useEffect(() => {
+    if (tab !== "strategies") return;
+    setLoading(true);
+    fetch(`/api/strategy-library/strategies?scope=all&page=${strategyPage}&limit=20`, { credentials: "same-origin" })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+      .then((payload: { items?: Record<string, unknown>[]; total?: number }) => {
+        setStrategies((current) => strategyPage === 1 ? payload.items ?? [] : [...current, ...(payload.items ?? [])]);
+        setStrategyTotal(Number(payload.total ?? 0));
+      })
+      .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }))
+      .finally(() => setLoading(false));
+  }, [tab, strategyPage, t]);
 
   useEffect(() => {
     if (tab !== "factors") return;
@@ -53,6 +70,7 @@ export function CatalogPage(): React.ReactElement {
       <div className="tr-catalog-tabs">
         <button type="button" className={tab === "products" ? "is-active" : ""} onClick={() => setTab("products")}>{t("catalog.products")}</button>
         <button type="button" className={tab === "factors" ? "is-active" : ""} onClick={() => setTab("factors")}>{t("catalog.factors")}</button>
+        <button type="button" className={tab === "strategies" ? "is-active" : ""} onClick={() => { setTab("strategies"); setStrategyPage(1); }}>{t("catalog.strategies")}</button>
       </div>
       {tab === "products" ? <div className="tr-catalog-groups">
         <button type="button" className={selected ? "" : "is-active"} onClick={() => setSelected("")}>{t("catalog.all")}</button>
@@ -67,7 +85,19 @@ export function CatalogPage(): React.ReactElement {
         })}
       </div> : null}
       <div className="tr-catalog-products">
-        {tab === "factors" ? (
+        {tab === "strategies" ? (
+          strategies.length === 0 ? <p>{t("empty")}</p> : strategies.map((item, index) => {
+            const ref = String(item.strategy_ref ?? item.id ?? index);
+            return (
+              <article key={ref}>
+                <button type="button" className="tr-catalog-card-link" onClick={() => setStrategyDetail(ref)}>
+                  <b>{String(item.name ?? item.title ?? ref)}</b>
+                </button>
+                <small>{String(item.description ?? "")}</small>
+              </article>
+            );
+          })
+        ) : tab === "factors" ? (
           factors.length === 0 ? <p>{t("empty")}</p> : factors.map((factor, index) => (
             <article key={String(factor.ref ?? factor.factor_ref ?? factor.alias ?? index)}>
               <b>{String(factor.name ?? factor.alias ?? factor.ref ?? "—")}</b>
@@ -81,6 +111,15 @@ export function CatalogPage(): React.ReactElement {
           </article>
         ))}
       </div>
+      {tab === "strategies" && strategies.length < strategyTotal ? (
+        <button type="button" className="tr-mobile-load-more" disabled={loading} onClick={() => setStrategyPage((value) => value + 1)}>{t("more")}</button>
+      ) : null}
+      {strategyDetail ? (
+        <div className="tr-legacy-overlay" role="dialog" aria-label={t("catalog.strategies")}>
+          <div className="tr-legacy-bar"><strong>{strategyDetail}</strong><button type="button" onClick={() => setStrategyDetail("")}>{t("notifications.close")}</button></div>
+          <iframe title={strategyDetail} src={`/strategies/${encodeURIComponent(strategyDetail)}?presentation=embedded`} />
+        </div>
+      ) : null}
       {legacy ? (
         <div className="tr-legacy-overlay" role="dialog" aria-label={t("catalog.legacy")}>
           <div className="tr-legacy-bar"><strong>{t("catalog.legacy")}</strong><button type="button" onClick={() => setLegacy(false)}>{t("notifications.close")}</button></div>
