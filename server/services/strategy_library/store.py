@@ -117,7 +117,7 @@ class StrategyLibraryStore:
         import os
         from server.jobs.storage.couchdb_authority import libraries_read_enabled
 
-        if scope in {"mine", "public", "superiors"} and libraries_read_enabled():
+        if scope in {"mine", "public", "superiors", "authorized"} and libraries_read_enabled():
             url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
             if url:
                 try:
@@ -128,6 +128,13 @@ class StrategyLibraryStore:
                         url, os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects",
                     )).strategies(principal if scope == "mine" else "")
                     needle = str(query or "").strip().lower()
+                    shares = set()
+                    if scope == "authorized":
+                        with self._lock, connect_sqlite(self.db_path, readonly=True) as db:
+                            shares = {str(row["strategy_ref"]) for row in db.execute(
+                                "SELECT strategy_ref FROM strategy_library_shares WHERE principal_ref=?",
+                                (principal,),
+                            ).fetchall()}
                     rows = []
                     for doc in docs:
                         payload = doc.get("payload") or {}
@@ -141,6 +148,9 @@ class StrategyLibraryStore:
                             owner in subordinate_users and visibility in {"public", "superiors"}
                         ):
                             continue
+                        if scope == "authorized":
+                            if str(entry.get("strategy_ref") or "") not in shares:
+                                continue
                         if needle and needle not in str(entry.get("name") or "").lower() \
                                 and needle not in str(entry.get("strategy_ref") or "").lower():
                             continue
