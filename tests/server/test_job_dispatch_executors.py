@@ -66,3 +66,13 @@ def test_router_uses_backtest_executor_for_backtest():
     router = JobExecutorRouter(backtest=Backtest(), process=ProcessRunnerExecutor({}))
     outcome = router.execute(_job("backtest"), _message(), _Context())
     assert outcome.result_summary == {"engine": "backtest"}
+
+
+def test_executor_app_router_is_resolvable(monkeypatch):
+    from server.jobs.dispatch.celery_app import resolve_executor
+
+    monkeypatch.setenv(
+        "FACTORTESTER_NAUTILUS_EXECUTOR",
+        "server.jobs.dispatch.executor_app:executor",
+    )
+    assert isinstance(resolve_executor(), JobExecutorRouter)
