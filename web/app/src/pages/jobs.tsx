@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { Select, Table, Tag, Typography } from "antd";
+import { Tag, Typography } from "antd";
 import type { TableProps } from "antd";
+import { FTDataTable } from "../components/data-table.tsx";
+import { FTMultiSelectFilter } from "../components/multi-select.tsx";
 
 type JobRow = {
   job_id?: string;
@@ -85,31 +87,23 @@ export function JobsPage(): React.ReactElement {
   return (
     <section className="tr-antd-panel">
       <div className="tr-antd-toolbar">
-        <Select
-          mode="multiple"
-          allowClear
+        <FTMultiSelectFilter
+          label="按状态筛选"
           placeholder="按状态筛选"
           options={STATUS_OPTIONS}
           value={statuses}
           onChange={(values) => { setStatuses(values); setPage(1); }}
-          style={{ minWidth: 220 }}
-          maxTagCount="responsive"
-          aria-label="按状态筛选"
         />
         <span className="tr-antd-total">共 {total} 条</span>
       </div>
-      {error ? <div className="tr-page-error" role="alert">{error}</div> : null}
-      <Table<JobRow>
+      <FTDataTable<JobRow>
         rowKey={(row) => row.job_id || JSON.stringify(row)}
         columns={columns}
-        dataSource={jobs}
+        rows={jobs}
         loading={loading}
-        size="middle"
+        error={error}
         pagination={{
-          current: page,
-          pageSize,
-          total,
-          showSizeChanger: true,
+          page, pageSize, total,
           onChange: (nextPage, nextSize) => {
             setPage(nextSize !== pageSize ? 1 : nextPage);
             setPageSize(nextSize);
