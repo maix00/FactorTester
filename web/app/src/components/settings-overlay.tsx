@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Modal } from "antd";
 import { useTranslation } from "react-i18next";
 import { LanguageSwitch } from "./language-switch.tsx";
@@ -25,6 +25,16 @@ export function SettingsOverlay({
 }): React.ReactElement {
   const { t } = useTranslation();
   const [section, setSection] = useState<string>("account");
+  const [session, setSession] = useState<{ username?: string; role?: string } | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    fetch("/api/session", { credentials: "same-origin" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((value) => { if (!cancelled) setSession(value?.session ?? value ?? null); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [open]);
   const current = SECTIONS.find((item) => item.id === section) ?? SECTIONS[0];
   return (
     <Modal
@@ -80,7 +90,11 @@ export function SettingsOverlay({
               <h3>{t("settingsPanel.sections.account")}</h3>
               <div className="tr-settings-row">
                 <div><b>{t("settingsPanel.accountSession")}</b><small>{t("settingsPanel.accountHint")}</small></div>
-                <span className="tr-settings-value">{t("settingsPanel.managedByServer")}</span>
+                <span className="tr-settings-value">{session?.username || t("settingsPanel.notSignedIn")}</span>
+              </div>
+              <div className="tr-settings-row">
+                <div><b>{t("settingsPanel.role")}</b><small>{t("settingsPanel.roleHint")}</small></div>
+                <span className="tr-settings-value">{session?.role || "—"}</span>
               </div>
             </div>
           ) : (
