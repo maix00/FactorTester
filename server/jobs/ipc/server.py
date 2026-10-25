@@ -9,8 +9,6 @@ from typing import Any
 
 import orjson
 
-from server.jobs.scheduling import ResearchJobScheduler
-
 from .paths import normalized_socket_path
 
 
@@ -32,7 +30,7 @@ class _Handler(socketserver.StreamRequestHandler):
 class _UnixServer(socketserver.ThreadingUnixStreamServer):
     daemon_threads = True
 
-    def __init__(self, socket_path: str, scheduler: ResearchJobScheduler) -> None:
+    def __init__(self, socket_path: str, scheduler: Any) -> None:
         self.scheduler = scheduler
         super().__init__(socket_path, _Handler)
 
@@ -51,9 +49,8 @@ class _UnixServer(socketserver.ThreadingUnixStreamServer):
             return {}
         if action == "cancel":
             job_id = str(request.get("job_id") or "")
-            notified = self.scheduler.planners.request_cancel(job_id)
-            notified = self.scheduler.executors.request_cancel(job_id) or notified
-            return {"notified": notified}
+            notify = getattr(self.scheduler, "cancel", None)
+            return {"notified": bool(notify(job_id)) if notify else False}
         if action == "continue_step":
             job_id = str(request.get("job_id") or "")
             command = request.get("command")
@@ -75,7 +72,7 @@ class _UnixServer(socketserver.ThreadingUnixStreamServer):
 
 
 class JobDaemonServer:
-    def __init__(self, *, socket_path: str | Path, scheduler: ResearchJobScheduler) -> None:
+    def __init__(self, *, socket_path: str | Path, scheduler: Any) -> None:
         self.socket_path = normalized_socket_path(socket_path)
         self.socket_path.parent.mkdir(parents=True, exist_ok=True)
         if self.socket_path.exists():

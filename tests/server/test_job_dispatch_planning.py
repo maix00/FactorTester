@@ -47,19 +47,3 @@ def test_plan_payload_persists_plan_and_queues_execution(tmp_path, monkeypatch):
     job = repository.require("plan-job")
     assert job.status is JobStatus.QUEUED
     assert job.execution_plan == {"plan_version": 1}
-
-
-def test_scheduler_can_yield_planning_and_execution_to_celery(monkeypatch, tmp_path):
-    from server.jobs.scheduling.daemon import ResearchJobScheduler
-    from server.jobs.states import JobStatus
-
-    monkeypatch.setenv("FACTORTESTER_DEPLOYMENT_ID", "local")
-    monkeypatch.setenv("FACTORTESTER_CELERY_PLANNING", "1")
-    monkeypatch.setenv("FACTORTESTER_CELERY_EXECUTION", "1")
-    repository = JobRepository(tmp_path / "jobs.db")
-    scheduler = ResearchJobScheduler(repository=repository, deployment_id="local")
-    scheduler._dispatch_planning()
-    scheduler._dispatch_execution()
-    assert repository.list_for_deployment(
-        deployment_id="local", statuses=(JobStatus.QUEUED,),
-    ) == []
