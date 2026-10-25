@@ -68,11 +68,9 @@ def test_run_spec_endpoint_returns_an_owned_immutable_run_spec(
 ) -> None:
     monkeypatch.setattr(Settings, "CACHE_DB_PATH", tmp_path / "run-spec.sqlite")
     run_spec = {
-        "run_spec_version": research_runs.NAUTILUS_RUN_SPEC_VERSION,
-        "configuration": {"shared": {}, "analyses": {
-            "backtest": {"execution": {"backend": "nautilus_trader"}},
-        }},
-        "analyses": ["backtest"],
+        "run_spec_version": research_runs.RUN_SPEC_VERSION,
+        "configuration": {"shared": {}},
+        "analyses": ["ic"],
     }
     run = research_runs.create_run(
         owner="owner-1",
