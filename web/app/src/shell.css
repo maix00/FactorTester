@@ -329,3 +329,7 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-report-chapter-actions { display: inline-flex; gap: 3px; margin-left: 8px; }
 .tr-report-chapter-actions button { border: 0; background: transparent; color: var(--muted); font: inherit; }
 .tr-job-actions { display: flex; justify-content: flex-end; padding: 0 0 8px; }
+.tr-job-artifacts { display: grid; gap: 6px; }
+.tr-job-artifact { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+.tr-job-artifact small { display: block; color: var(--muted); margin-top: 2px; }
+.tr-job-artifact button { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); padding: 3px 7px; font: inherit; font-size: 11px; }
