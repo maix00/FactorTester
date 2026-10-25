@@ -12,6 +12,11 @@ mkdir -p "$OUT" "$CACHE/cargo" "$CACHE/rustup"
 [ -f "$SRC/python/Cargo.toml" ] || { echo "missing $SRC/python/Cargo.toml" >&2; exit 1; }
 git -C "$SRC" diff --quiet || { echo "vendor/nautilus_trader has uncommitted changes" >&2; exit 1; }
 REVISION="$(git -C "$SRC" rev-parse HEAD)"
+CACHED="$OUT/nautilus_trader-$REVISION.whl"
+if [ -f "$CACHED" ]; then
+  echo "cached wheel for $REVISION: $CACHED"
+  exit 0
+fi
 echo "building nautilus_trader from local commit $REVISION"
 
 docker run --rm \
@@ -35,4 +40,6 @@ docker run --rm \
     cd /src/python
     CARGO_BUILD_JOBS='"$JOBS"' maturin build --release --out /wheels -i python3.14
   '
-ls -lh "$OUT"/nautilus_trader-*.whl
+WHEEL="$(ls "$OUT"/nautilus_trader-*.whl | head -n 1)"
+cp -f "$WHEEL" "$CACHED"
+ls -lh "$WHEEL" "$CACHED"
