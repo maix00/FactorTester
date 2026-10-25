@@ -1199,6 +1199,17 @@ def get_research_report_chapter(publication_id: str, chapter_id: str):
     return jsonify({"success": True, "chapter": _json.loads(store.get_attachment(document["_id"], name))})
 
 
+@sft_bp.get("/api/strategy-families")
+def get_public_strategy_families():
+    require_user()
+    from server.services.nautilus_bridge.strategy_family_catalog import (
+        list_public_strategy_families,
+    )
+
+    return jsonify({"success": True,
+                    "families": list_public_strategy_families()})
+
+
 @sft_bp.get("/api/research-reports/<publication_id>/agent")
 def get_research_report_agent(publication_id: str):
     actor = require_user()
