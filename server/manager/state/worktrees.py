@@ -154,7 +154,7 @@ class WorktreeStateMixin:
             # The declared release owns the fixed service even when another
             # checkout's branch convention would assign it the same port.
             # Otherwise a main Manager can silently launch stale feat writers.
-            if path == self.repo and self.fixed_port:
+            if path == getattr(self, "fixed_source", self.repo) and self.fixed_port:
                 branch = self.fixed_branch or self.server_role
                 port = self.fixed_port
             elif self.fixed_port and port == self.fixed_port:
@@ -168,12 +168,24 @@ class WorktreeStateMixin:
             item.port == self.fixed_port for item in result
         ):
             result.append(Worktree(
-                path=self.repo,
+                path=getattr(self, "fixed_source", self.repo),
                 branch=self.fixed_branch or self.server_role,
                 head=self._revision_for_path()[:8],
                 label=self.fixed_branch or self.server_role,
                 port=self.fixed_port,
             ))
+        known_ports = {item.port for item in result}
+        for port, path in getattr(self, "extra_services", ()):
+            if port in known_ports:
+                continue
+            result.append(Worktree(
+                path=path,
+                branch=f"service-{port}",
+                head=self._revision_for_path()[:8],
+                label=f"service-{port}",
+                port=port,
+            ))
+            known_ports.add(port)
         return sorted(result, key=lambda wt: (
             -1 if wt.port == 0 else wt.port, wt.label
         ))  # no-port worktrees at bottom

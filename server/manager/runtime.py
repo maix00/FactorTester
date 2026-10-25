@@ -210,8 +210,11 @@ class ManagerState(
         state_root: Path | None = None,
         fixed_daemon_socket: str | Path | None = None,
         session_db_path: Path | None = None,
+        extra_services: tuple[tuple[int, Path], ...] = (),
+        fixed_source: Path | None = None,
     ) -> None:
         self.repo = repo.resolve()
+        self.fixed_source = (fixed_source or repo).resolve()
         self.runtime_source_root = _REPO_ROOT.resolve()
         self.technical_docs = TechnicalDocsLibrary(
             self.runtime_source_root / "product_docs",
@@ -243,6 +246,15 @@ class ManagerState(
             or os.environ.get("FACTORTESTER_FIXED_BRANCH")
             or ("main" if self.server_role == "main" else "")
         ).strip()
+        self.extra_services = tuple(
+            (int(port), Path(path).resolve())
+            for port, path in extra_services
+        )
+        for port, path in self.extra_services:
+            if not 1 <= port <= 65535:
+                raise ValueError("service port must be between 1 and 65535")
+            if not path.is_dir():
+                raise ValueError(f"service source does not exist: {path}")
         self.fixed_daemon_socket = (
             str(
                 fixed_daemon_socket

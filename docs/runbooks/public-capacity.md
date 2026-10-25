@@ -34,3 +34,27 @@ Thresholds (overridable):
 1. Stop the app only.
 2. Set `FACTORTESTER_STATE_ROOT` back to the previous path.
 3. Start the app and verify `/state/job-index.sqlite` and health.
+
+
+## Installed monitor
+
+`factortester-capacity-check.timer` runs every 15 minutes and writes
+`/data/state/CAPACITY_ALERT` on failure (removed on recovery). Check:
+
+```bash
+systemctl list-timers factortester-capacity-check.timer
+sudo journalctl -u factortester-capacity-check.service -n 5
+cat /data/state/CAPACITY_ALERT
+```
+
+
+## Control-event retention
+
+Installed `factortester-control-events-retention.timer` (daily 03:30). It runs:
+
+```text
+factortester-prune-control-events /data/state/job-index.sqlite   --older-than-days 90 --apply --vacuum
+```
+
+The tool refuses to delete when `control_sync_cursors` is behind. It
+currently reports `candidates=0` because all events are younger than 90 days.

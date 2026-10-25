@@ -94,6 +94,7 @@ export FACTORTESTER_IMMUTABLE_SOURCE=1
 export HOME=/state/home
 export PYTHONPATH=/opt/factortester/app
 install -d -o factortester -g "$app_group" /state/home /state/logs
+install -d -o factortester -g "$app_group" /state/job-daemons
 chown -R factortester:"$app_group" /state
 if [[ -s /run/secrets/manager-state/mihomo.yaml ]]; then
     install -o factortester -g "$app_group" -m 0600 \
@@ -101,6 +102,7 @@ if [[ -s /run/secrets/manager-state/mihomo.yaml ]]; then
 else
     rm -f /state/mihomo.yaml
 fi
+export FACTORTESTER_JOB_DAEMON_RUNTIME_DIR=/state/job-daemons
 export FACTORTESTER_MIHOMO_BIN=/usr/local/bin/mihomo
 export FACTORTESTER_MIHOMO_CONFIG_FILE=/state/mihomo.yaml
 gosu factortester test -w /data || {
@@ -123,6 +125,21 @@ manager_args=(
     --daemon-socket /state/main-8000.sock
     --no-browser
 )
+if [[ -n "${FACTORTESTER_FIXED_SOURCE:-}" ]]; then
+    manager_args+=(--fixed-source "$FACTORTESTER_FIXED_SOURCE")
+fi
+extra_ports=(${FACTORTESTER_EXTRA_SERVICE_PORTS:-})
+extra_sources=(${FACTORTESTER_EXTRA_SERVICE_SOURCES:-})
+if (( ${#extra_ports[@]} != ${#extra_sources[@]} )); then
+    echo "FACTORTESTER_EXTRA_SERVICE_PORTS/SOURCES must be paired" >&2
+    exit 2
+fi
+for index in "${!extra_ports[@]}"; do
+    manager_args+=(
+        --service-port "${extra_ports[$index]}"
+        --service-source "${extra_sources[$index]}"
+    )
+done
 
 if python -m server.manager.app --help 2>&1 | grep -q -- '--overlay-bind-address'; then
     manager_args+=(
@@ -145,5 +162,13 @@ gosu factortester /usr/local/bin/start-fixed-service \
     --capability-file /state/manager-capability.key \
     --port 8000 \
     --timeout "${FACTORTESTER_STARTUP_TIMEOUT:-180}"
+
+for extra_port in "${extra_ports[@]}"; do
+    gosu factortester /usr/local/bin/start-fixed-service \
+        --manager https://127.0.0.1:7998 \
+        --capability-file /state/manager-capability.key \
+        --port "$extra_port" \
+        --timeout "${FACTORTESTER_STARTUP_TIMEOUT:-180}"
+done
 
 wait "$manager_pid"
