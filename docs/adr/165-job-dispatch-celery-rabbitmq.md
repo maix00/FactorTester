@@ -186,3 +186,25 @@ service port, job-spec hash, RunSpec hash/version and execution-plan hash
 before invoking the approved process runner.  The dispatch preflight therefore
 resolves the real executor instead of failing closed.  The fake executor probe
 remains a transport/routing test and is not a Nautilus backtest.
+
+## 2026-10-25 persistent public test stack
+
+Deployed a non-production dispatch test stack on the public server:
+
+```text
+RabbitMQ: factortester-job-rabbit
+  network: factortester-public_private
+  data: /opt/factortester-container/job-dispatch-test/rabbitmq
+workers: inside the existing app container, release 6b704449
+  public-test:8000, public-test:8001, fake executor only
+state: /state/job-dispatch-test/jobs.db
+release: /opt/factortester-container/releases/audit-dispatch-6b70
+```
+
+The isolated `dispatch_probe` Job kind is enabled only with
+`FACTORTESTER_ALLOW_DISPATCH_PROBE=1`. The smoke probe created one Job per
+port; both reached `succeeded` with their own port in the result. Production
+8000/8001 APIs remained healthy. This validates transport/routing/terminal
+writes, not Nautilus execution. The workers and RabbitMQ remain deployed for
+acceptance; they use an isolated DB and must not be described as production
+backtest execution.
