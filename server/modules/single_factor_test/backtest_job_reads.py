@@ -1016,6 +1016,36 @@ def get_report_attachment(report_ref: str, name: str):
     return Response(data, mimetype=mime, headers={"Content-Disposition": f'inline; filename="{name}"'})
 
 
+@sft_bp.get("/api/research-reports/<publication_id>")
+def get_research_report_document(publication_id: str):
+    actor = require_user()
+    import os
+    from server.jobs.storage.couchdb_research_reports import get_research_report
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "research report store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = get_research_report(store, publication_id)
+    except Exception:
+        return jsonify({"success": False, "error": "research report not found"}), 404
+    visibility = str(document.get("visibility") or "private")
+    allowed = document.get("owner_ref") == actor or visibility == "public"
+    if not allowed:
+        from server.permissions.entries import PermissionStore
+        from server.permissions.subjects import subjects_for_user
+        db = os.environ.get("TRADERESEARCH_PERMISSIONS_DB", "") or os.environ.get("FACTORTESTER_PERMISSIONS_DB", "")
+        allowed = bool(db and any(PermissionStore(db).allows(
+            subject=subject, resource_type="research_report",
+            resource_ref=publication_id, action="read",
+        ) for subject in subjects_for_user(actor)))
+    if not allowed:
+        return jsonify({"success": False, "error": "research report access denied"}), 403
+    return jsonify({"success": True, "document": document})
+
+
 @sft_bp.get("/api/job-test-reports/<path:report_ref>")
 @sft_bp.get("/api/reports/<path:report_ref>")
 def get_report_document(report_ref: str):

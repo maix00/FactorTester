@@ -142,3 +142,19 @@ def test_job_test_report_alias_route(monkeypatch):
     client = app.test_client()
     with client.session_transaction() as session: session["username"] = "alice"
     assert client.get("/api/job-test-reports/report:job:1/attachments").status_code == 200
+
+
+def test_research_report_api_uses_publication_namespace(monkeypatch):
+    class Store:
+        def __init__(self, *args, **kwargs): pass
+        def _request(self, method, path):
+            import json
+            return 200, json.dumps({"kind": "research_report", "publication_id": "p1",
+                                    "owner_ref": "alice", "visibility": "private"}).encode()
+
+    monkeypatch.setenv("FACTORTESTER_COUCHDB_URL", "http://couch")
+    monkeypatch.setattr("server.jobs.storage.couchdb_reports.CouchDBObjectStore", Store)
+    app = Flask(__name__); app.secret_key = "test"; app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session: session["username"] = "alice"
+    assert client.get("/api/research-reports/p1").get_json()["document"]["kind"] == "research_report"
