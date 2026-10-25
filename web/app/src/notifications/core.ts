@@ -60,5 +60,7 @@ export function resetNotifications(): void {
 }
 
 // Stable bridge for legacy pages and acceptance tooling.
-(window as unknown as { TRNotify?: typeof notify; FTNotify?: typeof notify }).TRNotify = notify;
-(window as unknown as { TRNotify?: typeof notify; FTNotify?: typeof notify }).FTNotify = notify;
+if (typeof window !== "undefined") {
+  (window as unknown as { TRNotify?: typeof notify; FTNotify?: typeof notify }).TRNotify = notify;
+  (window as unknown as { TRNotify?: typeof notify; FTNotify?: typeof notify }).FTNotify = notify;
+}
