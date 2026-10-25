@@ -1,0 +1,36 @@
+# Public capacity and cleanup
+
+## Check
+
+```bash
+scripts/server/check_public_capacity.sh
+```
+
+Thresholds (overridable):
+
+- root free >= 10G
+- `/data` free >= 10G
+- MemAvailable >= 1024MB
+
+## Layout
+
+- Manager state: `/data/state` (`FACTORTESTER_STATE_ROOT`)
+- Docker: `/var/lib/docker` on the root volume
+- Backups: `/opt/factortester-container/backups`
+
+## Incident response
+
+1. Run the capacity check.
+2. Inspect `docker system df`, `du -xh -d2 /data /opt /var`.
+3. Remove only unused artifacts: `docker builder prune -af`, `docker image prune -af`.
+4. Do not prune stopped business containers; PostgreSQL may be stopped during reboot.
+5. Do not delete `job-index.sqlite` while the app is running.
+6. Use `scripts/server/prune_control_events.py --older-than-days N` without
+   `--apply` first; apply only after checking `control_sync_cursors`.
+7. Build only when `check_public_build_capacity.sh` passes.
+
+## State rollback
+
+1. Stop the app only.
+2. Set `FACTORTESTER_STATE_ROOT` back to the previous path.
+3. Start the app and verify `/state/job-index.sqlite` and health.
