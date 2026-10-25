@@ -35,7 +35,7 @@ export function MobileShell(): React.ReactElement {
           ) : page?.id === "settings" ? (
             <MobileSettingsPage onOpen={setSetting} />
           ) : (
-            <PageFrame pageId={page?.id ?? "research"} canvas />
+            <PageFrame pageId={page?.id ?? "research"} />
           )}
           <IonTabBar className="tr-mobile-tabs" slot="bottom">
             {tabs.map((item) => (
