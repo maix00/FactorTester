@@ -1,4 +1,5 @@
 import React from "react";
+import "./i18n.ts";
 import { createRoot } from "react-dom/client";
 import { DesktopShell } from "./desktop-shell.tsx";
 import "./shell.css";

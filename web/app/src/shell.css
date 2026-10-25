@@ -160,3 +160,5 @@ body { margin: 0; }
 .tr-mobile-tabs ion-tab-button { color: var(--muted); }
 .tr-mobile-tabs ion-tab-button.tab-selected { color: var(--accent); }
 .tr-mobile-tabs .tr-icon { width: 18px; height: 18px; margin-bottom: 2px; }
+.tr-mobile-workspace-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.tr-mobile-language { border: 1px solid var(--line); border-radius: 7px; padding: 4px 6px; color: var(--text); background: var(--panel); font: inherit; font-size: 12px; }

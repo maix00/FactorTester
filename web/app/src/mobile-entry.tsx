@@ -1,4 +1,5 @@
 import React from "react";
+import "./i18n.ts";
 import { setupIonicReact } from "@ionic/react";
 import { createRoot } from "react-dom/client";
 import { MobileShell } from "./mobile-shell.tsx";

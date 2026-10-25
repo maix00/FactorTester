@@ -1,5 +1,7 @@
 import React from "react";
 import { pagesForScope } from "../registry.ts";
+import { useTranslation } from "react-i18next";
+import i18n from "../i18n.ts";
 import { PageIcon } from "../icon.tsx";
 
 const RECENT_KEY = "tr.mobile.recent";
@@ -14,6 +16,7 @@ function recentIds(): string[] {
 }
 
 export function WorkspacePage(): React.ReactElement {
+  const { t } = useTranslation();
   const recent = recentIds();
   const pages = pagesForScope("mobile")
     .filter((page) => page.id !== "workspace")
@@ -24,15 +27,29 @@ export function WorkspacePage(): React.ReactElement {
     });
   return (
     <section className="tr-mobile-workspace">
-      <header>
-        <h1>工作区</h1>
-        <p>已打开和最近访问的页面</p>
+      <header className="tr-mobile-workspace-header">
+        <div>
+          <h1>{t("workspace.title")}</h1>
+          <p>{t("workspace.desc")}</p>
+        </div>
+        <select
+          className="tr-mobile-language"
+          aria-label={t("language")}
+          value={i18n.language.startsWith("en") ? "en" : "zh"}
+          onChange={(event) => {
+            i18n.changeLanguage(event.target.value);
+            localStorage.setItem("tr.language", event.target.value);
+          }}
+        >
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+        </select>
       </header>
       <div className="tr-mobile-open-list">
         {pages.map((page) => (
           <a key={page.id} href={`/m/${page.id}`} className="tr-mobile-open-row">
             <span className="tr-mobile-open-icon"><PageIcon name={page.icon} /></span>
-            <span>{page.title}</span>
+            <span>{t(`nav.${page.id}`, { defaultValue: page.title })}</span>
             <span className="tr-mobile-open-route">{page.route.split("?")[0]}</span>
           </a>
         ))}
