@@ -22,3 +22,15 @@ def test_cli_status_show_and_retry(tmp_path, monkeypatch, capsys):
     assert '"service_port": 8001' in capsys.readouterr().out
     assert cli.main(["retry", "job-cli", "1"]) == 0
     assert outbox.get(("job-cli", 1)).status == "pending"
+
+
+def test_cli_lists_worker_targets(tmp_path, monkeypatch, capsys):
+    from server.jobs.repository.sqlite import JobRepository
+
+    db = tmp_path / "jobs.db"
+    monkeypatch.setenv("FACTORTESTER_JOB_DB", str(db))
+    JobRepository(db).heartbeat_worker_target("local-docker", 8001, "worker-a", ttl_seconds=60)
+    assert cli.main(["targets"]) == 0
+    output = capsys.readouterr().out
+    assert '"service_port": 8001' in output
+    assert '"online": true' in output

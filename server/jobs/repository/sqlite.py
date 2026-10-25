@@ -494,6 +494,30 @@ class JobRepository(
                 ),
             )
 
+    def list_worker_targets(self, *, now: float | None = None) -> list[dict[str, Any]]:
+        timestamp = time.time() if now is None else float(now)
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT deployment_id, service_port, worker_id, heartbeat_at,
+                       expires_at, capabilities_json
+                FROM research_job_worker_targets
+                ORDER BY deployment_id, service_port
+                """
+            ).fetchall()
+        return [
+            {
+                "deployment_id": row["deployment_id"],
+                "service_port": int(row["service_port"]),
+                "worker_id": row["worker_id"],
+                "online": float(row["expires_at"]) >= timestamp,
+                "heartbeat_at": float(row["heartbeat_at"]),
+                "expires_at": float(row["expires_at"]),
+                "capabilities": _loads(row["capabilities_json"], {}),
+            }
+            for row in rows
+        ]
+
     def worker_target_online(
         self, deployment_id: str, service_port: int, *, now: float | None = None,
     ) -> bool:

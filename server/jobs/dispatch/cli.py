@@ -23,6 +23,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("status")
+    sub.add_parser("targets")
     show = sub.add_parser("show")
     show.add_argument("job_id")
     show.add_argument("attempt", type=int)
@@ -33,6 +34,12 @@ def main(argv: list[str] | None = None) -> int:
     outbox = _outbox()
     if args.command == "status":
         print(json.dumps(outbox.counts(), ensure_ascii=False, sort_keys=True))
+        return 0
+    if args.command == "targets":
+        from server.jobs.repository.sqlite import JobRepository
+
+        db = Path(os.environ.get(DB_ENV, "") or Settings.CACHE_DB_PATH)
+        print(json.dumps(JobRepository(db).list_worker_targets(), ensure_ascii=False, sort_keys=True))
         return 0
     if args.command == "show":
         record = outbox.get((args.job_id, args.attempt))
