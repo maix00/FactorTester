@@ -54,5 +54,18 @@ python -m server.jobs.dispatch.cli retry <job_id> <attempt>
 `retry` only accepts failed/dead rows and resets attempts; it does not bypass a
 worker capability check.
 
+Acceptance probe (isolated DB; the worker executor must accept the probe):
+
+```bash
+python scripts/test/job_dispatch_smoke.py \
+  --db /tmp/dispatch-smoke/jobs.db \
+  --broker amqp://factortester:***@127.0.0.1:5672// \
+  --deployment local-docker --port 8000 --port 8001
+```
+
+It creates one queued probe per port, dispatches, and waits for terminal Job
+state.  It is not a Nautilus performance run and must not be pointed at the
+production database.
+
 The target queue names are not a substitute for a shared Job database. A worker
 on another server must never be given this server's Job DB path.
