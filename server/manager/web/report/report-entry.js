@@ -372,6 +372,20 @@
         context.showNotice(error?.message || t("保存失败"), true);
       }
     };
+    const addRow = document.createElement("div");
+    addRow.className = "report-edit-row";
+    const addTitle = document.createElement("input");
+    addTitle.placeholder = t("新章节标题");
+    const addButton = document.createElement("button");
+    addButton.textContent = t("新增章节");
+    addButton.onclick = () => apply({
+      op: "insert_chapter",
+      chapter_id: `chapter-${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`,
+      title: addTitle.value.trim() || t("新章节"),
+      after_chapter_id: chapters[chapters.length - 1]?.chapter_id || null,
+    });
+    addRow.append(addTitle, addButton);
+    panel.append(addRow);
     chapters.forEach((chapter, index) => {
       const row = document.createElement("div");
       row.className = "report-edit-row";
