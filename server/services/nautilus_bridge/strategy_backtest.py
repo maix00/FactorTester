@@ -1,4 +1,4 @@
-"""Bounded real Nautilus run of a frozen FactorExpr strategy on one catalog."""
+"""Bounded real Nautilus run of a frozen Strategy on one catalog."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from tools.factors.expr.core import FactorExpr
 from tools.data.types.time_freq import DataFreq
 
 
-def run_factor_strategy_replay(
+def run_strategy_replay(
     *, input: ReplayInput, factor_ref: str, expression: FactorExpr,
     product: Any, output_dir: Path, max_bars: int = 8,
     factor_field: str = "CLOSE_ADJUSTED",
