@@ -25,7 +25,10 @@ def import_accounts(accounts: list[dict], adapter, *, dry_run: bool) -> dict:
                 username=username,
                 email=str(account.get("email") or ""),
                 groups=tuple(account.get("groups") or ()),
-                attributes={"legacy_role": (str(account.get("role") or "user"),)},
+                attributes={
+                    "legacy_role": (str(account.get("role") or "user"),),
+                    "legacy_username": (username,),
+                },
             )
         except ValueError as exc:
             skipped.append({"username": username, "reason": str(exc)})

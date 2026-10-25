@@ -24,7 +24,11 @@ def subjects_for_user(username: str) -> list[str]:
             client_secret=os.environ.get("TRADERESEARCH_KEYCLOAK_CLIENT_SECRET", ""),
         ).user(username)
         if identity is not None:
-            return list(permission_subjects(identity))
+            subjects = list(permission_subjects(identity))
+            legacy = (getattr(identity, "attributes", {}) or {}).get("legacy_username")
+            if legacy:
+                subjects.insert(0, f"user:{legacy[0] if isinstance(legacy, (tuple, list)) else legacy}")
+            return subjects
     except Exception:
         pass
     return subjects
