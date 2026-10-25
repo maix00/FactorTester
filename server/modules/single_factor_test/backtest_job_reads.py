@@ -823,7 +823,14 @@ def resolve_report_conflicts(report_ref: str):
     if document.get("owner") != actor:
         from tools.data.account_manage import get_account, is_super_admin_account
         if not is_super_admin_account(get_account(actor)):
-            return jsonify({"success": False, "error": "only the report owner may resolve conflicts"}), 403
+            import os as _os
+            from server.permissions.entries import PermissionStore
+            db = _os.environ.get("TRADERESEARCH_PERMISSIONS_DB", "") or _os.environ.get("FACTORTESTER_PERMISSIONS_DB", "")
+            if not (db and PermissionStore(db).allows(
+                subject=f"user:{actor}", resource_type="admin_console",
+                resource_ref="dispatch", action="manage",
+            )):
+                return jsonify({"success": False, "error": "report owner or admin manage permission required"}), 403
     keep_rev = str((request.get_json(silent=True) or {}).get("keep_rev") or "")
     if not keep_rev:
         return jsonify({"success": False, "error": "keep_rev is required"}), 400
