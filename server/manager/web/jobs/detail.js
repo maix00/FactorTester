@@ -389,12 +389,12 @@
       const report = document.createElement("div");
       report.className = "job-report-link";
       resultsPanel.append(report);
-      context.api(`/api/reports/${encodeURIComponent(reportRef)}/attachments`).then(payload => {
+      context.api(`/api/job-test-reports/${encodeURIComponent(reportRef)}/attachments`).then(payload => {
         const attachments = Array.isArray(payload.attachments) ? payload.attachments : [];
         if (!attachments.length) return;
         for (const attachment of attachments) {
           const link = document.createElement("a");
-          link.href = `/api/reports/${encodeURIComponent(reportRef)}/attachments/${encodeURIComponent(attachment.name)}`;
+          link.href = `/api/job-test-reports/${encodeURIComponent(reportRef)}/attachments/${encodeURIComponent(attachment.name)}`;
           link.target = "_blank";
           link.rel = "noopener";
           link.textContent = attachment.name;
@@ -402,7 +402,7 @@
         }
       }).catch(() => {
         const link = document.createElement("a");
-        link.href = `/api/reports/${encodeURIComponent(reportRef)}/attachments/tearsheet.html`;
+        link.href = `/api/job-test-reports/${encodeURIComponent(reportRef)}/attachments/tearsheet.html`;
         link.target = "_blank";
         link.rel = "noopener";
         link.textContent = context.t("打开测试报告");

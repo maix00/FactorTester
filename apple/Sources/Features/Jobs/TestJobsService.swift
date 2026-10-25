@@ -391,7 +391,7 @@ final class TestJobsService {
 
     func reportAttachments(reportRef: String, port: Int) async throws -> [TestJobReportAttachment] {
         let encodedRef = reportRef.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? reportRef
-        let response = try await request(path: "/api/reports/\(encodedRef)/attachments", port: port)
+        let response = try await request(path: "/api/job-test-reports/\(encodedRef)/attachments", port: port)
         return (response["attachments"] as? [[String: Any]] ?? []).compactMap { item in
             guard let name = item["name"] as? String, !name.isEmpty else { return nil }
             return TestJobReportAttachment(
@@ -405,7 +405,7 @@ final class TestJobsService {
     func reportAttachment(reportRef: String, name: String, port: Int) async throws -> Data {
         let encodedRef = reportRef.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? reportRef
         let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
-        return try await requestData(path: "/api/reports/\(encodedRef)/attachments/\(encodedName)", port: port)
+        return try await requestData(path: "/api/job-test-reports/\(encodedRef)/attachments/\(encodedName)", port: port)
     }
 
     func request(path: String, method: String = "GET", port: Int? = nil, allowAnonymous: Bool = false) async throws -> [String: Any] {
