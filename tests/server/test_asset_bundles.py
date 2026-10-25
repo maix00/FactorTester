@@ -237,3 +237,6 @@ def test_react_shell_assets_are_served_and_manifest_gated():
         body, content_type = static_file(f"vendor/web-app/{name}")
         assert body
         assert content_type
+    manifest, manifest_type = static_file("vendor/web-app/manifest.webmanifest")
+    assert json.loads(manifest)["start_url"] == "/app"
+    assert manifest_type == "application/manifest+json"
