@@ -9,7 +9,7 @@ ARG DEBIAN_SECURITY_MIRROR=https://deb.debian.org/debian-security
 ARG PIP_INDEX_URL=https://pypi.org/simple
 ARG CODEX_VERSION=0.147.0
 ARG CODEX_NPM_REGISTRY=https://registry.npmjs.org
-ARG TARGETARCH
+ARG TARGETARCH=amd64
 ARG MIHOMO_ARCHIVE_SHA256=db214c7a2517e63c150d123178d16d102e03a241ccdae4e5e07ffbe9cf56c6f9
 
 ENV DEBIAN_FRONTEND=noninteractive \
