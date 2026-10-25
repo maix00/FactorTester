@@ -399,8 +399,14 @@ def _complete_authoring_field_coverage(
         for item in fields
         for token in str(item.get("path") or "").split("/")
     }
+    contract_owned = {
+        "product_scope_refs", "venues", "strategy_venue_bindings",
+        "account_model", "execution_model", "shared_market_data",
+        "instrument_execution_policy", "start_utc", "end_utc",
+        "data_source_ref", "source_version", "bar_end_timestamps",
+    }
     for key, value in settings.items():
-        if key in covered:
+        if key in covered or key in contract_owned:
             continue
         status, note_or_reason = _authoring_setting_disposition(
             key, value, settings,
