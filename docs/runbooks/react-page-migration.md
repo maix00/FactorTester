@@ -27,7 +27,6 @@ not the same as a fully migrated detail/editor route.
 /product-category/:id
 /products/:id, /product-reference/:kind/:id
 /profiles, /profiles/:id
-/manager
 /mihomo
 /docs/:slug
 ```
