@@ -101,10 +101,12 @@ def dispatch_overview(
     from server.jobs.dispatch.audit import list_audit
 
     from server.jobs.storage.couchdb_authority import authority_enabled
+    from server.services.nautilus_bridge.runtime_status import nautilus_runtime_status
 
     return {
         "success": True,
         "couchdb_authority": authority_enabled(),
+        "nautilus_runtime": nautilus_runtime_status(),
         "server_id": server_id,
         "audit": list_audit(repository.db_path, limit=20),
         "nautilus": nautilus,
