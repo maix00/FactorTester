@@ -80,6 +80,12 @@ harness is optional and not a production deployment.  Compose validation:
 `docker compose ... config` exits 0.  A live run still requires Docker daemon
 and the approved Nautilus executor.
 
+Live local check (2026-10-25, fake executor only): RabbitMQ 3.13 container;
+two queued Jobs for `local-docker` ports 8000/8001; dispatcher published both
+target queues; the 8001 worker consumed only the 8001 message, wrote
+`succeeded` and progress, while 8000 remained queued with one message.  This
+proves broker routing/target isolation, not Nautilus execution.
+
 ## Worker boundary
 
 Celery worker configuration starts with `prefetch_multiplier=1`, one process,
