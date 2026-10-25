@@ -225,3 +225,15 @@ def test_lazy_groups_are_bundled_but_still_declared():
         assert bundle_bytes(name) == b"\n;\n".join(
             static_file(relative)[0] for relative in files
         )
+
+
+def test_react_shell_assets_are_served_and_manifest_gated():
+    from server.manager.web.assets import static_file
+
+    html, kind = static_file("vendor/web-app/index.html")
+    assert b"data-tr-web-app" in html
+    assert kind.startswith("text/html")
+    for name in ("loader.js", "desktop.js", "desktop.css", "mobile.js", "mobile.css"):
+        body, content_type = static_file(f"vendor/web-app/{name}")
+        assert body
+        assert content_type
