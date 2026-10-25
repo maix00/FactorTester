@@ -31,6 +31,7 @@ _FROZEN_EXECUTION_KEYS = frozenset({
     "liquidity_mode", "participation_rate", "matching_model",
     "nt_capacity_policy", "nt_matching_policy", "nt_price_protection_points",
     "nautilus_venue",
+    "fund_transfers", "instrument_updates", "trading_day_inventory_roll",
 })
 
 
@@ -762,6 +763,14 @@ def compile_frozen_execution_plan(
         raise UnsupportedExecutionConfig(
             "settings", f"unmapped execution fields: {', '.join(unknown)}",
         )
+    unsupported_features = {
+        "fund_transfers": "account-to-account transfers are not yet scheduled by a RunSpec controller strategy",
+        "instrument_updates": "dynamic Instrument updates need a frozen effective-time event stream and chunk boundary runner",
+        "trading_day_inventory_roll": "trading-day inventory roll needs an official session-close event stream",
+    }
+    for key, reason in unsupported_features.items():
+        if settings.get(key) not in (None, "", (), [], {}):
+            raise UnsupportedExecutionConfig(key, reason)
     source = _nonempty_text(settings.get("data_source_ref"), "data_source_ref")
     version_value = settings.get("source_version")
     version = None if version_value is None else _nonempty_text(version_value, "source_version")
