@@ -39,3 +39,14 @@ def test_replication_uses_continuous_database_copy():
         "source": "http://a/ft_objects", "target": "http://b/ft_objects",
         "continuous": True,
     }
+
+
+def test_conflict_resolution_deletes_non_winning_branches():
+    store = FakeStore()
+    calls = []
+    store.conflicts = lambda ref: ["2-a", "2-b"]
+    def request(method, path, body=None, content_type="application/json"):
+        calls.append((method, path)); return 200, b"{}"
+    store._request = request
+    assert store.resolve_conflicts("report:r:1", keep_rev="2-a") == ["2-a", "2-b"]
+    assert calls == [("DELETE", "report:r:1?rev=2-b")]

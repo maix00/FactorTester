@@ -108,6 +108,14 @@ class CouchDBObjectStore:
         _, raw = self._request("GET", f"{report_ref}?conflicts=true")
         return list(json.loads(raw).get("_conflicts") or [])
 
+    def resolve_conflicts(self, report_ref: str, *, keep_rev: str) -> list[str]:
+        """Keep one winning revision and delete other conflict branches."""
+        conflicts = self.conflicts(report_ref)
+        for revision in conflicts:
+            if revision != keep_rev:
+                self._request("DELETE", f"{report_ref}?rev={revision}")
+        return self.conflicts(report_ref)
+
     def get_attachment(self, report_ref: str, name: str) -> bytes:
         return self._request("GET", f"{report_ref}/{name}")[1]
 
