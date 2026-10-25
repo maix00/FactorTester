@@ -167,10 +167,11 @@ class KeycloakAdminAdapter:
 
         body = {
             "username": username, "enabled": True,
-            "email": email or f"{username}@invalid.local",
             "requiredActions": ["UPDATE_PASSWORD"],
             "attributes": {key: list(value) for key, value in (attributes or {}).items()},
         }
+        if email:
+            body["email"] = email
         status, location = self._post("users", body)
         if status not in {201, 204}:
             raise RuntimeError(f"user create failed: {status}")
