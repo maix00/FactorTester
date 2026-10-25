@@ -116,5 +116,6 @@
     return options;
   }
 
-  window.FTHighchartsRangeLoader = Object.freeze({attach, replaceVisibleSeries});
+  window.TRHighchartsRangeLoader = Object.freeze({attach, replaceVisibleSeries});
+  window.FTHighchartsRangeLoader = window.TRHighchartsRangeLoader;
 })();

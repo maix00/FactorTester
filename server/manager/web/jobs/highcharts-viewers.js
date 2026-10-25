@@ -82,7 +82,7 @@
         }
       }};
     }
-    window.FTHighchartsRangeLoader?.attach(options, displayOptions);
+    window.TRHighchartsRangeLoader?.attach(options, displayOptions);
     if (typeof displayOptions.onPointClick !== "function") return options;
     options.plotOptions = options.plotOptions || {};
     options.plotOptions.series = {
