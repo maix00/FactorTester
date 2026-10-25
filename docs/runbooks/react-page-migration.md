@@ -26,7 +26,7 @@ not the same as a fully migrated detail/editor route.
 /factor-families/:id, /factor-sets/:id
 /product-category/:id
 /products/:id, /product-reference/:kind/:id
-/profiles, /profiles/:id
+/profiles/:id
 /mihomo
 /docs/:slug
 ```
