@@ -101,6 +101,13 @@ class WriteRoutesMixin:
                 repository = JobRepository()
                 outbox = DispatchOutbox(repository.db_path)
                 outbox.requeue((job_id, attempt))
+                from server.jobs.dispatch.audit import append_audit
+
+                append_audit(
+                    repository.db_path, action="requeue",
+                    actor=str((browser_session or {}).get("username") or "manager-token"),
+                    job_id=job_id, attempt=attempt,
+                )
             except (ValueError, KeyError) as exc:
                 json_response(self, {"success": False, "error": str(exc)}, 409)
                 return
