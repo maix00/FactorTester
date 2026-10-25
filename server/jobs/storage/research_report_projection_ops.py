@@ -140,6 +140,7 @@ def apply_projection_operation(store, document: dict[str, Any], *, base_rev: str
         projection["components"] = _remove_chapter_block(
             list(projection.get("components") or []), chapter_id)
         removed_logical = chapter_attachment_path(chapter_id)
+        removed_name = str(((document.get("attachments") or {}).get(removed_logical) or {}).get("name") or "")
     elif op == "insert_chapter":
         chapter_id = str(operation.get("chapter_id") or "")
         after = operation.get("after_chapter_id")
@@ -263,5 +264,15 @@ def apply_projection_operation(store, document: dict[str, Any], *, base_rev: str
         raise
     if status not in {201, 202}:
         raise ValueError("document write failed")
-    return {"rev": json.loads(body)["rev"], "projection_hash": projection["projection_hash"],
+    final_rev = json.loads(body)["rev"]
+    if "removed_name" in locals() and removed_name:
+        try:
+            status, body = store._request(
+                "DELETE", f"{document['_id']}/{removed_name}?rev={final_rev}",
+            )
+            if status in {200, 202}:
+                final_rev = json.loads(body)["rev"]
+        except Exception:
+            pass
+    return {"rev": final_rev, "projection_hash": projection["projection_hash"],
             "generation": generation, "chapter": chapter}
