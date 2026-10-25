@@ -235,3 +235,6 @@ pyrightconfig.json
 web/chart-workbench/node_modules/
 
 # End of https://www.toptal.com/developers/gitignore/api/macos,python,visualstudiocode
+
+!deploy/docker/factortester-public/wheels/
+!deploy/docker/factortester-public/wheels/README.md

@@ -66,6 +66,20 @@ LABEL org.traderesearch.nautilus.revision="${NAUTILUS_VENDOR_REVISION}"
 COPY deploy/docker/factortester-public/wheels/py_alpha_lib-0.3.1-cp314-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl /tmp/py_alpha_lib-0.3.1-cp314-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
 RUN python -m pip install --no-cache-dir --no-deps /tmp/py_alpha_lib-0.3.1-cp314-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl && rm -f /tmp/py_alpha_lib-0.3.1-cp314-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
 
+# Nautilus is built from the local vendor submodule by
+# scripts/server/build_nautilus_linux_wheel.sh. A public release that requires
+# it passes NAUTILUS_WHEEL_REQUIRED=1 and fails rather than shipping without it.
+ARG NAUTILUS_WHEEL_REQUIRED=0
+COPY deploy/docker/factortester-public/wheels/ /tmp/factortester-wheels/
+RUN set -eu; \
+    wheel="$(ls /tmp/factortester-wheels/nautilus_trader-*.whl 2>/dev/null | head -n 1 || true)"; \
+    if [ -n "$wheel" ]; then \
+      python -m pip install --no-cache-dir --no-deps "$wheel"; \
+      rm -rf /tmp/factortester-wheels; \
+    elif [ "$NAUTILUS_WHEEL_REQUIRED" = "1" ]; then \
+      echo "NAUTILUS_WHEEL_REQUIRED=1 but no local nautilus_trader wheel was supplied" >&2; exit 1; \
+    fi
+
 # The npm package is a small launcher around the platform package. Install
 # only the official native Linux binary, so the image needs neither npm nor a
 # second Node runtime and the existing Python dependency layer stays cached.
