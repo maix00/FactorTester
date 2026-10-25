@@ -244,6 +244,24 @@ class StrategyLibraryStore:
             pass
 
     def get_entry(self, strategy_ref: str) -> dict[str, Any] | None:
+        import os
+        from server.jobs.storage.couchdb_authority import libraries_read_enabled
+
+        if libraries_read_enabled():
+            url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+            if url:
+                try:
+                    from server.jobs.storage.couchdb_library_reader import CouchDBLibraryReader
+                    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+                    document = CouchDBLibraryReader(CouchDBObjectStore(
+                        url, os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects",
+                    )).strategy(strategy_ref)
+                    entry = ((document or {}).get("payload") or {}).get("entry")
+                    if isinstance(entry, dict):
+                        return entry
+                except Exception:
+                    pass
         with self._lock, connect_sqlite(self.db_path, readonly=True) as db:
             row = db.execute(
                 "SELECT * FROM strategy_library_entries WHERE strategy_ref=? AND deleted_at=0",

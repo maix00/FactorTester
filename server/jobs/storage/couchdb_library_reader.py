@@ -131,3 +131,15 @@ class CouchDBLibraryWriter:
         document = json.loads(body)
         document.update({"_deleted": True, "_rev": document["_rev"]})
         self.store._request("PUT", strategy_ref, json.dumps(document).encode())
+
+    def strategy(self, strategy_ref: str) -> dict | None:
+        import json
+
+        try:
+            _, body = self.store._request("GET", strategy_ref)
+        except Exception:
+            return None
+        document = json.loads(body)
+        if document.get("kind") != "strategy_version":
+            return None
+        return document
