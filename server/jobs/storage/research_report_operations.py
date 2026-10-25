@@ -233,3 +233,41 @@ def apply_component_remove(store, document: dict[str, Any], *, base_rev: str,
 
 
 from .research_report_agent import chapter_attachment_path
+
+
+def apply_component_batch(store, document: dict[str, Any], *, base_rev: str,
+                          operations: list[dict[str, Any]]) -> dict[str, Any]:
+    if str(document.get("_rev") or "") != str(base_rev or ""):
+        raise ValueError("revision conflict")
+    if not operations or len(operations) > 100:
+        raise ValueError("batch size must be between 1 and 100")
+    chapter_id = str(operations[0].get("chapter_id") or "")
+    if not chapter_id or any(str(op.get("chapter_id") or "") != chapter_id for op in operations):
+        raise ValueError("all operations must target one chapter")
+    meta = (document.get("attachments") or {}).get(chapter_attachment_path(chapter_id)) or {}
+    name = str(meta.get("name") or "")
+    if not name:
+        raise ValueError("chapter attachment is missing")
+    chapter = json.loads(store.get_attachment(str(document["_id"]), name))
+    for operation in operations:
+        op = str(operation.get("op") or "")
+        if op == "insert_component":
+            chapter = insert_component(
+                chapter, dict(operation.get("component") or {}),
+                str(operation.get("parent_id") or ""),
+                str(operation.get("after_component_id") or ""),
+            )
+        elif op == "move_component":
+            chapter = move_component(
+                chapter, str(operation.get("component_id") or ""),
+                str(operation.get("parent_id") or ""),
+                str(operation.get("after_component_id") or ""),
+            )
+        elif op == "remove_component":
+            chapter = remove_component(
+                chapter, str(operation.get("component_id") or ""),
+                bool(operation.get("include_children")),
+            )
+        else:
+            raise ValueError(f"unsupported batch operation: {op}")
+    return _save_chapter(store, document, base_rev, chapter_id, chapter)

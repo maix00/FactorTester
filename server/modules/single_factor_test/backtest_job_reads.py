@@ -1024,8 +1024,8 @@ def apply_research_report_operation(publication_id: str):
     from server.jobs.storage.couchdb_research_reports import get_research_report
     from server.jobs.storage.couchdb_reports import CouchDBObjectStore
     from server.jobs.storage.research_report_operations import (
-        apply_component_insert, apply_component_move, apply_component_remove,
-        apply_index_operation,
+        apply_component_batch, apply_component_insert, apply_component_move,
+        apply_component_remove, apply_index_operation,
     )
 
     payload = request.get_json(silent=True) or {}
@@ -1068,6 +1068,12 @@ def apply_research_report_operation(publication_id: str):
                 component_id=str(operation.get("component_id") or ""),
                 include_children=bool(operation.get("include_children")),
             )
+        elif op == "batch":
+            operations = operation.get("operations")
+            if not isinstance(operations, list):
+                return jsonify({"success": False, "error": "operations must be a list"}), 400
+            result = apply_component_batch(store, document, base_rev=base_rev,
+                                           operations=operations)
         else:
             result = apply_index_operation(store, document, base_rev=base_rev, operation=operation)
     except ValueError as exc:

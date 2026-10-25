@@ -44,3 +44,27 @@ def test_insert_and_remove_components():
     assert [c["component_id"] for c in inserted["components"]] == ["root", "a", "b"]
     removed = remove_component(inserted, "b")
     assert [c["component_id"] for c in removed["components"]] == ["root", "a"]
+
+
+def test_component_batch_validates_single_chapter():
+    from server.jobs.storage.research_report_operations import apply_component_batch
+    import json
+    class Store:
+        def get_attachment(self, ref, name):
+            return json.dumps({"components": [
+                {"component_id": "root", "kind": "chapter", "parent_id": None},
+                {"component_id": "a", "kind": "section", "parent_id": "root"},
+            ]}).encode()
+        def _request(self, *args, **kwargs):
+            raise AssertionError("save should not be reached")
+    document = {"_id": "research-report:p1", "_rev": "1-a", "attachments": {
+        "chapters/" + __import__("hashlib").sha256(b"chapter-x").hexdigest()[:32] + ".json": {"name": "x.json"}}}
+    try:
+        apply_component_batch(Store(), document, base_rev="1-a", operations=[
+            {"op": "remove_component", "chapter_id": "chapter-x", "component_id": "a"},
+            {"op": "remove_component", "chapter_id": "other", "component_id": "a"},
+        ])
+    except ValueError as exc:
+        assert "one chapter" in str(exc)
+    else:
+        raise AssertionError("mixed chapters should fail")
