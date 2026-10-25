@@ -782,8 +782,8 @@ def oidc_callback():
         from server.identity.keycloak import KeycloakAdminAdapter
         identity = KeycloakAdminAdapter(
             branding.env("KEYCLOAK_URL"), branding.env("KEYCLOAK_REALM"),
-            client_id=branding.env("KEYCLOAK_CLIENT_ID", "admin-cli"),
-            client_secret=branding.env("KEYCLOAK_CLIENT_SECRET", ""),
+            client_id=branding.env("KEYCLOAK_ADMIN_CLIENT_ID", "admin-cli"),
+            client_secret=branding.env("KEYCLOAK_ADMIN_CLIENT_SECRET", ""),
         ).user(username)
         legacy = (getattr(identity, "attributes", {}) or {}).get("legacy_username") if identity else None
         if legacy:
