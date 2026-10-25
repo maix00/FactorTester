@@ -8,9 +8,9 @@ not the same as a fully migrated detail/editor route.
 | Route | Status |
 | --- | --- |
 | `/research` | native landing; detail editor bridge |
-| `/jobs` | native list; native detail drawer; job configuration/input still legacy |
+| `/jobs` | native list; native detail + run configuration drawer; input still legacy |
 | `/backtest` | native strategy-family landing; workbench bridge |
-| `/products` | native catalog; group/product editors bridge |
+| `/products` | native catalog with product/factor tabs; group/product/factor editors bridge |
 | `/settings` | native overlay; several sections still placeholders |
 | `/account` | native |
 
@@ -21,12 +21,11 @@ not the same as a fully migrated detail/editor route.
 /research reports
 /reports/:id
 /strategies, /strategies/:id
-/jobs/:port/:id/configuration
 /jobs/:port/:id/input/:name
 /ic
 /factor-series
 /factor-families, /factor-sets
-/factors, /factor-families/:id, /factors/:id, /factor-sets/:id
+/factor-families/:id, /factors/:id, /factor-sets/:id
 /product-groups, /product-categories, /product-category/:id
 /products/:id, /product-groups/:id, /product-sources, /product-reference/:kind/:id
 /profiles, /profiles/:id
