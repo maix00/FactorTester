@@ -21,6 +21,8 @@ export function CatalogPage(): React.ReactElement {
   const [strategyData, setStrategyData] = useState<Record<string, unknown> | null>(null);
   const [factorDetail, setFactorDetail] = useState<string>("");
   const [factorData, setFactorData] = useState<Record<string, unknown> | null>(null);
+  const [groupDetail, setGroupDetail] = useState<string>("");
+  const [groupData, setGroupData] = useState<Record<string, unknown> | null>(null);
   const [factors, setFactors] = useState<Record<string, unknown>[]>([]);
 
   useEffect(() => {
@@ -42,6 +44,15 @@ export function CatalogPage(): React.ReactElement {
       .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }))
       .finally(() => setLoading(false));
   }, [tab, strategyPage, t]);
+
+  useEffect(() => {
+    if (!groupDetail) { setGroupData(null); return; }
+    setGroupData(null);
+    fetch(`/api/product-library/product-groups/${encodeURIComponent(groupDetail)}`, { credentials: "same-origin" })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+      .then((value) => setGroupData(value))
+      .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }));
+  }, [groupDetail, t]);
 
   useEffect(() => {
     if (!factorDetail) { setFactorData(null); return; }
@@ -98,10 +109,13 @@ export function CatalogPage(): React.ReactElement {
         {groups.map((group) => {
           const id = String(group.id ?? group.name ?? "");
           return (
-            <button key={id} type="button" className={selected === id ? "is-active" : ""} onClick={() => setSelected(id)}>
-              <b>{group.name ?? group.title ?? id}</b>
-              <small>{group.member_count ?? group.product_count ?? 0} {t("catalog.members")}</small>
-            </button>
+            <div key={id} className={`tr-catalog-group${selected === id ? " is-active" : ""}`}>
+              <button type="button" onClick={() => setSelected(id)}>
+                <b>{group.name ?? group.title ?? id}</b>
+                <small>{group.member_count ?? group.product_count ?? 0} {t("catalog.members")}</small>
+              </button>
+              <button type="button" className="tr-catalog-group-detail" onClick={() => setGroupDetail(id)}>{t("jobs.detail")}</button>
+            </div>
           );
         })}
       </div> : null}
@@ -136,6 +150,12 @@ export function CatalogPage(): React.ReactElement {
       </div>
       {tab === "strategies" && strategies.length < strategyTotal ? (
         <button type="button" className="tr-mobile-load-more" disabled={loading} onClick={() => setStrategyPage((value) => value + 1)}>{t("more")}</button>
+      ) : null}
+      {groupDetail ? (
+        <div className="tr-legacy-overlay" role="dialog" aria-label={groupDetail}>
+          <div className="tr-legacy-bar"><strong>{groupDetail}</strong><button type="button" onClick={() => setGroupDetail("")}>{t("notifications.close")}</button></div>
+          {groupData ? <pre className="tr-job-detail">{JSON.stringify(groupData, null, 2)}</pre> : <p className="tr-catalog-detail-loading">{t("loading")}</p>}
+        </div>
       ) : null}
       {factorDetail ? (
         <div className="tr-legacy-overlay" role="dialog" aria-label={factorDetail}>
