@@ -615,6 +615,15 @@ def load_product_groups(username: str) -> list:
 def save_product_groups(username: str, groups: list) -> None:
     ensure_account_manager_sqlite_store()
     _save_product_groups(username, groups)
+    if str(os.environ.get("TRADERESEARCH_LIBRARIES_COUCHDB_WRITE", "")).lower() in {"1", "true", "yes"}:
+        from server.jobs.storage.couchdb_library_reader import CouchDBLibraryWriter
+        from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+        url = str(os.environ.get("FACTORTESTER_COUCHDB_URL") or "").strip()
+        if url:
+            CouchDBLibraryWriter(CouchDBObjectStore(
+                url, str(os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects"),
+            )).replace_product_groups(username, groups)
     _replace_domain_entities(
         username, "product_group", groups, id_key="id",
     )
