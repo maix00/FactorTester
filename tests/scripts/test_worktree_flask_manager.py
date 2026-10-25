@@ -2641,7 +2641,7 @@ def test_worktrees_skip_bare_repository_entry(tmp_path, monkeypatch) -> None:
 def test_manager_starts_bundle_and_api_restart_preserves_daemon(tmp_path, monkeypatch) -> None:
     (tmp_path / "start_server.py").write_text("", encoding="ascii")
     (tmp_path / "scripts").mkdir()
-    (tmp_path / "scripts" / "research_job_daemon.py").write_text("", encoding="ascii")
+    (tmp_path / "scripts" / "research_job_planner.py").write_text("", encoding="ascii")
     created = []
 
     def fake_popen(command, **kwargs):
@@ -2664,7 +2664,7 @@ def test_manager_starts_bundle_and_api_restart_preserves_daemon(tmp_path, monkey
     assert bundle.daemon.pid == daemon_pid
     assert bundle.daemon.poll() is None
     assert bundle.api.pid != old_api_pid
-    assert created[0][0].command[1] == "scripts/research_job_daemon.py"
+    assert created[0][0].command[1] == "scripts/research_job_planner.py"
     assert created[1][1]["env"]["GTHT_DEPLOYMENT_ID"].endswith("-8135")
     assert created[1][1]["env"]["GTHT_JOB_DAEMON_SOCKET"] == str(bundle.socket_path)
     assert created[1][1]["env"]["FACTORTESTER_WERKZEUG_RELOADER"] == "0"
@@ -2693,7 +2693,7 @@ def test_manager_reclaims_services_after_control_process_restart(tmp_path, monke
         "_process_listing",
         lambda: [
             (41001, "python start_server.py --port 8141"),
-            (41002, "python scripts/research_job_daemon.py "
+            (41002, "python scripts/research_job_planner.py "
              "--deployment-id issue-141-service-8141 "
              f"--socket {path.resolve() / '.workspace/runtime/issue-141-service-8141.sock'}"),
         ],
@@ -2715,7 +2715,7 @@ def test_manager_restores_desired_services_after_graceful_restart(
     path.mkdir()
     (path / "start_server.py").write_text("", encoding="ascii")
     (path / "scripts").mkdir()
-    (path / "scripts" / "research_job_daemon.py").write_text(
+    (path / "scripts" / "research_job_planner.py").write_text(
         "", encoding="ascii",
     )
     worktree = manager.Worktree(
@@ -2772,7 +2772,7 @@ def test_explicit_service_stop_clears_restart_intent(tmp_path, monkeypatch) -> N
     path.mkdir()
     (path / "start_server.py").write_text("", encoding="ascii")
     (path / "scripts").mkdir()
-    (path / "scripts" / "research_job_daemon.py").write_text(
+    (path / "scripts" / "research_job_planner.py").write_text(
         "", encoding="ascii",
     )
     worktree = manager.Worktree(
@@ -2904,7 +2904,7 @@ def test_bundle_restart_recovers_api_when_daemon_has_died(
 ) -> None:
     (tmp_path / "start_server.py").write_text("", encoding="ascii")
     (tmp_path / "scripts").mkdir()
-    (tmp_path / "scripts" / "research_job_daemon.py").write_text(
+    (tmp_path / "scripts" / "research_job_planner.py").write_text(
         "", encoding="ascii"
     )
     old_api = _Process(["api"])

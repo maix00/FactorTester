@@ -259,7 +259,7 @@ class WorktreeStateMixin:
                 "start_server.py" in command and f"--port {port}" in command
             )
             is_daemon_candidate = (
-                "scripts/research_job_daemon.py" in command
+                "scripts/research_job_planner.py" in command
                 and f"--deployment-id {deployment_id}" in command
                 and f"--socket {socket_path}" in command
             )

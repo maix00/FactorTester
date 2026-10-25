@@ -163,7 +163,7 @@ def test_nautilus_execution_bridge_selects_only_its_focused_tests():
         "server/modules/single_factor_test/process_runners.py",
         "server/modules/single_factor_test/group.py",
         "server/jobs/repository/queries.py",
-        "server/jobs/scheduling/daemon.py",
+        "server/jobs/planning/daemon.py",
         "server/services/nautilus_bridge/position_offsets.py",
     }
     mode, targets = selector.select(paths)
@@ -183,9 +183,10 @@ def test_nautilus_execution_bridge_selects_only_its_focused_tests():
         "tests/server/test_nautilus_bridge_engine_factory.py",
         "tests/server/test_research_run_sample_use.py",
         "tests/server/test_research_job_lifecycle.py",
-        "tests/server/test_research_job_scheduler.py",
         "tests/server/test_group_research_run_module.py",
         "tests/server/test_nautilus_bridge_position_offsets.py",
+        "tests/server/test_job_repository.py",
+        "tests/server/test_job_planning_daemon.py",
     }
     assert all((selector.ROOT / path).is_file() for path in targets)
 

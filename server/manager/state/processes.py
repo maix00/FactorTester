@@ -156,7 +156,7 @@ class ProcessStateMixin:
         daemon = subprocess.Popen(
             [
                 self.python,
-                "scripts/research_job_daemon.py",
+                "scripts/research_job_planner.py",
                 "--deployment-id", deployment_id,
                 "--socket", str(socket_path),
             ],

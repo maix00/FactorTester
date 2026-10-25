@@ -218,10 +218,10 @@ EXACT_PATH_TESTS = {
         "tests/server/test_nautilus_report_route.py",
     ),
     "server/jobs/repository/queries.py": (
-        "tests/server/test_research_job_scheduler.py",
+        "tests/server/test_job_repository.py",
     ),
-    "server/jobs/scheduling/daemon.py": (
-        "tests/server/test_research_job_scheduler.py",
+    "server/jobs/planning/daemon.py": (
+        "tests/server/test_job_planning_daemon.py",
     ),
     "server/modules/single_factor_test/backtest_jobs.py": (
         "tests/server/test_research_job_lifecycle.py",

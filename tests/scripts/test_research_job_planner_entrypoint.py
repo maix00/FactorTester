@@ -16,7 +16,7 @@ def test_daemon_entrypoint_bootstraps_repo_without_editable_install(tmp_path) ->
         [
             sys.executable,
             "-S",
-            str(repo_root / "scripts" / "research_job_daemon.py"),
+            str(repo_root / "scripts" / "research_job_planner.py"),
             "--help",
         ],
         cwd=tmp_path,
