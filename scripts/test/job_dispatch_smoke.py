@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 
@@ -21,6 +22,8 @@ from server.jobs.dispatch.outbox import DispatchOutbox
 from server.jobs.models import JobRecord
 from server.jobs.repository.sqlite import JobRepository
 from server.jobs.states import JobStatus
+
+os.environ.setdefault("FACTORTESTER_ALLOW_DISPATCH_PROBE", "1")
 
 
 def create_probe(repo: JobRepository, *, job_id: str, deployment: str, port: int) -> None:
@@ -32,7 +35,7 @@ def create_probe(repo: JobRepository, *, job_id: str, deployment: str, port: int
             run_id=f"smoke-{job_id}",
             owner="__dispatch_smoke__",
             workspace_id="__dispatch_smoke__",
-            kind="backtest",
+            kind="dispatch_probe",
             status=JobStatus.SUBMITTED,
             deployment_id=deployment,
             service_port=port,

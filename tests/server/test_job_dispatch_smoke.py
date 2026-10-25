@@ -5,7 +5,8 @@ from server.jobs.dispatch import DispatchOutbox
 from server.jobs.repository.sqlite import JobRepository
 
 
-def test_create_probe_enqueues_only_target_port(tmp_path):
+def test_create_probe_enqueues_only_target_port(tmp_path, monkeypatch):
+    monkeypatch.setenv("FACTORTESTER_ALLOW_DISPATCH_PROBE", "1")
     db = tmp_path / "jobs.db"
     repository = JobRepository(db)
     create_probe(repository, job_id="probe-8001", deployment="local-docker", port=8001)
