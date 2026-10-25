@@ -20,12 +20,18 @@
 4. artifact sink 已迁移到 `server/jobs/dispatch/artifact_sink.py`；
 5. `step continue` IPC 接口已退役。
 
+## 已删除
+
+1. `server/jobs/ipc`；
+2. Manager 的 planning sidecar 子进程与 `research_job_planner.py`；
+3. `server/jobs/scheduling/result_projection.py`（迁移为 `server/jobs/result_projection.py`）。
+
+Manager 现在只管理 API 进程；planning 和 execution 必须由独立 Celery
+dispatcher 与目标端口 worker 承担，不再依赖 daemon health/drain.
+
 ## 仍需删除
 
-1. `server/jobs/ipc` 的 health/wake/cancel 生命周期兼容层；
-2. Manager 的 planning sidecar 子进程（planning 已在 dispatcher）；
-3. `server/jobs/scheduling/result_projection.py` 兼容模块；
-4. 旧 Job 详情/结果 Web 渲染。
+1. 旧 Job 详情/结果 Web 渲染。
 
 ## 约束
 
