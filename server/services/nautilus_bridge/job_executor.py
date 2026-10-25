@@ -263,7 +263,7 @@ class NautilusJobExecutor:
             "runner_path": record.runner_path,
         })
         receiver = _DispatchEventSink(context)
-        from server.jobs.scheduling.worker_pool import _WorkerSink
+        from server.jobs.dispatch.artifact_sink import _WorkerSink
 
         sink = _WorkerSink(
             record.job_id,
