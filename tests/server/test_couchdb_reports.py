@@ -50,3 +50,8 @@ def test_conflict_resolution_deletes_non_winning_branches():
     store._request = request
     assert store.resolve_conflicts("report:r:1", keep_rev="2-a") == ["2-a", "2-b"]
     assert calls == [("DELETE", "report:r:1?rev=2-b")]
+
+
+def test_job_test_report_document_kind_is_explicit():
+    from server.jobs.storage.couchdb_reports import JobTestReportDocument
+    assert JobTestReportDocument("r", "j", "alice").to_doc()["kind"] == "job_test_report"
