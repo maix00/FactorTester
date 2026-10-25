@@ -111,6 +111,10 @@ signal for a live trading process.
   failure backoff; broker URL is `FACTORTESTER_BROKER_URL`.
 - Focused tests: `tests/server/test_job_dispatch_outbox.py`,
   `tests/server/test_job_dispatch_runner.py` (14 passed at this commit).
+- Added `worker.py`: claim -> execute -> terminal write contract; duplicate
+  deliveries return `duplicate` without a second execution.
+- Cancelling a queued Job terminally closes its unsent outbox row in the same
+  transaction.
 - Celery app/worker task is intentionally not registered until the Nautilus
   vertical slice can consume a claimed attempt; a fake task would be worse
   than no task.
