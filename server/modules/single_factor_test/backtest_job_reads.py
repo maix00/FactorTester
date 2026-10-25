@@ -16,7 +16,6 @@ from flask import Response, jsonify, request, session, stream_with_context
 from server.jobs.artifacts import default_user_quota_bytes
 from server.jobs.product_scope_inputs import product_scope_snapshot
 from server.jobs.input_artifacts import FACTOR_SOURCE_PREFIX, artifact_role
-from server.jobs.ipc import DaemonUnavailable
 from server.jobs.ports import detect_port
 from server.jobs.report_outputs import (
     artifact_description,
@@ -35,7 +34,6 @@ from server.modules.single_factor_test.backtest_job_support import (
     require_job,
     require_job_detail,
 )
-from server.modules.single_factor_test.research_jobs import _daemon_client
 from server.services.session_runtime import require_user
 
 
@@ -728,84 +726,48 @@ def dispatch_status():
 
 @sft_bp.get("/api/jobs/<job_id>/stream")
 def stream_test_job(job_id: str):
-    job, error = require_job(job_id)
+    """Stream the durable Job progress projection.
+
+    Celery workers run in a different process (and possibly a different
+    server), so the old daemon EventBroker is no longer the live source.
+    Progress snapshots are persisted in the Job database and replayed here.
+    """
+    _job, error = require_job(job_id)
     if error:
         return error
     owner = require_user()
-    after = _after_seq()
 
     @stream_with_context
     def generate():
-        nonlocal after
-        last_db_sequence = -1
+        last_sequence = -1
         while True:
             current = repository().load(job_id, owner=owner)
             if current is None:
-                yield _sse(
-                    "error",
-                    {"error": "research job not found"},
-                )
+                yield _sse("error", {"error": "research job not found"})
                 return
-            db_progress = repository().progress(job_id, current.attempt)
-            if db_progress is not None and int(db_progress["sequence"]) > last_db_sequence:
-                last_db_sequence = int(db_progress["sequence"])
+            progress = repository().progress(job_id, current.attempt)
+            if progress is not None and int(progress["sequence"]) > last_sequence:
+                last_sequence = int(progress["sequence"])
                 yield _sse("progress", {
-                    **db_progress,
+                    **progress,
                     "status": current.status.value,
                     "percent_scope": "global",
                 })
-            try:
-                snapshot = _daemon_client().events(
-                    job_id,
-                    after=after,
-                    timeout=2.0,
-                )
-            except DaemonUnavailable:
-                yield _sse("reset", {
-                    "reason": "daemon_unavailable",
+            if current.status in TERMINAL_STATUSES:
+                yield _sse("result", {
                     "status": current.status.value,
                     "result_summary": current.result_summary,
                     "error": current.error,
                 })
                 return
-            if not snapshot.get("known", True):
-                yield _sse("reset", {
-                    "reason": "event_state_unavailable",
-                    "status": current.status.value,
-                    "latest_progress": None,
-                    "manifest": None,
-                    "result_summary": current.result_summary,
-                    "error": current.error,
-                })
-                if current.status in TERMINAL_STATUSES or after > 0:
-                    return
-            gap = snapshot.get("gap")
-            if gap:
-                yield _sse("reset", {
-                    "reason": "event_gap",
-                    "gap": gap,
-                    "status": current.status.value,
-                    "latest_progress": snapshot.get("latest_progress"),
-                    "manifest": snapshot.get("manifest"),
-                })
-            for event in snapshot.get("events") or []:
-                after = max(after, int(event["seq"]))
-                yield _sse(
-                    event["event"],
-                    event["data"],
-                    event_id=after,
-                )
-            if (
-                current.status in TERMINAL_STATUSES
-                or snapshot.get("closed")
-            ):
-                return
-            if not snapshot.get("events"):
-                yield _sse("heartbeat", {
-                    "status": current.status.value,
-                    "latest_progress": snapshot.get("latest_progress"),
-                    "server_time": time.time(),
-                })
+            yield _sse("heartbeat", {
+                "status": current.status.value,
+                "latest_progress": (
+                    progress if progress is not None and last_sequence >= 0 else None
+                ),
+                "server_time": time.time(),
+            })
+            time.sleep(1.0)
 
     return Response(
         generate(),

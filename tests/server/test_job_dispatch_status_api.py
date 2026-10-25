@@ -73,13 +73,9 @@ def test_job_stream_emits_persisted_progress_before_daemon_reset(tmp_path, monke
         "stream-progress", 1, sequence=3, phase="event_replay",
         completed=5, total=10, percent=50, message="half",
     )
+    repository.transition("stream-progress", JobStatus.RUNNING)
+    repository.transition("stream-progress", JobStatus.SUCCEEDED)
 
-    class EmptyDaemon:
-        def events(self, job_id, *, after, timeout):
-            return {"known": True, "events": [], "gap": None, "closed": True,
-                    "latest_progress": None, "manifest": None}
-
-    monkeypatch.setattr(backtest_job_reads, "_daemon_client", lambda: EmptyDaemon())
     response = client.get("/api/jobs/stream-progress/stream")
     body = response.get_data(as_text=True)
     assert "event: progress" in body
