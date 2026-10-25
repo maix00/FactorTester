@@ -157,6 +157,10 @@ class CouchDBLibraryWriter:
             return None
         return document
 
+    def revisions(self, strategy_ref: str) -> list[dict]:
+        documents = self._find({"kind": "strategy_revision", "strategy_ref": strategy_ref})
+        return [dict(doc.get("payload") or {}) for doc in documents]
+
     def revision(self, revision_ref: str) -> dict | None:
         import json
 

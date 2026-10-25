@@ -407,6 +407,27 @@ class StrategyLibraryStore:
         return self._revision(row, include_source=include_source) if row is not None else None
 
     def list_revisions(self, strategy_ref: str) -> list[dict[str, Any]]:
+        import os
+        from server.jobs.storage.couchdb_authority import libraries_read_enabled
+
+        if libraries_read_enabled():
+            url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+            if url:
+                try:
+                    from server.jobs.storage.couchdb_library_reader import CouchDBLibraryReader
+                    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+                    values = CouchDBLibraryReader(CouchDBObjectStore(
+                        url, os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects",
+                    )).revisions(strategy_ref)
+                    if values:
+                        return sorted(values, key=lambda item: (
+                            -int(item.get("revision_number") or 0),
+                            -float(item.get("created_at") or 0),
+                            str(item.get("revision_ref") or ""),
+                        ))
+                except Exception:
+                    pass
         with self._lock, connect_sqlite(self.db_path, readonly=True) as db:
             rows = db.execute(
                 "SELECT * FROM strategy_library_revisions WHERE strategy_ref=? ORDER BY revision_number DESC, created_at DESC, revision_ref",
