@@ -208,3 +208,9 @@ port; both reached `succeeded` with their own port in the result. Production
 writes, not Nautilus execution. The workers and RabbitMQ remain deployed for
 acceptance; they use an isolated DB and must not be described as production
 backtest execution.
+
+Redeployed through `scripts/server/deploy_dispatch_test.sh` at release
+`5633ff8789a3` (deployment `public-accept3`): both ports again succeeded.  The
+script initially passed the host release path to `docker exec -w`; that bug was
+fixed by mapping the host worktree to `/opt/factortester/releases/...` inside
+the app container.
