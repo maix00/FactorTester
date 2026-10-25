@@ -20,8 +20,8 @@ def content_name(data: bytes, suffix: str) -> str:
 
 
 @dataclass
-class ReportDocument:
-    """One JobAttempt's test/backtest report document (not a Research Report)."""
+class JobTestReportDocument:
+    """One JobAttempt's immutable test/backtest report (not a Research Report)."""
     report_ref: str
     job_id: str
     owner: str
@@ -77,7 +77,7 @@ class CouchDBObjectStore:
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
             return response.status, response.read()
 
-    def put_report(self, report: ReportDocument, *, overwrite: bool = False) -> None:
+    def put_report(self, report: JobTestReportDocument, *, overwrite: bool = False) -> None:
         doc = report.to_doc()
         if overwrite:
             try:
@@ -154,8 +154,8 @@ class CouchDBObjectStore:
 
 def write_report(store: CouchDBObjectStore, *, job_id: str, owner: str,
                  revision: int, metadata: dict[str, Any],
-                 files: dict[str, tuple[bytes, str]]) -> ReportDocument:
-    report = ReportDocument(
+                 files: dict[str, tuple[bytes, str]]) -> JobTestReportDocument:
+    report = JobTestReportDocument(
         report_ref=f"report:{job_id}:{int(revision)}", job_id=job_id,
         owner=owner, metadata=dict(metadata),
     )
@@ -196,3 +196,7 @@ def publish_job_report(*, job_id: str, attempt: int, owner: str,
         metadata={"kind": "nautilus_report", **(metadata or {})}, files=files,
     )
     return report.report_ref
+
+
+# Backward-compatible name; new code should use JobTestReportDocument.
+ReportDocument = JobTestReportDocument
