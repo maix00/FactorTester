@@ -22,7 +22,10 @@
   function actionButton(context, actions, label, path, instanceID, disabled = false, danger = false) {
     const button = document.createElement("button");
     button.textContent = context.t(label);
-    button.disabled = disabled;
+    const canManage = Array.isArray(context.session?.admin_capabilities)
+      && context.session.admin_capabilities.includes("admin_console:manage");
+    button.disabled = disabled || !canManage;
+    if (!canManage) button.title = context.t("需要管理权限");
     if (danger) button.classList.add("danger-action");
     button.onclick = async () => {
       if (danger && !window.confirm(context.t("确认执行“%@”？").replace("%@", context.t(label)))) return;
