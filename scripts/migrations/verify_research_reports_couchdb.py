@@ -49,14 +49,31 @@ def main(argv: list[str] | None = None) -> int:
         for field in ("title", "owner_ref", "visibility", "projection_hash"):
             if str(publication.get(field) or "") != str(record.get(field) or ""):
                 mismatches.append({"publication_id": publication_id, "field": field})
+        try:
+            meta = (document.get("attachments") or {}).get("projection.json") or {}
+            name = str(meta.get("name") or "")
+            if name:
+                request = urllib.request.Request(
+                    f"{base}/{urllib.parse.quote('research-report:' + publication_id)}/{urllib.parse.quote(name)}",
+                    headers={"Authorization": auth},
+                )
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    projection = json.loads(response.read())
+                local = args.root / "mirrors" / f"{publication_id}.json"
+                local_projection = json.loads(local.read_text()) if local.is_file() else {}
+                if projection.get("projection_hash") != local_projection.get("projection_hash"):
+                    mismatches.append({"publication_id": publication_id, "field": "projection_hash"})
+        except Exception:
+            mismatches.append({"publication_id": publication_id, "field": "projection"})
         mirror = args.root / "mirrors" / publication_id
         if mirror.is_dir():
             files = [path for path in mirror.rglob("*")
                      if path.is_file() and not path.is_symlink() and path.name != ".DS_Store"]
             stored = document.get("attachments") or {}
-            if len(files) != len(stored):
+            extra = sum(1 for key in ("projection.json", "index.json") if key in stored)
+            if len(files) != len(stored) - extra:
                 mismatches.append({"publication_id": publication_id,
-                                   "files": len(files), "attachments": len(stored)})
+                                   "files": len(files), "attachments": len(stored) - extra})
     print(json.dumps({
         "checked": len(records), "missing": missing,
         "without_attachments": no_attachments, "mismatches": mismatches,
