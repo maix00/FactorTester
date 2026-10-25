@@ -786,6 +786,51 @@ def oidc_callback():
     return redirect("/")
 
 
+@sft_bp.get("/api/reports/<report_ref>/conflicts")
+def get_report_conflicts(report_ref: str):
+    actor = require_user()
+    import os
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "report store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = store.get_report(report_ref)
+    except Exception:
+        return jsonify({"success": False, "error": "report not found"}), 404
+    if not _can_read_report(actor, document, report_ref):
+        return jsonify({"success": False, "error": "report access denied"}), 403
+    return jsonify({"success": True, "conflicts": store.conflicts(report_ref)})
+
+
+@sft_bp.post("/api/reports/<report_ref>/conflicts/resolve")
+def resolve_report_conflicts(report_ref: str):
+    actor = require_user()
+    import os
+    from flask import request
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "report store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = store.get_report(report_ref)
+    except Exception:
+        return jsonify({"success": False, "error": "report not found"}), 404
+    if document.get("owner") != actor:
+        from tools.data.account_manage import get_account, is_super_admin_account
+        if not is_super_admin_account(get_account(actor)):
+            return jsonify({"success": False, "error": "only the report owner may resolve conflicts"}), 403
+    keep_rev = str((request.get_json(silent=True) or {}).get("keep_rev") or "")
+    if not keep_rev:
+        return jsonify({"success": False, "error": "keep_rev is required"}), 400
+    remaining = store.resolve_conflicts(report_ref, keep_rev=keep_rev)
+    return jsonify({"success": True, "conflicts": remaining})
+
+
 @sft_bp.get("/api/reports/<report_ref>/attachments/<path:name>")
 def get_report_attachment(report_ref: str, name: str):
     """Stream one content-addressed CouchDB report attachment."""

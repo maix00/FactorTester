@@ -55,3 +55,21 @@ def test_report_document_api_uses_managed_permission(monkeypatch, tmp_path):
     with client.session_transaction() as session: session["username"] = "alice"
     response = client.get("/api/reports/report:job:1")
     assert response.status_code == 200
+
+
+def test_report_conflicts_are_owner_resolvable(monkeypatch):
+    class Store:
+        def __init__(self, *args, **kwargs): pass
+        def get_report(self, ref): return {"_id": ref, "owner": "alice"}
+        def conflicts(self, ref): return ["2-a", "2-b"]
+        def resolve_conflicts(self, ref, *, keep_rev): return ["2-a"]
+
+    monkeypatch.setenv("FACTORTESTER_COUCHDB_URL", "http://couch")
+    monkeypatch.setattr("server.jobs.storage.couchdb_reports.CouchDBObjectStore", Store)
+    app = Flask(__name__); app.secret_key = "test"; app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session: session["username"] = "alice"
+    assert client.get("/api/reports/report:job:1/conflicts").get_json()["conflicts"] == ["2-a", "2-b"]
+    response = client.post("/api/reports/report:job:1/conflicts/resolve", json={"keep_rev": "2-a"})
+    assert response.status_code == 200
+    assert response.get_json()["conflicts"] == ["2-a"]
