@@ -50,3 +50,21 @@ Account   -> native account page
 ```
 
 All five entries render; only Runs and Account are native today.
+
+## Full server suite (target worktree)
+
+Run with the local vendored extension and Celery:
+
+```bash
+~/venvs/ft-factor-kernel/bin/python -m pytest -q tests/server
+```
+
+Result:
+
+```text
+1518 passed, 2 skipped
+```
+
+The 53 Nautilus integration tests pass against
+`vendor/nautilus_trader/python/nautilus_trader/_libnautilus.cpython-314-darwin.so`.
+The public Linux wheel is a separate deployment artifact and is still building.
