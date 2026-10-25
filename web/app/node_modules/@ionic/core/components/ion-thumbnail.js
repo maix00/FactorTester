@@ -1,0 +1,4 @@
+/*!
+ * (C) Ionic http://ionicframework.com - MIT License
+ */
+import{d as t,H as e,h as s,f as r,t as o}from"./p-Ct2aBEue.js";import{b as i}from"./p-HthJZjZ6.js";const a=t(class extends e{constructor(t){super(),!1!==t&&this.__registerHost(),this.__attachShadow()}render(){return s(r,{key:"ff9d2a4886b1c90a316c761f1160111f0e997f5d",class:i(this)},s("slot",{key:"9a0f0d69e3713831e88c8770a60b28ff1a03abb6"}))}static get style(){return":host{--size:48px;--border-radius:0;border-radius:var(--border-radius);display:block;width:var(--size);height:var(--size)}::slotted(ion-img),::slotted(img){border-radius:var(--border-radius);width:100%;height:100%;-o-object-fit:cover;object-fit:cover;overflow:hidden}"}},[257,"ion-thumbnail"]),d=a,n=function(){"undefined"!=typeof customElements&&["ion-thumbnail"].forEach((t=>{"ion-thumbnail"===t&&(customElements.get(o(t))||customElements.define(o(t),a))}))};export{d as IonThumbnail,n as defineCustomElement}

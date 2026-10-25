@@ -1,0 +1,4 @@
+/*!
+ * (C) Ionic http://ionicframework.com - MIT License
+ */
+import{d as t,H as e,h as o,t as s,f as i}from"./p-Ct2aBEue.js";import{b as r}from"./p-HthJZjZ6.js";const n=t(class extends e{constructor(t){super(),!1!==t&&this.__registerHost()}render(){const t=r(this);return o(i,{key:"d24ee9c70a99d11b7d95dfb4a8066670bdfcbc1d",role:"group",class:{[t]:!0,["item-group-"+t]:!0,item:!0}})}static get style(){return{ios:"ion-item-group{display:block}",md:"ion-item-group{display:block}"}}},[32,"ion-item-group"]),m=n,u=function(){"undefined"!=typeof customElements&&["ion-item-group"].forEach((t=>{"ion-item-group"===t&&(customElements.get(s(t))||customElements.define(s(t),n))}))};export{m as IonItemGroup,u as defineCustomElement}
