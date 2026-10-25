@@ -171,3 +171,28 @@ def test_running_job_cancel_request_is_observed_at_batch_boundary(tmp_path):
     record = repository.require("job-running-cancel")
     assert record.status is JobStatus.CANCELLED
     assert record.cancel_requested_at is not None
+
+
+def test_progress_is_monotonic_and_visible_to_job_owner(tmp_path):
+    repository = JobRepository(tmp_path / "jobs.db")
+    _queued_job(repository, "job-progress")
+
+    class ProgressExecutor:
+        def execute(self, record, message, context):
+            assert context.report_progress(
+                sequence=1, phase="event_replay", completed=1, total=2, percent=50,
+            )
+            assert not context.report_progress(
+                sequence=1, phase="stale", completed=2, total=2, percent=60,
+            )
+            assert context.report_progress(
+                sequence=2, phase="done", completed=2, total=2, percent=100,
+            )
+            return ExecutionOutcome({"ok": True})
+
+    DispatchWorker(repository).execute(_message("job-progress"), ProgressExecutor())
+    snapshot = repository.progress("job-progress", 1)
+    assert snapshot == {
+        "sequence": 2, "phase": "done", "completed": 2, "total": 2,
+        "percent": 100.0, "message": "",
+    }

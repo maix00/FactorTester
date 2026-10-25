@@ -403,6 +403,68 @@ class JobRepository(
             )
         return self._record(updated) if updated is not None else None
 
+    def record_progress(
+        self,
+        job_id: str,
+        attempt: int,
+        *,
+        sequence: int,
+        phase: str,
+        completed: int = 0,
+        total: int = 0,
+        percent: float = 0.0,
+        message: str = "",
+    ) -> bool:
+        """Keep only the newest monotonic snapshot per JobAttempt."""
+        if sequence < 0 or completed < 0 or total < 0 or not 0 <= percent <= 100:
+            raise ValueError("invalid progress snapshot")
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT sequence FROM research_job_progress WHERE job_id=? AND attempt=?",
+                (str(job_id), int(attempt)),
+            ).fetchone()
+            if row is not None and int(row["sequence"]) >= int(sequence):
+                return False
+            conn.execute(
+                """
+                INSERT INTO research_job_progress (
+                    job_id, attempt, sequence, phase, completed, total, percent,
+                    message, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(job_id, attempt) DO UPDATE SET
+                    sequence=excluded.sequence,
+                    phase=excluded.phase,
+                    completed=excluded.completed,
+                    total=excluded.total,
+                    percent=excluded.percent,
+                    message=excluded.message,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    str(job_id), int(attempt), int(sequence), str(phase),
+                    int(completed), int(total), float(percent), str(message)[:500],
+                    time.time(),
+                ),
+            )
+            return True
+
+    def progress(self, job_id: str, attempt: int) -> dict[str, Any] | None:
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM research_job_progress WHERE job_id=? AND attempt=?",
+                (str(job_id), int(attempt)),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "sequence": int(row["sequence"]),
+            "phase": row["phase"],
+            "completed": int(row["completed"]),
+            "total": int(row["total"]),
+            "percent": float(row["percent"]),
+            "message": row["message"],
+        }
+
     def cancel_requested(self, job_id: str, attempt: int) -> bool:
         with self._connection() as conn:
             row = conn.execute(

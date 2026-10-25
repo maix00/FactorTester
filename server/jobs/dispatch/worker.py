@@ -44,6 +44,15 @@ class ExecutionContext:
     def cancel_requested(self) -> bool:
         return self.repository.cancel_requested(self.job_id, self.attempt)
 
+    def report_progress(
+        self, *, sequence: int, phase: str, completed: int = 0,
+        total: int = 0, percent: float = 0.0, message: str = "",
+    ) -> bool:
+        return self.repository.record_progress(
+            self.job_id, self.attempt, sequence=sequence, phase=phase,
+            completed=completed, total=total, percent=percent, message=message,
+        )
+
 
 class JobExecutor(Protocol):
     def execute(

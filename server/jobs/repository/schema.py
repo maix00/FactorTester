@@ -178,6 +178,25 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
                 'queued', 'running', 'paused'
             );
 
+        CREATE TABLE IF NOT EXISTS research_job_progress (
+            job_id TEXT NOT NULL,
+            attempt INTEGER NOT NULL,
+            sequence INTEGER NOT NULL,
+            phase TEXT NOT NULL,
+            completed INTEGER NOT NULL DEFAULT 0,
+            total INTEGER NOT NULL DEFAULT 0,
+            percent REAL NOT NULL DEFAULT 0,
+            message TEXT NOT NULL DEFAULT '',
+            updated_at REAL NOT NULL,
+            PRIMARY KEY (job_id, attempt),
+            FOREIGN KEY (job_id) REFERENCES research_jobs(job_id) ON DELETE CASCADE,
+            CHECK (attempt >= 1),
+            CHECK (sequence >= 0),
+            CHECK (completed >= 0),
+            CHECK (total >= 0),
+            CHECK (percent >= 0 AND percent <= 100)
+        );
+
         CREATE TABLE IF NOT EXISTS research_job_worker_leases (
             job_id TEXT PRIMARY KEY,
             attempt INTEGER NOT NULL,
