@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Inspect or prune old Job control events from job-index.sqlite.
 
 Dry-run is the default.  Deleting events is refused while a control-sync
