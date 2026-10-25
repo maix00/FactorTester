@@ -20,7 +20,7 @@ not the same as a fully migrated detail/editor route.
 /researches/:id (native read; editor bridge)
 /reports/:id (agent markdown is native; report editor remains legacy)
 /jobs/:port/:id/input/:name
-/ic
+/ic-test
 /factor-series
 /factor-families/:id, /factor-sets/:id
 /product-category/:id
