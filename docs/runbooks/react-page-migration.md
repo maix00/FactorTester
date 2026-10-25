@@ -22,7 +22,6 @@ not the same as a fully migrated detail/editor route.
 /jobs/:port/:id/input/:name
 /ic-test
 /factor-series
-/factor-families/:id, /factor-sets/:id
 /product-category/:id
 /products/:id, /product-reference/:kind/:id
 /mihomo
