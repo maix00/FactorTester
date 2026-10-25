@@ -36,3 +36,17 @@ Last verified: local Manager at `http://10.118.197.132:8770/app`.
 Do not claim Nautilus is installed, the strategy-family chain is accepted, or
 that all pages are native React. The legacy iframe bridge remains intentional
 during migration.
+
+## Desktop page render check
+
+Verified with Playwright against the local Manager:
+
+```text
+Research  -> embedded frame
+Runs      -> native page
+Trading   -> embedded frame
+Catalog   -> embedded frame
+Account   -> native account page
+```
+
+All five entries render; only Runs and Account are native today.
