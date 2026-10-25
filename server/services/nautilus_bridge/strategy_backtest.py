@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Any
 from pathlib import Path
 from typing import Any
 
@@ -202,3 +203,68 @@ def run_strategy_family_replay(
         "publications": {role: len(rows) for role, rows in publications.items()},
         "orders": engine.get_result().total_orders, "reports": reports,
     }
+
+
+def run_strategy_family_run_spec(
+    *, job_spec: dict[str, Any], plan: dict[str, Any], output_dir: Path,
+) -> dict[str, Any]:
+    """Resolve frozen factor roles and product catalogs from one Job RunSpec."""
+    from server.modules.shared.run_spec_resolution.factors import RunFactorResolver
+    from server.services.nautilus_bridge.strategy_families import (
+        CrossSectionalGroup, ThresholdState,
+    )
+
+    template = plan.get("strategy")
+    if not isinstance(template, dict):
+        raise ValueError("strategy plan is missing")
+    kind = str(template.get("kind") or "")
+    parameters = template.get("parameters") or {}
+    if kind == "cross_sectional_group":
+        family = CrossSectionalGroup(
+            int(parameters.get("split_count") or 0),
+            int(parameters.get("group_index") or 0),
+        )
+    elif kind == "threshold":
+        family = ThresholdState(
+            float(parameters.get("entry_threshold") or 0),
+            float(parameters.get("exit_threshold") or 0),
+            str(parameters.get("side_mode") or "long_short"),
+        )
+    else:
+        raise ValueError(f"unsupported strategy family: {kind}")
+
+    shared = ((job_spec.get("run_spec") or {}).get("configuration") or {}).get("shared") or {}
+    resolver = RunFactorResolver(
+        owner=str(job_spec.get("_owner") or job_spec.get("owner") or ""),
+        frozen_factors=shared.get("factors") or [],
+        external_factor_artifacts=shared.get("external_factor_artifacts"),
+    )
+    roles = template.get("factor_roles")
+    if not isinstance(roles, dict) or not roles:
+        raise ValueError("strategy has no factor role bindings")
+    bindings = {}
+    for role, binding in roles.items():
+        if not isinstance(binding, dict):
+            raise ValueError(f"factor role {role!r} has an invalid binding")
+        factor = resolver.resolve(
+            factor_ref=str(binding.get("ref") or ""),
+            alias=str(binding.get("alias") or ""),
+        )
+        expression = getattr(factor, "expr", None)
+        if expression is None:
+            raise ValueError(f"factor role {role!r} has no FactorExpr")
+        bindings[str(role)] = expression
+    catalogs = plan.get("catalog_inputs")
+    if not isinstance(catalogs, dict) or not catalogs:
+        raise ValueError("strategy plan has no product catalogs")
+    inputs = {
+        product: ReplayInput(
+            Path(str(value["catalog_dir"])).resolve(),
+            str(value["contract_uid"]),
+        )
+        for product, value in catalogs.items()
+    }
+    return run_strategy_family_replay(
+        inputs=inputs, factor_bindings=bindings, family=family,
+        output_dir=Path(output_dir), max_bars=int(plan.get("max_input_bars") or 8),
+    )
