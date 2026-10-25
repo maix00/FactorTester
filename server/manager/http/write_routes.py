@@ -71,6 +71,42 @@ class WriteRoutesMixin:
             json_response(self, {"success": result.get("status") == "synced", "sync": result},
                           200 if result.get("status") == "synced" else 503)
             return
+        if parsed.path == "/api/dispatch/requeue":
+            browser_session = self._session()
+            if browser_session is None and not self._has_api_authorization():
+                self._require_capability()
+                return
+            if browser_session is not None:
+                from server.manager.http.core_get_routes import _admin_capabilities
+
+                if "admin_console:manage" not in _admin_capabilities(
+                    str(browser_session.get("username") or ""),
+                    str(browser_session.get("role") or ""),
+                ):
+                    json_response(self, {"success": False, "error": "admin console manage permission required"}, 403)
+                    return
+            try:
+                payload = self._json_body(16 * 1024)
+                job_id = str(payload.get("job_id") or "").strip()
+                attempt = int(payload.get("attempt") or 0)
+                if not job_id or attempt < 1:
+                    raise ValueError("job_id and attempt are required")
+            except (TypeError, ValueError, UnicodeError):
+                json_response(self, {"success": False, "error": "invalid requeue request"}, 400)
+                return
+            from server.jobs.dispatch.outbox import DispatchOutbox
+            from server.jobs.repository import JobRepository
+
+            try:
+                repository = JobRepository()
+                outbox = DispatchOutbox(repository.db_path)
+                outbox.requeue((job_id, attempt))
+            except (ValueError, KeyError) as exc:
+                json_response(self, {"success": False, "error": str(exc)}, 409)
+                return
+            json_response(self, {"success": True, "job_id": job_id, "attempt": attempt,
+                                 "status": outbox.get((job_id, attempt)).status})
+            return
         if self._mihomo_write(parsed, "POST"):
             return
         if self._post_agent_app_routes(parsed):

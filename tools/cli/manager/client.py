@@ -388,6 +388,12 @@ class ManagerClient:
             form={"instance_id": str(instance_id or "").strip()},
         )
 
+    def dispatch_requeue(self, job_id: str, attempt: int) -> dict[str, Any]:
+        return self._request(
+            "POST", "/api/dispatch/requeue",
+            payload={"job_id": job_id, "attempt": int(attempt)},
+        )
+
     def dispatch_overview(self) -> dict[str, Any]:
         """Read the super-admin Job dispatch overview."""
         return self._request("GET", "/api/dispatch/overview")

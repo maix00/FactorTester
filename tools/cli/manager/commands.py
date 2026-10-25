@@ -147,6 +147,21 @@ def dispatch_status(as_json: bool) -> None:
             click.echo(f"  {target.get('port')}  {target.get('queue')}  worker={online}")
 
 
+@dispatch_commands.command("requeue")
+@click.argument("job_id")
+@click.argument("attempt", type=int)
+@click.option("--json", "as_json", is_flag=True)
+@friendly_errors
+def dispatch_requeue(job_id: str, attempt: int, as_json: bool) -> None:
+    """Requeue a failed/dead local outbox row (requires admin manage)."""
+    client, _ = _authenticated_client()
+    value = client.dispatch_requeue(job_id, attempt)
+    if as_json:
+        click.echo(json.dumps(value, ensure_ascii=False, indent=2))
+        return
+    click.echo(f"{value.get('job_id')} attempt={value.get('attempt')} status={value.get('status')}")
+
+
 @dispatch_commands.command("targets")
 @click.option("--json", "as_json", is_flag=True)
 @friendly_errors
