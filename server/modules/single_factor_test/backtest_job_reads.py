@@ -828,6 +828,16 @@ def resolve_report_conflicts(report_ref: str):
     if not keep_rev:
         return jsonify({"success": False, "error": "keep_rev is required"}), 400
     remaining = store.resolve_conflicts(report_ref, keep_rev=keep_rev)
+    try:
+        from server.jobs.dispatch.audit import append_audit
+        import settings as Settings
+
+        append_audit(
+            Settings.CACHE_DB_PATH, action="report_conflict_resolve",
+            actor=actor, job_id=report_ref, detail=keep_rev,
+        )
+    except Exception:
+        pass
     return jsonify({"success": True, "conflicts": remaining})
 
 
