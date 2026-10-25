@@ -6,9 +6,10 @@ import os
 
 
 def authority_enabled() -> bool:
-    return str(os.environ.get("TRADERESEARCH_COUCHDB_AUTHORITY", "")).lower() in {
-        "1", "true", "yes",
-    }
+    value = os.environ.get("TRADERESEARCH_COUCHDB_AUTHORITY")
+    if value is None or str(value).strip() == "":
+        return bool(os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip())
+    return str(value).lower() in {"1", "true", "yes"}
 
 
 def libraries_read_enabled() -> bool:

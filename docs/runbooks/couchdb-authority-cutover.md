@@ -26,8 +26,10 @@ public:   factors 126/126, heads 126/126, product_groups 15/15,
 
 ## Enable
 
+When `FACTORTESTER_COUCHDB_URL` is configured, authority is enabled by default.
+Set `TRADERESEARCH_COUCHDB_AUTHORITY=0` to force the legacy path.
+
 ```text
-TRADERESEARCH_COUCHDB_AUTHORITY=1
 FACTORTESTER_COUCHDB_URL=http://...
 FACTORTESTER_COUCHDB_DB=ft_objects
 ```
