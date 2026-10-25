@@ -88,11 +88,22 @@ class PermissionStore:
             reason=r["reason"],
         ) for r in rows]
 
+    @staticmethod
+    def _matches(entry: PermissionEntry, resource_ref: str) -> bool:
+        if entry.resource_ref == "*" or entry.resource_ref == resource_ref:
+            return True
+        if entry.scope == "subtree":
+            return resource_ref.startswith(entry.resource_ref.rstrip(":") + ":")
+        return False
+
     def allows(self, *, subject: str, resource_type: str,
                resource_ref: str, action: str) -> bool:
+        allowed = False
         for entry in self.list(subject=subject):
             if (entry.resource_type == resource_type
-                    and entry.resource_ref in {resource_ref, "*"}
-                    and entry.action == action):
-                return entry.effect == "allow"
-        return False
+                    and entry.action == action
+                    and self._matches(entry, resource_ref)):
+                if entry.effect == "deny":
+                    return False
+                allowed = True
+        return allowed

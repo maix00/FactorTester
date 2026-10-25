@@ -27,3 +27,19 @@ def test_invalid_permission_is_rejected():
             subject="user:alice", resource_type="report",
             resource_ref="r", action="delete_all",
         )
+
+
+def test_subtree_and_deny_override(tmp_path):
+    store = PermissionStore(tmp_path / "permissions.db")
+    store.add(PermissionEntry(
+        subject="group:team/a", resource_type="report",
+        resource_ref="report:job", action="read", scope="subtree",
+    ))
+    store.add(PermissionEntry(
+        subject="group:team/a", resource_type="report",
+        resource_ref="report:job:secret", action="read", effect="deny",
+    ))
+    assert store.allows(subject="group:team/a", resource_type="report",
+                        resource_ref="report:job:ok", action="read")
+    assert not store.allows(subject="group:team/a", resource_type="report",
+                           resource_ref="report:job:secret", action="read")
