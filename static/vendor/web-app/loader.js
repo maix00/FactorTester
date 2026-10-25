@@ -1,0 +1,1 @@
+"use strict";(()=>{const t=window.matchMedia("(max-width: 760px)").matches,c="/static/vendor/web-app",e=document.createElement("link");e.rel="stylesheet";e.href=`${c}/${t?"mobile":"desktop"}.css`;document.head.append(e);const n=document.createElement("script");n.src=`${c}/${t?"mobile":"desktop"}.js`;document.body.append(n);})();
