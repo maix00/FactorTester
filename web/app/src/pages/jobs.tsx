@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Tag, Typography } from "antd";
+import { Drawer, Tag, Typography } from "antd";
 import type { TableProps } from "antd";
 import { useTranslation } from "react-i18next";
 import { TRDataTable } from "../components/data-table.tsx";
@@ -34,6 +34,8 @@ export function JobsPage(): React.ReactElement {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [selected, setSelected] = useState<JobRow | null>(null);
+  const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -66,6 +68,15 @@ export function JobsPage(): React.ReactElement {
     });
   }, [error, t]);
 
+  useEffect(() => {
+    if (!selected?.job_id) return;
+    setDetail(null);
+    fetch(`/api/jobs/${encodeURIComponent(selected.job_id)}`, { credentials: "same-origin" })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+      .then((value) => setDetail(value))
+      .catch((reason: Error) => notify({ code: "jobs.detail", type: "error", message: t("loadFailed"), description: reason.message }));
+  }, [selected, t]);
+
   const columns: TableProps<JobRow>["columns"] = [
     {
       title: t("jobs.task"),
@@ -73,9 +84,9 @@ export function JobsPage(): React.ReactElement {
       key: "task",
       ellipsis: true,
       render: (value: string, row) => (
-        <a href={`/jobs/${encodeURIComponent(row.job_id || "")}`} className="tr-table-link">
+        <button type="button" className="tr-table-link" onClick={() => setSelected(row)}>
           {value || row.kind || row.job_id || "运行"}
-        </a>
+        </button>
       ),
     },
     {
@@ -114,6 +125,9 @@ export function JobsPage(): React.ReactElement {
         />
         <span className="tr-antd-total">{t("total", { count: total })}</span>
       </div>
+      <Drawer title={selected?.task_name || selected?.job_id || t("jobs.detail")} placement="right" width={620} open={Boolean(selected)} onClose={() => setSelected(null)}>
+        {detail ? <pre className="tr-job-detail">{JSON.stringify(detail, null, 2)}</pre> : <p>{t("loading")}</p>}
+      </Drawer>
       <TRDataTable<JobRow>
         rowKey={(row) => row.job_id || JSON.stringify(row)}
         columns={columns}
