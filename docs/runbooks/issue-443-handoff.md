@@ -109,3 +109,16 @@ job_index_gb=4 control_events=650492
   language select to avoid shipping Ant Design.
 - Local Docker cleanup: removed the duplicate stopped `ft-couchdb-b` container;
   kept `ft-couchdb`, `ft-rabbit`, `ft-keycloak` and their volumes.
+
+## Local intranet React-shell test
+
+Run from the integration checkout:
+
+```bash
+./scripts/server/start_local_manager.sh
+```
+
+The Manager binds `0.0.0.0:8770`; open `/app` on the LAN address printed at
+startup. This instance uses `/tmp/ft-manager-state` and `/tmp/ft-manager-data`
+so it does not touch production state. Verified: `/app` returned 200, desktop
+Dockview rendered, mobile rendered 5 bottom tabs, and the page list loaded.
