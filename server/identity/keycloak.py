@@ -141,17 +141,32 @@ class KeycloakAdminAdapter:
             path = str(group.get("path") or "")
             if path:
                 groups.append(path)
+        try:
+            org_rows = self._get(f"users/{user_id}/organizations") or []
+        except urllib.error.HTTPError as exc:
+            if exc.code not in {403, 404}:
+                raise
+            org_rows = []
         orgs = [
             str(item.get("name") or "")
-            for item in (self._get(f"users/{user_id}/organizations") or [])
+            for item in org_rows
             if item.get("name")
         ]
         return self._identity(raw, groups, orgs)
 
+    def _all_groups(self, parent: str = "") -> list[dict]:
+        path = f"groups/{parent}/children" if parent else "groups"
+        rows = self._get(path) or []
+        result = []
+        for item in rows:
+            result.append(item)
+            result.extend(self._all_groups(str(item.get("id") or "")))
+        return result
+
     def group_members(self, group_path: str) -> list[Identity]:
-        groups = self._get("groups")
         target = next(
-            (item for item in groups if str(item.get("path") or "") == group_path),
+            (item for item in self._all_groups()
+             if str(item.get("path") or "") == group_path),
             None,
         )
         if target is None:
