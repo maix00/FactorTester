@@ -13,7 +13,17 @@
 - Product-group/factor/strategy CouchDB migration and read/write-through flags.
 - CouchDB authority readiness: intranet true, public true.
 - Keycloak OIDC login/logout, account import/backfill/dual-read, permission subjects, admin console permissions.
-- Full server tests: 1501 passed / 2 skipped.
+- Full server tests: 1503 passed / 2 skipped.
+- Web Research Report editor (`?edit=1`): chapter insert/move/remove and component insert/move/remove.
+- CLI `research report-operation` and `report-document`.
+- CouchDB authority readiness: intranet and public both `ready: true`.
+
+## Blocks requiring explicit authorization / external build
+
+- Public publication requires `FACTORTESTER_PUBLISH_AUTHORIZED=1` and the `main`
+  worktree; this branch is `fix/issue-443-nautilus-bridge`.
+- Linux Nautilus 2.0.0rc8 runtime has no wheel and no build toolchain on the
+  public host.
 
 ## Not complete
 
