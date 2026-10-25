@@ -272,3 +272,22 @@ reports: tearsheet.html, orders.csv, fills.csv, positions.csv, account.csv
 This used the public factor row/exported factor-library subset and the real
 Nautilus engine; no synthetic factor or synthetic result was substituted.
 The worker ran with a factor-library database path and the strategy executor.
+
+## 2026-10-25 real strategy Job writes CouchDB report_ref
+
+The same real frozen-factor strategy Job was rerun with a single worker
+configured for CouchDB.  The Job completed and:
+
+```text
+Job status: succeeded
+publications.signal: 8
+orders: 1
+report_ref: report:mm-celery-job:1
+CouchDB GET report:mm-celery-job:1 -> 200
+PostgreSQL research_jobs.report_ref -> report:mm-celery-job:1
+```
+
+The earlier empty report_ref was caused by a stale second worker without
+CouchDB environment consuming the same queue; after stopping both old workers
+and running one correctly configured worker, the full Celery -> Nautilus ->
+CouchDB -> PostgreSQL projection passed.
