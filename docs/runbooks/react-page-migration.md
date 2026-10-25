@@ -18,8 +18,7 @@ not the same as a fully migrated detail/editor route.
 
 ```text
 /researches/:id
-/research reports
-/reports/:id
+/reports/:id (agent markdown is native; report editor remains legacy)
 /jobs/:port/:id/input/:name
 /ic
 /factor-series
