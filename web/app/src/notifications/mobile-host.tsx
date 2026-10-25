@@ -11,10 +11,18 @@ type Queued = { notice: ActiveNotice; done: () => void; id: number };
 
 export function MobileNotificationHost(): React.ReactElement {
   const { t } = useTranslation();
-  const [items, setItems] = useState<Entry[]>([]);
+  const [items, setItems] = useState<Entry[]>(() => {
+    try {
+      const value = JSON.parse(localStorage.getItem("tr.notifications") ?? "[]");
+      return Array.isArray(value) ? value.filter((item) => item && typeof item.message === "string").slice(0, 50) : [];
+    } catch {
+      return [];
+    }
+  });
   const [queue, setQueue] = useState<Queued[]>([]);
   const [open, setOpen] = useState(false);
   const unread = items.filter((item) => !item.read).length;
+  useEffect(() => { localStorage.setItem("tr.notifications", JSON.stringify(items)); }, [items]);
   const current = queue[0];
 
   useEffect(() => {
