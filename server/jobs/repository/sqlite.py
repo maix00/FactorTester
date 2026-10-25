@@ -412,6 +412,13 @@ class JobRepository(
             )
         return self._record(updated) if updated is not None else None
 
+    def set_report_ref(self, job_id: str, report_ref: str) -> None:
+        with self._connection() as conn:
+            conn.execute(
+                "UPDATE research_jobs SET report_ref=? WHERE job_id=?",
+                (str(report_ref), str(job_id)),
+            )
+
     def claim_planning(
         self, job_id: str, attempt: int,
     ) -> JobRecord | None:

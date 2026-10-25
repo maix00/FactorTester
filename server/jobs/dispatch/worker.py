@@ -140,6 +140,12 @@ class DispatchWorker:
                 expected=JobStatus.RUNNING,
                 result_summary=outcome.result_summary,
             )
+            report_ref = (
+                outcome.result_summary.get("report_ref")
+                if isinstance(outcome.result_summary, dict) else ""
+            )
+            if report_ref:
+                self.repository.set_report_ref(record.job_id, str(report_ref))
             return {"status": updated.status.value, "job_id": updated.job_id}
         self.repository.transition(
             record.job_id,

@@ -118,6 +118,7 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
             execution_plan_hash TEXT NOT NULL DEFAULT '',
             plan_notices_json TEXT NOT NULL DEFAULT '[]',
             result_summary_json TEXT,
+            report_ref TEXT NOT NULL DEFAULT '',
             error_json TEXT,
             terminal_assurance_json TEXT,
             created_at REAL NOT NULL,
@@ -296,6 +297,10 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
     if "service_port" not in columns:
         conn.execute(
             "ALTER TABLE research_jobs ADD COLUMN service_port INTEGER NOT NULL DEFAULT 0"
+        )
+    if "report_ref" not in columns:
+        conn.execute(
+            "ALTER TABLE research_jobs ADD COLUMN report_ref TEXT NOT NULL DEFAULT ''"
         )
     supplemental_columns = {
         "job_role", "parent_job_id", "supplemental_kind",

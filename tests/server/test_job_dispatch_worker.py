@@ -208,3 +208,25 @@ def test_worker_target_heartbeat_is_port_scoped(tmp_path):
     assert not repository.worker_target_online("local-docker", 8000)
     assert not repository.worker_target_online("other", 8001)
     assert not repository.worker_target_online("local-docker", 8001, now=10**12)
+
+
+def test_success_persists_report_ref(tmp_path):
+    from server.jobs.dispatch.worker import DispatchWorker, ExecutionOutcome
+    from server.jobs.models import JobRecord
+    from server.jobs.repository.sqlite import JobRepository
+    from server.jobs.states import JobStatus
+    from server.jobs.dispatch.contract import DispatchMessage
+
+    repo = JobRepository(tmp_path / "jobs.db")
+    repo.create(JobRecord(job_id="job-report", run_id="r", owner="o", workspace_id="w",
+                          kind="backtest", status=JobStatus.SUBMITTED,
+                          deployment_id="d", service_port=8001,
+                          run_spec_hash="a" * 64, job_spec={}))
+    repo.transition("job-report", JobStatus.PLANNING)
+    repo.transition("job-report", JobStatus.QUEUED)
+    class E:
+        def execute(self, record, message, context):
+            return ExecutionOutcome({"report_ref": "report:job-report:1"})
+    DispatchWorker(repo).execute(DispatchMessage("job-report", 1, "d", "a"*64, "b"*64, 8001), E())
+    with repo._connection() as conn:
+        assert conn.execute("select report_ref from research_jobs where job_id='job-report'").fetchone()[0] == "report:job-report:1"
