@@ -175,6 +175,25 @@ final class TestJobsController: ObservableObject {
 
     private var currentPort: Int { Int(ServerConfig.shared.port) ?? 0 }
 
+    func openReportAttachment(
+        reportRef: String, name: String, from job: TestJob
+    ) async throws {
+        let data: Data
+        do {
+            data = try await service.reportAttachment(
+                reportRef: reportRef, name: name, port: job.port
+            )
+        } catch where job.port != currentPort {
+            data = try await service.reportAttachment(
+                reportRef: reportRef, name: name, port: currentPort
+            )
+        }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(name)
+        try data.write(to: url, options: .atomic)
+        openFile(url)
+    }
+
     private func openFile(_ url: URL) {
 #if os(macOS)
         NSWorkspace.shared.open(url)

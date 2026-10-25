@@ -16,6 +16,7 @@ struct TestJobDetailView: View {
     @State private var loadingArtifactIDs: Set<String> = []
     @State private var artifactTableErrors: [String: String] = [:]
     @State private var presentedReference: ResearchDocumentTypedLink?
+    @State private var reportError: String?
 
     var body: some View {
         Group {
@@ -211,6 +212,22 @@ struct TestJobDetailView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("CouchDB 报告").font(.headline)
                     Text(detail.reportRef).font(.caption.monospaced()).textSelection(.enabled)
+                    Button("打开 tearsheet.html") {
+                        Task {
+                            do {
+                                try await controller.openReportAttachment(
+                                    reportRef: detail.reportRef,
+                                    name: "tearsheet.html",
+                                    from: job
+                                )
+                            } catch {
+                                reportError = error.localizedDescription
+                            }
+                        }
+                    }
+                    if let reportError {
+                        Text(reportError).font(.caption).foregroundStyle(.red)
+                    }
                 }
             }
             ForEach(detail.resultSections) { section in

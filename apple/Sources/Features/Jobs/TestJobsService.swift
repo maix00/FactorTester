@@ -389,6 +389,12 @@ final class TestJobsService {
         _ = try await request(path: "/api/jobs/\(jobID)/artifacts", method: "DELETE", port: port)
     }
 
+    func reportAttachment(reportRef: String, name: String, port: Int) async throws -> Data {
+        let encodedRef = reportRef.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? reportRef
+        let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        return try await requestData(path: "/api/reports/\(encodedRef)/attachments/\(encodedName)", port: port)
+    }
+
     func request(path: String, method: String = "GET", port: Int? = nil, allowAnonymous: Bool = false) async throws -> [String: Any] {
         let data = try await requestData(path: path, method: method, port: port, allowAnonymous: allowAnonymous)
         guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
