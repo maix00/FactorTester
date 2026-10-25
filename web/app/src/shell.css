@@ -175,3 +175,25 @@ body { margin: 0; }
 .tr-settings-overlay .ant-modal-header { border-radius: 12px 12px 0 0; }
 .tr-page-surface { position: relative; isolation: isolate; }
 .tr-tab-layer { position: relative; isolation: isolate; height: 100%; min-height: 0; overflow: hidden; }
+.tr-settings-hub { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 20px; min-height: 430px; margin: -8px -4px; }
+.tr-settings-nav { display: flex; flex-direction: column; gap: 2px; padding: 4px 0; }
+.tr-settings-nav button { display: flex; align-items: center; gap: 8px; border: 0; border-radius: 8px; padding: 8px 10px; color: var(--text); background: transparent; font: inherit; font-size: 13px; text-align: left; }
+.tr-settings-nav button:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.tr-settings-nav button.is-active { color: var(--accent); background: color-mix(in srgb, var(--accent) 11%, transparent); font-weight: 600; }
+.tr-settings-content { min-width: 0; padding: 4px 4px 0 0; }
+.tr-settings-page-header { display: flex; align-items: flex-start; gap: 12px; padding: 4px 0 18px; }
+.tr-settings-page-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.tr-settings-page-header h2 { margin: 0; font-size: 17px; }
+.tr-settings-page-header p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+.tr-settings-card { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 14px; }
+.tr-settings-card h3 { margin: 0 0 12px; font-size: 13px; }
+.tr-settings-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 0; border-top: 1px solid var(--line); }
+.tr-settings-row b { display: block; font-size: 12px; }
+.tr-settings-row small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
+.tr-settings-value { color: var(--muted); font-size: 12px; }
+.tr-settings-migrating p { margin: 0; color: var(--muted); font-size: 12px; }
+@media (max-width: 620px) {
+  .tr-settings-hub { grid-template-columns: 1fr; }
+  .tr-settings-nav { flex-direction: row; overflow-x: auto; }
+  .tr-settings-nav button span { display: none; }
+}
