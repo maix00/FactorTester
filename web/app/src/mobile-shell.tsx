@@ -7,6 +7,7 @@ import { PageFrame } from "./frame.tsx";
 import { WorkspacePage } from "./pages/workspace.tsx";
 import { MobileSettingDetail, MobileSettingsPage, type MobileSettingSection } from "./pages/mobile-settings.tsx";
 import { MobileJobsPage } from "./pages/mobile-jobs.tsx";
+import { PageErrorBoundary } from "./error-boundary.tsx";
 import { MobileNotificationHost } from "./notifications/mobile-host.tsx";
 
 for (const page of BUILTIN_PAGES) registerPage(page);
@@ -52,6 +53,7 @@ export function MobileShell(): React.ReactElement {
         <MobileSettingDetail section={setting} onBack={backSetting} />
       ) : (
         <div className="tr-mobile-shell">
+          <PageErrorBoundary label={page?.id ?? "mobile"}>
           {page?.id === "workspace" ? (
             <WorkspacePage onOpen={selectTab} />
           ) : page?.id === "jobs" ? (
@@ -61,6 +63,7 @@ export function MobileShell(): React.ReactElement {
           ) : (
             <PageFrame pageId={page?.id ?? "research"} />
           )}
+          </PageErrorBoundary>
           <IonTabBar className="tr-mobile-tabs" slot="bottom">
             {tabs.map((item) => (
               <IonTabButton
