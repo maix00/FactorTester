@@ -13,7 +13,9 @@ export function CatalogPage(): React.ReactElement {
   const [selected, setSelected] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [legacy, setLegacy] = useState(false);
-  const [tab, setTab] = useState<"products" | "factors" | "strategies">("products");
+  const [tab, setTab] = useState<"products" | "factors" | "strategies" | "sources" | "categories">("products");
+  const [sources, setSources] = useState<{ id: string; name?: string; visitor_data_accessible?: boolean }[]>([]);
+  const [categories, setCategories] = useState<{ id?: string; name?: string; title?: string }[]>([]);
   const [strategies, setStrategies] = useState<Record<string, unknown>[]>([]);
   const [strategyPage, setStrategyPage] = useState(1);
   const [strategyTotal, setStrategyTotal] = useState(0);
@@ -31,6 +33,19 @@ export function CatalogPage(): React.ReactElement {
       .then((payload: Payload<Group>) => setGroups(payload.groups ?? []))
       .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }));
   }, [t]);
+
+  useEffect(() => {
+    if (tab !== "sources" && tab !== "categories") return;
+    setLoading(true);
+    const path = tab === "sources" ? "/api/product-library/data-sources" : "/api/product-library/categories";
+    fetch(path, { credentials: "same-origin" })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+      .then((payload: { sources?: typeof sources; categories?: typeof categories }) => {
+        if (tab === "sources") setSources(payload.sources ?? []); else setCategories(payload.categories ?? []);
+      })
+      .catch((error: Error) => notify({ code: "catalog.load", type: "error", message: t("loadFailed"), description: error.message }))
+      .finally(() => setLoading(false));
+  }, [tab, t]);
 
   useEffect(() => {
     if (tab !== "strategies") return;
@@ -103,6 +118,8 @@ export function CatalogPage(): React.ReactElement {
         <button type="button" className={tab === "products" ? "is-active" : ""} onClick={() => setTab("products")}>{t("catalog.products")}</button>
         <button type="button" className={tab === "factors" ? "is-active" : ""} onClick={() => setTab("factors")}>{t("catalog.factors")}</button>
         <button type="button" className={tab === "strategies" ? "is-active" : ""} onClick={() => { setTab("strategies"); setStrategyPage(1); }}>{t("catalog.strategies")}</button>
+        <button type="button" className={tab === "sources" ? "is-active" : ""} onClick={() => setTab("sources")}>{t("catalog.sources")}</button>
+        <button type="button" className={tab === "categories" ? "is-active" : ""} onClick={() => setTab("categories")}>{t("catalog.categories")}</button>
       </div>
       {tab === "products" ? <div className="tr-catalog-groups">
         <button type="button" className={selected ? "" : "is-active"} onClick={() => setSelected("")}>{t("catalog.all")}</button>
@@ -120,7 +137,15 @@ export function CatalogPage(): React.ReactElement {
         })}
       </div> : null}
       <div className="tr-catalog-products">
-        {tab === "strategies" ? (
+        {tab === "sources" ? (
+          sources.length === 0 ? <p>{t("empty")}</p> : sources.map((source) => (
+            <article key={source.id}><b>{source.name ?? source.id}</b><small>{source.id}</small></article>
+          ))
+        ) : tab === "categories" ? (
+          categories.length === 0 ? <p>{t("empty")}</p> : categories.map((category, index) => (
+            <article key={String(category.id ?? index)}><b>{category.name ?? category.title ?? category.id ?? "—"}</b></article>
+          ))
+        ) : tab === "strategies" ? (
           strategies.length === 0 ? <p>{t("empty")}</p> : strategies.map((item, index) => {
             const ref = String(item.strategy_ref ?? item.id ?? index);
             return (
