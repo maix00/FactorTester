@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { IonApp, IonTabBar, IonTabButton } from "@ionic/react";
 import { BUILTIN_PAGES, pagesForScope, registerPage } from "./registry.ts";
 import { PageIcon } from "./icon.tsx";
+import { useTranslation } from "react-i18next";
 import { PageFrame } from "./frame.tsx";
 import { WorkspacePage } from "./pages/workspace.tsx";
 
@@ -10,6 +11,7 @@ for (const page of BUILTIN_PAGES) registerPage(page);
 const tabs = pagesForScope("mobile").filter((page) => page.mobileTab);
 
 export function MobileShell(): React.ReactElement {
+  const { t } = useTranslation();
   const [active, setActive] = useState(tabs[0]?.id ?? "research");
   const page = tabs.find((item) => item.id === active) ?? tabs[0];
   React.useEffect(() => {
@@ -35,7 +37,7 @@ export function MobileShell(): React.ReactElement {
               onClick={() => setActive(item.id)}
             >
               <PageIcon name={item.icon} />
-              <span>{item.title}</span>
+              <span>{t(`nav.${item.id}`, { defaultValue: item.title })}</span>
             </IonTabButton>
           ))}
         </IonTabBar>

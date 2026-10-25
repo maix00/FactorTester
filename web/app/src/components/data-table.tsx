@@ -1,5 +1,6 @@
 import React from "react";
 import { Alert, Empty, Table } from "antd";
+import { useTranslation } from "react-i18next";
 import type { TableProps } from "antd";
 
 export type TRPagination = {
@@ -10,7 +11,7 @@ export type TRPagination = {
 };
 
 export function TRDataTable<T extends object>({
-  columns, rows, rowKey, loading = false, pagination, error = "", empty = "暂无数据",
+  columns, rows, rowKey, loading = false, pagination, error = "", empty,
 }: {
   columns: TableProps<T>["columns"];
   rows: T[];
@@ -20,7 +21,8 @@ export function TRDataTable<T extends object>({
   error?: string;
   empty?: string;
 }): React.ReactElement {
-  if (error) return <Alert type="error" showIcon message="读取失败" description={error} />;
+  const { t } = useTranslation();
+  if (error) return <Alert type="error" showIcon message={t("loadFailed")} description={error} />;
   return (
     <Table<T>
       rowKey={rowKey}
@@ -28,7 +30,7 @@ export function TRDataTable<T extends object>({
       dataSource={rows}
       loading={loading}
       size="middle"
-      locale={{ emptyText: <Empty description={empty} /> }}
+      locale={{ emptyText: <Empty description={empty || t("empty")} /> }}
       pagination={{
         current: pagination.page,
         pageSize: pagination.pageSize,

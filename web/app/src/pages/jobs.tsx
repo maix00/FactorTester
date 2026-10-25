@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Tag, Typography } from "antd";
 import type { TableProps } from "antd";
+import { useTranslation } from "react-i18next";
 import { TRDataTable } from "../components/data-table.tsx";
 import { TRMultiSelectFilter } from "../components/multi-select.tsx";
 
@@ -23,6 +24,7 @@ function statusColor(status = ""): string {
 }
 
 export function JobsPage(): React.ReactElement {
+  const { t } = useTranslation();
   const [jobs, setJobs] = useState<JobRow[]>([]);
   const [statuses, setStatuses] = useState<string[]>([]);
   const [page, setPage] = useState(1);
@@ -57,7 +59,7 @@ export function JobsPage(): React.ReactElement {
 
   const columns: TableProps<JobRow>["columns"] = [
     {
-      title: "任务",
+      title: t("jobs.task"),
       dataIndex: "task_name",
       key: "task",
       ellipsis: true,
@@ -68,14 +70,14 @@ export function JobsPage(): React.ReactElement {
       ),
     },
     {
-      title: "状态",
+      title: t("jobs.status"),
       dataIndex: "status",
       key: "status",
       width: 120,
       render: (value: string) => <Tag color={statusColor(value)}>{value || "unknown"}</Tag>,
     },
     {
-      title: "Job ID",
+      title: t("jobs.jobId"),
       dataIndex: "job_id",
       key: "job_id",
       width: 220,
@@ -88,13 +90,13 @@ export function JobsPage(): React.ReactElement {
     <section className="tr-antd-panel">
       <div className="tr-antd-toolbar">
         <TRMultiSelectFilter
-          label="按状态筛选"
-          placeholder="按状态筛选"
+          label={t("jobs.statusFilter")}
+          placeholder={t("jobs.statusFilter")}
           options={STATUS_OPTIONS}
           value={statuses}
           onChange={(values) => { setStatuses(values); setPage(1); }}
         />
-        <span className="tr-antd-total">共 {total} 条</span>
+        <span className="tr-antd-total">{t("total", { count: total })}</span>
       </div>
       <TRDataTable<JobRow>
         rowKey={(row) => row.job_id || JSON.stringify(row)}

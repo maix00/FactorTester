@@ -16,9 +16,11 @@
     "@ionic/react-router": "9.0.9",
     "antd": "^5.29.3",
     "dockview-react": "8.6.1",
+    "i18next": "^25.10.10",
     "ionicons": "8.0.13",
     "react": "19.2.0",
     "react-dom": "19.2.0",
+    "react-i18next": "^16.6.6",
     "react-router-dom": "6.30.3"
   },
   "devDependencies": {

@@ -9,6 +9,10 @@ import { BUILTIN_PAGES, getPage, pagesForScope, registerPage } from "./registry.
 import { PageIcon } from "./icon.tsx";
 import { PageSurface } from "./surface.tsx";
 import { ConfigProvider } from "antd";
+import { useTranslation } from "react-i18next";
+import zhCN from "antd/locale/zh_CN";
+import enUS from "antd/locale/en_US";
+import { LanguageSwitch } from "./components/language-switch.tsx";
 
 for (const page of BUILTIN_PAGES) registerPage(page);
 
@@ -20,10 +24,12 @@ function Panel(props: IDockviewPanelProps<{ pageId: string }>): React.ReactEleme
 
 function Tab(props: IDockviewPanelHeaderProps<{ pageId: string }>): React.ReactElement {
   const page = getPage(props.params.pageId);
+  const { t } = useTranslation();
+  const title = page ? t(`nav.${page.id}`, { defaultValue: page.title }) : (props.api.title ?? props.params.pageId);
   return (
     <span className="tr-dock-tab">
       <PageIcon name={page?.icon} />
-      <span className="tr-dock-tab-title" title={page?.title ?? props.api.title ?? ""}>{page?.title ?? props.api.title ?? props.params.pageId}</span>
+      <span className="tr-dock-tab-title" title={title}>{title}</span>
       <button type="button" className="tr-dock-close" aria-label="关闭" onClick={() => props.api.close()}>×</button>
     </span>
   );
@@ -35,7 +41,9 @@ const LAYOUT_KEY = "tr.workspace.layout.v2";
 type DockviewApi = DockviewReadyEvent["api"];
 
 export function DesktopShell(): React.ReactElement {
+  const { t, i18n } = useTranslation();
   const pages = pagesForScope("desktop");
+  const label = (page: { id: string; title: string }): string => t(`nav.${page.id}`, { defaultValue: page.title });
   const [api, setApi] = useState<DockviewApi | null>(null);
   const [active, setActive] = useState(pages[0]?.id ?? "research");
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("tr.sidebar.collapsed") === "1");
@@ -123,7 +131,7 @@ export function DesktopShell(): React.ReactElement {
   };
 
   return (
-    <ConfigProvider theme={{ token: {
+    <ConfigProvider locale={i18n.language.startsWith("en") ? enUS : zhCN} theme={{ token: {
       colorPrimary: "#087cff", colorBorder: "#d9d9de", borderRadius: 8,
       colorBgContainer: "#ffffff", colorText: "#1d1d1f", colorTextSecondary: "#74747a",
       fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
@@ -134,7 +142,7 @@ export function DesktopShell(): React.ReactElement {
           <button type="button" className="tr-sidebar-brand" onClick={() => open(pages[0]?.id ?? "research")}>
             <span className="tr-sidebar-title">TradeResearch</span>
           </button>
-          <button type="button" className="tr-sidebar-toggle" aria-label={collapsed ? "展开侧栏" : "收起侧栏"} title={collapsed ? "展开侧栏" : "收起侧栏"} onClick={() => {
+          <button type="button" className="tr-sidebar-toggle" aria-label={collapsed ? t("expand") : t("collapse")} title={collapsed ? t("expand") : t("collapse")} onClick={() => {
               setCollapsed((value) => {
                 const next = !value;
                 localStorage.setItem("tr.sidebar.collapsed", next ? "1" : "0");
@@ -158,7 +166,7 @@ export function DesktopShell(): React.ReactElement {
               onClick={() => open(page.id)}
             >
               <PageIcon name={page.icon} />
-              <span className="tr-nav-label">{page.title}</span>
+              <span className="tr-nav-label">{label(page)}</span>
             </button>
           ))}
         </nav>
@@ -168,17 +176,18 @@ export function DesktopShell(): React.ReactElement {
             <div key={panel.id} className={`tr-opened-tab${active === panel.pageId ? " is-active" : ""}`}>
               <button type="button" className="tr-opened-main" onClick={() => { setActive(panel.pageId); api?.getPanel(panel.id)?.api.setActive(); }}>
                 <PageIcon name={getPage(panel.pageId)?.icon} />
-                <span>{panel.title}</span>
+                <span>{t(`nav.${panel.pageId}`, { defaultValue: panel.title })}</span>
               </button>
               <button type="button" className="tr-opened-close" aria-label="关闭" onClick={() => close(panel.id)}>×</button>
             </div>
           ))}
         </nav>
         <div className="tr-sidebar-spacer" />
-        <button type="button" className="tr-sidebar-reset" onClick={resetLayout}>重置布局</button>
+        <LanguageSwitch />
+        <button type="button" className="tr-sidebar-reset" onClick={resetLayout}>{t("resetLayout")}</button>
         <button type="button" className="tr-account-button" onClick={() => open("account")}>
           <PageIcon name="account" />
-          <span className="tr-nav-label">设置</span>
+          <span className="tr-nav-label">{t("settings")}</span>
         </button>
       </aside>
       <main className="tr-main">
