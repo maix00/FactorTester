@@ -11,7 +11,16 @@ from pathlib import Path
 from server.jobs.storage.couchdb_reports import CouchDBObjectStore, content_name
 
 
+def _report_files(directory: Path) -> list[Path]:
+    return [
+        path for path in sorted(directory.iterdir())
+        if path.is_file() and path.name != "nautilus_receipt.json"
+    ]
+
+
 def verify_dir(store: CouchDBObjectStore, directory: Path) -> dict[str, object]:
+    if not _report_files(directory):
+        return {"directory": str(directory), "ok": True, "skip": "no report files"}
     ref = f"report:{directory.name}:1"
     try:
         _, raw = store._request("GET", ref)
@@ -20,9 +29,7 @@ def verify_dir(store: CouchDBObjectStore, directory: Path) -> dict[str, object]:
         return {"directory": str(directory), "ok": False, "error": type(exc).__name__}
     attachments = doc.get("attachments") or {}
     checked = []
-    for path in sorted(directory.iterdir()):
-        if not path.is_file() or path.name == "nautilus_receipt.json":
-            continue
+    for path in _report_files(directory):
         stored = attachments.get(path.name)
         if not stored:
             return {"directory": str(directory), "ok": False, "error": f"missing {path.name}"}
