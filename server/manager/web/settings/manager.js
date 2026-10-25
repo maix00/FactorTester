@@ -108,18 +108,25 @@
     wrapper.append(intro);
     const view = FTUI.table([
       context.t("服务器"), context.t("端口"), context.t("队列"),
-      context.t("worker"), context.t("状态"),
+      context.t("worker"), context.t("outbox"), context.t("状态"),
     ], []);
     (payload.servers || []).forEach(server => {
       (server.ports || []).forEach(target => {
         const worker = target.worker_online;
         const workerText = worker === true ? context.t("在线") : worker === false ? context.t("离线") : context.t("未知");
         const status = server.online ? (worker === false ? "degraded" : "running") : "stopped";
+        const remoteOutbox = server.remote_outbox;
+        const outboxText = remoteOutbox
+          ? `pending ${remoteOutbox.pending ?? 0} · sent ${remoteOutbox.sent ?? 0} · failed ${remoteOutbox.failed ?? 0} · dead ${remoteOutbox.dead ?? 0}`
+          : server.is_local
+            ? `pending ${outbox.pending ?? 0} · sent ${outbox.sent ?? 0} · failed ${outbox.failed ?? 0} · dead ${outbox.dead ?? 0}`
+            : "—";
         FTUI.appendRow(view.body, [
           `${server.server_id}${server.is_local ? " (本机)" : ""}`,
           target.port,
           target.queue,
           workerText,
+          outboxText,
           statusPill(context, status),
         ]);
       });
