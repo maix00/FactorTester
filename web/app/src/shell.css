@@ -326,3 +326,5 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .tr-report-component-actions { display: flex; gap: 4px; align-items: flex-start; }
 .tr-report-component-actions button { min-width: 24px; color: var(--muted); }
 .tr-report-component input[type="checkbox"] { margin-right: 6px; vertical-align: middle; }
+.tr-report-chapter-actions { display: inline-flex; gap: 3px; margin-left: 8px; }
+.tr-report-chapter-actions button { border: 0; background: transparent; color: var(--muted); font: inherit; }

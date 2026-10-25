@@ -78,11 +78,17 @@ export function ReportEditor({ publicationID }: { publicationID: string }): Reac
           })}
         </section>
       ) : null}
-      {chapters.map((chapter) => {
+      {chapters.map((chapter, chapterIndex) => {
         const chapterID = String(chapter.chapter_id ?? chapter.component_id ?? "");
         return (
           <section key={chapterID} className="tr-report-chapter">
-            <h3>{chapter.title || chapterID}</h3>
+            <h3>
+              {chapter.title || chapterID}
+              <span className="tr-report-chapter-actions">
+                {chapterIndex > 0 ? <button type="button" disabled={busy} onClick={() => apply({ op: "move_chapter", chapter_id: chapterID, after_chapter_id: chapterIndex > 1 ? String(chapters[chapterIndex - 2].chapter_id ?? chapters[chapterIndex - 2].component_id ?? "") : null })}>↑</button> : null}
+                {chapterIndex < chapters.length - 1 ? <button type="button" disabled={busy} onClick={() => apply({ op: "move_chapter", chapter_id: chapterID, after_chapter_id: chapters[chapterIndex + 1].chapter_id ?? chapters[chapterIndex + 1].component_id ?? "" })}>↓</button> : null}
+              </span>
+            </h3>
             {(chapter.components ?? []).map((component, index, list) => (
               <div className="tr-report-component" key={String(component.component_id)}>
                 <div>
