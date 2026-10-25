@@ -1172,6 +1172,33 @@ def resolve_research_report_conflicts(publication_id: str):
     return jsonify({"success": True, "conflicts": remaining})
 
 
+@sft_bp.get("/api/research-reports/<publication_id>/chapters/<chapter_id>")
+def get_research_report_chapter(publication_id: str, chapter_id: str):
+    actor = require_user()
+    import os
+    from server.jobs.storage.couchdb_research_reports import get_research_report
+    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+    from server.jobs.storage.research_report_agent import chapter_attachment_path
+
+    url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "research report store unavailable"}), 503
+    store = CouchDBObjectStore(url, os.environ.get("FACTORTESTER_COUCHDB_DB", "ft_objects").strip())
+    try:
+        document = get_research_report(store, publication_id)
+    except Exception:
+        return jsonify({"success": False, "error": "research report not found"}), 404
+    if document.get("owner_ref") != actor and str(document.get("visibility") or "private") != "public":
+        return jsonify({"success": False, "error": "research report access denied"}), 403
+    meta = (document.get("attachments") or {}).get(chapter_attachment_path(chapter_id)) or {}
+    name = str(meta.get("name") or "")
+    if not name:
+        return jsonify({"success": False, "error": "chapter not found"}), 404
+    import json as _json
+
+    return jsonify({"success": True, "chapter": _json.loads(store.get_attachment(document["_id"], name))})
+
+
 @sft_bp.get("/api/research-reports/<publication_id>/agent")
 def get_research_report_agent(publication_id: str):
     actor = require_user()

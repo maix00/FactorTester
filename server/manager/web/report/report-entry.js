@@ -412,7 +412,56 @@
           apply({op: "remove_chapter", chapter_id: chapter.chapter_id});
         }
       };
-      row.append(label, up, down, remove);
+      const componentsButton = document.createElement("button");
+      componentsButton.textContent = t("组件");
+      const componentBox = document.createElement("div");
+      componentBox.hidden = true;
+      componentsButton.onclick = async () => {
+        componentBox.hidden = !componentBox.hidden;
+        if (!componentBox.hidden && !componentBox.childElementCount) {
+          try {
+            const response = await api(`/api/research-reports/${encodeURIComponent(publicationID)}/chapters/${encodeURIComponent(chapter.chapter_id)}`);
+            const components = (response.chapter?.components || []).filter(item => item.kind !== "chapter");
+            components.forEach(component => {
+              const line = document.createElement("div");
+              line.className = "report-edit-row";
+              const name = document.createElement("span");
+              name.textContent = component.title || component.component_id;
+              const siblings = components.filter(item => item.parent_id === component.parent_id);
+              const at = siblings.findIndex(item => item.component_id === component.component_id);
+              const upComponent = document.createElement("button");
+              upComponent.textContent = t("上移");
+              upComponent.disabled = at <= 0;
+              upComponent.onclick = () => apply({
+                op: "move_component", chapter_id: chapter.chapter_id,
+                component_id: component.component_id, parent_id: component.parent_id,
+                after_component_id: siblings[at - 2]?.component_id || component.parent_id,
+              });
+              const downComponent = document.createElement("button");
+              downComponent.textContent = t("下移");
+              downComponent.disabled = at < 0 || at >= siblings.length - 1;
+              downComponent.onclick = () => apply({
+                op: "move_component", chapter_id: chapter.chapter_id,
+                component_id: component.component_id, parent_id: component.parent_id,
+                after_component_id: siblings[at + 1]?.component_id || "",
+              });
+              const removeComponent = document.createElement("button");
+              removeComponent.textContent = t("删除");
+              removeComponent.onclick = () => {
+                if (window.confirm(`${t("删除组件")}: ${name.textContent}?`)) {
+                  apply({op: "remove_component", chapter_id: chapter.chapter_id,
+                         component_id: component.component_id});
+                }
+              };
+              line.append(name, upComponent, downComponent, removeComponent);
+              componentBox.append(line);
+            });
+          } catch (error) {
+            context.showNotice(error?.message || t("读取章节失败"), true);
+          }
+        }
+      };
+      row.append(label, up, down, remove, componentsButton, componentBox);
       panel.append(row);
     });
     content.append(panel);

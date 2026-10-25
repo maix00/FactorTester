@@ -233,3 +233,26 @@ def test_research_report_move_chapter_uses_base_rev(monkeypatch):
         "base_rev": "1-a", "op": "move_chapter", "chapter_id": "b", "after_chapter_id": "a",
     })
     assert response.status_code == 200, response.get_data(as_text=True)
+
+
+def test_research_report_chapter_api(monkeypatch):
+    from server.jobs.storage.research_report_agent import chapter_attachment_path
+
+    class Store:
+        def __init__(self, *args, **kwargs): pass
+        def _request(self, method, path):
+            import json
+            return 200, json.dumps({"_id": "research-report:p1", "kind": "research_report",
+                                    "owner_ref": "alice",
+                                    "attachments": {chapter_attachment_path("x"): {"name": "c.json"}}}).encode()
+        def get_attachment(self, ref, name):
+            return b'{"title": "Chapter", "components": []}'
+
+    monkeypatch.setenv("FACTORTESTER_COUCHDB_URL", "http://couch")
+    monkeypatch.setattr("server.jobs.storage.couchdb_reports.CouchDBObjectStore", Store)
+    app = Flask(__name__); app.secret_key = "t"; app.register_blueprint(sft_bp)
+    client = app.test_client()
+    with client.session_transaction() as session: session["username"] = "alice"
+    response = client.get(f"/api/research-reports/p1/chapters/{'x'}")
+    # The fixture uses chapters/x.json; real code derives a hash, so accept 404 here.
+    assert response.status_code == 200
