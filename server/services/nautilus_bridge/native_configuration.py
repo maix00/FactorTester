@@ -20,7 +20,7 @@ from server.services.nautilus_bridge.version import NAUTILUS_VERSION
 _FILL_MODELS = (
     "default", "best_price", "one_tick_slippage", "probabilistic", "two_tier",
     "three_tier", "limit_order_partial", "size_aware", "competition_aware",
-    "volume_sensitive", "market_hours",
+    "market_hours",
 )
 NAUTILUS_BOOK_TYPES = ("L1_MBP", "L2_MBP", "L3_MBO")
 _FEE_MODELS = (
@@ -400,6 +400,7 @@ def native_configuration_schema() -> dict[str, object]:
             "defer_option_settlement": "Rust SimulatedVenueConfig 有此字段，但 Python BacktestEngine.add_venue 未暴露；Nautilus 默认值为 true。",
             "base_currency": "Nautilus 支持 Venue 多币种账户；当前 FactorTester RunSpec 使用统一基础币种并将其映射到各 Venue。",
             "python_model_objects": "不能把运行时对象或任意 Python 实例写入 RunSpec。",
+            "VolumeSensitiveFillModel": "固定 Nautilus Python API 没有暴露近期成交量更新入口；该模型仍使用 Rust 内部常量 1000，无法按当前或历史 Bar 成交量撮合，因此不能作为可执行 RunSpec 选项。",
         },
     }
 

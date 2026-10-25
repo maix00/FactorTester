@@ -142,7 +142,6 @@ def build_backtest_engine(
         ThreeTierFillModel,
         TieredNotionalOptionFeeModel,
         TwoTierFillModel,
-        VolumeSensitiveFillModel,
     )
     from nautilus_trader.model import (
         AccountType,
@@ -206,7 +205,6 @@ def build_backtest_engine(
                     LimitOrderPartialFillModel=LimitOrderPartialFillModel,
                     SizeAwareFillModel=SizeAwareFillModel,
                     CompetitionAwareFillModel=CompetitionAwareFillModel,
-                    VolumeSensitiveFillModel=VolumeSensitiveFillModel,
                     MarketHoursFillModel=MarketHoursFillModel,
                 ),
                 fee_model=_venue_fee_model(
@@ -396,7 +394,6 @@ def _fill_model(config: Mapping[str, Any], **constructors: Any) -> Any:
         "limit_order_partial": "LimitOrderPartialFillModel",
         "size_aware": "SizeAwareFillModel",
         "competition_aware": "CompetitionAwareFillModel",
-        "volume_sensitive": "VolumeSensitiveFillModel",
         "market_hours": "MarketHoursFillModel",
     }.get(model_type)
     constructor = constructors.get(class_name)
