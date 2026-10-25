@@ -770,7 +770,29 @@ def oidc_callback():
     username = str(profile.get("preferred_username") or profile.get("sub") or "")
     if not username:
         return jsonify({"success": False, "error": "OIDC profile has no username"}), 401
+    # Keycloak lowercases usernames; retain the legacy spelling when available.
+    try:
+        from server.identity.keycloak import KeycloakAdminAdapter
+        identity = KeycloakAdminAdapter(
+            branding.env("KEYCLOAK_URL"), branding.env("KEYCLOAK_REALM"),
+            client_id=branding.env("KEYCLOAK_CLIENT_ID", "admin-cli"),
+            client_secret=branding.env("KEYCLOAK_CLIENT_SECRET", ""),
+        ).user(username)
+        legacy = (getattr(identity, "attributes", {}) or {}).get("legacy_username") if identity else None
+        if legacy:
+            username = legacy[0] if isinstance(legacy, (tuple, list)) else str(legacy)
+    except Exception:
+        pass
+    role = "user"
+    try:
+        from tools.data.account_manage import get_account
+        account = get_account(username)
+        if account is not None:
+            role = str(account.role or "user")
+    except Exception:
+        pass
     session["username"] = username
+    session["role"] = role
     return redirect("/")
 
 
