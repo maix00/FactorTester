@@ -737,6 +737,7 @@ class JobQueryImplementation:
                 if isinstance(_loads(row["result_summary_json"]), dict)
                 else None
             ),
+            report_ref=str(row["report_ref"] or ""),
             error=(
                 _loads(row["error_json"])
                 if isinstance(_loads(row["error_json"]), dict)
