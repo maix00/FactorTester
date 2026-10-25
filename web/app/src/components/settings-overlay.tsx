@@ -1,5 +1,5 @@
 import React from "react";
-import { Drawer } from "antd";
+import { Modal } from "antd";
 import { useTranslation } from "react-i18next";
 import { LanguageSwitch } from "./language-switch.tsx";
 
@@ -12,7 +12,16 @@ export function SettingsOverlay({
 }): React.ReactElement {
   const { t } = useTranslation();
   return (
-    <Drawer title={t("settingsPanel.title")} placement="right" width={360} open={open} onClose={onClose}>
+    <Modal
+      title={t("settingsPanel.title")}
+      open={open}
+      onCancel={onClose}
+      footer={null}
+      centered
+      width={480}
+      className="tr-settings-overlay"
+      destroyOnClose
+    >
       <div className="tr-settings-section">
         <h3>{t("settingsPanel.language")}</h3>
         <p>{t("settingsPanel.languageHint")}</p>
@@ -23,6 +32,6 @@ export function SettingsOverlay({
         <p>{t("settingsPanel.layoutHint")}</p>
         <button type="button" className="tr-toolbar-button" onClick={onResetLayout}>{t("resetLayout")}</button>
       </div>
-    </Drawer>
+    </Modal>
   );
 }

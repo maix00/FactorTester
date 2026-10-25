@@ -171,3 +171,7 @@ body { margin: 0; }
 .tr-settings-section { padding: 4px 0 18px; border-bottom: 1px solid var(--line); margin-bottom: 18px; }
 .tr-settings-section h3 { margin: 0 0 4px; font-size: 13px; }
 .tr-settings-section p { margin: 0 0 10px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.tr-settings-overlay .ant-modal-content { border-radius: 12px; }
+.tr-settings-overlay .ant-modal-header { border-radius: 12px 12px 0 0; }
+.tr-page-surface { position: relative; isolation: isolate; }
+.tr-tab-layer { position: relative; isolation: isolate; height: 100%; min-height: 0; overflow: hidden; }
