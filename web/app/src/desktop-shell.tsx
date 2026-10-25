@@ -38,8 +38,29 @@ export function DesktopShell(): React.ReactElement {
   const [api, setApi] = useState<DockviewApi | null>(null);
   const [active, setActive] = useState(pages[0]?.id ?? "research");
   const [collapsed, setCollapsed] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const value = Number(localStorage.getItem("tr.sidebar.width"));
+    return Number.isFinite(value) && value >= 180 && value <= 360 ? value : 230;
+  });
   const [openPanels, setOpenPanels] = useState<OpenPanel[]>([]);
   const activePage = getPage(active) ?? pages[0];
+
+  const startResize = (event: React.PointerEvent<HTMLDivElement>): void => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+    const move = (moveEvent: PointerEvent): void => {
+      const next = Math.max(180, Math.min(360, startWidth + moveEvent.clientX - startX));
+      setSidebarWidth(next);
+      localStorage.setItem("tr.sidebar.width", String(next));
+    };
+    const stop = (): void => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop, { once: true });
+  };
 
   const syncPanels = (container: DockviewApi): void => {
     setOpenPanels(container.panels.map((panel) => ({
@@ -102,7 +123,7 @@ export function DesktopShell(): React.ReactElement {
   };
 
   return (
-    <div className={`tr-app-shell${collapsed ? " is-collapsed" : ""}`}>
+    <div className={`tr-app-shell${collapsed ? " is-collapsed" : ""}`} style={{ "--tr-sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}>
       <aside className="tr-sidebar" aria-label="主导航">
         <div className="tr-sidebar-header">
           <button type="button" className="tr-sidebar-brand" onClick={() => open(pages[0]?.id ?? "research")}>
@@ -112,6 +133,7 @@ export function DesktopShell(): React.ReactElement {
             {collapsed ? "»" : "«"}
           </button>
         </div>
+        <div className="tr-sidebar-resize" role="separator" aria-orientation="vertical" aria-label="调整侧栏宽度" onPointerDown={startResize} />
         <div className="tr-sidebar-caption">功能入口</div>
         <nav className="tr-module-nav">
           {pages.map((page) => (
