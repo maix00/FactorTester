@@ -28,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
         netloc += f":{parsed.port}"
     base = f"{parsed.scheme or 'http'}://{netloc}/{args.database}"
     records = json.loads((args.root / "publications.json").read_text()).get("publications") or []
-    missing, no_attachments = [], []
+    missing, no_attachments, mismatches = [], [], []
     for record in records:
         publication_id = str(record.get("publication_id") or "")
         if not publication_id:
@@ -45,11 +45,23 @@ def main(argv: list[str] | None = None) -> int:
             continue
         if document.get("kind") != "research_report" or not document.get("attachments"):
             no_attachments.append(publication_id)
+        publication = document.get("publication") or {}
+        for field in ("title", "owner_ref", "visibility", "projection_hash"):
+            if str(publication.get(field) or "") != str(record.get(field) or ""):
+                mismatches.append({"publication_id": publication_id, "field": field})
+        mirror = args.root / "mirrors" / publication_id
+        if mirror.is_dir():
+            files = [path for path in mirror.rglob("*")
+                     if path.is_file() and not path.is_symlink() and path.name != ".DS_Store"]
+            stored = document.get("attachments") or {}
+            if len(files) != len(stored):
+                mismatches.append({"publication_id": publication_id,
+                                   "files": len(files), "attachments": len(stored)})
     print(json.dumps({
         "checked": len(records), "missing": missing,
-        "without_attachments": no_attachments,
+        "without_attachments": no_attachments, "mismatches": mismatches,
     }, indent=2))
-    return 1 if missing else 0
+    return 1 if missing or mismatches else 0
 
 
 if __name__ == "__main__":
