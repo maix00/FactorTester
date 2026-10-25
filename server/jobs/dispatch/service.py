@@ -25,6 +25,11 @@ INTERVAL_ENV = "FACTORTESTER_DISPATCH_INTERVAL"
 
 
 def build_runner() -> DispatchRunner:
+    from .preflight import check_deployment
+
+    report = check_deployment(check_executor=True)
+    if not report["ok"]:
+        raise RuntimeError("job dispatch preflight failed: " + "; ".join(report["errors"]))
     db_path = Path(os.environ.get(DB_ENV, "") or Settings.CACHE_DB_PATH)
     outbox = DispatchOutbox(db_path)
     outbox.ensure_schema()
