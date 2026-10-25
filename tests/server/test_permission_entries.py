@@ -43,3 +43,13 @@ def test_subtree_and_deny_override(tmp_path):
                         resource_ref="report:job:ok", action="read")
     assert not store.allows(subject="group:team/a", resource_type="report",
                            resource_ref="report:job:secret", action="read")
+
+
+def test_admin_console_manage_permission(tmp_path):
+    store = PermissionStore(tmp_path / "permissions.db")
+    store.add(PermissionEntry(
+        subject="group:ops", resource_type="admin_console",
+        resource_ref="dispatch", action="manage",
+    ))
+    assert store.allows(subject="group:ops", resource_type="admin_console",
+                        resource_ref="dispatch", action="manage")

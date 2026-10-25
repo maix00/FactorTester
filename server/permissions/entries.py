@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-RESOURCE_TYPES = {"report", "factor_version", "strategy_version", "job", "workspace"}
-ACTIONS = {"read", "write", "publish", "approve", "delete", "share"}
+RESOURCE_TYPES = {"report", "factor_version", "strategy_version", "job", "workspace", "admin_console"}
+ACTIONS = {"read", "write", "publish", "approve", "delete", "share", "manage"}
 SCOPES = {"self", "subtree", "organization", "explicit"}
 EFFECTS = {"allow", "deny"}
 
