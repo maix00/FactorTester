@@ -219,3 +219,27 @@ def test_cancelling_queued_job_closes_outbox_row(tmp_path):
     assert outbox.get(("job-cancel", 1)).status == "pending"
     repository.request_cancel("job-cancel", owner="owner", reason="user")
     assert outbox.get(("job-cancel", 1)).status == "dead"
+
+
+def test_non_backtest_job_is_not_dispatched(tmp_path):
+    from server.jobs.models import JobRecord
+    from server.jobs.repository.sqlite import JobRepository
+    from server.jobs.states import JobStatus
+
+    repository = JobRepository(tmp_path / "jobs.db")
+    repository.create(
+        JobRecord(
+            job_id="job-ic",
+            run_id="run-ic",
+            owner="owner",
+            workspace_id="workspace",
+            kind="ic",
+            status=JobStatus.SUBMITTED,
+            deployment_id="remote-main",
+            run_spec_hash="f" * 64,
+            job_spec={},
+        )
+    )
+    repository.transition("job-ic", JobStatus.PLANNING)
+    repository.transition("job-ic", JobStatus.QUEUED)
+    assert DispatchOutbox(tmp_path / "jobs.db").get(("job-ic", 1)) is None

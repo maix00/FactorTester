@@ -208,6 +208,8 @@ class JobRepository(
         from server.jobs.dispatch.contract import DispatchMessage
         from server.jobs.dispatch.outbox import enqueue
 
+        if str(row["kind"] or "") != "backtest":
+            return
         run_spec_hash = str(row["run_spec_hash"] or "")
         deployment_id = str(row["deployment_id"] or "")
         if not run_spec_hash or not deployment_id:
