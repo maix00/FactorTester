@@ -1043,6 +1043,12 @@ def apply_research_report_operation(publication_id: str):
         return jsonify({"success": False, "error": "research report not found"}), 404
     if document.get("owner_ref") != actor:
         return jsonify({"success": False, "error": "only the research report owner may edit"}), 403
+    if document.get("projection_hash"):
+        return jsonify({
+            "success": False,
+            "error": "projection-aware edits are not enabled",
+            "code": "projection_consistency_required",
+        }), 409
     try:
         op = str(operation.get("op") or "")
         if op == "move_component":
