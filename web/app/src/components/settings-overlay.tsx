@@ -34,6 +34,8 @@ export function SettingsOverlay({
   const [sectionData, setSectionData] = useState<Record<string, unknown> | null>(null);
   const [docPage, setDocPage] = useState<string>("");
   const [docContent, setDocContent] = useState<string>("");
+  const [profileID, setProfileID] = useState<string>("");
+  const [profileData, setProfileData] = useState<Record<string, unknown> | null>(null);
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -62,6 +64,14 @@ export function SettingsOverlay({
       .then((value) => setSectionData(value))
       .catch(() => setSectionData(null));
   }, [open, section]);
+
+  useEffect(() => {
+    if (!open || section !== "profiles" || !profileID) { setProfileData(null); return; }
+    fetch(`/api/client/profiles/${encodeURIComponent(profileID)}`, { credentials: "same-origin" })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+      .then((value) => setProfileData(value))
+      .catch(() => setProfileData(null));
+  }, [open, section, profileID]);
 
   useEffect(() => {
     if (!open || section !== "docs" || !docPage) { setDocContent(""); return; }
@@ -135,6 +145,19 @@ export function SettingsOverlay({
             <div className="tr-settings-card">
               <h3>{t("settingsPanel.sections.server")}</h3>
               {serverInfo ? <pre className="tr-job-detail">{JSON.stringify(serverInfo, null, 2)}</pre> : <p>{t("loading")}</p>}
+            </div>
+          ) : current.id === "profiles" ? (
+            <div className="tr-settings-card">
+              <h3>{t("settingsPanel.sections.profiles")}</h3>
+              {sectionData ? (
+                <div className="tr-doc-pages">
+                  {((sectionData.profiles ?? sectionData.items ?? []) as Record<string, unknown>[]).map((profile, index) => {
+                    const id = String(profile.profile_id ?? profile.id ?? index);
+                    return <button key={id} type="button" className={profileID === id ? "is-active" : ""} onClick={() => setProfileID(id)}>{String(profile.name ?? profile.title ?? id)}</button>;
+                  })}
+                </div>
+              ) : <p>{t("loading")}</p>}
+              {profileID ? <pre className="tr-job-detail">{profileData ? JSON.stringify(profileData, null, 2) : t("loading")}</pre> : null}
             </div>
           ) : current.id === "docs" ? (
             <div className="tr-settings-card">
