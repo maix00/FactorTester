@@ -108,3 +108,15 @@ def test_app_queue_is_scoped_to_deployment_and_port():
     pytest.importorskip("celery")
     app = create_app(broker_url="memory://", queue="q", target_deployment="remote-main", target_port=8001)
     assert app.conf.task_default_queue == "q.remote-main.8001"
+
+
+def test_worker_app_uses_environment_target(monkeypatch):
+    pytest.importorskip("celery")
+    monkeypatch.setenv("FACTORTESTER_BROKER_URL", "memory://")
+    monkeypatch.setenv("FACTORTESTER_DEPLOYMENT_ID", "remote-main")
+    monkeypatch.setenv("FACTORTESTER_SERVICE_PORT", "8001")
+    import importlib
+    import server.jobs.dispatch.worker_app as worker_app
+
+    module = importlib.reload(worker_app)
+    assert module.app.conf.task_default_queue == "factortester.jobs.remote-main.8001"
