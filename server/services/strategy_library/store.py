@@ -381,6 +381,24 @@ class StrategyLibraryStore:
     def get_revision(
         self, revision_ref: str, *, include_source: bool = True,
     ) -> dict[str, Any] | None:
+        import os
+        from server.jobs.storage.couchdb_authority import libraries_read_enabled
+
+        if libraries_read_enabled():
+            url = os.environ.get("FACTORTESTER_COUCHDB_URL", "").strip()
+            if url:
+                try:
+                    from server.jobs.storage.couchdb_library_reader import CouchDBLibraryReader
+                    from server.jobs.storage.couchdb_reports import CouchDBObjectStore
+
+                    document = CouchDBLibraryReader(CouchDBObjectStore(
+                        url, os.environ.get("FACTORTESTER_COUCHDB_DB") or "ft_objects",
+                    )).revision(revision_ref)
+                    revision = ((document or {}).get("payload") or {})
+                    if isinstance(revision, dict) and revision:
+                        return revision
+                except Exception:
+                    pass
         with self._lock, connect_sqlite(self.db_path, readonly=True) as db:
             row = db.execute(
                 "SELECT * FROM strategy_library_revisions WHERE revision_ref=?",

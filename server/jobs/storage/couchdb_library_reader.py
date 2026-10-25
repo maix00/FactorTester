@@ -120,6 +120,19 @@ class CouchDBLibraryWriter:
         except Exception:
             pass
         self.store._request("PUT", doc_id, json.dumps(document).encode())
+        if isinstance(revision, dict) and revision.get("revision_ref"):
+            revision_ref = str(revision["revision_ref"])
+            revision_doc = {
+                "_id": revision_ref, "schema_version": 1,
+                "kind": "strategy_revision", "strategy_ref": strategy_ref,
+                "payload": dict(revision),
+            }
+            try:
+                _, body = self.store._request("GET", revision_ref)
+                revision_doc["_rev"] = json.loads(body)["_rev"]
+            except Exception:
+                pass
+            self.store._request("PUT", revision_ref, json.dumps(revision_doc).encode())
 
     def delete_strategy(self, strategy_ref: str) -> None:
         import json
@@ -143,3 +156,13 @@ class CouchDBLibraryWriter:
         if document.get("kind") != "strategy_version":
             return None
         return document
+
+    def revision(self, revision_ref: str) -> dict | None:
+        import json
+
+        try:
+            _, body = self.store._request("GET", revision_ref)
+        except Exception:
+            return None
+        document = json.loads(body)
+        return document if document.get("kind") == "strategy_revision" else None
