@@ -53,3 +53,16 @@
 
 - Unset `TRADERESEARCH_COUCHDB_AUTHORITY` -> SQLite/JSON/mirror.
 - `TRADERESEARCH_AUTH_MODE=legacy` -> old password login.
+
+## Vendored Nautilus feature status
+
+`FrozenExecutionPlan.manifest()["local_nautilus_features"]` now records:
+
+- supported: next-bar open, OHLC bar-volume allocation, per-instrument cost basis, lot settlement basis;
+- blocker: daily-settlement event stream, fund transfers;
+- adapter-only/not wired: dynamic instrument updates, trading-day inventory roll.
+
+The strategy-family replay still uses a local hard-coded CFFEX venue; it must be
+switched to `engine_factory` before these statuses can become execution paths.
+The submodule commit is local (`6800ea1150`) and is not yet pushed/built into the
+public image.
