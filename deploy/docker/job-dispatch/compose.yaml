@@ -1,0 +1,75 @@
+name: factortester-job-dispatch
+
+x-worker: &worker
+  image: factortester-job-worker:local
+  build:
+    context: ../../..
+    dockerfile: deploy/docker/job-dispatch/Dockerfile.worker
+    args:
+      BASE_IMAGE: ${FACTORTESTER_BASE_IMAGE:-factortester-public:local}
+  restart: unless-stopped
+  depends_on:
+    rabbitmq:
+      condition: service_healthy
+  environment:
+    FACTORTESTER_BROKER_URL: amqp://factortester:${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD}@rabbitmq:5672//
+    FACTORTESTER_JOB_QUEUE: factortester.jobs
+    FACTORTESTER_JOB_DB: ${FACTORTESTER_JOB_DB:?set FACTORTESTER_JOB_DB inside the container}
+    FACTORTESTER_DEPLOYMENT_ID: ${FACTORTESTER_DEPLOYMENT_ID:?set FACTORTESTER_DEPLOYMENT_ID}
+    FACTORTESTER_NAUTILUS_EXECUTOR: ${FACTORTESTER_NAUTILUS_EXECUTOR:-server.services.nautilus_bridge.job_executor:execute_nautilus_job}
+    GTHT_JOB_LEASE_SECONDS: ${GTHT_JOB_LEASE_SECONDS:-120}
+  volumes:
+    - ${FACTORTESTER_STATE_ROOT:?set FACTORTESTER_STATE_ROOT}:/state
+    - ${FACTORTESTER_DATA_ROOT:?set FACTORTESTER_DATA_ROOT}:/data
+  mem_limit: ${WORKER_MEM_LIMIT:-4g}
+  cpus: ${WORKER_CPUS:-2}
+  command:
+    - celery
+    - -A
+    - server.jobs.dispatch.worker_app:app
+    - worker
+    - --concurrency=1
+    - --prefetch-multiplier=1
+    - --loglevel=INFO
+
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: factortester
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD}
+    ports:
+      - 127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15672}:15672
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+
+  worker-8000:
+    <<: *worker
+    environment:
+      FACTORTESTER_BROKER_URL: amqp://factortester:${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD}@rabbitmq:5672//
+      FACTORTESTER_JOB_QUEUE: factortester.jobs
+      FACTORTESTER_JOB_DB: ${FACTORTESTER_JOB_DB:?set FACTORTESTER_JOB_DB inside the container}
+      FACTORTESTER_DEPLOYMENT_ID: ${FACTORTESTER_DEPLOYMENT_ID:?set FACTORTESTER_DEPLOYMENT_ID}
+      FACTORTESTER_SERVICE_PORT: "8000"
+      FACTORTESTER_NAUTILUS_EXECUTOR: ${FACTORTESTER_NAUTILUS_EXECUTOR:-server.services.nautilus_bridge.job_executor:execute_nautilus_job}
+      GTHT_JOB_LEASE_SECONDS: ${GTHT_JOB_LEASE_SECONDS:-120}
+
+  worker-8001:
+    <<: *worker
+    environment:
+      FACTORTESTER_BROKER_URL: amqp://factortester:${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD}@rabbitmq:5672//
+      FACTORTESTER_JOB_QUEUE: factortester.jobs
+      FACTORTESTER_JOB_DB: ${FACTORTESTER_JOB_DB:?set FACTORTESTER_JOB_DB inside the container}
+      FACTORTESTER_DEPLOYMENT_ID: ${FACTORTESTER_DEPLOYMENT_ID:?set FACTORTESTER_DEPLOYMENT_ID}
+      FACTORTESTER_SERVICE_PORT: "8001"
+      FACTORTESTER_NAUTILUS_EXECUTOR: ${FACTORTESTER_NAUTILUS_EXECUTOR:-server.services.nautilus_bridge.job_executor:execute_nautilus_job}
+      GTHT_JOB_LEASE_SECONDS: ${GTHT_JOB_LEASE_SECONDS:-120}
+
+volumes:
+  rabbitmq-data:
