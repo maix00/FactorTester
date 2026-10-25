@@ -8,8 +8,10 @@ Nautilus runner. It does not create a second queue or copy market data.
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 import threading
+import uuid
 from typing import Any
 
 import orjson
@@ -158,6 +160,84 @@ class _RunnerSinkAdapter:
         self._sink.emit_error(error, traceback, code=code, **extra)
 
 
+class _ReplayRunner:
+    """Run the bounded, receipt-checked Nautilus catalog replay for one Job."""
+
+    def __init__(self, record: JobRecord, context: ExecutionContext) -> None:
+        self.record = record
+        self.context = context
+
+    def __call__(self, payload: dict[str, Any], sink: Any, cancel_event: Any) -> None:
+        from dataclasses import asdict
+
+        from server.services.nautilus_bridge.backtest_runner import (
+            ReplayInput,
+            run_small_catalog_replay,
+        )
+
+        plan = self.record.execution_plan or {}
+        raw_inputs = plan.get("catalog_inputs")
+        if not isinstance(raw_inputs, list) or not raw_inputs:
+            sink.emit_error(
+                "execution plan has no catalog inputs",
+                error_code="nautilus_replay_invalid_plan",
+            )
+            return
+        allowed_root = Path(
+            os.environ.get("FACTORTESTER_NAUTILUS_CATALOG_ROOT", "/data")
+        ).resolve()
+        inputs = []
+        for item in raw_inputs:
+            if not isinstance(item, dict):
+                sink.emit_error(
+                    "catalog input must be an object",
+                    error_code="nautilus_replay_invalid_plan",
+                )
+                return
+            folder = Path(str(item.get("catalog_dir") or "")).resolve()
+            if not folder.is_relative_to(allowed_root):
+                sink.emit_error(
+                    "catalog input is outside the configured catalog root",
+                    error_code="nautilus_replay_forbidden_path",
+                )
+                return
+            contract = str(item.get("contract_uid") or "").strip()
+            if not contract:
+                sink.emit_error(
+                    "catalog input has no contract uid",
+                    error_code="nautilus_replay_invalid_plan",
+                )
+                return
+            inputs.append(ReplayInput(folder, contract))
+        output = (
+            Path(artifact_root()) / self.record.job_id
+            / f"nautilus-replay-{self.record.attempt}-{uuid.uuid4().hex[:8]}"
+        )
+        output.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            receipt = run_small_catalog_replay(
+                tuple(inputs), output,
+                max_input_bars=int(plan.get("max_input_bars") or 200),
+                batch_minutes=int(plan.get("batch_minutes") or 20),
+                synthetic_order_probe=bool(plan.get("synthetic_order_probe")),
+                position_cost_basis=str(
+                    plan.get("position_cost_basis") or "WEIGHTED_AVERAGE"
+                ),
+            )
+        except NotImplementedError as exc:
+            sink.emit_error(str(exc), error_code="nautilus_execution_unavailable")
+            return
+        except Exception as exc:  # runner errors surface as Job failure
+            sink.emit_error(
+                f"Nautilus replay failed: {type(exc).__name__}: {exc}",
+                error_code="nautilus_replay_failed",
+            )
+            return
+        result = asdict(receipt)
+        result["reports_dir"] = str(output)
+        sink.emit_result(result)
+
+
 class NautilusJobExecutor:
     """Execute one verified Nautilus RunSpec through FactorTester's runner API."""
 
@@ -197,9 +277,12 @@ class NautilusJobExecutor:
         runner_sink = _RunnerSinkAdapter(sink)
         runner = self._runner
         if runner is None:
-            from server.modules.single_factor_test.process_runners import run_group
+            if str((record.execution_plan or {}).get("kind") or "") == "nautilus_catalog_replay":
+                runner = _ReplayRunner(record, context)
+            else:
+                from server.modules.single_factor_test.process_runners import run_group
 
-            runner = run_group
+                runner = run_group
         runner(payload, runner_sink, sink.cancel_event)
 
         if receiver.cancelled or context.cancel_requested():
