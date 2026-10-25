@@ -243,3 +243,37 @@ def test_non_backtest_job_is_not_dispatched(tmp_path):
     repository.transition("job-ic", JobStatus.PLANNING)
     repository.transition("job-ic", JobStatus.QUEUED)
     assert DispatchOutbox(tmp_path / "jobs.db").get(("job-ic", 1)) is None
+
+
+def test_worker_lease_heartbeat_and_expiry_fails_job(tmp_path):
+    from server.jobs.models import JobRecord
+    from server.jobs.repository.sqlite import JobRepository
+    from server.jobs.states import JobStatus
+
+    repository = JobRepository(tmp_path / "jobs.db")
+    repository.create(
+        JobRecord(
+            job_id="job-lease",
+            run_id="run-lease",
+            owner="owner",
+            workspace_id="workspace",
+            kind="backtest",
+            status=JobStatus.SUBMITTED,
+            deployment_id="remote-main",
+            run_spec_hash="1" * 64,
+            job_spec={},
+        )
+    )
+    repository.transition("job-lease", JobStatus.PLANNING)
+    repository.transition("job-lease", JobStatus.QUEUED)
+    claimed = repository.claim_attempt("job-lease", 1, worker_id="worker-a")
+    assert claimed is not None
+    assert repository.heartbeat_attempt("job-lease", 1, "worker-a", lease_seconds=60)
+    assert not repository.heartbeat_attempt("job-lease", 1, "worker-b", lease_seconds=60)
+    failed = repository.recover_expired_leases(now=claimed.started_at + 31)
+    assert failed == []
+    expired = repository.recover_expired_leases(now=claimed.started_at + 10_000)
+    assert expired == ["job-lease"]
+    record = repository.require("job-lease")
+    assert record.status is JobStatus.FAILED
+    assert record.error["code"] == "worker_lease_expired"

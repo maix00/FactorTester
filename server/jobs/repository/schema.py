@@ -178,6 +178,19 @@ def ensure_job_schema(conn: sqlite3.Connection) -> None:
                 'queued', 'running', 'paused'
             );
 
+        CREATE TABLE IF NOT EXISTS research_job_worker_leases (
+            job_id TEXT PRIMARY KEY,
+            attempt INTEGER NOT NULL,
+            worker_id TEXT NOT NULL,
+            lease_until REAL NOT NULL,
+            heartbeat_at REAL NOT NULL,
+            created_at REAL NOT NULL,
+            FOREIGN KEY (job_id) REFERENCES research_jobs(job_id) ON DELETE CASCADE,
+            CHECK (attempt >= 1)
+        );
+        CREATE INDEX IF NOT EXISTS idx_research_job_worker_lease_expiry
+            ON research_job_worker_leases(lease_until);
+
         CREATE TABLE IF NOT EXISTS user_job_pins (
             owner TEXT PRIMARY KEY,
             job_id TEXT NOT NULL UNIQUE,

@@ -28,6 +28,9 @@ def build_runner() -> DispatchRunner:
     db_path = Path(os.environ.get(DB_ENV, "") or Settings.CACHE_DB_PATH)
     outbox = DispatchOutbox(db_path)
     outbox.ensure_schema()
+    from server.jobs.repository.sqlite import JobRepository
+
+    JobRepository(db_path).recover_expired_leases()
     return DispatchRunner(
         outbox,
         publisher_from_env(),

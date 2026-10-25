@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import sqlite3
 import threading
 import time
@@ -321,6 +322,11 @@ class JobRepository(
                 """,
                 values,
             ).fetchone()
+            if target in TERMINAL_STATUSES:
+                conn.execute(
+                    "DELETE FROM research_job_worker_leases WHERE job_id=?",
+                    (str(job_id),),
+                )
             if target is JobStatus.QUEUED and updated is not None:
                 self._enqueue_dispatch(conn, updated)
             if target is JobStatus.RUNNING:
@@ -341,6 +347,7 @@ class JobRepository(
 
     def claim_attempt(
         self, job_id: str, attempt: int, *, worker_pid: int | None = None,
+        worker_id: str = "",
     ) -> JobRecord | None:
         """Atomically claim one queued JobAttempt for a broker worker.
 
@@ -348,6 +355,9 @@ class JobRepository(
         after the first claim; a later attempt must be a new Job record.
         """
         now = time.time()
+        lease_seconds = float(os.environ.get("GTHT_JOB_LEASE_SECONDS", "120"))
+        lease_seconds = max(15.0, lease_seconds)
+        lease_owner = str(worker_id or (worker_pid if worker_pid is not None else "worker"))
         with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
@@ -372,10 +382,75 @@ class JobRepository(
                 values,
             ).fetchone()
             conn.execute(
+                """
+                INSERT INTO research_job_worker_leases (
+                    job_id, attempt, worker_id, lease_until, heartbeat_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(job_id) DO UPDATE SET
+                    attempt=excluded.attempt,
+                    worker_id=excluded.worker_id,
+                    lease_until=excluded.lease_until,
+                    heartbeat_at=excluded.heartbeat_at
+                """,
+                (
+                    str(job_id), int(attempt), lease_owner,
+                    now + lease_seconds, now, now,
+                ),
+            )
+            conn.execute(
                 "DELETE FROM user_job_pins WHERE owner=? AND job_id=?",
                 (str(row["owner"]), str(job_id)),
             )
         return self._record(updated) if updated is not None else None
+
+    def heartbeat_attempt(
+        self, job_id: str, attempt: int, worker_id: str,
+        *, lease_seconds: float | None = None,
+    ) -> bool:
+        now = time.time()
+        seconds = max(15.0, float(
+            lease_seconds if lease_seconds is not None
+            else os.environ.get("GTHT_JOB_LEASE_SECONDS", "120")
+        ))
+        with self._connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE research_job_worker_leases
+                SET heartbeat_at=?, lease_until=?
+                WHERE job_id=? AND attempt=? AND worker_id=?
+                """,
+                (now, now + seconds, str(job_id), int(attempt), str(worker_id)),
+            )
+            return cursor.rowcount == 1
+
+    def recover_expired_leases(self, *, now: float | None = None) -> list[str]:
+        """Fail running Jobs whose worker lease expired; never auto-replay."""
+        timestamp = time.time() if now is None else float(now)
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT job_id, attempt FROM research_job_worker_leases
+                WHERE lease_until < ?
+                ORDER BY lease_until, job_id
+                """,
+                (timestamp,),
+            ).fetchall()
+        failed: list[str] = []
+        for row in rows:
+            try:
+                self.transition(
+                    str(row["job_id"]),
+                    JobStatus.FAILED,
+                    expected=JobStatus.RUNNING,
+                    error={
+                        "code": "worker_lease_expired",
+                        "message": "worker lease expired before terminal result",
+                    },
+                )
+            except (RuntimeError, KeyError):
+                continue
+            failed.append(str(row["job_id"]))
+        return failed
 
     def set_execution_plan(
         self,

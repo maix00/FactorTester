@@ -92,3 +92,28 @@ def test_outbox_message_still_pending_is_independent_of_execution(tmp_path):
     # A direct worker execution does not fabricate broker confirmation.
     DispatchWorker(repository).execute(_message(), _Executor())
     assert outbox.get(("job-worker", 1)).status == "pending"
+
+
+def test_worker_heartbeats_during_long_executor(tmp_path):
+    import time
+
+    repository = JobRepository(tmp_path / "jobs.db")
+    _queued_job(repository, "job-beat")
+
+    class SlowExecutor:
+        def execute(self, record, message):
+            time.sleep(0.12)
+            return ExecutionOutcome({"ok": True})
+
+    DispatchWorker(repository).execute(
+        _message("job-beat"), SlowExecutor(), worker_id="worker-beat",
+        heartbeat_interval=0.02,
+    )
+    import sqlite3
+    with sqlite3.connect(tmp_path / "jobs.db") as conn:
+        row = conn.execute(
+            "SELECT lease_until, heartbeat_at FROM research_job_worker_leases WHERE job_id=?",
+            ("job-beat",),
+        ).fetchone()
+    # The terminal transition removes the lease.
+    assert row is None

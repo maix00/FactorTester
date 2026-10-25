@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+import socket
+import threading
+import uuid
 from typing import Any, Protocol
 
 from server.jobs.models import JobRecord
@@ -45,13 +48,28 @@ class DispatchWorker:
         executor: JobExecutor,
         *,
         worker_pid: int | None = None,
+        worker_id: str = "",
+        heartbeat_interval: float = 30.0,
     ) -> dict[str, Any]:
         pid = os.getpid() if worker_pid is None else int(worker_pid)
+        owner = worker_id or f"{socket.gethostname()}:{pid}:{uuid.uuid4().hex[:12]}"
         record = self.repository.claim_attempt(
-            message.job_id, message.attempt, worker_pid=pid,
+            message.job_id, message.attempt, worker_pid=pid, worker_id=owner,
         )
         if record is None:
             return {"status": "duplicate", "job_id": message.job_id, "attempt": message.attempt}
+        stop = threading.Event()
+
+        def heartbeat() -> None:
+            interval = max(0.05, float(heartbeat_interval))
+            while not stop.wait(interval):
+                if not self.repository.heartbeat_attempt(
+                    record.job_id, record.attempt, owner,
+                ):
+                    return
+
+        beat = threading.Thread(target=heartbeat, name="job-lease-heartbeat", daemon=True)
+        beat.start()
         try:
             outcome = executor.execute(record, message)
         except Exception as exc:
@@ -70,6 +88,9 @@ class DispatchWorker:
                 "attempt": record.attempt,
                 "error": {"code": "worker_execution_failed"},
             }
+        finally:
+            stop.set()
+            beat.join(timeout=1.0)
         if outcome.succeeded:
             updated = self.repository.transition(
                 record.job_id,
