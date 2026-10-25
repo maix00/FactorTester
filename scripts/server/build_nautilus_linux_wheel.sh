@@ -8,6 +8,9 @@ OUT="${NAUTILUS_WHEEL_DIR:-$ROOT/.artifacts/nautilus-wheels}"
 CACHE="${NAUTILUS_CACHE:-$ROOT/.artifacts/nautilus-build}"
 JOBS="${CARGO_BUILD_JOBS:-1}"
 MEMORY="${NAUTILUS_BUILD_MEMORY:-3g}"
+# nautilus-model is a large staticlib; codegen-units=1 exceeded a 3 GiB
+# container. Sixteen units keep the peak below that budget on the public host.
+
 mkdir -p "$OUT" "$CACHE/cargo" "$CACHE/rustup"
 [ -f "$SRC/python/Cargo.toml" ] || { echo "missing $SRC/python/Cargo.toml" >&2; exit 1; }
 git -C "$SRC" diff --quiet || { echo "vendor/nautilus_trader has uncommitted changes" >&2; exit 1; }
