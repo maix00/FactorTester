@@ -737,6 +737,7 @@ def stream_test_job(job_id: str):
     @stream_with_context
     def generate():
         nonlocal after
+        last_db_sequence = -1
         while True:
             current = repository().load(job_id, owner=owner)
             if current is None:
@@ -745,6 +746,14 @@ def stream_test_job(job_id: str):
                     {"error": "research job not found"},
                 )
                 return
+            db_progress = repository().progress(job_id, current.attempt)
+            if db_progress is not None and int(db_progress["sequence"]) > last_db_sequence:
+                last_db_sequence = int(db_progress["sequence"])
+                yield _sse("progress", {
+                    **db_progress,
+                    "status": current.status.value,
+                    "percent_scope": "global",
+                })
             try:
                 snapshot = _daemon_client().events(
                     job_id,
