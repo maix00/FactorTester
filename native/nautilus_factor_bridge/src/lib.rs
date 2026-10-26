@@ -292,6 +292,22 @@ pub mod nautilus {
             }
         }
 
+        /// Drop slices older than ``now_ns - grace_ns``; report dropped work.
+        pub fn expire_stale(&mut self, now_ns: i64, grace_ns: i64) -> usize {
+            let cutoff = now_ns.saturating_sub(grace_ns);
+            let before = self.pending_len();
+            self.future_slices = self.future_slices.split_off(&cutoff);
+            if self.pending_timestamp.is_some_and(|timestamp| timestamp < cutoff) {
+                self.pending_bars.clear();
+                self.pending_timestamp = None;
+            }
+            let dropped = before - self.pending_len();
+            if dropped > 0 {
+                self.last_error = Some(format!("dropped {dropped} stale slice bars"));
+            }
+            dropped
+        }
+
         pub fn expire_before(&mut self, timestamp_ns: i64) {
             self.future_slices = self.future_slices.split_off(&timestamp_ns);
             if self.pending_timestamp.is_some_and(|timestamp| timestamp < timestamp_ns) {
@@ -631,6 +647,22 @@ mod nautilus_tests {
         );
         actor.handle(&bar);
         assert_eq!(*seen.lock().unwrap(), vec![1_000]);
+    }
+
+    #[test]
+    fn factor_actor_reports_expired_incomplete_slices() {
+        let json = r#"{"columns":["CLOSE"],"nodes":[{"kind":"column","index":0}],"outputs":[0]}"#;
+        let mut actor = nautilus::FactorActor::from_plan_json("factor-stale-test", 2, json).unwrap();
+        actor.expect_products(&["A.B", "C.D"]);
+        let bar = Bar::new(
+            BarType::from("A.B-1-MINUTE-LAST-EXTERNAL"),
+            Price::from("1.0"), Price::from("1.0"), Price::from("1.0"),
+            Price::from("1.0"), Quantity::from("1"), 1_000.into(), 1_000.into(),
+        );
+        actor.on_completed_bar(&bar);
+        assert_eq!(actor.expire_stale(5_000, 1_000), 1);
+        assert_eq!(actor.pending_len(), 0);
+        assert!(actor.last_error().unwrap().contains("stale"));
     }
 
     #[test]
