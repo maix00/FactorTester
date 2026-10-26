@@ -420,25 +420,6 @@ class RollingOp(OperandExpr):
             raise TypeError("min_periods must resolve to an integer constant")
         return int(value)
 
-    def _apply_window_semantics(self, result: pd.DataFrame, values: pd.DataFrame,
-                                window: int) -> pd.DataFrame:
-        """Mask the Rust aggregation according to explicit window semantics."""
-        min_periods = self._min_periods_value(window)
-        propagate = self.nan_policy is NanPolicy.PROPAGATE
-        output = result.to_numpy(copy=True)
-        for column_index, column in enumerate(result.columns):
-            raw = pd.to_numeric(values[column], errors="coerce").to_numpy(dtype=float)
-            finite = np.isfinite(raw)
-            counts = np.concatenate(([0], np.cumsum(finite)))
-            positions = np.arange(len(raw))
-            widths = np.minimum(positions + 1, window)
-            valid = counts[positions + 1] - counts[np.maximum(0, positions + 1 - window)]
-            mask = valid < min_periods
-            if propagate:
-                mask |= valid < widths
-            output[mask, column_index] = np.nan
-        return pd.DataFrame(output, index=result.index, columns=result.columns)
-
     def _rust_rolling(self, window: int, df: pd.DataFrame,
                       quantile: float | None = None) -> pd.DataFrame | None:
         """Batch path uses the same Rust interval kernel as streaming."""
