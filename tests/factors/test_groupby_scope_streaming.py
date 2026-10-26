@@ -358,3 +358,37 @@ def test_trading_day_scope_refuses_to_guess_the_trading_day():
             SimpleNamespace(timestamp=None, trading_day=None, prices={}),
             {},
         )
+
+
+def test_rolling_slides_while_scope_resets_within_partition():
+    """rolling(3) keeps the last 3 bars; scope_bars(3) resets every 3 bars."""
+    import pandas as pd
+
+    from tools.data.types import DataColumn, DataFreq
+    from tools.factors.expr.groupby_scope import GroupByScopeExpr
+    from tools.factors.expr.leaf import ColumnRef, _to_expr
+    from tools.factors.expr.lookback_scope import scope_bars
+    from tools.factors.expr.streaming.incremental import compile_incremental_factor
+
+    column = DataColumn.CLOSE
+    rolling = compile_incremental_factor(
+        "rolling-3", ColumnRef(column).rolling_mean(3), ("A",),
+        source_freq=DataFreq.MIN1,
+    )
+    scoped = compile_incremental_factor(
+        "scope-3",
+        GroupByScopeExpr(scope_bars(3), ColumnRef(column)).mean(),
+        ("A",), source_freq=DataFreq.MIN1,
+    )
+    stamps = pd.date_range("2026-01-05 09:31", periods=5, freq="min")
+    rolling_values = []
+    scoped_values = []
+    for value, stamp in zip([10.0, 20.0, 30.0, 40.0, 50.0], stamps, strict=True):
+        fields = {"A": {column.name: value}}
+        rolling.on_bar(pd.Timestamp(stamp), fields)
+        scoped.on_bar(pd.Timestamp(stamp), fields)
+        rolling_values.append(rolling.on_signal(stamp)["A"])
+        scoped_values.append(scoped.on_signal(stamp)["A"])
+
+    assert rolling_values == [10.0, 15.0, 20.0, 30.0, 40.0]
+    assert scoped_values == [10.0, 15.0, 20.0, 40.0, 45.0]
