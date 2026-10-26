@@ -17,9 +17,11 @@ fn main() {
         let mut engine = nautilus_factor_bridge::FactorPlanEngine::from_spec_json(json, 1).unwrap();
         let started = Instant::now();
         let mut sink = 0.0;
+        let mut out = Vec::new();
         for index in 0..n {
             let bar = MarketBar::new(index as i64, vec!["A".into()], vec![(index as f64).sin()]);
-            sink += engine.update(&bar).unwrap()[0];
+            engine.update_into(&bar, &mut out).unwrap();
+            sink += out[0];
         }
         samples.push(started.elapsed().as_secs_f64());
         std::hint::black_box(sink);

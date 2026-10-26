@@ -138,6 +138,12 @@ impl FactorPlanKernel {
     }
 
     pub fn update_at(&mut self, timestamp_ns: i64, values: &[f64]) -> Result<Vec<f64>, crate::algo::Error> {
+        let mut result = Vec::with_capacity(self.outputs.len() * self.products);
+        self.update_into(timestamp_ns, values, &mut result)?;
+        Ok(result)
+    }
+
+    pub fn update_into(&mut self, timestamp_ns: i64, values: &[f64], result: &mut Vec<f64>) -> Result<(), crate::algo::Error> {
         self.timestamp_ns = timestamp_ns;
         if self.products == 0 || values.is_empty() || values.len() % self.products != 0 {
             return Err(crate::algo::Error::InvalidParameter("plan values must be product-major fields".into()));
@@ -249,10 +255,10 @@ impl FactorPlanKernel {
                 }
             }
         }
-        let mut result = Vec::with_capacity(self.outputs.len() * products);
+        result.clear();
         for output in &self.outputs { result.extend_from_slice(&self.slots[*output]); }
         self.ordinal += 1;
-        Ok(result)
+        Ok(())
     }
 }
 
