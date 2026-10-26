@@ -252,3 +252,13 @@ def test_compat_plan_emits_scalar_truncation():
     node = spec['nodes'][-1]
     assert node['trunc_start'] == 1
     assert node['trunc_end'] == 3
+
+
+def test_compat_plan_emits_dynamic_truncation_children():
+    from tools.factors.alpha_plan import alpha_plan_spec
+
+    expression = ColumnRef(DataColumn.CLOSE).rolling(5).truncate(ColumnRef(DataColumn.CLOSE), 2).mean()
+    spec = alpha_plan_spec(expression, source_freq=DataFreq.MIN1, products=('A',))
+    node = spec['nodes'][-1]
+    assert node['trunc_start_child'] is not None
+    assert node['trunc_end'] == 2

@@ -118,18 +118,23 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
             op, _, q = expr.op.partition(":") if ":" in expr.op else (expr.op, "", "")
             op = op.removeprefix("rolling_")
             trunc = []
+            trunc_children = []
             for value in (expr.trunc_start, expr.trunc_end):
                 if value is None:
-                    trunc.append(-1)
+                    trunc.append(-1); trunc_children.append(None)
                 elif isinstance(value, ConstExpr) and isinstance(value.value, int):
-                    trunc.append(int(value.value))
+                    trunc.append(int(value.value)); trunc_children.append(None)
                 else:
-                    return None
+                    child_index = build(value)
+                    if child_index is None:
+                        return None
+                    trunc.append(-1); trunc_children.append(child_index)
             node = {
                 "kind": "rolling", "child": child, "window": window_count,
                 "op": op, "min_periods": expr._min_periods_value(window_count),
                 "propagate_nan": expr.nan_policy.value == "propagate",
                 "trunc_start": trunc[0], "trunc_end": trunc[1],
+                "trunc_start_child": trunc_children[0], "trunc_end_child": trunc_children[1],
             }
             if op == "quantile":
                 node["quantile"] = float(expr.quantile)
