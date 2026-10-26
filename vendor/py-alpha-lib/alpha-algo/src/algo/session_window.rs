@@ -254,8 +254,7 @@ impl OrderStatisticTree {
     self.root.map(|index| self.nodes[index].sum).unwrap_or(0.0)
   }
 
-  fn kth(&self, mut k: usize) -> Option<f64> {
-    let mut node = self.root;
+  fn kth_at(&self, mut node: Option<usize>, mut k: usize) -> Option<f64> {
     while let Some(index) = node {
       let left = Self::size(self.nodes[index].left, &self.nodes);
       if k < left {
@@ -268,6 +267,31 @@ impl OrderStatisticTree {
       }
     }
     None
+  }
+
+  fn kth(&self, k: usize) -> Option<f64> {
+    self.kth_at(self.root, k)
+  }
+
+  fn kth_pair(&self, mut k1: usize, mut k2: usize) -> (Option<f64>, Option<f64>) {
+    if k1 == k2 { let value = self.kth(k1); return (value, value); }
+    let mut node = self.root;
+    while let Some(index) = node {
+      let left = Self::size(self.nodes[index].left, &self.nodes);
+      let right_start = left + self.nodes[index].count;
+      if k2 < left {
+        node = self.nodes[index].left;
+      } else if k1 >= right_start {
+        k1 -= right_start;
+        k2 -= right_start;
+        node = self.nodes[index].right;
+      } else {
+        let first = if k1 < left { self.kth_at(self.nodes[index].left, k1) } else { Some(self.nodes[index].key) };
+        let second = if k2 < right_start { Some(self.nodes[index].key) } else { self.kth_at(self.nodes[index].right, k2 - right_start) };
+        return (first, second);
+      }
+    }
+    (None, None)
   }
 }
 
@@ -506,7 +530,7 @@ impl SessionWindowState {
         let Some(tree) = self.order_stat.as_ref() else { return f64::NAN };
         let lower = (count - 1) / 2;
         let upper = count / 2;
-        let (Some(low), Some(high)) = (tree.kth(lower), tree.kth(upper)) else {
+        let (Some(low), Some(high)) = tree.kth_pair(lower, upper) else {
           return f64::NAN;
         };
         let median = (low + high) / 2.0;
@@ -541,7 +565,7 @@ impl SessionWindowState {
         let position = q.clamp(0.0, 1.0) * (count - 1) as f64;
         let lower = position.floor() as usize;
         let upper = position.ceil() as usize;
-        let (Some(low), Some(high)) = (tree.kth(lower), tree.kth(upper)) else {
+        let (Some(low), Some(high)) = tree.kth_pair(lower, upper) else {
           return f64::NAN;
         };
         low + (high - low) * (position - lower as f64)
