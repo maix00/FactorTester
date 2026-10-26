@@ -802,6 +802,27 @@ mod nautilus_tests {
     }
 
     #[test]
+    fn bridge_raw_extrema_select_the_same_parent_window_position() {
+        let json = r#"{"nodes":[{"kind":"column","index":0},
+          {"kind":"rolling","child":0,"window":5,"op":"argmax_raw","min_periods":1,"propagate_nan":false,"trunc_start":1,"trunc_end":2},
+          {"kind":"rolling","child":0,"window":5,"op":"min","min_periods":1,"propagate_nan":false,"trunc_start_child":1,"trunc_end_child":1}],"outputs":[1,2]}"#;
+        let values = [2.0,5.0,5.0,-2.0,9.0,1.0,0.0,3.0];
+        let positions = [f64::NAN,1.0,1.0,1.0,1.0,1.0,2.0,1.0];
+        let selected = [f64::NAN,5.0,5.0,5.0,5.0,5.0,9.0,9.0];
+        for prefix in 1..=values.len() {
+            let mut engine = crate::FactorPlanEngine::from_spec_json(json,1).unwrap();
+            let mut out = Vec::new();
+            for current in 0..prefix {
+                let bar = crate::MarketBar::new(current as i64,vec!["A".into()],vec![values[current]]);
+                engine.update_into(&bar,&mut out).unwrap();
+                for (actual,expected) in out.iter().zip([positions[current],selected[current]]) {
+                    assert!(actual.is_nan() && expected.is_nan() || *actual == expected, "row {current}: {actual} != {expected}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn factor_actor_buffers_future_slice_without_mixing() {
         let json = r#"{"columns":["CLOSE"],"nodes":[{"kind":"column","index":0}],"outputs":[0]}"#;
         let mut actor = nautilus::FactorActor::from_plan_json("factor-time-test", 2, json).unwrap();

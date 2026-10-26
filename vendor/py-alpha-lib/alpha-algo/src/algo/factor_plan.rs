@@ -7,6 +7,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use crate::algo::{IntervalKernel, SessionOp};
+use crate::algo::session_window::arg_extreme_position;
 use serde::Deserialize;
 
 
@@ -204,6 +205,12 @@ impl FactorPlanKernel {
                 _ => None,
             };
             let rolling = match &spec {
+                ExprSpec::Rolling { op, window, trunc_start, trunc_end, trunc_start_child: None, trunc_end_child: None, .. }
+                    if *trunc_start >= 0 && *trunc_end >= *trunc_start && (*trunc_end as usize) < window.saturating_sub(1)
+                        && matches!(op, SessionOp::Argmin | SessionOp::Argmax) => {
+                    let raw = if *op == SessionOp::Argmin { SessionOp::ArgminRaw } else { SessionOp::ArgmaxRaw };
+                    (0..products).map(|_| IntervalKernel::new_explicit(raw).map(Some)).collect::<Result<Vec<_>, _>>()?
+                }
                 ExprSpec::Rolling { op, .. } | ExprSpec::RollingDynamic { op, .. } | ExprSpec::Scope { op, .. } | ExprSpec::SessionRolling { op, .. } | ExprSpec::SessionReset { op, .. } => (0..products)
                     .map(|_| IntervalKernel::new_explicit(*op).map(Some))
                     .collect::<Result<Vec<_>, _>>()?,
@@ -229,7 +236,7 @@ impl FactorPlanKernel {
             };
             let trunc_delay = match &spec {
                 ExprSpec::Rolling { window, trunc_start, trunc_end, trunc_start_child, trunc_end_child, .. }
-                    if *trunc_start >= 0 && *trunc_end >= 0
+                    if *trunc_start >= 0 && *trunc_end >= *trunc_start
                         && trunc_start_child.is_none() && trunc_end_child.is_none()
                         && (*trunc_end as usize) < window.saturating_sub(1) =>
                     (0..products).map(|_| VecDeque::with_capacity(window - 1 - *trunc_end as usize + 1)).collect(),
@@ -451,17 +458,35 @@ impl FactorPlanKernel {
                                 let end = base.saturating_add(*trunc_end as u64);
                                 truncated_slice(op, history, base.saturating_add(*trunc_start as u64), end, current, *min_periods, *propagate_nan)
                             } else {
-                                ring.front().copied().unwrap_or(f64::NAN)
+                                let winner = ring.front().copied().unwrap_or(f64::NAN);
+                                match op {
+                                    SessionOp::ArgminRaw | SessionOp::ArgmaxRaw => winner + *trunc_start as f64,
+                                    SessionOp::Argmin | SessionOp::Argmax => {
+                                        if winner.is_nan() { f64::NAN } else {
+                                            arg_extreme_position(*op, *trunc_start as u64 + winner as u64, *trunc_start as u64, (*window - 1) as u64)
+                                        }
+                                    }
+                                    _ => winner,
+                                }
                             };
+                            if current + 1 < *window as u64 && matches!(op, SessionOp::ArgminRaw | SessionOp::ArgmaxRaw) {
+                                out[product] += *trunc_start as f64;
+                            }
                         } else if truncated {
                             let history = &mut node.trunc_history[product];
                             history.push_back(input[product]);
                             while history.len() > *window { history.pop_front(); }
                             let start_offset = trunc_start_child.map_or(*trunc_start as f64, |offset| head[offset][product]);
                             let end_offset = trunc_end_child.map_or(*trunc_end as f64, |offset| head[offset][product]);
+                            if (trunc_start_child.is_some() && !start_offset.is_finite())
+                                || (trunc_end_child.is_some() && (!end_offset.is_finite() || end_offset < 0.0)) {
+                                out[product] = f64::NAN;
+                                continue;
+                            }
                             let start = if start_offset >= 0.0 { base.saturating_add(start_offset as u64) } else { base };
                             let end = if end_offset >= 0.0 { base.saturating_add(end_offset as u64) } else { current };
                             out[product] = truncated_slice(op, history, start, end, current, *min_periods, *propagate_nan);
+                            if matches!(op, SessionOp::ArgminRaw | SessionOp::ArgmaxRaw) { out[product] += (start - base) as f64; }
                         } else {
                             let Some(state) = node.rolling[product].as_mut() else { out[product] = f64::NAN; continue };
                             state.set_semantics(*min_periods, *propagate_nan);
@@ -650,17 +675,20 @@ fn truncated_slice(op: &SessionOp, history: &VecDeque<f64>, start: u64, end: u64
     let mut sum_sq = 0.0;
     let mut minimum = f64::INFINITY;
     let mut maximum = f64::NEG_INFINITY;
+    let mut minimum_index = low;
+    let mut maximum_index = low;
+    let extrema = matches!(op, SessionOp::Argmin | SessionOp::Argmax | SessionOp::ArgminRaw | SessionOp::ArgmaxRaw | SessionOp::Min | SessionOp::Max);
     let mut finite = Vec::new();
     let needs_values = matches!(op, SessionOp::Quantile(_));
     for index in low..=high {
         let Some(value) = history.get((index - first) as usize).copied() else { continue };
         if value.is_nan() { nan_count += 1; continue; }
-        if !value.is_finite() { continue; }
+        if !value.is_finite() && !extrema { continue; }
+        if count == 0 || value < minimum { minimum = value; minimum_index = index; }
+        if count == 0 || value > maximum { maximum = value; maximum_index = index; }
         count += 1;
         sum += value;
         sum_sq += value * value;
-        minimum = minimum.min(value);
-        maximum = maximum.max(value);
         if needs_values { finite.push(value); }
     }
     if (propagate_nan && nan_count > 0) || count < min_periods.max(1) { return f64::NAN; }
@@ -669,6 +697,10 @@ fn truncated_slice(op: &SessionOp, history: &VecDeque<f64>, start: u64, end: u64
         SessionOp::Mean => sum / count as f64,
         SessionOp::Min => minimum,
         SessionOp::Max => maximum,
+        SessionOp::Argmin | SessionOp::Argmax | SessionOp::ArgminRaw | SessionOp::ArgmaxRaw => {
+            let winner = if matches!(op, SessionOp::Argmin | SessionOp::ArgminRaw) { minimum_index } else { maximum_index };
+            arg_extreme_position(*op, winner, start, current)
+        }
         SessionOp::Var | SessionOp::Std => {
             if count < 2 { return f64::NAN; }
             let variance = (sum_sq - sum * sum / count as f64) / (count - 1) as f64;

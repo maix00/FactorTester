@@ -363,6 +363,13 @@ pub struct SessionWindowState {
   order_stat: Option<OrderStatisticTree>,
 }
 
+/// Shared extrema coordinates: raw is a start-relative offset; normalized is age / Bar span.
+pub(crate) fn arg_extreme_position(op: SessionOp, winner: u64, start: u64, current: u64) -> f64 {
+  if matches!(op, SessionOp::ArgminRaw | SessionOp::ArgmaxRaw) { winner.saturating_sub(start) as f64 }
+  else if current == start { 0.0 }
+  else { current.saturating_sub(winner) as f64 / current.saturating_sub(start) as f64 }
+}
+
 impl SessionWindowState {
   pub fn new(op: SessionOp) -> Result<Self, Error> {
     Ok(Self {
@@ -459,10 +466,7 @@ impl SessionWindowState {
   fn arg_extreme_at(&self, current: u64) -> f64 {
     let deque = if matches!(self.op, SessionOp::Argmax | SessionOp::ArgmaxRaw) { &self.max_deque } else { &self.min_deque };
     let Some((index, _)) = deque.front() else { return f64::NAN };
-    let age = current.saturating_sub(*index) as f64;
-    let span = current.saturating_sub(self.start_index);
-    if matches!(self.op, SessionOp::ArgminRaw | SessionOp::ArgmaxRaw) { age }
-    else if span == 0 { 0.0 } else { age / span as f64 }
+    arg_extreme_position(self.op, *index, self.start_index, current)
   }
 
   // Extrema order infinities normally; arithmetic kernels retain their finite-input contract.

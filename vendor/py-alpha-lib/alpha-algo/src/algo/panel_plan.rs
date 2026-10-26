@@ -185,6 +185,24 @@ impl PanelPlan {
         out.par_chunks_mut(rows.max(1)).enumerate().try_for_each(|(g,chunk)|->Result<()>{
             let observed:Vec<usize>=(0..rows).filter(|&t|width!=products||grid.observed[g*rows+t]!=0).collect();
             let x:Vec<f64>=observed.iter().map(|&t|args[0].at(g,t)).collect();
+            // Delayed rolling candidates must still ingest every source Bar.
+            // Reuse the incremental rolling implementation rather than freezing
+            // an interval state at an endpoint which moves behind the clock.
+            if !scope && args.len()==1 && (p[6]>=0.0 || p[7]>=0.0) {
+                use crate::algo::{ExprSpec, FactorPlanKernel};
+                let mut kernel = FactorPlanKernel::new(1, vec![ExprSpec::Column(0), ExprSpec::Rolling {
+                    op: session_op(op,p[5])?, child: 0, window: p[1] as usize,
+                    min_periods: p[3] as usize, propagate_nan: p[4]!=0.0,
+                    trunc_start: p[6] as i64, trunc_end: p[7] as i64,
+                    trunc_start_child: None, trunc_end_child: None,
+                }], vec![1])?;
+                let mut result = Vec::with_capacity(1);
+                for (&t,&value) in observed.iter().zip(&x) {
+                    kernel.update_into(grid.times[t], &[value], &mut result)?;
+                    chunk[t] = result[0];
+                }
+                return Ok(());
+            }
             if !scope && args.len()==1 && p[6]<0.0 && p[7]<0.0 {
                 if op == "ema" {
                     let mut state = crate::algo::EmaState::new(p[1] as usize)
@@ -391,6 +409,47 @@ fn panel_linreg(values: &[f64], window: usize, metric: &str, min: usize, prop: b
 #[cfg(test)]
 mod session_rolling_tests {
     use super::*;
+
+    #[test]
+    fn truncated_rolling_extrema_match_positions_and_every_prefix() {
+        let input = [f64::NAN, 5.0, 5.0, -2.0, f64::INFINITY, 1.0, f64::NAN, 8.0, -9.0, 3.0];
+        for op in ["argmax", "argmin", "argmax_raw", "argmin_raw", "mean"] {
+            for (start,end) in [(0,0), (1,2), (0,3), (3,1)] {
+                let json = format!(r#"{{"nodes":[{{"kind":"column","index":0}},{{"kind":"rolling","child":0,"window":5,"op":"{op}","min_periods":1,"propagate_nan":false,"trunc_start":{start},"trunc_end":{end}}}],"outputs":[1]}}"#);
+                for prefix in 1..=input.len() {
+                    let mut plan = PanelPlan::new();
+                    let grid = plan.grid(&(0..prefix as i64).collect::<Vec<_>>(), &vec![0;prefix], &vec![1;prefix]).unwrap();
+                    let column = plan.add("column".into(), vec![], vec![0.0], vec![], grid).unwrap();
+                    let output = plan.add(format!("rolling:{op}"), vec![column], vec![1.0,5.0,0.0,1.0,0.0,0.5,start as f64,end as f64],vec![],grid).unwrap();
+                    let batch = plan.execute_panel(&[&input[..prefix]], &[output], 1).unwrap();
+                    let mut incremental = crate::algo::FactorPlanKernel::from_spec_json(&json,1).unwrap();
+                    for current in 0..prefix {
+                        let base = current.saturating_sub(4);
+                        let low = base + start;
+                        let high = (base + end).min(current);
+                        let valid: Vec<_> = if low <= high {
+                            (low..=high).filter(|&i| !input[i].is_nan() && (op != "mean" || input[i].is_finite())).collect()
+                        } else { vec![] };
+                        let expected = if valid.is_empty() { f64::NAN } else if op == "mean" {
+                            valid.iter().map(|&i| input[i]).sum::<f64>() / valid.len() as f64
+                        } else {
+                            let mut best = valid[0];
+                            for &i in &valid[1..] {
+                                if (op.starts_with("argmax") && input[i] > input[best]) || (op.starts_with("argmin") && input[i] < input[best]) { best = i; }
+                            }
+                            if op.ends_with("_raw") { (best-base) as f64 }
+                            else if current == low { 0.0 } else { (current-best) as f64 / (current-low) as f64 }
+                        };
+                        let stream = incremental.update(&[input[current]]).unwrap()[0];
+                        for actual in [batch[0][current], stream] {
+                            assert!(actual.is_nan() && expected.is_nan() || (actual-expected).abs()<1e-12,
+                                "{op} ({start},{end}) prefix={prefix} row={current}: {actual} != {expected}");
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn batch_session_rolling_uses_observations_not_calendar_capacity() {
