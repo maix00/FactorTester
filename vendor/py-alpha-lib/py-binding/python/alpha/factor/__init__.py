@@ -2,6 +2,7 @@
 
 from .cross_sectional import CrossSectionalExpr
 from .bar_search import BarSinceExpr, bar_since
+from .scopes import SessionScope, TradingDayScope, scope_session, scope_trading_day
 from .scope import BarCountScope, GroupByScopeExpr, GroupByScopeOp, scope_bars
 from .family import FactorDefinition, FactorFamily, FactorIdentity
 from .semantics import NanPolicy, PartitionSemantics, WindowSemantics, default_min_periods
@@ -28,5 +29,6 @@ __all__ = [
     "CrossSectionalExpr",
     "FactorFamily", "FactorDefinition", "FactorIdentity",
     "BarCountScope", "scope_bars", "GroupByScopeExpr", "GroupByScopeOp",
+    "TradingDayScope", "SessionScope", "scope_trading_day", "scope_session",
     "BarSinceExpr", "bar_since",
 ]
