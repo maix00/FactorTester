@@ -1,7 +1,8 @@
 // Copyright 2026 MSD-RS Project LiJia
 // SPDX-License-Identifier: BSD-2-Clause
 //! Product-major matrix DAG.
-type Result<T> = std::result::Result<T, crate::algo::Error>; Leaves borrow NumPy; last-use releases intermediates.
+//! Leaves borrow NumPy; last-use releases intermediates.
+type Result<T> = std::result::Result<T, crate::algo::Error>;
 use std::{borrow::Cow, collections::{HashMap, VecDeque}};
 
 use rayon::prelude::*;
@@ -64,14 +65,14 @@ fn session_op(op: &str, q: f64) -> Result<crate::algo::SessionOp> {
 
 pub struct PanelPlan { nodes: Vec<Node>, grids: Vec<Grid> }
 impl PanelPlan {
-    fn new() -> Self { Self { nodes: vec![], grids: vec![] } }
-    fn grid(&mut self, times: &[i64], days: &[i64], observed: &[u8]) -> Result<usize> {
+    pub fn new() -> Self { Self { nodes: vec![], grids: vec![] } }
+    pub fn grid(&mut self, times: &[i64], days: &[i64], observed: &[u8]) -> Result<usize> {
         let (times,days,observed)=(times,days,observed);
         if times.len()!=days.len() { return Err(error("grid time/day length mismatch")); }
         self.grids.push(Grid { times:times.to_vec(), days:days.to_vec(), observed:observed.to_vec() });
         Ok(self.grids.len()-1)
     }
-    fn add(&mut self, op: String, children: Vec<usize>, params: Vec<f64>, indices: Vec<i64>, grid: usize) -> Result<usize> {
+    pub fn add(&mut self, op: String, children: Vec<usize>, params: Vec<f64>, indices: Vec<i64>, grid: usize) -> Result<usize> {
         if grid>=self.grids.len() || children.iter().any(|&c|c>=self.nodes.len()) { return Err(error("invalid grid or non-topological child")); }
         let valid=matches!(op.as_str(),"column"|"const"|"product"|"reindex"|"where"|"shift"|"since"|"distance"|"term"|
             "neg"|"abs"|"sign"|"sqrt"|"log"|"tanh"|"not"|"add"|"sub"|"mul"|"div"|"pow"|"max"|"min"|
@@ -103,7 +104,7 @@ impl PanelPlan {
             if base[i] {if gap.is_some() {if (i-start+1)%multiple==0 {output.push(i);}} else {ordinal+=1;if ordinal%multiple==0 {output.push(i);}}}
         } Ok(output)
     }
-    fn execute_panel(&self, columns: &[&[f64]], outputs: &[usize], products: usize) -> Result<Vec<Vec<f64>>> {
+    pub fn execute_panel(&self, columns: &[&[f64]], outputs: &[usize], products: usize) -> Result<Vec<Vec<f64>>> {
         if products==0 || outputs.iter().any(|&o|o>=self.nodes.len()) {return Err(error("invalid plan output/products"));}
         self.execute(columns, outputs, products)
     }
@@ -169,8 +170,26 @@ impl PanelPlan {
             let observed:Vec<usize>=(0..rows).filter(|&t|width!=products||grid.observed[g*rows+t]!=0).collect();
             let x:Vec<f64>=observed.iter().map(|&t|args[0].at(g,t)).collect();
             if !scope && args.len()==1 && p[6]<0.0 && p[7]<0.0 {
-                let v=super::plan_rolling(&x,p[1]as usize,op,p[3]as usize,p[4]!=0.0,Some(p[5]))?;
-                for(&t,v)in observed.iter().zip(v){chunk[t]=v;}return Ok(());
+                if op == "ema" {
+                    let mut state = crate::algo::EmaState::new(p[1] as usize)
+                        .map_err(|e| error(e.to_string()))?
+                        .with_semantics(p[3] as usize, p[4] != 0.0);
+                    for (&t, value) in observed.iter().zip(x.iter()) { chunk[t] = state.update(*value); }
+                    return Ok(());
+                }
+                if op.starts_with("linreg_") {
+                    let ctx = crate::algo::Context::default();
+                    let mut values = vec![f64::NAN; x.len()];
+                    match op {
+                        "linreg_slope" => crate::algo::ta_linreg_slope(&ctx, &mut values, &x, p[1] as usize, p[3] as usize)?,
+                        "linreg_r2" => crate::algo::ta_linreg_r2(&ctx, &mut values, &x, p[1] as usize, p[3] as usize)?,
+                        "linreg_tstat" => crate::algo::ta_linreg_tstat(&ctx, &mut values, &x, p[1] as usize, p[3] as usize)?,
+                        "linreg_resid_std" => crate::algo::ta_linreg_resid_std(&ctx, &mut values, &x, p[1] as usize, p[3] as usize)?,
+                        _ => return Err(error(format!("unsupported temporal operation {op}"))),
+                    }
+                    for (&t, value) in observed.iter().zip(values.iter()) { chunk[t] = *value; }
+                    return Ok(());
+                }
             }
             let mut base=0;let mut state=if args.len()==1 {Some(crate::algo::IntervalKernel::new(session_op(op,p[5])?).map_err(|e|error(e.to_string()))?.with_semantics(p[3]as usize,p[4]!=0.0))}else{None};
             let mut pair=crate::algo::PairIntervalState::new(op=="corr");
