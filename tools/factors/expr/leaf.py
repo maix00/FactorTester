@@ -199,6 +199,9 @@ class CategoryBoolRef(FactorExpr):
     def is_leaf_ref(self) -> bool:
         return True
 
+    def evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
+        return self._evaluate(ctx)
+
     def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
         timeline = ctx.panel_timeline
         if timeline is None:
