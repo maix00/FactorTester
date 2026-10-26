@@ -33,7 +33,8 @@ def _expand_product_paths(paths: list[str], *, start: str, end: str) -> list[str
         uids = [
             str(row.get("uid")) for row in rows
             if isinstance(row, dict) and row.get("uid")
-            and str(row.get("uid")).split("|")[-1] not in {"0001", "9999"}
+            and str(row.get("uid")).split("|")[-1].isdigit()
+            and int(str(row.get("uid")).split("|")[-1]) >= 1000
         ]
         if not uids:
             expanded.append(path)
