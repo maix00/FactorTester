@@ -76,7 +76,7 @@ impl PanelPlan {
         if grid>=self.grids.len() || children.iter().any(|&c|c>=self.nodes.len()) { return Err(error("invalid grid or non-topological child")); }
         let valid=matches!(op.as_str(),"column"|"const"|"product"|"bar_count"|"reindex"|"where"|"shift"|"since"|"distance"|"term"|
             "neg"|"abs"|"sign"|"sqrt"|"log"|"tanh"|"not"|"add"|"sub"|"mul"|"div"|"pow"|"max"|"min"|
-            "gt"|"lt"|"ge"|"le"|"eq"|"ne"|"and"|"or") || op.starts_with("rolling:") || op.starts_with("scope:") || op.starts_with("cross:") || op.starts_with("session_rolling:") || op == "bar_count";
+            "gt"|"lt"|"ge"|"le"|"eq"|"ne"|"and"|"or") || op.starts_with("rolling:") || op.starts_with("scope:") || op.starts_with("cross:") || op.starts_with("session_rolling:");
         if !valid { return Err(error(format!("unknown plan operation {op}"))); }
         if op == "bar_count" && (!children.is_empty() || indices.len() != 2 || indices[0] > indices[1]) {
             return Err(error("bar_count requires ordered inclusive bounds and no children"));
@@ -144,18 +144,6 @@ impl PanelPlan {
                         }
                     }
                     owned(out, products)
-                },
-                "bar_count"=> {
-                    let start=node.indices.first().copied().unwrap_or_else(|| p.first().copied().unwrap_or(f64::NEG_INFINITY) as i64);
-                    let end=node.indices.get(1).copied().unwrap_or_else(|| p.get(1).copied().unwrap_or(f64::INFINITY) as i64);
-                    let mut out=vec![f64::NAN;rows*products];
-                    for g in 0..products { for t in 0..rows {
-                        if grid.observed[g*rows+t]==0 {continue;}
-                        out[g*rows+t]=grid.times.iter().enumerate()
-                            .filter(|(row,time)| grid.observed[g*rows+*row]!=0 && **time>=start && **time<=end && **time<=grid.times[t])
-                            .count() as f64;
-                    }}
-                    owned(out,products)
                 },
                 "reindex"=> {
                     if node.indices.len()!=rows || node.indices.iter().any(|&i|i>=args[0].rows as i64){return Err(error("invalid reindex mapping"));}

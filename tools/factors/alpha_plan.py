@@ -17,7 +17,7 @@ from tools.factors.expr.cross_sectional import CrossSectionalOp
 from tools.factors.expr.groupby_scope import GroupByScopeOp
 from tools.factors.expr.leaf import CategoryBoolRef, ColumnRef, ConstExpr
 from tools.factors.expr.lookback_scope import BarCountScope, SessionScope, TradingDayScope
-from tools.factors.expr.rolling import IntervalBarsExpr, RollingOp, WindowBarsExpr, WindowBarsExpr, _resolve_windows
+from tools.factors.expr.rolling import IntervalBarsExpr, RollingOp, WindowBarsExpr, _resolve_windows
 from tools.factors.expr.shift import ShiftOp
 from tools.factors.expr.term_structure import TermStructureOp
 from tools.factors.expr.match_refs import MatchValueRef
@@ -71,13 +71,6 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
         elif isinstance(expr, IntervalBarsExpr):
             node = {"kind": "bar_count", "start_ns": expr.start_ns, "end_ns": expr.end_ns}
         elif isinstance(expr, WindowBarsExpr):
-            if source_freq is None or not products:
-                return None
-            from tools.factors.expr.rolling import _resolve_windows
-            common, count, per_product = _resolve_windows(expr.window.value, source_freq, products)
-            values = [float(count)] * len(products) if common else [float(per_product[product]) for product in products]
-            node = {"kind": "product", "values": values}
-        elif isinstance(expr, WindowBarsExpr):
             if source_freq is None or not isinstance(expr.window, ConstExpr):
                 return None
             common, count, _ = _resolve_windows(expr.window.value, source_freq, products)
@@ -94,7 +87,6 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
             if isinstance(window, ConstExpr) and isinstance(window.value, int):
                 window_count = int(window.value)
             elif type(window).__name__ == "WindowBarsExpr" and source_freq is not None and products:
-                from tools.factors.expr.rolling import _resolve_windows
                 value = window.window.value
                 if session_calendar is not None and isinstance(value, str) and value.strip().lower().endswith("d"):
                     lookback = int(value.strip().lower().removesuffix("d"))

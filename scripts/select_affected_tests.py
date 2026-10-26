@@ -221,7 +221,7 @@ EXACT_PATH_TESTS = {
         "tests/server/test_job_repository.py",
     ),
     "server/jobs/planning/daemon.py": (
-        "tests/server/test_job_planning_daemon.py",
+        "tests/server/test_job_dispatch_planning.py",
     ),
     "server/modules/single_factor_test/backtest_jobs.py": (
         "tests/server/test_research_job_lifecycle.py",
@@ -401,11 +401,30 @@ EXACT_PATH_TESTS = {
         "tests/data/test_factor_source_versions.py",
     ),
 }
+FACTOR_PLAN_TESTS = (
+    "tests/factors/test_bar_counts.py",
+    "tests/factors/test_rust_plan.py",
+    "tests/factors/test_alpha_factor_public_api.py",
+    "tests/factors/test_groupby_scope_streaming.py",
+    "tests/server/test_factor_calendar_window.py",
+)
+for _path in (
+    "tools/factors/alpha_plan.py",
+    "tools/factors/expr/rust_plan.py",
+    "tools/factors/expr/rolling.py",
+    "tools/factors/expr/streaming/rust_incremental.py",
+    "vendor/py-alpha-lib/alpha-algo/src/algo/factor_plan.rs",
+    "vendor/py-alpha-lib/alpha-algo/src/algo/panel_plan.rs",
+    "vendor/py-alpha-lib/py-binding/src/lib.rs",
+):
+    EXACT_PATH_TESTS[_path] = FACTOR_PLAN_TESTS
+EXACT_PATH_TESTS["tests/factors/test_bar_counts.py"] = ("tests/factors/test_bar_counts.py",)
+
 PREFIX_PATH_TESTS = {
     "tools/testers/backtest/engines/factors/": (
         "tests/factors/test_factor_expr_incremental.py",
         "tests/factors/test_groupby_scope_derived_missing.py",
-        "tests/factors/test_groupby_scope_infinities.py",
+        "tests/factors/test_groupby_scope.py",
         "tests/factors/test_groupby_scope_streaming.py",
         "tests/backtest/native/test_factor_incremental_compile.py",
         "tests/backtest/native/test_factor_incremental_rolling_window.py",
@@ -414,7 +433,7 @@ PREFIX_PATH_TESTS = {
     "tools/factors/expr/streaming/": (
         "tests/factors/test_factor_expr_incremental.py",
         "tests/factors/test_groupby_scope_derived_missing.py",
-        "tests/factors/test_groupby_scope_infinities.py",
+        "tests/factors/test_groupby_scope.py",
         "tests/factors/test_groupby_scope_streaming.py",
         "tests/backtest/native/test_factor_incremental_compile.py",
         "tests/backtest/native/test_factor_incremental_rolling_window.py",

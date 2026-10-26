@@ -28,6 +28,12 @@ def test_shared_and_unclassified_paths_fail_closed():
         "SCOPED", ["tests/scripts/test_nautilus_extension_build.py"],
     )
     assert selector.select({"tools/parameters/base.py"}) == ("FULL", [])
+
+
+def test_factor_plan_changes_select_concrete_consumers_without_full_suite():
+    mode, targets = selector.select({"tools/factors/alpha_plan.py", "vendor/py-alpha-lib/alpha-algo/src/algo/panel_plan.rs"})
+    assert mode == "SCOPED"
+    assert set(targets) == set(selector.FACTOR_PLAN_TESTS)
     assert selector.select({"tools/cli/app.py", "mystery/new.py"}) == ("FULL", [])
 
 
@@ -186,7 +192,7 @@ def test_nautilus_execution_bridge_selects_only_its_focused_tests():
         "tests/server/test_group_research_run_module.py",
         "tests/server/test_nautilus_bridge_position_offsets.py",
         "tests/server/test_job_repository.py",
-        "tests/server/test_job_planning_daemon.py",
+        "tests/server/test_job_dispatch_planning.py",
     }
     assert all((selector.ROOT / path).is_file() for path in targets)
 
@@ -283,7 +289,7 @@ def test_factor_expr_streaming_changes_select_bounded_contract_tests():
     assert set(targets) == {
         "tests/factors/test_factor_expr_incremental.py",
         "tests/factors/test_groupby_scope_derived_missing.py",
-        "tests/factors/test_groupby_scope_infinities.py",
+        "tests/factors/test_groupby_scope.py",
         "tests/factors/test_groupby_scope_streaming.py",
         "tests/backtest/native/test_factor_incremental_compile.py",
         "tests/backtest/native/test_factor_incremental_rolling_window.py",
