@@ -44,8 +44,8 @@ def build_contract_spec(
     start_ns = int(contract_row["start_ts"]) * 1_000_000
     end_ns = (int(contract_row["end_ts"]) + 86_400_000) * 1_000_000 - 1
     return FuturesContractSpec(
-        instrument_code=f"{underlying}{month}".upper(), venue=venue,
-        underlying=underlying.upper(),
+        instrument_code=f"{underlying}{month}".lower(), venue=venue,
+        underlying=underlying.lower(),
         price_increment=min_tick, price_precision=precision,
         multiplier=Decimal(str(spec_fields["point_value"])), currency="CNY",
         activation_ns=start_ns, expiration_ns=end_ns,
