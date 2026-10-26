@@ -339,6 +339,14 @@ pub mod nautilus {
 
         pub fn last_update(&self) -> Option<&FactorUpdate> { self.last_update.as_ref() }
 
+        /// Publish the latest update through Nautilus' runtime-typed message bus.
+        pub fn publish_last_update(&self, topic: &str) {
+            use nautilus_common::msgbus::mstr::{MStr, Topic};
+            if let Some(update) = self.last_update.as_ref() {
+                nautilus_common::msgbus::publish_any(MStr::<Topic>::from(topic), update);
+            }
+        }
+
         pub fn expect_products(&mut self, products: &[&str]) {
             self.expected_products = products.iter().map(|product| product.to_string()).collect();
             self.expected_products.sort();
@@ -665,6 +673,7 @@ mod nautilus_tests {
         );
         actor.handle(&bar);
         assert_eq!(*seen.lock().unwrap(), vec![1_000]);
+        actor.publish_last_update("factor.updates.test");
     }
 
     #[test]
