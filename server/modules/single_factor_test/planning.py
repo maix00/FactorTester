@@ -420,7 +420,11 @@ def build_execution_plan(kind: str, data: dict[str, Any]) -> dict[str, Any]:
         ]
     return {
         "plan_version": 1,
-        "kind": kind,
+        "kind": resolved.get("kind") or kind,
+        "strategy": resolved.get("strategy"),
+        "catalog_staging": resolved.get("catalog_staging"),
+        "source_adapter": resolved.get("source_adapter"),
+        "run_window": resolved.get("run_window"),
         "resolved": resolved,
         "resolved_hash": resolved_hash,
         "cache_keys": sorted(set(cache_keys)),
