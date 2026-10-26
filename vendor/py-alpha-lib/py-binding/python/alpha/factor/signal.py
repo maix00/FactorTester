@@ -54,7 +54,20 @@ class SignalAlign(FactorExpr):
         self.include_current = include_current
 
     def _structural_key(self):
-        return ("alpha.factor.SignalAlign", self.signal_freq,
+        if (
+            self.scope is None
+            and self.scope_anchor == "start"
+            and self.partial == "drop"
+            and self.basepoint == "last"
+            and self.daily_basepoint is None
+            and not self.end_session_skip
+            and self.end_session_gap is None
+            and self.include_current
+        ):
+            # Preserve the frozen factor:v2 fingerprint for legacy calls.
+            return ("alpha.factor.SignalAlign", self.signal_freq, self.basepoint,
+                    self.child._structural_key())
+        return ("alpha.factor.SignalAlign:v2", self.signal_freq,
                 type(self.scope).__name__ if self.scope is not None else None,
                 self.scope_anchor, self.partial, self.basepoint,
                 self.daily_basepoint, self.end_session_skip, self.end_session_gap,

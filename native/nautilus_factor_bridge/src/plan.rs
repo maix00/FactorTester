@@ -16,6 +16,8 @@ impl FactorPlanEngine {
     pub fn from_spec_json(json: &str, products: usize) -> Result<Self, alpha_algo::Error> {
         Ok(Self { inner: alpha_algo::FactorPlanKernel::from_spec_json(json, products)? })
     }
+
+    pub fn node_keys(&self) -> &[String] { self.inner.node_keys() }
 }
 
 impl FactorEngine for FactorPlanEngine {

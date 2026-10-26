@@ -376,3 +376,24 @@ def test_sessions_from_trading_calendar_window():
     ))
     scope = sessions_from_calendar(calendar)
     assert [(item.start_ns, item.end_ns) for item in scope.sessions] == [(100, 200), (300, 400)]
+
+
+def test_plan_spec_carries_structural_node_keys():
+    close = ColumnRef('CLOSE')
+    spec = (close.rolling(3).mean() + close.rolling(3).mean()).to_plan_spec()
+    assert len(spec['keys']) == len(spec['nodes'])
+    assert spec['nodes'][1]['kind'] == 'rolling'
+    assert spec['keys'][1].startswith("('alpha.factor.Rolling")
+
+
+def test_signal_align_legacy_identity_is_unchanged_by_new_parameters():
+    from alpha.factor import scope_trading_day
+
+    close = ColumnRef('CLOSE')
+    legacy = close.signal_align('2min')
+    assert legacy._structural_key() == (
+        'alpha.factor.SignalAlign', '2min', 'last', close._structural_key(),
+    )
+    scoped = close.signal_align('2min', scope=scope_trading_day())
+    assert scoped._structural_key()[0] == 'alpha.factor.SignalAlign:v2'
+    assert scoped.semantic_fingerprint() != legacy.semantic_fingerprint()

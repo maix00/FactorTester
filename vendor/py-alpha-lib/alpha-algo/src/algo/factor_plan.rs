@@ -51,6 +51,7 @@ pub struct FactorPlanKernel {
     outputs: Vec<usize>,
     ordinal: u64,
     timestamp_ns: i64,
+    node_keys: Vec<String>,
 }
 
 fn binary(op: BinaryOp, left: f64, right: f64) -> f64 {
@@ -120,7 +121,7 @@ impl FactorPlanKernel {
                 _ => {}
             }
         }
-        Ok(Self { products, nodes, outputs, ordinal: 0, timestamp_ns: 0 })
+        Ok(Self { products, nodes, outputs, ordinal: 0, timestamp_ns: 0, node_keys: Vec::new() })
     }
 
     fn eval(&mut self, index: usize, columns: &[f64], cache: &mut [Option<Vec<f64>>]) -> Result<Vec<f64>, crate::algo::Error> {
@@ -309,7 +310,7 @@ enum RawNode {
 }
 
 #[derive(Deserialize)]
-struct RawPlan { nodes: Vec<RawNode>, outputs: Vec<usize> }
+struct RawPlan { #[serde(default)] keys: Vec<String>, nodes: Vec<RawNode>, outputs: Vec<usize> }
 
 fn session_op(name: &str, quantile: Option<f64>) -> Result<SessionOp, crate::algo::Error> {
     Ok(match name {
@@ -363,8 +364,12 @@ impl FactorPlanKernel {
                     ExprSpec::Signal { child, signal_ns, sessions: sessions.into_iter().map(|pair| (pair[0], pair[1])).collect() },
             });
         }
-        Self::new(products, specs, raw.outputs)
+        let mut plan = Self::new(products, specs, raw.outputs)?;
+        plan.node_keys = raw.keys;
+        Ok(plan)
     }
+
+    pub fn node_keys(&self) -> &[String] { &self.node_keys }
 }
 
 #[cfg(test)]
@@ -447,6 +452,13 @@ mod audit_tests {
         assert_eq!(kernel.update(&[0.0]).unwrap(), vec![2.0, 2.0]);
         assert_eq!(kernel.update(&[1.0]).unwrap(), vec![0.0, 3.0]);
         assert_eq!(kernel.update(&[0.0]).unwrap(), vec![1.0, 4.0]);
+    }
+
+    #[test]
+    fn plan_json_preserves_structural_keys() {
+        let json = r#"{"columns":["CLOSE"],"keys":["k0","k1"],"nodes":[{"kind":"column","index":0},{"kind":"column","index":0}],"outputs":[1]}"#;
+        let kernel = FactorPlanKernel::from_spec_json(json, 1).unwrap();
+        assert_eq!(kernel.node_keys(), &["k0".to_string(), "k1".to_string()]);
     }
 
     #[test]

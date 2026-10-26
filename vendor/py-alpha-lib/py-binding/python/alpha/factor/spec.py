@@ -20,6 +20,7 @@ _BINARY = {"add", "sub", "mul", "div", "gt", "lt", "ge", "le", "eq", "ne"}
 def to_plan_spec(expressions: list[Any]) -> dict[str, Any] | None:
     columns: list[str] = []
     nodes: list[dict[str, Any]] = []
+    keys: list[str] = []
     memo: dict[tuple, int] = {}
 
     def build(expr) -> int | None:
@@ -120,13 +121,14 @@ def to_plan_spec(expressions: list[Any]) -> dict[str, Any] | None:
         else:
             return None
         memo[key] = len(nodes)
+        keys.append(repr(key))
         nodes.append(node)
         return len(nodes) - 1
 
     outputs = [build(expression) for expression in expressions]
     if any(output is None for output in outputs):
         return None
-    return {"columns": columns, "nodes": nodes, "outputs": outputs}
+    return {"columns": columns, "keys": keys, "nodes": nodes, "outputs": outputs}
 
 
 def plan_blockers(expression: Any) -> tuple[str, ...]:
