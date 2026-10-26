@@ -60,6 +60,7 @@ def run_strategy_replay(
                     factor_fields=lambda _p, bar: _bar_fields(bar),
                     first_executable_at=lambda clocks: max(
                         clock.available_at_ns for clock in clocks.values()) + 1,
+                    event_line=self.events,
                     on_publication=publications[role].append,
                 )
                 for role, expression in factor_bindings.items()
@@ -193,6 +194,7 @@ def run_strategy_family_replay(
                     factor_fields=lambda _p, bar: _bar_fields(bar),
                     first_executable_at=lambda clocks: max(
                         clock.available_at_ns for clock in clocks.values()) + 1,
+                    event_line=self.events,
                     on_publication=publications[role].append,
                 )
                 for role, expression in factor_bindings.items()

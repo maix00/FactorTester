@@ -42,7 +42,7 @@ class EventTimeFactorStream:
 
     def __init__(self, *, factor_ref: str, expression: FactorExpr,
                  products: tuple[Any, ...], source_freq: Any,
-                 session_calendar: Any = None) -> None:
+                 session_calendar: Any = None, event_line: Any = None) -> None:
         if not factor_ref.startswith("factor:v2:"):
             raise ValueError("factor stream needs an immutable frozen factor:v2 ref")
         if not products or len(products) != len(set(products)):
@@ -52,6 +52,7 @@ class EventTimeFactorStream:
         self._executor = compile_incremental_factor(
             factor_ref, expression, products, source_freq=source_freq,
             session_calendar=session_calendar,
+            event_line=event_line,
         )
         self._last_end_ns: int | None = None
         # Keep the previous value while a newly completed slice is still
@@ -116,6 +117,7 @@ def build_factor_expr_bar_adapter(
     on_publication: Any,
     trading_day: Any = None,
     session_calendar: Any = None,
+    event_line: Any = None,
 ):
     """Build an NT Strategy which advances FactorExpr only from ``on_bar``.
 
@@ -143,6 +145,7 @@ def build_factor_expr_bar_adapter(
         products=products,
         source_freq=source_freq,
         session_calendar=session_calendar,
+        event_line=event_line,
     )
     product_by_instrument: dict[str, Any] = {}
     for product, value in bar_types_by_product.items():

@@ -353,6 +353,56 @@ class RustPartitionNode:
         return result
 
 
+class RustEventWindowNode:
+    """Window whose start is the latest occurrence of a TradeResearch event."""
+
+    _OPS = {
+        "rolling_mean": "mean", "rolling_sum": "sum",
+        "rolling_var": "var", "rolling_std": "std",
+        "rolling_min": "min", "rolling_max": "max",
+        "rolling_skew": "skew",
+        "rolling_argmin": "argmin", "rolling_argmax": "argmax",
+        "rolling_median": "quantile",
+        "rolling_quantile": "quantile", "rolling_rank": "rank",
+        "rolling_mad": "mad",
+    }
+
+    def __init__(self, op, child, event_ref, event_line, width, quantile=None):
+        from alpha import StartIndexState
+        rust_op = self._OPS.get(op)
+        if rust_op is None:
+            raise UnsupportedStreamingFactor(f"event window does not support {op}")
+        if event_line is None:
+            raise UnsupportedStreamingFactor("event window needs an EventLine")
+        self.op = op
+        self.child = child
+        self.event_ref = event_ref
+        self.event_line = event_line
+        self._width = width
+        q = 0.5 if op == "rolling_median" else quantile
+        self._states = [StartIndexState(rust_op, q) for _ in range(width)]
+
+    def update(self, market, cache):
+        key = id(self)
+        if key in cache:
+            return cache[key]
+        occurrence = self.event_line.latest(self.event_ref.event)
+        if occurrence is None:
+            return np.full(self._width, np.nan, dtype=float)
+        start = int(occurrence) - 1 + int(self.event_ref.offset)
+        start = max(0, start)
+        values = np.asarray(self.child.update(market, cache), dtype=float)
+        if values.shape != (self._width,):
+            raise ValueError("event window input width changed")
+        result = np.asarray(
+            [state.update(start, float(value))
+             for state, value in zip(self._states, values, strict=True)],
+            dtype=float,
+        )
+        cache[key] = result
+        return result
+
+
 class RustEmaNode:
     """Adjusted EMA executed by Rust."""
 
@@ -1559,6 +1609,7 @@ def compile_streaming_factor(
     *,
     source_freq: DataFreq | str | None = None,
     session_calendar: Any = None,
+    event_line: Any = None,
 ) -> StreamingFactorPlan:
     if not products or len(set(products)) != len(products):
         raise ValueError("streaming products must be non-empty and unique")
@@ -1641,8 +1692,11 @@ def compile_streaming_factor(
             if not isinstance(expr.window, ConstExpr):
                 raise UnsupportedStreamingFactor("streaming windows must resolve to fixed bars")
             lookback_sessions = None
+            event_ref = _event_ref_from_window(expr.window.value)
             wall_duration_ns = _wall_duration_ns(expr.window.value)
-            if wall_duration_ns is not None:
+            if event_ref is not None:
+                window = 1
+            elif wall_duration_ns is not None:
                 window = 1
             elif session_calendar is not None:
                 try:
@@ -1676,7 +1730,16 @@ def compile_streaming_factor(
                 compile_node(item)
                 for item in expr.operands[expr._data_start:expr._data_start + expr._n_data]
             )
-            if wall_duration_ns is not None:
+            if event_ref is not None:
+                if len(children) != 1:
+                    raise UnsupportedStreamingFactor(
+                        "event window expects one streaming operand"
+                    )
+                node = RustEventWindowNode(
+                    expr.op, children[0], event_ref, event_line, len(products),
+                    quantile=getattr(expr, "quantile", None),
+                )
+            elif wall_duration_ns is not None:
                 if expr.op in {"rolling_cov", "rolling_corr"} and len(children) == 2:
                     node = RustWallPairNode(
                         expr.op, children, wall_duration_ns, len(products),
@@ -1761,6 +1824,7 @@ def compile_streaming_factor(
                     window,
                     len(products),
                     session_calendar=session_calendar,
+        event_line=event_line,
                     lookback_sessions=lookback_sessions,
                 )
         elif isinstance(expr, GroupByScopeOp):
@@ -1894,12 +1958,13 @@ def compile_incremental_factor(
     *,
     source_freq: DataFreq | str | None = None,
     session_calendar: Any = None,
+    event_line: Any = None,
 ) -> IncrementalFactorExecutor:
     """Compile one author-facing FactorExpr into a run-scoped executor."""
 
     plan = compile_streaming_factor(
         expression, products, source_freq=source_freq,
-        session_calendar=session_calendar,
+        session_calendar=session_calendar, event_line=event_line,
     )
     return IncrementalFactorExecutor(factor_alias, plan)
 
@@ -2005,6 +2070,15 @@ def resolve_trading_day_window(
     if not np.isfinite(ratio) or not np.isclose(ratio, round(ratio)):
         raise UnsupportedStreamingFactor("trading-day window must be an integer day count")
     return calendar_window.window_size(current_session, int(round(ratio)))
+
+
+def _event_ref_from_window(value: object):
+    """Parse explicit ``event:<id>`` window syntax into an EventRef."""
+    if not isinstance(value, str) or not value.startswith("event:"):
+        return None
+    from tools.factors.events import EventId, EventRef
+
+    return EventRef(EventId(value.split(":", 1)[1]))
 
 
 def _wall_duration_ns(value: object) -> int | None:
