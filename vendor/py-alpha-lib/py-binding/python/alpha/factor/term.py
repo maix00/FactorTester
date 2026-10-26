@@ -75,16 +75,31 @@ class TermStructureExpr(FactorExpr):
     def evaluate(self, ctx) -> pd.DataFrame:
         curves = getattr(ctx, "term_curves", None) or {}
         index = next(iter(ctx.preloaded.values())).index if ctx.preloaded else pd.RangeIndex(0)
+        timestamps = index.as_unit("ns").asi8 if isinstance(index, pd.DatetimeIndex) else None
         out = {}
         for product in ctx.products:
             curve = curves.get(product)
-            if curve is not None and hasattr(curve, "rows"):
-                curve = pd.DataFrame(curve.rows())
-            value = float("nan") if curve is None else _metric(
-                self.op, pd.DataFrame(curve), near_rank=self.near_rank,
-                far_rank=self.far_rank, depth=self.depth, column=self.column,
-            )
-            out[product] = np.full(len(index), value, dtype=float)
+            values = np.full(len(index), np.nan, dtype=float)
+            if isinstance(curve, (tuple, list)) and curve:
+                for row, timestamp in enumerate(timestamps if timestamps is not None else [None] * len(index)):
+                    active = [
+                        item for item in curve
+                        if getattr(item, "available_at_ns", None) is None
+                        or timestamp is None or item.available_at_ns <= timestamp
+                    ]
+                    if active:
+                        selected = active[-1]
+                        values[row] = _metric(
+                            self.op, pd.DataFrame(selected.rows()), near_rank=self.near_rank,
+                            far_rank=self.far_rank, depth=self.depth, column=self.column,
+                        )
+            elif curve is not None:
+                values.fill(_metric(
+                    self.op, pd.DataFrame(curve.rows() if hasattr(curve, "rows") else curve),
+                    near_rank=self.near_rank, far_rank=self.far_rank,
+                    depth=self.depth, column=self.column,
+                ))
+            out[product] = values
         return pd.DataFrame(out, index=index)
 
 

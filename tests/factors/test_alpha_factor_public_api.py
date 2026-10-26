@@ -757,3 +757,24 @@ def test_alpha_factor_term_structure_compiles_to_rust_plan():
     plan = IncrementalFactorPlan({'spread': expression}, ('A',))
     values = plan.update_with_curves(0, [1.0], [[(30.0, 10.0), (90.0, 8.0)]])
     assert values == {'spread': {'A': 2.0}}
+
+
+def test_term_structure_curves_are_time_aligned():
+    from alpha.factor import TermCurve, TermPoint, term_spread
+
+    index = pd.date_range('2026-01-05', periods=2, freq='min')
+    curves = [
+        TermCurve('A', (TermPoint({'CLOSE': 10.0}, days_to_maturity=30, rank=0),
+                        TermPoint({'CLOSE': 8.0}, days_to_maturity=90, rank=1)),
+                  available_at_ns=0),
+        TermCurve('A', (TermPoint({'CLOSE': 12.0}, days_to_maturity=30, rank=0),
+                        TermPoint({'CLOSE': 9.0}, days_to_maturity=90, rank=1)),
+                  available_at_ns=index[1].value),
+    ]
+    ctx = EvalContext(
+        products=('A',),
+        preloaded={'A': pd.DataFrame({'CLOSE': [1.0, 2.0]}, index=index)},
+        term_curves={'A': curves},
+    )
+    result = term_spread().evaluate(ctx)
+    np.testing.assert_allclose(result['A'].to_numpy(), [2.0, 3.0])
