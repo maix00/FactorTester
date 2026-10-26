@@ -30,3 +30,27 @@ def EMA(
     r = np.empty_like(input)
     _algo.ema(r, input, period)
     return r
+
+
+def session_rolling_sum(values, session_ids, lookback_sessions: int) -> np.ndarray:
+  """Rust session-spanning rolling sum (variable bar count per session)."""
+  return np.asarray(
+    _algo.session_rolling_sum(
+      np.asarray(values, dtype=float).tolist(),
+      [int(value) for value in session_ids],
+      int(lookback_sessions),
+    ),
+    dtype=float,
+  )
+
+
+def session_rolling_mean(values, session_ids, lookback_sessions: int) -> np.ndarray:
+  """Rust session-spanning rolling mean (variable bar count per session)."""
+  return np.asarray(
+    _algo.session_rolling_mean(
+      np.asarray(values, dtype=float).tolist(),
+      [int(value) for value in session_ids],
+      int(lookback_sessions),
+    ),
+    dtype=float,
+  )
