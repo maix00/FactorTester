@@ -198,7 +198,10 @@ mod tests {
 #[cfg(all(test, feature = "nautilus"))]
 mod nautilus_tests {
     use super::*;
+    use nautilus_common::actor::Actor;
     use nautilus_common::actor::registry::{actor_exists, deregister_actor};
+    use nautilus_model::data::{Bar, BarType};
+    use nautilus_model::types::{Price, Quantity};
     use ustr::Ustr;
 
     #[test]
@@ -208,5 +211,18 @@ mod nautilus_tests {
         actor.register();
         assert!(actor_exists(&Ustr::from("factor-actor-test")));
         deregister_actor(&Ustr::from("factor-actor-test"));
+    }
+
+    #[test]
+    fn factor_actor_consumes_nautilus_bar() {
+        let engine = MultiWindowEngine::new(vec![("mean".into(), 2, SessionOp::Mean)]).unwrap();
+        let mut actor = nautilus::FactorActor::new("factor-actor-bar-test", engine);
+        let bar = Bar::new(
+            BarType::from("A.B-1-MINUTE-LAST-EXTERNAL"),
+            Price::from("1.0"), Price::from("1.0"), Price::from("1.0"),
+            Price::from("1.0"), Quantity::from("10"), 1_000.into(), 1_000.into(),
+        );
+        actor.handle(&bar);
+        assert_eq!(actor.latest(), &[1.0]);
     }
 }
