@@ -170,72 +170,6 @@ class SignalHoldNode:
         return cache[key]
 
 
-class RustSessionRollingNode:
-    """Session-spanning mean/sum executed by py-alpha-lib's Rust state."""
-
-    def __init__(
-        self, op: str, child: StreamingNode, calendar: Any,
-        lookback_sessions: int, width: int, quantile: float | None = None,
-    ) -> None:
-        if op not in {
-            "rolling_mean", "rolling_sum", "rolling_var",
-            "rolling_std", "rolling_min", "rolling_max",
-            "rolling_skew", "rolling_argmin", "rolling_argmax",
-            "rolling_argmin_raw", "rolling_argmax_raw",
-            "rolling_median", "rolling_quantile", "rolling_rank", "rolling_mad",
-        }:
-            raise UnsupportedStreamingFactor(
-                f"Rust session state does not support {op}"
-            )
-        from alpha import SessionRollingState
-
-        self.op = op
-        self.child = child
-        self.calendar = calendar
-        self.lookback_sessions = int(lookback_sessions)
-        self._width = width
-        self._mean = op == "rolling_mean"
-        rust_op = {
-            "rolling_mean": "mean", "rolling_sum": "sum",
-            "rolling_var": "var", "rolling_std": "std",
-            "rolling_min": "min", "rolling_max": "max",
-            "rolling_skew": "skew",
-            "rolling_argmin": "argmin", "rolling_argmax": "argmax",
-            "rolling_argmin_raw": "argmin_raw",
-            "rolling_argmax_raw": "argmax_raw",
-            "rolling_median": "quantile",
-            "rolling_quantile": "quantile", "rolling_rank": "rank", "rolling_mad": "mad",
-        }[op]
-        q = 0.5 if op == "rolling_median" else quantile
-        self._states = [
-            SessionRollingState(self.lookback_sessions, False, rust_op, q)
-            for _ in range(width)
-        ]
-
-    def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
-        key = id(self)
-        if key in cache:
-            return cache[key]
-        timestamp = getattr(market, "timestamp", None)
-        if timestamp is None:
-            raise UnsupportedStreamingFactor(
-                "session-window factor needs bar timestamps"
-            )
-        session, _size = self.calendar.window_for_timestamp(
-            int(pd.Timestamp(timestamp).value), self.lookback_sessions,
-        )
-        values = np.asarray(self.child.update(market, cache), dtype=float)
-        if values.shape != (self._width,):
-            raise ValueError("Rust session rolling input width changed")
-        result = np.asarray(
-            [state.update(int(session), float(value))
-             for state, value in zip(self._states, values, strict=True)],
-            dtype=float,
-        )
-        cache[key] = result
-        return result
-
-
 class RustSessionPairNode:
     """Session-spanning cov/corr executed by Rust pair state."""
 
@@ -274,6 +208,56 @@ class RustSessionPairNode:
         )
         cache[key] = result
         return result
+
+
+class _BarWindowResolver:
+    def __init__(self, window):
+        self.window = max(1, int(window))
+        self.ordinal = 0
+
+    def __call__(self, _market):
+        current = self.ordinal
+        self.ordinal += 1
+        return max(0, current - self.window + 1), current
+
+
+class _SessionWindowResolver:
+    def __init__(self, calendar, lookback_sessions):
+        self.calendar = calendar
+        self.lookback_sessions = int(lookback_sessions)
+        self.ordinal = 0
+
+    def __call__(self, market):
+        timestamp = getattr(market, "timestamp", None)
+        if timestamp is None:
+            return None
+        _session, size = self.calendar.window_for_timestamp(
+            int(pd.Timestamp(timestamp).value), self.lookback_sessions,
+        )
+        current = self.ordinal
+        self.ordinal += 1
+        return max(0, current - int(size) + 1), current
+
+
+class _WallWindowResolver:
+    def __init__(self, duration_ns):
+        self.duration_ns = int(duration_ns)
+        self.ordinal = 0
+        self._timestamps: deque[tuple[int, int]] = deque()
+
+    def __call__(self, market):
+        timestamp = getattr(market, "timestamp", None)
+        if timestamp is None:
+            return None
+        current = self.ordinal
+        self.ordinal += 1
+        nanos = int(pd.Timestamp(timestamp).value)
+        cutoff = nanos - self.duration_ns
+        while self._timestamps and self._timestamps[0][1] < cutoff:
+            self._timestamps.popleft()
+        self._timestamps.append((current, nanos))
+        start = self._timestamps[0][0]
+        return start, current
 
 
 class _BarScopeResolver:
@@ -350,6 +334,14 @@ class RustIntervalNode:
         "argmin": "argmin", "argmax": "argmax",
         "median": "quantile", "quantile": "quantile", "rank": "rank",
         "mad": "mad",
+        "rolling_mean": "mean", "rolling_sum": "sum",
+        "rolling_var": "var", "rolling_std": "std",
+        "rolling_min": "min", "rolling_max": "max",
+        "rolling_skew": "skew",
+        "rolling_argmin": "argmin", "rolling_argmax": "argmax",
+        "rolling_argmin_raw": "argmin", "rolling_argmax_raw": "argmax",
+        "rolling_median": "quantile", "rolling_quantile": "quantile",
+        "rolling_rank": "rank",
     }
 
     def __init__(self, op, child, width, resolver, quantile=None):
@@ -441,51 +433,6 @@ class RustBarPairNode:
         return result
 
 
-class RustBarRollingNode:
-    """Fixed bar-count window executed by the unified Rust kernel."""
-
-    _OPS = {
-        "rolling_mean": "mean", "rolling_sum": "sum",
-        "rolling_var": "var", "rolling_std": "std",
-        "rolling_min": "min", "rolling_max": "max",
-        "rolling_skew": "skew",
-        "rolling_argmin": "argmin", "rolling_argmax": "argmax",
-        "rolling_argmin_raw": "argmin_raw",
-        "rolling_argmax_raw": "argmax_raw",
-        "rolling_median": "quantile",
-        "rolling_quantile": "quantile", "rolling_rank": "rank", "rolling_mad": "mad",
-    }
-
-    def __init__(self, op, child, window, width, quantile=None):
-        from alpha import BarRollingState
-        rust_op = self._OPS.get(op)
-        if rust_op is None:
-            raise UnsupportedStreamingFactor(f"bar window does not support {op}")
-        self.op = op
-        self.child = child
-        self.window = int(window)
-        self._width = width
-        q = 0.5 if op == "rolling_median" else quantile
-        self._states = [
-            BarRollingState(self.window, rust_op, q) for _ in range(width)
-        ]
-
-    def update(self, market, cache):
-        key = id(self)
-        if key in cache:
-            return cache[key]
-        values = np.asarray(self.child.update(market, cache), dtype=float)
-        if values.shape != (self._width,):
-            raise ValueError("bar window input width changed")
-        result = np.asarray(
-            [state.update(float(value))
-             for state, value in zip(self._states, values, strict=True)],
-            dtype=float,
-        )
-        cache[key] = result
-        return result
-
-
 class RustWallPairNode:
     """Explicit wall-clock cov/corr executed by Rust."""
 
@@ -517,53 +464,6 @@ class RustWallPairNode:
         result = np.asarray(
             [state.update(ts, float(x), float(y))
              for state, x, y in zip(self._states, left, right, strict=True)],
-            dtype=float,
-        )
-        cache[key] = result
-        return result
-
-
-class RustWallRollingNode:
-    """Explicit wall-clock window executed by Rust."""
-
-    def __init__(self, op, child, duration_ns, width, quantile=None):
-        from alpha import WallRollingState
-        rust_op = {
-            "rolling_mean": "mean", "rolling_sum": "sum",
-            "rolling_var": "var", "rolling_std": "std",
-            "rolling_min": "min", "rolling_max": "max",
-            "rolling_skew": "skew",
-            "rolling_argmin": "argmin", "rolling_argmax": "argmax",
-            "rolling_argmin_raw": "argmin_raw",
-            "rolling_argmax_raw": "argmax_raw",
-            "rolling_median": "quantile",
-            "rolling_quantile": "quantile", "rolling_rank": "rank", "rolling_mad": "mad",
-        }.get(op)
-        if rust_op is None:
-            raise UnsupportedStreamingFactor(f"wall window does not support {op}")
-        self.op = op
-        self.child = child
-        self.duration_ns = int(duration_ns)
-        self._width = width
-        q = 0.5 if op == "rolling_median" else quantile
-        self._states = [
-            WallRollingState(self.duration_ns, rust_op, q) for _ in range(width)
-        ]
-
-    def update(self, market, cache):
-        key = id(self)
-        if key in cache:
-            return cache[key]
-        timestamp = getattr(market, "timestamp", None)
-        if timestamp is None:
-            raise UnsupportedStreamingFactor("wall window needs bar timestamps")
-        values = np.asarray(self.child.update(market, cache), dtype=float)
-        if values.shape != (self._width,):
-            raise ValueError("wall window input width changed")
-        ts = int(pd.Timestamp(timestamp).value)
-        result = np.asarray(
-            [state.update(ts, float(value))
-             for state, value in zip(self._states, values, strict=True)],
             dtype=float,
         )
         cache[key] = result
@@ -1726,8 +1626,9 @@ def compile_streaming_factor(
                         expr.op, children, wall_duration_ns, len(products),
                     )
                 elif len(children) == 1:
-                    node = RustWallRollingNode(
-                        expr.op, children[0], wall_duration_ns, len(products),
+                    node = RustIntervalNode(
+                        expr.op, children[0], len(products),
+                        _WallWindowResolver(wall_duration_ns),
                         quantile=getattr(expr, "quantile", None),
                     )
                 else:
@@ -1755,12 +1656,20 @@ def compile_streaming_factor(
                     "rolling_median", "rolling_quantile", "rolling_rank", "rolling_mad",
                 }
             ):
-                node = RustSessionRollingNode(
-                    expr.op,
-                    children[0],
-                    session_calendar,
-                    lookback_sessions,
-                    len(products),
+                node = RustIntervalNode(
+                    expr.op, children[0], len(products),
+                    _SessionWindowResolver(session_calendar, lookback_sessions),
+                    quantile=getattr(expr, "quantile", None),
+                )
+            elif (
+                wall_duration_ns is None
+                and lookback_sessions is None
+                and len(children) == 1
+                and expr.op in RustIntervalNode._OPS
+            ):
+                node = RustIntervalNode(
+                    expr.op, children[0], len(products),
+                    _BarWindowResolver(window),
                     quantile=getattr(expr, "quantile", None),
                 )
             elif expr.op in ROLLING_STATISTICS:
@@ -1787,16 +1696,6 @@ def compile_streaming_factor(
             ):
                 node = RustBarPairNode(
                     expr.op, children, window, len(products),
-                )
-            elif (
-                wall_duration_ns is None
-                and lookback_sessions is None
-                and len(children) == 1
-                and expr.op in RustBarRollingNode._OPS
-            ):
-                node = RustBarRollingNode(
-                    expr.op, children[0], window, len(products),
-                    quantile=getattr(expr, "quantile", None),
                 )
             else:
                 node = RollingWindowNode(
