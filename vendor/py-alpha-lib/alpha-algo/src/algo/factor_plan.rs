@@ -140,6 +140,7 @@ struct NodeState {
     spec: Arc<ExprSpec>,
     rolling: Vec<Option<IntervalKernel>>,
     trunc_history: Vec<VecDeque<f64>>,
+    trunc_delay: Vec<VecDeque<f64>>,
     interval_count: u64,
     count_timestamp: Option<i64>,
     session_window: Option<SessionWindow>,
@@ -226,6 +227,14 @@ impl FactorPlanKernel {
                     (0..products).map(|_| VecDeque::new()).collect(),
                 _ => Vec::new(),
             };
+            let trunc_delay = match &spec {
+                ExprSpec::Rolling { window, trunc_start, trunc_end, trunc_start_child, trunc_end_child, .. }
+                    if *trunc_start >= 0 && *trunc_end >= 0
+                        && trunc_start_child.is_none() && trunc_end_child.is_none()
+                        && (*trunc_end as usize) < window.saturating_sub(1) =>
+                    (0..products).map(|_| VecDeque::with_capacity(window - 1 - *trunc_end as usize + 1)).collect(),
+                _ => Vec::new(),
+            };
             let match_history = match &spec {
                 ExprSpec::MatchDistance { .. } => (0..products).map(|_| VecDeque::new()).collect(),
                 _ => Vec::new(),
@@ -236,6 +245,7 @@ impl FactorPlanKernel {
             nodes.push(NodeState {
                 spec: Arc::new(spec), rolling, ema, linreg,
                 trunc_history,
+                trunc_delay,
                 interval_count: 0, count_timestamp: None,
                 session_window,
                 match_history,
@@ -421,8 +431,29 @@ impl FactorPlanKernel {
                     let node = &mut self.nodes[index];
                     let base = current.saturating_sub(*window as u64 - 1);
                     let truncated = *trunc_start >= 0 || *trunc_end >= 0 || trunc_start_child.is_some() || trunc_end_child.is_some();
+                    let static_trunc = *trunc_start >= 0 && *trunc_end >= 0
+                        && trunc_start_child.is_none() && trunc_end_child.is_none()
+                        && (*trunc_end as usize) < window.saturating_sub(1);
                     for product in 0..products {
-                        if truncated {
+                        if static_trunc {
+                            let width = (*trunc_end - *trunc_start + 1) as u64;
+                            let delay = window.saturating_sub(1) - *trunc_end as usize;
+                            let Some(state) = node.rolling[product].as_mut() else { out[product] = f64::NAN; continue };
+                            state.set_semantics(*min_periods, *propagate_nan);
+                            let value = state.update_explicit(current.saturating_sub(width - 1), current, input[product]);
+                            let ring = &mut node.trunc_delay[product];
+                            ring.push_back(value);
+                            while ring.len() > delay + 1 { ring.pop_front(); }
+                            out[product] = if current + 1 < *window as u64 {
+                                let history = &mut node.trunc_history[product];
+                                history.push_back(input[product]);
+                                while history.len() > *window { history.pop_front(); }
+                                let end = base.saturating_add(*trunc_end as u64);
+                                truncated_slice(op, history, base.saturating_add(*trunc_start as u64), end, current, *min_periods, *propagate_nan)
+                            } else {
+                                ring.front().copied().unwrap_or(f64::NAN)
+                            };
+                        } else if truncated {
                             let history = &mut node.trunc_history[product];
                             history.push_back(input[product]);
                             while history.len() > *window { history.pop_front(); }
@@ -1161,6 +1192,33 @@ mod variance_semantics_tests {
             let full = full_kernel.update(&[value]).unwrap()[0];
             let truncated = truncated_kernel.update(&[value]).unwrap()[0];
             assert!(full.is_nan() && truncated.is_nan() || (full - truncated).abs() < 1e-12);
+        }
+    }
+}
+
+#[cfg(test)]
+mod static_truncation_tests {
+    use super::*;
+
+    #[test]
+    fn static_truncation_matches_dynamic_endpoint_reference() {
+        let static_json = r#"{"columns":["C"],"nodes":[
+          {"kind":"column","index":0},
+          {"kind":"rolling","child":0,"window":4,"op":"mean","min_periods":1,"propagate_nan":false,"trunc_start":1,"trunc_end":2}
+        ],"outputs":[1]}"#;
+        let dynamic_json = r#"{"columns":["C"],"nodes":[
+          {"kind":"column","index":0},
+          {"kind":"const","value":1.0},
+          {"kind":"const","value":2.0},
+          {"kind":"rolling","child":0,"window":4,"op":"mean","min_periods":1,"propagate_nan":false,"trunc_start_child":1,"trunc_end_child":2}
+        ],"outputs":[3]}"#;
+        let mut static_kernel = FactorPlanKernel::from_spec_json(static_json, 1).unwrap();
+        let mut dynamic_kernel = FactorPlanKernel::from_spec_json(dynamic_json, 1).unwrap();
+        for value in 0..20 {
+            let value = value as f64;
+            let a = static_kernel.update(&[value]).unwrap()[0];
+            let b = dynamic_kernel.update(&[value]).unwrap()[0];
+            assert!(a.is_nan() && b.is_nan() || (a - b).abs() < 1e-12, "{a} != {b}");
         }
     }
 }

@@ -28,6 +28,7 @@ fn run(name: &str, json: &str, products: usize, n: usize) {
 fn main() {
     let n = 1_000_000;
     run("rolling_mean", r#"{"columns":["C"],"nodes":[{"kind":"column","index":0},{"kind":"rolling","child":0,"window":480,"op":"mean","min_periods":1,"propagate_nan":true}],"outputs":[1]}"#, 1, n);
+    run("trunc_mean", r#"{"columns":["C"],"nodes":[{"kind":"column","index":0},{"kind":"rolling","child":0,"window":480,"op":"mean","min_periods":1,"propagate_nan":true,"trunc_start":1,"trunc_end":300}],"outputs":[1]}"#, 1, n);
     run("ema", r#"{"columns":["C"],"nodes":[{"kind":"column","index":0},{"kind":"rolling","child":0,"window":480,"op":"ema","min_periods":1,"propagate_nan":true}],"outputs":[1]}"#, 1, n);
     run("linreg_slope", r#"{"columns":["C"],"nodes":[{"kind":"column","index":0},{"kind":"rolling","child":0,"window":480,"op":"linreg_slope","min_periods":3,"propagate_nan":true}],"outputs":[1]}"#, 1, n);
     run("since", r#"{"columns":["C"],"nodes":[{"kind":"column","index":0},{"kind":"since","condition":0,"count":3,"include_current":true,"nearest":true,"default_scope":true,"default":0.0}],"outputs":[1]}"#, 1, n);
