@@ -1003,7 +1003,12 @@ def compile_streaming_factor(
             else:
                 min_periods = getattr(expr, "min_periods", None)
                 if min_periods is None:
-                    min_periods = locals().get("window", 1) if isinstance(locals().get("window"), int) else 1
+                    from tools.factors.expr.window_semantics import default_min_periods
+                    window_value = locals().get("window", 1)
+                    min_periods = default_min_periods(
+                        getattr(expr, "op", ""),
+                        window_value if isinstance(window_value, int) else 1,
+                    )
             if isinstance(min_periods, ConstExpr):
                 min_periods = min_periods.value
             elif hasattr(min_periods, "param"):

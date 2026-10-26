@@ -14,6 +14,7 @@ mod algo_impl {
   use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1, PyReadwriteArray1};
   use pyo3::{exceptions::PyValueError, prelude::*, types::PyList};
   use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+  use rayon::slice::ParallelSliceMut;
 
   use crate::_ALGO_CTX_;
 
@@ -79,107 +80,203 @@ mod algo_impl {
         | alpha_algo::SessionOp::Var | alpha_algo::SessionOp::Std
         | alpha_algo::SessionOp::Skew
     ) {
-      // SumMoments family: prefix sums, O(1) per bar.
-      let mut count = vec![0u64; values.len() + 1];
-      let mut sum = vec![0.0f64; values.len() + 1];
-      let mut sumsq = vec![0.0f64; values.len() + 1];
-      let mut sum3 = vec![0.0f64; values.len() + 1];
-      for (i, value) in values.iter().copied().enumerate() {
-        let finite = value.is_finite();
-        count[i + 1] = count[i] + u64::from(finite);
-        sum[i + 1] = sum[i] + if finite { value } else { 0.0 };
-        sumsq[i + 1] = sumsq[i] + if finite { value * value } else { 0.0 };
-        sum3[i + 1] = sum3[i] + if finite { value * value * value } else { 0.0 };
-      }
-      let mean = matches!(op, alpha_algo::SessionOp::Mean);
-      let std = matches!(op, alpha_algo::SessionOp::Std);
-      let variance = matches!(op, alpha_algo::SessionOp::Var | alpha_algo::SessionOp::Std);
-      let out: Vec<f64> = (0..values.len()).into_par_iter().map(|index| {
-        let end = index + 1;
-        let start = starts[index] as usize;
-        let n = count[end] - count[start];
-        let value = if n == 0 {
-          f64::NAN
-        } else {
-          let total = sum[end] - sum[start];
-          if mean {
-            total / n as f64
-          } else if variance {
-            if n < 2 { f64::NAN } else {
-              let square = sumsq[end] - sumsq[start];
-              let variance = ((square - total * total / n as f64) / (n - 1) as f64).max(0.0);
-              if std { variance.sqrt() } else { variance }
+      // SumMoments family: one independent sliding state per chunk, like upstream.
+      let n = values.len();
+      let window = if n > 1 { starts[1] as usize + 1 } else { 1 };
+      let contiguous = (0..n).all(|i| starts[i] as usize == i.saturating_sub(window - 1));
+      if contiguous {
+        const CHUNK: usize = 65_536;
+        let mut out = vec![f64::NAN; n];
+        out.par_chunks_mut(CHUNK).enumerate().for_each(|(chunk_index, chunk)| {
+          let chunk_start = chunk_index * CHUNK;
+          let (mut total, mut square, mut cube, mut count) = (0.0f64, 0.0f64, 0.0f64, 0usize);
+          for value in &values[chunk_start.saturating_sub(window)..chunk_start] {
+            if value.is_finite() {
+              total += *value; square += *value * *value; cube += *value * *value * *value;
+              count += 1;
             }
-          } else if matches!(op, alpha_algo::SessionOp::Skew) {
-            if n < 3 { f64::NAN } else {
-              let n = n as f64;
-              let mean = total / n;
-              let m2 = (sumsq[end] - sumsq[start] - total * total / n).max(0.0);
-              let m3 = sum3[end] - sum3[start] - 3.0 * mean * (sumsq[end] - sumsq[start])
-                + 2.0 * n * mean * mean * mean;
-              if m2 <= 0.0 { f64::NAN } else {
-                let population = (m3 / n) / (m2 / n).powf(1.5);
-                population * (n * (n - 1.0)).sqrt() / (n - 2.0)
+          }
+          for (offset, slot) in chunk.iter_mut().enumerate() {
+            let index = chunk_start + offset;
+            let value = values[index];
+            if value.is_finite() {
+              total += value; square += value * value; cube += value * value * value;
+              count += 1;
+            }
+            if index >= window {
+              let old = values[index - window];
+              if old.is_finite() {
+                total -= old; square -= old * old; cube -= old * old * old;
+                count -= 1;
               }
             }
-          } else { total }
-        };
-        value
-      }).collect();
-      return Ok(out.into_pyarray(py).unbind());
+            *slot = if count == 0 {
+              f64::NAN
+            } else if matches!(op, alpha_algo::SessionOp::Mean) {
+              total / count as f64
+            } else if matches!(op, alpha_algo::SessionOp::Var | alpha_algo::SessionOp::Std) {
+              if count < 2 { f64::NAN } else {
+                let variance = ((square - total * total / count as f64) / (count - 1) as f64).max(0.0);
+                if matches!(op, alpha_algo::SessionOp::Std) { variance.sqrt() } else { variance }
+              }
+            } else if matches!(op, alpha_algo::SessionOp::Skew) {
+              if count < 3 { f64::NAN } else {
+                let n = count as f64;
+                let mean = total / n;
+                let m2 = (square - total * total / n).max(0.0);
+                let m3 = cube - 3.0 * mean * square + 2.0 * n * mean * mean * mean;
+                if m2 <= 0.0 { f64::NAN } else {
+                  let population = (m3 / n) / (m2 / n).powf(1.5);
+                  population * (n * (n - 1.0)).sqrt() / (n - 2.0)
+                }
+              }
+            } else { total };
+          }
+        });
+        return Ok(out.into_pyarray(py).unbind());
+      }
     }
     if fixed && matches!(
       op, alpha_algo::SessionOp::Min | alpha_algo::SessionOp::Max
         | alpha_algo::SessionOp::Argmin | alpha_algo::SessionOp::Argmax
         | alpha_algo::SessionOp::ArgminRaw | alpha_algo::SessionOp::ArgmaxRaw
     ) {
-      // Extrema family: monotonic deque with a flat backing vector.
+      // Extrema family: chunk-independent monotonic deques.
+      use std::collections::VecDeque;
       let is_max = matches!(op, alpha_algo::SessionOp::Max | alpha_algo::SessionOp::Argmax
         | alpha_algo::SessionOp::ArgmaxRaw);
       let is_arg = matches!(op, alpha_algo::SessionOp::Argmin | alpha_algo::SessionOp::Argmax
         | alpha_algo::SessionOp::ArgminRaw | alpha_algo::SessionOp::ArgmaxRaw);
       let raw = matches!(op, alpha_algo::SessionOp::ArgminRaw | alpha_algo::SessionOp::ArgmaxRaw);
-      let mut count = vec![0u64; values.len() + 1];
-      for (i, value) in values.iter().copied().enumerate() {
-        count[i + 1] = count[i] + u64::from(value.is_finite());
-      }
-      let mut deque: Vec<usize> = Vec::with_capacity(values.len());
-      let mut head = 0usize;
-      let mut out = Vec::with_capacity(values.len());
-      for (index, value) in values.iter().copied().enumerate() {
-        let start = starts[index] as usize;
-        while head < deque.len() && deque[head] < start { head += 1; }
-        if value.is_finite() {
-          while deque.len() > head {
-            let last = *deque.last().unwrap();
-            if (is_max && values[last] <= value) || (!is_max && values[last] >= value) {
-              deque.pop();
-            } else { break; }
+      let n = values.len();
+      let window = if n > 1 { starts[1] as usize + 1 } else { 1 };
+      let contiguous = (0..n).all(|i| starts[i] as usize == i.saturating_sub(window - 1));
+      if contiguous {
+        const CHUNK: usize = 65_536;
+        let mut out = vec![f64::NAN; n];
+        out.par_chunks_mut(CHUNK).enumerate().for_each(|(chunk_index, chunk)| {
+          let chunk_start = chunk_index * CHUNK;
+          let mut deque: VecDeque<usize> = VecDeque::new();
+          let mut count = 0usize;
+          for k in chunk_start.saturating_sub(window)..chunk_start {
+            if !values[k].is_finite() { continue; }
+            count += 1;
+            while let Some(last) = deque.back().copied() {
+              if (is_max && values[last] <= values[k]) || (!is_max && values[last] >= values[k]) {
+                deque.pop_back();
+              } else { break; }
+            }
+            deque.push_back(k);
           }
-          deque.push(index);
-        }
-        if deque.len() == head {
-          out.push(f64::NAN);
-          continue;
-        }
-        let best = deque[head];
-        if !is_arg {
-          out.push(values[best]);
-        } else {
-          let distance = (index - best) as f64;
-          if raw {
-            out.push(distance);
-          } else {
-            let observations = count[index + 1] - count[start];
-            out.push(if observations <= 1 { 0.0 } else { distance / (observations - 1) as f64 });
+          for (offset, slot) in chunk.iter_mut().enumerate() {
+            let index = chunk_start + offset;
+            let start = index.saturating_sub(window - 1);
+            while deque.front().is_some_and(|i| *i < start) { deque.pop_front(); }
+            if index >= window && values[index - window].is_finite() { count -= 1; }
+            if values[index].is_finite() {
+              count += 1;
+              while let Some(last) = deque.back().copied() {
+                if (is_max && values[last] <= values[index]) || (!is_max && values[last] >= values[index]) {
+                  deque.pop_back();
+                } else { break; }
+              }
+              deque.push_back(index);
+            }
+            let Some(best) = deque.front().copied() else { continue };
+            *slot = if !is_arg {
+              values[best]
+            } else {
+              let distance = (index - best) as f64;
+              if raw { distance } else if count <= 1 { 0.0 } else { distance / (count - 1) as f64 }
+            };
           }
-        }
+        });
+        return Ok(out.into_pyarray(py).unbind());
       }
-      return Ok(out.into_pyarray(py).unbind());
     }
     let mut state = alpha_algo::IntervalKernel::new(op)
       .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
     Ok(values.iter().copied().zip(starts.iter().copied()).zip(ends.iter().copied())
+      .map(|((value, start), end)| state.update_explicit(start, end, value))
+      .collect::<Vec<_>>().into_pyarray(py).unbind())
+  }
+
+  #[pyfunction]
+  #[pyo3(signature = (values, window, op, quantile=None, min_periods=1, propagate_nan=false))]
+  pub fn interval_rolling_fixed(
+    py: Python<'_>, values: PyReadonlyArray1<f64>, window: usize,
+    op: &str, quantile: Option<f64>, min_periods: usize, propagate_nan: bool,
+  ) -> PyResult<Py<PyArray1<f64>>> {
+    let values = values.as_slice()?;
+    let window = window.max(1);
+    let op = interval_op(op, quantile)?;
+    if matches!(
+      op, alpha_algo::SessionOp::Sum | alpha_algo::SessionOp::Mean
+        | alpha_algo::SessionOp::Var | alpha_algo::SessionOp::Std
+        | alpha_algo::SessionOp::Skew
+    ) {
+      const CHUNK: usize = 65_536;
+      let n = values.len();
+      let mut out = vec![f64::NAN; n];
+      out.par_chunks_mut(CHUNK).enumerate().for_each(|(chunk_index, chunk)| {
+        let chunk_start = chunk_index * CHUNK;
+        let (mut total, mut square, mut cube, mut count) = (0.0f64, 0.0f64, 0.0f64, 0usize);
+        for value in &values[chunk_start.saturating_sub(window)..chunk_start] {
+          if value.is_finite() {
+            total += *value; square += *value * *value; cube += *value * *value * *value;
+            count += 1;
+          }
+        }
+        for (offset, slot) in chunk.iter_mut().enumerate() {
+          let index = chunk_start + offset;
+          let value = values[index];
+          if value.is_finite() {
+            total += value; square += value * value; cube += value * value * value;
+            count += 1;
+          }
+          if index >= window {
+            let old = values[index - window];
+            if old.is_finite() {
+              total -= old; square -= old * old; cube -= old * old * old;
+              count -= 1;
+            }
+          }
+          let width = (index + 1).min(window);
+          *slot = if count < min_periods || (propagate_nan && count < width) || count == 0 {
+            f64::NAN
+          } else if matches!(op, alpha_algo::SessionOp::Mean) {
+            total / count as f64
+          } else if matches!(op, alpha_algo::SessionOp::Var | alpha_algo::SessionOp::Std) {
+            if count < 2 { f64::NAN } else {
+              let variance = ((square - total * total / count as f64) / (count - 1) as f64).max(0.0);
+              if matches!(op, alpha_algo::SessionOp::Std) { variance.sqrt() } else { variance }
+            }
+          } else if matches!(op, alpha_algo::SessionOp::Skew) {
+            if count < 3 { f64::NAN } else {
+              let n = count as f64;
+              let mean = total / n;
+              let m2 = (square - total * total / n).max(0.0);
+              let m3 = cube - 3.0 * mean * square + 2.0 * n * mean * mean * mean;
+              if m2 <= 0.0 { f64::NAN } else {
+                let population = (m3 / n) / (m2 / n).powf(1.5);
+                population * (n * (n - 1.0)).sqrt() / (n - 2.0)
+              }
+            }
+          } else { total };
+        }
+      });
+      return Ok(out.into_pyarray(py).unbind());
+    }
+    let mut starts = Vec::with_capacity(values.len());
+    let mut ends = Vec::with_capacity(values.len());
+    for index in 0..values.len() {
+      starts.push(index.saturating_sub(window - 1) as u64);
+      ends.push(index as u64);
+    }
+    let mut state = alpha_algo::IntervalKernel::new(op)
+      .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
+      .with_semantics(min_periods, propagate_nan);
+    Ok(values.iter().copied().zip(starts).zip(ends)
       .map(|((value, start), end)| state.update_explicit(start, end, value))
       .collect::<Vec<_>>().into_pyarray(py).unbind())
   }
@@ -202,47 +299,117 @@ mod algo_impl {
     }
     let fixed = ends.iter().enumerate().all(|(i, end)| *end == i as u64);
     if fixed {
-      // PairMoments family: prefix sums, O(1) per bar.
+      // PairMoments family: chunk-independent sliding moments.
       let n = x.len();
-      let mut count = vec![0u64; n + 1];
-      let (mut sx, mut sy) = (vec![0.0f64; n + 1], vec![0.0f64; n + 1]);
-      let (mut sxx, mut syy) = (vec![0.0f64; n + 1], vec![0.0f64; n + 1]);
-      let mut sxy = vec![0.0f64; n + 1];
-      for i in 0..n {
-        let finite = x[i].is_finite() && y[i].is_finite();
-        count[i + 1] = count[i] + u64::from(finite);
-        sx[i + 1] = sx[i] + if finite { x[i] } else { 0.0 };
-        sy[i + 1] = sy[i] + if finite { y[i] } else { 0.0 };
-        sxx[i + 1] = sxx[i] + if finite { x[i] * x[i] } else { 0.0 };
-        syy[i + 1] = syy[i] + if finite { y[i] * y[i] } else { 0.0 };
-        sxy[i + 1] = sxy[i] + if finite { x[i] * y[i] } else { 0.0 };
+      let window = if n > 1 { starts[1] as usize + 1 } else { 1 };
+      let contiguous = (0..n).all(|i| starts[i] as usize == i.saturating_sub(window - 1));
+      if contiguous {
+        const CHUNK: usize = 65_536;
+        let mut out = vec![f64::NAN; n];
+        out.par_chunks_mut(CHUNK).enumerate().for_each(|(chunk_index, chunk)| {
+          let chunk_start = chunk_index * CHUNK;
+          let (mut sx, mut sy) = (0.0f64, 0.0f64);
+          let (mut sxx, mut syy, mut sxy) = (0.0f64, 0.0f64, 0.0f64);
+          let mut count = 0usize;
+          for k in chunk_start.saturating_sub(window)..chunk_start {
+            if x[k].is_finite() && y[k].is_finite() {
+              sx += x[k]; sy += y[k]; sxx += x[k] * x[k];
+              syy += y[k] * y[k]; sxy += x[k] * y[k]; count += 1;
+            }
+          }
+          for (offset, slot) in chunk.iter_mut().enumerate() {
+            let index = chunk_start + offset;
+            if x[index].is_finite() && y[index].is_finite() {
+              sx += x[index]; sy += y[index]; sxx += x[index] * x[index];
+              syy += y[index] * y[index]; sxy += x[index] * y[index]; count += 1;
+            }
+            if index >= window {
+              let k = index - window;
+              if x[k].is_finite() && y[k].is_finite() {
+                sx -= x[k]; sy -= y[k]; sxx -= x[k] * x[k];
+                syy -= y[k] * y[k]; sxy -= x[k] * y[k]; count -= 1;
+              }
+            }
+            if count < 2 { *slot = f64::NAN; continue; }
+            let m = count as f64;
+            let covariance = (sxy - sx * sy / m) / (m - 1.0);
+            *slot = if !correlation {
+              covariance
+            } else {
+              let vx = (sxx - sx * sx / m).max(0.0);
+              let vy = (syy - sy * sy / m).max(0.0);
+              let denom = (vx * vy).sqrt();
+              if denom > 0.0 { (sxy - sx * sy / m) / denom } else { f64::NAN }
+            };
+          }
+        });
+        return Ok(out.into_pyarray(py).unbind());
       }
-      let out: Vec<f64> = (0..n).into_par_iter().map(|index| {
-        let end = index + 1;
-        let start = starts[index] as usize;
-        let m = count[end] - count[start];
-        if m < 2 { return f64::NAN; }
-        let n = m as f64;
-        let (ax, ay) = (sx[end] - sx[start], sy[end] - sy[start]);
-        let (axx, ayy) = (sxx[end] - sxx[start], syy[end] - syy[start]);
-        let axy = sxy[end] - sxy[start];
-        let covariance = (axy - ax * ay / n) / (n - 1.0);
-        if !correlation {
-          covariance
-        } else {
-          let vx = (axx - ax * ax / n).max(0.0);
-          let vy = (ayy - ay * ay / n).max(0.0);
-          let denom = (vx * vy).sqrt();
-          if denom > 0.0 { (axy - ax * ay / n) / denom } else { f64::NAN }
-        }
-      }).collect();
-      return Ok(out.into_pyarray(py).unbind());
     }
     let mut state = alpha_algo::PairIntervalState::new(correlation);
     Ok(x.iter().copied().zip(y.iter().copied())
       .zip(starts.iter().copied()).zip(ends.iter().copied())
       .map(|(((x, y), start), end)| state.update(start, end, x, y))
       .collect::<Vec<_>>().into_pyarray(py).unbind())
+  }
+
+  #[pyfunction]
+  #[pyo3(signature = (x, y, window, correlation=false, min_periods=2, propagate_nan=false))]
+  pub fn interval_rolling_pair_fixed(
+    py: Python<'_>, x: PyReadonlyArray1<f64>, y: PyReadonlyArray1<f64>,
+    window: usize, correlation: bool, min_periods: usize, propagate_nan: bool,
+  ) -> PyResult<Py<PyArray1<f64>>> {
+    let x = x.as_slice()?;
+    let y = y.as_slice()?;
+    if x.len() != y.len() {
+      return Err(pyo3::exceptions::PyValueError::new_err("pair length mismatch"));
+    }
+    let window = window.max(1);
+    const CHUNK: usize = 65_536;
+    let n = x.len();
+    let mut out = vec![f64::NAN; n];
+    out.par_chunks_mut(CHUNK).enumerate().for_each(|(chunk_index, chunk)| {
+      let chunk_start = chunk_index * CHUNK;
+      let (mut sx, mut sy) = (0.0f64, 0.0f64);
+      let (mut sxx, mut syy, mut sxy) = (0.0f64, 0.0f64, 0.0f64);
+      let mut count = 0usize;
+      for k in chunk_start.saturating_sub(window)..chunk_start {
+        if x[k].is_finite() && y[k].is_finite() {
+          sx += x[k]; sy += y[k]; sxx += x[k] * x[k];
+          syy += y[k] * y[k]; sxy += x[k] * y[k]; count += 1;
+        }
+      }
+      for (offset, slot) in chunk.iter_mut().enumerate() {
+        let index = chunk_start + offset;
+        if x[index].is_finite() && y[index].is_finite() {
+          sx += x[index]; sy += y[index]; sxx += x[index] * x[index];
+          syy += y[index] * y[index]; sxy += x[index] * y[index]; count += 1;
+        }
+        if index >= window {
+          let k = index - window;
+          if x[k].is_finite() && y[k].is_finite() {
+            sx -= x[k]; sy -= y[k]; sxx -= x[k] * x[k];
+            syy -= y[k] * y[k]; sxy -= x[k] * y[k]; count -= 1;
+          }
+        }
+        let width = (index + 1).min(window);
+        if count < min_periods || (propagate_nan && count < width) || count < 2 {
+          *slot = f64::NAN;
+          continue;
+        }
+        let m = count as f64;
+        let covariance = (sxy - sx * sy / m) / (m - 1.0);
+        *slot = if !correlation {
+          covariance
+        } else {
+          let vx = (sxx - sx * sx / m).max(0.0);
+          let vy = (syy - sy * sy / m).max(0.0);
+          let denom = (vx * vy).sqrt();
+          if denom > 0.0 { (sxy - sx * sy / m) / denom } else { f64::NAN }
+        };
+      }
+    });
+    Ok(out.into_pyarray(py).unbind())
   }
 
   #[pyfunction]
@@ -2860,7 +3027,9 @@ fn _algo(m: &Bound<'_, PyModule>) -> PyResult<()> {
   m.add_function(wrap_pyfunction!(ema, m)?)?;
   m.add_function(wrap_pyfunction!(interval_ema, m)?)?;
   m.add_function(wrap_pyfunction!(interval_rolling, m)?)?;
+  m.add_function(wrap_pyfunction!(interval_rolling_fixed, m)?)?;
   m.add_function(wrap_pyfunction!(interval_rolling_pair, m)?)?;
+  m.add_function(wrap_pyfunction!(interval_rolling_pair_fixed, m)?)?;
   m.add_function(wrap_pyfunction!(session_rolling_sum, m)?)?;
   m.add_function(wrap_pyfunction!(session_rolling_mean, m)?)?;
   m.add_function(wrap_pyfunction!(set_ctx, m)?)?;

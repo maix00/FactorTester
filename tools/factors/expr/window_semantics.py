@@ -23,7 +23,7 @@ class NanPolicy(str, Enum):
 
 
 # Upstream ta_ma/ta_sum/ta_stddev default: full window, NaN propagates.
-DEFAULT_MIN_PERIODS: int | None = None  # None means "the whole window"
+DEFAULT_MIN_PERIODS: int | None = None  # None means the upstream op default
 DEFAULT_NAN_POLICY = NanPolicy.PROPAGATE
 
 
@@ -39,9 +39,10 @@ class WindowSemantics:
         if self.min_periods is not None and not 1 <= self.min_periods <= self.window:
             raise ValueError("min_periods must be within [1, window]")
 
-    @property
-    def effective_min_periods(self) -> int:
-        return self.window if self.min_periods is None else self.min_periods
+    def effective_min_periods(self, op: str = "mean") -> int:
+        if self.min_periods is not None:
+            return self.min_periods
+        return default_min_periods(op, self.window)
 
     @property
     def propagate_nan(self) -> bool:
@@ -72,3 +73,13 @@ class PartitionSemantics:
     @property
     def propagate_nan(self) -> bool:
         return self.nan_policy is NanPolicy.PROPAGATE
+
+
+# Upstream ta_ma/ta_sum/ta_ema/ta_min/ta_max start at min_periods=1;
+# ta_stddev/ta_var need 2; ta_skew needs 3.
+_UPSTREAM_MIN_PERIODS = {"var": 2, "std": 2, "skew": 3}
+
+
+def default_min_periods(op: str, window: int) -> int:
+    name = op.removeprefix("rolling_")
+    return min(max(1, int(window)), _UPSTREAM_MIN_PERIODS.get(name, 1))

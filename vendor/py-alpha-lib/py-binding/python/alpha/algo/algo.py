@@ -110,3 +110,28 @@ def interval_ema(values, span: int, min_periods: int = 1, propagate_nan: bool = 
     ),
     dtype=float,
   )
+
+
+def interval_rolling_fixed(values, window, op="mean", quantile=None,
+                           min_periods=1, propagate_nan=False):
+  """Fixed-window family fast path with scalar width; no starts/ends arrays."""
+  return np.asarray(
+    _algo.interval_rolling_fixed(
+      np.asarray(values, dtype=float), int(window), str(op),
+      None if quantile is None else float(quantile),
+      int(min_periods), bool(propagate_nan),
+    ),
+    dtype=float,
+  )
+
+
+def interval_rolling_pair_fixed(x, y, window, correlation=False,
+                                min_periods=2, propagate_nan=False):
+  """Fixed-window cov/corr family fast path."""
+  return np.asarray(
+    _algo.interval_rolling_pair_fixed(
+      np.asarray(x, dtype=float), np.asarray(y, dtype=float), int(window),
+      bool(correlation), int(min_periods), bool(propagate_nan),
+    ),
+    dtype=float,
+  )
