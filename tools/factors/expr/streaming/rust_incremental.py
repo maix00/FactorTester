@@ -16,14 +16,14 @@ class UnsupportedByRustPlan(Exception):
     pass
 
 
-def compile_rust_incremental(expressions: Mapping[str, Any], products: tuple[Any, ...], *, source_freq=None):
+def compile_rust_incremental(expressions: Mapping[str, Any], products: tuple[Any, ...], *, source_freq=None, session_calendar=None):
     from alpha import FactorPlanState
 
     if not expressions or not products:
         raise UnsupportedByRustPlan("empty factor set")
     specs = []
     for alias, expression in expressions.items():
-        spec = alpha_plan_spec(expression, source_freq=source_freq, products=products)
+        spec = alpha_plan_spec(expression, source_freq=source_freq, products=products, session_calendar=session_calendar)
         if spec is None:
             raise UnsupportedByRustPlan(f"{alias} is not representable by the Rust plan")
         specs.append(spec)

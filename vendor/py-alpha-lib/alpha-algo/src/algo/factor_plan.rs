@@ -22,6 +22,7 @@ pub enum ExprSpec {
     Const(f64),
     Rolling { child: usize, window: usize, op: SessionOp, min_periods: usize, propagate_nan: bool },
     Ema { child: usize, span: usize, min_periods: usize, propagate_nan: bool },
+    SessionRolling { child: usize, lookback_sessions: usize, sessions: Vec<(i64, i64, usize)>, op: SessionOp, min_periods: usize, propagate_nan: bool },
     Linreg { child: usize, window: usize, op: String, min_periods: usize, propagate_nan: bool },
     Neg { child: usize },
     Unary { op: String, child: usize },
@@ -138,7 +139,7 @@ impl FactorPlanKernel {
         let mut nodes = Vec::with_capacity(specs.len());
         for spec in specs {
             let rolling = match &spec {
-                ExprSpec::Rolling { op, .. } | ExprSpec::Scope { op, .. } => (0..products)
+                ExprSpec::Rolling { op, .. } | ExprSpec::Scope { op, .. } | ExprSpec::SessionRolling { op, .. } => (0..products)
                     .map(|_| IntervalKernel::new_explicit(*op).map(Some))
                     .collect::<Result<Vec<_>, _>>()?,
                 _ => (0..products).map(|_| None).collect(),
@@ -177,6 +178,7 @@ impl FactorPlanKernel {
             let children: &[usize] = match &node.spec {
                 ExprSpec::Column(_) | ExprSpec::Const(_) => &[],
                 ExprSpec::Neg { child } | ExprSpec::Unary { child, .. } | ExprSpec::Rolling { child, .. }
+                | ExprSpec::SessionRolling { child, .. }
                 | ExprSpec::Ema { child, .. } | ExprSpec::Linreg { child, .. }
                 | ExprSpec::Shift { child, .. } | ExprSpec::Cross { child, .. }
                 | ExprSpec::Scope { child, .. } | ExprSpec::Signal { child, .. } => std::slice::from_ref(child),
@@ -264,6 +266,18 @@ impl FactorPlanKernel {
                     let input = &head[child];
                     let node = &mut self.nodes[index];
                     let start = current.saturating_sub(window as u64 - 1);
+                    for product in 0..products {
+                        let Some(state) = node.rolling[product].as_mut() else { out[product] = f64::NAN; continue };
+                        state.set_semantics(min_periods, propagate_nan);
+                        out[product] = state.update_explicit(start, current, input[product]);
+                    }
+                }
+                ExprSpec::SessionRolling { child, lookback_sessions, ref sessions, min_periods, propagate_nan, .. } => {
+                    let input = &head[child];
+                    let node = &mut self.nodes[index];
+                    let current_session = sessions.iter().position(|(start, end, _)| timestamp_ns >= *start && timestamp_ns <= *end).unwrap_or(0);
+                    let first_session = (current_session + 1).saturating_sub(lookback_sessions);
+                    let start: u64 = sessions[..first_session].iter().map(|(_, _, bars)| *bars as u64).sum();
                     for product in 0..products {
                         let Some(state) = node.rolling[product].as_mut() else { out[product] = f64::NAN; continue };
                         state.set_semantics(min_periods, propagate_nan);
@@ -400,6 +414,8 @@ enum RawNode {
               propagate_nan: bool, #[serde(default)] quantile: Option<f64> },
     Scope { child: usize, count: usize, op: String, min_periods: usize, propagate_nan: bool,
             #[serde(default)] sessions: Vec<[i64; 3]> },
+    SessionRolling { child: usize, lookback_sessions: usize, sessions: Vec<[i64; 3]>, op: String,
+                     min_periods: usize, propagate_nan: bool },
     Binary { op: String, left: usize, right: usize },
     Neg { child: usize },
     Unary { op: String, child: usize },
@@ -451,6 +467,10 @@ impl FactorPlanKernel {
                         ExprSpec::Rolling { child, window, op: session_op(&op, quantile)?, min_periods, propagate_nan }
                     }
                 }
+                RawNode::SessionRolling { child, lookback_sessions, sessions, op, min_periods, propagate_nan } =>
+                    ExprSpec::SessionRolling { child, lookback_sessions,
+                        sessions: sessions.into_iter().map(|item| (item[0], item[1], item[2] as usize)).collect(),
+                        op: session_op(&op, None)?, min_periods, propagate_nan },
                 RawNode::Scope { child, count, op, min_periods, propagate_nan, sessions } =>
                     ExprSpec::Scope { child, count, op: session_op(&op, None)?, min_periods, propagate_nan,
                         sessions: sessions.into_iter().map(|item| (item[0], item[1], item[2])).collect() },

@@ -577,3 +577,23 @@ def test_tools_window_bars_compiles_to_rust():
     expression = ToolColumnRef(DataColumn.CLOSE).rolling(window_bars(5)).mean()
     executor = compile_incremental_factor('m', expression, ('A',), source_freq=DataFreq.MIN1)
     assert getattr(executor._multi, 'uses_rust', False) is True
+
+
+def test_window_bars_250d_compiles_to_rust_session_window():
+    from tools.data.types import DataColumn, DataFreq
+    from tools.factors import window_bars
+    from tools.factors.expr.leaf import ColumnRef as ToolColumnRef
+    from tools.factors.expr.streaming.calendar_window import (
+        TradingCalendarWindow, TradingSession as ToolsSession,
+    )
+    from tools.factors.expr.streaming.incremental import compile_incremental_factor
+
+    calendar = TradingCalendarWindow((
+        ToolsSession('2026-01-05', 0, 10, 2),
+        ToolsSession('2026-01-06', 20, 30, 2),
+    ))
+    expression = ToolColumnRef(DataColumn.CLOSE).rolling(window_bars('250d')).mean()
+    executor = compile_incremental_factor(
+        'm', expression, ('A',), source_freq=DataFreq.MIN1, session_calendar=calendar,
+    )
+    assert getattr(executor._multi, 'uses_rust', False) is True

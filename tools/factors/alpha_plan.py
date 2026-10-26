@@ -25,7 +25,7 @@ _BINARY = {"add", "sub", "mul", "div", "gt", "lt", "ge", "le", "eq", "ne"}
 _UNARY = {"abs", "sign", "sqrt", "log", "tanh"}
 
 
-def alpha_plan_spec(expression: Any, *, source_freq=None, products=()) -> dict[str, Any] | None:
+def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_calendar=None) -> dict[str, Any] | None:
     columns: list[str] = []
     nodes: list[dict[str, Any]] = []
     keys: list[str] = []
@@ -53,7 +53,29 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=()) -> dict[s
                 window_count = int(window.value)
             elif type(window).__name__ == "WindowBarsExpr" and source_freq is not None and products:
                 from tools.factors.expr.rolling import _resolve_windows
-                common, window_count, _ = _resolve_windows(window.window.value, source_freq, products)
+                value = window.window.value
+                if session_calendar is not None and isinstance(value, str) and value.strip().lower().endswith("d"):
+                    lookback = int(value.strip().lower().removesuffix("d"))
+                    sessions = [
+                        [int(item.start_ns), int(item.end_ns), int(item.bar_count)]
+                        for item in session_calendar.sessions
+                    ]
+                    if not sessions or any(item[2] <= 0 for item in sessions):
+                        return None
+                    child = build(expr.operands[expr._data_start])
+                    if child is None:
+                        return None
+                    op, _, q = expr.op.partition(":") if ":" in expr.op else (expr.op, "", "")
+                    op = op.removeprefix("rolling_")
+                    node = {
+                        "kind": "session_rolling", "child": child,
+                        "lookback_sessions": lookback, "sessions": sessions,
+                        "op": op, "min_periods": expr._min_periods_value(1),
+                        "propagate_nan": expr.nan_policy.value == "propagate",
+                    }
+                    memo[key] = len(nodes); keys.append(repr(key)); key_tuples.append(key); nodes.append(node)
+                    return memo[key]
+                common, window_count, _ = _resolve_windows(value, source_freq, products)
                 if not common:
                     return None
             else:

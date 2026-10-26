@@ -1101,7 +1101,7 @@ def compile_incremental_factors(
         UnsupportedByRustPlan, compile_rust_incremental,
     )
     try:
-        return compile_rust_incremental(expressions, products, source_freq=source_freq)
+        return compile_rust_incremental(expressions, products, source_freq=source_freq, session_calendar=session_calendar)
     except (UnsupportedByRustPlan, AttributeError, KeyError, TypeError, ValueError):
         pass
     memo: dict[tuple, StreamingNode] = {}
