@@ -56,3 +56,21 @@ def test_calendar_from_bars_merges_night_and_day_into_one_session():
     assert window.sessions[0].start_ns == 0
     assert window.sessions[0].end_ns == 30
     assert window.sessions[0].bar_count == 2
+
+
+def test_sub_day_duration_is_fixed_bar_count():
+    from tools.factors.expr.streaming.incremental import _resolve_window_bars
+
+    assert _resolve_window_bars("30m", "1m") == 30
+    assert _resolve_window_bars("8h", "1m") == 480
+
+
+def test_multi_day_duration_requires_calendar():
+    import pytest
+    from tools.factors.expr.streaming.incremental import (
+        UnsupportedStreamingFactor,
+        _resolve_window_bars,
+    )
+
+    with pytest.raises(UnsupportedStreamingFactor):
+        _resolve_window_bars("250d", "1m")
