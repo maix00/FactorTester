@@ -44,8 +44,6 @@ pub fn ta_ref<NumT: Float + Send + Sync>(
         for i in start..end {
           if i >= periods {
             r[i] = x[i - periods];
-          } else if !ctx.is_strictly_cycle() {
-            r[i] = x[0];
           }
         }
       }
@@ -96,8 +94,6 @@ pub fn ta_ref_v<NumT: Float + Send + Sync>(
           let period = p[i];
           if i >= period {
             r[i] = x[i - period];
-          } else if !ctx.is_strictly_cycle() {
-            r[i] = x[0];
           }
         }
       }
