@@ -273,18 +273,20 @@ pub mod nautilus {
         fn as_any(&self) -> &dyn Any { self }
     }
 
+    impl FactorActor<crate::plan::FactorPlanEngine> {
+        /// Build an actor directly from the public `alpha.factor` plan JSON.
+        pub fn from_plan_json(actor_id: &str, products: usize, json: &str) -> Result<Self, alpha_algo::Error> {
+            let engine = crate::plan::FactorPlanEngine::from_spec_json(json, products)?;
+            Ok(Self::new(actor_id, engine))
+        }
+    }
+
     impl From<&Bar> for MarketBar {
         fn from(bar: &Bar) -> Self {
             Self {
                 timestamp_ns: bar.ts_event.as_u64() as i64,
                 products: vec![bar.bar_type.instrument_id().to_string()],
-                values: vec![
-                    bar.open.as_f64(),
-                    bar.high.as_f64(),
-                    bar.low.as_f64(),
-                    bar.close.as_f64(),
-                    bar.volume.as_f64(),
-                ],
+                values: vec![bar.close.as_f64()],
             }
         }
     }
@@ -363,6 +365,19 @@ mod nautilus_tests {
         actor.register();
         assert!(actor_exists(&Ustr::from("factor-actor-test")));
         deregister_actor(&Ustr::from("factor-actor-test"));
+    }
+
+    #[test]
+    fn factor_actor_loads_public_plan_json() {
+        let json = r#"{"columns":["CLOSE"],"nodes":[{"kind":"column","index":0},{"kind":"rolling","child":0,"window":2,"op":"mean","min_periods":1,"propagate_nan":true}],"outputs":[1]}"#;
+        let mut actor = nautilus::FactorActor::from_plan_json("factor-json-test", 1, json).unwrap();
+        let bar = Bar::new(
+            BarType::from("A.B-1-MINUTE-LAST-EXTERNAL"),
+            Price::from("1.0"), Price::from("1.0"), Price::from("1.0"),
+            Price::from("1.0"), Quantity::from("10"), 1_000.into(), 1_000.into(),
+        );
+        actor.handle(&bar);
+        assert_eq!(actor.latest(), &[1.0]);
     }
 
     #[test]
