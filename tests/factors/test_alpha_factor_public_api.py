@@ -713,3 +713,19 @@ def test_tools_bar_distance_compiles_to_rust_match_plan():
     for timestamp, value in zip(pd.date_range('2026-01-05', periods=3, freq='min'), (10.0, 12.0, 9.0)):
         executor.on_bar(timestamp, {'A': {DataColumn.CLOSE.name: value}})
     assert executor.on_signal(pd.Timestamp('2026-01-05 00:02'))['A'] == 9.0
+
+
+def test_alpha_match_bar_distance_batch_incremental_reconcile():
+    from alpha.factor import CANDIDATE, CURRENT, IncrementalFactorPlan, bar_distance, scope_bars
+
+    index = pd.date_range('2026-01-05', periods=4, freq='min')
+    frame = pd.DataFrame({'CLOSE': [10.0, 12.0, 9.0, 13.0]}, index=index)
+    ctx = EvalContext(products=('A',), preloaded={'A': frame})
+    expression = bar_distance(
+        ColumnRef('CLOSE'), (CURRENT - CANDIDATE) > 1.5,
+        scope=scope_bars(3), default=9.0,
+    )
+    batch = expression.evaluate(ctx)['A'].to_numpy()
+    plan = IncrementalFactorPlan({'d': expression}, ('A',))
+    incremental = [plan.update([value])['d']['A'] for value in frame['CLOSE']]
+    np.testing.assert_allclose(incremental, batch)
