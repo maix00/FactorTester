@@ -196,11 +196,13 @@ def test_existing_tools_factor_can_emit_bridge_plan_json():
     assert [node['kind'] for node in spec['nodes']] == ['column', 'rolling', 'const', 'binary']
 
 
-def test_compat_plan_rejects_truncated_and_distance_semantics():
+def test_compat_plan_rejects_truncated_but_compiles_match_distance():
     from tools.factors.alpha_plan import alpha_plan_spec
     from tools.factors import scope_bars
 
     close = ColumnRef(DataColumn.CLOSE)
     assert alpha_plan_spec(close.rolling(5).truncate(0, 2).mean()) is None
-    condition = close > 0
-    assert alpha_plan_spec(close.bar_distance(condition, scope=scope_bars(3))) is None
+    from tools.factors import CANDIDATE, CURRENT, bar_distance
+    condition = CURRENT - CANDIDATE > 0
+    spec = alpha_plan_spec(bar_distance(close, condition, scope=scope_bars(3)))
+    assert spec['nodes'][-1]['kind'] == 'match_distance' 

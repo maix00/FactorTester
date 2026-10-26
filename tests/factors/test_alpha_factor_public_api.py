@@ -696,3 +696,20 @@ def test_alpha_factor_current_candidate_bar_distance_plan():
     state = FactorPlanState(json.dumps(spec), 1)
     values = [float(state.update(np.array([value]))[0]) for value in (10.0, 12.0, 9.0)]
     np.testing.assert_allclose(values, [9.0, 1.0, 9.0])
+
+
+def test_tools_bar_distance_compiles_to_rust_match_plan():
+    from tools.data.types import DataColumn, DataFreq
+    from tools.factors import CURRENT, CANDIDATE, bar_distance, scope_bars
+    from tools.factors.expr.leaf import ColumnRef as ToolColumnRef
+    from tools.factors.expr.streaming.incremental import compile_incremental_factor
+
+    expression = bar_distance(
+        ToolColumnRef(DataColumn.CLOSE), (CURRENT - CANDIDATE) > 1.5,
+        scope=scope_bars(3), default=9.0,
+    )
+    executor = compile_incremental_factor('d', expression, ('A',), source_freq=DataFreq.MIN1)
+    assert getattr(executor._multi, 'uses_rust', False) is True
+    for timestamp, value in zip(pd.date_range('2026-01-05', periods=3, freq='min'), (10.0, 12.0, 9.0)):
+        executor.on_bar(timestamp, {'A': {DataColumn.CLOSE.name: value}})
+    assert executor.on_signal(pd.Timestamp('2026-01-05 00:02'))['A'] == 9.0

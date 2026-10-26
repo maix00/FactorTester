@@ -10,7 +10,7 @@ import pandas as pd
 
 from typing import Any
 
-from tools.factors.expr.bar_search import BarDistanceOp, BarSinceOp
+from tools.factors.expr.bar_search import BarDistanceOp, BarSinceOp, ScopeLengthDefault
 from tools.factors.expr.composite import CompositeExpr
 from tools.factors.expr.conditional import WhereOp
 from tools.factors.expr.cross_sectional import CrossSectionalOp
@@ -19,10 +19,25 @@ from tools.factors.expr.leaf import CategoryBoolRef, ColumnRef, ConstExpr
 from tools.factors.expr.lookback_scope import BarCountScope
 from tools.factors.expr.rolling import RollingOp
 from tools.factors.expr.shift import ShiftOp
+from tools.factors.expr.match_refs import MatchValueRef
 from tools.factors.expr.signal_align import SignalAlign
 
 _BINARY = {"add", "sub", "mul", "div", "gt", "lt", "ge", "le", "eq", "ne"}
 _UNARY = {"abs", "sign", "sqrt", "log", "tanh"}
+
+
+def _match_predicate(expr) -> dict:
+    if isinstance(expr, MatchValueRef):
+        return {"op": expr.role}
+    if isinstance(expr, ConstExpr):
+        return {"op": "const", "value": float(expr.value)}
+    if isinstance(expr, CompositeExpr):
+        if expr.op in {"neg", "abs"}:
+            return {"op": expr.op, "a": _match_predicate(expr.operands[0])}
+        if expr.op in _BINARY:
+            return {"op": expr.op, "a": _match_predicate(expr.operands[0]),
+                    "b": _match_predicate(expr.operands[1])}
+    raise TypeError(f"unsupported match node {type(expr).__name__}")
 
 
 def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_calendar=None) -> dict[str, Any] | None:
@@ -160,7 +175,21 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
             node = {"kind": "where", "condition": children[0],
                     "when_true": children[1], "when_false": children[2]}
         elif isinstance(expr, BarDistanceOp):
-            return None
+            if not isinstance(expr.scope, BarCountScope):
+                return None
+            child = build(expr.value)
+            if child is None:
+                return None
+            default = expr.operands[-1]
+            default_value = (float(expr.scope.resolved_count()) if isinstance(default, ScopeLengthDefault)
+                             else float(default.value))
+            node = {
+                "kind": "match_distance", "child": child,
+                "predicate": _match_predicate(expr.condition),
+                "count": int(expr.scope.resolved_count()),
+                "nearest": expr.select == "nearest",
+                "default": default_value, "include_current": False,
+            }
         elif isinstance(expr, BarSinceOp):
             if not isinstance(expr.scope, BarCountScope):
                 return None
@@ -168,7 +197,6 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
             if child is None:
                 return None
             default = expr.operands[-1]
-            from tools.factors.expr.bar_search import ScopeLengthDefault
             default_scope = isinstance(default, ScopeLengthDefault)
             node = {
                 "kind": "distance" if isinstance(expr, BarDistanceOp) else "since",
