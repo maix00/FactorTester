@@ -273,6 +273,43 @@ class RustSessionPairNode:
         return result
 
 
+class RustWallPairNode:
+    """Explicit wall-clock cov/corr executed by Rust."""
+
+    def __init__(self, op, children, duration_ns, width):
+        from alpha import WallPairState
+        if op not in {"rolling_cov", "rolling_corr"}:
+            raise UnsupportedStreamingFactor(f"wall pair does not support {op}")
+        self.op = op
+        self.children = tuple(children)
+        self.duration_ns = int(duration_ns)
+        self._width = width
+        self._states = [
+            WallPairState(self.duration_ns, op == "rolling_corr")
+            for _ in range(width)
+        ]
+
+    def update(self, market, cache):
+        key = id(self)
+        if key in cache:
+            return cache[key]
+        timestamp = getattr(market, "timestamp", None)
+        if timestamp is None:
+            raise UnsupportedStreamingFactor("wall cov/corr needs bar timestamps")
+        ts = int(pd.Timestamp(timestamp).value)
+        left = np.asarray(self.children[0].update(market, cache), dtype=float)
+        right = np.asarray(self.children[1].update(market, cache), dtype=float)
+        if left.shape != (self._width,) or right.shape != (self._width,):
+            raise ValueError("wall cov/corr input width changed")
+        result = np.asarray(
+            [state.update(ts, float(x), float(y))
+             for state, x, y in zip(self._states, left, right, strict=True)],
+            dtype=float,
+        )
+        cache[key] = result
+        return result
+
+
 class RustWallRollingNode:
     """Explicit wall-clock window executed by Rust."""
 
@@ -1454,14 +1491,19 @@ def compile_streaming_factor(
                 for item in expr.operands[expr._data_start:expr._data_start + expr._n_data]
             )
             if wall_duration_ns is not None:
-                if len(children) != 1:
-                    raise UnsupportedStreamingFactor(
-                        "wall window expects one streaming operand"
+                if expr.op in {"rolling_cov", "rolling_corr"} and len(children) == 2:
+                    node = RustWallPairNode(
+                        expr.op, children, wall_duration_ns, len(products),
                     )
-                node = RustWallRollingNode(
-                    expr.op, children[0], wall_duration_ns, len(products),
-                    quantile=getattr(expr, "quantile", None),
-                )
+                elif len(children) == 1:
+                    node = RustWallRollingNode(
+                        expr.op, children[0], wall_duration_ns, len(products),
+                        quantile=getattr(expr, "quantile", None),
+                    )
+                else:
+                    raise UnsupportedStreamingFactor(
+                        "wall window expects one operand or cov/corr pair"
+                    )
             elif (
                 session_calendar is not None
                 and lookback_sessions is not None
