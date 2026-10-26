@@ -1116,7 +1116,8 @@ def compile_incremental_factors(
         return compile_rust_incremental(expressions, products, source_freq=source_freq, session_calendar=session_calendar)
     except (UnsupportedByRustPlan, AttributeError, KeyError, TypeError, ValueError) as error:
         LAST_RUST_PLAN_ERROR = f"{type(error).__name__}: {error}"
-        if require_rust:
+        import os
+        if require_rust or os.environ.get("FT_FACTORS_REQUIRE_RUST") == "1":
             raise
     memo: dict[tuple, StreamingNode] = {}
     plans = []

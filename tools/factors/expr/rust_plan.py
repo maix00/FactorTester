@@ -15,7 +15,7 @@ from tools.data.types import DataFreq, finest_index
 from .core import EvaluateContext, FactorExpr
 from .leaf import ColumnRef, ConstExpr, CategoryBoolRef
 from .composite import CompositeExpr
-from .rolling import RollingOp, WindowBarsExpr, _resolve_windows
+from .rolling import RollingOp, WindowBarsExpr, IntervalBarsExpr, _resolve_windows
 from .conditional import WhereOp
 from .shift import ShiftOp
 from .groupby_scope import GroupByScopeOp
@@ -86,6 +86,10 @@ class _PlanBuilder:
             index = next(iter(self.frames.values())).index
         elif ctx.preloaded:
             index = next(iter(ctx.preloaded.values())).index
+            for product in self.products:
+                frame = ctx.preloaded.get((product, ctx.freq.name))
+                if frame is not None:
+                    index = index.union(frame.index, sort=False)
         else:
             raise ValueError('a Rust panel plan requires a concrete source timeline')
         for frame in self.frames.values():
@@ -296,6 +300,18 @@ class _PlanBuilder:
             result = self.add('column', params=[self.input(frame.to_numpy(dtype=float).T)])
         elif isinstance(expr, ConstExpr):
             result = self.add('const', params=[float(expr.value)], scalar=True, columns=())
+        elif isinstance(expr, WindowBarsExpr):
+            if not isinstance(expr.window, ConstExpr):
+                raise ValueError('window_bars requires a resolved window')
+            common, count, _ = _resolve_windows(expr.window.value, self.ctx.freq, self.products)
+            if not common:
+                raise ValueError('window_bars requires a common scalar count across products')
+            result = self.add('product', params=[float(count)] * len(self.products))
+        elif isinstance(expr, IntervalBarsExpr):
+            source_index = finest_index(self.index) if isinstance(self.index, pd.MultiIndex) else self.index
+            if not isinstance(source_index, pd.DatetimeIndex):
+                raise ValueError('interval_bars requires source timestamps')
+            result = self.add('bar_count', indices=[expr.start_ns, expr.end_ns])
         elif isinstance(expr, CategoryBoolRef):
             values = [float(expr.category.is_in_category(expr.category_name, p)) for p in self.products]
             result = self.add('product', params=values)
@@ -319,6 +335,8 @@ class _PlanBuilder:
                 params.extend(value for instruction in program for value in instruction)
             result = self.add('distance' if isinstance(expr, BarDistanceOp) else 'since', children,
                               params, grid=child.grid, signal=child.signal, columns=child.columns)
+        elif isinstance(expr, IntervalBarsExpr):
+            result = self.add('bar_count', [], [], [expr.start_ns, expr.end_ns])
         elif isinstance(expr, (RollingOp, GroupByScopeOp)):
             children = [self.build(c) for c in expr.operands[expr._data_start:expr._data_start + expr._n_data]]
             grid, signal = self.common(children)
@@ -436,7 +454,7 @@ def plan_identity(expressions: list[FactorExpr]) -> tuple[tuple, ...]:
     return tuple(node._structural_key() for node in _walk(expressions))
 
 
-_PLAN_SUPPORTED = (ColumnRef, ConstExpr, RollingOp, WindowBarsExpr, CompositeExpr, WhereOp, ShiftOp,
+_PLAN_SUPPORTED = (ColumnRef, ConstExpr, RollingOp, WindowBarsExpr, IntervalBarsExpr, CompositeExpr, WhereOp, ShiftOp,
                    GroupByScopeOp, BarSinceOp, BarDistanceOp, CrossSectionalOp,
                    SignalAlign, CategoryBoolRef, MatchValueRef, ScopeLengthDefault,
                    TermStructureOp)

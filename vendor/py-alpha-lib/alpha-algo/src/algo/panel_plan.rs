@@ -74,10 +74,13 @@ impl PanelPlan {
     }
     pub fn add(&mut self, op: String, children: Vec<usize>, params: Vec<f64>, indices: Vec<i64>, grid: usize) -> Result<usize> {
         if grid>=self.grids.len() || children.iter().any(|&c|c>=self.nodes.len()) { return Err(error("invalid grid or non-topological child")); }
-        let valid=matches!(op.as_str(),"column"|"const"|"product"|"reindex"|"where"|"shift"|"since"|"distance"|"term"|
+        let valid=matches!(op.as_str(),"column"|"const"|"product"|"bar_count"|"reindex"|"where"|"shift"|"since"|"distance"|"term"|
             "neg"|"abs"|"sign"|"sqrt"|"log"|"tanh"|"not"|"add"|"sub"|"mul"|"div"|"pow"|"max"|"min"|
-            "gt"|"lt"|"ge"|"le"|"eq"|"ne"|"and"|"or") || op.starts_with("rolling:") || op.starts_with("scope:") || op.starts_with("cross:") || op.starts_with("session_rolling:");
+            "gt"|"lt"|"ge"|"le"|"eq"|"ne"|"and"|"or") || op.starts_with("rolling:") || op.starts_with("scope:") || op.starts_with("cross:") || op.starts_with("session_rolling:") || op == "bar_count";
         if !valid { return Err(error(format!("unknown plan operation {op}"))); }
+        if op == "bar_count" && (!children.is_empty() || indices.len() != 2 || indices[0] > indices[1]) {
+            return Err(error("bar_count requires ordered inclusive bounds and no children"));
+        }
         self.nodes.push(Node {op,children,params,indices,grid}); Ok(self.nodes.len()-1)
     }
     pub fn asof_indices(source: &[i64], target: &[i64]) -> Result<Vec<i64>> {
@@ -128,6 +131,32 @@ impl PanelPlan {
                 "column"=> {let data=input(p[0] as usize)?;if data.len()!=rows*products{return Err(error("column matrix shape mismatch"));}Value{data:Data::Panel(Cow::Borrowed(data)),rows,width:products}},
                 "const"=>Value{data:Data::Scalar(p[0]),rows,width:0},
                 "product"=>{if p.len()!=products{return Err(error("product constant shape mismatch"));}Value{data:Data::Product(p.clone()),rows,width:products}},
+                "bar_count"=> {
+                    let mut out = vec![f64::NAN; rows * products];
+                    for product in 0..products {
+                        let mut count = 0_u64;
+                        for (row, &timestamp) in grid.times.iter().enumerate() {
+                            let offset = product * rows + row;
+                            if grid.observed[offset] != 0 {
+                                count += u64::from(timestamp >= node.indices[0] && timestamp <= node.indices[1]);
+                                out[offset] = count as f64;
+                            }
+                        }
+                    }
+                    owned(out, products)
+                },
+                "bar_count"=> {
+                    let start=node.indices.first().copied().unwrap_or_else(|| p.first().copied().unwrap_or(f64::NEG_INFINITY) as i64);
+                    let end=node.indices.get(1).copied().unwrap_or_else(|| p.get(1).copied().unwrap_or(f64::INFINITY) as i64);
+                    let mut out=vec![f64::NAN;rows*products];
+                    for g in 0..products { for t in 0..rows {
+                        if grid.observed[g*rows+t]==0 {continue;}
+                        out[g*rows+t]=grid.times.iter().enumerate()
+                            .filter(|(row,time)| grid.observed[g*rows+*row]!=0 && **time>=start && **time<=end && **time<=grid.times[t])
+                            .count() as f64;
+                    }}
+                    owned(out,products)
+                },
                 "reindex"=> {
                     if node.indices.len()!=rows || node.indices.iter().any(|&i|i>=args[0].rows as i64){return Err(error("invalid reindex mapping"));}
                     if let Data::Scalar(v)=args[0].data {Value{data:Data::Scalar(v),rows,width:0}} else {
