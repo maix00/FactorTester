@@ -294,7 +294,7 @@ def test_factor_expr_streaming_changes_select_bounded_contract_tests():
         "tests/backtest/native/test_factor_incremental_compile.py",
         "tests/backtest/native/test_factor_incremental_rolling_window.py",
         "tests/backtest/native/test_incremental_cross_sectional_kernels.py",
-    }
+    } | set(selector.FACTOR_PLAN_TESTS)
 
 
 def test_nautilus_fee_benchmark_edit_selects_fee_contract_tests():

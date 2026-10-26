@@ -1113,7 +1113,7 @@ def compile_incremental_factors(
     global LAST_RUST_PLAN_ERROR
     try:
         LAST_RUST_PLAN_ERROR = None
-        return compile_rust_incremental(expressions, products, source_freq=source_freq, session_calendar=session_calendar)
+        return compile_rust_incremental(expressions, products, source_freq=source_freq, session_calendar=session_calendar, event_line=event_line)
     except (UnsupportedByRustPlan, AttributeError, KeyError, TypeError, ValueError) as error:
         LAST_RUST_PLAN_ERROR = f"{type(error).__name__}: {error}"
         import os

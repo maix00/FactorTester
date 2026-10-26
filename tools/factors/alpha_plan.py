@@ -43,6 +43,7 @@ def _match_predicate(expr) -> dict:
 
 def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_calendar=None) -> dict[str, Any] | None:
     columns: list[str] = []
+    boundaries: list[str] = []
     nodes: list[dict[str, Any]] = []
     keys: list[str] = []
     key_tuples: list[tuple] = []
@@ -152,7 +153,28 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
             if op == "quantile":
                 node["quantile"] = float(expr.quantile)
         elif isinstance(expr, GroupByScopeOp):
-            if isinstance(expr.scope, (SessionScope, TradingDayScope)) and session_calendar is not None:
+            if isinstance(expr.scope, (SessionScope, TradingDayScope)) and (
+                session_calendar is None or isinstance(expr.scope, SessionScope)
+            ):
+                if expr.trunc_start is not None or expr.trunc_end is not None or expr.op.startswith("quantile"):
+                    return None
+                child = build(expr.operands[0])
+                if child is None:
+                    return None
+                event = "trading_day_start" if isinstance(expr.scope, TradingDayScope) else "trading_session_start"
+                boundary_key = ("event_boundary", event)
+                if boundary_key not in memo:
+                    if event not in boundaries:
+                        boundaries.append(event)
+                    memo[boundary_key] = len(nodes)
+                    nodes.append({"kind": "boundary", "index": boundaries.index(event)})
+                    keys.append(repr(boundary_key)); key_tuples.append(boundary_key)
+                node = {
+                    "kind": "session_reset", "child": child, "boundary": memo[boundary_key],
+                    "op": expr.op, "min_periods": expr.min_periods or 1,
+                    "propagate_nan": expr.nan_policy.value == "propagate",
+                }
+            elif isinstance(expr.scope, TradingDayScope) and session_calendar is not None:
                 sessions = [[int(item.start_ns), int(item.end_ns), int(item.bar_count)]
                             for item in session_calendar.sessions]
                 if not sessions or any(item[2] <= 0 for item in sessions):
@@ -272,7 +294,7 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
     output = build(expression)
     if output is None:
         return None
-    return {"columns": columns, "keys": keys, "key_tuples": key_tuples,
+    return {"columns": columns, "boundaries": boundaries, "keys": keys, "key_tuples": key_tuples,
             "nodes": nodes, "outputs": [output]}
 
 

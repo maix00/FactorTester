@@ -18,16 +18,10 @@ impl FactorPlanEngine {
     }
 
     pub fn node_keys(&self) -> &[String] { self.inner.node_keys() }
+    pub fn boundary_channels(&self) -> usize { self.inner.boundary_channels() }
 
     pub fn update_into(&mut self, bar: &MarketBar, out: &mut Vec<f64>) -> Result<(), alpha_algo::Error> {
-        if bar.term_curves.is_empty() {
-            self.inner.update_into(bar.timestamp_ns, &bar.values, out)
-        } else {
-            let values = self.inner.update_with_curves(bar.timestamp_ns, &bar.values, &bar.term_curves)?;
-            out.clear();
-            out.extend(values);
-            Ok(())
-        }
+        self.inner.update_into_context(bar.timestamp_ns, &bar.values, &bar.boundaries, &bar.term_curves, out)
     }
 }
 
@@ -35,6 +29,12 @@ impl FactorEngine for FactorPlanEngine {
     type Error = alpha_algo::Error;
 
     fn update(&mut self, bar: &MarketBar) -> Result<Vec<f64>, Self::Error> {
-        self.inner.update_at(bar.timestamp_ns, &bar.values)
+        let mut out = Vec::new();
+        self.update_into(bar, &mut out)?;
+        Ok(out)
+    }
+
+    fn update_into(&mut self, bar: &MarketBar, out: &mut Vec<f64>) -> Result<(), Self::Error> {
+        FactorPlanEngine::update_into(self, bar, out)
     }
 }

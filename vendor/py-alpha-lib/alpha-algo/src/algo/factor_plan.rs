@@ -22,6 +22,7 @@ pub enum ExprSpec {
     Const(f64),
     Product(Vec<f64>),
     BarCount { start_ns: i64, end_ns: i64 },
+    Boundary { index: usize },
     Category { memberships: Vec<(usize, i64, bool)> },
     Rolling { child: usize, window: usize, op: SessionOp, min_periods: usize, propagate_nan: bool, trunc_start: i64, trunc_end: i64, trunc_start_child: Option<usize>, trunc_end_child: Option<usize> },
     Ema { child: usize, span: usize, min_periods: usize, propagate_nan: bool },
@@ -98,14 +99,49 @@ impl LinearState {
     }
 }
 
+/// Shared batch/streaming session-window resolver. Positions refer to received
+/// observations, never the calendar's declared full-session bar capacity.
+pub(crate) struct SessionWindow {
+    cursor: Option<usize>,
+    starts: Vec<u64>,
+    timestamp: Option<i64>,
+    lookback: usize,
+}
+
+impl SessionWindow {
+    pub(crate) fn new(sessions: &[(i64, i64, usize)], lookback: usize) -> Result<Self, crate::algo::Error> {
+        if lookback == 0 || sessions.is_empty()
+            || sessions.iter().any(|(start, end, _)| start > end)
+            || sessions.windows(2).any(|pair| pair[0].1 >= pair[1].0) {
+            return Err(crate::algo::Error::InvalidParameter("session window requires positive lookback and ordered nonoverlapping sessions".into()));
+        }
+        Ok(Self { cursor: None, starts: vec![0; sessions.len()], timestamp: None, lookback })
+    }
+
+    pub(crate) fn start(&mut self, timestamp: i64, ordinal: u64, sessions: &[(i64, i64, usize)]) -> Result<u64, crate::algo::Error> {
+        if self.timestamp.is_some_and(|last| timestamp <= last) {
+            return Err(crate::algo::Error::InvalidParameter("session bars must have increasing timestamps".into()));
+        }
+        let position = self.cursor.filter(|&p| timestamp >= sessions[p].0 && timestamp <= sessions[p].1)
+            .or_else(|| sessions.partition_point(|(start, _, _)| *start <= timestamp).checked_sub(1))
+            .filter(|&p| timestamp <= sessions[p].1)
+            .ok_or_else(|| crate::algo::Error::InvalidParameter("bar is outside the frozen session calendar".into()))?;
+        if self.cursor != Some(position) {
+            self.starts[self.cursor.map_or(0, |p| p + 1)..=position].fill(ordinal);
+            self.cursor = Some(position);
+        }
+        self.timestamp = Some(timestamp);
+        Ok(self.starts[(position + 1).saturating_sub(self.lookback)])
+    }
+}
+
 struct NodeState {
     spec: ExprSpec,
     rolling: Vec<Option<IntervalKernel>>,
     trunc_history: Vec<VecDeque<f64>>,
     interval_count: u64,
     count_timestamp: Option<i64>,
-    session_cursor: Option<usize>,
-    session_starts: Vec<u64>,
+    session_window: Option<SessionWindow>,
     ema: Vec<Option<crate::algo::EmaState>>,
     linreg: Vec<Option<LinearState>>,
     match_history: Vec<VecDeque<(u64, f64)>>,
@@ -132,7 +168,7 @@ pub struct FactorPlanKernel {
     fields: usize,
     slots: Vec<Vec<f64>>,
     node_keys: Vec<String>,
-    term_curves: Vec<Vec<(f64, f64)>>,
+    boundary_channels: usize,
 }
 
 fn binary(op: BinaryOp, left: f64, right: f64) -> f64 {
@@ -146,25 +182,24 @@ fn binary(op: BinaryOp, left: f64, right: f64) -> f64 {
 }
 
 impl FactorPlanKernel {
+    pub fn boundary_channels(&self) -> usize { self.boundary_channels }
     pub fn new(products: usize, specs: Vec<ExprSpec>, outputs: Vec<usize>) -> Result<Self, crate::algo::Error> {
         if products == 0 || specs.is_empty() || outputs.is_empty() {
             return Err(crate::algo::Error::InvalidParameter("plan requires products, nodes and outputs".into()));
         }
+        let boundary_channels = specs.iter().filter_map(|spec| match spec {
+            ExprSpec::Boundary { index } => Some(index + 1), _ => None,
+        }).max().unwrap_or(0);
         let mut nodes = Vec::with_capacity(specs.len());
         for spec in specs {
-            let session_starts = match &spec {
+            let session_window = match &spec {
                 ExprSpec::SessionRolling { sessions, lookback_sessions, .. } => {
-                    if *lookback_sessions == 0 || sessions.is_empty()
-                        || sessions.iter().any(|(start, end, _)| start > end)
-                        || sessions.windows(2).any(|pair| pair[0].1 >= pair[1].0) {
-                        return Err(crate::algo::Error::InvalidParameter("session window requires positive lookback and ordered nonoverlapping sessions".into()));
-                    }
-                    vec![0; sessions.len()]
+                    Some(SessionWindow::new(sessions, *lookback_sessions)?)
                 }
                 ExprSpec::BarCount { start_ns, end_ns } if start_ns > end_ns => {
                     return Err(crate::algo::Error::InvalidParameter("interval start exceeds end".into()));
                 }
-                _ => Vec::new(),
+                _ => None,
             };
             let rolling = match &spec {
                 ExprSpec::Rolling { op, .. } | ExprSpec::RollingDynamic { op, .. } | ExprSpec::Scope { op, .. } | ExprSpec::SessionRolling { op, .. } | ExprSpec::SessionReset { op, .. } => (0..products)
@@ -188,7 +223,7 @@ impl FactorPlanKernel {
                 spec, rolling, ema, linreg,
                 trunc_history: (0..products).map(|_| VecDeque::new()).collect(),
                 interval_count: 0, count_timestamp: None,
-                session_cursor: None, session_starts,
+                session_window,
                 match_history: (0..products).map(|_| VecDeque::new()).collect(),
                 history: VecDeque::new(),
                 since_first: vec![None; products],
@@ -209,14 +244,20 @@ impl FactorPlanKernel {
         }
         for (index, node) in nodes.iter().enumerate() {
             let children: &[usize] = match &node.spec {
-                ExprSpec::Column(_) | ExprSpec::Const(_) | ExprSpec::Product(_) | ExprSpec::BarCount { .. } | ExprSpec::Category { .. } | ExprSpec::Term { .. } => &[],
+                ExprSpec::Column(_) | ExprSpec::Const(_) | ExprSpec::Product(_) | ExprSpec::BarCount { .. } | ExprSpec::Boundary { .. } | ExprSpec::Category { .. } | ExprSpec::Term { .. } => &[],
                 ExprSpec::Neg { child } | ExprSpec::Unary { child, .. } | ExprSpec::Rolling { child, .. }
                 | ExprSpec::SessionRolling { child, .. } | ExprSpec::RollingDynamic { child, .. } | ExprSpec::MatchDistance { child, .. }
-                | ExprSpec::Ema { child, .. } | ExprSpec::Linreg { child, .. } | ExprSpec::SessionReset { child, .. }
+                | ExprSpec::Ema { child, .. } | ExprSpec::Linreg { child, .. }
                 | ExprSpec::Shift { child, .. } | ExprSpec::Cross { child, .. }
                 | ExprSpec::Scope { child, .. } | ExprSpec::Signal { child, .. } => std::slice::from_ref(child),
                 ExprSpec::Binary { left, right, .. } => {
                     if *left >= index || *right >= index { return Err(crate::algo::Error::InvalidParameter("plan child must precede parent".into())); }
+                    &[]
+                }
+                ExprSpec::SessionReset { child, boundary, .. } => {
+                    if *child >= index || *boundary >= index {
+                        return Err(crate::algo::Error::InvalidParameter("session reset children must precede parent".into()));
+                    }
                     &[]
                 }
                 ExprSpec::Where { condition, when_true, when_false } => {
@@ -241,7 +282,7 @@ impl FactorPlanKernel {
             }
         }
         let slots = vec![vec![f64::NAN; products]; nodes.len()];
-        Ok(Self { products, nodes, outputs, ordinal: 0, timestamp_ns: 0, fields: 1, slots, node_keys: Vec::new(), term_curves: Vec::new() })
+        Ok(Self { products, nodes, outputs, ordinal: 0, timestamp_ns: 0, fields: 1, slots, node_keys: Vec::new(), boundary_channels })
     }
 
     pub fn update(&mut self, values: &[f64]) -> Result<Vec<f64>, crate::algo::Error> {
@@ -255,19 +296,31 @@ impl FactorPlanKernel {
     }
 
     pub fn update_with_curves(&mut self, timestamp_ns: i64, values: &[f64], curves: &[Vec<(f64, f64)>]) -> Result<Vec<f64>, crate::algo::Error> {
-        self.term_curves = curves.to_vec();
         let mut result = Vec::with_capacity(self.outputs.len() * self.products);
-        self.update_into(timestamp_ns, values, &mut result)?;
+        self.update_into_context(timestamp_ns, values, &[], curves, &mut result)?;
         Ok(result)
     }
 
     pub fn update_into(&mut self, timestamp_ns: i64, values: &[f64], result: &mut Vec<f64>) -> Result<(), crate::algo::Error> {
+        self.update_into_context(timestamp_ns, values, &[], &[], result)
+    }
+
+    /// Borrow one completed market slice; event and curve inputs are never
+    /// copied into persistent plan state. Boundaries are channel-major bytes.
+    pub fn update_into_context(&mut self, timestamp_ns: i64, values: &[f64], boundaries: &[u8], curves: &[Vec<(f64, f64)>], result: &mut Vec<f64>) -> Result<(), crate::algo::Error> {
+        if boundaries.len() % self.products != 0 || (!curves.is_empty() && curves.len() != self.products) {
+            return Err(crate::algo::Error::InvalidParameter("context product width mismatch".into()));
+        }
+        // Validate before advancing any node: missing event inputs must not
+        // partially mutate rolling state and corrupt a subsequent retry.
+        if boundaries.len() / self.products < self.boundary_channels {
+            return Err(crate::algo::Error::InvalidParameter("missing boundary channel".into()));
+        }
         self.timestamp_ns = timestamp_ns;
         if self.products == 0 || values.is_empty() || values.len() % self.products != 0 {
             return Err(crate::algo::Error::InvalidParameter("plan values must be product-major fields".into()));
         }
         self.fields = values.len() / self.products;
-        if self.term_curves.is_empty() { self.term_curves = vec![Vec::new(); self.products]; }
         let products = self.products;
         let fields = self.fields;
         let current = self.ordinal;
@@ -275,27 +328,16 @@ impl FactorPlanKernel {
             // Borrow large calendar specs instead of cloning them per bar.
             // Store actual replay ordinals, not declared full-session sizes:
             // replay may begin midway through a calendar or contain missing bars.
-            if let ExprSpec::SessionRolling { child, lookback_sessions, sessions, min_periods, propagate_nan, .. } = &self.nodes[index].spec {
-                let node = &self.nodes[index];
-                let position = node.session_cursor.filter(|&p| timestamp_ns >= sessions[p].0 && timestamp_ns <= sessions[p].1)
-                    .or_else(|| sessions.partition_point(|(start, _, _)| *start <= timestamp_ns).checked_sub(1))
-                    .filter(|&p| timestamp_ns <= sessions[p].1)
-                    .ok_or_else(|| crate::algo::Error::InvalidParameter("bar is outside the frozen session calendar".into()))?;
-                if node.count_timestamp.is_some_and(|last| timestamp_ns <= last) {
-                    return Err(crate::algo::Error::InvalidParameter("session bars must have increasing timestamps".into()));
-                }
-                let (child, first, minimum, propagate) = (*child, (position + 1).saturating_sub(*lookback_sessions), *min_periods, *propagate_nan);
+            if let ExprSpec::SessionRolling { child, min_periods, propagate_nan, .. } = &self.nodes[index].spec {
+                let (child, minimum, propagate) = (*child, *min_periods, *propagate_nan);
+                let node = &mut self.nodes[index];
+                let (spec, window) = (&node.spec, node.session_window.as_mut().unwrap());
+                let ExprSpec::SessionRolling { sessions, .. } = spec else { unreachable!() };
+                let start = window.start(timestamp_ns, current, sessions)?;
                 let (head, tail) = self.slots.split_at_mut(index);
                 let input = &head[child];
                 let out = &mut tail[0];
                 let node = &mut self.nodes[index];
-                if node.session_cursor != Some(position) {
-                    let from = node.session_cursor.map_or(0, |p| p + 1);
-                    node.session_starts[from..=position].fill(current);
-                    node.session_cursor = Some(position);
-                }
-                node.count_timestamp = Some(timestamp_ns);
-                let start = node.session_starts[first];
                 for product in 0..products {
                     let state = node.rolling[product].as_mut().unwrap();
                     state.set_semantics(minimum, propagate);
@@ -307,6 +349,11 @@ impl FactorPlanKernel {
             let (head, tail) = self.slots.split_at_mut(index);
             let out = &mut tail[0];
             match spec {
+                ExprSpec::Boundary { index: channel } => {
+                    for product in 0..products {
+                        out[product] = f64::from(boundaries[channel * products + product] != 0);
+                    }
+                }
                 ExprSpec::Category { ref memberships } => {
                     for product in 0..products {
                         out[product] = memberships.iter()
@@ -379,7 +426,7 @@ impl FactorPlanKernel {
                 }
                 ExprSpec::Term { ref op, near_rank, far_rank, depth } => {
                     for product in 0..products {
-                        let curve = self.term_curves.get(product);
+                        let curve = curves.get(product);
                         out[product] = curve.map_or(f64::NAN, |points| term_metric(op, points, near_rank, far_rank, depth));
                     }
                 }
@@ -681,6 +728,7 @@ enum RawNode {
     Const { value: f64 },
     Product { values: Vec<f64> },
     BarCount { start_ns: i64, end_ns: i64 },
+    Boundary { index: usize },
     Category { memberships: Vec<[i64; 3]> },
     Rolling { child: usize, window: usize, op: String, min_periods: usize,
               propagate_nan: bool, #[serde(default)] quantile: Option<f64>,
@@ -741,6 +789,7 @@ impl FactorPlanKernel {
                 RawNode::Const { value } => ExprSpec::Const(value),
                 RawNode::Product { values } => ExprSpec::Product(values),
                 RawNode::BarCount { start_ns, end_ns } => ExprSpec::BarCount { start_ns, end_ns },
+                RawNode::Boundary { index } => ExprSpec::Boundary { index },
                 RawNode::Category { memberships } => ExprSpec::Category {
                     memberships: memberships.into_iter().map(|item| (item[0] as usize, item[1], item[2] != 0)).collect(),
                 },
@@ -1042,7 +1091,7 @@ mod bar_count_tests {
         assert_eq!(output, vec![100_000.0]);
         assert_eq!(kernel.nodes[0].interval_count, 100_000);
         assert!(kernel.nodes[0].history.is_empty());
-        assert!(kernel.nodes[0].session_starts.is_empty());
+        assert!(kernel.nodes[0].session_window.is_none());
         assert!(kernel.update_at(99_999, &[1.0]).is_err());
         assert!(kernel.update_at(1, &[1.0]).is_err());
         assert_eq!(kernel.update_at(100_001, &[1.0]).unwrap(), vec![100_000.0]);
@@ -1082,5 +1131,21 @@ mod session_reset_tests {
         assert_eq!(kernel.update(&[2.0, 1.0]).unwrap(), vec![2.0]);
         assert_eq!(kernel.update(&[3.0, 0.0]).unwrap(), vec![2.5]);
         assert_eq!(kernel.update(&[4.0, 0.0]).unwrap(), vec![3.0]);
+    }
+
+    #[test]
+    fn borrowed_boundary_channels_reset_products_independently() {
+        let json = r#"{"nodes":[{"kind":"column","index":0},
+          {"kind":"boundary","index":0},
+          {"kind":"session_reset","child":0,"boundary":1,"op":"mean","min_periods":1,"propagate_nan":false}],"outputs":[2]}"#;
+        let mut kernel = FactorPlanKernel::from_spec_json(json, 2).unwrap();
+        let mut out = Vec::new();
+        assert!(kernel.update_into_context(0, &[1.0, 10.0], &[], &[], &mut out).is_err());
+        kernel.update_into_context(0, &[1.0, 10.0], &[1, 1], &[], &mut out).unwrap();
+        assert_eq!(out, vec![1.0, 10.0]);
+        kernel.update_into_context(1, &[3.0, 30.0], &[0, 1], &[], &mut out).unwrap();
+        assert_eq!(out, vec![2.0, 30.0]);
+        kernel.update_into_context(2, &[9.0, 50.0], &[1, 0], &[], &mut out).unwrap();
+        assert_eq!(out, vec![9.0, 40.0]);
     }
 }

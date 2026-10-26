@@ -403,22 +403,30 @@ EXACT_PATH_TESTS = {
 }
 FACTOR_PLAN_TESTS = (
     "tests/factors/test_bar_counts.py",
+    "tests/factors/test_runtime_boundaries.py",
     "tests/factors/test_rust_plan.py",
     "tests/factors/test_alpha_factor_public_api.py",
     "tests/factors/test_groupby_scope_streaming.py",
     "tests/server/test_factor_calendar_window.py",
+    "tests/server/test_nautilus_bridge_factor_stream.py",
 )
 for _path in (
     "tools/factors/alpha_plan.py",
     "tools/factors/expr/rust_plan.py",
     "tools/factors/expr/rolling.py",
     "tools/factors/expr/streaming/rust_incremental.py",
+    "tools/factors/expr/streaming/incremental.py",
     "vendor/py-alpha-lib/alpha-algo/src/algo/factor_plan.rs",
     "vendor/py-alpha-lib/alpha-algo/src/algo/panel_plan.rs",
     "vendor/py-alpha-lib/py-binding/src/lib.rs",
+    "native/nautilus_factor_bridge/src/lib.rs",
+    "native/nautilus_factor_bridge/src/plan.rs",
+    "native/nautilus_factor_bridge/src/boundary.rs",
+    "vendor/py-alpha-lib/alpha-algo/examples/bench_panel_barrier.rs",
 ):
     EXACT_PATH_TESTS[_path] = FACTOR_PLAN_TESTS
 EXACT_PATH_TESTS["tests/factors/test_bar_counts.py"] = ("tests/factors/test_bar_counts.py",)
+EXACT_PATH_TESTS["tests/factors/test_runtime_boundaries.py"] = ("tests/factors/test_runtime_boundaries.py",)
 
 PREFIX_PATH_TESTS = {
     "tools/testers/backtest/engines/factors/": (

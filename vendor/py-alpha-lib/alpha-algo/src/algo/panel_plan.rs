@@ -230,14 +230,17 @@ impl PanelPlan {
         if count==0 || node.indices.len()!=1+count*3 {return Err(error("invalid session rolling sessions"));}
         let sessions:Vec<(i64,i64,usize)>=node.indices[1..].chunks_exact(3)
             .map(|item|(item[0],item[1],item[2] as usize)).collect();
+        crate::algo::factor_plan::SessionWindow::new(&sessions, lookback)?;
         let kernel_op=session_op(op,p[3])?;
         out.par_chunks_mut(rows.max(1)).enumerate().try_for_each(|(g,chunk)|->Result<()>{
             let mut state=crate::algo::IntervalKernel::new_explicit(kernel_op)?.with_semantics(min,prop);
+            let mut window = crate::algo::factor_plan::SessionWindow::new(&sessions, lookback)?;
+            let mut ordinal = 0;
             for t in 0..rows {
-                let current_session=sessions.iter().position(|(start,end,_)|grid.times[t]>=*start&&grid.times[t]<=*end).unwrap_or(0);
-                let first=(current_session+1).saturating_sub(lookback);
-                let start: u64=sessions[..first].iter().map(|(_,_,bars)|*bars as u64).sum();
-                chunk[t]=state.update_explicit(start,t as u64,args[0].at(g,t));
+                if width == products && grid.observed[g * rows + t] == 0 { continue; }
+                let start = window.start(grid.times[t], ordinal, &sessions)?;
+                chunk[t]=state.update_explicit(start,ordinal,args[0].at(g,t));
+                ordinal += 1;
             } Ok(())
         })?;Ok(Value{data:Data::Panel(Cow::Owned(out)),rows,width})
     }
@@ -392,7 +395,7 @@ mod session_rolling_tests {
     use super::*;
 
     #[test]
-    fn batch_session_rolling_uses_calendar_bar_counts() {
+    fn batch_session_rolling_uses_observations_not_calendar_capacity() {
         let mut plan = PanelPlan::new();
         let grid = plan.grid(&[0, 1, 2, 3, 4], &[0, 0, 0, 0, 0], &[1; 5]).unwrap();
         let column = plan.add("column".into(), vec![], vec![0.0], vec![], grid).unwrap();
@@ -403,7 +406,36 @@ mod session_rolling_tests {
         let values = [1.0, 3.0, 10.0, 20.0, 30.0];
         let out = plan.execute(&[&values], &[node], 1).unwrap();
         assert!((out[0][2] - 14.0 / 3.0).abs() < 1e-9);
-        assert_eq!(out[0][3], 15.0);
-        assert_eq!(out[0][4], 20.0);
+        assert_eq!(out[0][3], 20.0);
+        assert_eq!(out[0][4], 25.0);
+    }
+
+    #[test]
+    fn product_lanes_cross_barrier_and_downstream_lanes_match_streaming() {
+        let (products, rows) = (4, 128);
+        let mut plan = PanelPlan::new();
+        let grid = plan.grid(&(0..rows as i64).collect::<Vec<_>>(), &vec![0; rows], &vec![1; rows * products]).unwrap();
+        let column = plan.add("column".into(), vec![], vec![0.0], vec![], grid).unwrap();
+        let mean = plan.add("rolling:mean".into(), vec![column], vec![1.0, 8.0, 0.0, 1.0, 0.0, 0.5, -1.0, -1.0], vec![], grid).unwrap();
+        let cross = plan.add("cross:zscore".into(), vec![mean], vec![], vec![], grid).unwrap();
+        let output = plan.add("rolling:mean".into(), vec![cross], vec![1.0, 4.0, 0.0, 1.0, 0.0, 0.5, -1.0, -1.0], vec![], grid).unwrap();
+        let input: Vec<f64> = (0..products).flat_map(|g| (0..rows).map(move |t| ((t * (g + 1)) as f64).sin() + g as f64)).collect();
+        let serial = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap()
+            .install(|| plan.execute_panel(&[&input], &[output], products).unwrap());
+        let parallel = rayon::ThreadPoolBuilder::new().num_threads(4).build().unwrap()
+            .install(|| plan.execute_panel(&[&input], &[output], products).unwrap());
+        assert_eq!(serial, parallel);
+        let json = r#"{"nodes":[{"kind":"column","index":0},
+          {"kind":"rolling","child":0,"window":8,"op":"mean","min_periods":1,"propagate_nan":false},
+          {"kind":"cross","child":1,"op":"zscore"},
+          {"kind":"rolling","child":2,"window":4,"op":"mean","min_periods":1,"propagate_nan":false}],"outputs":[3]}"#;
+        let mut kernel = crate::algo::FactorPlanKernel::from_spec_json(json, products).unwrap();
+        for row in 0..rows {
+            let values: Vec<f64> = (0..products).map(|g| input[g * rows + row]).collect();
+            let actual = kernel.update_at(row as i64, &values).unwrap();
+            for product in 0..products {
+                assert!((actual[product] - serial[0][product * rows + row]).abs() < 1e-10);
+            }
+        }
     }
 }

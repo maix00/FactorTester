@@ -335,8 +335,6 @@ class _PlanBuilder:
                 params.extend(value for instruction in program for value in instruction)
             result = self.add('distance' if isinstance(expr, BarDistanceOp) else 'since', children,
                               params, grid=child.grid, signal=child.signal, columns=child.columns)
-        elif isinstance(expr, IntervalBarsExpr):
-            result = self.add('bar_count', [], [], [expr.start_ns, expr.end_ns])
         elif isinstance(expr, (RollingOp, GroupByScopeOp)):
             children = [self.build(c) for c in expr.operands[expr._data_start:expr._data_start + expr._n_data]]
             grid, signal = self.common(children)

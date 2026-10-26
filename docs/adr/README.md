@@ -61,3 +61,4 @@ ADR-156 对 ADR-040、ADR-047、ADR-094、ADR-142 的 Graph 专属约束作部�
 - [156 — 退役 Research Graph，采用 Agent WorkflowRun 与独立研究对象](156-retire-research-graph-agent-workflow.md)
 - [157 — Run 级样本使用合同，不再依赖 TrialPlan](157-run-sample-use-without-trial-plan.md)
 - [158 — 稳定数据源身份与源管理的行情更新](158-source-identity-and-source-managed-market-data.md)
+- [180 — 因子边界输入与共享交易日窗口](180-factor-boundary-input-and-shared-session-windows.md)

@@ -7,6 +7,8 @@
 use alpha_algo::{IntervalKernel, SessionOp};
 
 pub mod plan;
+#[cfg(feature = "nautilus")]
+pub mod boundary;
 pub use plan::{BinaryOp, CrossOp, ExprSpec, FactorPlanEngine};
 
 #[derive(Clone, Debug)]
@@ -15,16 +17,22 @@ pub struct MarketBar {
     pub products: Vec<String>,
     pub values: Vec<f64>,
     pub term_curves: Vec<Vec<(f64, f64)>>,
+    /// Channel-major flags for this slice only; the plan manifest fixes order.
+    pub boundaries: Vec<u8>,
 }
 
 impl MarketBar {
+    pub fn with_boundaries(mut self, boundaries: Vec<u8>) -> Self {
+        self.boundaries = boundaries;
+        self
+    }
     pub fn with_term_curves(mut self, curves: Vec<Vec<(f64, f64)>>) -> Self {
         self.term_curves = curves;
         self
     }
 
     pub fn new(timestamp_ns: i64, products: Vec<String>, values: Vec<f64>) -> Self {
-        Self { timestamp_ns, products, values, term_curves: Vec::new() }
+        Self { timestamp_ns, products, values, term_curves: Vec::new(), boundaries: Vec::new() }
     }
 }
 
@@ -39,6 +47,12 @@ pub trait FactorEngine {
     type Error;
     fn warmup(&mut self) -> Result<(), Self::Error> { Ok(()) }
     fn update(&mut self, bar: &MarketBar) -> Result<Vec<f64>, Self::Error>;
+    fn update_into(&mut self, bar: &MarketBar, output: &mut Vec<f64>) -> Result<(), Self::Error> {
+        let values = self.update(bar)?;
+        output.clear();
+        output.extend(values);
+        Ok(())
+    }
 }
 
 /// Minimal single-window engine proving the bridge owns Rust factor state.
@@ -259,10 +273,9 @@ pub mod nautilus {
     //! never depends on this crate.
     pub use nautilus_core as core;
 
-    use std::any::Any;
     use std::fmt;
 
-    use nautilus_common::actor::{Actor, DataActor, DataActorConfig, DataActorCore, DataActorNative};
+    use nautilus_common::actor::{DataActor, DataActorConfig, DataActorCore, DataActorNative};
     use nautilus_model::data::Bar;
     use nautilus_model::identifiers::ActorId;
     use ustr::Ustr;
@@ -274,11 +287,12 @@ pub mod nautilus {
     pub struct FactorActor<E> {
         id: Ustr,
         engine: E,
-        latest: Vec<f64>,
         last_error: Option<String>,
         expected_products: Vec<String>,
         pending_bars: std::collections::BTreeMap<String, Bar>,
         last_update: Option<FactorUpdate>,
+        boundary_buffer: Vec<u8>,
+        pending_boundaries: std::collections::BTreeMap<i64, Vec<u8>>,
         pending_timestamp: Option<i64>,
         future_slices: std::collections::BTreeMap<i64, std::collections::BTreeMap<String, Bar>>,
         max_future_slices: usize,
@@ -301,7 +315,7 @@ pub mod nautilus {
                 actor_id: Some(ActorId::new(actor_id)), ..Default::default()
             });
             Self {
-                id: Ustr::from(actor_id), engine, latest: Vec::new(), last_error: None,
+                id: Ustr::from(actor_id), engine, last_error: None,
                 core,
                 expected_products: Vec::new(),
                 pending_bars: std::collections::BTreeMap::new(),
@@ -311,12 +325,65 @@ pub mod nautilus {
                 barrier_grace_ns: None,
                 sink: None,
                 last_update: None,
+                boundary_buffer: Vec::new(),
+                pending_boundaries: std::collections::BTreeMap::new(),
             }
         }
 
-        pub fn latest(&self) -> &[f64] { &self.latest }
+        pub fn latest(&self) -> &[f64] { self.last_update.as_ref().map_or(&[], |update| update.values.as_slice()) }
 
         pub fn last_error(&self) -> Option<&str> { self.last_error.as_deref() }
+
+        /// Queue an authoritative boundary before its completed slice. Bound
+        /// queued events with the same budget as out-of-order market slices.
+        pub fn queue_boundary(&mut self, timestamp_ns: i64, flags: &[u8]) -> anyhow::Result<()> {
+            if flags.len() != self.boundary_buffer.len() || flags.is_empty() {
+                anyhow::bail!("boundary shape differs from frozen plan");
+            }
+            if self.last_update.as_ref().is_some_and(|update| timestamp_ns <= update.timestamp_ns) {
+                anyhow::bail!("boundary arrived after its slice was executed");
+            }
+            if !self.pending_boundaries.contains_key(&timestamp_ns) && self.pending_boundaries.len() >= self.max_future_slices {
+                anyhow::bail!("boundary queue capacity exceeded");
+            }
+            let queued = self.pending_boundaries.entry(timestamp_ns).or_insert_with(|| vec![0; flags.len()]);
+            for (value, &flag) in queued.iter_mut().zip(flags) { *value |= u8::from(flag != 0); }
+            Ok(())
+        }
+
+        fn evaluate_market(&mut self, mut market: MarketBar) -> anyhow::Result<()> {
+            if self.last_update.as_ref().is_some_and(|update| market.timestamp_ns <= update.timestamp_ns) {
+                anyhow::bail!("market slice must follow the last completed slice");
+            }
+            if let Some(flags) = self.pending_boundaries.remove(&market.timestamp_ns) {
+                self.boundary_buffer.copy_from_slice(&flags);
+            }
+            // Move the reusable buffer into the temporary input and back;
+            // there is no per-Bar boundary allocation or copy.
+            std::mem::swap(&mut market.boundaries, &mut self.boundary_buffer);
+            let had_update = self.last_update.is_some();
+            let mut update = self.last_update.take().unwrap_or_else(|| FactorUpdate {
+                timestamp_ns: market.timestamp_ns, products: Vec::new(), values: Vec::new(),
+            });
+            let result = self.engine.update_into(&market, &mut update.values);
+            std::mem::swap(&mut market.boundaries, &mut self.boundary_buffer);
+            self.boundary_buffer.fill(0);
+            match result {
+                Ok(()) => {
+                    update.timestamp_ns = market.timestamp_ns;
+                    update.products = market.products;
+                    self.last_update = Some(update);
+                    self.last_error = None;
+                    self.publish();
+                    Ok(())
+                }
+                Err(error) => {
+                    if had_update { self.last_update = Some(update); }
+                    self.last_error = Some(error.to_string());
+                    Err(anyhow::anyhow!(error.to_string()))
+                }
+            }
+        }
 
         pub fn set_max_future_slices(&mut self, limit: usize) { self.max_future_slices = limit.max(1); }
 
@@ -344,6 +411,7 @@ pub mod nautilus {
             let cutoff = now_ns.saturating_sub(grace_ns);
             let before = self.pending_len();
             self.future_slices = self.future_slices.split_off(&cutoff);
+            self.pending_boundaries = self.pending_boundaries.split_off(&cutoff);
             if self.pending_timestamp.is_some_and(|timestamp| timestamp < cutoff) {
                 self.pending_bars.clear();
                 self.pending_timestamp = None;
@@ -357,6 +425,7 @@ pub mod nautilus {
 
         pub fn expire_before(&mut self, timestamp_ns: i64) {
             self.future_slices = self.future_slices.split_off(&timestamp_ns);
+            self.pending_boundaries = self.pending_boundaries.split_off(&timestamp_ns);
             if self.pending_timestamp.is_some_and(|timestamp| timestamp < timestamp_ns) {
                 self.pending_bars.clear();
                 self.pending_timestamp = None;
@@ -423,19 +492,7 @@ pub mod nautilus {
                 .map(|product| self.pending_bars.remove(product).unwrap())
                 .collect();
             let market = crate::nautilus::market_bar_from_bars(timestamp, &bars);
-            match self.engine.update(&market) {
-                Ok(values) => {
-                    self.latest = values.clone();
-                    self.last_update = Some(FactorUpdate {
-                        timestamp_ns: timestamp,
-                        products: market.products.clone(),
-                        values,
-                    });
-                    self.last_error = None;
-                    self.publish();
-                }
-                Err(error) => self.last_error = Some(error.to_string()),
-            }
+            let _ = self.evaluate_market(market);
             self.pending_bars.clear();
             self.pending_timestamp = None;
             while let Some((&next, slice)) = self.future_slices.iter().next() {
@@ -450,11 +507,16 @@ pub mod nautilus {
         /// Assemble one completed cross-sectional slice and update once.
         pub fn handle_bars(&mut self, bars: &[Bar]) {
             let Some(first) = bars.first() else { return };
-            let bar = crate::nautilus::market_bar_from_bars(first.ts_event.as_u64() as i64, bars);
-            match self.engine.update(&bar) {
-                Ok(values) => { self.latest = values; self.last_error = None; }
-                Err(error) => self.last_error = Some(error.to_string()),
+            if bars.iter().any(|bar| bar.ts_event != first.ts_event) {
+                self.last_error = Some("completed slice has mixed timestamps".into());
+                return;
             }
+            if !self.expected_products.is_empty() {
+                for bar in bars { self.on_completed_bar(bar); }
+                return;
+            }
+            let bar = crate::nautilus::market_bar_from_bars(first.ts_event.as_u64() as i64, bars);
+            let _ = self.evaluate_market(bar);
         }
 
         /// Register this actor in Nautilus' thread-local actor registry.
@@ -465,24 +527,30 @@ pub mod nautilus {
 
     impl<E: FactorEngine + 'static> DataActor for FactorActor<E>
     where E::Error: std::fmt::Display {
+        fn on_start(&mut self) -> anyhow::Result<()> {
+            if !self.boundary_buffer.is_empty() {
+                use nautilus_model::data::{DataType, ensure_custom_data_json_registered};
+                ensure_custom_data_json_registered::<crate::boundary::FactorBoundary>()?;
+                self.subscribe_data(DataType::new("FactorBoundary", None, None), None, None);
+            }
+            Ok(())
+        }
+
+        fn on_data(&mut self, data: &nautilus_model::data::CustomData) -> anyhow::Result<()> {
+            if let Some(boundary) = data.data.as_any().downcast_ref::<crate::boundary::FactorBoundary>() {
+                let timestamp = i64::try_from(boundary.timestamp_ns)?;
+                self.queue_boundary(timestamp, &boundary.flags)?;
+            }
+            Ok(())
+        }
+
         fn on_bar(&mut self, bar: &Bar) -> anyhow::Result<()> {
-            let market = MarketBar::from(bar);
-            match self.engine.update(&market) {
-                Ok(values) => {
-                    self.latest = values.clone();
-                    self.last_update = Some(FactorUpdate {
-                        timestamp_ns: market.timestamp_ns,
-                        products: market.products.clone(),
-                        values,
-                    });
-                    self.last_error = None;
-                    self.publish();
-                    Ok(())
-                }
-                Err(error) => {
-                    self.last_error = Some(error.to_string());
-                    Err(anyhow::anyhow!(error.to_string()))
-                }
+            if self.expected_products.is_empty() {
+                self.evaluate_market(MarketBar::from(bar))
+            } else {
+                self.on_completed_bar(bar);
+                if let Some(error) = self.last_error.as_ref() { anyhow::bail!("{error}"); }
+                Ok(())
             }
         }
     }
@@ -491,7 +559,10 @@ pub mod nautilus {
         /// Build an actor directly from the public `alpha.factor` plan JSON.
         pub fn from_plan_json(actor_id: &str, products: usize, json: &str) -> Result<Self, alpha_algo::Error> {
             let engine = crate::plan::FactorPlanEngine::from_spec_json(json, products)?;
-            Ok(Self::new(actor_id, engine))
+            let channels = engine.boundary_channels();
+            let mut actor = Self::new(actor_id, engine);
+            actor.boundary_buffer = vec![0; channels * products];
+            Ok(actor)
         }
     }
 
@@ -514,6 +585,7 @@ pub mod nautilus {
                 products: vec![bar.bar_type.instrument_id().to_string()],
                 values: vec![bar.close.as_f64()],
                 term_curves: Vec::new(),
+                boundaries: Vec::new(),
             }
         }
     }
@@ -596,6 +668,36 @@ mod nautilus_tests {
     use nautilus_model::data::{Bar, BarType};
     use nautilus_model::types::{Price, Quantity};
     use ustr::Ustr;
+
+    #[test]
+    fn native_callbacks_share_the_barrier_and_authoritative_boundaries() {
+        use nautilus_model::data::CustomData;
+        use std::sync::Arc;
+        let json = r#"{"nodes":[{"kind":"column","index":0},
+          {"kind":"boundary","index":0},
+          {"kind":"session_reset","child":0,"boundary":1,"op":"mean","min_periods":1,"propagate_nan":false}],"outputs":[2]}"#;
+        let mut actor = nautilus::FactorActor::from_plan_json("boundary-callback-test", 2, json).unwrap();
+        actor.expect_products(&["A.B", "C.D"]);
+        let make = |product: &str, price: &str, timestamp: u64| Bar::new(
+            BarType::from(format!("{product}-1-MINUTE-LAST-EXTERNAL").as_str()),
+            Price::from(price), Price::from(price), Price::from(price), Price::from(price),
+            Quantity::from("1"), timestamp.into(), timestamp.into(),
+        );
+        actor.on_data(&CustomData::from_arc(Arc::new(crate::boundary::FactorBoundary {
+            timestamp_ns: 1000, flags: vec![1, 1],
+        }))).unwrap();
+        actor.on_bar(&make("C.D", "10.0", 1000)).unwrap();
+        assert!(actor.latest().is_empty(), "do not publish a partial cross-section");
+        actor.on_bar(&make("A.B", "1.0", 1000)).unwrap();
+        assert_eq!(actor.latest(), &[1.0, 10.0]);
+        actor.on_data(&CustomData::from_arc(Arc::new(crate::boundary::FactorBoundary {
+            timestamp_ns: 2000, flags: vec![0, 1],
+        }))).unwrap();
+        actor.on_bar(&make("A.B", "3.0", 2000)).unwrap();
+        actor.on_bar(&make("C.D", "30.0", 2000)).unwrap();
+        assert_eq!(actor.latest(), &[2.0, 30.0]);
+        assert!(actor.queue_boundary(2000, &[1, 0]).is_err());
+    }
 
     #[test]
     fn market_bar_from_bars_assembles_cross_section() {
