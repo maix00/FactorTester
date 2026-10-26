@@ -277,7 +277,7 @@ pub mod nautilus {
 
     use nautilus_common::actor::{DataActor, DataActorConfig, DataActorCore, DataActorNative};
     use nautilus_model::data::Bar;
-    use nautilus_model::identifiers::{ActorId, Symbol};
+    use nautilus_model::identifiers::{ActorId, InstrumentId, Symbol};
     use ustr::Ustr;
 
     use crate::{FactorEngine, FactorUpdate, MarketBar};
@@ -289,8 +289,8 @@ pub mod nautilus {
         engine: E,
         last_error: Option<String>,
         expected_products: Vec<String>,
-        product_index: std::collections::HashMap<String, usize>,
         symbol_index: std::collections::HashMap<Symbol, usize>,
+        id_index: std::collections::HashMap<InstrumentId, usize>,
         pending_bars: Vec<Option<Bar>>,
         last_update: Option<FactorUpdate>,
         boundary_buffer: Vec<u8>,
@@ -320,8 +320,8 @@ pub mod nautilus {
                 id: Ustr::from(actor_id), engine, last_error: None,
                 core,
                 expected_products: Vec::new(),
-                product_index: std::collections::HashMap::new(),
                 symbol_index: std::collections::HashMap::new(),
+                id_index: std::collections::HashMap::new(),
                 pending_bars: Vec::new(),
                 pending_timestamp: None,
                 future_slices: std::collections::BTreeMap::new(),
@@ -454,10 +454,11 @@ pub mod nautilus {
         pub fn expect_products(&mut self, products: &[&str]) {
             self.expected_products = products.iter().map(|product| product.to_string()).collect();
             self.expected_products.sort();
-            self.product_index = self.expected_products.iter().enumerate()
-                .map(|(index, product)| (product.clone(), index)).collect();
             self.symbol_index = self.expected_products.iter().enumerate()
                 .map(|(index, product)| (Symbol::new(product), index)).collect();
+            self.id_index = self.expected_products.iter().enumerate()
+                .filter_map(|(index, product)| product.parse::<InstrumentId>().ok().map(|id| (id, index)))
+                .collect();
             self.pending_bars = vec![None; self.expected_products.len()];
             self.pending_timestamp = None;
         }
@@ -470,10 +471,9 @@ pub mod nautilus {
             }
             let instrument_id = bar.bar_type.instrument_id();
             let index = self.symbol_index.get(&instrument_id.symbol).copied()
-                .or_else(|| self.product_index.get(&instrument_id.to_string()).copied());
+                .or_else(|| self.id_index.get(&instrument_id).copied());
             let Some(index) = index else {
-                let product = instrument_id.to_string();
-                self.last_error = Some(format!("unexpected product {product}"));
+                self.last_error = Some(format!("unexpected product {instrument_id}"));
                 return;
             };
 
