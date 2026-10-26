@@ -170,46 +170,6 @@ class SignalHoldNode:
         return cache[key]
 
 
-class RustSessionPairNode:
-    """Session-spanning cov/corr executed by Rust pair state."""
-
-    def __init__(self, op, children, calendar, lookback_sessions, width):
-        from alpha import SessionPairState
-        if op not in {"rolling_cov", "rolling_corr"}:
-            raise UnsupportedStreamingFactor(f"Rust pair state does not support {op}")
-        self.op = op
-        self.children = tuple(children)
-        self.calendar = calendar
-        self.lookback_sessions = int(lookback_sessions)
-        self._width = width
-        self._states = [
-            SessionPairState(self.lookback_sessions, op == "rolling_corr")
-            for _ in range(width)
-        ]
-
-    def update(self, market, cache):
-        key = id(self)
-        if key in cache:
-            return cache[key]
-        timestamp = getattr(market, "timestamp", None)
-        if timestamp is None:
-            raise UnsupportedStreamingFactor("session cov/corr needs bar timestamps")
-        session, _size = self.calendar.window_for_timestamp(
-            int(pd.Timestamp(timestamp).value), self.lookback_sessions,
-        )
-        left = np.asarray(self.children[0].update(market, cache), dtype=float)
-        right = np.asarray(self.children[1].update(market, cache), dtype=float)
-        if left.shape != (self._width,) or right.shape != (self._width,):
-            raise ValueError("session cov/corr input width changed")
-        result = np.asarray(
-            [state.update(int(session), float(x), float(y))
-             for state, x, y in zip(self._states, left, right, strict=True)],
-            dtype=float,
-        )
-        cache[key] = result
-        return result
-
-
 class _BarWindowResolver:
     def __init__(self, window):
         self.window = max(1, int(window))
@@ -375,6 +335,42 @@ class RustIntervalNode:
         return result
 
 
+class RustIntervalPairNode:
+    """cov/corr over an explicit interval resolved from any boundary."""
+
+    def __init__(self, op, children, width, resolver):
+        from alpha import IntervalPairState
+        if op not in {"rolling_cov", "rolling_corr"}:
+            raise UnsupportedStreamingFactor(f"interval pair does not support {op}")
+        self.op = op
+        self.children = tuple(children)
+        self.resolver = resolver
+        self._width = width
+        self._states = [
+            IntervalPairState(op == "rolling_corr") for _ in range(width)
+        ]
+
+    def update(self, market, cache):
+        key = id(self)
+        if key in cache:
+            return cache[key]
+        bounds = self.resolver(market)
+        if bounds is None:
+            return np.full(self._width, np.nan, dtype=float)
+        start, end = bounds
+        left = np.asarray(self.children[0].update(market, cache), dtype=float)
+        right = np.asarray(self.children[1].update(market, cache), dtype=float)
+        if left.shape != (self._width,) or right.shape != (self._width,):
+            raise ValueError("interval pair input width changed")
+        result = np.asarray(
+            [state.update(start, end, float(x), float(y))
+             for state, x, y in zip(self._states, left, right, strict=True)],
+            dtype=float,
+        )
+        cache[key] = result
+        return result
+
+
 class RustEmaNode:
     """Adjusted EMA executed by Rust."""
 
@@ -395,75 +391,6 @@ class RustEmaNode:
         result = np.asarray(
             [state.update(float(value))
              for state, value in zip(self._states, values, strict=True)],
-            dtype=float,
-        )
-        cache[key] = result
-        return result
-
-
-class RustBarPairNode:
-    """Fixed bar-count cov/corr executed by the unified Rust kernel."""
-
-    def __init__(self, op, children, window, width):
-        from alpha import BarPairState
-        if op not in {"rolling_cov", "rolling_corr"}:
-            raise UnsupportedStreamingFactor(f"bar pair does not support {op}")
-        self.op = op
-        self.children = tuple(children)
-        self.window = int(window)
-        self._width = width
-        self._states = [
-            BarPairState(self.window, op == "rolling_corr") for _ in range(width)
-        ]
-
-    def update(self, market, cache):
-        key = id(self)
-        if key in cache:
-            return cache[key]
-        left = np.asarray(self.children[0].update(market, cache), dtype=float)
-        right = np.asarray(self.children[1].update(market, cache), dtype=float)
-        if left.shape != (self._width,) or right.shape != (self._width,):
-            raise ValueError("bar pair input width changed")
-        result = np.asarray(
-            [state.update(float(x), float(y))
-             for state, x, y in zip(self._states, left, right, strict=True)],
-            dtype=float,
-        )
-        cache[key] = result
-        return result
-
-
-class RustWallPairNode:
-    """Explicit wall-clock cov/corr executed by Rust."""
-
-    def __init__(self, op, children, duration_ns, width):
-        from alpha import WallPairState
-        if op not in {"rolling_cov", "rolling_corr"}:
-            raise UnsupportedStreamingFactor(f"wall pair does not support {op}")
-        self.op = op
-        self.children = tuple(children)
-        self.duration_ns = int(duration_ns)
-        self._width = width
-        self._states = [
-            WallPairState(self.duration_ns, op == "rolling_corr")
-            for _ in range(width)
-        ]
-
-    def update(self, market, cache):
-        key = id(self)
-        if key in cache:
-            return cache[key]
-        timestamp = getattr(market, "timestamp", None)
-        if timestamp is None:
-            raise UnsupportedStreamingFactor("wall cov/corr needs bar timestamps")
-        ts = int(pd.Timestamp(timestamp).value)
-        left = np.asarray(self.children[0].update(market, cache), dtype=float)
-        right = np.asarray(self.children[1].update(market, cache), dtype=float)
-        if left.shape != (self._width,) or right.shape != (self._width,):
-            raise ValueError("wall cov/corr input width changed")
-        result = np.asarray(
-            [state.update(ts, float(x), float(y))
-             for state, x, y in zip(self._states, left, right, strict=True)],
             dtype=float,
         )
         cache[key] = result
@@ -1611,19 +1538,25 @@ def compile_streaming_factor(
                 for item in expr.operands[expr._data_start:expr._data_start + expr._n_data]
             )
             if event_ref is not None:
-                if len(children) != 1:
-                    raise UnsupportedStreamingFactor(
-                        "event window expects one streaming operand"
+                resolver = _EventResolver(event_ref, event_line)
+                if expr.op in {"rolling_cov", "rolling_corr"} and len(children) == 2:
+                    node = RustIntervalPairNode(
+                        expr.op, children, len(products), resolver,
                     )
-                node = RustIntervalNode(
-                    expr.op, children[0], len(products),
-                    _EventResolver(event_ref, event_line),
-                    quantile=getattr(expr, "quantile", None),
-                )
+                elif len(children) == 1:
+                    node = RustIntervalNode(
+                        expr.op, children[0], len(products), resolver,
+                        quantile=getattr(expr, "quantile", None),
+                    )
+                else:
+                    raise UnsupportedStreamingFactor(
+                        "event window expects one operand or cov/corr pair"
+                    )
             elif wall_duration_ns is not None:
                 if expr.op in {"rolling_cov", "rolling_corr"} and len(children) == 2:
-                    node = RustWallPairNode(
-                        expr.op, children, wall_duration_ns, len(products),
+                    node = RustIntervalPairNode(
+                        expr.op, children, len(products),
+                        _WallWindowResolver(wall_duration_ns),
                     )
                 elif len(children) == 1:
                     node = RustIntervalNode(
@@ -1641,9 +1574,9 @@ def compile_streaming_factor(
                 and expr.op in {"rolling_cov", "rolling_corr"}
                 and len(children) == 2
             ):
-                node = RustSessionPairNode(
-                    expr.op, children, session_calendar,
-                    lookback_sessions, len(products),
+                node = RustIntervalPairNode(
+                    expr.op, children, len(products),
+                    _SessionWindowResolver(session_calendar, lookback_sessions),
                 )
             elif (
                 session_calendar is not None
@@ -1694,8 +1627,9 @@ def compile_streaming_factor(
                 and expr.op in {"rolling_cov", "rolling_corr"}
                 and len(children) == 2
             ):
-                node = RustBarPairNode(
-                    expr.op, children, window, len(products),
+                node = RustIntervalPairNode(
+                    expr.op, children, len(products),
+                    _BarWindowResolver(window),
                 )
             else:
                 node = RollingWindowNode(
