@@ -279,6 +279,7 @@ pub enum SessionOp {
 pub enum WindowPolicy {
   Bars(u32),
   Partition,
+  PartitionRange { start: u32, end: u32 },
   Sessions(u32),
   WallClock(i64),
 }
@@ -292,6 +293,7 @@ pub struct SessionWindowState {
   finite_sum3: f64,
   finite_count: usize,
   next_index: u64,
+  last_value: f64,
   min_deque: VecDeque<(u64, f64)>,
   max_deque: VecDeque<(u64, f64)>,
   order_stat: Option<OrderStatisticTree>,
@@ -315,6 +317,7 @@ impl SessionWindowState {
       finite_sum3: 0.0,
       finite_count: 0,
       next_index: 0,
+      last_value: f64::NAN,
       min_deque: VecDeque::new(),
       max_deque: VecDeque::new(),
       order_stat: if matches!(op, SessionOp::Quantile(_) | SessionOp::Rank | SessionOp::Mad) {
@@ -349,6 +352,15 @@ impl SessionWindowState {
     Ok(state)
   }
 
+  pub fn new_partition_range(start: usize, end: usize, op: SessionOp) -> Result<Self, Error> {
+    if end < start {
+      return Err(Error::InvalidParameter("partition range end before start".to_string()));
+    }
+    let mut state = Self::new_op(1, op)?;
+    state.policy = WindowPolicy::PartitionRange { start: start as u32, end: end as u32 };
+    Ok(state)
+  }
+
   fn clear(&mut self) {
     self.ring.clear();
     self.finite_sum = 0.0;
@@ -356,6 +368,7 @@ impl SessionWindowState {
     self.finite_sum3 = 0.0;
     self.finite_count = 0;
     self.next_index = 0;
+    self.last_value = f64::NAN;
     self.min_deque.clear();
     self.max_deque.clear();
     if let Some(tree) = self.order_stat.as_mut() { *tree = OrderStatisticTree::default(); }
@@ -383,6 +396,24 @@ impl SessionWindowState {
   }
 
   pub fn update_at(&mut self, session_id: u32, timestamp_ns: i64, value: f64) -> f64 {
+    if let WindowPolicy::PartitionRange { start, end } = self.policy {
+      if let Some((last, _, _, _)) = self.ring.back() {
+        if *last != session_id { self.clear(); }
+      }
+      let ordinal = self.next_index as u32;
+      if ordinal < start {
+        self.next_index += 1;
+        return self.last_value;
+      }
+      if ordinal > end { return self.last_value; }
+      let out = self.update_at_inner(session_id, timestamp_ns, value);
+      self.last_value = out;
+      return out;
+    }
+    self.update_at_inner(session_id, timestamp_ns, value)
+  }
+
+  fn update_at_inner(&mut self, session_id: u32, timestamp_ns: i64, value: f64) -> f64 {
     if self.policy == WindowPolicy::Partition {
       if let Some((last_session, _, _, _)) = self.ring.back() {
         if *last_session != session_id {
@@ -414,7 +445,7 @@ impl SessionWindowState {
           self.remove_oldest();
         }
       }
-      WindowPolicy::Partition => {}
+      WindowPolicy::Partition | WindowPolicy::PartitionRange { .. } => {}
     }
     let index = self.next_index;
     self.next_index += 1;
@@ -918,6 +949,7 @@ impl SessionPairState {
           self.remove_oldest();
         }
       }
+      WindowPolicy::PartitionRange { .. } => {}
       WindowPolicy::Partition => {
         if let Some((last, _, _, _)) = self.ring.back() {
           if *last != session_id {
@@ -1065,6 +1097,14 @@ mod tests {
     assert_eq!(min[2], 2.0);
     let q = ta_time_rolling_quantile(&timestamps, &values, 2_000, 0.5).unwrap();
     assert_eq!(q[2], 2.0);
+  }
+
+  #[test]
+  fn partition_range_truncates_and_freezes() {
+    let mut state = SessionWindowState::new_partition_range(0, 0, SessionOp::Sum).unwrap();
+    assert_eq!(state.update(1, 2.0), 2.0);
+    assert_eq!(state.update(1, 3.0), 2.0);
+    assert_eq!(state.update(2, 7.0), 7.0);
   }
 
   #[test]

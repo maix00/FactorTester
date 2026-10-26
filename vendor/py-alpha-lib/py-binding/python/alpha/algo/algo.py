@@ -78,3 +78,6 @@ EmaState = _algo.EmaState
 
 
 PartitionState = _algo.PartitionState
+
+
+PartitionRangeState = _algo.PartitionRangeState
