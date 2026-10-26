@@ -74,16 +74,19 @@ mod algo_impl {
     if fixed && matches!(
       op, alpha_algo::SessionOp::Sum | alpha_algo::SessionOp::Mean
         | alpha_algo::SessionOp::Var | alpha_algo::SessionOp::Std
+        | alpha_algo::SessionOp::Skew
     ) {
       // SumMoments family: prefix sums, O(1) per bar.
       let mut count = vec![0u64; values.len() + 1];
       let mut sum = vec![0.0f64; values.len() + 1];
       let mut sumsq = vec![0.0f64; values.len() + 1];
+      let mut sum3 = vec![0.0f64; values.len() + 1];
       for (i, value) in values.iter().copied().enumerate() {
         let finite = value.is_finite();
         count[i + 1] = count[i] + u64::from(finite);
         sum[i + 1] = sum[i] + if finite { value } else { 0.0 };
         sumsq[i + 1] = sumsq[i] + if finite { value * value } else { 0.0 };
+        sum3[i + 1] = sum3[i] + if finite { value * value * value } else { 0.0 };
       }
       let mean = matches!(op, alpha_algo::SessionOp::Mean);
       let std = matches!(op, alpha_algo::SessionOp::Std);
@@ -104,6 +107,18 @@ mod algo_impl {
               let square = sumsq[end] - sumsq[start];
               let variance = ((square - total * total / n as f64) / (n - 1) as f64).max(0.0);
               if std { variance.sqrt() } else { variance }
+            }
+          } else if matches!(op, alpha_algo::SessionOp::Skew) {
+            if n < 3 { f64::NAN } else {
+              let n = n as f64;
+              let mean = total / n;
+              let m2 = (sumsq[end] - sumsq[start] - total * total / n).max(0.0);
+              let m3 = sum3[end] - sum3[start] - 3.0 * mean * (sumsq[end] - sumsq[start])
+                + 2.0 * n * mean * mean * mean;
+              if m2 <= 0.0 { f64::NAN } else {
+                let population = (m3 / n) / (m2 / n).powf(1.5);
+                population * (n * (n - 1.0)).sqrt() / (n - 2.0)
+              }
             }
           } else { total }
         };
@@ -2790,8 +2805,8 @@ struct IntervalState {
 #[pymethods]
 impl IntervalState {
   #[new]
-  #[pyo3(signature = (op="mean", quantile=None))]
-  fn new(op: &str, quantile: Option<f64>) -> PyResult<Self> {
+  #[pyo3(signature = (op="mean", quantile=None, min_periods=1, propagate_nan=false))]
+  fn new(op: &str, quantile: Option<f64>, min_periods: usize, propagate_nan: bool) -> PyResult<Self> {
     use alpha_algo::SessionOp;
     let op = match op {
       "sum" => SessionOp::Sum, "mean" => SessionOp::Mean,
@@ -2806,7 +2821,8 @@ impl IntervalState {
       )),
     };
     let inner = alpha_algo::SessionWindowState::new_explicit(op)
-      .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+      .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
+      .with_semantics(min_periods, propagate_nan);
     Ok(Self { inner })
   }
 

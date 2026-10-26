@@ -299,6 +299,9 @@ pub struct SessionWindowState {
   finite_sumsq: f64,
   finite_sum3: f64,
   finite_count: usize,
+  nan_count: usize,
+  min_periods: usize,
+  propagate_nan: bool,
   next_index: u64,
   start_index: u64,
   range_end: u64,
@@ -317,6 +320,9 @@ impl SessionWindowState {
       finite_sumsq: 0.0,
       finite_sum3: 0.0,
       finite_count: 0,
+      nan_count: 0,
+      min_periods: 1,
+      propagate_nan: false,
       next_index: 0,
       start_index: 0,
       range_end: u64::MAX,
@@ -335,6 +341,17 @@ impl SessionWindowState {
     Self::new(op)
   }
 
+  pub fn with_semantics(mut self, min_periods: usize, propagate_nan: bool) -> Self {
+    self.min_periods = min_periods.max(1);
+    self.propagate_nan = propagate_nan;
+    self
+  }
+
+  pub fn set_semantics(&mut self, min_periods: usize, propagate_nan: bool) {
+    self.min_periods = min_periods.max(1);
+    self.propagate_nan = propagate_nan;
+  }
+
   pub fn update_interval(&mut self, interval: crate::algo::IntervalSpec, value: f64) -> f64 {
     self.update_explicit(interval.start, interval.end, value)
   }
@@ -351,12 +368,22 @@ impl SessionWindowState {
       self.remove_oldest();
     }
     let out = self.consume(value);
+    let out = if (self.propagate_nan && self.nan_count > 0)
+      || self.finite_count < self.min_periods
+    {
+      f64::NAN
+    } else {
+      out
+    };
     self.last_value = out;
     out
   }
 
   fn remove_oldest(&mut self) {
     let Some((_session, _timestamp, old, index)) = self.ring.pop_front() else { return };
+    if !old.is_finite() {
+      self.nan_count = self.nan_count.saturating_sub(1);
+    }
     if old.is_finite() {
       match self.op {
         SessionOp::Sum | SessionOp::Mean => self.finite_sum -= old,
@@ -394,6 +421,9 @@ impl SessionWindowState {
     let index = self.next_index;
     self.next_index += 1;
     self.ring.push_back((0, 0, value, index));
+    if !value.is_finite() {
+      self.nan_count += 1;
+    }
     if value.is_finite() {
       match self.op {
         SessionOp::Sum | SessionOp::Mean => self.finite_sum += value,
