@@ -140,3 +140,30 @@ def test_unsupported_nodes_are_explicit_blockers():
     close = ColumnRef(DataColumn.CLOSE)
     blockers = unsupported_plan_nodes(bar_since(close > 50, scope=scope_bars(10)))
     assert "BarSinceOp" in blockers
+
+
+
+
+def test_all_rolling_operators_enter_the_plan_without_a_whitelist():
+    values = np.random.default_rng(2).standard_normal(300)
+    close = ColumnRef(DataColumn.CLOSE)
+    expressions = [
+        close.rolling(20).semantics(min_periods=20).linreg_slope(),
+        close.rolling(20).semantics(min_periods=20).linreg_r2(),
+        close.rolling(20).semantics(min_periods=20).linreg_tstat(),
+        close.rolling(20).semantics(min_periods=20).linreg_resid_std(),
+    ]
+    outputs = evaluate_rust_plan(expressions, _ctx(values))
+    assert outputs is not None
+    from tools.factors.expr.rolling_statistics import apply_rolling_statistic
+    frame = pd.DataFrame({DataColumn.CLOSE.name: values})
+    for output, op in zip(outputs, [
+        'rolling_linreg_slope', 'rolling_linreg_r2',
+        'rolling_linreg_tstat', 'rolling_linreg_resid_std',
+    ], strict=True):
+        expected = apply_rolling_statistic(
+            op, frame, 20, min_periods=20,
+        ).to_numpy()[:, 0]
+        np.testing.assert_allclose(
+            output['A'].to_numpy(), expected, equal_nan=True, rtol=1e-9, atol=1e-10,
+        )

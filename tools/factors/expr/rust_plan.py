@@ -26,11 +26,7 @@ _BINARY = {"add": "+", "sub": "-", "mul": "*", "div": "/",
            "gt": "gt", "lt": "lt", "ge": "ge", "le": "le", "eq": "eq", "ne": "ne",
            "and": "and", "or": "or"}
 _UNARY = {"neg", "abs", "sign", "sqrt", "log", "tanh", "not"}
-_ROLLING = {"rolling_sum", "rolling_mean", "rolling_var", "rolling_std",
-           "rolling_skew", "rolling_min", "rolling_max", "rolling_argmin",
-           "rolling_argmax", "rolling_argmin_raw", "rolling_argmax_raw",
-           "rolling_ema", "rolling_median", "rolling_quantile",
-           "rolling_rank", "rolling_mad"}
+
 
 
 class _PlanBuilder:
@@ -61,7 +57,7 @@ class _PlanBuilder:
             self.memo[key] = node
             return node
         if isinstance(expr, RollingOp):
-            if expr.op not in _ROLLING or expr._n_data != 1:
+            if expr._n_data != 1:
                 return None
             window_expr = expr.window
             if not isinstance(window_expr, ConstExpr) or not isinstance(window_expr.value, (int, np.integer)):
@@ -205,9 +201,6 @@ def unsupported_plan_nodes(expression: FactorExpr) -> tuple[str, ...]:
             return
         if isinstance(node, GroupByScopeOp) and not isinstance(node.scope, BarCountScope):
             blockers.append(f"GroupByScopeOp({type(node.scope).__name__})")
-            return
-        if isinstance(node, RollingOp) and node.op not in _ROLLING:
-            blockers.append(f"RollingOp({node.op})")
             return
         for child in getattr(node, "_operands", ()):
             visit(child)

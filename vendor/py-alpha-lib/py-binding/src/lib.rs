@@ -2907,10 +2907,59 @@ enum PlanNode {
   BarScope { child: usize, count: usize, op: String, min: usize, prop: bool, quantile: Option<f64> },
 }
 
+fn plan_linreg(values: &[f64], window: usize, metric: &str, min: usize, prop: bool) -> Vec<f64> {
+  let window = window.max(1);
+  let mut out = vec![f64::NAN; values.len()];
+  let (mut sx, mut sy, mut sxx, mut syy, mut sxy) = (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64);
+  let mut count = 0usize;
+  for index in 0..values.len() {
+    let x = index as f64;
+    let y = values[index];
+    if y.is_finite() {
+      sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; count += 1;
+    }
+    if index >= window {
+      let old_index = index - window;
+      let old_x = old_index as f64;
+      let old_y = values[old_index];
+      if old_y.is_finite() {
+        sx -= old_x; sy -= old_y; sxx -= old_x * old_x;
+        syy -= old_y * old_y; sxy -= old_x * old_y; count -= 1;
+      }
+    }
+    let width = (index + 1).min(window);
+    if count < min.max(3) || (prop && count < width) { continue; }
+    let n = count as f64;
+    let cxx = sxx - sx * sx / n;
+    if cxx <= 0.0 { continue; }
+    let cyy = syy - sy * sy / n;
+    let cxy = sxy - sx * sy / n;
+    let slope = cxy / cxx;
+    let intercept = (sy - slope * sx) / n;
+    let sse = (syy - intercept * sy - slope * sxy).max(0.0);
+    out[index] = match metric {
+      "linreg_slope" => slope,
+      "linreg_r2" => if cyy <= 0.0 { f64::NAN } else { 1.0 - sse / cyy },
+      "linreg_resid_std" => if count < 3 { f64::NAN } else { (sse / (n - 2.0)).sqrt() },
+      "linreg_tstat" => {
+        if count < 3 { f64::NAN } else {
+          let se = ((sse / (n - 2.0)) / cxx).sqrt();
+          if se > 0.0 { slope / se } else { f64::NAN }
+        }
+      }
+      _ => f64::NAN,
+    };
+  }
+  out
+}
+
 fn plan_rolling(values: &[f64], window: usize, op: &str, min: usize, prop: bool, quantile: Option<f64>) -> pyo3::PyResult<Vec<f64>> {
   use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
   use rayon::slice::ParallelSliceMut;
   let window = window.max(1);
+  if op.starts_with("linreg_") {
+    return Ok(plan_linreg(values, window, op, min, prop));
+  }
   if op == "ema" {
     let mut state = alpha_algo::EmaState::new(window)
       .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
