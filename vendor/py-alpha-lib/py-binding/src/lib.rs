@@ -2905,6 +2905,7 @@ enum PlanNode {
   Unary { op: String, child: usize },
   Shift { child: usize, periods: usize },
   BarScope { child: usize, count: usize, op: String, min: usize, prop: bool, quantile: Option<f64> },
+  BarSince { condition: usize, count: usize, include_current: bool, nearest: bool, default_scope: bool, default: f64 },
 }
 
 fn plan_linreg(values: &[f64], window: usize, metric: &str, min: usize, prop: bool) -> Vec<f64> {
@@ -3138,6 +3139,13 @@ impl BatchPlan {
     self.nodes.len() - 1
   }
 
+  fn bar_since(&mut self, condition: usize, count: usize, include_current: bool, nearest: bool, default_scope: bool, default: f64) -> usize {
+    self.nodes.push(PlanNode::BarSince {
+      condition, count: count.max(1), include_current, nearest, default_scope, default,
+    });
+    self.nodes.len() - 1
+  }
+
   fn bar_scope(&mut self, child: usize, count: usize, op: &str, min: usize, prop: bool, quantile: Option<f64>) -> usize {
     self.nodes.push(PlanNode::BarScope {
       child, count: count.max(1), op: op.to_string(), min, prop, quantile,
@@ -3166,6 +3174,31 @@ impl BatchPlan {
           .to_vec(),
         PlanNode::Rolling { child, window, op, min, prop, quantile } => {
           plan_rolling(&values[*child], *window, op, *min, *prop, *quantile)?
+        }
+        PlanNode::BarSince { condition, count, include_current, nearest, default_scope, default } => {
+          let values = &values[*condition];
+          let mut out = vec![f64::NAN; values.len()];
+          let mut first: Option<usize> = None;
+          let mut last: Option<usize> = None;
+          let mut base = 0usize;
+          for index in 0..values.len() {
+            if index % *count == 0 { base = index; first = None; last = None; }
+            let truth = values[index].is_finite() && values[index] != 0.0;
+            if truth && *include_current {
+              if first.is_none() { first = Some(index); }
+              last = Some(index);
+            }
+            let matched = if *nearest { last } else { first };
+            out[index] = match matched {
+              Some(hit) => (index - hit) as f64,
+              None => if *default_scope { (index - base) as f64 } else { *default },
+            };
+            if truth && !*include_current {
+              if first.is_none() { first = Some(index); }
+              last = Some(index);
+            }
+          }
+          out
         }
         PlanNode::BarScope { child, count, op, min, prop, quantile } => {
           use alpha_algo::SessionOp;

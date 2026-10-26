@@ -20,6 +20,7 @@ from .rolling import RollingOp
 from .conditional import WhereOp
 from .shift import ShiftOp
 from .groupby_scope import GroupByScopeOp
+from .bar_search import BarSinceOp, ScopeLengthDefault
 from .lookback_scope import BarCountScope
 
 _BINARY = {"add": "+", "sub": "-", "mul": "*", "div": "/",
@@ -91,6 +92,30 @@ class _PlanBuilder:
             if child is None:
                 return None
             node = self.plan.unary(expr.op, child)
+            self.memo[key] = node
+            return node
+        if isinstance(expr, BarSinceOp):
+            if not isinstance(expr.scope, BarCountScope):
+                return None
+            condition = self.build(expr.condition)
+            if condition is None:
+                return None
+            count = expr.scope.resolved_count(
+                source_freq=getattr(self.ctx, "freq", None),
+                products=getattr(self.ctx, "products", ()),
+            )
+            default_expr = expr.operands[1]
+            default_scope = isinstance(default_expr, ScopeLengthDefault)
+            if default_scope:
+                default = 0.0
+            elif isinstance(default_expr, ConstExpr) and np.isscalar(default_expr.value):
+                default = float(default_expr.value)
+            else:
+                return None
+            node = self.plan.bar_since(
+                condition, int(count), bool(expr.include_current),
+                expr.select == "nearest", default_scope, default,
+            )
             self.memo[key] = node
             return node
         if isinstance(expr, GroupByScopeOp):
@@ -187,7 +212,7 @@ def plan_identity(expressions: list[FactorExpr]) -> tuple[tuple, ...]:
 
 _PLAN_SUPPORTED = (
     ColumnRef, ConstExpr, RollingOp, CompositeExpr, WhereOp, ShiftOp,
-    GroupByScopeOp,
+    GroupByScopeOp, BarSinceOp,
 )
 
 
