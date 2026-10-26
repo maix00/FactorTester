@@ -94,10 +94,9 @@ mod algo_impl {
       let mean = matches!(op, alpha_algo::SessionOp::Mean);
       let std = matches!(op, alpha_algo::SessionOp::Std);
       let variance = matches!(op, alpha_algo::SessionOp::Var | alpha_algo::SessionOp::Std);
-      let mut out = Vec::with_capacity(values.len());
-      for (index, start) in starts.iter().copied().enumerate() {
+      let out: Vec<f64> = (0..values.len()).into_par_iter().map(|index| {
         let end = index + 1;
-        let start = start as usize;
+        let start = starts[index] as usize;
         let n = count[end] - count[start];
         let value = if n == 0 {
           f64::NAN
@@ -125,8 +124,8 @@ mod algo_impl {
             }
           } else { total }
         };
-        out.push(value);
-      }
+        value
+      }).collect();
       return Ok(out.into_pyarray(py).unbind());
     }
     if fixed && matches!(
@@ -218,26 +217,25 @@ mod algo_impl {
         syy[i + 1] = syy[i] + if finite { y[i] * y[i] } else { 0.0 };
         sxy[i + 1] = sxy[i] + if finite { x[i] * y[i] } else { 0.0 };
       }
-      let mut out = Vec::with_capacity(n);
-      for (index, start) in starts.iter().copied().enumerate() {
+      let out: Vec<f64> = (0..n).into_par_iter().map(|index| {
         let end = index + 1;
-        let start = start as usize;
+        let start = starts[index] as usize;
         let m = count[end] - count[start];
-        if m < 2 { out.push(f64::NAN); continue; }
+        if m < 2 { return f64::NAN; }
         let n = m as f64;
         let (ax, ay) = (sx[end] - sx[start], sy[end] - sy[start]);
         let (axx, ayy) = (sxx[end] - sxx[start], syy[end] - syy[start]);
         let axy = sxy[end] - sxy[start];
         let covariance = (axy - ax * ay / n) / (n - 1.0);
-        out.push(if !correlation {
+        if !correlation {
           covariance
         } else {
           let vx = (axx - ax * ax / n).max(0.0);
           let vy = (ayy - ay * ay / n).max(0.0);
           let denom = (vx * vy).sqrt();
           if denom > 0.0 { (axy - ax * ay / n) / denom } else { f64::NAN }
-        });
-      }
+        }
+      }).collect();
       return Ok(out.into_pyarray(py).unbind());
     }
     let mut state = alpha_algo::PairIntervalState::new(correlation);

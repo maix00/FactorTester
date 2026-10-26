@@ -186,6 +186,17 @@ def evaluate_bar_distance(
     nan_policy: str = "propagate",
 ) -> pd.DataFrame:
     current = values.to_numpy(dtype=float)
+    invalid_current = None
+    if nan_policy == "propagate":
+        try:
+            current_condition = condition_expr.evaluate(ctx=ctx)
+            if isinstance(current_condition, pd.DataFrame):
+                current_condition = current_condition.reindex(
+                    index=values.index, columns=values.columns,
+                )
+                invalid_current = current_condition.isna().to_numpy()
+        except Exception:
+            invalid_current = None
     observed = _observed_mask(values, ctx)
     output = np.full(current.shape, np.nan, dtype=float)
     matched = np.zeros(current.shape, dtype=bool)
@@ -240,4 +251,6 @@ def evaluate_bar_distance(
             matched |= condition
         else:
             output[condition] = lag
+    if invalid_current is not None:
+        output[invalid_current] = np.nan
     return pd.DataFrame(output, index=values.index, columns=values.columns)
