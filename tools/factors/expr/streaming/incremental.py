@@ -233,6 +233,46 @@ class RustSessionRollingNode:
         return result
 
 
+class RustSessionPairNode:
+    """Session-spanning cov/corr executed by Rust pair state."""
+
+    def __init__(self, op, children, calendar, lookback_sessions, width):
+        from alpha import SessionPairState
+        if op not in {"rolling_cov", "rolling_corr"}:
+            raise UnsupportedStreamingFactor(f"Rust pair state does not support {op}")
+        self.op = op
+        self.children = tuple(children)
+        self.calendar = calendar
+        self.lookback_sessions = int(lookback_sessions)
+        self._width = width
+        self._states = [
+            SessionPairState(self.lookback_sessions, op == "rolling_corr")
+            for _ in range(width)
+        ]
+
+    def update(self, market, cache):
+        key = id(self)
+        if key in cache:
+            return cache[key]
+        timestamp = getattr(market, "timestamp", None)
+        if timestamp is None:
+            raise UnsupportedStreamingFactor("session cov/corr needs bar timestamps")
+        session, _size = self.calendar.window_for_timestamp(
+            int(pd.Timestamp(timestamp).value), self.lookback_sessions,
+        )
+        left = np.asarray(self.children[0].update(market, cache), dtype=float)
+        right = np.asarray(self.children[1].update(market, cache), dtype=float)
+        if left.shape != (self._width,) or right.shape != (self._width,):
+            raise ValueError("session cov/corr input width changed")
+        result = np.asarray(
+            [state.update(int(session), float(x), float(y))
+             for state, x, y in zip(self._states, left, right, strict=True)],
+            dtype=float,
+        )
+        cache[key] = result
+        return result
+
+
 class RollingWindowNode:
     def __init__(
         self,
@@ -1351,6 +1391,7 @@ def compile_streaming_factor(
                         "rolling_std", "rolling_min", "rolling_max",
                         "rolling_skew", "rolling_argmin", "rolling_argmax",
                         "rolling_median", "rolling_quantile", "rolling_rank",
+                        "rolling_cov", "rolling_corr",
                     }:
                         raise UnsupportedStreamingFactor(
                             "session window has no verified Rust implementation"
@@ -1365,6 +1406,16 @@ def compile_streaming_factor(
                 for item in expr.operands[expr._data_start:expr._data_start + expr._n_data]
             )
             if (
+                session_calendar is not None
+                and lookback_sessions is not None
+                and expr.op in {"rolling_cov", "rolling_corr"}
+                and len(children) == 2
+            ):
+                node = RustSessionPairNode(
+                    expr.op, children, session_calendar,
+                    lookback_sessions, len(products),
+                )
+            elif (
                 session_calendar is not None
                 and lookback_sessions is not None
                 and expr.op in {
