@@ -175,12 +175,13 @@ class RustSessionRollingNode:
 
     def __init__(
         self, op: str, child: StreamingNode, calendar: Any,
-        lookback_sessions: int, width: int,
+        lookback_sessions: int, width: int, quantile: float | None = None,
     ) -> None:
         if op not in {
             "rolling_mean", "rolling_sum", "rolling_var",
             "rolling_std", "rolling_min", "rolling_max",
             "rolling_skew", "rolling_argmin", "rolling_argmax",
+            "rolling_median", "rolling_quantile", "rolling_rank",
         }:
             raise UnsupportedStreamingFactor(
                 f"Rust session state does not support {op}"
@@ -199,9 +200,12 @@ class RustSessionRollingNode:
             "rolling_min": "min", "rolling_max": "max",
             "rolling_skew": "skew",
             "rolling_argmin": "argmin", "rolling_argmax": "argmax",
+            "rolling_median": "quantile",
+            "rolling_quantile": "quantile", "rolling_rank": "rank",
         }[op]
+        q = 0.5 if op == "rolling_median" else quantile
         self._states = [
-            SessionRollingState(self.lookback_sessions, False, rust_op)
+            SessionRollingState(self.lookback_sessions, False, rust_op, q)
             for _ in range(width)
         ]
 
@@ -1346,6 +1350,7 @@ def compile_streaming_factor(
                         "rolling_mean", "rolling_sum", "rolling_var",
                         "rolling_std", "rolling_min", "rolling_max",
                         "rolling_skew", "rolling_argmin", "rolling_argmax",
+                        "rolling_median", "rolling_quantile", "rolling_rank",
                     }:
                         raise UnsupportedStreamingFactor(
                             "session window has no verified Rust implementation"
@@ -1359,7 +1364,25 @@ def compile_streaming_factor(
                 compile_node(item)
                 for item in expr.operands[expr._data_start:expr._data_start + expr._n_data]
             )
-            if expr.op in ROLLING_STATISTICS:
+            if (
+                session_calendar is not None
+                and lookback_sessions is not None
+                and expr.op in {
+                    "rolling_mean", "rolling_sum", "rolling_var",
+                    "rolling_std", "rolling_min", "rolling_max",
+                    "rolling_skew", "rolling_argmin", "rolling_argmax",
+                    "rolling_median", "rolling_quantile", "rolling_rank",
+                }
+            ):
+                node = RustSessionRollingNode(
+                    expr.op,
+                    children[0],
+                    session_calendar,
+                    lookback_sessions,
+                    len(products),
+                    quantile=getattr(expr, "quantile", None),
+                )
+            elif expr.op in ROLLING_STATISTICS:
                 if len(children) != 1:
                     raise UnsupportedStreamingFactor(
                         f"{expr.op} expects one streaming operand"
@@ -1376,31 +1399,14 @@ def compile_streaming_factor(
                     raise UnsupportedStreamingFactor("rolling_ema expects one streaming operand")
                 node = ExpandingEwmNode(children[0], window, len(products))
             else:
-                if (
-                    session_calendar is not None
-                    and lookback_sessions is not None
-                    and expr.op in {
-                        "rolling_mean", "rolling_sum", "rolling_var",
-                        "rolling_std", "rolling_min", "rolling_max",
-                        "rolling_skew", "rolling_argmin", "rolling_argmax",
-                    }
-                ):
-                    node = RustSessionRollingNode(
-                        expr.op,
-                        children[0],
-                        session_calendar,
-                        lookback_sessions,
-                        len(products),
-                    )
-                else:
-                    node = RollingWindowNode(
-                        expr.op,
-                        children,
-                        window,
-                        len(products),
-                        session_calendar=session_calendar,
-                        lookback_sessions=lookback_sessions,
-                    )
+                node = RollingWindowNode(
+                    expr.op,
+                    children,
+                    window,
+                    len(products),
+                    session_calendar=session_calendar,
+                    lookback_sessions=lookback_sessions,
+                )
         elif isinstance(expr, GroupByScopeOp):
             op_name = expr.op
             operands = expr.operands
