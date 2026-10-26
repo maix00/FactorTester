@@ -12,6 +12,7 @@ nautilus = ["dep:nautilus-core", "dep:nautilus-model", "dep:nautilus-common", "d
 [dependencies]
 alpha-algo = { path = "../../vendor/py-alpha-lib/alpha-algo" }
 rayon = "1"
+anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 nautilus-core = { path = "../../vendor/nautilus_trader/crates/core", optional = true }

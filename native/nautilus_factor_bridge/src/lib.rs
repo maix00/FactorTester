@@ -238,8 +238,9 @@ pub mod nautilus {
     use std::any::Any;
     use std::fmt;
 
-    use nautilus_common::actor::Actor;
+    use nautilus_common::actor::{Actor, DataActor, DataActorConfig, DataActorCore, DataActorNative};
     use nautilus_model::data::Bar;
+    use nautilus_model::identifiers::ActorId;
     use ustr::Ustr;
 
     use crate::{FactorEngine, FactorUpdate, MarketBar};
@@ -259,6 +260,7 @@ pub mod nautilus {
         max_future_slices: usize,
         barrier_grace_ns: Option<i64>,
         sink: Option<Box<dyn Fn(&FactorUpdate) + Send>>,
+        core: DataActorCore,
     }
 
     impl<E> fmt::Debug for FactorActor<E> {
@@ -271,8 +273,12 @@ pub mod nautilus {
     where E::Error: std::fmt::Display,
 {
         pub fn new(actor_id: &str, engine: E) -> Self {
+            let core = DataActorCore::new(DataActorConfig {
+                actor_id: Some(ActorId::new(actor_id)), ..Default::default()
+            });
             Self {
                 id: Ustr::from(actor_id), engine, latest: Vec::new(), last_error: None,
+                core,
                 expected_products: Vec::new(),
                 pending_bars: std::collections::BTreeMap::new(),
                 pending_timestamp: None,
@@ -355,7 +361,7 @@ pub mod nautilus {
         /// Collect one bar per frozen product; update only when every product arrived.
         pub fn on_completed_bar(&mut self, bar: &Bar) {
             if self.expected_products.is_empty() {
-                self.handle(bar);
+                let _ = self.on_bar(bar);
                 return;
             }
             let product = bar.bar_type.instrument_id().to_string();
@@ -433,30 +439,28 @@ pub mod nautilus {
         }
     }
 
-    impl<E: FactorEngine + 'static> Actor for FactorActor<E>
-    where E::Error: std::fmt::Display, {
-        fn id(&self) -> Ustr { self.id }
-
-        fn handle(&mut self, msg: &dyn Any) {
-            if let Some(bar) = msg.downcast_ref::<Bar>() {
-                let bar = MarketBar::from(bar);
-                match self.engine.update(&bar) {
-                    Ok(values) => {
-                        self.latest = values.clone();
-                        self.last_update = Some(FactorUpdate {
-                            timestamp_ns: bar.timestamp_ns,
-                            products: bar.products.clone(),
-                            values,
-                        });
-                        self.last_error = None;
-                        self.publish();
-                    }
-                    Err(error) => self.last_error = Some(error.to_string()),
+    impl<E: FactorEngine + 'static> DataActor for FactorActor<E>
+    where E::Error: std::fmt::Display {
+        fn on_bar(&mut self, bar: &Bar) -> anyhow::Result<()> {
+            let market = MarketBar::from(bar);
+            match self.engine.update(&market) {
+                Ok(values) => {
+                    self.latest = values.clone();
+                    self.last_update = Some(FactorUpdate {
+                        timestamp_ns: market.timestamp_ns,
+                        products: market.products.clone(),
+                        values,
+                    });
+                    self.last_error = None;
+                    self.publish();
+                    Ok(())
+                }
+                Err(error) => {
+                    self.last_error = Some(error.to_string());
+                    Err(anyhow::anyhow!(error.to_string()))
                 }
             }
         }
-
-        fn as_any(&self) -> &dyn Any { self }
     }
 
     impl FactorActor<crate::plan::FactorPlanEngine> {
@@ -472,6 +476,11 @@ pub mod nautilus {
         let products = bars.iter().map(|bar| bar.bar_type.instrument_id().to_string()).collect();
         let values = bars.iter().map(|bar| bar.close.as_f64()).collect();
         MarketBar::new(timestamp_ns, products, values)
+    }
+
+    impl<E: FactorEngine + 'static> DataActorNative for FactorActor<E> {
+        fn core(&self) -> &DataActorCore { &self.core }
+        fn core_mut(&mut self) -> &mut DataActorCore { &mut self.core }
     }
 
     impl From<&Bar> for MarketBar {
@@ -558,7 +567,7 @@ mod tests {
 #[cfg(all(test, feature = "nautilus"))]
 mod nautilus_tests {
     use super::*;
-    use nautilus_common::actor::Actor;
+    use nautilus_common::actor::{Actor, DataActor};
     use nautilus_common::actor::registry::{actor_exists, deregister_actor};
     use nautilus_model::data::{Bar, BarType};
     use nautilus_model::types::{Price, Quantity};
@@ -574,6 +583,13 @@ mod nautilus_tests {
         let bar = nautilus::market_bar_from_bars(1_000, &[make("A.B", "1.0"), make("C.D", "2.0")]);
         assert_eq!(bar.products, vec!["A.B".to_string(), "C.D".to_string()]);
         assert_eq!(bar.values, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn factor_actor_satisfies_trader_actor_bounds() {
+        use nautilus_common::component::Component;
+        fn assert_bounds<T: Actor + DataActor + Component + std::fmt::Debug + 'static>() {}
+        assert_bounds::<nautilus::FactorActor<crate::WindowEngine>>();
     }
 
     #[test]
@@ -671,7 +687,7 @@ mod nautilus_tests {
             Price::from("1.0"), Price::from("1.0"), Price::from("1.0"),
             Price::from("1.0"), Quantity::from("1"), 1_000.into(), 1_000.into(),
         );
-        actor.handle(&bar);
+        actor.on_bar(&bar).unwrap();
         assert_eq!(*seen.lock().unwrap(), vec![1_000]);
         actor.publish_last_update("factor.updates.test");
     }
@@ -717,7 +733,7 @@ mod nautilus_tests {
             Price::from("1.0"), Price::from("1.0"), Price::from("1.0"),
             Price::from("1.0"), Quantity::from("10"), 1_000.into(), 1_000.into(),
         );
-        actor.handle(&bar);
+        let _ = actor.on_bar(&bar);
         assert!(actor.last_error().is_some());
     }
 
@@ -730,7 +746,7 @@ mod nautilus_tests {
             Price::from("1.0"), Price::from("1.0"), Price::from("1.0"),
             Price::from("1.0"), Quantity::from("10"), 1_000.into(), 1_000.into(),
         );
-        actor.handle(&bar);
+        actor.on_bar(&bar).unwrap();
         assert_eq!(actor.latest(), &[1.0]);
     }
 
@@ -743,7 +759,7 @@ mod nautilus_tests {
             Price::from("1.0"), Price::from("1.0"), Price::from("1.0"),
             Price::from("1.0"), Quantity::from("10"), 1_000.into(), 1_000.into(),
         );
-        actor.handle(&bar);
+        actor.on_bar(&bar).unwrap();
         assert_eq!(actor.latest(), &[1.0]);
     }
 }

@@ -705,6 +705,7 @@ name = "nautilus-factor-bridge"
 version = "0.1.0"
 dependencies = [
  "alpha-algo",
+ "anyhow",
  "nautilus-common",
  "nautilus-core",
  "nautilus-model",
