@@ -15,6 +15,11 @@ class SignalAlign(FactorExpr):
     """
 
     def __init__(self, child: FactorExpr, signal_freq: str, basepoint: str = "last"):
+        if basepoint != "last":
+            raise NotImplementedError(
+                "alpha.factor SignalAlign currently supports basepoint='last' only; "
+                "first/daily/end_session_skip remain explicit blockers"
+            )
         self.child = child
         self.signal_freq = str(signal_freq)
         self.basepoint = basepoint
@@ -49,13 +54,15 @@ class SignalAlign(FactorExpr):
             times.as_unit("ns").asi8,
             target.as_unit("ns").asi8,
         )
+        import numpy as np
+        positions = np.asarray(positions, dtype=np.int64)
+        valid = positions >= 0
         out = {}
         for product in source.columns:
             values = source[product].to_numpy(dtype=float)
-            out[product] = [
-                values[position] if position >= 0 else float("nan")
-                for position in positions
-            ]
+            aligned = np.full(len(positions), np.nan, dtype=float)
+            aligned[valid] = values[positions[valid]]
+            out[product] = aligned
         return pd.DataFrame(out, index=target)
 
 

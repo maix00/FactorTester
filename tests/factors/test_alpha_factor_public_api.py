@@ -177,3 +177,17 @@ def test_nested_signal_align_uses_causal_inner_signal():
         ColumnRef('CLOSE').signal_align('2min').signal_align('4min')
     ).evaluate(ctx)
     np.testing.assert_allclose(nested['A'].to_numpy(), [2.0, 6.0])
+
+
+def test_unsupported_plan_nodes_are_explicit():
+    from alpha.factor import plan_blockers
+
+    expression = ColumnRef('CLOSE').signal_align('2min')
+    assert 'SignalAlign' in plan_blockers(expression)
+
+
+def test_signal_align_rejects_unsupported_basepoint_explicitly():
+    import pytest
+
+    with pytest.raises(NotImplementedError):
+        ColumnRef('CLOSE').signal_align('2min', basepoint='first')
