@@ -7,11 +7,14 @@ fn run(name: &str, json: &str, products: usize, n: usize) {
     for _ in 0..3 {
         let mut engine = nautilus_factor_bridge::FactorPlanEngine::from_spec_json(json, products).unwrap();
         let mut out = Vec::new();
+        let mut bar = MarketBar::new(0, vec![String::new(); products], vec![0.0; products]);
         let started = Instant::now();
         let mut sink = 0.0;
         for index in 0..n {
-            let values: Vec<f64> = (0..products).map(|p| (index as f64 + p as f64).sin()).collect();
-            let bar = MarketBar::new(index as i64, vec![String::new(); products], values);
+            bar.timestamp_ns = index as i64;
+            for product in 0..products {
+                bar.values[product] = (index as f64 + product as f64).sin();
+            }
             engine.update_into(&bar, &mut out).unwrap();
             sink += out[0];
         }
