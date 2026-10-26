@@ -27,6 +27,7 @@ pub enum ExprSpec {
     Where { condition: usize, when_true: usize, when_false: usize },
     Cross { op: CrossOp, child: usize },
     Since { condition: usize, count: usize, include_current: bool, nearest: bool, default_scope: bool, default: f64 },
+    Distance { condition: usize, count: usize, include_current: bool, nearest: bool, default_scope: bool, default: f64 },
     Scope { child: usize, count: usize, op: SessionOp, min_periods: usize, propagate_nan: bool, sessions: Vec<(i64, i64, i64)> },
     Signal { child: usize, signal_ns: i64, sessions: Vec<(i64, i64, i64)>,
              basepoint: String, include_current: bool, partial: String },
@@ -54,6 +55,7 @@ pub struct FactorPlanKernel {
     outputs: Vec<usize>,
     ordinal: u64,
     timestamp_ns: i64,
+    fields: usize,
     node_keys: Vec<String>,
 }
 
@@ -111,7 +113,7 @@ impl FactorPlanKernel {
                     if *condition >= index || *when_true >= index || *when_false >= index { return Err(crate::algo::Error::InvalidParameter("plan child must precede parent".into())); }
                     &[]
                 }
-                ExprSpec::Since { condition, .. } => {
+                ExprSpec::Since { condition, .. } | ExprSpec::Distance { condition, .. } => {
                     if *condition >= index { return Err(crate::algo::Error::InvalidParameter("plan child must precede parent".into())); }
                     &[]
                 }
@@ -122,11 +124,11 @@ impl FactorPlanKernel {
             match &node.spec {
                 ExprSpec::Rolling { window, .. } if *window == 0 => return Err(crate::algo::Error::InvalidParameter("rolling window must be positive".into())),
                 ExprSpec::Scope { count, sessions, .. } if sessions.is_empty() && *count == 0 => return Err(crate::algo::Error::InvalidParameter("scope count must be positive".into())),
-                ExprSpec::Since { count, .. } if *count == 0 => return Err(crate::algo::Error::InvalidParameter("scope count must be positive".into())),
+                ExprSpec::Since { count, .. } | ExprSpec::Distance { count, .. } if *count == 0 => return Err(crate::algo::Error::InvalidParameter("scope count must be positive".into())),
                 _ => {}
             }
         }
-        Ok(Self { products, nodes, outputs, ordinal: 0, timestamp_ns: 0, node_keys: Vec::new() })
+        Ok(Self { products, nodes, outputs, ordinal: 0, timestamp_ns: 0, fields: 1, node_keys: Vec::new() })
     }
 
     fn eval(&mut self, index: usize, columns: &[f64], cache: &mut [Option<Vec<f64>>]) -> Result<Vec<f64>, crate::algo::Error> {
@@ -137,10 +139,11 @@ impl FactorPlanKernel {
                 if column >= columns.len() {
                     return Err(crate::algo::Error::InvalidParameter("column out of range".into()));
                 }
-                if columns.len() == self.products {
+                if column >= self.fields { return Err(crate::algo::Error::InvalidParameter("column out of range".into())); }
+                if self.fields == 1 {
                     columns.to_vec()
                 } else {
-                    vec![columns[column]; self.products]
+                    (0..self.products).map(|product| columns[product * self.fields + column]).collect()
                 }
             }
             ExprSpec::Const(value) => vec![value; self.products],
@@ -239,7 +242,8 @@ impl FactorPlanKernel {
                     state.update_explicit(node.scope_base[product] as u64, current, *value)
                 }).collect()
             }
-            ExprSpec::Since { condition, count, include_current, nearest, default_scope, default } => {
+            ExprSpec::Since { condition, count, include_current, nearest, default_scope, default }
+            | ExprSpec::Distance { condition, count, include_current, nearest, default_scope, default } => {
                 let condition = self.eval(condition, columns, cache)?;
                 let mut out = vec![f64::NAN; self.products];
                 for product in 0..self.products {
@@ -301,9 +305,10 @@ impl FactorPlanKernel {
 
     pub fn update_at(&mut self, timestamp_ns: i64, values: &[f64]) -> Result<Vec<f64>, crate::algo::Error> {
         self.timestamp_ns = timestamp_ns;
-        if values.len() != self.products {
-            return Err(crate::algo::Error::InvalidParameter("plan product width mismatch".into()));
+        if self.products == 0 || values.is_empty() || values.len() % self.products != 0 {
+            return Err(crate::algo::Error::InvalidParameter("plan values must be product-major fields".into()));
         }
+        self.fields = values.len() / self.products;
         let mut cache = vec![None; self.nodes.len()];
         let mut out = Vec::with_capacity(self.outputs.len() * self.products);
         for output in self.outputs.clone() {
@@ -334,6 +339,8 @@ enum RawNode {
     Cross { op: String, child: usize },
     Since { condition: usize, count: usize, include_current: bool, nearest: bool,
             default_scope: bool, default: f64 },
+    Distance { condition: usize, count: usize, include_current: bool, nearest: bool,
+               default_scope: bool, default: f64 },
     Signal { child: usize, signal_ns: i64, #[serde(default)] sessions: Vec<[i64; 3]>,
              #[serde(default = "default_basepoint")] basepoint: String,
              #[serde(default = "default_include_current")] include_current: bool,
@@ -391,6 +398,8 @@ impl FactorPlanKernel {
                 },
                 RawNode::Since { condition, count, include_current, nearest, default_scope, default } =>
                     ExprSpec::Since { condition, count, include_current, nearest, default_scope, default },
+                RawNode::Distance { condition, count, include_current, nearest, default_scope, default } =>
+                    ExprSpec::Distance { condition, count, include_current, nearest, default_scope, default },
                 RawNode::Signal { child, signal_ns, sessions, basepoint, include_current, partial } =>
                     ExprSpec::Signal { child, signal_ns,
                         sessions: sessions.into_iter().map(|item| (item[0], item[1], item[2])).collect(),

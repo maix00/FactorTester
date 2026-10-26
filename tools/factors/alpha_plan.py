@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from tools.factors.expr.bar_search import BarSinceOp
+from tools.factors.expr.bar_search import BarDistanceOp, BarSinceOp
 from tools.factors.expr.composite import CompositeExpr
 from tools.factors.expr.conditional import WhereOp
 from tools.factors.expr.cross_sectional import CrossSectionalOp
@@ -24,6 +24,8 @@ _BINARY = {"add", "sub", "mul", "div", "gt", "lt", "ge", "le", "eq", "ne"}
 def alpha_plan_spec(expression: Any) -> dict[str, Any] | None:
     columns: list[str] = []
     nodes: list[dict[str, Any]] = []
+    keys: list[str] = []
+    key_tuples: list[tuple] = []
     memo: dict[tuple, int] = {}
 
     def build(expr) -> int | None:
@@ -97,7 +99,7 @@ def alpha_plan_spec(expression: Any) -> dict[str, Any] | None:
                 return None
             node = {"kind": "where", "condition": children[0],
                     "when_true": children[1], "when_false": children[2]}
-        elif isinstance(expr, BarSinceOp):
+        elif isinstance(expr, (BarSinceOp, BarDistanceOp)):
             if not isinstance(expr.scope, BarCountScope):
                 return None
             child = build(expr.condition)
@@ -107,7 +109,8 @@ def alpha_plan_spec(expression: Any) -> dict[str, Any] | None:
             from tools.factors.expr.bar_search import ScopeLengthDefault
             default_scope = isinstance(default, ScopeLengthDefault)
             node = {
-                "kind": "since", "condition": child,
+                "kind": "distance" if isinstance(expr, BarDistanceOp) else "since",
+                "condition": child,
                 "count": int(expr.scope.resolved_count()),
                 "include_current": bool(expr.include_current),
                 "nearest": expr.select == "nearest",
@@ -117,13 +120,16 @@ def alpha_plan_spec(expression: Any) -> dict[str, Any] | None:
         else:
             return None
         memo[key] = len(nodes)
+        keys.append(repr(key))
+        key_tuples.append(key)
         nodes.append(node)
         return len(nodes) - 1
 
     output = build(expression)
     if output is None:
         return None
-    return {"columns": columns, "nodes": nodes, "outputs": [output]}
+    return {"columns": columns, "keys": keys, "key_tuples": key_tuples,
+            "nodes": nodes, "outputs": [output]}
 
 
 def factor_alpha_plan_spec(factor: Any) -> dict[str, Any] | None:

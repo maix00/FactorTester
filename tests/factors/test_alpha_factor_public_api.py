@@ -455,3 +455,26 @@ def test_tools_incremental_uses_rust_facade_for_simple_rolling():
     executor.on_bar(pd.Timestamp('2026-01-05 09:30'), {'A': {DataColumn.CLOSE.name: 1.0}})
     executor.on_bar(pd.Timestamp('2026-01-05 09:31'), {'A': {DataColumn.CLOSE.name: 3.0}})
     assert executor.on_signal(pd.Timestamp('2026-01-05 09:31')) == {'A': 2.0}
+
+
+def test_tools_incremental_rust_facade_supports_multiple_columns():
+    from tools.data.types import DataColumn
+    from tools.factors.expr.leaf import ColumnRef as ToolColumnRef
+    from tools.factors.expr.streaming.incremental import compile_incremental_factor
+
+    expression = ToolColumnRef(DataColumn.CLOSE) + ToolColumnRef(DataColumn.VOLUME)
+    executor = compile_incremental_factor('sum', expression, ('A',))
+    assert getattr(executor._multi, 'uses_rust', False) is True
+    executor.on_bar(pd.Timestamp('2026-01-05 09:30'),
+                    {'A': {DataColumn.CLOSE.name: 2.0, DataColumn.VOLUME.name: 3.0}})
+    assert executor.on_signal(pd.Timestamp('2026-01-05 09:30')) == {'A': 5.0}
+
+
+def test_alpha_factor_bar_distance_enters_rust_plan():
+    from alpha.factor import bar_distance, scope_bars
+
+    condition = ColumnRef('CLOSE') > 0
+    expression = bar_distance(condition, scope=scope_bars(3), default=3.0)
+    spec = expression.to_plan_spec()
+    assert spec is not None
+    assert spec['nodes'][-1]['kind'] == 'distance'

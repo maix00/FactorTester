@@ -38,6 +38,23 @@ class BarSinceExpr(FactorExpr):
         return pd.DataFrame(output, index=frame.index)
 
 
+class BarDistanceExpr(BarSinceExpr):
+    """Distance to the nearest/farthest matching bar in a bar-count scope."""
+
+    def _structural_key(self):
+        return ("alpha.factor.BarDistanceExpr", self.scope.count, self.select,
+                self.include_current, self.default,
+                self.condition._structural_key())
+
+
+def bar_distance(condition, *, scope: BarCountScope, select: str = "nearest",
+                 default: float | None = None, include_current: bool = True) -> BarDistanceExpr:
+    return BarDistanceExpr(
+        _to_expr(condition), scope, select=select, default=default,
+        include_current=include_current,
+    )
+
+
 def bar_since(condition, *, scope: BarCountScope, select: str = "nearest",
               default: float | None = None, include_current: bool = True) -> BarSinceExpr:
     return BarSinceExpr(

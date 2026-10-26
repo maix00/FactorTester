@@ -10,7 +10,7 @@ import pandas as pd
 from .core import ColumnRef, CompositeExpr, ConstExpr, RollingOp, ShiftOp, WhereOp
 from .cross_sectional import CrossSectionalExpr
 from .scope import GroupByScopeOp
-from .bar_search import BarSinceExpr, BarSinceExpr as BarSince
+from .bar_search import BarDistanceExpr, BarSinceExpr, BarSinceExpr as BarSince
 from .signal import SignalAlign
 from .scopes import SessionScope, TradingDayScope
 
@@ -124,11 +124,12 @@ def to_plan_spec(expressions: list[Any]) -> dict[str, Any] | None:
                 node["sessions"] = sessions
             elif expr.scope is not None:
                 return None
-        elif isinstance(expr, BarSince):
+        elif isinstance(expr, (BarSince, BarDistanceExpr)):
             child = build(expr.condition)
             if child is None:
                 return None
-            node = {"kind": "since", "condition": child, "count": expr.scope.count,
+            node = {"kind": "distance" if isinstance(expr, BarDistanceExpr) else "since",
+                    "condition": child, "count": expr.scope.count,
                     "include_current": bool(expr.include_current),
                     "nearest": expr.select == "nearest",
                     "default_scope": expr.default is None,
