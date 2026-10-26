@@ -1,5 +1,7 @@
 //! CURRENT/CANDIDATE search kernel shared by batch, incremental and bridge.
 
+use std::collections::VecDeque;
+
 #[derive(Clone, Debug)]
 pub enum MatchExpr {
     Current,
@@ -82,9 +84,48 @@ where
     matched.map_or(default, |ordinal| (current_ordinal - ordinal) as f64)
 }
 
+/// Scan an ordinal-sorted deque without copying it. Nearest scans backwards
+/// and stops at the first match; earliest scans forwards and stops at the
+/// first match, so both avoid a full window scan when a match is close.
+pub fn match_distance_deque(
+    current_ordinal: u64,
+    current: f64,
+    candidates: &VecDeque<(u64, f64)>,
+    predicate: &MatchExpr,
+    scope: u64,
+    nearest: bool,
+    default: f64,
+) -> f64 {
+    let start = current_ordinal.saturating_sub(scope);
+    if nearest {
+        for &(ordinal, value) in candidates.iter().rev() {
+            if ordinal < start || ordinal >= current_ordinal { if ordinal < start { break; } else { continue; } }
+            if predicate.eval(current, value) != 0.0 { return (current_ordinal - ordinal) as f64; }
+        }
+    } else {
+        for &(ordinal, value) in candidates {
+            if ordinal < start { continue; }
+            if ordinal >= current_ordinal { break; }
+            if predicate.eval(current, value) != 0.0 { return (current_ordinal - ordinal) as f64; }
+        }
+    }
+    default
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deque_scan_is_direction_aware() {
+        let predicate = MatchExpr::Ge(
+            Box::new(MatchExpr::Sub(Box::new(MatchExpr::Current), Box::new(MatchExpr::Candidate))),
+            Box::new(MatchExpr::Const(1.5)),
+        );
+        let candidates = VecDeque::from([(0, 8.0), (1, 8.0), (2, 9.5)]);
+        assert_eq!(match_distance_deque(3, 10.0, &candidates, &predicate, 3, true, 9.0), 2.0);
+        assert_eq!(match_distance_deque(3, 10.0, &candidates, &predicate, 3, false, 9.0), 3.0);
+    }
 
     #[test]
     fn current_candidate_references_evaluate_in_rust() {
