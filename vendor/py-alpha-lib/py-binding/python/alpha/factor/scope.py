@@ -72,7 +72,7 @@ class GroupByScopeOp(FactorExpr):
             self.owner.days = np.asarray(ctx.trading_days)
         else:
             self.owner.days = pd.factorize(frame.index.normalize())[0]
-        self.owner.times = np.asarray(frame.index.asi8 if isinstance(frame.index, pd.DatetimeIndex) else np.arange(len(frame.index)))
+        self.owner.times = np.asarray(frame.index.as_unit("ns").asi8 if isinstance(frame.index, pd.DatetimeIndex) else np.arange(len(frame.index)))
         from alpha import interval_rolling
         starts = None
         output = {}

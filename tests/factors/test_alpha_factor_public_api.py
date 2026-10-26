@@ -124,3 +124,16 @@ def test_alpha_factor_trading_day_scope_is_cumulative():
     ctx = EvalContext(products=('A',), preloaded={'A': frame})
     result = ColumnRef('CLOSE').groupby_scope(scope_trading_day()).mean().evaluate(ctx)
     np.testing.assert_allclose(result['A'].to_numpy(), np.cumsum(values) / np.arange(1, 9))
+
+
+def test_alpha_factor_session_scope_resets_after_gap():
+    from alpha.factor import scope_session
+
+    index = pd.DatetimeIndex([
+        '2026-01-05 09:30', '2026-01-05 09:31',
+        '2026-01-05 10:30', '2026-01-05 10:31',
+    ])
+    frame = pd.DataFrame({'CLOSE': [0.0, 1.0, 2.0, 3.0]}, index=index)
+    ctx = EvalContext(products=('A',), preloaded={'A': frame})
+    result = ColumnRef('CLOSE').groupby_scope(scope_session('30min')).mean().evaluate(ctx)
+    np.testing.assert_allclose(result['A'].to_numpy(), [0.0, 0.5, 2.0, 2.5])
