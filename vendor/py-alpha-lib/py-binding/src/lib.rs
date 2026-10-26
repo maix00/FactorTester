@@ -2902,6 +2902,8 @@ enum PlanNode {
   Rolling { child: usize, window: usize, op: String, min: usize, prop: bool, quantile: Option<f64> },
   Binary { op: String, left: usize, right: usize },
   Where { condition: usize, when_true: usize, when_false: usize },
+  Unary { op: String, child: usize },
+  Shift { child: usize, periods: usize },
 }
 
 fn plan_rolling(values: &[f64], window: usize, op: &str, min: usize, prop: bool, quantile: Option<f64>) -> pyo3::PyResult<Vec<f64>> {
@@ -3076,6 +3078,16 @@ impl BatchPlan {
     self.nodes.len() - 1
   }
 
+  fn unary(&mut self, op: &str, child: usize) -> usize {
+    self.nodes.push(PlanNode::Unary { op: op.to_string(), child });
+    self.nodes.len() - 1
+  }
+
+  fn shift(&mut self, child: usize, periods: usize) -> usize {
+    self.nodes.push(PlanNode::Shift { child, periods });
+    self.nodes.len() - 1
+  }
+
   fn execute(
     &self, py: pyo3::Python<'_>, columns: Vec<numpy::PyReadonlyArray1<f64>>, output: usize,
   ) -> pyo3::PyResult<pyo3::Py<numpy::PyArray1<f64>>> {
@@ -3098,6 +3110,22 @@ impl BatchPlan {
         PlanNode::Rolling { child, window, op, min, prop, quantile } => {
           plan_rolling(&values[*child], *window, op, *min, *prop, *quantile)?
         }
+        PlanNode::Unary { op, child } => {
+          let values = &values[*child];
+          values.iter().map(|value| match op.as_str() {
+            "neg" => -*value, "abs" => value.abs(), "sign" => value.signum(),
+            "sqrt" => value.sqrt(), "log" => value.ln(), "tanh" => value.tanh(),
+            "not" => f64::from(*value == 0.0), _ => f64::NAN,
+          }).collect()
+        }
+        PlanNode::Shift { child, periods } => {
+          let values = &values[*child];
+          let mut shifted = vec![f64::NAN; values.len()];
+          if *periods < values.len() {
+            shifted[*periods..].copy_from_slice(&values[..values.len() - *periods]);
+          }
+          shifted
+        }
         PlanNode::Where { condition, when_true, when_false } => {
           let (c, a, b) = (&values[*condition], &values[*when_true], &values[*when_false]);
           if c.len() != a.len() || a.len() != b.len() {
@@ -3117,6 +3145,8 @@ impl BatchPlan {
             "gt" => f64::from(x > y), "lt" => f64::from(x < y),
             "ge" => f64::from(x >= y), "le" => f64::from(x <= y),
             "eq" => f64::from(x == y), "ne" => f64::from(x != y),
+            "and" => f64::from(*x != 0.0 && *y != 0.0),
+            "or" => f64::from(*x != 0.0 || *y != 0.0),
             other => f64::NAN * (other.len() as f64),
           }).collect()
         }

@@ -18,9 +18,12 @@ from .leaf import ColumnRef, ConstExpr
 from .composite import CompositeExpr
 from .rolling import RollingOp
 from .conditional import WhereOp
+from .shift import ShiftOp
 
 _BINARY = {"add": "+", "sub": "-", "mul": "*", "div": "/",
-           "gt": "gt", "lt": "lt", "ge": "ge", "le": "le", "eq": "eq", "ne": "ne"}
+           "gt": "gt", "lt": "lt", "ge": "ge", "le": "le", "eq": "eq", "ne": "ne",
+           "and": "and", "or": "or"}
+_UNARY = {"neg", "abs", "sign", "sqrt", "log", "tanh", "not"}
 _ROLLING = {"rolling_sum", "rolling_mean", "rolling_var", "rolling_std",
            "rolling_skew", "rolling_min", "rolling_max", "rolling_argmin",
            "rolling_argmax", "rolling_argmin_raw", "rolling_argmax_raw",
@@ -82,6 +85,23 @@ class _PlanBuilder:
             if condition is None or when_true is None or when_false is None:
                 return None
             node = self.plan.where_node(condition, when_true, when_false)
+            self.memo[key] = node
+            return node
+        if isinstance(expr, CompositeExpr) and expr.op in _UNARY and len(expr.operands) == 1:
+            child = self.build(expr.operands[0])
+            if child is None:
+                return None
+            node = self.plan.unary(expr.op, child)
+            self.memo[key] = node
+            return node
+        if isinstance(expr, ShiftOp):
+            periods = expr.periods
+            if not isinstance(periods, ConstExpr) or not isinstance(periods.value, (int, np.integer)):
+                return None
+            child = self.build(expr.operand)
+            if child is None or int(periods.value) < 0:
+                return None
+            node = self.plan.shift(child, int(periods.value))
             self.memo[key] = node
             return node
         if isinstance(expr, CompositeExpr):

@@ -101,3 +101,16 @@ def test_batch_and_incremental_plans_share_node_identity():
     )
     streaming_keys = set(streaming._plan.plans[0].node_keys) | set(streaming._plan.plans[1].node_keys)
     assert batch_keys == streaming_keys
+
+
+def test_plan_supports_unary_and_shift_nodes():
+    values = np.linspace(1.0, 100.0, 200)
+    close = ColumnRef(DataColumn.CLOSE)
+    shifted = close.shift(3)
+    negated = (close.rolling(10).mean()).neg()
+    outputs = evaluate_rust_plan([shifted, negated], _ctx(values))
+    assert outputs is not None
+    assert np.isnan(outputs[0]['A'].to_numpy()[:3]).all()
+    np.testing.assert_allclose(outputs[0]['A'].to_numpy()[3:], values[:-3])
+    expected = -pd.Series(values).rolling(10, min_periods=1).mean().to_numpy()
+    np.testing.assert_allclose(outputs[1]['A'].to_numpy(), expected)
