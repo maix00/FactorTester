@@ -101,9 +101,51 @@ pub mod nautilus {
     //! never depends on this crate.
     pub use nautilus_core as core;
 
-    use nautilus_model::data::Bar;
+    use std::any::Any;
+    use std::fmt;
 
-    use crate::MarketBar;
+    use nautilus_common::actor::Actor;
+    use nautilus_model::data::Bar;
+    use ustr::Ustr;
+
+    use crate::{FactorEngine, MarketBar, MultiWindowEngine};
+
+    /// Minimal Nautilus actor that owns the Rust factor engine and consumes
+    /// `Bar` messages.  Registration with a trader is the caller's job.
+    pub struct FactorActor {
+        id: Ustr,
+        engine: MultiWindowEngine,
+        latest: Vec<f64>,
+    }
+
+    impl fmt::Debug for FactorActor {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("FactorActor").field("id", &self.id).finish()
+        }
+    }
+
+    impl FactorActor {
+        pub fn new(actor_id: &str, engine: MultiWindowEngine) -> Self {
+            Self { id: Ustr::from(actor_id), engine, latest: Vec::new() }
+        }
+
+        pub fn latest(&self) -> &[f64] { &self.latest }
+    }
+
+    impl Actor for FactorActor {
+        fn id(&self) -> Ustr { self.id }
+
+        fn handle(&mut self, msg: &dyn Any) {
+            if let Some(bar) = msg.downcast_ref::<Bar>() {
+                let bar = MarketBar::from(bar);
+                if let Ok(values) = self.engine.update(&bar) {
+                    self.latest = values;
+                }
+            }
+        }
+
+        fn as_any(&self) -> &dyn Any { self }
+    }
 
     impl From<&Bar> for MarketBar {
         fn from(bar: &Bar) -> Self {
