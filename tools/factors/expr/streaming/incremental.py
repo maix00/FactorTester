@@ -631,49 +631,19 @@ class _StreamingMarketSlice:
     observed: tuple[bool, ...]
 
 
-class IncrementalFactorExecutor:
-    """Run-scoped stateful executor produced from a FactorExpr graph."""
+class SingleFactorIncrementalExecutor:
+    """Compatibility facade: one alias over the shared multi-factor executor."""
 
-    def __init__(self, factor_alias: str, plan: StreamingFactorPlan) -> None:
-        if not factor_alias:
-            raise ValueError("incremental executor requires a factor alias")
+    def __init__(self, factor_alias: str, multi: MultiStreamingIncrementalExecutor) -> None:
         self.factor_alias = factor_alias
-        self._plan = plan
-        self._latest: dict[Any, float] = {}
+        self._multi = multi
+        self._plan = multi._plan
 
-    def on_bar(
-        self,
-        timestamp: pd.Timestamp,
-        fields_by_product: Mapping[Any, Any],
-        term_curves_by_product: Mapping[Any, Any] | None = None,
-        trading_day: pd.Timestamp | None = None,
-    ) -> None:
-        term_curves_by_product = term_curves_by_product or {}
-        observed_products = set(fields_by_product) | set(term_curves_by_product)
-        missing = [product for product in self._plan.products if product not in observed_products]
-        if missing:
-            raise ValueError(f"market slice is missing streaming products: {missing!r}")
-        market = _StreamingMarketSlice(
-            pd.Timestamp(timestamp),
-            pd.Timestamp(trading_day).normalize() if trading_day is not None else None,
-            {
-                product: _StreamingBarPrice(_normalize_bar_fields(fields_by_product.get(product, {})))
-                for product in self._plan.products
-            },
-            {
-                product: _normalize_term_curve(curve)
-                for product, curve in term_curves_by_product.items()
-                if product in self._plan.products
-            },
-            tuple(product in observed_products for product in self._plan.products),
-        )
-        self._latest = {
-            product: float(value)
-            for product, value in self._plan.update(pd.Timestamp(timestamp), market).items()
-        }
+    def on_bar(self, *args, **kwargs) -> None:
+        self._multi.on_bar(*args, **kwargs)
 
     def on_signal(self, timestamp: pd.Timestamp) -> dict[Any, float]:
-        return dict(self._latest)
+        return dict(self._multi.on_signal(timestamp)[self.factor_alias])
 
 
 class MultiStreamingIncrementalExecutor:
@@ -1102,14 +1072,14 @@ def compile_incremental_factor(
     source_freq: DataFreq | str | None = None,
     session_calendar: Any = None,
     event_line: Any = None,
-) -> IncrementalFactorExecutor:
+) -> SingleFactorIncrementalExecutor:
     """Compile one author-facing FactorExpr into a run-scoped executor."""
 
-    plan = compile_streaming_factor(
-        expression, products, source_freq=source_freq,
+    multi = compile_incremental_factors(
+        {factor_alias: expression}, products, source_freq=source_freq,
         session_calendar=session_calendar, event_line=event_line,
     )
-    return IncrementalFactorExecutor(factor_alias, plan)
+    return SingleFactorIncrementalExecutor(factor_alias, multi)
 
 
 def compile_incremental_factors(

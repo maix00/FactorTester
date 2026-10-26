@@ -135,5 +135,3 @@ def try_evaluate_rust_plan(expression: FactorExpr, ctx: EvaluateContext) -> pd.D
     return None if result is None else result[0]
 
 
-def try_evaluate_rust_plan_many(expressions, ctx):
-    return evaluate_rust_plan(expressions, ctx)
