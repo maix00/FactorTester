@@ -63,22 +63,18 @@ def build_run_spec_session_calendar(
     from tools.factors.expr.streaming.calendar_window import TradingCalendarWindow
 
     start_ns, end_ns = _ns(start_utc), _ns(end_utc)
-    bars = []
-    for request in staging_requests:
-        for contract_uid in request["paths"]:
-            product = find_contract_product(contract_uid)
-            if product is None:
-                raise ValueError(f"contract is not in the product catalog: {contract_uid}")
-            path = contract_data_path_for(contract_uid, product)
-            bars.extend(
-                bar for bar in iter_minute_bars(
-                    path, start_ns=start_ns, end_ns=end_ns,
-                )
-                if hasattr(bar, "trading_day")
-            )
-    if not bars:
-        raise ValueError("source bars produced an empty trading calendar")
-    return TradingCalendarWindow.from_contract_bars(bars)
+    def source_bars():
+        for request in staging_requests:
+            for contract_uid in request["paths"]:
+                product = find_contract_product(contract_uid)
+                if product is None:
+                    raise ValueError(f"contract is not in the product catalog: {contract_uid}")
+                path = contract_data_path_for(contract_uid, product)
+                for bar in iter_minute_bars(path, start_ns=start_ns, end_ns=end_ns):
+                    if hasattr(bar, "trading_day"):
+                        yield bar
+
+    return TradingCalendarWindow.from_contract_bars(source_bars())
 
 
 def stage_run_spec_catalogs(
