@@ -189,8 +189,8 @@ def test_unsupported_plan_nodes_are_explicit():
 def test_signal_align_rejects_unsupported_basepoint_explicitly():
     import pytest
 
-    with pytest.raises(NotImplementedError):
-        ColumnRef('CLOSE').signal_align('2min', basepoint='first')
+    with pytest.raises(ValueError):
+        ColumnRef('CLOSE').signal_align('2min', basepoint='middle')
 
 
 def test_incremental_plan_negation_and_multi_product_columns():
@@ -204,3 +204,60 @@ def test_incremental_plan_negation_and_multi_product_columns():
     col = ColumnRef('CLOSE').to_plan_spec()
     state = FactorPlanState(json.dumps(col), 2)
     np.testing.assert_allclose(state.update(np.array([2.0, 4.0])), [2.0, 4.0])
+
+
+def test_signal_align_first_and_exclude_current_boundary():
+    index = pd.date_range('2026-01-05 09:30', periods=6, freq='min')
+    frame = pd.DataFrame({'CLOSE': np.arange(6, dtype=float)}, index=index)
+    ctx = EvalContext(products=('A',), preloaded={'A': frame})
+    first = ColumnRef('CLOSE').signal_align('2min', basepoint='first').evaluate(ctx)
+    np.testing.assert_allclose(first['A'].to_numpy()[:4], [0.0, 1.0, 3.0])
+    excluded = ColumnRef('CLOSE').signal_align('2min', include_current=False).evaluate(ctx)
+    assert np.isnan(excluded['A'].iloc[0])
+
+
+def test_signal_align_daily_basepoint_selects_clock_time():
+    index = pd.date_range('2026-01-05 09:00', periods=120, freq='min')
+    frame = pd.DataFrame({'CLOSE': np.arange(120, dtype=float)}, index=index)
+    ctx = EvalContext(products=('A',), preloaded={'A': frame})
+    aligned = ColumnRef('CLOSE').signal_align('1d', daily_basepoint='10:00').evaluate(ctx)
+    assert list(aligned.index) == [pd.Timestamp('2026-01-05 10:00')]
+    assert aligned['A'].iloc[0] == 60.0
+
+
+def test_signal_align_scope_none_keeps_continuous_frequency_grid():
+    index = pd.DatetimeIndex([
+        '2026-01-05 09:30', '2026-01-05 09:31',
+        '2026-01-05 09:32', '2026-01-06 09:30',
+    ])
+    frame = pd.DataFrame({'CLOSE': [0.0, 1.0, 2.0, 3.0]}, index=index)
+    ctx = EvalContext(products=('A',), preloaded={'A': frame})
+    aligned = ColumnRef('CLOSE').signal_align('2min').evaluate(ctx)
+    assert list(aligned.index[:2]) == [pd.Timestamp('2026-01-05 09:30'), pd.Timestamp('2026-01-05 09:32')]
+
+
+def test_signal_align_trading_day_scope_restarts_each_day():
+    from alpha.factor import scope_trading_day
+
+    index = pd.DatetimeIndex([
+        '2026-01-05 09:30', '2026-01-05 09:31', '2026-01-05 09:32',
+        '2026-01-06 09:30', '2026-01-06 09:31', '2026-01-06 09:32',
+    ])
+    frame = pd.DataFrame({'CLOSE': np.arange(6, dtype=float)}, index=index)
+    ctx = EvalContext(products=('A',), preloaded={'A': frame})
+    aligned = ColumnRef('CLOSE').signal_align('2min', scope=scope_trading_day()).evaluate(ctx)
+    assert list(aligned.index) == [
+        pd.Timestamp('2026-01-05 09:30'), pd.Timestamp('2026-01-05 09:32'),
+        pd.Timestamp('2026-01-06 09:30'), pd.Timestamp('2026-01-06 09:32'),
+    ]
+    np.testing.assert_allclose(aligned['A'].to_numpy(), [0.0, 2.0, 3.0, 5.0])
+
+
+def test_signal_align_scope_anchor_positions_grid_inside_scope():
+    index = pd.date_range('2026-01-05 09:31', periods=4, freq='min')
+    frame = pd.DataFrame({'CLOSE': np.arange(4, dtype=float)}, index=index)
+    ctx = EvalContext(products=('A',), preloaded={'A': frame})
+    from_start = ColumnRef('CLOSE').signal_align('2min').evaluate(ctx)
+    assert list(from_start.index) == [pd.Timestamp('2026-01-05 09:32'), pd.Timestamp('2026-01-05 09:34')]
+    from_end = ColumnRef('CLOSE').signal_align('2min', scope_anchor='end').evaluate(ctx)
+    assert list(from_end.index) == [pd.Timestamp('2026-01-05 09:31'), pd.Timestamp('2026-01-05 09:33')]
