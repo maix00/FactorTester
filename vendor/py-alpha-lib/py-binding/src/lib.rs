@@ -2908,6 +2908,59 @@ fn plan_rolling(values: &[f64], window: usize, op: &str, min: usize, prop: bool)
   use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
   use rayon::slice::ParallelSliceMut;
   let window = window.max(1);
+  if op == "ema" {
+    let mut state = alpha_algo::EmaState::new(window)
+      .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
+      .with_semantics(min, prop);
+    return Ok(values.iter().copied().map(|value| state.update(value)).collect());
+  }
+  if matches!(op, "min" | "max" | "argmin" | "argmax" | "argmin_raw" | "argmax_raw") {
+    use std::collections::VecDeque;
+    let is_max = matches!(op, "max" | "argmax" | "argmax_raw");
+    let is_arg = matches!(op, "argmin" | "argmax" | "argmin_raw" | "argmax_raw");
+    let raw = matches!(op, "argmin_raw" | "argmax_raw");
+    const CHUNK: usize = 65_536;
+    let n = values.len();
+    let mut out = vec![f64::NAN; n];
+    out.par_chunks_mut(CHUNK).enumerate().for_each(|(chunk_index, chunk)| {
+      let chunk_start = chunk_index * CHUNK;
+      let mut deque: VecDeque<usize> = VecDeque::new();
+      let mut count = 0usize;
+      for k in chunk_start.saturating_sub(window)..chunk_start {
+        if !values[k].is_finite() { continue; }
+        count += 1;
+        while let Some(last) = deque.back().copied() {
+          if (is_max && values[last] <= values[k]) || (!is_max && values[last] >= values[k]) {
+            deque.pop_back();
+          } else { break; }
+        }
+        deque.push_back(k);
+      }
+      for (offset, slot) in chunk.iter_mut().enumerate() {
+        let index = chunk_start + offset;
+        let start = index.saturating_sub(window - 1);
+        while deque.front().is_some_and(|i| *i < start) { deque.pop_front(); }
+        if index >= window && values[index - window].is_finite() { count -= 1; }
+        if values[index].is_finite() {
+          count += 1;
+          while let Some(last) = deque.back().copied() {
+            if (is_max && values[last] <= values[index]) || (!is_max && values[last] >= values[index]) {
+              deque.pop_back();
+            } else { break; }
+          }
+          deque.push_back(index);
+        }
+        let width = (index + 1).min(window);
+        if count < min || (prop && count < width) { continue; }
+        let Some(best) = deque.front().copied() else { continue };
+        *slot = if !is_arg { values[best] } else {
+          let distance = (index - best) as f64;
+          if raw { distance } else if count <= 1 { 0.0 } else { distance / (count - 1) as f64 }
+        };
+      }
+    });
+    return Ok(out);
+  }
   if !matches!(op, "sum" | "mean" | "var" | "std" | "skew") {
     return Err(pyo3::exceptions::PyValueError::new_err(
       format!("batch plan rolling does not support {op}")

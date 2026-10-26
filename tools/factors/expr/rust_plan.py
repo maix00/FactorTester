@@ -21,7 +21,11 @@ from .conditional import WhereOp
 
 _BINARY = {"add": "+", "sub": "-", "mul": "*", "div": "/",
            "gt": "gt", "lt": "lt", "ge": "ge", "le": "le", "eq": "eq", "ne": "ne"}
-_ROLLING = {"rolling_sum", "rolling_mean", "rolling_var", "rolling_std", "rolling_skew"}
+_ROLLING = {
+    "rolling_sum", "rolling_mean", "rolling_var", "rolling_std", "rolling_skew",
+    "rolling_min", "rolling_max", "rolling_argmin", "rolling_argmax",
+    "rolling_argmin_raw", "rolling_argmax_raw", "rolling_ema",
+}
 
 
 class _PlanBuilder:

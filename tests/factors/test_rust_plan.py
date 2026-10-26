@@ -61,3 +61,26 @@ def test_plan_supports_where_and_comparison_nodes():
     assert outputs is not None
     expected = np.where(values > 50, pd.Series(values).rolling(10, min_periods=1).mean(), 0.0)
     np.testing.assert_allclose(outputs[0]['A'].to_numpy(), expected)
+
+
+def test_plan_supports_extrema_and_ema_rolling_ops():
+    values = np.linspace(1.0, 100.0, 300)
+    close = ColumnRef(DataColumn.CLOSE)
+    series = pd.Series(values)
+    cases = {
+        'min': (close.rolling(20).min(), series.rolling(20, min_periods=1).min()),
+        'max': (close.rolling(20).max(), series.rolling(20, min_periods=1).max()),
+    }
+    outputs = try_evaluate_rust_plan_many([expr for expr, _ in cases.values()], _ctx(values))
+    assert outputs is not None
+    for output, (_, expected) in zip(outputs, cases.values(), strict=True):
+        np.testing.assert_allclose(output['A'].to_numpy(), expected.to_numpy())
+
+
+def test_plan_supports_ema_rolling_op():
+    values = np.linspace(1.0, 100.0, 300)
+    close = ColumnRef(DataColumn.CLOSE)
+    outputs = try_evaluate_rust_plan_many([close.rolling(20).ema()], _ctx(values))
+    assert outputs is not None
+    expected = pd.Series(values).ewm(span=20, min_periods=1, adjust=False).mean()
+    np.testing.assert_allclose(outputs[0]['A'].to_numpy(), expected.to_numpy(), rtol=1e-10)
