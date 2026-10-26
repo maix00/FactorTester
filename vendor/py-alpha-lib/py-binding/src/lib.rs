@@ -2601,6 +2601,38 @@ impl SessionRollingState {
 }
 
 #[pyclass]
+struct BarRollingState {
+  inner: alpha_algo::SessionWindowState,
+}
+
+#[pymethods]
+impl BarRollingState {
+  #[new]
+  #[pyo3(signature = (max_bars, op="mean", quantile=None))]
+  fn new(max_bars: usize, op: &str, quantile: Option<f64>) -> PyResult<Self> {
+    use alpha_algo::SessionOp;
+    let op = match op {
+      "sum" => SessionOp::Sum, "mean" => SessionOp::Mean,
+      "var" => SessionOp::Var, "std" => SessionOp::Std,
+      "min" => SessionOp::Min, "max" => SessionOp::Max,
+      "skew" => SessionOp::Skew, "argmin" => SessionOp::Argmin,
+      "argmax" => SessionOp::Argmax, "rank" => SessionOp::Rank,
+      "quantile" => SessionOp::Quantile(quantile.unwrap_or(0.5)),
+      other => return Err(pyo3::exceptions::PyValueError::new_err(
+        format!("unsupported bar op: {other}")
+      )),
+    };
+    let inner = alpha_algo::SessionWindowState::new_bars(max_bars, op)
+      .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    Ok(Self { inner })
+  }
+
+  fn update(&mut self, value: f64) -> f64 {
+    self.inner.update(0, value)
+  }
+}
+
+#[pyclass]
 struct WallRollingState {
   inner: alpha_algo::SessionWindowState,
 }
@@ -2629,6 +2661,26 @@ impl WallRollingState {
 
   fn update(&mut self, timestamp_ns: i64, value: f64) -> f64 {
     self.inner.update_at(0, timestamp_ns, value)
+  }
+}
+
+#[pyclass]
+struct BarPairState {
+  inner: alpha_algo::SessionPairState,
+}
+
+#[pymethods]
+impl BarPairState {
+  #[new]
+  #[pyo3(signature = (max_bars, correlation=false))]
+  fn new(max_bars: usize, correlation: bool) -> PyResult<Self> {
+    let inner = alpha_algo::SessionPairState::new_bars(max_bars, correlation)
+      .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    Ok(Self { inner })
+  }
+
+  fn update(&mut self, x: f64, y: f64) -> f64 {
+    self.inner.update(0, x, y)
   }
 }
 
@@ -2696,7 +2748,9 @@ fn _algo(m: &Bound<'_, PyModule>) -> PyResult<()> {
   m.add_class::<ThresholdKernel>()?;
   m.add_class::<SessionRollingState>()?;
   m.add_class::<SessionPairState>()?;
+  m.add_class::<BarPairState>()?;
   m.add_class::<WallPairState>()?;
+  m.add_class::<BarRollingState>()?;
   m.add_class::<WallRollingState>()?;
   m.add_class::<GroupKernel>()?;
   m.add_class::<TermCarryKernel>()?;

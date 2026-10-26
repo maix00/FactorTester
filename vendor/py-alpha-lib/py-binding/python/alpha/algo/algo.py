@@ -66,3 +66,9 @@ WallRollingState = _algo.WallRollingState
 
 
 WallPairState = _algo.WallPairState
+
+
+BarRollingState = _algo.BarRollingState
+
+
+BarPairState = _algo.BarPairState

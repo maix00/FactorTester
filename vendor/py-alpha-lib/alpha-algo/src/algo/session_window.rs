@@ -251,6 +251,7 @@ pub enum SessionOp {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WindowPolicy {
+  Bars(u32),
   Sessions(u32),
   WallClock(i64),
 }
@@ -306,6 +307,15 @@ impl SessionWindowState {
     Ok(state)
   }
 
+  pub fn new_bars(max_bars: usize, op: SessionOp) -> Result<Self, Error> {
+    if max_bars == 0 {
+      return Err(Error::InvalidParameter("max_bars must be positive".to_string()));
+    }
+    let mut state = Self::new_op(1, op)?;
+    state.policy = WindowPolicy::Bars(max_bars as u32);
+    Ok(state)
+  }
+
   fn remove_oldest(&mut self) {
     let Some((_session, _timestamp, old, index)) = self.ring.pop_front() else { return };
     if old.is_finite() {
@@ -344,6 +354,11 @@ impl SessionWindowState {
       }
       WindowPolicy::WallClock(duration) => {
         while self.ring.front().is_some_and(|(_, ts, _, _)| timestamp_ns - *ts > duration) {
+          self.remove_oldest();
+        }
+      }
+      WindowPolicy::Bars(max_bars) => {
+        while self.ring.len() >= max_bars as usize {
           self.remove_oldest();
         }
       }
@@ -729,6 +744,15 @@ impl SessionPairState {
     Ok(state)
   }
 
+  pub fn new_bars(max_bars: usize, correlation: bool) -> Result<Self, Error> {
+    if max_bars == 0 {
+      return Err(Error::InvalidParameter("max_bars must be positive".to_string()));
+    }
+    let mut state = Self::new(1, correlation)?;
+    state.policy = WindowPolicy::Bars(max_bars as u32);
+    Ok(state)
+  }
+
   fn remove_oldest(&mut self) {
     let Some((_, _, ox, oy)) = self.ring.pop_front() else { return };
     if ox.is_finite() && oy.is_finite() {
@@ -758,6 +782,11 @@ impl SessionPairState {
       }
       WindowPolicy::WallClock(duration) => {
         while self.ring.front().is_some_and(|(_, ts, _, _)| timestamp_ns - *ts > duration) {
+          self.remove_oldest();
+        }
+      }
+      WindowPolicy::Bars(max_bars) => {
+        while self.ring.len() >= max_bars as usize {
           self.remove_oldest();
         }
       }
@@ -899,6 +928,14 @@ mod tests {
     assert_eq!(min[2], 2.0);
     let q = ta_time_rolling_quantile(&timestamps, &values, 2_000, 0.5).unwrap();
     assert_eq!(q[2], 2.0);
+  }
+
+  #[test]
+  fn bar_policy_evicts_by_count() {
+    let mut state = SessionWindowState::new_bars(2, SessionOp::Sum).unwrap();
+    assert_eq!(state.update(0, 1.0), 1.0);
+    assert_eq!(state.update(0, 2.0), 3.0);
+    assert_eq!(state.update(0, 3.0), 5.0);
   }
 
   #[test]
