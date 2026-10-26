@@ -384,6 +384,61 @@ pub fn ta_session_rolling_rank(
   session_quantile_like(values, session_ids, lookback_sessions, None, true)
 }
 
+/// Time-boundary rolling state for sub-day windows that may cross sessions.
+/// A bar belongs to the window when its timestamp is within `duration_ns` of
+/// the current bar, regardless of session breaks.
+pub struct TimeWindowState {
+  duration_ns: i64,
+  ring: VecDeque<(i64, f64)>,
+  sum: f64,
+  count: usize,
+  mean: bool,
+}
+
+impl TimeWindowState {
+  pub fn new(duration_ns: i64, mean: bool) -> Result<Self, Error> {
+    if duration_ns <= 0 {
+      return Err(Error::InvalidParameter("duration must be positive".to_string()));
+    }
+    Ok(Self { duration_ns, ring: VecDeque::new(), sum: 0.0, count: 0, mean })
+  }
+
+  pub fn update(&mut self, timestamp_ns: i64, value: f64) -> f64 {
+    if let Some((last, _)) = self.ring.back() {
+      if timestamp_ns < *last { return f64::NAN; }
+    }
+    while self.ring.front().is_some_and(|(ts, _)| timestamp_ns - *ts > self.duration_ns) {
+      if let Some((_, old)) = self.ring.pop_front() {
+        if old.is_finite() { self.sum -= old; self.count -= 1; }
+      }
+    }
+    self.ring.push_back((timestamp_ns, value));
+    if value.is_finite() { self.sum += value; self.count += 1; }
+    if self.count == 0 { f64::NAN }
+    else if self.mean { self.sum / self.count as f64 }
+    else { self.sum }
+  }
+}
+
+fn time_rolling(
+  timestamps: &[i64], values: &[f64], duration_ns: i64, mean: bool,
+) -> Result<Vec<f64>, Error> {
+  if timestamps.len() != values.len() {
+    return Err(Error::LengthMismatch(timestamps.len(), values.len()));
+  }
+  let mut state = TimeWindowState::new(duration_ns, mean)?;
+  Ok(timestamps.iter().copied().zip(values.iter().copied())
+    .map(|(ts, value)| state.update(ts, value)).collect())
+}
+
+pub fn ta_time_rolling_sum(timestamps: &[i64], values: &[f64], duration_ns: i64) -> Result<Vec<f64>, Error> {
+  time_rolling(timestamps, values, duration_ns, false)
+}
+
+pub fn ta_time_rolling_mean(timestamps: &[i64], values: &[f64], duration_ns: i64) -> Result<Vec<f64>, Error> {
+  time_rolling(timestamps, values, duration_ns, true)
+}
+
 fn session_rolling_pair(
   x: &[f64], y: &[f64], session_ids: &[u32], lookback_sessions: usize,
   correlation: bool,
@@ -498,6 +553,14 @@ mod tests {
     state.update(0, 3.0);
     let value = state.update(0, 2.0);
     assert!((value - 0.5).abs() < 1e-12);
+  }
+
+  #[test]
+  fn time_window_spans_session_break_by_timestamp() {
+    let timestamps = [0i64, 1_000, 10_000, 11_000];
+    let values = [1.0, 2.0, 3.0, 4.0];
+    let sum = ta_time_rolling_sum(&timestamps, &values, 2_000).unwrap();
+    assert_eq!(sum, vec![1.0, 3.0, 3.0, 7.0]);
   }
 
   #[test]
