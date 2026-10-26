@@ -159,3 +159,11 @@ def test_alpha_factor_incremental_plan_uses_shared_rust_kernel():
     )
     assert plan.update([1.0]) == {'mean': {'A': 1.0}, 'sum': {'A': 1.0}}
     assert plan.update([3.0]) == {'mean': {'A': 2.0}, 'sum': {'A': 4.0}}
+
+
+def test_signal_align_uses_last_completed_value_only():
+    index = pd.date_range('2026-01-05 09:30', periods=6, freq='min')
+    frame = pd.DataFrame({'CLOSE': np.arange(6, dtype=float)}, index=index)
+    ctx = EvalContext(products=('A',), preloaded={'A': frame})
+    aligned = ColumnRef('CLOSE').signal_align('2min').evaluate(ctx)
+    np.testing.assert_allclose(aligned['A'].to_numpy(), [0.0, 2.0, 4.0])
