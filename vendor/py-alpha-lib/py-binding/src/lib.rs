@@ -29,6 +29,24 @@ mod algo_impl {
   }
 
   #[pyfunction]
+  pub fn session_rolling_sum(
+    values: Vec<f64>, session_ids: Vec<u32>, lookback_sessions: usize,
+  ) -> PyResult<Vec<f64>> {
+    let ctx = Context::default();
+    ta_session_rolling_sum(&ctx, &values, &session_ids, lookback_sessions)
+      .map_err(|e| e.into())
+  }
+
+  #[pyfunction]
+  pub fn session_rolling_mean(
+    values: Vec<f64>, session_ids: Vec<u32>, lookback_sessions: usize,
+  ) -> PyResult<Vec<f64>> {
+    let ctx = Context::default();
+    ta_session_rolling_mean(&ctx, &values, &session_ids, lookback_sessions)
+      .map_err(|e| e.into())
+  }
+
+  #[pyfunction]
   #[pyo3(signature = (/, start=None, end=None, groups=None, flags=None))]
   pub fn set_ctx<'py>(
     _py: Python<'py>,
@@ -2552,6 +2570,8 @@ fn _algo(m: &Bound<'_, PyModule>) -> PyResult<()> {
   pyo3_log::init();
 
   m.add_function(wrap_pyfunction!(ema, m)?)?;
+  m.add_function(wrap_pyfunction!(session_rolling_sum, m)?)?;
+  m.add_function(wrap_pyfunction!(session_rolling_mean, m)?)?;
   m.add_function(wrap_pyfunction!(set_ctx, m)?)?;
   m.add_class::<EventHeap>()?;
   m.add_class::<MarketDataMatrix>()?;
