@@ -836,3 +836,32 @@ def test_signal_align_clock_anchor_without_scope():
     aligned = ColumnRef('CLOSE').signal_align('2min', scope_anchor='09:32').evaluate(ctx)
     assert list(aligned.index) == [pd.Timestamp('2026-01-05 09:32'), pd.Timestamp('2026-01-05 09:34')]
     np.testing.assert_allclose(aligned['A'].to_numpy(), [1.0, 3.0])
+
+
+def test_signal_last_gap_asof_and_strict_sampling_match_every_prefix():
+    from alpha.factor import IncrementalFactorPlan, SignalAlign
+    times = [1, 4, 11, 12, 15, 16]
+    values = [10.0, 40.0, 110.0, 120.0, 150.0, 160.0]
+    for include_current, expected in (
+        (True, [np.nan,np.nan,40.0,40.0,150.0,150.0]),
+        (False,[np.nan,np.nan,40.0,40.0,120.0,120.0]),
+    ):
+        expression = SignalAlign(ColumnRef('CLOSE'),'5ns',include_current=include_current)
+        for prefix in range(1,len(times)+1):
+            plan = IncrementalFactorPlan({'s':expression},('A',))
+            actual = [plan.update_at(t,[value])['s']['A']
+                      for t,value in zip(times[:prefix],values[:prefix])]
+            np.testing.assert_allclose(actual,expected[:prefix],equal_nan=True)
+
+
+def test_incremental_mean_precision_does_not_flip_equal_threshold_where():
+    from alpha.factor import IncrementalFactorPlan, WhereOp, ConstExpr
+    mean = ColumnRef('CLOSE').rolling(20).semantics(min_periods=1).mean()
+    expression = WhereOp(mean > ConstExpr(101.65),ConstExpr(1),ConstExpr(0))
+    plan = IncrementalFactorPlan({'mean':mean,'decision':expression},('A',))
+    values = [101.63,101.65,101.67,101.64,101.66]
+    for index in range(5000):
+        result = plan.update_at(index,[values[index % 5]])
+        if index >= 19:
+            assert result['mean']['A'] == 101.65
+            assert result['decision']['A'] == 0.0

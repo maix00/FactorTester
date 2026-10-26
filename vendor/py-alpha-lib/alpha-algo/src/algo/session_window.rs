@@ -29,49 +29,20 @@ fn validate(
   Ok(())
 }
 
-fn session_rolling<NumT, F>(
-  _ctx: &Context,
-  values: &[f64],
-  session_ids: &[u32],
-  lookback_sessions: usize,
-  aggregate: F,
-) -> Result<Vec<NumT>, Error>
-where
-  NumT: Float,
-  F: Fn(f64, usize) -> NumT,
-{
-  validate(values, session_ids, lookback_sessions)?;
-  let mut ring: VecDeque<(u32, f64)> = VecDeque::new();
-  let mut finite_sum = 0.0f64;
-  let mut finite_count = 0usize;
-  let mut out = Vec::with_capacity(values.len());
-  for (index, value) in values.iter().copied().enumerate() {
-    let session = session_ids[index];
-    let first_session = (session + 1).saturating_sub(lookback_sessions as u32);
-    while ring.front().is_some_and(|(id, _)| *id < first_session) {
-      if let Some((_, old)) = ring.pop_front() {
-        if old.is_finite() {
-          finite_sum -= old;
-          finite_count -= 1;
-        }
-      }
-    }
-    ring.push_back((session, value));
-    if value.is_finite() {
-      finite_sum += value;
-      finite_count += 1;
-    }
-    out.push(aggregate(finite_sum, finite_count));
+/// Adds one finite value, including eviction deltas, without losing low-order terms.
+#[inline]
+pub(crate) fn add_compensated(sum: &mut f64, correction: &mut f64, value: f64) {
+  let next = *sum + value;
+  if next.is_finite() {
+    *correction += if sum.abs() >= value.abs() { (*sum - next) + value } else { (value - next) + *sum };
+  } else {
+    // Keep the existing overflow result rather than producing inf - inf in the correction.
+    *correction = 0.0;
   }
-  Ok(out)
+  *sum = next;
 }
 
-
-/// Mutable run-scoped state for one session-spanning rolling operator.
-///
-/// The caller advances one bar at a time.  Eviction follows the session
-/// ordinal, so the logical window can grow/shrink at session boundaries while
-/// each update remains amortized O(1).
+/// Order-statistic tree slots are reused; storage follows live window cardinality.
 #[derive(Clone, Copy, Debug)]
 struct OstNode {
   key: f64,
@@ -348,6 +319,7 @@ pub struct SessionWindowState {
   op: SessionOp,
   ring: VecDeque<(u32, i64, f64, u64)>,
   finite_sum: f64,
+  sum_correction: f64,
   finite_sumsq: f64,
   finite_sum3: f64,
   finite_count: usize,
@@ -376,6 +348,7 @@ impl SessionWindowState {
       op,
       ring: VecDeque::new(),
       finite_sum: 0.0,
+      sum_correction: 0.0,
       finite_sumsq: 0.0,
       finite_sum3: 0.0,
       finite_count: 0,
@@ -417,7 +390,7 @@ impl SessionWindowState {
 
   pub fn reset_at(&mut self, index: u64) {
     self.ring.clear();
-    self.finite_sum = 0.0; self.finite_sumsq = 0.0; self.finite_sum3 = 0.0;
+    self.finite_sum = 0.0; self.sum_correction = 0.0; self.finite_sumsq = 0.0; self.finite_sum3 = 0.0;
     self.finite_count = 0; self.nan_count = 0;
     self.min_deque.clear(); self.max_deque.clear();
     self.order_stat = if matches!(self.op, SessionOp::Quantile(_) | SessionOp::Rank | SessionOp::Mad) {
@@ -484,7 +457,7 @@ impl SessionWindowState {
     }
     if self.accepts_value(old) {
       match self.op {
-        SessionOp::Sum | SessionOp::Mean => self.finite_sum -= old,
+        SessionOp::Sum | SessionOp::Mean => add_compensated(&mut self.finite_sum, &mut self.sum_correction, -old),
         SessionOp::Var | SessionOp::Std => {
           self.finite_sum -= old;
           self.finite_sumsq -= old * old;
@@ -501,6 +474,9 @@ impl SessionWindowState {
         _ => {}
       }
       self.finite_count -= 1;
+      if self.finite_count == 0 && matches!(self.op, SessionOp::Sum | SessionOp::Mean) {
+        self.finite_sum = 0.0; self.sum_correction = 0.0;
+      }
       if let Some(tree) = self.order_stat.as_mut() { tree.remove(old); }
     }
     if matches!(self.op, SessionOp::Min | SessionOp::Max | SessionOp::Argmin
@@ -524,7 +500,7 @@ impl SessionWindowState {
     }
     if self.accepts_value(value) {
       match self.op {
-        SessionOp::Sum | SessionOp::Mean => self.finite_sum += value,
+        SessionOp::Sum | SessionOp::Mean => add_compensated(&mut self.finite_sum, &mut self.sum_correction, value),
         SessionOp::Var | SessionOp::Std => {
           self.finite_sum += value;
           self.finite_sumsq += value * value;
@@ -562,8 +538,8 @@ impl SessionWindowState {
       return f64::NAN;
     }
     match self.op {
-      SessionOp::Sum => self.finite_sum,
-      SessionOp::Mean => self.finite_sum / count as f64,
+      SessionOp::Sum => self.finite_sum + self.sum_correction,
+      SessionOp::Mean => (self.finite_sum + self.sum_correction) / count as f64,
       SessionOp::Var | SessionOp::Std => {
         if count < 2 {
           f64::NAN
@@ -1129,6 +1105,25 @@ pub fn ta_session_rolling_corr(
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn rolling_mean_preserves_equal_price_threshold_after_many_evictions() {
+    let mut state = SessionWindowState::new_explicit(SessionOp::Mean).unwrap();
+    let values = [101.63,101.65,101.67,101.64,101.66];
+    let mut mean = 0.0;
+    for index in 0_u64..5000 {
+      mean = state.update_explicit(index.saturating_sub(19),index,values[index as usize % 5]);
+    }
+    assert_eq!(mean,101.65,"a drifting sum must not flip comparisons at an equal threshold");
+  }
+
+  #[test]
+  fn interval_sum_preserves_small_residual_after_cancellation() {
+    let mut state = SessionWindowState::new_explicit(SessionOp::Sum).unwrap();
+    state.update_explicit(0,10,1e16);
+    state.update_explicit(0,10,1.0);
+    assert_eq!(state.update_explicit(0,10,-1e16),1.0);
+  }
 
   #[test]
   fn extrema_missing_policy_and_infinities_apply_to_candidates() {

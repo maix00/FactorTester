@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use crate::algo::{IntervalKernel, SessionOp};
-use crate::algo::session_window::arg_extreme_position;
+use crate::algo::session_window::{arg_extreme_position, add_compensated};
 use serde::Deserialize;
 
 
@@ -170,9 +170,11 @@ pub struct FactorPlanKernel {
     timestamp_ns: i64,
     fields: usize,
     required_fields: usize,
+    input_columns: Vec<String>,
     slots: Vec<Vec<f64>>,
     node_keys: Vec<String>,
     boundary_channels: usize,
+    curve_channels: usize,
 }
 
 fn binary(op: BinaryOp, left: f64, right: f64) -> f64 {
@@ -188,12 +190,17 @@ fn binary(op: BinaryOp, left: f64, right: f64) -> f64 {
 impl FactorPlanKernel {
     pub fn boundary_channels(&self) -> usize { self.boundary_channels }
     pub fn input_fields(&self) -> usize { self.required_fields }
+    pub fn input_columns(&self) -> &[String] { &self.input_columns }
+    pub fn curve_channels(&self) -> usize { self.curve_channels }
     pub fn new(products: usize, specs: Vec<ExprSpec>, outputs: Vec<usize>) -> Result<Self, crate::algo::Error> {
         if products == 0 || specs.is_empty() || outputs.is_empty() {
             return Err(crate::algo::Error::InvalidParameter("plan requires products, nodes and outputs".into()));
         }
         let boundary_channels = specs.iter().filter_map(|spec| match spec {
             ExprSpec::Boundary { index } => Some(index + 1), _ => None,
+        }).max().unwrap_or(0);
+        let curve_channels = specs.iter().filter_map(|spec| match spec {
+            ExprSpec::Term { column, .. } => Some(column + 1), _ => None,
         }).max().unwrap_or(0);
         let mut nodes = Vec::with_capacity(specs.len());
         for spec in specs {
@@ -311,6 +318,7 @@ impl FactorPlanKernel {
                 ExprSpec::Rolling { window, .. } if *window == 0 => return Err(crate::algo::Error::InvalidParameter("rolling window must be positive".into())),
                 ExprSpec::Scope { count, sessions, .. } if sessions.is_empty() && *count == 0 => return Err(crate::algo::Error::InvalidParameter("scope count must be positive".into())),
                 ExprSpec::Since { count, .. } | ExprSpec::Distance { count, .. } if *count == 0 => return Err(crate::algo::Error::InvalidParameter("scope count must be positive".into())),
+                ExprSpec::Signal { signal_ns, .. } if *signal_ns <= 0 => return Err(crate::algo::Error::InvalidParameter("signal interval must be positive".into())),
                 _ => {}
             }
         }
@@ -318,7 +326,7 @@ impl FactorPlanKernel {
         let required_fields = nodes.iter().filter_map(|node| match node.spec.as_ref() {
             ExprSpec::Column(index) => Some(index + 1), _ => None,
         }).max().unwrap_or(0);
-        Ok(Self { products, nodes, outputs, ordinal: 0, timestamp_ns: 0, fields: 1, required_fields, slots, node_keys: Vec::new(), boundary_channels })
+        Ok(Self { products, nodes, outputs, ordinal: 0, timestamp_ns: 0, fields: 1, required_fields, input_columns: Vec::new(), slots, node_keys: Vec::new(), boundary_channels, curve_channels })
     }
 
     pub fn update(&mut self, values: &[f64]) -> Result<Vec<f64>, crate::algo::Error> {
@@ -645,9 +653,16 @@ impl FactorPlanKernel {
                         let target = timestamp_ns >= next;
                         let emit_partial = partial == "emit" && session_end == Some(timestamp_ns) && timestamp_ns < next;
                         if target || emit_partial {
-                            let value = if basepoint.as_str() == "first" { node.signal_pending[product].unwrap_or(if *include_current { input[product] } else { f64::NAN }) } else if *include_current { input[product] } else { node.signal_prev[product] };
+                            // A gap can cross many target points. The latest one
+                            // samples only observations at/before that target,
+                            // never the later Bar which reveals the gap.
+                            let last = basepoint.as_str() == "last";
+                            let latest = if target && last { next + ((timestamp_ns - next) / signal_ns) * signal_ns } else { next };
+                            let value = if !last { node.signal_pending[product].unwrap_or(if *include_current { input[product] } else { f64::NAN }) }
+                                else if *include_current && (!target || timestamp_ns == latest) { input[product] }
+                                else { node.signal_prev[product] };
                             node.signal_last[product] = value; node.signal_pending[product] = None;
-                            if target { node.signal_next[product] = Some(next + signal_ns); }
+                            if target { node.signal_next[product] = Some(latest.saturating_add(*signal_ns)); }
                         } else if basepoint.as_str() == "first" && node.signal_pending[product].is_none() { node.signal_pending[product] = Some(input[product]); }
                         node.signal_prev[product] = input[product];
                         out[product] = node.signal_last[product];
@@ -677,6 +692,7 @@ fn truncated_slice(op: &SessionOp, history: &VecDeque<f64>, start: u64, end: u64
     let mut count = 0usize;
     let mut nan_count = 0usize;
     let mut sum = 0.0;
+    let mut correction = 0.0;
     let mut sum_sq = 0.0;
     let mut minimum = f64::INFINITY;
     let mut maximum = f64::NEG_INFINITY;
@@ -692,14 +708,15 @@ fn truncated_slice(op: &SessionOp, history: &VecDeque<f64>, start: u64, end: u64
         if count == 0 || value < minimum { minimum = value; minimum_index = index; }
         if count == 0 || value > maximum { maximum = value; maximum_index = index; }
         count += 1;
-        sum += value;
+        if matches!(op, SessionOp::Sum | SessionOp::Mean) { add_compensated(&mut sum, &mut correction, value); }
+        else { sum += value; }
         sum_sq += value * value;
         if needs_values { finite.push(value); }
     }
     if (propagate_nan && nan_count > 0) || count < min_periods.max(1) { return f64::NAN; }
     match op {
-        SessionOp::Sum => sum,
-        SessionOp::Mean => sum / count as f64,
+        SessionOp::Sum => sum + correction,
+        SessionOp::Mean => (sum + correction) / count as f64,
         SessionOp::Min => minimum,
         SessionOp::Max => maximum,
         SessionOp::Argmin | SessionOp::Argmax | SessionOp::ArgminRaw | SessionOp::ArgmaxRaw => {
@@ -831,7 +848,7 @@ enum RawNode {
 }
 
 #[derive(Deserialize)]
-struct RawPlan { #[serde(default)] keys: Vec<String>, nodes: Vec<RawNode>, outputs: Vec<usize> }
+struct RawPlan { #[serde(default)] columns: Option<Vec<String>>, #[serde(default)] keys: Vec<String>, nodes: Vec<RawNode>, outputs: Vec<usize> }
 
 fn session_op(name: &str, quantile: Option<f64>) -> Result<SessionOp, crate::algo::Error> {
     crate::algo::parse_session_op(name, quantile)
@@ -907,6 +924,13 @@ impl FactorPlanKernel {
         }
         let mut plan = Self::new(products, specs, raw.outputs)?;
         plan.node_keys = raw.keys;
+        if let Some(columns) = raw.columns {
+            if columns.len() < plan.required_fields {
+                return Err(crate::algo::Error::InvalidParameter("plan column metadata differs from its input nodes".into()));
+            }
+            plan.required_fields = columns.len();
+            plan.input_columns = columns;
+        }
         Ok(plan)
     }
 
@@ -1266,6 +1290,32 @@ mod static_truncation_tests {
             let a = static_kernel.update(&[value]).unwrap()[0];
             let b = dynamic_kernel.update(&[value]).unwrap()[0];
             assert!(a.is_nan() && b.is_nan() || (a - b).abs() < 1e-12, "{a} != {b}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod signal_gap_tests {
+    use super::*;
+
+    #[test]
+    fn signal_last_asof_skips_missing_grid_points_without_future_values() {
+        for (include_current, expected) in [
+            (true, [f64::NAN,f64::NAN,40.0,40.0,150.0,150.0]),
+            (false,[f64::NAN,f64::NAN,40.0,40.0,120.0,120.0]),
+        ] {
+            let json = format!(r#"{{"nodes":[{{"kind":"column","index":0}},
+              {{"kind":"signal","child":0,"signal_ns":5,"basepoint":"last","include_current":{include_current}}}],"outputs":[1]}}"#);
+            let times = [1,4,11,12,15,16];
+            let values = [10.0,40.0,110.0,120.0,150.0,160.0];
+            for prefix in 1..=times.len() {
+                let mut kernel = FactorPlanKernel::from_spec_json(&json,1).unwrap();
+                for row in 0..prefix {
+                    let actual = kernel.update_at(times[row], &[values[row]]).unwrap()[0];
+                    assert!(actual.is_nan() && expected[row].is_nan() || actual == expected[row],
+                        "include_current={include_current} prefix={prefix} row={row}: {actual} != {}",expected[row]);
+                }
+            }
         }
     }
 }
