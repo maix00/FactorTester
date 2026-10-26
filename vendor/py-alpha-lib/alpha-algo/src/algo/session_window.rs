@@ -565,6 +565,32 @@ impl SessionWindowState {
   }
 }
 
+fn session_window_starts(session_ids: &[u32], lookback_sessions: usize) -> Result<Vec<u64>, Error> {
+  if lookback_sessions == 0 {
+    return Err(Error::InvalidParameter("lookback must be positive".to_string()));
+  }
+  if session_ids.windows(2).any(|pair| pair[0] > pair[1]) {
+    return Err(Error::InvalidParameter("session ids must be non-decreasing".to_string()));
+  }
+  let max_session = session_ids.last().copied().unwrap_or(0) as usize;
+  let mut first = vec![None; max_session + 1];
+  for (index, session) in session_ids.iter().copied().enumerate() {
+    first[session as usize].get_or_insert(index as u64);
+  }
+  let mut starts = Vec::with_capacity(session_ids.len());
+  for session in session_ids.iter().copied() {
+    let start_session = (session as usize + 1).saturating_sub(lookback_sessions);
+    let start = first[start_session..=session as usize]
+      .iter()
+      .flatten()
+      .copied()
+      .min()
+      .unwrap_or(0);
+    starts.push(start);
+  }
+  Ok(starts)
+}
+
 fn session_rolling_state<NumT: Float>(
   values: &[f64],
   session_ids: &[u32],
@@ -572,10 +598,11 @@ fn session_rolling_state<NumT: Float>(
   op: SessionOp,
 ) -> Result<Vec<NumT>, Error> {
   validate(values, session_ids, lookback_sessions)?;
-  let mut state = SessionWindowState::new_op(lookback_sessions, op)?;
+  let starts = session_window_starts(session_ids, lookback_sessions)?;
+  let mut state = SessionWindowState::new_explicit(op)?;
   let mut out = Vec::with_capacity(values.len());
-  for (value, session) in values.iter().zip(session_ids.iter()) {
-    out.push(NumT::from(state.update(*session, *value)).unwrap());
+  for (index, value) in values.iter().copied().enumerate() {
+    out.push(NumT::from(state.update_explicit(starts[index], index as u64, value)).unwrap());
   }
   Ok(out)
 }
@@ -600,15 +627,37 @@ pub fn ta_time_rolling_mean(timestamps: &[i64], values: &[f64], duration_ns: i64
   time_rolling(timestamps, values, duration_ns, true)
 }
 
+fn time_window_starts(timestamps: &[i64], duration_ns: i64) -> Result<Vec<u64>, Error> {
+  if duration_ns <= 0 {
+    return Err(Error::InvalidParameter("duration must be positive".to_string()));
+  }
+  if timestamps.windows(2).any(|pair| pair[0] > pair[1]) {
+    return Err(Error::InvalidParameter("timestamps must be non-decreasing".to_string()));
+  }
+  let mut deque: VecDeque<(u64, i64)> = VecDeque::new();
+  let mut starts = Vec::with_capacity(timestamps.len());
+  for (index, timestamp) in timestamps.iter().copied().enumerate() {
+    let cutoff = timestamp - duration_ns;
+    while deque.front().is_some_and(|(_, ts)| *ts < cutoff) {
+      deque.pop_front();
+    }
+    deque.push_back((index as u64, timestamp));
+    starts.push(deque.front().map(|(index, _)| *index).unwrap_or(index as u64));
+  }
+  Ok(starts)
+}
+
 fn time_rolling_op(
   timestamps: &[i64], values: &[f64], duration_ns: i64, op: SessionOp,
 ) -> Result<Vec<f64>, Error> {
   if timestamps.len() != values.len() {
     return Err(Error::LengthMismatch(timestamps.len(), values.len()));
   }
-  let mut state = SessionWindowState::new_wall(duration_ns, op)?;
-  Ok(timestamps.iter().copied().zip(values.iter().copied())
-    .map(|(ts, value)| state.update_at(0, ts, value)).collect())
+  let starts = time_window_starts(timestamps, duration_ns)?;
+  let mut state = SessionWindowState::new_explicit(op)?;
+  Ok(values.iter().copied().enumerate()
+    .map(|(index, value)| state.update_explicit(starts[index], index as u64, value))
+    .collect())
 }
 
 pub fn ta_time_rolling_var(timestamps: &[i64], values: &[f64], duration_ns: i64) -> Result<Vec<f64>, Error> {
@@ -645,9 +694,10 @@ fn time_rolling_pair(
   if timestamps.len() != x.len() || x.len() != y.len() {
     return Err(Error::LengthMismatch(timestamps.len(), x.len()));
   }
-  let mut state = SessionPairState::new_wall(duration_ns, correlation)?;
-  Ok(timestamps.iter().copied().zip(x.iter().copied()).zip(y.iter().copied())
-    .map(|((ts, x), y)| state.update_at(0, ts, x, y)).collect())
+  let starts = time_window_starts(timestamps, duration_ns)?;
+  let mut state = PairIntervalState::new(correlation);
+  Ok(x.iter().copied().zip(y.iter().copied()).enumerate()
+    .map(|(index, (x, y))| state.update(starts[index], index as u64, x, y)).collect())
 }
 
 pub fn ta_time_rolling_cov(
@@ -880,9 +930,11 @@ fn time_rolling(
     return Err(Error::LengthMismatch(timestamps.len(), values.len()));
   }
   let op = if mean { SessionOp::Mean } else { SessionOp::Sum };
-  let mut state = SessionWindowState::new_wall(duration_ns, op)?;
-  Ok(timestamps.iter().copied().zip(values.iter().copied())
-    .map(|(ts, value)| state.update_at(0, ts, value)).collect())
+  let starts = time_window_starts(timestamps, duration_ns)?;
+  let mut state = SessionWindowState::new_explicit(op)?;
+  Ok(values.iter().copied().enumerate()
+    .map(|(index, value)| state.update_explicit(starts[index], index as u64, value))
+    .collect())
 }
 
 /// Explicit-interval pair kernel for cov/corr.
@@ -1052,9 +1104,10 @@ fn session_rolling_pair(
     return Err(Error::LengthMismatch(x.len(), y.len()));
   }
   validate(x, session_ids, lookback_sessions)?;
-  let mut state = SessionPairState::new(lookback_sessions, correlation)?;
-  Ok(x.iter().copied().zip(y.iter().copied()).zip(session_ids.iter().copied())
-    .map(|((x, y), session)| state.update(session, x, y)).collect())
+  let starts = session_window_starts(session_ids, lookback_sessions)?;
+  let mut state = PairIntervalState::new(correlation);
+  Ok(x.iter().copied().zip(y.iter().copied()).enumerate()
+    .map(|(index, (x, y))| state.update(starts[index], index as u64, x, y)).collect())
 }
 
 pub fn ta_session_rolling_cov(
