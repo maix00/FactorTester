@@ -178,15 +178,7 @@ impl PanelPlan {
                     return Ok(());
                 }
                 if op.starts_with("linreg_") {
-                    let ctx = crate::algo::Context::default();
-                    let mut values = vec![f64::NAN; x.len()];
-                    match op {
-                        "linreg_slope" => crate::algo::ta_linreg_slope(&ctx, &mut values, &x, p[1] as usize, p[3] as usize)?,
-                        "linreg_r2" => crate::algo::ta_linreg_r2(&ctx, &mut values, &x, p[1] as usize, p[3] as usize)?,
-                        "linreg_tstat" => crate::algo::ta_linreg_tstat(&ctx, &mut values, &x, p[1] as usize, p[3] as usize)?,
-                        "linreg_resid_std" => crate::algo::ta_linreg_resid_std(&ctx, &mut values, &x, p[1] as usize, p[3] as usize)?,
-                        _ => return Err(error(format!("unsupported temporal operation {op}"))),
-                    }
+                    let values = panel_linreg(&x, p[1] as usize, op, p[3] as usize, p[4] != 0.0);
                     for (&t, value) in observed.iter().zip(values.iter()) { chunk[t] = *value; }
                     return Ok(());
                 }
@@ -316,4 +308,45 @@ mod audit_tests {
         assert!(out[0][2].is_nan(), "new partition must not reuse the previous partition result");
         assert_eq!(out[0][3], 4.0);
     }
+}
+
+
+fn panel_linreg(values: &[f64], window: usize, metric: &str, min: usize, prop: bool) -> Vec<f64> {
+    let window = window.max(1);
+    let mut out = vec![f64::NAN; values.len()];
+    let (mut sx, mut sy, mut sxx, mut syy, mut sxy) = (0.0, 0.0, 0.0, 0.0, 0.0);
+    let mut count = 0usize;
+    for index in 0..values.len() {
+        let x = index as f64;
+        let y = values[index];
+        if y.is_finite() { sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; count += 1; }
+        if index >= window {
+            let old_x = (index - window) as f64;
+            let old_y = values[index - window];
+            if old_y.is_finite() { sx -= old_x; sy -= old_y; sxx -= old_x * old_x; syy -= old_y * old_y; sxy -= old_x * old_y; count -= 1; }
+        }
+        let width = (index + 1).min(window);
+        if count < min.max(3) || (prop && count < width) { continue; }
+        let n = count as f64;
+        let cxx = sxx - sx * sx / n;
+        if cxx <= 0.0 { continue; }
+        let cyy = syy - sy * sy / n;
+        let cxy = sxy - sx * sy / n;
+        let slope = cxy / cxx;
+        let intercept = (sy - slope * sx) / n;
+        let sse = (syy - intercept * sy - slope * sxy).max(0.0);
+        out[index] = match metric {
+            "linreg_slope" => slope,
+            "linreg_r2" => if cyy <= 0.0 { f64::NAN } else { 1.0 - sse / cyy },
+            "linreg_resid_std" => if count < 3 { f64::NAN } else { (sse / (n - 2.0)).sqrt() },
+            "linreg_tstat" => {
+                if count < 3 { f64::NAN } else {
+                    let se = ((sse / (n - 2.0)) / cxx).sqrt();
+                    if se > 0.0 { slope / se } else { f64::NAN }
+                }
+            }
+            _ => f64::NAN,
+        };
+    }
+    out
 }
