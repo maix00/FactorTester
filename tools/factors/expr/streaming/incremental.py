@@ -273,6 +273,81 @@ class RustSessionPairNode:
         return result
 
 
+class RustBarPairNode:
+    """Fixed bar-count cov/corr executed by the unified Rust kernel."""
+
+    def __init__(self, op, children, window, width):
+        from alpha import BarPairState
+        if op not in {"rolling_cov", "rolling_corr"}:
+            raise UnsupportedStreamingFactor(f"bar pair does not support {op}")
+        self.op = op
+        self.children = tuple(children)
+        self.window = int(window)
+        self._width = width
+        self._states = [
+            BarPairState(self.window, op == "rolling_corr") for _ in range(width)
+        ]
+
+    def update(self, market, cache):
+        key = id(self)
+        if key in cache:
+            return cache[key]
+        left = np.asarray(self.children[0].update(market, cache), dtype=float)
+        right = np.asarray(self.children[1].update(market, cache), dtype=float)
+        if left.shape != (self._width,) or right.shape != (self._width,):
+            raise ValueError("bar pair input width changed")
+        result = np.asarray(
+            [state.update(float(x), float(y))
+             for state, x, y in zip(self._states, left, right, strict=True)],
+            dtype=float,
+        )
+        cache[key] = result
+        return result
+
+
+class RustBarRollingNode:
+    """Fixed bar-count window executed by the unified Rust kernel."""
+
+    _OPS = {
+        "rolling_mean": "mean", "rolling_sum": "sum",
+        "rolling_var": "var", "rolling_std": "std",
+        "rolling_min": "min", "rolling_max": "max",
+        "rolling_skew": "skew",
+        "rolling_argmin": "argmin", "rolling_argmax": "argmax",
+        "rolling_median": "quantile",
+        "rolling_quantile": "quantile", "rolling_rank": "rank",
+    }
+
+    def __init__(self, op, child, window, width, quantile=None):
+        from alpha import BarRollingState
+        rust_op = self._OPS.get(op)
+        if rust_op is None:
+            raise UnsupportedStreamingFactor(f"bar window does not support {op}")
+        self.op = op
+        self.child = child
+        self.window = int(window)
+        self._width = width
+        q = 0.5 if op == "rolling_median" else quantile
+        self._states = [
+            BarRollingState(self.window, rust_op, q) for _ in range(width)
+        ]
+
+    def update(self, market, cache):
+        key = id(self)
+        if key in cache:
+            return cache[key]
+        values = np.asarray(self.child.update(market, cache), dtype=float)
+        if values.shape != (self._width,):
+            raise ValueError("bar window input width changed")
+        result = np.asarray(
+            [state.update(float(value))
+             for state, value in zip(self._states, values, strict=True)],
+            dtype=float,
+        )
+        cache[key] = result
+        return result
+
+
 class RustWallPairNode:
     """Explicit wall-clock cov/corr executed by Rust."""
 
@@ -1548,6 +1623,25 @@ def compile_streaming_factor(
                 if len(children) != 1:
                     raise UnsupportedStreamingFactor("rolling_ema expects one streaming operand")
                 node = ExpandingEwmNode(children[0], window, len(products))
+            elif (
+                wall_duration_ns is None
+                and lookback_sessions is None
+                and expr.op in {"rolling_cov", "rolling_corr"}
+                and len(children) == 2
+            ):
+                node = RustBarPairNode(
+                    expr.op, children, window, len(products),
+                )
+            elif (
+                wall_duration_ns is None
+                and lookback_sessions is None
+                and len(children) == 1
+                and expr.op in RustBarRollingNode._OPS
+            ):
+                node = RustBarRollingNode(
+                    expr.op, children[0], window, len(products),
+                    quantile=getattr(expr, "quantile", None),
+                )
             else:
                 node = RollingWindowNode(
                     expr.op,
