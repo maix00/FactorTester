@@ -11,6 +11,33 @@ from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
+
+from tools.factors.events import EventId
+
+
+class _DayEvents:
+    """Minimal EventLine used by scope tests; ordinal is 1-based like Nautilus."""
+
+    def __init__(self) -> None:
+        self.ordinal = 0
+        self.day = None
+        self.events = {}
+
+    def observe(self, stamp) -> None:
+        self.ordinal += 1
+        day = pd.Timestamp(stamp).normalize()
+        if day != self.day:
+            self.day = day
+            self.events[EventId.TRADING_DAY_START] = self.ordinal
+
+    def latest(self, event):
+        return self.events.get(event)
+
+    def previous(self, event):
+        return self.events.get(event)
+
+    def first(self, event):
+        return self.events.get(event)
 import pytest
 
 from tools.data.types import DataFreq
@@ -185,7 +212,7 @@ def test_compiled_plan_routes_groupby_scope_to_the_scope_kernel():
     from tools.factors.expr.groupby_scope import GroupByScopeExpr
     from tools.factors.expr.leaf import ColumnRef
     from tools.factors.expr.streaming.incremental import (
-        GroupScopeNode,
+        RustEventWindowNode,
         StreamingFactorPlan,
         compile_incremental_factor,
         compile_streaming_factor,
@@ -193,18 +220,23 @@ def test_compiled_plan_routes_groupby_scope_to_the_scope_kernel():
 
     column = DataColumn.CLOSE
     expression = GroupByScopeExpr(scope_trading_day(), ColumnRef(column)).mean()
-    plan = compile_streaming_factor(expression, ("A",), source_freq=DataFreq.MIN1)
+    events = _DayEvents()
+    plan = compile_streaming_factor(
+        expression, ("A",), source_freq=DataFreq.MIN1, event_line=events,
+    )
     assert isinstance(plan, StreamingFactorPlan)
-    assert isinstance(plan._root, GroupScopeNode), (
-        f"编译路径没有接到作用域内核，而是 {type(plan._root).__name__}"
+    assert isinstance(plan._root, RustEventWindowNode), (
+        f"编译路径没有接到事件作用域内核，而是 {type(plan._root).__name__}"
     )
 
     executor = compile_incremental_factor(
         "trading-day-mean", expression, ("A",), source_freq=DataFreq.MIN1,
+        event_line=events,
     )
     index = pd.date_range("2026-01-05 09:31", periods=4, freq="min")
     observed = []
     for position, stamp in enumerate(index):
+        events.observe(stamp)
         executor.on_bar(
             pd.Timestamp(stamp),
             {"A": {column.name: float(position)}},
@@ -225,14 +257,17 @@ def test_compiled_plan_resets_at_the_day_boundary():
 
     column = DataColumn.CLOSE
     expression = GroupByScopeExpr(scope_trading_day(), ColumnRef(column)).mean()
+    events = _DayEvents()
     executor = compile_incremental_factor(
         "trading-day-mean", expression, ("A",), source_freq=DataFreq.MIN1,
+        event_line=events,
     )
 
     def feed(day: str, values: list[float]) -> list[float]:
         out = []
         stamps = pd.date_range(f"{day} 09:31", periods=len(values), freq="min")
         for value, stamp in zip(values, stamps, strict=True):
+            events.observe(stamp)
             executor.on_bar(
                 pd.Timestamp(stamp), {"A": {column.name: value}},
                 trading_day=pd.Timestamp(stamp).normalize(),

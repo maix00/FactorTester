@@ -276,79 +276,80 @@ class RustSessionPairNode:
         return result
 
 
-class RustPartitionNode:
-    """Scope-partitioned aggregation executed by the Rust partition policy."""
+class RustRangeScopeNode:
+    """Scope aggregation over an explicit [start, end] event/bar interval."""
 
     _OPS = {
         "mean": "mean", "sum": "sum", "var": "var", "std": "std",
         "min": "min", "max": "max", "skew": "skew",
         "argmin": "argmin", "argmax": "argmax",
-        "median": "median", "quantile": "quantile", "rank": "rank",
+        "median": "quantile", "quantile": "quantile", "rank": "rank",
         "mad": "mad",
     }
 
-    def __init__(self, op, child, scope, width, quantile=None, source_freq=None, products=(), range_start=None, range_end=None):
-        from alpha import PartitionRangeState, PartitionState
+    def __init__(self, op, child, scope, width, *, trunc_start, trunc_end,
+                 event_line=None, source_freq=None, products=()):
+        from alpha import ExplicitRangeState
+        from tools.factors.events import EventId, EventRef, resolve_event_ref
         from tools.factors.expr.lookback_scope import (
             BarCountScope, SessionScope, TradingDayScope,
         )
         rust_op = self._OPS.get(op)
         if rust_op is None:
-            raise UnsupportedStreamingFactor(f"partition scope does not support {op}")
+            raise UnsupportedStreamingFactor(f"range scope does not support {op}")
         self.op = op
         self.child = child
         self.scope = scope
+        self.event_line = event_line
         self._width = width
-        if range_start is not None and range_end is not None:
-            self._states = [
-                PartitionRangeState(int(range_start), int(range_end), rust_op, quantile)
-                for _ in range(width)
-            ]
+        self._ordinal = 0
+        self._trunc_start = int(trunc_start)
+        self._trunc_end = int(trunc_end)
+        self._states = [ExplicitRangeState(rust_op, None) for _ in range(width)]
+        if isinstance(scope, TradingDayScope):
+            self._event_ref = EventRef(EventId.TRADING_DAY_START)
+            self._bar_count = None
+        elif isinstance(scope, SessionScope):
+            self._event_ref = EventRef(EventId.TRADING_SESSION_START)
+            self._bar_count = None
+        elif isinstance(scope, BarCountScope):
+            self._event_ref = None
+            self._bar_count = int(scope.resolved_count(
+                source_freq=source_freq, products=products,
+            ))
         else:
-            self._states = [PartitionState(rust_op, quantile) for _ in range(width)]
-        self._last_ts = [None] * width
-        self._session_id = [0] * width
-        self._bar_ordinal = 0
-        self._day_scope = isinstance(scope, TradingDayScope)
-        self._session_scope = isinstance(scope, SessionScope)
-        self._bar_scope = isinstance(scope, BarCountScope)
-        self._gap = pd.Timedelta(getattr(scope, "gap", "3h"))
-        self._bar_count = 1
-        if self._bar_scope:
-            self._bar_count = int(scope.resolved_count(source_freq=source_freq, products=products))
+            raise UnsupportedStreamingFactor(f"unsupported range scope: {scope!r}")
+        if self._event_ref is not None and event_line is None:
+            raise UnsupportedStreamingFactor("event range scope needs an EventLine")
+
+    def _base(self):
+        if self._bar_count is not None:
+            base = (self._ordinal // self._bar_count) * self._bar_count
+            self._ordinal += 1
+            return base
+        from tools.factors.events import resolve_event_ref
+        occurrence = resolve_event_ref(self._event_ref, self.event_line, 0)
+        if occurrence is None:
+            return None
+        return max(0, int(occurrence) - 1)
 
     def update(self, market, cache):
         key = id(self)
         if key in cache:
             return cache[key]
+        base = self._base()
+        if base is None:
+            return np.full(self._width, np.nan, dtype=float)
+        start = base + self._trunc_start
+        end = base + self._trunc_end
         values = np.asarray(self.child.update(market, cache), dtype=float)
         if values.shape != (self._width,):
-            raise ValueError("partition scope input width changed")
-        timestamp = getattr(market, "timestamp", None)
-        trading_day = getattr(market, "trading_day", None)
-        if self._day_scope and trading_day is None:
-            raise UnsupportedStreamingFactor("trading_day scope needs trading_day")
-        if timestamp is None and (self._day_scope or self._session_scope):
-            raise UnsupportedStreamingFactor("scope needs bar timestamps")
-        ts = pd.Timestamp(timestamp) if timestamp is not None else None
-        if self._bar_scope:
-            partition = self._bar_ordinal // self._bar_count
-            self._bar_ordinal += 1
-        elif self._day_scope:
-            partition = int(pd.Timestamp(trading_day).value)
-        else:
-            partition = None
-        result = np.empty(self._width, dtype=float)
-        for index, value in enumerate(values):
-            if self._session_scope:
-                last = self._last_ts[index]
-                if last is not None and ts - last >= self._gap:
-                    self._session_id[index] += 1
-                self._last_ts[index] = ts
-                product_partition = self._session_id[index]
-            else:
-                product_partition = int(partition)
-            result[index] = self._states[index].update(product_partition, float(value))
+            raise ValueError("range scope input width changed")
+        result = np.asarray(
+            [state.update(start, end, float(value))
+             for state, value in zip(self._states, values, strict=True)],
+            dtype=float,
+        )
         cache[key] = result
         return result
 
@@ -406,6 +407,12 @@ class RustEventWindowNode:
         "rolling_median": "quantile",
         "rolling_quantile": "quantile", "rolling_rank": "rank",
         "rolling_mad": "mad",
+        # groupby_scope op names
+        "mean": "mean", "sum": "sum", "var": "var", "std": "std",
+        "min": "min", "max": "max", "skew": "skew",
+        "argmin": "argmin", "argmax": "argmax",
+        "median": "quantile", "quantile": "quantile", "rank": "rank",
+        "mad": "mad",
     }
 
     def __init__(self, op, child, event_ref, event_line, width, quantile=None):
@@ -1890,10 +1897,18 @@ def compile_streaming_factor(
             trunc_start = _resolve_truncation(expr.trunc_start)
             trunc_end = _resolve_truncation(expr.trunc_end)
             has_trunc = trunc_start is not None or trunc_end is not None
-            rust_range = has_trunc
             event_scope = None
             bar_scope_count = None
-            if not has_trunc:
+            if has_trunc:
+                node = RustRangeScopeNode(
+                    op_name, data_operands[0], expr.scope, len(products),
+                    trunc_start=(trunc_start if isinstance(trunc_start, int) else 0),
+                    trunc_end=(trunc_end if isinstance(trunc_end, int) else 0),
+                    event_line=event_line, source_freq=source_freq,
+                    products=products,
+                )
+                rust_partition = True
+            elif not has_trunc:
                 from tools.factors.expr.lookback_scope import (
                     BarCountScope, SessionScope, TradingDayScope,
                 )
@@ -1907,48 +1922,21 @@ def compile_streaming_factor(
                         event_scope = EventRef(EventId.TRADING_DAY_START)
                     elif isinstance(expr.scope, SessionScope):
                         event_scope = EventRef(EventId.TRADING_SESSION_START)
-            if bar_scope_count is not None and op_name in RustBarScopeNode._OPS:
-                try:
-                    node = RustBarScopeNode(
-                        op_name, data_operands[0], bar_scope_count, len(products),
-                        quantile=quantile,
-                    )
-                    rust_partition = True
-                except ImportError:
-                    rust_partition = False
-            if not rust_partition and event_scope is not None and op_name in RustEventWindowNode._OPS:
-                try:
-                    node = RustEventWindowNode(
-                        op_name, data_operands[0], event_scope, event_line,
-                        len(products), quantile=quantile,
-                    )
-                    rust_partition = True
-                except ImportError:
-                    rust_partition = False
-            if not rust_partition and op_name in RustPartitionNode._OPS:
-                try:
-                    node = RustPartitionNode(
-                        op_name, data_operands[0], expr.scope, len(products),
-                        quantile=quantile, source_freq=source_freq, products=products,
-                        range_start=(trunc_start if isinstance(trunc_start, int) else 0)
-                        if has_trunc else None,
-                        range_end=trunc_end if isinstance(trunc_end, int) else None,
-                    )
-                    rust_partition = True
-                except ImportError:
-                    # Installed py-alpha wheel predates the unified kernel.
-                    rust_partition = False
-            if not rust_partition:
-                node = GroupScopeNode(
-                    op_name,
-                    data_operands[0],
-                    expr.scope,
-                    len(products),
+            if not has_trunc and bar_scope_count is not None and op_name in RustBarScopeNode._OPS:
+                node = RustBarScopeNode(
+                    op_name, data_operands[0], bar_scope_count, len(products),
                     quantile=quantile,
-                    trunc_start=trunc_start,
-                    trunc_end=trunc_end,
-                    products=products,
-                    source_freq=source_freq,
+                )
+                rust_partition = True
+            if not rust_partition and event_scope is not None and op_name in RustEventWindowNode._OPS:
+                node = RustEventWindowNode(
+                    op_name, data_operands[0], event_scope, event_line,
+                    len(products), quantile=quantile,
+                )
+                rust_partition = True
+            if not rust_partition:
+                raise UnsupportedStreamingFactor(
+                    "scope aggregation requires the unified Rust kernel"
                 )
         elif isinstance(expr, ShiftOp):
             if not isinstance(expr.periods, ConstExpr) or not isinstance(expr.periods.value, int):
