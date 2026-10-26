@@ -2895,6 +2895,156 @@ impl IntervalPairState {
   }
 }
 
+#[derive(Clone)]
+enum PlanNode {
+  Const(f64),
+  Column(usize),
+  Rolling { child: usize, window: usize, op: String, min: usize, prop: bool },
+  Binary { op: String, left: usize, right: usize },
+}
+
+fn plan_rolling(values: &[f64], window: usize, op: &str, min: usize, prop: bool) -> pyo3::PyResult<Vec<f64>> {
+  use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+  use rayon::slice::ParallelSliceMut;
+  let window = window.max(1);
+  if !matches!(op, "sum" | "mean" | "var" | "std" | "skew") {
+    return Err(pyo3::exceptions::PyValueError::new_err(
+      format!("batch plan rolling does not support {op}")
+    ));
+  }
+  const CHUNK: usize = 65_536;
+  let n = values.len();
+  let mut out = vec![f64::NAN; n];
+  out.par_chunks_mut(CHUNK).enumerate().for_each(|(chunk_index, chunk)| {
+    let chunk_start = chunk_index * CHUNK;
+    let (mut total, mut square, mut cube, mut count) = (0.0f64, 0.0f64, 0.0f64, 0usize);
+    for value in &values[chunk_start.saturating_sub(window)..chunk_start] {
+      if value.is_finite() {
+        total += *value; square += *value * *value; cube += *value * *value * *value;
+        count += 1;
+      }
+    }
+    for (offset, slot) in chunk.iter_mut().enumerate() {
+      let index = chunk_start + offset;
+      let value = values[index];
+      if value.is_finite() {
+        total += value; square += value * value; cube += value * value * value;
+        count += 1;
+      }
+      if index >= window {
+        let old = values[index - window];
+        if old.is_finite() {
+          total -= old; square -= old * old; cube -= old * old * old; count -= 1;
+        }
+      }
+      let width = (index + 1).min(window);
+      *slot = if count == 0 || count < min || (prop && count < width) {
+        f64::NAN
+      } else {
+        match op {
+          "sum" => total,
+          "mean" => total / count as f64,
+          "var" | "std" => {
+            if count < 2 { f64::NAN } else {
+              let variance = ((square - total * total / count as f64) / (count - 1) as f64).max(0.0);
+              if op == "std" { variance.sqrt() } else { variance }
+            }
+          }
+          "skew" => {
+            if count < 3 { f64::NAN } else {
+              let n = count as f64;
+              let mean = total / n;
+              let m2 = (square - total * total / n).max(0.0);
+              let m3 = cube - 3.0 * mean * square + 2.0 * n * mean * mean * mean;
+              if m2 <= 0.0 { f64::NAN } else {
+                let population = (m3 / n) / (m2 / n).powf(1.5);
+                population * (n * (n - 1.0)).sqrt() / (n - 2.0)
+              }
+            }
+          }
+          _ => f64::NAN,
+        }
+      };
+    }
+  });
+  Ok(out)
+}
+
+#[pyclass]
+struct BatchPlan {
+  nodes: Vec<PlanNode>,
+}
+
+#[pymethods]
+impl BatchPlan {
+  #[new]
+  fn new() -> Self { Self { nodes: Vec::new() } }
+
+  fn constant(&mut self, value: f64) -> usize {
+    self.nodes.push(PlanNode::Const(value));
+    self.nodes.len() - 1
+  }
+
+  fn column(&mut self, index: usize) -> usize {
+    self.nodes.push(PlanNode::Column(index));
+    self.nodes.len() - 1
+  }
+
+  fn rolling(&mut self, child: usize, window: usize, op: &str, min: usize, prop: bool) -> usize {
+    self.nodes.push(PlanNode::Rolling {
+      child, window, op: op.to_string(), min, prop,
+    });
+    self.nodes.len() - 1
+  }
+
+  fn binary(&mut self, op: &str, left: usize, right: usize) -> usize {
+    self.nodes.push(PlanNode::Binary { op: op.to_string(), left, right });
+    self.nodes.len() - 1
+  }
+
+  fn execute(
+    &self, py: pyo3::Python<'_>, columns: Vec<numpy::PyReadonlyArray1<f64>>, output: usize,
+  ) -> pyo3::PyResult<pyo3::Py<numpy::PyArray1<f64>>> {
+    let mut outputs = self.execute_many(py, columns, vec![output])?;
+    Ok(outputs.remove(0))
+  }
+
+  fn execute_many(
+    &self, py: pyo3::Python<'_>, columns: Vec<numpy::PyReadonlyArray1<f64>>, outputs: Vec<usize>,
+  ) -> pyo3::PyResult<Vec<pyo3::Py<numpy::PyArray1<f64>>>> {
+    use numpy::IntoPyArray;
+    let columns: Vec<&[f64]> = columns.iter().map(|c| c.as_slice()).collect::<Result<_, _>>()?;
+    let mut values: Vec<Vec<f64>> = Vec::with_capacity(self.nodes.len());
+    for node in &self.nodes {
+      let value = match node {
+        PlanNode::Const(value) => columns.first().map(|c| vec![*value; c.len()]).unwrap_or_default(),
+        PlanNode::Column(index) => columns.get(*index)
+          .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("plan column out of range"))?
+          .to_vec(),
+        PlanNode::Rolling { child, window, op, min, prop } => {
+          plan_rolling(&values[*child], *window, op, *min, *prop)?
+        }
+        PlanNode::Binary { op, left, right } => {
+          let (a, b) = (&values[*left], &values[*right]);
+          if a.len() != b.len() {
+            return Err(pyo3::exceptions::PyValueError::new_err("plan binary length mismatch"));
+          }
+          a.iter().zip(b.iter()).map(|(x, y)| match op.as_str() {
+            "+" => x + y, "-" => x - y, "*" => x * y, "/" => x / y,
+            other => f64::NAN * (other.len() as f64),
+          }).collect()
+        }
+      };
+      values.push(value);
+    }
+    outputs.into_iter().map(|output| {
+      let out = values.get(output)
+        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("plan output out of range"))?;
+      Ok(out.clone().into_pyarray(py).unbind())
+    }).collect()
+  }
+}
+
 #[pyclass]
 struct IntervalState {
   inner: alpha_algo::IntervalKernel,
@@ -2976,6 +3126,7 @@ fn _algo(m: &Bound<'_, PyModule>) -> PyResult<()> {
   m.add_class::<EmaState>()?;
   m.add_class::<IntervalState>()?;
   m.add_class::<IntervalPairState>()?;
+  m.add_class::<BatchPlan>()?;
   m.add_class::<GroupKernel>()?;
   m.add_class::<TermCarryKernel>()?;
   m.add_class::<LifecycleKernel>()?;

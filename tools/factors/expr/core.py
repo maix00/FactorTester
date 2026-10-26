@@ -319,7 +319,12 @@ class FactorExpr:
         )
         if cacheable and cache is not None and sk in cache:
             return cache[sk]
-        result = self._evaluate(ctx)
+        try:
+            from .rust_plan import try_evaluate_rust_plan
+            planned = try_evaluate_rust_plan(self, ctx)
+        except Exception:
+            planned = None
+        result = planned if planned is not None else self._evaluate(ctx)
         if cacheable and cache is not None:
             cache[sk] = result
         # 全局求值进度：每次完成一个节点的实际计算后递增。

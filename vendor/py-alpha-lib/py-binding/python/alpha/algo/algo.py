@@ -115,3 +115,6 @@ def interval_ema(values, span: int, min_periods: int = 1, propagate_nan: bool = 
     ),
     dtype=float,
   )
+
+
+BatchPlan = _algo.BatchPlan
