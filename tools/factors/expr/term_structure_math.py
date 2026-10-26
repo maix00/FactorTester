@@ -37,7 +37,7 @@ def normalize_term_curve(curve: Any) -> pd.DataFrame:
     return frame.reset_index(drop=True)
 
 
-def evaluate_term_curve(
+def _evaluate_term_curve_local(
     op: str,
     curve: pd.DataFrame,
     *,
@@ -117,3 +117,27 @@ def _days(frame: pd.DataFrame) -> np.ndarray:
 
 def _values(frame: pd.DataFrame, column: str) -> np.ndarray:
     return frame[column].to_numpy(dtype=float)
+
+
+
+def evaluate_term_curve(
+    op: str,
+    curve: pd.DataFrame,
+    *,
+    near_rank: int,
+    far_rank: int,
+    depth: int,
+    column: str,
+) -> float:
+    """Prefer the alpha public metric; keep tools fallback only if alpha is absent."""
+    try:
+        from alpha.factor.term import evaluate_term_metric
+    except ImportError:
+        return _evaluate_term_curve_local(
+            op, curve, near_rank=near_rank, far_rank=far_rank,
+            depth=depth, column=column,
+        )
+    return evaluate_term_metric(
+        op, curve, near_rank=near_rank, far_rank=far_rank,
+        depth=depth, column=column,
+    )

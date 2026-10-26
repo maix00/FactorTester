@@ -57,6 +57,13 @@ def _metric(op: str, curve: pd.DataFrame, *, near_rank: int, far_rank: int,
     raise ValueError(f"unknown term operation {op}")
 
 
+def evaluate_term_metric(op: str, curve: pd.DataFrame, *, near_rank: int,
+                         far_rank: int, depth: int, column: str) -> float:
+    """Public pure-metric entry point shared with tools.factors."""
+    return _metric(op, curve, near_rank=near_rank, far_rank=far_rank,
+                   depth=depth, column=column)
+
+
 class TermStructureExpr(FactorExpr):
     def __init__(self, op: str, *, near_rank: int = 0, far_rank: int = 1,
                  depth: int = 4, column: str = "CLOSE"):
