@@ -72,7 +72,169 @@ where
 /// The caller advances one bar at a time.  Eviction follows the session
 /// ordinal, so the logical window can grow/shrink at session boundaries while
 /// each update remains amortized O(1).
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug)]
+struct OstNode {
+  key: f64,
+  count: usize,
+  size: usize,
+  priority: u64,
+  left: Option<usize>,
+  right: Option<usize>,
+}
+
+#[derive(Default)]
+struct OrderStatisticTree {
+  nodes: Vec<OstNode>,
+  root: Option<usize>,
+}
+
+impl OrderStatisticTree {
+  fn size(node: Option<usize>, nodes: &[OstNode]) -> usize {
+    node.map(|index| nodes[index].size).unwrap_or(0)
+  }
+
+  fn refresh(&mut self, node: usize) {
+    let left = Self::size(self.nodes[node].left, &self.nodes);
+    let right = Self::size(self.nodes[node].right, &self.nodes);
+    self.nodes[node].size = left + self.nodes[node].count + right;
+  }
+
+  fn priority(key: f64) -> u64 {
+    let mut bits = key.to_bits();
+    bits ^= bits >> 33;
+    bits = bits.wrapping_mul(0xff51afd7ed558ccd);
+    bits ^= bits >> 33;
+    bits = bits.wrapping_mul(0xc4ceb9fe1a85ec53);
+    bits ^= bits >> 33;
+    bits
+  }
+
+  fn rotate_right(&mut self, node: usize) -> usize {
+    let left = self.nodes[node].left.unwrap();
+    self.nodes[node].left = self.nodes[left].right;
+    self.nodes[left].right = Some(node);
+    self.refresh(node);
+    self.refresh(left);
+    left
+  }
+
+  fn rotate_left(&mut self, node: usize) -> usize {
+    let right = self.nodes[node].right.unwrap();
+    self.nodes[node].right = self.nodes[right].left;
+    self.nodes[right].left = Some(node);
+    self.refresh(node);
+    self.refresh(right);
+    right
+  }
+
+  fn insert_at(&mut self, node: Option<usize>, key: f64, priority: u64) -> usize {
+    let Some(index) = node else {
+      let index = self.nodes.len();
+      self.nodes.push(OstNode { key, count: 1, size: 1, priority, left: None, right: None });
+      return index;
+    };
+    if key == self.nodes[index].key {
+      self.nodes[index].count += 1;
+      self.refresh(index);
+      return index;
+    }
+    if key < self.nodes[index].key {
+      let child = self.insert_at(self.nodes[index].left, key, priority);
+      self.nodes[index].left = Some(child);
+      self.refresh(index);
+      if self.nodes[child].priority > self.nodes[index].priority {
+        return self.rotate_right(index);
+      }
+    } else {
+      let child = self.insert_at(self.nodes[index].right, key, priority);
+      self.nodes[index].right = Some(child);
+      self.refresh(index);
+      if self.nodes[child].priority > self.nodes[index].priority {
+        return self.rotate_left(index);
+      }
+    }
+    index
+  }
+
+  fn merge(&mut self, left: Option<usize>, right: Option<usize>) -> Option<usize> {
+    match (left, right) {
+      (None, node) | (node, None) => node,
+      (Some(l), Some(r)) => {
+        if self.nodes[l].priority > self.nodes[r].priority {
+          let new_right = self.merge(self.nodes[l].right, Some(r));
+          self.nodes[l].right = new_right;
+          self.refresh(l);
+          Some(l)
+        } else {
+          let new_left = self.merge(Some(l), self.nodes[r].left);
+          self.nodes[r].left = new_left;
+          self.refresh(r);
+          Some(r)
+        }
+      }
+    }
+  }
+
+  fn remove_at(&mut self, node: Option<usize>, key: f64) -> Option<usize> {
+    let index = node?;
+    if key == self.nodes[index].key {
+      if self.nodes[index].count > 1 {
+        self.nodes[index].count -= 1;
+        self.refresh(index);
+        return Some(index);
+      }
+      return self.merge(self.nodes[index].left, self.nodes[index].right);
+    }
+    if key < self.nodes[index].key {
+      self.nodes[index].left = self.remove_at(self.nodes[index].left, key);
+    } else {
+      self.nodes[index].right = self.remove_at(self.nodes[index].right, key);
+    }
+    self.refresh(index);
+    Some(index)
+  }
+
+  fn insert(&mut self, key: f64) {
+    let priority = Self::priority(key);
+    self.root = Some(self.insert_at(self.root, key, priority));
+  }
+
+  fn remove(&mut self, key: f64) {
+    self.root = self.remove_at(self.root, key);
+  }
+
+  fn rank_le(&self, key: f64) -> usize {
+    let mut node = self.root;
+    let mut total = 0;
+    while let Some(index) = node {
+      if key < self.nodes[index].key {
+        node = self.nodes[index].left;
+      } else {
+        total += Self::size(self.nodes[index].left, &self.nodes) + self.nodes[index].count;
+        node = self.nodes[index].right;
+      }
+    }
+    total
+  }
+
+  fn kth(&self, mut k: usize) -> Option<f64> {
+    let mut node = self.root;
+    while let Some(index) = node {
+      let left = Self::size(self.nodes[index].left, &self.nodes);
+      if k < left {
+        node = self.nodes[index].left;
+      } else if k < left + self.nodes[index].count {
+        return Some(self.nodes[index].key);
+      } else {
+        k -= left + self.nodes[index].count;
+        node = self.nodes[index].right;
+      }
+    }
+    None
+  }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SessionOp {
   Sum,
   Mean,
@@ -83,6 +245,8 @@ pub enum SessionOp {
   Skew,
   Argmin,
   Argmax,
+  Quantile(f64),
+  Rank,
 }
 
 pub struct SessionWindowState {
@@ -96,6 +260,7 @@ pub struct SessionWindowState {
   next_index: u64,
   min_deque: VecDeque<(u64, f64)>,
   max_deque: VecDeque<(u64, f64)>,
+  order_stat: Option<OrderStatisticTree>,
 }
 
 impl SessionWindowState {
@@ -118,6 +283,11 @@ impl SessionWindowState {
       next_index: 0,
       min_deque: VecDeque::new(),
       max_deque: VecDeque::new(),
+      order_stat: if matches!(op, SessionOp::Quantile(_) | SessionOp::Rank) {
+        Some(OrderStatisticTree::default())
+      } else {
+        None
+      },
     })
   }
 
@@ -128,6 +298,7 @@ impl SessionWindowState {
       self.finite_sumsq -= old * old;
       self.finite_sum3 -= old * old * old;
       self.finite_count -= 1;
+      if let Some(tree) = self.order_stat.as_mut() { tree.remove(old); }
     }
     while self.min_deque.front().is_some_and(|(i, _)| *i <= index) {
       self.min_deque.pop_front();
@@ -155,6 +326,7 @@ impl SessionWindowState {
       self.finite_sumsq += value * value;
       self.finite_sum3 += value * value * value;
       self.finite_count += 1;
+      if let Some(tree) = self.order_stat.as_mut() { tree.insert(value); }
       while self.min_deque.back().is_some_and(|(_, v)| *v >= value) {
         self.min_deque.pop_back();
       }
@@ -188,6 +360,22 @@ impl SessionWindowState {
         let Some((index, _)) = deque.front() else { return f64::NAN };
         let current = self.next_index.saturating_sub(1);
         if count <= 1 { 0.0 } else { (current - *index) as f64 / (count - 1) as f64 }
+      }
+      SessionOp::Rank => {
+        let Some(tree) = self.order_stat.as_ref() else { return f64::NAN };
+        if !value.is_finite() { f64::NAN } else {
+          tree.rank_le(value) as f64 / count as f64
+        }
+      }
+      SessionOp::Quantile(q) => {
+        let Some(tree) = self.order_stat.as_ref() else { return f64::NAN };
+        let position = q.clamp(0.0, 1.0) * (count - 1) as f64;
+        let lower = position.floor() as usize;
+        let upper = position.ceil() as usize;
+        let (Some(low), Some(high)) = (tree.kth(lower), tree.kth(upper)) else {
+          return f64::NAN;
+        };
+        low + (high - low) * (position - lower as f64)
       }
       SessionOp::Skew => {
         if count < 3 {
@@ -561,6 +749,19 @@ mod tests {
     let values = [1.0, 2.0, 3.0, 4.0];
     let sum = ta_time_rolling_sum(&timestamps, &values, 2_000).unwrap();
     assert_eq!(sum, vec![1.0, 3.0, 3.0, 7.0]);
+  }
+
+  #[test]
+  fn streaming_quantile_rank_use_session_window() {
+    let mut median = SessionWindowState::new_op(1, SessionOp::Quantile(0.5)).unwrap();
+    median.update(0, 1.0);
+    median.update(0, 2.0);
+    assert_eq!(median.update(0, 3.0), 2.0);
+    let mut rank = SessionWindowState::new_op(1, SessionOp::Rank).unwrap();
+    rank.update(0, 1.0);
+    rank.update(0, 2.0);
+    assert!((rank.update(0, 3.0) - 1.0).abs() < 1e-12);
+    assert_eq!(rank.update(1, 5.0), 1.0);
   }
 
   #[test]

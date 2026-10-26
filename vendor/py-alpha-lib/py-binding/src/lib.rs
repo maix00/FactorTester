@@ -2571,8 +2571,8 @@ struct SessionRollingState {
 #[pymethods]
 impl SessionRollingState {
   #[new]
-  #[pyo3(signature = (lookback_sessions, mean=false, op=None))]
-  fn new(lookback_sessions: usize, mean: bool, op: Option<&str>) -> PyResult<Self> {
+  #[pyo3(signature = (lookback_sessions, mean=false, op=None, quantile=None))]
+  fn new(lookback_sessions: usize, mean: bool, op: Option<&str>, quantile: Option<f64>) -> PyResult<Self> {
     use alpha_algo::SessionOp;
     let op = match op.unwrap_or(if mean { "mean" } else { "sum" }) {
       "sum" => SessionOp::Sum,
@@ -2584,6 +2584,8 @@ impl SessionRollingState {
       "skew" => SessionOp::Skew,
       "argmin" => SessionOp::Argmin,
       "argmax" => SessionOp::Argmax,
+      "quantile" => SessionOp::Quantile(quantile.unwrap_or(0.5)),
+      "rank" => SessionOp::Rank,
       other => return Err(pyo3::exceptions::PyValueError::new_err(
         format!("unsupported session op: {other}")
       )),
