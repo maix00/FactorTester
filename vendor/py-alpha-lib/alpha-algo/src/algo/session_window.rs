@@ -310,6 +310,19 @@ impl OrderStatisticTree {
   }
 }
 
+pub fn parse_session_op(name: &str, quantile: Option<f64>) -> Result<SessionOp, Error> {
+  Ok(match name {
+    "mean" => SessionOp::Mean, "sum" => SessionOp::Sum, "var" => SessionOp::Var,
+    "std" => SessionOp::Std, "min" => SessionOp::Min, "max" => SessionOp::Max,
+    "skew" => SessionOp::Skew, "argmin" => SessionOp::Argmin, "argmax" => SessionOp::Argmax,
+    "argmin_raw" => SessionOp::ArgminRaw, "argmax_raw" => SessionOp::ArgmaxRaw,
+    "rank" => SessionOp::Rank, "mad" => SessionOp::Mad,
+    "median" => SessionOp::Quantile(0.5),
+    "quantile" => SessionOp::Quantile(quantile.unwrap_or(0.5)),
+    other => return Err(Error::InvalidParameter(format!("unsupported interval operation {other}"))),
+  })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SessionOp {
   Sum,

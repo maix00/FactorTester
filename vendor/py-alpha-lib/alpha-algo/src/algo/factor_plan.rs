@@ -794,17 +794,7 @@ enum RawNode {
 struct RawPlan { #[serde(default)] keys: Vec<String>, nodes: Vec<RawNode>, outputs: Vec<usize> }
 
 fn session_op(name: &str, quantile: Option<f64>) -> Result<SessionOp, crate::algo::Error> {
-    Ok(match name {
-        "sum" => SessionOp::Sum, "mean" => SessionOp::Mean,
-        "var" => SessionOp::Var, "std" => SessionOp::Std,
-        "min" => SessionOp::Min, "max" => SessionOp::Max,
-        "skew" => SessionOp::Skew, "argmin" => SessionOp::Argmin,
-        "argmax" => SessionOp::Argmax, "argmin_raw" => SessionOp::ArgminRaw,
-        "argmax_raw" => SessionOp::ArgmaxRaw, "rank" => SessionOp::Rank,
-        "mad" => SessionOp::Mad, "median" => SessionOp::Quantile(0.5),
-        "quantile" => SessionOp::Quantile(quantile.unwrap_or(0.5)),
-        other => return Err(crate::algo::Error::InvalidParameter(format!("unsupported rolling op {other}"))),
-    })
+    crate::algo::parse_session_op(name, quantile)
 }
 
 impl FactorPlanKernel {

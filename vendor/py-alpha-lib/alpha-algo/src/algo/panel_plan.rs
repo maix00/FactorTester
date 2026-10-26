@@ -56,11 +56,7 @@ fn ranks(values: &[(usize, f64)], ordinal: bool, descending: bool, priorities: &
     } out
 }
 fn session_op(op: &str, q: f64) -> Result<crate::algo::SessionOp> {
-    use crate::algo::SessionOp::*;
-    Ok(match op { "mean"=>Mean,"sum"=>Sum,"var"=>Var,"std"=>Std,"min"=>Min,"max"=>Max,
-        "argmin"=>Argmin,"argmax"=>Argmax,"argmin_raw"=>ArgminRaw,"argmax_raw"=>ArgmaxRaw,
-        "rank"=>Rank,"mad"=>Mad,"skew"=>Skew,"median"=>Quantile(0.5),"quantile"=>Quantile(q),
-        _=>return Err(error(format!("unsupported interval operation {op}"))) })
+    crate::algo::parse_session_op(op, Some(q))
 }
 
 pub struct PanelPlan { nodes: Vec<Node>, grids: Vec<Grid> }
