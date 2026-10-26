@@ -2904,6 +2904,7 @@ enum PlanNode {
   Where { condition: usize, when_true: usize, when_false: usize },
   Unary { op: String, child: usize },
   Shift { child: usize, periods: usize },
+  BarScope { child: usize, count: usize, op: String, min: usize, prop: bool, quantile: Option<f64> },
 }
 
 fn plan_rolling(values: &[f64], window: usize, op: &str, min: usize, prop: bool, quantile: Option<f64>) -> pyo3::PyResult<Vec<f64>> {
@@ -3088,6 +3089,13 @@ impl BatchPlan {
     self.nodes.len() - 1
   }
 
+  fn bar_scope(&mut self, child: usize, count: usize, op: &str, min: usize, prop: bool, quantile: Option<f64>) -> usize {
+    self.nodes.push(PlanNode::BarScope {
+      child, count: count.max(1), op: op.to_string(), min, prop, quantile,
+    });
+    self.nodes.len() - 1
+  }
+
   fn execute(
     &self, py: pyo3::Python<'_>, columns: Vec<numpy::PyReadonlyArray1<f64>>, output: usize,
   ) -> pyo3::PyResult<pyo3::Py<numpy::PyArray1<f64>>> {
@@ -3109,6 +3117,30 @@ impl BatchPlan {
           .to_vec(),
         PlanNode::Rolling { child, window, op, min, prop, quantile } => {
           plan_rolling(&values[*child], *window, op, *min, *prop, *quantile)?
+        }
+        PlanNode::BarScope { child, count, op, min, prop, quantile } => {
+          use alpha_algo::SessionOp;
+          let session_op = match op.as_str() {
+            "sum" => SessionOp::Sum, "mean" => SessionOp::Mean,
+            "var" => SessionOp::Var, "std" => SessionOp::Std,
+            "min" => SessionOp::Min, "max" => SessionOp::Max,
+            "skew" => SessionOp::Skew, "argmin" => SessionOp::Argmin,
+            "argmax" => SessionOp::Argmax, "rank" => SessionOp::Rank,
+            "mad" => SessionOp::Mad,
+            "median" => SessionOp::Quantile(0.5),
+            "quantile" => SessionOp::Quantile(quantile.unwrap_or(0.5)),
+            other => return Err(pyo3::exceptions::PyValueError::new_err(
+              format!("batch plan scope does not support {other}")
+            )),
+          };
+          let mut state = alpha_algo::IntervalKernel::new(session_op)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
+            .with_semantics(*min, *prop);
+          let values = &values[*child];
+          (0..values.len()).map(|index| {
+            let start = (index / *count) * *count;
+            state.update_explicit(start as u64, index as u64, values[index])
+          }).collect()
         }
         PlanNode::Unary { op, child } => {
           let values = &values[*child];

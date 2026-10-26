@@ -114,3 +114,19 @@ def test_plan_supports_unary_and_shift_nodes():
     np.testing.assert_allclose(outputs[0]['A'].to_numpy()[3:], values[:-3])
     expected = -pd.Series(values).rolling(10, min_periods=1).mean().to_numpy()
     np.testing.assert_allclose(outputs[1]['A'].to_numpy(), expected)
+
+
+def test_plan_supports_bar_count_scope():
+    from tools.factors.expr.groupby_scope import GroupByScopeExpr
+    from tools.factors.expr.lookback_scope import scope_bars
+
+    values = np.arange(20, dtype=float)
+    close = ColumnRef(DataColumn.CLOSE)
+    expression = GroupByScopeExpr(scope_bars(3), close).mean()
+    outputs = evaluate_rust_plan([expression], _ctx(values))
+    assert outputs is not None
+    expected = []
+    for start in range(0, len(values), 3):
+        group = values[start:start + 3]
+        expected.extend(np.cumsum(group) / np.arange(1, len(group) + 1))
+    np.testing.assert_allclose(outputs[0]['A'].to_numpy(), expected)

@@ -19,6 +19,8 @@ from .composite import CompositeExpr
 from .rolling import RollingOp
 from .conditional import WhereOp
 from .shift import ShiftOp
+from .groupby_scope import GroupByScopeOp
+from .lookback_scope import BarCountScope
 
 _BINARY = {"add": "+", "sub": "-", "mul": "*", "div": "/",
            "gt": "gt", "lt": "lt", "ge": "ge", "le": "le", "eq": "eq", "ne": "ne",
@@ -32,9 +34,10 @@ _ROLLING = {"rolling_sum", "rolling_mean", "rolling_var", "rolling_std",
 
 
 class _PlanBuilder:
-    def __init__(self) -> None:
+    def __init__(self, ctx=None) -> None:
         from alpha import BatchPlan
 
+        self.ctx = ctx
         self.plan = BatchPlan()
         self.columns: list[ColumnRef] = []
         self.memo: dict[Any, int] = {}
@@ -94,6 +97,27 @@ class _PlanBuilder:
             node = self.plan.unary(expr.op, child)
             self.memo[key] = node
             return node
+        if isinstance(expr, GroupByScopeOp):
+            if not isinstance(expr.scope, BarCountScope) or expr._n_data != 1:
+                return None
+            child = self.build(expr.operands[0])
+            if child is None:
+                return None
+            count = expr.scope.resolved_count(
+                source_freq=getattr(self.ctx, "freq", None),
+                products=getattr(self.ctx, "products", ()),
+            )
+            quantile = expr.quantile_value if expr.op == "quantile" else None
+            if isinstance(quantile, ConstExpr):
+                quantile = quantile.value
+            node = self.plan.bar_scope(
+                child, int(count), expr.op.removeprefix("rolling_"),
+                expr.min_periods if expr.min_periods is not None else 1,
+                expr.nan_policy.value == "propagate",
+                None if quantile is None else float(quantile),
+            )
+            self.memo[key] = node
+            return node
         if isinstance(expr, ShiftOp):
             periods = expr.periods
             if not isinstance(periods, ConstExpr) or not isinstance(periods.value, (int, np.integer)):
@@ -126,7 +150,7 @@ def evaluate_rust_plan(
         return None
     if not expressions or any(isinstance(e, (ColumnRef, ConstExpr)) for e in expressions):
         return None
-    builder = _PlanBuilder()
+    builder = _PlanBuilder(ctx)
     outputs = [builder.build(expression) for expression in expressions]
     if any(output is None for output in outputs):
         return None
