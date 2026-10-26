@@ -654,22 +654,24 @@ fn truncated_slice(op: &SessionOp, history: &VecDeque<f64>, start: u64, end: u64
 
 fn term_metric(op: &str, curve: &[(f64, f64)], near_rank: usize, far_rank: usize, depth: usize) -> f64 {
     if curve.is_empty() { return f64::NAN; }
-    let near = curve.get(near_rank).map(|(_, value)| *value);
-    let far = curve.get(far_rank).map(|(_, value)| *value);
+    let near = curve.get(near_rank).copied();
+    let far = curve.get(far_rank).copied();
+    let pair_op = match op {
+        "term_spread" => Some(0),
+        "term_ratio" => Some(1),
+        "term_log_ratio" => Some(2),
+        "term_contango" => Some(3),
+        "term_carry_annualized" => Some(4),
+        "term_slope_segment" => Some(5),
+        _ => None,
+    };
+    if let Some(code) = pair_op {
+        return near.zip(far).map_or(f64::NAN, |((near_days, near), (far_days, far))| {
+            crate::algo::ft_pair_value(near, far, near_days, far_days, code).unwrap_or(f64::NAN)
+        });
+    }
     match op {
-        "term_spread" => near.zip(far).map_or(f64::NAN, |(near, far)| near - far),
-        "term_ratio" => near.zip(far).map_or(f64::NAN, |(near, far)| if far == 0.0 { f64::NAN } else { near / far - 1.0 }),
-        "term_log_ratio" => near.zip(far).map_or(f64::NAN, |(near, far)| if near > 0.0 && far > 0.0 { (near / far).ln() } else { f64::NAN }),
-        "term_contango" => near.zip(far).map_or(f64::NAN, |(near, far)| if near == 0.0 { f64::NAN } else { far / near - 1.0 }),
-        "term_carry_annualized" | "term_slope_segment" => {
-            let Some((near_days, near)) = curve.get(near_rank) else { return f64::NAN };
-            let Some((far_days, far)) = curve.get(far_rank) else { return f64::NAN };
-            let diff = far_days - near_days;
-            if diff == 0.0 { return f64::NAN; }
-            if op == "term_slope_segment" { (far - near) / diff }
-            else if *far == 0.0 { f64::NAN } else { (near / far - 1.0) * 365.0 / diff }
-        }
-        "term_rank_value" => near.unwrap_or(f64::NAN),
+        "term_rank_value" => near.map(|(_, value)| value).unwrap_or(f64::NAN),
         "term_slope" | "term_curvature" => {
             let frame: Vec<(f64, f64)> = curve.iter().take(depth).copied().collect();
             if frame.len() < if op == "term_slope" { 2 } else { 3 } { return f64::NAN; }

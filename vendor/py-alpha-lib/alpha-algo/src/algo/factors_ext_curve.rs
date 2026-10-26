@@ -23,6 +23,38 @@ fn write_row<NumT: Float>(r: &mut [NumT], slots: usize, row: usize, value: NumT)
   }
 }
 
+/// Pairwise curve value used by both the panel and streaming plans.
+/// `op`: 0 spread, 1 ratio, 2 log-ratio, 3 contango, 4 annualized carry,
+/// 5 segment slope. Returns `None` for invalid/non-finite inputs.
+pub fn ft_pair_value<NumT: Float>(
+    v_near: NumT,
+    v_far: NumT,
+    d_near: NumT,
+    d_far: NumT,
+    op: usize,
+) -> Option<NumT> {
+    if !is_normal(&v_near) || !is_normal(&v_far) {
+        return None;
+    }
+    match op {
+        0 => Some(v_near - v_far),
+        1 => if v_far == NumT::zero() { None } else { Some(v_near / v_far - NumT::one()) },
+        2 => if v_near > NumT::zero() && v_far > NumT::zero() { Some((v_near / v_far).ln()) } else { None },
+        3 => if v_near == NumT::zero() { None } else { Some(v_far / v_near - NumT::one()) },
+        4 | 5 => {
+            let day_diff = d_far - d_near;
+            if !is_normal(&day_diff) || day_diff == NumT::zero() || (op == 4 && v_far == NumT::zero()) {
+                None
+            } else if op == 4 {
+                Some((v_near / v_far - NumT::one()) * NumT::from(365.0).unwrap() / day_diff)
+            } else {
+                Some((v_far - v_near) / day_diff)
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Pairwise curve op: 0 spread, 1 ratio, 2 log-ratio, 3 contango,
 /// 4 annualized carry, 5 segment slope, 6 rank value.
 pub fn ta_ft_curve_pair<NumT: Float + Send + Sync>(
@@ -60,40 +92,10 @@ pub fn ta_ft_curve_pair<NumT: Float + Send + Sync>(
     }
     let v_near = row_value(values, slots, row, near);
     let v_far = row_value(values, slots, row, far);
-    if !is_normal(&v_near) || !is_normal(&v_far) {
-      continue;
-    }
     let d_near = row_value(days, slots, row, near);
     let d_far = row_value(days, slots, row, far);
-    let day_diff = d_far - d_near;
-    let value = match op {
-      0 => v_near - v_far,
-      1 => {
-        if v_far == NumT::zero() { continue; } else { v_near / v_far - NumT::one() }
-      }
-      2 => {
-        if v_near > NumT::zero() && v_far > NumT::zero() {
-          (v_near / v_far).ln()
-        } else {
-          continue;
-        }
-      }
-      3 => {
-        if v_near == NumT::zero() { continue; } else { v_far / v_near - NumT::one() }
-      }
-      4 => {
-        if v_far == NumT::zero() || !is_normal(&day_diff) || day_diff == NumT::zero() {
-          continue;
-        }
-        (v_near / v_far - NumT::one()) * NumT::from(365.0).unwrap() / day_diff
-      }
-      5 => {
-        if !is_normal(&day_diff) || day_diff == NumT::zero() {
-          continue;
-        }
-        (v_far - v_near) / day_diff
-      }
-      _ => continue,
+    let Some(value) = ft_pair_value(v_near, v_far, d_near, d_far, op) else {
+      continue;
     };
     write_row(r, slots, row, value);
   }
