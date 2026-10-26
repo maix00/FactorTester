@@ -427,11 +427,13 @@ for _path in (
     "tools/factors/expr/streaming/incremental.py",
     "vendor/py-alpha-lib/alpha-algo/src/algo/factor_plan.rs",
     "vendor/py-alpha-lib/alpha-algo/src/algo/panel_plan.rs",
+    "vendor/py-alpha-lib/alpha-algo/src/algo/session_window.rs",
     "vendor/py-alpha-lib/py-binding/src/lib.rs",
     "native/nautilus_factor_bridge/src/lib.rs",
     "native/nautilus_factor_bridge/src/plan.rs",
     "native/nautilus_factor_bridge/src/boundary.rs",
     "vendor/py-alpha-lib/alpha-algo/examples/bench_panel_barrier.rs",
+    "vendor/py-alpha-lib/alpha-algo/examples/bench_window_memory.rs",
 ):
     EXACT_PATH_TESTS[_path] = FACTOR_PLAN_TESTS
 EXACT_PATH_TESTS["tests/factors/test_bar_counts.py"] = ("tests/factors/test_bar_counts.py",)

@@ -86,6 +86,7 @@ struct OstNode {
 #[derive(Default)]
 struct OrderStatisticTree {
   nodes: Vec<OstNode>,
+  free: Vec<usize>,
   root: Option<usize>,
 }
 
@@ -133,8 +134,15 @@ impl OrderStatisticTree {
 
   fn insert_at(&mut self, node: Option<usize>, key: f64, priority: u64) -> usize {
     let Some(index) = node else {
-      let index = self.nodes.len();
-      self.nodes.push(OstNode { key, count: 1, size: 1, sum: key, priority, left: None, right: None });
+      let value = OstNode { key, count: 1, size: 1, sum: key, priority, left: None, right: None };
+      let index = if let Some(index) = self.free.pop() {
+        self.nodes[index] = value;
+        index
+      } else {
+        let index = self.nodes.len();
+        self.nodes.push(value);
+        index
+      };
       return index;
     };
     if key == self.nodes[index].key {
@@ -187,7 +195,14 @@ impl OrderStatisticTree {
         self.refresh(index);
         return Some(index);
       }
-      return self.merge(self.nodes[index].left, self.nodes[index].right);
+      let merged = self.merge(self.nodes[index].left, self.nodes[index].right);
+      self.nodes[index].left = None;
+      self.nodes[index].right = None;
+      self.nodes[index].count = 0;
+      self.nodes[index].size = 0;
+      self.nodes[index].sum = 0.0;
+      self.free.push(index);
+      return merged;
     }
     if key < self.nodes[index].key {
       self.nodes[index].left = self.remove_at(self.nodes[index].left, key);
@@ -1076,6 +1091,44 @@ pub fn ta_session_rolling_corr(
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn order_statistic_slots_plateau_for_long_fixed_windows() {
+    let width = 480_u64;
+    for op in [SessionOp::Quantile(0.5), SessionOp::Rank, SessionOp::Mad] {
+      let mut state = SessionWindowState::new_explicit(op).unwrap();
+      let mut value = f64::NAN;
+      for index in 0_u64..20_000 {
+        value = state.update_explicit(index.saturating_sub(width - 1), index, index as f64);
+      }
+      let tree = state.order_stat.as_ref().unwrap();
+      assert!(tree.nodes.len() <= width as usize + 1);
+      assert_eq!(OrderStatisticTree::size(tree.root, &tree.nodes), width as usize);
+      assert!(state.ring.len() <= width as usize);
+      let expected = match op {
+        SessionOp::Quantile(_) => 19_999.0 - 239.5,
+        SessionOp::Rank => 1.0,
+        SessionOp::Mad => 120.0,
+        _ => unreachable!(),
+      };
+      assert!((value - expected).abs() < 1e-8);
+    }
+  }
+
+  #[test]
+  fn reused_tree_slots_preserve_duplicates_and_rank_totals() {
+    let mut tree = OrderStatisticTree::default();
+    for _ in 0..1000 {
+      tree.insert(2.0); tree.insert(2.0); tree.insert(1.0); tree.insert(3.0);
+      assert_eq!(tree.kth(1), Some(2.0));
+      tree.remove(2.0);
+      assert_eq!(tree.rank_le(2.0), 2);
+      for value in [1.0, 2.0, 3.0] { tree.remove(value); }
+      assert!(tree.root.is_none());
+    }
+    assert_eq!(tree.nodes.len(), 3);
+    assert_eq!(tree.free.len(), 3);
+  }
 
   #[test]
   fn session_window_expands_and_evicts() {
