@@ -610,3 +610,31 @@ def test_alpha_factor_category_bool_compiles_to_rust_product_node():
 
     plan = IncrementalFactorPlan({'metal': CategoryBoolRef(Category(), 'metal')}, ('A', 'B'))
     assert plan.update([0.0, 0.0]) == {'metal': {'A': 1.0, 'B': 0.0}}
+
+
+def test_batch_and_incremental_shift_where_since_reconcile():
+    from alpha.factor import IncrementalFactorPlan
+
+    index = pd.date_range('2026-01-05 09:30', periods=5, freq='min')
+    frames = {
+        'A': pd.DataFrame({'CLOSE': [1.0, 2.0, 3.0, 4.0, 5.0]}, index=index),
+        'B': pd.DataFrame({'CLOSE': [-1.0, -2.0, -3.0, -4.0, -5.0]}, index=index),
+    }
+    ctx = EvalContext(products=('A', 'B'), preloaded=frames)
+    expressions = {
+        'shift': ColumnRef('CLOSE').shift(1),
+        'where': ColumnRef('CLOSE').where(ColumnRef('CLOSE') > 0, 0.0),
+        'since': __import__('alpha.factor', fromlist=['bar_since']).bar_since(
+            ColumnRef('CLOSE') > 0, scope=__import__('alpha.factor', fromlist=['scope_bars']).scope_bars(3),
+            default=3.0,
+        ),
+    }
+    plan = IncrementalFactorPlan(expressions, ('A', 'B'))
+    for row, timestamp in enumerate(index):
+        increment = plan.update([frames[p]['CLOSE'].iloc[row] for p in ('A', 'B')])
+        for alias, expression in expressions.items():
+            batch = expression.evaluate(ctx).iloc[row]
+            np.testing.assert_allclose(
+                [increment[alias]['A'], increment[alias]['B']],
+                [batch['A'], batch['B']], equal_nan=True, err_msg=alias,
+            )
