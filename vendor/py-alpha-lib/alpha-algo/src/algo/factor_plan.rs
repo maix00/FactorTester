@@ -99,6 +99,7 @@ impl LinearState {
 struct NodeState {
     spec: ExprSpec,
     rolling: Vec<Option<IntervalKernel>>,
+    trunc_history: Vec<VecDeque<f64>>,
     ema: Vec<Option<crate::algo::EmaState>>,
     linreg: Vec<Option<LinearState>>,
     match_history: Vec<VecDeque<(u64, f64)>>,
@@ -165,6 +166,7 @@ impl FactorPlanKernel {
             };
             nodes.push(NodeState {
                 spec, rolling, ema, linreg,
+                trunc_history: (0..products).map(|_| VecDeque::new()).collect(),
                 match_history: (0..products).map(|_| VecDeque::new()).collect(),
                 history: VecDeque::new(),
                 since_first: vec![None; products],
@@ -291,19 +293,23 @@ impl FactorPlanKernel {
                     let a = &head[left]; let b = &head[right];
                     for product in 0..products { out[product] = binary(op, a[product], b[product]); }
                 }
-                ExprSpec::Rolling { child, window, min_periods, propagate_nan, trunc_start, trunc_end, .. } => {
+                ExprSpec::Rolling { ref op, child, window, min_periods, propagate_nan, trunc_start, trunc_end, .. } => {
                     let input = &head[child];
                     let node = &mut self.nodes[index];
                     let base = current.saturating_sub(window as u64 - 1);
-                    let start = if trunc_start >= 0 { base.saturating_add(trunc_start as u64) } else { base };
-                    let end = if trunc_end >= 0 { base.saturating_add(trunc_end as u64) } else { current };
-                    if start > end {
-                        for product in 0..products { out[product] = f64::NAN; }
-                    } else {
-                        for product in 0..products {
+                    let truncated = trunc_start >= 0 || trunc_end >= 0;
+                    for product in 0..products {
+                        if truncated {
+                            let history = &mut node.trunc_history[product];
+                            history.push_back(input[product]);
+                            while history.len() > window { history.pop_front(); }
+                            let start = if trunc_start >= 0 { base.saturating_add(trunc_start as u64) } else { base };
+                            let end = if trunc_end >= 0 { base.saturating_add(trunc_end as u64) } else { current };
+                            out[product] = truncated_slice(op, history, start, end, current, min_periods, propagate_nan);
+                        } else {
                             let Some(state) = node.rolling[product].as_mut() else { out[product] = f64::NAN; continue };
                             state.set_semantics(min_periods, propagate_nan);
-                            out[product] = state.update_explicit(start, end, input[product]);
+                            out[product] = state.update_explicit(base, current, input[product]);
                         }
                     }
                 }
@@ -472,6 +478,37 @@ fn default_neg_one() -> i64 { -1 }
 
 fn default_include_current() -> bool { true }
 fn default_partial() -> String { "drop".into() }
+
+fn truncated_slice(op: &SessionOp, history: &VecDeque<f64>, start: u64, end: u64, current: u64, min_periods: usize, propagate_nan: bool) -> f64 {
+    if start > end || history.is_empty() { return f64::NAN; }
+    let first = (current + 1).saturating_sub(history.len() as u64);
+    let low = start.max(first);
+    let high = end.min(first + history.len() as u64 - 1);
+    if low > high { return f64::NAN; }
+    let values: Vec<f64> = (low..=high).filter_map(|index| history.get((index - first) as usize).copied()).collect();
+    if values.is_empty() { return f64::NAN; }
+    if propagate_nan && values.iter().any(|value| value.is_nan()) { return f64::NAN; }
+    let finite: Vec<f64> = values.iter().copied().filter(|value| value.is_finite()).collect();
+    if finite.len() < min_periods.max(1) { return f64::NAN; }
+    match op {
+        SessionOp::Sum => finite.iter().sum(),
+        SessionOp::Mean => finite.iter().sum::<f64>() / finite.len() as f64,
+        SessionOp::Min => finite.iter().copied().fold(f64::INFINITY, f64::min),
+        SessionOp::Max => finite.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+        SessionOp::Var | SessionOp::Std => {
+            let mean = finite.iter().sum::<f64>() / finite.len() as f64;
+            let variance = finite.iter().map(|value| (value - mean).powi(2)).sum::<f64>() / finite.len() as f64;
+            if matches!(op, SessionOp::Std) { variance.sqrt() } else { variance }
+        }
+        SessionOp::Quantile(q) => {
+            let mut sorted = finite; sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let position = (q * (sorted.len() - 1) as f64).clamp(0.0, (sorted.len() - 1) as f64);
+            let low = position.floor() as usize; let high = position.ceil() as usize;
+            sorted[low] + (sorted[high] - sorted[low]) * (position - low as f64)
+        }
+        _ => f64::NAN,
+    }
+}
 
 fn term_metric(op: &str, curve: &[(f64, f64)], near_rank: usize, far_rank: usize, depth: usize) -> f64 {
     if curve.is_empty() { return f64::NAN; }
@@ -838,6 +875,19 @@ mod term_plan_tests {
         let mut kernel = FactorPlanKernel::from_spec_json(json, 1).unwrap();
         let values = kernel.update_with_curves(0, &[1.0], &[vec![(30.0, 10.0), (90.0, 8.0)]]).unwrap();
         assert_eq!(values, vec![2.0]);
+    }
+
+    #[test]
+    fn truncated_slice_supports_end_before_current() {
+        let json = r#"{"columns":["C"],"nodes":[
+          {"kind":"column","index":0},
+          {"kind":"rolling","child":0,"window":3,"op":"mean","min_periods":1,"propagate_nan":false,"trunc_start":1,"trunc_end":1}
+        ],"outputs":[1]}"#;
+        let mut kernel = FactorPlanKernel::from_spec_json(json, 1).unwrap();
+        kernel.update(&[1.0]).unwrap();
+        kernel.update(&[2.0]).unwrap();
+        assert_eq!(kernel.update(&[3.0]).unwrap(), vec![2.0]);
+        assert_eq!(kernel.update(&[4.0]).unwrap(), vec![3.0]);
     }
 
     #[test]
