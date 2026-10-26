@@ -22,6 +22,13 @@ impl MarketBar {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct FactorUpdate {
+    pub timestamp_ns: i64,
+    pub products: Vec<String>,
+    pub values: Vec<f64>,
+}
+
 pub trait FactorEngine {
     type Error;
     fn warmup(&mut self) -> Result<(), Self::Error> { Ok(()) }
@@ -229,7 +236,7 @@ pub mod nautilus {
     use nautilus_model::data::Bar;
     use ustr::Ustr;
 
-    use crate::{FactorEngine, MarketBar};
+    use crate::{FactorEngine, FactorUpdate, MarketBar};
 
     /// Minimal Nautilus actor that owns the Rust factor engine and consumes
     /// `Bar` messages.  Registration with a trader is the caller's job.
@@ -240,6 +247,7 @@ pub mod nautilus {
         last_error: Option<String>,
         expected_products: Vec<String>,
         pending_bars: std::collections::BTreeMap<String, Bar>,
+        last_update: Option<FactorUpdate>,
         pending_timestamp: Option<i64>,
     }
 
@@ -258,6 +266,7 @@ pub mod nautilus {
                 expected_products: Vec::new(),
                 pending_bars: std::collections::BTreeMap::new(),
                 pending_timestamp: None,
+                last_update: None,
             }
         }
 
@@ -266,6 +275,8 @@ pub mod nautilus {
         pub fn last_error(&self) -> Option<&str> { self.last_error.as_deref() }
 
         pub fn pending_len(&self) -> usize { self.pending_bars.len() }
+
+        pub fn last_update(&self) -> Option<&FactorUpdate> { self.last_update.as_ref() }
 
         pub fn expect_products(&mut self, products: &[&str]) {
             self.expected_products = products.iter().map(|product| product.to_string()).collect();
@@ -302,7 +313,15 @@ pub mod nautilus {
             let timestamp = bars[0].ts_event.as_u64() as i64;
             let market = crate::nautilus::market_bar_from_bars(timestamp, &bars);
             match self.engine.update(&market) {
-                Ok(values) => { self.latest = values; self.last_error = None; }
+                Ok(values) => {
+                    self.latest = values.clone();
+                    self.last_update = Some(FactorUpdate {
+                        timestamp_ns: market.timestamp_ns,
+                        products: market.products.clone(),
+                        values,
+                    });
+                    self.last_error = None;
+                }
                 Err(error) => self.last_error = Some(error.to_string()),
             }
             self.pending_bars.clear();
@@ -333,7 +352,15 @@ pub mod nautilus {
             if let Some(bar) = msg.downcast_ref::<Bar>() {
                 let bar = MarketBar::from(bar);
                 match self.engine.update(&bar) {
-                    Ok(values) => { self.latest = values; self.last_error = None; }
+                    Ok(values) => {
+                        self.latest = values.clone();
+                        self.last_update = Some(FactorUpdate {
+                            timestamp_ns: bar.timestamp_ns,
+                            products: bar.products.clone(),
+                            values,
+                        });
+                        self.last_error = None;
+                    }
                     Err(error) => self.last_error = Some(error.to_string()),
                 }
             }
@@ -496,6 +523,10 @@ mod nautilus_tests {
         actor.on_completed_bar(&make("C.D", "3.0"));
         assert_eq!(actor.latest(), &[0.0, 0.5]);
         assert_eq!(actor.pending_len(), 0);
+        let update = actor.last_update().unwrap();
+        assert_eq!(update.timestamp_ns, 1_000);
+        assert_eq!(update.products, vec!["A.B".to_string(), "C.D".to_string()]);
+        assert_eq!(update.values, vec![0.0, 0.5]);
     }
 
     #[test]
