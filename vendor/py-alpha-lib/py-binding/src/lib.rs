@@ -283,7 +283,7 @@ mod algo_impl {
               values[best]
             } else {
               let distance = (index - best) as f64;
-              if raw { distance } else if count <= 1 { 0.0 } else { distance / (count - 1) as f64 }
+              if raw { (width - 1) as f64 - distance } else if count <= 1 { 0.0 } else { distance / (count - 1) as f64 }
             };
           }
         });

@@ -303,8 +303,10 @@ class _PlanBuilder:
             result = self.signal(expr)
         elif isinstance(expr, TermStructureOp):
             result = self.term(expr)
-        elif isinstance(expr, (BarSinceOp, BarDistanceOp)):
-            child = self.build(expr.value if isinstance(expr, BarDistanceOp) else expr.condition)
+        elif isinstance(expr, BarDistanceOp):
+            raise ValueError("bar_distance still uses the original CANDIDATE semantics")
+        elif isinstance(expr, BarSinceOp):
+            child = self.build(expr.condition)
             default = expr.operands[-1]
             fallback = 0.0 if isinstance(default, ScopeLengthDefault) else float(default.value)
             params = [*self.scope(expr.scope), float(getattr(expr, 'include_current', False)),
