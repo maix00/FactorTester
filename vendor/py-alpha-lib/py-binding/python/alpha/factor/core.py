@@ -28,7 +28,7 @@ class FactorExpr:
     _operands: tuple["FactorExpr", ...] = ()
 
     def evaluate(self, ctx: EvalContext) -> pd.DataFrame:
-        raise NotImplementedError
+        return self._evaluate(ctx)
 
     def _structural_key(self) -> tuple:
         raise NotImplementedError
@@ -173,7 +173,7 @@ class RollingOp(FactorExpr):
                 self.semantics.min_periods, self.semantics.nan_policy.value,
                 self.data._structural_key())
 
-    def evaluate(self, ctx: EvalContext) -> pd.DataFrame:
+    def _evaluate(self, ctx: EvalContext) -> pd.DataFrame:
         frame = self.data.evaluate(ctx)
         from alpha import interval_rolling
         from numpy import arange, maximum, uint64
@@ -206,7 +206,7 @@ class CompositeExpr(FactorExpr):
         return ("alpha.factor.CompositeExpr", self.op,
                 tuple(o._structural_key() for o in self.operands))
 
-    def evaluate(self, ctx: EvalContext) -> pd.DataFrame:
+    def _evaluate(self, ctx: EvalContext) -> pd.DataFrame:
         values = [operand.evaluate(ctx) for operand in self.operands]
         left = values[0]
         if self.op == "neg":
@@ -227,7 +227,7 @@ class ShiftOp(FactorExpr):
     def _structural_key(self):
         return ("alpha.factor.ShiftOp", self.periods, self.data._structural_key())
 
-    def evaluate(self, ctx: EvalContext) -> pd.DataFrame:
+    def _evaluate(self, ctx: EvalContext) -> pd.DataFrame:
         return self.data.evaluate(ctx).shift(self.periods)
 
 
@@ -241,6 +241,6 @@ class WhereOp(FactorExpr):
         return ("alpha.factor.WhereOp", self.condition._structural_key(),
                 self.when_true._structural_key(), self.when_false._structural_key())
 
-    def evaluate(self, ctx: EvalContext) -> pd.DataFrame:
+    def _evaluate(self, ctx: EvalContext) -> pd.DataFrame:
         condition = self.condition.evaluate(ctx)
         return self.when_true.evaluate(ctx).where(condition != 0, self.when_false.evaluate(ctx))

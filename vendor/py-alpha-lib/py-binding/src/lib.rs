@@ -63,6 +63,39 @@ mod algo_impl {
   }
 
   #[pyfunction]
+  #[pyo3(signature = (values, count, include_current=true, nearest=true, default_scope=true, default=0.0))]
+  pub fn bar_since(
+    py: pyo3::Python<'_>, values: numpy::PyReadonlyArray1<f64>, count: usize,
+    include_current: bool, nearest: bool, default_scope: bool, default: f64,
+  ) -> pyo3::PyResult<pyo3::Py<numpy::PyArray1<f64>>> {
+    use numpy::IntoPyArray;
+    let values = values.as_slice()?;
+    let count = count.max(1);
+    let mut out = vec![f64::NAN; values.len()];
+    let mut first: Option<usize> = None;
+    let mut last: Option<usize> = None;
+    let mut base = 0usize;
+    for index in 0..values.len() {
+      if index % count == 0 { base = index; first = None; last = None; }
+      let truth = values[index].is_finite() && values[index] != 0.0;
+      if truth && include_current {
+        if first.is_none() { first = Some(index); }
+        last = Some(index);
+      }
+      let matched = if nearest { last } else { first };
+      out[index] = match matched {
+        Some(hit) => (index - hit) as f64,
+        None => if default_scope { (index - base) as f64 } else { default },
+      };
+      if truth && !include_current {
+        if first.is_none() { first = Some(index); }
+        last = Some(index);
+      }
+    }
+    Ok(out.into_pyarray(py).unbind())
+  }
+
+  #[pyfunction]
   pub fn cross_sectional(
     py: pyo3::Python<'_>, columns: Vec<numpy::PyReadonlyArray1<f64>>, op: &str,
   ) -> pyo3::PyResult<Vec<pyo3::Py<numpy::PyArray1<f64>>>> {
@@ -3188,6 +3221,7 @@ fn _algo(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
   m.add_function(wrap_pyfunction!(ema, m)?)?;
   m.add_function(wrap_pyfunction!(interval_ema, m)?)?;
+  m.add_function(wrap_pyfunction!(bar_since, m)?)?;
   m.add_function(wrap_pyfunction!(cross_sectional, m)?)?;
   m.add_function(wrap_pyfunction!(interval_rolling, m)?)?;
   m.add_function(wrap_pyfunction!(interval_rolling_pair, m)?)?;

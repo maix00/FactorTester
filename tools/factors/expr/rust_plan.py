@@ -1,198 +1,398 @@
-"""Compile a FactorExpr subgraph into the Rust BatchPlan executor.
+"""Compile FactorExpr into a shared Rust time × product DAG.
 
-Only operations with a Rust batch implementation are compiled.  Anything else
-returns ``None`` so the regular Python evaluator remains the explicit fallback.
-Intermediate values stay in Rust; only the input columns and final result cross
-the Python boundary.
+Python supplies source arrays and labelled timeline metadata. Sampling, causal
+as-of carry, arithmetic, temporal searches and matrix kernels execute in Rust.
 """
-
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
+from tools.data.types import DataFreq, finest_index
 from .core import EvaluateContext, FactorExpr
-from .leaf import ColumnRef, ConstExpr
+from .leaf import ColumnRef, ConstExpr, CategoryBoolRef
 from .composite import CompositeExpr
-from .rolling import RollingOp
+from .rolling import RollingOp, _resolve_windows
 from .conditional import WhereOp
 from .shift import ShiftOp
 from .groupby_scope import GroupByScopeOp
-from .bar_search import BarSinceOp, ScopeLengthDefault
-from .lookback_scope import BarCountScope
+from .cross_sectional import CrossSectionalOp
+from .bar_search import BarSinceOp, BarDistanceOp, ScopeLengthDefault
+from .lookback_scope import BarCountScope, TradingDayScope, SessionScope
+from .signal_align import SignalAlign, _index_level_freqs, _named_time_index
+from .match_refs import MatchValueRef
+from .term_structure import TermStructureOp
+from .pointwise import POINTWISE_OPS
 
-_BINARY = {"add": "+", "sub": "-", "mul": "*", "div": "/",
-           "gt": "gt", "lt": "lt", "ge": "ge", "le": "le", "eq": "eq", "ne": "ne",
-           "and": "and", "or": "or"}
-_UNARY = {"neg", "abs", "sign", "sqrt", "log", "tanh", "not"}
 
+@dataclass(eq=False)
+class _Grid:
+    id: int
+    index: pd.Index
+    positions: np.ndarray
+    times: np.ndarray
+
+
+@dataclass
+class _Ref:
+    id: int
+    grid: _Grid
+    signal: DataFreq | None = None
+    scalar: bool = False
+    columns: tuple = ()
+
+
+def _times(index: pd.Index) -> np.ndarray:
+    values = finest_index(index) if isinstance(index, pd.MultiIndex) else index
+    if isinstance(values, pd.DatetimeIndex):
+        return np.ascontiguousarray(values.as_unit('ns').asi8)
+    return np.arange(len(index), dtype=np.int64)
+
+
+def _walk(expressions):
+    seen = set()
+    def visit(expr):
+        key = expr._structural_key()
+        if key in seen:
+            return
+        seen.add(key)
+        yield expr
+        if not isinstance(expr, TermStructureOp):
+            for operand in getattr(expr, '_operands', ()):
+                yield from visit(operand)
+    for expression in expressions:
+        yield from visit(expression)
 
 
 class _PlanBuilder:
-    def __init__(self, ctx=None) -> None:
+    def __init__(self, ctx: EvaluateContext, expressions: list[FactorExpr]):
         from alpha import BatchPlan
-
         self.ctx = ctx
         self.plan = BatchPlan()
-        self.columns: list[ColumnRef] = []
-        self.memo: dict[Any, int] = {}
+        self.inputs: list[np.ndarray] = []
+        self.memo: dict[tuple, _Ref] = {}
+        self.aligned: dict[tuple, _Ref] = {}
+        self.products = tuple(ctx.products)
+        self.frames = {}
+        for expr in _walk(expressions):
+            if isinstance(expr, ColumnRef):
+                self.frames[expr._structural_key()] = expr._evaluate(ctx)
+        if ctx.panel_timeline is not None:
+            index = ctx.panel_timeline.index
+        elif self.frames:
+            index = next(iter(self.frames.values())).index
+        elif ctx.preloaded:
+            index = next(iter(ctx.preloaded.values())).index
+        else:
+            raise ValueError('a Rust panel plan requires a concrete source timeline')
+        for frame in self.frames.values():
+            if not index.equals(frame.index):
+                index = index.union(frame.index, sort=False)
+        if isinstance(index, pd.MultiIndex):
+            order = np.argsort(_times(index), kind='stable')
+            index = index.take(order)
+        elif isinstance(index, pd.DatetimeIndex):
+            index = index.sort_values()
+        self.index = index
+        if ctx.panel_timeline is not None:
+            self.observed = ctx.panel_timeline.observed_mask.reindex(
+                index=index, columns=self.products, fill_value=False,
+            ).to_numpy(dtype=np.uint8).T
+            day_values = pd.Series(np.asarray(ctx.panel_timeline.trading_days),
+                                   index=ctx.panel_timeline.index).reindex(index)
+            self.days = pd.factorize(day_values, sort=False)[0].astype(np.int64)
+        else:
+            self.observed = np.ones((len(self.products), len(index)), dtype=np.uint8)
+            if ctx.preloaded:
+                for g, product in enumerate(self.products):
+                    frame = ctx.preloaded.get((product, ctx.freq.name))
+                    if frame is not None:
+                        self.observed[g] = index.isin(frame.index)
+            day_values = index.get_level_values(0) if isinstance(index, pd.MultiIndex) else index
+            if isinstance(day_values, pd.DatetimeIndex):
+                day_values = day_values.normalize()
+            self.days = pd.factorize(day_values, sort=False)[0].astype(np.int64)
+        self.base = self.grid(index, np.arange(len(index), dtype=np.int64))
 
-    def build(self, expr: FactorExpr) -> int | None:
+    def input(self, values) -> int:
+        self.inputs.append(np.ascontiguousarray(values, dtype=float).reshape(-1))
+        return len(self.inputs) - 1
+
+    def grid(self, index, positions) -> _Grid:
+        times = _times(index)
+        grid_id = self.plan.grid(times, np.ascontiguousarray(self.days[positions]),
+                                 np.ascontiguousarray(self.observed[:, positions]).reshape(-1))
+        return _Grid(grid_id, index, positions, times)
+
+    def add(self, op, children=(), params=(), indices=(), *, grid=None,
+            signal=None, scalar=False, columns=None):
+        grid = self.base if grid is None else grid
+        node = self.plan.add(op, [child.id for child in children], list(params),
+                             list(indices), grid.id)
+        return _Ref(node, grid, signal, scalar,
+                    self.products if columns is None else tuple(columns))
+
+    def align(self, ref: _Ref, grid: _Grid) -> _Ref:
+        if ref.scalar or ref.grid is grid:
+            return ref
+        key = (ref.id, grid.id)
+        if key not in self.aligned:
+            if ref.signal is not None:
+                mapping = self.plan.asof_indices(ref.grid.times, grid.times)
+            else:
+                mapping = ref.grid.index.get_indexer(grid.index)
+            self.aligned[key] = self.add('reindex', [ref], indices=mapping,
+                                        grid=grid, columns=ref.columns)
+        return self.aligned[key]
+
+    def common(self, refs):
+        non_scalar = [ref for ref in refs if not ref.scalar]
+        if not non_scalar:
+            return self.base, None
+        raw = [ref for ref in non_scalar if ref.signal is None]
+        if raw:
+            return raw[0].grid, None
+        # Equal frequency follows the right operand, as in pointwise alignment.
+        chosen = min(reversed(non_scalar), key=lambda ref: ref.signal.value)
+        return chosen.grid, chosen.signal
+
+    def point(self, op, refs):
+        grid, signal = self.common(refs)
+        columns = max(refs, key=lambda ref: len(ref.columns) if not ref.scalar else 0).columns
+        return self.add(op, [self.align(ref, grid) for ref in refs], grid=grid,
+                        signal=signal, scalar=all(ref.scalar for ref in refs), columns=columns)
+
+    def scope(self, scope):
+        if isinstance(scope, BarCountScope):
+            return 1, scope.resolved_count(ctx=self.ctx), 0
+        if isinstance(scope, TradingDayScope):
+            if self.ctx.panel_timeline is None:
+                raise ValueError('trading_day scope requires panel_timeline')
+            return 2, 0, 0
+        if isinstance(scope, SessionScope):
+            return 3, 0, int(pd.Timedelta(scope.gap).value)
+        raise TypeError(f'unsupported scope {scope!r}')
+
+    def predicate(self, expr, grid, dependencies, program):
+        unary = ['neg', 'abs', 'sign', 'sqrt', 'log', 'tanh', 'not']
+        binary = ['add', 'sub', 'mul', 'div', 'pow', 'max', 'min',
+                  'gt', 'lt', 'ge', 'le', 'eq', 'ne', 'and', 'or', 'bimax', 'bimin']
+        if isinstance(expr, MatchValueRef):
+            instruction = [0 if expr.role == 'current' else 1, 0, 0, 0, 0]
+        elif isinstance(expr, ConstExpr):
+            instruction = [2, 0, 0, 0, float(expr.value)]
+        elif isinstance(expr, WhereOp):
+            operands = [self.predicate(c, grid, dependencies, program) for c in expr.operands]
+            instruction = [4, *operands, 0]
+        elif type(expr) is CompositeExpr and expr.op in POINTWISE_OPS:
+            operands = [self.predicate(c, grid, dependencies, program) for c in expr.operands]
+            if expr.op in unary:
+                instruction = [10 + unary.index(expr.op), operands[0], 0, 0, 0]
+            else:
+                # Fold variadic max/min without evaluating the predicate in Python.
+                a = operands[0]
+                for b in operands[1:-1]:
+                    program.append([20 + binary.index(expr.op), a, b, 0, 0])
+                    a = len(program) - 1
+                instruction = [20 + binary.index(expr.op), a, operands[-1], 0, 0]
+        else:
+            dependency = self.align(self.build(expr), grid)
+            dependencies.append(dependency)
+            instruction = [3, len(dependencies) - 1, 0, 0, 0]
+        program.append(instruction)
+        return len(program) - 1
+
+    def signal(self, expr):
+        child = self.build(expr.operands[0])
+        if child.signal is not None:
+            if self.ctx.panel_timeline is None:
+                raise ValueError('outer SignalAlign over a nested signal requires panel_timeline')
+            child = self.align(child, self.base)
+        source = child.grid
+        freq = DataFreq(expr.signal_freq)
+        levels = _index_level_freqs(source.index, target_freq=freq)
+        template, names = _named_time_index(pd.DataFrame(index=source.index), levels)
+        level = next((item for item in levels if freq.value % item.freq.value == pd.Timedelta(0)), None)
+        if level is None:
+            raise ValueError(f'frequency {freq} is not an integer multiple of an input frequency')
+        multiple = int(freq.value / level.freq.value)
+        keys = pd.DatetimeIndex(template.index.get_level_values(level.pos)).as_unit('ns').asi8
+        bp, mask = expr.basepoint, []
+        if freq.is_day_multiple() and expr.daily_basepoint is not None:
+            mask = list(pd.DatetimeIndex(finest_index(source.index)).time == pd.Timestamp(expr.daily_basepoint).time())
+            bp = 'mask'
+        elif callable(bp):
+            selection = bp(template.groupby(names[level.pos]))
+            if not isinstance(selection, pd.Series) or selection.dtype != bool:
+                raise TypeError('basepoint function must return a boolean Series')
+            mask, bp = selection.to_list(), 'mask'
+        gap = int(pd.Timedelta(expr.end_session_gap).value) if expr.end_session_skip and not freq.is_day_multiple() else None
+        positions = np.asarray(self.plan.signal_indices(np.ascontiguousarray(keys), source.times,
+                                                       multiple, bp, mask, gap), dtype=np.int64)
+        keep = [i for i, name in enumerate(names) if not str(name).startswith('_SIGNAL@')]
+        arrays = [template.index.get_level_values(i).take(positions) for i in keep]
+        new_names = [f'_SIGNAL@{freq.name}' if i == level.pos else str(names[i]).split('@')[-1] for i in keep]
+        index = pd.MultiIndex.from_arrays(arrays, names=new_names)
+        grid = self.grid(index, source.positions[positions])
+        return self.add('reindex', [child], indices=positions, grid=grid,
+                        signal=freq, columns=child.columns)
+
+    def term(self, expr):
+        from tools.products.AdjustableTermStructure import TERM_DAYS_TO_MATURITY_COL, TERM_RANK_COL
+        near, far, depth, column = expr._term_param_values()
+        if min(near, far, depth) < 0:
+            raise ValueError('term ranks and depth must be nonnegative')
+        slots = max(near, far, depth, 1) + 1
+        mapping = np.full((len(self.products), len(self.index)), -1.0)
+        raw_values, raw_days, lengths = [], [], []
+        trading_days = expr._trading_days_for_index(self.index)
+        needs_days = expr.op in {'term_carry_annualized', 'term_slope_segment', 'term_slope', 'term_curvature'}
+        for g, product in enumerate(self.products):
+            supports = getattr(product, 'supports_term_structure', None)
+            if callable(supports) and not supports():
+                continue
+            if not hasattr(product, 'get_term_structure'):
+                continue
+            days = trading_days[self.observed[g].astype(bool)].unique()
+            batch = getattr(product, 'get_term_structures', None)
+            curves = batch(days, depth=slots) if callable(batch) else {day: product.get_term_structure(day, depth=slots) for day in days}
+            by_day = {}
+            for day in days:
+                curve = curves.get(pd.Timestamp(day).normalize(), pd.DataFrame())
+                if not isinstance(curve, pd.DataFrame):
+                    curve = pd.DataFrame(curve)
+                if not curve.empty and TERM_RANK_COL in curve:
+                    curve = curve.sort_values(TERM_RANK_COL, kind='stable')
+                if not curve.empty and column not in curve:
+                    raise KeyError(f'{column!r} not in term curve')
+                if not curve.empty and needs_days and TERM_DAYS_TO_MATURITY_COL not in curve:
+                    raise KeyError(f'{TERM_DAYS_TO_MATURITY_COL!r} not in term curve')
+                count = min(len(curve), slots)
+                values, maturity = np.full(slots, np.nan), np.full(slots, np.nan)
+                if count:
+                    values[:count] = curve[column].to_numpy(dtype=float)[:count]
+                    if TERM_DAYS_TO_MATURITY_COL in curve:
+                        maturity[:count] = curve[TERM_DAYS_TO_MATURITY_COL].to_numpy(dtype=float)[:count]
+                by_day[day] = len(lengths)
+                lengths.append(count)
+                raw_values.append(values)
+                raw_days.append(maturity)
+            mapping[g] = [by_day.get(day, -1) if self.observed[g, i] else -1 for i, day in enumerate(trading_days)]
+        ops = ['term_spread', 'term_ratio', 'term_log_ratio', 'term_contango',
+               'term_carry_annualized', 'term_slope_segment', 'term_rank_value',
+               'term_slope', 'term_curvature']
+        inputs = [self.input(raw_values), self.input(raw_days), self.input(lengths), self.input(mapping), slots]
+        return self.add('term', params=[near, far, depth, ops.index(expr.op)], indices=inputs)
+
+    def build(self, expr) -> _Ref:
         key = expr._structural_key()
         if key in self.memo:
             return self.memo[key]
         if isinstance(expr, ColumnRef):
-            for index, ref in enumerate(self.columns):
-                if ref.column.name == expr.column.name:
-                    return self.plan.column(index)
-            self.columns.append(expr)
-            node = self.plan.column(len(self.columns) - 1)
-            self.memo[key] = node
-            return node
-        if isinstance(expr, ConstExpr):
-            if not np.isscalar(expr.value):
-                return None
-            node = self.plan.constant(float(expr.value))
-            self.memo[key] = node
-            return node
-        if isinstance(expr, RollingOp):
-            if expr._n_data != 1:
-                return None
-            window_expr = expr.window
-            if not isinstance(window_expr, ConstExpr) or not isinstance(window_expr.value, (int, np.integer)):
-                return None
-            child = self.build(expr.operands[expr._data_start])
-            if child is None:
-                return None
-            window = int(window_expr.value)
-            quantile = expr.quantile if expr.op == "rolling_quantile" else None
-            node = self.plan.rolling(
-                child, window, expr.op.removeprefix("rolling_"),
-                expr._min_periods_value(window),
-                expr.nan_policy.value == "propagate",
-                quantile,
-            )
-            self.memo[key] = node
-            return node
-        if isinstance(expr, WhereOp):
-            if len(expr.operands) != 3:
-                return None
-            condition = self.build(expr.operands[0])
-            when_true = self.build(expr.operands[1])
-            when_false = self.build(expr.operands[2])
-            if condition is None or when_true is None or when_false is None:
-                return None
-            node = self.plan.where_node(condition, when_true, when_false)
-            self.memo[key] = node
-            return node
-        if isinstance(expr, CompositeExpr) and expr.op in _UNARY and len(expr.operands) == 1:
-            child = self.build(expr.operands[0])
-            if child is None:
-                return None
-            node = self.plan.unary(expr.op, child)
-            self.memo[key] = node
-            return node
-        if isinstance(expr, BarSinceOp):
-            if not isinstance(expr.scope, BarCountScope):
-                return None
-            condition = self.build(expr.condition)
-            if condition is None:
-                return None
-            count = expr.scope.resolved_count(
-                source_freq=getattr(self.ctx, "freq", None),
-                products=getattr(self.ctx, "products", ()),
-            )
-            default_expr = expr.operands[1]
-            default_scope = isinstance(default_expr, ScopeLengthDefault)
-            if default_scope:
-                default = 0.0
-            elif isinstance(default_expr, ConstExpr) and np.isscalar(default_expr.value):
-                default = float(default_expr.value)
+            frame = self.frames[key].reindex(index=self.index, columns=self.products)
+            result = self.add('column', params=[self.input(frame.to_numpy(dtype=float).T)])
+        elif isinstance(expr, ConstExpr):
+            result = self.add('const', params=[float(expr.value)], scalar=True, columns=())
+        elif isinstance(expr, CategoryBoolRef):
+            values = [float(expr.category.is_in_category(expr.category_name, p)) for p in self.products]
+            result = self.add('product', params=values)
+        elif isinstance(expr, SignalAlign):
+            result = self.signal(expr)
+        elif isinstance(expr, TermStructureOp):
+            result = self.term(expr)
+        elif isinstance(expr, (BarSinceOp, BarDistanceOp)):
+            child = self.build(expr.value if isinstance(expr, BarDistanceOp) else expr.condition)
+            default = expr.operands[-1]
+            fallback = 0.0 if isinstance(default, ScopeLengthDefault) else float(default.value)
+            params = [*self.scope(expr.scope), float(getattr(expr, 'include_current', False)),
+                      float(expr.select == 'nearest'), float(isinstance(default, ScopeLengthDefault)),
+                      fallback, float(expr.nan_policy.value == 'propagate')]
+            children = [child]
+            if isinstance(expr, BarDistanceOp):
+                program = []
+                self.predicate(expr.condition, child.grid, children, program)
+                params.extend(value for instruction in program for value in instruction)
+            result = self.add('distance' if isinstance(expr, BarDistanceOp) else 'since', children,
+                              params, grid=child.grid, signal=child.signal, columns=child.columns)
+        elif isinstance(expr, (RollingOp, GroupByScopeOp)):
+            children = [self.build(c) for c in expr.operands[expr._data_start:expr._data_start + expr._n_data]]
+            grid, signal = self.common(children)
+            children = [self.align(c, grid) for c in children]
+            if isinstance(expr, RollingOp):
+                if not isinstance(expr.window, ConstExpr):
+                    raise TypeError('rolling window must resolve to a constant')
+                common, count, _ = _resolve_windows(expr.window.value, self.ctx.freq, self.products)
+                if not common:
+                    raise ValueError('rolling duration differs across products; use explicit bar counts')
+                scope = (0, count, 0)
+                minimum = expr._min_periods_value(count)
+                quantile = expr.quantile
             else:
-                return None
-            node = self.plan.bar_since(
-                condition, int(count), bool(expr.include_current),
-                expr.select == "nearest", default_scope, default,
-            )
-            self.memo[key] = node
-            return node
-        if isinstance(expr, GroupByScopeOp):
-            if not isinstance(expr.scope, BarCountScope) or expr._n_data != 1:
-                return None
-            child = self.build(expr.operands[0])
-            if child is None:
-                return None
-            count = expr.scope.resolved_count(
-                source_freq=getattr(self.ctx, "freq", None),
-                products=getattr(self.ctx, "products", ()),
-            )
-            quantile = expr.quantile_value if expr.op == "quantile" else None
-            if isinstance(quantile, ConstExpr):
-                quantile = quantile.value
-            node = self.plan.bar_scope(
-                child, int(count), expr.op.removeprefix("rolling_"),
-                expr.min_periods if expr.min_periods is not None else 1,
-                expr.nan_policy.value == "propagate",
-                None if quantile is None else float(quantile),
-            )
-            self.memo[key] = node
-            return node
-        if isinstance(expr, ShiftOp):
-            periods = expr.periods
-            if not isinstance(periods, ConstExpr) or not isinstance(periods.value, (int, np.integer)):
-                return None
+                scope = self.scope(expr.scope)
+                minimum = expr.min_periods if expr.min_periods is not None else 1
+                quantile = expr.quantile_value
+                if isinstance(quantile, ConstExpr):
+                    quantile = quantile.value
+            start = float(expr.trunc_start.value) if isinstance(expr.trunc_start, ConstExpr) else -1.0
+            end = float(expr.trunc_end.value) if isinstance(expr.trunc_end, ConstExpr) else -1.0
+            params = [*scope, minimum, float(expr.nan_policy.value == 'propagate'),
+                      0.5 if quantile is None else float(quantile), start, end]
+            result = self.add(('rolling:' if isinstance(expr, RollingOp) else 'scope:') + expr.op.removeprefix('rolling_'),
+                              children, params, grid=grid, signal=signal, columns=children[0].columns)
+        elif isinstance(expr, CrossSectionalOp):
+            children = [self.build(c) for c in expr.operands]
+            grid, signal = self.common(children)
+            categories = []
+            if expr.category is not None:
+                categories = [-1] * len(self.products)
+                for label_id, label in enumerate(expr.category.categories):
+                    for g, product in enumerate(self.products):
+                        if expr.category.is_in_category(label, product):
+                            categories[g] = label_id
+            priority = {p: i for i, p in enumerate(sorted(self.products, key=str))}
+            result = self.add('cross:' + expr.op.removeprefix('cs_'),
+                              [self.align(c, grid) for c in children], categories,
+                              [priority[p] for p in self.products], grid=grid, signal=signal,
+                              columns=('IC',) if expr.op in {'cs_corr', 'cs_spearman'} else self.products)
+        elif isinstance(expr, ShiftOp):
             child = self.build(expr.operand)
-            if child is None or int(periods.value) < 0:
-                return None
-            node = self.plan.shift(child, int(periods.value))
-            self.memo[key] = node
-            return node
-        if isinstance(expr, CompositeExpr):
-            binary = _BINARY.get(expr.op)
-            if binary is None or len(expr.operands) != 2:
-                return None
-            left = self.build(expr.operands[0])
-            right = self.build(expr.operands[1])
-            if left is None or right is None:
-                return None
-            node = self.plan.binary(binary, left, right)
-            self.memo[key] = node
-            return node
-        return None
+            periods = int(expr.periods.value)
+            if periods < 0:
+                raise ValueError('negative shift is not a causal factor')
+            result = self.add('shift', [child], [periods], grid=child.grid,
+                              signal=child.signal, columns=child.columns)
+        elif isinstance(expr, WhereOp):
+            result = self.point('where', [self.build(c) for c in expr.operands])
+        elif type(expr) is CompositeExpr and expr.op in POINTWISE_OPS:
+            children = [self.build(c) for c in expr.operands]
+            op = {'bimax': 'max', 'bimin': 'min'}.get(expr.op, expr.op)
+            if len(children) == 1:
+                result = self.point(op, children)
+            else:
+                result = children[0]
+                for child in children[1:]:
+                    result = self.point(op, [result, child])
+        else:
+            raise TypeError(f'unsupported Rust plan node: {type(expr).__name__}')
+        self.memo[key] = result
+        return result
 
 
-def evaluate_rust_plan(
-    expressions: list[FactorExpr], ctx: EvaluateContext,
-) -> list[pd.DataFrame] | None:
-    """Execute several factors through one shared Rust Plan DAG."""
-    if ctx.panel_timeline is not None and not ctx.panel_timeline.same_session:
-        return None
+def evaluate_rust_plan(expressions: list[FactorExpr], ctx: EvaluateContext) -> list[pd.DataFrame] | None:
+    """Execute once for all products and outputs, sharing repeated subgraphs."""
     if not expressions or any(isinstance(e, (ColumnRef, ConstExpr)) for e in expressions):
         return None
-    builder = _PlanBuilder(ctx)
-    outputs = [builder.build(expression) for expression in expressions]
-    if any(output is None for output in outputs):
+    if any(unsupported_plan_nodes(e) for e in expressions):
         return None
-    if not builder.columns:
-        return None
-    frames = [ref.evaluate(ctx=ctx) for ref in builder.columns]
-    if not frames or not isinstance(frames[0], pd.DataFrame):
-        return None
-    products = [p for p in ctx.products if p in frames[0].columns]
-    if not products:
-        return None
-    result: list[dict[Any, np.ndarray]] = [{} for _ in expressions]
-    for product in products:
-        arrays = [
-            np.ascontiguousarray(frame[product].to_numpy(dtype=float))
-            for frame in frames
-        ]
-        values = builder.plan.execute_many(arrays, [int(o) for o in outputs])
-        for index, array in enumerate(values):
-            result[index][product] = array
-    return [pd.DataFrame(item, index=frames[0].index) for item in result]
+    builder = _PlanBuilder(ctx, expressions)
+    outputs = [builder.build(expr) for expr in expressions]
+    arrays = builder.plan.execute_panel(builder.inputs, [ref.id for ref in outputs], len(builder.products))
+    return [pd.DataFrame(np.asarray(values).reshape(len(ref.columns), len(ref.grid.index)).T,
+                         index=ref.grid.index, columns=ref.columns)
+            for values, ref in zip(arrays, outputs, strict=True)]
 
 
 def try_evaluate_rust_plan(expression: FactorExpr, ctx: EvaluateContext) -> pd.DataFrame | None:
@@ -200,35 +400,16 @@ def try_evaluate_rust_plan(expression: FactorExpr, ctx: EvaluateContext) -> pd.D
     return None if result is None else result[0]
 
 
-
-
 def plan_identity(expressions: list[FactorExpr]) -> tuple[tuple, ...]:
-    """Stable node identity of the Rust batch plan for a factor collection."""
-    builder = _PlanBuilder()
-    for expression in expressions:
-        builder.build(expression)
-    return tuple(builder.memo.keys())
+    return tuple(node._structural_key() for node in _walk(expressions))
 
 
-_PLAN_SUPPORTED = (
-    ColumnRef, ConstExpr, RollingOp, CompositeExpr, WhereOp, ShiftOp,
-    GroupByScopeOp, BarSinceOp,
-)
+_PLAN_SUPPORTED = (ColumnRef, ConstExpr, RollingOp, CompositeExpr, WhereOp, ShiftOp,
+                   GroupByScopeOp, BarSinceOp, BarDistanceOp, CrossSectionalOp,
+                   SignalAlign, CategoryBoolRef, MatchValueRef, ScopeLengthDefault,
+                   TermStructureOp)
 
 
 def unsupported_plan_nodes(expression: FactorExpr) -> tuple[str, ...]:
-    """Explicitly list node types that still require Python execution."""
-    blockers: list[str] = []
-
-    def visit(node: FactorExpr) -> None:
-        if not isinstance(node, _PLAN_SUPPORTED):
-            blockers.append(type(node).__name__)
-            return
-        if isinstance(node, GroupByScopeOp) and not isinstance(node.scope, BarCountScope):
-            blockers.append(f"GroupByScopeOp({type(node.scope).__name__})")
-            return
-        for child in getattr(node, "_operands", ()):
-            visit(child)
-
-    visit(expression)
-    return tuple(dict.fromkeys(blockers))
+    return tuple(dict.fromkeys(type(node).__name__ for node in _walk([expression])
+                               if not isinstance(node, _PLAN_SUPPORTED)))

@@ -95,7 +95,7 @@ def test_batch_and_incremental_plans_share_node_identity():
     close = ColumnRef(DataColumn.CLOSE)
     first = close.rolling(20).mean()
     second = first.rolling(10).std()
-    batch_keys = set(plan_identity([first, second]))
+    batch_keys = {key for key in plan_identity([first, second]) if key[0] != 'ConstExpr'}
     streaming = compile_incremental_factors(
         {'first': first, 'second': second}, ('A',), source_freq=DataFreq.MIN1,
     )
@@ -133,12 +133,12 @@ def test_plan_supports_bar_count_scope():
 
 
 def test_unsupported_nodes_are_explicit_blockers():
+    from tools.factors.expr.leaf import ParamRef
     from tools.factors.expr.rust_plan import unsupported_plan_nodes
-    from tools.factors.expr.cross_sectional import CrossSectionalOp
+    from tools.parameters import TypeParam
 
-    close = ColumnRef(DataColumn.CLOSE)
-    blockers = unsupported_plan_nodes(close.cs_zscore())
-    assert "CrossSectionalOp" in blockers
+    blocker = ParamRef(TypeParam("M", default_value=1, typ=int))
+    assert "ParamRef" in unsupported_plan_nodes(blocker)
 
 
 def test_all_rolling_operators_enter_the_plan_without_a_whitelist():

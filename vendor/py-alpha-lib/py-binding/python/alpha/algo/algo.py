@@ -129,3 +129,16 @@ def cross_sectional(columns, op):
       [np.asarray(column, dtype=float) for column in columns], str(op),
     )
   ]
+
+
+def bar_since(values, count, include_current=True, nearest=True,
+              default_scope=True, default=0.0):
+  """Bar distance since the last matching condition inside a bar-count partition."""
+  return np.asarray(
+    _algo.bar_since(
+      np.asarray(values, dtype=float), int(count), bool(include_current),
+      bool(nearest), bool(default_scope), float(default),
+    ),
+    dtype=float,
+  )
+

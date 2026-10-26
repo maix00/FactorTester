@@ -81,3 +81,31 @@ def test_alpha_factor_family_owns_versioned_identity():
     assert first.ref == second.ref
     other = Momentum.get_factor(owner_ref='other')
     assert other.ref != first.ref
+
+
+def test_alpha_factor_bar_count_scope_executes_in_rust():
+    from alpha.factor import scope_bars
+
+    values = np.arange(10, dtype=float)
+    result = ColumnRef('CLOSE').groupby_scope(scope_bars(3)).mean().evaluate(_ctx(values))
+    expected = []
+    for start in range(0, 10, 3):
+        group = values[start:start + 3]
+        expected.extend(np.cumsum(group) / np.arange(1, len(group) + 1))
+    np.testing.assert_allclose(result['A'].to_numpy(), expected)
+
+
+def test_alpha_factor_bar_since_executes_in_rust():
+    from alpha.factor import bar_since, scope_bars
+
+    values = np.arange(12, dtype=float)
+    condition = ColumnRef('CLOSE') > 4
+    result = bar_since(condition, scope=scope_bars(5)).evaluate(_ctx(values))
+    expected = []
+    for start in range(0, 12, 5):
+        last = None
+        for index in range(start, min(start + 5, 12)):
+            if values[index] > 4:
+                last = index
+            expected.append(index - last if last is not None else index - start)
+    np.testing.assert_allclose(result['A'].to_numpy(), expected)
