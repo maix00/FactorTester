@@ -181,6 +181,7 @@ class RustSessionRollingNode:
             "rolling_mean", "rolling_sum", "rolling_var",
             "rolling_std", "rolling_min", "rolling_max",
             "rolling_skew", "rolling_argmin", "rolling_argmax",
+            "rolling_argmin_raw", "rolling_argmax_raw",
             "rolling_median", "rolling_quantile", "rolling_rank",
         }:
             raise UnsupportedStreamingFactor(
@@ -200,6 +201,8 @@ class RustSessionRollingNode:
             "rolling_min": "min", "rolling_max": "max",
             "rolling_skew": "skew",
             "rolling_argmin": "argmin", "rolling_argmax": "argmax",
+            "rolling_argmin_raw": "argmin_raw",
+            "rolling_argmax_raw": "argmax_raw",
             "rolling_median": "quantile",
             "rolling_quantile": "quantile", "rolling_rank": "rank",
         }[op]
@@ -314,6 +317,8 @@ class RustBarRollingNode:
         "rolling_min": "min", "rolling_max": "max",
         "rolling_skew": "skew",
         "rolling_argmin": "argmin", "rolling_argmax": "argmax",
+        "rolling_argmin_raw": "argmin_raw",
+        "rolling_argmax_raw": "argmax_raw",
         "rolling_median": "quantile",
         "rolling_quantile": "quantile", "rolling_rank": "rank",
     }
@@ -396,6 +401,8 @@ class RustWallRollingNode:
             "rolling_min": "min", "rolling_max": "max",
             "rolling_skew": "skew",
             "rolling_argmin": "argmin", "rolling_argmax": "argmax",
+            "rolling_argmin_raw": "argmin_raw",
+            "rolling_argmax_raw": "argmax_raw",
             "rolling_median": "quantile",
             "rolling_quantile": "quantile", "rolling_rank": "rank",
         }.get(op)
@@ -1550,6 +1557,7 @@ def compile_streaming_factor(
                         "rolling_mean", "rolling_sum", "rolling_var",
                         "rolling_std", "rolling_min", "rolling_max",
                         "rolling_skew", "rolling_argmin", "rolling_argmax",
+            "rolling_argmin_raw", "rolling_argmax_raw",
                         "rolling_median", "rolling_quantile", "rolling_rank",
                         "rolling_cov", "rolling_corr",
                     }:
@@ -1596,6 +1604,7 @@ def compile_streaming_factor(
                     "rolling_mean", "rolling_sum", "rolling_var",
                     "rolling_std", "rolling_min", "rolling_max",
                     "rolling_skew", "rolling_argmin", "rolling_argmax",
+            "rolling_argmin_raw", "rolling_argmax_raw",
                     "rolling_median", "rolling_quantile", "rolling_rank",
                 }
             ):
