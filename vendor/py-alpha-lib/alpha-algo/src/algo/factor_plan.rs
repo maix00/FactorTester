@@ -610,26 +610,40 @@ fn truncated_slice(op: &SessionOp, history: &VecDeque<f64>, start: u64, end: u64
     let low = start.max(first);
     let high = end.min(first + history.len() as u64 - 1);
     if low > high { return f64::NAN; }
-    let values: Vec<f64> = (low..=high).filter_map(|index| history.get((index - first) as usize).copied()).collect();
-    if values.is_empty() { return f64::NAN; }
-    if propagate_nan && values.iter().any(|value| value.is_nan()) { return f64::NAN; }
-    let finite: Vec<f64> = values.iter().copied().filter(|value| value.is_finite()).collect();
-    if finite.len() < min_periods.max(1) { return f64::NAN; }
+    let mut count = 0usize;
+    let mut nan_count = 0usize;
+    let mut sum = 0.0;
+    let mut sum_sq = 0.0;
+    let mut minimum = f64::INFINITY;
+    let mut maximum = f64::NEG_INFINITY;
+    let mut finite = Vec::new();
+    let needs_values = matches!(op, SessionOp::Quantile(_));
+    for index in low..=high {
+        let Some(value) = history.get((index - first) as usize).copied() else { continue };
+        if value.is_nan() { nan_count += 1; continue; }
+        if !value.is_finite() { continue; }
+        count += 1;
+        sum += value;
+        sum_sq += value * value;
+        minimum = minimum.min(value);
+        maximum = maximum.max(value);
+        if needs_values { finite.push(value); }
+    }
+    if (propagate_nan && nan_count > 0) || count < min_periods.max(1) { return f64::NAN; }
     match op {
-        SessionOp::Sum => finite.iter().sum(),
-        SessionOp::Mean => finite.iter().sum::<f64>() / finite.len() as f64,
-        SessionOp::Min => finite.iter().copied().fold(f64::INFINITY, f64::min),
-        SessionOp::Max => finite.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+        SessionOp::Sum => sum,
+        SessionOp::Mean => sum / count as f64,
+        SessionOp::Min => minimum,
+        SessionOp::Max => maximum,
         SessionOp::Var | SessionOp::Std => {
-            let mean = finite.iter().sum::<f64>() / finite.len() as f64;
-            let variance = finite.iter().map(|value| (value - mean).powi(2)).sum::<f64>() / finite.len() as f64;
-            if matches!(op, SessionOp::Std) { variance.sqrt() } else { variance }
+            let variance = (sum_sq - sum * sum / count as f64) / count as f64;
+            if matches!(op, SessionOp::Std) { variance.max(0.0).sqrt() } else { variance.max(0.0) }
         }
         SessionOp::Quantile(q) => {
-            let mut sorted = finite; sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            let position = (q * (sorted.len() - 1) as f64).clamp(0.0, (sorted.len() - 1) as f64);
+            finite.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let position = (q * (finite.len() - 1) as f64).clamp(0.0, (finite.len() - 1) as f64);
             let low = position.floor() as usize; let high = position.ceil() as usize;
-            sorted[low] + (sorted[high] - sorted[low]) * (position - low as f64)
+            finite[low] + (finite[high] - finite[low]) * (position - low as f64)
         }
         _ => f64::NAN,
     }
