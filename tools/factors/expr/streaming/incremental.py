@@ -182,7 +182,7 @@ class RustSessionRollingNode:
             "rolling_std", "rolling_min", "rolling_max",
             "rolling_skew", "rolling_argmin", "rolling_argmax",
             "rolling_argmin_raw", "rolling_argmax_raw",
-            "rolling_median", "rolling_quantile", "rolling_rank",
+            "rolling_median", "rolling_quantile", "rolling_rank", "rolling_mad",
         }:
             raise UnsupportedStreamingFactor(
                 f"Rust session state does not support {op}"
@@ -204,7 +204,7 @@ class RustSessionRollingNode:
             "rolling_argmin_raw": "argmin_raw",
             "rolling_argmax_raw": "argmax_raw",
             "rolling_median": "quantile",
-            "rolling_quantile": "quantile", "rolling_rank": "rank",
+            "rolling_quantile": "quantile", "rolling_rank": "rank", "rolling_mad": "mad",
         }[op]
         q = 0.5 if op == "rolling_median" else quantile
         self._states = [
@@ -276,6 +276,32 @@ class RustSessionPairNode:
         return result
 
 
+class RustEmaNode:
+    """Adjusted EMA executed by Rust."""
+
+    def __init__(self, child, span, width):
+        from alpha import EmaState
+        self.child = child
+        self.span = int(span)
+        self._width = width
+        self._states = [EmaState(self.span) for _ in range(width)]
+
+    def update(self, market, cache):
+        key = id(self)
+        if key in cache:
+            return cache[key]
+        values = np.asarray(self.child.update(market, cache), dtype=float)
+        if values.shape != (self._width,):
+            raise ValueError("ema input width changed")
+        result = np.asarray(
+            [state.update(float(value))
+             for state, value in zip(self._states, values, strict=True)],
+            dtype=float,
+        )
+        cache[key] = result
+        return result
+
+
 class RustBarPairNode:
     """Fixed bar-count cov/corr executed by the unified Rust kernel."""
 
@@ -320,7 +346,7 @@ class RustBarRollingNode:
         "rolling_argmin_raw": "argmin_raw",
         "rolling_argmax_raw": "argmax_raw",
         "rolling_median": "quantile",
-        "rolling_quantile": "quantile", "rolling_rank": "rank",
+        "rolling_quantile": "quantile", "rolling_rank": "rank", "rolling_mad": "mad",
     }
 
     def __init__(self, op, child, window, width, quantile=None):
@@ -404,7 +430,7 @@ class RustWallRollingNode:
             "rolling_argmin_raw": "argmin_raw",
             "rolling_argmax_raw": "argmax_raw",
             "rolling_median": "quantile",
-            "rolling_quantile": "quantile", "rolling_rank": "rank",
+            "rolling_quantile": "quantile", "rolling_rank": "rank", "rolling_mad": "mad",
         }.get(op)
         if rust_op is None:
             raise UnsupportedStreamingFactor(f"wall window does not support {op}")
@@ -1558,7 +1584,7 @@ def compile_streaming_factor(
                         "rolling_std", "rolling_min", "rolling_max",
                         "rolling_skew", "rolling_argmin", "rolling_argmax",
             "rolling_argmin_raw", "rolling_argmax_raw",
-                        "rolling_median", "rolling_quantile", "rolling_rank",
+                        "rolling_median", "rolling_quantile", "rolling_rank", "rolling_mad",
                         "rolling_cov", "rolling_corr",
                     }:
                         raise UnsupportedStreamingFactor(
@@ -1605,7 +1631,7 @@ def compile_streaming_factor(
                     "rolling_std", "rolling_min", "rolling_max",
                     "rolling_skew", "rolling_argmin", "rolling_argmax",
             "rolling_argmin_raw", "rolling_argmax_raw",
-                    "rolling_median", "rolling_quantile", "rolling_rank",
+                    "rolling_median", "rolling_quantile", "rolling_rank", "rolling_mad",
                 }
             ):
                 node = RustSessionRollingNode(
@@ -1631,7 +1657,7 @@ def compile_streaming_factor(
             elif expr.op == "rolling_ema":
                 if len(children) != 1:
                     raise UnsupportedStreamingFactor("rolling_ema expects one streaming operand")
-                node = ExpandingEwmNode(children[0], window, len(products))
+                node = RustEmaNode(children[0], window, len(products))
             elif (
                 wall_duration_ns is None
                 and lookback_sessions is None
