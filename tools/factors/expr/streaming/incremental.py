@@ -276,174 +276,106 @@ class RustSessionPairNode:
         return result
 
 
-class RustRangeScopeNode:
-    """Scope aggregation over an explicit [start, end] event/bar interval."""
+class _BarScopeResolver:
+    def __init__(self, bar_count):
+        self.bar_count = max(1, int(bar_count))
+        self.ordinal = 0
 
-    _OPS = {
-        "mean": "mean", "sum": "sum", "var": "var", "std": "std",
-        "min": "min", "max": "max", "skew": "skew",
-        "argmin": "argmin", "argmax": "argmax",
-        "median": "quantile", "quantile": "quantile", "rank": "rank",
-        "mad": "mad",
-    }
+    def __call__(self, _market):
+        start = (self.ordinal // self.bar_count) * self.bar_count
+        current = self.ordinal
+        self.ordinal += 1
+        return start, current
 
-    def __init__(self, op, child, scope, width, *, trunc_start, trunc_end,
-                 event_line=None, source_freq=None, products=()):
-        from alpha import ExplicitRangeState
-        from tools.factors.events import EventId, EventRef, resolve_event_ref
+
+class _EventResolver:
+    def __init__(self, event_ref, event_line):
+        self.event_ref = event_ref
+        self.event_line = event_line
+        self.ordinal = 0
+
+    def __call__(self, _market):
+        from tools.factors.events import resolve_event_ref
+        occurrence = resolve_event_ref(self.event_ref, self.event_line, 0)
+        current = self.ordinal
+        self.ordinal += 1
+        if occurrence is None:
+            return None
+        return max(0, int(occurrence) - 1), current
+
+
+class _RangeResolver:
+    def __init__(self, scope, trunc_start, trunc_end, event_line, source_freq, products):
+        from tools.factors.events import EventId, EventRef
         from tools.factors.expr.lookback_scope import (
             BarCountScope, SessionScope, TradingDayScope,
         )
-        rust_op = self._OPS.get(op)
-        if rust_op is None:
-            raise UnsupportedStreamingFactor(f"range scope does not support {op}")
-        self.op = op
-        self.child = child
-        self.scope = scope
+        self.trunc_start = int(trunc_start)
+        self.trunc_end = int(trunc_end)
+        self.ordinal = 0
         self.event_line = event_line
-        self._width = width
-        self._ordinal = 0
-        self._trunc_start = int(trunc_start)
-        self._trunc_end = int(trunc_end)
-        self._states = [ExplicitRangeState(rust_op, None) for _ in range(width)]
+        self.event_ref = None
+        self.bar_count = None
         if isinstance(scope, TradingDayScope):
-            self._event_ref = EventRef(EventId.TRADING_DAY_START)
-            self._bar_count = None
+            self.event_ref = EventRef(EventId.TRADING_DAY_START)
         elif isinstance(scope, SessionScope):
-            self._event_ref = EventRef(EventId.TRADING_SESSION_START)
-            self._bar_count = None
+            self.event_ref = EventRef(EventId.TRADING_SESSION_START)
         elif isinstance(scope, BarCountScope):
-            self._event_ref = None
-            self._bar_count = int(scope.resolved_count(
+            self.bar_count = int(scope.resolved_count(
                 source_freq=source_freq, products=products,
             ))
         else:
             raise UnsupportedStreamingFactor(f"unsupported range scope: {scope!r}")
-        if self._event_ref is not None and event_line is None:
-            raise UnsupportedStreamingFactor("event range scope needs an EventLine")
 
-    def _base(self):
-        if self._bar_count is not None:
-            base = (self._ordinal // self._bar_count) * self._bar_count
-            self._ordinal += 1
-            return base
-        from tools.factors.events import resolve_event_ref
-        occurrence = resolve_event_ref(self._event_ref, self.event_line, 0)
-        if occurrence is None:
-            return None
-        return max(0, int(occurrence) - 1)
+    def __call__(self, _market):
+        current = self.ordinal
+        self.ordinal += 1
+        if self.bar_count is not None:
+            base = (current // self.bar_count) * self.bar_count
+        else:
+            from tools.factors.events import resolve_event_ref
+            occurrence = resolve_event_ref(self.event_ref, self.event_line, 0)
+            if occurrence is None:
+                return None
+            base = max(0, int(occurrence) - 1)
+        return base + self.trunc_start, base + self.trunc_end
+
+
+class RustIntervalNode:
+    """The only scope/window node: resolves [start, end] then updates one kernel."""
+
+    _OPS = {
+        "mean": "mean", "sum": "sum", "var": "var", "std": "std",
+        "min": "min", "max": "max", "skew": "skew",
+        "argmin": "argmin", "argmax": "argmax",
+        "median": "quantile", "quantile": "quantile", "rank": "rank",
+        "mad": "mad",
+    }
+
+    def __init__(self, op, child, width, resolver, quantile=None):
+        from alpha import IntervalState
+        rust_op = self._OPS.get(op)
+        if rust_op is None:
+            raise UnsupportedStreamingFactor(f"interval does not support {op}")
+        self.op = op
+        self.child = child
+        self.resolver = resolver
+        self._width = width
+        self._states = [IntervalState(rust_op, quantile) for _ in range(width)]
 
     def update(self, market, cache):
         key = id(self)
         if key in cache:
             return cache[key]
-        base = self._base()
-        if base is None:
+        bounds = self.resolver(market)
+        if bounds is None:
             return np.full(self._width, np.nan, dtype=float)
-        start = base + self._trunc_start
-        end = base + self._trunc_end
+        start, end = bounds
         values = np.asarray(self.child.update(market, cache), dtype=float)
         if values.shape != (self._width,):
-            raise ValueError("range scope input width changed")
+            raise ValueError("interval input width changed")
         result = np.asarray(
             [state.update(start, end, float(value))
-             for state, value in zip(self._states, values, strict=True)],
-            dtype=float,
-        )
-        cache[key] = result
-        return result
-
-
-class RustBarScopeNode:
-    """Bar-count scope expressed as a resetting start index, not a partition."""
-
-    _OPS = {
-        "mean": "mean", "sum": "sum", "var": "var", "std": "std",
-        "min": "min", "max": "max", "skew": "skew",
-        "argmin": "argmin", "argmax": "argmax",
-        "median": "quantile", "quantile": "quantile", "rank": "rank",
-        "mad": "mad",
-    }
-
-    def __init__(self, op, child, bar_count, width, quantile=None):
-        from alpha import StartIndexState
-        rust_op = self._OPS.get(op)
-        if rust_op is None:
-            raise UnsupportedStreamingFactor(f"bar scope does not support {op}")
-        self.op = op
-        self.child = child
-        self.bar_count = max(1, int(bar_count))
-        self._width = width
-        self._ordinal = 0
-        self._states = [StartIndexState(rust_op, quantile) for _ in range(width)]
-
-    def update(self, market, cache):
-        key = id(self)
-        if key in cache:
-            return cache[key]
-        start = (self._ordinal // self.bar_count) * self.bar_count
-        self._ordinal += 1
-        values = np.asarray(self.child.update(market, cache), dtype=float)
-        if values.shape != (self._width,):
-            raise ValueError("bar scope input width changed")
-        result = np.asarray(
-            [state.update(start, float(value))
-             for state, value in zip(self._states, values, strict=True)],
-            dtype=float,
-        )
-        cache[key] = result
-        return result
-
-
-class RustEventWindowNode:
-    """Window whose start is the latest occurrence of a TradeResearch event."""
-
-    _OPS = {
-        "rolling_mean": "mean", "rolling_sum": "sum",
-        "rolling_var": "var", "rolling_std": "std",
-        "rolling_min": "min", "rolling_max": "max",
-        "rolling_skew": "skew",
-        "rolling_argmin": "argmin", "rolling_argmax": "argmax",
-        "rolling_median": "quantile",
-        "rolling_quantile": "quantile", "rolling_rank": "rank",
-        "rolling_mad": "mad",
-        # groupby_scope op names
-        "mean": "mean", "sum": "sum", "var": "var", "std": "std",
-        "min": "min", "max": "max", "skew": "skew",
-        "argmin": "argmin", "argmax": "argmax",
-        "median": "quantile", "quantile": "quantile", "rank": "rank",
-        "mad": "mad",
-    }
-
-    def __init__(self, op, child, event_ref, event_line, width, quantile=None):
-        from alpha import StartIndexState
-        rust_op = self._OPS.get(op)
-        if rust_op is None:
-            raise UnsupportedStreamingFactor(f"event window does not support {op}")
-        if event_line is None:
-            raise UnsupportedStreamingFactor("event window needs an EventLine")
-        self.op = op
-        self.child = child
-        self.event_ref = event_ref
-        self.event_line = event_line
-        self._width = width
-        q = 0.5 if op == "rolling_median" else quantile
-        self._states = [StartIndexState(rust_op, q) for _ in range(width)]
-
-    def update(self, market, cache):
-        key = id(self)
-        if key in cache:
-            return cache[key]
-        from tools.factors.events import resolve_event_ref
-        occurrence = resolve_event_ref(self.event_ref, self.event_line, 0)
-        if occurrence is None:
-            return np.full(self._width, np.nan, dtype=float)
-        start = max(0, int(occurrence) - 1)
-        values = np.asarray(self.child.update(market, cache), dtype=float)
-        if values.shape != (self._width,):
-            raise ValueError("event window input width changed")
-        result = np.asarray(
-            [state.update(start, float(value))
              for state, value in zip(self._states, values, strict=True)],
             dtype=float,
         )
@@ -1783,8 +1715,9 @@ def compile_streaming_factor(
                     raise UnsupportedStreamingFactor(
                         "event window expects one streaming operand"
                     )
-                node = RustEventWindowNode(
-                    expr.op, children[0], event_ref, event_line, len(products),
+                node = RustIntervalNode(
+                    expr.op, children[0], len(products),
+                    _EventResolver(event_ref, event_line),
                     quantile=getattr(expr, "quantile", None),
                 )
             elif wall_duration_ns is not None:
@@ -1897,41 +1830,44 @@ def compile_streaming_factor(
             trunc_start = _resolve_truncation(expr.trunc_start)
             trunc_end = _resolve_truncation(expr.trunc_end)
             has_trunc = trunc_start is not None or trunc_end is not None
-            event_scope = None
-            bar_scope_count = None
             if has_trunc:
-                node = RustRangeScopeNode(
-                    op_name, data_operands[0], expr.scope, len(products),
-                    trunc_start=(trunc_start if isinstance(trunc_start, int) else 0),
-                    trunc_end=(trunc_end if isinstance(trunc_end, int) else 0),
-                    event_line=event_line, source_freq=source_freq,
-                    products=products,
+                resolver = _RangeResolver(
+                    expr.scope,
+                    trunc_start if isinstance(trunc_start, int) else 0,
+                    trunc_end if isinstance(trunc_end, int) else 0,
+                    event_line, source_freq, products,
+                )
+                node = RustIntervalNode(
+                    op_name, data_operands[0], len(products), resolver,
+                    quantile=quantile,
                 )
                 rust_partition = True
-            elif not has_trunc:
+            else:
                 from tools.factors.expr.lookback_scope import (
                     BarCountScope, SessionScope, TradingDayScope,
                 )
                 if isinstance(expr.scope, BarCountScope):
-                    bar_scope_count = int(expr.scope.resolved_count(
+                    resolver = _BarScopeResolver(expr.scope.resolved_count(
                         source_freq=source_freq, products=products,
                     ))
                 elif event_line is not None:
                     from tools.factors.events import EventId, EventRef
                     if isinstance(expr.scope, TradingDayScope):
-                        event_scope = EventRef(EventId.TRADING_DAY_START)
+                        ref = EventRef(EventId.TRADING_DAY_START)
                     elif isinstance(expr.scope, SessionScope):
-                        event_scope = EventRef(EventId.TRADING_SESSION_START)
-            if not has_trunc and bar_scope_count is not None and op_name in RustBarScopeNode._OPS:
-                node = RustBarScopeNode(
-                    op_name, data_operands[0], bar_scope_count, len(products),
+                        ref = EventRef(EventId.TRADING_SESSION_START)
+                    else:
+                        ref = None
+                    resolver = _EventResolver(ref, event_line) if ref else None
+                else:
+                    resolver = None
+                if resolver is None:
+                    raise UnsupportedStreamingFactor(
+                        "scope aggregation needs an event line or fixed bar count"
+                    )
+                node = RustIntervalNode(
+                    op_name, data_operands[0], len(products), resolver,
                     quantile=quantile,
-                )
-                rust_partition = True
-            if not rust_partition and event_scope is not None and op_name in RustEventWindowNode._OPS:
-                node = RustEventWindowNode(
-                    op_name, data_operands[0], event_scope, event_line,
-                    len(products), quantile=quantile,
                 )
                 rust_partition = True
             if not rust_partition:

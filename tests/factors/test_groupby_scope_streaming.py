@@ -212,7 +212,7 @@ def test_compiled_plan_routes_groupby_scope_to_the_scope_kernel():
     from tools.factors.expr.groupby_scope import GroupByScopeExpr
     from tools.factors.expr.leaf import ColumnRef
     from tools.factors.expr.streaming.incremental import (
-        RustEventWindowNode,
+        RustIntervalNode,
         StreamingFactorPlan,
         compile_incremental_factor,
         compile_streaming_factor,
@@ -225,7 +225,7 @@ def test_compiled_plan_routes_groupby_scope_to_the_scope_kernel():
         expression, ("A",), source_freq=DataFreq.MIN1, event_line=events,
     )
     assert isinstance(plan, StreamingFactorPlan)
-    assert isinstance(plan._root, RustEventWindowNode), (
+    assert isinstance(plan._root, RustIntervalNode), (
         f"编译路径没有接到事件作用域内核，而是 {type(plan._root).__name__}"
     )
 
