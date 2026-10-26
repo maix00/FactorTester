@@ -13,7 +13,7 @@ use serde::Deserialize;
 #[derive(Clone, Copy, Debug)]
 pub enum BinaryOp { Add, Sub, Mul, Div, Gt, Lt, Ge, Le, Eq, Ne }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CrossOp { ZScore, Rank }
 
 #[derive(Clone, Debug)]
@@ -56,6 +56,7 @@ pub struct FactorPlanKernel {
     ordinal: u64,
     timestamp_ns: i64,
     fields: usize,
+    slots: Vec<Vec<f64>>,
     node_keys: Vec<String>,
 }
 
@@ -128,177 +129,10 @@ impl FactorPlanKernel {
                 _ => {}
             }
         }
-        Ok(Self { products, nodes, outputs, ordinal: 0, timestamp_ns: 0, fields: 1, node_keys: Vec::new() })
+        let slots = vec![vec![f64::NAN; products]; nodes.len()];
+        Ok(Self { products, nodes, outputs, ordinal: 0, timestamp_ns: 0, fields: 1, slots, node_keys: Vec::new() })
     }
 
-    fn eval(&mut self, index: usize, columns: &[f64], cache: &mut [Option<Vec<f64>>]) -> Result<Vec<f64>, crate::algo::Error> {
-        if let Some(value) = &cache[index] { return Ok(value.clone()); }
-        let spec = self.nodes[index].spec.clone();
-        let value = match spec {
-            ExprSpec::Column(column) => {
-                if column >= columns.len() {
-                    return Err(crate::algo::Error::InvalidParameter("column out of range".into()));
-                }
-                if column >= self.fields { return Err(crate::algo::Error::InvalidParameter("column out of range".into())); }
-                if self.fields == 1 {
-                    columns.to_vec()
-                } else {
-                    (0..self.products).map(|product| columns[product * self.fields + column]).collect()
-                }
-            }
-            ExprSpec::Const(value) => vec![value; self.products],
-            ExprSpec::Rolling { child, window, min_periods, propagate_nan, .. } => {
-                let input = self.eval(child, columns, cache)?;
-                let current = self.ordinal;
-                let start = current.saturating_sub(window as u64 - 1);
-                let node = &mut self.nodes[index];
-                input.iter().enumerate().map(|(product, value)| {
-                    let Some(state) = node.rolling[product].as_mut() else { return f64::NAN };
-                    state.set_semantics(min_periods, propagate_nan);
-                    state.update_explicit(start, current, *value)
-                }).collect()
-            }
-            ExprSpec::Neg { child } => self.eval(child, columns, cache)?.iter().map(|value| -*value).collect(),
-            ExprSpec::Binary { op, left, right } => {
-                let a = self.eval(left, columns, cache)?;
-                let b = self.eval(right, columns, cache)?;
-                a.iter().zip(&b).map(|(x, y)| binary(op, *x, *y)).collect()
-            }
-            ExprSpec::Shift { child, periods } => {
-                let input = self.eval(child, columns, cache)?;
-                let history = &mut self.nodes[index].history;
-                history.push_back(input);
-                while history.len() > periods + 1 { history.pop_front(); }
-                if history.len() <= periods { vec![f64::NAN; self.products] }
-                else { history[history.len() - 1 - periods].clone() }
-            }
-            ExprSpec::Where { condition, when_true, when_false } => {
-                let condition = self.eval(condition, columns, cache)?;
-                let when_true = self.eval(when_true, columns, cache)?;
-                let when_false = self.eval(when_false, columns, cache)?;
-                condition.iter().zip(when_true.iter().zip(&when_false))
-                    .map(|(c, (a, b))| if c.is_finite() && *c != 0.0 { *a } else { *b }).collect()
-            }
-            ExprSpec::Signal { child, signal_ns, sessions, basepoint, include_current, partial } => {
-                let input = self.eval(child, columns, cache)?;
-                let timestamp = self.timestamp_ns;
-                let node = &mut self.nodes[index];
-                let session = sessions.iter().position(|(start, end, _)| timestamp >= *start && timestamp <= *end);
-                if session != node.signal_session {
-                    node.signal_session = session;
-                    node.signal_last.fill(f64::NAN);
-                    node.signal_next.fill(None);
-                    node.signal_pending.fill(None);
-                    node.signal_prev.fill(f64::NAN);
-                }
-                let session_end = session.map(|position| sessions[position].1);
-                for product in 0..self.products {
-                    if node.signal_next[product].is_none() {
-                        let anchor = session.map_or(timestamp, |position| sessions[position].2);
-                        let first = if anchor % signal_ns == 0 { anchor } else { (anchor / signal_ns + 1) * signal_ns };
-                        node.signal_next[product] = Some(first);
-                    }
-                    let next = node.signal_next[product].unwrap_or(i64::MAX);
-                    let target = timestamp >= next;
-                    let emit_partial = partial == "emit" && session_end == Some(timestamp) && timestamp < next;
-                    if target || emit_partial {
-                        let value = if basepoint == "first" {
-                            node.signal_pending[product].unwrap_or(if include_current { input[product] } else { f64::NAN })
-                        } else if include_current {
-                            input[product]
-                        } else {
-                            node.signal_prev[product]
-                        };
-                        node.signal_last[product] = value;
-                        node.signal_pending[product] = None;
-                        if target {
-                            node.signal_next[product] = Some(next + signal_ns);
-                        }
-                    } else if basepoint == "first" && node.signal_pending[product].is_none() {
-                        node.signal_pending[product] = Some(input[product]);
-                    }
-                    node.signal_prev[product] = input[product];
-                }
-                node.signal_last.clone()
-            }
-            ExprSpec::Scope { child, count, op, min_periods, propagate_nan, sessions } => {
-                let input = self.eval(child, columns, cache)?;
-                let current = self.ordinal;
-                let timestamp = self.timestamp_ns;
-                let node = &mut self.nodes[index];
-                if !sessions.is_empty() {
-                    let session = sessions.iter().position(|(start, end, _)| timestamp >= *start && timestamp <= *end);
-                    if session != node.scope_session {
-                        node.scope_session = session;
-                        node.scope_base.fill(current as usize);
-                        for state in node.rolling.iter_mut().flatten() { state.reset_at(current); }
-                    }
-                } else if current as usize % count == 0 {
-                    node.scope_base.fill(current as usize);
-                }
-                input.iter().enumerate().map(|(product, value)| {
-                    let Some(state) = node.rolling[product].as_mut() else { return f64::NAN };
-                    state.set_semantics(min_periods, propagate_nan);
-                    state.update_explicit(node.scope_base[product] as u64, current, *value)
-                }).collect()
-            }
-            ExprSpec::Since { condition, count, include_current, nearest, default_scope, default }
-            | ExprSpec::Distance { condition, count, include_current, nearest, default_scope, default } => {
-                let condition = self.eval(condition, columns, cache)?;
-                let mut out = vec![f64::NAN; self.products];
-                for product in 0..self.products {
-                    let node = &mut self.nodes[index];
-                    if self.ordinal as usize % count == 0 {
-                        node.since_base[product] = self.ordinal as usize;
-                        node.since_first[product] = None;
-                        node.since_last[product] = None;
-                    }
-                    let truth = condition[product].is_finite() && condition[product] != 0.0;
-                    if truth && include_current {
-                        if node.since_first[product].is_none() { node.since_first[product] = Some(self.ordinal as usize); }
-                        node.since_last[product] = Some(self.ordinal as usize);
-                    }
-                    let matched = if nearest { node.since_last[product] } else { node.since_first[product] };
-                    out[product] = match matched {
-                        Some(hit) => (self.ordinal as usize - hit) as f64,
-                        None => if default_scope { (self.ordinal as usize - node.since_base[product]) as f64 } else { default },
-                    };
-                    if truth && !include_current {
-                        if node.since_first[product].is_none() { node.since_first[product] = Some(self.ordinal as usize); }
-                        node.since_last[product] = Some(self.ordinal as usize);
-                    }
-                }
-                out
-            }
-            ExprSpec::Cross { op, child } => {
-                let input = self.eval(child, columns, cache)?;
-                match op {
-                    CrossOp::ZScore => {
-                        let valid: Vec<f64> = input.iter().copied().filter(|v| v.is_finite()).collect();
-                        let n = valid.len() as f64;
-                        let mean = valid.iter().sum::<f64>() / n;
-                        let std = (valid.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (n - 1.0).max(1.0)).sqrt();
-                        input.iter().map(|v| if !v.is_finite() { f64::NAN } else if std == 0.0 { 0.0 } else { (v - mean) / std }).collect()
-                    }
-                    CrossOp::Rank => {
-                        let mut sorted: Vec<(usize, f64)> = input.iter().copied().enumerate().filter(|(_, v)| v.is_finite()).collect();
-                        sorted.sort_by(|a, b| a.1.total_cmp(&b.1));
-                        let mut out = vec![f64::NAN; self.products];
-                        let n = sorted.len() as f64;
-                        for (rank, (product, _)) in sorted.into_iter().enumerate() {
-                            out[product] = (rank as f64 + 1.0) / n - 0.5;
-                        }
-                        out
-                    }
-                }
-            }
-        };
-        cache[index] = Some(value.clone());
-        Ok(value)
-    }
-}
-
-impl FactorPlanKernel {
     pub fn update(&mut self, values: &[f64]) -> Result<Vec<f64>, crate::algo::Error> {
         self.update_at(0, values)
     }
@@ -309,13 +143,116 @@ impl FactorPlanKernel {
             return Err(crate::algo::Error::InvalidParameter("plan values must be product-major fields".into()));
         }
         self.fields = values.len() / self.products;
-        let mut cache = vec![None; self.nodes.len()];
-        let mut out = Vec::with_capacity(self.outputs.len() * self.products);
-        for output in self.outputs.clone() {
-            out.extend(self.eval(output, values, &mut cache)?);
+        let products = self.products;
+        let fields = self.fields;
+        let current = self.ordinal;
+        for index in 0..self.nodes.len() {
+            let spec = self.nodes[index].spec.clone();
+            let (head, tail) = self.slots.split_at_mut(index);
+            let out = &mut tail[0];
+            match spec {
+                ExprSpec::Column(column) => {
+                    if column >= fields { return Err(crate::algo::Error::InvalidParameter("column out of range".into())); }
+                    if fields == 1 { out.copy_from_slice(values); }
+                    else { for product in 0..products { out[product] = values[product * fields + column]; } }
+                }
+                ExprSpec::Const(value) => out.fill(value),
+                ExprSpec::Neg { child } => {
+                    let input = &head[child];
+                    for product in 0..products { out[product] = -input[product]; }
+                }
+                ExprSpec::Binary { op, left, right } => {
+                    let a = &head[left]; let b = &head[right];
+                    for product in 0..products { out[product] = binary(op, a[product], b[product]); }
+                }
+                ExprSpec::Rolling { child, window, min_periods, propagate_nan, .. } => {
+                    let input = &head[child];
+                    let node = &mut self.nodes[index];
+                    let start = current.saturating_sub(window as u64 - 1);
+                    for product in 0..products {
+                        let Some(state) = node.rolling[product].as_mut() else { out[product] = f64::NAN; continue };
+                        state.set_semantics(min_periods, propagate_nan);
+                        out[product] = state.update_explicit(start, current, input[product]);
+                    }
+                }
+                ExprSpec::Shift { child, periods } => {
+                    let input = head[child].clone();
+                    let node = &mut self.nodes[index];
+                    node.history.push_back(input);
+                    while node.history.len() > periods + 1 { node.history.pop_front(); }
+                    if node.history.len() <= periods { out.fill(f64::NAN); }
+                    else { out.copy_from_slice(&node.history[node.history.len() - 1 - periods]); }
+                }
+                ExprSpec::Where { condition, when_true, when_false } => {
+                    let c = &head[condition]; let a = &head[when_true]; let b = &head[when_false];
+                    for product in 0..products { out[product] = if c[product].is_finite() && c[product] != 0.0 { a[product] } else { b[product] }; }
+                }
+                ExprSpec::Cross { op, child } => {
+                    let input = &head[child];
+                    let valid: Vec<(usize, f64)> = (0..products).filter_map(|product| input[product].is_finite().then_some((product, input[product]))).collect();
+                    if op == CrossOp::ZScore {
+                        let n = valid.len() as f64;
+                        let mean = valid.iter().map(|(_, value)| value).sum::<f64>() / n;
+                        let std = (valid.iter().map(|(_, value)| (value - mean).powi(2)).sum::<f64>() / (n - 1.0).max(1.0)).sqrt();
+                        for product in 0..products { out[product] = if !input[product].is_finite() { f64::NAN } else if std == 0.0 { 0.0 } else { (input[product] - mean) / std }; }
+                    } else {
+                        let mut sorted = valid; sorted.sort_by(|a, b| a.1.total_cmp(&b.1)); out.fill(f64::NAN);
+                        let n = sorted.len() as f64;
+                        for (rank, (product, _)) in sorted.into_iter().enumerate() { out[product] = (rank as f64 + 1.0) / n - 0.5; }
+                    }
+                }
+                ExprSpec::Since { condition, count, include_current, nearest, default_scope, default }
+                | ExprSpec::Distance { condition, count, include_current, nearest, default_scope, default } => {
+                    let input = &head[condition];
+                    let node = &mut self.nodes[index];
+                    for product in 0..products {
+                        if current as usize % count == 0 { node.since_base[product] = current as usize; node.since_first[product] = None; node.since_last[product] = None; }
+                        let truth = input[product].is_finite() && input[product] != 0.0;
+                        if truth && include_current { if node.since_first[product].is_none() { node.since_first[product] = Some(current as usize); } node.since_last[product] = Some(current as usize); }
+                        let matched = if nearest { node.since_last[product] } else { node.since_first[product] };
+                        out[product] = match matched { Some(hit) => (current as usize - hit) as f64, None => if default_scope { (current as usize - node.since_base[product]) as f64 } else { default } };
+                        if truth && !include_current { if node.since_first[product].is_none() { node.since_first[product] = Some(current as usize); } node.since_last[product] = Some(current as usize); }
+                    }
+                }
+                ExprSpec::Scope { child, count, op, min_periods, propagate_nan, sessions } => {
+                    let input = &head[child];
+                    let node = &mut self.nodes[index];
+                    if !sessions.is_empty() {
+                        let session = sessions.iter().position(|(start, end, _)| timestamp_ns >= *start && timestamp_ns <= *end);
+                        if session != node.scope_session { node.scope_session = session; node.scope_base.fill(current as usize); for state in node.rolling.iter_mut().flatten() { state.reset_at(current); } }
+                    } else if current as usize % count == 0 { node.scope_base.fill(current as usize); }
+                    for product in 0..products {
+                        let Some(state) = node.rolling[product].as_mut() else { out[product] = f64::NAN; continue };
+                        state.set_semantics(min_periods, propagate_nan);
+                        out[product] = state.update_explicit(node.scope_base[product] as u64, current, input[product]);
+                    }
+                }
+                ExprSpec::Signal { child, signal_ns, sessions, basepoint, include_current, partial } => {
+                    let input = &head[child];
+                    let node = &mut self.nodes[index];
+                    let session = sessions.iter().position(|(start, end, _)| timestamp_ns >= *start && timestamp_ns <= *end);
+                    if session != node.signal_session { node.signal_session = session; node.signal_last.fill(f64::NAN); node.signal_next.fill(None); node.signal_pending.fill(None); node.signal_prev.fill(f64::NAN); }
+                    let session_end = session.map(|position| sessions[position].1);
+                    for product in 0..products {
+                        if node.signal_next[product].is_none() { let anchor = session.map_or(timestamp_ns, |position| sessions[position].2); let first = if anchor % signal_ns == 0 { anchor } else { (anchor / signal_ns + 1) * signal_ns }; node.signal_next[product] = Some(first); }
+                        let next = node.signal_next[product].unwrap_or(i64::MAX);
+                        let target = timestamp_ns >= next;
+                        let emit_partial = partial == "emit" && session_end == Some(timestamp_ns) && timestamp_ns < next;
+                        if target || emit_partial {
+                            let value = if basepoint == "first" { node.signal_pending[product].unwrap_or(if include_current { input[product] } else { f64::NAN }) } else if include_current { input[product] } else { node.signal_prev[product] };
+                            node.signal_last[product] = value; node.signal_pending[product] = None;
+                            if target { node.signal_next[product] = Some(next + signal_ns); }
+                        } else if basepoint == "first" && node.signal_pending[product].is_none() { node.signal_pending[product] = Some(input[product]); }
+                        node.signal_prev[product] = input[product];
+                        out[product] = node.signal_last[product];
+                    }
+                }
+            }
         }
+        let mut result = Vec::with_capacity(self.outputs.len() * products);
+        for output in &self.outputs { result.extend_from_slice(&self.slots[*output]); }
         self.ordinal += 1;
-        Ok(out)
+        Ok(result)
     }
 }
 

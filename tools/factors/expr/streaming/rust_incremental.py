@@ -49,12 +49,20 @@ def compile_rust_incremental(expressions: Mapping[str, Any], products: tuple[Any
         keys.extend(spec.get("keys", [""] * len(spec["nodes"])))
         outputs.append(spec["outputs"][0] + offset)
 
-    if len(columns) != 1:
-        raise UnsupportedByRustPlan("multi-column panes are not yet wired to the product kernel")
     state = FactorPlanState(json.dumps({
         "columns": columns, "keys": keys, "nodes": nodes, "outputs": outputs,
     }), len(products))
-    return RustIncrementalExecutor(expressions, products, columns, state)
+    return RustIncrementalExecutor(expressions, products, columns, state, specs)
+
+
+class _NodePlan:
+    def __init__(self, keys):
+        self.node_keys = tuple(keys)
+
+
+class _PlanView:
+    def __init__(self, specs):
+        self.plans = tuple(_NodePlan(spec.get("key_tuples", [])) for spec in specs)
 
 
 class RustIncrementalExecutor:
@@ -62,12 +70,12 @@ class RustIncrementalExecutor:
 
     uses_rust = True
 
-    def __init__(self, expressions, products, columns, state) -> None:
+    def __init__(self, expressions, products, columns, state, specs) -> None:
         self._aliases = tuple(expressions)
         self._products = tuple(products)
         self._columns = tuple(columns)
         self._state = state
-        self._plan = None
+        self._plan = _PlanView(specs)
         self._latest: dict[str, dict[Any, float]] = {}
 
     def _field(self, fields, name: str) -> float:
