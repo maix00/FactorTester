@@ -21,7 +21,7 @@ _BINARY = {"add", "sub", "mul", "div", "gt", "lt", "ge", "le", "eq", "ne"}
 _UNARY = {"abs", "sign", "sqrt", "log", "tanh"}
 
 
-def to_plan_spec(expressions: list[Any], *, products=None) -> dict[str, Any] | None:
+def to_plan_spec(expressions: list[Any], *, products=None, categories=None) -> dict[str, Any] | None:
     columns: list[str] = []
     nodes: list[dict[str, Any]] = []
     keys: list[str] = []
@@ -37,10 +37,26 @@ def to_plan_spec(expressions: list[Any], *, products=None) -> dict[str, Any] | N
         elif isinstance(expr, CategoryBoolRef):
             if products is None:
                 return None
-            node = {"kind": "product", "values": [
-                1.0 if expr.category.is_in_category(expr.label, product) else 0.0
-                for product in products
-            ]}
+            if categories is not None:
+                memberships = []
+                for index, product in enumerate(products):
+                    entries = categories.get(product) or categories.get(str(product))
+                    if isinstance(entries, (tuple, list)):
+                        changed = None
+                        for item in sorted(entries, key=lambda entry: entry.effective_at_ns or 0):
+                            member = expr.label in item.labels
+                            if member != changed:
+                                memberships.append([index, int(item.effective_at_ns or 0), int(member)])
+                                changed = member
+                    elif entries is not None:
+                        labels = getattr(entries, "labels", entries)
+                        memberships.append([index, 0, int(expr.label in labels)])
+                node = {"kind": "category", "memberships": memberships}
+            else:
+                node = {"kind": "product", "values": [
+                    1.0 if expr.category.is_in_category(expr.label, product) else 0.0
+                    for product in products
+                ]}
         elif isinstance(expr, ColumnRef):
             if expr.column not in columns:
                 columns.append(expr.column)

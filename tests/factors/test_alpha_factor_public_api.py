@@ -778,3 +778,17 @@ def test_term_structure_curves_are_time_aligned():
     )
     result = term_spread().evaluate(ctx)
     np.testing.assert_allclose(result['A'].to_numpy(), [2.0, 3.0])
+
+
+def test_category_effective_time_compiles_to_rust_plan():
+    from alpha.factor import CategoryBoolRef, CategoryMembership, IncrementalFactorPlan
+
+    plan = IncrementalFactorPlan(
+        {'metal': CategoryBoolRef(label='metal')}, ('A',),
+        categories={'A': (
+            CategoryMembership('A', frozenset(), effective_at_ns=0),
+            CategoryMembership('A', frozenset({'metal'}), effective_at_ns=100),
+        )},
+    )
+    assert plan.update_at(0, [1.0]) == {'metal': {'A': 0.0}}
+    assert plan.update_at(100, [1.0]) == {'metal': {'A': 1.0}}

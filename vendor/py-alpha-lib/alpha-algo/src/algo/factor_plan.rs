@@ -21,6 +21,7 @@ pub enum ExprSpec {
     Column(usize),
     Const(f64),
     Product(Vec<f64>),
+    Category { memberships: Vec<(usize, i64, bool)> },
     Rolling { child: usize, window: usize, op: SessionOp, min_periods: usize, propagate_nan: bool },
     Ema { child: usize, span: usize, min_periods: usize, propagate_nan: bool },
     Term { op: String, near_rank: usize, far_rank: usize, depth: usize },
@@ -183,7 +184,7 @@ impl FactorPlanKernel {
         }
         for (index, node) in nodes.iter().enumerate() {
             let children: &[usize] = match &node.spec {
-                ExprSpec::Column(_) | ExprSpec::Const(_) | ExprSpec::Product(_) | ExprSpec::Term { .. } => &[],
+                ExprSpec::Column(_) | ExprSpec::Const(_) | ExprSpec::Product(_) | ExprSpec::Category { .. } | ExprSpec::Term { .. } => &[],
                 ExprSpec::Neg { child } | ExprSpec::Unary { child, .. } | ExprSpec::Rolling { child, .. }
                 | ExprSpec::SessionRolling { child, .. } | ExprSpec::MatchDistance { child, .. }
                 | ExprSpec::Ema { child, .. } | ExprSpec::Linreg { child, .. }
@@ -250,6 +251,14 @@ impl FactorPlanKernel {
             let (head, tail) = self.slots.split_at_mut(index);
             let out = &mut tail[0];
             match spec {
+                ExprSpec::Category { ref memberships } => {
+                    for product in 0..products {
+                        out[product] = memberships.iter()
+                            .filter(|(index, at, _)| *index == product && *at <= timestamp_ns)
+                            .max_by_key(|(_, at, _)| *at)
+                            .map_or(0.0, |(_, _, member)| if *member { 1.0 } else { 0.0 });
+                    }
+                }
                 ExprSpec::Product(ref values) => {
                     if values.len() != products { return Err(crate::algo::Error::InvalidParameter("product constant width mismatch".into())); }
                     out.copy_from_slice(values);
@@ -549,6 +558,7 @@ enum RawNode {
     Column { index: usize },
     Const { value: f64 },
     Product { values: Vec<f64> },
+    Category { memberships: Vec<[i64; 3]> },
     Rolling { child: usize, window: usize, op: String, min_periods: usize,
               propagate_nan: bool, #[serde(default)] quantile: Option<f64> },
     Scope { child: usize, count: usize, op: String, min_periods: usize, propagate_nan: bool,
@@ -601,6 +611,9 @@ impl FactorPlanKernel {
                 RawNode::Column { index } => ExprSpec::Column(index),
                 RawNode::Const { value } => ExprSpec::Const(value),
                 RawNode::Product { values } => ExprSpec::Product(values),
+                RawNode::Category { memberships } => ExprSpec::Category {
+                    memberships: memberships.into_iter().map(|item| (item[0] as usize, item[1], item[2] != 0)).collect(),
+                },
                 RawNode::Rolling { child, window, op, min_periods, propagate_nan, quantile } => {
                     if op == "ema" {
                         ExprSpec::Ema { child, span: window, min_periods, propagate_nan }
