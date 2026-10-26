@@ -115,65 +115,111 @@ def preflight_catalogs(opened, *, max_input_bars: int) -> tuple[int, int, int]:
     return first, last, total
 
 
-def iter_catalog_bar_batches(opened, *, max_input_bars: int, batch_minutes: int = 20,
-                             max_batch_bars: int = 250_000):
-    """One bounded catalog reader shared by probe and strategy replays.
+def iter_catalog_bar_batches(opened, *, max_input_bars: int,
+                             max_batch_bars: int = 250_000,
+                             max_timestamp_group_bars: int | None = None,
+                             query_memory_limit_bytes: int = 128 * 1024 * 1024,
+                             target_batch_bars: int = 10_000):
+    """Merge native lazy query sessions; retain one source batch per catalog.
 
-    ``max_batch_bars`` derives a denser time step from the frozen receipt
-    density when one 20-minute slice would exceed the per-batch bar budget.
+    Target batch size is soft; timestamp groups are atomic and have an explicit
+    hard bound. These bounds do not replace the query runtime/process memory cap.
     """
-    if isinstance(batch_minutes, bool) or not isinstance(batch_minutes, int) or batch_minutes <= 0:
-        raise ValueError("batch_minutes must be a positive integer")
-    if isinstance(max_batch_bars, bool) or not isinstance(max_batch_bars, int) or max_batch_bars <= 0:
-        raise ValueError("max_batch_bars must be a positive integer")
+    import heapq
+    from itertools import groupby
+
+    for name, value in (("max_batch_bars", max_batch_bars),
+                        ("query_memory_limit_bytes", query_memory_limit_bytes),
+                        ("target_batch_bars", target_batch_bars)):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{name} must be a positive integer")
+    if max_timestamp_group_bars is None:
+        max_timestamp_group_bars = max_batch_bars
+    if (isinstance(max_timestamp_group_bars, bool) or not isinstance(max_timestamp_group_bars, int)
+            or not 1 <= max_timestamp_group_bars <= max_batch_bars):
+        raise ValueError("timestamp group budget must be positive and fit the replay batch budget")
     rows = tuple(opened)
-    first, last, expected = preflight_catalogs(rows, max_input_bars=max_input_bars)
-    processed = 0
-    step = batch_minutes * MINUTE_NS
-    span = max(1, last - first + 1)
-    density_step = max(MINUTE_NS, (span * max_batch_bars) // max(1, expected))
-    step = min(step, density_step)
-    for begin in range(first, last + 1, step):
-        end = min(begin + step - 1, last)
-        bars = []
+    preflight_catalogs(rows, max_input_bars=max_input_bars)
+    target = min(max_batch_bars, target_batch_bars)
+    sessions, streams = [], []
+
+    def source_stream(session, count):
+        processed = 0
+        batch = None
+        try:
+            while (batch := session.next_batch()) is not None:
+                processed += len(batch)
+                if processed > count:
+                    raise ValueError("catalog query exceeds its frozen receipt count")
+                yield from batch
+                batch.clear()
+            if processed != count:
+                raise ValueError(f"catalog replay count {processed} != receipt {count}")
+        finally:
+            if batch is not None:
+                batch.clear()
+
+    try:
         for _, catalog, receipt, _ in rows:
-            if int(receipt["last_available_ns"]) < begin or int(receipt["first_available_ns"]) > end:
-                continue
-            bars.extend(catalog.query_bars(identifiers=[receipt["bar_type"]], start=begin, end=end))
-        if len(bars) > max_batch_bars:
-            raise ValueError("catalog query exceeds the per-batch bar budget")
-        processed += len(bars)
-        if processed > expected:
-            raise ValueError("catalog query exceeds its frozen receipt count")
-        if bars:
-            bars.sort(key=lambda bar: int(bar.ts_init))
-            yield bars
-    if processed != expected:
-        raise ValueError(f"catalog replay count {processed} != receipts {expected}")
+            session = catalog.query_bar_batches(
+                identifiers=[receipt["bar_type"]], start=int(receipt["first_available_ns"]),
+                end=int(receipt["last_available_ns"]), chunk_size=target,
+                max_timestamp_group_rows=max_timestamp_group_bars,
+                memory_limit_bytes=max(1, query_memory_limit_bytes // len(rows)),
+            )
+            sessions.append(session)
+            streams.append(source_stream(session, int(receipt["selected_count"])))
+        merged = heapq.merge(*streams, key=lambda bar: int(bar.ts_init))
+        pending = []
+        for _, group in groupby(merged, key=lambda bar: int(bar.ts_init)):
+            aligned = []
+            for bar in group:
+                if len(aligned) >= max_timestamp_group_bars:
+                    raise ValueError("replay timestamp group exceeds its bar budget")
+                aligned.append(bar)
+            if pending and len(pending) + len(aligned) > max_batch_bars:
+                yield pending
+                pending = []
+            pending.extend(aligned)
+            if len(pending) >= target:
+                yield pending
+                pending = []
+        if pending:
+            yield pending
+    finally:
+        for stream in streams:
+            stream.close()
+        for session in sessions:
+            session.close()
 
 
 def replay_catalog_batches(engine, opened, *, max_input_bars: int, batch_minutes: int = 20,
                            max_batch_bars: int = 250_000):
     """Feed bounded slices to Nautilus' native streaming replay path."""
+    if isinstance(batch_minutes, bool) or not isinstance(batch_minutes, int) or batch_minutes <= 0:
+        raise ValueError("batch_minutes must be a positive integer")
     rows = tuple(opened)
     next_start, _, _ = preflight_catalogs(rows, max_input_bars=max_input_bars)
     total = batches = largest = 0
     previous_end = None
-    for bars in iter_catalog_bar_batches(rows, max_input_bars=max_input_bars, batch_minutes=batch_minutes,
-                                         max_batch_bars=max_batch_bars):
-        begin, end = int(bars[0].ts_init), int(bars[-1].ts_init)
-        if previous_end is not None and begin <= previous_end:
-            raise ValueError("streaming batch splits or reorders a replay timestamp")
-        total += len(bars)
-        largest = max(largest, len(bars))
-        try:
-            engine.add_data(bars)
-            bars.clear()  # Nautilus owns this bounded batch now.
-            engine.run(start=next_start, end=end, streaming=True)
-        finally:
-            engine.clear_data()
-        next_start = previous_end = end
-        batches += 1
+    from contextlib import closing
+    with closing(iter_catalog_bar_batches(rows, max_input_bars=max_input_bars,
+                                          max_batch_bars=max_batch_bars,
+                                          target_batch_bars=batch_minutes * len(rows))) as batches_iter:
+        for bars in batches_iter:
+            begin, end = int(bars[0].ts_init), int(bars[-1].ts_init)
+            if previous_end is not None and begin <= previous_end:
+                raise ValueError("streaming batch splits or reorders a replay timestamp")
+            total += len(bars)
+            largest = max(largest, len(bars))
+            try:
+                engine.add_data(bars)
+                bars.clear()  # Nautilus owns this bounded batch now.
+                engine.run(start=next_start, end=end, streaming=True)
+            finally:
+                engine.clear_data()
+            next_start = previous_end = end
+            batches += 1
     return {"bars": total, "batch_count": batches, "max_batch_bars": largest}
 
 
@@ -329,7 +375,7 @@ def run_small_catalog_replay(
         probe_seen = 0
         probe_order_pending = False
         expected_probe_fill_prices: list[str] = []
-        for bars in iter_catalog_bar_batches(opened, max_input_bars=max_input_bars, batch_minutes=batch_minutes,
+        for bars in iter_catalog_bar_batches(opened, max_input_bars=max_input_bars, target_batch_bars=batch_minutes * len(opened),
                                              max_batch_bars=max_batch_bars):
             processed += len(bars)
             if processed > max_input_bars:

@@ -126,3 +126,41 @@ batch 的截断 rolling 原先把不断移动、但落在当前 Bar 之前的结
 独立标量扫描对所有输入前缀逐点验证 min/max 的位置与均值，包括重复极值、
 NaN、正负无穷、反向与单元素候选。bridge 回归验证 raw 输出再次用作
 truncate 端点时选回同一原始值。该验收不等同于原研报真实 Job 验收。
+
+## 2026-10-27 原生流式查询接线与目标边界
+
+Nautilus 的 `query_batch_session` 已有 typed pages 和时间戳对齐，本次只补
+Python `query_bar_batches` 的薄绑定；`next_batch`、关闭和错误清理均由原生
+session 持有。可独立指定软批大小及同时间戳组硬上限；跨数据源仍需检查
+合并后的整组数量。查询按冻结收据的 ts_init 可用时刻限定范围，不改写
+Bar 的 ts_event。转换后的 Catalog 读回验证也应使用可用时刻。
+
+DataFusion 查询内存池预算与 spill 上限独立于回放批大小。清理查询表时
+只复用 memory_pool 和 disk_manager，必须重建文件列表与元数据缓存；
+保留整个 RuntimeEnv 会使新增的 Catalog 批次不可见。真实追加批次读回测试
+已覆盖该回归。DataFusion 并非所有分配都受内存池约束，仍需 worker 的
+进程级资源限制；本次不宣称整进程内存上界已完成验收。
+
+目标是 Rust 数据面与 FactorTester 控制面：注册、权限、冻结身份及 RunSpec
+留在 FactorTester；扫描、排序、跨品种合并、共享 Cache 和回放分发归 Nautilus。
+因子 bridge 必须进入同一个 runtime，不能另起数据管理器重新读一份行情。
+相同输入/时钟的因子共享计划，订单与账户状态保持各自归属。首次转换生成的
+日历、范围与摘要应冻结复用；实时适配器与历史回放遵守相同的事件/可用时刻
+合同，但不共享可变回放缓存。
+
+当前 Python 绑定、逐 Bar 迭代及 heap 合并是明确的过渡实现，不是目标架构，
+不得把本次读取改进称为零 Python per-Bar 或完整 Rust Job。后续切换必须以
+Nautilus 原生 BacktestNode/DataIterator 分发给 FactorActor 与执行系统，完成
+同一真实任务的读取次数、跨语言调用、耗时、峰值 RSS 及结果逐点对账后，
+再删除过渡读取/合并与 Python 因子事件适配器。
+
+聚焦验证：真实 T/TL Catalog、真实阈值/分组 Strategy、原生 batch 绑定及
+合成清理/多源时间戳组测试共 18 项通过；原生 session 9 项、查询预算重置
+1 项通过。均非全仓测试，也未在公网运行负载。
+
+容量样本（仅一次、缓存未清空）：macOS arm64、GTHT Python 3.14、Nautilus
+本机 dev opt-level=1；T/TL 各 500 根真实分钟 Bar、共享 CLOSE rolling(20)
+计划和原生分组 Strategy。1000 根回放分 25 批，最大 40 根，发布 500 次、
+计划 2 节点。转换 Catalog 后的进程峰值已达 282,312,704 字节，回放/报告后
+峰值 386,826,240 字节；回放与报告耗时 0.159604 秒。耗时不含前面的转换，
+峰值包含转换且是高水位；该样本不是泄漏证明、端到端 Job 基准或提速比例。

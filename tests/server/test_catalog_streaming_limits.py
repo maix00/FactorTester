@@ -12,10 +12,33 @@ class Catalog:
     def __init__(self, count=8, delay=100):
         self.bars = [SimpleNamespace(ts_init=index * MINUTE_NS + delay) for index in range(count)]
         self.queries = []
+        self.sessions = []
 
-    def query_bars(self, *, identifiers, start, end):
+    def query_bar_batches(self, *, identifiers, start, end, chunk_size, max_timestamp_group_rows, memory_limit_bytes):
         self.queries.append((start, end))
-        return [bar for bar in self.bars if start <= bar.ts_init <= end]
+        bars = [bar for bar in self.bars if start <= bar.ts_init <= end]
+
+        class Session:
+            def __init__(self):
+                self.position = 0
+                self.closed = False
+
+            def next_batch(self):
+                if self.position == len(bars):
+                    return None
+                first = self.position
+                end = min(len(bars), first + chunk_size)
+                while end < len(bars) and bars[end].ts_init == bars[end - 1].ts_init:
+                    end += 1
+                self.position = end
+                return bars[first:end]
+
+            def close(self):
+                self.closed = True
+
+        session = Session()
+        self.sessions.append(session)
+        return session
 
 
 def opened(catalog):
@@ -72,9 +95,10 @@ def test_native_failure_still_releases_loaded_batch():
     with pytest.raises(RuntimeError, match="failed"):
         replay_catalog_batches(engine, [opened(catalog)], max_input_bars=8)
     assert cleared == [True]
+    assert catalog.sessions[0].closed
 
 
-def test_per_batch_bar_budget_densifies_the_time_step():
+def test_per_batch_bar_budget_bounds_native_query_chunks():
     catalog = Catalog(count=16)
     batches = list(iter_catalog_bar_batches(
         [opened(catalog)], max_input_bars=16, max_batch_bars=2,
@@ -82,3 +106,32 @@ def test_per_batch_bar_budget_densifies_the_time_step():
     assert sum(len(batch) for batch in batches) == 16
     assert max(len(batch) for batch in batches) <= 2
     assert len(batches) >= 8
+
+
+def test_multi_catalog_equal_timestamps_stay_in_one_batch_and_sources_close():
+    first, second = Catalog(count=5), Catalog(count=5)
+    batches = list(iter_catalog_bar_batches([opened(first), opened(second)],
+                                            max_input_bars=10, max_batch_bars=3))
+    timestamps = [int(bar.ts_init) for batch in batches for bar in batch]
+    assert timestamps == sorted([bar.ts_init for bar in first.bars + second.bars])
+    assert len(timestamps) == 10
+    assert all(batches[i][-1].ts_init < batches[i+1][0].ts_init for i in range(len(batches)-1))
+    assert all(session.closed for catalog in (first, second) for session in catalog.sessions)
+
+
+def test_oversized_global_timestamp_group_refuses_and_closes_all_sources():
+    first, second = Catalog(count=4), Catalog(count=4)
+    for bar in first.bars + second.bars:
+        bar.ts_init = 100
+    with pytest.raises(ValueError, match="timestamp group"):
+        list(iter_catalog_bar_batches([opened(first), opened(second)], max_input_bars=8,
+                                      max_batch_bars=10, max_timestamp_group_bars=5))
+    assert all(session.closed for catalog in (first, second) for session in catalog.sessions)
+
+
+def test_early_consumer_close_releases_all_native_sessions():
+    catalog = Catalog()
+    stream = iter_catalog_bar_batches([opened(catalog)], max_input_bars=8, max_batch_bars=2)
+    next(stream)
+    stream.close()
+    assert catalog.sessions[0].closed

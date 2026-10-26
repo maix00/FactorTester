@@ -57,8 +57,8 @@ def _assert_readback(catalog, bar_type, source_bars: list[MarketBar]) -> None:
     """Query only the just-written window; compare every value and clock."""
     read = catalog.query_bars(
         identifiers=[str(bar_type)],
-        start=source_bars[0].clock.interval_end_ns,
-        end=source_bars[-1].clock.interval_end_ns,
+        start=source_bars[0].clock.available_at_ns,
+        end=source_bars[-1].clock.available_at_ns,
     )
     if len(read) != len(source_bars):
         raise ValueError(f"catalog readback count {len(read)} != {len(source_bars)}")

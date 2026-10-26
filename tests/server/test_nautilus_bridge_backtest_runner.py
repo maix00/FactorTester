@@ -114,3 +114,27 @@ def test_frozen_ref_without_resolved_expression_is_not_misrepresented(tmp_path):
         run_small_catalog_replay(
             (ReplayInput(tmp_path / "missing", "CFFEX|F|T|2403"),),
             tmp_path / "out", frozen_factor_ref="factor:v2:example")
+
+
+def test_native_catalog_batch_binding_matches_frozen_range_and_can_close_early(tmp_path):
+    require_nautilus()
+    from server.services.nautilus_bridge.backtest_runner import _load_input
+    _, catalog, receipt, _ = _load_input(_real_catalog(tmp_path))
+    args = dict(identifiers=[receipt["bar_type"]], start=receipt["first_available_ns"],
+                end=receipt["last_available_ns"])
+    expected = catalog.query_bars(**args)
+    session = catalog.query_bar_batches(**args, chunk_size=2, max_timestamp_group_rows=2,
+                                         memory_limit_bytes=32 * 1024 * 1024)
+    actual = []
+    sizes = []
+    while (batch := session.next_batch()) is not None:
+        sizes.append(len(batch))
+        actual.extend(batch)
+    assert sizes == [2,2,2,2]
+    assert actual == expected
+    assert session.next_batch() is None
+    session.close()
+    early = catalog.query_bar_batches(**args, chunk_size=2)
+    assert len(early.next_batch()) == 2
+    early.close()
+    assert early.next_batch() is None
