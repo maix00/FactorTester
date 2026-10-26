@@ -367,10 +367,50 @@ class RollingOp(OperandExpr):
         'rolling_skew': lambda s, w: s.rolling(w, min_periods=max(1, w // 2)).skew(),
     }
 
+    _RUST_OPS = {
+        'rolling_mean': 'mean', 'rolling_sum': 'sum',
+        'rolling_var': 'var', 'rolling_std': 'std',
+        'rolling_min': 'min', 'rolling_max': 'max',
+        'rolling_skew': 'skew',
+        'rolling_argmin': 'argmin', 'rolling_argmax': 'argmax',
+        'rolling_argmin_raw': 'argmin_raw', 'rolling_argmax_raw': 'argmax_raw',
+        'rolling_median': 'median', 'rolling_quantile': 'quantile',
+        'rolling_rank': 'rank', 'rolling_mad': 'mad',
+    }
+
+    def _rust_rolling(self, window: int, df: pd.DataFrame,
+                      quantile: float | None = None) -> pd.DataFrame | None:
+        """Batch path uses the same Rust interval kernel as streaming."""
+        op = self._RUST_OPS.get(self.op)
+        if op is None:
+            return None
+        try:
+            from alpha import IntervalState
+        except ImportError:
+            return None
+        result = pd.DataFrame(index=df.index, columns=df.columns, dtype=float)
+        for column in df.columns:
+            values = pd.to_numeric(df[column], errors="coerce").to_numpy(dtype=float)
+            state = IntervalState(op, quantile)
+            output = np.empty(len(values), dtype=float)
+            for index, value in enumerate(values):
+                start = max(0, index - window + 1)
+                output[index] = state.update(start, index, float(value))
+            result[column] = output
+        return result
+
     def _apply_rolling(self, window: int, *dfs: pd.DataFrame,
                        freq: DataFreq,
                        trunc_start_arr: np.ndarray | None = None,
                        trunc_end_arr: np.ndarray | None = None) -> pd.DataFrame:
+        if trunc_start_arr is None and trunc_end_arr is None and len(dfs) == 1:
+            quantile = None
+            if self.op == 'rolling_quantile':
+                q = self.quantile
+                quantile = float(q) if isinstance(q, (int, float)) else None
+            rust = self._rust_rolling(window, dfs[0], quantile)
+            if rust is not None:
+                return rust
         # argmax/argmin：全向量化，不依赖 rolling()
         if self.op in ('rolling_argmax', 'rolling_argmin',
                        'rolling_argmax_raw', 'rolling_argmin_raw'):
