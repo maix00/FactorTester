@@ -89,7 +89,7 @@ def to_plan_spec(expressions: list[Any]) -> dict[str, Any] | None:
             node = {"kind": "where", "condition": children[0],
                     "when_true": children[1], "when_false": children[2]}
         elif isinstance(expr, SignalAlign):
-            if expr.basepoint != "last" or not expr.include_current or expr.partial not in {"drop", "emit"}:
+            if expr.basepoint != "last" or not expr.include_current or expr.partial != "drop":
                 return None
             if expr.scope_anchor != "start" and not isinstance(expr.scope, SessionScope):
                 return None
