@@ -301,7 +301,7 @@ class RustIntervalNode:
         "rolling_argmin": "argmin", "rolling_argmax": "argmax",
         "rolling_argmin_raw": "argmin", "rolling_argmax_raw": "argmax",
         "rolling_median": "quantile", "rolling_quantile": "quantile",
-        "rolling_rank": "rank",
+        "rolling_rank": "rank", "rolling_mad": "mad",
     }
 
     def __init__(self, op, child, width, resolver, quantile=None):
