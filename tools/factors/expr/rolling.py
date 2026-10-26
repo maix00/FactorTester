@@ -458,23 +458,18 @@ class RollingOp(OperandExpr):
         propagate = self.nan_policy is NanPolicy.PROPAGATE
         result = pd.DataFrame(index=df.index, columns=df.columns, dtype=float)
         try:
-            from alpha import interval_rolling, interval_rolling_fixed
+            from alpha import interval_rolling
         except ImportError:
             return None
         for column in df.columns:
             values = pd.to_numeric(df[column], errors="coerce").to_numpy(dtype=float)
-            if op in {"sum", "mean", "var", "std", "skew"}:
-                result[column] = interval_rolling_fixed(
-                    values, window, op, quantile, min_periods, propagate,
-                )
-            else:
-                ordinals = np.arange(len(values), dtype=np.uint64)
-                starts = np.maximum(
-                    0, ordinals.astype(np.int64) - window + 1,
-                ).astype(np.uint64)
-                result[column] = interval_rolling(
-                    values, starts, ordinals, op, quantile,
-                )
+            ordinals = np.arange(len(values), dtype=np.uint64)
+            starts = np.maximum(
+                0, ordinals.astype(np.int64) - window + 1,
+            ).astype(np.uint64)
+            result[column] = interval_rolling(
+                values, starts, ordinals, op, quantile, window,
+            )
         return self._apply_window_semantics(result, df, window)
 
     def _rust_rolling_pair(self, window: int, left: pd.DataFrame,
@@ -483,19 +478,21 @@ class RollingOp(OperandExpr):
         if op is None:
             return None
         try:
-            from alpha import interval_rolling_pair_fixed
+            from alpha import interval_rolling_pair
         except ImportError:
             return None
-        min_periods = self._min_periods_value(window)
-        propagate = self.nan_policy is NanPolicy.PROPAGATE
         result = pd.DataFrame(index=left.index, columns=left.columns, dtype=float)
         for column in left.columns:
             x = pd.to_numeric(left[column], errors="coerce").to_numpy(dtype=float)
             y = pd.to_numeric(right[column], errors="coerce").to_numpy(dtype=float)
-            result[column] = interval_rolling_pair_fixed(
-                x, y, window, op == 'corr', max(2, min_periods), propagate,
+            ordinals = np.arange(len(x), dtype=np.uint64)
+            starts = np.maximum(
+                0, ordinals.astype(np.int64) - window + 1,
+            ).astype(np.uint64)
+            result[column] = interval_rolling_pair(
+                x, y, starts, ordinals, op == 'corr', window,
             )
-        return result
+        return self._apply_window_semantics(result, left, window)
 
     def _apply_rolling(self, window: int, *dfs: pd.DataFrame,
                        freq: DataFreq,

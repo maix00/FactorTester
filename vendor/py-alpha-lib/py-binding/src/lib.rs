@@ -60,10 +60,11 @@ mod algo_impl {
   }
 
   #[pyfunction]
-  #[pyo3(signature = (values, starts, ends, op, quantile=None))]
+  #[pyo3(signature = (values, starts, ends, op, quantile=None, window=None))]
   pub fn interval_rolling(
     py: Python<'_>, values: PyReadonlyArray1<f64>, starts: PyReadonlyArray1<u64>,
     ends: PyReadonlyArray1<u64>, op: &str, quantile: Option<f64>,
+    window: Option<usize>,
   ) -> PyResult<Py<PyArray1<f64>>> {
     let values = values.as_slice()?;
     let starts = starts.as_slice()?;
@@ -74,7 +75,8 @@ mod algo_impl {
       ));
     }
     let op = interval_op(op, quantile)?;
-    let fixed = ends.iter().enumerate().all(|(i, end)| *end == i as u64);
+    let fixed = window.is_some();
+    let window = window.unwrap_or(1).max(1);
     if fixed && matches!(
       op, alpha_algo::SessionOp::Sum | alpha_algo::SessionOp::Mean
         | alpha_algo::SessionOp::Var | alpha_algo::SessionOp::Std
@@ -82,9 +84,7 @@ mod algo_impl {
     ) {
       // SumMoments family: one independent sliding state per chunk, like upstream.
       let n = values.len();
-      let window = if n > 1 { starts[1] as usize + 1 } else { 1 };
-      let contiguous = (0..n).all(|i| starts[i] as usize == i.saturating_sub(window - 1));
-      if contiguous {
+      {
         const CHUNK: usize = 65_536;
         let mut out = vec![f64::NAN; n];
         out.par_chunks_mut(CHUNK).enumerate().for_each(|(chunk_index, chunk)| {
@@ -149,9 +149,7 @@ mod algo_impl {
         | alpha_algo::SessionOp::ArgminRaw | alpha_algo::SessionOp::ArgmaxRaw);
       let raw = matches!(op, alpha_algo::SessionOp::ArgminRaw | alpha_algo::SessionOp::ArgmaxRaw);
       let n = values.len();
-      let window = if n > 1 { starts[1] as usize + 1 } else { 1 };
-      let contiguous = (0..n).all(|i| starts[i] as usize == i.saturating_sub(window - 1));
-      if contiguous {
+      {
         const CHUNK: usize = 65_536;
         let mut out = vec![f64::NAN; n];
         out.par_chunks_mut(CHUNK).enumerate().for_each(|(chunk_index, chunk)| {
@@ -193,6 +191,57 @@ mod algo_impl {
         });
         return Ok(out.into_pyarray(py).unbind());
       }
+    }
+    if matches!(
+      op, alpha_algo::SessionOp::Sum | alpha_algo::SessionOp::Mean
+        | alpha_algo::SessionOp::Var | alpha_algo::SessionOp::Std
+        | alpha_algo::SessionOp::Skew
+    ) {
+      // Arbitrary intervals: prefix moments, still O(1) per output.
+      let n = values.len();
+      let mut count = vec![0u64; n + 1];
+      let mut sum = vec![0.0f64; n + 1];
+      let mut sumsq = vec![0.0f64; n + 1];
+      let mut sum3 = vec![0.0f64; n + 1];
+      for (i, value) in values.iter().copied().enumerate() {
+        let finite = value.is_finite();
+        count[i + 1] = count[i] + u64::from(finite);
+        sum[i + 1] = sum[i] + if finite { value } else { 0.0 };
+        sumsq[i + 1] = sumsq[i] + if finite { value * value } else { 0.0 };
+        sum3[i + 1] = sum3[i] + if finite { value * value * value } else { 0.0 };
+      }
+      let mean = matches!(op, alpha_algo::SessionOp::Mean);
+      let variance = matches!(op, alpha_algo::SessionOp::Var | alpha_algo::SessionOp::Std);
+      let std = matches!(op, alpha_algo::SessionOp::Std);
+      let skew = matches!(op, alpha_algo::SessionOp::Skew);
+      let out: Vec<f64> = (0..n).into_par_iter().map(|index| {
+        let start = starts[index] as usize;
+        let end = (ends[index] as usize + 1).min(n);
+        let m = count[end] - count[start];
+        if m == 0 { return f64::NAN; }
+        let total = sum[end] - sum[start];
+        if mean { return total / m as f64; }
+        if variance {
+          if m < 2 { return f64::NAN; }
+          let square = sumsq[end] - sumsq[start];
+          let var = ((square - total * total / m as f64) / (m - 1) as f64).max(0.0);
+          return if std { var.sqrt() } else { var };
+        }
+        if skew {
+          if m < 3 { return f64::NAN; }
+          let m = m as f64;
+          let mean = total / m;
+          let square = sumsq[end] - sumsq[start];
+          let cube = sum3[end] - sum3[start];
+          let m2 = (square - total * total / m).max(0.0);
+          let m3 = cube - 3.0 * mean * square + 2.0 * m * mean * mean * mean;
+          if m2 <= 0.0 { return f64::NAN; }
+          let population = (m3 / m) / (m2 / m).powf(1.5);
+          return population * (m * (m - 1.0)).sqrt() / (m - 2.0);
+        }
+        total
+      }).collect();
+      return Ok(out.into_pyarray(py).unbind());
     }
     let mut state = alpha_algo::IntervalKernel::new(op)
       .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
@@ -282,11 +331,11 @@ mod algo_impl {
   }
 
   #[pyfunction]
-  #[pyo3(signature = (x, y, starts, ends, correlation=false))]
+  #[pyo3(signature = (x, y, starts, ends, correlation=false, window=None))]
   pub fn interval_rolling_pair(
     py: Python<'_>, x: PyReadonlyArray1<f64>, y: PyReadonlyArray1<f64>,
     starts: PyReadonlyArray1<u64>, ends: PyReadonlyArray1<u64>,
-    correlation: bool,
+    correlation: bool, window: Option<usize>,
   ) -> PyResult<Py<PyArray1<f64>>> {
     let x = x.as_slice()?;
     let y = y.as_slice()?;
@@ -297,13 +346,12 @@ mod algo_impl {
         "interval_rolling_pair length mismatch"
       ));
     }
-    let fixed = ends.iter().enumerate().all(|(i, end)| *end == i as u64);
+    let fixed = window.is_some();
+    let window = window.unwrap_or(1).max(1);
     if fixed {
       // PairMoments family: chunk-independent sliding moments.
       let n = x.len();
-      let window = if n > 1 { starts[1] as usize + 1 } else { 1 };
-      let contiguous = (0..n).all(|i| starts[i] as usize == i.saturating_sub(window - 1));
-      if contiguous {
+      {
         const CHUNK: usize = 65_536;
         let mut out = vec![f64::NAN; n];
         out.par_chunks_mut(CHUNK).enumerate().for_each(|(chunk_index, chunk)| {
