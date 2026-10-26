@@ -373,6 +373,18 @@ mod nautilus_tests {
     use ustr::Ustr;
 
     #[test]
+    fn market_bar_from_bars_assembles_cross_section() {
+        let make = |symbol: &str, close: &str| Bar::new(
+            BarType::from(format!("{symbol}-1-MINUTE-LAST-EXTERNAL").as_str()),
+            Price::from(close), Price::from(close), Price::from(close),
+            Price::from(close), Quantity::from("1"), 1_000.into(), 1_000.into(),
+        );
+        let bar = nautilus::market_bar_from_bars(1_000, &[make("A.B", "1.0"), make("C.D", "2.0")]);
+        assert_eq!(bar.products, vec!["A.B".to_string(), "C.D".to_string()]);
+        assert_eq!(bar.values, vec![1.0, 2.0]);
+    }
+
+    #[test]
     fn factor_actor_registers_with_nautilus() {
         let engine = MultiWindowEngine::new(vec![("mean".into(), 2, SessionOp::Mean)]).unwrap();
         let actor = nautilus::FactorActor::new("factor-actor-test", engine);
