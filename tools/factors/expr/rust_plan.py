@@ -81,7 +81,7 @@ class _PlanBuilder:
 
 def try_evaluate_rust_plan(expression: FactorExpr, ctx: EvaluateContext) -> pd.DataFrame | None:
     """Return a DataFrame when the whole graph has a Rust batch plan."""
-    if ctx.panel_timeline is not None:
+    if ctx.panel_timeline is not None and not ctx.panel_timeline.same_session:
         return None
     if isinstance(expression, (ColumnRef, ConstExpr)):
         return None
@@ -113,7 +113,7 @@ def try_evaluate_rust_plan_many(
     expressions: list[FactorExpr], ctx: EvaluateContext,
 ) -> list[pd.DataFrame] | None:
     """Execute several factors through one shared Rust Plan DAG."""
-    if ctx.panel_timeline is not None:
+    if ctx.panel_timeline is not None and not ctx.panel_timeline.same_session:
         return None
     if not expressions or any(isinstance(e, (ColumnRef, ConstExpr)) for e in expressions):
         return None

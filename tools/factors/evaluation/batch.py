@@ -241,11 +241,32 @@ def evaluate_factors(
         preloaded = _preload(
             factors, eligible, resolved_freq, start_dt, end_dt, warmup_window,
         )
+    shared_keys = set(shared_cache_keys_for_factors(factors))
+    shared_cache: dict[tuple, pd.DataFrame] = {}
+    try:
+        from tools.factors.expr.core import EvaluateContext
+        from tools.factors.expr.rust_plan import try_evaluate_rust_plan_many
+
+        plan_expressions = [factor._func_expr for factor in factors]
+        plan_context = EvaluateContext(
+            products=prepared.products, freq=resolved_freq,
+            preloaded=preloaded, cache={},
+            start_dt=start_dt, end_dt=end_dt, warmup_window=warmup_window,
+            panel_timeline=prepared.panel_timeline,
+            shared_cache_keys=frozenset(shared_keys),
+        )
+        planned = try_evaluate_rust_plan_many(plan_expressions, plan_context)
+    except Exception:
+        planned = None
+    if planned is not None:
+        for expression, frame in zip(plan_expressions, planned, strict=True):
+            shared_cache[expression._structural_key()] = frame
+            shared_keys.add(expression._structural_key())
     context = EvaluationBatchContext(
         products=prepared.products, freq=resolved_freq, start_dt=start_dt, end_dt=end_dt,
         warmup_window=warmup_window, preloaded=preloaded,
         panel_timeline=prepared.panel_timeline,
-        shared_cache={}, shared_cache_keys=shared_cache_keys_for_factors(factors),
+        shared_cache=shared_cache, shared_cache_keys=frozenset(shared_keys),
     )
     for factor in factors:
         factor.evaluate(
