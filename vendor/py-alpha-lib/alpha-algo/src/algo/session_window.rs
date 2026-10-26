@@ -561,9 +561,8 @@ pub fn ta_session_rolling_sum<NumT: Float>(
   session_ids: &[u32],
   lookback_sessions: usize,
 ) -> Result<Vec<NumT>, Error> {
-  session_rolling(ctx, values, session_ids, lookback_sessions, |sum, count| {
-    if count == 0 { NumT::nan() } else { NumT::from(sum).unwrap() }
-  })
+  let _ = ctx;
+  session_rolling_state(values, session_ids, lookback_sessions, SessionOp::Sum)
 }
 
 pub fn ta_session_rolling_mean<NumT: Float>(
@@ -572,9 +571,8 @@ pub fn ta_session_rolling_mean<NumT: Float>(
   session_ids: &[u32],
   lookback_sessions: usize,
 ) -> Result<Vec<NumT>, Error> {
-  session_rolling(ctx, values, session_ids, lookback_sessions, |sum, count| {
-    if count == 0 { NumT::nan() } else { NumT::from(sum / (count as f64)).unwrap() }
-  })
+  let _ = ctx;
+  session_rolling_state(values, session_ids, lookback_sessions, SessionOp::Mean)
 }
 
 struct Fenwick {
@@ -663,13 +661,23 @@ fn session_quantile_like(
 pub fn ta_session_rolling_quantile(
   values: &[f64], session_ids: &[u32], lookback_sessions: usize, quantile: f64,
 ) -> Result<Vec<f64>, Error> {
-  session_quantile_like(values, session_ids, lookback_sessions, Some(quantile), false)
+  if values.len() != session_ids.len() {
+    return Err(Error::LengthMismatch(values.len(), session_ids.len()));
+  }
+  let mut state = SessionWindowState::new_op(lookback_sessions, SessionOp::Quantile(quantile))?;
+  Ok(values.iter().copied().zip(session_ids.iter().copied())
+    .map(|(value, session)| state.update(session, value)).collect())
 }
 
 pub fn ta_session_rolling_rank(
   values: &[f64], session_ids: &[u32], lookback_sessions: usize,
 ) -> Result<Vec<f64>, Error> {
-  session_quantile_like(values, session_ids, lookback_sessions, None, true)
+  if values.len() != session_ids.len() {
+    return Err(Error::LengthMismatch(values.len(), session_ids.len()));
+  }
+  let mut state = SessionWindowState::new_op(lookback_sessions, SessionOp::Rank)?;
+  Ok(values.iter().copied().zip(session_ids.iter().copied())
+    .map(|(value, session)| state.update(session, value)).collect())
 }
 
 /// Backward-compatible alias: wall-clock is a WindowPolicy of the same kernel.
@@ -778,43 +786,9 @@ fn session_rolling_pair(
     return Err(Error::LengthMismatch(x.len(), y.len()));
   }
   validate(x, session_ids, lookback_sessions)?;
-  let mut ring: VecDeque<(u32, f64, f64)> = VecDeque::new();
-  let (mut sx, mut sy, mut sxx, mut syy, mut sxy, mut count) =
-    (0.0, 0.0, 0.0, 0.0, 0.0, 0usize);
-  let mut out = Vec::with_capacity(x.len());
-  for index in 0..x.len() {
-    let session = session_ids[index];
-    let first_session = (session + 1).saturating_sub(lookback_sessions as u32);
-    while ring.front().is_some_and(|(id, _, _)| *id < first_session) {
-      if let Some((_, ox, oy)) = ring.pop_front() {
-        if ox.is_finite() && oy.is_finite() {
-          sx -= ox; sy -= oy; sxx -= ox * ox; syy -= oy * oy; sxy -= ox * oy;
-          count -= 1;
-        }
-      }
-    }
-    let (vx, vy) = (x[index], y[index]);
-    ring.push_back((session, vx, vy));
-    if vx.is_finite() && vy.is_finite() {
-      sx += vx; sy += vy; sxx += vx * vx; syy += vy * vy; sxy += vx * vy;
-      count += 1;
-    }
-    if count < 2 {
-      out.push(f64::NAN);
-      continue;
-    }
-    let n = count as f64;
-    let cov = (sxy - sx * sy / n) / (n - 1.0);
-    if !correlation {
-      out.push(cov);
-    } else {
-      let vx = (sxx - sx * sx / n).max(0.0);
-      let vy = (syy - sy * sy / n).max(0.0);
-      let denom = (vx * vy).sqrt();
-      out.push(if denom > 0.0 { (sxy - sx * sy / n) / denom } else { f64::NAN });
-    }
-  }
-  Ok(out)
+  let mut state = SessionPairState::new(lookback_sessions, correlation)?;
+  Ok(x.iter().copied().zip(y.iter().copied()).zip(session_ids.iter().copied())
+    .map(|((x, y), session)| state.update(session, x, y)).collect())
 }
 
 pub fn ta_session_rolling_cov(
