@@ -94,3 +94,18 @@ def test_semantics_change_the_factor_formula_fingerprint():
         min_periods=1, nan_policy=NanPolicy.SKIP,
     ).mean()
     assert base.semantic_fingerprint() != skip.semantic_fingerprint()
+
+
+def test_min_periods_can_be_parameterized():
+    from tools.data.types import DataColumn
+    from tools.factors.expr.leaf import ColumnRef, ConstExpr
+    from tools.factors.expr.window_semantics import NanPolicy
+    from tools.parameters import TypeParam
+
+    parameter = TypeParam("M", default_value=1, typ=int)
+    expression = ColumnRef(DataColumn.CLOSE).rolling(3).semantics(
+        min_periods=parameter, nan_policy=NanPolicy.SKIP,
+    ).mean()
+    resolved = expression.resolve()
+    assert isinstance(resolved.min_periods, ConstExpr)
+    assert resolved.min_periods.value == 1

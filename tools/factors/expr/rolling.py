@@ -56,7 +56,7 @@ class RollingExpr(FactorExpr):
         self._window = window
         self._trunc_start = trunc_start
         self._trunc_end = trunc_end
-        self._min_periods = min_periods
+        self._min_periods = _to_expr(min_periods) if min_periods is not None else None
         self._nan_policy = nan_policy
 
     @property
@@ -185,15 +185,19 @@ class RollingExpr(FactorExpr):
             base += (self._trunc_start._structural_key(),)
         if self._trunc_end is not None:
             base += (self._trunc_end._structural_key(),)
-        return base + (self._min_periods, self._nan_policy.value)
+        mp = (self._min_periods._structural_key()
+              if isinstance(self._min_periods, FactorExpr) else self._min_periods)
+        return base + (mp, self._nan_policy.value)
 
     def resolve(self, *args, **kwargs) -> 'FactorExpr':
         resolved_data = self._data.resolve(*args, **kwargs)
         resolved_window = self._window.resolve(*args, **kwargs)
         resolved_ts = self._trunc_start.resolve(*args, **kwargs) if self._trunc_start is not None else None
         resolved_te = self._trunc_end.resolve(*args, **kwargs) if self._trunc_end is not None else None
+        resolved_mp = (self._min_periods.resolve(*args, **kwargs)
+                       if isinstance(self._min_periods, FactorExpr) else self._min_periods)
         return RollingExpr(resolved_data, resolved_window, resolved_ts, resolved_te,
-                           self._min_periods, self._nan_policy)
+                           resolved_mp, self._nan_policy)
 
     def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
         # RollingExpr 本身不求值——聚合由 RollingOp 完成
@@ -208,6 +212,8 @@ class RollingExpr(FactorExpr):
             deps.update(self._trunc_start.dependencies)
         if self._trunc_end is not None:
             deps.update(self._trunc_end.dependencies)
+        if isinstance(self._min_periods, FactorExpr):
+            deps.update(self._min_periods.dependencies)
         return deps
 
     def get_ref_types(self, typ: type, leaf_only: bool = False) -> Set[Any]:
@@ -220,6 +226,8 @@ class RollingExpr(FactorExpr):
             result.update(self._trunc_start.get_ref_types(typ, leaf_only))
         if self._trunc_end is not None:
             result.update(self._trunc_end.get_ref_types(typ, leaf_only))
+        if isinstance(self._min_periods, FactorExpr):
+            result.update(self._min_periods.get_ref_types(typ, leaf_only))
         return result
 
     def _to_latex(self, subst: dict | None = None) -> str:
@@ -400,10 +408,22 @@ class RollingOp(OperandExpr):
         'rolling_rank': 'rank', 'rolling_mad': 'mad',
     }
 
+    def _min_periods_value(self, window: int) -> int:
+        value = self.min_periods
+        if value is None:
+            return window
+        if isinstance(value, ConstExpr):
+            return int(value.value)
+        if hasattr(value, "param") and hasattr(value.param, "default_value"):
+            return int(value.param.default_value)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError("min_periods must resolve to an integer constant")
+        return int(value)
+
     def _apply_window_semantics(self, result: pd.DataFrame, values: pd.DataFrame,
                                 window: int) -> pd.DataFrame:
         """Mask the Rust aggregation according to explicit window semantics."""
-        min_periods = self.min_periods if self.min_periods is not None else window
+        min_periods = self._min_periods_value(window)
         propagate = self.nan_policy is NanPolicy.PROPAGATE
         for column in result.columns:
             raw = pd.to_numeric(values[column], errors="coerce").to_numpy(dtype=float)
@@ -430,8 +450,7 @@ class RollingOp(OperandExpr):
             for column in df.columns:
                 values = pd.to_numeric(df[column], errors="coerce").to_numpy(dtype=float)
                 result[column] = interval_ema(
-                    values, window,
-                    self.min_periods if self.min_periods is not None else window,
+                    values, window, self._min_periods_value(window),
                     self.nan_policy is NanPolicy.PROPAGATE,
                 )
             return result
@@ -612,13 +631,17 @@ class RollingOp(OperandExpr):
             extra += (self._trunc_start._structural_key(),)
         if self._trunc_end is not None:
             extra += (self._trunc_end._structural_key(),)
-        return extra + (self.min_periods, self.nan_policy.value)
+        mp = (self.min_periods._structural_key()
+              if isinstance(self.min_periods, FactorExpr) else self.min_periods)
+        return extra + (mp, self.nan_policy.value)
 
     def resolve(self, *args, **kwargs) -> 'FactorExpr':
         resolved = [opnd.resolve(*args, **kwargs) for opnd in self._operands]
+        mp = (self.min_periods.resolve(*args, **kwargs)
+              if isinstance(self.min_periods, FactorExpr) else self.min_periods)
         return type(self)(
             self.op, *resolved,
-            min_periods=self.min_periods, nan_policy=self.nan_policy,
+            min_periods=mp, nan_policy=self.nan_policy,
         )
 
     def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:

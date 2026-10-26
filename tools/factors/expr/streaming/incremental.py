@@ -1004,6 +1004,10 @@ def compile_streaming_factor(
                 min_periods = getattr(expr, "min_periods", None)
                 if min_periods is None:
                     min_periods = locals().get("window", 1) if isinstance(locals().get("window"), int) else 1
+            if isinstance(min_periods, ConstExpr):
+                min_periods = min_periods.value
+            elif hasattr(min_periods, "param"):
+                min_periods = min_periods.param.default_value
             policy = getattr(expr, "nan_policy", NanPolicy.PROPAGATE)
             node.configure(int(min_periods), policy is NanPolicy.PROPAGATE)
         memo[key] = node
