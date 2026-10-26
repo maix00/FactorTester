@@ -59,3 +59,14 @@ quantile、rank、MAD 共用此树，无第二套回收实现，也无逐 Bar �
 峰值 RSS 1,884,160 字节。RSS 是包含五次运行及分配器行为的进程峰值，并非单树大小；
 此实验说明该输入下内存增长消失，不代表整个 Job 的内存或所有算子的耗时。
 回归同时验证 quantile/rank/MAD 的数值、窗口 480 的长期节点上界、重复值删除后复用。
+
+## 行情加载前限制与分批回放
+
+probe 和策略复用 `iter_catalog_bar_batches`。先读取已经校验文件哈希的目录收据，
+检查总行数上限，再按 `first_available_ns`/`last_available_ns` 及固定时间批查询。
+Nautilus 的 Parquet 查询过滤 `ts_init`，不能把 `ts_event` 当作可用时间边界。
+策略复用原生 `streaming=True` 回放，加载一个批次后释放 Python 批次，执行后
+`clear_data`；失败也清理当前原生输入。两产品真实小窗口回放验证跨批次策略状态持续。
+
+时间批不是任意数据频率下的固定条数上限；总体条数上限来自冻结收据，任务资源限制
+仍是独立保护。不能把该改动宣称为零复制或无需控制 Nautilus Cache/报告大小。

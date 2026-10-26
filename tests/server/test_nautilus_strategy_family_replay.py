@@ -21,9 +21,11 @@ def test_real_group_strategy_runs_across_two_products(tmp_path):
         inputs=inputs, factor_bindings={"signal": CLOSE},
         factor_refs={"signal": "factor:v2:" + "a" * 43},
         family=CrossSectionalGroup(split_count=2, group_index=1),
-        output_dir=tmp_path / "group-reports", max_bars=8,
+        output_dir=tmp_path / "group-reports", max_bars=8, batch_minutes=3,
     )
     assert result["products"] == ["T", "TL"]
     assert result["publications"] == {"signal": 8}
+    assert result["batch_count"] >= 2
+    assert result["max_batch_bars"] <= 6
     assert result["orders"] >= 1
     assert (tmp_path / "group-reports" / "tearsheet.html").is_file()

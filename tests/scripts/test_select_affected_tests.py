@@ -179,6 +179,7 @@ def test_nautilus_execution_bridge_selects_only_its_focused_tests():
         "tests/server/test_nautilus_bridge_historical_rule_events.py",
         "tests/server/test_nautilus_bridge_catalog.py",
         "tests/server/test_nautilus_bridge_backtest_runner.py",
+        "tests/server/test_catalog_streaming_limits.py",
         "tests/server/test_nautilus_bridge_reports.py",
         "tests/server/test_nautilus_bridge_factor_stream.py",
         "tests/server/test_nautilus_strategy_backtest.py",

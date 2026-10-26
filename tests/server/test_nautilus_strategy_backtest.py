@@ -16,12 +16,14 @@ def test_real_nautilus_strategy_run(tmp_path):
         factor_bindings={"signal": CLOSE, "confirm": CLOSE},
         factor_refs={"signal": "factor:v2:" + "a" * 43, "confirm": "factor:v2:" + "a" * 43},
         product="T", output_dir=tmp_path / "factor-reports",
-        max_bars=8,
+        max_bars=8, batch_minutes=3,
     )
     assert result["bars"] == 8
     assert result["factor_roles"] == ["confirm", "signal"]
     assert result["publications"] == {"signal": 8, "confirm": 8}
     assert result["factor_plan_nodes"] == 1
+    assert result["batch_count"] >= 2
+    assert result["max_batch_bars"] <= 3
     assert result["order_count"] >= 1
     assert (tmp_path / "factor-reports" / "tearsheet.html").is_file()
     assert (tmp_path / "factor-reports" / "orders.csv").is_file()

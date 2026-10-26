@@ -91,6 +91,78 @@ def _load_input(item: ReplayInput):
     return folder, catalog, receipt, instruments[0]
 
 
+def preflight_catalogs(opened, *, max_input_bars: int) -> tuple[int, int, int]:
+    """Check frozen row counts before any Bar query or engine allocation.
+
+    Counts belong to the hash-verified receipts, not a caller's estimate.
+    Query boundaries use ts_init, as does Nautilus' Parquet catalog.
+    """
+    if isinstance(max_input_bars, bool) or not isinstance(max_input_bars, int) or max_input_bars <= 0:
+        raise ValueError("replay bar cap must be a positive integer")
+    rows = tuple(opened)
+    if not rows:
+        raise ValueError("replay needs at least one catalog")
+    counts = [int(row[2]["selected_count"]) for row in rows]
+    if any(count <= 0 for count in counts):
+        raise ValueError("catalog receipt needs a positive frozen row count")
+    total = sum(counts)
+    if total > max_input_bars:
+        raise ValueError("catalog receipts exceed the explicit replay bar cap")
+    first = min(int(row[2]["first_available_ns"]) for row in rows)
+    last = max(int(row[2]["last_available_ns"]) for row in rows)
+    if first < 0 or last < first:
+        raise ValueError("catalog receipt has an invalid replay range")
+    return first, last, total
+
+
+def iter_catalog_bar_batches(opened, *, max_input_bars: int, batch_minutes: int = 20):
+    """One bounded catalog reader shared by probe and strategy replays."""
+    if isinstance(batch_minutes, bool) or not isinstance(batch_minutes, int) or batch_minutes <= 0:
+        raise ValueError("batch_minutes must be a positive integer")
+    rows = tuple(opened)
+    first, last, expected = preflight_catalogs(rows, max_input_bars=max_input_bars)
+    processed = 0
+    step = batch_minutes * MINUTE_NS
+    for begin in range(first, last + 1, step):
+        end = min(begin + step - 1, last)
+        bars = []
+        for _, catalog, receipt, _ in rows:
+            if int(receipt["last_available_ns"]) < begin or int(receipt["first_available_ns"]) > end:
+                continue
+            bars.extend(catalog.query_bars(identifiers=[receipt["bar_type"]], start=begin, end=end))
+        processed += len(bars)
+        if processed > expected:
+            raise ValueError("catalog query exceeds its frozen receipt count")
+        if bars:
+            bars.sort(key=lambda bar: int(bar.ts_init))
+            yield bars
+    if processed != expected:
+        raise ValueError(f"catalog replay count {processed} != receipts {expected}")
+
+
+def replay_catalog_batches(engine, opened, *, max_input_bars: int, batch_minutes: int = 20):
+    """Feed bounded slices to Nautilus' native streaming replay path."""
+    rows = tuple(opened)
+    next_start, _, _ = preflight_catalogs(rows, max_input_bars=max_input_bars)
+    total = batches = largest = 0
+    previous_end = None
+    for bars in iter_catalog_bar_batches(rows, max_input_bars=max_input_bars, batch_minutes=batch_minutes):
+        begin, end = int(bars[0].ts_init), int(bars[-1].ts_init)
+        if previous_end is not None and begin <= previous_end:
+            raise ValueError("streaming batch splits or reorders a replay timestamp")
+        total += len(bars)
+        largest = max(largest, len(bars))
+        try:
+            engine.add_data(bars)
+            bars.clear()  # Nautilus owns this bounded batch now.
+            engine.run(start=next_start, end=end, streaming=True)
+        finally:
+            engine.clear_data()
+        next_start = previous_end = end
+        batches += 1
+    return {"bars": total, "batch_count": batches, "max_batch_bars": largest}
+
+
 def run_small_catalog_replay(
     inputs: tuple[ReplayInput, ...], output_dir: Path, *,
     max_input_bars: int = 2_000, batch_minutes: int = 20,
@@ -162,8 +234,7 @@ def run_small_catalog_replay(
         instrument_id: str(value).rsplit(".", 1)[-1]
         for instrument_id, value in raw_basis_overrides.items()
     }
-    if sum(int(row[2]["selected_count"]) for row in opened) > max_input_bars:
-        raise ValueError("catalog receipts exceed the explicit replay bar cap")
+    preflight_catalogs(opened, max_input_bars=max_input_bars)
     first_ns = min(int(row[2]["first_event_ns"]) for row in opened)
     first_available_ns = min(int(row[2]["first_available_ns"]) for row in opened)
     last_ns = max(int(row[2]["last_event_ns"]) for row in opened)
@@ -240,15 +311,7 @@ def run_small_catalog_replay(
         probe_seen = 0
         probe_order_pending = False
         expected_probe_fill_prices: list[str] = []
-        step_ns = batch_minutes * MINUTE_NS
-        for begin in range(first_ns, last_ns + 1, step_ns):
-            end = min(begin + step_ns - 1, last_ns)
-            bars = []
-            for _, catalog, receipt, _ in opened:
-                bars.extend(catalog.query_bars(
-                    identifiers=[receipt["bar_type"]], start=begin, end=end))
-            if not bars:
-                continue
+        for bars in iter_catalog_bar_batches(opened, max_input_bars=max_input_bars, batch_minutes=batch_minutes):
             processed += len(bars)
             if processed > max_input_bars:
                 raise ValueError("catalog query exceeds explicit replay bar cap")

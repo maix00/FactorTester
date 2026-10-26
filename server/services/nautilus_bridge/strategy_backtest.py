@@ -7,7 +7,9 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
-from server.services.nautilus_bridge.backtest_runner import _load_input, ReplayInput
+from server.services.nautilus_bridge.backtest_runner import (
+    _load_input, ReplayInput, preflight_catalogs, replay_catalog_batches,
+)
 from server.services.nautilus_bridge.factor_stream import build_factor_expr_bar_adapter
 from server.services.nautilus_bridge.nautilus_events import NautilusEventTimeline
 from server.services.nautilus_bridge.reports import export_backtest_reports
@@ -53,6 +55,7 @@ def run_strategy_replay(
     factor_refs: dict[str, str],
     product: Any, output_dir: Path, max_bars: int = 8,
     factor_field: str = "CLOSE_ADJUSTED", session_calendar: Any = None,
+    batch_minutes: int = 20,
 ) -> dict[str, Any]:
     """Run one FactorExpr strategy in Nautilus and export native reports."""
     from nautilus_trader.backtest import BacktestEngine
@@ -65,6 +68,8 @@ def run_strategy_replay(
     from nautilus_trader.trading import Strategy
 
     folder, catalog, receipt, instrument = _load_input(input)
+    opened = ((folder, catalog, receipt, instrument),)
+    preflight_catalogs(opened, max_input_bars=max_bars)
     bar_type = BarType.from_str(str(receipt["bar_type"]))
     engine = BacktestEngine(config=BacktestEngineConfig(
         trader_id=TraderId.from_str("FT-FACTOR-001"),
@@ -109,16 +114,12 @@ def run_strategy_replay(
 
     trader = Trader()
     engine.add_strategy(trader)
-    bars = catalog.query_bars(identifiers=[receipt["bar_type"]], start=0, end=2**63 - 1)
-    if len(bars) > max_bars:
-        raise ValueError("factor replay exceeds explicit bar cap")
-    engine.add_data(list(bars))
-    engine.run()
+    replay = replay_catalog_batches(engine, opened, max_input_bars=max_bars, batch_minutes=batch_minutes)
     engine.end()
     reports = export_backtest_reports(engine, Path(output_dir), venue=venue)
     return {
         "engine": "nautilus_trader",
-        "bars": len(bars),
+        **replay,
         "strategy_kind": strategy_kind,
         "factor_roles": sorted(factor_bindings),
         "publications": publication_counts,
@@ -173,6 +174,7 @@ def run_strategy_family_replay(
     family: Any, output_dir: Path, max_bars: int = 8,
     factor_field: str = "CLOSE_ADJUSTED", execution_plan: Any = None,
     session_calendar: Any = None,
+    batch_minutes: int = 20,
 ) -> dict[str, Any]:
     """Run one strategy family across multiple frozen product catalogs."""
     from nautilus_trader.backtest import BacktestEngine
@@ -185,6 +187,7 @@ def run_strategy_family_replay(
     from nautilus_trader.trading import Strategy
 
     opened = {product: _load_input(item) for product, item in inputs.items()}
+    preflight_catalogs(opened.values(), max_input_bars=max_bars * len(opened))
     bar_types = {
         product: BarType.from_str(str(row[2]["bar_type"]))
         for product, row in opened.items()
@@ -248,20 +251,12 @@ def run_strategy_family_replay(
 
     trader = FamilyTrader()
     engine.add_strategy(trader)
-    bars = []
-    for _, catalog, receipt, _ in opened.values():
-        bars.extend(catalog.query_bars(
-            identifiers=[receipt["bar_type"]], start=0, end=2**63 - 1))
-    bars.sort(key=lambda item: int(item.ts_init))
-    if len(bars) > max_bars * max(1, len(opened)):
-        raise ValueError("strategy replay exceeds explicit bar cap")
-    engine.add_data(bars)
-    engine.run()
+    replay = replay_catalog_batches(engine, opened.values(), max_input_bars=max_bars * len(opened), batch_minutes=batch_minutes)
     engine.end()
     reports = export_backtest_reports(engine, Path(output_dir), venue=venue)
     return {
         "engine": "nautilus_trader", "products": sorted(map(str, opened)),
-        "factor_roles": sorted(factor_bindings), "bars": len(bars),
+        "factor_roles": sorted(factor_bindings), **replay,
         "publications": publication_counts,
         "factor_plan_nodes": trader.factor_adapter.stream._executor.node_count,
         "orders": engine.get_result().total_orders, "reports": reports,

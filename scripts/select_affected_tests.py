@@ -114,8 +114,11 @@ EXACT_PATH_TESTS = {
         "tests/server/test_nautilus_bridge_catalog.py",
     ),
     "server/services/nautilus_bridge/backtest_runner.py": (
+        "tests/server/test_catalog_streaming_limits.py",
         "tests/server/test_nautilus_bridge_backtest_runner.py",
         "tests/server/test_nautilus_bridge_reports.py",
+        "tests/server/test_nautilus_strategy_backtest.py",
+        "tests/server/test_nautilus_strategy_family_replay.py",
     ),
     "server/services/nautilus_bridge/factor_stream.py": (
         "tests/server/test_nautilus_bridge_factor_stream.py",
@@ -124,6 +127,7 @@ EXACT_PATH_TESTS = {
         "tests/server/test_nautilus_strategy_runspec.py",
     ),
     "server/services/nautilus_bridge/strategy_backtest.py": (
+        "tests/server/test_catalog_streaming_limits.py",
         "tests/server/test_nautilus_bridge_factor_stream.py",
         "tests/server/test_nautilus_strategy_backtest.py",
         "tests/server/test_nautilus_strategy_family_replay.py",
@@ -438,6 +442,7 @@ for _path in (
     EXACT_PATH_TESTS[_path] = FACTOR_PLAN_TESTS
 EXACT_PATH_TESTS["tests/factors/test_bar_counts.py"] = ("tests/factors/test_bar_counts.py",)
 EXACT_PATH_TESTS["tests/factors/test_runtime_boundaries.py"] = ("tests/factors/test_runtime_boundaries.py",)
+EXACT_PATH_TESTS["tests/server/test_catalog_streaming_limits.py"] = ("tests/server/test_catalog_streaming_limits.py",)
 
 PREFIX_PATH_TESTS = {
     "tools/testers/backtest/engines/factors/": (
