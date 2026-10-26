@@ -19,6 +19,7 @@ def test_real_group_strategy_runs_across_two_products(tmp_path):
     }
     result = run_strategy_family_replay(
         inputs=inputs, factor_bindings={"signal": CLOSE},
+        factor_refs={"signal": "factor:v2:" + "a" * 43},
         family=CrossSectionalGroup(split_count=2, group_index=1),
         output_dir=tmp_path / "group-reports", max_bars=8,
     )

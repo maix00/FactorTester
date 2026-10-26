@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -15,9 +15,42 @@ from tools.factors.expr.core import FactorExpr
 from tools.data.types.time_freq import DataFreq
 
 
+def _shared_factor_adapter(*, bindings, refs, products, bar_types, events,
+                           calendar, publications, publication_counts):
+    """One run/input/clock scoped DAG; roles only subscribe to its outputs."""
+    if set(refs) != set(bindings):
+        raise ValueError("factor role refs must exactly match their frozen bindings")
+    expressions = {}
+    roles_by_ref = {}
+    for role, expression in bindings.items():
+        ref = refs[role]
+        previous = expressions.get(ref)
+        if previous is not None and previous.semantic_fingerprint() != expression.semantic_fingerprint():
+            raise ValueError("one frozen factor ref resolved to conflicting expressions")
+        expressions[ref] = expression
+        roles_by_ref.setdefault(ref, []).append(role)
+
+    def publish(rows):
+        for ref, publication in rows.items():
+            for role in roles_by_ref[ref]:
+                publications[role].append(publication)
+                publication_counts[role] += 1
+
+    return build_factor_expr_bar_adapter(
+        expressions=expressions, products=products,
+        bar_types_by_product=bar_types, source_freq=DataFreq.MIN1,
+        session_calendar=calendar, event_line=events,
+        bar_clock=lambda _p, bar: _clock(bar),
+        factor_fields=lambda _p, bar: _bar_fields(bar),
+        first_executable_at=lambda clocks: max(clock.available_at_ns for clock in clocks.values()) + 1,
+        on_publication=publish,
+    )
+
+
 def run_strategy_replay(
     *, input: ReplayInput, strategy_kind: str,
     factor_bindings: dict[str, FactorExpr],
+    factor_refs: dict[str, str],
     product: Any, output_dir: Path, max_bars: int = 8,
     factor_field: str = "CLOSE_ADJUSTED", session_calendar: Any = None,
 ) -> dict[str, Any]:
@@ -45,26 +78,18 @@ def run_strategy_replay(
             maker_rate=Decimal(0), taker_rate=Decimal(0)),
     )
     engine.add_instrument(instrument)
-    publications: dict[str, list[Any]] = {role: [] for role in factor_bindings}
+    publications = {role: deque(maxlen=2) for role in factor_bindings}
+    publication_counts = dict.fromkeys(factor_bindings, 0)
 
     class Trader(Strategy):
         def __init__(self) -> None:
             super().__init__()
             self.events = NautilusEventTimeline(calendar=session_calendar)
-            self.factors = {
-                role: build_factor_expr_bar_adapter(
-                    factor_ref="factor:v2:" + role.encode().hex().ljust(43, "0")[:43],
-                    expression=expression, products=(product,),
-                    bar_types_by_product={product: bar_type}, source_freq=DataFreq.MIN1,
-                    bar_clock=lambda _p, bar: _clock(bar),
-                    factor_fields=lambda _p, bar: _bar_fields(bar),
-                    first_executable_at=lambda clocks: max(
-                        clock.available_at_ns for clock in clocks.values()) + 1,
-                    event_line=self.events,
-                    on_publication=publications[role].append,
-                )
-                for role, expression in factor_bindings.items()
-            }
+            self.factor_adapter = _shared_factor_adapter(
+                bindings=factor_bindings, refs=factor_refs, products=(product,),
+                bar_types={product: bar_type}, events=self.events, calendar=session_calendar,
+                publications=publications, publication_counts=publication_counts,
+            )
             self.seen = 0
 
         def on_start(self) -> None:
@@ -72,8 +97,7 @@ def run_strategy_replay(
 
         def on_bar(self, bar) -> None:
             self.events.on_bar(bar)
-            for factor in self.factors.values():
-                factor.on_bar(bar)
+            self.factor_adapter.on_bar(bar)
             self.seen += 1
             if self.seen == 2:
                 self.submit_order(self.order_factory.market(
@@ -83,7 +107,8 @@ def run_strategy_replay(
                     time_in_force=TimeInForce.AT_THE_OPEN,
                 ))
 
-    engine.add_strategy(Trader())
+    trader = Trader()
+    engine.add_strategy(trader)
     bars = catalog.query_bars(identifiers=[receipt["bar_type"]], start=0, end=2**63 - 1)
     if len(bars) > max_bars:
         raise ValueError("factor replay exceeds explicit bar cap")
@@ -96,7 +121,8 @@ def run_strategy_replay(
         "bars": len(bars),
         "strategy_kind": strategy_kind,
         "factor_roles": sorted(factor_bindings),
-        "publications": {role: len(rows) for role, rows in publications.items()},
+        "publications": publication_counts,
+        "factor_plan_nodes": trader.factor_adapter.stream._executor.node_count,
         "reports": reports,
         "order_count": engine.get_result().total_orders,
         "catalog": str(folder),
@@ -143,6 +169,7 @@ def _build_strategy_family_engine(execution_plan: Any, instruments: list[Any]):
 
 def run_strategy_family_replay(
     *, inputs: dict[Any, ReplayInput], factor_bindings: dict[str, FactorExpr],
+    factor_refs: dict[str, str],
     family: Any, output_dir: Path, max_bars: int = 8,
     factor_field: str = "CLOSE_ADJUSTED", execution_plan: Any = None,
     session_calendar: Any = None,
@@ -178,27 +205,18 @@ def run_strategy_family_replay(
         )
         for instrument in instruments:
             engine.add_instrument(instrument)
-    publications: dict[str, list[Any]] = {role: [] for role in factor_bindings}
+    publications = {role: deque(maxlen=2) for role in factor_bindings}
+    publication_counts = dict.fromkeys(factor_bindings, 0)
 
     class FamilyTrader(Strategy):
         def __init__(self) -> None:
             super().__init__()
             self.events = NautilusEventTimeline(calendar=session_calendar)
-            self.factors = {
-                role: build_factor_expr_bar_adapter(
-                    factor_ref="factor:v2:" + role.encode().hex().ljust(43, "0")[:43],
-                    expression=expression, products=tuple(opened),
-                    bar_types_by_product=bar_types, source_freq=DataFreq.MIN1,
-                    session_calendar=session_calendar,
-                    bar_clock=lambda _p, bar: _clock(bar),
-                    factor_fields=lambda _p, bar: _bar_fields(bar),
-                    first_executable_at=lambda clocks: max(
-                        clock.available_at_ns for clock in clocks.values()) + 1,
-                    event_line=self.events,
-                    on_publication=publications[role].append,
-                )
-                for role, expression in factor_bindings.items()
-            }
+            self.factor_adapter = _shared_factor_adapter(
+                bindings=factor_bindings, refs=factor_refs, products=tuple(opened),
+                bar_types=bar_types, events=self.events, calendar=session_calendar,
+                publications=publications, publication_counts=publication_counts,
+            )
             self.positions_seen: set[Any] = set()
             self.last_signal: Any = None
 
@@ -208,8 +226,7 @@ def run_strategy_family_replay(
 
         def on_bar(self, bar) -> None:
             self.events.on_bar(bar)
-            for factor in self.factors.values():
-                factor.on_bar(bar)
+            self.factor_adapter.on_bar(bar)
             signal = publications.get("signal") or []
             if not signal or signal[-1] is self.last_signal:
                 return
@@ -229,7 +246,8 @@ def run_strategy_family_replay(
                 ))
                 self.positions_seen.add(product) if side is OrderSide.BUY else self.positions_seen.discard(product)
 
-    engine.add_strategy(FamilyTrader())
+    trader = FamilyTrader()
+    engine.add_strategy(trader)
     bars = []
     for _, catalog, receipt, _ in opened.values():
         bars.extend(catalog.query_bars(
@@ -244,7 +262,8 @@ def run_strategy_family_replay(
     return {
         "engine": "nautilus_trader", "products": sorted(map(str, opened)),
         "factor_roles": sorted(factor_bindings), "bars": len(bars),
-        "publications": {role: len(rows) for role, rows in publications.items()},
+        "publications": publication_counts,
+        "factor_plan_nodes": trader.factor_adapter.stream._executor.node_count,
         "orders": engine.get_result().total_orders, "reports": reports,
     }
 
@@ -295,6 +314,7 @@ def run_strategy_family_run_spec(
     if not isinstance(roles, dict) or not roles:
         raise ValueError("strategy has no factor role bindings")
     bindings = {}
+    factor_refs = {}
     for role, binding in roles.items():
         if not isinstance(binding, dict):
             raise ValueError(f"factor role {role!r} has an invalid binding")
@@ -306,6 +326,10 @@ def run_strategy_family_run_spec(
         if expression is None:
             raise ValueError(f"factor role {role!r} has no FactorExpr")
         bindings[str(role)] = expression
+        ref = str(binding.get("ref") or "")
+        if not ref.startswith("factor:v2:"):
+            raise ValueError(f"factor role {role!r} must freeze its immutable ref")
+        factor_refs[str(role)] = ref
     catalogs = plan.get("catalog_inputs")
     run_spec_value = job_spec.get("run_spec") if isinstance(job_spec, dict) else None
     source_adapter = plan.get("source_adapter") or {}
@@ -370,7 +394,7 @@ def run_strategy_family_run_spec(
                 }),
             )
     return run_strategy_family_replay(
-        inputs=inputs, factor_bindings=bindings, family=family,
+        inputs=inputs, factor_bindings=bindings, factor_refs=factor_refs, family=family,
         output_dir=Path(output_dir), max_bars=int(plan.get("max_input_bars") or 8),
         execution_plan=execution_plan,
         session_calendar=plan.get("session_calendar"),

@@ -197,4 +197,20 @@ def test_simple_stream_uses_rust_factor_executor():
         factor_ref=REF, expression=CLOSE, products=("T", "TL"),
         source_freq=DataFreq.MIN1,
     )
-    assert getattr(stream._executor._multi, "uses_rust", False) is True
+    assert stream._executor.uses_rust is True
+
+
+def test_shared_stream_cse_and_publications_are_bounded_and_immutable():
+    other_ref = "factor:v2:" + "b" * 43
+    expression = CLOSE.rolling(3).mean()
+    stream = EventTimeFactorStream(expressions={REF: expression, other_ref: expression + 1},
+                                   products=("T", "TL"), source_freq=DataFreq.MIN1)
+    assert stream._executor.node_count == 4  # source, shared mean, constant, add
+    for minute in range(31, 41):
+        clock, publications = _slice(stream, minute, minute, minute * 10)
+        assert set(publications) == {REF, other_ref}
+        assert publications[other_ref].values["T"] == publications[REF].values["T"] + 1
+    assert len(stream._recent) == 2
+    assert stream.latest_as_of(clock.interval_end_ns) is publications
+    with pytest.raises(TypeError):
+        publications[REF].values["T"] = -1

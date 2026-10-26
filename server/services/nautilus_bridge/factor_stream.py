@@ -18,7 +18,7 @@ import pandas as pd
 from server.services.nautilus_bridge.market_data import BarClock
 from tools.factors.expr.core import FactorExpr
 from tools.factors.expr.streaming.incremental import (
-    compile_incremental_factor,
+    compile_incremental_factors,
 )
 
 
@@ -40,24 +40,34 @@ class EventTimeFactorStream:
     bar callback alone does not promise next-open execution.
     """
 
-    def __init__(self, *, factor_ref: str, expression: FactorExpr,
+    def __init__(self, *, factor_ref: str | None = None, expression: FactorExpr | None = None,
+                 expressions: Mapping[str, FactorExpr] | None = None,
                  products: tuple[Any, ...], source_freq: Any,
                  session_calendar: Any = None, event_line: Any = None) -> None:
-        if not factor_ref.startswith("factor:v2:"):
+        self._single = expressions is None
+        if expressions is None:
+            expressions = {factor_ref: expression}
+        elif factor_ref is not None or expression is not None:
+            raise ValueError("supply either one factor or a shared factor set")
+        if not expressions or any(not isinstance(ref, str) or not ref.startswith("factor:v2:") for ref in expressions):
             raise ValueError("factor stream needs an immutable frozen factor:v2 ref")
+        if any(not isinstance(expr, FactorExpr) for expr in expressions.values()):
+            raise TypeError("each frozen factor needs a FactorExpr")
         if not products or len(products) != len(set(products)):
             raise ValueError("products must be a nonempty unique tuple")
         self.factor_ref = factor_ref
         self.products = products
-        self._executor = compile_incremental_factor(
-            factor_ref, expression, products, source_freq=source_freq,
+        self._product_set = frozenset(products)
+        self._executor = compile_incremental_factors(
+            dict(expressions), products, source_freq=source_freq,
             session_calendar=session_calendar,
             event_line=event_line,
+            require_rust=True,
         )
         self._last_end_ns: int | None = None
         # Keep the previous value while a newly completed slice is still
         # waiting for its declared publication delay.  Never keep the panel.
-        self._recent: deque[FactorPublication] = deque(maxlen=2)
+        self._recent: deque[tuple[int, int, Any]] = deque(maxlen=2)
 
     def on_completed_slice(
         self, *, clocks_by_product: Mapping[Any, BarClock],
@@ -65,8 +75,7 @@ class EventTimeFactorStream:
         first_executable_at_ns: int,
         trading_day: pd.Timestamp | None = None,
     ) -> FactorPublication:
-        required = set(self.products)
-        if set(clocks_by_product) != required or set(fields_by_product) != required:
+        if clocks_by_product.keys() != self._product_set or fields_by_product.keys() != self._product_set:
             raise ValueError("market slice must contain exactly the frozen product set")
         clocks = tuple(clocks_by_product[p] for p in self.products)
         ends = {clock.interval_end_ns for clock in clocks}
@@ -85,29 +94,34 @@ class EventTimeFactorStream:
         timestamp = pd.Timestamp(formed_at_ns, unit="ns", tz="UTC")
         self._executor.on_bar(timestamp, fields_by_product,
                               trading_day=trading_day)
-        values = dict(self._executor.on_signal(timestamp))
-        publication = FactorPublication(
-            self.factor_ref, formed_at_ns, available_at_ns,
-            first_executable_at_ns, values)
-        self._recent.append(publication)
+        from types import MappingProxyType
+        values = self._executor.on_signal(timestamp)
+        publications = {
+            ref: FactorPublication(ref, formed_at_ns, available_at_ns,
+                                   first_executable_at_ns, MappingProxyType(row))
+            for ref, row in values.items()
+        }
+        publication = publications[self.factor_ref] if self._single else MappingProxyType(publications)
+        self._recent.append((available_at_ns, first_executable_at_ns, publication))
         self._last_end_ns = formed_at_ns
         return publication
 
     def latest_as_of(self, event_time_ns: int) -> FactorPublication | None:
         """Return only a fully available value, never a future bar's value."""
-        return next((pub for pub in reversed(self._recent)
-                     if pub.available_at_ns <= event_time_ns), None)
+        return next((pub for available, _, pub in reversed(self._recent)
+                     if available <= event_time_ns), None)
 
     def tradable_as_of(self, event_time_ns: int) -> FactorPublication | None:
         """Return a signal only at/after its separately proven next opening."""
-        return next((pub for pub in reversed(self._recent)
-                     if pub.first_executable_at_ns <= event_time_ns), None)
+        return next((pub for _, executable, pub in reversed(self._recent)
+                     if executable <= event_time_ns), None)
 
 
 def build_factor_expr_bar_adapter(
     *,
-    factor_ref: str,
-    expression: FactorExpr,
+    factor_ref: str | None = None,
+    expression: FactorExpr | None = None,
+    expressions: Mapping[str, FactorExpr] | None = None,
     products: tuple[Any, ...],
     bar_types_by_product: Mapping[Any, Any],
     source_freq: Any,
@@ -142,27 +156,29 @@ def build_factor_expr_bar_adapter(
     stream = EventTimeFactorStream(
         factor_ref=factor_ref,
         expression=expression,
+        expressions=expressions,
         products=products,
         source_freq=source_freq,
         session_calendar=session_calendar,
         event_line=event_line,
     )
-    product_by_instrument: dict[str, Any] = {}
+    product_by_instrument: dict[Any, Any] = {}
     for product, value in bar_types_by_product.items():
-        instrument_id = str(value.instrument_id)
+        instrument_id = value.instrument_id
         if instrument_id in product_by_instrument:
             raise ValueError(f"duplicate bar instrument id: {instrument_id}")
         product_by_instrument[instrument_id] = product
 
     class FactorExprBarAdapter:
         def __init__(self) -> None:
+            self.stream = stream
             self.subscriptions = list(bar_types_by_product.values())
             self._pending_end_ns: int | None = None
             self._pending_clocks: dict[Any, BarClock] = {}
             self._pending_fields: dict[Any, Mapping[str, float]] = {}
 
         def on_bar(self, bar: Any) -> None:
-            instrument_id = str(bar.bar_type.instrument_id)
+            instrument_id = bar.bar_type.instrument_id
             try:
                 product = product_by_instrument[instrument_id]
             except KeyError as exc:
@@ -193,7 +209,7 @@ def build_factor_expr_bar_adapter(
 
             self._pending_clocks[product] = clock
             self._pending_fields[product] = factor_fields(product, bar)
-            if set(self._pending_clocks) != set(products):
+            if len(self._pending_clocks) != len(products):
                 return
 
             executable_ns = int(first_executable_at(dict(self._pending_clocks)))

@@ -119,6 +119,15 @@ EXACT_PATH_TESTS = {
     ),
     "server/services/nautilus_bridge/factor_stream.py": (
         "tests/server/test_nautilus_bridge_factor_stream.py",
+        "tests/server/test_nautilus_strategy_backtest.py",
+        "tests/server/test_nautilus_strategy_family_replay.py",
+        "tests/server/test_nautilus_strategy_runspec.py",
+    ),
+    "server/services/nautilus_bridge/strategy_backtest.py": (
+        "tests/server/test_nautilus_bridge_factor_stream.py",
+        "tests/server/test_nautilus_strategy_backtest.py",
+        "tests/server/test_nautilus_strategy_family_replay.py",
+        "tests/server/test_nautilus_strategy_runspec.py",
     ),
     "server/services/nautilus_bridge/rule_transition.py": (
         "tests/server/test_nautilus_bridge_rule_transition.py",
