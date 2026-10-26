@@ -147,6 +147,9 @@ class SignalAlign(FactorExpr):
 
 
 def _method(self, signal_freq: str, scope=None, basepoint: str = "last", **kwargs):
+    # Older callers passed basepoint positionally as the third argument.
+    if isinstance(scope, str) and scope in {"last", "first"}:
+        basepoint, scope = scope, None
     return SignalAlign(self, signal_freq, scope, basepoint, **kwargs)
 
 

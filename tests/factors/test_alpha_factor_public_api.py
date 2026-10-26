@@ -261,3 +261,11 @@ def test_signal_align_scope_anchor_positions_grid_inside_scope():
     assert list(from_start.index) == [pd.Timestamp('2026-01-05 09:32'), pd.Timestamp('2026-01-05 09:34')]
     from_end = ColumnRef('CLOSE').signal_align('2min', scope_anchor='end').evaluate(ctx)
     assert list(from_end.index) == [pd.Timestamp('2026-01-05 09:31'), pd.Timestamp('2026-01-05 09:33')]
+
+
+def test_signal_align_legacy_positional_basepoint():
+    index = pd.date_range('2026-01-05 09:30', periods=6, freq='min')
+    frame = pd.DataFrame({'CLOSE': np.arange(6, dtype=float)}, index=index)
+    ctx = EvalContext(products=('A',), preloaded={'A': frame})
+    aligned = ColumnRef('CLOSE').signal_align('2min', 'last').evaluate(ctx)
+    np.testing.assert_allclose(aligned['A'].to_numpy(), [0.0, 2.0, 4.0])
