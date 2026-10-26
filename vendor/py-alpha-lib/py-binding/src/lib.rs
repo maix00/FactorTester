@@ -2901,6 +2901,7 @@ enum PlanNode {
   Column(usize),
   Rolling { child: usize, window: usize, op: String, min: usize, prop: bool },
   Binary { op: String, left: usize, right: usize },
+  Where { condition: usize, when_true: usize, when_false: usize },
 }
 
 fn plan_rolling(values: &[f64], window: usize, op: &str, min: usize, prop: bool) -> pyo3::PyResult<Vec<f64>> {
@@ -3002,6 +3003,11 @@ impl BatchPlan {
     self.nodes.len() - 1
   }
 
+  fn where_node(&mut self, condition: usize, when_true: usize, when_false: usize) -> usize {
+    self.nodes.push(PlanNode::Where { condition, when_true, when_false });
+    self.nodes.len() - 1
+  }
+
   fn execute(
     &self, py: pyo3::Python<'_>, columns: Vec<numpy::PyReadonlyArray1<f64>>, output: usize,
   ) -> pyo3::PyResult<pyo3::Py<numpy::PyArray1<f64>>> {
@@ -3024,6 +3030,15 @@ impl BatchPlan {
         PlanNode::Rolling { child, window, op, min, prop } => {
           plan_rolling(&values[*child], *window, op, *min, *prop)?
         }
+        PlanNode::Where { condition, when_true, when_false } => {
+          let (c, a, b) = (&values[*condition], &values[*when_true], &values[*when_false]);
+          if c.len() != a.len() || a.len() != b.len() {
+            return Err(pyo3::exceptions::PyValueError::new_err("plan where length mismatch"));
+          }
+          c.iter().zip(a.iter()).zip(b.iter())
+            .map(|((c, a), b)| if c.is_finite() && *c != 0.0 { *a } else { *b })
+            .collect()
+        }
         PlanNode::Binary { op, left, right } => {
           let (a, b) = (&values[*left], &values[*right]);
           if a.len() != b.len() {
@@ -3031,6 +3046,9 @@ impl BatchPlan {
           }
           a.iter().zip(b.iter()).map(|(x, y)| match op.as_str() {
             "+" => x + y, "-" => x - y, "*" => x * y, "/" => x / y,
+            "gt" => f64::from(x > y), "lt" => f64::from(x < y),
+            "ge" => f64::from(x >= y), "le" => f64::from(x <= y),
+            "eq" => f64::from(x == y), "ne" => f64::from(x != y),
             other => f64::NAN * (other.len() as f64),
           }).collect()
         }

@@ -48,3 +48,16 @@ def test_plan_reuses_a_repeated_subexpression_in_the_same_dag():
     np.testing.assert_allclose(
         outputs[1]['A'].to_numpy(), 2.0 * outputs[0]['A'].to_numpy(),
     )
+
+
+def test_plan_supports_where_and_comparison_nodes():
+    from tools.factors.expr.conditional import where
+
+    values = np.linspace(1.0, 100.0, 120)
+    close = ColumnRef(DataColumn.CLOSE)
+    mean = close.rolling(10).mean()
+    expression = where(close > 50, mean, 0.0)
+    outputs = try_evaluate_rust_plan_many([expression], _ctx(values))
+    assert outputs is not None
+    expected = np.where(values > 50, pd.Series(values).rolling(10, min_periods=1).mean(), 0.0)
+    np.testing.assert_allclose(outputs[0]['A'].to_numpy(), expected)

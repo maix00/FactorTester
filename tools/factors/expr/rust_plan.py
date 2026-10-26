@@ -17,8 +17,10 @@ from .core import EvaluateContext, FactorExpr
 from .leaf import ColumnRef, ConstExpr
 from .composite import CompositeExpr
 from .rolling import RollingOp
+from .conditional import WhereOp
 
-_BINARY = {"add": "+", "sub": "-", "mul": "*", "div": "/"}
+_BINARY = {"add": "+", "sub": "-", "mul": "*", "div": "/",
+           "gt": "gt", "lt": "lt", "ge": "ge", "le": "le", "eq": "eq", "ne": "ne"}
 _ROLLING = {"rolling_sum", "rolling_mean", "rolling_var", "rolling_std", "rolling_skew"}
 
 
@@ -63,6 +65,17 @@ class _PlanBuilder:
                 expr._min_periods_value(window),
                 expr.nan_policy.value == "propagate",
             )
+            self.memo[key] = node
+            return node
+        if isinstance(expr, WhereOp):
+            if len(expr.operands) != 3:
+                return None
+            condition = self.build(expr.operands[0])
+            when_true = self.build(expr.operands[1])
+            when_false = self.build(expr.operands[2])
+            if condition is None or when_true is None or when_false is None:
+                return None
+            node = self.plan.where_node(condition, when_true, when_false)
             self.memo[key] = node
             return node
         if isinstance(expr, CompositeExpr):
