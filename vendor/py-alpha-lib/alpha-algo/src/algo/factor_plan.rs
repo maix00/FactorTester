@@ -24,6 +24,7 @@ pub enum ExprSpec {
     Category { memberships: Vec<(usize, i64, bool)> },
     Rolling { child: usize, window: usize, op: SessionOp, min_periods: usize, propagate_nan: bool },
     Ema { child: usize, span: usize, min_periods: usize, propagate_nan: bool },
+    RollingDynamic { child: usize, windows: Vec<usize>, op: SessionOp, min_periods: usize, propagate_nan: bool },
     Term { op: String, near_rank: usize, far_rank: usize, depth: usize },
     MatchDistance { child: usize, predicate: crate::algo::MatchExpr, count: usize, nearest: bool, default: f64, include_current: bool },
     SessionRolling { child: usize, lookback_sessions: usize, sessions: Vec<(i64, i64, usize)>, op: SessionOp, min_periods: usize, propagate_nan: bool },
@@ -145,7 +146,7 @@ impl FactorPlanKernel {
         let mut nodes = Vec::with_capacity(specs.len());
         for spec in specs {
             let rolling = match &spec {
-                ExprSpec::Rolling { op, .. } | ExprSpec::Scope { op, .. } | ExprSpec::SessionRolling { op, .. } => (0..products)
+                ExprSpec::Rolling { op, .. } | ExprSpec::RollingDynamic { op, .. } | ExprSpec::Scope { op, .. } | ExprSpec::SessionRolling { op, .. } => (0..products)
                     .map(|_| IntervalKernel::new_explicit(*op).map(Some))
                     .collect::<Result<Vec<_>, _>>()?,
                 _ => (0..products).map(|_| None).collect(),
@@ -186,7 +187,7 @@ impl FactorPlanKernel {
             let children: &[usize] = match &node.spec {
                 ExprSpec::Column(_) | ExprSpec::Const(_) | ExprSpec::Product(_) | ExprSpec::Category { .. } | ExprSpec::Term { .. } => &[],
                 ExprSpec::Neg { child } | ExprSpec::Unary { child, .. } | ExprSpec::Rolling { child, .. }
-                | ExprSpec::SessionRolling { child, .. } | ExprSpec::MatchDistance { child, .. }
+                | ExprSpec::SessionRolling { child, .. } | ExprSpec::RollingDynamic { child, .. } | ExprSpec::MatchDistance { child, .. }
                 | ExprSpec::Ema { child, .. } | ExprSpec::Linreg { child, .. }
                 | ExprSpec::Shift { child, .. } | ExprSpec::Cross { child, .. }
                 | ExprSpec::Scope { child, .. } | ExprSpec::Signal { child, .. } => std::slice::from_ref(child),
@@ -327,6 +328,17 @@ impl FactorPlanKernel {
                     let first_session = (current_session + 1).saturating_sub(lookback_sessions);
                     let start: u64 = sessions[..first_session].iter().map(|(_, _, bars)| *bars as u64).sum();
                     for product in 0..products {
+                        let Some(state) = node.rolling[product].as_mut() else { out[product] = f64::NAN; continue };
+                        state.set_semantics(min_periods, propagate_nan);
+                        out[product] = state.update_explicit(start, current, input[product]);
+                    }
+                }
+                ExprSpec::RollingDynamic { child, ref windows, min_periods, propagate_nan, .. } => {
+                    let input = &head[child];
+                    let node = &mut self.nodes[index];
+                    for product in 0..products {
+                        let width = windows.get(product).copied().unwrap_or(1).max(1) as u64;
+                        let start = current.saturating_sub(width - 1);
                         let Some(state) = node.rolling[product].as_mut() else { out[product] = f64::NAN; continue };
                         state.set_semantics(min_periods, propagate_nan);
                         out[product] = state.update_explicit(start, current, input[product]);
@@ -563,6 +575,7 @@ enum RawNode {
               propagate_nan: bool, #[serde(default)] quantile: Option<f64> },
     Scope { child: usize, count: usize, op: String, min_periods: usize, propagate_nan: bool,
             #[serde(default)] sessions: Vec<[i64; 3]> },
+    RollingDynamic { child: usize, windows: Vec<usize>, op: String, min_periods: usize, propagate_nan: bool },
     SessionRolling { child: usize, lookback_sessions: usize, sessions: Vec<[i64; 3]>, op: String,
                      min_periods: usize, propagate_nan: bool },
     Term { op: String, near_rank: usize, far_rank: usize, depth: usize },
@@ -627,6 +640,8 @@ impl FactorPlanKernel {
                     ExprSpec::Term { op, near_rank, far_rank, depth },
                 RawNode::MatchDistance { child, predicate, count, nearest, default, include_current } =>
                     ExprSpec::MatchDistance { child, predicate: compile_match(predicate), count, nearest, default, include_current },
+                RawNode::RollingDynamic { child, windows, op, min_periods, propagate_nan } =>
+                    ExprSpec::RollingDynamic { child, windows, op: session_op(&op, None)?, min_periods, propagate_nan },
                 RawNode::SessionRolling { child, lookback_sessions, sessions, op, min_periods, propagate_nan } =>
                     ExprSpec::SessionRolling { child, lookback_sessions,
                         sessions: sessions.into_iter().map(|item| (item[0], item[1], item[2] as usize)).collect(),
@@ -813,6 +828,18 @@ mod term_plan_tests {
         let mut kernel = FactorPlanKernel::from_spec_json(json, 1).unwrap();
         let values = kernel.update_with_curves(0, &[1.0], &[vec![(30.0, 10.0), (90.0, 8.0)]]).unwrap();
         assert_eq!(values, vec![2.0]);
+    }
+
+    #[test]
+    fn rolling_dynamic_uses_per_product_windows() {
+        let json = r#"{"columns":["C"],"nodes":[
+          {"kind":"column","index":0},
+          {"kind":"rolling_dynamic","child":0,"windows":[2,3],"op":"mean","min_periods":1,"propagate_nan":false}
+        ],"outputs":[1]}"#;
+        let mut kernel = FactorPlanKernel::from_spec_json(json, 2).unwrap();
+        assert_eq!(kernel.update(&[1.0, 10.0]).unwrap(), vec![1.0, 10.0]);
+        assert_eq!(kernel.update(&[3.0, 30.0]).unwrap(), vec![2.0, 20.0]);
+        assert_eq!(kernel.update(&[5.0, 50.0]).unwrap(), vec![4.0, 30.0]);
     }
 
     #[test]

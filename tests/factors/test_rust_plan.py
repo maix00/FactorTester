@@ -206,3 +206,19 @@ def test_compat_plan_rejects_truncated_but_compiles_match_distance():
     condition = CURRENT - CANDIDATE > 0
     spec = alpha_plan_spec(bar_distance(close, condition, scope=scope_bars(3)))
     assert spec['nodes'][-1]['kind'] == 'match_distance' 
+
+
+def test_compat_plan_emits_per_product_dynamic_windows():
+    from types import SimpleNamespace
+    from tools.factors import window_bars
+    from tools.factors.alpha_plan import alpha_plan_spec
+
+    class Product:
+        def __init__(self, periods): self.MIN1 = SimpleNamespace(day_periods=periods)
+        def __hash__(self): return id(self)
+    products = (Product(10), Product(20))
+    expression = ColumnRef(DataColumn.CLOSE).rolling(window_bars('2d')).mean()
+    spec = alpha_plan_spec(expression, source_freq=DataFreq.MIN1, products=products)
+    node = spec['nodes'][-1]
+    assert node['kind'] == 'rolling_dynamic'
+    assert node['windows'] == [20, 40]

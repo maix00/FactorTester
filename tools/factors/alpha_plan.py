@@ -66,6 +66,9 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
         elif isinstance(expr, RollingOp):
             if expr._n_data != 1:
                 return None
+            child = build(expr.operands[expr._data_start])
+            if child is None:
+                return None
             if expr.trunc_start is not None or expr.trunc_end is not None:
                 return None
             window = expr.window
@@ -95,9 +98,20 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
                     }
                     memo[key] = len(nodes); keys.append(repr(key)); key_tuples.append(key); nodes.append(node)
                     return memo[key]
-                common, window_count, _ = _resolve_windows(value, source_freq, products)
+                common, window_count, per_product = _resolve_windows(value, source_freq, products)
                 if not common:
-                    return None
+                    if not per_product:
+                        return None
+                    windows = [int(per_product[product]) for product in products]
+                    op, _, q = expr.op.partition(":") if ":" in expr.op else (expr.op, "", "")
+                    op = op.removeprefix("rolling_")
+                    node = {
+                        "kind": "rolling_dynamic", "child": child, "windows": windows,
+                        "op": op, "min_periods": 1,
+                        "propagate_nan": expr.nan_policy.value == "propagate",
+                    }
+                    memo[key] = len(nodes); keys.append(repr(key)); key_tuples.append(key); nodes.append(node)
+                    return memo[key]
             else:
                 return None
             child = build(expr.operands[expr._data_start])
