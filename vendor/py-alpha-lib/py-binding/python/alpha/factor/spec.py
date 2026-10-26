@@ -15,6 +15,7 @@ from .signal import SignalAlign
 from .scopes import SessionScope, TradingDayScope
 
 _BINARY = {"add", "sub", "mul", "div", "gt", "lt", "ge", "le", "eq", "ne"}
+_UNARY = {"abs", "sign", "sqrt", "log", "tanh"}
 
 
 def to_plan_spec(expressions: list[Any]) -> dict[str, Any] | None:
@@ -75,6 +76,8 @@ def to_plan_spec(expressions: list[Any]) -> dict[str, Any] | None:
                 return None
             if expr.op == "neg":
                 node = {"kind": "neg", "child": children[0]}
+            elif expr.op in _UNARY:
+                node = {"kind": "unary", "op": expr.op, "child": children[0]}
             elif expr.op in _BINARY:
                 node = {"kind": "binary", "op": expr.op, "left": children[0], "right": children[1]}
             else:

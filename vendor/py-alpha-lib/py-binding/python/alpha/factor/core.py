@@ -52,6 +52,24 @@ class FactorExpr:
     def shift(self, periods: int) -> "FactorExpr":
         return ShiftOp(periods, self)
 
+    def abs(self) -> "FactorExpr":
+        return CompositeExpr("abs", self)
+
+    def sign(self) -> "FactorExpr":
+        return CompositeExpr("sign", self)
+
+    def sqrt(self) -> "FactorExpr":
+        return CompositeExpr("sqrt", self)
+
+    def log(self) -> "FactorExpr":
+        return CompositeExpr("log", self)
+
+    def tanh(self) -> "FactorExpr":
+        return CompositeExpr("tanh", self)
+
+    def __abs__(self) -> "FactorExpr":
+        return self.abs()
+
     def neg(self) -> "FactorExpr":
         return CompositeExpr("neg", self)
 

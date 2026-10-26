@@ -554,3 +554,14 @@ def test_alpha_factor_category_bool_leaf_evaluates_publicly():
     np.testing.assert_array_equal(result['A'].to_numpy(), [True, True])
     np.testing.assert_array_equal(result['B'].to_numpy(), [False, False])
     assert 'CategoryBoolRef' in plan_blockers(CategoryBoolRef(Category(), 'metal'))
+
+
+def test_alpha_factor_unary_pointwise_compiles_to_rust():
+    import json
+    from alpha import FactorPlanState
+
+    expression = ColumnRef('CLOSE').abs() + ColumnRef('CLOSE').sign()
+    spec = expression.to_plan_spec()
+    assert [node['kind'] for node in spec['nodes']] == ['column', 'unary', 'unary', 'binary']
+    state = FactorPlanState(json.dumps(spec), 1)
+    assert float(state.update(np.array([-3.0]))[0]) == 2.0

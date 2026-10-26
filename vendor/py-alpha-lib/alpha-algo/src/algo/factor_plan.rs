@@ -24,6 +24,7 @@ pub enum ExprSpec {
     Ema { child: usize, span: usize, min_periods: usize, propagate_nan: bool },
     Linreg { child: usize, window: usize, op: String, min_periods: usize, propagate_nan: bool },
     Neg { child: usize },
+    Unary { op: String, child: usize },
     Binary { op: BinaryOp, left: usize, right: usize },
     Shift { child: usize, periods: usize },
     Where { condition: usize, when_true: usize, when_false: usize },
@@ -175,7 +176,7 @@ impl FactorPlanKernel {
         for (index, node) in nodes.iter().enumerate() {
             let children: &[usize] = match &node.spec {
                 ExprSpec::Column(_) | ExprSpec::Const(_) => &[],
-                ExprSpec::Neg { child } | ExprSpec::Rolling { child, .. }
+                ExprSpec::Neg { child } | ExprSpec::Unary { child, .. } | ExprSpec::Rolling { child, .. }
                 | ExprSpec::Ema { child, .. } | ExprSpec::Linreg { child, .. }
                 | ExprSpec::Shift { child, .. } | ExprSpec::Cross { child, .. }
                 | ExprSpec::Scope { child, .. } | ExprSpec::Signal { child, .. } => std::slice::from_ref(child),
@@ -241,6 +242,19 @@ impl FactorPlanKernel {
                 ExprSpec::Neg { child } => {
                     let input = &head[child];
                     for product in 0..products { out[product] = -input[product]; }
+                }
+                ExprSpec::Unary { ref op, child } => {
+                    let input = &head[child];
+                    for product in 0..products {
+                        out[product] = match op.as_str() {
+                            "abs" => input[product].abs(),
+                            "sign" => input[product].signum(),
+                            "sqrt" => input[product].sqrt(),
+                            "log" => input[product].ln(),
+                            "tanh" => input[product].tanh(),
+                            _ => f64::NAN,
+                        };
+                    }
                 }
                 ExprSpec::Binary { op, left, right } => {
                     let a = &head[left]; let b = &head[right];
@@ -388,6 +402,7 @@ enum RawNode {
             #[serde(default)] sessions: Vec<[i64; 3]> },
     Binary { op: String, left: usize, right: usize },
     Neg { child: usize },
+    Unary { op: String, child: usize },
     Shift { child: usize, periods: usize },
     Where { condition: usize, when_true: usize, when_false: usize },
     Cross { op: String, child: usize },
@@ -449,6 +464,7 @@ impl FactorPlanKernel {
                     }, left, right,
                 },
                 RawNode::Neg { child } => ExprSpec::Neg { child },
+                RawNode::Unary { op, child } => ExprSpec::Unary { op, child },
                 RawNode::Shift { child, periods } => ExprSpec::Shift { child, periods },
                 RawNode::Where { condition, when_true, when_false } => ExprSpec::Where { condition, when_true, when_false },
                 RawNode::Cross { op, child } => ExprSpec::Cross {
