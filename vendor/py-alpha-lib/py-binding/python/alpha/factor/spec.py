@@ -51,7 +51,7 @@ def to_plan_spec(expressions: list[Any]) -> dict[str, Any] | None:
                 return None
             scope = expr.owner.scope
             if isinstance(scope, SessionScope):
-                sessions = [[int(item.start_ns), int(item.end_ns)] for item in scope.sessions]
+                sessions = [[int(item.start_ns), int(item.end_ns), int(item.start_ns)] for item in scope.sessions]
                 count = 0
             else:
                 sessions = []
@@ -89,8 +89,9 @@ def to_plan_spec(expressions: list[Any]) -> dict[str, Any] | None:
             node = {"kind": "where", "condition": children[0],
                     "when_true": children[1], "when_false": children[2]}
         elif isinstance(expr, SignalAlign):
-            if (expr.basepoint != "last" or expr.scope_anchor != "start"
-                    or not expr.include_current or expr.partial != "drop"):
+            if expr.basepoint != "last" or not expr.include_current or expr.partial not in {"drop", "emit"}:
+                return None
+            if expr.scope_anchor != "start" and not isinstance(expr.scope, SessionScope):
                 return None
             child = build(expr.child)
             if child is None:
@@ -103,10 +104,23 @@ def to_plan_spec(expressions: list[Any]) -> dict[str, Any] | None:
                 "sessions": [],
             }
             if isinstance(expr.scope, SessionScope):
-                node["sessions"] = [
-                    [int(session.start_ns), int(session.end_ns)]
-                    for session in expr.scope.sessions
-                ]
+                signal_ns = node["signal_ns"]
+                sessions = []
+                for session in expr.scope.sessions:
+                    start, end = int(session.start_ns), int(session.end_ns)
+                    if expr.scope_anchor == "end":
+                        first = end - ((end - start) // signal_ns) * signal_ns
+                    elif expr.scope_anchor != "start":
+                        clock = pd.Timestamp(expr.scope_anchor).time()
+                        first = int((pd.Timestamp(start, unit="ns").normalize()
+                                     + pd.Timedelta(hours=clock.hour, minutes=clock.minute,
+                                                    seconds=clock.second)).value)
+                        if first < start:
+                            first += 86_400_000_000_000
+                    else:
+                        first = start
+                    sessions.append([start, end, first])
+                node["sessions"] = sessions
             elif expr.scope is not None:
                 return None
         elif isinstance(expr, BarSince):

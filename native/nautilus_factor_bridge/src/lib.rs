@@ -325,7 +325,7 @@ mod tests {
 
     #[test]
     fn signal_plan_resets_on_calendar_session_boundary() {
-        let json = r#"{"columns":["CLOSE"],"nodes":[{"kind":"column","index":0},{"kind":"signal","child":0,"signal_ns":200,"sessions":[[0,200],[1000,1200]]}],"outputs":[1]}"#;
+        let json = r#"{"columns":["CLOSE"],"nodes":[{"kind":"column","index":0},{"kind":"signal","child":0,"signal_ns":200,"sessions":[[0,200,0],[1000,1200,1000]]}],"outputs":[1]}"#;
         let mut engine = FactorPlanEngine::from_spec_json(json, 1).unwrap();
         let bar = |timestamp, value| MarketBar::new(timestamp, vec!["A".into()], vec![value]);
         assert_eq!(engine.update(&bar(0, 0.0)).unwrap(), vec![0.0]);

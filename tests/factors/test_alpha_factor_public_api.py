@@ -311,7 +311,7 @@ def test_signal_align_session_scope_serializes_to_rust_plan():
     assert spec is not None
     signal = next(node for node in spec['nodes'] if node['kind'] == 'signal')
     assert signal['signal_ns'] == 120_000_000_000
-    assert signal['sessions'] == [[session.start_ns, session.end_ns]]
+    assert signal['sessions'] == [[session.start_ns, session.end_ns, session.start_ns]]
 
     state = FactorPlanState(json.dumps(spec), 1)
     outputs = [
@@ -353,8 +353,8 @@ def test_session_groupby_scope_serializes_and_executes_in_rust():
     expression = ColumnRef('CLOSE').groupby_scope(scope_session(sessions)).mean()
     spec = expression.to_plan_spec()
     node = next(node for node in spec['nodes'] if node['kind'] == 'scope')
-    assert node['sessions'] == [[sessions[0].start_ns, sessions[0].end_ns],
-                                [sessions[1].start_ns, sessions[1].end_ns]]
+    assert node['sessions'] == [[sessions[0].start_ns, sessions[0].end_ns, sessions[0].start_ns],
+                                [sessions[1].start_ns, sessions[1].end_ns, sessions[1].start_ns]]
     state = FactorPlanState(json.dumps(spec), 1)
     outputs = [
         float(state.update_at(pd.Timestamp(timestamp).value, np.array([value]))[0])

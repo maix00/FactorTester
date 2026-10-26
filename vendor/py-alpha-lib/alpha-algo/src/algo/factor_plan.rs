@@ -27,8 +27,8 @@ pub enum ExprSpec {
     Where { condition: usize, when_true: usize, when_false: usize },
     Cross { op: CrossOp, child: usize },
     Since { condition: usize, count: usize, include_current: bool, nearest: bool, default_scope: bool, default: f64 },
-    Scope { child: usize, count: usize, op: SessionOp, min_periods: usize, propagate_nan: bool, sessions: Vec<(i64, i64)> },
-    Signal { child: usize, signal_ns: i64, sessions: Vec<(i64, i64)> },
+    Scope { child: usize, count: usize, op: SessionOp, min_periods: usize, propagate_nan: bool, sessions: Vec<(i64, i64, i64)> },
+    Signal { child: usize, signal_ns: i64, sessions: Vec<(i64, i64, i64)> },
 }
 
 struct NodeState {
@@ -175,7 +175,7 @@ impl FactorPlanKernel {
                 let input = self.eval(child, columns, cache)?;
                 let timestamp = self.timestamp_ns;
                 let node = &mut self.nodes[index];
-                let session = sessions.iter().position(|(start, end)| timestamp >= *start && timestamp <= *end);
+                let session = sessions.iter().position(|(start, end, _)| timestamp >= *start && timestamp <= *end);
                 if session != node.signal_session {
                     node.signal_session = session;
                     node.signal_last.fill(f64::NAN);
@@ -183,7 +183,7 @@ impl FactorPlanKernel {
                 }
                 for product in 0..self.products {
                     if node.signal_next[product].is_none() {
-                        let anchor = session.map_or(timestamp, |position| sessions[position].0);
+                        let anchor = session.map_or(timestamp, |position| sessions[position].2);
                         let first = if anchor % signal_ns == 0 { anchor } else { (anchor / signal_ns + 1) * signal_ns };
                         node.signal_next[product] = Some(first);
                     }
@@ -200,7 +200,7 @@ impl FactorPlanKernel {
                 let timestamp = self.timestamp_ns;
                 let node = &mut self.nodes[index];
                 if !sessions.is_empty() {
-                    let session = sessions.iter().position(|(start, end)| timestamp >= *start && timestamp <= *end);
+                    let session = sessions.iter().position(|(start, end, _)| timestamp >= *start && timestamp <= *end);
                     if session != node.scope_session {
                         node.scope_session = session;
                         node.scope_base.fill(current as usize);
@@ -298,7 +298,7 @@ enum RawNode {
     Rolling { child: usize, window: usize, op: String, min_periods: usize,
               propagate_nan: bool, #[serde(default)] quantile: Option<f64> },
     Scope { child: usize, count: usize, op: String, min_periods: usize, propagate_nan: bool,
-            #[serde(default)] sessions: Vec<[i64; 2]> },
+            #[serde(default)] sessions: Vec<[i64; 3]> },
     Binary { op: String, left: usize, right: usize },
     Neg { child: usize },
     Shift { child: usize, periods: usize },
@@ -306,7 +306,7 @@ enum RawNode {
     Cross { op: String, child: usize },
     Since { condition: usize, count: usize, include_current: bool, nearest: bool,
             default_scope: bool, default: f64 },
-    Signal { child: usize, signal_ns: i64, #[serde(default)] sessions: Vec<[i64; 2]> },
+    Signal { child: usize, signal_ns: i64, #[serde(default)] sessions: Vec<[i64; 3]> },
 }
 
 #[derive(Deserialize)]
@@ -339,7 +339,7 @@ impl FactorPlanKernel {
                 }
                 RawNode::Scope { child, count, op, min_periods, propagate_nan, sessions } =>
                     ExprSpec::Scope { child, count, op: session_op(&op, None)?, min_periods, propagate_nan,
-                        sessions: sessions.into_iter().map(|pair| (pair[0], pair[1])).collect() },
+                        sessions: sessions.into_iter().map(|item| (item[0], item[1], item[2])).collect() },
                 RawNode::Binary { op, left, right } => ExprSpec::Binary {
                     op: match op.as_str() {
                         "add" => BinaryOp::Add, "sub" => BinaryOp::Sub, "mul" => BinaryOp::Mul,
@@ -361,7 +361,7 @@ impl FactorPlanKernel {
                 RawNode::Since { condition, count, include_current, nearest, default_scope, default } =>
                     ExprSpec::Since { condition, count, include_current, nearest, default_scope, default },
                 RawNode::Signal { child, signal_ns, sessions } =>
-                    ExprSpec::Signal { child, signal_ns, sessions: sessions.into_iter().map(|pair| (pair[0], pair[1])).collect() },
+                    ExprSpec::Signal { child, signal_ns, sessions: sessions.into_iter().map(|item| (item[0], item[1], item[2])).collect() },
             });
         }
         let mut plan = Self::new(products, specs, raw.outputs)?;
