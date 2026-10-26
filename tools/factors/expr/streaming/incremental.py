@@ -1775,16 +1775,23 @@ def compile_streaming_factor(
                 if isinstance(quantile, bool) or not isinstance(quantile, (int, float)):
                     raise UnsupportedStreamingFactor("streaming quantile must be a constant")
                 quantile = float(quantile)
+            rust_partition = False
             if (
                 expr.trunc_start is None
                 and expr.trunc_end is None
                 and op_name in RustPartitionNode._OPS
             ):
-                node = RustPartitionNode(
-                    op_name, data_operands[0], expr.scope, len(products),
-                    quantile=quantile, source_freq=source_freq, products=products,
-                )
-            else:
+                try:
+                    node = RustPartitionNode(
+                        op_name, data_operands[0], expr.scope, len(products),
+                        quantile=quantile, source_freq=source_freq, products=products,
+                    )
+                    rust_partition = True
+                except ImportError:
+                    # Installed py-alpha wheel predates PartitionState.  Keep the
+                    # Python scope kernel only until the unified wheel is built.
+                    rust_partition = False
+            if not rust_partition:
                 node = GroupScopeNode(
                     op_name,
                     data_operands[0],
