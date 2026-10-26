@@ -13,7 +13,7 @@ class IncrementalFactorPlan:
     def __init__(self, expressions: dict[str, object], products: tuple[str, ...]):
         self.aliases = tuple(expressions)
         self.products = tuple(products)
-        spec = to_plan_spec(list(expressions.values()))
+        spec = to_plan_spec(list(expressions.values()), products=self.products)
         if spec is None:
             raise ValueError("factor expressions cannot be compiled to the Rust plan")
         from alpha import FactorPlanState

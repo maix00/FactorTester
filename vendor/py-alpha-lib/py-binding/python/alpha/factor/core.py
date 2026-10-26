@@ -42,9 +42,9 @@ class FactorExpr:
     def semantic_fingerprint(self) -> str:
         return hashlib.sha256(repr(self._structural_key()).encode()).hexdigest()
 
-    def to_plan_spec(self) -> dict | None:
+    def to_plan_spec(self, *, products=None) -> dict | None:
         from .spec import to_plan_spec
-        return to_plan_spec([self])
+        return to_plan_spec([self], products=products)
 
     def rolling(self, window: int) -> "RollingExpr":
         return RollingExpr(self, window)

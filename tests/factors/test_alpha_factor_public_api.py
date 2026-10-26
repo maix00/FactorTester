@@ -597,3 +597,16 @@ def test_window_bars_250d_compiles_to_rust_session_window():
         'm', expression, ('A',), source_freq=DataFreq.MIN1, session_calendar=calendar,
     )
     assert getattr(executor._multi, 'uses_rust', False) is True
+
+
+def test_alpha_factor_category_bool_compiles_to_rust_product_node():
+    from alpha.factor import CategoryBoolRef, IncrementalFactorPlan
+
+    class Category:
+        alias = 'Sector'
+        categories = ('metal',)
+        def is_in_category(self, label, product):
+            return product == 'A'
+
+    plan = IncrementalFactorPlan({'metal': CategoryBoolRef(Category(), 'metal')}, ('A', 'B'))
+    assert plan.update([0.0, 0.0]) == {'metal': {'A': 1.0, 'B': 0.0}}

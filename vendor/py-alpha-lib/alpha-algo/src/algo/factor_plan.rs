@@ -20,6 +20,7 @@ pub enum CrossOp { ZScore, Rank }
 pub enum ExprSpec {
     Column(usize),
     Const(f64),
+    Product(Vec<f64>),
     Rolling { child: usize, window: usize, op: SessionOp, min_periods: usize, propagate_nan: bool },
     Ema { child: usize, span: usize, min_periods: usize, propagate_nan: bool },
     SessionRolling { child: usize, lookback_sessions: usize, sessions: Vec<(i64, i64, usize)>, op: SessionOp, min_periods: usize, propagate_nan: bool },
@@ -176,7 +177,7 @@ impl FactorPlanKernel {
         }
         for (index, node) in nodes.iter().enumerate() {
             let children: &[usize] = match &node.spec {
-                ExprSpec::Column(_) | ExprSpec::Const(_) => &[],
+                ExprSpec::Column(_) | ExprSpec::Const(_) | ExprSpec::Product(_) => &[],
                 ExprSpec::Neg { child } | ExprSpec::Unary { child, .. } | ExprSpec::Rolling { child, .. }
                 | ExprSpec::SessionRolling { child, .. }
                 | ExprSpec::Ema { child, .. } | ExprSpec::Linreg { child, .. }
@@ -235,6 +236,10 @@ impl FactorPlanKernel {
             let (head, tail) = self.slots.split_at_mut(index);
             let out = &mut tail[0];
             match spec {
+                ExprSpec::Product(ref values) => {
+                    if values.len() != products { return Err(crate::algo::Error::InvalidParameter("product constant width mismatch".into())); }
+                    out.copy_from_slice(values);
+                }
                 ExprSpec::Column(column) => {
                     if column >= fields { return Err(crate::algo::Error::InvalidParameter("column out of range".into())); }
                     if fields == 1 { out.copy_from_slice(values); }
@@ -410,6 +415,7 @@ fn default_partial() -> String { "drop".into() }
 enum RawNode {
     Column { index: usize },
     Const { value: f64 },
+    Product { values: Vec<f64> },
     Rolling { child: usize, window: usize, op: String, min_periods: usize,
               propagate_nan: bool, #[serde(default)] quantile: Option<f64> },
     Scope { child: usize, count: usize, op: String, min_periods: usize, propagate_nan: bool,
@@ -458,6 +464,7 @@ impl FactorPlanKernel {
             specs.push(match node {
                 RawNode::Column { index } => ExprSpec::Column(index),
                 RawNode::Const { value } => ExprSpec::Const(value),
+                RawNode::Product { values } => ExprSpec::Product(values),
                 RawNode::Rolling { child, window, op, min_periods, propagate_nan, quantile } => {
                     if op == "ema" {
                         ExprSpec::Ema { child, span: window, min_periods, propagate_nan }

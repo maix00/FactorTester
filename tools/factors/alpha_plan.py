@@ -15,7 +15,7 @@ from tools.factors.expr.composite import CompositeExpr
 from tools.factors.expr.conditional import WhereOp
 from tools.factors.expr.cross_sectional import CrossSectionalOp
 from tools.factors.expr.groupby_scope import GroupByScopeOp
-from tools.factors.expr.leaf import ColumnRef, ConstExpr
+from tools.factors.expr.leaf import CategoryBoolRef, ColumnRef, ConstExpr
 from tools.factors.expr.lookback_scope import BarCountScope
 from tools.factors.expr.rolling import RollingOp
 from tools.factors.expr.shift import ShiftOp
@@ -36,7 +36,12 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
         key = expr._structural_key()
         if key in memo:
             return memo[key]
-        if isinstance(expr, ColumnRef):
+        if isinstance(expr, CategoryBoolRef) and products:
+            node = {"kind": "product", "values": [
+                1.0 if expr.category.is_in_category(expr.category_name, product) else 0.0
+                for product in products
+            ]}
+        elif isinstance(expr, ColumnRef):
             name = expr.column.name
             if name not in columns:
                 columns.append(name)
