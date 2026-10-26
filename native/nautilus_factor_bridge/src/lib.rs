@@ -503,7 +503,7 @@ mod tests {
     fn product_parallel_plan_updates_products_independently() {
         let specs = vec![
             plan::ExprSpec::Column(0),
-            plan::ExprSpec::Rolling { child: 0, window: 2, op: SessionOp::Mean, min_periods: 1, propagate_nan: true },
+            plan::ExprSpec::Rolling { child: 0, window: 2, op: SessionOp::Mean, min_periods: 1, propagate_nan: true, trunc_start: -1, trunc_end: -1 },
         ];
         let mut engine = ProductParallelPlanEngine::new(2, specs, vec![1]).unwrap();
         let bar = MarketBar::new(0, vec!["A".into(), "B".into()], vec![1.0, 10.0]);
