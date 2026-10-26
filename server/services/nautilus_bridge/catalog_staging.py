@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from server.services.nautilus_bridge.catalog import stage_contract_minute_catalog
-from server.services.nautilus_bridge.market_data import FuturesContractSpec
+from server.services.nautilus_bridge.market_data import FuturesContractSpec, iter_minute_bars
 from server.modules.shared.price_services import (
     cn_futures_trading_spec_fields,
     contract_data_path_for,
@@ -44,7 +44,8 @@ def build_contract_spec(
     start_ns = int(contract_row["start_ts"]) * 1_000_000
     end_ns = (int(contract_row["end_ts"]) + 86_400_000) * 1_000_000 - 1
     return FuturesContractSpec(
-        instrument_code=f"{underlying}{month}", venue=venue, underlying=underlying,
+        instrument_code=f"{underlying}{month}".lower(), venue=venue,
+        underlying=underlying.lower(),
         price_increment=min_tick, price_precision=precision,
         multiplier=Decimal(str(spec_fields["point_value"])), currency="CNY",
         activation_ns=start_ns, expiration_ns=end_ns,
@@ -52,6 +53,32 @@ def build_contract_spec(
         provenance=str(spec_fields.get("trading_spec_source") or "run_spec_product_catalog"),
         resolved_source=resolved_source,
     )
+
+
+def build_run_spec_session_calendar(
+    *, staging_requests: list[dict[str, Any]], source_key: str,
+    frequency: str, start_utc: str, end_utc: str,
+) -> Any:
+    """Build the authoritative TradeResearch session window from source bars."""
+    from tools.factors.expr.streaming.calendar_window import TradingCalendarWindow
+
+    start_ns, end_ns = _ns(start_utc), _ns(end_utc)
+    bars = []
+    for request in staging_requests:
+        for contract_uid in request["paths"]:
+            product = find_contract_product(contract_uid)
+            if product is None:
+                raise ValueError(f"contract is not in the product catalog: {contract_uid}")
+            path = contract_data_path_for(contract_uid, product)
+            bars.extend(
+                bar for bar in iter_minute_bars(
+                    path, start_ns=start_ns, end_ns=end_ns,
+                )
+                if hasattr(bar, "trading_day")
+            )
+    if not bars:
+        raise ValueError("source bars produced an empty trading calendar")
+    return TradingCalendarWindow.from_contract_bars(bars)
 
 
 def stage_run_spec_catalogs(

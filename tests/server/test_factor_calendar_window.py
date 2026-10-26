@@ -74,3 +74,22 @@ def test_multi_day_duration_requires_calendar():
 
     with pytest.raises(UnsupportedStreamingFactor):
         _resolve_window_bars("250d", "1m")
+
+
+def test_contract_bars_use_max_count_not_sum():
+    from types import SimpleNamespace
+    from tools.factors.expr.streaming.calendar_window import TradingCalendarWindow
+
+    def bar(day, contract, start, end):
+        return SimpleNamespace(
+            trading_day=day, contract_uid=contract,
+            clock=SimpleNamespace(interval_open_ns=start, interval_end_ns=end),
+        )
+
+    calendar = TradingCalendarWindow.from_contract_bars([
+        bar("2026-01-05", "a", 1, 2),
+        bar("2026-01-05", "a", 2, 3),
+        bar("2026-01-05", "b", 1, 4),
+        bar("2026-01-06", "a", 5, 6),
+    ])
+    assert [session.bar_count for session in calendar.sessions] == [2, 1]
