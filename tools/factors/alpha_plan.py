@@ -19,6 +19,7 @@ from tools.factors.expr.leaf import CategoryBoolRef, ColumnRef, ConstExpr
 from tools.factors.expr.lookback_scope import BarCountScope
 from tools.factors.expr.rolling import IntervalBarsExpr, RollingOp, WindowBarsExpr, WindowBarsExpr, _resolve_windows
 from tools.factors.expr.shift import ShiftOp
+from tools.factors.expr.term_structure import TermStructureOp
 from tools.factors.expr.match_refs import MatchValueRef
 from tools.factors.expr.signal_align import SignalAlign
 
@@ -63,6 +64,10 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
             node = {"kind": "column", "index": columns.index(name)}
         elif isinstance(expr, ConstExpr):
             node = {"kind": "const", "value": float(expr.value)}
+        elif isinstance(expr, TermStructureOp):
+            near, far, depth, column = expr._term_param_values()
+            node = {"kind": "term", "op": expr.op, "near_rank": near,
+                    "far_rank": far, "depth": depth}
         elif isinstance(expr, IntervalBarsExpr):
             node = {"kind": "bar_count", "start_ns": expr.start_ns, "end_ns": expr.end_ns}
         elif isinstance(expr, WindowBarsExpr):
