@@ -289,6 +289,101 @@ pub fn ta_session_rolling_mean<NumT: Float>(
   })
 }
 
+struct Fenwick {
+  tree: Vec<usize>,
+  size: usize,
+}
+
+impl Fenwick {
+  fn new(size: usize) -> Self { Self { tree: vec![0; size + 1], size } }
+  fn add(&mut self, index: usize, delta: isize) {
+    let mut i = index + 1;
+    while i <= self.size {
+      self.tree[i] = (self.tree[i] as isize + delta).max(0) as usize;
+      i += i & i.wrapping_neg();
+    }
+  }
+  fn prefix(&self, index: usize) -> usize {
+    let mut i = index + 1;
+    let mut total = 0;
+    while i > 0 { total += self.tree[i]; i -= i & i.wrapping_neg(); }
+    total
+  }
+  fn kth(&self, mut k: usize) -> usize {
+    let mut index = 0usize;
+    let mut bit = self.size.next_power_of_two();
+    while bit > 0 {
+      let next = index + bit;
+      if next <= self.size && self.tree[next] < k {
+        index = next;
+        k -= self.tree[next];
+      }
+      bit >>= 1;
+    }
+    index
+  }
+}
+
+fn session_quantile_like(
+  values: &[f64], session_ids: &[u32], lookback_sessions: usize,
+  quantile: Option<f64>, rank: bool,
+) -> Result<Vec<f64>, Error> {
+  validate(values, session_ids, lookback_sessions)?;
+  let mut coordinates: Vec<f64> = values.iter().copied().filter(|v| v.is_finite()).collect();
+  coordinates.sort_by(|a, b| a.partial_cmp(b).unwrap());
+  coordinates.dedup();
+  if coordinates.is_empty() { return Ok(vec![f64::NAN; values.len()]); }
+  let lookup = |value: f64| -> usize {
+    coordinates.partition_point(|candidate| *candidate < value)
+  };
+  let mut fenwick = Fenwick::new(coordinates.len());
+  let mut ring: VecDeque<(u32, f64)> = VecDeque::new();
+  let mut out = Vec::with_capacity(values.len());
+  for (index, value) in values.iter().copied().enumerate() {
+    let session = session_ids[index];
+    let first_session = (session + 1).saturating_sub(lookback_sessions as u32);
+    while ring.front().is_some_and(|(id, _)| *id < first_session) {
+      if let Some((_, old)) = ring.pop_front() {
+        if old.is_finite() { fenwick.add(lookup(old), -1); }
+      }
+    }
+    ring.push_back((session, value));
+    if value.is_finite() { fenwick.add(lookup(value), 1); }
+    let total = fenwick.prefix(coordinates.len() - 1);
+    if total == 0 {
+      out.push(f64::NAN);
+    } else if rank {
+      if !value.is_finite() {
+        out.push(f64::NAN);
+      } else {
+        let below = fenwick.prefix(lookup(value));
+        out.push(below as f64 / total as f64);
+      }
+    } else {
+      let q = quantile.unwrap_or(0.5).clamp(0.0, 1.0);
+      let position = q * (total - 1) as f64;
+      let lower = position.floor() as usize;
+      let upper = position.ceil() as usize;
+      let lower_v = coordinates[fenwick.kth(lower + 1)];
+      let upper_v = coordinates[fenwick.kth(upper + 1)];
+      out.push(lower_v + (upper_v - lower_v) * (position - lower as f64));
+    }
+  }
+  Ok(out)
+}
+
+pub fn ta_session_rolling_quantile(
+  values: &[f64], session_ids: &[u32], lookback_sessions: usize, quantile: f64,
+) -> Result<Vec<f64>, Error> {
+  session_quantile_like(values, session_ids, lookback_sessions, Some(quantile), false)
+}
+
+pub fn ta_session_rolling_rank(
+  values: &[f64], session_ids: &[u32], lookback_sessions: usize,
+) -> Result<Vec<f64>, Error> {
+  session_quantile_like(values, session_ids, lookback_sessions, None, true)
+}
+
 fn session_rolling_pair(
   x: &[f64], y: &[f64], session_ids: &[u32], lookback_sessions: usize,
   correlation: bool,
@@ -403,6 +498,19 @@ mod tests {
     state.update(0, 3.0);
     let value = state.update(0, 2.0);
     assert!((value - 0.5).abs() < 1e-12);
+  }
+
+  #[test]
+  fn session_quantile_and_rank_use_only_window() {
+    let values = [1.0, 2.0, 3.0, 4.0, 5.0];
+    let sessions = [0u32, 0, 1, 1, 1];
+    let q = ta_session_rolling_quantile(&values, &sessions, 1, 0.5).unwrap();
+
+    assert!((q[1] - 1.5).abs() < 1e-12);
+    assert!((q[2] - 3.0).abs() < 1e-12);
+    let r = ta_session_rolling_rank(&values, &sessions, 1).unwrap();
+
+    assert!((r[1] - 1.0).abs() < 1e-12);
   }
 
   #[test]
