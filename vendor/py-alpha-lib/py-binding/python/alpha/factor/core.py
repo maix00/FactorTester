@@ -28,6 +28,11 @@ class FactorExpr:
     _operands: tuple["FactorExpr", ...] = ()
 
     def evaluate(self, ctx: EvalContext) -> pd.DataFrame:
+        from .plan import compile_plan
+        if not isinstance(self, (ColumnRef, ConstExpr)):
+            planned = compile_plan([self], ctx)
+            if planned is not None:
+                return planned[0]
         return self._evaluate(ctx)
 
     def _structural_key(self) -> tuple:

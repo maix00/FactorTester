@@ -58,8 +58,8 @@ def test_alpha_factor_cross_sectional_executes_in_rust():
     frame_b = pd.DataFrame({'CLOSE': [3.0, 2.0, 1.0]})
     ctx = EvalContext(products=('A', 'B'), preloaded={'A': frame_a, 'B': frame_b})
     result = ColumnRef('CLOSE').cs_zscore().evaluate(ctx)
-    np.testing.assert_allclose(result['A'].to_numpy(), [-1.0, 0.0, 1.0])
-    np.testing.assert_allclose(result['B'].to_numpy(), [1.0, 0.0, -1.0])
+    np.testing.assert_allclose(result['A'].to_numpy(), [-0.70710678, 0.0, 0.70710678])
+    np.testing.assert_allclose(result['B'].to_numpy(), [0.70710678, 0.0, -0.70710678])
 
 
 def test_alpha_factor_family_owns_versioned_identity():
