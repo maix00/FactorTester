@@ -275,20 +275,10 @@ pub enum SessionOp {
   Mad,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum WindowPolicy {
-  Bars(u32),
-  StartIndex,
-  ExplicitRange,
-  Sessions(u32),
-  WallClock(i64),
-}
-
 /// Single kernel entry point: all windows/scopes are explicit `[start,end]`.
 pub type IntervalKernel = SessionWindowState;
 
 pub struct SessionWindowState {
-  policy: WindowPolicy,
   op: SessionOp,
   ring: VecDeque<(u32, i64, f64, u64)>,
   finite_sum: f64,
@@ -305,16 +295,8 @@ pub struct SessionWindowState {
 }
 
 impl SessionWindowState {
-  pub fn new(lookback_sessions: usize, mean: bool) -> Result<Self, Error> {
-    Self::new_op(lookback_sessions, if mean { SessionOp::Mean } else { SessionOp::Sum })
-  }
-
-  pub fn new_op(lookback_sessions: usize, op: SessionOp) -> Result<Self, Error> {
-    if lookback_sessions == 0 {
-      return Err(Error::InvalidParameter("lookback must be positive".to_string()));
-    }
+  pub fn new(op: SessionOp) -> Result<Self, Error> {
     Ok(Self {
-      policy: WindowPolicy::Sessions(lookback_sessions as u32),
       op,
       ring: VecDeque::new(),
       finite_sum: 0.0,
@@ -335,71 +317,24 @@ impl SessionWindowState {
     })
   }
 
-  pub fn new_wall(duration_ns: i64, op: SessionOp) -> Result<Self, Error> {
-    if duration_ns <= 0 {
-      return Err(Error::InvalidParameter("duration must be positive".to_string()));
-    }
-    let mut state = Self::new_op(1, op)?;
-    state.policy = WindowPolicy::WallClock(duration_ns);
-    Ok(state)
-  }
-
-  pub fn new_bars(max_bars: usize, op: SessionOp) -> Result<Self, Error> {
-    if max_bars == 0 {
-      return Err(Error::InvalidParameter("max_bars must be positive".to_string()));
-    }
-    let mut state = Self::new_op(1, op)?;
-    state.policy = WindowPolicy::Bars(max_bars as u32);
-    Ok(state)
-  }
-
-  pub fn new_start_index(op: SessionOp) -> Result<Self, Error> {
-    let mut state = Self::new_op(1, op)?;
-    state.policy = WindowPolicy::StartIndex;
-    Ok(state)
-  }
-
   pub fn new_explicit(op: SessionOp) -> Result<Self, Error> {
-    let mut state = Self::new_op(1, op)?;
-    state.policy = WindowPolicy::ExplicitRange;
-    Ok(state)
-  }
-
-  pub fn update_from(&mut self, start_index: u64, value: f64) -> f64 {
-    self.start_index = start_index;
-    self.update_at(0, 0, value)
+    Self::new(op)
   }
 
   pub fn update_explicit(&mut self, start_index: u64, end_index: u64, value: f64) -> f64 {
     self.start_index = start_index;
     self.range_end = end_index;
     let current = self.next_index;
-    if current > end_index {
+    if current < start_index || current > end_index {
       self.next_index += 1;
       return self.last_value;
     }
-    if current < start_index {
-      self.next_index += 1;
-      return self.last_value;
+    while self.ring.front().is_some_and(|(_, _, _, index)| *index < start_index) {
+      self.remove_oldest();
     }
-    let out = self.update_at_inner(0, 0, value);
+    let out = self.consume(value);
     self.last_value = out;
     out
-  }
-
-  fn clear(&mut self) {
-    self.ring.clear();
-    self.finite_sum = 0.0;
-    self.finite_sumsq = 0.0;
-    self.finite_sum3 = 0.0;
-    self.finite_count = 0;
-    self.next_index = 0;
-    self.start_index = 0;
-    self.range_end = u64::MAX;
-    self.last_value = f64::NAN;
-    self.min_deque.clear();
-    self.max_deque.clear();
-    if let Some(tree) = self.order_stat.as_mut() { *tree = OrderStatisticTree::default(); }
   }
 
   fn remove_oldest(&mut self) {
@@ -419,53 +354,10 @@ impl SessionWindowState {
     }
   }
 
-  pub fn update(&mut self, session_id: u32, value: f64) -> f64 {
-    self.update_at(session_id, 0, value)
-  }
-
-  pub fn update_at(&mut self, session_id: u32, timestamp_ns: i64, value: f64) -> f64 {
-    self.update_at_inner(session_id, timestamp_ns, value)
-  }
-
-  fn update_at_inner(&mut self, session_id: u32, timestamp_ns: i64, value: f64) -> f64 {
-    if let Some((last_session, last_timestamp, _, _)) = self.ring.back() {
-      match self.policy {
-        WindowPolicy::Sessions(_) if session_id < *last_session => return f64::NAN,
-        WindowPolicy::WallClock(_) if timestamp_ns < *last_timestamp => return f64::NAN,
-        _ => {}
-      }
-    }
-    match self.policy {
-      WindowPolicy::Sessions(lookback) => {
-        let first_session = (session_id + 1).saturating_sub(lookback);
-        while self.ring.front().is_some_and(|(id, _, _, _)| *id < first_session) {
-          self.remove_oldest();
-        }
-      }
-      WindowPolicy::WallClock(duration) => {
-        while self.ring.front().is_some_and(|(_, ts, _, _)| timestamp_ns - *ts > duration) {
-          self.remove_oldest();
-        }
-      }
-      WindowPolicy::Bars(max_bars) => {
-        while self.ring.len() >= max_bars as usize {
-          self.remove_oldest();
-        }
-      }
-      WindowPolicy::ExplicitRange => {
-        while self.ring.front().is_some_and(|(_, _, _, index)| *index < self.start_index) {
-          self.remove_oldest();
-        }
-      }
-      WindowPolicy::StartIndex => {
-        while self.ring.front().is_some_and(|(_, _, _, index)| *index < self.start_index) {
-          self.remove_oldest();
-        }
-      }
-    }
+  fn consume(&mut self, value: f64) -> f64 {
     let index = self.next_index;
     self.next_index += 1;
-    self.ring.push_back((session_id, timestamp_ns, value, index));
+    self.ring.push_back((0, 0, value, index));
     if value.is_finite() {
       self.finite_sum += value;
       self.finite_sumsq += value * value;
@@ -895,12 +787,7 @@ fn session_quantile_like(
 pub fn ta_session_rolling_quantile(
   values: &[f64], session_ids: &[u32], lookback_sessions: usize, quantile: f64,
 ) -> Result<Vec<f64>, Error> {
-  if values.len() != session_ids.len() {
-    return Err(Error::LengthMismatch(values.len(), session_ids.len()));
-  }
-  let mut state = SessionWindowState::new_op(lookback_sessions, SessionOp::Quantile(quantile))?;
-  Ok(values.iter().copied().zip(session_ids.iter().copied())
-    .map(|(value, session)| state.update(session, value)).collect())
+  session_rolling_state(values, session_ids, lookback_sessions, SessionOp::Quantile(quantile))
 }
 
 pub fn ta_session_rolling_mad(
@@ -912,15 +799,10 @@ pub fn ta_session_rolling_mad(
 pub fn ta_session_rolling_rank(
   values: &[f64], session_ids: &[u32], lookback_sessions: usize,
 ) -> Result<Vec<f64>, Error> {
-  if values.len() != session_ids.len() {
-    return Err(Error::LengthMismatch(values.len(), session_ids.len()));
-  }
-  let mut state = SessionWindowState::new_op(lookback_sessions, SessionOp::Rank)?;
-  Ok(values.iter().copied().zip(session_ids.iter().copied())
-    .map(|(value, session)| state.update(session, value)).collect())
+  session_rolling_state(values, session_ids, lookback_sessions, SessionOp::Rank)
 }
 
-/// Backward-compatible alias: wall-clock is a WindowPolicy of the same kernel.
+/// Backward-compatible alias: the kernel now has one explicit interval policy.
 pub type TimeWindowState = SessionWindowState;
 
 fn time_rolling(
@@ -998,104 +880,6 @@ impl PairIntervalState {
   }
 }
 
-pub struct SessionPairState {
-  policy: WindowPolicy,
-  correlation: bool,
-  ring: VecDeque<(u32, i64, f64, f64)>,
-  sx: f64,
-  sy: f64,
-  sxx: f64,
-  syy: f64,
-  sxy: f64,
-  count: usize,
-}
-
-impl SessionPairState {
-  pub fn new(lookback_sessions: usize, correlation: bool) -> Result<Self, Error> {
-    if lookback_sessions == 0 {
-      return Err(Error::InvalidParameter("lookback must be positive".to_string()));
-    }
-    Ok(Self {
-      policy: WindowPolicy::Sessions(lookback_sessions as u32),
-      correlation,
-      ring: VecDeque::new(),
-      sx: 0.0, sy: 0.0, sxx: 0.0, syy: 0.0, sxy: 0.0, count: 0,
-    })
-  }
-
-  pub fn new_wall(duration_ns: i64, correlation: bool) -> Result<Self, Error> {
-    let mut state = Self::new(1, correlation)?;
-    if duration_ns <= 0 {
-      return Err(Error::InvalidParameter("duration must be positive".to_string()));
-    }
-    state.policy = WindowPolicy::WallClock(duration_ns);
-    Ok(state)
-  }
-
-  pub fn new_bars(max_bars: usize, correlation: bool) -> Result<Self, Error> {
-    if max_bars == 0 {
-      return Err(Error::InvalidParameter("max_bars must be positive".to_string()));
-    }
-    let mut state = Self::new(1, correlation)?;
-    state.policy = WindowPolicy::Bars(max_bars as u32);
-    Ok(state)
-  }
-
-  fn remove_oldest(&mut self) {
-    let Some((_, _, ox, oy)) = self.ring.pop_front() else { return };
-    if ox.is_finite() && oy.is_finite() {
-      self.sx -= ox; self.sy -= oy; self.sxx -= ox * ox;
-      self.syy -= oy * oy; self.sxy -= ox * oy; self.count -= 1;
-    }
-  }
-
-  pub fn update(&mut self, session_id: u32, x: f64, y: f64) -> f64 {
-    self.update_at(session_id, 0, x, y)
-  }
-
-  pub fn update_at(&mut self, session_id: u32, timestamp_ns: i64, x: f64, y: f64) -> f64 {
-    if let Some((last_session, last_timestamp, _, _)) = self.ring.back() {
-      match self.policy {
-        WindowPolicy::Sessions(_) if session_id < *last_session => return f64::NAN,
-        WindowPolicy::WallClock(_) if timestamp_ns < *last_timestamp => return f64::NAN,
-        _ => {}
-      }
-    }
-    match self.policy {
-      WindowPolicy::Sessions(lookback) => {
-        let first_session = (session_id + 1).saturating_sub(lookback);
-        while self.ring.front().is_some_and(|(id, _, _, _)| *id < first_session) {
-          self.remove_oldest();
-        }
-      }
-      WindowPolicy::WallClock(duration) => {
-        while self.ring.front().is_some_and(|(_, ts, _, _)| timestamp_ns - *ts > duration) {
-          self.remove_oldest();
-        }
-      }
-      WindowPolicy::Bars(max_bars) => {
-        while self.ring.len() >= max_bars as usize {
-          self.remove_oldest();
-        }
-      }
-      WindowPolicy::StartIndex | WindowPolicy::ExplicitRange => {}
-    }
-    self.ring.push_back((session_id, timestamp_ns, x, y));
-    if x.is_finite() && y.is_finite() {
-      self.sx += x; self.sy += y; self.sxx += x * x;
-      self.syy += y * y; self.sxy += x * y; self.count += 1;
-    }
-    if self.count < 2 { return f64::NAN; }
-    let n = self.count as f64;
-    let cov = (self.sxy - self.sx * self.sy / n) / (n - 1.0);
-    if !self.correlation { return cov; }
-    let vx = (self.sxx - self.sx * self.sx / n).max(0.0);
-    let vy = (self.syy - self.sy * self.sy / n).max(0.0);
-    let denom = (vx * vy).sqrt();
-    if denom > 0.0 { (self.sxy - self.sx * self.sy / n) / denom } else { f64::NAN }
-  }
-}
-
 fn session_rolling_pair(
   x: &[f64], y: &[f64], session_ids: &[u32], lookback_sessions: usize,
   correlation: bool,
@@ -1139,52 +923,51 @@ mod tests {
 
   #[test]
   fn streaming_state_matches_batch_semantics() {
-    let mut state = SessionWindowState::new(1, false).unwrap();
-    assert_eq!(state.update(0, 1.0), 1.0);
-    assert_eq!(state.update(0, 2.0), 3.0);
-    assert_eq!(state.update(1, 3.0), 3.0);
-    assert_eq!(state.update(1, 4.0), 7.0);
-    assert_eq!(state.update(1, 5.0), 12.0);
+    let mut state = SessionWindowState::new_explicit(SessionOp::Sum).unwrap();
+    assert_eq!(state.update_explicit(0, 10, 1.0), 1.0);
+    assert_eq!(state.update_explicit(0, 10, 2.0), 3.0);
+    assert_eq!(state.update_explicit(2, 10, 3.0), 3.0);
+    assert_eq!(state.update_explicit(2, 10, 4.0), 7.0);
+    assert_eq!(state.update_explicit(2, 10, 5.0), 12.0);
   }
 
   #[test]
   fn streaming_state_supports_var_std_min_max() {
-    let mut var = SessionWindowState::new_op(1, SessionOp::Var).unwrap();
-    var.update(0, 1.0);
-    var.update(0, 2.0);
-    let value = var.update(0, 4.0);
+    let mut var = SessionWindowState::new_explicit(SessionOp::Var).unwrap();
+    var.update_explicit(0, 10, 1.0);
+    var.update_explicit(0, 10, 2.0);
+    let value = var.update_explicit(0, 10, 4.0);
     assert!((value - 7.0 / 3.0).abs() < 1e-12);
-    let mut std = SessionWindowState::new_op(1, SessionOp::Std).unwrap();
-    std.update(0, 1.0);
-    std.update(0, 2.0);
-    std.update(0, 4.0);
-    let value = std.update(0, 4.0);
+    let mut std = SessionWindowState::new_explicit(SessionOp::Std).unwrap();
+    std.update_explicit(0, 10, 1.0);
+    std.update_explicit(0, 10, 2.0);
+    std.update_explicit(0, 10, 4.0);
+    let value = std.update_explicit(0, 10, 4.0);
     assert!(value.is_finite());
-    let mut min = SessionWindowState::new_op(1, SessionOp::Min).unwrap();
-    min.update(0, 5.0);
-    min.update(0, 2.0);
-    assert_eq!(min.update(1, 7.0), 7.0);
-    let mut max = SessionWindowState::new_op(1, SessionOp::Max).unwrap();
-    max.update(0, 5.0);
-    max.update(0, 2.0);
-    assert_eq!(max.update(1, 7.0), 7.0);
+    let mut min = SessionWindowState::new_explicit(SessionOp::Min).unwrap();
+    min.update_explicit(0, 10, 5.0);
+    min.update_explicit(0, 10, 2.0);
+    assert_eq!(min.update_explicit(2, 10, 7.0), 7.0);
+    let mut max = SessionWindowState::new_explicit(SessionOp::Max).unwrap();
+    max.update_explicit(0, 10, 5.0);
+    max.update_explicit(0, 10, 2.0);
+    assert_eq!(max.update_explicit(2, 10, 7.0), 7.0);
   }
 
   #[test]
   fn arg_extrema_report_window_offset() {
-    let mut state = SessionWindowState::new_op(1, SessionOp::Argmax).unwrap();
-    state.update(0, 1.0);
-    state.update(0, 3.0);
-    let value = state.update(0, 2.0);
+    let mut state = SessionWindowState::new_explicit(SessionOp::Argmax).unwrap();
+    state.update_explicit(0, 10, 1.0);
+    state.update_explicit(0, 10, 3.0);
+    let value = state.update_explicit(0, 10, 2.0);
     assert!((value - 0.5).abs() < 1e-12);
   }
 
   #[test]
   fn streaming_pair_cov_and_corr() {
-    let mut corr = SessionPairState::new(1, true).unwrap();
-    corr.update(0, 1.0, 2.0);
-    assert!((corr.update(0, 2.0, 4.0) - 1.0).abs() < 1e-12);
-    assert!(corr.update(1, 3.0, 6.0).is_nan() || corr.update(1, 3.0, 6.0).is_finite());
+    let mut corr = PairIntervalState::new(true);
+    corr.update(0, 10, 1.0, 2.0);
+    assert!((corr.update(0, 10, 2.0, 4.0) - 1.0).abs() < 1e-12);
   }
 
   #[test]
@@ -1197,15 +980,15 @@ mod tests {
 
   #[test]
   fn streaming_quantile_rank_use_session_window() {
-    let mut median = SessionWindowState::new_op(1, SessionOp::Quantile(0.5)).unwrap();
-    median.update(0, 1.0);
-    median.update(0, 2.0);
-    assert_eq!(median.update(0, 3.0), 2.0);
-    let mut rank = SessionWindowState::new_op(1, SessionOp::Rank).unwrap();
-    rank.update(0, 1.0);
-    rank.update(0, 2.0);
-    assert!((rank.update(0, 3.0) - 1.0).abs() < 1e-12);
-    assert_eq!(rank.update(1, 5.0), 1.0);
+    let mut median = SessionWindowState::new_explicit(SessionOp::Quantile(0.5)).unwrap();
+    median.update_explicit(0, 10, 1.0);
+    median.update_explicit(0, 10, 2.0);
+    assert_eq!(median.update_explicit(0, 10, 3.0), 2.0);
+    let mut rank = SessionWindowState::new_explicit(SessionOp::Rank).unwrap();
+    rank.update_explicit(0, 10, 1.0);
+    rank.update_explicit(0, 10, 2.0);
+    assert!((rank.update_explicit(0, 10, 3.0) - 1.0).abs() < 1e-12);
+    assert_eq!(rank.update_explicit(1, 10, 5.0), 1.0);
   }
 
   #[test]
@@ -1221,18 +1004,11 @@ mod tests {
   }
 
   #[test]
-  fn event_start_index_evicts_older_bars() {
-    let mut state = SessionWindowState::new_start_index(SessionOp::Sum).unwrap();
-    assert_eq!(state.update_from(0, 1.0), 1.0);
-    assert_eq!(state.update_from(0, 2.0), 3.0);
-    assert_eq!(state.update_from(1, 5.0), 7.0);
-  }
-
   #[test]
   fn pair_interval_tracks_explicit_range() {
     let mut state = PairIntervalState::new(true);
-    state.update(0, 2, 1.0, 2.0);
-    assert!((state.update(0, 2, 2.0, 4.0) - 1.0).abs() < 1e-12);
+    state.update(0, 10, 1.0, 2.0);
+    assert!((state.update(0, 10, 2.0, 4.0) - 1.0).abs() < 1e-12);
     assert!(state.update(2, 2, 3.0, 6.0).is_nan());
   }
 
@@ -1261,13 +1037,6 @@ mod tests {
   }
 
   #[test]
-  fn bar_policy_evicts_by_count() {
-    let mut state = SessionWindowState::new_bars(2, SessionOp::Sum).unwrap();
-    assert_eq!(state.update(0, 1.0), 1.0);
-    assert_eq!(state.update(0, 2.0), 3.0);
-    assert_eq!(state.update(0, 3.0), 5.0);
-  }
-
   #[test]
   fn wall_pair_cov_and_corr() {
     let ts = [0i64, 1_000, 2_000];
@@ -1294,9 +1063,9 @@ mod tests {
 
   #[test]
   fn streaming_skew_is_available() {
-    let mut state = SessionWindowState::new_op(1, SessionOp::Skew).unwrap();
+    let mut state = SessionWindowState::new_explicit(SessionOp::Skew).unwrap();
     for value in [1.0, 2.0, 3.0, 4.0] {
-      let result = state.update(0, value);
+      let result = state.update_explicit(0, 10, value);
       if value >= 3.0 {
         assert!(result.is_finite());
       }
