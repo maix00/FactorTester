@@ -2592,6 +2592,9 @@ impl SessionRollingState {
       "argmax_raw" => SessionOp::ArgmaxRaw,
       "quantile" => SessionOp::Quantile(quantile.unwrap_or(0.5)),
       "rank" => SessionOp::Rank,
+      "mad" => SessionOp::Mad,
+      "mad" => SessionOp::Mad,
+      "mad" => SessionOp::Mad,
       other => return Err(pyo3::exceptions::PyValueError::new_err(
         format!("unsupported session op: {other}")
       )),
@@ -2604,6 +2607,23 @@ impl SessionRollingState {
   fn update(&mut self, session_id: u32, value: f64) -> f64 {
     self.inner.update(session_id, value)
   }
+}
+
+#[pyclass]
+struct EmaState {
+  inner: alpha_algo::EmaState,
+}
+
+#[pymethods]
+impl EmaState {
+  #[new]
+  fn new(span: usize) -> PyResult<Self> {
+    let inner = alpha_algo::EmaState::new(span)
+      .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    Ok(Self { inner })
+  }
+
+  fn update(&mut self, value: f64) -> f64 { self.inner.update(value) }
 }
 
 #[pyclass]
@@ -2756,6 +2776,7 @@ fn _algo(m: &Bound<'_, PyModule>) -> PyResult<()> {
   m.add_class::<SessionPairState>()?;
   m.add_class::<BarPairState>()?;
   m.add_class::<WallPairState>()?;
+  m.add_class::<EmaState>()?;
   m.add_class::<BarRollingState>()?;
   m.add_class::<WallRollingState>()?;
   m.add_class::<GroupKernel>()?;

@@ -72,3 +72,6 @@ BarRollingState = _algo.BarRollingState
 
 
 BarPairState = _algo.BarPairState
+
+
+EmaState = _algo.EmaState

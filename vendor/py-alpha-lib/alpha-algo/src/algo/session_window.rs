@@ -77,6 +77,7 @@ struct OstNode {
   key: f64,
   count: usize,
   size: usize,
+  sum: f64,
   priority: u64,
   left: Option<usize>,
   right: Option<usize>,
@@ -97,6 +98,9 @@ impl OrderStatisticTree {
     let left = Self::size(self.nodes[node].left, &self.nodes);
     let right = Self::size(self.nodes[node].right, &self.nodes);
     self.nodes[node].size = left + self.nodes[node].count + right;
+    let left_sum = self.nodes[node].left.map(|i| self.nodes[i].sum).unwrap_or(0.0);
+    let right_sum = self.nodes[node].right.map(|i| self.nodes[i].sum).unwrap_or(0.0);
+    self.nodes[node].sum = left_sum + self.nodes[node].key * self.nodes[node].count as f64 + right_sum;
   }
 
   fn priority(key: f64) -> u64 {
@@ -130,7 +134,7 @@ impl OrderStatisticTree {
   fn insert_at(&mut self, node: Option<usize>, key: f64, priority: u64) -> usize {
     let Some(index) = node else {
       let index = self.nodes.len();
-      self.nodes.push(OstNode { key, count: 1, size: 1, priority, left: None, right: None });
+      self.nodes.push(OstNode { key, count: 1, size: 1, sum: key, priority, left: None, right: None });
       return index;
     };
     if key == self.nodes[index].key {
@@ -217,6 +221,25 @@ impl OrderStatisticTree {
     total
   }
 
+  fn sum_le(&self, key: f64) -> f64 {
+    let mut node = self.root;
+    let mut total = 0.0;
+    while let Some(index) = node {
+      if key < self.nodes[index].key {
+        node = self.nodes[index].left;
+      } else {
+        let left_sum = self.nodes[index].left.map(|i| self.nodes[i].sum).unwrap_or(0.0);
+        total += left_sum + self.nodes[index].key * self.nodes[index].count as f64;
+        node = self.nodes[index].right;
+      }
+    }
+    total
+  }
+
+  fn total_sum(&self) -> f64 {
+    self.root.map(|index| self.nodes[index].sum).unwrap_or(0.0)
+  }
+
   fn kth(&self, mut k: usize) -> Option<f64> {
     let mut node = self.root;
     while let Some(index) = node {
@@ -249,11 +272,13 @@ pub enum SessionOp {
   ArgmaxRaw,
   Quantile(f64),
   Rank,
+  Mad,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WindowPolicy {
   Bars(u32),
+  Partition,
   Sessions(u32),
   WallClock(i64),
 }
@@ -292,7 +317,7 @@ impl SessionWindowState {
       next_index: 0,
       min_deque: VecDeque::new(),
       max_deque: VecDeque::new(),
-      order_stat: if matches!(op, SessionOp::Quantile(_) | SessionOp::Rank) {
+      order_stat: if matches!(op, SessionOp::Quantile(_) | SessionOp::Rank | SessionOp::Mad) {
         Some(OrderStatisticTree::default())
       } else {
         None
@@ -318,6 +343,24 @@ impl SessionWindowState {
     Ok(state)
   }
 
+  pub fn new_partition(op: SessionOp) -> Result<Self, Error> {
+    let mut state = Self::new_op(1, op)?;
+    state.policy = WindowPolicy::Partition;
+    Ok(state)
+  }
+
+  fn clear(&mut self) {
+    self.ring.clear();
+    self.finite_sum = 0.0;
+    self.finite_sumsq = 0.0;
+    self.finite_sum3 = 0.0;
+    self.finite_count = 0;
+    self.next_index = 0;
+    self.min_deque.clear();
+    self.max_deque.clear();
+    if let Some(tree) = self.order_stat.as_mut() { *tree = OrderStatisticTree::default(); }
+  }
+
   fn remove_oldest(&mut self) {
     let Some((_session, _timestamp, old, index)) = self.ring.pop_front() else { return };
     if old.is_finite() {
@@ -340,6 +383,13 @@ impl SessionWindowState {
   }
 
   pub fn update_at(&mut self, session_id: u32, timestamp_ns: i64, value: f64) -> f64 {
+    if self.policy == WindowPolicy::Partition {
+      if let Some((last_session, _, _, _)) = self.ring.back() {
+        if *last_session != session_id {
+          self.clear();
+        }
+      }
+    }
     if let Some((last_session, last_timestamp, _, _)) = self.ring.back() {
       match self.policy {
         WindowPolicy::Sessions(_) if session_id < *last_session => return f64::NAN,
@@ -364,6 +414,7 @@ impl SessionWindowState {
           self.remove_oldest();
         }
       }
+      WindowPolicy::Partition => {}
     }
     let index = self.next_index;
     self.next_index += 1;
@@ -415,6 +466,20 @@ impl SessionWindowState {
         } else {
           raw / (count - 1) as f64
         }
+      }
+      SessionOp::Mad => {
+        let Some(tree) = self.order_stat.as_ref() else { return f64::NAN };
+        let lower = (count - 1) / 2;
+        let upper = count / 2;
+        let (Some(low), Some(high)) = (tree.kth(lower), tree.kth(upper)) else {
+          return f64::NAN;
+        };
+        let median = (low + high) / 2.0;
+        let below = tree.rank_le(median) as f64;
+        let below_sum = tree.sum_le(median);
+        let above = count as f64 - below;
+        let above_sum = tree.total_sum() - below_sum;
+        (median * below - below_sum + above_sum - median * above) / count as f64
       }
       SessionOp::Rank => {
         let Some(tree) = self.order_stat.as_ref() else { return f64::NAN };
@@ -600,6 +665,53 @@ pub fn ta_session_rolling_mean<NumT: Float>(
   session_rolling_state(values, session_ids, lookback_sessions, SessionOp::Mean)
 }
 
+pub struct EmaState {
+  decay: f64,
+  numerator: f64,
+  denominator: f64,
+  observations: usize,
+  minimum: usize,
+  last: f64,
+}
+
+impl EmaState {
+  pub fn new(span: usize) -> Result<Self, Error> {
+    if span == 0 {
+      return Err(Error::InvalidParameter("span must be positive".to_string()));
+    }
+    Ok(Self {
+      decay: 1.0 - 2.0 / (span as f64 + 1.0),
+      numerator: 0.0,
+      denominator: 0.0,
+      observations: 0,
+      minimum: (span / 2).max(1),
+      last: f64::NAN,
+    })
+  }
+
+  pub fn update(&mut self, value: f64) -> f64 {
+    self.numerator *= self.decay;
+    self.denominator *= self.decay;
+    if value.is_finite() {
+      self.numerator += value;
+      self.denominator += 1.0;
+      self.observations += 1;
+    }
+    if self.observations >= self.minimum && self.denominator > 0.0 {
+      let result = self.numerator / self.denominator;
+      self.last = result;
+      result
+    } else {
+      self.last
+    }
+  }
+}
+
+pub fn ta_ema_streaming(values: &[f64], span: usize) -> Result<Vec<f64>, Error> {
+  let mut state = EmaState::new(span)?;
+  Ok(values.iter().copied().map(|value| state.update(value)).collect())
+}
+
 struct Fenwick {
   tree: Vec<usize>,
   size: usize,
@@ -692,6 +804,12 @@ pub fn ta_session_rolling_quantile(
   let mut state = SessionWindowState::new_op(lookback_sessions, SessionOp::Quantile(quantile))?;
   Ok(values.iter().copied().zip(session_ids.iter().copied())
     .map(|(value, session)| state.update(session, value)).collect())
+}
+
+pub fn ta_session_rolling_mad(
+  values: &[f64], session_ids: &[u32], lookback_sessions: usize,
+) -> Result<Vec<f64>, Error> {
+  session_rolling_state(values, session_ids, lookback_sessions, SessionOp::Mad)
 }
 
 pub fn ta_session_rolling_rank(
@@ -798,6 +916,15 @@ impl SessionPairState {
       WindowPolicy::Bars(max_bars) => {
         while self.ring.len() >= max_bars as usize {
           self.remove_oldest();
+        }
+      }
+      WindowPolicy::Partition => {
+        if let Some((last, _, _, _)) = self.ring.back() {
+          if *last != session_id {
+            self.ring.clear();
+            self.sx = 0.0; self.sy = 0.0; self.sxx = 0.0;
+            self.syy = 0.0; self.sxy = 0.0; self.count = 0;
+          }
         }
       }
     }
@@ -938,6 +1065,29 @@ mod tests {
     assert_eq!(min[2], 2.0);
     let q = ta_time_rolling_quantile(&timestamps, &values, 2_000, 0.5).unwrap();
     assert_eq!(q[2], 2.0);
+  }
+
+  #[test]
+  fn partition_policy_resets_at_boundary() {
+    let mut state = SessionWindowState::new_partition(SessionOp::Sum).unwrap();
+    assert_eq!(state.update(1, 2.0), 2.0);
+    assert_eq!(state.update(1, 3.0), 5.0);
+    assert_eq!(state.update(2, 7.0), 7.0);
+  }
+
+  #[test]
+  fn streaming_ema_matches_adjusted_recurrence() {
+    let values = ta_ema_streaming(&[1.0, 2.0, 3.0], 3).unwrap();
+    assert!(values[2].is_finite());
+    assert!(values[2] > 2.0 && values[2] < 3.0);
+  }
+
+  #[test]
+  fn session_mad_is_built_from_order_stats() {
+    let values = [1.0, 2.0, 3.0, 4.0];
+    let sessions = [0u32, 0, 0, 0];
+    let mad = ta_session_rolling_mad(&values, &sessions, 1).unwrap();
+    assert!((mad[3] - 1.0).abs() < 1e-12);
   }
 
   #[test]
