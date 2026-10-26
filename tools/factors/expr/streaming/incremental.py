@@ -177,18 +177,28 @@ class RollingWindowNode:
         children: tuple[StreamingNode, ...],
         window: int,
         width: int,
+        *,
+        session_calendar: Any = None,
+        lookback_sessions: int | None = None,
     ) -> None:
         self.op = op
         self.children = children
         self.window = window
         self._width = width
+        self._session_calendar = session_calendar
+        self._lookback_sessions = lookback_sessions
         self._fast = len(children) == 1 and op in {
             # The sum/mean state is a clear win for all window sizes.
             "rolling_mean", "rolling_sum",
-        }
+        } and (session_calendar is None or lookback_sessions is not None)
         self._state: Any | None = None
         if self._fast:
-            self._ring = np.full((window, width), np.nan, dtype=float)
+            capacity = (
+                session_calendar.max_window_size(int(lookback_sessions))
+                if session_calendar is not None else window
+            )
+            self._ring_capacity = max(1, int(capacity))
+            self._ring = np.full((self._ring_capacity, width), np.nan, dtype=float)
             self._ring_cursor = 0
             self._ring_length = 0
             # Keep the running total centered near each product's latest
@@ -199,7 +209,7 @@ class RollingWindowNode:
             self._count = np.zeros(width, dtype=np.int64)
             self._histories: list[deque[np.ndarray]] = []
         else:
-            if (
+            if session_calendar is None and (
                 len(children) == 1
                 and op in {"rolling_std", "rolling_var"}
                 and window >= 128
@@ -226,13 +236,35 @@ class RollingWindowNode:
                 )
             self._histories = (
                 [] if self._state is not None
-                else [deque(maxlen=window) for _ in children]
+                else [
+                    deque() if session_calendar is not None
+                    else deque(maxlen=window)
+                    for _ in children
+                ]
             )
 
     def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
         key = id(self)
         if key in cache:
             return cache[key]
+        if self._session_calendar is not None:
+            timestamp = getattr(market, "timestamp", None)
+            if timestamp is None:
+                raise UnsupportedStreamingFactor(
+                    "session-window factor needs bar timestamps"
+                )
+            session, size = self._session_calendar.window_for_timestamp(
+                int(pd.Timestamp(timestamp).value), int(self._lookback_sessions),
+            )
+            if size <= 0:
+                raise UnsupportedStreamingFactor("session window resolved to no bars")
+            self.window = int(size)
+            if self._fast:
+                while self._ring_length > self.window:
+                    self._evict_fast()
+            for history in self._histories:
+                while len(history) > self.window:
+                    history.popleft()
         if self._fast:
             value = self.children[0].update(market, cache)
             result = self._update_fast(np.asarray(value, dtype=float))
@@ -254,6 +286,17 @@ class RollingWindowNode:
         result = self._aggregate()
         cache[key] = result
         return result
+
+    def _evict_fast(self) -> None:
+        if self._ring_length == 0:
+            return
+        old = self._ring[(self._ring_cursor - self._ring_length) % self._ring_capacity]
+        self._ring_length -= 1
+        old_finite = np.isfinite(old)
+        self._sum[old_finite] -= old[old_finite] - self._origin[old_finite]
+        self._count[old_finite] -= 1
+        emptied = self._count == 0
+        self._sum[emptied] = 0.0
 
     def _update_fast(self, value: np.ndarray) -> np.ndarray:
         if value.shape != (self._width,):
@@ -286,7 +329,7 @@ class RollingWindowNode:
         # origin, so its centered contribution to the sum is exactly zero.
         self._ring[self._ring_cursor] = value
         self._count[finite] += 1
-        self._ring_cursor = (self._ring_cursor + 1) % self.window
+        self._ring_cursor = (self._ring_cursor + 1) % self._ring_capacity
         self._ring_length = min(self.window, self._ring_length + 1)
 
         result = np.full(self._width, np.nan, dtype=float)
@@ -1145,6 +1188,7 @@ def compile_streaming_factor(
     products: tuple[Any, ...],
     *,
     source_freq: DataFreq | str | None = None,
+    session_calendar: Any = None,
 ) -> StreamingFactorPlan:
     if not products or len(set(products)) != len(products):
         raise ValueError("streaming products must be non-empty and unique")
@@ -1226,7 +1270,28 @@ def compile_streaming_factor(
                 raise UnsupportedStreamingFactor("truncated rolling windows are not supported")
             if not isinstance(expr.window, ConstExpr):
                 raise UnsupportedStreamingFactor("streaming windows must resolve to fixed bars")
-            window = _resolve_window_bars(expr.window.value, source_freq)
+            lookback_sessions = None
+            if session_calendar is not None:
+                try:
+                    duration = pd.Timedelta(expr.window.value)
+                except (TypeError, ValueError):
+                    duration = None
+                if duration is not None and duration >= pd.Timedelta("1D"):
+                    ratio = duration / pd.Timedelta("1D")
+                    if not np.isclose(ratio, round(ratio)):
+                        raise UnsupportedStreamingFactor(
+                            "session window must be an integer trading-day count"
+                        )
+                    lookback_sessions = int(round(ratio))
+                    if expr.op not in {"rolling_mean", "rolling_sum"}:
+                        raise UnsupportedStreamingFactor(
+                            "session windows currently support only O(1) mean/sum"
+                        )
+                    window = 1
+                else:
+                    window = _resolve_window_bars(expr.window.value, source_freq)
+            else:
+                window = _resolve_window_bars(expr.window.value, source_freq)
             children = tuple(
                 compile_node(item)
                 for item in expr.operands[expr._data_start:expr._data_start + expr._n_data]
@@ -1253,6 +1318,8 @@ def compile_streaming_factor(
                     children,
                     window,
                     len(products),
+                    session_calendar=session_calendar,
+                    lookback_sessions=lookback_sessions,
                 )
         elif isinstance(expr, GroupByScopeOp):
             op_name = expr.op
@@ -1365,10 +1432,14 @@ def compile_incremental_factor(
     products: tuple[Any, ...],
     *,
     source_freq: DataFreq | str | None = None,
+    session_calendar: Any = None,
 ) -> IncrementalFactorExecutor:
     """Compile one author-facing FactorExpr into a run-scoped executor."""
 
-    plan = compile_streaming_factor(expression, products, source_freq=source_freq)
+    plan = compile_streaming_factor(
+        expression, products, source_freq=source_freq,
+        session_calendar=session_calendar,
+    )
     return IncrementalFactorExecutor(factor_alias, plan)
 
 
