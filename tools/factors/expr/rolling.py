@@ -372,6 +372,7 @@ class RollingOp(OperandExpr):
         'rolling_var': 'var', 'rolling_std': 'std',
         'rolling_min': 'min', 'rolling_max': 'max',
         'rolling_skew': 'skew',
+        'rolling_ema': 'ema',
         'rolling_argmin': 'argmin', 'rolling_argmax': 'argmax',
         'rolling_argmin_raw': 'argmin_raw', 'rolling_argmax_raw': 'argmax_raw',
         'rolling_median': 'median', 'rolling_quantile': 'quantile',
@@ -384,25 +385,55 @@ class RollingOp(OperandExpr):
         op = self._RUST_OPS.get(self.op)
         if op is None:
             return None
+        if op == 'ema':
+            from alpha import interval_ema
+            result = pd.DataFrame(index=df.index, columns=df.columns, dtype=float)
+            for column in df.columns:
+                values = pd.to_numeric(df[column], errors="coerce").to_numpy(dtype=float)
+                result[column] = interval_ema(values, window)
+            return result
         try:
-            from alpha import IntervalState
+            from alpha import interval_rolling
         except ImportError:
             return None
         result = pd.DataFrame(index=df.index, columns=df.columns, dtype=float)
         for column in df.columns:
             values = pd.to_numeric(df[column], errors="coerce").to_numpy(dtype=float)
-            state = IntervalState(op, quantile)
-            output = np.empty(len(values), dtype=float)
-            for index, value in enumerate(values):
-                start = max(0, index - window + 1)
-                output[index] = state.update(start, index, float(value))
-            result[column] = output
+            ordinals = np.arange(len(values), dtype=np.uint64)
+            starts = np.maximum(0, ordinals.astype(np.int64) - window + 1).astype(np.uint64)
+            result[column] = interval_rolling(
+                values, starts, ordinals, op, quantile,
+            )
+        return result
+
+    def _rust_rolling_pair(self, window: int, left: pd.DataFrame,
+                           right: pd.DataFrame) -> pd.DataFrame | None:
+        op = {'rolling_cov': 'cov', 'rolling_corr': 'corr'}.get(self.op)
+        if op is None:
+            return None
+        try:
+            from alpha import interval_rolling_pair
+        except ImportError:
+            return None
+        result = pd.DataFrame(index=left.index, columns=left.columns, dtype=float)
+        for column in left.columns:
+            x = pd.to_numeric(left[column], errors="coerce").to_numpy(dtype=float)
+            y = pd.to_numeric(right[column], errors="coerce").to_numpy(dtype=float)
+            ordinals = np.arange(len(x), dtype=np.uint64)
+            starts = np.maximum(0, ordinals.astype(np.int64) - window + 1).astype(np.uint64)
+            result[column] = interval_rolling_pair(
+                x, y, starts, ordinals, op == 'corr',
+            )
         return result
 
     def _apply_rolling(self, window: int, *dfs: pd.DataFrame,
                        freq: DataFreq,
                        trunc_start_arr: np.ndarray | None = None,
                        trunc_end_arr: np.ndarray | None = None) -> pd.DataFrame:
+        if trunc_start_arr is None and trunc_end_arr is None and len(dfs) == 2:
+            rust_pair = self._rust_rolling_pair(window, dfs[0], dfs[1])
+            if rust_pair is not None:
+                return rust_pair
         if trunc_start_arr is None and trunc_end_arr is None and len(dfs) == 1:
             quantile = None
             if self.op == 'rolling_quantile':
