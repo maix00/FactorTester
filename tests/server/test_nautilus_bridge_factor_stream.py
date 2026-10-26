@@ -190,3 +190,11 @@ def test_nautilus_strategy_buffers_one_complete_cross_sectional_slice(monkeypatc
         ))
 
 
+
+
+def test_simple_stream_uses_rust_factor_executor():
+    stream = EventTimeFactorStream(
+        factor_ref=REF, expression=CLOSE, products=("T", "TL"),
+        source_freq=DataFreq.MIN1,
+    )
+    assert getattr(stream._executor._multi, "uses_rust", False) is True

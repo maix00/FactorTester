@@ -6,6 +6,8 @@ This is the compatibility path: factor-family code keeps using
 
 from __future__ import annotations
 
+import pandas as pd
+
 from typing import Any
 
 from tools.factors.expr.bar_search import BarDistanceOp, BarSinceOp
@@ -17,6 +19,7 @@ from tools.factors.expr.leaf import ColumnRef, ConstExpr
 from tools.factors.expr.lookback_scope import BarCountScope
 from tools.factors.expr.rolling import RollingOp
 from tools.factors.expr.shift import ShiftOp
+from tools.factors.expr.signal_align import SignalAlign
 
 _BINARY = {"add", "sub", "mul", "div", "gt", "lt", "ge", "le", "eq", "ne"}
 
@@ -71,6 +74,22 @@ def alpha_plan_spec(expression: Any) -> dict[str, Any] | None:
                 "kind": "scope", "child": child, "count": int(expr.scope.resolved_count()),
                 "op": expr.op, "min_periods": expr.min_periods or 1,
                 "propagate_nan": expr.nan_policy.value == "propagate",
+            }
+        elif isinstance(expr, SignalAlign):
+            if expr.daily_basepoint is not None or expr.end_session_skip:
+                return None
+            if str(expr.signal_freq).lower() in {"1d", "1day", "daily"}:
+                return None
+            if not isinstance(expr.basepoint, str) or expr.basepoint not in {"last", "first"}:
+                return None
+            child = build(expr.operands[0])
+            if child is None:
+                return None
+            node = {
+                "kind": "signal", "child": child,
+                "signal_ns": int(pd.Timedelta(str(expr.signal_freq)).value),
+                "basepoint": expr.basepoint, "include_current": True,
+                "partial": "drop", "scope_anchor": "start", "sessions": [],
             }
         elif isinstance(expr, CrossSectionalOp):
             if len(expr.operands) != 1:
