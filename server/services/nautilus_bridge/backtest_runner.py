@@ -72,8 +72,8 @@ def _load_input(item: ReplayInput):
         raise ValueError("catalog was not staged with pinned NautilusTrader")
     if receipt.get("contract_uid") != item.expected_contract_uid:
         raise ValueError("catalog contract UID does not match the requested identity")
-    if not item.expected_contract_uid.startswith("CFFEX|F|"):
-        raise ValueError("probe accepts CFFEX futures contracts only")
+    if "|F|" not in str(item.expected_contract_uid):
+        raise ValueError("probe accepts futures contracts only")
     for file in receipt.get("catalog_files", ()):
         path = (folder / file["path"]).resolve(strict=True)
         if not path.is_relative_to(folder):
