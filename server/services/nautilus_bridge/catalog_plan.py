@@ -21,12 +21,12 @@ def _expand_product_paths(paths: list[str], *, start: str, end: str) -> list[str
             continue
         product_name = path.rsplit(marker, 1)[-1]
         try:
-            from sources.LocalCNFutures.CNFutures import CNFutures
+            from settings import get_all_products
+            from server.modules.shared.price_services import find_product
+            product = find_product(get_all_products(), product_name)
         except Exception:
-            expanded.append(path)
-            continue
-        product = CNFutures.get_by_product_name(product_name)
-        if product is None:
+            product = None
+        if product is None or not callable(getattr(product, "get_contract_list", None)):
             expanded.append(path)
             continue
         rows = product.get_contract_list(start[:10], end[:10])
