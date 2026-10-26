@@ -61,6 +61,15 @@ class TradingCalendarWindow:
         start = max(0, current_session - lookback_sessions + 1)
         return self._cumulative[current_session + 1] - self._cumulative[start]
 
+    def max_window_size(self, lookback_sessions: int) -> int:
+        """Largest minute-bar window over all frozen sessions."""
+        if not isinstance(lookback_sessions, int) or lookback_sessions <= 0:
+            raise ValueError("lookback_sessions must be a positive integer")
+        return max(
+            self.window_size(index, lookback_sessions)
+            for index in range(len(self.sessions))
+        )
+
     def window_for_timestamp(
         self, timestamp_ns: int, lookback_sessions: int,
     ) -> tuple[int, int]:
