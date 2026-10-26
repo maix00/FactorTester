@@ -289,12 +289,13 @@ pub mod nautilus {
         engine: E,
         last_error: Option<String>,
         expected_products: Vec<String>,
-        pending_bars: std::collections::BTreeMap<String, Bar>,
+        product_index: std::collections::HashMap<String, usize>,
+        pending_bars: Vec<Option<Bar>>,
         last_update: Option<FactorUpdate>,
         boundary_buffer: Vec<u8>,
         pending_boundaries: std::collections::BTreeMap<i64, Vec<u8>>,
         pending_timestamp: Option<i64>,
-        future_slices: std::collections::BTreeMap<i64, std::collections::BTreeMap<String, Bar>>,
+        future_slices: std::collections::BTreeMap<i64, std::collections::BTreeMap<usize, Bar>>,
         max_future_slices: usize,
         barrier_grace_ns: Option<i64>,
         sink: Option<Box<dyn Fn(&FactorUpdate) + Send>>,
@@ -318,7 +319,8 @@ pub mod nautilus {
                 id: Ustr::from(actor_id), engine, last_error: None,
                 core,
                 expected_products: Vec::new(),
-                pending_bars: std::collections::BTreeMap::new(),
+                product_index: std::collections::HashMap::new(),
+                pending_bars: Vec::new(),
                 pending_timestamp: None,
                 future_slices: std::collections::BTreeMap::new(),
                 max_future_slices: 64,
@@ -413,7 +415,7 @@ pub mod nautilus {
             self.future_slices = self.future_slices.split_off(&cutoff);
             self.pending_boundaries = self.pending_boundaries.split_off(&cutoff);
             if self.pending_timestamp.is_some_and(|timestamp| timestamp < cutoff) {
-                self.pending_bars.clear();
+                self.pending_bars.fill(None);
                 self.pending_timestamp = None;
             }
             let dropped = before - self.pending_len();
@@ -433,7 +435,8 @@ pub mod nautilus {
         }
 
         pub fn pending_len(&self) -> usize {
-            self.pending_bars.len() + self.future_slices.values().map(|slice| slice.len()).sum::<usize>()
+            self.pending_bars.iter().filter(|bar| bar.is_some()).count()
+                + self.future_slices.values().map(|slice| slice.len()).sum::<usize>()
         }
 
         pub fn last_update(&self) -> Option<&FactorUpdate> { self.last_update.as_ref() }
@@ -449,6 +452,10 @@ pub mod nautilus {
         pub fn expect_products(&mut self, products: &[&str]) {
             self.expected_products = products.iter().map(|product| product.to_string()).collect();
             self.expected_products.sort();
+            self.product_index = self.expected_products.iter().enumerate()
+                .map(|(index, product)| (product.clone(), index)).collect();
+            self.pending_bars = vec![None; self.expected_products.len()];
+            self.pending_timestamp = None;
         }
 
         /// Collect one bar per frozen product; update only when every product arrived.
@@ -458,10 +465,11 @@ pub mod nautilus {
                 return;
             }
             let product = bar.bar_type.instrument_id().to_string();
-            if !self.expected_products.contains(&product) {
+            let Some(index) = self.product_index.get(&product).copied() else {
                 self.last_error = Some(format!("unexpected product {product}"));
                 return;
-            }
+            };
+
             let timestamp = bar.ts_event.as_u64() as i64;
             if let Some(pending) = self.pending_timestamp {
                 if timestamp < pending {
@@ -473,32 +481,35 @@ pub mod nautilus {
                         self.last_error = Some(format!("future slice limit {} exceeded", self.max_future_slices));
                         return;
                     }
-                    self.future_slices.entry(timestamp).or_default().insert(product, bar.clone());
+                    self.future_slices.entry(timestamp).or_default().insert(index, bar.clone());
                     return;
                 }
             } else {
                 self.pending_timestamp = Some(timestamp);
             }
-            self.pending_bars.insert(product, bar.clone());
-            if self.pending_bars.len() == self.expected_products.len() {
+            self.pending_bars[index] = Some(bar.clone());
+            if self.pending_bars.iter().all(Option::is_some) {
                 self.flush_slice();
             }
         }
 
         fn flush_slice(&mut self) {
             let Some(timestamp) = self.pending_timestamp else { return };
-            if self.pending_bars.len() != self.expected_products.len() { return; }
-            let bars: Vec<Bar> = self.expected_products.iter()
-                .map(|product| self.pending_bars.remove(product).unwrap())
+            if self.pending_bars.len() != self.expected_products.len()
+                || self.pending_bars.iter().any(Option::is_none) { return; }
+            let bars: Vec<Bar> = self.pending_bars.iter_mut()
+                .map(|bar| bar.take().unwrap())
                 .collect();
             let market = crate::nautilus::market_bar_from_bars(timestamp, &bars);
             let _ = self.evaluate_market(market);
-            self.pending_bars.clear();
+            self.pending_bars.fill(None);
             self.pending_timestamp = None;
             while let Some((&next, slice)) = self.future_slices.iter().next() {
                 if slice.len() != self.expected_products.len() { break; }
                 let slice = self.future_slices.remove(&next).unwrap();
-                self.pending_bars = slice;
+                let mut pending = vec![None; self.expected_products.len()];
+                for (index, bar) in slice { pending[index] = Some(bar); }
+                self.pending_bars = pending;
                 self.pending_timestamp = Some(next);
                 self.flush_slice();
             }
