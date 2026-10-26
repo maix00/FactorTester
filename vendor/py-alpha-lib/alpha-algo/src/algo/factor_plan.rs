@@ -21,6 +21,7 @@ pub enum ExprSpec {
     Column(usize),
     Const(f64),
     Rolling { child: usize, window: usize, op: SessionOp, min_periods: usize, propagate_nan: bool },
+    Neg { child: usize },
     Binary { op: BinaryOp, left: usize, right: usize },
     Shift { child: usize, periods: usize },
     Where { condition: usize, when_true: usize, when_false: usize },
@@ -33,6 +34,10 @@ struct NodeState {
     spec: ExprSpec,
     rolling: Vec<Option<IntervalKernel>>,
     history: VecDeque<Vec<f64>>,
+    since_first: Vec<Option<usize>>,
+    since_last: Vec<Option<usize>>,
+    since_base: Vec<usize>,
+    scope_base: Vec<usize>,
 }
 
 pub struct FactorPlanKernel {
@@ -40,10 +45,6 @@ pub struct FactorPlanKernel {
     nodes: Vec<NodeState>,
     outputs: Vec<usize>,
     ordinal: u64,
-    since_first: Vec<Option<usize>>,
-    since_last: Vec<Option<usize>>,
-    since_base: Vec<usize>,
-    scope_bases: Vec<usize>,
 }
 
 fn binary(op: BinaryOp, left: f64, right: f64) -> f64 {
@@ -69,18 +70,46 @@ impl FactorPlanKernel {
                     .collect::<Result<Vec<_>, _>>()?,
                 _ => (0..products).map(|_| None).collect(),
             };
-            nodes.push(NodeState { spec, rolling, history: VecDeque::new() });
+            nodes.push(NodeState {
+                spec, rolling, history: VecDeque::new(),
+                since_first: vec![None; products],
+                since_last: vec![None; products],
+                since_base: vec![0; products],
+                scope_base: vec![0; products],
+            });
         }
         if outputs.iter().any(|index| *index >= nodes.len()) {
             return Err(crate::algo::Error::InvalidParameter("plan output out of range".into()));
         }
-        Ok(Self {
-            products, nodes, outputs, ordinal: 0,
-            since_first: vec![None; products],
-            since_last: vec![None; products],
-            since_base: vec![0; products],
-            scope_bases: vec![0; products],
-        })
+        for (index, node) in nodes.iter().enumerate() {
+            let children: &[usize] = match &node.spec {
+                ExprSpec::Column(_) | ExprSpec::Const(_) => &[],
+                ExprSpec::Neg { child } | ExprSpec::Rolling { child, .. }
+                | ExprSpec::Shift { child, .. } | ExprSpec::Cross { child, .. }
+                | ExprSpec::Scope { child, .. } => std::slice::from_ref(child),
+                ExprSpec::Binary { left, right, .. } => {
+                    if *left >= index || *right >= index { return Err(crate::algo::Error::InvalidParameter("plan child must precede parent".into())); }
+                    &[]
+                }
+                ExprSpec::Where { condition, when_true, when_false } => {
+                    if *condition >= index || *when_true >= index || *when_false >= index { return Err(crate::algo::Error::InvalidParameter("plan child must precede parent".into())); }
+                    &[]
+                }
+                ExprSpec::Since { condition, .. } => {
+                    if *condition >= index { return Err(crate::algo::Error::InvalidParameter("plan child must precede parent".into())); }
+                    &[]
+                }
+            };
+            if children.iter().any(|child| *child >= index) {
+                return Err(crate::algo::Error::InvalidParameter("plan child must precede parent".into()));
+            }
+            match &node.spec {
+                ExprSpec::Rolling { window, .. } if *window == 0 => return Err(crate::algo::Error::InvalidParameter("rolling window must be positive".into())),
+                ExprSpec::Scope { count, .. } | ExprSpec::Since { count, .. } if *count == 0 => return Err(crate::algo::Error::InvalidParameter("scope count must be positive".into())),
+                _ => {}
+            }
+        }
+        Ok(Self { products, nodes, outputs, ordinal: 0 })
     }
 
     fn eval(&mut self, index: usize, columns: &[f64], cache: &mut [Option<Vec<f64>>]) -> Result<Vec<f64>, crate::algo::Error> {
@@ -88,8 +117,14 @@ impl FactorPlanKernel {
         let spec = self.nodes[index].spec.clone();
         let value = match spec {
             ExprSpec::Column(column) => {
-                if column >= columns.len() { return Err(crate::algo::Error::InvalidParameter("column out of range".into())); }
-                vec![columns[column]; self.products]
+                if column >= columns.len() {
+                    return Err(crate::algo::Error::InvalidParameter("column out of range".into()));
+                }
+                if columns.len() == self.products {
+                    columns.to_vec()
+                } else {
+                    vec![columns[column]; self.products]
+                }
             }
             ExprSpec::Const(value) => vec![value; self.products],
             ExprSpec::Rolling { child, window, min_periods, propagate_nan, .. } => {
@@ -103,6 +138,7 @@ impl FactorPlanKernel {
                     state.update_explicit(start, current, *value)
                 }).collect()
             }
+            ExprSpec::Neg { child } => self.eval(child, columns, cache)?.iter().map(|value| -*value).collect(),
             ExprSpec::Binary { op, left, right } => {
                 let a = self.eval(left, columns, cache)?;
                 let b = self.eval(right, columns, cache)?;
@@ -128,34 +164,35 @@ impl FactorPlanKernel {
                 let current = self.ordinal;
                 let node = &mut self.nodes[index];
                 input.iter().enumerate().map(|(product, value)| {
-                    if current as usize % count == 0 { self.scope_bases[product] = current as usize; }
+                    if current as usize % count == 0 { node.scope_base[product] = current as usize; }
                     let Some(state) = node.rolling[product].as_mut() else { return f64::NAN };
                     state.set_semantics(min_periods, propagate_nan);
-                    state.update_explicit(self.scope_bases[product] as u64, current, *value)
+                    state.update_explicit(node.scope_base[product] as u64, current, *value)
                 }).collect()
             }
             ExprSpec::Since { condition, count, include_current, nearest, default_scope, default } => {
                 let condition = self.eval(condition, columns, cache)?;
                 let mut out = vec![f64::NAN; self.products];
                 for product in 0..self.products {
+                    let node = &mut self.nodes[index];
                     if self.ordinal as usize % count == 0 {
-                        self.since_base[product] = self.ordinal as usize;
-                        self.since_first[product] = None;
-                        self.since_last[product] = None;
+                        node.since_base[product] = self.ordinal as usize;
+                        node.since_first[product] = None;
+                        node.since_last[product] = None;
                     }
                     let truth = condition[product].is_finite() && condition[product] != 0.0;
                     if truth && include_current {
-                        if self.since_first[product].is_none() { self.since_first[product] = Some(self.ordinal as usize); }
-                        self.since_last[product] = Some(self.ordinal as usize);
+                        if node.since_first[product].is_none() { node.since_first[product] = Some(self.ordinal as usize); }
+                        node.since_last[product] = Some(self.ordinal as usize);
                     }
-                    let matched = if nearest { self.since_last[product] } else { self.since_first[product] };
+                    let matched = if nearest { node.since_last[product] } else { node.since_first[product] };
                     out[product] = match matched {
                         Some(hit) => (self.ordinal as usize - hit) as f64,
-                        None => if default_scope { (self.ordinal as usize - self.since_base[product]) as f64 } else { default },
+                        None => if default_scope { (self.ordinal as usize - node.since_base[product]) as f64 } else { default },
                     };
                     if truth && !include_current {
-                        if self.since_first[product].is_none() { self.since_first[product] = Some(self.ordinal as usize); }
-                        self.since_last[product] = Some(self.ordinal as usize);
+                        if node.since_first[product].is_none() { node.since_first[product] = Some(self.ordinal as usize); }
+                        node.since_last[product] = Some(self.ordinal as usize);
                     }
                 }
                 out
@@ -259,7 +296,7 @@ impl FactorPlanKernel {
                         other => return Err(crate::algo::Error::InvalidParameter(format!("unsupported binary op {other}"))),
                     }, left, right,
                 },
-                RawNode::Neg { child } => ExprSpec::Binary { op: BinaryOp::Sub, left: child, right: child },
+                RawNode::Neg { child } => ExprSpec::Neg { child },
                 RawNode::Shift { child, periods } => ExprSpec::Shift { child, periods },
                 RawNode::Where { condition, when_true, when_false } => ExprSpec::Where { condition, when_true, when_false },
                 RawNode::Cross { op, child } => ExprSpec::Cross {
@@ -323,6 +360,47 @@ mod tests {
         ];
         let mut engine = FactorPlanKernel::new(2, specs, vec![1]).unwrap();
         assert_eq!(engine.update(&[1.0, 3.0]).unwrap(), vec![0.0, 0.5]);
+    }
+}
+
+#[cfg(test)]
+mod audit_tests {
+    use super::*;
+
+    #[test]
+    fn neg_is_not_zero() {
+        let mut kernel = FactorPlanKernel::new(1, vec![
+            ExprSpec::Column(0), ExprSpec::Neg { child: 0 },
+        ], vec![1]).unwrap();
+        assert_eq!(kernel.update(&[3.0]).unwrap(), vec![-3.0]);
+    }
+
+    #[test]
+    fn column_keeps_each_product_value() {
+        let mut kernel = FactorPlanKernel::new(2, vec![ExprSpec::Column(0)], vec![0]).unwrap();
+        assert_eq!(kernel.update(&[2.0, 4.0]).unwrap(), vec![2.0, 4.0]);
+    }
+
+    #[test]
+    fn two_since_nodes_do_not_share_state() {
+        let mut kernel = FactorPlanKernel::new(1, vec![
+            ExprSpec::Column(0),
+            ExprSpec::Since { condition: 0, count: 10, include_current: true, nearest: true, default_scope: false, default: 0.0 },
+            ExprSpec::Since { condition: 0, count: 10, include_current: true, nearest: false, default_scope: false, default: 0.0 },
+        ], vec![1, 2]).unwrap();
+        assert_eq!(kernel.update(&[1.0]).unwrap(), vec![0.0, 0.0]);
+        assert_eq!(kernel.update(&[0.0]).unwrap(), vec![1.0, 1.0]);
+        assert_eq!(kernel.update(&[0.0]).unwrap(), vec![2.0, 2.0]);
+        assert_eq!(kernel.update(&[1.0]).unwrap(), vec![0.0, 3.0]);
+        assert_eq!(kernel.update(&[0.0]).unwrap(), vec![1.0, 4.0]);
+    }
+
+    #[test]
+    fn invalid_child_index_is_an_error() {
+        let result = FactorPlanKernel::new(1, vec![
+            ExprSpec::Neg { child: 9 },
+        ], vec![0]);
+        assert!(result.is_err());
     }
 }
 

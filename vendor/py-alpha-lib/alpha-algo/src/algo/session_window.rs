@@ -939,16 +939,26 @@ pub struct PairIntervalState {
   syy: f64,
   sxy: f64,
   count: usize,
+  nan_count: usize,
+  min_periods: usize,
+  propagate_nan: bool,
   next_index: u64,
   last: f64,
 }
 
 impl PairIntervalState {
+  pub fn with_semantics(mut self, min_periods: usize, propagate_nan: bool) -> Self {
+    self.min_periods = min_periods.max(1);
+    self.propagate_nan = propagate_nan;
+    self
+  }
+
   pub fn new(correlation: bool) -> Self {
     Self {
       correlation, ring: VecDeque::new(),
       sx: 0.0, sy: 0.0, sxx: 0.0, syy: 0.0, sxy: 0.0,
-      count: 0, next_index: 0, last: f64::NAN,
+      count: 0, nan_count: 0, min_periods: 2, propagate_nan: false,
+      next_index: 0, last: f64::NAN,
     }
   }
 
@@ -958,6 +968,8 @@ impl PairIntervalState {
         if x.is_finite() && y.is_finite() {
           self.sx -= x; self.sy -= y; self.sxx -= x * x;
           self.syy -= y * y; self.sxy -= x * y; self.count -= 1;
+        } else {
+          self.nan_count = self.nan_count.saturating_sub(1);
         }
       }
     }
@@ -973,8 +985,11 @@ impl PairIntervalState {
     if x.is_finite() && y.is_finite() {
       self.sx += x; self.sy += y; self.sxx += x * x;
       self.syy += y * y; self.sxy += x * y; self.count += 1;
+    } else {
+      self.nan_count += 1;
     }
-    if self.count < 2 { self.last = f64::NAN; return self.last; }
+    if self.propagate_nan && self.nan_count > 0 { self.last = f64::NAN; return self.last; }
+    if self.count < self.min_periods.max(2) { self.last = f64::NAN; return self.last; }
     let n = self.count as f64;
     let covariance = (self.sxy - self.sx * self.sy / n) / (n - 1.0);
     let value = if !self.correlation {

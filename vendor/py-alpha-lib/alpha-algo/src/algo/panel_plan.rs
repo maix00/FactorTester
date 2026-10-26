@@ -192,7 +192,8 @@ impl PanelPlan {
                 }
             }
             let mut base=0;let mut state=if args.len()==1 {Some(crate::algo::IntervalKernel::new(session_op(op,p[5])?).map_err(|e|error(e.to_string()))?.with_semantics(p[3]as usize,p[4]!=0.0))}else{None};
-            let mut pair=crate::algo::PairIntervalState::new(op=="corr");
+            let mut pair=crate::algo::PairIntervalState::new(op=="corr")
+                .with_semantics(p[3] as usize, p[4] != 0.0);
             for (ordinal,&t) in observed.iter().enumerate(){
                 if scope && boundary(p[0]as usize,p[1]as usize,p[2]as i64,ordinal,t,base,&observed,grid){base=ordinal;}
                 let start=if scope {base} else {ordinal.saturating_sub(p[1]as usize-1)};

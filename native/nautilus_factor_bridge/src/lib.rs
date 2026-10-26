@@ -237,6 +237,7 @@ pub mod nautilus {
         id: Ustr,
         engine: E,
         latest: Vec<f64>,
+        last_error: Option<String>,
     }
 
     impl<E> fmt::Debug for FactorActor<E> {
@@ -245,12 +246,16 @@ pub mod nautilus {
         }
     }
 
-    impl<E: FactorEngine + 'static> FactorActor<E> {
+    impl<E: FactorEngine + 'static> FactorActor<E>
+    where E::Error: std::fmt::Display,
+{
         pub fn new(actor_id: &str, engine: E) -> Self {
-            Self { id: Ustr::from(actor_id), engine, latest: Vec::new() }
+            Self { id: Ustr::from(actor_id), engine, latest: Vec::new(), last_error: None }
         }
 
         pub fn latest(&self) -> &[f64] { &self.latest }
+
+        pub fn last_error(&self) -> Option<&str> { self.last_error.as_deref() }
 
         /// Register this actor in Nautilus' thread-local actor registry.
         pub fn register(self) -> std::rc::Rc<std::cell::UnsafeCell<Self>> {
@@ -258,14 +263,16 @@ pub mod nautilus {
         }
     }
 
-    impl<E: FactorEngine + 'static> Actor for FactorActor<E> {
+    impl<E: FactorEngine + 'static> Actor for FactorActor<E>
+    where E::Error: std::fmt::Display, {
         fn id(&self) -> Ustr { self.id }
 
         fn handle(&mut self, msg: &dyn Any) {
             if let Some(bar) = msg.downcast_ref::<Bar>() {
                 let bar = MarketBar::from(bar);
-                if let Ok(values) = self.engine.update(&bar) {
-                    self.latest = values;
+                match self.engine.update(&bar) {
+                    Ok(values) => { self.latest = values; self.last_error = None; }
+                    Err(error) => self.last_error = Some(error.to_string()),
                 }
             }
         }
@@ -279,6 +286,13 @@ pub mod nautilus {
             let engine = crate::plan::FactorPlanEngine::from_spec_json(json, products)?;
             Ok(Self::new(actor_id, engine))
         }
+    }
+
+    /// Assemble a cross-sectional bar from one Nautilus `Bar` per product.
+    pub fn market_bar_from_bars(timestamp_ns: i64, bars: &[Bar]) -> MarketBar {
+        let products = bars.iter().map(|bar| bar.bar_type.instrument_id().to_string()).collect();
+        let values = bars.iter().map(|bar| bar.close.as_f64()).collect();
+        MarketBar::new(timestamp_ns, products, values)
     }
 
     impl From<&Bar> for MarketBar {
@@ -365,6 +379,19 @@ mod nautilus_tests {
         actor.register();
         assert!(actor_exists(&Ustr::from("factor-actor-test")));
         deregister_actor(&Ustr::from("factor-actor-test"));
+    }
+
+    #[test]
+    fn factor_actor_surfaces_engine_errors() {
+        let json = r#"{"columns":["CLOSE"],"nodes":[{"kind":"column","index":0}],"outputs":[0]}"#;
+        let mut actor = nautilus::FactorActor::from_plan_json("factor-error-test", 2, json).unwrap();
+        let bar = Bar::new(
+            BarType::from("A.B-1-MINUTE-LAST-EXTERNAL"),
+            Price::from("1.0"), Price::from("1.0"), Price::from("1.0"),
+            Price::from("1.0"), Quantity::from("10"), 1_000.into(), 1_000.into(),
+        );
+        actor.handle(&bar);
+        assert!(actor.last_error().is_some());
     }
 
     #[test]

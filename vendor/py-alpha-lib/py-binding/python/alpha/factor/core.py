@@ -55,6 +55,9 @@ class FactorExpr:
     def neg(self) -> "FactorExpr":
         return CompositeExpr("neg", self)
 
+    def __neg__(self) -> "FactorExpr":
+        return self.neg()
+
     def __add__(self, other: Any) -> "FactorExpr":
         return CompositeExpr("add", self, _to_expr(other))
 

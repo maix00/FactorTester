@@ -191,3 +191,16 @@ def test_signal_align_rejects_unsupported_basepoint_explicitly():
 
     with pytest.raises(NotImplementedError):
         ColumnRef('CLOSE').signal_align('2min', basepoint='first')
+
+
+def test_incremental_plan_negation_and_multi_product_columns():
+    import json
+    from alpha import FactorPlanState
+
+    neg = (-ColumnRef('CLOSE')).to_plan_spec()
+    state = FactorPlanState(json.dumps(neg), 1)
+    np.testing.assert_allclose(state.update(np.array([3.0])), [-3.0])
+
+    col = ColumnRef('CLOSE').to_plan_spec()
+    state = FactorPlanState(json.dumps(col), 2)
+    np.testing.assert_allclose(state.update(np.array([2.0, 4.0])), [2.0, 4.0])
