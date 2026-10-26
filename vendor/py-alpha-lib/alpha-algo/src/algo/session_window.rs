@@ -356,6 +356,18 @@ impl SessionWindowState {
     self.update_explicit(interval.start, interval.end, value)
   }
 
+  pub fn reset_at(&mut self, index: u64) {
+    self.ring.clear();
+    self.finite_sum = 0.0; self.finite_sumsq = 0.0; self.finite_sum3 = 0.0;
+    self.finite_count = 0; self.nan_count = 0;
+    self.min_deque.clear(); self.max_deque.clear();
+    self.order_stat = None;
+    self.next_index = index;
+    self.start_index = index;
+    self.range_end = u64::MAX;
+    self.last_value = f64::NAN;
+  }
+
   pub fn update_explicit(&mut self, start_index: u64, end_index: u64, value: f64) -> f64 {
     self.start_index = start_index;
     self.range_end = end_index;
@@ -973,6 +985,12 @@ impl PairIntervalState {
         }
       }
     }
+  }
+
+  pub fn reset_at(&mut self, index: u64) {
+    self.ring.clear();
+    self.sx = 0.0; self.sy = 0.0; self.sxx = 0.0; self.syy = 0.0; self.sxy = 0.0;
+    self.count = 0; self.nan_count = 0; self.next_index = index; self.last = f64::NAN;
   }
 
   pub fn update(&mut self, start: u64, end: u64, x: f64, y: f64) -> f64 {

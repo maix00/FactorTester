@@ -195,10 +195,19 @@ impl PanelPlan {
             let mut pair=crate::algo::PairIntervalState::new(op=="corr")
                 .with_semantics(p[3] as usize, p[4] != 0.0);
             for (ordinal,&t) in observed.iter().enumerate(){
-                if scope && boundary(p[0]as usize,p[1]as usize,p[2]as i64,ordinal,t,base,&observed,grid){base=ordinal;}
+                if scope && boundary(p[0]as usize,p[1]as usize,p[2]as i64,ordinal,t,base,&observed,grid){
+                    base=ordinal;
+                    if let Some(state)=state.as_mut(){state.reset_at(ordinal as u64);}
+                    else {pair.reset_at(ordinal as u64);}
+                }
                 let start=if scope {base} else {ordinal.saturating_sub(p[1]as usize-1)};
                 let start=start+if p[6]>=0.0{p[6]as usize}else{0};
                 let end=if p[7]>=0.0 {(if scope{base}else{ordinal.saturating_sub(p[1]as usize-1)})+p[7]as usize}else{ordinal};
+                if start>end {
+                    if let Some(state)=state.as_mut(){state.update_explicit(start as u64,end as u64,f64::NAN);}
+                    else {pair.update(start as u64,end as u64,f64::NAN,f64::NAN);}
+                    chunk[t]=f64::NAN;continue;
+                }
                 chunk[t]=if let Some(state)=state.as_mut(){state.update_explicit(start as u64,end.min(ordinal)as u64,x[ordinal])}
                     else {pair.update(start as u64,end.min(ordinal)as u64,x[ordinal],args[1].at(g,t))};
             }Ok(())
@@ -287,4 +296,24 @@ impl PanelPlan {
 }
 fn boundary(kind:usize,count:usize,gap:i64,ordinal:usize,t:usize,base:usize,observed:&[usize],grid:&Grid)->bool {
     ordinal==0||match kind{1=>ordinal-base>=count.max(1),2=>grid.days[t]!=grid.days[observed[ordinal-1]],3=>grid.times[t]-grid.times[observed[ordinal-1]]>=gap,_=>false}
+}
+
+#[cfg(test)]
+mod audit_tests {
+    use super::*;
+
+    #[test]
+    fn partition_switch_does_not_carry_truncated_state() {
+        let mut plan = PanelPlan::new();
+        let grid = plan.grid(&[0, 1, 2, 3, 4, 5], &[0, 0, 0, 0, 0, 0], &[1; 6]).unwrap();
+        let column = plan.add("column".into(), vec![], vec![0.0], vec![], grid).unwrap();
+        let scoped = plan.add(
+            "scope:mean".into(), vec![column],
+            vec![1.0, 2.0, 0.0, 1.0, 0.0, 0.5, 1.0, -1.0], vec![], grid,
+        ).unwrap();
+        let values = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let out = plan.execute(&[&values], &[scoped], 1).unwrap();
+        assert!(out[0][2].is_nan(), "new partition must not reuse the previous partition result");
+        assert_eq!(out[0][3], 4.0);
+    }
 }
