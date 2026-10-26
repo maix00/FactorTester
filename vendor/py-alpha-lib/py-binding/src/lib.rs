@@ -2610,6 +2610,39 @@ impl SessionRollingState {
 }
 
 #[pyclass]
+struct PartitionState {
+  inner: alpha_algo::SessionWindowState,
+}
+
+#[pymethods]
+impl PartitionState {
+  #[new]
+  #[pyo3(signature = (op="mean", quantile=None))]
+  fn new(op: &str, quantile: Option<f64>) -> PyResult<Self> {
+    use alpha_algo::SessionOp;
+    let op = match op {
+      "sum" => SessionOp::Sum, "mean" => SessionOp::Mean,
+      "var" => SessionOp::Var, "std" => SessionOp::Std,
+      "min" => SessionOp::Min, "max" => SessionOp::Max,
+      "skew" => SessionOp::Skew, "argmin" => SessionOp::Argmin,
+      "argmax" => SessionOp::Argmax, "rank" => SessionOp::Rank,
+      "mad" => SessionOp::Mad,
+      "median" | "quantile" => SessionOp::Quantile(quantile.unwrap_or(0.5)),
+      other => return Err(pyo3::exceptions::PyValueError::new_err(
+        format!("unsupported partition op: {other}")
+      )),
+    };
+    let inner = alpha_algo::SessionWindowState::new_partition(op)
+      .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    Ok(Self { inner })
+  }
+
+  fn update(&mut self, partition_id: u32, value: f64) -> f64 {
+    self.inner.update(partition_id, value)
+  }
+}
+
+#[pyclass]
 struct EmaState {
   inner: alpha_algo::EmaState,
 }
@@ -2777,6 +2810,7 @@ fn _algo(m: &Bound<'_, PyModule>) -> PyResult<()> {
   m.add_class::<BarPairState>()?;
   m.add_class::<WallPairState>()?;
   m.add_class::<EmaState>()?;
+  m.add_class::<PartitionState>()?;
   m.add_class::<BarRollingState>()?;
   m.add_class::<WallRollingState>()?;
   m.add_class::<GroupKernel>()?;

@@ -75,3 +75,6 @@ BarPairState = _algo.BarPairState
 
 
 EmaState = _algo.EmaState
+
+
+PartitionState = _algo.PartitionState
