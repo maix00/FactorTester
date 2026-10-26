@@ -48,11 +48,14 @@ def linear_metric(values: np.ndarray, metric: str, minimum: int) -> float:
     raise ValueError(f"Unknown rolling linear metric: {metric}")
 
 
-def rolling_linear_metric(data: pd.DataFrame, window: int, metric: str) -> pd.DataFrame:
+def rolling_linear_metric(
+    data: pd.DataFrame, window: int, metric: str,
+    *, min_periods: int | None = None, propagate_nan: bool = True,
+) -> pd.DataFrame:
     """Vectorized rolling OLS using sufficient statistics."""
     if metric not in ROLLING_LINEAR_METRICS:
         raise ValueError(f"Unknown rolling linear metric: {metric}")
-    minimum = max(3, window // 2)
+    minimum = max(3, window if min_periods is None else min_periods)
     values = data.to_numpy(dtype=float, copy=False)
     if values.shape[0] == 0 or values.shape[1] == 0:
         return pd.DataFrame(index=data.index, columns=data.columns, dtype=float)
@@ -91,6 +94,9 @@ def rolling_linear_metric(data: pd.DataFrame, window: int, metric: str) -> pd.Da
     intercept = (sum_y - slope * sum_x) / count
     sse = (sum_y2 - intercept * sum_y - slope * sum_xy).clip(lower=0.0)
     eligible = (count >= minimum) & (centered_xx > 0)
+    if propagate_nan:
+        widths = np.minimum(np.arange(len(data)) + 1, window)[:, None]
+        eligible &= count >= widths
 
     if metric == "rolling_linreg_slope":
         result = slope

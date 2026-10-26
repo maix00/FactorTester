@@ -24,12 +24,17 @@ def apply_rolling_statistic(
     window: int,
     *,
     quantile: float | None = None,
+    min_periods: int | None = None,
+    propagate_nan: bool = True,
 ) -> pd.DataFrame:
     if op in ROLLING_LINEAR_METRICS:
-        return rolling_linear_metric(data, window, op)
+        return rolling_linear_metric(
+            data, window, op,
+            min_periods=min_periods, propagate_nan=propagate_nan,
+        )
     if op == "rolling_skew":
         return rolling_skew_batch(data, window)
-    minimum = max(1, window // 2)
+    minimum = max(1, window if min_periods is None else min_periods)
     if op == "rolling_median":
         return data.rolling(window, min_periods=minimum).median()
     if op == "rolling_quantile":

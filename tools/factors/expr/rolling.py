@@ -497,7 +497,11 @@ class RollingOp(OperandExpr):
         if trunc_start_arr is not None or trunc_end_arr is not None:
             if self.op == 'rolling_skew':
                 masked = _mask_outside_trunc(dfs[0], window, trunc_start_arr, trunc_end_arr)
-                return apply_rolling_statistic(self.op, masked, window)
+                return apply_rolling_statistic(
+                    self.op, masked, window,
+                    min_periods=self.min_periods,
+                    propagate_nan=self.nan_policy is NanPolicy.PROPAGATE,
+                )
             if self.op in self._OP_MAP:
                 masked = _mask_outside_trunc(dfs[0], window, trunc_start_arr, trunc_end_arr)
                 func = self._OP_MAP[self.op]
@@ -507,6 +511,8 @@ class RollingOp(OperandExpr):
         if self.op == 'rolling_skew' or self.op in ROLLING_STATISTICS:
             return apply_rolling_statistic(
                 self.op, dfs[0], window, quantile=self.quantile,
+                min_periods=self.min_periods,
+                propagate_nan=self.nan_policy is NanPolicy.PROPAGATE,
             )
         if self.op in self._OP_MAP:
             func = self._OP_MAP[self.op]
