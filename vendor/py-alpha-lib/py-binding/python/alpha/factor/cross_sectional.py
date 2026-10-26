@@ -15,7 +15,7 @@ class CrossSectionalExpr(FactorExpr):
     def _structural_key(self):
         return ("alpha.factor.CrossSectionalExpr", self.op, self.operand._structural_key())
 
-    def evaluate(self, ctx) -> pd.DataFrame:
+    def _evaluate(self, ctx) -> pd.DataFrame:
         frame = self.operand.evaluate(ctx)
         from alpha import cross_sectional
         outputs = cross_sectional(
