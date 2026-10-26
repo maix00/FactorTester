@@ -114,6 +114,49 @@ impl FactorEngine for ProductWindowEngine {
     }
 }
 
+/// Matrix of independent window factors: factors x products.
+pub struct MatrixPlanEngine {
+    states: Vec<Vec<IntervalKernel>>,
+    windows: Vec<usize>,
+    products: usize,
+    ordinal: u64,
+}
+
+impl MatrixPlanEngine {
+    pub fn new(products: usize, specs: &[(usize, SessionOp)]) -> Result<Self, alpha_algo::Error> {
+        if products == 0 || specs.is_empty() {
+            return Err(alpha_algo::Error::InvalidParameter("matrix plan requires factors and products".into()));
+        }
+        let mut states = Vec::with_capacity(specs.len());
+        let mut windows = Vec::with_capacity(specs.len());
+        for (window, op) in specs {
+            windows.push(*window);
+            states.push((0..products).map(|_| IntervalKernel::new_explicit(*op)).collect::<Result<Vec<_>, _>>()?);
+        }
+        Ok(Self { states, windows, products, ordinal: 0 })
+    }
+}
+
+impl FactorEngine for MatrixPlanEngine {
+    type Error = alpha_algo::Error;
+
+    fn update(&mut self, bar: &MarketBar) -> Result<Vec<f64>, Self::Error> {
+        if bar.values.len() != self.products {
+            return Err(alpha_algo::Error::InvalidParameter("matrix plan product width mismatch".into()));
+        }
+        let current = self.ordinal;
+        self.ordinal += 1;
+        let mut out = Vec::with_capacity(self.states.len() * self.products);
+        for (states, window) in self.states.iter_mut().zip(&self.windows) {
+            let start = current.saturating_sub(*window as u64 - 1);
+            for (state, value) in states.iter_mut().zip(&bar.values) {
+                out.push(state.update_explicit(start, current, *value));
+            }
+        }
+        Ok(out)
+    }
+}
+
 /// Nautilus-side adapter contract.  Implemented by the actor that receives
 /// Nautilus bars; it does not leak Nautilus types into py-alpha-lib.
 pub trait NautilusMarketAdapter {
@@ -203,6 +246,15 @@ pub mod nautilus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn matrix_plan_engine_updates_factor_product_matrix() {
+        let mut engine = MatrixPlanEngine::new(2, &[(2, SessionOp::Mean), (2, SessionOp::Sum)]).unwrap();
+        let bar = MarketBar::new(0, vec!["A".into(), "B".into()], vec![2.0, 4.0]);
+        assert_eq!(engine.update(&bar).unwrap(), vec![2.0, 4.0, 2.0, 4.0]);
+        let bar = MarketBar::new(1, vec!["A".into(), "B".into()], vec![4.0, 8.0]);
+        assert_eq!(engine.update(&bar).unwrap(), vec![3.0, 6.0, 6.0, 12.0]);
+    }
 
     #[test]
     fn product_window_engine_updates_every_product() {
