@@ -84,3 +84,20 @@ def test_plan_supports_ema_rolling_op():
     assert outputs is not None
     expected = pd.Series(values).ewm(span=20, min_periods=1, adjust=False).mean()
     np.testing.assert_allclose(outputs[0]['A'].to_numpy(), expected.to_numpy(), rtol=1e-10)
+
+
+def test_batch_and_incremental_plans_share_node_identity():
+    from tools.factors.expr.rust_plan import plan_identity
+    from tools.factors.expr.streaming.incremental import (
+        compile_incremental_factors,
+    )
+
+    close = ColumnRef(DataColumn.CLOSE)
+    first = close.rolling(20).mean()
+    second = first.rolling(10).std()
+    batch_keys = set(plan_identity([first, second]))
+    streaming = compile_incremental_factors(
+        {'first': first, 'second': second}, ('A',), source_freq=DataFreq.MIN1,
+    )
+    streaming_keys = set(streaming._plan.plans[0].node_keys) | set(streaming._plan.plans[1].node_keys)
+    assert batch_keys == streaming_keys

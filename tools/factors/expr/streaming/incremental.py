@@ -579,11 +579,13 @@ class StreamingFactorPlan:
         products: tuple[Any, ...],
         root: StreamingNode,
         lookback_contract: LookbackContract | None = None,
+        node_keys: tuple[tuple, ...] = (),
     ) -> None:
         self.expression = expression
         self.products = products
         self._root = root
         self.lookback_contract = lookback_contract
+        self.node_keys = node_keys
 
     def update(self, timestamp: pd.Timestamp, market: MarketSlice) -> dict[str, float]:
         if set(market.prices) != set(self.products):
@@ -1061,7 +1063,9 @@ def compile_streaming_factor(
         zero=0,
         add=add,
     )
-    return StreamingFactorPlan(expression, products, root, lookback_contract)
+    return StreamingFactorPlan(
+        expression, products, root, lookback_contract, tuple(memo.keys()),
+    )
 
 
 def compile_incremental_factor(

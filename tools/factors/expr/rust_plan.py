@@ -135,3 +135,11 @@ def try_evaluate_rust_plan(expression: FactorExpr, ctx: EvaluateContext) -> pd.D
     return None if result is None else result[0]
 
 
+
+
+def plan_identity(expressions: list[FactorExpr]) -> tuple[tuple, ...]:
+    """Stable node identity of the Rust batch plan for a factor collection."""
+    builder = _PlanBuilder()
+    for expression in expressions:
+        builder.build(expression)
+    return tuple(builder.memo.keys())
