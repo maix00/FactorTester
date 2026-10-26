@@ -183,3 +183,13 @@ def test_plan_supports_bar_since_with_bar_count_scope():
                 last = index
             expected.append(index - last if last is not None else index - start)
     np.testing.assert_allclose(outputs[0]['A'].to_numpy(), expected)
+
+
+def test_existing_tools_factor_can_emit_bridge_plan_json():
+    from tools.factors.alpha_plan import alpha_plan_spec
+
+    close = ColumnRef(DataColumn.CLOSE)
+    spec = alpha_plan_spec((close.rolling(5).mean() + 1.0))
+    assert spec is not None
+    assert spec['columns'] == ['CLOSE']
+    assert [node['kind'] for node in spec['nodes']] == ['column', 'rolling', 'const', 'binary']
