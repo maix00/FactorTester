@@ -11,7 +11,7 @@ static _ALGO_CTX_: LazyLock<RwLock<Context>> = LazyLock::new(|| RwLock::new(Cont
 
 mod algo_impl {
   use log::debug;
-  use numpy::{PyReadonlyArray1, PyReadwriteArray1};
+  use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1, PyReadwriteArray1};
   use pyo3::{exceptions::PyValueError, prelude::*, types::PyList};
   use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
@@ -45,19 +45,22 @@ mod algo_impl {
   }
 
   #[pyfunction]
-  pub fn interval_ema(values: PyReadonlyArray1<f64>, span: usize) -> PyResult<Vec<f64>> {
+  pub fn interval_ema(
+    py: Python<'_>, values: PyReadonlyArray1<f64>, span: usize,
+  ) -> PyResult<Py<PyArray1<f64>>> {
     let values = values.as_slice()?;
     let mut state = alpha_algo::EmaState::new(span)
       .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-    Ok(values.iter().copied().map(|value| state.update(value)).collect())
+    Ok(values.iter().copied().map(|value| state.update(value))
+      .collect::<Vec<_>>().into_pyarray(py).unbind())
   }
 
   #[pyfunction]
   #[pyo3(signature = (values, starts, ends, op, quantile=None))]
   pub fn interval_rolling(
-    values: PyReadonlyArray1<f64>, starts: PyReadonlyArray1<u64>,
+    py: Python<'_>, values: PyReadonlyArray1<f64>, starts: PyReadonlyArray1<u64>,
     ends: PyReadonlyArray1<u64>, op: &str, quantile: Option<f64>,
-  ) -> PyResult<Vec<f64>> {
+  ) -> PyResult<Py<PyArray1<f64>>> {
     let values = values.as_slice()?;
     let starts = starts.as_slice()?;
     let ends = ends.as_slice()?;
@@ -106,22 +109,71 @@ mod algo_impl {
         };
         out.push(value);
       }
-      return Ok(out);
+      return Ok(out.into_pyarray(py).unbind());
+    }
+    if fixed && matches!(
+      op, alpha_algo::SessionOp::Min | alpha_algo::SessionOp::Max
+        | alpha_algo::SessionOp::Argmin | alpha_algo::SessionOp::Argmax
+        | alpha_algo::SessionOp::ArgminRaw | alpha_algo::SessionOp::ArgmaxRaw
+    ) {
+      // Extrema family: monotonic deque with a flat backing vector.
+      let is_max = matches!(op, alpha_algo::SessionOp::Max | alpha_algo::SessionOp::Argmax
+        | alpha_algo::SessionOp::ArgmaxRaw);
+      let is_arg = matches!(op, alpha_algo::SessionOp::Argmin | alpha_algo::SessionOp::Argmax
+        | alpha_algo::SessionOp::ArgminRaw | alpha_algo::SessionOp::ArgmaxRaw);
+      let raw = matches!(op, alpha_algo::SessionOp::ArgminRaw | alpha_algo::SessionOp::ArgmaxRaw);
+      let mut count = vec![0u64; values.len() + 1];
+      for (i, value) in values.iter().copied().enumerate() {
+        count[i + 1] = count[i] + u64::from(value.is_finite());
+      }
+      let mut deque: Vec<usize> = Vec::with_capacity(values.len());
+      let mut head = 0usize;
+      let mut out = Vec::with_capacity(values.len());
+      for (index, value) in values.iter().copied().enumerate() {
+        let start = starts[index] as usize;
+        while head < deque.len() && deque[head] < start { head += 1; }
+        if value.is_finite() {
+          while deque.len() > head {
+            let last = *deque.last().unwrap();
+            if (is_max && values[last] <= value) || (!is_max && values[last] >= value) {
+              deque.pop();
+            } else { break; }
+          }
+          deque.push(index);
+        }
+        if deque.len() == head {
+          out.push(f64::NAN);
+          continue;
+        }
+        let best = deque[head];
+        if !is_arg {
+          out.push(values[best]);
+        } else {
+          let distance = (index - best) as f64;
+          if raw {
+            out.push(distance);
+          } else {
+            let observations = count[index + 1] - count[start];
+            out.push(if observations <= 1 { 0.0 } else { distance / (observations - 1) as f64 });
+          }
+        }
+      }
+      return Ok(out.into_pyarray(py).unbind());
     }
     let mut state = alpha_algo::IntervalKernel::new(op)
       .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
     Ok(values.iter().copied().zip(starts.iter().copied()).zip(ends.iter().copied())
       .map(|((value, start), end)| state.update_explicit(start, end, value))
-      .collect())
+      .collect::<Vec<_>>().into_pyarray(py).unbind())
   }
 
   #[pyfunction]
   #[pyo3(signature = (x, y, starts, ends, correlation=false))]
   pub fn interval_rolling_pair(
-    x: PyReadonlyArray1<f64>, y: PyReadonlyArray1<f64>,
+    py: Python<'_>, x: PyReadonlyArray1<f64>, y: PyReadonlyArray1<f64>,
     starts: PyReadonlyArray1<u64>, ends: PyReadonlyArray1<u64>,
     correlation: bool,
-  ) -> PyResult<Vec<f64>> {
+  ) -> PyResult<Py<PyArray1<f64>>> {
     let x = x.as_slice()?;
     let y = y.as_slice()?;
     let starts = starts.as_slice()?;
@@ -131,11 +183,50 @@ mod algo_impl {
         "interval_rolling_pair length mismatch"
       ));
     }
+    let fixed = ends.iter().enumerate().all(|(i, end)| *end == i as u64);
+    if fixed {
+      // PairMoments family: prefix sums, O(1) per bar.
+      let n = x.len();
+      let mut count = vec![0u64; n + 1];
+      let (mut sx, mut sy) = (vec![0.0f64; n + 1], vec![0.0f64; n + 1]);
+      let (mut sxx, mut syy) = (vec![0.0f64; n + 1], vec![0.0f64; n + 1]);
+      let mut sxy = vec![0.0f64; n + 1];
+      for i in 0..n {
+        let finite = x[i].is_finite() && y[i].is_finite();
+        count[i + 1] = count[i] + u64::from(finite);
+        sx[i + 1] = sx[i] + if finite { x[i] } else { 0.0 };
+        sy[i + 1] = sy[i] + if finite { y[i] } else { 0.0 };
+        sxx[i + 1] = sxx[i] + if finite { x[i] * x[i] } else { 0.0 };
+        syy[i + 1] = syy[i] + if finite { y[i] * y[i] } else { 0.0 };
+        sxy[i + 1] = sxy[i] + if finite { x[i] * y[i] } else { 0.0 };
+      }
+      let mut out = Vec::with_capacity(n);
+      for (index, start) in starts.iter().copied().enumerate() {
+        let end = index + 1;
+        let start = start as usize;
+        let m = count[end] - count[start];
+        if m < 2 { out.push(f64::NAN); continue; }
+        let n = m as f64;
+        let (ax, ay) = (sx[end] - sx[start], sy[end] - sy[start]);
+        let (axx, ayy) = (sxx[end] - sxx[start], syy[end] - syy[start]);
+        let axy = sxy[end] - sxy[start];
+        let covariance = (axy - ax * ay / n) / (n - 1.0);
+        out.push(if !correlation {
+          covariance
+        } else {
+          let vx = (axx - ax * ax / n).max(0.0);
+          let vy = (ayy - ay * ay / n).max(0.0);
+          let denom = (vx * vy).sqrt();
+          if denom > 0.0 { (axy - ax * ay / n) / denom } else { f64::NAN }
+        });
+      }
+      return Ok(out.into_pyarray(py).unbind());
+    }
     let mut state = alpha_algo::PairIntervalState::new(correlation);
     Ok(x.iter().copied().zip(y.iter().copied())
       .zip(starts.iter().copied()).zip(ends.iter().copied())
       .map(|(((x, y), start), end)| state.update(start, end, x, y))
-      .collect())
+      .collect::<Vec<_>>().into_pyarray(py).unbind())
   }
 
   #[pyfunction]
