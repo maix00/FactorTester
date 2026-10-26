@@ -25,6 +25,7 @@ class EvalContext:
     trading_days: Any = None
     term_curves: Any = None
     categories: Any = None
+    timeline: Any = None
 
 
 class FactorExpr:

@@ -815,3 +815,15 @@ def test_signal_align_multi_product_batch_incremental_reconcile():
                 [incremental['A'], incremental['B']],
                 [batch.loc[timestamp, 'A'], batch.loc[timestamp, 'B']],
             )
+
+
+def test_batch_plan_reuses_canonical_timeline():
+    index = pd.date_range('2026-01-05', periods=3, freq='min')
+    frame = pd.DataFrame({'CLOSE': [1.0, 2.0, 3.0]}, index=index)
+    ctx = EvalContext(products=('A',), preloaded={'A': frame})
+    expression = ColumnRef('CLOSE').rolling(2).mean()
+    expression.evaluate(ctx)
+    timeline = ctx.timeline
+    assert timeline is not None
+    expression.evaluate(ctx)
+    assert ctx.timeline is timeline

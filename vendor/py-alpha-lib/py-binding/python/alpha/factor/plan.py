@@ -68,21 +68,13 @@ class _Builder:
         for expr in _walk(expressions):
             if type(expr).__name__ == "ColumnRef":
                 self.frames[expr._structural_key()] = expr._evaluate(ctx)
-        if self.frames:
-            self.index = next(iter(self.frames.values())).index
-        elif ctx.preloaded:
-            self.index = next(iter(ctx.preloaded.values())).index
-        else:
-            raise ValueError("alpha.factor plan requires a source timeline")
-        self.observed = np.ones((len(self.products), len(self.index)), dtype=np.uint8)
-        day_values = self.index
-        if isinstance(day_values, pd.MultiIndex):
-            day_values = day_values.get_level_values(0)
-        if isinstance(day_values, pd.DatetimeIndex):
-            day_values = day_values.normalize()
-        if ctx.trading_days is not None:
-            day_values = pd.Series(ctx.trading_days, index=self.index).sort_index().reindex(self.index)
-        self.days = pd.factorize(day_values, sort=False)[0].astype(np.int64)
+        if ctx.timeline is None:
+            from .timeline import build_timeline
+            object.__setattr__(ctx, "timeline", build_timeline(self.products, ctx.preloaded, ctx.trading_days))
+        timeline = ctx.timeline
+        self.index = timeline.index
+        self.observed = timeline.observed
+        self.days = timeline.days
         self.base = _Grid(
             self.plan.grid(
                 _times(self.index), self.days,

@@ -2,6 +2,7 @@
 
 from .cross_sectional import CrossSectionalExpr
 from .category import CategoryBoolRef
+from .timeline import Timeline, build_timeline
 from .inputs import CategoryMembership, MatchRequest, ProductId, TermCurve, TermPoint
 from .match import CANDIDATE, CURRENT, MatchBarDistanceExpr, MatchValueRef, bar_distance
 from .term import (TermStructureExpr, term_carry_annualized, term_contango, term_curvature, term_log_ratio, term_rank_value, term_ratio, term_slope, term_slope_segment, term_spread)
