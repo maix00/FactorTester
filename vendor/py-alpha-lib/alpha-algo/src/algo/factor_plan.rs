@@ -4,6 +4,7 @@
 //! one `MarketBar` at a time.  No pandas/Python objects are involved.
 
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use crate::algo::{IntervalKernel, SessionOp};
 use serde::Deserialize;
@@ -136,7 +137,7 @@ impl SessionWindow {
 }
 
 struct NodeState {
-    spec: ExprSpec,
+    spec: Arc<ExprSpec>,
     rolling: Vec<Option<IntervalKernel>>,
     trunc_history: Vec<VecDeque<f64>>,
     interval_count: u64,
@@ -233,7 +234,7 @@ impl FactorPlanKernel {
             let signal_state = matches!(&spec, ExprSpec::Signal { .. });
             let scope_state = matches!(&spec, ExprSpec::Scope { .. } | ExprSpec::SessionReset { .. });
             nodes.push(NodeState {
-                spec, rolling, ema, linreg,
+                spec: Arc::new(spec), rolling, ema, linreg,
                 trunc_history,
                 interval_count: 0, count_timestamp: None,
                 session_window,
@@ -256,7 +257,7 @@ impl FactorPlanKernel {
             return Err(crate::algo::Error::InvalidParameter("plan output out of range".into()));
         }
         for (index, node) in nodes.iter().enumerate() {
-            let children: &[usize] = match &node.spec {
+            let children: &[usize] = match node.spec.as_ref() {
                 ExprSpec::Column(_) | ExprSpec::Const(_) | ExprSpec::Product(_) | ExprSpec::BarCount { .. } | ExprSpec::Boundary { .. } | ExprSpec::Category { .. } | ExprSpec::Term { .. } => &[],
                 ExprSpec::Neg { child } | ExprSpec::Unary { child, .. } | ExprSpec::Rolling { child, .. }
                 | ExprSpec::SessionRolling { child, .. } | ExprSpec::RollingDynamic { child, .. } | ExprSpec::MatchDistance { child, .. }
@@ -285,7 +286,7 @@ impl FactorPlanKernel {
             if children.iter().any(|child| *child >= index) {
                 return Err(crate::algo::Error::InvalidParameter("plan child must precede parent".into()));
             }
-            match &node.spec {
+            match node.spec.as_ref() {
                 ExprSpec::Ema { span, .. } if *span == 0 => return Err(crate::algo::Error::InvalidParameter("ema span must be positive".into())),
                 ExprSpec::Linreg { window, .. } if *window == 0 => return Err(crate::algo::Error::InvalidParameter("linreg window must be positive".into())),
                 ExprSpec::Rolling { window, .. } if *window == 0 => return Err(crate::algo::Error::InvalidParameter("rolling window must be positive".into())),
@@ -341,10 +342,10 @@ impl FactorPlanKernel {
             // Borrow large calendar specs instead of cloning them per bar.
             // Store actual replay ordinals, not declared full-session sizes:
             // replay may begin midway through a calendar or contain missing bars.
-            if let ExprSpec::SessionRolling { child, min_periods, propagate_nan, .. } = &self.nodes[index].spec {
+            if let ExprSpec::SessionRolling { child, min_periods, propagate_nan, .. } = self.nodes[index].spec.as_ref() {
                 let (child, minimum, propagate) = (*child, *min_periods, *propagate_nan);
                 let node = &mut self.nodes[index];
-                let (spec, window) = (&node.spec, node.session_window.as_mut().unwrap());
+                let (spec, window) = (node.spec.as_ref(), node.session_window.as_mut().unwrap());
                 let ExprSpec::SessionRolling { sessions, .. } = spec else { unreachable!() };
                 let start = window.start(timestamp_ns, current, sessions)?;
                 let (head, tail) = self.slots.split_at_mut(index);
@@ -358,16 +359,16 @@ impl FactorPlanKernel {
                 }
                 continue;
             }
-            let spec = self.nodes[index].spec.clone();
+            let spec = Arc::clone(&self.nodes[index].spec);
             let (head, tail) = self.slots.split_at_mut(index);
             let out = &mut tail[0];
-            match spec {
+            match spec.as_ref() {
                 ExprSpec::Boundary { index: channel } => {
                     for product in 0..products {
                         out[product] = f64::from(boundaries[channel * products + product] != 0);
                     }
                 }
-                ExprSpec::Category { ref memberships } => {
+                ExprSpec::Category { memberships } => {
                     for product in 0..products {
                         out[product] = memberships.iter()
                             .filter(|(index, at, _)| *index == product && *at <= timestamp_ns)
@@ -381,25 +382,25 @@ impl FactorPlanKernel {
                         return Err(crate::algo::Error::InvalidParameter("counted bars must have increasing timestamps".into()));
                     }
                     node.count_timestamp = Some(timestamp_ns);
-                    node.interval_count += u64::from(timestamp_ns >= start_ns && timestamp_ns <= end_ns);
+                    node.interval_count += u64::from(timestamp_ns >= *start_ns && timestamp_ns <= *end_ns);
                     out.fill(node.interval_count as f64);
                 }
-                ExprSpec::Product(ref values) => {
+                ExprSpec::Product(values) => {
                     if values.len() != products { return Err(crate::algo::Error::InvalidParameter("product constant width mismatch".into())); }
                     out.copy_from_slice(values);
                 }
                 ExprSpec::Column(column) => {
-                    if column >= fields { return Err(crate::algo::Error::InvalidParameter("column out of range".into())); }
+                    if *column >= fields { return Err(crate::algo::Error::InvalidParameter("column out of range".into())); }
                     if fields == 1 { out.copy_from_slice(values); }
-                    else { for product in 0..products { out[product] = values[product * fields + column]; } }
+                    else { for product in 0..products { out[product] = values[product * fields + *column]; } }
                 }
-                ExprSpec::Const(value) => out.fill(value),
+                ExprSpec::Const(value) => out.fill(*value),
                 ExprSpec::Neg { child } => {
-                    let input = &head[child];
+                    let input = &head[*child];
                     for product in 0..products { out[product] = -input[product]; }
                 }
-                ExprSpec::Unary { ref op, child } => {
-                    let input = &head[child];
+                ExprSpec::Unary { op, child } => {
+                    let input = &head[*child];
                     for product in 0..products {
                         out[product] = match op.as_str() {
                             "abs" => input[product].abs(),
@@ -412,79 +413,79 @@ impl FactorPlanKernel {
                     }
                 }
                 ExprSpec::Binary { op, left, right } => {
-                    let a = &head[left]; let b = &head[right];
-                    for product in 0..products { out[product] = binary(op, a[product], b[product]); }
+                    let a = &head[*left]; let b = &head[*right];
+                    for product in 0..products { out[product] = binary(*op, a[product], b[product]); }
                 }
-                ExprSpec::Rolling { ref op, child, window, min_periods, propagate_nan, trunc_start, trunc_end, trunc_start_child, trunc_end_child } => {
-                    let input = &head[child];
+                ExprSpec::Rolling { op, child, window, min_periods, propagate_nan, trunc_start, trunc_end, trunc_start_child, trunc_end_child } => {
+                    let input = &head[*child];
                     let node = &mut self.nodes[index];
-                    let base = current.saturating_sub(window as u64 - 1);
-                    let truncated = trunc_start >= 0 || trunc_end >= 0 || trunc_start_child.is_some() || trunc_end_child.is_some();
+                    let base = current.saturating_sub(*window as u64 - 1);
+                    let truncated = *trunc_start >= 0 || *trunc_end >= 0 || trunc_start_child.is_some() || trunc_end_child.is_some();
                     for product in 0..products {
                         if truncated {
                             let history = &mut node.trunc_history[product];
                             history.push_back(input[product]);
-                            while history.len() > window { history.pop_front(); }
-                            let start_offset = trunc_start_child.map_or(trunc_start as f64, |offset| head[offset][product]);
-                            let end_offset = trunc_end_child.map_or(trunc_end as f64, |offset| head[offset][product]);
+                            while history.len() > *window { history.pop_front(); }
+                            let start_offset = trunc_start_child.map_or(*trunc_start as f64, |offset| head[offset][product]);
+                            let end_offset = trunc_end_child.map_or(*trunc_end as f64, |offset| head[offset][product]);
                             let start = if start_offset >= 0.0 { base.saturating_add(start_offset as u64) } else { base };
                             let end = if end_offset >= 0.0 { base.saturating_add(end_offset as u64) } else { current };
-                            out[product] = truncated_slice(op, history, start, end, current, min_periods, propagate_nan);
+                            out[product] = truncated_slice(op, history, start, end, current, *min_periods, *propagate_nan);
                         } else {
                             let Some(state) = node.rolling[product].as_mut() else { out[product] = f64::NAN; continue };
-                            state.set_semantics(min_periods, propagate_nan);
+                            state.set_semantics(*min_periods, *propagate_nan);
                             out[product] = state.update_explicit(base, current, input[product]);
                         }
                     }
                 }
-                ExprSpec::Term { ref op, near_rank, far_rank, depth, column } => {
+                ExprSpec::Term { op, near_rank, far_rank, depth, column } => {
                     for product in 0..products {
-                        let curve = curves.get(column * products + product);
-                        out[product] = curve.map_or(f64::NAN, |points| term_metric(op, points, near_rank, far_rank, depth));
+                        let curve = curves.get(*column * products + product);
+                        out[product] = curve.map_or(f64::NAN, |points| term_metric(op, points, *near_rank, *far_rank, *depth));
                     }
                 }
-                ExprSpec::MatchDistance { child, ref predicate, count, nearest, default, include_current } => {
-                    let input = &head[child];
+                ExprSpec::MatchDistance { child, predicate, count, nearest, default, include_current } => {
+                    let input = &head[*child];
                     let node = &mut self.nodes[index];
                     for product in 0..products {
                         let current_value = input[product];
                         let mut value = crate::algo::match_distance_iter(
                             current, current_value, node.match_history[product].iter().copied(),
-                            predicate, count as u64, nearest, default,
+                            predicate, *count as u64, *nearest, *default,
                         );
-                        if include_current && predicate.eval(current_value, current_value) != 0.0 { value = 0.0; }
+                        if *include_current && predicate.eval(current_value, current_value) != 0.0 { value = 0.0; }
                         out[product] = value;
                         let history = &mut node.match_history[product];
                         history.push_back((current, current_value));
-                        while history.len() > count { history.pop_front(); }
+                        while history.len() > *count { history.pop_front(); }
                     }
                 }
                 ExprSpec::SessionRolling { .. } => unreachable!("handled without cloning above"),
-                ExprSpec::RollingDynamic { child, ref windows, min_periods, propagate_nan, .. } => {
-                    let input = &head[child];
+                ExprSpec::RollingDynamic { child, windows, min_periods, propagate_nan, .. } => {
+                    let input = &head[*child];
                     let node = &mut self.nodes[index];
                     for product in 0..products {
                         let width = windows.get(product).copied().unwrap_or(1).max(1) as u64;
                         let start = current.saturating_sub(width - 1);
                         let Some(state) = node.rolling[product].as_mut() else { out[product] = f64::NAN; continue };
-                        state.set_semantics(min_periods, propagate_nan);
+                        state.set_semantics(*min_periods, *propagate_nan);
                         out[product] = state.update_explicit(start, current, input[product]);
                     }
                 }
-                ExprSpec::SessionReset { child, boundary, ref op, min_periods, propagate_nan } => {
-                    let input = &head[child];
-                    let boundary_values = &head[boundary];
+                ExprSpec::SessionReset { child, boundary, op, min_periods, propagate_nan } => {
+                    let input = &head[*child];
+                    let boundary_values = &head[*boundary];
                     let node = &mut self.nodes[index];
                     for product in 0..products {
                         if boundary_values[product] != 0.0 { node.scope_base[product] = current as usize; }
                         let start = node.scope_base[product] as u64;
                         let Some(state) = node.rolling[product].as_mut() else { out[product] = f64::NAN; continue };
-                        state.set_semantics(min_periods, propagate_nan);
+                        state.set_semantics(*min_periods, *propagate_nan);
                         out[product] = state.update_explicit(start, current, input[product]);
                     }
                 }
                 ExprSpec::Ema { child, min_periods, propagate_nan, .. } => {
-                    let input = &head[child];
+                    let input = &head[*child];
                     let node = &mut self.nodes[index];
                     for product in 0..products {
                         let Some(state) = node.ema[product].as_mut() else { out[product] = f64::NAN; continue };
@@ -492,8 +493,8 @@ impl FactorPlanKernel {
                         out[product] = state.update(input[product]);
                     }
                 }
-                ExprSpec::Linreg { child, ref op, .. } => {
-                    let input = &head[child];
+                ExprSpec::Linreg { child, op, .. } => {
+                    let input = &head[*child];
                     let node = &mut self.nodes[index];
                     for product in 0..products {
                         let Some(state) = node.linreg[product].as_mut() else { out[product] = f64::NAN; continue };
@@ -501,28 +502,28 @@ impl FactorPlanKernel {
                     }
                 }
                 ExprSpec::Shift { child, periods } => {
-                    let input = &head[child];
+                    let input = &head[*child];
                     let node = &mut self.nodes[index];
-                    let mut buffer = if node.history.len() > periods {
+                    let mut buffer = if node.history.len() > *periods {
                         node.history.pop_front().unwrap()
                     } else {
                         vec![f64::NAN; products]
                     };
                     buffer.copy_from_slice(input);
                     node.history.push_back(buffer);
-                    if node.history.len() <= periods { out.fill(f64::NAN); }
+                    if node.history.len() <= *periods { out.fill(f64::NAN); }
                     else { out.copy_from_slice(&node.history[0]); }
                 }
                 ExprSpec::Where { condition, when_true, when_false } => {
-                    let c = &head[condition]; let a = &head[when_true]; let b = &head[when_false];
+                    let c = &head[*condition]; let a = &head[*when_true]; let b = &head[*when_false];
                     for product in 0..products { out[product] = if c[product] != 0.0 { a[product] } else { b[product] }; }
                 }
                 ExprSpec::Cross { op, child } => {
-                    let input = &head[child];
+                    let input = &head[*child];
                     let node = &mut self.nodes[index];
                     node.cross_scratch.clear();
                     node.cross_scratch.extend((0..products).filter_map(|product| input[product].is_finite().then_some((product, input[product]))));
-                    if op == CrossOp::ZScore {
+                    if *op == CrossOp::ZScore {
                         let n = node.cross_scratch.len() as f64;
                         if n < 2.0 {
                             out.fill(f64::NAN);
@@ -547,46 +548,46 @@ impl FactorPlanKernel {
                 }
                 ExprSpec::Since { condition, count, include_current, nearest, default_scope, default }
                 | ExprSpec::Distance { condition, count, include_current, nearest, default_scope, default } => {
-                    let input = &head[condition];
+                    let input = &head[*condition];
                     let node = &mut self.nodes[index];
                     for product in 0..products {
-                        if current as usize % count == 0 { node.since_base[product] = current as usize; node.since_first[product] = None; node.since_last[product] = None; }
+                        if current as usize % *count == 0 { node.since_base[product] = current as usize; node.since_first[product] = None; node.since_last[product] = None; }
                         let truth = input[product].is_finite() && input[product] != 0.0;
-                        if truth && include_current { if node.since_first[product].is_none() { node.since_first[product] = Some(current as usize); } node.since_last[product] = Some(current as usize); }
-                        let matched = if nearest { node.since_last[product] } else { node.since_first[product] };
-                        out[product] = match matched { Some(hit) => (current as usize - hit) as f64, None => if default_scope { (current as usize - node.since_base[product]) as f64 } else { default } };
-                        if truth && !include_current { if node.since_first[product].is_none() { node.since_first[product] = Some(current as usize); } node.since_last[product] = Some(current as usize); }
+                        if truth && *include_current { if node.since_first[product].is_none() { node.since_first[product] = Some(current as usize); } node.since_last[product] = Some(current as usize); }
+                        let matched = if *nearest { node.since_last[product] } else { node.since_first[product] };
+                        out[product] = match matched { Some(hit) => (current as usize - hit) as f64, None => if *default_scope { (current as usize - node.since_base[product]) as f64 } else { *default } };
+                        if truth && !*include_current { if node.since_first[product].is_none() { node.since_first[product] = Some(current as usize); } node.since_last[product] = Some(current as usize); }
                     }
                 }
                 ExprSpec::Scope { child, count, op, min_periods, propagate_nan, sessions } => {
-                    let input = &head[child];
+                    let input = &head[*child];
                     let node = &mut self.nodes[index];
                     if !sessions.is_empty() {
                         let session = sessions.iter().position(|(start, end, _)| timestamp_ns >= *start && timestamp_ns <= *end);
                         if session != node.scope_session { node.scope_session = session; node.scope_base.fill(current as usize); for state in node.rolling.iter_mut().flatten() { state.reset_at(current); } }
-                    } else if current as usize % count == 0 { node.scope_base.fill(current as usize); }
+                    } else if current as usize % *count == 0 { node.scope_base.fill(current as usize); }
                     for product in 0..products {
                         let Some(state) = node.rolling[product].as_mut() else { out[product] = f64::NAN; continue };
-                        state.set_semantics(min_periods, propagate_nan);
+                        state.set_semantics(*min_periods, *propagate_nan);
                         out[product] = state.update_explicit(node.scope_base[product] as u64, current, input[product]);
                     }
                 }
                 ExprSpec::Signal { child, signal_ns, sessions, basepoint, include_current, partial } => {
-                    let input = &head[child];
+                    let input = &head[*child];
                     let node = &mut self.nodes[index];
                     let session = sessions.iter().position(|(start, end, _)| timestamp_ns >= *start && timestamp_ns <= *end);
                     if session != node.signal_session { node.signal_session = session; node.signal_last.fill(f64::NAN); node.signal_next.fill(None); node.signal_pending.fill(None); node.signal_prev.fill(f64::NAN); }
                     let session_end = session.map(|position| sessions[position].1);
                     for product in 0..products {
-                        if node.signal_next[product].is_none() { let anchor = session.map_or(timestamp_ns, |position| sessions[position].2); let first = if anchor % signal_ns == 0 { anchor } else { (anchor / signal_ns + 1) * signal_ns }; node.signal_next[product] = Some(first); }
+                        if node.signal_next[product].is_none() { let anchor = session.map_or(timestamp_ns, |position| sessions[position].2); let first = if anchor % *signal_ns == 0 { anchor } else { (anchor / *signal_ns + 1) * *signal_ns }; node.signal_next[product] = Some(first); }
                         let next = node.signal_next[product].unwrap_or(i64::MAX);
                         let target = timestamp_ns >= next;
                         let emit_partial = partial == "emit" && session_end == Some(timestamp_ns) && timestamp_ns < next;
                         if target || emit_partial {
-                            let value = if basepoint == "first" { node.signal_pending[product].unwrap_or(if include_current { input[product] } else { f64::NAN }) } else if include_current { input[product] } else { node.signal_prev[product] };
+                            let value = if basepoint.as_str() == "first" { node.signal_pending[product].unwrap_or(if *include_current { input[product] } else { f64::NAN }) } else if *include_current { input[product] } else { node.signal_prev[product] };
                             node.signal_last[product] = value; node.signal_pending[product] = None;
                             if target { node.signal_next[product] = Some(next + signal_ns); }
-                        } else if basepoint == "first" && node.signal_pending[product].is_none() { node.signal_pending[product] = Some(input[product]); }
+                        } else if basepoint.as_str() == "first" && node.signal_pending[product].is_none() { node.signal_pending[product] = Some(input[product]); }
                         node.signal_prev[product] = input[product];
                         out[product] = node.signal_last[product];
                     }
