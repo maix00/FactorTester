@@ -76,7 +76,7 @@ impl PanelPlan {
         if grid>=self.grids.len() || children.iter().any(|&c|c>=self.nodes.len()) { return Err(error("invalid grid or non-topological child")); }
         let valid=matches!(op.as_str(),"column"|"const"|"product"|"reindex"|"where"|"shift"|"since"|"distance"|"term"|
             "neg"|"abs"|"sign"|"sqrt"|"log"|"tanh"|"not"|"add"|"sub"|"mul"|"div"|"pow"|"max"|"min"|
-            "gt"|"lt"|"ge"|"le"|"eq"|"ne"|"and"|"or") || op.starts_with("rolling:") || op.starts_with("scope:") || op.starts_with("cross:");
+            "gt"|"lt"|"ge"|"le"|"eq"|"ne"|"and"|"or") || op.starts_with("rolling:") || op.starts_with("scope:") || op.starts_with("cross:") || op.starts_with("session_rolling:");
         if !valid { return Err(error(format!("unknown plan operation {op}"))); }
         self.nodes.push(Node {op,children,params,indices,grid}); Ok(self.nodes.len()-1)
     }
@@ -149,6 +149,7 @@ impl PanelPlan {
                 op if op.starts_with("cross:")=>self.cross(&op[6..],&args,node,products,rows)?,
                 "since"|"distance"=>self.search(&args,node,grid,products,rows)?,
                 op if op.starts_with("rolling:")||op.starts_with("scope:")=>self.temporal(&args,node,grid,products,rows)?,
+                op if op.starts_with("session_rolling:")=>self.session_rolling(&op[16..],&args,node,grid,products,rows)?,
                 "shift"=> {let mut out=vec![f64::NAN;rows*width];let n=p[0]as usize;for g in 0..width {let observed:Vec<usize>=(0..rows).filter(|&r|width!=products||grid.observed[g*rows+r]!=0).collect();for i in n..observed.len(){out[g*rows+observed[i]]=args[0].at(g,observed[i-n]);}}owned(out,width)},
                 "where"=> {let mut out=vec![0.0;rows*width];for g in 0..width {for t in 0..rows{out[g*rows+t]=if args[0].at(g,t)!=0.0{args[1].at(g,t)}else{args[2].at(g,t)};}}owned(out,width)},
                 op=> {let mut out=vec![0.0;rows*width];for g in 0..width{for t in 0..rows{out[g*rows+t]=if args.len()==1{unary(op,args[0].at(g,t))}else{binary(op,args[0].at(g,t),args[1].at(g,t))};}}owned(out,width)},
@@ -203,6 +204,24 @@ impl PanelPlan {
                 chunk[t]=if let Some(state)=state.as_mut(){state.update_explicit(start as u64,end.min(ordinal)as u64,x[ordinal])}
                     else {pair.update(start as u64,end.min(ordinal)as u64,x[ordinal],args[1].at(g,t))};
             }Ok(())
+        })?;Ok(Value{data:Data::Panel(Cow::Owned(out)),rows,width})
+    }
+    fn session_rolling(&self,op:&str,args:&[&Value<'_>],node:&Node,grid:&Grid,products:usize,rows:usize)->Result<Value<'static>> {
+        let p=&node.params;let width=args[0].width.max(1);let mut out=vec![f64::NAN;rows*width];
+        let lookback=p[0] as usize;let min=p[1] as usize;let prop=p[2]!=0.0;
+        let count=node.indices[0] as usize;
+        if count==0 || node.indices.len()!=1+count*3 {return Err(error("invalid session rolling sessions"));}
+        let sessions:Vec<(i64,i64,usize)>=node.indices[1..].chunks_exact(3)
+            .map(|item|(item[0],item[1],item[2] as usize)).collect();
+        let kernel_op=session_op(op,p[3])?;
+        out.par_chunks_mut(rows.max(1)).enumerate().try_for_each(|(g,chunk)|->Result<()>{
+            let mut state=crate::algo::IntervalKernel::new_explicit(kernel_op)?.with_semantics(min,prop);
+            for t in 0..rows {
+                let current_session=sessions.iter().position(|(start,end,_)|grid.times[t]>=*start&&grid.times[t]<=*end).unwrap_or(0);
+                let first=(current_session+1).saturating_sub(lookback);
+                let start: u64=sessions[..first].iter().map(|(_,_,bars)|*bars as u64).sum();
+                chunk[t]=state.update_explicit(start,t as u64,args[0].at(g,t));
+            } Ok(())
         })?;Ok(Value{data:Data::Panel(Cow::Owned(out)),rows,width})
     }
     fn search(&self,args:&[&Value<'_>],node:&Node,grid:&Grid,products:usize,rows:usize)->Result<Value<'static>> {
@@ -349,4 +368,25 @@ fn panel_linreg(values: &[f64], window: usize, metric: &str, min: usize, prop: b
         };
     }
     out
+}
+
+#[cfg(test)]
+mod session_rolling_tests {
+    use super::*;
+
+    #[test]
+    fn batch_session_rolling_uses_calendar_bar_counts() {
+        let mut plan = PanelPlan::new();
+        let grid = plan.grid(&[0, 1, 2, 3, 4], &[0, 0, 0, 0, 0], &[1; 5]).unwrap();
+        let column = plan.add("column".into(), vec![], vec![0.0], vec![], grid).unwrap();
+        let node = plan.add(
+            "session_rolling:mean".into(), vec![column], vec![1.0, 1.0, 0.0, 0.5],
+            vec![2, 0, 2, 2, 3, 5, 3], grid,
+        ).unwrap();
+        let values = [1.0, 3.0, 10.0, 20.0, 30.0];
+        let out = plan.execute(&[&values], &[node], 1).unwrap();
+        assert!((out[0][2] - 14.0 / 3.0).abs() < 1e-9);
+        assert_eq!(out[0][3], 15.0);
+        assert_eq!(out[0][4], 20.0);
+    }
 }
