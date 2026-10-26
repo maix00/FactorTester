@@ -28,5 +28,7 @@ fn main() {
     run("ema", r#"{"columns":["C"],"nodes":[{"kind":"column","index":0},{"kind":"rolling","child":0,"window":480,"op":"ema","min_periods":1,"propagate_nan":true}],"outputs":[1]}"#, 1, n);
     run("linreg_slope", r#"{"columns":["C"],"nodes":[{"kind":"column","index":0},{"kind":"rolling","child":0,"window":480,"op":"linreg_slope","min_periods":3,"propagate_nan":true}],"outputs":[1]}"#, 1, n);
     run("since", r#"{"columns":["C"],"nodes":[{"kind":"column","index":0},{"kind":"since","condition":0,"count":3,"include_current":true,"nearest":true,"default_scope":true,"default":0.0}],"outputs":[1]}"#, 1, n);
+    run("argmin_raw", r#"{"columns":["C"],"nodes":[{"kind":"column","index":0},{"kind":"rolling","child":0,"window":480,"op":"argmin_raw","min_periods":1,"propagate_nan":true}],"outputs":[1]}"#, 1, n);
+    run("quantile", r#"{"columns":["C"],"nodes":[{"kind":"column","index":0},{"kind":"rolling","child":0,"window":480,"op":"quantile","quantile":0.5,"min_periods":1,"propagate_nan":true}],"outputs":[1]}"#, 1, n);
     run("cross_rank", r#"{"columns":["C"],"nodes":[{"kind":"column","index":0},{"kind":"cross","child":0,"op":"rank"}],"outputs":[1]}"#, 4, n);
 }
