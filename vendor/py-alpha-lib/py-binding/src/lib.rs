@@ -3063,11 +3063,13 @@ impl FactorPlanState {
       .into_pyarray(py).unbind())
   }
 
+  #[pyo3(signature = (timestamp_ns, values, boundaries, curves=None))]
   fn update_context(&mut self, py: Python<'_>, timestamp_ns: i64,
-                    values: numpy::PyReadonlyArray1<f64>, boundaries: numpy::PyReadonlyArray1<u8>) -> PyResult<Py<numpy::PyArray1<f64>>> {
+                    values: numpy::PyReadonlyArray1<f64>, boundaries: numpy::PyReadonlyArray1<u8>,
+                    curves: Option<Vec<Vec<(f64, f64)>>>) -> PyResult<Py<numpy::PyArray1<f64>>> {
     use numpy::IntoPyArray;
     let mut result = Vec::new();
-    self.inner.update_into_context(timestamp_ns, values.as_slice()?, boundaries.as_slice()?, &[], &mut result)
+    self.inner.update_into_context(timestamp_ns, values.as_slice()?, boundaries.as_slice()?, &curves.unwrap_or_default(), &mut result)
       .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
     Ok(result.into_pyarray(py).unbind())
   }

@@ -33,6 +33,7 @@ def compile_rust_incremental(expressions: Mapping[str, Any], products: tuple[Any
 
     columns: list[str] = []
     boundaries: list[str] = []
+    term_columns: list[str] = []
     nodes: list[dict[str, Any]] = []
     keys: list[str] = []
     outputs: list[int] = []
@@ -60,6 +61,11 @@ def compile_rust_incremental(expressions: Mapping[str, Any], products: tuple[Any
                 if name not in boundaries:
                     boundaries.append(name)
                 node["index"] = boundaries.index(name)
+            elif node.get("kind") == "term":
+                name = spec["term_columns"][node["column"]]
+                if name not in term_columns:
+                    term_columns.append(name)
+                node["column"] = term_columns.index(name)
             local_to_global[local_index] = len(nodes)
             if key:
                 by_key[key] = len(nodes)
@@ -69,7 +75,7 @@ def compile_rust_incremental(expressions: Mapping[str, Any], products: tuple[Any
     state = FactorPlanState(json.dumps({
         "columns": columns, "keys": keys, "nodes": nodes, "outputs": outputs,
     }), len(products))
-    return RustIncrementalExecutor(expressions, products, columns, state, specs, len(nodes), boundaries, event_line)
+    return RustIncrementalExecutor(expressions, products, columns, state, specs, len(nodes), boundaries, event_line, term_columns)
 
 
 class _NodePlan:
@@ -87,7 +93,7 @@ class RustIncrementalExecutor:
 
     uses_rust = True
 
-    def __init__(self, expressions, products, columns, state, specs, node_count, boundaries=(), event_line=None) -> None:
+    def __init__(self, expressions, products, columns, state, specs, node_count, boundaries=(), event_line=None, term_columns=()) -> None:
         self._aliases = tuple(expressions)
         self._products = tuple(products)
         self._columns = tuple(columns)
@@ -101,6 +107,7 @@ class RustIncrementalExecutor:
         self._flat = np.zeros(len(products) * max(1, len(columns)), dtype=float)
         self._flags = np.zeros(len(boundaries) * len(products), dtype=np.uint8)
         self._trading_day = None
+        self._term_columns = tuple(term_columns)
 
     def _field(self, fields, name: str) -> float:
         if name in fields:
@@ -137,8 +144,23 @@ class RustIncrementalExecutor:
             else:
                 self._flags[offset:offset + len(self._products)].fill(bool(flag))
         stamp = pd.Timestamp(timestamp).value
-        raw = np.asarray(self._state.update_context(stamp, self._flat, self._flags)
-                         if self._boundaries else self._state.update_at(stamp, self._flat), dtype=float)
+        curves = []
+        if self._term_columns:
+            from tools.factors.expr.term_structure_math import normalize_term_curve
+            from tools.products.AdjustableTermStructure import TERM_DAYS_TO_MATURITY_COL
+            if term_curves_by_product is None or any(product not in term_curves_by_product for product in self._products):
+                raise KeyError("TERM_STRUCTURE snapshot is missing curve")
+            frames = [normalize_term_curve(term_curves_by_product[product]) for product in self._products]
+            for column in self._term_columns:
+                for frame in frames:
+                    if frame.empty:
+                        curves.append([])
+                    else:
+                        days = frame[TERM_DAYS_TO_MATURITY_COL].to_numpy(dtype=float, copy=False)
+                        prices = frame[column].to_numpy(dtype=float, copy=False)
+                        curves.append(list(zip(days, prices)))
+        raw = np.asarray(self._state.update_context(stamp, self._flat, self._flags, curves)
+                         if self._boundaries or self._term_columns else self._state.update_at(stamp, self._flat), dtype=float)
         self._trading_day = trading_day
         matrix = raw.reshape(len(self._aliases), len(self._products))
         self._latest = {

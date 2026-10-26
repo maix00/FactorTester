@@ -44,6 +44,7 @@ def _match_predicate(expr) -> dict:
 def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_calendar=None) -> dict[str, Any] | None:
     columns: list[str] = []
     boundaries: list[str] = []
+    term_columns: list[str] = []
     nodes: list[dict[str, Any]] = []
     keys: list[str] = []
     key_tuples: list[tuple] = []
@@ -67,8 +68,10 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
             node = {"kind": "const", "value": float(expr.value)}
         elif isinstance(expr, TermStructureOp):
             near, far, depth, column = expr._term_param_values()
+            if column not in term_columns:
+                term_columns.append(column)
             node = {"kind": "term", "op": expr.op, "near_rank": near,
-                    "far_rank": far, "depth": depth}
+                    "far_rank": far, "depth": depth, "column": term_columns.index(column)}
         elif isinstance(expr, IntervalBarsExpr):
             node = {"kind": "bar_count", "start_ns": expr.start_ns, "end_ns": expr.end_ns}
         elif isinstance(expr, WindowBarsExpr):
@@ -294,7 +297,7 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
     output = build(expression)
     if output is None:
         return None
-    return {"columns": columns, "boundaries": boundaries, "keys": keys, "key_tuples": key_tuples,
+    return {"columns": columns, "boundaries": boundaries, "term_columns": term_columns, "keys": keys, "key_tuples": key_tuples,
             "nodes": nodes, "outputs": [output]}
 
 
