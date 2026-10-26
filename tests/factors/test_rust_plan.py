@@ -201,7 +201,9 @@ def test_compat_plan_rejects_truncated_but_compiles_match_distance():
     from tools.factors import scope_bars
 
     close = ColumnRef(DataColumn.CLOSE)
-    assert alpha_plan_spec(close.rolling(5).truncate(0, 2).mean()) is None
+    truncated = alpha_plan_spec(close.rolling(5).truncate(0, 2).mean())
+    assert truncated['nodes'][-1]['trunc_start'] == 0
+    assert truncated['nodes'][-1]['trunc_end'] == 2
     from tools.factors import CANDIDATE, CURRENT, bar_distance
     condition = CURRENT - CANDIDATE > 0
     spec = alpha_plan_spec(bar_distance(close, condition, scope=scope_bars(3)))
@@ -239,3 +241,14 @@ def test_batch_250d_compiles_to_rust_session_rolling():
     )
     result = ColumnRef(DataColumn.CLOSE).rolling(window_bars('250d')).mean().evaluate(ctx=ctx)
     np.testing.assert_allclose(result['A'].to_numpy(), [1.0, 1.5, 2.0, 2.5])
+
+
+def test_compat_plan_emits_scalar_truncation():
+    from tools.factors import window_bars
+    from tools.factors.alpha_plan import alpha_plan_spec
+
+    expression = ColumnRef(DataColumn.CLOSE).rolling(5).truncate(1, 3).mean()
+    spec = alpha_plan_spec(expression, source_freq=DataFreq.MIN1, products=('A',))
+    node = spec['nodes'][-1]
+    assert node['trunc_start'] == 1
+    assert node['trunc_end'] == 3

@@ -22,7 +22,7 @@ pub enum ExprSpec {
     Const(f64),
     Product(Vec<f64>),
     Category { memberships: Vec<(usize, i64, bool)> },
-    Rolling { child: usize, window: usize, op: SessionOp, min_periods: usize, propagate_nan: bool },
+    Rolling { child: usize, window: usize, op: SessionOp, min_periods: usize, propagate_nan: bool, trunc_start: i64, trunc_end: i64 },
     Ema { child: usize, span: usize, min_periods: usize, propagate_nan: bool },
     RollingDynamic { child: usize, windows: Vec<usize>, op: SessionOp, min_periods: usize, propagate_nan: bool },
     Term { op: String, near_rank: usize, far_rank: usize, depth: usize },
@@ -291,14 +291,20 @@ impl FactorPlanKernel {
                     let a = &head[left]; let b = &head[right];
                     for product in 0..products { out[product] = binary(op, a[product], b[product]); }
                 }
-                ExprSpec::Rolling { child, window, min_periods, propagate_nan, .. } => {
+                ExprSpec::Rolling { child, window, min_periods, propagate_nan, trunc_start, trunc_end, .. } => {
                     let input = &head[child];
                     let node = &mut self.nodes[index];
-                    let start = current.saturating_sub(window as u64 - 1);
-                    for product in 0..products {
-                        let Some(state) = node.rolling[product].as_mut() else { out[product] = f64::NAN; continue };
-                        state.set_semantics(min_periods, propagate_nan);
-                        out[product] = state.update_explicit(start, current, input[product]);
+                    let base = current.saturating_sub(window as u64 - 1);
+                    let start = if trunc_start >= 0 { base.saturating_add(trunc_start as u64) } else { base };
+                    let end = if trunc_end >= 0 { base.saturating_add(trunc_end as u64) } else { current };
+                    if start > end {
+                        for product in 0..products { out[product] = f64::NAN; }
+                    } else {
+                        for product in 0..products {
+                            let Some(state) = node.rolling[product].as_mut() else { out[product] = f64::NAN; continue };
+                            state.set_semantics(min_periods, propagate_nan);
+                            out[product] = state.update_explicit(start, end, input[product]);
+                        }
                     }
                 }
                 ExprSpec::Term { ref op, near_rank, far_rank, depth } => {
@@ -462,6 +468,8 @@ impl FactorPlanKernel {
 }
 
 fn default_basepoint() -> String { "last".into() }
+fn default_neg_one() -> i64 { -1 }
+
 fn default_include_current() -> bool { true }
 fn default_partial() -> String { "drop".into() }
 
@@ -572,7 +580,9 @@ enum RawNode {
     Product { values: Vec<f64> },
     Category { memberships: Vec<[i64; 3]> },
     Rolling { child: usize, window: usize, op: String, min_periods: usize,
-              propagate_nan: bool, #[serde(default)] quantile: Option<f64> },
+              propagate_nan: bool, #[serde(default)] quantile: Option<f64>,
+              #[serde(default = "default_neg_one")] trunc_start: i64,
+              #[serde(default = "default_neg_one")] trunc_end: i64 },
     Scope { child: usize, count: usize, op: String, min_periods: usize, propagate_nan: bool,
             #[serde(default)] sessions: Vec<[i64; 3]> },
     RollingDynamic { child: usize, windows: Vec<usize>, op: String, min_periods: usize, propagate_nan: bool },
@@ -627,13 +637,13 @@ impl FactorPlanKernel {
                 RawNode::Category { memberships } => ExprSpec::Category {
                     memberships: memberships.into_iter().map(|item| (item[0] as usize, item[1], item[2] != 0)).collect(),
                 },
-                RawNode::Rolling { child, window, op, min_periods, propagate_nan, quantile } => {
+                RawNode::Rolling { child, window, op, min_periods, propagate_nan, quantile, trunc_start, trunc_end } => {
                     if op == "ema" {
                         ExprSpec::Ema { child, span: window, min_periods, propagate_nan }
                     } else if op.starts_with("linreg_") {
                         ExprSpec::Linreg { child, window, op, min_periods, propagate_nan }
                     } else {
-                        ExprSpec::Rolling { child, window, op: session_op(&op, quantile)?, min_periods, propagate_nan }
+                        ExprSpec::Rolling { child, window, op: session_op(&op, quantile)?, min_periods, propagate_nan, trunc_start, trunc_end }
                     }
                 }
                 RawNode::Term { op, near_rank, far_rank, depth } =>
@@ -694,7 +704,7 @@ mod tests {
     fn rolling_chain_and_binary_are_evaluated_in_rust() {
         let specs = vec![
             ExprSpec::Column(0),
-            ExprSpec::Rolling { child: 0, window: 2, op: SessionOp::Mean, min_periods: 1, propagate_nan: true },
+            ExprSpec::Rolling { child: 0, window: 2, op: SessionOp::Mean, min_periods: 1, propagate_nan: true, trunc_start: -1, trunc_end: -1 },
             ExprSpec::Const(1.0),
             ExprSpec::Binary { op: BinaryOp::Add, left: 1, right: 2 },
         ];
@@ -828,6 +838,19 @@ mod term_plan_tests {
         let mut kernel = FactorPlanKernel::from_spec_json(json, 1).unwrap();
         let values = kernel.update_with_curves(0, &[1.0], &[vec![(30.0, 10.0), (90.0, 8.0)]]).unwrap();
         assert_eq!(values, vec![2.0]);
+    }
+
+    #[test]
+    fn rolling_truncates_fixed_window_positions() {
+        let json = r#"{"columns":["C"],"nodes":[
+          {"kind":"column","index":0},
+          {"kind":"rolling","child":0,"window":3,"op":"mean","min_periods":1,"propagate_nan":false,"trunc_start":1,"trunc_end":2}
+        ],"outputs":[1]}"#;
+        let mut kernel = FactorPlanKernel::from_spec_json(json, 1).unwrap();
+        kernel.update(&[1.0]).unwrap();
+        kernel.update(&[2.0]).unwrap();
+        assert_eq!(kernel.update(&[3.0]).unwrap(), vec![2.5]);
+        assert_eq!(kernel.update(&[4.0]).unwrap(), vec![3.5]);
     }
 
     #[test]
