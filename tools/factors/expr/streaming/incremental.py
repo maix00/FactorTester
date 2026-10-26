@@ -170,6 +170,54 @@ class SignalHoldNode:
         return cache[key]
 
 
+class RustSessionRollingNode:
+    """Session-spanning mean/sum executed by py-alpha-lib's Rust state."""
+
+    def __init__(
+        self, op: str, child: StreamingNode, calendar: Any,
+        lookback_sessions: int, width: int,
+    ) -> None:
+        if op not in {"rolling_mean", "rolling_sum"}:
+            raise UnsupportedStreamingFactor(
+                f"Rust session state does not support {op}"
+            )
+        from alpha import SessionRollingState
+
+        self.op = op
+        self.child = child
+        self.calendar = calendar
+        self.lookback_sessions = int(lookback_sessions)
+        self._width = width
+        self._mean = op == "rolling_mean"
+        self._states = [
+            SessionRollingState(self.lookback_sessions, self._mean)
+            for _ in range(width)
+        ]
+
+    def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
+        key = id(self)
+        if key in cache:
+            return cache[key]
+        timestamp = getattr(market, "timestamp", None)
+        if timestamp is None:
+            raise UnsupportedStreamingFactor(
+                "session-window factor needs bar timestamps"
+            )
+        session, _size = self.calendar.window_for_timestamp(
+            int(pd.Timestamp(timestamp).value), self.lookback_sessions,
+        )
+        values = np.asarray(self.child.update(market, cache), dtype=float)
+        if values.shape != (self._width,):
+            raise ValueError("Rust session rolling input width changed")
+        result = np.asarray(
+            [state.update(int(session), float(value))
+             for state, value in zip(self._states, values, strict=True)],
+            dtype=float,
+        )
+        cache[key] = result
+        return result
+
+
 class RollingWindowNode:
     def __init__(
         self,
@@ -1313,14 +1361,27 @@ def compile_streaming_factor(
                     raise UnsupportedStreamingFactor("rolling_ema expects one streaming operand")
                 node = ExpandingEwmNode(children[0], window, len(products))
             else:
-                node = RollingWindowNode(
-                    expr.op,
-                    children,
-                    window,
-                    len(products),
-                    session_calendar=session_calendar,
-                    lookback_sessions=lookback_sessions,
-                )
+                if (
+                    session_calendar is not None
+                    and lookback_sessions is not None
+                    and expr.op in {"rolling_mean", "rolling_sum"}
+                ):
+                    node = RustSessionRollingNode(
+                        expr.op,
+                        children[0],
+                        session_calendar,
+                        lookback_sessions,
+                        len(products),
+                    )
+                else:
+                    node = RollingWindowNode(
+                        expr.op,
+                        children,
+                        window,
+                        len(products),
+                        session_calendar=session_calendar,
+                        lookback_sessions=lookback_sessions,
+                    )
         elif isinstance(expr, GroupByScopeOp):
             op_name = expr.op
             operands = expr.operands
