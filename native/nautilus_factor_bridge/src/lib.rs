@@ -83,6 +83,37 @@ impl FactorEngine for MultiWindowEngine {
     }
 }
 
+/// One window across every product in a `MarketBar`.
+pub struct ProductWindowEngine {
+    window: usize,
+    states: Vec<IntervalKernel>,
+    ordinal: u64,
+}
+
+impl ProductWindowEngine {
+    pub fn new(products: usize, window: usize, op: SessionOp) -> Result<Self, alpha_algo::Error> {
+        if products == 0 || window == 0 {
+            return Err(alpha_algo::Error::InvalidParameter("products/window must be positive".into()));
+        }
+        let states = (0..products).map(|_| IntervalKernel::new_explicit(op)).collect::<Result<Vec<_>, _>>()?;
+        Ok(Self { window, states, ordinal: 0 })
+    }
+}
+
+impl FactorEngine for ProductWindowEngine {
+    type Error = alpha_algo::Error;
+
+    fn update(&mut self, bar: &MarketBar) -> Result<Vec<f64>, Self::Error> {
+        if bar.values.len() != self.states.len() {
+            return Err(alpha_algo::Error::InvalidParameter("market bar product width mismatch".into()));
+        }
+        let current = self.ordinal;
+        let start = current.saturating_sub(self.window as u64 - 1);
+        self.ordinal += 1;
+        Ok(self.states.iter_mut().zip(bar.values.iter()).map(|(state, value)| state.update_explicit(start, current, *value)).collect())
+    }
+}
+
 /// Nautilus-side adapter contract.  Implemented by the actor that receives
 /// Nautilus bars; it does not leak Nautilus types into py-alpha-lib.
 pub trait NautilusMarketAdapter {
@@ -172,6 +203,15 @@ pub mod nautilus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn product_window_engine_updates_every_product() {
+        let mut engine = ProductWindowEngine::new(2, 2, SessionOp::Mean).unwrap();
+        let bar = MarketBar::new(0, vec!["A".into(), "B".into()], vec![2.0, 4.0]);
+        assert_eq!(engine.update(&bar).unwrap(), vec![2.0, 4.0]);
+        let bar = MarketBar::new(1, vec!["A".into(), "B".into()], vec![4.0, 8.0]);
+        assert_eq!(engine.update(&bar).unwrap(), vec![3.0, 6.0]);
+    }
 
     #[test]
     fn multi_window_engine_updates_shared_bar_once() {
