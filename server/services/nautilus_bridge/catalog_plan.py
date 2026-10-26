@@ -76,8 +76,19 @@ def catalog_staging_requests(run_spec: dict[str, Any]) -> list[dict[str, Any]]:
         if any(not isinstance(path, str) or not path.strip() for path in paths):
             raise ValueError(f"Nautilus product scope contains an invalid path: {scope}")
         entry = by_scope.setdefault(scope, {"scope_ref": scope, "paths": [], "strategy_ids": []})
-        start = str((run_spec.get("configuration") or {}).get("analysis", {}).get("start_date") or "")
-        end = str((run_spec.get("configuration") or {}).get("analysis", {}).get("end_date") or "")
+        configuration = run_spec.get("configuration") or {}
+        analysis = ((configuration.get("analyses") or {}).get("backtest") or {})
+        settings = ((analysis.get("execution") or {}).get("settings") or {})
+        start = str(
+            settings.get("start_date")
+            or (configuration.get("analysis") or {}).get("start_date")
+            or ""
+        )
+        end = str(
+            settings.get("end_date")
+            or (configuration.get("analysis") or {}).get("end_date")
+            or ""
+        )
         expanded_paths = _expand_product_paths(
             [str(path) for path in paths],
             start=start or "1900-01-01",
