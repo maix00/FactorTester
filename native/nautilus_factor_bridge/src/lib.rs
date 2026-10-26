@@ -251,6 +251,7 @@ pub mod nautilus {
         pending_timestamp: Option<i64>,
         future_slices: std::collections::BTreeMap<i64, std::collections::BTreeMap<String, Bar>>,
         max_future_slices: usize,
+        barrier_grace_ns: Option<i64>,
         sink: Option<Box<dyn Fn(&FactorUpdate) + Send>>,
     }
 
@@ -271,6 +272,7 @@ pub mod nautilus {
                 pending_timestamp: None,
                 future_slices: std::collections::BTreeMap::new(),
                 max_future_slices: 64,
+                barrier_grace_ns: None,
                 sink: None,
                 last_update: None,
             }
@@ -281,6 +283,15 @@ pub mod nautilus {
         pub fn last_error(&self) -> Option<&str> { self.last_error.as_deref() }
 
         pub fn set_max_future_slices(&mut self, limit: usize) { self.max_future_slices = limit.max(1); }
+
+        pub fn set_barrier_grace(&mut self, grace_ns: i64) { self.barrier_grace_ns = Some(grace_ns.max(0)); }
+
+        pub fn on_timer(&mut self, now_ns: i64) -> usize {
+            match self.barrier_grace_ns {
+                Some(grace) => self.expire_stale(now_ns, grace),
+                None => 0,
+            }
+        }
 
         pub fn set_update_sink(&mut self, sink: impl Fn(&FactorUpdate) + Send + 'static) {
             self.sink = Some(Box::new(sink));
@@ -663,6 +674,22 @@ mod nautilus_tests {
         assert_eq!(actor.expire_stale(5_000, 1_000), 1);
         assert_eq!(actor.pending_len(), 0);
         assert!(actor.last_error().unwrap().contains("stale"));
+    }
+
+    #[test]
+    fn factor_actor_timer_expires_incomplete_slices() {
+        let json = r#"{"columns":["CLOSE"],"nodes":[{"kind":"column","index":0}],"outputs":[0]}"#;
+        let mut actor = nautilus::FactorActor::from_plan_json("factor-timer-test", 2, json).unwrap();
+        actor.expect_products(&["A.B", "C.D"]);
+        actor.set_barrier_grace(1_000);
+        let bar = Bar::new(
+            BarType::from("A.B-1-MINUTE-LAST-EXTERNAL"),
+            Price::from("1.0"), Price::from("1.0"), Price::from("1.0"),
+            Price::from("1.0"), Quantity::from("1"), 1_000.into(), 1_000.into(),
+        );
+        actor.on_completed_bar(&bar);
+        assert_eq!(actor.on_timer(3_000), 1);
+        assert_eq!(actor.pending_len(), 0);
     }
 
     #[test]
