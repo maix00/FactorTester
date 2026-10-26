@@ -369,3 +369,12 @@ def test_staged_and_push_ranges_are_separate(tmp_path, monkeypatch):
         "tools/cli/app.py"
     }
     assert selector.pushed_paths(f"refs/heads/feat {base} refs/heads/feat {base}\n") == set()
+
+
+def test_native_catalog_runtime_changes_keep_python_hook_scoped():
+    mode, targets = selector.select({"native/nautilus_factor_bridge/src/replay.rs",
+                                     "native/nautilus_factor_bridge/tests/catalog_runtime.rs",
+                                     "native/nautilus_factor_bridge/Cargo.toml",
+                                     "native/nautilus_factor_bridge/Cargo.lock"})
+    assert mode == "SCOPED"
+    assert set(targets) == set(selector.FACTOR_PLAN_TESTS)

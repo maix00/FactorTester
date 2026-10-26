@@ -450,6 +450,10 @@ for _path in (
     "native/nautilus_factor_bridge/src/lib.rs",
     "native/nautilus_factor_bridge/src/plan.rs",
     "native/nautilus_factor_bridge/src/boundary.rs",
+    "native/nautilus_factor_bridge/src/replay.rs",
+    "native/nautilus_factor_bridge/tests/catalog_runtime.rs",
+    "native/nautilus_factor_bridge/Cargo.toml",
+    "native/nautilus_factor_bridge/Cargo.lock",
     "vendor/py-alpha-lib/alpha-algo/examples/bench_panel_barrier.rs",
     "vendor/py-alpha-lib/alpha-algo/examples/bench_window_memory.rs",
 ):

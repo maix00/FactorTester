@@ -19,6 +19,7 @@ impl FactorPlanEngine {
 
     pub fn node_keys(&self) -> &[String] { self.inner.node_keys() }
     pub fn boundary_channels(&self) -> usize { self.inner.boundary_channels() }
+    pub fn input_fields(&self) -> usize { self.inner.input_fields() }
 
     pub fn update_into(&mut self, bar: &MarketBar, out: &mut Vec<f64>) -> Result<(), alpha_algo::Error> {
         self.inner.update_into_context(bar.timestamp_ns, &bar.values, &bar.boundaries, &bar.term_curves, out)

@@ -164,3 +164,32 @@ Nautilus 原生 BacktestNode/DataIterator 分发给 FactorActor 与执行系统�
 计划 2 节点。转换 Catalog 后的进程峰值已达 282,312,704 字节，回放/报告后
 峰值 386,826,240 字节；回放与报告耗时 0.159604 秒。耗时不含前面的转换，
 峰值包含转换且是高水位；该样本不是泄漏证明、端到端 Job 基准或提速比例。
+
+## 原生 BacktestNode 与 FactorActor 接线（2026-10-27）
+
+`nautilus_factor_bridge::replay::attach_factor_plan` 在调用方已经冻结的
+BacktestRunConfig 上注册一个共享 Actor。调用方继续运行同一个 Nautilus
+BacktestNode；Catalog 扫描、跨文件归并、分批回放及 DataEngine 分发均使用
+Nautilus 的实现。bridge 不另建读取器或 Cache，不使 Nautilus core 依赖 alpha。
+调用者必须在 node.run 后检查返回的 FactorReplayHandle；Nautilus 默认仅记录
+Actor 回调错误，因此因子首次错误另行保存并请求系统停止，不能据 node.run
+返回成功就发布结果。结束时未到齐的产品切片同样失败。
+
+Actor 启动时订阅冻结的 BarType。产品次序保留 Plan 给定次序，不再字典排序；
+Bar 的 InstrumentId 映射到对应产品槽位。OHLCV 字段一次解析为枚举，以 kernel
+既有的 product-major 输入布局填充复用缓冲；未知字段（如 Bar 没有的持仓量）
+明确拒绝，不能代替为收盘价。字段数在读取 Catalog 前对齐 Plan 的冻结输入需求。
+输入时钟 timestamp_ns 表示 Bar 时刻，available_at_ns 表示该切片全部输入实际
+可用的最晚时刻；FactorUpdate 同时保留两者。正常路径不锁共享错误状态，也不再
+每次逐个比较冻结的产品字符串；错误锁仅在失败或结束检查时使用。
+
+验证入口：`native/nautilus_factor_bridge/tests/catalog_runtime.rs`。纯 Rust 创建
+真实 Nautilus Catalog，分两文件写入 8 根测试 Bar，以 chunk_size=2 原生回放，
+不经过 Python，也不手动调用 Actor 的 Bar 回调。逐点校验 rolling(2) 均值、HIGH、
+Bar/可用时刻；Cache bar_capacity=1，因子仍保持跨批次状态。未知字段和字段数
+错误在读取前失败。另有双产品字段布局与产品次序回归，测试 Actor 完成切片的
+可用时刻为各输入 ts_init 最大值。该测试不是原研报、真实 T/TL Job 或策略收益验收。
+
+BacktestNode 支持由 feature `nautilus-backtest` 隔离，默认 bridge 不拉入回放后端。
+新增 Catalog 后端依赖由独立 bridge Cargo.lock 固定；与 wheel 的锁文件不同会
+使首次构建编译部分不同小版本依赖。不能把首次冷构建耗时当作增量部署耗时。

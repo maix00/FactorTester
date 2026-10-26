@@ -169,6 +169,7 @@ pub struct FactorPlanKernel {
     ordinal: u64,
     timestamp_ns: i64,
     fields: usize,
+    required_fields: usize,
     slots: Vec<Vec<f64>>,
     node_keys: Vec<String>,
     boundary_channels: usize,
@@ -186,6 +187,7 @@ fn binary(op: BinaryOp, left: f64, right: f64) -> f64 {
 
 impl FactorPlanKernel {
     pub fn boundary_channels(&self) -> usize { self.boundary_channels }
+    pub fn input_fields(&self) -> usize { self.required_fields }
     pub fn new(products: usize, specs: Vec<ExprSpec>, outputs: Vec<usize>) -> Result<Self, crate::algo::Error> {
         if products == 0 || specs.is_empty() || outputs.is_empty() {
             return Err(crate::algo::Error::InvalidParameter("plan requires products, nodes and outputs".into()));
@@ -313,7 +315,10 @@ impl FactorPlanKernel {
             }
         }
         let slots = vec![vec![f64::NAN; products]; nodes.len()];
-        Ok(Self { products, nodes, outputs, ordinal: 0, timestamp_ns: 0, fields: 1, slots, node_keys: Vec::new(), boundary_channels })
+        let required_fields = nodes.iter().filter_map(|node| match node.spec.as_ref() {
+            ExprSpec::Column(index) => Some(index + 1), _ => None,
+        }).max().unwrap_or(0);
+        Ok(Self { products, nodes, outputs, ordinal: 0, timestamp_ns: 0, fields: 1, required_fields, slots, node_keys: Vec::new(), boundary_channels })
     }
 
     pub fn update(&mut self, values: &[f64]) -> Result<Vec<f64>, crate::algo::Error> {

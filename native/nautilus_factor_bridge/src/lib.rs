@@ -7,6 +7,8 @@
 use alpha_algo::{IntervalKernel, SessionOp};
 
 pub mod plan;
+#[cfg(feature = "nautilus-backtest")]
+pub mod replay;
 #[cfg(feature = "nautilus")]
 pub mod boundary;
 pub use plan::{BinaryOp, CrossOp, ExprSpec, FactorPlanEngine};
@@ -14,6 +16,8 @@ pub use plan::{BinaryOp, CrossOp, ExprSpec, FactorPlanEngine};
 #[derive(Clone, Debug)]
 pub struct MarketBar {
     pub timestamp_ns: i64,
+    /// Actual availability of this completed slice, distinct from its Bar clock.
+    pub available_at_ns: i64,
     pub products: Vec<String>,
     pub values: Vec<f64>,
     pub term_curves: Vec<Vec<(f64, f64)>>,
@@ -32,13 +36,14 @@ impl MarketBar {
     }
 
     pub fn new(timestamp_ns: i64, products: Vec<String>, values: Vec<f64>) -> Self {
-        Self { timestamp_ns, products, values, term_curves: Vec::new(), boundaries: Vec::new() }
+        Self { timestamp_ns, available_at_ns: timestamp_ns, products, values, term_curves: Vec::new(), boundaries: Vec::new() }
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct FactorUpdate {
     pub timestamp_ns: i64,
+    pub available_at_ns: i64,
     pub products: Vec<String>,
     pub values: Vec<f64>,
 }
@@ -276,11 +281,35 @@ pub mod nautilus {
     use std::fmt;
 
     use nautilus_common::actor::{DataActor, DataActorConfig, DataActorCore, DataActorNative};
-    use nautilus_model::data::Bar;
+    use nautilus_model::data::{Bar, BarType};
     use nautilus_model::identifiers::{ActorId, InstrumentId, Symbol};
     use ustr::Ustr;
 
     use crate::{FactorEngine, FactorUpdate, MarketBar};
+
+    #[derive(Clone, Copy, Debug)]
+    enum BarField { Open, High, Low, Close, Volume }
+
+    impl BarField {
+        fn parse(name: &str) -> anyhow::Result<Self> {
+            match name {
+                "O" | "OPEN" | "OPEN_ADJUSTED" => Ok(Self::Open),
+                "H" | "HIGH" | "HIGH_ADJUSTED" => Ok(Self::High),
+                "L" | "LOW" | "LOW_ADJUSTED" => Ok(Self::Low),
+                "C" | "CLOSE" | "CLOSE_ADJUSTED" => Ok(Self::Close),
+                "V" | "VOLUME" => Ok(Self::Volume),
+                _ => anyhow::bail!("field {name} is not supplied by Nautilus Bar; an authoritative custom event is required"),
+            }
+        }
+
+        fn value(self, bar: &Bar) -> f64 {
+            match self {
+                Self::Open => bar.open.as_f64(), Self::High => bar.high.as_f64(),
+                Self::Low => bar.low.as_f64(), Self::Close => bar.close.as_f64(),
+                Self::Volume => bar.volume.as_f64(),
+            }
+        }
+    }
 
     /// Minimal Nautilus actor that owns the Rust factor engine and consumes
     /// `Bar` messages.  Registration with a trader is the caller's job.
@@ -291,8 +320,11 @@ pub mod nautilus {
         expected_products: Vec<String>,
         symbol_index: std::collections::HashMap<Symbol, usize>,
         id_index: std::collections::HashMap<InstrumentId, usize>,
+        bar_types: Vec<BarType>,
+        fields: Vec<BarField>,
         pending_bars: Vec<Option<Bar>>,
         pending_count: usize,
+        pending_available_at_ns: i64,
         market: MarketBar,
         last_update: Option<FactorUpdate>,
         boundary_buffer: Vec<u8>,
@@ -302,6 +334,7 @@ pub mod nautilus {
         max_future_slices: usize,
         barrier_grace_ns: Option<i64>,
         sink: Option<Box<dyn Fn(&FactorUpdate) + Send>>,
+        error_sink: Option<Box<dyn Fn(&str) + Send>>,
         core: DataActorCore,
     }
 
@@ -324,14 +357,18 @@ pub mod nautilus {
                 expected_products: Vec::new(),
                 symbol_index: std::collections::HashMap::new(),
                 id_index: std::collections::HashMap::new(),
+                bar_types: Vec::new(),
+                fields: vec![BarField::Close],
                 pending_bars: Vec::new(),
                 pending_count: 0,
+                pending_available_at_ns: 0,
                 market: MarketBar::new(0, Vec::new(), Vec::new()),
                 pending_timestamp: None,
                 future_slices: std::collections::BTreeMap::new(),
                 max_future_slices: 64,
                 barrier_grace_ns: None,
                 sink: None,
+                error_sink: None,
                 last_update: None,
                 boundary_buffer: Vec::new(),
                 pending_boundaries: std::collections::BTreeMap::new(),
@@ -371,7 +408,7 @@ pub mod nautilus {
             std::mem::swap(&mut market.boundaries, &mut self.boundary_buffer);
             let had_update = self.last_update.is_some();
             let mut update = self.last_update.take().unwrap_or_else(|| FactorUpdate {
-                timestamp_ns: market.timestamp_ns, products: Vec::new(), values: Vec::new(),
+                timestamp_ns: market.timestamp_ns, available_at_ns: market.available_at_ns, products: Vec::new(), values: Vec::new(),
             });
             let result = self.engine.update_into(market, &mut update.values);
             std::mem::swap(&mut market.boundaries, &mut self.boundary_buffer);
@@ -379,7 +416,8 @@ pub mod nautilus {
             match result {
                 Ok(()) => {
                     update.timestamp_ns = market.timestamp_ns;
-                    if update.products != market.products {
+                    update.available_at_ns = market.available_at_ns;
+                    if !had_update || (self.expected_products.is_empty() && update.products != market.products) {
                         update.products.clone_from(&market.products);
                     }
                     self.last_update = Some(update);
@@ -414,6 +452,17 @@ pub mod nautilus {
             self.sink = Some(Box::new(sink));
         }
 
+        pub fn set_error_sink(&mut self, sink: impl Fn(&str) + Send + 'static) {
+            self.error_sink = Some(Box::new(sink));
+        }
+
+        fn report_runtime_error(&self, error: &str) {
+            if let Some(sink) = self.error_sink.as_ref() {
+                sink(error);
+                self.shutdown_system(Some(error.to_owned()));
+            }
+        }
+
         fn publish(&self) {
             if let (Some(sink), Some(update)) = (self.sink.as_ref(), self.last_update.as_ref()) {
                 sink(update);
@@ -429,6 +478,7 @@ pub mod nautilus {
             if self.pending_timestamp.is_some_and(|timestamp| timestamp < cutoff) {
                 self.pending_bars.fill(None);
                 self.pending_count = 0;
+            self.pending_available_at_ns = 0;
                 self.pending_timestamp = None;
             }
             let dropped = before - self.pending_len();
@@ -444,6 +494,7 @@ pub mod nautilus {
             if self.pending_timestamp.is_some_and(|timestamp| timestamp < timestamp_ns) {
                 self.pending_bars.fill(None);
                 self.pending_count = 0;
+            self.pending_available_at_ns = 0;
                 self.pending_timestamp = None;
             }
         }
@@ -465,7 +516,7 @@ pub mod nautilus {
 
         pub fn expect_products(&mut self, products: &[&str]) {
             self.expected_products = products.iter().map(|product| product.to_string()).collect();
-            self.expected_products.sort();
+
             self.symbol_index = self.expected_products.iter().enumerate()
                 .map(|(index, product)| (Symbol::new(product), index)).collect();
             self.id_index = self.expected_products.iter().enumerate()
@@ -473,21 +524,41 @@ pub mod nautilus {
                 .collect();
             self.pending_bars = vec![None; self.expected_products.len()];
             self.pending_count = 0;
+            self.pending_available_at_ns = 0;
             self.market.products.clone_from(&self.expected_products);
             self.market.values.clear();
             self.market.values.reserve(self.expected_products.len());
             self.pending_timestamp = None;
         }
 
-        /// Collect one bar per frozen product; update only when every product arrived.
+        /// Freezes one base-clock Bar stream per product, in the plan's product order.
+        pub fn configure_bar_inputs(&mut self, bar_types: &[BarType], fields: &[&str]) -> anyhow::Result<()> {
+            anyhow::ensure!(!self.expected_products.is_empty() && bar_types.len() == self.expected_products.len(),
+                "one Bar type is required for each frozen product");
+            anyhow::ensure!(self.pending_timestamp.is_none() && self.last_update.is_none(), "Bar inputs must be frozen before replay");
+            let fields = fields.iter().map(|name| BarField::parse(name)).collect::<anyhow::Result<Vec<_>>>()?;
+            let ids: std::collections::HashMap<_,_> = bar_types.iter().enumerate()
+                .map(|(index, bar_type)| (bar_type.instrument_id(), index)).collect();
+            anyhow::ensure!(ids.len() == bar_types.len(), "duplicate instrument in frozen Bar inputs");
+            anyhow::ensure!(bar_types.iter().all(|bar_type| bar_type.spec() == bar_types[0].spec()),
+                "one shared factor Actor requires one base Bar specification");
+            self.id_index = ids;
+            self.symbol_index.clear();
+            self.bar_types = bar_types.to_vec();
+            self.fields = fields;
+            self.market.values.reserve(self.fields.len() * self.expected_products.len());
+            Ok(())
+        }
+
+        /// Collect one Bar per frozen product before updating the shared plan.
         pub fn on_completed_bar(&mut self, bar: &Bar) {
             if self.expected_products.is_empty() {
                 let _ = self.on_bar(bar);
                 return;
             }
             let instrument_id = bar.bar_type.instrument_id();
-            let index = self.symbol_index.get(&instrument_id.symbol).copied()
-                .or_else(|| self.id_index.get(&instrument_id).copied());
+            let index = self.id_index.get(&instrument_id).copied()
+                .or_else(|| self.symbol_index.get(&instrument_id.symbol).copied());
             let Some(index) = index else {
                 self.last_error = Some(format!("unexpected product {instrument_id}"));
                 return;
@@ -511,6 +582,7 @@ pub mod nautilus {
                 self.pending_timestamp = Some(timestamp);
             }
             if self.pending_bars[index].is_none() { self.pending_count += 1; }
+            self.pending_available_at_ns = self.pending_available_at_ns.max(bar.ts_init.as_u64() as i64);
             self.pending_bars[index] = Some(bar.clone());
             if self.pending_count == self.expected_products.len() {
                 self.flush_slice();
@@ -521,11 +593,15 @@ pub mod nautilus {
             let Some(timestamp) = self.pending_timestamp else { return };
             if self.pending_count != self.expected_products.len() { return; }
             self.market.timestamp_ns = timestamp;
+            self.market.available_at_ns = self.pending_available_at_ns;
             self.market.values.clear();
-            for slot in &mut self.pending_bars {
-                self.market.values.push(slot.take().expect("completed slice slot").close.as_f64());
+            for slot in &self.pending_bars {
+                let bar = slot.as_ref().expect("completed slice slot");
+                for field in &self.fields { self.market.values.push(field.value(bar)); }
             }
+            self.pending_bars.fill(None);
             self.pending_count = 0;
+            self.pending_available_at_ns = 0;
             let mut market = std::mem::replace(&mut self.market, MarketBar::new(0, Vec::new(), Vec::new()));
             let _ = self.evaluate_market_ref(&mut market);
             self.market = market;
@@ -534,7 +610,10 @@ pub mod nautilus {
                 if slice.len() != self.expected_products.len() { break; }
                 let slice = self.future_slices.remove(&next).unwrap();
                 self.pending_count = slice.len();
-                for (index, bar) in slice { self.pending_bars[index] = Some(bar); }
+                for (index, bar) in slice {
+                    self.pending_available_at_ns = self.pending_available_at_ns.max(bar.ts_init.as_u64() as i64);
+                    self.pending_bars[index] = Some(bar);
+                }
                 self.pending_timestamp = Some(next);
                 self.flush_slice();
             }
@@ -564,6 +643,7 @@ pub mod nautilus {
     impl<E: FactorEngine + 'static> DataActor for FactorActor<E>
     where E::Error: std::fmt::Display {
         fn on_start(&mut self) -> anyhow::Result<()> {
+            for bar_type in self.bar_types.clone() { self.subscribe_bars(bar_type, None, None); }
             if !self.boundary_buffer.is_empty() {
                 use nautilus_model::data::{DataType, ensure_custom_data_json_registered};
                 ensure_custom_data_json_registered::<crate::boundary::FactorBoundary>()?;
@@ -572,26 +652,44 @@ pub mod nautilus {
             Ok(())
         }
 
+        fn on_stop(&mut self) -> anyhow::Result<()> {
+            let pending = self.pending_len();
+            if pending != 0 {
+                let message = format!("native replay ended with {pending} incomplete factor input Bars");
+                self.report_runtime_error(&message);
+                anyhow::bail!(message);
+            }
+            Ok(())
+        }
+
         fn on_data(&mut self, data: &nautilus_model::data::CustomData) -> anyhow::Result<()> {
             if let Some(boundary) = data.data.as_any().downcast_ref::<crate::boundary::FactorBoundary>() {
                 let timestamp = i64::try_from(boundary.timestamp_ns)?;
-                self.queue_boundary(timestamp, &boundary.flags)?;
+                if let Err(error) = self.queue_boundary(timestamp, &boundary.flags) {
+                    self.report_runtime_error(&error.to_string());
+                    return Err(error);
+                }
             }
             Ok(())
         }
 
         fn on_bar(&mut self, bar: &Bar) -> anyhow::Result<()> {
-            if self.expected_products.is_empty() {
+            let result = if self.expected_products.is_empty() {
                 self.evaluate_market(MarketBar::from(bar))
             } else {
                 self.on_completed_bar(bar);
-                if let Some(error) = self.last_error.as_ref() { anyhow::bail!("{error}"); }
-                Ok(())
-            }
+                match self.last_error.as_ref() {
+                    Some(error) => Err(anyhow::anyhow!(error.clone())), None => Ok(()),
+                }
+            };
+            if let Err(error) = &result { self.report_runtime_error(&error.to_string()); }
+            result
         }
     }
 
     impl FactorActor<crate::plan::FactorPlanEngine> {
+        pub fn input_fields(&self) -> usize { self.engine.input_fields() }
+
         /// Build an actor directly from the public `alpha.factor` plan JSON.
         pub fn from_plan_json(actor_id: &str, products: usize, json: &str) -> Result<Self, alpha_algo::Error> {
             let engine = crate::plan::FactorPlanEngine::from_spec_json(json, products)?;
@@ -606,7 +704,9 @@ pub mod nautilus {
     pub fn market_bar_from_bars(timestamp_ns: i64, bars: &[Bar]) -> MarketBar {
         let products = bars.iter().map(|bar| bar.bar_type.instrument_id().to_string()).collect();
         let values = bars.iter().map(|bar| bar.close.as_f64()).collect();
-        MarketBar::new(timestamp_ns, products, values)
+        let mut market = MarketBar::new(timestamp_ns, products, values);
+        market.available_at_ns = bars.iter().map(|bar| bar.ts_init.as_u64() as i64).max().unwrap_or(timestamp_ns);
+        market
     }
 
     impl<E: FactorEngine + 'static> DataActorNative for FactorActor<E> {
@@ -618,6 +718,7 @@ pub mod nautilus {
         fn from(bar: &Bar) -> Self {
             Self {
                 timestamp_ns: bar.ts_event.as_u64() as i64,
+                available_at_ns: bar.ts_init.as_u64() as i64,
                 products: vec![bar.bar_type.instrument_id().to_string()],
                 values: vec![bar.close.as_f64()],
                 term_curves: Vec::new(),
@@ -799,6 +900,27 @@ mod nautilus_tests {
         assert_eq!(update.timestamp_ns, 1_000);
         assert_eq!(update.products, vec!["A.B".to_string(), "C.D".to_string()]);
         assert_eq!(update.values, vec![0.0, 0.5]);
+    }
+
+    #[test]
+    fn frozen_fields_preserve_product_order_and_slice_availability() {
+        let json = r#"{"nodes":[{"kind":"column","index":0},{"kind":"column","index":1}],"outputs":[0,1]}"#;
+        let mut actor = nautilus::FactorActor::from_plan_json("frozen-input-test",2,json).unwrap();
+        actor.expect_products(&["Z", "A"]);
+        let z = BarType::from("C.D-1-MINUTE-LAST-EXTERNAL");
+        let a = BarType::from("A.B-1-MINUTE-LAST-EXTERNAL");
+        actor.configure_bar_inputs(&[z,a], &["HIGH", "VOLUME"]).unwrap();
+        let make = |bar_type, high, volume, available: u64| Bar::new(bar_type,
+            Price::from("1.0"), Price::new(high,1), Price::from("1.0"),Price::from("1.0"),
+            Quantity::new(volume,0),1000.into(),available.into());
+        actor.on_completed_bar(&make(a,20.0,2.0,1005));
+        actor.on_completed_bar(&make(z,10.0,1.0,1020));
+        let update = actor.last_update().unwrap();
+        assert_eq!(update.products, vec!["Z","A"]);
+        assert_eq!(update.values, vec![10.0,20.0,1.0,2.0]);
+        assert_eq!(update.timestamp_ns,1000);
+        assert_eq!(update.available_at_ns,1020);
+        assert!(actor.configure_bar_inputs(&[z,a], &["HIGH","VOLUME"]).is_err());
     }
 
     #[test]
