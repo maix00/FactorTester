@@ -139,24 +139,24 @@ pub mod nautilus {
     use nautilus_model::data::Bar;
     use ustr::Ustr;
 
-    use crate::{FactorEngine, MarketBar, MultiWindowEngine};
+    use crate::{FactorEngine, MarketBar};
 
     /// Minimal Nautilus actor that owns the Rust factor engine and consumes
     /// `Bar` messages.  Registration with a trader is the caller's job.
-    pub struct FactorActor {
+    pub struct FactorActor<E> {
         id: Ustr,
-        engine: MultiWindowEngine,
+        engine: E,
         latest: Vec<f64>,
     }
 
-    impl fmt::Debug for FactorActor {
+    impl<E> fmt::Debug for FactorActor<E> {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             f.debug_struct("FactorActor").field("id", &self.id).finish()
         }
     }
 
-    impl FactorActor {
-        pub fn new(actor_id: &str, engine: MultiWindowEngine) -> Self {
+    impl<E: FactorEngine + 'static> FactorActor<E> {
+        pub fn new(actor_id: &str, engine: E) -> Self {
             Self { id: Ustr::from(actor_id), engine, latest: Vec::new() }
         }
 
@@ -168,7 +168,7 @@ pub mod nautilus {
         }
     }
 
-    impl Actor for FactorActor {
+    impl<E: FactorEngine + 'static> Actor for FactorActor<E> {
         fn id(&self) -> Ustr { self.id }
 
         fn handle(&mut self, msg: &dyn Any) {
