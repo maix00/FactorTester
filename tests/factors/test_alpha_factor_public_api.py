@@ -137,3 +137,13 @@ def test_alpha_factor_session_scope_resets_after_gap():
     ctx = EvalContext(products=('A',), preloaded={'A': frame})
     result = ColumnRef('CLOSE').groupby_scope(scope_session('30min')).mean().evaluate(ctx)
     np.testing.assert_allclose(result['A'].to_numpy(), [0.0, 0.5, 2.0, 2.5])
+
+
+def test_alpha_factor_serializes_to_rust_plan_spec():
+    close = ColumnRef('CLOSE')
+    spec = (close.rolling(3).mean() + 1.0).to_plan_spec()
+    assert spec is not None
+    assert spec['columns'] == ['CLOSE']
+    kinds = [node['kind'] for node in spec['nodes']]
+    assert kinds == ['column', 'rolling', 'const', 'binary']
+    assert spec['nodes'][1]['op'] == 'mean'

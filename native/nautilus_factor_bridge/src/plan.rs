@@ -6,6 +6,7 @@
 use std::collections::VecDeque;
 
 use alpha_algo::{IntervalKernel, SessionOp};
+use serde::Deserialize;
 
 use crate::{FactorEngine, MarketBar};
 
@@ -25,6 +26,7 @@ pub enum ExprSpec {
     Where { condition: usize, when_true: usize, when_false: usize },
     Cross { op: CrossOp, child: usize },
     Since { condition: usize, count: usize, include_current: bool, nearest: bool, default_scope: bool, default: f64 },
+    Scope { child: usize, count: usize, op: SessionOp, min_periods: usize, propagate_nan: bool },
 }
 
 struct NodeState {
@@ -41,6 +43,7 @@ pub struct FactorPlanEngine {
     since_first: Vec<Option<usize>>,
     since_last: Vec<Option<usize>>,
     since_base: Vec<usize>,
+    scope_bases: Vec<usize>,
 }
 
 fn binary(op: BinaryOp, left: f64, right: f64) -> f64 {
@@ -61,7 +64,7 @@ impl FactorPlanEngine {
         let mut nodes = Vec::with_capacity(specs.len());
         for spec in specs {
             let rolling = match &spec {
-                ExprSpec::Rolling { op, .. } => (0..products)
+                ExprSpec::Rolling { op, .. } | ExprSpec::Scope { op, .. } => (0..products)
                     .map(|_| IntervalKernel::new_explicit(*op).map(Some))
                     .collect::<Result<Vec<_>, _>>()?,
                 _ => (0..products).map(|_| None).collect(),
@@ -76,6 +79,7 @@ impl FactorPlanEngine {
             since_first: vec![None; products],
             since_last: vec![None; products],
             since_base: vec![0; products],
+            scope_bases: vec![0; products],
         })
     }
 
@@ -118,6 +122,17 @@ impl FactorPlanEngine {
                 let when_false = self.eval(when_false, columns, cache)?;
                 condition.iter().zip(when_true.iter().zip(&when_false))
                     .map(|(c, (a, b))| if c.is_finite() && *c != 0.0 { *a } else { *b }).collect()
+            }
+            ExprSpec::Scope { child, count, op, min_periods, propagate_nan } => {
+                let input = self.eval(child, columns, cache)?;
+                let current = self.ordinal;
+                let node = &mut self.nodes[index];
+                input.iter().enumerate().map(|(product, value)| {
+                    if current as usize % count == 0 { self.scope_bases[product] = current as usize; }
+                    let Some(state) = node.rolling[product].as_mut() else { return f64::NAN };
+                    state.set_semantics(min_periods, propagate_nan);
+                    state.update_explicit(self.scope_bases[product] as u64, current, *value)
+                }).collect()
             }
             ExprSpec::Since { condition, count, include_current, nearest, default_scope, default } => {
                 let condition = self.eval(condition, columns, cache)?;
@@ -190,6 +205,79 @@ impl FactorEngine for FactorPlanEngine {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum RawNode {
+    Column { index: usize },
+    Const { value: f64 },
+    Rolling { child: usize, window: usize, op: String, min_periods: usize,
+              propagate_nan: bool, #[serde(default)] quantile: Option<f64> },
+    Scope { child: usize, count: usize, op: String, min_periods: usize, propagate_nan: bool },
+    Binary { op: String, left: usize, right: usize },
+    Neg { child: usize },
+    Shift { child: usize, periods: usize },
+    Where { condition: usize, when_true: usize, when_false: usize },
+    Cross { op: String, child: usize },
+    Since { condition: usize, count: usize, include_current: bool, nearest: bool,
+            default_scope: bool, default: f64 },
+}
+
+#[derive(Deserialize)]
+struct RawPlan { nodes: Vec<RawNode>, outputs: Vec<usize> }
+
+fn session_op(name: &str, quantile: Option<f64>) -> Result<SessionOp, alpha_algo::Error> {
+    Ok(match name {
+        "sum" => SessionOp::Sum, "mean" => SessionOp::Mean,
+        "var" => SessionOp::Var, "std" => SessionOp::Std,
+        "min" => SessionOp::Min, "max" => SessionOp::Max,
+        "skew" => SessionOp::Skew, "argmin" => SessionOp::Argmin,
+        "argmax" => SessionOp::Argmax, "rank" => SessionOp::Rank,
+        "mad" => SessionOp::Mad, "median" => SessionOp::Quantile(0.5),
+        "quantile" => SessionOp::Quantile(quantile.unwrap_or(0.5)),
+        other => return Err(alpha_algo::Error::InvalidParameter(format!("unsupported rolling op {other}"))),
+    })
+}
+
+impl FactorPlanEngine {
+    pub fn from_spec_json(json: &str, products: usize) -> Result<Self, alpha_algo::Error> {
+        let raw: RawPlan = serde_json::from_str(json)
+            .map_err(|error| alpha_algo::Error::InvalidParameter(error.to_string()))?;
+        let mut specs = Vec::with_capacity(raw.nodes.len());
+        for node in raw.nodes {
+            specs.push(match node {
+                RawNode::Column { index } => ExprSpec::Column(index),
+                RawNode::Const { value } => ExprSpec::Const(value),
+                RawNode::Rolling { child, window, op, min_periods, propagate_nan, quantile } => {
+                    ExprSpec::Rolling { child, window, op: session_op(&op, quantile)?, min_periods, propagate_nan }
+                }
+                RawNode::Scope { child, count, op, min_periods, propagate_nan } =>
+                    ExprSpec::Scope { child, count, op: session_op(&op, None)?, min_periods, propagate_nan },
+                RawNode::Binary { op, left, right } => ExprSpec::Binary {
+                    op: match op.as_str() {
+                        "add" => BinaryOp::Add, "sub" => BinaryOp::Sub, "mul" => BinaryOp::Mul,
+                        "div" => BinaryOp::Div, "gt" => BinaryOp::Gt, "lt" => BinaryOp::Lt,
+                        "ge" => BinaryOp::Ge, "le" => BinaryOp::Le, "eq" => BinaryOp::Eq,
+                        "ne" => BinaryOp::Ne,
+                        other => return Err(alpha_algo::Error::InvalidParameter(format!("unsupported binary op {other}"))),
+                    }, left, right,
+                },
+                RawNode::Neg { child } => ExprSpec::Binary { op: BinaryOp::Sub, left: child, right: child },
+                RawNode::Shift { child, periods } => ExprSpec::Shift { child, periods },
+                RawNode::Where { condition, when_true, when_false } => ExprSpec::Where { condition, when_true, when_false },
+                RawNode::Cross { op, child } => ExprSpec::Cross {
+                    op: match op.as_str() {
+                        "zscore" => CrossOp::ZScore, "rank" => CrossOp::Rank,
+                        other => return Err(alpha_algo::Error::InvalidParameter(format!("unsupported cross op {other}"))),
+                    }, child,
+                },
+                RawNode::Since { condition, count, include_current, nearest, default_scope, default } =>
+                    ExprSpec::Since { condition, count, include_current, nearest, default_scope, default },
+            });
+        }
+        Self::new(products, specs, raw.outputs)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,6 +295,14 @@ mod tests {
         assert_eq!(engine.update(&bar(1.0)).unwrap(), vec![2.0]);
         assert_eq!(engine.update(&bar(3.0)).unwrap(), vec![3.0]);
         assert_eq!(engine.update(&bar(5.0)).unwrap(), vec![5.0]);
+    }
+
+    #[test]
+    fn plan_is_deserialized_from_public_api_json() {
+        let json = r#"{"columns":["CLOSE"],"nodes":[{"kind":"column","index":0},{"kind":"rolling","child":0,"window":2,"op":"mean","min_periods":1,"propagate_nan":true}],"outputs":[1]}"#;
+        let mut engine = FactorPlanEngine::from_spec_json(json, 1).unwrap();
+        assert_eq!(engine.update(&MarketBar::new(0, vec!["A".into()], vec![1.0])).unwrap(), vec![1.0]);
+        assert_eq!(engine.update(&MarketBar::new(1, vec!["A".into()], vec![3.0])).unwrap(), vec![2.0]);
     }
 
     #[test]

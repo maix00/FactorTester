@@ -707,6 +707,8 @@ dependencies = [
  "nautilus-core",
  "nautilus-model",
  "rayon",
+ "serde",
+ "serde_json",
  "ustr",
 ]
 
