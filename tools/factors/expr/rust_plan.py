@@ -187,3 +187,30 @@ def plan_identity(expressions: list[FactorExpr]) -> tuple[tuple, ...]:
     for expression in expressions:
         builder.build(expression)
     return tuple(builder.memo.keys())
+
+
+_PLAN_SUPPORTED = (
+    ColumnRef, ConstExpr, RollingOp, CompositeExpr, WhereOp, ShiftOp,
+    GroupByScopeOp,
+)
+
+
+def unsupported_plan_nodes(expression: FactorExpr) -> tuple[str, ...]:
+    """Explicitly list node types that still require Python execution."""
+    blockers: list[str] = []
+
+    def visit(node: FactorExpr) -> None:
+        if not isinstance(node, _PLAN_SUPPORTED):
+            blockers.append(type(node).__name__)
+            return
+        if isinstance(node, GroupByScopeOp) and not isinstance(node.scope, BarCountScope):
+            blockers.append(f"GroupByScopeOp({type(node.scope).__name__})")
+            return
+        if isinstance(node, RollingOp) and node.op not in _ROLLING:
+            blockers.append(f"RollingOp({node.op})")
+            return
+        for child in getattr(node, "_operands", ()):
+            visit(child)
+
+    visit(expression)
+    return tuple(dict.fromkeys(blockers))

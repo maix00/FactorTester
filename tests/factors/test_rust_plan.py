@@ -130,3 +130,13 @@ def test_plan_supports_bar_count_scope():
         group = values[start:start + 3]
         expected.extend(np.cumsum(group) / np.arange(1, len(group) + 1))
     np.testing.assert_allclose(outputs[0]['A'].to_numpy(), expected)
+
+
+def test_unsupported_nodes_are_explicit_blockers():
+    from tools.factors.expr.bar_search import bar_since
+    from tools.factors.expr.lookback_scope import scope_bars
+    from tools.factors.expr.rust_plan import unsupported_plan_nodes
+
+    close = ColumnRef(DataColumn.CLOSE)
+    blockers = unsupported_plan_nodes(bar_since(close > 50, scope=scope_bars(10)))
+    assert "BarSinceOp" in blockers
