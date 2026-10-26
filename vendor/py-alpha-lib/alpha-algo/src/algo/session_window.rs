@@ -249,10 +249,16 @@ pub enum SessionOp {
   Rank,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum WindowPolicy {
+  Sessions(u32),
+  WallClock(i64),
+}
+
 pub struct SessionWindowState {
-  lookback_sessions: u32,
+  policy: WindowPolicy,
   op: SessionOp,
-  ring: VecDeque<(u32, f64, u64)>,
+  ring: VecDeque<(u32, i64, f64, u64)>,
   finite_sum: f64,
   finite_sumsq: f64,
   finite_sum3: f64,
@@ -273,7 +279,7 @@ impl SessionWindowState {
       return Err(Error::InvalidParameter("lookback must be positive".to_string()));
     }
     Ok(Self {
-      lookback_sessions: lookback_sessions as u32,
+      policy: WindowPolicy::Sessions(lookback_sessions as u32),
       op,
       ring: VecDeque::new(),
       finite_sum: 0.0,
@@ -291,8 +297,17 @@ impl SessionWindowState {
     })
   }
 
+  pub fn new_wall(duration_ns: i64, op: SessionOp) -> Result<Self, Error> {
+    if duration_ns <= 0 {
+      return Err(Error::InvalidParameter("duration must be positive".to_string()));
+    }
+    let mut state = Self::new_op(1, op)?;
+    state.policy = WindowPolicy::WallClock(duration_ns);
+    Ok(state)
+  }
+
   fn remove_oldest(&mut self) {
-    let Some((_session, old, index)) = self.ring.pop_front() else { return };
+    let Some((_session, _timestamp, old, index)) = self.ring.pop_front() else { return };
     if old.is_finite() {
       self.finite_sum -= old;
       self.finite_sumsq -= old * old;
@@ -309,18 +324,33 @@ impl SessionWindowState {
   }
 
   pub fn update(&mut self, session_id: u32, value: f64) -> f64 {
-    if let Some((last, _, _)) = self.ring.back() {
-      if session_id < *last {
-        return f64::NAN;
+    self.update_at(session_id, 0, value)
+  }
+
+  pub fn update_at(&mut self, session_id: u32, timestamp_ns: i64, value: f64) -> f64 {
+    if let Some((last_session, last_timestamp, _, _)) = self.ring.back() {
+      match self.policy {
+        WindowPolicy::Sessions(_) if session_id < *last_session => return f64::NAN,
+        WindowPolicy::WallClock(_) if timestamp_ns < *last_timestamp => return f64::NAN,
+        _ => {}
       }
     }
-    let first_session = (session_id + 1).saturating_sub(self.lookback_sessions);
-    while self.ring.front().is_some_and(|(id, _, _)| *id < first_session) {
-      self.remove_oldest();
+    match self.policy {
+      WindowPolicy::Sessions(lookback) => {
+        let first_session = (session_id + 1).saturating_sub(lookback);
+        while self.ring.front().is_some_and(|(id, _, _, _)| *id < first_session) {
+          self.remove_oldest();
+        }
+      }
+      WindowPolicy::WallClock(duration) => {
+        while self.ring.front().is_some_and(|(_, ts, _, _)| timestamp_ns - *ts > duration) {
+          self.remove_oldest();
+        }
+      }
     }
     let index = self.next_index;
     self.next_index += 1;
-    self.ring.push_back((session_id, value, index));
+    self.ring.push_back((session_id, timestamp_ns, value, index));
     if value.is_finite() {
       self.finite_sum += value;
       self.finite_sumsq += value * value;
@@ -423,6 +453,53 @@ pub fn ta_session_rolling_std<NumT: Float>(
   values: &[f64], session_ids: &[u32], lookback_sessions: usize,
 ) -> Result<Vec<NumT>, Error> {
   session_rolling_state(values, session_ids, lookback_sessions, SessionOp::Std)
+}
+
+pub fn ta_time_rolling_sum(timestamps: &[i64], values: &[f64], duration_ns: i64) -> Result<Vec<f64>, Error> {
+  time_rolling(timestamps, values, duration_ns, false)
+}
+
+pub fn ta_time_rolling_mean(timestamps: &[i64], values: &[f64], duration_ns: i64) -> Result<Vec<f64>, Error> {
+  time_rolling(timestamps, values, duration_ns, true)
+}
+
+fn time_rolling_op(
+  timestamps: &[i64], values: &[f64], duration_ns: i64, op: SessionOp,
+) -> Result<Vec<f64>, Error> {
+  if timestamps.len() != values.len() {
+    return Err(Error::LengthMismatch(timestamps.len(), values.len()));
+  }
+  let mut state = SessionWindowState::new_wall(duration_ns, op)?;
+  Ok(timestamps.iter().copied().zip(values.iter().copied())
+    .map(|(ts, value)| state.update_at(0, ts, value)).collect())
+}
+
+pub fn ta_time_rolling_var(timestamps: &[i64], values: &[f64], duration_ns: i64) -> Result<Vec<f64>, Error> {
+  time_rolling_op(timestamps, values, duration_ns, SessionOp::Var)
+}
+
+pub fn ta_time_rolling_std(timestamps: &[i64], values: &[f64], duration_ns: i64) -> Result<Vec<f64>, Error> {
+  time_rolling_op(timestamps, values, duration_ns, SessionOp::Std)
+}
+
+pub fn ta_time_rolling_min(timestamps: &[i64], values: &[f64], duration_ns: i64) -> Result<Vec<f64>, Error> {
+  time_rolling_op(timestamps, values, duration_ns, SessionOp::Min)
+}
+
+pub fn ta_time_rolling_max(timestamps: &[i64], values: &[f64], duration_ns: i64) -> Result<Vec<f64>, Error> {
+  time_rolling_op(timestamps, values, duration_ns, SessionOp::Max)
+}
+
+pub fn ta_time_rolling_skew(timestamps: &[i64], values: &[f64], duration_ns: i64) -> Result<Vec<f64>, Error> {
+  time_rolling_op(timestamps, values, duration_ns, SessionOp::Skew)
+}
+
+pub fn ta_time_rolling_quantile(timestamps: &[i64], values: &[f64], duration_ns: i64, q: f64) -> Result<Vec<f64>, Error> {
+  time_rolling_op(timestamps, values, duration_ns, SessionOp::Quantile(q))
+}
+
+pub fn ta_time_rolling_rank(timestamps: &[i64], values: &[f64], duration_ns: i64) -> Result<Vec<f64>, Error> {
+  time_rolling_op(timestamps, values, duration_ns, SessionOp::Rank)
 }
 
 pub fn ta_session_rolling_argmin<NumT: Float>(
@@ -572,41 +649,8 @@ pub fn ta_session_rolling_rank(
   session_quantile_like(values, session_ids, lookback_sessions, None, true)
 }
 
-/// Time-boundary rolling state for sub-day windows that may cross sessions.
-/// A bar belongs to the window when its timestamp is within `duration_ns` of
-/// the current bar, regardless of session breaks.
-pub struct TimeWindowState {
-  duration_ns: i64,
-  ring: VecDeque<(i64, f64)>,
-  sum: f64,
-  count: usize,
-  mean: bool,
-}
-
-impl TimeWindowState {
-  pub fn new(duration_ns: i64, mean: bool) -> Result<Self, Error> {
-    if duration_ns <= 0 {
-      return Err(Error::InvalidParameter("duration must be positive".to_string()));
-    }
-    Ok(Self { duration_ns, ring: VecDeque::new(), sum: 0.0, count: 0, mean })
-  }
-
-  pub fn update(&mut self, timestamp_ns: i64, value: f64) -> f64 {
-    if let Some((last, _)) = self.ring.back() {
-      if timestamp_ns < *last { return f64::NAN; }
-    }
-    while self.ring.front().is_some_and(|(ts, _)| timestamp_ns - *ts > self.duration_ns) {
-      if let Some((_, old)) = self.ring.pop_front() {
-        if old.is_finite() { self.sum -= old; self.count -= 1; }
-      }
-    }
-    self.ring.push_back((timestamp_ns, value));
-    if value.is_finite() { self.sum += value; self.count += 1; }
-    if self.count == 0 { f64::NAN }
-    else if self.mean { self.sum / self.count as f64 }
-    else { self.sum }
-  }
-}
+/// Backward-compatible alias: wall-clock is a WindowPolicy of the same kernel.
+pub type TimeWindowState = SessionWindowState;
 
 fn time_rolling(
   timestamps: &[i64], values: &[f64], duration_ns: i64, mean: bool,
@@ -614,17 +658,10 @@ fn time_rolling(
   if timestamps.len() != values.len() {
     return Err(Error::LengthMismatch(timestamps.len(), values.len()));
   }
-  let mut state = TimeWindowState::new(duration_ns, mean)?;
+  let op = if mean { SessionOp::Mean } else { SessionOp::Sum };
+  let mut state = SessionWindowState::new_wall(duration_ns, op)?;
   Ok(timestamps.iter().copied().zip(values.iter().copied())
-    .map(|(ts, value)| state.update(ts, value)).collect())
-}
-
-pub fn ta_time_rolling_sum(timestamps: &[i64], values: &[f64], duration_ns: i64) -> Result<Vec<f64>, Error> {
-  time_rolling(timestamps, values, duration_ns, false)
-}
-
-pub fn ta_time_rolling_mean(timestamps: &[i64], values: &[f64], duration_ns: i64) -> Result<Vec<f64>, Error> {
-  time_rolling(timestamps, values, duration_ns, true)
+    .map(|(ts, value)| state.update_at(0, ts, value)).collect())
 }
 
 pub struct SessionPairState {
@@ -827,6 +864,18 @@ mod tests {
     rank.update(0, 2.0);
     assert!((rank.update(0, 3.0) - 1.0).abs() < 1e-12);
     assert_eq!(rank.update(1, 5.0), 1.0);
+  }
+
+  #[test]
+  fn time_window_supports_all_single_series_ops() {
+    let timestamps = [0i64, 1_000, 2_000];
+    let values = [1.0, 2.0, 4.0];
+    let var = ta_time_rolling_var(&timestamps, &values, 2_000).unwrap();
+    assert!((var[2] - 7.0 / 3.0).abs() < 1e-12);
+    let min = ta_time_rolling_min(&timestamps, &values, 1_000).unwrap();
+    assert_eq!(min[2], 2.0);
+    let q = ta_time_rolling_quantile(&timestamps, &values, 2_000, 0.5).unwrap();
+    assert_eq!(q[2], 2.0);
   }
 
   #[test]
