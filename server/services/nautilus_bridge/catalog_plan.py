@@ -29,8 +29,7 @@ def _expand_product_paths(paths: list[str], *, start: str, end: str) -> list[str
         if product is None:
             expanded.append(path)
             continue
-        parent = product.get_parent_product()
-        rows = parent.get_contract_list(start[:10], end[:10]) if parent else []
+        rows = product.get_contract_list(start[:10], end[:10])
         uids = [str(row.get("uid")) for row in rows if isinstance(row, dict) and row.get("uid")]
         if not uids:
             expanded.append(path)
