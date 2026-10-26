@@ -193,3 +193,49 @@ Bar/可用时刻；Cache bar_capacity=1，因子仍保持跨批次状态。未�
 BacktestNode 支持由 feature `nautilus-backtest` 隔离，默认 bridge 不拉入回放后端。
 新增 Catalog 后端依赖由独立 bridge Cargo.lock 固定；与 wheel 的锁文件不同会
 使首次构建编译部分不同小版本依赖。不能把首次冷构建耗时当作增量部署耗时。
+
+## 原生输出与真实分钟数据校验（2026-10-27）
+
+`FactorOutputSink` 在原生 Actor 内借用当前输出，允许 write/finish 返回错误。
+首次错误进入 FactorReplayHandle，Nautilus 停止后必须检查；空输出、未到齐切片、
+写入失败与结束刷新失败不能被当成成功。该接口本身不保证调用方有界，验收工具
+使用 64 KiB BufWriter 逐行写入，不保存输出历史。正常写入路径不使用共享锁。
+
+冻结 JSON 的 columns 在读取前与 Bar 字段顺序对齐；允许未被计算节点使用的
+时钟来源列，但不得缺少节点引用列。期限曲线尚未接入该 Bar runtime 时明确拒绝；
+需要 boundary 的计划必须同时声明冻结的 FactorBoundary CustomData 输入，并在
+原生读取前注册其 codec。不能向这些通道静默传空值。这些是 bridge 接线校验，
+不是新建行情读取器、Cache 或撮合器。
+
+真实 T/TL 数据逐点核验暴露两项计算错误，并在共享 alpha-algo 核心修复：
+
+- SignalAlign last：源时钟跨过多个目标网格点（如休市）时，原实现取了发现缺口的
+  较晚 Bar。现在以最后已到达的目标网格点作 as-of，严格模式排除该点本身；
+  O(1) 跳过缺失网格，不逐个扫描。小型手算输入和每个前缀覆盖 inclusive/strict，
+  bridge 覆盖内层 signal 连接外层 Where。first、其他 anchor/partial 的全组合
+  尚未完成同等级验证，不能由本次结果推定全部通过。
+- Sum/Mean：增删窗口值的浮点误差可翻转相等阈值的比较。例：20 根周期价格
+  经 5,000 次更新后原结果为 101.65000000000002；真实样本也出现均值
+  101.64999999999999 与信号 101.65 导致 Where 翻转。共享补偿求和用于
+  session 窗口和截断扫描，增删仍为 O(1)，每状态多一个 f64；不引入 Decimal、
+  窗口重扫或比较容差。独立参考使用 math.fsum，另测大数消去的小残差。
+
+可复现入口：`tests/benchmarks/bench_native_factor_replay.py` 与独立 Rust 示例
+`catalog_replay`（feature nautilus-backtest）。Python 仅冻结输入并作独立对账；
+被计时的原生进程由 Nautilus BacktestNode 读取、归并、分发，再计算和写出。
+该示例没有交易策略、订单或报告，不是生产 Job runner。
+
+测量环境：macOS arm64，GTHT Python 3.14，原生 dev opt-level=1；没有清空系统
+文件缓存，每规模一次预热后 3 个独立进程样本。T/TL 共用 4 输出计划：rolling20
+均值、5 分钟 last 信号、Where、shift；chunk_size=40、Cache 每 BarType 只存
+1 根。各 500 根的原生读/算/写中位数 0.115 秒，峰值 62,128,128 字节；
+各 2,000 根约 0.45 秒、约 90 MB（约 86 MiB）。全部输出、产品、事件时刻、
+可用时刻逐点校验。记录 source/binary SHA256 与逐样本耗时/RSS；输入收据冻结
+数据来源。夹具每 3 根写一个 Parquet 文件，大量文件元数据也影响 RSS；两种
+规模不能证明内存恒定。计时不含 Python 初次转换和参考面板，不能与此前 Python
+整进程高水位比较成提速或内存下降比例，也不是原研报收益、公网或 CouchDB 验收。
+
+聚焦验证：native bridge 26 项与真实 Catalog 集成 1 项；公开 API/测试选择器
+82 项；session window 26 项；Plan 26 项。正确性提交 hook 额外选择 138 项通过。
+没有执行全仓测试。原生接线和离线工具已验证，不代表 Celery 的 Python 过渡
+读取/合并/因子事件路径已被替换；切换仍须同一真实策略 Job 端到端验收。

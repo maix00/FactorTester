@@ -451,6 +451,8 @@ for _path in (
     "native/nautilus_factor_bridge/src/plan.rs",
     "native/nautilus_factor_bridge/src/boundary.rs",
     "native/nautilus_factor_bridge/src/replay.rs",
+    "native/nautilus_factor_bridge/examples/catalog_replay.rs",
+    "tests/benchmarks/bench_native_factor_replay.py",
     "native/nautilus_factor_bridge/tests/catalog_runtime.rs",
     "native/nautilus_factor_bridge/Cargo.toml",
     "native/nautilus_factor_bridge/Cargo.lock",

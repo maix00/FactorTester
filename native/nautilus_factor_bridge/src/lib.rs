@@ -48,6 +48,16 @@ pub struct FactorUpdate {
     pub values: Vec<f64>,
 }
 
+/// Bounded output consumer; finish is called when Nautilus stops the Actor.
+pub trait FactorOutputSink: Send {
+    fn write_update(&mut self, update: &FactorUpdate) -> anyhow::Result<()>;
+    fn finish(&mut self) -> anyhow::Result<()> { Ok(()) }
+}
+
+impl<F: FnMut(&FactorUpdate) -> anyhow::Result<()> + Send> FactorOutputSink for F {
+    fn write_update(&mut self, update: &FactorUpdate) -> anyhow::Result<()> { self(update) }
+}
+
 pub trait FactorEngine {
     type Error;
     fn warmup(&mut self) -> Result<(), Self::Error> { Ok(()) }
@@ -285,9 +295,9 @@ pub mod nautilus {
     use nautilus_model::identifiers::{ActorId, InstrumentId, Symbol};
     use ustr::Ustr;
 
-    use crate::{FactorEngine, FactorUpdate, MarketBar};
+    use crate::{FactorEngine, FactorUpdate, FactorOutputSink, MarketBar};
 
-    #[derive(Clone, Copy, Debug)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum BarField { Open, High, Low, Close, Volume }
 
     impl BarField {
@@ -333,7 +343,7 @@ pub mod nautilus {
         future_slices: std::collections::BTreeMap<i64, std::collections::BTreeMap<usize, Bar>>,
         max_future_slices: usize,
         barrier_grace_ns: Option<i64>,
-        sink: Option<Box<dyn Fn(&FactorUpdate) + Send>>,
+        sink: Option<Box<dyn FactorOutputSink>>,
         error_sink: Option<Box<dyn Fn(&str) + Send>>,
         core: DataActorCore,
     }
@@ -422,7 +432,10 @@ pub mod nautilus {
                     }
                     self.last_update = Some(update);
                     self.last_error = None;
-                    self.publish();
+                    if let Err(error) = self.publish() {
+                        self.last_error = Some(error.to_string());
+                        return Err(error);
+                    }
                     Ok(())
                 }
                 Err(error) => {
@@ -448,7 +461,11 @@ pub mod nautilus {
             }
         }
 
-        pub fn set_update_sink(&mut self, sink: impl Fn(&FactorUpdate) + Send + 'static) {
+        pub fn set_update_sink(&mut self, mut sink: impl FnMut(&FactorUpdate) + Send + 'static) {
+            self.set_output_sink(move |update: &FactorUpdate| { sink(update); Ok(()) });
+        }
+
+        pub fn set_output_sink(&mut self, sink: impl FactorOutputSink + 'static) {
             self.sink = Some(Box::new(sink));
         }
 
@@ -463,10 +480,11 @@ pub mod nautilus {
             }
         }
 
-        fn publish(&self) {
-            if let (Some(sink), Some(update)) = (self.sink.as_ref(), self.last_update.as_ref()) {
-                sink(update);
+        fn publish(&mut self) -> anyhow::Result<()> {
+            if let (Some(sink), Some(update)) = (self.sink.as_mut(), self.last_update.as_ref()) {
+                sink.write_update(update)?;
             }
+            Ok(())
         }
 
         /// Drop slices older than ``now_ns - grace_ns``; report dropped work.
@@ -654,6 +672,17 @@ pub mod nautilus {
 
         fn on_stop(&mut self) -> anyhow::Result<()> {
             let pending = self.pending_len();
+            if self.last_update.is_none() && self.error_sink.is_some() {
+                let message = "native replay produced no factor updates";
+                self.report_runtime_error(message);
+                anyhow::bail!(message);
+            }
+            if let Some(sink) = self.sink.as_mut() {
+                if let Err(error) = sink.finish() {
+                    self.report_runtime_error(&error.to_string());
+                    return Err(error);
+                }
+            }
             if pending != 0 {
                 let message = format!("native replay ended with {pending} incomplete factor input Bars");
                 self.report_runtime_error(&message);
@@ -688,7 +717,19 @@ pub mod nautilus {
     }
 
     impl FactorActor<crate::plan::FactorPlanEngine> {
+        pub fn validate_bar_columns(&self, fields: &[&str]) -> anyhow::Result<()> {
+            let expected = self.engine.input_columns();
+            if !expected.is_empty() {
+                let requested = fields.iter().map(|name| BarField::parse(name)).collect::<anyhow::Result<Vec<_>>>()?;
+                let frozen = expected.iter().map(|name| BarField::parse(name)).collect::<anyhow::Result<Vec<_>>>()?;
+                anyhow::ensure!(requested == frozen, "Bar field mapping differs from frozen factor column order");
+            }
+            Ok(())
+        }
+
         pub fn input_fields(&self) -> usize { self.engine.input_fields() }
+        pub fn boundary_channels(&self) -> usize { self.engine.boundary_channels() }
+        pub fn curve_channels(&self) -> usize { self.engine.curve_channels() }
 
         /// Build an actor directly from the public `alpha.factor` plan JSON.
         pub fn from_plan_json(actor_id: &str, products: usize, json: &str) -> Result<Self, alpha_algo::Error> {
@@ -731,6 +772,28 @@ pub mod nautilus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn signal_gap_does_not_make_outer_where_see_a_future_source_value() {
+        let json = r#"{"nodes":[{"kind":"column","index":0},
+          {"kind":"signal","child":0,"signal_ns":5},
+          {"kind":"const","value":100},
+          {"kind":"binary","op":"gt","left":1,"right":2},
+          {"kind":"const","value":1},{"kind":"const","value":0},
+          {"kind":"where","condition":3,"when_true":4,"when_false":5}],"outputs":[1,6]}"#;
+        let times = [1,4,11,12,15,16];
+        let values = [10.0,40.0,110.0,120.0,150.0,160.0];
+        let expected = [f64::NAN,f64::NAN,40.0,40.0,150.0,150.0];
+        for prefix in 1..=times.len() {
+            let mut engine = FactorPlanEngine::from_spec_json(json,1).unwrap();
+            let mut output = Vec::new();
+            for row in 0..prefix {
+                engine.update_into(&MarketBar::new(times[row],vec!["A".into()],vec![values[row]]),&mut output).unwrap();
+                assert!(output[0].is_nan() && expected[row].is_nan() || output[0] == expected[row]);
+                assert_eq!(output[1],if expected[row] > 100.0 {1.0} else {0.0});
+            }
+        }
+    }
 
     #[test]
     fn product_parallel_plan_updates_products_independently() {

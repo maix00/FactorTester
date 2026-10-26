@@ -31,3 +31,7 @@ path = "src/lib.rs"
 
 [dev-dependencies]
 tempfile = "3"
+
+[[example]]
+name = "catalog_replay"
+required-features = ["nautilus-backtest"]
