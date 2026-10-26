@@ -292,6 +292,7 @@ pub mod nautilus {
         symbol_index: std::collections::HashMap<Symbol, usize>,
         id_index: std::collections::HashMap<InstrumentId, usize>,
         pending_bars: Vec<Option<Bar>>,
+        market: MarketBar,
         last_update: Option<FactorUpdate>,
         boundary_buffer: Vec<u8>,
         pending_boundaries: std::collections::BTreeMap<i64, Vec<u8>>,
@@ -323,6 +324,7 @@ pub mod nautilus {
                 symbol_index: std::collections::HashMap::new(),
                 id_index: std::collections::HashMap::new(),
                 pending_bars: Vec::new(),
+                market: MarketBar::new(0, Vec::new(), Vec::new()),
                 pending_timestamp: None,
                 future_slices: std::collections::BTreeMap::new(),
                 max_future_slices: 64,
@@ -355,7 +357,7 @@ pub mod nautilus {
             Ok(())
         }
 
-        fn evaluate_market(&mut self, mut market: MarketBar) -> anyhow::Result<()> {
+        fn evaluate_market_ref(&mut self, market: &mut MarketBar) -> anyhow::Result<()> {
             if self.last_update.as_ref().is_some_and(|update| market.timestamp_ns <= update.timestamp_ns) {
                 anyhow::bail!("market slice must follow the last completed slice");
             }
@@ -369,13 +371,15 @@ pub mod nautilus {
             let mut update = self.last_update.take().unwrap_or_else(|| FactorUpdate {
                 timestamp_ns: market.timestamp_ns, products: Vec::new(), values: Vec::new(),
             });
-            let result = self.engine.update_into(&market, &mut update.values);
+            let result = self.engine.update_into(market, &mut update.values);
             std::mem::swap(&mut market.boundaries, &mut self.boundary_buffer);
             self.boundary_buffer.fill(0);
             match result {
                 Ok(()) => {
                     update.timestamp_ns = market.timestamp_ns;
-                    update.products = market.products;
+                    if update.products != market.products {
+                        update.products.clone_from(&market.products);
+                    }
                     self.last_update = Some(update);
                     self.last_error = None;
                     self.publish();
@@ -387,6 +391,10 @@ pub mod nautilus {
                     Err(anyhow::anyhow!(error.to_string()))
                 }
             }
+        }
+
+        fn evaluate_market(&mut self, mut market: MarketBar) -> anyhow::Result<()> {
+            self.evaluate_market_ref(&mut market)
         }
 
         pub fn set_max_future_slices(&mut self, limit: usize) { self.max_future_slices = limit.max(1); }
@@ -460,6 +468,9 @@ pub mod nautilus {
                 .filter_map(|(index, product)| product.parse::<InstrumentId>().ok().map(|id| (id, index)))
                 .collect();
             self.pending_bars = vec![None; self.expected_products.len()];
+            self.market.products.clone_from(&self.expected_products);
+            self.market.values.clear();
+            self.market.values.reserve(self.expected_products.len());
             self.pending_timestamp = None;
         }
 
@@ -507,8 +518,12 @@ pub mod nautilus {
             let bars: Vec<Bar> = self.pending_bars.iter_mut()
                 .map(|bar| bar.take().unwrap())
                 .collect();
-            let market = crate::nautilus::market_bar_from_bars(timestamp, &bars);
-            let _ = self.evaluate_market(market);
+            self.market.timestamp_ns = timestamp;
+            self.market.values.clear();
+            for bar in &bars { self.market.values.push(bar.close.as_f64()); }
+            let mut market = std::mem::replace(&mut self.market, MarketBar::new(0, Vec::new(), Vec::new()));
+            let _ = self.evaluate_market_ref(&mut market);
+            self.market = market;
             self.pending_bars.fill(None);
             self.pending_timestamp = None;
             while let Some((&next, slice)) = self.future_slices.iter().next() {
