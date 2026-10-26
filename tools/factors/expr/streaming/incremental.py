@@ -287,8 +287,8 @@ class RustPartitionNode:
         "mad": "mad",
     }
 
-    def __init__(self, op, child, scope, width, quantile=None, source_freq=None, products=()):
-        from alpha import PartitionState
+    def __init__(self, op, child, scope, width, quantile=None, source_freq=None, products=(), range_start=None, range_end=None):
+        from alpha import PartitionRangeState, PartitionState
         from tools.factors.expr.lookback_scope import (
             BarCountScope, SessionScope, TradingDayScope,
         )
@@ -299,7 +299,13 @@ class RustPartitionNode:
         self.child = child
         self.scope = scope
         self._width = width
-        self._states = [PartitionState(rust_op, quantile) for _ in range(width)]
+        if range_start is not None and range_end is not None:
+            self._states = [
+                PartitionRangeState(int(range_start), int(range_end), rust_op, quantile)
+                for _ in range(width)
+            ]
+        else:
+            self._states = [PartitionState(rust_op, quantile) for _ in range(width)]
         self._last_ts = [None] * width
         self._session_id = [0] * width
         self._bar_ordinal = 0
@@ -1776,20 +1782,22 @@ def compile_streaming_factor(
                     raise UnsupportedStreamingFactor("streaming quantile must be a constant")
                 quantile = float(quantile)
             rust_partition = False
-            if (
-                expr.trunc_start is None
-                and expr.trunc_end is None
-                and op_name in RustPartitionNode._OPS
-            ):
+            trunc_start = _resolve_truncation(expr.trunc_start)
+            trunc_end = _resolve_truncation(expr.trunc_end)
+            rust_range = (
+                isinstance(trunc_start, int) and isinstance(trunc_end, int)
+            )
+            if op_name in RustPartitionNode._OPS:
                 try:
                     node = RustPartitionNode(
                         op_name, data_operands[0], expr.scope, len(products),
                         quantile=quantile, source_freq=source_freq, products=products,
+                        range_start=trunc_start if rust_range else None,
+                        range_end=trunc_end if rust_range else None,
                     )
                     rust_partition = True
                 except ImportError:
-                    # Installed py-alpha wheel predates PartitionState.  Keep the
-                    # Python scope kernel only until the unified wheel is built.
+                    # Installed py-alpha wheel predates the unified kernel.
                     rust_partition = False
             if not rust_partition:
                 node = GroupScopeNode(
@@ -1798,8 +1806,8 @@ def compile_streaming_factor(
                     expr.scope,
                     len(products),
                     quantile=quantile,
-                    trunc_start=_resolve_truncation(expr.trunc_start),
-                    trunc_end=_resolve_truncation(expr.trunc_end),
+                    trunc_start=trunc_start,
+                    trunc_end=trunc_end,
                     products=products,
                     source_freq=source_freq,
                 )
