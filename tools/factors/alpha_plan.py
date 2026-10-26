@@ -42,8 +42,10 @@ def alpha_plan_spec(expression: Any) -> dict[str, Any] | None:
         elif isinstance(expr, RollingOp):
             if expr._n_data != 1:
                 return None
+            if expr.trunc_start is not None or expr.trunc_end is not None:
+                return None
             window = expr.window
-            if not isinstance(window, ConstExpr):
+            if not isinstance(window, ConstExpr) or not isinstance(window.value, int):
                 return None
             child = build(expr.operands[expr._data_start])
             if child is None:
@@ -59,6 +61,8 @@ def alpha_plan_spec(expression: Any) -> dict[str, Any] | None:
                 node["quantile"] = float(expr.quantile)
         elif isinstance(expr, GroupByScopeOp):
             if not isinstance(expr.scope, BarCountScope):
+                return None
+            if expr.op.startswith("quantile"):
                 return None
             child = build(expr.operands[0])
             if child is None:
@@ -99,7 +103,9 @@ def alpha_plan_spec(expression: Any) -> dict[str, Any] | None:
                 return None
             node = {"kind": "where", "condition": children[0],
                     "when_true": children[1], "when_false": children[2]}
-        elif isinstance(expr, (BarSinceOp, BarDistanceOp)):
+        elif isinstance(expr, BarDistanceOp):
+            return None
+        elif isinstance(expr, BarSinceOp):
             if not isinstance(expr.scope, BarCountScope):
                 return None
             child = build(expr.condition)

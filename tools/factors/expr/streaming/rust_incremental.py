@@ -32,27 +32,35 @@ def compile_rust_incremental(expressions: Mapping[str, Any], products: tuple[Any
     nodes: list[dict[str, Any]] = []
     keys: list[str] = []
     outputs: list[int] = []
+    by_key: dict[str, int] = {}
     for spec in specs:
-        offset = len(nodes)
         local_columns = list(spec["columns"])
-        for node in spec["nodes"]:
+        local_keys = spec.get("keys", [""] * len(spec["nodes"]))
+        local_to_global: dict[int, int] = {}
+        for local_index, node in enumerate(spec["nodes"]):
+            key = local_keys[local_index]
+            if key and key in by_key:
+                local_to_global[local_index] = by_key[key]
+                continue
             node = dict(node)
             for field in ("child", "left", "right", "condition", "when_true", "when_false"):
                 if field in node:
-                    node[field] += offset
+                    node[field] = local_to_global[node[field]]
             if node.get("kind") == "column":
                 name = local_columns[node["index"]]
                 if name not in columns:
                     columns.append(name)
                 node["index"] = columns.index(name)
+            local_to_global[local_index] = len(nodes)
+            if key:
+                by_key[key] = len(nodes)
+            keys.append(key)
             nodes.append(node)
-        keys.extend(spec.get("keys", [""] * len(spec["nodes"])))
-        outputs.append(spec["outputs"][0] + offset)
-
+        outputs.append(local_to_global[spec["outputs"][0]])
     state = FactorPlanState(json.dumps({
         "columns": columns, "keys": keys, "nodes": nodes, "outputs": outputs,
     }), len(products))
-    return RustIncrementalExecutor(expressions, products, columns, state, specs)
+    return RustIncrementalExecutor(expressions, products, columns, state, specs, len(nodes))
 
 
 class _NodePlan:
@@ -70,12 +78,13 @@ class RustIncrementalExecutor:
 
     uses_rust = True
 
-    def __init__(self, expressions, products, columns, state, specs) -> None:
+    def __init__(self, expressions, products, columns, state, specs, node_count) -> None:
         self._aliases = tuple(expressions)
         self._products = tuple(products)
         self._columns = tuple(columns)
         self._state = state
         self._plan = _PlanView(specs)
+        self.node_count = node_count
         self._latest: dict[str, dict[Any, float]] = {}
 
     def _field(self, fields, name: str) -> float:

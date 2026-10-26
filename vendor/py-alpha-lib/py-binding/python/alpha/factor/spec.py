@@ -46,6 +46,8 @@ def to_plan_spec(expressions: list[Any]) -> dict[str, Any] | None:
             if q:
                 node["quantile"] = float(q)
         elif isinstance(expr, GroupByScopeOp):
+            if expr.op.startswith("quantile"):
+                return None
             child = build(expr.owner.data)
             if child is None:
                 return None
@@ -124,7 +126,11 @@ def to_plan_spec(expressions: list[Any]) -> dict[str, Any] | None:
                 node["sessions"] = sessions
             elif expr.scope is not None:
                 return None
-        elif isinstance(expr, (BarSince, BarDistanceExpr)):
+        elif isinstance(expr, BarDistanceExpr):
+            # The original bar_distance compares CURRENT against historical
+            # CANDIDATE values; a boolean condition is not the same operator.
+            return None
+        elif isinstance(expr, BarSince):
             child = build(expr.condition)
             if child is None:
                 return None

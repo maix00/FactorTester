@@ -470,14 +470,13 @@ def test_tools_incremental_rust_facade_supports_multiple_columns():
     assert executor.on_signal(pd.Timestamp('2026-01-05 09:30')) == {'A': 5.0}
 
 
-def test_alpha_factor_bar_distance_enters_rust_plan():
+def test_alpha_factor_bar_distance_is_not_falsely_claimed_as_migrated():
     from alpha.factor import bar_distance, scope_bars
 
     condition = ColumnRef('CLOSE') > 0
     expression = bar_distance(condition, scope=scope_bars(3), default=3.0)
     spec = expression.to_plan_spec()
-    assert spec is not None
-    assert spec['nodes'][-1]['kind'] == 'distance'
+    assert spec is None
 
 
 def test_alpha_factor_ema_executes_in_rust_kernel():
@@ -505,3 +504,14 @@ def test_tools_linreg_uses_single_pass_rust_state():
     ):
         executor.on_bar(timestamp, {'A': {DataColumn.CLOSE.name: value}})
     assert executor.on_signal(pd.Timestamp('2026-01-05 09:33'))['A'] == 1.0
+
+
+def test_tools_incremental_facade_uses_global_cse():
+    from tools.data.types import DataColumn
+    from tools.factors.expr.leaf import ColumnRef as ToolColumnRef
+    from tools.factors.expr.streaming.incremental import compile_incremental_factors
+
+    close = ToolColumnRef(DataColumn.CLOSE)
+    expression = close.rolling(2).mean()
+    executor = compile_incremental_factors({'a': expression, 'b': expression}, ('A',))
+    assert executor.node_count == 2

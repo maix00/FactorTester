@@ -187,9 +187,20 @@ def test_plan_supports_bar_since_with_bar_count_scope():
 
 def test_existing_tools_factor_can_emit_bridge_plan_json():
     from tools.factors.alpha_plan import alpha_plan_spec
+    from tools.factors import scope_bars
 
     close = ColumnRef(DataColumn.CLOSE)
     spec = alpha_plan_spec((close.rolling(5).mean() + 1.0))
     assert spec is not None
     assert spec['columns'] == ['CLOSE']
     assert [node['kind'] for node in spec['nodes']] == ['column', 'rolling', 'const', 'binary']
+
+
+def test_compat_plan_rejects_truncated_and_distance_semantics():
+    from tools.factors.alpha_plan import alpha_plan_spec
+    from tools.factors import scope_bars
+
+    close = ColumnRef(DataColumn.CLOSE)
+    assert alpha_plan_spec(close.rolling(5).truncate(0, 2).mean()) is None
+    condition = close > 0
+    assert alpha_plan_spec(close.bar_distance(condition, scope=scope_bars(3))) is None
