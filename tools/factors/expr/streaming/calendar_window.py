@@ -87,6 +87,40 @@ class TradingCalendarWindow:
             sessions.append(TradingSession(day, start, end, len(intervals)))
         return cls(tuple(sorted(sessions, key=lambda item: item.start_ns)))
 
+    @classmethod
+    def from_contract_bars(cls, bars: object) -> "TradingCalendarWindow":
+        """Build one session per trading day from bars of several contracts.
+
+        Each contract has its own bar coverage.  A session's bar count is the
+        maximum count observed for that trading day across contracts, not the
+        sum: overlapping contracts must not multiply the window size.
+        """
+        grouped: dict[tuple[object, object], list[tuple[int, int]]] = {}
+        for bar in bars:
+            day = getattr(bar, "trading_day", None)
+            clock = getattr(bar, "clock", None)
+            contract = getattr(bar, "contract_uid", None)
+            if day is None or clock is None:
+                raise ValueError("bars need trading_day and clock fields")
+            grouped.setdefault((day, contract), []).append(
+                (int(clock.interval_open_ns), int(clock.interval_end_ns))
+            )
+        if not grouped:
+            raise ValueError("bars contain no trading sessions")
+        by_day: dict[object, list[tuple[int, int]]] = {}
+        counts: dict[object, int] = {}
+        for (day, _contract), intervals in grouped.items():
+            by_day.setdefault(day, []).extend(intervals)
+            counts[day] = max(counts.get(day, 0), len(intervals))
+        sessions = [
+            TradingSession(
+                day, min(item[0] for item in intervals),
+                max(item[1] for item in intervals), counts[day],
+            )
+            for day, intervals in by_day.items()
+        ]
+        return cls(tuple(sorted(sessions, key=lambda item: item.start_ns)))
+
     def max_window_size(self, lookback_sessions: int) -> int:
         """Largest minute-bar window over all frozen sessions."""
         if not isinstance(lookback_sessions, int) or lookback_sessions <= 0:

@@ -141,6 +141,7 @@ def run_strategy_family_replay(
     *, inputs: dict[Any, ReplayInput], factor_bindings: dict[str, FactorExpr],
     family: Any, output_dir: Path, max_bars: int = 8,
     factor_field: str = "CLOSE_ADJUSTED", execution_plan: Any = None,
+    session_calendar: Any = None,
 ) -> dict[str, Any]:
     """Run one strategy family across multiple frozen product catalogs."""
     from nautilus_trader.backtest import BacktestEngine
@@ -183,6 +184,7 @@ def run_strategy_family_replay(
                     factor_ref="factor:v2:" + role.encode().hex().ljust(43, "0")[:43],
                     expression=expression, products=tuple(opened),
                     bar_types_by_product=bar_types, source_freq=DataFreq.MIN1,
+                    session_calendar=session_calendar,
                     bar_clock=lambda _p, bar: _clock(bar),
                     factor_fields=lambda _p, bar: _bar_fields(bar),
                     first_executable_at=lambda clocks: max(
@@ -307,16 +309,31 @@ def run_strategy_family_run_spec(
             raise ValueError("strategy plan has no product catalogs and no RunSpec")
         source_adapter = plan.get("source_adapter") or {}
         window = plan.get("run_window") or {}
+        staging_requests = plan.get("catalog_staging") or catalog_staging_requests(run_spec_value)
         catalogs = stage_run_spec_catalogs(
-            staging_requests=plan.get("catalog_staging")
-            or catalog_staging_requests(run_spec_value),
+            staging_requests=staging_requests,
             source_key=str(source_adapter.get("member_key") or ""),
             frequency=str(source_adapter.get("frequency") or ""),
             start_utc=str(window.get("start") or ""),
             end_utc=str(window.get("end") or ""),
             target_root=Path(output_dir) / "catalogs",
         )
-        plan = {**plan, "catalog_inputs": catalogs}
+        plan = {**plan, "catalog_inputs": catalogs, "session_calendar": None}
+        try:
+            from server.services.nautilus_bridge.catalog_staging import (
+                build_run_spec_session_calendar,
+            )
+            plan["session_calendar"] = build_run_spec_session_calendar(
+                staging_requests=staging_requests,
+                source_key=str(source_adapter.get("member_key") or ""),
+                frequency=str(source_adapter.get("frequency") or ""),
+                start_utc=str(window.get("start") or ""),
+                end_utc=str(window.get("end") or ""),
+            )
+        except (OSError, ValueError) as error:
+            # A factor without a session window can still run with a fixed
+            # window.  A session-window factor must not fall back silently.
+            plan["session_calendar_error"] = str(error)
     inputs = {
         product: ReplayInput(
             Path(str(value["catalog_dir"])).resolve(),
@@ -347,4 +364,5 @@ def run_strategy_family_run_spec(
         inputs=inputs, factor_bindings=bindings, family=family,
         output_dir=Path(output_dir), max_bars=int(plan.get("max_input_bars") or 8),
         execution_plan=execution_plan,
+        session_calendar=plan.get("session_calendar"),
     )
