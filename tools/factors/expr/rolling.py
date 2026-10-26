@@ -867,7 +867,11 @@ def _coerce_bar_count_window(
 
 
 class IntervalBarsExpr(FactorExpr):
-    """Number of source bars whose timestamp falls inside an explicit interval."""
+    """Causal per-product count of observed bars in inclusive [start, end].
+
+    Each output includes only bars formed by that output timestamp. Union
+    padding does not count; an observed bar with a NaN value still counts.
+    """
 
     def __init__(self, start_ns: int, end_ns: int):
         self.start_ns = int(start_ns)
@@ -886,10 +890,27 @@ class IntervalBarsExpr(FactorExpr):
     def _structural_key(self):
         return ('interval_bars', self.start_ns, self.end_ns)
 
-    def _evaluate(self, ctx: EvaluateContext) -> int:
-        index = next(iter(ctx.preloaded.values())).index
-        timestamps = pd.DatetimeIndex(index).as_unit('ns').asi8
-        return int(((timestamps >= self.start_ns) & (timestamps <= self.end_ns)).sum())
+    def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
+        timeline = ctx.panel_timeline
+        if timeline is not None:
+            index = timeline.index
+            observed = timeline.observed_mask.reindex(index=index, columns=ctx.products, fill_value=False).to_numpy(bool).T
+        else:
+            frames = [ctx.preloaded[(product, ctx.freq.name)] for product in ctx.products]
+            index = frames[0].index
+            for frame in frames[1:]:
+                index = index.union(frame.index)
+            index = index.sort_values()
+            observed = np.asarray([index.isin(frame.index) for frame in frames])
+        from tools.data.types import finest_index
+        source_index = finest_index(index) if isinstance(index, pd.MultiIndex) else index
+        if not isinstance(source_index, pd.DatetimeIndex):
+            raise ValueError('interval_bars requires source timestamps')
+        times = source_index.as_unit('ns').asi8
+        inside = (times >= self.start_ns) & (times <= self.end_ns)
+        counts = np.cumsum(observed & inside, axis=1).astype(float)
+        counts[~observed] = np.nan
+        return pd.DataFrame(counts.T, index=index, columns=ctx.products)
 
     def _to_latex(self, subst: dict | None = None) -> str:
         return f'\\operatorname{{bars}}[{self.start_ns},{self.end_ns}]'

@@ -101,7 +101,10 @@ struct NodeState {
     spec: ExprSpec,
     rolling: Vec<Option<IntervalKernel>>,
     trunc_history: Vec<VecDeque<f64>>,
-    timestamps: VecDeque<i64>,
+    interval_count: u64,
+    count_timestamp: Option<i64>,
+    session_cursor: Option<usize>,
+    session_starts: Vec<u64>,
     ema: Vec<Option<crate::algo::EmaState>>,
     linreg: Vec<Option<LinearState>>,
     match_history: Vec<VecDeque<(u64, f64)>>,
@@ -148,6 +151,20 @@ impl FactorPlanKernel {
         }
         let mut nodes = Vec::with_capacity(specs.len());
         for spec in specs {
+            let session_starts = match &spec {
+                ExprSpec::SessionRolling { sessions, lookback_sessions, .. } => {
+                    if *lookback_sessions == 0 || sessions.is_empty()
+                        || sessions.iter().any(|(start, end, _)| start > end)
+                        || sessions.windows(2).any(|pair| pair[0].1 >= pair[1].0) {
+                        return Err(crate::algo::Error::InvalidParameter("session window requires positive lookback and ordered nonoverlapping sessions".into()));
+                    }
+                    vec![0; sessions.len()]
+                }
+                ExprSpec::BarCount { start_ns, end_ns } if start_ns > end_ns => {
+                    return Err(crate::algo::Error::InvalidParameter("interval start exceeds end".into()));
+                }
+                _ => Vec::new(),
+            };
             let rolling = match &spec {
                 ExprSpec::Rolling { op, .. } | ExprSpec::RollingDynamic { op, .. } | ExprSpec::Scope { op, .. } | ExprSpec::SessionRolling { op, .. } => (0..products)
                     .map(|_| IntervalKernel::new_explicit(*op).map(Some))
@@ -169,7 +186,8 @@ impl FactorPlanKernel {
             nodes.push(NodeState {
                 spec, rolling, ema, linreg,
                 trunc_history: (0..products).map(|_| VecDeque::new()).collect(),
-                timestamps: VecDeque::new(),
+                interval_count: 0, count_timestamp: None,
+                session_cursor: None, session_starts,
                 match_history: (0..products).map(|_| VecDeque::new()).collect(),
                 history: VecDeque::new(),
                 since_first: vec![None; products],
@@ -253,6 +271,37 @@ impl FactorPlanKernel {
         let fields = self.fields;
         let current = self.ordinal;
         for index in 0..self.nodes.len() {
+            // Borrow large calendar specs instead of cloning them per bar.
+            // Store actual replay ordinals, not declared full-session sizes:
+            // replay may begin midway through a calendar or contain missing bars.
+            if let ExprSpec::SessionRolling { child, lookback_sessions, sessions, min_periods, propagate_nan, .. } = &self.nodes[index].spec {
+                let node = &self.nodes[index];
+                let position = node.session_cursor.filter(|&p| timestamp_ns >= sessions[p].0 && timestamp_ns <= sessions[p].1)
+                    .or_else(|| sessions.partition_point(|(start, _, _)| *start <= timestamp_ns).checked_sub(1))
+                    .filter(|&p| timestamp_ns <= sessions[p].1)
+                    .ok_or_else(|| crate::algo::Error::InvalidParameter("bar is outside the frozen session calendar".into()))?;
+                if node.count_timestamp.is_some_and(|last| timestamp_ns <= last) {
+                    return Err(crate::algo::Error::InvalidParameter("session bars must have increasing timestamps".into()));
+                }
+                let (child, first, minimum, propagate) = (*child, (position + 1).saturating_sub(*lookback_sessions), *min_periods, *propagate_nan);
+                let (head, tail) = self.slots.split_at_mut(index);
+                let input = &head[child];
+                let out = &mut tail[0];
+                let node = &mut self.nodes[index];
+                if node.session_cursor != Some(position) {
+                    let from = node.session_cursor.map_or(0, |p| p + 1);
+                    node.session_starts[from..=position].fill(current);
+                    node.session_cursor = Some(position);
+                }
+                node.count_timestamp = Some(timestamp_ns);
+                let start = node.session_starts[first];
+                for product in 0..products {
+                    let state = node.rolling[product].as_mut().unwrap();
+                    state.set_semantics(minimum, propagate);
+                    out[product] = state.update_explicit(start, current, input[product]);
+                }
+                continue;
+            }
             let spec = self.nodes[index].spec.clone();
             let (head, tail) = self.slots.split_at_mut(index);
             let out = &mut tail[0];
@@ -266,11 +315,13 @@ impl FactorPlanKernel {
                     }
                 }
                 ExprSpec::BarCount { start_ns, end_ns } => {
-                    let history = &mut self.nodes[index].timestamps;
-                    history.push_back(timestamp_ns);
-                    while history.front().is_some_and(|value| *value < start_ns) { history.pop_front(); }
-                    while history.back().is_some_and(|value| *value > end_ns) { history.pop_back(); }
-                    out.fill(history.len() as f64);
+                    let node = &mut self.nodes[index];
+                    if node.count_timestamp.is_some_and(|last| timestamp_ns <= last) {
+                        return Err(crate::algo::Error::InvalidParameter("counted bars must have increasing timestamps".into()));
+                    }
+                    node.count_timestamp = Some(timestamp_ns);
+                    node.interval_count += u64::from(timestamp_ns >= start_ns && timestamp_ns <= end_ns);
+                    out.fill(node.interval_count as f64);
                 }
                 ExprSpec::Product(ref values) => {
                     if values.len() != products { return Err(crate::algo::Error::InvalidParameter("product constant width mismatch".into())); }
@@ -345,18 +396,7 @@ impl FactorPlanKernel {
                         while history.len() > count { history.pop_front(); }
                     }
                 }
-                ExprSpec::SessionRolling { child, lookback_sessions, ref sessions, min_periods, propagate_nan, .. } => {
-                    let input = &head[child];
-                    let node = &mut self.nodes[index];
-                    let current_session = sessions.iter().position(|(start, end, _)| timestamp_ns >= *start && timestamp_ns <= *end).unwrap_or(0);
-                    let first_session = (current_session + 1).saturating_sub(lookback_sessions);
-                    let start: u64 = sessions[..first_session].iter().map(|(_, _, bars)| *bars as u64).sum();
-                    for product in 0..products {
-                        let Some(state) = node.rolling[product].as_mut() else { out[product] = f64::NAN; continue };
-                        state.set_semantics(min_periods, propagate_nan);
-                        out[product] = state.update_explicit(start, current, input[product]);
-                    }
-                }
+                ExprSpec::SessionRolling { .. } => unreachable!("handled without cloning above"),
                 ExprSpec::RollingDynamic { child, ref windows, min_periods, propagate_nan, .. } => {
                     let input = &head[child];
                     let node = &mut self.nodes[index];

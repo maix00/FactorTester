@@ -104,9 +104,9 @@ class RustIncrementalExecutor:
             for product in self._products
             for column in self._columns
         ]
-        # The kernel expects one value per product for the compiled column set;
-        # multi-column panes use column-major product values.
-        flat = np.asarray(values, dtype=float)
+        # Constant/count-only graphs have no source columns, but still receive
+        # one complete market slice. Supply its product width to the kernel.
+        flat = np.asarray(values if self._columns else [0.0] * len(self._products), dtype=float)
         raw = np.asarray(self._state.update_at(pd.Timestamp(timestamp).value, flat), dtype=float)
         matrix = raw.reshape(len(self._aliases), len(self._products))
         self._latest = {
