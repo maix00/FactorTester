@@ -64,8 +64,8 @@ FROM factortester-public-deps AS factortester-public
 ARG NAUTILUS_VENDOR_REVISION
 ARG MIHOMO_ARCHIVE_SHA256=db214c7a2517e63c150d123178d16d102e03a241ccdae4e5e07ffbe9cf56c6f9
 LABEL org.traderesearch.nautilus.revision="${NAUTILUS_VENDOR_REVISION}"
-COPY deploy/docker/factortester-public/wheels/py_alpha_lib-0.3.1-cp314-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl /tmp/py_alpha_lib-0.3.1-cp314-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-RUN python -m pip install --no-cache-dir --no-deps /tmp/py_alpha_lib-0.3.1-cp314-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl && rm -f /tmp/py_alpha_lib-0.3.1-cp314-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+COPY deploy/docker/factortester-public/wheels/py_alpha_lib-0.3.1-cp314-abi3-linux_x86_64.whl /tmp/py_alpha_lib-0.3.1-cp314-abi3-linux_x86_64.whl
+RUN python -m pip install --no-cache-dir --no-deps /tmp/py_alpha_lib-0.3.1-cp314-abi3-linux_x86_64.whl && rm -f /tmp/py_alpha_lib-0.3.1-cp314-abi3-linux_x86_64.whl
 
 # Nautilus is built from the local vendor submodule by
 # scripts/server/build_nautilus_linux_wheel.sh. A public release that requires
