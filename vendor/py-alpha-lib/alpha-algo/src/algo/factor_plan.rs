@@ -470,10 +470,38 @@ fn term_metric(op: &str, curve: &[(f64, f64)], near_rank: usize, far_rank: usize
             let mean_y = frame.iter().map(|(_, y)| y).sum::<f64>() / n;
             let (mut sxx, mut sxy) = (0.0, 0.0);
             for (x, y) in &frame { sxx += (x - mean_x).powi(2); sxy += (x - mean_x) * (y - mean_y); }
-            if sxx == 0.0 { f64::NAN } else if op == "term_slope" { sxy / sxx } else { f64::NAN }
+            if sxx == 0.0 { f64::NAN }
+            else if op == "term_slope" { sxy / sxx }
+            else { quadratic_coefficient(&frame) }
         }
         _ => f64::NAN,
     }
+}
+
+fn quadratic_coefficient(points: &[(f64, f64)]) -> f64 {
+    // Normal equations for y = a + b*x + c*x^2, return c.
+    let mut matrix = [[0.0; 4]; 3];
+    for &(x, y) in points {
+        let powers = [1.0, x, x * x];
+        for row in 0..3 {
+            for column in 0..3 { matrix[row][column] += powers[row] * powers[column]; }
+            matrix[row][3] += powers[row] * y;
+        }
+    }
+    for pivot in 0..3 {
+        let mut best = pivot;
+        for row in pivot + 1..3 { if matrix[row][pivot].abs() > matrix[best][pivot].abs() { best = row; } }
+        if matrix[best][pivot].abs() < 1e-12 { return f64::NAN; }
+        matrix.swap(pivot, best);
+        let divisor = matrix[pivot][pivot];
+        for column in pivot..4 { matrix[pivot][column] /= divisor; }
+        for row in 0..3 {
+            if row == pivot { continue; }
+            let factor = matrix[row][pivot];
+            for column in pivot..4 { matrix[row][column] -= factor * matrix[pivot][column]; }
+        }
+    }
+    matrix[2][3]
 }
 
 #[derive(Deserialize)]
@@ -772,5 +800,16 @@ mod term_plan_tests {
         let mut kernel = FactorPlanKernel::from_spec_json(json, 1).unwrap();
         let values = kernel.update_with_curves(0, &[1.0], &[vec![(30.0, 10.0), (90.0, 8.0)]]).unwrap();
         assert_eq!(values, vec![2.0]);
+    }
+
+    #[test]
+    fn term_curvature_fits_quadratic_coefficient() {
+        let json = r#"{"columns":["C"],"nodes":[
+          {"kind":"column","index":0},
+          {"kind":"term","op":"term_curvature","near_rank":0,"far_rank":1,"depth":3}
+        ],"outputs":[1]}"#;
+        let mut kernel = FactorPlanKernel::from_spec_json(json, 1).unwrap();
+        let values = kernel.update_with_curves(0, &[1.0], &[vec![(1.0, 1.0), (2.0, 4.0), (3.0, 9.0)]]).unwrap();
+        assert!((values[0] - 1.0).abs() < 1e-9);
     }
 }
