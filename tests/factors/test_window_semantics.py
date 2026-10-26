@@ -65,3 +65,20 @@ def test_groupby_scope_operator_carries_partition_semantics():
     assert partial.min_periods == 3
     assert partial.nan_policy is NanPolicy.SKIP
     assert base._structural_key() != partial._structural_key()
+
+
+def test_bar_search_operator_carries_nan_policy():
+    from tools.data.types import DataColumn
+    from tools.factors.expr.bar_search import bar_since
+    from tools.factors.expr.leaf import ColumnRef
+    from tools.factors.expr.lookback_scope import scope_trading_day
+    from tools.factors.expr.window_semantics import NanPolicy
+
+    condition = ColumnRef(DataColumn.CLOSE) > 0
+    base = bar_since(condition, scope=scope_trading_day())
+    skip = bar_since(
+        condition, scope=scope_trading_day(), nan_policy=NanPolicy.SKIP,
+    )
+    assert base.nan_policy is NanPolicy.PROPAGATE
+    assert skip.nan_policy is NanPolicy.SKIP
+    assert base._structural_key() != skip._structural_key()

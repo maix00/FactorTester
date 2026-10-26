@@ -11,6 +11,7 @@ from .core import EvaluateContext, FactorExpr
 from .leaf import _to_expr
 from .lookback_scope import BarCountScope, LookbackScope
 from .operands import OperandExpr
+from .window_semantics import DEFAULT_NAN_POLICY, NanPolicy
 
 Selection = Literal["nearest", "farthest"]
 
@@ -70,11 +71,13 @@ class BarSinceOp(OperandExpr):
         select: str = "nearest",
         default: Any = SCOPE_LENGTH,
         include_current: bool = True,
+        nan_policy: NanPolicy = DEFAULT_NAN_POLICY,
     ) -> None:
         super().__init__("bar_since", condition, _to_expr(default))
         self.scope = scope
         self.select = _validate_select(select)
         self.include_current = bool(include_current)
+        self.nan_policy = nan_policy
 
     @property
     def condition(self) -> FactorExpr:
@@ -94,6 +97,7 @@ class BarSinceOp(OperandExpr):
             default=scalar_default(self.operands[1]),
             ctx=ctx,
             include_current=self.include_current,
+            nan_policy=self.nan_policy,
         )
 
     def resolve(self, *args: Any, **kwargs: Any) -> FactorExpr:
@@ -103,6 +107,7 @@ class BarSinceOp(OperandExpr):
             select=self.select,
             default=self.operands[1].resolve(*args, **kwargs),
             include_current=self.include_current,
+            nan_policy=self.nan_policy,
         )
         if self._is_intermediate:
             resolved = resolved.as_intermediate(
@@ -111,7 +116,8 @@ class BarSinceOp(OperandExpr):
         return resolved
 
     def _structural_extra(self) -> tuple[Any, ...]:
-        return (self.scope.structural_key(), self.select, self.include_current)
+        return (self.scope.structural_key(), self.select, self.include_current,
+                self.nan_policy.value)
 
     def _to_latex(self, subst: dict | None = None) -> str:
         condition = self.condition._to_latex(subst)
@@ -133,6 +139,7 @@ def bar_since(
     select: str = "nearest",
     default: Any = SCOPE_LENGTH,
     include_current: bool = True,
+    nan_policy: NanPolicy = DEFAULT_NAN_POLICY,
 ) -> BarSinceOp:
     if not isinstance(scope, LookbackScope):
         raise TypeError(
@@ -145,6 +152,7 @@ def bar_since(
         select=select,
         default=default,
         include_current=include_current,
+        nan_policy=nan_policy,
     )
 
 
@@ -157,10 +165,12 @@ class BarDistanceOp(OperandExpr):
         scope: LookbackScope,
         select: str = "nearest",
         default: Any = SCOPE_LENGTH,
+        nan_policy: NanPolicy = DEFAULT_NAN_POLICY,
     ) -> None:
         super().__init__("bar_distance", value, condition, _to_expr(default))
         self.scope = scope
         self.select = _validate_select(select)
+        self.nan_policy = nan_policy
 
     @property
     def value(self) -> FactorExpr:
@@ -184,6 +194,7 @@ class BarDistanceOp(OperandExpr):
             select=self.select,
             default=scalar_default(self.operands[2]),
             ctx=ctx,
+            nan_policy=self.nan_policy,
         )
 
     def resolve(self, *args: Any, **kwargs: Any) -> FactorExpr:
@@ -193,6 +204,7 @@ class BarDistanceOp(OperandExpr):
             scope=self.scope.resolve(*args, **kwargs),
             select=self.select,
             default=self.operands[2].resolve(*args, **kwargs),
+            nan_policy=self.nan_policy,
         )
         if self._is_intermediate:
             resolved = resolved.as_intermediate(
@@ -201,7 +213,7 @@ class BarDistanceOp(OperandExpr):
         return resolved
 
     def _structural_extra(self) -> tuple[Any, ...]:
-        return (self.scope.structural_key(), self.select)
+        return (self.scope.structural_key(), self.select, self.nan_policy.value)
 
     def _to_latex(self, subst: dict | None = None) -> str:
         value = self.value._to_latex(subst)
@@ -227,6 +239,7 @@ def bar_distance(
     scope: LookbackScope,
     select: str = "nearest",
     default: Any = SCOPE_LENGTH,
+    nan_policy: NanPolicy = DEFAULT_NAN_POLICY,
 ) -> BarDistanceOp:
     if not isinstance(scope, LookbackScope):
         raise TypeError(
@@ -239,4 +252,5 @@ def bar_distance(
         scope=scope,
         select=select,
         default=default,
+        nan_policy=nan_policy,
     )

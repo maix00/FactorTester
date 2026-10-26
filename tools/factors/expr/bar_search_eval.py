@@ -71,7 +71,11 @@ def evaluate_bar_since(
     default: float | None,
     ctx: EvaluateContext,
     include_current: bool,
+    nan_policy: str = "propagate",
 ) -> pd.DataFrame:
+    missing = condition.isna().to_numpy()
+    if nan_policy == "propagate" and missing.any():
+        condition = condition.copy()
     values = condition.fillna(False).to_numpy(dtype=bool)
     observed = _observed_mask(condition, ctx)
     output = np.full(values.shape, np.nan, dtype=float)
@@ -109,6 +113,8 @@ def evaluate_bar_since(
                 output[int(row), column] = scope_age if default is None else default
             if not include_current and values[int(row), column]:
                 matches.append(ordinal)
+    if nan_policy == "propagate":
+        output[missing] = np.nan
     return pd.DataFrame(output, index=condition.index, columns=condition.columns)
 
 
@@ -177,6 +183,7 @@ def evaluate_bar_distance(
     select: Selection,
     default: float | None,
     ctx: EvaluateContext,
+    nan_policy: str = "propagate",
 ) -> pd.DataFrame:
     current = values.to_numpy(dtype=float)
     observed = _observed_mask(values, ctx)
