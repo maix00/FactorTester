@@ -2582,6 +2582,8 @@ impl SessionRollingState {
       "min" => SessionOp::Min,
       "max" => SessionOp::Max,
       "skew" => SessionOp::Skew,
+      "argmin" => SessionOp::Argmin,
+      "argmax" => SessionOp::Argmax,
       other => return Err(pyo3::exceptions::PyValueError::new_err(
         format!("unsupported session op: {other}")
       )),

@@ -81,6 +81,8 @@ pub enum SessionOp {
   Min,
   Max,
   Skew,
+  Argmin,
+  Argmax,
 }
 
 pub struct SessionWindowState {
@@ -181,6 +183,12 @@ impl SessionWindowState {
       }
       SessionOp::Min => self.min_deque.front().map(|(_, v)| *v).unwrap_or(f64::NAN),
       SessionOp::Max => self.max_deque.front().map(|(_, v)| *v).unwrap_or(f64::NAN),
+      SessionOp::Argmin | SessionOp::Argmax => {
+        let deque = if self.op == SessionOp::Argmax { &self.max_deque } else { &self.min_deque };
+        let Some((index, _)) = deque.front() else { return f64::NAN };
+        let current = self.next_index.saturating_sub(1);
+        if count <= 1 { 0.0 } else { (current - *index) as f64 / (count - 1) as f64 }
+      }
       SessionOp::Skew => {
         if count < 3 {
           f64::NAN
@@ -227,6 +235,18 @@ pub fn ta_session_rolling_std<NumT: Float>(
   values: &[f64], session_ids: &[u32], lookback_sessions: usize,
 ) -> Result<Vec<NumT>, Error> {
   session_rolling_state(values, session_ids, lookback_sessions, SessionOp::Std)
+}
+
+pub fn ta_session_rolling_argmin<NumT: Float>(
+  values: &[f64], session_ids: &[u32], lookback_sessions: usize,
+) -> Result<Vec<NumT>, Error> {
+  session_rolling_state(values, session_ids, lookback_sessions, SessionOp::Argmin)
+}
+
+pub fn ta_session_rolling_argmax<NumT: Float>(
+  values: &[f64], session_ids: &[u32], lookback_sessions: usize,
+) -> Result<Vec<NumT>, Error> {
+  session_rolling_state(values, session_ids, lookback_sessions, SessionOp::Argmax)
 }
 
 pub fn ta_session_rolling_skew<NumT: Float>(
@@ -374,6 +394,15 @@ mod tests {
     max.update(0, 5.0);
     max.update(0, 2.0);
     assert_eq!(max.update(1, 7.0), 7.0);
+  }
+
+  #[test]
+  fn arg_extrema_report_window_offset() {
+    let mut state = SessionWindowState::new_op(1, SessionOp::Argmax).unwrap();
+    state.update(0, 1.0);
+    state.update(0, 3.0);
+    let value = state.update(0, 2.0);
+    assert!((value - 0.5).abs() < 1e-12);
   }
 
   #[test]
