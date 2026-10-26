@@ -180,6 +180,7 @@ class RustSessionRollingNode:
         if op not in {
             "rolling_mean", "rolling_sum", "rolling_var",
             "rolling_std", "rolling_min", "rolling_max",
+            "rolling_skew", "rolling_argmin", "rolling_argmax",
         }:
             raise UnsupportedStreamingFactor(
                 f"Rust session state does not support {op}"
@@ -196,6 +197,8 @@ class RustSessionRollingNode:
             "rolling_mean": "mean", "rolling_sum": "sum",
             "rolling_var": "var", "rolling_std": "std",
             "rolling_min": "min", "rolling_max": "max",
+            "rolling_skew": "skew",
+            "rolling_argmin": "argmin", "rolling_argmax": "argmax",
         }[op]
         self._states = [
             SessionRollingState(self.lookback_sessions, False, rust_op)
@@ -1342,6 +1345,7 @@ def compile_streaming_factor(
                     if expr.op not in {
                         "rolling_mean", "rolling_sum", "rolling_var",
                         "rolling_std", "rolling_min", "rolling_max",
+                        "rolling_skew", "rolling_argmin", "rolling_argmax",
                     }:
                         raise UnsupportedStreamingFactor(
                             "session window has no verified Rust implementation"
@@ -1378,6 +1382,7 @@ def compile_streaming_factor(
                     and expr.op in {
                         "rolling_mean", "rolling_sum", "rolling_var",
                         "rolling_std", "rolling_min", "rolling_max",
+                        "rolling_skew", "rolling_argmin", "rolling_argmax",
                     }
                 ):
                     node = RustSessionRollingNode(
