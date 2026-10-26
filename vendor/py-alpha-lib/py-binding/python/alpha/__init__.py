@@ -4,6 +4,7 @@
 from .algo import *
 from .lang import *
 from .context import ExecContext
+from . import factor
 
 
 # skip nan values during computations
