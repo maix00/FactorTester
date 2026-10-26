@@ -47,6 +47,7 @@ struct NodeState {
     signal_pending: Vec<Option<f64>>,
     signal_prev: Vec<f64>,
     scope_session: Option<usize>,
+    cross_scratch: Vec<(usize, f64)>,
 }
 
 pub struct FactorPlanKernel {
@@ -95,6 +96,7 @@ impl FactorPlanKernel {
                 signal_pending: vec![None; products],
                 signal_prev: vec![f64::NAN; products],
                 scope_session: None,
+                cross_scratch: Vec::new(),
             });
         }
         if outputs.iter().any(|index| *index >= nodes.len()) {
@@ -182,12 +184,17 @@ impl FactorPlanKernel {
                     }
                 }
                 ExprSpec::Shift { child, periods } => {
-                    let input = head[child].clone();
+                    let input = &head[child];
                     let node = &mut self.nodes[index];
-                    node.history.push_back(input);
-                    while node.history.len() > periods + 1 { node.history.pop_front(); }
+                    let mut buffer = if node.history.len() > periods {
+                        node.history.pop_front().unwrap()
+                    } else {
+                        vec![f64::NAN; products]
+                    };
+                    buffer.copy_from_slice(input);
+                    node.history.push_back(buffer);
                     if node.history.len() <= periods { out.fill(f64::NAN); }
-                    else { out.copy_from_slice(&node.history[node.history.len() - 1 - periods]); }
+                    else { out.copy_from_slice(&node.history[0]); }
                 }
                 ExprSpec::Where { condition, when_true, when_false } => {
                     let c = &head[condition]; let a = &head[when_true]; let b = &head[when_false];
@@ -195,16 +202,19 @@ impl FactorPlanKernel {
                 }
                 ExprSpec::Cross { op, child } => {
                     let input = &head[child];
-                    let valid: Vec<(usize, f64)> = (0..products).filter_map(|product| input[product].is_finite().then_some((product, input[product]))).collect();
+                    let node = &mut self.nodes[index];
+                    node.cross_scratch.clear();
+                    node.cross_scratch.extend((0..products).filter_map(|product| input[product].is_finite().then_some((product, input[product]))));
                     if op == CrossOp::ZScore {
-                        let n = valid.len() as f64;
-                        let mean = valid.iter().map(|(_, value)| value).sum::<f64>() / n;
-                        let std = (valid.iter().map(|(_, value)| (value - mean).powi(2)).sum::<f64>() / (n - 1.0).max(1.0)).sqrt();
+                        let n = node.cross_scratch.len() as f64;
+                        let mean = node.cross_scratch.iter().map(|(_, value)| value).sum::<f64>() / n;
+                        let std = (node.cross_scratch.iter().map(|(_, value)| (value - mean).powi(2)).sum::<f64>() / (n - 1.0).max(1.0)).sqrt();
                         for product in 0..products { out[product] = if !input[product].is_finite() { f64::NAN } else if std == 0.0 { 0.0 } else { (input[product] - mean) / std }; }
                     } else {
-                        let mut sorted = valid; sorted.sort_by(|a, b| a.1.total_cmp(&b.1)); out.fill(f64::NAN);
-                        let n = sorted.len() as f64;
-                        for (rank, (product, _)) in sorted.into_iter().enumerate() { out[product] = (rank as f64 + 1.0) / n - 0.5; }
+                        node.cross_scratch.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
+                        out.fill(f64::NAN);
+                        let n = node.cross_scratch.len() as f64;
+                        for (rank, (product, _)) in node.cross_scratch.iter().enumerate() { out[*product] = (rank as f64 + 1.0) / n - 0.5; }
                     }
                 }
                 ExprSpec::Since { condition, count, include_current, nearest, default_scope, default }
