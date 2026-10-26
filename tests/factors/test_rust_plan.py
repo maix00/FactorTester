@@ -262,3 +262,16 @@ def test_compat_plan_emits_dynamic_truncation_children():
     node = spec['nodes'][-1]
     assert node['trunc_start_child'] is not None
     assert node['trunc_end'] == 2
+
+
+def test_interval_bars_compiles_to_bar_count_and_drives_truncation():
+    from tools.factors import interval_bars
+    from tools.factors.alpha_plan import alpha_plan_spec
+
+    counts = interval_bars(1, 3)
+    assert counts.op_name == 'interval_bars:1:3'
+    expression = ColumnRef(DataColumn.CLOSE).rolling(5).truncate(counts, 2).mean()
+    spec = alpha_plan_spec(expression, source_freq=DataFreq.MIN1, products=('A',))
+    kinds = [node['kind'] for node in spec['nodes']]
+    assert 'bar_count' in kinds
+    assert spec['nodes'][-1]['trunc_start_child'] is not None

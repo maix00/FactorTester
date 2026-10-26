@@ -17,7 +17,7 @@ from tools.factors.expr.cross_sectional import CrossSectionalOp
 from tools.factors.expr.groupby_scope import GroupByScopeOp
 from tools.factors.expr.leaf import CategoryBoolRef, ColumnRef, ConstExpr
 from tools.factors.expr.lookback_scope import BarCountScope
-from tools.factors.expr.rolling import RollingOp
+from tools.factors.expr.rolling import IntervalBarsExpr, RollingOp
 from tools.factors.expr.shift import ShiftOp
 from tools.factors.expr.match_refs import MatchValueRef
 from tools.factors.expr.signal_align import SignalAlign
@@ -63,6 +63,8 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
             node = {"kind": "column", "index": columns.index(name)}
         elif isinstance(expr, ConstExpr):
             node = {"kind": "const", "value": float(expr.value)}
+        elif isinstance(expr, IntervalBarsExpr):
+            node = {"kind": "bar_count", "start_ns": expr.start_ns, "end_ns": expr.end_ns}
         elif isinstance(expr, RollingOp):
             if expr._n_data != 1:
                 return None

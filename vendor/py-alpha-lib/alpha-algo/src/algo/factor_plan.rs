@@ -21,6 +21,7 @@ pub enum ExprSpec {
     Column(usize),
     Const(f64),
     Product(Vec<f64>),
+    BarCount { start_ns: i64, end_ns: i64 },
     Category { memberships: Vec<(usize, i64, bool)> },
     Rolling { child: usize, window: usize, op: SessionOp, min_periods: usize, propagate_nan: bool, trunc_start: i64, trunc_end: i64, trunc_start_child: Option<usize>, trunc_end_child: Option<usize> },
     Ema { child: usize, span: usize, min_periods: usize, propagate_nan: bool },
@@ -100,6 +101,7 @@ struct NodeState {
     spec: ExprSpec,
     rolling: Vec<Option<IntervalKernel>>,
     trunc_history: Vec<VecDeque<f64>>,
+    timestamps: VecDeque<i64>,
     ema: Vec<Option<crate::algo::EmaState>>,
     linreg: Vec<Option<LinearState>>,
     match_history: Vec<VecDeque<(u64, f64)>>,
@@ -167,6 +169,7 @@ impl FactorPlanKernel {
             nodes.push(NodeState {
                 spec, rolling, ema, linreg,
                 trunc_history: (0..products).map(|_| VecDeque::new()).collect(),
+                timestamps: VecDeque::new(),
                 match_history: (0..products).map(|_| VecDeque::new()).collect(),
                 history: VecDeque::new(),
                 since_first: vec![None; products],
@@ -187,7 +190,7 @@ impl FactorPlanKernel {
         }
         for (index, node) in nodes.iter().enumerate() {
             let children: &[usize] = match &node.spec {
-                ExprSpec::Column(_) | ExprSpec::Const(_) | ExprSpec::Product(_) | ExprSpec::Category { .. } | ExprSpec::Term { .. } => &[],
+                ExprSpec::Column(_) | ExprSpec::Const(_) | ExprSpec::Product(_) | ExprSpec::BarCount { .. } | ExprSpec::Category { .. } | ExprSpec::Term { .. } => &[],
                 ExprSpec::Neg { child } | ExprSpec::Unary { child, .. } | ExprSpec::Rolling { child, .. }
                 | ExprSpec::SessionRolling { child, .. } | ExprSpec::RollingDynamic { child, .. } | ExprSpec::MatchDistance { child, .. }
                 | ExprSpec::Ema { child, .. } | ExprSpec::Linreg { child, .. }
@@ -261,6 +264,13 @@ impl FactorPlanKernel {
                             .max_by_key(|(_, at, _)| *at)
                             .map_or(0.0, |(_, _, member)| if *member { 1.0 } else { 0.0 });
                     }
+                }
+                ExprSpec::BarCount { start_ns, end_ns } => {
+                    let history = &mut self.nodes[index].timestamps;
+                    history.push_back(timestamp_ns);
+                    while history.front().is_some_and(|value| *value < start_ns) { history.pop_front(); }
+                    while history.back().is_some_and(|value| *value > end_ns) { history.pop_back(); }
+                    out.fill(history.len() as f64);
                 }
                 ExprSpec::Product(ref values) => {
                     if values.len() != products { return Err(crate::algo::Error::InvalidParameter("product constant width mismatch".into())); }
@@ -617,6 +627,7 @@ enum RawNode {
     Column { index: usize },
     Const { value: f64 },
     Product { values: Vec<f64> },
+    BarCount { start_ns: i64, end_ns: i64 },
     Category { memberships: Vec<[i64; 3]> },
     Rolling { child: usize, window: usize, op: String, min_periods: usize,
               propagate_nan: bool, #[serde(default)] quantile: Option<f64>,
@@ -675,6 +686,7 @@ impl FactorPlanKernel {
                 RawNode::Column { index } => ExprSpec::Column(index),
                 RawNode::Const { value } => ExprSpec::Const(value),
                 RawNode::Product { values } => ExprSpec::Product(values),
+                RawNode::BarCount { start_ns, end_ns } => ExprSpec::BarCount { start_ns, end_ns },
                 RawNode::Category { memberships } => ExprSpec::Category {
                     memberships: memberships.into_iter().map(|item| (item[0] as usize, item[1], item[2] != 0)).collect(),
                 },
@@ -942,5 +954,23 @@ mod term_plan_tests {
         let mut kernel = FactorPlanKernel::from_spec_json(json, 1).unwrap();
         let values = kernel.update_with_curves(0, &[1.0], &[vec![(1.0, 1.0), (2.0, 4.0), (3.0, 9.0)]]).unwrap();
         assert!((values[0] - 1.0).abs() < 1e-9);
+    }
+}
+
+#[cfg(test)]
+mod bar_count_tests {
+    use super::*;
+
+    #[test]
+    fn bar_count_tracks_a_fixed_interval() {
+        let json = r#"{"columns":["C"],"nodes":[
+          {"kind":"bar_count","start_ns":1,"end_ns":3}
+        ],"outputs":[0]}"#;
+        let mut kernel = FactorPlanKernel::from_spec_json(json, 1).unwrap();
+        assert_eq!(kernel.update_at(0, &[1.0]).unwrap(), vec![0.0]);
+        assert_eq!(kernel.update_at(1, &[1.0]).unwrap(), vec![1.0]);
+        assert_eq!(kernel.update_at(2, &[1.0]).unwrap(), vec![2.0]);
+        assert_eq!(kernel.update_at(3, &[1.0]).unwrap(), vec![3.0]);
+        assert_eq!(kernel.update_at(4, &[1.0]).unwrap(), vec![3.0]);
     }
 }

@@ -864,3 +864,41 @@ def _coerce_bar_count_window(
                 raise ValueError(f"滚动窗口 bar 数必须为正整数，收到 {window!r}")
             return count
     return None
+
+
+class IntervalBarsExpr(FactorExpr):
+    """Number of source bars whose timestamp falls inside an explicit interval."""
+
+    def __init__(self, start_ns: int, end_ns: int):
+        self.start_ns = int(start_ns)
+        self.end_ns = int(end_ns)
+        if self.start_ns > self.end_ns:
+            raise ValueError('interval start must not exceed end')
+
+    @property
+    def _operands(self) -> Sequence[FactorExpr]:
+        return ()
+
+    @property
+    def op_name(self) -> str:
+        return f'interval_bars:{self.start_ns}:{self.end_ns}'
+
+    def _structural_key(self):
+        return ('interval_bars', self.start_ns, self.end_ns)
+
+    def _evaluate(self, ctx: EvaluateContext) -> int:
+        index = next(iter(ctx.preloaded.values())).index
+        timestamps = pd.DatetimeIndex(index).as_unit('ns').asi8
+        return int(((timestamps >= self.start_ns) & (timestamps <= self.end_ns)).sum())
+
+    def _to_latex(self, subst: dict | None = None) -> str:
+        return f'\\operatorname{{bars}}[{self.start_ns},{self.end_ns}]'
+
+
+def interval_bars(start: Any, end: Any) -> IntervalBarsExpr:
+    """Count bars between two explicit nanosecond timestamps."""
+    def timestamp(value):
+        if isinstance(value, pd.Timestamp):
+            return value.value
+        return int(value)
+    return IntervalBarsExpr(timestamp(start), timestamp(end))
