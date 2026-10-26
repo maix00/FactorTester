@@ -57,6 +57,32 @@ impl FactorEngine for WindowEngine {
     }
 }
 
+
+/// Several factor windows updated from one market bar.  Each engine owns its
+/// own Rust interval state; shared inputs are read once.
+pub struct MultiWindowEngine {
+    pub names: Vec<String>,
+    engines: Vec<WindowEngine>,
+}
+
+impl MultiWindowEngine {
+    pub fn new(specs: Vec<(String, usize, SessionOp)>) -> Result<Self, alpha_algo::Error> {
+        let n = specs.len();
+        let names: Vec<String> = specs.iter().map(|(name, _, _)| name.clone()).collect();
+        let engines = specs.into_iter().map(|(_, window, op)| WindowEngine::new(window, op)).collect::<Result<Vec<_>, _>>()?;
+        debug_assert_eq!(names.len(), n);
+        Ok(Self { names, engines })
+    }
+}
+
+impl FactorEngine for MultiWindowEngine {
+    type Error = alpha_algo::Error;
+
+    fn update(&mut self, bar: &MarketBar) -> Result<Vec<f64>, Self::Error> {
+        Ok(self.engines.iter_mut().map(|engine| engine.update(bar).map(|values| values[0])).collect::<Result<Vec<_>, _>>()?)
+    }
+}
+
 /// Nautilus-side adapter contract.  Implemented by the actor that receives
 /// Nautilus bars; it does not leak Nautilus types into py-alpha-lib.
 pub trait NautilusMarketAdapter {
@@ -79,6 +105,18 @@ pub mod nautilus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn multi_window_engine_updates_shared_bar_once() {
+        let mut engine = MultiWindowEngine::new(vec![
+            ("mean2".into(), 2, SessionOp::Mean),
+            ("sum3".into(), 3, SessionOp::Sum),
+        ]).unwrap();
+        let bar = |value| MarketBar::new(0, vec!["A".into()], vec![value]);
+        assert_eq!(engine.update(&bar(1.0)).unwrap(), vec![1.0, 1.0]);
+        assert_eq!(engine.update(&bar(2.0)).unwrap(), vec![1.5, 3.0]);
+        assert_eq!(engine.update(&bar(3.0)).unwrap(), vec![2.5, 6.0]);
+    }
 
     #[test]
     fn window_engine_keeps_rust_state_across_bars() {
