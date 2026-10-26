@@ -91,11 +91,17 @@ class GroupByScopeOp(FactorExpr):
                     starts[i] = current
             else:
                 times = self.owner.times
-                gap = self.owner.scope.gap_ns
+                sessions = self.owner.scope.sessions
                 starts = np.zeros(len(values), dtype=np.uint64)
+                session_index = 0
+                while session_index + 1 < len(sessions) and sessions[session_index].end_ns < times[0]:
+                    session_index += 1
                 current = 0
                 for i in range(1, len(values)):
-                    if times[i] - times[i - 1] >= gap:
+                    if times[i] > sessions[session_index].end_ns:
+                        session_index += 1
+                        if session_index >= len(sessions):
+                            raise ValueError("bar falls outside the frozen session calendar")
                         current = i
                     starts[i] = current
             op, _, q = self.op.partition(":")

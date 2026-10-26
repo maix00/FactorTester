@@ -127,7 +127,7 @@ def test_alpha_factor_trading_day_scope_is_cumulative():
 
 
 def test_alpha_factor_session_scope_resets_after_gap():
-    from alpha.factor import scope_session
+    from alpha.factor import TradingSession, scope_session
 
     index = pd.DatetimeIndex([
         '2026-01-05 09:30', '2026-01-05 09:31',
@@ -135,7 +135,11 @@ def test_alpha_factor_session_scope_resets_after_gap():
     ])
     frame = pd.DataFrame({'CLOSE': [0.0, 1.0, 2.0, 3.0]}, index=index)
     ctx = EvalContext(products=('A',), preloaded={'A': frame})
-    result = ColumnRef('CLOSE').groupby_scope(scope_session('30min')).mean().evaluate(ctx)
+    sessions = (
+        TradingSession(pd.Timestamp('2026-01-05 09:30').value, pd.Timestamp('2026-01-05 09:31').value),
+        TradingSession(pd.Timestamp('2026-01-05 10:30').value, pd.Timestamp('2026-01-05 10:31').value),
+    )
+    result = ColumnRef('CLOSE').groupby_scope(scope_session(sessions)).mean().evaluate(ctx)
     np.testing.assert_allclose(result['A'].to_numpy(), [0.0, 0.5, 2.0, 2.5])
 
 
@@ -269,3 +273,24 @@ def test_signal_align_legacy_positional_basepoint():
     ctx = EvalContext(products=('A',), preloaded={'A': frame})
     aligned = ColumnRef('CLOSE').signal_align('2min', 'last').evaluate(ctx)
     np.testing.assert_allclose(aligned['A'].to_numpy(), [0.0, 2.0, 4.0])
+
+
+def test_signal_align_session_scope_uses_calendar_boundaries():
+    from alpha.factor import TradingSession, scope_session
+
+    index = pd.DatetimeIndex([
+        '2026-01-05 09:30', '2026-01-05 09:31', '2026-01-05 09:32',
+        '2026-01-06 09:30', '2026-01-06 09:31', '2026-01-06 09:32',
+    ])
+    frame = pd.DataFrame({'CLOSE': np.arange(6, dtype=float)}, index=index)
+    ctx = EvalContext(products=('A',), preloaded={'A': frame})
+    sessions = (
+        TradingSession(pd.Timestamp('2026-01-05 09:30').value, pd.Timestamp('2026-01-05 09:32').value),
+        TradingSession(pd.Timestamp('2026-01-06 09:30').value, pd.Timestamp('2026-01-06 09:32').value),
+    )
+    aligned = ColumnRef('CLOSE').signal_align('2min', scope=scope_session(sessions), partial='emit').evaluate(ctx)
+    assert list(aligned.index) == [pd.Timestamp(ts) for ts in [
+        '2026-01-05 09:30', '2026-01-05 09:32',
+        '2026-01-06 09:30', '2026-01-06 09:32',
+    ]]
+    np.testing.assert_allclose(aligned['A'].to_numpy(), [0.0, 2.0, 3.0, 5.0])

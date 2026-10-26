@@ -3,7 +3,7 @@
 from .cross_sectional import CrossSectionalExpr
 from .signal import SignalAlign
 from .bar_search import BarSinceExpr, bar_since
-from .scopes import SessionScope, TradingDayScope, scope_session, scope_trading_day
+from .scopes import SessionScope, TradingDayScope, TradingSession, scope_session, scope_trading_day
 from .spec import plan_blockers, to_plan_spec
 from .incremental import IncrementalFactorPlan
 from .scope import BarCountScope, GroupByScopeExpr, GroupByScopeOp, scope_bars
@@ -33,7 +33,7 @@ __all__ = [
     "SignalAlign",
     "FactorFamily", "FactorDefinition", "FactorIdentity",
     "BarCountScope", "scope_bars", "GroupByScopeExpr", "GroupByScopeOp",
-    "TradingDayScope", "SessionScope", "scope_trading_day", "scope_session",
+    "TradingDayScope", "SessionScope", "TradingSession", "scope_trading_day", "scope_session",
     "BarSinceExpr", "bar_since",
     "to_plan_spec",
     "plan_blockers",

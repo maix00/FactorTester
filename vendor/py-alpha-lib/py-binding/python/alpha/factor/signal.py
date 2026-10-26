@@ -87,18 +87,22 @@ class SignalAlign(FactorExpr):
                     targets.append(end)
             return pd.DatetimeIndex(sorted(targets))
         if isinstance(self.scope, SessionScope):
-            nanos = times.as_unit("ns").asi8
-            starts = [0]
-            for position in range(1, len(times)):
-                if nanos[position] - nanos[position - 1] >= self.scope.gap_ns:
-                    starts.append(position)
-            ends = starts[1:] + [len(times)]
+            sessions = self.scope.sessions
+            session_index = 0
+            groups: dict[int, list[int]] = {}
+            for position, timestamp in enumerate(times):
+                while session_index + 1 < len(sessions) and timestamp > pd.Timestamp(sessions[session_index].end_ns, tz=timestamp.tz):
+                    session_index += 1
+                if timestamp < pd.Timestamp(sessions[session_index].start_ns, tz=timestamp.tz) or timestamp > pd.Timestamp(sessions[session_index].end_ns, tz=timestamp.tz):
+                    raise ValueError("bar falls outside the frozen session calendar")
+                groups.setdefault(session_index, []).append(position)
             targets = []
-            for start, end in zip(starts, ends, strict=True):
-                grid = daily_grid(times[start], times[end - 1])
+            for positions in groups.values():
+                start, end = times[positions[0]], times[positions[-1]]
+                grid = daily_grid(start, end)
                 targets.extend(grid.tolist())
-                if self.partial == "emit" and (not grid.empty and grid[-1] < times[end - 1]):
-                    targets.append(times[end - 1])
+                if self.partial == "emit" and (not grid.empty and grid[-1] < end):
+                    targets.append(end)
             return pd.DatetimeIndex(sorted(targets))
         raise TypeError(f"unsupported SignalAlign scope {type(self.scope).__name__}")
 
