@@ -32,6 +32,8 @@ dependencies = [
  "anyhow",
  "num-traits",
  "rayon",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 

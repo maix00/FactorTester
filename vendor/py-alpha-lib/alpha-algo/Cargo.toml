@@ -20,6 +20,8 @@ num-traits.workspace = true
 rayon.workspace = true
 pyo3 = { workspace = true, optional = true }
 mlua = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
 
 [build-dependencies]
 anyhow.workspace = true
