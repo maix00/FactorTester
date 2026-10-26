@@ -1449,6 +1449,32 @@ def _term_structure_column_operand(expr: FactorExpr) -> str:
     raise UnsupportedStreamingFactor("term structure column operand must be a ColumnRef or DataColumn constant")
 
 
+def resolve_trading_day_window(
+    value: object,
+    *,
+    calendar_window: Any,
+    current_session: int,
+) -> int:
+    """Resolve a session lookback (e.g. ``250d``) to its minute-bar count.
+
+    The count is variable: it is the sum of authoritative session bar counts
+    over the requested trading-day lookback.  It must be recomputed at every
+    session boundary, never approximated as a fixed multiple of calendar days.
+    """
+    if isinstance(value, str):
+        duration = pd.Timedelta(value)
+    elif isinstance(value, pd.Timedelta):
+        duration = value
+    else:
+        raise UnsupportedStreamingFactor("trading-day windows must be durations")
+    if duration < pd.Timedelta("1D"):
+        raise UnsupportedStreamingFactor("trading-day window must span at least one day")
+    ratio = duration / pd.Timedelta("1D")
+    if not np.isfinite(ratio) or not np.isclose(ratio, round(ratio)):
+        raise UnsupportedStreamingFactor("trading-day window must be an integer day count")
+    return calendar_window.window_size(current_session, int(round(ratio)))
+
+
 def _resolve_window_bars(
     value: object,
     source_freq: DataFreq | str | None,
