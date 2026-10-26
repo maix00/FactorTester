@@ -1,6 +1,7 @@
 """Public factor DSL and execution API for py-alpha-lib."""
 
 from .cross_sectional import CrossSectionalExpr
+from .category import CategoryBoolRef
 from .signal import SignalAlign
 from .bar_search import BarDistanceExpr, BarSinceExpr, bar_distance, bar_since
 from .scopes import SessionScope, TradingDayScope, TradingSession, scope_session, scope_trading_day, sessions_from_calendar
@@ -30,6 +31,7 @@ __all__ = [
     "Parameter", "TypeParam", "FactorParam",
     "NanPolicy", "WindowSemantics", "PartitionSemantics", "default_min_periods",
     "CrossSectionalExpr",
+    "CategoryBoolRef",
     "SignalAlign",
     "FactorFamily", "FactorDefinition", "FactorIdentity",
     "BarCountScope", "scope_bars", "GroupByScopeExpr", "GroupByScopeOp",

@@ -530,3 +530,27 @@ def test_batch_and_incremental_cross_rank_ties_reconcile():
     incremental = IncrementalFactorPlan({'r': expression}, ('A', 'B'))
     assert incremental.update([1.0, 1.0]) == {'r': {'A': 0.25, 'B': 0.25}}
     np.testing.assert_allclose(batch.iloc[0].to_numpy(), [0.25, 0.25])
+
+
+def test_alpha_factor_category_bool_leaf_evaluates_publicly():
+    from alpha.factor import CategoryBoolRef, plan_blockers
+
+    class Category:
+        alias = 'Sector'
+        categories = ('metal',)
+
+        def is_in_category(self, label, product):
+            return label == 'metal' and product == 'A'
+
+    index = pd.date_range('2026-01-05', periods=2, freq='min')
+    ctx = EvalContext(
+        products=('A', 'B'),
+        preloaded={
+            'A': pd.DataFrame({'CLOSE': [1.0, 2.0]}, index=index),
+            'B': pd.DataFrame({'CLOSE': [3.0, 4.0]}, index=index),
+        },
+    )
+    result = CategoryBoolRef(Category(), 'metal').evaluate(ctx)
+    np.testing.assert_array_equal(result['A'].to_numpy(), [True, True])
+    np.testing.assert_array_equal(result['B'].to_numpy(), [False, False])
+    assert 'CategoryBoolRef' in plan_blockers(CategoryBoolRef(Category(), 'metal'))
