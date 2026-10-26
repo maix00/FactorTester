@@ -251,6 +251,7 @@ pub mod nautilus {
         pending_timestamp: Option<i64>,
         future_slices: std::collections::BTreeMap<i64, std::collections::BTreeMap<String, Bar>>,
         max_future_slices: usize,
+        sink: Option<Box<dyn Fn(&FactorUpdate) + Send>>,
     }
 
     impl<E> fmt::Debug for FactorActor<E> {
@@ -270,6 +271,7 @@ pub mod nautilus {
                 pending_timestamp: None,
                 future_slices: std::collections::BTreeMap::new(),
                 max_future_slices: 64,
+                sink: None,
                 last_update: None,
             }
         }
@@ -279,6 +281,16 @@ pub mod nautilus {
         pub fn last_error(&self) -> Option<&str> { self.last_error.as_deref() }
 
         pub fn set_max_future_slices(&mut self, limit: usize) { self.max_future_slices = limit.max(1); }
+
+        pub fn set_update_sink(&mut self, sink: impl Fn(&FactorUpdate) + Send + 'static) {
+            self.sink = Some(Box::new(sink));
+        }
+
+        fn publish(&self) {
+            if let (Some(sink), Some(update)) = (self.sink.as_ref(), self.last_update.as_ref()) {
+                sink(update);
+            }
+        }
 
         pub fn expire_before(&mut self, timestamp_ns: i64) {
             self.future_slices = self.future_slices.split_off(&timestamp_ns);
@@ -349,6 +361,7 @@ pub mod nautilus {
                         values,
                     });
                     self.last_error = None;
+                    self.publish();
                 }
                 Err(error) => self.last_error = Some(error.to_string()),
             }
@@ -395,6 +408,7 @@ pub mod nautilus {
                             values,
                         });
                         self.last_error = None;
+                        self.publish();
                     }
                     Err(error) => self.last_error = Some(error.to_string()),
                 }
@@ -601,6 +615,22 @@ mod nautilus_tests {
         assert!(actor.last_error().unwrap().contains("future slice limit"));
         actor.expire_before(2_000);
         assert_eq!(actor.pending_len(), 1);
+    }
+
+    #[test]
+    fn factor_actor_publishes_timestamped_update_to_sink() {
+        let json = r#"{"columns":["CLOSE"],"nodes":[{"kind":"column","index":0}],"outputs":[0]}"#;
+        let mut actor = nautilus::FactorActor::from_plan_json("factor-sink-test", 1, json).unwrap();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let target = seen.clone();
+        actor.set_update_sink(move |update| target.lock().unwrap().push(update.timestamp_ns));
+        let bar = Bar::new(
+            BarType::from("A.B-1-MINUTE-LAST-EXTERNAL"),
+            Price::from("1.0"), Price::from("1.0"), Price::from("1.0"),
+            Price::from("1.0"), Quantity::from("1"), 1_000.into(), 1_000.into(),
+        );
+        actor.handle(&bar);
+        assert_eq!(*seen.lock().unwrap(), vec![1_000]);
     }
 
     #[test]
