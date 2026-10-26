@@ -74,7 +74,8 @@ IntervalState = _algo.IntervalState
 IntervalPairState = _algo.IntervalPairState
 
 
-def interval_rolling(values, starts, ends, op="mean", quantile=None, window=None):
+def interval_rolling(values, starts, ends, op="mean", quantile=None, window=None,
+                     min_periods=1, propagate_nan=False):
   """Batch interval aggregation executed in Rust."""
   return np.asarray(
     _algo.interval_rolling(
@@ -83,6 +84,7 @@ def interval_rolling(values, starts, ends, op="mean", quantile=None, window=None
       np.asarray(ends, dtype=np.uint64),
       str(op), None if quantile is None else float(quantile),
       None if window is None else int(window),
+      int(min_periods), bool(propagate_nan),
     ),
     dtype=float,
   )

@@ -60,22 +60,22 @@ mod algo_impl {
   }
 
   #[pyfunction]
-  #[pyo3(signature = (values, starts, ends, op, quantile=None, window=None))]
+  #[pyo3(signature = (values, starts, ends, op, quantile=None, window=None, min_periods=1, propagate_nan=false))]
   pub fn interval_rolling(
     py: Python<'_>, values: PyReadonlyArray1<f64>, starts: PyReadonlyArray1<u64>,
     ends: PyReadonlyArray1<u64>, op: &str, quantile: Option<f64>,
-    window: Option<usize>,
+    window: Option<usize>, min_periods: usize, propagate_nan: bool,
   ) -> PyResult<Py<PyArray1<f64>>> {
     let values = values.as_slice()?;
     let starts = starts.as_slice()?;
     let ends = ends.as_slice()?;
-    if values.len() != starts.len() || values.len() != ends.len() {
+    let fixed = window.is_some();
+    if !fixed && (values.len() != starts.len() || values.len() != ends.len()) {
       return Err(pyo3::exceptions::PyValueError::new_err(
         "interval_rolling length mismatch"
       ));
     }
     let op = interval_op(op, quantile)?;
-    let fixed = window.is_some();
     let window = window.unwrap_or(1).max(1);
     if fixed && matches!(
       op, alpha_algo::SessionOp::Sum | alpha_algo::SessionOp::Mean
@@ -119,7 +119,8 @@ mod algo_impl {
                 count -= 1;
               }
             }
-            *slot = if count == 0 { f64::NAN } else {
+            let width = (index + 1).min(window);
+            *slot = if count < min_periods || (propagate_nan && count < width) || count == 0 { f64::NAN } else {
               match family {
                 Moment::Sum => total,
                 Moment::Mean => total / count as f64,
@@ -192,6 +193,8 @@ mod algo_impl {
               }
               deque.push_back(index);
             }
+            let width = (index + 1).min(window);
+            if count < min_periods || (propagate_nan && count < width) { continue; }
             let Some(best) = deque.front().copied() else { continue };
             *slot = if !is_arg {
               values[best]
@@ -230,7 +233,8 @@ mod algo_impl {
         let start = starts[index] as usize;
         let end = (ends[index] as usize + 1).min(n);
         let m = count[end] - count[start];
-        if m == 0 { return f64::NAN; }
+        let width = end.saturating_sub(start);
+        if m == 0 || m < min_periods as u64 || (propagate_nan && m < width as u64) { return f64::NAN; }
         let total = sum[end] - sum[start];
         if mean { return total / m as f64; }
         if variance {
@@ -256,7 +260,8 @@ mod algo_impl {
       return Ok(out.into_pyarray(py).unbind());
     }
     let mut state = alpha_algo::IntervalKernel::new(op)
-      .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+      .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
+      .with_semantics(min_periods, propagate_nan);
     Ok(values.iter().copied().zip(starts.iter().copied()).zip(ends.iter().copied())
       .map(|((value, start), end)| state.update_explicit(start, end, value))
       .collect::<Vec<_>>().into_pyarray(py).unbind())

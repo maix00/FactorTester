@@ -425,7 +425,8 @@ class RollingOp(OperandExpr):
         """Mask the Rust aggregation according to explicit window semantics."""
         min_periods = self._min_periods_value(window)
         propagate = self.nan_policy is NanPolicy.PROPAGATE
-        for column in result.columns:
+        output = result.to_numpy(copy=True)
+        for column_index, column in enumerate(result.columns):
             raw = pd.to_numeric(values[column], errors="coerce").to_numpy(dtype=float)
             finite = np.isfinite(raw)
             counts = np.concatenate(([0], np.cumsum(finite)))
@@ -435,8 +436,8 @@ class RollingOp(OperandExpr):
             mask = valid < min_periods
             if propagate:
                 mask |= valid < widths
-            result.loc[mask, column] = np.nan
-        return result
+            output[mask, column_index] = np.nan
+        return pd.DataFrame(output, index=result.index, columns=result.columns)
 
     def _rust_rolling(self, window: int, df: pd.DataFrame,
                       quantile: float | None = None) -> pd.DataFrame | None:
@@ -461,16 +462,26 @@ class RollingOp(OperandExpr):
             from alpha import interval_rolling
         except ImportError:
             return None
+        fast = op in {"sum", "mean", "var", "std", "skew",
+                      "min", "max", "argmin", "argmax",
+                      "argmin_raw", "argmax_raw"}
+        empty = np.empty(0, dtype=np.uint64)
         for column in df.columns:
             values = pd.to_numeric(df[column], errors="coerce").to_numpy(dtype=float)
-            ordinals = np.arange(len(values), dtype=np.uint64)
-            starts = np.maximum(
-                0, ordinals.astype(np.int64) - window + 1,
-            ).astype(np.uint64)
+            if fast:
+                starts = empty
+                ends = empty
+            else:
+                ordinals = np.arange(len(values), dtype=np.uint64)
+                starts = np.maximum(
+                    0, ordinals.astype(np.int64) - window + 1,
+                ).astype(np.uint64)
+                ends = ordinals
             result[column] = interval_rolling(
-                values, starts, ordinals, op, quantile, window,
+                values, starts, ends, op, quantile, window,
+                min_periods, propagate,
             )
-        return self._apply_window_semantics(result, df, window)
+        return result
 
     def _rust_rolling_pair(self, window: int, left: pd.DataFrame,
                            right: pd.DataFrame) -> pd.DataFrame | None:
