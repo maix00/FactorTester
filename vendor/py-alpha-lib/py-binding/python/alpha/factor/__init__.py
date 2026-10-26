@@ -1,5 +1,7 @@
 """Public factor DSL and execution API for py-alpha-lib."""
 
+from .cross_sectional import CrossSectionalExpr
+from .semantics import NanPolicy, PartitionSemantics, WindowSemantics, default_min_periods
 from .parameter import FactorParam, Parameter, TypeParam
 from .core import (
     ColumnRef,
@@ -19,4 +21,6 @@ __all__ = [
     "ColumnRef", "CompositeExpr", "ConstExpr", "EvalContext", "FactorExpr",
     "ParamRef", "RollingExpr", "RollingOp", "ShiftOp", "WhereOp",
     "Parameter", "TypeParam", "FactorParam",
+    "NanPolicy", "WindowSemantics", "PartitionSemantics", "default_min_periods",
+    "CrossSectionalExpr",
 ]

@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
+from .semantics import NanPolicy, WindowSemantics
 
 import numpy as np
 import pandas as pd
@@ -134,8 +135,17 @@ class RollingExpr(FactorExpr):
         self.data = data
         self.window = int(window)
 
+    def semantics(self, *, min_periods: int | None = None,
+                  nan_policy: NanPolicy = NanPolicy.PROPAGATE) -> "RollingExpr":
+        result = RollingExpr(self.data, self.window)
+        result._semantics = WindowSemantics(self.window, min_periods, nan_policy)
+        return result
+
     def _op(self, name: str) -> "RollingOp":
-        return RollingOp(name, self.data, self.window)
+        return RollingOp(
+            name, self.data, self.window,
+            getattr(self, "_semantics", WindowSemantics(self.window)),
+        )
 
     def mean(self): return self._op("mean")
     def sum(self): return self._op("sum")
@@ -151,13 +161,17 @@ class RollingExpr(FactorExpr):
 
 
 class RollingOp(FactorExpr):
-    def __init__(self, op: str, data: FactorExpr, window: int):
+    def __init__(self, op: str, data: FactorExpr, window: int,
+                 semantics: WindowSemantics | None = None):
         self.op = op
         self.data = data
         self.window = int(window)
+        self.semantics = semantics or WindowSemantics(self.window)
 
     def _structural_key(self):
-        return ("alpha.factor.RollingOp", self.op, self.window, self.data._structural_key())
+        return ("alpha.factor.RollingOp", self.op, self.window,
+                self.semantics.min_periods, self.semantics.nan_policy.value,
+                self.data._structural_key())
 
     def evaluate(self, ctx: EvalContext) -> pd.DataFrame:
         frame = self.data.evaluate(ctx)
@@ -165,7 +179,8 @@ class RollingOp(FactorExpr):
         from numpy import arange, maximum, uint64
         op, _, q = self.op.partition(":")
         quantile = float(q) if q else None
-        min_periods = {"var": 2, "std": 2, "skew": 3}.get(op, 1)
+        min_periods = self.semantics.min_periods_for(op)
+        propagate = self.semantics.nan_policy is NanPolicy.PROPAGATE
         out = {}
         for product in frame.columns:
             values = frame[product].to_numpy(dtype=float)
@@ -173,11 +188,11 @@ class RollingOp(FactorExpr):
             starts = maximum(0, ordinals.astype("int64") - self.window + 1).astype(uint64)
             if op == "ema":
                 from alpha import interval_ema
-                out[product] = interval_ema(values, self.window, min_periods, True)
+                out[product] = interval_ema(values, self.window, min_periods, propagate)
             else:
                 out[product] = interval_rolling(
                     values, starts, ordinals, op, quantile, self.window,
-                    min_periods, True,
+                    min_periods, propagate,
                 )
         return pd.DataFrame(out, index=frame.index)
 

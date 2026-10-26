@@ -118,3 +118,14 @@ def interval_ema(values, span: int, min_periods: int = 1, propagate_nan: bool = 
 
 
 BatchPlan = _algo.BatchPlan
+
+
+
+def cross_sectional(columns, op):
+  """Cross-sectional zscore/rank across product columns."""
+  return [
+    np.asarray(array, dtype=float)
+    for array in _algo.cross_sectional(
+      [np.asarray(column, dtype=float) for column in columns], str(op),
+    )
+  ]

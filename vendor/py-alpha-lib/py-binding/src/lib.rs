@@ -7,6 +7,9 @@ use alpha_algo::Context;
 use pyo3::prelude::*;
 use numpy::PyArrayMethods;
 
+mod batch_plan;
+use batch_plan::BatchPlan;
+
 static _ALGO_CTX_: LazyLock<RwLock<Context>> = LazyLock::new(|| RwLock::new(Context::default()));
 
 mod algo_impl {
@@ -57,6 +60,51 @@ mod algo_impl {
       .with_semantics(min_periods, propagate_nan);
     Ok(values.iter().copied().map(|value| state.update(value))
       .collect::<Vec<_>>().into_pyarray(py).unbind())
+  }
+
+  #[pyfunction]
+  pub fn cross_sectional(
+    py: pyo3::Python<'_>, columns: Vec<numpy::PyReadonlyArray1<f64>>, op: &str,
+  ) -> pyo3::PyResult<Vec<pyo3::Py<numpy::PyArray1<f64>>>> {
+    use numpy::IntoPyArray;
+    let slices: Vec<&[f64]> = columns.iter().map(|c| c.as_slice()).collect::<Result<_, _>>()?;
+    let rows = slices.first().map(|c| c.len()).unwrap_or(0);
+    let width = slices.len();
+    if slices.iter().any(|c| c.len() != rows) {
+      return Err(pyo3::exceptions::PyValueError::new_err("cross_sectional length mismatch"));
+    }
+    let mut output = vec![vec![f64::NAN; rows]; width];
+    for row in 0..rows {
+      let mut values: Vec<(usize, f64)> = (0..width)
+        .map(|column| (column, slices[column][row]))
+        .filter(|(_, value)| value.is_finite())
+        .collect();
+      if values.is_empty() { continue; }
+      match op {
+        "cs_zscore" => {
+          let n = values.len() as f64;
+          let mean = values.iter().map(|(_, value)| *value).sum::<f64>() / n;
+          let variance = values.iter().map(|(_, value)| (*value - mean).powi(2)).sum::<f64>() / n;
+          let std = variance.sqrt();
+          if std > 0.0 {
+            for (column, value) in values { output[column][row] = (value - mean) / std; }
+          } else {
+            for (column, _) in values { output[column][row] = 0.0; }
+          }
+        }
+        "cs_rank" => {
+          values.sort_by(|a, b| a.1.total_cmp(&b.1));
+          let n = values.len() as f64;
+          for (rank, (column, _)) in values.into_iter().enumerate() {
+            output[column][row] = (rank as f64 + 1.0) / n - 0.5;
+          }
+        }
+        other => return Err(pyo3::exceptions::PyValueError::new_err(
+          format!("cross_sectional does not support {other}")
+        )),
+      }
+    }
+    Ok(output.into_iter().map(|values| values.into_pyarray(py).unbind()).collect())
   }
 
   #[pyfunction]
@@ -2895,19 +2943,6 @@ impl IntervalPairState {
   }
 }
 
-#[derive(Clone)]
-enum PlanNode {
-  Const(f64),
-  Column(usize),
-  Rolling { child: usize, window: usize, op: String, min: usize, prop: bool, quantile: Option<f64> },
-  Binary { op: String, left: usize, right: usize },
-  Where { condition: usize, when_true: usize, when_false: usize },
-  Unary { op: String, child: usize },
-  Shift { child: usize, periods: usize },
-  BarScope { child: usize, count: usize, op: String, min: usize, prop: bool, quantile: Option<f64> },
-  BarSince { condition: usize, count: usize, include_current: bool, nearest: bool, default_scope: bool, default: f64 },
-}
-
 fn plan_linreg(values: &[f64], window: usize, metric: &str, min: usize, prop: bool) -> Vec<f64> {
   let window = window.max(1);
   let mut out = vec![f64::NAN; values.len()];
@@ -3093,189 +3128,6 @@ fn plan_rolling(values: &[f64], window: usize, op: &str, min: usize, prop: bool,
 }
 
 #[pyclass]
-struct BatchPlan {
-  nodes: Vec<PlanNode>,
-}
-
-#[pymethods]
-impl BatchPlan {
-  #[new]
-  fn new() -> Self { Self { nodes: Vec::new() } }
-
-  fn constant(&mut self, value: f64) -> usize {
-    self.nodes.push(PlanNode::Const(value));
-    self.nodes.len() - 1
-  }
-
-  fn column(&mut self, index: usize) -> usize {
-    self.nodes.push(PlanNode::Column(index));
-    self.nodes.len() - 1
-  }
-
-  fn rolling(&mut self, child: usize, window: usize, op: &str, min: usize, prop: bool, quantile: Option<f64>) -> usize {
-    self.nodes.push(PlanNode::Rolling {
-      child, window, op: op.to_string(), min, prop, quantile,
-    });
-    self.nodes.len() - 1
-  }
-
-  fn binary(&mut self, op: &str, left: usize, right: usize) -> usize {
-    self.nodes.push(PlanNode::Binary { op: op.to_string(), left, right });
-    self.nodes.len() - 1
-  }
-
-  fn where_node(&mut self, condition: usize, when_true: usize, when_false: usize) -> usize {
-    self.nodes.push(PlanNode::Where { condition, when_true, when_false });
-    self.nodes.len() - 1
-  }
-
-  fn unary(&mut self, op: &str, child: usize) -> usize {
-    self.nodes.push(PlanNode::Unary { op: op.to_string(), child });
-    self.nodes.len() - 1
-  }
-
-  fn shift(&mut self, child: usize, periods: usize) -> usize {
-    self.nodes.push(PlanNode::Shift { child, periods });
-    self.nodes.len() - 1
-  }
-
-  fn bar_since(&mut self, condition: usize, count: usize, include_current: bool, nearest: bool, default_scope: bool, default: f64) -> usize {
-    self.nodes.push(PlanNode::BarSince {
-      condition, count: count.max(1), include_current, nearest, default_scope, default,
-    });
-    self.nodes.len() - 1
-  }
-
-  fn bar_scope(&mut self, child: usize, count: usize, op: &str, min: usize, prop: bool, quantile: Option<f64>) -> usize {
-    self.nodes.push(PlanNode::BarScope {
-      child, count: count.max(1), op: op.to_string(), min, prop, quantile,
-    });
-    self.nodes.len() - 1
-  }
-
-  fn execute(
-    &self, py: pyo3::Python<'_>, columns: Vec<numpy::PyReadonlyArray1<f64>>, output: usize,
-  ) -> pyo3::PyResult<pyo3::Py<numpy::PyArray1<f64>>> {
-    let mut outputs = self.execute_many(py, columns, vec![output])?;
-    Ok(outputs.remove(0))
-  }
-
-  fn execute_many(
-    &self, py: pyo3::Python<'_>, columns: Vec<numpy::PyReadonlyArray1<f64>>, outputs: Vec<usize>,
-  ) -> pyo3::PyResult<Vec<pyo3::Py<numpy::PyArray1<f64>>>> {
-    use numpy::IntoPyArray;
-    let columns: Vec<&[f64]> = columns.iter().map(|c| c.as_slice()).collect::<Result<_, _>>()?;
-    let mut values: Vec<Vec<f64>> = Vec::with_capacity(self.nodes.len());
-    for node in &self.nodes {
-      let value = match node {
-        PlanNode::Const(value) => columns.first().map(|c| vec![*value; c.len()]).unwrap_or_default(),
-        PlanNode::Column(index) => columns.get(*index)
-          .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("plan column out of range"))?
-          .to_vec(),
-        PlanNode::Rolling { child, window, op, min, prop, quantile } => {
-          plan_rolling(&values[*child], *window, op, *min, *prop, *quantile)?
-        }
-        PlanNode::BarSince { condition, count, include_current, nearest, default_scope, default } => {
-          let values = &values[*condition];
-          let mut out = vec![f64::NAN; values.len()];
-          let mut first: Option<usize> = None;
-          let mut last: Option<usize> = None;
-          let mut base = 0usize;
-          for index in 0..values.len() {
-            if index % *count == 0 { base = index; first = None; last = None; }
-            let truth = values[index].is_finite() && values[index] != 0.0;
-            if truth && *include_current {
-              if first.is_none() { first = Some(index); }
-              last = Some(index);
-            }
-            let matched = if *nearest { last } else { first };
-            out[index] = match matched {
-              Some(hit) => (index - hit) as f64,
-              None => if *default_scope { (index - base) as f64 } else { *default },
-            };
-            if truth && !*include_current {
-              if first.is_none() { first = Some(index); }
-              last = Some(index);
-            }
-          }
-          out
-        }
-        PlanNode::BarScope { child, count, op, min, prop, quantile } => {
-          use alpha_algo::SessionOp;
-          let session_op = match op.as_str() {
-            "sum" => SessionOp::Sum, "mean" => SessionOp::Mean,
-            "var" => SessionOp::Var, "std" => SessionOp::Std,
-            "min" => SessionOp::Min, "max" => SessionOp::Max,
-            "skew" => SessionOp::Skew, "argmin" => SessionOp::Argmin,
-            "argmax" => SessionOp::Argmax, "rank" => SessionOp::Rank,
-            "mad" => SessionOp::Mad,
-            "median" => SessionOp::Quantile(0.5),
-            "quantile" => SessionOp::Quantile(quantile.unwrap_or(0.5)),
-            other => return Err(pyo3::exceptions::PyValueError::new_err(
-              format!("batch plan scope does not support {other}")
-            )),
-          };
-          let mut state = alpha_algo::IntervalKernel::new(session_op)
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
-            .with_semantics(*min, *prop);
-          let values = &values[*child];
-          (0..values.len()).map(|index| {
-            let start = (index / *count) * *count;
-            state.update_explicit(start as u64, index as u64, values[index])
-          }).collect()
-        }
-        PlanNode::Unary { op, child } => {
-          let values = &values[*child];
-          values.iter().map(|value| match op.as_str() {
-            "neg" => -*value, "abs" => value.abs(), "sign" => value.signum(),
-            "sqrt" => value.sqrt(), "log" => value.ln(), "tanh" => value.tanh(),
-            "not" => f64::from(*value == 0.0), _ => f64::NAN,
-          }).collect()
-        }
-        PlanNode::Shift { child, periods } => {
-          let values = &values[*child];
-          let mut shifted = vec![f64::NAN; values.len()];
-          if *periods < values.len() {
-            shifted[*periods..].copy_from_slice(&values[..values.len() - *periods]);
-          }
-          shifted
-        }
-        PlanNode::Where { condition, when_true, when_false } => {
-          let (c, a, b) = (&values[*condition], &values[*when_true], &values[*when_false]);
-          if c.len() != a.len() || a.len() != b.len() {
-            return Err(pyo3::exceptions::PyValueError::new_err("plan where length mismatch"));
-          }
-          c.iter().zip(a.iter()).zip(b.iter())
-            .map(|((c, a), b)| if c.is_finite() && *c != 0.0 { *a } else { *b })
-            .collect()
-        }
-        PlanNode::Binary { op, left, right } => {
-          let (a, b) = (&values[*left], &values[*right]);
-          if a.len() != b.len() {
-            return Err(pyo3::exceptions::PyValueError::new_err("plan binary length mismatch"));
-          }
-          a.iter().zip(b.iter()).map(|(x, y)| match op.as_str() {
-            "+" => x + y, "-" => x - y, "*" => x * y, "/" => x / y,
-            "gt" => f64::from(x > y), "lt" => f64::from(x < y),
-            "ge" => f64::from(x >= y), "le" => f64::from(x <= y),
-            "eq" => f64::from(x == y), "ne" => f64::from(x != y),
-            "and" => f64::from(*x != 0.0 && *y != 0.0),
-            "or" => f64::from(*x != 0.0 || *y != 0.0),
-            other => f64::NAN * (other.len() as f64),
-          }).collect()
-        }
-      };
-      values.push(value);
-    }
-    outputs.into_iter().map(|output| {
-      let out = values.get(output)
-        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("plan output out of range"))?;
-      Ok(out.clone().into_pyarray(py).unbind())
-    }).collect()
-  }
-}
-
-#[pyclass]
 struct IntervalState {
   inner: alpha_algo::IntervalKernel,
 }
@@ -3336,6 +3188,7 @@ fn _algo(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
   m.add_function(wrap_pyfunction!(ema, m)?)?;
   m.add_function(wrap_pyfunction!(interval_ema, m)?)?;
+  m.add_function(wrap_pyfunction!(cross_sectional, m)?)?;
   m.add_function(wrap_pyfunction!(interval_rolling, m)?)?;
   m.add_function(wrap_pyfunction!(interval_rolling_pair, m)?)?;
   m.add_function(wrap_pyfunction!(session_rolling_sum, m)?)?;
