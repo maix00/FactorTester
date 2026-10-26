@@ -490,3 +490,18 @@ def test_alpha_factor_ema_executes_in_rust_kernel():
     assert values[0] == 1.0
     assert values[1] > values[0]
     assert values[2] > values[1]
+
+
+def test_tools_linreg_uses_single_pass_rust_state():
+    from tools.data.types import DataColumn
+    from tools.factors.expr.leaf import ColumnRef as ToolColumnRef
+    from tools.factors.expr.streaming.incremental import compile_incremental_factor
+
+    expression = ToolColumnRef(DataColumn.CLOSE).rolling(3).linreg_slope()
+    executor = compile_incremental_factor('slope', expression, ('A',))
+    assert getattr(executor._multi, 'uses_rust', False) is True
+    for timestamp, value in zip(
+        pd.date_range('2026-01-05 09:30', periods=4, freq='min'), (1.0, 2.0, 3.0, 4.0),
+    ):
+        executor.on_bar(timestamp, {'A': {DataColumn.CLOSE.name: value}})
+    assert executor.on_signal(pd.Timestamp('2026-01-05 09:33'))['A'] == 1.0

@@ -35,11 +35,65 @@ pub enum ExprSpec {
              basepoint: String, include_current: bool, partial: String },
 }
 
+struct LinearState {
+    window: usize,
+    min_periods: usize,
+    propagate_nan: bool,
+    ring: VecDeque<(u64, f64)>,
+    count: usize,
+    nan_count: usize,
+    sx: f64, sy: f64, sxx: f64, syy: f64, sxy: f64,
+}
+
+impl LinearState {
+    fn new(window: usize, min_periods: usize, propagate_nan: bool) -> Self {
+        Self { window, min_periods, propagate_nan, ring: VecDeque::new(), count: 0, nan_count: 0, sx: 0.0, sy: 0.0, sxx: 0.0, syy: 0.0, sxy: 0.0 }
+    }
+
+    fn update(&mut self, index: u64, value: f64, op: &str) -> f64 {
+        while self.ring.front().is_some_and(|(old, _)| *old + self.window as u64 <= index) {
+            if let Some((old, value)) = self.ring.pop_front() {
+                if value.is_finite() {
+                    let x = old as f64;
+                    self.sx -= x; self.sy -= value; self.sxx -= x * x; self.syy -= value * value; self.sxy -= x * value; self.count -= 1;
+                } else { self.nan_count = self.nan_count.saturating_sub(1); }
+            }
+        }
+        self.ring.push_back((index, value));
+        if value.is_finite() {
+            let x = index as f64;
+            self.sx += x; self.sy += value; self.sxx += x * x; self.syy += value * value; self.sxy += x * value; self.count += 1;
+        } else { self.nan_count += 1; }
+        if (self.propagate_nan && self.nan_count > 0) || self.count < self.min_periods.max(2) {
+            return f64::NAN;
+        }
+        let n = self.count as f64;
+        let cxx = self.sxx - self.sx * self.sx / n;
+        let cyy = self.syy - self.sy * self.sy / n;
+        let cxy = self.sxy - self.sx * self.sy / n;
+        if cxx <= 0.0 { return f64::NAN; }
+        let slope = cxy / cxx;
+        let intercept = (self.sy - slope * self.sx) / n;
+        let sse = (self.syy - intercept * self.sy - slope * self.sxy).max(0.0);
+        match op {
+            "linreg_slope" => slope,
+            "linreg_r2" => if cyy <= 0.0 { f64::NAN } else { 1.0 - sse / cyy },
+            "linreg_resid_std" => (sse / (n - 2.0)).max(0.0).sqrt(),
+            "linreg_tstat" => {
+                let variance = sse / (n - 2.0);
+                let standard_error = (variance / cxx).sqrt();
+                if standard_error > 0.0 { slope / standard_error } else { f64::NAN }
+            }
+            _ => f64::NAN,
+        }
+    }
+}
+
 struct NodeState {
     spec: ExprSpec,
     rolling: Vec<Option<IntervalKernel>>,
     ema: Vec<Option<crate::algo::EmaState>>,
-    linreg_history: VecDeque<Vec<f64>>,
+    linreg: Vec<Option<LinearState>>,
     history: VecDeque<Vec<f64>>,
     since_first: Vec<Option<usize>>,
     since_last: Vec<Option<usize>>,
@@ -94,8 +148,14 @@ impl FactorPlanKernel {
                     .collect(),
                 _ => (0..products).map(|_| None).collect(),
             };
+            let linreg = match &spec {
+                ExprSpec::Linreg { window, min_periods, propagate_nan, .. } => (0..products)
+                    .map(|_| Some(LinearState::new(*window, *min_periods, *propagate_nan)))
+                    .collect(),
+                _ => (0..products).map(|_| None).collect(),
+            };
             nodes.push(NodeState {
-                spec, rolling, ema, linreg_history: VecDeque::new(), history: VecDeque::new(),
+                spec, rolling, ema, linreg, history: VecDeque::new(),
                 since_first: vec![None; products],
                 since_last: vec![None; products],
                 since_base: vec![0; products],
@@ -205,29 +265,13 @@ impl FactorPlanKernel {
                         out[product] = state.update(input[product]);
                     }
                 }
-                ExprSpec::Linreg { child, window, ref op, min_periods, propagate_nan } => {
-                    let input = head[child].clone();
+                ExprSpec::Linreg { child, ref op, .. } => {
+                    let input = &head[child];
                     let node = &mut self.nodes[index];
-                    node.linreg_history.push_back(input);
-                    while node.linreg_history.len() > window { node.linreg_history.pop_front(); }
-                    let mut values = vec![f64::NAN; products];
-                    if node.linreg_history.len() >= min_periods {
-                        for product in 0..products {
-                            let series: Vec<f64> = node.linreg_history.iter().map(|row| row[product]).collect();
-                            let mut one = vec![f64::NAN; 1];
-                            let ctx = crate::algo::Context::default();
-                            match op.as_str() {
-                                "linreg_slope" => crate::algo::ta_linreg_slope(&ctx, &mut one, &series, series.len(), min_periods)?,
-                                "linreg_r2" => crate::algo::ta_linreg_r2(&ctx, &mut one, &series, series.len(), min_periods)?,
-                                "linreg_tstat" => crate::algo::ta_linreg_tstat(&ctx, &mut one, &series, series.len(), min_periods)?,
-                                "linreg_resid_std" => crate::algo::ta_linreg_resid_std(&ctx, &mut one, &series, series.len(), min_periods)?,
-                                other => return Err(crate::algo::Error::InvalidParameter(format!("unsupported linreg op {other}"))),
-                            }
-                            values[product] = one[0];
-                        }
+                    for product in 0..products {
+                        let Some(state) = node.linreg[product].as_mut() else { out[product] = f64::NAN; continue };
+                        out[product] = state.update(current, input[product], op);
                     }
-                    out.copy_from_slice(&values);
-                    let _ = propagate_nan;
                 }
                 ExprSpec::Shift { child, periods } => {
                     let input = &head[child];
