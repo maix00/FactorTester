@@ -83,6 +83,15 @@ mod algo_impl {
         | alpha_algo::SessionOp::Skew
     ) {
       // SumMoments family: one independent sliding state per chunk, like upstream.
+      #[derive(Clone, Copy)]
+      enum Moment { Sum, Mean, Var, Std, Skew }
+      let family = match op {
+        alpha_algo::SessionOp::Mean => Moment::Mean,
+        alpha_algo::SessionOp::Var => Moment::Var,
+        alpha_algo::SessionOp::Std => Moment::Std,
+        alpha_algo::SessionOp::Skew => Moment::Skew,
+        _ => Moment::Sum,
+      };
       let n = values.len();
       {
         const CHUNK: usize = 65_536;
@@ -110,27 +119,30 @@ mod algo_impl {
                 count -= 1;
               }
             }
-            *slot = if count == 0 {
-              f64::NAN
-            } else if matches!(op, alpha_algo::SessionOp::Mean) {
-              total / count as f64
-            } else if matches!(op, alpha_algo::SessionOp::Var | alpha_algo::SessionOp::Std) {
-              if count < 2 { f64::NAN } else {
-                let variance = ((square - total * total / count as f64) / (count - 1) as f64).max(0.0);
-                if matches!(op, alpha_algo::SessionOp::Std) { variance.sqrt() } else { variance }
-              }
-            } else if matches!(op, alpha_algo::SessionOp::Skew) {
-              if count < 3 { f64::NAN } else {
-                let n = count as f64;
-                let mean = total / n;
-                let m2 = (square - total * total / n).max(0.0);
-                let m3 = cube - 3.0 * mean * square + 2.0 * n * mean * mean * mean;
-                if m2 <= 0.0 { f64::NAN } else {
-                  let population = (m3 / n) / (m2 / n).powf(1.5);
-                  population * (n * (n - 1.0)).sqrt() / (n - 2.0)
+            *slot = if count == 0 { f64::NAN } else {
+              match family {
+                Moment::Sum => total,
+                Moment::Mean => total / count as f64,
+                Moment::Var | Moment::Std => {
+                  if count < 2 { f64::NAN } else {
+                    let variance = ((square - total * total / count as f64) / (count - 1) as f64).max(0.0);
+                    if matches!(family, Moment::Std) { variance.sqrt() } else { variance }
+                  }
+                }
+                Moment::Skew => {
+                  if count < 3 { f64::NAN } else {
+                    let n = count as f64;
+                    let mean = total / n;
+                    let m2 = (square - total * total / n).max(0.0);
+                    let m3 = cube - 3.0 * mean * square + 2.0 * n * mean * mean * mean;
+                    if m2 <= 0.0 { f64::NAN } else {
+                      let population = (m3 / n) / (m2 / n).powf(1.5);
+                      population * (n * (n - 1.0)).sqrt() / (n - 2.0)
+                    }
+                  }
                 }
               }
-            } else { total };
+            };
           }
         });
         return Ok(out.into_pyarray(py).unbind());
