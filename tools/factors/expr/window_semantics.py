@@ -46,3 +46,29 @@ class WindowSemantics:
     @property
     def propagate_nan(self) -> bool:
         return self.nan_policy is NanPolicy.PROPAGATE
+
+
+@dataclass(frozen=True, slots=True)
+class PartitionSemantics:
+    """Semantics for cumulative aggregation inside a partition.
+
+    A partition's final length is unknown while it is being evaluated, so the
+    default cannot be "the whole window".  Partial partitions therefore start
+    after the first valid observation, while NaN handling still defaults to the
+    upstream-style propagation policy.
+    """
+
+    min_periods: int | None = 1
+    nan_policy: NanPolicy = DEFAULT_NAN_POLICY
+
+    def __post_init__(self) -> None:
+        if self.min_periods is not None and self.min_periods < 1:
+            raise ValueError("min_periods must be positive")
+
+    @property
+    def effective_min_periods(self) -> int:
+        return 1 if self.min_periods is None else self.min_periods
+
+    @property
+    def propagate_nan(self) -> bool:
+        return self.nan_policy is NanPolicy.PROPAGATE

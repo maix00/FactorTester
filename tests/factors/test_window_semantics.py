@@ -46,3 +46,22 @@ def test_rolling_operator_carries_semantics_in_its_structural_key():
     assert partial.min_periods == 10
     assert partial.nan_policy is NanPolicy.SKIP
     assert base._structural_key() != partial._structural_key()
+
+
+def test_groupby_scope_operator_carries_partition_semantics():
+    from tools.data.types import DataColumn
+    from tools.factors.expr.groupby_scope import GroupByScopeExpr
+    from tools.factors.expr.leaf import ColumnRef
+    from tools.factors.expr.lookback_scope import scope_bars
+
+    base = GroupByScopeExpr(scope_bars(5), ColumnRef(DataColumn.CLOSE)).mean()
+    partial = (
+        GroupByScopeExpr(scope_bars(5), ColumnRef(DataColumn.CLOSE))
+        .semantics(min_periods=3, nan_policy=NanPolicy.SKIP)
+        .mean()
+    )
+    assert base.min_periods == 1
+    assert base.nan_policy is NanPolicy.PROPAGATE
+    assert partial.min_periods == 3
+    assert partial.nan_policy is NanPolicy.SKIP
+    assert base._structural_key() != partial._structural_key()
