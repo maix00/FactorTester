@@ -222,3 +222,20 @@ def test_compat_plan_emits_per_product_dynamic_windows():
     node = spec['nodes'][-1]
     assert node['kind'] == 'rolling_dynamic'
     assert node['windows'] == [20, 40]
+
+
+def test_batch_250d_compiles_to_rust_session_rolling():
+    from tools.factors import window_bars
+    from tools.factors.expr import EvaluateContext
+    from tools.factors.expr.leaf import ColumnRef
+    from tools.factors.expr.timeline import build_panel_timeline
+
+    index = pd.date_range('2026-01-05', periods=4, freq='min')
+    frame = pd.DataFrame({'CLOSE': [1.0, 2.0, 3.0, 4.0]}, index=index)
+    timeline = build_panel_timeline(('A',), DataFreq.MIN1, {('A', 'MIN1'): frame})
+    ctx = EvaluateContext(
+        products=('A',), freq=DataFreq.MIN1, cache={},
+        preloaded={('A', 'MIN1'): frame}, panel_timeline=timeline,
+    )
+    result = ColumnRef(DataColumn.CLOSE).rolling(window_bars('250d')).mean().evaluate(ctx=ctx)
+    np.testing.assert_allclose(result['A'].to_numpy(), [1.0, 1.5, 2.0, 2.5])

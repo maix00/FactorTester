@@ -15,7 +15,7 @@ from tools.data.types import DataFreq, finest_index
 from .core import EvaluateContext, FactorExpr
 from .leaf import ColumnRef, ConstExpr, CategoryBoolRef
 from .composite import CompositeExpr
-from .rolling import RollingOp, _resolve_windows
+from .rolling import RollingOp, WindowBarsExpr, _resolve_windows
 from .conditional import WhereOp
 from .shift import ShiftOp
 from .groupby_scope import GroupByScopeOp
@@ -323,7 +323,34 @@ class _PlanBuilder:
             children = [self.build(c) for c in expr.operands[expr._data_start:expr._data_start + expr._n_data]]
             grid, signal = self.common(children)
             children = [self.align(c, grid) for c in children]
-            if isinstance(expr, RollingOp):
+            if isinstance(expr, RollingOp) and type(expr.window).__name__ == "WindowBarsExpr":
+                timeline = getattr(self.ctx, "panel_timeline", None)
+                value = expr.window.window.value
+                if timeline is not None and isinstance(value, str) and value.strip().lower().endswith("d"):
+                    lookback = int(value.strip().lower().removesuffix("d"))
+                    days = pd.Index(timeline.trading_days)
+                    groups: dict[object, list[int]] = {}
+                    for row, day in enumerate(days):
+                        groups.setdefault(day, []).append(row)
+                    indices = [len(groups)]
+                    for rows in groups.values():
+                        indices.extend([
+                            int(timeline.index[rows[0]].value),
+                            int(timeline.index[rows[-1]].value),
+                            len(rows),
+                        ])
+                    minimum = expr._min_periods_value(1)
+                    params = [lookback, minimum,
+                              float(expr.nan_policy.value == 'propagate'),
+                              0.5 if expr.quantile is None else float(expr.quantile)]
+                    return self.add(
+                        'session_rolling:' + expr.op.removeprefix('rolling_'),
+                        children, params, indices, grid=grid, signal=signal,
+                        columns=children[0].columns,
+                    )
+                else:
+                    raise TypeError('250d rolling requires panel timeline')
+            elif isinstance(expr, RollingOp):
                 if not isinstance(expr.window, ConstExpr):
                     raise TypeError('rolling window must resolve to a constant')
                 common, count, _ = _resolve_windows(expr.window.value, self.ctx.freq, self.products)
@@ -332,6 +359,8 @@ class _PlanBuilder:
                 scope = (0, count, 0)
                 minimum = expr._min_periods_value(count)
                 quantile = expr.quantile
+            elif isinstance(expr, RollingOp):
+                scope = (0, 0, 0); minimum = 1; quantile = None
             else:
                 scope = self.scope(expr.scope)
                 minimum = expr.min_periods if expr.min_periods is not None else 1
@@ -342,8 +371,9 @@ class _PlanBuilder:
             end = float(expr.trunc_end.value) if isinstance(expr.trunc_end, ConstExpr) else -1.0
             params = [*scope, minimum, float(expr.nan_policy.value == 'propagate'),
                       0.5 if quantile is None else float(quantile), start, end]
-            result = self.add(('rolling:' if isinstance(expr, RollingOp) else 'scope:') + expr.op.removeprefix('rolling_'),
-                              children, params, grid=grid, signal=signal, columns=children[0].columns)
+            if not (isinstance(expr, RollingOp) and type(expr.window).__name__ == "WindowBarsExpr"):
+                result = self.add(('rolling:' if isinstance(expr, RollingOp) else 'scope:') + expr.op.removeprefix('rolling_'),
+                                  children, params, grid=grid, signal=signal, columns=children[0].columns)
         elif isinstance(expr, CrossSectionalOp):
             children = [self.build(c) for c in expr.operands]
             grid, signal = self.common(children)
@@ -406,7 +436,7 @@ def plan_identity(expressions: list[FactorExpr]) -> tuple[tuple, ...]:
     return tuple(node._structural_key() for node in _walk(expressions))
 
 
-_PLAN_SUPPORTED = (ColumnRef, ConstExpr, RollingOp, CompositeExpr, WhereOp, ShiftOp,
+_PLAN_SUPPORTED = (ColumnRef, ConstExpr, RollingOp, WindowBarsExpr, CompositeExpr, WhereOp, ShiftOp,
                    GroupByScopeOp, BarSinceOp, BarDistanceOp, CrossSectionalOp,
                    SignalAlign, CategoryBoolRef, MatchValueRef, ScopeLengthDefault,
                    TermStructureOp)
