@@ -3047,6 +3047,15 @@ impl FactorPlanState {
       .into_pyarray(py).unbind())
   }
 
+  fn update_with_curves(&mut self, py: Python<'_>, timestamp_ns: i64,
+                        values: numpy::PyReadonlyArray1<f64>,
+                        curves: Vec<Vec<(f64, f64)>>) -> PyResult<Py<numpy::PyArray1<f64>>> {
+    use numpy::IntoPyArray;
+    Ok(self.inner.update_with_curves(timestamp_ns, values.as_slice()?, &curves)
+      .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
+      .into_pyarray(py).unbind())
+  }
+
   fn update_at(&mut self, py: Python<'_>, timestamp_ns: i64, values: numpy::PyReadonlyArray1<f64>) -> PyResult<Py<numpy::PyArray1<f64>>> {
     use numpy::IntoPyArray;
     Ok(self.inner.update_at(timestamp_ns, values.as_slice()?)

@@ -20,6 +20,17 @@ class IncrementalFactorPlan:
         self._state = FactorPlanState(json.dumps(spec), len(self.products))
         self._outputs = tuple(spec["outputs"])
 
+    def update_with_curves(self, timestamp_ns: int, values, curves) -> dict[str, dict[str, float]]:
+        array = np.asarray(values, dtype=float)
+        flat = np.asarray(self._state.update_with_curves(
+            int(timestamp_ns), np.ascontiguousarray(array), curves,
+        ), dtype=float)
+        matrix = flat.reshape(len(self.aliases), len(self.products))
+        return {
+            alias: dict(zip(self.products, matrix[index], strict=True))
+            for index, alias in enumerate(self.aliases)
+        }
+
     def update(self, values: list[float] | np.ndarray) -> dict[str, dict[str, float]]:
         array = np.asarray(values, dtype=float)
         if array.shape != (len(self.products),):

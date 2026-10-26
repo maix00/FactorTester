@@ -13,6 +13,7 @@ from .scope import GroupByScopeOp
 from .bar_search import BarDistanceExpr, BarSinceExpr, BarSinceExpr as BarSince
 from .match import MatchBarDistanceExpr, _predicate
 from .signal import SignalAlign
+from .term import TermStructureExpr
 from .scopes import SessionScope, TradingDayScope
 from .category import CategoryBoolRef
 
@@ -30,7 +31,10 @@ def to_plan_spec(expressions: list[Any], *, products=None) -> dict[str, Any] | N
         key = expr._structural_key()
         if key in memo:
             return memo[key]
-        if isinstance(expr, CategoryBoolRef):
+        if isinstance(expr, TermStructureExpr): 
+            node = {"kind": "term", "op": expr.op, "near_rank": expr.near_rank,
+                    "far_rank": expr.far_rank, "depth": expr.depth}
+        elif isinstance(expr, CategoryBoolRef):
             if products is None:
                 return None
             node = {"kind": "product", "values": [

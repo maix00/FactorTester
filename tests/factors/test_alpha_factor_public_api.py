@@ -745,3 +745,15 @@ def test_category_membership_effective_time_is_respected():
     )
     result = CategoryBoolRef(label='metal').evaluate(ctx)
     np.testing.assert_array_equal(result['A'].to_numpy(), [False, True])
+
+
+def test_alpha_factor_term_structure_compiles_to_rust_plan():
+    from alpha.factor import IncrementalFactorPlan, term_spread
+
+    expression = term_spread()
+    spec = expression.to_plan_spec()
+    assert spec is not None
+    assert spec['nodes'][-1]['kind'] == 'term'
+    plan = IncrementalFactorPlan({'spread': expression}, ('A',))
+    values = plan.update_with_curves(0, [1.0], [[(30.0, 10.0), (90.0, 8.0)]])
+    assert values == {'spread': {'A': 2.0}}

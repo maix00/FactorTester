@@ -23,6 +23,7 @@ pub enum ExprSpec {
     Product(Vec<f64>),
     Rolling { child: usize, window: usize, op: SessionOp, min_periods: usize, propagate_nan: bool },
     Ema { child: usize, span: usize, min_periods: usize, propagate_nan: bool },
+    Term { op: String, near_rank: usize, far_rank: usize, depth: usize },
     MatchDistance { child: usize, predicate: crate::algo::MatchExpr, count: usize, nearest: bool, default: f64, include_current: bool },
     SessionRolling { child: usize, lookback_sessions: usize, sessions: Vec<(i64, i64, usize)>, op: SessionOp, min_periods: usize, propagate_nan: bool },
     Linreg { child: usize, window: usize, op: String, min_periods: usize, propagate_nan: bool },
@@ -122,6 +123,7 @@ pub struct FactorPlanKernel {
     fields: usize,
     slots: Vec<Vec<f64>>,
     node_keys: Vec<String>,
+    term_curves: Vec<Vec<(f64, f64)>>,
 }
 
 fn binary(op: BinaryOp, left: f64, right: f64) -> f64 {
@@ -181,7 +183,7 @@ impl FactorPlanKernel {
         }
         for (index, node) in nodes.iter().enumerate() {
             let children: &[usize] = match &node.spec {
-                ExprSpec::Column(_) | ExprSpec::Const(_) | ExprSpec::Product(_) => &[],
+                ExprSpec::Column(_) | ExprSpec::Const(_) | ExprSpec::Product(_) | ExprSpec::Term { .. } => &[],
                 ExprSpec::Neg { child } | ExprSpec::Unary { child, .. } | ExprSpec::Rolling { child, .. }
                 | ExprSpec::SessionRolling { child, .. } | ExprSpec::MatchDistance { child, .. }
                 | ExprSpec::Ema { child, .. } | ExprSpec::Linreg { child, .. }
@@ -213,7 +215,7 @@ impl FactorPlanKernel {
             }
         }
         let slots = vec![vec![f64::NAN; products]; nodes.len()];
-        Ok(Self { products, nodes, outputs, ordinal: 0, timestamp_ns: 0, fields: 1, slots, node_keys: Vec::new() })
+        Ok(Self { products, nodes, outputs, ordinal: 0, timestamp_ns: 0, fields: 1, slots, node_keys: Vec::new(), term_curves: Vec::new() })
     }
 
     pub fn update(&mut self, values: &[f64]) -> Result<Vec<f64>, crate::algo::Error> {
@@ -226,12 +228,20 @@ impl FactorPlanKernel {
         Ok(result)
     }
 
+    pub fn update_with_curves(&mut self, timestamp_ns: i64, values: &[f64], curves: &[Vec<(f64, f64)>]) -> Result<Vec<f64>, crate::algo::Error> {
+        self.term_curves = curves.to_vec();
+        let mut result = Vec::with_capacity(self.outputs.len() * self.products);
+        self.update_into(timestamp_ns, values, &mut result)?;
+        Ok(result)
+    }
+
     pub fn update_into(&mut self, timestamp_ns: i64, values: &[f64], result: &mut Vec<f64>) -> Result<(), crate::algo::Error> {
         self.timestamp_ns = timestamp_ns;
         if self.products == 0 || values.is_empty() || values.len() % self.products != 0 {
             return Err(crate::algo::Error::InvalidParameter("plan values must be product-major fields".into()));
         }
         self.fields = values.len() / self.products;
+        if self.term_curves.is_empty() { self.term_curves = vec![Vec::new(); self.products]; }
         let products = self.products;
         let fields = self.fields;
         let current = self.ordinal;
@@ -279,6 +289,12 @@ impl FactorPlanKernel {
                         let Some(state) = node.rolling[product].as_mut() else { out[product] = f64::NAN; continue };
                         state.set_semantics(min_periods, propagate_nan);
                         out[product] = state.update_explicit(start, current, input[product]);
+                    }
+                }
+                ExprSpec::Term { ref op, near_rank, far_rank, depth } => {
+                    for product in 0..products {
+                        let curve = self.term_curves.get(product);
+                        out[product] = curve.map_or(f64::NAN, |points| term_metric(op, points, near_rank, far_rank, depth));
                     }
                 }
                 ExprSpec::MatchDistance { child, ref predicate, count, nearest, default, include_current } => {
@@ -428,6 +444,38 @@ fn default_basepoint() -> String { "last".into() }
 fn default_include_current() -> bool { true }
 fn default_partial() -> String { "drop".into() }
 
+fn term_metric(op: &str, curve: &[(f64, f64)], near_rank: usize, far_rank: usize, depth: usize) -> f64 {
+    if curve.is_empty() { return f64::NAN; }
+    let near = curve.get(near_rank).map(|(_, value)| *value);
+    let far = curve.get(far_rank).map(|(_, value)| *value);
+    match op {
+        "term_spread" => near.zip(far).map_or(f64::NAN, |(near, far)| near - far),
+        "term_ratio" => near.zip(far).map_or(f64::NAN, |(near, far)| if far == 0.0 { f64::NAN } else { near / far - 1.0 }),
+        "term_log_ratio" => near.zip(far).map_or(f64::NAN, |(near, far)| if near > 0.0 && far > 0.0 { (near / far).ln() } else { f64::NAN }),
+        "term_contango" => near.zip(far).map_or(f64::NAN, |(near, far)| if near == 0.0 { f64::NAN } else { far / near - 1.0 }),
+        "term_carry_annualized" | "term_slope_segment" => {
+            let Some((near_days, near)) = curve.get(near_rank) else { return f64::NAN };
+            let Some((far_days, far)) = curve.get(far_rank) else { return f64::NAN };
+            let diff = far_days - near_days;
+            if diff == 0.0 { return f64::NAN; }
+            if op == "term_slope_segment" { (far - near) / diff }
+            else if *far == 0.0 { f64::NAN } else { (near / far - 1.0) * 365.0 / diff }
+        }
+        "term_rank_value" => near.unwrap_or(f64::NAN),
+        "term_slope" | "term_curvature" => {
+            let frame: Vec<(f64, f64)> = curve.iter().take(depth).copied().collect();
+            if frame.len() < if op == "term_slope" { 2 } else { 3 } { return f64::NAN; }
+            let n = frame.len() as f64;
+            let mean_x = frame.iter().map(|(x, _)| x).sum::<f64>() / n;
+            let mean_y = frame.iter().map(|(_, y)| y).sum::<f64>() / n;
+            let (mut sxx, mut sxy) = (0.0, 0.0);
+            for (x, y) in &frame { sxx += (x - mean_x).powi(2); sxy += (x - mean_x) * (y - mean_y); }
+            if sxx == 0.0 { f64::NAN } else if op == "term_slope" { sxy / sxx } else { f64::NAN }
+        }
+        _ => f64::NAN,
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 enum RawMatch {
@@ -479,6 +527,7 @@ enum RawNode {
             #[serde(default)] sessions: Vec<[i64; 3]> },
     SessionRolling { child: usize, lookback_sessions: usize, sessions: Vec<[i64; 3]>, op: String,
                      min_periods: usize, propagate_nan: bool },
+    Term { op: String, near_rank: usize, far_rank: usize, depth: usize },
     MatchDistance { child: usize, predicate: RawMatch, count: usize, nearest: bool,
                     default: f64, #[serde(default = "default_include_current")] include_current: bool },
     Binary { op: String, left: usize, right: usize },
@@ -533,6 +582,8 @@ impl FactorPlanKernel {
                         ExprSpec::Rolling { child, window, op: session_op(&op, quantile)?, min_periods, propagate_nan }
                     }
                 }
+                RawNode::Term { op, near_rank, far_rank, depth } =>
+                    ExprSpec::Term { op, near_rank, far_rank, depth },
                 RawNode::MatchDistance { child, predicate, count, nearest, default, include_current } =>
                     ExprSpec::MatchDistance { child, predicate: compile_match(predicate), count, nearest, default, include_current },
                 RawNode::SessionRolling { child, lookback_sessions, sessions, op, min_periods, propagate_nan } =>
@@ -705,5 +756,21 @@ mod match_plan_tests {
         let mut kernel = FactorPlanKernel::from_spec_json(json, 1).unwrap();
         assert_eq!(kernel.update(&[10.0]).unwrap(), vec![9.0]);
         assert_eq!(kernel.update(&[12.0]).unwrap(), vec![1.0]);
+    }
+}
+
+#[cfg(test)]
+mod term_plan_tests {
+    use super::*;
+
+    #[test]
+    fn term_spread_reads_ordered_curve_input() {
+        let json = r#"{"columns":["C"],"nodes":[
+          {"kind":"column","index":0},
+          {"kind":"term","op":"term_spread","near_rank":0,"far_rank":1,"depth":4}
+        ],"outputs":[1]}"#;
+        let mut kernel = FactorPlanKernel::from_spec_json(json, 1).unwrap();
+        let values = kernel.update_with_curves(0, &[1.0], &[vec![(30.0, 10.0), (90.0, 8.0)]]).unwrap();
+        assert_eq!(values, vec![2.0]);
     }
 }

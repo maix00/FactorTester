@@ -20,7 +20,14 @@ impl FactorPlanEngine {
     pub fn node_keys(&self) -> &[String] { self.inner.node_keys() }
 
     pub fn update_into(&mut self, bar: &MarketBar, out: &mut Vec<f64>) -> Result<(), alpha_algo::Error> {
-        self.inner.update_into(bar.timestamp_ns, &bar.values, out)
+        if bar.term_curves.is_empty() {
+            self.inner.update_into(bar.timestamp_ns, &bar.values, out)
+        } else {
+            let values = self.inner.update_with_curves(bar.timestamp_ns, &bar.values, &bar.term_curves)?;
+            out.clear();
+            out.extend(values);
+            Ok(())
+        }
     }
 }
 

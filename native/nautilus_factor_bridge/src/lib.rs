@@ -14,11 +14,17 @@ pub struct MarketBar {
     pub timestamp_ns: i64,
     pub products: Vec<String>,
     pub values: Vec<f64>,
+    pub term_curves: Vec<Vec<(f64, f64)>>,
 }
 
 impl MarketBar {
+    pub fn with_term_curves(mut self, curves: Vec<Vec<(f64, f64)>>) -> Self {
+        self.term_curves = curves;
+        self
+    }
+
     pub fn new(timestamp_ns: i64, products: Vec<String>, values: Vec<f64>) -> Self {
-        Self { timestamp_ns, products, values }
+        Self { timestamp_ns, products, values, term_curves: Vec::new() }
     }
 }
 
@@ -466,6 +472,7 @@ pub mod nautilus {
                 timestamp_ns: bar.ts_event.as_u64() as i64,
                 products: vec![bar.bar_type.instrument_id().to_string()],
                 values: vec![bar.close.as_f64()],
+                term_curves: Vec::new(),
             }
         }
     }
