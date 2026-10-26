@@ -638,3 +638,50 @@ def test_batch_and_incremental_shift_where_since_reconcile():
                 [increment[alias]['A'], increment[alias]['B']],
                 [batch['A'], batch['B']], equal_nan=True, err_msg=alias,
             )
+
+
+def test_alpha_factor_term_structure_public_leaf():
+    import pandas as pd
+    from alpha.factor import plan_blockers, term_spread
+
+    index = pd.date_range('2026-01-05', periods=2, freq='min')
+    curve = pd.DataFrame({
+        'TERM_RANK': [0, 1],
+        'DAYS_TO_MATURITY': [30, 90],
+        'CLOSE': [10.0, 8.0],
+    })
+    ctx = EvalContext(
+        products=('A',),
+        preloaded={'A': pd.DataFrame({'CLOSE': [1.0, 2.0]}, index=index)},
+        term_curves={'A': curve},
+    )
+    expression = term_spread()
+    np.testing.assert_allclose(expression.evaluate(ctx)['A'].to_numpy(), [2.0, 2.0])
+    assert 'TermStructureExpr' in plan_blockers(expression)
+
+
+def test_lightweight_category_and_term_inputs_without_product_objects():
+    from alpha.factor import CategoryBoolRef, TermCurve, TermPoint, term_spread
+
+    index = pd.date_range('2026-01-05', periods=1, freq='min')
+    ctx = EvalContext(
+        products=('A', 'B'),
+        preloaded={
+            'A': pd.DataFrame({'CLOSE': [1.0]}, index=index),
+            'B': pd.DataFrame({'CLOSE': [2.0]}, index=index),
+        },
+        categories={'A': frozenset({'metal'}), 'B': frozenset()},
+        term_curves={
+            'A': TermCurve('A', (
+                TermPoint({'CLOSE': 10.0}, days_to_maturity=30, rank=0),
+                TermPoint({'CLOSE': 8.0}, days_to_maturity=90, rank=1),
+            )),
+            'B': TermCurve('B', ()),
+        },
+    )
+    category = CategoryBoolRef(label='metal').evaluate(ctx)
+    np.testing.assert_array_equal(category['A'].to_numpy(), [True])
+    np.testing.assert_array_equal(category['B'].to_numpy(), [False])
+    spread = term_spread().evaluate(ctx)
+    assert spread['A'].iloc[0] == 2.0
+    assert np.isnan(spread['B'].iloc[0])

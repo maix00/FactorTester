@@ -23,6 +23,8 @@ class EvalContext:
     preloaded: Mapping[Any, pd.DataFrame] = field(default_factory=dict)
     cache: dict[Any, Any] = field(default_factory=dict)
     trading_days: Any = None
+    term_curves: Any = None
+    categories: Any = None
 
 
 class FactorExpr:

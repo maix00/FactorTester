@@ -15,11 +15,13 @@ class CategoryBoolRef(FactorExpr):
     universe at compile time.
     """
 
-    def __init__(self, category, label: str):
-        if label not in getattr(category, "categories", ()): 
-            raise ValueError(f"unknown category label {label!r}")
+    def __init__(self, category=None, label: str | None = None):
+        self.label = label or getattr(category, "alias", None)
+        if self.label is None:
+            raise ValueError("CategoryBoolRef requires a label")
+        if category is not None and self.label not in getattr(category, "categories", ()):
+            raise ValueError(f"unknown category label {self.label!r}")
         self.category = category
-        self.label = label
 
     def _structural_key(self):
         return (
@@ -32,8 +34,16 @@ class CategoryBoolRef(FactorExpr):
     def evaluate(self, ctx) -> pd.DataFrame:
         index = next(iter(ctx.preloaded.values())).index if ctx.preloaded else pd.RangeIndex(0)
         frame = pd.DataFrame(index=index, columns=tuple(ctx.products), dtype=bool)
+        memberships = getattr(ctx, "categories", None)
         for product in ctx.products:
-            frame[product] = self.category.is_in_category(self.label, product)
+            if memberships is not None:
+                membership = memberships.get(product) or memberships.get(str(product))
+                labels = getattr(membership, "labels", membership)
+                frame[product] = bool(labels) and self.label in labels
+            elif self.category is not None:
+                frame[product] = self.category.is_in_category(self.label, product)
+            else:
+                raise ValueError("CategoryBoolRef needs ctx.categories or a category object")
         return frame
 
     def _evaluate(self, ctx) -> pd.DataFrame:

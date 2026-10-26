@@ -2,6 +2,8 @@
 
 from .cross_sectional import CrossSectionalExpr
 from .category import CategoryBoolRef
+from .inputs import CategoryMembership, MatchRequest, ProductId, TermCurve, TermPoint
+from .term import (TermStructureExpr, term_carry_annualized, term_contango, term_curvature, term_log_ratio, term_rank_value, term_ratio, term_slope, term_slope_segment, term_spread)
 from .signal import SignalAlign
 from .bar_search import BarDistanceExpr, BarSinceExpr, bar_distance, bar_since
 from .scopes import SessionScope, TradingDayScope, TradingSession, scope_session, scope_trading_day, sessions_from_calendar
@@ -31,7 +33,11 @@ __all__ = [
     "Parameter", "TypeParam", "FactorParam",
     "NanPolicy", "WindowSemantics", "PartitionSemantics", "default_min_periods",
     "CrossSectionalExpr",
-    "CategoryBoolRef",
+    "CategoryBoolRef", "ProductId", "TermPoint", "TermCurve",
+    "CategoryMembership", "MatchRequest", "TermStructureExpr",
+    "term_spread", "term_ratio", "term_log_ratio", "term_contango",
+    "term_carry_annualized", "term_slope_segment", "term_slope",
+    "term_curvature", "term_rank_value",
     "SignalAlign",
     "FactorFamily", "FactorDefinition", "FactorIdentity",
     "BarCountScope", "scope_bars", "GroupByScopeExpr", "GroupByScopeOp",
