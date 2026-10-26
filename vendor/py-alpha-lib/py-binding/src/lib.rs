@@ -2584,6 +2584,12 @@ impl SessionRollingState {
       "skew" => SessionOp::Skew,
       "argmin" => SessionOp::Argmin,
       "argmax" => SessionOp::Argmax,
+      "argmin_raw" => SessionOp::ArgminRaw,
+      "argmax_raw" => SessionOp::ArgmaxRaw,
+      "argmin_raw" => SessionOp::ArgminRaw,
+      "argmax_raw" => SessionOp::ArgmaxRaw,
+      "argmin_raw" => SessionOp::ArgminRaw,
+      "argmax_raw" => SessionOp::ArgmaxRaw,
       "quantile" => SessionOp::Quantile(quantile.unwrap_or(0.5)),
       "rank" => SessionOp::Rank,
       other => return Err(pyo3::exceptions::PyValueError::new_err(

@@ -245,6 +245,8 @@ pub enum SessionOp {
   Skew,
   Argmin,
   Argmax,
+  ArgminRaw,
+  ArgmaxRaw,
   Quantile(f64),
   Rank,
 }
@@ -400,11 +402,19 @@ impl SessionWindowState {
       }
       SessionOp::Min => self.min_deque.front().map(|(_, v)| *v).unwrap_or(f64::NAN),
       SessionOp::Max => self.max_deque.front().map(|(_, v)| *v).unwrap_or(f64::NAN),
-      SessionOp::Argmin | SessionOp::Argmax => {
-        let deque = if self.op == SessionOp::Argmax { &self.max_deque } else { &self.min_deque };
+      SessionOp::Argmin | SessionOp::Argmax | SessionOp::ArgminRaw | SessionOp::ArgmaxRaw => {
+        let find_max = matches!(self.op, SessionOp::Argmax | SessionOp::ArgmaxRaw);
+        let deque = if find_max { &self.max_deque } else { &self.min_deque };
         let Some((index, _)) = deque.front() else { return f64::NAN };
         let current = self.next_index.saturating_sub(1);
-        if count <= 1 { 0.0 } else { (current - *index) as f64 / (count - 1) as f64 }
+        let raw = (current - *index) as f64;
+        if matches!(self.op, SessionOp::ArgminRaw | SessionOp::ArgmaxRaw) {
+          raw
+        } else if count <= 1 {
+          0.0
+        } else {
+          raw / (count - 1) as f64
+        }
       }
       SessionOp::Rank => {
         let Some(tree) = self.order_stat.as_ref() else { return f64::NAN };
