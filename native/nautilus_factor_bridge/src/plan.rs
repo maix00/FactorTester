@@ -24,6 +24,7 @@ pub enum ExprSpec {
     Shift { child: usize, periods: usize },
     Where { condition: usize, when_true: usize, when_false: usize },
     Cross { op: CrossOp, child: usize },
+    Since { condition: usize, count: usize, include_current: bool, nearest: bool, default_scope: bool, default: f64 },
 }
 
 struct NodeState {
@@ -37,6 +38,9 @@ pub struct FactorPlanEngine {
     nodes: Vec<NodeState>,
     outputs: Vec<usize>,
     ordinal: u64,
+    since_first: Vec<Option<usize>>,
+    since_last: Vec<Option<usize>>,
+    since_base: Vec<usize>,
 }
 
 fn binary(op: BinaryOp, left: f64, right: f64) -> f64 {
@@ -67,7 +71,12 @@ impl FactorPlanEngine {
         if outputs.iter().any(|index| *index >= nodes.len()) {
             return Err(alpha_algo::Error::InvalidParameter("plan output out of range".into()));
         }
-        Ok(Self { products, nodes, outputs, ordinal: 0 })
+        Ok(Self {
+            products, nodes, outputs, ordinal: 0,
+            since_first: vec![None; products],
+            since_last: vec![None; products],
+            since_base: vec![0; products],
+        })
     }
 
     fn eval(&mut self, index: usize, columns: &[f64], cache: &mut [Option<Vec<f64>>]) -> Result<Vec<f64>, alpha_algo::Error> {
@@ -109,6 +118,32 @@ impl FactorPlanEngine {
                 let when_false = self.eval(when_false, columns, cache)?;
                 condition.iter().zip(when_true.iter().zip(&when_false))
                     .map(|(c, (a, b))| if c.is_finite() && *c != 0.0 { *a } else { *b }).collect()
+            }
+            ExprSpec::Since { condition, count, include_current, nearest, default_scope, default } => {
+                let condition = self.eval(condition, columns, cache)?;
+                let mut out = vec![f64::NAN; self.products];
+                for product in 0..self.products {
+                    if self.ordinal as usize % count == 0 {
+                        self.since_base[product] = self.ordinal as usize;
+                        self.since_first[product] = None;
+                        self.since_last[product] = None;
+                    }
+                    let truth = condition[product].is_finite() && condition[product] != 0.0;
+                    if truth && include_current {
+                        if self.since_first[product].is_none() { self.since_first[product] = Some(self.ordinal as usize); }
+                        self.since_last[product] = Some(self.ordinal as usize);
+                    }
+                    let matched = if nearest { self.since_last[product] } else { self.since_first[product] };
+                    out[product] = match matched {
+                        Some(hit) => (self.ordinal as usize - hit) as f64,
+                        None => if default_scope { (self.ordinal as usize - self.since_base[product]) as f64 } else { default },
+                    };
+                    if truth && !include_current {
+                        if self.since_first[product].is_none() { self.since_first[product] = Some(self.ordinal as usize); }
+                        self.since_last[product] = Some(self.ordinal as usize);
+                    }
+                }
+                out
             }
             ExprSpec::Cross { op, child } => {
                 let input = self.eval(child, columns, cache)?;
@@ -172,6 +207,19 @@ mod tests {
         assert_eq!(engine.update(&bar(1.0)).unwrap(), vec![2.0]);
         assert_eq!(engine.update(&bar(3.0)).unwrap(), vec![3.0]);
         assert_eq!(engine.update(&bar(5.0)).unwrap(), vec![5.0]);
+    }
+
+    #[test]
+    fn since_tracks_bar_count_partition() {
+        let specs = vec![
+            ExprSpec::Column(0),
+            ExprSpec::Since { condition: 0, count: 5, include_current: true, nearest: true, default_scope: true, default: 0.0 },
+        ];
+        let mut engine = FactorPlanEngine::new(1, specs, vec![1]).unwrap();
+        assert_eq!(engine.update(&MarketBar::new(0, vec!["A".into()], vec![0.0])).unwrap(), vec![0.0]);
+        assert_eq!(engine.update(&MarketBar::new(1, vec!["A".into()], vec![1.0])).unwrap(), vec![0.0]);
+        assert_eq!(engine.update(&MarketBar::new(2, vec!["A".into()], vec![0.0])).unwrap(), vec![1.0]);
+        assert_eq!(engine.update(&MarketBar::new(3, vec!["A".into()], vec![0.0])).unwrap(), vec![2.0]);
     }
 
     #[test]
