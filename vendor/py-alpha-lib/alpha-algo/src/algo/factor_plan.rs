@@ -25,6 +25,7 @@ pub enum ExprSpec {
     Category { memberships: Vec<(usize, i64, bool)> },
     Rolling { child: usize, window: usize, op: SessionOp, min_periods: usize, propagate_nan: bool, trunc_start: i64, trunc_end: i64, trunc_start_child: Option<usize>, trunc_end_child: Option<usize> },
     Ema { child: usize, span: usize, min_periods: usize, propagate_nan: bool },
+    SessionReset { child: usize, boundary: usize, op: SessionOp, min_periods: usize, propagate_nan: bool },
     RollingDynamic { child: usize, windows: Vec<usize>, op: SessionOp, min_periods: usize, propagate_nan: bool },
     Term { op: String, near_rank: usize, far_rank: usize, depth: usize },
     MatchDistance { child: usize, predicate: crate::algo::MatchExpr, count: usize, nearest: bool, default: f64, include_current: bool },
@@ -166,7 +167,7 @@ impl FactorPlanKernel {
                 _ => Vec::new(),
             };
             let rolling = match &spec {
-                ExprSpec::Rolling { op, .. } | ExprSpec::RollingDynamic { op, .. } | ExprSpec::Scope { op, .. } | ExprSpec::SessionRolling { op, .. } => (0..products)
+                ExprSpec::Rolling { op, .. } | ExprSpec::RollingDynamic { op, .. } | ExprSpec::Scope { op, .. } | ExprSpec::SessionRolling { op, .. } | ExprSpec::SessionReset { op, .. } => (0..products)
                     .map(|_| IntervalKernel::new_explicit(*op).map(Some))
                     .collect::<Result<Vec<_>, _>>()?,
                 _ => (0..products).map(|_| None).collect(),
@@ -211,7 +212,7 @@ impl FactorPlanKernel {
                 ExprSpec::Column(_) | ExprSpec::Const(_) | ExprSpec::Product(_) | ExprSpec::BarCount { .. } | ExprSpec::Category { .. } | ExprSpec::Term { .. } => &[],
                 ExprSpec::Neg { child } | ExprSpec::Unary { child, .. } | ExprSpec::Rolling { child, .. }
                 | ExprSpec::SessionRolling { child, .. } | ExprSpec::RollingDynamic { child, .. } | ExprSpec::MatchDistance { child, .. }
-                | ExprSpec::Ema { child, .. } | ExprSpec::Linreg { child, .. }
+                | ExprSpec::Ema { child, .. } | ExprSpec::Linreg { child, .. } | ExprSpec::SessionReset { child, .. }
                 | ExprSpec::Shift { child, .. } | ExprSpec::Cross { child, .. }
                 | ExprSpec::Scope { child, .. } | ExprSpec::Signal { child, .. } => std::slice::from_ref(child),
                 ExprSpec::Binary { left, right, .. } => {
@@ -403,6 +404,18 @@ impl FactorPlanKernel {
                     for product in 0..products {
                         let width = windows.get(product).copied().unwrap_or(1).max(1) as u64;
                         let start = current.saturating_sub(width - 1);
+                        let Some(state) = node.rolling[product].as_mut() else { out[product] = f64::NAN; continue };
+                        state.set_semantics(min_periods, propagate_nan);
+                        out[product] = state.update_explicit(start, current, input[product]);
+                    }
+                }
+                ExprSpec::SessionReset { child, boundary, ref op, min_periods, propagate_nan } => {
+                    let input = &head[child];
+                    let boundary_values = &head[boundary];
+                    let node = &mut self.nodes[index];
+                    for product in 0..products {
+                        if boundary_values[product] != 0.0 { node.scope_base[product] = current as usize; }
+                        let start = node.scope_base[product] as u64;
                         let Some(state) = node.rolling[product].as_mut() else { out[product] = f64::NAN; continue };
                         state.set_semantics(min_periods, propagate_nan);
                         out[product] = state.update_explicit(start, current, input[product]);
@@ -678,6 +691,7 @@ enum RawNode {
     Scope { child: usize, count: usize, op: String, min_periods: usize, propagate_nan: bool,
             #[serde(default)] sessions: Vec<[i64; 3]> },
     RollingDynamic { child: usize, windows: Vec<usize>, op: String, min_periods: usize, propagate_nan: bool },
+    SessionReset { child: usize, boundary: usize, op: String, min_periods: usize, propagate_nan: bool },
     SessionRolling { child: usize, lookback_sessions: usize, sessions: Vec<[i64; 3]>, op: String,
                      min_periods: usize, propagate_nan: bool },
     Term { op: String, near_rank: usize, far_rank: usize, depth: usize },
@@ -745,6 +759,8 @@ impl FactorPlanKernel {
                     ExprSpec::MatchDistance { child, predicate: compile_match(predicate), count, nearest, default, include_current },
                 RawNode::RollingDynamic { child, windows, op, min_periods, propagate_nan } =>
                     ExprSpec::RollingDynamic { child, windows, op: session_op(&op, None)?, min_periods, propagate_nan },
+                RawNode::SessionReset { child, boundary, op, min_periods, propagate_nan } =>
+                    ExprSpec::SessionReset { child, boundary, op: session_op(&op, None)?, min_periods, propagate_nan },
                 RawNode::SessionRolling { child, lookback_sessions, sessions, op, min_periods, propagate_nan } =>
                     ExprSpec::SessionRolling { child, lookback_sessions,
                         sessions: sessions.into_iter().map(|item| (item[0], item[1], item[2] as usize)).collect(),
@@ -1047,5 +1063,24 @@ mod bar_count_tests {
             assert_eq!(kernel.update_at(22, &[5.0]).unwrap(), vec![expected]);
             assert!(kernel.update_at(30, &[7.0]).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod session_reset_tests {
+    use super::*;
+
+    #[test]
+    fn session_reset_starts_a_new_accumulation_on_boundary() {
+        let json = r#"{"columns":["C","B"],"nodes":[
+          {"kind":"column","index":0},
+          {"kind":"column","index":1},
+          {"kind":"session_reset","child":0,"boundary":1,"op":"mean","min_periods":1,"propagate_nan":false}
+        ],"outputs":[2]}"#;
+        let mut kernel = FactorPlanKernel::from_spec_json(json, 1).unwrap();
+        assert_eq!(kernel.update(&[1.0, 0.0]).unwrap(), vec![1.0]);
+        assert_eq!(kernel.update(&[2.0, 1.0]).unwrap(), vec![2.0]);
+        assert_eq!(kernel.update(&[3.0, 0.0]).unwrap(), vec![2.5]);
+        assert_eq!(kernel.update(&[4.0, 0.0]).unwrap(), vec![3.0]);
     }
 }
