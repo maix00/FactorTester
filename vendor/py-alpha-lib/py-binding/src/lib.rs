@@ -2899,12 +2899,12 @@ impl IntervalPairState {
 enum PlanNode {
   Const(f64),
   Column(usize),
-  Rolling { child: usize, window: usize, op: String, min: usize, prop: bool },
+  Rolling { child: usize, window: usize, op: String, min: usize, prop: bool, quantile: Option<f64> },
   Binary { op: String, left: usize, right: usize },
   Where { condition: usize, when_true: usize, when_false: usize },
 }
 
-fn plan_rolling(values: &[f64], window: usize, op: &str, min: usize, prop: bool) -> pyo3::PyResult<Vec<f64>> {
+fn plan_rolling(values: &[f64], window: usize, op: &str, min: usize, prop: bool, quantile: Option<f64>) -> pyo3::PyResult<Vec<f64>> {
   use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
   use rayon::slice::ParallelSliceMut;
   let window = window.max(1);
@@ -2962,9 +2962,24 @@ fn plan_rolling(values: &[f64], window: usize, op: &str, min: usize, prop: bool)
     return Ok(out);
   }
   if !matches!(op, "sum" | "mean" | "var" | "std" | "skew") {
-    return Err(pyo3::exceptions::PyValueError::new_err(
-      format!("batch plan rolling does not support {op}")
-    ));
+    use alpha_algo::SessionOp;
+    let session_op = match op {
+      "min" => SessionOp::Min, "max" => SessionOp::Max,
+      "argmin" => SessionOp::Argmin, "argmax" => SessionOp::Argmax,
+      "argmin_raw" => SessionOp::ArgminRaw, "argmax_raw" => SessionOp::ArgmaxRaw,
+      "median" => SessionOp::Quantile(0.5),
+      "quantile" => SessionOp::Quantile(quantile.unwrap_or(0.5)),
+      "rank" => SessionOp::Rank, "mad" => SessionOp::Mad,
+      other => return Err(pyo3::exceptions::PyValueError::new_err(
+        format!("batch plan rolling does not support {other}")
+      )),
+    };
+    let mut state = alpha_algo::IntervalKernel::new(session_op)
+      .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
+      .with_semantics(min, prop);
+    return Ok((0..values.len()).map(|index| {
+      state.update_explicit(index.saturating_sub(window - 1) as u64, index as u64, values[index])
+    }).collect());
   }
   const CHUNK: usize = 65_536;
   let n = values.len();
@@ -3044,9 +3059,9 @@ impl BatchPlan {
     self.nodes.len() - 1
   }
 
-  fn rolling(&mut self, child: usize, window: usize, op: &str, min: usize, prop: bool) -> usize {
+  fn rolling(&mut self, child: usize, window: usize, op: &str, min: usize, prop: bool, quantile: Option<f64>) -> usize {
     self.nodes.push(PlanNode::Rolling {
-      child, window, op: op.to_string(), min, prop,
+      child, window, op: op.to_string(), min, prop, quantile,
     });
     self.nodes.len() - 1
   }
@@ -3080,8 +3095,8 @@ impl BatchPlan {
         PlanNode::Column(index) => columns.get(*index)
           .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("plan column out of range"))?
           .to_vec(),
-        PlanNode::Rolling { child, window, op, min, prop } => {
-          plan_rolling(&values[*child], *window, op, *min, *prop)?
+        PlanNode::Rolling { child, window, op, min, prop, quantile } => {
+          plan_rolling(&values[*child], *window, op, *min, *prop, *quantile)?
         }
         PlanNode::Where { condition, when_true, when_false } => {
           let (c, a, b) = (&values[*condition], &values[*when_true], &values[*when_false]);

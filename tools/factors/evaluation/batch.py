@@ -245,7 +245,7 @@ def evaluate_factors(
     shared_cache: dict[tuple, pd.DataFrame] = {}
     try:
         from tools.factors.expr.core import EvaluateContext
-        from tools.factors.expr.rust_plan import try_evaluate_rust_plan_many
+        from tools.factors.expr.rust_plan import evaluate_rust_plan
 
         plan_expressions = [factor._func_expr for factor in factors]
         plan_context = EvaluateContext(
@@ -255,7 +255,7 @@ def evaluate_factors(
             panel_timeline=prepared.panel_timeline,
             shared_cache_keys=frozenset(shared_keys),
         )
-        planned = try_evaluate_rust_plan_many(plan_expressions, plan_context)
+        planned = evaluate_rust_plan(plan_expressions, plan_context)
     except Exception:
         planned = None
     if planned is not None:

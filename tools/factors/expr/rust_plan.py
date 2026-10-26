@@ -21,11 +21,11 @@ from .conditional import WhereOp
 
 _BINARY = {"add": "+", "sub": "-", "mul": "*", "div": "/",
            "gt": "gt", "lt": "lt", "ge": "ge", "le": "le", "eq": "eq", "ne": "ne"}
-_ROLLING = {
-    "rolling_sum", "rolling_mean", "rolling_var", "rolling_std", "rolling_skew",
-    "rolling_min", "rolling_max", "rolling_argmin", "rolling_argmax",
-    "rolling_argmin_raw", "rolling_argmax_raw", "rolling_ema",
-}
+_ROLLING = {"rolling_sum", "rolling_mean", "rolling_var", "rolling_std",
+           "rolling_skew", "rolling_min", "rolling_max", "rolling_argmin",
+           "rolling_argmax", "rolling_argmin_raw", "rolling_argmax_raw",
+           "rolling_ema", "rolling_median", "rolling_quantile",
+           "rolling_rank", "rolling_mad"}
 
 
 class _PlanBuilder:
@@ -64,10 +64,12 @@ class _PlanBuilder:
             if child is None:
                 return None
             window = int(window_expr.value)
+            quantile = expr.quantile if expr.op == "rolling_quantile" else None
             node = self.plan.rolling(
                 child, window, expr.op.removeprefix("rolling_"),
                 expr._min_periods_value(window),
                 expr.nan_policy.value == "propagate",
+                quantile,
             )
             self.memo[key] = node
             return node
@@ -96,37 +98,7 @@ class _PlanBuilder:
         return None
 
 
-def try_evaluate_rust_plan(expression: FactorExpr, ctx: EvaluateContext) -> pd.DataFrame | None:
-    """Return a DataFrame when the whole graph has a Rust batch plan."""
-    if ctx.panel_timeline is not None and not ctx.panel_timeline.same_session:
-        return None
-    if isinstance(expression, (ColumnRef, ConstExpr)):
-        return None
-    builder = _PlanBuilder()
-    output = builder.build(expression)
-    if output is None:
-        return None
-    if not builder.columns:
-        return None
-    frames = [ref.evaluate(ctx=ctx) for ref in builder.columns]
-    if not frames or not isinstance(frames[0], pd.DataFrame):
-        return None
-    index = frames[0].index
-    products = [p for p in ctx.products if p in frames[0].columns]
-    if not products:
-        return None
-    result = {}
-    for product in products:
-        arrays = []
-        for frame in frames:
-            if product not in frame.columns:
-                return None
-            arrays.append(np.ascontiguousarray(frame[product].to_numpy(dtype=float)))
-        result[product] = builder.plan.execute(arrays, output)
-    return pd.DataFrame(result, index=index)
-
-
-def try_evaluate_rust_plan_many(
+def evaluate_rust_plan(
     expressions: list[FactorExpr], ctx: EvaluateContext,
 ) -> list[pd.DataFrame] | None:
     """Execute several factors through one shared Rust Plan DAG."""
@@ -156,3 +128,12 @@ def try_evaluate_rust_plan_many(
         for index, array in enumerate(values):
             result[index][product] = array
     return [pd.DataFrame(item, index=frames[0].index) for item in result]
+
+
+def try_evaluate_rust_plan(expression: FactorExpr, ctx: EvaluateContext) -> pd.DataFrame | None:
+    result = evaluate_rust_plan([expression], ctx)
+    return None if result is None else result[0]
+
+
+def try_evaluate_rust_plan_many(expressions, ctx):
+    return evaluate_rust_plan(expressions, ctx)
