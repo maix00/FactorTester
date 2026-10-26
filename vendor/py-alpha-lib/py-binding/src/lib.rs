@@ -2563,6 +2563,26 @@ impl EventHeap {
   }
 }
 
+#[pyclass]
+struct SessionRollingState {
+  inner: alpha_algo::SessionWindowState,
+}
+
+#[pymethods]
+impl SessionRollingState {
+  #[new]
+  #[pyo3(signature = (lookback_sessions, mean=false))]
+  fn new(lookback_sessions: usize, mean: bool) -> PyResult<Self> {
+    let inner = alpha_algo::SessionWindowState::new(lookback_sessions, mean)
+      .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    Ok(Self { inner })
+  }
+
+  fn update(&mut self, session_id: u32, value: f64) -> f64 {
+    self.inner.update(session_id, value)
+  }
+}
+
 #[pymodule]
 fn _algo(m: &Bound<'_, PyModule>) -> PyResult<()> {
   use algo_impl::*;
@@ -2585,6 +2605,7 @@ fn _algo(m: &Bound<'_, PyModule>) -> PyResult<()> {
   m.add_class::<OrderLifecycleBatch>()?;
   m.add_class::<OrderConstructionKernel>()?;
   m.add_class::<ThresholdKernel>()?;
+  m.add_class::<SessionRollingState>()?;
   m.add_class::<GroupKernel>()?;
   m.add_class::<TermCarryKernel>()?;
   m.add_class::<LifecycleKernel>()?;

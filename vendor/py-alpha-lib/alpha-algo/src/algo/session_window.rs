@@ -66,6 +66,66 @@ where
   Ok(out)
 }
 
+
+/// Mutable run-scoped state for one session-spanning rolling operator.
+///
+/// The caller advances one bar at a time.  Eviction follows the session
+/// ordinal, so the logical window can grow/shrink at session boundaries while
+/// each update remains amortized O(1).
+pub struct SessionWindowState {
+  lookback_sessions: u32,
+  mean: bool,
+  ring: VecDeque<(u32, f64)>,
+  finite_sum: f64,
+  finite_count: usize,
+}
+
+impl SessionWindowState {
+  pub fn new(lookback_sessions: usize, mean: bool) -> Result<Self, Error> {
+    if lookback_sessions == 0 {
+      return Err(Error::InvalidParameter("lookback must be positive".to_string()));
+    }
+    Ok(Self {
+      lookback_sessions: lookback_sessions as u32,
+      mean,
+      ring: VecDeque::new(),
+      finite_sum: 0.0,
+      finite_count: 0,
+    })
+  }
+
+  pub fn update(&mut self, session_id: u32, value: f64) -> f64 {
+    if let Some((last, _)) = self.ring.back() {
+      // Session ids must be non-decreasing; a stale id is a programming error.
+      // Keep the latest observation rather than silently crossing sessions.
+      if session_id < *last {
+        return f64::NAN;
+      }
+    }
+    let first_session = (session_id + 1).saturating_sub(self.lookback_sessions);
+    while self.ring.front().is_some_and(|(id, _)| *id < first_session) {
+      if let Some((_, old)) = self.ring.pop_front() {
+        if old.is_finite() {
+          self.finite_sum -= old;
+          self.finite_count -= 1;
+        }
+      }
+    }
+    self.ring.push_back((session_id, value));
+    if value.is_finite() {
+      self.finite_sum += value;
+      self.finite_count += 1;
+    }
+    if self.finite_count == 0 {
+      f64::NAN
+    } else if self.mean {
+      self.finite_sum / self.finite_count as f64
+    } else {
+      self.finite_sum
+    }
+  }
+}
+
 pub fn ta_session_rolling_sum<NumT: Float>(
   ctx: &Context,
   values: &[f64],
@@ -101,6 +161,16 @@ mod tests {
     assert_eq!(sum, vec![1.0, 3.0, 6.0, 10.0, 15.0]);
     let mean: Vec<f64> = ta_session_rolling_mean(&ctx, &values, &sessions, 2).unwrap();
     assert_eq!(mean, vec![1.0, 1.5, 2.0, 2.5, 3.0]);
+  }
+
+  #[test]
+  fn streaming_state_matches_batch_semantics() {
+    let mut state = SessionWindowState::new(1, false).unwrap();
+    assert_eq!(state.update(0, 1.0), 1.0);
+    assert_eq!(state.update(0, 2.0), 3.0);
+    assert_eq!(state.update(1, 3.0), 3.0);
+    assert_eq!(state.update(1, 4.0), 7.0);
+    assert_eq!(state.update(1, 5.0), 12.0);
   }
 
   #[test]

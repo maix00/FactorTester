@@ -54,3 +54,6 @@ def session_rolling_mean(values, session_ids, lookback_sessions: int) -> np.ndar
     ),
     dtype=float,
   )
+
+
+SessionRollingState = _algo.SessionRollingState
