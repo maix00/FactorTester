@@ -729,3 +729,19 @@ def test_alpha_match_bar_distance_batch_incremental_reconcile():
     plan = IncrementalFactorPlan({'d': expression}, ('A',))
     incremental = [plan.update([value])['d']['A'] for value in frame['CLOSE']]
     np.testing.assert_allclose(incremental, batch)
+
+
+def test_category_membership_effective_time_is_respected():
+    from alpha.factor import CategoryBoolRef, CategoryMembership
+
+    index = pd.date_range('2026-01-05', periods=2, freq='min')
+    ctx = EvalContext(
+        products=('A',),
+        preloaded={'A': pd.DataFrame({'CLOSE': [1.0, 2.0]}, index=index)},
+        categories={'A': (
+            CategoryMembership('A', frozenset(), effective_at_ns=0),
+            CategoryMembership('A', frozenset({'metal'}), effective_at_ns=index[1].value),
+        )},
+    )
+    result = CategoryBoolRef(label='metal').evaluate(ctx)
+    np.testing.assert_array_equal(result['A'].to_numpy(), [False, True])

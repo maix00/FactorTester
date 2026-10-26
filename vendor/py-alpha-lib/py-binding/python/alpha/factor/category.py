@@ -35,9 +35,16 @@ class CategoryBoolRef(FactorExpr):
         index = next(iter(ctx.preloaded.values())).index if ctx.preloaded else pd.RangeIndex(0)
         frame = pd.DataFrame(index=index, columns=tuple(ctx.products), dtype=bool)
         memberships = getattr(ctx, "categories", None)
+        timestamps = index.as_unit("ns").asi8 if isinstance(index, pd.DatetimeIndex) else None
         for product in ctx.products:
             if memberships is not None:
                 membership = memberships.get(product) or memberships.get(str(product))
+                if isinstance(membership, (tuple, list)):
+                    for row, timestamp in enumerate(timestamps if timestamps is not None else [None] * len(index)):
+                        active = [item for item in membership if getattr(item, "active_at", lambda _: True)(timestamp)]
+                        labels = frozenset().union(*(item.labels for item in active)) if active else frozenset()
+                        frame.iloc[row, frame.columns.get_loc(product)] = self.label in labels
+                    continue
                 labels = getattr(membership, "labels", membership)
                 frame[product] = bool(labels) and self.label in labels
             elif self.category is not None:
