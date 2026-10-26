@@ -276,6 +276,77 @@ class RustSessionPairNode:
         return result
 
 
+class RustPartitionNode:
+    """Scope-partitioned aggregation executed by the Rust partition policy."""
+
+    _OPS = {
+        "mean": "mean", "sum": "sum", "var": "var", "std": "std",
+        "min": "min", "max": "max", "skew": "skew",
+        "argmin": "argmin", "argmax": "argmax",
+        "median": "median", "quantile": "quantile", "rank": "rank",
+        "mad": "mad",
+    }
+
+    def __init__(self, op, child, scope, width, quantile=None, source_freq=None, products=()):
+        from alpha import PartitionState
+        from tools.factors.expr.lookback_scope import (
+            BarCountScope, SessionScope, TradingDayScope,
+        )
+        rust_op = self._OPS.get(op)
+        if rust_op is None:
+            raise UnsupportedStreamingFactor(f"partition scope does not support {op}")
+        self.op = op
+        self.child = child
+        self.scope = scope
+        self._width = width
+        self._states = [PartitionState(rust_op, quantile) for _ in range(width)]
+        self._last_ts = [None] * width
+        self._session_id = [0] * width
+        self._bar_ordinal = 0
+        self._day_scope = isinstance(scope, TradingDayScope)
+        self._session_scope = isinstance(scope, SessionScope)
+        self._bar_scope = isinstance(scope, BarCountScope)
+        self._gap = pd.Timedelta(getattr(scope, "gap", "3h"))
+        self._bar_count = 1
+        if self._bar_scope:
+            self._bar_count = int(scope.resolved_count(source_freq=source_freq, products=products))
+
+    def update(self, market, cache):
+        key = id(self)
+        if key in cache:
+            return cache[key]
+        values = np.asarray(self.child.update(market, cache), dtype=float)
+        if values.shape != (self._width,):
+            raise ValueError("partition scope input width changed")
+        timestamp = getattr(market, "timestamp", None)
+        trading_day = getattr(market, "trading_day", None)
+        if self._day_scope and trading_day is None:
+            raise UnsupportedStreamingFactor("trading_day scope needs trading_day")
+        if timestamp is None and (self._day_scope or self._session_scope):
+            raise UnsupportedStreamingFactor("scope needs bar timestamps")
+        ts = pd.Timestamp(timestamp) if timestamp is not None else None
+        if self._bar_scope:
+            partition = self._bar_ordinal // self._bar_count
+            self._bar_ordinal += 1
+        elif self._day_scope:
+            partition = int(pd.Timestamp(trading_day).value)
+        else:
+            partition = None
+        result = np.empty(self._width, dtype=float)
+        for index, value in enumerate(values):
+            if self._session_scope:
+                last = self._last_ts[index]
+                if last is not None and ts - last >= self._gap:
+                    self._session_id[index] += 1
+                self._last_ts[index] = ts
+                product_partition = self._session_id[index]
+            else:
+                product_partition = int(partition)
+            result[index] = self._states[index].update(product_partition, float(value))
+        cache[key] = result
+        return result
+
+
 class RustEmaNode:
     """Adjusted EMA executed by Rust."""
 
@@ -1704,17 +1775,27 @@ def compile_streaming_factor(
                 if isinstance(quantile, bool) or not isinstance(quantile, (int, float)):
                     raise UnsupportedStreamingFactor("streaming quantile must be a constant")
                 quantile = float(quantile)
-            node = GroupScopeNode(
-                op_name,
-                data_operands[0],
-                expr.scope,
-                len(products),
-                quantile=quantile,
-                trunc_start=_resolve_truncation(expr.trunc_start),
-                trunc_end=_resolve_truncation(expr.trunc_end),
-                products=products,
-                source_freq=source_freq,
-            )
+            if (
+                expr.trunc_start is None
+                and expr.trunc_end is None
+                and op_name in RustPartitionNode._OPS
+            ):
+                node = RustPartitionNode(
+                    op_name, data_operands[0], expr.scope, len(products),
+                    quantile=quantile, source_freq=source_freq, products=products,
+                )
+            else:
+                node = GroupScopeNode(
+                    op_name,
+                    data_operands[0],
+                    expr.scope,
+                    len(products),
+                    quantile=quantile,
+                    trunc_start=_resolve_truncation(expr.trunc_start),
+                    trunc_end=_resolve_truncation(expr.trunc_end),
+                    products=products,
+                    source_freq=source_freq,
+                )
         elif isinstance(expr, ShiftOp):
             if not isinstance(expr.periods, ConstExpr) or not isinstance(expr.periods.value, int):
                 raise UnsupportedStreamingFactor("streaming shifts must resolve to fixed bars")
