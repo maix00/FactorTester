@@ -61,6 +61,32 @@ class TradingCalendarWindow:
         start = max(0, current_session - lookback_sessions + 1)
         return self._cumulative[current_session + 1] - self._cumulative[start]
 
+    @classmethod
+    def from_bars(cls, bars: object) -> "TradingCalendarWindow":
+        """Build sessions from source bars grouped by authoritative trading day.
+
+        Night and day bars sharing one trading day form one session: the
+        session opens at the earliest night open and closes at the latest day
+        close.  Calendar dates alone are never used to derive the day.
+        """
+        grouped: dict[object, list[tuple[int, int]]] = {}
+        for bar in bars:
+            day = getattr(bar, "trading_day", None)
+            clock = getattr(bar, "clock", None)
+            if day is None or clock is None:
+                raise ValueError("bars need trading_day and clock fields")
+            grouped.setdefault(day, []).append(
+                (int(clock.interval_open_ns), int(clock.interval_end_ns))
+            )
+        if not grouped:
+            raise ValueError("bars contain no trading sessions")
+        sessions: list[TradingSession] = []
+        for day, intervals in grouped.items():
+            start = min(item[0] for item in intervals)
+            end = max(item[1] for item in intervals)
+            sessions.append(TradingSession(day, start, end, len(intervals)))
+        return cls(tuple(sorted(sessions, key=lambda item: item.start_ns)))
+
     def max_window_size(self, lookback_sessions: int) -> int:
         """Largest minute-bar window over all frozen sessions."""
         if not isinstance(lookback_sessions, int) or lookback_sessions <= 0:
