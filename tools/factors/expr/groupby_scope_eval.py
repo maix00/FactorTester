@@ -79,40 +79,6 @@ def _group_bounds(keys: np.ndarray) -> list[tuple[int, int]]:
     return [(int(edges[i]), int(edges[i + 1])) for i in range(len(edges) - 1)]
 
 
-def _prefix_aggregate(
-    values: np.ndarray, op: str, quantile: float | None,
-    start: int, end: int,
-) -> np.ndarray:
-    """Aggregate the partition's [start, end] members for every prefix position.
-
-    ``start``/``end`` are positions **inside the partition** (``end=None`` means
-    "up to the current bar").  Results before ``start`` are NaN.
-    """
-    length = len(values)
-    output = np.full(length, np.nan, dtype=float)
-    if length == 0:
-        return output
-    window = values[start:length] if end is None else values[start:end + 1]
-    if len(window) == 0:
-        return output
-    series = pd.Series(window, dtype=float)
-    minimum = min(_MIN_PERIODS.get(op, 1), max(1, len(series)))
-    if op == "quantile":
-        if quantile is None:
-            raise ValueError("groupby_scope.quantile requires q")
-        expanded = series.expanding(min_periods=minimum).quantile(quantile)
-    elif op == "median":
-        expanded = series.expanding(min_periods=minimum).median()
-    else:
-        expanded = getattr(series.expanding(min_periods=minimum), op)()
-    # positions after the fixed end keep the completed window's value
-    if end is not None and end + 1 < length:
-        tail = np.full(length - (end + 1), expanded.iloc[-1], dtype=float)
-        expanded = pd.concat([expanded, pd.Series(tail, index=range(end + 1, length))])
-    output[start:] = expanded.to_numpy(dtype=float)[: length - start]
-    return output
-
-
 def _prefix_arg_extreme_loop(
     values: np.ndarray, op: str, start: int, end: int,
 ) -> np.ndarray:
@@ -223,9 +189,15 @@ def apply_grouped(
             end = None if trunc_end is None else max(0, int(trunc_end))
             if end is not None and end >= len(group):
                 end = None
-            if op in ("argmax", "argmin"):
-                result = _prefix_arg_extreme(group, op, start, end)
-            else:
-                result = _prefix_aggregate(group, op, quantile, start, end)
+            from alpha import IntervalState
+            rust_op = {"mean": "mean", "sum": "sum", "std": "std", "var": "var",
+                       "min": "min", "max": "max", "median": "quantile",
+                       "quantile": "quantile", "argmax": "argmax",
+                       "argmin": "argmin"}[op]
+            state = IntervalState(rust_op, quantile)
+            result = np.empty(len(group), dtype=float)
+            for position, value in enumerate(group):
+                effective_end = position if end is None else min(end, position)
+                result[position] = state.update(start, effective_end, float(value))
             output[rows[start_ordinal:stop_ordinal], column] = result
     return pd.DataFrame(output, index=data.index, columns=data.columns)
