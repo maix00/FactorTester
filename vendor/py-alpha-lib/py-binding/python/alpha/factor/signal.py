@@ -14,19 +14,38 @@ class SignalAlign(FactorExpr):
     ``source_time <= t``; no future value is ever used.
     """
 
-    def __init__(self, child: FactorExpr, signal_freq: str, basepoint: str = "last"):
+    def __init__(
+        self,
+        child: FactorExpr,
+        signal_freq: str,
+        basepoint: str = "last",
+        daily_basepoint: str | None = None,
+        end_session_skip: bool = False,
+        end_session_gap: str | None = None,
+        include_current: bool = True,
+    ):
         if basepoint != "last":
-            raise NotImplementedError(
-                "alpha.factor SignalAlign currently supports basepoint='last' only; "
-                "first/daily/end_session_skip remain explicit blockers"
-            )
+            raise NotImplementedError("SignalAlign currently implements basepoint='last' only")
+        if daily_basepoint is not None:
+            raise NotImplementedError("daily_basepoint is an explicit SignalAlign blocker")
+        if end_session_skip:
+            raise NotImplementedError("end_session_skip is an explicit SignalAlign blocker")
+        if end_session_gap is not None:
+            raise NotImplementedError("end_session_gap is an explicit SignalAlign blocker")
+        if not include_current:
+            raise NotImplementedError("include_current=False is an explicit SignalAlign blocker")
         self.child = child
         self.signal_freq = str(signal_freq)
         self.basepoint = basepoint
+        self.daily_basepoint = daily_basepoint
+        self.end_session_skip = end_session_skip
+        self.end_session_gap = end_session_gap
+        self.include_current = include_current
 
     def _structural_key(self):
         return ("alpha.factor.SignalAlign", self.signal_freq, self.basepoint,
-                self.child._structural_key())
+                self.daily_basepoint, self.end_session_skip, self.end_session_gap,
+                self.include_current, self.child._structural_key())
 
     def evaluate(self, ctx) -> pd.DataFrame:
         source = self.child.evaluate(ctx)

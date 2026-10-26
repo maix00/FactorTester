@@ -96,3 +96,27 @@ def to_plan_spec(expressions: list[Any]) -> dict[str, Any] | None:
     if any(output is None for output in outputs):
         return None
     return {"columns": columns, "nodes": nodes, "outputs": outputs}
+
+
+def plan_blockers(expression: Any) -> tuple[str, ...]:
+    """Explicitly list nodes that the Rust plan cannot execute yet."""
+    from .signal import SignalAlign
+
+    blockers: list[str] = []
+
+    def visit(node) -> None:
+        if isinstance(node, SignalAlign):
+            blockers.append("SignalAlign")
+            return
+        if type(node).__name__ in {"TermStructureExpr", "CategoryBoolRef", "MatchValueRef"}:
+            blockers.append(type(node).__name__)
+            return
+        for child in getattr(node, "operands", ()) or ():
+            visit(child)
+        for attribute in ("data", "operand", "owner", "condition", "when_true", "when_false"):
+            child = getattr(node, attribute, None)
+            if child is not None and hasattr(child, "_structural_key"):
+                visit(child)
+
+    visit(expression)
+    return tuple(dict.fromkeys(blockers))

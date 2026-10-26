@@ -28,6 +28,7 @@ pub enum ExprSpec {
     Cross { op: CrossOp, child: usize },
     Since { condition: usize, count: usize, include_current: bool, nearest: bool, default_scope: bool, default: f64 },
     Scope { child: usize, count: usize, op: SessionOp, min_periods: usize, propagate_nan: bool },
+    Signal { child: usize, signal_ns: i64 },
 }
 
 struct NodeState {
@@ -38,6 +39,8 @@ struct NodeState {
     since_last: Vec<Option<usize>>,
     since_base: Vec<usize>,
     scope_base: Vec<usize>,
+    signal_last: Vec<f64>,
+    signal_next: Vec<Option<i64>>,
 }
 
 pub struct FactorPlanKernel {
@@ -45,6 +48,7 @@ pub struct FactorPlanKernel {
     nodes: Vec<NodeState>,
     outputs: Vec<usize>,
     ordinal: u64,
+    timestamp_ns: i64,
 }
 
 fn binary(op: BinaryOp, left: f64, right: f64) -> f64 {
@@ -76,6 +80,8 @@ impl FactorPlanKernel {
                 since_last: vec![None; products],
                 since_base: vec![0; products],
                 scope_base: vec![0; products],
+                signal_last: vec![f64::NAN; products],
+                signal_next: vec![None; products],
             });
         }
         if outputs.iter().any(|index| *index >= nodes.len()) {
@@ -86,7 +92,7 @@ impl FactorPlanKernel {
                 ExprSpec::Column(_) | ExprSpec::Const(_) => &[],
                 ExprSpec::Neg { child } | ExprSpec::Rolling { child, .. }
                 | ExprSpec::Shift { child, .. } | ExprSpec::Cross { child, .. }
-                | ExprSpec::Scope { child, .. } => std::slice::from_ref(child),
+                | ExprSpec::Scope { child, .. } | ExprSpec::Signal { child, .. } => std::slice::from_ref(child),
                 ExprSpec::Binary { left, right, .. } => {
                     if *left >= index || *right >= index { return Err(crate::algo::Error::InvalidParameter("plan child must precede parent".into())); }
                     &[]
@@ -109,7 +115,7 @@ impl FactorPlanKernel {
                 _ => {}
             }
         }
-        Ok(Self { products, nodes, outputs, ordinal: 0 })
+        Ok(Self { products, nodes, outputs, ordinal: 0, timestamp_ns: 0 })
     }
 
     fn eval(&mut self, index: usize, columns: &[f64], cache: &mut [Option<Vec<f64>>]) -> Result<Vec<f64>, crate::algo::Error> {
@@ -158,6 +164,22 @@ impl FactorPlanKernel {
                 let when_false = self.eval(when_false, columns, cache)?;
                 condition.iter().zip(when_true.iter().zip(&when_false))
                     .map(|(c, (a, b))| if c.is_finite() && *c != 0.0 { *a } else { *b }).collect()
+            }
+            ExprSpec::Signal { child, signal_ns } => {
+                let input = self.eval(child, columns, cache)?;
+                let timestamp = self.timestamp_ns;
+                let node = &mut self.nodes[index];
+                for product in 0..self.products {
+                    if node.signal_next[product].is_none() {
+                        let first = if timestamp % signal_ns == 0 { timestamp } else { (timestamp / signal_ns + 1) * signal_ns };
+                        node.signal_next[product] = Some(first);
+                    }
+                    if timestamp >= node.signal_next[product].unwrap_or(i64::MAX) {
+                        node.signal_last[product] = input[product];
+                        node.signal_next[product] = Some(node.signal_next[product].unwrap_or(timestamp) + signal_ns);
+                    }
+                }
+                node.signal_last.clone()
             }
             ExprSpec::Scope { child, count, op, min_periods, propagate_nan } => {
                 let input = self.eval(child, columns, cache)?;
@@ -227,6 +249,11 @@ impl FactorPlanKernel {
 
 impl FactorPlanKernel {
     pub fn update(&mut self, values: &[f64]) -> Result<Vec<f64>, crate::algo::Error> {
+        self.update_at(0, values)
+    }
+
+    pub fn update_at(&mut self, timestamp_ns: i64, values: &[f64]) -> Result<Vec<f64>, crate::algo::Error> {
+        self.timestamp_ns = timestamp_ns;
         if values.len() != self.products {
             return Err(crate::algo::Error::InvalidParameter("plan product width mismatch".into()));
         }
@@ -255,6 +282,7 @@ enum RawNode {
     Cross { op: String, child: usize },
     Since { condition: usize, count: usize, include_current: bool, nearest: bool,
             default_scope: bool, default: f64 },
+    Signal { child: usize, signal_ns: i64 },
 }
 
 #[derive(Deserialize)]
@@ -307,6 +335,7 @@ impl FactorPlanKernel {
                 },
                 RawNode::Since { condition, count, include_current, nearest, default_scope, default } =>
                     ExprSpec::Since { condition, count, include_current, nearest, default_scope, default },
+                RawNode::Signal { child, signal_ns } => ExprSpec::Signal { child, signal_ns },
             });
         }
         Self::new(products, specs, raw.outputs)
