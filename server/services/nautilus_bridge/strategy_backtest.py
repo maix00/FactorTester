@@ -300,16 +300,17 @@ def run_strategy_family_run_spec(
             raise ValueError(f"factor role {role!r} has no FactorExpr")
         bindings[str(role)] = expression
     catalogs = plan.get("catalog_inputs")
+    run_spec_value = job_spec.get("run_spec") if isinstance(job_spec, dict) else None
+    source_adapter = plan.get("source_adapter") or {}
+    window = plan.get("run_window") or {}
+    staging_requests = plan.get("catalog_staging")
     if not isinstance(catalogs, dict) or not catalogs:
         from server.services.nautilus_bridge.catalog_plan import catalog_staging_requests
         from server.services.nautilus_bridge.catalog_staging import stage_run_spec_catalogs
 
-        run_spec_value = job_spec.get("run_spec") if isinstance(job_spec, dict) else None
         if not isinstance(run_spec_value, dict):
             raise ValueError("strategy plan has no product catalogs and no RunSpec")
-        source_adapter = plan.get("source_adapter") or {}
-        window = plan.get("run_window") or {}
-        staging_requests = plan.get("catalog_staging") or catalog_staging_requests(run_spec_value)
+        staging_requests = staging_requests or catalog_staging_requests(run_spec_value)
         catalogs = stage_run_spec_catalogs(
             staging_requests=staging_requests,
             source_key=str(source_adapter.get("member_key") or ""),
@@ -318,7 +319,8 @@ def run_strategy_family_run_spec(
             end_utc=str(window.get("end") or ""),
             target_root=Path(output_dir) / "catalogs",
         )
-        plan = {**plan, "catalog_inputs": catalogs, "session_calendar": None}
+        plan = {**plan, "catalog_inputs": catalogs}
+    if plan.get("session_calendar") is None and staging_requests:
         try:
             from server.services.nautilus_bridge.catalog_staging import (
                 build_run_spec_session_calendar,
@@ -331,8 +333,8 @@ def run_strategy_family_run_spec(
                 end_utc=str(window.get("end") or ""),
             )
         except (OSError, ValueError) as error:
-            # A factor without a session window can still run with a fixed
-            # window.  A session-window factor must not fall back silently.
+            # A fixed-window factor can still run.  A session-window factor
+            # must fail its own compilation instead of silently using 1 bar.
             plan["session_calendar_error"] = str(error)
     inputs = {
         product: ReplayInput(
