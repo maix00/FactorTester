@@ -277,7 +277,7 @@ pub mod nautilus {
 
     use nautilus_common::actor::{DataActor, DataActorConfig, DataActorCore, DataActorNative};
     use nautilus_model::data::Bar;
-    use nautilus_model::identifiers::ActorId;
+    use nautilus_model::identifiers::{ActorId, Symbol};
     use ustr::Ustr;
 
     use crate::{FactorEngine, FactorUpdate, MarketBar};
@@ -290,6 +290,7 @@ pub mod nautilus {
         last_error: Option<String>,
         expected_products: Vec<String>,
         product_index: std::collections::HashMap<String, usize>,
+        symbol_index: std::collections::HashMap<Symbol, usize>,
         pending_bars: Vec<Option<Bar>>,
         last_update: Option<FactorUpdate>,
         boundary_buffer: Vec<u8>,
@@ -320,6 +321,7 @@ pub mod nautilus {
                 core,
                 expected_products: Vec::new(),
                 product_index: std::collections::HashMap::new(),
+                symbol_index: std::collections::HashMap::new(),
                 pending_bars: Vec::new(),
                 pending_timestamp: None,
                 future_slices: std::collections::BTreeMap::new(),
@@ -454,6 +456,8 @@ pub mod nautilus {
             self.expected_products.sort();
             self.product_index = self.expected_products.iter().enumerate()
                 .map(|(index, product)| (product.clone(), index)).collect();
+            self.symbol_index = self.expected_products.iter().enumerate()
+                .map(|(index, product)| (Symbol::new(product), index)).collect();
             self.pending_bars = vec![None; self.expected_products.len()];
             self.pending_timestamp = None;
         }
@@ -464,8 +468,11 @@ pub mod nautilus {
                 let _ = self.on_bar(bar);
                 return;
             }
-            let product = bar.bar_type.instrument_id().to_string();
-            let Some(index) = self.product_index.get(&product).copied() else {
+            let instrument_id = bar.bar_type.instrument_id();
+            let index = self.symbol_index.get(&instrument_id.symbol).copied()
+                .or_else(|| self.product_index.get(&instrument_id.to_string()).copied());
+            let Some(index) = index else {
+                let product = instrument_id.to_string();
                 self.last_error = Some(format!("unexpected product {product}"));
                 return;
             };
