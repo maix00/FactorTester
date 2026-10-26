@@ -241,6 +241,65 @@ pub fn ta_session_rolling_mean<NumT: Float>(
   })
 }
 
+fn session_rolling_pair(
+  x: &[f64], y: &[f64], session_ids: &[u32], lookback_sessions: usize,
+  correlation: bool,
+) -> Result<Vec<f64>, Error> {
+  if x.len() != y.len() {
+    return Err(Error::LengthMismatch(x.len(), y.len()));
+  }
+  validate(x, session_ids, lookback_sessions)?;
+  let mut ring: VecDeque<(u32, f64, f64)> = VecDeque::new();
+  let (mut sx, mut sy, mut sxx, mut syy, mut sxy, mut count) =
+    (0.0, 0.0, 0.0, 0.0, 0.0, 0usize);
+  let mut out = Vec::with_capacity(x.len());
+  for index in 0..x.len() {
+    let session = session_ids[index];
+    let first_session = (session + 1).saturating_sub(lookback_sessions as u32);
+    while ring.front().is_some_and(|(id, _, _)| *id < first_session) {
+      if let Some((_, ox, oy)) = ring.pop_front() {
+        if ox.is_finite() && oy.is_finite() {
+          sx -= ox; sy -= oy; sxx -= ox * ox; syy -= oy * oy; sxy -= ox * oy;
+          count -= 1;
+        }
+      }
+    }
+    let (vx, vy) = (x[index], y[index]);
+    ring.push_back((session, vx, vy));
+    if vx.is_finite() && vy.is_finite() {
+      sx += vx; sy += vy; sxx += vx * vx; syy += vy * vy; sxy += vx * vy;
+      count += 1;
+    }
+    if count < 2 {
+      out.push(f64::NAN);
+      continue;
+    }
+    let n = count as f64;
+    let cov = (sxy - sx * sy / n) / (n - 1.0);
+    if !correlation {
+      out.push(cov);
+    } else {
+      let vx = (sxx - sx * sx / n).max(0.0);
+      let vy = (syy - sy * sy / n).max(0.0);
+      let denom = (vx * vy).sqrt();
+      out.push(if denom > 0.0 { (sxy - sx * sy / n) / denom } else { f64::NAN });
+    }
+  }
+  Ok(out)
+}
+
+pub fn ta_session_rolling_cov(
+  x: &[f64], y: &[f64], session_ids: &[u32], lookback_sessions: usize,
+) -> Result<Vec<f64>, Error> {
+  session_rolling_pair(x, y, session_ids, lookback_sessions, false)
+}
+
+pub fn ta_session_rolling_corr(
+  x: &[f64], y: &[f64], session_ids: &[u32], lookback_sessions: usize,
+) -> Result<Vec<f64>, Error> {
+  session_rolling_pair(x, y, session_ids, lookback_sessions, true)
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -287,6 +346,18 @@ mod tests {
     max.update(0, 5.0);
     max.update(0, 2.0);
     assert_eq!(max.update(1, 7.0), 7.0);
+  }
+
+  #[test]
+  fn pair_cov_and_corr_respect_sessions() {
+    let x = [1.0, 2.0, 3.0, 4.0];
+    let y = [2.0, 4.0, 6.0, 8.0];
+    let sessions = [0u32, 0, 1, 1];
+    let corr = ta_session_rolling_corr(&x, &y, &sessions, 1).unwrap();
+    assert!((corr[1] - 1.0).abs() < 1e-12);
+    assert!((corr[3] - 1.0).abs() < 1e-12);
+    let cov = ta_session_rolling_cov(&x, &y, &sessions, 1).unwrap();
+    assert!((cov[1] - 1.0).abs() < 1e-12);
   }
 
   #[test]
