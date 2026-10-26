@@ -72,3 +72,35 @@ IntervalState = _algo.IntervalState
 
 
 IntervalPairState = _algo.IntervalPairState
+
+
+def interval_rolling(values, starts, ends, op="mean", quantile=None):
+  """Batch interval aggregation executed in Rust."""
+  return np.asarray(
+    _algo.interval_rolling(
+      np.asarray(values, dtype=float),
+      np.asarray(starts, dtype=np.uint64),
+      np.asarray(ends, dtype=np.uint64),
+      str(op), None if quantile is None else float(quantile),
+    ),
+    dtype=float,
+  )
+
+
+def interval_rolling_pair(x, y, starts, ends, correlation=False):
+  """Batch interval cov/corr executed in Rust."""
+  return np.asarray(
+    _algo.interval_rolling_pair(
+      np.asarray(x, dtype=float),
+      np.asarray(y, dtype=float),
+      np.asarray(starts, dtype=np.uint64),
+      np.asarray(ends, dtype=np.uint64),
+      bool(correlation),
+    ),
+    dtype=float,
+  )
+
+
+def interval_ema(values, span: int):
+  """Batch adjusted EMA executed in Rust."""
+  return np.asarray(_algo.interval_ema(np.asarray(values, dtype=float), int(span)), dtype=float)

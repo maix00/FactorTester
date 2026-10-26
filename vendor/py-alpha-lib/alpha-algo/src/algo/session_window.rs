@@ -358,17 +358,35 @@ impl SessionWindowState {
   fn remove_oldest(&mut self) {
     let Some((_session, _timestamp, old, index)) = self.ring.pop_front() else { return };
     if old.is_finite() {
-      self.finite_sum -= old;
-      self.finite_sumsq -= old * old;
-      self.finite_sum3 -= old * old * old;
+      match self.op {
+        SessionOp::Sum | SessionOp::Mean => self.finite_sum -= old,
+        SessionOp::Var | SessionOp::Std => {
+          self.finite_sum -= old;
+          self.finite_sumsq -= old * old;
+        }
+        SessionOp::Skew => {
+          self.finite_sum -= old;
+          self.finite_sumsq -= old * old;
+          self.finite_sum3 -= old * old * old;
+        }
+        SessionOp::Mad => {
+          self.finite_sum -= old;
+          self.finite_sumsq -= old * old;
+        }
+        _ => {}
+      }
       self.finite_count -= 1;
       if let Some(tree) = self.order_stat.as_mut() { tree.remove(old); }
     }
-    while self.min_deque.front().is_some_and(|(i, _)| *i <= index) {
-      self.min_deque.pop_front();
-    }
-    while self.max_deque.front().is_some_and(|(i, _)| *i <= index) {
-      self.max_deque.pop_front();
+    if matches!(self.op, SessionOp::Min | SessionOp::Max | SessionOp::Argmin
+      | SessionOp::Argmax | SessionOp::ArgminRaw | SessionOp::ArgmaxRaw
+      | SessionOp::Mad) {
+      while self.min_deque.front().is_some_and(|(i, _)| *i <= index) {
+        self.min_deque.pop_front();
+      }
+      while self.max_deque.front().is_some_and(|(i, _)| *i <= index) {
+        self.max_deque.pop_front();
+      }
     }
   }
 
@@ -377,19 +395,37 @@ impl SessionWindowState {
     self.next_index += 1;
     self.ring.push_back((0, 0, value, index));
     if value.is_finite() {
-      self.finite_sum += value;
-      self.finite_sumsq += value * value;
-      self.finite_sum3 += value * value * value;
+      match self.op {
+        SessionOp::Sum | SessionOp::Mean => self.finite_sum += value,
+        SessionOp::Var | SessionOp::Std => {
+          self.finite_sum += value;
+          self.finite_sumsq += value * value;
+        }
+        SessionOp::Skew => {
+          self.finite_sum += value;
+          self.finite_sumsq += value * value;
+          self.finite_sum3 += value * value * value;
+        }
+        SessionOp::Mad => {
+          self.finite_sum += value;
+          self.finite_sumsq += value * value;
+        }
+        _ => {}
+      }
       self.finite_count += 1;
       if let Some(tree) = self.order_stat.as_mut() { tree.insert(value); }
-      while self.min_deque.back().is_some_and(|(_, v)| *v >= value) {
-        self.min_deque.pop_back();
+      if matches!(self.op, SessionOp::Min | SessionOp::Max | SessionOp::Argmin
+        | SessionOp::Argmax | SessionOp::ArgminRaw | SessionOp::ArgmaxRaw
+        | SessionOp::Mad) {
+        while self.min_deque.back().is_some_and(|(_, v)| *v >= value) {
+          self.min_deque.pop_back();
+        }
+        self.min_deque.push_back((index, value));
+        while self.max_deque.back().is_some_and(|(_, v)| *v <= value) {
+          self.max_deque.pop_back();
+        }
+        self.max_deque.push_back((index, value));
       }
-      self.min_deque.push_back((index, value));
-      while self.max_deque.back().is_some_and(|(_, v)| *v <= value) {
-        self.max_deque.pop_back();
-      }
-      self.max_deque.push_back((index, value));
     }
     let count = self.finite_count;
     if count == 0 {

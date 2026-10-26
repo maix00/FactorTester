@@ -28,6 +28,116 @@ mod algo_impl {
     ctx
   }
 
+  fn interval_op(name: &str, quantile: Option<f64>) -> PyResult<alpha_algo::SessionOp> {
+    use alpha_algo::SessionOp;
+    Ok(match name {
+      "sum" => SessionOp::Sum, "mean" => SessionOp::Mean,
+      "var" => SessionOp::Var, "std" => SessionOp::Std,
+      "min" => SessionOp::Min, "max" => SessionOp::Max,
+      "skew" => SessionOp::Skew, "argmin" => SessionOp::Argmin,
+      "argmax" => SessionOp::Argmax, "rank" => SessionOp::Rank,
+      "mad" => SessionOp::Mad,
+      "median" | "quantile" => SessionOp::Quantile(quantile.unwrap_or(0.5)),
+      other => return Err(pyo3::exceptions::PyValueError::new_err(
+        format!("unsupported interval op: {other}")
+      )),
+    })
+  }
+
+  #[pyfunction]
+  pub fn interval_ema(values: PyReadonlyArray1<f64>, span: usize) -> PyResult<Vec<f64>> {
+    let values = values.as_slice()?;
+    let mut state = alpha_algo::EmaState::new(span)
+      .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    Ok(values.iter().copied().map(|value| state.update(value)).collect())
+  }
+
+  #[pyfunction]
+  #[pyo3(signature = (values, starts, ends, op, quantile=None))]
+  pub fn interval_rolling(
+    values: PyReadonlyArray1<f64>, starts: PyReadonlyArray1<u64>,
+    ends: PyReadonlyArray1<u64>, op: &str, quantile: Option<f64>,
+  ) -> PyResult<Vec<f64>> {
+    let values = values.as_slice()?;
+    let starts = starts.as_slice()?;
+    let ends = ends.as_slice()?;
+    if values.len() != starts.len() || values.len() != ends.len() {
+      return Err(pyo3::exceptions::PyValueError::new_err(
+        "interval_rolling length mismatch"
+      ));
+    }
+    let op = interval_op(op, quantile)?;
+    let fixed = ends.iter().enumerate().all(|(i, end)| *end == i as u64);
+    if fixed && matches!(
+      op, alpha_algo::SessionOp::Sum | alpha_algo::SessionOp::Mean
+        | alpha_algo::SessionOp::Var | alpha_algo::SessionOp::Std
+    ) {
+      // SumMoments family: prefix sums, O(1) per bar.
+      let mut count = vec![0u64; values.len() + 1];
+      let mut sum = vec![0.0f64; values.len() + 1];
+      let mut sumsq = vec![0.0f64; values.len() + 1];
+      for (i, value) in values.iter().copied().enumerate() {
+        let finite = value.is_finite();
+        count[i + 1] = count[i] + u64::from(finite);
+        sum[i + 1] = sum[i] + if finite { value } else { 0.0 };
+        sumsq[i + 1] = sumsq[i] + if finite { value * value } else { 0.0 };
+      }
+      let mean = matches!(op, alpha_algo::SessionOp::Mean);
+      let std = matches!(op, alpha_algo::SessionOp::Std);
+      let variance = matches!(op, alpha_algo::SessionOp::Var | alpha_algo::SessionOp::Std);
+      let mut out = Vec::with_capacity(values.len());
+      for (index, start) in starts.iter().copied().enumerate() {
+        let end = index + 1;
+        let start = start as usize;
+        let n = count[end] - count[start];
+        let value = if n == 0 {
+          f64::NAN
+        } else {
+          let total = sum[end] - sum[start];
+          if mean {
+            total / n as f64
+          } else if variance {
+            if n < 2 { f64::NAN } else {
+              let square = sumsq[end] - sumsq[start];
+              let variance = ((square - total * total / n as f64) / (n - 1) as f64).max(0.0);
+              if std { variance.sqrt() } else { variance }
+            }
+          } else { total }
+        };
+        out.push(value);
+      }
+      return Ok(out);
+    }
+    let mut state = alpha_algo::IntervalKernel::new(op)
+      .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    Ok(values.iter().copied().zip(starts.iter().copied()).zip(ends.iter().copied())
+      .map(|((value, start), end)| state.update_explicit(start, end, value))
+      .collect())
+  }
+
+  #[pyfunction]
+  #[pyo3(signature = (x, y, starts, ends, correlation=false))]
+  pub fn interval_rolling_pair(
+    x: PyReadonlyArray1<f64>, y: PyReadonlyArray1<f64>,
+    starts: PyReadonlyArray1<u64>, ends: PyReadonlyArray1<u64>,
+    correlation: bool,
+  ) -> PyResult<Vec<f64>> {
+    let x = x.as_slice()?;
+    let y = y.as_slice()?;
+    let starts = starts.as_slice()?;
+    let ends = ends.as_slice()?;
+    if x.len() != y.len() || x.len() != starts.len() || x.len() != ends.len() {
+      return Err(pyo3::exceptions::PyValueError::new_err(
+        "interval_rolling_pair length mismatch"
+      ));
+    }
+    let mut state = alpha_algo::PairIntervalState::new(correlation);
+    Ok(x.iter().copied().zip(y.iter().copied())
+      .zip(starts.iter().copied()).zip(ends.iter().copied())
+      .map(|(((x, y), start), end)| state.update(start, end, x, y))
+      .collect())
+  }
+
   #[pyfunction]
   pub fn session_rolling_sum(
     values: Vec<f64>, session_ids: Vec<u32>, lookback_sessions: usize,
@@ -2638,6 +2748,9 @@ fn _algo(m: &Bound<'_, PyModule>) -> PyResult<()> {
   pyo3_log::init();
 
   m.add_function(wrap_pyfunction!(ema, m)?)?;
+  m.add_function(wrap_pyfunction!(interval_ema, m)?)?;
+  m.add_function(wrap_pyfunction!(interval_rolling, m)?)?;
+  m.add_function(wrap_pyfunction!(interval_rolling_pair, m)?)?;
   m.add_function(wrap_pyfunction!(session_rolling_sum, m)?)?;
   m.add_function(wrap_pyfunction!(session_rolling_mean, m)?)?;
   m.add_function(wrap_pyfunction!(set_ctx, m)?)?;
