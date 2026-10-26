@@ -478,3 +478,15 @@ def test_alpha_factor_bar_distance_enters_rust_plan():
     spec = expression.to_plan_spec()
     assert spec is not None
     assert spec['nodes'][-1]['kind'] == 'distance'
+
+
+def test_alpha_factor_ema_executes_in_rust_kernel():
+    import json
+    from alpha import FactorPlanState
+
+    spec = ColumnRef('CLOSE').rolling(3).ema().to_plan_spec()
+    state = FactorPlanState(json.dumps(spec), 1)
+    values = [float(state.update(np.array([value]))[0]) for value in (1.0, 3.0, 5.0)]
+    assert values[0] == 1.0
+    assert values[1] > values[0]
+    assert values[2] > values[1]

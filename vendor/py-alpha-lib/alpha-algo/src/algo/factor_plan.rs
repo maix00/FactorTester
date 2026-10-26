@@ -21,6 +21,8 @@ pub enum ExprSpec {
     Column(usize),
     Const(f64),
     Rolling { child: usize, window: usize, op: SessionOp, min_periods: usize, propagate_nan: bool },
+    Ema { child: usize, span: usize, min_periods: usize, propagate_nan: bool },
+    Linreg { child: usize, window: usize, op: String, min_periods: usize, propagate_nan: bool },
     Neg { child: usize },
     Binary { op: BinaryOp, left: usize, right: usize },
     Shift { child: usize, periods: usize },
@@ -36,6 +38,8 @@ pub enum ExprSpec {
 struct NodeState {
     spec: ExprSpec,
     rolling: Vec<Option<IntervalKernel>>,
+    ema: Vec<Option<crate::algo::EmaState>>,
+    linreg_history: VecDeque<Vec<f64>>,
     history: VecDeque<Vec<f64>>,
     since_first: Vec<Option<usize>>,
     since_last: Vec<Option<usize>>,
@@ -84,8 +88,14 @@ impl FactorPlanKernel {
                     .collect::<Result<Vec<_>, _>>()?,
                 _ => (0..products).map(|_| None).collect(),
             };
+            let ema = match &spec {
+                ExprSpec::Ema { span, min_periods, propagate_nan, .. } => (0..products)
+                    .map(|_| crate::algo::EmaState::new(*span).ok().map(|state| state.with_semantics(*min_periods, *propagate_nan)))
+                    .collect(),
+                _ => (0..products).map(|_| None).collect(),
+            };
             nodes.push(NodeState {
-                spec, rolling, history: VecDeque::new(),
+                spec, rolling, ema, linreg_history: VecDeque::new(), history: VecDeque::new(),
                 since_first: vec![None; products],
                 since_last: vec![None; products],
                 since_base: vec![0; products],
@@ -106,6 +116,7 @@ impl FactorPlanKernel {
             let children: &[usize] = match &node.spec {
                 ExprSpec::Column(_) | ExprSpec::Const(_) => &[],
                 ExprSpec::Neg { child } | ExprSpec::Rolling { child, .. }
+                | ExprSpec::Ema { child, .. } | ExprSpec::Linreg { child, .. }
                 | ExprSpec::Shift { child, .. } | ExprSpec::Cross { child, .. }
                 | ExprSpec::Scope { child, .. } | ExprSpec::Signal { child, .. } => std::slice::from_ref(child),
                 ExprSpec::Binary { left, right, .. } => {
@@ -125,6 +136,8 @@ impl FactorPlanKernel {
                 return Err(crate::algo::Error::InvalidParameter("plan child must precede parent".into()));
             }
             match &node.spec {
+                ExprSpec::Ema { span, .. } if *span == 0 => return Err(crate::algo::Error::InvalidParameter("ema span must be positive".into())),
+                ExprSpec::Linreg { window, .. } if *window == 0 => return Err(crate::algo::Error::InvalidParameter("linreg window must be positive".into())),
                 ExprSpec::Rolling { window, .. } if *window == 0 => return Err(crate::algo::Error::InvalidParameter("rolling window must be positive".into())),
                 ExprSpec::Scope { count, sessions, .. } if sessions.is_empty() && *count == 0 => return Err(crate::algo::Error::InvalidParameter("scope count must be positive".into())),
                 ExprSpec::Since { count, .. } | ExprSpec::Distance { count, .. } if *count == 0 => return Err(crate::algo::Error::InvalidParameter("scope count must be positive".into())),
@@ -182,6 +195,39 @@ impl FactorPlanKernel {
                         state.set_semantics(min_periods, propagate_nan);
                         out[product] = state.update_explicit(start, current, input[product]);
                     }
+                }
+                ExprSpec::Ema { child, min_periods, propagate_nan, .. } => {
+                    let input = &head[child];
+                    let node = &mut self.nodes[index];
+                    for product in 0..products {
+                        let Some(state) = node.ema[product].as_mut() else { out[product] = f64::NAN; continue };
+                        let _ = (min_periods, propagate_nan);
+                        out[product] = state.update(input[product]);
+                    }
+                }
+                ExprSpec::Linreg { child, window, ref op, min_periods, propagate_nan } => {
+                    let input = head[child].clone();
+                    let node = &mut self.nodes[index];
+                    node.linreg_history.push_back(input);
+                    while node.linreg_history.len() > window { node.linreg_history.pop_front(); }
+                    let mut values = vec![f64::NAN; products];
+                    if node.linreg_history.len() >= min_periods {
+                        for product in 0..products {
+                            let series: Vec<f64> = node.linreg_history.iter().map(|row| row[product]).collect();
+                            let mut one = vec![f64::NAN; 1];
+                            let ctx = crate::algo::Context::default();
+                            match op.as_str() {
+                                "linreg_slope" => crate::algo::ta_linreg_slope(&ctx, &mut one, &series, series.len(), min_periods)?,
+                                "linreg_r2" => crate::algo::ta_linreg_r2(&ctx, &mut one, &series, series.len(), min_periods)?,
+                                "linreg_tstat" => crate::algo::ta_linreg_tstat(&ctx, &mut one, &series, series.len(), min_periods)?,
+                                "linreg_resid_std" => crate::algo::ta_linreg_resid_std(&ctx, &mut one, &series, series.len(), min_periods)?,
+                                other => return Err(crate::algo::Error::InvalidParameter(format!("unsupported linreg op {other}"))),
+                            }
+                            values[product] = one[0];
+                        }
+                    }
+                    out.copy_from_slice(&values);
+                    let _ = propagate_nan;
                 }
                 ExprSpec::Shift { child, periods } => {
                     let input = &head[child];
@@ -326,7 +372,13 @@ impl FactorPlanKernel {
                 RawNode::Column { index } => ExprSpec::Column(index),
                 RawNode::Const { value } => ExprSpec::Const(value),
                 RawNode::Rolling { child, window, op, min_periods, propagate_nan, quantile } => {
-                    ExprSpec::Rolling { child, window, op: session_op(&op, quantile)?, min_periods, propagate_nan }
+                    if op == "ema" {
+                        ExprSpec::Ema { child, span: window, min_periods, propagate_nan }
+                    } else if op.starts_with("linreg_") {
+                        ExprSpec::Linreg { child, window, op, min_periods, propagate_nan }
+                    } else {
+                        ExprSpec::Rolling { child, window, op: session_op(&op, quantile)?, min_periods, propagate_nan }
+                    }
                 }
                 RawNode::Scope { child, count, op, min_periods, propagate_nan, sessions } =>
                     ExprSpec::Scope { child, count, op: session_op(&op, None)?, min_periods, propagate_nan,
