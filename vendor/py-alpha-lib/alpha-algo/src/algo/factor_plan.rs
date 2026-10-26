@@ -449,8 +449,8 @@ impl FactorPlanKernel {
                     let node = &mut self.nodes[index];
                     for product in 0..products {
                         let current_value = input[product];
-                        let mut value = crate::algo::match_distance_iter(
-                            current, current_value, node.match_history[product].iter().copied(),
+                        let mut value = crate::algo::match_distance_deque(
+                            current, current_value, &node.match_history[product],
                             predicate, *count as u64, *nearest, *default,
                         );
                         if *include_current && predicate.eval(current_value, current_value) != 0.0 { value = 0.0; }
@@ -639,7 +639,8 @@ fn truncated_slice(op: &SessionOp, history: &VecDeque<f64>, start: u64, end: u64
         SessionOp::Min => minimum,
         SessionOp::Max => maximum,
         SessionOp::Var | SessionOp::Std => {
-            let variance = (sum_sq - sum * sum / count as f64) / count as f64;
+            if count < 2 { return f64::NAN; }
+            let variance = (sum_sq - sum * sum / count as f64) / (count - 1) as f64;
             if matches!(op, SessionOp::Std) { variance.max(0.0).sqrt() } else { variance.max(0.0) }
         }
         SessionOp::Quantile(q) => {
@@ -1137,5 +1138,29 @@ mod session_reset_tests {
         assert_eq!(out, vec![2.0, 30.0]);
         kernel.update_into_context(2, &[9.0, 50.0], &[1, 0], &[], &mut out).unwrap();
         assert_eq!(out, vec![9.0, 40.0]);
+    }
+}
+
+#[cfg(test)]
+mod variance_semantics_tests {
+    use super::*;
+
+    #[test]
+    fn truncated_variance_matches_full_window_sample_variance() {
+        let full = r#"{"columns":["C"],"nodes":[
+          {"kind":"column","index":0},
+          {"kind":"rolling","child":0,"window":3,"op":"var","min_periods":1,"propagate_nan":false}
+        ],"outputs":[1]}"#;
+        let truncated = r#"{"columns":["C"],"nodes":[
+          {"kind":"column","index":0},
+          {"kind":"rolling","child":0,"window":3,"op":"var","min_periods":1,"propagate_nan":false,"trunc_start":0,"trunc_end":2}
+        ],"outputs":[1]}"#;
+        let mut full_kernel = FactorPlanKernel::from_spec_json(full, 1).unwrap();
+        let mut truncated_kernel = FactorPlanKernel::from_spec_json(truncated, 1).unwrap();
+        for value in [1.0, 2.0, 3.0, 4.0] {
+            let full = full_kernel.update(&[value]).unwrap()[0];
+            let truncated = truncated_kernel.update(&[value]).unwrap()[0];
+            assert!(full.is_nan() && truncated.is_nan() || (full - truncated).abs() < 1e-12);
+        }
     }
 }

@@ -431,7 +431,7 @@ pub mod nautilus {
             self.future_slices = self.future_slices.split_off(&timestamp_ns);
             self.pending_boundaries = self.pending_boundaries.split_off(&timestamp_ns);
             if self.pending_timestamp.is_some_and(|timestamp| timestamp < timestamp_ns) {
-                self.pending_bars.clear();
+                self.pending_bars.fill(None);
                 self.pending_timestamp = None;
             }
         }
@@ -866,6 +866,27 @@ mod nautilus_tests {
         actor.on_completed_bar(&bar);
         assert_eq!(actor.on_timer(3_000), 1);
         assert_eq!(actor.pending_len(), 0);
+    }
+
+    #[test]
+    fn expire_before_keeps_pending_slots_allocated() {
+        let json = r#"{"columns":["CLOSE"],"nodes":[{"kind":"column","index":0}],"outputs":[0]}"#;
+        let mut actor = nautilus::FactorActor::from_plan_json("factor-expire-test", 2, json).unwrap();
+        actor.expect_products(&["A.B", "C.D"]);
+        let first = Bar::new(
+            BarType::from("A.B-1-MINUTE-LAST-EXTERNAL"),
+            Price::from("1.0"), Price::from("1.0"), Price::from("1.0"),
+            Price::from("1.0"), Quantity::from("1"), 1_000.into(), 1_000.into(),
+        );
+        actor.on_completed_bar(&first);
+        actor.expire_before(2_000);
+        let second = Bar::new(
+            BarType::from("A.B-1-MINUTE-LAST-EXTERNAL"),
+            Price::from("1.0"), Price::from("1.0"), Price::from("1.0"),
+            Price::from("1.0"), Quantity::from("1"), 2_000.into(), 2_000.into(),
+        );
+        actor.on_completed_bar(&second);
+        assert_eq!(actor.pending_len(), 1);
     }
 
     #[test]
