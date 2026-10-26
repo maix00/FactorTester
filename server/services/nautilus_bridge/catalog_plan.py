@@ -30,7 +30,11 @@ def _expand_product_paths(paths: list[str], *, start: str, end: str) -> list[str
             expanded.append(path)
             continue
         rows = product.get_contract_list(start[:10], end[:10])
-        uids = [str(row.get("uid")) for row in rows if isinstance(row, dict) and row.get("uid")]
+        uids = [
+            str(row.get("uid")) for row in rows
+            if isinstance(row, dict) and row.get("uid")
+            and str(row.get("uid")).split("|")[-1] not in {"0001", "9999"}
+        ]
         if not uids:
             expanded.append(path)
             continue
