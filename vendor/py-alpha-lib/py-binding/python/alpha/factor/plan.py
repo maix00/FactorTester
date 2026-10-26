@@ -80,6 +80,8 @@ class _Builder:
             day_values = day_values.get_level_values(0)
         if isinstance(day_values, pd.DatetimeIndex):
             day_values = day_values.normalize()
+        if ctx.trading_days is not None:
+            day_values = pd.Series(ctx.trading_days, index=self.index).sort_index().reindex(self.index)
         self.days = pd.factorize(day_values, sort=False)[0].astype(np.int64)
         self.base = _Grid(
             self.plan.grid(
@@ -107,6 +109,7 @@ class _Builder:
         from .core import ColumnRef, CompositeExpr, ConstExpr, RollingOp, ShiftOp, WhereOp
         from .cross_sectional import CrossSectionalExpr
         from .scope import GroupByScopeOp
+        from .scopes import TradingDayScope, SessionScope
         from .bar_search import BarSinceExpr
 
         if isinstance(expr, ColumnRef):
@@ -131,9 +134,15 @@ class _Builder:
         elif isinstance(expr, GroupByScopeOp):
             child = self.build(expr.owner.data)
             op, _, q = expr.op.partition(":")
+            if isinstance(expr.owner.scope, TradingDayScope):
+                scope_params = [2, 0, 0]
+            elif isinstance(expr.owner.scope, SessionScope):
+                scope_params = [3, 0, expr.owner.scope.gap_ns]
+            else:
+                scope_params = [1, expr.owner.scope.count, 0]
             ref = self.add(
                 f"scope:{op}", [child],
-                [1, expr.owner.scope.count, 0,
+                [*scope_params,
                  expr.owner.semantics.effective_min_periods,
                  float(expr.owner.semantics.nan_policy.value == "propagate"),
                  float(q) if q else 0.5, -1.0, -1.0],

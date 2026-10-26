@@ -7,11 +7,12 @@ description = "Independent Rust bridge between Nautilus market events and py-alp
 
 [features]
 default = []
-nautilus = ["dep:nautilus-core"]
+nautilus = ["dep:nautilus-core", "dep:nautilus-model"]
 
 [dependencies]
 alpha-algo = { path = "../../vendor/py-alpha-lib/alpha-algo" }
 nautilus-core = { path = "../../vendor/nautilus_trader/crates/core", optional = true }
+nautilus-model = { path = "../../vendor/nautilus_trader/crates/model", optional = true }
 
 [lib]
 name = "nautilus_factor_bridge"

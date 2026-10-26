@@ -97,9 +97,29 @@ pub trait NautilusMarketAdapter {
 
 #[cfg(feature = "nautilus")]
 pub mod nautilus {
-    //! Placeholder for the concrete Nautilus Bar adapter.  The dependency is
-    //! feature-gated so Nautilus core never depends on this crate.
+    //! Concrete Nautilus adapters.  Kept behind a feature so Nautilus core
+    //! never depends on this crate.
     pub use nautilus_core as core;
+
+    use nautilus_model::data::Bar;
+
+    use crate::MarketBar;
+
+    impl From<&Bar> for MarketBar {
+        fn from(bar: &Bar) -> Self {
+            Self {
+                timestamp_ns: bar.ts_event.as_u64() as i64,
+                products: vec![bar.bar_type.instrument_id().to_string()],
+                values: vec![
+                    bar.open.as_f64(),
+                    bar.high.as_f64(),
+                    bar.low.as_f64(),
+                    bar.close.as_f64(),
+                    bar.volume.as_f64(),
+                ],
+            }
+        }
+    }
 }
 
 #[cfg(test)]

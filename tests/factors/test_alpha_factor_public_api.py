@@ -109,3 +109,7 @@ def test_alpha_factor_bar_since_executes_in_rust():
                 last = index
             expected.append(index - last if last is not None else index - start)
     np.testing.assert_allclose(result['A'].to_numpy(), expected)
+
+
+
+
