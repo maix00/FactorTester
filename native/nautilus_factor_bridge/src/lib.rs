@@ -763,3 +763,20 @@ mod nautilus_tests {
         assert_eq!(actor.latest(), &[1.0]);
     }
 }
+
+#[cfg(all(test, feature = "nautilus-backtest"))]
+mod backtest_actor_tests {
+    use nautilus_backtest::config::BacktestEngineConfig;
+    use nautilus_backtest::engine::BacktestEngine;
+
+    use crate::{SessionOp, WindowEngine};
+    use crate::nautilus::FactorActor;
+
+    #[test]
+    fn factor_actor_can_be_added_to_backtest_engine() {
+        let mut engine = BacktestEngine::new(BacktestEngineConfig::default()).unwrap();
+        let actor = FactorActor::new("factor-engine-test", WindowEngine::new(2, SessionOp::Mean).unwrap());
+        engine.add_actor(actor).unwrap();
+        assert_eq!(engine.kernel().trader.borrow().actor_count(), 1);
+    }
+}
