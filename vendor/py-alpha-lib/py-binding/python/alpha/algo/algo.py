@@ -81,3 +81,6 @@ PartitionState = _algo.PartitionState
 
 
 PartitionRangeState = _algo.PartitionRangeState
+
+
+StartIndexState = _algo.StartIndexState

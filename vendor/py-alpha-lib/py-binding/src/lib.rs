@@ -2610,6 +2610,39 @@ impl SessionRollingState {
 }
 
 #[pyclass]
+struct StartIndexState {
+  inner: alpha_algo::SessionWindowState,
+}
+
+#[pymethods]
+impl StartIndexState {
+  #[new]
+  #[pyo3(signature = (op="mean", quantile=None))]
+  fn new(op: &str, quantile: Option<f64>) -> PyResult<Self> {
+    use alpha_algo::SessionOp;
+    let op = match op {
+      "sum" => SessionOp::Sum, "mean" => SessionOp::Mean,
+      "var" => SessionOp::Var, "std" => SessionOp::Std,
+      "min" => SessionOp::Min, "max" => SessionOp::Max,
+      "skew" => SessionOp::Skew, "argmin" => SessionOp::Argmin,
+      "argmax" => SessionOp::Argmax, "rank" => SessionOp::Rank,
+      "mad" => SessionOp::Mad,
+      "median" | "quantile" => SessionOp::Quantile(quantile.unwrap_or(0.5)),
+      other => return Err(pyo3::exceptions::PyValueError::new_err(
+        format!("unsupported event window op: {other}")
+      )),
+    };
+    let inner = alpha_algo::SessionWindowState::new_start_index(op)
+      .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    Ok(Self { inner })
+  }
+
+  fn update(&mut self, start_index: u64, value: f64) -> f64 {
+    self.inner.update_from(start_index, value)
+  }
+}
+
+#[pyclass]
 struct PartitionRangeState {
   inner: alpha_algo::SessionWindowState,
 }
@@ -2845,6 +2878,7 @@ fn _algo(m: &Bound<'_, PyModule>) -> PyResult<()> {
   m.add_class::<EmaState>()?;
   m.add_class::<PartitionState>()?;
   m.add_class::<PartitionRangeState>()?;
+  m.add_class::<StartIndexState>()?;
   m.add_class::<BarRollingState>()?;
   m.add_class::<WallRollingState>()?;
   m.add_class::<GroupKernel>()?;

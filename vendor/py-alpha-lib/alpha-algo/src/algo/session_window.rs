@@ -280,6 +280,7 @@ pub enum WindowPolicy {
   Bars(u32),
   Partition,
   PartitionRange { start: u32, end: u32 },
+  StartIndex,
   Sessions(u32),
   WallClock(i64),
 }
@@ -293,6 +294,7 @@ pub struct SessionWindowState {
   finite_sum3: f64,
   finite_count: usize,
   next_index: u64,
+  start_index: u64,
   last_value: f64,
   min_deque: VecDeque<(u64, f64)>,
   max_deque: VecDeque<(u64, f64)>,
@@ -317,6 +319,7 @@ impl SessionWindowState {
       finite_sum3: 0.0,
       finite_count: 0,
       next_index: 0,
+      start_index: 0,
       last_value: f64::NAN,
       min_deque: VecDeque::new(),
       max_deque: VecDeque::new(),
@@ -362,6 +365,17 @@ impl SessionWindowState {
     Ok(state)
   }
 
+  pub fn new_start_index(op: SessionOp) -> Result<Self, Error> {
+    let mut state = Self::new_op(1, op)?;
+    state.policy = WindowPolicy::StartIndex;
+    Ok(state)
+  }
+
+  pub fn update_from(&mut self, start_index: u64, value: f64) -> f64 {
+    self.start_index = start_index;
+    self.update_at(0, 0, value)
+  }
+
   fn clear(&mut self) {
     self.ring.clear();
     self.finite_sum = 0.0;
@@ -369,6 +383,7 @@ impl SessionWindowState {
     self.finite_sum3 = 0.0;
     self.finite_count = 0;
     self.next_index = 0;
+    self.start_index = 0;
     self.last_value = f64::NAN;
     self.min_deque.clear();
     self.max_deque.clear();
@@ -447,6 +462,11 @@ impl SessionWindowState {
         }
       }
       WindowPolicy::Partition | WindowPolicy::PartitionRange { .. } => {}
+      WindowPolicy::StartIndex => {
+        while self.ring.front().is_some_and(|(_, _, _, index)| *index < self.start_index) {
+          self.remove_oldest();
+        }
+      }
     }
     let index = self.next_index;
     self.next_index += 1;
@@ -951,6 +971,7 @@ impl SessionPairState {
         }
       }
       WindowPolicy::PartitionRange { .. } => {}
+      WindowPolicy::StartIndex => {}
       WindowPolicy::Partition => {
         if let Some((last, _, _, _)) = self.ring.back() {
           if *last != session_id {
@@ -1098,6 +1119,14 @@ mod tests {
     assert_eq!(min[2], 2.0);
     let q = ta_time_rolling_quantile(&timestamps, &values, 2_000, 0.5).unwrap();
     assert_eq!(q[2], 2.0);
+  }
+
+  #[test]
+  fn event_start_index_evicts_older_bars() {
+    let mut state = SessionWindowState::new_start_index(SessionOp::Sum).unwrap();
+    assert_eq!(state.update_from(0, 1.0), 1.0);
+    assert_eq!(state.update_from(0, 2.0), 3.0);
+    assert_eq!(state.update_from(1, 5.0), 7.0);
   }
 
   #[test]
