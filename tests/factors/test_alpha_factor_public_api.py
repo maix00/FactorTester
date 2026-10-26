@@ -827,3 +827,12 @@ def test_batch_plan_reuses_canonical_timeline():
     assert timeline is not None
     expression.evaluate(ctx)
     assert ctx.timeline is timeline
+
+
+def test_signal_align_clock_anchor_without_scope():
+    index = pd.date_range('2026-01-05 09:31', periods=4, freq='min')
+    frame = pd.DataFrame({'CLOSE': np.arange(4, dtype=float)}, index=index)
+    ctx = EvalContext(products=('A',), preloaded={'A': frame})
+    aligned = ColumnRef('CLOSE').signal_align('2min', scope_anchor='09:32').evaluate(ctx)
+    assert list(aligned.index) == [pd.Timestamp('2026-01-05 09:32'), pd.Timestamp('2026-01-05 09:34')]
+    np.testing.assert_allclose(aligned['A'].to_numpy(), [1.0, 3.0])
