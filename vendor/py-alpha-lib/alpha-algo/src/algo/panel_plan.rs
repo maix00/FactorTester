@@ -67,8 +67,10 @@ pub struct PanelPlan { nodes: Vec<Node>, grids: Vec<Grid> }
 impl PanelPlan {
     pub fn new() -> Self { Self { nodes: vec![], grids: vec![] } }
     pub fn grid(&mut self, times: &[i64], days: &[i64], observed: &[u8]) -> Result<usize> {
-        let (times,days,observed)=(times,days,observed);
         if times.len()!=days.len() { return Err(error("grid time/day length mismatch")); }
+        if let Some(index) = self.grids.iter().position(|grid|
+            grid.times == times && grid.days == days && grid.observed == observed
+        ) { return Ok(index); }
         self.grids.push(Grid { times:times.to_vec(), days:days.to_vec(), observed:observed.to_vec() });
         Ok(self.grids.len()-1)
     }
@@ -437,5 +439,20 @@ mod session_rolling_tests {
                 assert!((actual[product] - serial[0][product * rows + row]).abs() < 1e-10);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod grid_dedup_tests {
+    use super::*;
+
+    #[test]
+    fn identical_grids_share_one_allocation() {
+        let mut plan = PanelPlan::new();
+        let first = plan.grid(&[1, 2], &[0, 0], &[1, 1]).unwrap();
+        let second = plan.grid(&[1, 2], &[0, 0], &[1, 1]).unwrap();
+        assert_eq!(first, second);
+        let different = plan.grid(&[1, 3], &[0, 0], &[1, 1]).unwrap();
+        assert_ne!(first, different);
     }
 }
