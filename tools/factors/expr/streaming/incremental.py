@@ -1093,10 +1093,17 @@ def compile_incremental_factors(
     source_freq: DataFreq | str | None = None,
     session_calendar: Any = None,
     event_line: Any = None,
-) -> MultiStreamingIncrementalExecutor:
+):
     """Compile several factors into one shared incremental DAG."""
     if not expressions:
         raise ValueError("incremental factor set must be non-empty")
+    from tools.factors.expr.streaming.rust_incremental import (
+        UnsupportedByRustPlan, compile_rust_incremental,
+    )
+    try:
+        return compile_rust_incremental(expressions, products)
+    except (UnsupportedByRustPlan, AttributeError, KeyError, TypeError, ValueError):
+        pass
     memo: dict[tuple, StreamingNode] = {}
     plans = []
     aliases = []

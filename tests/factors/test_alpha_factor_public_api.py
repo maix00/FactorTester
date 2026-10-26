@@ -442,3 +442,16 @@ def test_trading_day_scope_anchor_end_enters_rust_plan():
     ]
     assert np.isnan(values[0])
     assert values[2] == 2.0
+
+
+def test_tools_incremental_uses_rust_facade_for_simple_rolling():
+    from tools.data.types import DataColumn
+    from tools.factors.expr.leaf import ColumnRef as ToolColumnRef
+    from tools.factors.expr.streaming.incremental import compile_incremental_factor
+
+    expression = ToolColumnRef(DataColumn.CLOSE).rolling(2).mean()
+    executor = compile_incremental_factor('mean', expression, ('A',))
+    assert getattr(executor._multi, 'uses_rust', False) is True
+    executor.on_bar(pd.Timestamp('2026-01-05 09:30'), {'A': {DataColumn.CLOSE.name: 1.0}})
+    executor.on_bar(pd.Timestamp('2026-01-05 09:31'), {'A': {DataColumn.CLOSE.name: 3.0}})
+    assert executor.on_signal(pd.Timestamp('2026-01-05 09:31')) == {'A': 2.0}
