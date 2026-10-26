@@ -429,7 +429,11 @@ class RollingOp(OperandExpr):
             result = pd.DataFrame(index=df.index, columns=df.columns, dtype=float)
             for column in df.columns:
                 values = pd.to_numeric(df[column], errors="coerce").to_numpy(dtype=float)
-                result[column] = interval_ema(values, window)
+                result[column] = interval_ema(
+                    values, window,
+                    self.min_periods if self.min_periods is not None else window,
+                    self.nan_policy is NanPolicy.PROPAGATE,
+                )
             return result
         try:
             from alpha import interval_rolling

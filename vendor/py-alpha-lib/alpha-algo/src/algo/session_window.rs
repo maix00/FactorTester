@@ -759,6 +759,8 @@ pub struct EmaState {
   observations: usize,
   minimum: usize,
   last: f64,
+  adjust: bool,
+  propagate_nan: bool,
 }
 
 impl EmaState {
@@ -771,26 +773,36 @@ impl EmaState {
       numerator: 0.0,
       denominator: 0.0,
       observations: 0,
-      minimum: (span / 2).max(1),
+      minimum: 1,
       last: f64::NAN,
+      adjust: false,
+      propagate_nan: true,
     })
   }
 
+  pub fn with_semantics(mut self, min_periods: usize, propagate_nan: bool) -> Self {
+    self.minimum = min_periods.max(1);
+    self.propagate_nan = propagate_nan;
+    self
+  }
+
   pub fn update(&mut self, value: f64) -> f64 {
-    self.numerator *= self.decay;
-    self.denominator *= self.decay;
-    if value.is_finite() {
-      self.numerator += value;
-      self.denominator += 1.0;
-      self.observations += 1;
+    if !value.is_finite() {
+      if self.propagate_nan { self.last = f64::NAN; }
+      return self.last;
     }
-    if self.observations >= self.minimum && self.denominator > 0.0 {
-      let result = self.numerator / self.denominator;
-      self.last = result;
-      result
-    } else {
-      self.last
+    self.observations += 1;
+    if self.adjust {
+      self.numerator = self.numerator * self.decay + value;
+      self.denominator = self.denominator * self.decay + 1.0;
+      if self.observations >= self.minimum && self.denominator > 0.0 {
+        self.last = self.numerator / self.denominator;
+      }
+      return self.last;
     }
+    let alpha = 1.0 - self.decay;
+    self.last = if self.observations == 1 { value } else { alpha * value + self.decay * self.last };
+    if self.observations >= self.minimum { self.last } else { f64::NAN }
   }
 }
 

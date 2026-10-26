@@ -387,7 +387,14 @@ class RustEmaNode:
         self.child = child
         self.span = int(span)
         self._width = width
-        self._states = [EmaState(self.span) for _ in range(width)]
+        self._states = [EmaState(self.span, 1, True) for _ in range(width)]
+
+    def configure(self, min_periods: int, propagate_nan: bool) -> None:
+        from alpha import EmaState
+        self._states = [
+            EmaState(self.span, max(1, int(min_periods)), bool(propagate_nan))
+            for _ in range(self._width)
+        ]
 
     def update(self, market, cache):
         key = id(self)
@@ -989,7 +996,7 @@ def compile_streaming_factor(
             raise UnsupportedStreamingFactor(
                 f"unsupported FactorExpr node: {type(expr).__name__}"
             )
-        if isinstance(node, RustIntervalNode):
+        if isinstance(node, (RustIntervalNode, RustEmaNode)):
             from tools.factors.expr.window_semantics import NanPolicy
             if isinstance(expr, GroupByScopeOp):
                 min_periods = expr.min_periods if expr.min_periods is not None else 1

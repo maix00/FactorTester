@@ -109,3 +109,23 @@ def test_explicit_skip_semantics_matches_batch_and_streaming():
     )
     actual = _stream(expression, values)
     np.testing.assert_allclose(actual, expected.iloc[:, 0].to_numpy(dtype=float), equal_nan=True)
+
+
+def test_ema_batch_and_streaming_share_semantics():
+    from tools.factors.expr.window_semantics import NanPolicy
+
+    values = [1.0, 2.0, np.nan, 4.0]
+    frame = _FrameExpr(pd.DataFrame({"A": values}))
+    for semantics in (
+        {},
+        {"min_periods": 1, "nan_policy": NanPolicy.SKIP},
+    ):
+        batch_expr = frame.rolling(3).semantics(**semantics).ema()
+        stream_expr = ColumnRef(DataColumn.CLOSE).rolling(3).semantics(**semantics).ema()
+        expected = batch_expr.evaluate(
+            ctx=EvaluateContext(products=["A"], freq=DataFreq.MIN1, cache={})
+        )
+        actual = _stream(stream_expr, values)
+        np.testing.assert_allclose(
+            actual, expected.iloc[:, 0].to_numpy(dtype=float), equal_nan=True,
+        )

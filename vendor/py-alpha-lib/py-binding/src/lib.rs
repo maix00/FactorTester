@@ -45,12 +45,15 @@ mod algo_impl {
   }
 
   #[pyfunction]
+  #[pyo3(signature = (values, span, min_periods=1, propagate_nan=true))]
   pub fn interval_ema(
     py: Python<'_>, values: PyReadonlyArray1<f64>, span: usize,
+    min_periods: usize, propagate_nan: bool,
   ) -> PyResult<Py<PyArray1<f64>>> {
     let values = values.as_slice()?;
     let mut state = alpha_algo::EmaState::new(span)
-      .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+      .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
+      .with_semantics(min_periods, propagate_nan);
     Ok(values.iter().copied().map(|value| state.update(value))
       .collect::<Vec<_>>().into_pyarray(py).unbind())
   }
@@ -2839,9 +2842,11 @@ struct EmaState {
 #[pymethods]
 impl EmaState {
   #[new]
-  fn new(span: usize) -> PyResult<Self> {
+  #[pyo3(signature = (span, min_periods=1, propagate_nan=true))]
+  fn new(span: usize, min_periods: usize, propagate_nan: bool) -> PyResult<Self> {
     let inner = alpha_algo::EmaState::new(span)
-      .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+      .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
+      .with_semantics(min_periods, propagate_nan);
     Ok(Self { inner })
   }
 
