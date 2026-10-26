@@ -257,6 +257,16 @@ pub mod nautilus {
 
         pub fn last_error(&self) -> Option<&str> { self.last_error.as_deref() }
 
+        /// Assemble one completed cross-sectional slice and update once.
+        pub fn handle_bars(&mut self, bars: &[Bar]) {
+            let Some(first) = bars.first() else { return };
+            let bar = crate::nautilus::market_bar_from_bars(first.ts_event.as_u64() as i64, bars);
+            match self.engine.update(&bar) {
+                Ok(values) => { self.latest = values; self.last_error = None; }
+                Err(error) => self.last_error = Some(error.to_string()),
+            }
+        }
+
         /// Register this actor in Nautilus' thread-local actor registry.
         pub fn register(self) -> std::rc::Rc<std::cell::UnsafeCell<Self>> {
             nautilus_common::actor::registry::register_actor(self)
@@ -403,6 +413,20 @@ mod nautilus_tests {
         actor.register();
         assert!(actor_exists(&Ustr::from("factor-actor-test")));
         deregister_actor(&Ustr::from("factor-actor-test"));
+    }
+
+    #[test]
+    fn factor_actor_accepts_completed_cross_section_slice() {
+        let json = r#"{"columns":["CLOSE"],"nodes":[{"kind":"column","index":0},{"kind":"cross","child":0,"op":"rank"}],"outputs":[1]}"#;
+        let mut actor = nautilus::FactorActor::from_plan_json("factor-cross-test", 2, json).unwrap();
+        let make = |symbol: &str, close: &str| Bar::new(
+            BarType::from(format!("{symbol}-1-MINUTE-LAST-EXTERNAL").as_str()),
+            Price::from(close), Price::from(close), Price::from(close),
+            Price::from(close), Quantity::from("1"), 1_000.into(), 1_000.into(),
+        );
+        actor.handle_bars(&[make("A.B", "1.0"), make("C.D", "3.0")]);
+        assert!(actor.last_error().is_none(), "{:?}", actor.last_error());
+        assert_eq!(actor.latest(), &[0.0, 0.5]);
     }
 
     #[test]
