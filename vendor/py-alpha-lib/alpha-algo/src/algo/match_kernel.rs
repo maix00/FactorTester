@@ -52,9 +52,24 @@ pub fn match_distance(
     nearest: bool,
     default: f64,
 ) -> f64 {
+    match_distance_iter(current_ordinal, current, candidates.iter().copied(), predicate, scope, nearest, default)
+}
+
+pub fn match_distance_iter<I>(
+    current_ordinal: u64,
+    current: f64,
+    candidates: I,
+    predicate: &MatchExpr,
+    scope: u64,
+    nearest: bool,
+    default: f64,
+) -> f64
+where
+    I: IntoIterator<Item = (u64, f64)>,
+{
     let start = current_ordinal.saturating_sub(scope);
     let mut matched: Option<u64> = None;
-    for &(ordinal, value) in candidates {
+    for (ordinal, value) in candidates {
         if ordinal < start || ordinal >= current_ordinal { continue; }
         if predicate.eval(current, value) != 0.0 {
             matched = Some(match matched {

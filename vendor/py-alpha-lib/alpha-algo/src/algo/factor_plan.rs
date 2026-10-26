@@ -448,8 +448,10 @@ impl FactorPlanKernel {
                     let node = &mut self.nodes[index];
                     for product in 0..products {
                         let current_value = input[product];
-                        let candidates: Vec<(u64, f64)> = node.match_history[product].iter().copied().collect();
-                        let mut value = crate::algo::match_distance(current, current_value, &candidates, predicate, count as u64, nearest, default);
+                        let mut value = crate::algo::match_distance_iter(
+                            current, current_value, node.match_history[product].iter().copied(),
+                            predicate, count as u64, nearest, default,
+                        );
                         if include_current && predicate.eval(current_value, current_value) != 0.0 { value = 0.0; }
                         out[product] = value;
                         let history = &mut node.match_history[product];
