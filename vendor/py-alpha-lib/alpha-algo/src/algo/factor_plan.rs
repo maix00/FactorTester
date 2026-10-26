@@ -288,7 +288,7 @@ impl FactorPlanKernel {
                 }
                 ExprSpec::Where { condition, when_true, when_false } => {
                     let c = &head[condition]; let a = &head[when_true]; let b = &head[when_false];
-                    for product in 0..products { out[product] = if c[product].is_finite() && c[product] != 0.0 { a[product] } else { b[product] }; }
+                    for product in 0..products { out[product] = if c[product] != 0.0 { a[product] } else { b[product] }; }
                 }
                 ExprSpec::Cross { op, child } => {
                     let input = &head[child];
@@ -297,14 +297,25 @@ impl FactorPlanKernel {
                     node.cross_scratch.extend((0..products).filter_map(|product| input[product].is_finite().then_some((product, input[product]))));
                     if op == CrossOp::ZScore {
                         let n = node.cross_scratch.len() as f64;
-                        let mean = node.cross_scratch.iter().map(|(_, value)| value).sum::<f64>() / n;
-                        let std = (node.cross_scratch.iter().map(|(_, value)| (value - mean).powi(2)).sum::<f64>() / (n - 1.0).max(1.0)).sqrt();
-                        for product in 0..products { out[product] = if !input[product].is_finite() { f64::NAN } else if std == 0.0 { 0.0 } else { (input[product] - mean) / std }; }
+                        if n < 2.0 {
+                            out.fill(f64::NAN);
+                        } else {
+                            let mean = node.cross_scratch.iter().map(|(_, value)| value).sum::<f64>() / n;
+                            let std = (node.cross_scratch.iter().map(|(_, value)| (value - mean).powi(2)).sum::<f64>() / (n - 1.0)).sqrt();
+                            for product in 0..products { out[product] = if !input[product].is_finite() { f64::NAN } else if std == 0.0 { 0.0 } else { (input[product] - mean) / std }; }
+                        }
                     } else {
                         node.cross_scratch.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
                         out.fill(f64::NAN);
                         let n = node.cross_scratch.len() as f64;
-                        for (rank, (product, _)) in node.cross_scratch.iter().enumerate() { out[*product] = (rank as f64 + 1.0) / n - 0.5; }
+                        let mut start = 0;
+                        while start < node.cross_scratch.len() {
+                            let mut end = start + 1;
+                            while end < node.cross_scratch.len() && node.cross_scratch[end].1 == node.cross_scratch[start].1 { end += 1; }
+                            let rank = (start + 1 + end) as f64 / 2.0;
+                            for (product, _) in &node.cross_scratch[start..end] { out[*product] = rank / n - 0.5; }
+                            start = end;
+                        }
                     }
                 }
                 ExprSpec::Since { condition, count, include_current, nearest, default_scope, default }

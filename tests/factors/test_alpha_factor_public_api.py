@@ -515,3 +515,18 @@ def test_tools_incremental_facade_uses_global_cse():
     expression = close.rolling(2).mean()
     executor = compile_incremental_factors({'a': expression, 'b': expression}, ('A',))
     assert executor.node_count == 2
+
+
+def test_batch_and_incremental_cross_rank_ties_reconcile():
+    from alpha.factor import IncrementalFactorPlan
+
+    index = pd.date_range('2026-01-05 09:30', periods=2, freq='min')
+    frames = {
+        'A': pd.DataFrame({'CLOSE': [1.0, 3.0]}, index=index),
+        'B': pd.DataFrame({'CLOSE': [1.0, 5.0]}, index=index),
+    }
+    expression = ColumnRef('CLOSE').cs_rank()
+    batch = expression.evaluate(EvalContext(products=('A', 'B'), preloaded=frames))
+    incremental = IncrementalFactorPlan({'r': expression}, ('A', 'B'))
+    assert incremental.update([1.0, 1.0]) == {'r': {'A': 0.25, 'B': 0.25}}
+    np.testing.assert_allclose(batch.iloc[0].to_numpy(), [0.25, 0.25])
