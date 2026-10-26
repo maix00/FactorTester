@@ -1104,36 +1104,20 @@ def compile_incremental_factors(
     event_line: Any = None,
     require_rust: bool = False,
 ):
-    """Compile several factors into one shared incremental DAG."""
+    """Compile several factors into one shared Rust incremental DAG."""
     if not expressions:
         raise ValueError("incremental factor set must be non-empty")
-    from tools.factors.expr.streaming.rust_incremental import (
-        UnsupportedByRustPlan, compile_rust_incremental,
-    )
+    from tools.factors.expr.streaming.rust_incremental import compile_rust_incremental
     global LAST_RUST_PLAN_ERROR
     try:
         LAST_RUST_PLAN_ERROR = None
-        return compile_rust_incremental(expressions, products, source_freq=source_freq, session_calendar=session_calendar, event_line=event_line)
-    except (UnsupportedByRustPlan, AttributeError, KeyError, TypeError, ValueError) as error:
-        LAST_RUST_PLAN_ERROR = f"{type(error).__name__}: {error}"
-        import os
-        if require_rust or os.environ.get("FT_FACTORS_REQUIRE_RUST") == "1":
-            raise
-    memo: dict[tuple, StreamingNode] = {}
-    plans = []
-    aliases = []
-    roots = []
-    for alias, expression in expressions.items():
-        plan = compile_streaming_factor(
-            expression, products, source_freq=source_freq,
+        return compile_rust_incremental(
+            expressions, products, source_freq=source_freq,
             session_calendar=session_calendar, event_line=event_line,
-            memo=memo,
         )
-        aliases.append(alias)
-        plans.append(plan)
-        roots.append(plan._root)
-    multi = MultiStreamingPlan(aliases, products, roots, plans)
-    return MultiStreamingIncrementalExecutor(multi)
+    except Exception as error:
+        LAST_RUST_PLAN_ERROR = f"{type(error).__name__}: {error}"
+        raise
 
 
 def _normalize_bar_fields(fields: Any) -> dict[str, float]:
