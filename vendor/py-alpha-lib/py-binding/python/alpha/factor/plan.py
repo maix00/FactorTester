@@ -107,6 +107,7 @@ class _Builder:
         from .core import ColumnRef, CompositeExpr, ConstExpr, RollingOp, ShiftOp, WhereOp
         from .cross_sectional import CrossSectionalExpr
         from .scope import GroupByScopeOp
+        from .bar_search import BarSinceExpr
 
         if isinstance(expr, ColumnRef):
             frame = self.frames.get(key)
@@ -144,6 +145,15 @@ class _Builder:
             ref = self.add(
                 "cross:" + expr.op.removeprefix("cs_"), [child], [], priority,
                 columns=self.products,
+            )
+        elif isinstance(expr, BarSinceExpr):
+            child = self.build(expr.condition)
+            ref = self.add(
+                "since", [child],
+                [1, expr.scope.count, 0, float(expr.include_current),
+                 float(expr.select == "nearest"), float(expr.default is None),
+                 0.0 if expr.default is None else float(expr.default), 1.0],
+                columns=child.columns,
             )
         elif isinstance(expr, CompositeExpr):
             children = [self.build(item) for item in expr.operands]
