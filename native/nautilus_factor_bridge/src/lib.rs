@@ -181,6 +181,30 @@ pub struct ProductParallelPlanEngine {
 }
 
 impl ProductParallelPlanEngine {
+    /// Evaluate a whole batch with one independent lane per product.
+    pub fn update_batch(&mut self, bars: &[MarketBar]) -> Result<Vec<Vec<f64>>, alpha_algo::Error> {
+        use rayon::prelude::*;
+        let per_product: Vec<Vec<Vec<f64>>> = self.lanes
+            .par_iter_mut()
+            .enumerate()
+            .map(|(product, lane)| bars.iter().map(|bar| {
+                let value = *bar.values.get(product).ok_or_else(|| {
+                    alpha_algo::Error::InvalidParameter("parallel batch product width mismatch".into())
+                })?;
+                lane.update(&MarketBar::new(bar.timestamp_ns, Vec::new(), vec![value]))
+            }).collect())
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut out = Vec::with_capacity(bars.len());
+        for index in 0..bars.len() {
+            let mut row = Vec::with_capacity(self.outputs * per_product.len());
+            for factor in 0..self.outputs {
+                for product in &per_product { row.push(product[index][factor]); }
+            }
+            out.push(row);
+        }
+        Ok(out)
+    }
+
     pub fn new(products: usize, specs: Vec<plan::ExprSpec>, outputs: Vec<usize>) -> Result<Self, alpha_algo::Error> {
         use rayon::prelude::*;
         if specs.iter().any(|spec| matches!(spec, plan::ExprSpec::Cross { .. })) {
@@ -778,5 +802,33 @@ mod backtest_actor_tests {
         let actor = FactorActor::new("factor-engine-test", WindowEngine::new(2, SessionOp::Mean).unwrap());
         engine.add_actor(actor).unwrap();
         assert_eq!(engine.kernel().trader.borrow().actor_count(), 1);
+    }
+}
+
+#[cfg(test)]
+mod batch_product_lane_tests {
+    use super::*;
+
+    #[test]
+    fn batch_product_lanes_match_sequential_products() {
+        let specs = vec![
+            plan::ExprSpec::Column(0),
+            plan::ExprSpec::Rolling { child: 0, window: 2, op: alpha_algo::SessionOp::Mean,
+                min_periods: 1, propagate_nan: false, trunc_start: -1, trunc_end: -1,
+                trunc_start_child: None, trunc_end_child: None },
+        ];
+        let mut parallel = ProductParallelPlanEngine::new(8, specs.clone(), vec![1]).unwrap();
+        let products: Vec<String> = (0..8).map(|index| format!("P{index}")).collect();
+        let first: Vec<f64> = (0..8).map(|value| value as f64).collect();
+        let second: Vec<f64> = (0..8).map(|value| value as f64 * 3.0).collect();
+        let bars = vec![
+            MarketBar::new(1, products.clone(), first.clone()),
+            MarketBar::new(2, products, second.clone()),
+        ];
+        let out = parallel.update_batch(&bars).unwrap();
+        for product in 0..8 {
+            assert_eq!(out[0][product], first[product]);
+            assert_eq!(out[1][product], (first[product] + second[product]) / 2.0);
+        }
     }
 }
