@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import numpy as np
 import pandas as pd
 
 from .core import FactorExpr
-from .semantics import NanPolicy, PartitionSemantics
+from .semantics import PartitionSemantics
 from .scopes import SessionScope, TradingDayScope
 
 
@@ -33,7 +32,9 @@ class GroupByScopeExpr(FactorExpr):
         self.semantics = semantics or PartitionSemantics()
 
     def _structural_key(self):
-        key = getattr(self.scope, "count", None) or type(self.scope).__name__
+        key = (("bars", self.scope.count) if isinstance(self.scope, BarCountScope) else
+               (type(self.scope).__name__, tuple((item.start_ns, item.end_ns, repr(item.trading_day))
+                                                for item in self.scope.sessions)))
         return ("alpha.factor.GroupByScopeExpr", key,
                 self.semantics.effective_min_periods,
                 self.semantics.nan_policy.value,
@@ -48,70 +49,15 @@ class GroupByScopeOp(FactorExpr):
         self.op = op
         self.owner = owner
 
-    def evaluate(self, ctx):
-        # Day/session partitions are resolved from the context calendar; the
-        # matrix plan path currently covers bar-count scopes only.
-        if not isinstance(self.owner.scope, BarCountScope):
-            return self._evaluate(ctx)
-        return super().evaluate(ctx)
-
-    @property
-    def days(self):
-        return self.owner.days
-
-    @property
-    def times(self):
-        return self.owner.times
-
     def _structural_key(self):
         return ("alpha.factor.GroupByScopeOp", self.op, self.owner._structural_key())
 
     def _evaluate(self, ctx) -> pd.DataFrame:
-        frame = self.owner.data.evaluate(ctx)
-        if ctx.trading_days is not None:
-            self.owner.days = np.asarray(ctx.trading_days)
-        else:
-            self.owner.days = pd.factorize(frame.index.normalize())[0]
-        self.owner.times = np.asarray(frame.index.as_unit("ns").asi8 if isinstance(frame.index, pd.DatetimeIndex) else np.arange(len(frame.index)))
-        from alpha import interval_rolling
-        starts = None
-        output = {}
-        for product in frame.columns:
-            values = frame[product].to_numpy(dtype=float)
-            ordinals = np.arange(len(values), dtype=np.uint64)
-            if isinstance(self.owner.scope, BarCountScope):
-                starts = (ordinals.astype(np.int64) // self.owner.scope.count * self.owner.scope.count).astype(np.uint64)
-            elif isinstance(self.owner.scope, TradingDayScope):
-                days = self.owner.days
-                starts = np.zeros(len(values), dtype=np.uint64)
-                current = 0
-                for i in range(1, len(values)):
-                    if days[i] != days[i - 1]:
-                        current = i
-                    starts[i] = current
-            else:
-                times = self.owner.times
-                sessions = self.owner.scope.sessions
-                starts = np.zeros(len(values), dtype=np.uint64)
-                session_index = 0
-                while session_index + 1 < len(sessions) and sessions[session_index].end_ns < times[0]:
-                    session_index += 1
-                current = 0
-                for i in range(1, len(values)):
-                    if times[i] > sessions[session_index].end_ns:
-                        session_index += 1
-                        if session_index >= len(sessions):
-                            raise ValueError("bar falls outside the frozen session calendar")
-                        current = i
-                    starts[i] = current
-            op, _, q = self.op.partition(":")
-            output[product] = interval_rolling(
-                values, starts, ordinals, op,
-                float(q) if q else None, None,
-                self.owner.semantics.effective_min_periods,
-                self.owner.semantics.nan_policy is NanPolicy.PROPAGATE,
-            )
-        return pd.DataFrame(output, index=frame.index)
+        from .plan import compile_plan
+        result = compile_plan([self], ctx)
+        if result is None:
+            raise TypeError("scope expression is not representable by the Rust matrix plan")
+        return result[0]
 
 
 def _methods(cls: type) -> None:

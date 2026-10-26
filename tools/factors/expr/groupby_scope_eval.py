@@ -43,7 +43,7 @@ def apply_grouped(op: str, scope: LookbackScope, data: pd.DataFrame, *, ctx: Any
              else np.arange(len(data), dtype=np.int64))
     days = (pd.factorize(ctx.panel_timeline.trading_days, sort=False)[0].astype(np.int64)
             if kind == 2 else np.zeros(len(data), dtype=np.int64))
-    if len(days) != len(data):
+    if kind == 2 and not ctx.panel_timeline.index.equals(data.index):
         days = pd.factorize(pd.Series(np.asarray(ctx.panel_timeline.trading_days),
                                      index=ctx.panel_timeline.index).reindex(data.index), sort=False)[0].astype(np.int64)
     observed = np.ascontiguousarray(_observed_mask(data, ctx).T, dtype=np.uint8)

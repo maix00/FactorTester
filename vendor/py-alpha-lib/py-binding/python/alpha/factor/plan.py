@@ -7,6 +7,8 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from .timeline import timestamps_ns as _times
+
 
 @dataclass
 class _Grid:
@@ -22,15 +24,6 @@ class _Ref:
     grid: _Grid
     columns: tuple
     scalar: bool = False
-
-
-def _times(index):
-    values = index
-    if isinstance(values, pd.MultiIndex):
-        values = values.get_level_values(-1)
-    if isinstance(values, pd.DatetimeIndex):
-        return np.ascontiguousarray(values.as_unit("ns").asi8)
-    return np.arange(len(index), dtype=np.int64)
 
 
 def _walk(expressions):
@@ -70,17 +63,17 @@ class _Builder:
                 self.frames[expr._structural_key()] = expr._evaluate(ctx)
         if ctx.timeline is None:
             from .timeline import build_timeline
-            object.__setattr__(ctx, "timeline", build_timeline(self.products, ctx.preloaded, ctx.trading_days))
+            object.__setattr__(ctx, "timeline", build_timeline(self.products, ctx.preloaded, ctx.trading_days, frequency=getattr(ctx.freq, "name", ctx.freq)))
         timeline = ctx.timeline
         self.index = timeline.index
         self.observed = timeline.observed
         self.days = timeline.days
         self.base = _Grid(
             self.plan.grid(
-                _times(self.index), self.days,
+                timeline.times_ns, self.days,
                 np.ascontiguousarray(self.observed).reshape(-1),
             ),
-            self.index, np.arange(len(self.index), dtype=np.int64), _times(self.index),
+            self.index, np.arange(len(self.index), dtype=np.int64), timeline.times_ns,
         )
 
     def input(self, values):
@@ -129,7 +122,16 @@ class _Builder:
             if isinstance(expr.owner.scope, TradingDayScope):
                 scope_params = [2, 0, 0]
             elif isinstance(expr.owner.scope, SessionScope):
-                scope_params = [3, 0, expr.owner.scope.gap_ns]
+                sessions = expr.owner.scope.sessions
+                ref = self.add(
+                    f"session_rolling:{op}", [child],
+                    [1, expr.owner.semantics.effective_min_periods,
+                     float(expr.owner.semantics.nan_policy.value == "propagate"), float(q) if q else 0.5],
+                    [len(sessions), *[value for session in sessions for value in (session.start_ns, session.end_ns, 0)]],
+                    columns=child.columns,
+                )
+                self.memo[key] = ref
+                return ref
             else:
                 scope_params = [1, expr.owner.scope.count, 0]
             ref = self.add(

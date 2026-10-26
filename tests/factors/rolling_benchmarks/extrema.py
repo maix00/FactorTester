@@ -17,7 +17,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 import tools.factors.expr.rolling_arg_extrema as rolling_module
-from tools.factors.expr.groupby_scope_eval import _prefix_arg_extreme_loop
+from tests.factors._scope_extrema_oracle import _prefix_arg_extreme_loop
 from tools.factors.expr.streaming.rolling_extrema import RollingMinMaxState
 
 

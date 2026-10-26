@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from tools.factors.expr.groupby_scope_eval import _prefix_arg_extreme_loop
+from tests.factors._scope_extrema_oracle import _prefix_arg_extreme_loop
 
 
 @pytest.mark.parametrize("operation", ["argmax", "argmin"])

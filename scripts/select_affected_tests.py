@@ -415,6 +415,12 @@ EXACT_PATH_TESTS = {
     ),
 }
 FACTOR_PLAN_TESTS = (
+    "tests/factors/test_shared_timeline.py",
+    "tests/factors/test_panel_timeline.py",
+    "tests/factors/test_signal_alignment.py",
+    "tests/factors/test_groupby_scope.py",
+    "tests/factors/test_groupby_scope_derived_missing.py",
+    "tests/factors/test_groupby_scope_arg_extreme_edges.py",
     "tests/server/test_factor_session_rolling.py",
     "tests/factors/test_bar_counts.py",
     "tests/factors/test_runtime_boundaries.py",
@@ -427,6 +433,11 @@ FACTOR_PLAN_TESTS = (
 for _path in (
     "tools/factors/alpha_plan.py",
     "tools/factors/expr/rust_plan.py",
+    "tools/factors/expr/groupby_scope_eval.py",
+    "tools/factors/expr/timeline.py",
+    "vendor/py-alpha-lib/py-binding/python/alpha/factor/timeline.py",
+    "vendor/py-alpha-lib/py-binding/python/alpha/factor/plan.py",
+    "vendor/py-alpha-lib/py-binding/python/alpha/factor/scope.py",
     "tools/factors/expr/rolling.py",
     "tools/factors/expr/streaming/rust_incremental.py",
     "tools/factors/expr/streaming/incremental.py",
@@ -446,6 +457,9 @@ for _path in (
 EXACT_PATH_TESTS["tests/factors/test_bar_counts.py"] = ("tests/factors/test_bar_counts.py",)
 EXACT_PATH_TESTS["tests/factors/test_runtime_boundaries.py"] = ("tests/factors/test_runtime_boundaries.py",)
 EXACT_PATH_TESTS["tests/server/test_catalog_streaming_limits.py"] = ("tests/server/test_catalog_streaming_limits.py",)
+EXACT_PATH_TESTS["tests/factors/_scope_extrema_oracle.py"] = ("tests/factors/test_groupby_scope.py", "tests/factors/test_groupby_scope_arg_extreme_edges.py")
+EXACT_PATH_TESTS["tests/factors/rolling_benchmarks/extrema.py"] = ("tests/factors/test_groupby_scope_arg_extreme_edges.py",)
+EXACT_PATH_TESTS["tests/factors/test_shared_timeline.py"] = ("tests/factors/test_shared_timeline.py",)
 
 PREFIX_PATH_TESTS = {
     "tools/testers/backtest/engines/factors/": (

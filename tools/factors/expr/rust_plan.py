@@ -101,7 +101,13 @@ class _PlanBuilder:
         elif isinstance(index, pd.DatetimeIndex):
             index = index.sort_values()
         self.index = index
-        if ctx.panel_timeline is not None:
+        if (ctx.panel_timeline is not None
+                and hasattr(ctx.panel_timeline, 'observed')
+                and ctx.panel_timeline.index.equals(index)
+                and ctx.panel_timeline.products == self.products):
+            self.observed = ctx.panel_timeline.observed
+            self.days = ctx.panel_timeline.days
+        elif ctx.panel_timeline is not None:
             self.observed = ctx.panel_timeline.observed_mask.reindex(
                 index=index, columns=self.products, fill_value=False,
             ).to_numpy(dtype=np.uint8).T

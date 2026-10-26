@@ -27,6 +27,28 @@ PanelPlan 按拓扑节点完成整批计算：产品 lane → 截面节点 → �
 同一引擎、冻结产品顺序、输入源、时钟、事件语义的一组因子应合并为一个 Plan，
 策略只消费发布结果；不能仅凭因子名字共享不同输入语义的 Actor。
 
+## 分段与 timeline 的单向依赖
+
+分段数值运算统一在 alpha-algo：公开 alpha.factor 与 tools 适配器均调用矩阵
+`scope:*` 或具有权威日历的 `session_rolling:*`，不再保留 Python 逐 Bar 聚合。
+旧标量极值循环仅作为 tests 下的独立 oracle 和基准，不是运行 fallback。
+同分区极值并列选择最早观测；截断右端后候选集合冻结，但到当前 Bar 的年龄仍变化。
+普通 min/max 继续压缩相等值，避免为修复 arg 极值而增加普通极值的缓存。
+
+Timeline 的唯一实现位于 `alpha.factor.timeline`，不导入 FactorTester。
+tools.timeline 只将 DataIndex 的源频率、事件时间和交易日标签传入该实现；
+旧构造器是适配类，compact/scatter 直接复用公开函数。同频矩阵 Plan 直接使用
+已经形成的 observed/day 数组；不重复 factorize，也不为每个算子建立目录。
+稀疏产品取源频率和冻结产品的 union；原始 NaN 仍是观测，union 空行不是观测。
+对齐保留已知的夜盘交易日和事件时刻，未知标签明确失败，不能静默改成自然日。
+
+公开 SessionScope 不再使用不存在的 gap_ns；静态 session 直接进入共享 Rust
+session-window resolver，作用域身份包含完整冻结日历，防止不同日历被 CSE 合并。
+
+同机 GTHT Python 3.14，5000 行 × 4 产品、scope_bars(250) 的 mean，4 次本地运行
+丢弃首次热身：逐 Bar 适配中位 2.142541 ms，矩阵适配中位 0.230667 ms，末行相同。
+这是局部合成入口测量，不含真实 Job/I/O，也不是跨规模的最优性结论。
+
 ## 验证及性能证据
 
 本机 arm64、Rust 1.99.1、release、已编译且已热身；不含源码编译、数据 I/O 或浏览器。

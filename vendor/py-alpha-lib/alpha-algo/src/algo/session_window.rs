@@ -430,6 +430,11 @@ impl SessionWindowState {
     let current = self.next_index;
     if current < start_index || current > end_index {
       self.next_index += 1;
+      if current > end_index && matches!(self.op, SessionOp::Argmin | SessionOp::Argmax | SessionOp::ArgminRaw | SessionOp::ArgmaxRaw) {
+        return if !value.is_finite() || self.finite_count < self.min_periods || (self.propagate_nan && self.nan_count > 0) {
+          f64::NAN
+        } else { self.arg_extreme_at(current) };
+      }
       return self.last_value;
     }
     while self.ring.front().is_some_and(|(_, _, _, index)| *index < start_index) {
@@ -445,6 +450,15 @@ impl SessionWindowState {
     };
     self.last_value = out;
     out
+  }
+
+  fn arg_extreme_at(&self, current: u64) -> f64 {
+    let deque = if matches!(self.op, SessionOp::Argmax | SessionOp::ArgmaxRaw) { &self.max_deque } else { &self.min_deque };
+    let Some((index, _)) = deque.front() else { return f64::NAN };
+    let age = current.saturating_sub(*index) as f64;
+    let span = current.saturating_sub(self.start_index);
+    if matches!(self.op, SessionOp::ArgminRaw | SessionOp::ArgmaxRaw) { age }
+    else if span == 0 { 0.0 } else { age / span as f64 }
   }
 
   fn remove_oldest(&mut self) {
@@ -515,11 +529,13 @@ impl SessionWindowState {
       if matches!(self.op, SessionOp::Min | SessionOp::Max | SessionOp::Argmin
         | SessionOp::Argmax | SessionOp::ArgminRaw | SessionOp::ArgmaxRaw
         | SessionOp::Mad) {
-        while self.min_deque.back().is_some_and(|(_, v)| *v >= value) {
+        let keep_min_ties = matches!(self.op, SessionOp::Argmin | SessionOp::ArgminRaw);
+        while self.min_deque.back().is_some_and(|(_, v)| *v > value || (!keep_min_ties && *v == value)) {
           self.min_deque.pop_back();
         }
         self.min_deque.push_back((index, value));
-        while self.max_deque.back().is_some_and(|(_, v)| *v <= value) {
+        let keep_max_ties = matches!(self.op, SessionOp::Argmax | SessionOp::ArgmaxRaw);
+        while self.max_deque.back().is_some_and(|(_, v)| *v < value || (!keep_max_ties && *v == value)) {
           self.max_deque.pop_back();
         }
         self.max_deque.push_back((index, value));
@@ -545,18 +561,7 @@ impl SessionWindowState {
       SessionOp::Min => self.min_deque.front().map(|(_, v)| *v).unwrap_or(f64::NAN),
       SessionOp::Max => self.max_deque.front().map(|(_, v)| *v).unwrap_or(f64::NAN),
       SessionOp::Argmin | SessionOp::Argmax | SessionOp::ArgminRaw | SessionOp::ArgmaxRaw => {
-        let find_max = matches!(self.op, SessionOp::Argmax | SessionOp::ArgmaxRaw);
-        let deque = if find_max { &self.max_deque } else { &self.min_deque };
-        let Some((index, _)) = deque.front() else { return f64::NAN };
-        let current = self.next_index.saturating_sub(1);
-        let raw = (current - *index) as f64;
-        if matches!(self.op, SessionOp::ArgminRaw | SessionOp::ArgmaxRaw) {
-          raw
-        } else if count <= 1 {
-          0.0
-        } else {
-          raw / (count - 1) as f64
-        }
+        if !value.is_finite() { f64::NAN } else { self.arg_extreme_at(self.next_index.saturating_sub(1)) }
       }
       SessionOp::Mad => {
         let Some(tree) = self.order_stat.as_ref() else { return f64::NAN };
@@ -1108,6 +1113,20 @@ pub fn ta_session_rolling_corr(
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn truncated_extreme_keeps_first_tie_and_advances_age_after_endpoint() {
+    let mut state = SessionWindowState::new_explicit(SessionOp::Argmax).unwrap().with_semantics(1, false);
+    assert_eq!(state.update_explicit(0, 2, 1.0), 0.0);
+    assert_eq!(state.update_explicit(0, 2, 5.0), 0.0);
+    assert_eq!(state.update_explicit(0, 2, 5.0), 0.5);
+    assert_eq!(state.update_explicit(0, 2, 100.0), 2.0 / 3.0);
+    assert!(state.update_explicit(0, 2, f64::NAN).is_nan());
+    assert_eq!(state.update_explicit(0, 2, 100.0), 4.0 / 5.0);
+    let mut minimum = SessionWindowState::new_explicit(SessionOp::Min).unwrap();
+    for index in 0..1000 { minimum.update_explicit(0, index, 1.0); }
+    assert_eq!(minimum.min_deque.len(), 1, "plain minima still compress equal values");
+  }
 
   #[test]
   fn order_statistic_slots_plateau_for_long_fixed_windows() {
