@@ -48,3 +48,16 @@ def scope_trading_day() -> TradingDayScope:
 
 def scope_session(sessions) -> SessionScope:
     return SessionScope(tuple(sessions))
+
+
+def sessions_from_calendar(calendar) -> SessionScope:
+    """Build a SessionScope from TradingCalendarWindow or any .sessions iterable."""
+    items = getattr(calendar, "sessions", calendar)
+    sessions = []
+    for item in items:
+        sessions.append(TradingSession(
+            start_ns=int(item.start_ns),
+            end_ns=int(item.end_ns),
+            trading_day=getattr(item, "trading_day", None),
+        ))
+    return SessionScope(tuple(sessions))

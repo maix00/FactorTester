@@ -22,6 +22,6 @@ impl FactorEngine for FactorPlanEngine {
     type Error = alpha_algo::Error;
 
     fn update(&mut self, bar: &MarketBar) -> Result<Vec<f64>, Self::Error> {
-        self.inner.update(&bar.values)
+        self.inner.update_at(bar.timestamp_ns, &bar.values)
     }
 }

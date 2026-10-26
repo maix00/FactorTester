@@ -294,3 +294,42 @@ def test_signal_align_session_scope_uses_calendar_boundaries():
         '2026-01-06 09:30', '2026-01-06 09:32',
     ]]
     np.testing.assert_allclose(aligned['A'].to_numpy(), [0.0, 2.0, 3.0, 5.0])
+
+
+def test_signal_align_session_scope_serializes_to_rust_plan():
+    import json
+    from alpha import FactorPlanState
+    from alpha.factor import TradingSession, scope_session
+
+    session = TradingSession(
+        pd.Timestamp('2026-01-05 09:30').value,
+        pd.Timestamp('2026-01-05 09:32').value,
+    )
+    close = ColumnRef('CLOSE')
+    expression = close.signal_align('2min', scope=scope_session((session,)))
+    spec = expression.to_plan_spec()
+    assert spec is not None
+    signal = next(node for node in spec['nodes'] if node['kind'] == 'signal')
+    assert signal['signal_ns'] == 120_000_000_000
+    assert signal['sessions'] == [[session.start_ns, session.end_ns]]
+
+    state = FactorPlanState(json.dumps(spec), 1)
+    outputs = [
+        float(state.update_at(pd.Timestamp(timestamp).value, np.array([value]))[0])
+        for timestamp, value in [
+            ('2026-01-05 09:30', 0.0),
+            ('2026-01-05 09:31', 1.0),
+            ('2026-01-05 09:32', 2.0),
+        ]
+    ]
+    np.testing.assert_allclose(outputs, [0.0, 0.0, 2.0])
+
+
+def test_signal_align_anchor_bar_is_inclusive_by_default():
+    index = pd.DatetimeIndex(['2026-01-05 09:30'])
+    frame = pd.DataFrame({'CLOSE': [7.0]}, index=index)
+    ctx = EvalContext(products=('A',), preloaded={'A': frame})
+    included = ColumnRef('CLOSE').signal_align('2min').evaluate(ctx)
+    assert included['A'].iloc[0] == 7.0
+    excluded = ColumnRef('CLOSE').signal_align('2min', include_current=False).evaluate(ctx)
+    assert np.isnan(excluded['A'].iloc[0])

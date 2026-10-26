@@ -12,8 +12,9 @@ from .scopes import SessionScope, TradingDayScope
 class SignalAlign(FactorExpr):
     """Resample a factor to a lower signal frequency without look-ahead.
 
-    The signal at target time ``t`` is the last source value with
-    ``source_time <= t``; no future value is ever used.
+    The signal at target time ``t`` uses a source value at or before ``t``;
+    "before the anchor" is inclusive unless ``include_current=False``.
+    No future value is ever used.
     """
 
     def __init__(
@@ -39,6 +40,8 @@ class SignalAlign(FactorExpr):
             raise ValueError("scope_anchor must be 'start', 'end', or a time of day")
         if partial not in {"drop", "emit"}:
             raise ValueError("partial must be 'drop' or 'emit'")
+        if end_session_skip or end_session_gap is not None:
+            raise ValueError("session boundaries must come from a calendar-backed SessionScope")
         self.child = child
         self.signal_freq = str(signal_freq)
         self.scope = scope
@@ -139,6 +142,10 @@ class SignalAlign(FactorExpr):
             positions = np.searchsorted(source_ns, target_ns, side="left") - 1
         else:
             positions = BatchPlan.asof_indices(source_ns, target_ns)
+        positions = np.asarray(positions, dtype=np.int64)
+        valid = (positions >= 0) & (positions < len(source_ns))
+        safe = np.clip(positions, 0, max(len(source_ns) - 1, 0))
+        positions = np.where(valid & (source_ns[safe] <= target_ns) if len(source_ns) else np.zeros_like(valid), positions, -1)
         positions = np.asarray(positions, dtype=np.int64)
         valid = positions >= 0
         out = {}

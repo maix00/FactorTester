@@ -28,7 +28,7 @@ pub enum ExprSpec {
     Cross { op: CrossOp, child: usize },
     Since { condition: usize, count: usize, include_current: bool, nearest: bool, default_scope: bool, default: f64 },
     Scope { child: usize, count: usize, op: SessionOp, min_periods: usize, propagate_nan: bool },
-    Signal { child: usize, signal_ns: i64 },
+    Signal { child: usize, signal_ns: i64, sessions: Vec<(i64, i64)> },
 }
 
 struct NodeState {
@@ -41,6 +41,7 @@ struct NodeState {
     scope_base: Vec<usize>,
     signal_last: Vec<f64>,
     signal_next: Vec<Option<i64>>,
+    signal_session: Option<usize>,
 }
 
 pub struct FactorPlanKernel {
@@ -82,6 +83,7 @@ impl FactorPlanKernel {
                 scope_base: vec![0; products],
                 signal_last: vec![f64::NAN; products],
                 signal_next: vec![None; products],
+                signal_session: None,
             });
         }
         if outputs.iter().any(|index| *index >= nodes.len()) {
@@ -165,13 +167,20 @@ impl FactorPlanKernel {
                 condition.iter().zip(when_true.iter().zip(&when_false))
                     .map(|(c, (a, b))| if c.is_finite() && *c != 0.0 { *a } else { *b }).collect()
             }
-            ExprSpec::Signal { child, signal_ns } => {
+            ExprSpec::Signal { child, signal_ns, sessions } => {
                 let input = self.eval(child, columns, cache)?;
                 let timestamp = self.timestamp_ns;
                 let node = &mut self.nodes[index];
+                let session = sessions.iter().position(|(start, end)| timestamp >= *start && timestamp <= *end);
+                if session != node.signal_session {
+                    node.signal_session = session;
+                    node.signal_last.fill(f64::NAN);
+                    node.signal_next.fill(None);
+                }
                 for product in 0..self.products {
                     if node.signal_next[product].is_none() {
-                        let first = if timestamp % signal_ns == 0 { timestamp } else { (timestamp / signal_ns + 1) * signal_ns };
+                        let anchor = session.map_or(timestamp, |position| sessions[position].0);
+                        let first = if anchor % signal_ns == 0 { anchor } else { (anchor / signal_ns + 1) * signal_ns };
                         node.signal_next[product] = Some(first);
                     }
                     if timestamp >= node.signal_next[product].unwrap_or(i64::MAX) {
@@ -282,7 +291,7 @@ enum RawNode {
     Cross { op: String, child: usize },
     Since { condition: usize, count: usize, include_current: bool, nearest: bool,
             default_scope: bool, default: f64 },
-    Signal { child: usize, signal_ns: i64 },
+    Signal { child: usize, signal_ns: i64, #[serde(default)] sessions: Vec<[i64; 2]> },
 }
 
 #[derive(Deserialize)]
@@ -335,7 +344,8 @@ impl FactorPlanKernel {
                 },
                 RawNode::Since { condition, count, include_current, nearest, default_scope, default } =>
                     ExprSpec::Since { condition, count, include_current, nearest, default_scope, default },
-                RawNode::Signal { child, signal_ns } => ExprSpec::Signal { child, signal_ns },
+                RawNode::Signal { child, signal_ns, sessions } =>
+                    ExprSpec::Signal { child, signal_ns, sessions: sessions.into_iter().map(|pair| (pair[0], pair[1])).collect() },
             });
         }
         Self::new(products, specs, raw.outputs)

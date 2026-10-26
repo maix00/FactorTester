@@ -5,11 +5,14 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 from .core import ColumnRef, CompositeExpr, ConstExpr, RollingOp, ShiftOp, WhereOp
 from .cross_sectional import CrossSectionalExpr
 from .scope import GroupByScopeOp
 from .bar_search import BarSinceExpr, BarSinceExpr as BarSince
+from .signal import SignalAlign
+from .scopes import SessionScope
 
 _BINARY = {"add", "sub", "mul", "div", "gt", "lt", "ge", "le", "eq", "ne"}
 
@@ -77,6 +80,24 @@ def to_plan_spec(expressions: list[Any]) -> dict[str, Any] | None:
                 return None
             node = {"kind": "where", "condition": children[0],
                     "when_true": children[1], "when_false": children[2]}
+        elif isinstance(expr, SignalAlign):
+            child = build(expr.child)
+            if child is None:
+                return None
+            node = {
+                "kind": "signal", "child": child,
+                "signal_ns": int(pd.Timedelta(expr.signal_freq).value),
+                "basepoint": expr.basepoint, "scope_anchor": expr.scope_anchor,
+                "include_current": expr.include_current, "partial": expr.partial,
+                "sessions": [],
+            }
+            if isinstance(expr.scope, SessionScope):
+                node["sessions"] = [
+                    [int(session.start_ns), int(session.end_ns)]
+                    for session in expr.scope.sessions
+                ]
+            elif expr.scope is not None:
+                return None
         elif isinstance(expr, BarSince):
             child = build(expr.condition)
             if child is None:
