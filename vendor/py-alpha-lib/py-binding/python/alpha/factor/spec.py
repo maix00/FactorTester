@@ -12,7 +12,7 @@ from .cross_sectional import CrossSectionalExpr
 from .scope import GroupByScopeOp
 from .bar_search import BarSinceExpr, BarSinceExpr as BarSince
 from .signal import SignalAlign
-from .scopes import SessionScope
+from .scopes import SessionScope, TradingDayScope
 
 _BINARY = {"add", "sub", "mul", "div", "gt", "lt", "ge", "le", "eq", "ne"}
 
@@ -89,7 +89,10 @@ def to_plan_spec(expressions: list[Any]) -> dict[str, Any] | None:
             node = {"kind": "where", "condition": children[0],
                     "when_true": children[1], "when_false": children[2]}
         elif isinstance(expr, SignalAlign):
-            if expr.scope_anchor != "start" and not isinstance(expr.scope, SessionScope):
+            calendar_scope = isinstance(expr.scope, SessionScope) or (
+                isinstance(expr.scope, TradingDayScope) and bool(expr.scope.sessions)
+            )
+            if expr.scope_anchor != "start" and not calendar_scope:
                 return None
             child = build(expr.child)
             if child is None:
@@ -101,7 +104,7 @@ def to_plan_spec(expressions: list[Any]) -> dict[str, Any] | None:
                 "include_current": expr.include_current, "partial": expr.partial,
                 "sessions": [],
             }
-            if isinstance(expr.scope, SessionScope):
+            if isinstance(expr.scope, (SessionScope, TradingDayScope)) and expr.scope.sessions:
                 signal_ns = node["signal_ns"]
                 sessions = []
                 for session in expr.scope.sessions:

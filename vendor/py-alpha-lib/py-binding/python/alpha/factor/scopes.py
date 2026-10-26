@@ -9,7 +9,7 @@ import pandas as pd
 
 @dataclass(frozen=True)
 class TradingDayScope:
-    pass
+    sessions: tuple = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,8 +42,8 @@ class SessionScope:
         return index
 
 
-def scope_trading_day() -> TradingDayScope:
-    return TradingDayScope()
+def scope_trading_day(sessions=None) -> TradingDayScope:
+    return TradingDayScope(tuple(sessions) if sessions is not None else ())
 
 
 def scope_session(sessions) -> SessionScope:

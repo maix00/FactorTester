@@ -424,3 +424,21 @@ def test_signal_align_first_include_false_and_emit_in_rust():
     emitted = _signal_state(close.signal_align('100ns', scope=scope_session((session,)), partial='emit'))
     emitted_values = [float(emitted.update_at(timestamp, np.array([value]))[0]) for timestamp, value in bars]
     assert emitted_values[-1] == 5.0
+
+
+def test_trading_day_scope_anchor_end_enters_rust_plan():
+    from alpha.factor import TradingSession, scope_trading_day
+
+    session = TradingSession(0, 250)
+    expression = ColumnRef('CLOSE').signal_align(
+        '100ns', scope=scope_trading_day((session,)), scope_anchor='end',
+    )
+    spec = expression.to_plan_spec()
+    assert spec is not None
+    state = _signal_state(expression)
+    values = [
+        float(state.update_at(timestamp, np.array([value]))[0])
+        for timestamp, value in [(0, 0.0), (100, 1.0), (200, 2.0), (250, 3.0)]
+    ]
+    assert np.isnan(values[0])
+    assert values[2] == 2.0
