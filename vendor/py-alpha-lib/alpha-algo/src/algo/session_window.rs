@@ -413,7 +413,11 @@ impl SessionWindowState {
     self.finite_sum = 0.0; self.finite_sumsq = 0.0; self.finite_sum3 = 0.0;
     self.finite_count = 0; self.nan_count = 0;
     self.min_deque.clear(); self.max_deque.clear();
-    self.order_stat = None;
+    self.order_stat = if matches!(self.op, SessionOp::Quantile(_) | SessionOp::Rank | SessionOp::Mad) {
+      Some(OrderStatisticTree::default())
+    } else {
+      None
+    };
     self.next_index = index;
     self.start_index = index;
     self.range_end = u64::MAX;
@@ -1325,4 +1329,16 @@ mod tests {
     let sum: Vec<f64> = ta_session_rolling_sum(&ctx, &values, &sessions, 1).unwrap();
     assert_eq!(sum, vec![1.0, 3.0, 3.0, 7.0, 12.0]);
   }
+}
+
+#[cfg(test)]
+mod explicit_quantile_smoke {
+    use super::*;
+
+    #[test]
+    fn explicit_scope_quantile_returns_first_value() {
+        let mut kernel = IntervalKernel::new_explicit(SessionOp::Quantile(0.5)).unwrap();
+        kernel.set_semantics(1, true);
+        assert_eq!(kernel.update_explicit(0, 0, 1.0), 1.0);
+    }
 }

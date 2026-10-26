@@ -452,3 +452,21 @@ mod grid_dedup_tests {
         assert_ne!(first, different);
     }
 }
+
+#[cfg(test)]
+mod scope_quantile_tests {
+    use super::*;
+
+    #[test]
+    fn scope_quantile_matches_scope_mean_presence() {
+        let mut plan = PanelPlan::new();
+        let grid = plan.grid(&[0, 1, 2, 3], &[0, 0, 1, 1], &[1, 1, 1, 1]).unwrap();
+        let column = plan.add("column".into(), vec![], vec![0.0], vec![], grid).unwrap();
+        let quantile = plan.add("scope:quantile".into(), vec![column], vec![2.0, 0.0, 0.0, 1.0, 1.0, 0.5, -1.0, -1.0], vec![], grid).unwrap();
+        let out = plan.execute(&[&[1.0, 2.0, 3.0, 4.0]], &[quantile], 1).unwrap();
+        assert_eq!(out[0][0], 1.0);
+        assert_eq!(out[0][1], 1.5);
+        assert_eq!(out[0][2], 3.0);
+        assert_eq!(out[0][3], 3.5);
+    }
+}
