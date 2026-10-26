@@ -39,7 +39,9 @@ mod algo_impl {
       "var" => SessionOp::Var, "std" => SessionOp::Std,
       "min" => SessionOp::Min, "max" => SessionOp::Max,
       "skew" => SessionOp::Skew, "argmin" => SessionOp::Argmin,
-      "argmax" => SessionOp::Argmax, "rank" => SessionOp::Rank,
+      "argmin_raw" => SessionOp::ArgminRaw, "argmax_raw" => SessionOp::ArgmaxRaw,
+      "argmax" => SessionOp::Argmax, "argmin_raw" => SessionOp::ArgminRaw,
+      "argmax_raw" => SessionOp::ArgmaxRaw, "rank" => SessionOp::Rank,
       "mad" => SessionOp::Mad,
       "median" | "quantile" => SessionOp::Quantile(quantile.unwrap_or(0.5)),
       other => return Err(pyo3::exceptions::PyValueError::new_err(
