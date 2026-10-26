@@ -240,6 +240,7 @@ pub mod nautilus {
         last_error: Option<String>,
         expected_products: Vec<String>,
         pending_bars: std::collections::BTreeMap<String, Bar>,
+        pending_timestamp: Option<i64>,
     }
 
     impl<E> fmt::Debug for FactorActor<E> {
@@ -256,6 +257,7 @@ pub mod nautilus {
                 id: Ustr::from(actor_id), engine, latest: Vec::new(), last_error: None,
                 expected_products: Vec::new(),
                 pending_bars: std::collections::BTreeMap::new(),
+                pending_timestamp: None,
             }
         }
 
@@ -281,6 +283,17 @@ pub mod nautilus {
                 self.last_error = Some(format!("unexpected product {product}"));
                 return;
             }
+            let timestamp = bar.ts_event.as_u64() as i64;
+            if let Some(pending) = self.pending_timestamp {
+                if pending != timestamp {
+                    self.last_error = Some(format!("mixed slice timestamps {pending} and {timestamp}"));
+                    self.pending_bars.clear();
+                    self.pending_timestamp = None;
+                    return;
+                }
+            } else {
+                self.pending_timestamp = Some(timestamp);
+            }
             self.pending_bars.insert(product, bar.clone());
             if self.pending_bars.len() != self.expected_products.len() { return; }
             let bars: Vec<Bar> = self.expected_products.iter()
@@ -293,6 +306,7 @@ pub mod nautilus {
                 Err(error) => self.last_error = Some(error.to_string()),
             }
             self.pending_bars.clear();
+            self.pending_timestamp = None;
         }
 
         /// Assemble one completed cross-sectional slice and update once.
@@ -482,6 +496,22 @@ mod nautilus_tests {
         actor.on_completed_bar(&make("C.D", "3.0"));
         assert_eq!(actor.latest(), &[0.0, 0.5]);
         assert_eq!(actor.pending_len(), 0);
+    }
+
+    #[test]
+    fn factor_actor_rejects_mixed_slice_timestamps() {
+        let json = r#"{"columns":["CLOSE"],"nodes":[{"kind":"column","index":0}],"outputs":[0]}"#;
+        let mut actor = nautilus::FactorActor::from_plan_json("factor-time-test", 2, json).unwrap();
+        actor.expect_products(&["A.B", "C.D"]);
+        let make = |symbol: &str, timestamp: u64| Bar::new(
+            BarType::from(format!("{symbol}-1-MINUTE-LAST-EXTERNAL").as_str()),
+            Price::from("1.0"), Price::from("1.0"), Price::from("1.0"),
+            Price::from("1.0"), Quantity::from("1"), timestamp.into(), timestamp.into(),
+        );
+        actor.on_completed_bar(&make("A.B", 1_000));
+        actor.on_completed_bar(&make("C.D", 2_000));
+        assert_eq!(actor.pending_len(), 0);
+        assert!(actor.last_error().unwrap().contains("mixed slice"));
     }
 
     #[test]
