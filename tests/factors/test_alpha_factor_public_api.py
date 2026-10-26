@@ -333,3 +333,46 @@ def test_signal_align_anchor_bar_is_inclusive_by_default():
     assert included['A'].iloc[0] == 7.0
     excluded = ColumnRef('CLOSE').signal_align('2min', include_current=False).evaluate(ctx)
     assert np.isnan(excluded['A'].iloc[0])
+
+
+def test_session_groupby_scope_serializes_and_executes_in_rust():
+    import json
+    from alpha import FactorPlanState
+    from alpha.factor import TradingSession, scope_session
+
+    index = pd.DatetimeIndex([
+        '2026-01-05 09:30', '2026-01-05 09:31',
+        '2026-01-06 09:30', '2026-01-06 09:31',
+    ])
+    frame = pd.DataFrame({'CLOSE': [1.0, 3.0, 10.0, 30.0]}, index=index)
+    ctx = EvalContext(products=('A',), preloaded={'A': frame})
+    sessions = (
+        TradingSession(pd.Timestamp('2026-01-05 09:30').value, pd.Timestamp('2026-01-05 09:31').value),
+        TradingSession(pd.Timestamp('2026-01-06 09:30').value, pd.Timestamp('2026-01-06 09:31').value),
+    )
+    expression = ColumnRef('CLOSE').groupby_scope(scope_session(sessions)).mean()
+    spec = expression.to_plan_spec()
+    node = next(node for node in spec['nodes'] if node['kind'] == 'scope')
+    assert node['sessions'] == [[sessions[0].start_ns, sessions[0].end_ns],
+                                [sessions[1].start_ns, sessions[1].end_ns]]
+    state = FactorPlanState(json.dumps(spec), 1)
+    outputs = [
+        float(state.update_at(pd.Timestamp(timestamp).value, np.array([value]))[0])
+        for timestamp, value in [
+            ('2026-01-05 09:30', 1.0), ('2026-01-05 09:31', 3.0),
+            ('2026-01-06 09:30', 10.0), ('2026-01-06 09:31', 30.0),
+        ]
+    ]
+    np.testing.assert_allclose(outputs, [1.0, 2.0, 10.0, 20.0])
+
+
+def test_sessions_from_trading_calendar_window():
+    from alpha.factor import sessions_from_calendar
+    from tools.factors.expr.streaming.calendar_window import TradingCalendarWindow, TradingSession as ToolsSession
+
+    calendar = TradingCalendarWindow((
+        ToolsSession('2026-01-05', 100, 200, 2),
+        ToolsSession('2026-01-06', 300, 400, 2),
+    ))
+    scope = sessions_from_calendar(calendar)
+    assert [(item.start_ns, item.end_ns) for item in scope.sessions] == [(100, 200), (300, 400)]

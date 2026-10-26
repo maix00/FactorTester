@@ -27,7 +27,7 @@ pub enum ExprSpec {
     Where { condition: usize, when_true: usize, when_false: usize },
     Cross { op: CrossOp, child: usize },
     Since { condition: usize, count: usize, include_current: bool, nearest: bool, default_scope: bool, default: f64 },
-    Scope { child: usize, count: usize, op: SessionOp, min_periods: usize, propagate_nan: bool },
+    Scope { child: usize, count: usize, op: SessionOp, min_periods: usize, propagate_nan: bool, sessions: Vec<(i64, i64)> },
     Signal { child: usize, signal_ns: i64, sessions: Vec<(i64, i64)> },
 }
 
@@ -42,6 +42,7 @@ struct NodeState {
     signal_last: Vec<f64>,
     signal_next: Vec<Option<i64>>,
     signal_session: Option<usize>,
+    scope_session: Option<usize>,
 }
 
 pub struct FactorPlanKernel {
@@ -84,6 +85,7 @@ impl FactorPlanKernel {
                 signal_last: vec![f64::NAN; products],
                 signal_next: vec![None; products],
                 signal_session: None,
+                scope_session: None,
             });
         }
         if outputs.iter().any(|index| *index >= nodes.len()) {
@@ -113,7 +115,8 @@ impl FactorPlanKernel {
             }
             match &node.spec {
                 ExprSpec::Rolling { window, .. } if *window == 0 => return Err(crate::algo::Error::InvalidParameter("rolling window must be positive".into())),
-                ExprSpec::Scope { count, .. } | ExprSpec::Since { count, .. } if *count == 0 => return Err(crate::algo::Error::InvalidParameter("scope count must be positive".into())),
+                ExprSpec::Scope { count, sessions, .. } if sessions.is_empty() && *count == 0 => return Err(crate::algo::Error::InvalidParameter("scope count must be positive".into())),
+                ExprSpec::Since { count, .. } if *count == 0 => return Err(crate::algo::Error::InvalidParameter("scope count must be positive".into())),
                 _ => {}
             }
         }
@@ -190,12 +193,22 @@ impl FactorPlanKernel {
                 }
                 node.signal_last.clone()
             }
-            ExprSpec::Scope { child, count, op, min_periods, propagate_nan } => {
+            ExprSpec::Scope { child, count, op, min_periods, propagate_nan, sessions } => {
                 let input = self.eval(child, columns, cache)?;
                 let current = self.ordinal;
+                let timestamp = self.timestamp_ns;
                 let node = &mut self.nodes[index];
+                if !sessions.is_empty() {
+                    let session = sessions.iter().position(|(start, end)| timestamp >= *start && timestamp <= *end);
+                    if session != node.scope_session {
+                        node.scope_session = session;
+                        node.scope_base.fill(current as usize);
+                        for state in node.rolling.iter_mut().flatten() { state.reset_at(current); }
+                    }
+                } else if current as usize % count == 0 {
+                    node.scope_base.fill(current as usize);
+                }
                 input.iter().enumerate().map(|(product, value)| {
-                    if current as usize % count == 0 { node.scope_base[product] = current as usize; }
                     let Some(state) = node.rolling[product].as_mut() else { return f64::NAN };
                     state.set_semantics(min_periods, propagate_nan);
                     state.update_explicit(node.scope_base[product] as u64, current, *value)
@@ -283,7 +296,8 @@ enum RawNode {
     Const { value: f64 },
     Rolling { child: usize, window: usize, op: String, min_periods: usize,
               propagate_nan: bool, #[serde(default)] quantile: Option<f64> },
-    Scope { child: usize, count: usize, op: String, min_periods: usize, propagate_nan: bool },
+    Scope { child: usize, count: usize, op: String, min_periods: usize, propagate_nan: bool,
+            #[serde(default)] sessions: Vec<[i64; 2]> },
     Binary { op: String, left: usize, right: usize },
     Neg { child: usize },
     Shift { child: usize, periods: usize },
@@ -322,8 +336,9 @@ impl FactorPlanKernel {
                 RawNode::Rolling { child, window, op, min_periods, propagate_nan, quantile } => {
                     ExprSpec::Rolling { child, window, op: session_op(&op, quantile)?, min_periods, propagate_nan }
                 }
-                RawNode::Scope { child, count, op, min_periods, propagate_nan } =>
-                    ExprSpec::Scope { child, count, op: session_op(&op, None)?, min_periods, propagate_nan },
+                RawNode::Scope { child, count, op, min_periods, propagate_nan, sessions } =>
+                    ExprSpec::Scope { child, count, op: session_op(&op, None)?, min_periods, propagate_nan,
+                        sessions: sessions.into_iter().map(|pair| (pair[0], pair[1])).collect() },
                 RawNode::Binary { op, left, right } => ExprSpec::Binary {
                     op: match op.as_str() {
                         "add" => BinaryOp::Add, "sub" => BinaryOp::Sub, "mul" => BinaryOp::Mul,

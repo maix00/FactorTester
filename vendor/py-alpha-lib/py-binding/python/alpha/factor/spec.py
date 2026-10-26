@@ -48,11 +48,18 @@ def to_plan_spec(expressions: list[Any]) -> dict[str, Any] | None:
             child = build(expr.owner.data)
             if child is None:
                 return None
+            scope = expr.owner.scope
+            if isinstance(scope, SessionScope):
+                sessions = [[int(item.start_ns), int(item.end_ns)] for item in scope.sessions]
+                count = 0
+            else:
+                sessions = []
+                count = getattr(scope, "count", 0)
             node = {
-                "kind": "scope", "child": child,
-                "count": expr.owner.scope.count,
+                "kind": "scope", "child": child, "count": count,
                 "op": expr.op, "min_periods": expr.owner.semantics.effective_min_periods,
                 "propagate_nan": expr.owner.semantics.nan_policy.value == "propagate",
+                "sessions": sessions,
             }
         elif isinstance(expr, CrossSectionalExpr):
             child = build(expr.operand)

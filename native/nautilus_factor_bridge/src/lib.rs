@@ -324,6 +324,18 @@ mod tests {
     }
 
     #[test]
+    fn signal_plan_resets_on_calendar_session_boundary() {
+        let json = r#"{"columns":["CLOSE"],"nodes":[{"kind":"column","index":0},{"kind":"signal","child":0,"signal_ns":200,"sessions":[[0,200],[1000,1200]]}],"outputs":[1]}"#;
+        let mut engine = FactorPlanEngine::from_spec_json(json, 1).unwrap();
+        let bar = |timestamp, value| MarketBar::new(timestamp, vec!["A".into()], vec![value]);
+        assert_eq!(engine.update(&bar(0, 0.0)).unwrap(), vec![0.0]);
+        assert_eq!(engine.update(&bar(100, 1.0)).unwrap(), vec![0.0]);
+        assert_eq!(engine.update(&bar(200, 2.0)).unwrap(), vec![2.0]);
+        // A new calendar session restarts the signal grid at its session start.
+        assert_eq!(engine.update(&bar(1000, 10.0)).unwrap(), vec![10.0]);
+    }
+
+    #[test]
     fn matrix_plan_engine_updates_factor_product_matrix() {
         let mut engine = MatrixPlanEngine::new(2, &[(2, SessionOp::Mean), (2, SessionOp::Sum)]).unwrap();
         let bar = MarketBar::new(0, vec!["A".into(), "B".into()], vec![2.0, 4.0]);
