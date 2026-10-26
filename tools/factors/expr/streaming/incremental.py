@@ -36,6 +36,7 @@ from tools.factors.expr.term_structure_math import (
     evaluate_term_curve,
     normalize_term_curve,
 )
+from tools.factors.interval import IntervalSpec
 from tools.factors.lookback import LookbackContract, infer_lookback_contract
 from tools.products.AdjustableTermStructure import (
     TERM_RANK_COL,
@@ -178,7 +179,7 @@ class _BarWindowResolver:
     def __call__(self, _market):
         current = self.ordinal
         self.ordinal += 1
-        return max(0, current - self.window + 1), current
+        return IntervalSpec(max(0, current - self.window + 1), current)
 
 
 class _SessionWindowResolver:
@@ -196,7 +197,7 @@ class _SessionWindowResolver:
         )
         current = self.ordinal
         self.ordinal += 1
-        return max(0, current - int(size) + 1), current
+        return IntervalSpec(max(0, current - int(size) + 1), current)
 
 
 class _WallWindowResolver:
@@ -216,8 +217,7 @@ class _WallWindowResolver:
         while self._timestamps and self._timestamps[0][1] < cutoff:
             self._timestamps.popleft()
         self._timestamps.append((current, nanos))
-        start = self._timestamps[0][0]
-        return start, current
+        return IntervalSpec(self._timestamps[0][0], current)
 
 
 class _BarScopeResolver:
@@ -229,7 +229,7 @@ class _BarScopeResolver:
         start = (self.ordinal // self.bar_count) * self.bar_count
         current = self.ordinal
         self.ordinal += 1
-        return start, current
+        return IntervalSpec(start, current)
 
 
 class _EventResolver:
@@ -245,7 +245,7 @@ class _EventResolver:
         self.ordinal += 1
         if occurrence is None:
             return None
-        return max(0, int(occurrence) - 1), current
+        return IntervalSpec(max(0, int(occurrence) - 1), current)
 
 
 class _RangeResolver:
@@ -282,7 +282,7 @@ class _RangeResolver:
             if occurrence is None:
                 return None
             base = max(0, int(occurrence) - 1)
-        return base + self.trunc_start, base + self.trunc_end
+        return IntervalSpec(base + self.trunc_start, base + self.trunc_end)
 
 
 class RustIntervalNode:
@@ -319,10 +319,10 @@ class RustIntervalNode:
         key = id(self)
         if key in cache:
             return cache[key]
-        bounds = self.resolver(market)
-        if bounds is None:
+        interval = self.resolver(market)
+        if interval is None:
             return np.full(self._width, np.nan, dtype=float)
-        start, end = bounds
+        start, end = interval.start, interval.end
         values = np.asarray(self.child.update(market, cache), dtype=float)
         if values.shape != (self._width,):
             raise ValueError("interval input width changed")
@@ -354,10 +354,10 @@ class RustIntervalPairNode:
         key = id(self)
         if key in cache:
             return cache[key]
-        bounds = self.resolver(market)
-        if bounds is None:
+        interval = self.resolver(market)
+        if interval is None:
             return np.full(self._width, np.nan, dtype=float)
-        start, end = bounds
+        start, end = interval.start, interval.end
         left = np.asarray(self.children[0].update(market, cache), dtype=float)
         right = np.asarray(self.children[1].update(market, cache), dtype=float)
         if left.shape != (self._width,) or right.shape != (self._width,):
