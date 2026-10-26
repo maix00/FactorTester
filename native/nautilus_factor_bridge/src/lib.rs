@@ -250,6 +250,7 @@ pub mod nautilus {
         last_update: Option<FactorUpdate>,
         pending_timestamp: Option<i64>,
         future_slices: std::collections::BTreeMap<i64, std::collections::BTreeMap<String, Bar>>,
+        max_future_slices: usize,
     }
 
     impl<E> fmt::Debug for FactorActor<E> {
@@ -268,6 +269,7 @@ pub mod nautilus {
                 pending_bars: std::collections::BTreeMap::new(),
                 pending_timestamp: None,
                 future_slices: std::collections::BTreeMap::new(),
+                max_future_slices: 64,
                 last_update: None,
             }
         }
@@ -275,6 +277,16 @@ pub mod nautilus {
         pub fn latest(&self) -> &[f64] { &self.latest }
 
         pub fn last_error(&self) -> Option<&str> { self.last_error.as_deref() }
+
+        pub fn set_max_future_slices(&mut self, limit: usize) { self.max_future_slices = limit.max(1); }
+
+        pub fn expire_before(&mut self, timestamp_ns: i64) {
+            self.future_slices = self.future_slices.split_off(&timestamp_ns);
+            if self.pending_timestamp.is_some_and(|timestamp| timestamp < timestamp_ns) {
+                self.pending_bars.clear();
+                self.pending_timestamp = None;
+            }
+        }
 
         pub fn pending_len(&self) -> usize {
             self.pending_bars.len() + self.future_slices.values().map(|slice| slice.len()).sum::<usize>()
@@ -305,6 +317,10 @@ pub mod nautilus {
                     return;
                 }
                 if timestamp > pending {
+                    if !self.future_slices.contains_key(&timestamp) && self.future_slices.len() >= self.max_future_slices {
+                        self.last_error = Some(format!("future slice limit {} exceeded", self.max_future_slices));
+                        return;
+                    }
                     self.future_slices.entry(timestamp).or_default().insert(product, bar.clone());
                     return;
                 }
@@ -566,6 +582,25 @@ mod nautilus_tests {
         actor.on_completed_bar(&make("C.D", 1_000));
         assert_eq!(actor.pending_len(), 0);
         assert_eq!(actor.last_update().unwrap().timestamp_ns, 2_000);
+    }
+
+    #[test]
+    fn factor_actor_expires_stale_slices_and_bounds_future_buffer() {
+        let json = r#"{"columns":["CLOSE"],"nodes":[{"kind":"column","index":0}],"outputs":[0]}"#;
+        let mut actor = nautilus::FactorActor::from_plan_json("factor-expire-test", 2, json).unwrap();
+        actor.expect_products(&["A.B", "C.D"]);
+        actor.set_max_future_slices(1);
+        let make = |symbol: &str, timestamp: u64| Bar::new(
+            BarType::from(format!("{symbol}-1-MINUTE-LAST-EXTERNAL").as_str()),
+            Price::from("1.0"), Price::from("1.0"), Price::from("1.0"),
+            Price::from("1.0"), Quantity::from("1"), timestamp.into(), timestamp.into(),
+        );
+        actor.on_completed_bar(&make("A.B", 1_000));
+        actor.on_completed_bar(&make("C.D", 2_000));
+        actor.on_completed_bar(&make("A.B", 3_000));
+        assert!(actor.last_error().unwrap().contains("future slice limit"));
+        actor.expire_before(2_000);
+        assert_eq!(actor.pending_len(), 1);
     }
 
     #[test]
