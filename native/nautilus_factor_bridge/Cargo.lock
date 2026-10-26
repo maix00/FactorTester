@@ -706,6 +706,7 @@ dependencies = [
  "nautilus-common",
  "nautilus-core",
  "nautilus-model",
+ "rayon",
  "ustr",
 ]
 

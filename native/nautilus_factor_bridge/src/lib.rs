@@ -160,6 +160,50 @@ impl FactorEngine for MatrixPlanEngine {
     }
 }
 
+/// Product-parallel plan for non-cross-sectional factors.  A cross-sectional
+/// node is not allowed here; use `FactorPlanEngine` for that barrier case.
+pub struct ProductParallelPlanEngine {
+    lanes: Vec<plan::FactorPlanEngine>,
+    outputs: usize,
+}
+
+impl ProductParallelPlanEngine {
+    pub fn new(products: usize, specs: Vec<plan::ExprSpec>, outputs: Vec<usize>) -> Result<Self, alpha_algo::Error> {
+        use rayon::prelude::*;
+        if specs.iter().any(|spec| matches!(spec, plan::ExprSpec::Cross { .. })) {
+            return Err(alpha_algo::Error::InvalidParameter("use FactorPlanEngine for cross-sectional nodes".into()));
+        }
+        let lanes = (0..products)
+            .into_par_iter()
+            .map(|_| plan::FactorPlanEngine::new(1, specs.clone(), outputs.clone()))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self { outputs: outputs.len(), lanes })
+    }
+}
+
+impl FactorEngine for ProductParallelPlanEngine {
+    type Error = alpha_algo::Error;
+
+    fn update(&mut self, bar: &MarketBar) -> Result<Vec<f64>, Self::Error> {
+        use rayon::prelude::*;
+        if bar.values.len() != self.lanes.len() {
+            return Err(alpha_algo::Error::InvalidParameter("parallel plan product width mismatch".into()));
+        }
+        let per_product: Vec<Vec<f64>> = self.lanes
+            .par_iter_mut()
+            .zip(bar.values.par_iter())
+            .map(|(lane, value)| lane.update(&MarketBar::new(bar.timestamp_ns, Vec::new(), vec![*value])))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut out = Vec::with_capacity(self.outputs * per_product.len());
+        for factor in 0..self.outputs {
+            for lane in &per_product {
+                out.push(lane[factor]);
+            }
+        }
+        Ok(out)
+    }
+}
+
 /// Nautilus-side adapter contract.  Implemented by the actor that receives
 /// Nautilus bars; it does not leak Nautilus types into py-alpha-lib.
 pub trait NautilusMarketAdapter {
@@ -249,6 +293,19 @@ pub mod nautilus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn product_parallel_plan_updates_products_independently() {
+        let specs = vec![
+            plan::ExprSpec::Column(0),
+            plan::ExprSpec::Rolling { child: 0, window: 2, op: SessionOp::Mean, min_periods: 1, propagate_nan: true },
+        ];
+        let mut engine = ProductParallelPlanEngine::new(2, specs, vec![1]).unwrap();
+        let bar = MarketBar::new(0, vec!["A".into(), "B".into()], vec![1.0, 10.0]);
+        assert_eq!(engine.update(&bar).unwrap(), vec![1.0, 10.0]);
+        let bar = MarketBar::new(1, vec!["A".into(), "B".into()], vec![3.0, 30.0]);
+        assert_eq!(engine.update(&bar).unwrap(), vec![2.0, 20.0]);
+    }
 
     #[test]
     fn matrix_plan_engine_updates_factor_product_matrix() {
