@@ -57,3 +57,6 @@ def session_rolling_mean(values, session_ids, lookback_sessions: int) -> np.ndar
 
 
 SessionRollingState = _algo.SessionRollingState
+
+
+SessionPairState = _algo.SessionPairState

@@ -2600,6 +2600,26 @@ impl SessionRollingState {
   }
 }
 
+#[pyclass]
+struct SessionPairState {
+  inner: alpha_algo::SessionPairState,
+}
+
+#[pymethods]
+impl SessionPairState {
+  #[new]
+  #[pyo3(signature = (lookback_sessions, correlation=false))]
+  fn new(lookback_sessions: usize, correlation: bool) -> PyResult<Self> {
+    let inner = alpha_algo::SessionPairState::new(lookback_sessions, correlation)
+      .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    Ok(Self { inner })
+  }
+
+  fn update(&mut self, session_id: u32, x: f64, y: f64) -> f64 {
+    self.inner.update(session_id, x, y)
+  }
+}
+
 #[pymodule]
 fn _algo(m: &Bound<'_, PyModule>) -> PyResult<()> {
   use algo_impl::*;
@@ -2623,6 +2643,7 @@ fn _algo(m: &Bound<'_, PyModule>) -> PyResult<()> {
   m.add_class::<OrderConstructionKernel>()?;
   m.add_class::<ThresholdKernel>()?;
   m.add_class::<SessionRollingState>()?;
+  m.add_class::<SessionPairState>()?;
   m.add_class::<GroupKernel>()?;
   m.add_class::<TermCarryKernel>()?;
   m.add_class::<LifecycleKernel>()?;

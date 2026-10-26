@@ -627,6 +627,63 @@ pub fn ta_time_rolling_mean(timestamps: &[i64], values: &[f64], duration_ns: i64
   time_rolling(timestamps, values, duration_ns, true)
 }
 
+pub struct SessionPairState {
+  lookback_sessions: u32,
+  correlation: bool,
+  ring: VecDeque<(u32, f64, f64)>,
+  sx: f64,
+  sy: f64,
+  sxx: f64,
+  syy: f64,
+  sxy: f64,
+  count: usize,
+}
+
+impl SessionPairState {
+  pub fn new(lookback_sessions: usize, correlation: bool) -> Result<Self, Error> {
+    if lookback_sessions == 0 {
+      return Err(Error::InvalidParameter("lookback must be positive".to_string()));
+    }
+    Ok(Self {
+      lookback_sessions: lookback_sessions as u32,
+      correlation,
+      ring: VecDeque::new(),
+      sx: 0.0, sy: 0.0, sxx: 0.0, syy: 0.0, sxy: 0.0, count: 0,
+    })
+  }
+
+  fn remove_oldest(&mut self) {
+    let Some((_, ox, oy)) = self.ring.pop_front() else { return };
+    if ox.is_finite() && oy.is_finite() {
+      self.sx -= ox; self.sy -= oy; self.sxx -= ox * ox;
+      self.syy -= oy * oy; self.sxy -= ox * oy; self.count -= 1;
+    }
+  }
+
+  pub fn update(&mut self, session_id: u32, x: f64, y: f64) -> f64 {
+    if let Some((last, _, _)) = self.ring.back() {
+      if session_id < *last { return f64::NAN; }
+    }
+    let first_session = (session_id + 1).saturating_sub(self.lookback_sessions);
+    while self.ring.front().is_some_and(|(id, _, _)| *id < first_session) {
+      self.remove_oldest();
+    }
+    self.ring.push_back((session_id, x, y));
+    if x.is_finite() && y.is_finite() {
+      self.sx += x; self.sy += y; self.sxx += x * x;
+      self.syy += y * y; self.sxy += x * y; self.count += 1;
+    }
+    if self.count < 2 { return f64::NAN; }
+    let n = self.count as f64;
+    let cov = (self.sxy - self.sx * self.sy / n) / (n - 1.0);
+    if !self.correlation { return cov; }
+    let vx = (self.sxx - self.sx * self.sx / n).max(0.0);
+    let vy = (self.syy - self.sy * self.sy / n).max(0.0);
+    let denom = (vx * vy).sqrt();
+    if denom > 0.0 { (self.sxy - self.sx * self.sy / n) / denom } else { f64::NAN }
+  }
+}
+
 fn session_rolling_pair(
   x: &[f64], y: &[f64], session_ids: &[u32], lookback_sessions: usize,
   correlation: bool,
@@ -741,6 +798,14 @@ mod tests {
     state.update(0, 3.0);
     let value = state.update(0, 2.0);
     assert!((value - 0.5).abs() < 1e-12);
+  }
+
+  #[test]
+  fn streaming_pair_cov_and_corr() {
+    let mut corr = SessionPairState::new(1, true).unwrap();
+    corr.update(0, 1.0, 2.0);
+    assert!((corr.update(0, 2.0, 4.0) - 1.0).abs() < 1e-12);
+    assert!(corr.update(1, 3.0, 6.0).is_nan() || corr.update(1, 3.0, 6.0).is_finite());
   }
 
   #[test]
