@@ -565,3 +565,15 @@ def test_alpha_factor_unary_pointwise_compiles_to_rust():
     assert [node['kind'] for node in spec['nodes']] == ['column', 'unary', 'unary', 'binary']
     state = FactorPlanState(json.dumps(spec), 1)
     assert float(state.update(np.array([-3.0]))[0]) == 2.0
+
+
+def test_tools_window_bars_compiles_to_rust():
+    from tools.data.types import DataColumn
+    from tools.factors import window_bars
+    from tools.factors.expr.leaf import ColumnRef as ToolColumnRef
+    from tools.factors.expr.streaming.incremental import compile_incremental_factor
+
+    from tools.data.types import DataFreq
+    expression = ToolColumnRef(DataColumn.CLOSE).rolling(window_bars(5)).mean()
+    executor = compile_incremental_factor('m', expression, ('A',), source_freq=DataFreq.MIN1)
+    assert getattr(executor._multi, 'uses_rust', False) is True

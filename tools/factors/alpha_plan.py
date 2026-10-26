@@ -25,7 +25,7 @@ _BINARY = {"add", "sub", "mul", "div", "gt", "lt", "ge", "le", "eq", "ne"}
 _UNARY = {"abs", "sign", "sqrt", "log", "tanh"}
 
 
-def alpha_plan_spec(expression: Any) -> dict[str, Any] | None:
+def alpha_plan_spec(expression: Any, *, source_freq=None, products=()) -> dict[str, Any] | None:
     columns: list[str] = []
     nodes: list[dict[str, Any]] = []
     keys: list[str] = []
@@ -49,7 +49,14 @@ def alpha_plan_spec(expression: Any) -> dict[str, Any] | None:
             if expr.trunc_start is not None or expr.trunc_end is not None:
                 return None
             window = expr.window
-            if not isinstance(window, ConstExpr) or not isinstance(window.value, int):
+            if isinstance(window, ConstExpr) and isinstance(window.value, int):
+                window_count = int(window.value)
+            elif type(window).__name__ == "WindowBarsExpr" and source_freq is not None and products:
+                from tools.factors.expr.rolling import _resolve_windows
+                common, window_count, _ = _resolve_windows(window.window.value, source_freq, products)
+                if not common:
+                    return None
+            else:
                 return None
             child = build(expr.operands[expr._data_start])
             if child is None:
@@ -57,8 +64,8 @@ def alpha_plan_spec(expression: Any) -> dict[str, Any] | None:
             op, _, q = expr.op.partition(":") if ":" in expr.op else (expr.op, "", "")
             op = op.removeprefix("rolling_")
             node = {
-                "kind": "rolling", "child": child, "window": int(window.value),
-                "op": op, "min_periods": expr._min_periods_value(int(window.value)),
+                "kind": "rolling", "child": child, "window": window_count,
+                "op": op, "min_periods": expr._min_periods_value(window_count),
                 "propagate_nan": expr.nan_policy.value == "propagate",
             }
             if op == "quantile":
