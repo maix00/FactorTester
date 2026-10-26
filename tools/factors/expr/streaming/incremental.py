@@ -1086,6 +1086,13 @@ def compile_incremental_factor(
     return SingleFactorIncrementalExecutor(factor_alias, multi)
 
 
+LAST_RUST_PLAN_ERROR: str | None = None
+
+
+def last_rust_plan_error() -> str | None:
+    return LAST_RUST_PLAN_ERROR
+
+
 def compile_incremental_factors(
     expressions: dict[str, FactorExpr],
     products: tuple[Any, ...],
@@ -1100,10 +1107,12 @@ def compile_incremental_factors(
     from tools.factors.expr.streaming.rust_incremental import (
         UnsupportedByRustPlan, compile_rust_incremental,
     )
+    global LAST_RUST_PLAN_ERROR
     try:
+        LAST_RUST_PLAN_ERROR = None
         return compile_rust_incremental(expressions, products, source_freq=source_freq, session_calendar=session_calendar)
-    except (UnsupportedByRustPlan, AttributeError, KeyError, TypeError, ValueError):
-        pass
+    except (UnsupportedByRustPlan, AttributeError, KeyError, TypeError, ValueError) as error:
+        LAST_RUST_PLAN_ERROR = f"{type(error).__name__}: {error}"
     memo: dict[tuple, StreamingNode] = {}
     plans = []
     aliases = []

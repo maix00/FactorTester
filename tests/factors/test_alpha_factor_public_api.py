@@ -685,3 +685,5 @@ def test_lightweight_category_and_term_inputs_without_product_objects():
     spread = term_spread().evaluate(ctx)
     assert spread['A'].iloc[0] == 2.0
     assert np.isnan(spread['B'].iloc[0])
+
+
