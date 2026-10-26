@@ -130,6 +130,11 @@ pub mod nautilus {
         }
 
         pub fn latest(&self) -> &[f64] { &self.latest }
+
+        /// Register this actor in Nautilus' thread-local actor registry.
+        pub fn register(self) -> std::rc::Rc<std::cell::UnsafeCell<Self>> {
+            nautilus_common::actor::registry::register_actor(self)
+        }
     }
 
     impl Actor for FactorActor {
@@ -187,5 +192,21 @@ mod tests {
         assert_eq!(engine.update(&bar(1.0)).unwrap()[0], 1.0);
         assert_eq!(engine.update(&bar(2.0)).unwrap()[0], 1.5);
         assert_eq!(engine.update(&bar(3.0)).unwrap()[0], 2.5);
+    }
+}
+
+#[cfg(all(test, feature = "nautilus"))]
+mod nautilus_tests {
+    use super::*;
+    use nautilus_common::actor::registry::{actor_exists, deregister_actor};
+    use ustr::Ustr;
+
+    #[test]
+    fn factor_actor_registers_with_nautilus() {
+        let engine = MultiWindowEngine::new(vec![("mean".into(), 2, SessionOp::Mean)]).unwrap();
+        let actor = nautilus::FactorActor::new("factor-actor-test", engine);
+        actor.register();
+        assert!(actor_exists(&Ustr::from("factor-actor-test")));
+        deregister_actor(&Ustr::from("factor-actor-test"));
     }
 }
