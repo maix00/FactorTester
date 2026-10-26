@@ -1076,12 +1076,14 @@ def compile_incremental_factor(
     source_freq: DataFreq | str | None = None,
     session_calendar: Any = None,
     event_line: Any = None,
+    require_rust: bool = False,
 ) -> SingleFactorIncrementalExecutor:
     """Compile one author-facing FactorExpr into a run-scoped executor."""
 
     multi = compile_incremental_factors(
         {factor_alias: expression}, products, source_freq=source_freq,
         session_calendar=session_calendar, event_line=event_line,
+        require_rust=require_rust,
     )
     return SingleFactorIncrementalExecutor(factor_alias, multi)
 
@@ -1100,6 +1102,7 @@ def compile_incremental_factors(
     source_freq: DataFreq | str | None = None,
     session_calendar: Any = None,
     event_line: Any = None,
+    require_rust: bool = False,
 ):
     """Compile several factors into one shared incremental DAG."""
     if not expressions:
@@ -1113,6 +1116,8 @@ def compile_incremental_factors(
         return compile_rust_incremental(expressions, products, source_freq=source_freq, session_calendar=session_calendar)
     except (UnsupportedByRustPlan, AttributeError, KeyError, TypeError, ValueError) as error:
         LAST_RUST_PLAN_ERROR = f"{type(error).__name__}: {error}"
+        if require_rust:
+            raise
     memo: dict[tuple, StreamingNode] = {}
     plans = []
     aliases = []
