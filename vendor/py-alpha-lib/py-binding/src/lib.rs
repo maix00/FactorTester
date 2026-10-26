@@ -251,86 +251,6 @@ mod algo_impl {
   }
 
   #[pyfunction]
-  #[pyo3(signature = (values, window, op, quantile=None, min_periods=1, propagate_nan=false))]
-  pub fn interval_rolling_fixed(
-    py: Python<'_>, values: PyReadonlyArray1<f64>, window: usize,
-    op: &str, quantile: Option<f64>, min_periods: usize, propagate_nan: bool,
-  ) -> PyResult<Py<PyArray1<f64>>> {
-    let values = values.as_slice()?;
-    let window = window.max(1);
-    let op = interval_op(op, quantile)?;
-    if matches!(
-      op, alpha_algo::SessionOp::Sum | alpha_algo::SessionOp::Mean
-        | alpha_algo::SessionOp::Var | alpha_algo::SessionOp::Std
-        | alpha_algo::SessionOp::Skew
-    ) {
-      const CHUNK: usize = 65_536;
-      let n = values.len();
-      let mut out = vec![f64::NAN; n];
-      out.par_chunks_mut(CHUNK).enumerate().for_each(|(chunk_index, chunk)| {
-        let chunk_start = chunk_index * CHUNK;
-        let (mut total, mut square, mut cube, mut count) = (0.0f64, 0.0f64, 0.0f64, 0usize);
-        for value in &values[chunk_start.saturating_sub(window)..chunk_start] {
-          if value.is_finite() {
-            total += *value; square += *value * *value; cube += *value * *value * *value;
-            count += 1;
-          }
-        }
-        for (offset, slot) in chunk.iter_mut().enumerate() {
-          let index = chunk_start + offset;
-          let value = values[index];
-          if value.is_finite() {
-            total += value; square += value * value; cube += value * value * value;
-            count += 1;
-          }
-          if index >= window {
-            let old = values[index - window];
-            if old.is_finite() {
-              total -= old; square -= old * old; cube -= old * old * old;
-              count -= 1;
-            }
-          }
-          let width = (index + 1).min(window);
-          *slot = if count < min_periods || (propagate_nan && count < width) || count == 0 {
-            f64::NAN
-          } else if matches!(op, alpha_algo::SessionOp::Mean) {
-            total / count as f64
-          } else if matches!(op, alpha_algo::SessionOp::Var | alpha_algo::SessionOp::Std) {
-            if count < 2 { f64::NAN } else {
-              let variance = ((square - total * total / count as f64) / (count - 1) as f64).max(0.0);
-              if matches!(op, alpha_algo::SessionOp::Std) { variance.sqrt() } else { variance }
-            }
-          } else if matches!(op, alpha_algo::SessionOp::Skew) {
-            if count < 3 { f64::NAN } else {
-              let n = count as f64;
-              let mean = total / n;
-              let m2 = (square - total * total / n).max(0.0);
-              let m3 = cube - 3.0 * mean * square + 2.0 * n * mean * mean * mean;
-              if m2 <= 0.0 { f64::NAN } else {
-                let population = (m3 / n) / (m2 / n).powf(1.5);
-                population * (n * (n - 1.0)).sqrt() / (n - 2.0)
-              }
-            }
-          } else { total };
-        }
-      });
-      return Ok(out.into_pyarray(py).unbind());
-    }
-    let mut starts = Vec::with_capacity(values.len());
-    let mut ends = Vec::with_capacity(values.len());
-    for index in 0..values.len() {
-      starts.push(index.saturating_sub(window - 1) as u64);
-      ends.push(index as u64);
-    }
-    let mut state = alpha_algo::IntervalKernel::new(op)
-      .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
-      .with_semantics(min_periods, propagate_nan);
-    Ok(values.iter().copied().zip(starts).zip(ends)
-      .map(|((value, start), end)| state.update_explicit(start, end, value))
-      .collect::<Vec<_>>().into_pyarray(py).unbind())
-  }
-
-  #[pyfunction]
   #[pyo3(signature = (x, y, starts, ends, correlation=false, window=None))]
   pub fn interval_rolling_pair(
     py: Python<'_>, x: PyReadonlyArray1<f64>, y: PyReadonlyArray1<f64>,
@@ -399,65 +319,6 @@ mod algo_impl {
       .zip(starts.iter().copied()).zip(ends.iter().copied())
       .map(|(((x, y), start), end)| state.update(start, end, x, y))
       .collect::<Vec<_>>().into_pyarray(py).unbind())
-  }
-
-  #[pyfunction]
-  #[pyo3(signature = (x, y, window, correlation=false, min_periods=2, propagate_nan=false))]
-  pub fn interval_rolling_pair_fixed(
-    py: Python<'_>, x: PyReadonlyArray1<f64>, y: PyReadonlyArray1<f64>,
-    window: usize, correlation: bool, min_periods: usize, propagate_nan: bool,
-  ) -> PyResult<Py<PyArray1<f64>>> {
-    let x = x.as_slice()?;
-    let y = y.as_slice()?;
-    if x.len() != y.len() {
-      return Err(pyo3::exceptions::PyValueError::new_err("pair length mismatch"));
-    }
-    let window = window.max(1);
-    const CHUNK: usize = 65_536;
-    let n = x.len();
-    let mut out = vec![f64::NAN; n];
-    out.par_chunks_mut(CHUNK).enumerate().for_each(|(chunk_index, chunk)| {
-      let chunk_start = chunk_index * CHUNK;
-      let (mut sx, mut sy) = (0.0f64, 0.0f64);
-      let (mut sxx, mut syy, mut sxy) = (0.0f64, 0.0f64, 0.0f64);
-      let mut count = 0usize;
-      for k in chunk_start.saturating_sub(window)..chunk_start {
-        if x[k].is_finite() && y[k].is_finite() {
-          sx += x[k]; sy += y[k]; sxx += x[k] * x[k];
-          syy += y[k] * y[k]; sxy += x[k] * y[k]; count += 1;
-        }
-      }
-      for (offset, slot) in chunk.iter_mut().enumerate() {
-        let index = chunk_start + offset;
-        if x[index].is_finite() && y[index].is_finite() {
-          sx += x[index]; sy += y[index]; sxx += x[index] * x[index];
-          syy += y[index] * y[index]; sxy += x[index] * y[index]; count += 1;
-        }
-        if index >= window {
-          let k = index - window;
-          if x[k].is_finite() && y[k].is_finite() {
-            sx -= x[k]; sy -= y[k]; sxx -= x[k] * x[k];
-            syy -= y[k] * y[k]; sxy -= x[k] * y[k]; count -= 1;
-          }
-        }
-        let width = (index + 1).min(window);
-        if count < min_periods || (propagate_nan && count < width) || count < 2 {
-          *slot = f64::NAN;
-          continue;
-        }
-        let m = count as f64;
-        let covariance = (sxy - sx * sy / m) / (m - 1.0);
-        *slot = if !correlation {
-          covariance
-        } else {
-          let vx = (sxx - sx * sx / m).max(0.0);
-          let vy = (syy - sy * sy / m).max(0.0);
-          let denom = (vx * vy).sqrt();
-          if denom > 0.0 { (sxy - sx * sy / m) / denom } else { f64::NAN }
-        };
-      }
-    });
-    Ok(out.into_pyarray(py).unbind())
   }
 
   #[pyfunction]
@@ -3075,9 +2936,7 @@ fn _algo(m: &Bound<'_, PyModule>) -> PyResult<()> {
   m.add_function(wrap_pyfunction!(ema, m)?)?;
   m.add_function(wrap_pyfunction!(interval_ema, m)?)?;
   m.add_function(wrap_pyfunction!(interval_rolling, m)?)?;
-  m.add_function(wrap_pyfunction!(interval_rolling_fixed, m)?)?;
   m.add_function(wrap_pyfunction!(interval_rolling_pair, m)?)?;
-  m.add_function(wrap_pyfunction!(interval_rolling_pair_fixed, m)?)?;
   m.add_function(wrap_pyfunction!(session_rolling_sum, m)?)?;
   m.add_function(wrap_pyfunction!(session_rolling_mean, m)?)?;
   m.add_function(wrap_pyfunction!(set_ctx, m)?)?;
