@@ -238,6 +238,8 @@ pub mod nautilus {
         engine: E,
         latest: Vec<f64>,
         last_error: Option<String>,
+        expected_products: Vec<String>,
+        pending_bars: std::collections::BTreeMap<String, Bar>,
     }
 
     impl<E> fmt::Debug for FactorActor<E> {
@@ -250,12 +252,48 @@ pub mod nautilus {
     where E::Error: std::fmt::Display,
 {
         pub fn new(actor_id: &str, engine: E) -> Self {
-            Self { id: Ustr::from(actor_id), engine, latest: Vec::new(), last_error: None }
+            Self {
+                id: Ustr::from(actor_id), engine, latest: Vec::new(), last_error: None,
+                expected_products: Vec::new(),
+                pending_bars: std::collections::BTreeMap::new(),
+            }
         }
 
         pub fn latest(&self) -> &[f64] { &self.latest }
 
         pub fn last_error(&self) -> Option<&str> { self.last_error.as_deref() }
+
+        pub fn pending_len(&self) -> usize { self.pending_bars.len() }
+
+        pub fn expect_products(&mut self, products: &[&str]) {
+            self.expected_products = products.iter().map(|product| product.to_string()).collect();
+            self.expected_products.sort();
+        }
+
+        /// Collect one bar per frozen product; update only when every product arrived.
+        pub fn on_completed_bar(&mut self, bar: &Bar) {
+            if self.expected_products.is_empty() {
+                self.handle(bar);
+                return;
+            }
+            let product = bar.bar_type.instrument_id().to_string();
+            if !self.expected_products.contains(&product) {
+                self.last_error = Some(format!("unexpected product {product}"));
+                return;
+            }
+            self.pending_bars.insert(product, bar.clone());
+            if self.pending_bars.len() != self.expected_products.len() { return; }
+            let bars: Vec<Bar> = self.expected_products.iter()
+                .map(|product| self.pending_bars.remove(product).unwrap())
+                .collect();
+            let timestamp = bars[0].ts_event.as_u64() as i64;
+            let market = crate::nautilus::market_bar_from_bars(timestamp, &bars);
+            match self.engine.update(&market) {
+                Ok(values) => { self.latest = values; self.last_error = None; }
+                Err(error) => self.last_error = Some(error.to_string()),
+            }
+            self.pending_bars.clear();
+        }
 
         /// Assemble one completed cross-sectional slice and update once.
         pub fn handle_bars(&mut self, bars: &[Bar]) {
@@ -427,6 +465,23 @@ mod nautilus_tests {
         actor.handle_bars(&[make("A.B", "1.0"), make("C.D", "3.0")]);
         assert!(actor.last_error().is_none(), "{:?}", actor.last_error());
         assert_eq!(actor.latest(), &[0.0, 0.5]);
+    }
+
+    #[test]
+    fn factor_actor_waits_for_complete_product_slice() {
+        let json = r#"{"columns":["CLOSE"],"nodes":[{"kind":"column","index":0},{"kind":"cross","child":0,"op":"rank"}],"outputs":[1]}"#;
+        let mut actor = nautilus::FactorActor::from_plan_json("factor-barrier-test", 2, json).unwrap();
+        actor.expect_products(&["A.B", "C.D"]);
+        let make = |symbol: &str, close: &str| Bar::new(
+            BarType::from(format!("{symbol}-1-MINUTE-LAST-EXTERNAL").as_str()),
+            Price::from(close), Price::from(close), Price::from(close),
+            Price::from(close), Quantity::from("1"), 1_000.into(), 1_000.into(),
+        );
+        actor.on_completed_bar(&make("A.B", "1.0"));
+        assert!(actor.latest().is_empty());
+        actor.on_completed_bar(&make("C.D", "3.0"));
+        assert_eq!(actor.latest(), &[0.0, 0.5]);
+        assert_eq!(actor.pending_len(), 0);
     }
 
     #[test]
