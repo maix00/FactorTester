@@ -3,10 +3,27 @@
 Independent Rust bridge between Nautilus market events and py-alpha-lib.
 
 ```text
-Nautilus actor/plugin
-  -> nautilus-factor-bridge
-       -> py-alpha-lib (FactorEngine state)
+Nautilus Bar
+  -> FactorActor<E: FactorEngine>
+  -> MarketBar
+  -> Rust factor engine
+  -> Vec<f64>
 ```
 
-`nautilus-core` is an optional feature; Nautilus core does not depend on this
-crate and py-alpha-lib does not depend on Nautilus.
+Engines:
+
+```text
+WindowEngine          one window, one product
+ProductWindowEngine   one window, all products
+MultiWindowEngine     several windows, one product
+MatrixPlanEngine      factors x products
+```
+
+`FactorActor` registers with `nautilus_common::actor::registry` and consumes
+`nautilus_model::data::Bar`; no Python is involved.
+
+Nautilus core does not depend on this crate. `nautilus-*` dependencies are
+optional behind the `nautilus` feature; `py-alpha-lib` never depends on
+Nautilus.
+
+Still missing: a FactorExpr DAG engine, signal notification, and trader wiring.
