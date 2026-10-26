@@ -397,3 +397,30 @@ def test_signal_align_legacy_identity_is_unchanged_by_new_parameters():
     scoped = close.signal_align('2min', scope=scope_trading_day())
     assert scoped._structural_key()[0] == 'alpha.factor.SignalAlign:v2'
     assert scoped.semantic_fingerprint() != legacy.semantic_fingerprint()
+
+
+def _signal_state(expression):
+    import json
+    from alpha import FactorPlanState
+    return FactorPlanState(json.dumps(expression.to_plan_spec()), 1)
+
+
+def test_signal_align_first_include_false_and_emit_in_rust():
+    from alpha.factor import TradingSession, scope_session
+
+    session = TradingSession(0, 250)
+    close = ColumnRef('CLOSE')
+    bars = [(0, 0.0), (50, 1.0), (100, 2.0), (150, 3.0), (200, 4.0), (250, 5.0)]
+
+    first = _signal_state(close.signal_align('100ns', scope=scope_session((session,)), basepoint='first'))
+    first_values = [float(first.update_at(timestamp, np.array([value]))[0]) for timestamp, value in bars]
+    np.testing.assert_allclose(first_values, [0.0, 0.0, 1.0, 1.0, 3.0, 3.0])
+
+    excluded = _signal_state(close.signal_align('100ns', scope=scope_session((session,)), include_current=False))
+    excluded_values = [float(excluded.update_at(timestamp, np.array([value]))[0]) for timestamp, value in bars]
+    assert np.isnan(excluded_values[0])
+    assert excluded_values[2] == 1.0
+
+    emitted = _signal_state(close.signal_align('100ns', scope=scope_session((session,)), partial='emit'))
+    emitted_values = [float(emitted.update_at(timestamp, np.array([value]))[0]) for timestamp, value in bars]
+    assert emitted_values[-1] == 5.0

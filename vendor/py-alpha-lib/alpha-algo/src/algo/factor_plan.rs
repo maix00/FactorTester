@@ -28,7 +28,8 @@ pub enum ExprSpec {
     Cross { op: CrossOp, child: usize },
     Since { condition: usize, count: usize, include_current: bool, nearest: bool, default_scope: bool, default: f64 },
     Scope { child: usize, count: usize, op: SessionOp, min_periods: usize, propagate_nan: bool, sessions: Vec<(i64, i64, i64)> },
-    Signal { child: usize, signal_ns: i64, sessions: Vec<(i64, i64, i64)> },
+    Signal { child: usize, signal_ns: i64, sessions: Vec<(i64, i64, i64)>,
+             basepoint: String, include_current: bool, partial: String },
 }
 
 struct NodeState {
@@ -42,6 +43,8 @@ struct NodeState {
     signal_last: Vec<f64>,
     signal_next: Vec<Option<i64>>,
     signal_session: Option<usize>,
+    signal_pending: Vec<Option<f64>>,
+    signal_prev: Vec<f64>,
     scope_session: Option<usize>,
 }
 
@@ -86,6 +89,8 @@ impl FactorPlanKernel {
                 signal_last: vec![f64::NAN; products],
                 signal_next: vec![None; products],
                 signal_session: None,
+                signal_pending: vec![None; products],
+                signal_prev: vec![f64::NAN; products],
                 scope_session: None,
             });
         }
@@ -171,7 +176,7 @@ impl FactorPlanKernel {
                 condition.iter().zip(when_true.iter().zip(&when_false))
                     .map(|(c, (a, b))| if c.is_finite() && *c != 0.0 { *a } else { *b }).collect()
             }
-            ExprSpec::Signal { child, signal_ns, sessions } => {
+            ExprSpec::Signal { child, signal_ns, sessions, basepoint, include_current, partial } => {
                 let input = self.eval(child, columns, cache)?;
                 let timestamp = self.timestamp_ns;
                 let node = &mut self.nodes[index];
@@ -180,17 +185,36 @@ impl FactorPlanKernel {
                     node.signal_session = session;
                     node.signal_last.fill(f64::NAN);
                     node.signal_next.fill(None);
+                    node.signal_pending.fill(None);
+                    node.signal_prev.fill(f64::NAN);
                 }
+                let session_end = session.map(|position| sessions[position].1);
                 for product in 0..self.products {
                     if node.signal_next[product].is_none() {
                         let anchor = session.map_or(timestamp, |position| sessions[position].2);
                         let first = if anchor % signal_ns == 0 { anchor } else { (anchor / signal_ns + 1) * signal_ns };
                         node.signal_next[product] = Some(first);
                     }
-                    if timestamp >= node.signal_next[product].unwrap_or(i64::MAX) {
-                        node.signal_last[product] = input[product];
-                        node.signal_next[product] = Some(node.signal_next[product].unwrap_or(timestamp) + signal_ns);
+                    let next = node.signal_next[product].unwrap_or(i64::MAX);
+                    let target = timestamp >= next;
+                    let emit_partial = partial == "emit" && session_end == Some(timestamp) && timestamp < next;
+                    if target || emit_partial {
+                        let value = if basepoint == "first" {
+                            node.signal_pending[product].unwrap_or(if include_current { input[product] } else { f64::NAN })
+                        } else if include_current {
+                            input[product]
+                        } else {
+                            node.signal_prev[product]
+                        };
+                        node.signal_last[product] = value;
+                        node.signal_pending[product] = None;
+                        if target {
+                            node.signal_next[product] = Some(next + signal_ns);
+                        }
+                    } else if basepoint == "first" && node.signal_pending[product].is_none() {
+                        node.signal_pending[product] = Some(input[product]);
                     }
+                    node.signal_prev[product] = input[product];
                 }
                 node.signal_last.clone()
             }
@@ -290,6 +314,10 @@ impl FactorPlanKernel {
     }
 }
 
+fn default_basepoint() -> String { "last".into() }
+fn default_include_current() -> bool { true }
+fn default_partial() -> String { "drop".into() }
+
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum RawNode {
@@ -306,7 +334,10 @@ enum RawNode {
     Cross { op: String, child: usize },
     Since { condition: usize, count: usize, include_current: bool, nearest: bool,
             default_scope: bool, default: f64 },
-    Signal { child: usize, signal_ns: i64, #[serde(default)] sessions: Vec<[i64; 3]> },
+    Signal { child: usize, signal_ns: i64, #[serde(default)] sessions: Vec<[i64; 3]>,
+             #[serde(default = "default_basepoint")] basepoint: String,
+             #[serde(default = "default_include_current")] include_current: bool,
+             #[serde(default = "default_partial")] partial: String },
 }
 
 #[derive(Deserialize)]
@@ -360,8 +391,10 @@ impl FactorPlanKernel {
                 },
                 RawNode::Since { condition, count, include_current, nearest, default_scope, default } =>
                     ExprSpec::Since { condition, count, include_current, nearest, default_scope, default },
-                RawNode::Signal { child, signal_ns, sessions } =>
-                    ExprSpec::Signal { child, signal_ns, sessions: sessions.into_iter().map(|item| (item[0], item[1], item[2])).collect() },
+                RawNode::Signal { child, signal_ns, sessions, basepoint, include_current, partial } =>
+                    ExprSpec::Signal { child, signal_ns,
+                        sessions: sessions.into_iter().map(|item| (item[0], item[1], item[2])).collect(),
+                        basepoint, include_current, partial },
             });
         }
         let mut plan = Self::new(products, specs, raw.outputs)?;
