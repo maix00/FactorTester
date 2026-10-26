@@ -249,6 +249,7 @@ pub mod nautilus {
         pending_bars: std::collections::BTreeMap<String, Bar>,
         last_update: Option<FactorUpdate>,
         pending_timestamp: Option<i64>,
+        future_slices: std::collections::BTreeMap<i64, std::collections::BTreeMap<String, Bar>>,
     }
 
     impl<E> fmt::Debug for FactorActor<E> {
@@ -266,6 +267,7 @@ pub mod nautilus {
                 expected_products: Vec::new(),
                 pending_bars: std::collections::BTreeMap::new(),
                 pending_timestamp: None,
+                future_slices: std::collections::BTreeMap::new(),
                 last_update: None,
             }
         }
@@ -274,7 +276,9 @@ pub mod nautilus {
 
         pub fn last_error(&self) -> Option<&str> { self.last_error.as_deref() }
 
-        pub fn pending_len(&self) -> usize { self.pending_bars.len() }
+        pub fn pending_len(&self) -> usize {
+            self.pending_bars.len() + self.future_slices.values().map(|slice| slice.len()).sum::<usize>()
+        }
 
         pub fn last_update(&self) -> Option<&FactorUpdate> { self.last_update.as_ref() }
 
@@ -296,27 +300,35 @@ pub mod nautilus {
             }
             let timestamp = bar.ts_event.as_u64() as i64;
             if let Some(pending) = self.pending_timestamp {
-                if pending != timestamp {
-                    self.last_error = Some(format!("mixed slice timestamps {pending} and {timestamp}"));
-                    self.pending_bars.clear();
-                    self.pending_timestamp = None;
+                if timestamp < pending {
+                    self.last_error = Some(format!("out-of-order slice {timestamp} after {pending}"));
+                    return;
+                }
+                if timestamp > pending {
+                    self.future_slices.entry(timestamp).or_default().insert(product, bar.clone());
                     return;
                 }
             } else {
                 self.pending_timestamp = Some(timestamp);
             }
             self.pending_bars.insert(product, bar.clone());
+            if self.pending_bars.len() == self.expected_products.len() {
+                self.flush_slice();
+            }
+        }
+
+        fn flush_slice(&mut self) {
+            let Some(timestamp) = self.pending_timestamp else { return };
             if self.pending_bars.len() != self.expected_products.len() { return; }
             let bars: Vec<Bar> = self.expected_products.iter()
                 .map(|product| self.pending_bars.remove(product).unwrap())
                 .collect();
-            let timestamp = bars[0].ts_event.as_u64() as i64;
             let market = crate::nautilus::market_bar_from_bars(timestamp, &bars);
             match self.engine.update(&market) {
                 Ok(values) => {
                     self.latest = values.clone();
                     self.last_update = Some(FactorUpdate {
-                        timestamp_ns: market.timestamp_ns,
+                        timestamp_ns: timestamp,
                         products: market.products.clone(),
                         values,
                     });
@@ -326,6 +338,13 @@ pub mod nautilus {
             }
             self.pending_bars.clear();
             self.pending_timestamp = None;
+            while let Some((&next, slice)) = self.future_slices.iter().next() {
+                if slice.len() != self.expected_products.len() { break; }
+                let slice = self.future_slices.remove(&next).unwrap();
+                self.pending_bars = slice;
+                self.pending_timestamp = Some(next);
+                self.flush_slice();
+            }
         }
 
         /// Assemble one completed cross-sectional slice and update once.
@@ -530,7 +549,7 @@ mod nautilus_tests {
     }
 
     #[test]
-    fn factor_actor_rejects_mixed_slice_timestamps() {
+    fn factor_actor_buffers_future_slice_without_mixing() {
         let json = r#"{"columns":["CLOSE"],"nodes":[{"kind":"column","index":0}],"outputs":[0]}"#;
         let mut actor = nautilus::FactorActor::from_plan_json("factor-time-test", 2, json).unwrap();
         actor.expect_products(&["A.B", "C.D"]);
@@ -541,8 +560,12 @@ mod nautilus_tests {
         );
         actor.on_completed_bar(&make("A.B", 1_000));
         actor.on_completed_bar(&make("C.D", 2_000));
+        assert_eq!(actor.pending_len(), 2);
+        assert!(actor.last_error().is_none());
+        actor.on_completed_bar(&make("A.B", 2_000));
+        actor.on_completed_bar(&make("C.D", 1_000));
         assert_eq!(actor.pending_len(), 0);
-        assert!(actor.last_error().unwrap().contains("mixed slice"));
+        assert_eq!(actor.last_update().unwrap().timestamp_ns, 2_000);
     }
 
     #[test]
