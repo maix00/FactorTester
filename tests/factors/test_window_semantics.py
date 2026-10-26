@@ -82,3 +82,15 @@ def test_bar_search_operator_carries_nan_policy():
     assert base.nan_policy is NanPolicy.PROPAGATE
     assert skip.nan_policy is NanPolicy.SKIP
     assert base._structural_key() != skip._structural_key()
+
+
+def test_semantics_change_the_factor_formula_fingerprint():
+    from tools.data.types import DataColumn
+    from tools.factors.expr.leaf import ColumnRef
+    from tools.factors.expr.window_semantics import NanPolicy
+
+    base = ColumnRef(DataColumn.CLOSE).rolling(20).mean()
+    skip = ColumnRef(DataColumn.CLOSE).rolling(20).semantics(
+        min_periods=1, nan_policy=NanPolicy.SKIP,
+    ).mean()
+    assert base.semantic_fingerprint() != skip.semantic_fingerprint()
