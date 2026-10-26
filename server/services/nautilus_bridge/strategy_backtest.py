@@ -9,6 +9,7 @@ from typing import Any
 
 from server.services.nautilus_bridge.backtest_runner import _load_input, ReplayInput
 from server.services.nautilus_bridge.factor_stream import build_factor_expr_bar_adapter
+from server.services.nautilus_bridge.nautilus_events import NautilusEventTimeline
 from server.services.nautilus_bridge.reports import export_backtest_reports
 from tools.factors.expr.core import FactorExpr
 from tools.data.types.time_freq import DataFreq
@@ -18,7 +19,7 @@ def run_strategy_replay(
     *, input: ReplayInput, strategy_kind: str,
     factor_bindings: dict[str, FactorExpr],
     product: Any, output_dir: Path, max_bars: int = 8,
-    factor_field: str = "CLOSE_ADJUSTED",
+    factor_field: str = "CLOSE_ADJUSTED", session_calendar: Any = None,
 ) -> dict[str, Any]:
     """Run one FactorExpr strategy in Nautilus and export native reports."""
     from nautilus_trader.backtest import BacktestEngine
@@ -49,6 +50,7 @@ def run_strategy_replay(
     class Trader(Strategy):
         def __init__(self) -> None:
             super().__init__()
+            self.events = NautilusEventTimeline(calendar=session_calendar)
             self.factors = {
                 role: build_factor_expr_bar_adapter(
                     factor_ref="factor:v2:" + role.encode().hex().ljust(43, "0")[:43],
@@ -68,6 +70,7 @@ def run_strategy_replay(
             self.subscribe_bars(bar_type)
 
         def on_bar(self, bar) -> None:
+            self.events.on_bar(bar)
             for factor in self.factors.values():
                 factor.on_bar(bar)
             self.seen += 1
@@ -179,6 +182,7 @@ def run_strategy_family_replay(
     class FamilyTrader(Strategy):
         def __init__(self) -> None:
             super().__init__()
+            self.events = NautilusEventTimeline(calendar=session_calendar)
             self.factors = {
                 role: build_factor_expr_bar_adapter(
                     factor_ref="factor:v2:" + role.encode().hex().ljust(43, "0")[:43],
@@ -201,6 +205,7 @@ def run_strategy_family_replay(
                 self.subscribe_bars(value)
 
         def on_bar(self, bar) -> None:
+            self.events.on_bar(bar)
             for factor in self.factors.values():
                 factor.on_bar(bar)
             signal = publications.get("signal") or []
