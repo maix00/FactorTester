@@ -6,12 +6,20 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SRC="${NAUTILUS_SRC:-$ROOT/vendor/nautilus_trader}"
 OUT="${NAUTILUS_WHEEL_DIR:-$ROOT/.artifacts/nautilus-wheels}"
 CACHE="${NAUTILUS_CACHE:-$ROOT/.artifacts/nautilus-build}"
+TARGET_CACHE="${NAUTILUS_TARGET_CACHE:-$CACHE/target}"
 JOBS="${CARGO_BUILD_JOBS:-1}"
 MEMORY="${NAUTILUS_BUILD_MEMORY:-3g}"
 BUILDER="${NAUTILUS_BUILDER_IMAGE:-traderesearch/nautilus-builder:py314}"
 # nautilus-model is a large staticlib; codegen-units=1 exceeded a 3 GiB
 # container. Sixteen units keep the peak below that budget on the public host.
-mkdir -p "$OUT" "$CACHE/cargo/registry" "$CACHE/cargo/git"
+mkdir -p "$OUT" "$CACHE/cargo/registry" "$CACHE/cargo/git" "$TARGET_CACHE"
+bash "$ROOT/scripts/server/check_local_build_capacity.sh"
+cleanup_target() {
+  # The target directory is build state, not a deliverable.  Leaving a 100 GiB
+  # debug/incremental tree behind has already exhausted the local disk once.
+  rm -rf -- "$TARGET_CACHE"
+}
+trap cleanup_target EXIT
 [ -f "$SRC/python/pyproject.toml" ] || { echo "missing $SRC/python/pyproject.toml" >&2; exit 1; }
 git -C "$SRC" diff --quiet || { echo "vendor/nautilus_trader has uncommitted changes" >&2; exit 1; }
 REVISION="$(git -C "$SRC" rev-parse HEAD)"
@@ -52,6 +60,11 @@ docker run --rm \
   -v "$SRC:/src" -v "$OUT:/wheels" \
   -v "$CACHE/cargo/registry:/root/.cargo/registry" \
   -v "$CACHE/cargo/git:/root/.cargo/git" \
+  -v "$TARGET_CACHE:/target" \
+  -e CARGO_TARGET_DIR=/target \
+  -e CARGO_INCREMENTAL=0 \
+  -e CARGO_PROFILE_RELEASE_DEBUG=0 \
+  -e CARGO_PROFILE_RELEASE_STRIP=symbols \
   "$BUILDER" bash -lc '
     set -euo pipefail
     . /root/.cargo/env

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-minimum_gb="${FACTORTESTER_MIN_BUILD_FREE_GB:-15}"
+minimum_gb="${FACTORTESTER_MIN_BUILD_FREE_GB:-20}"
 available_kb="$(df -Pk / | awk 'NR==2 {print $4}')"
 available_gb="$((available_kb / 1024 / 1024))"
 if (( available_gb < minimum_gb )); then
