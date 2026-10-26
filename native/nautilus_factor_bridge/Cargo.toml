@@ -1,0 +1,18 @@
+[package]
+name = "nautilus-factor-bridge"
+version = "0.1.0"
+edition = "2024"
+license = "BSD-2-Clause"
+description = "Independent Rust bridge between Nautilus market events and py-alpha-lib factor execution"
+
+[features]
+default = []
+nautilus = ["dep:nautilus-core"]
+
+[dependencies]
+alpha-algo = { path = "../../vendor/py-alpha-lib/alpha-algo" }
+nautilus-core = { path = "../../vendor/nautilus_trader/crates/core", optional = true }
+
+[lib]
+name = "nautilus_factor_bridge"
+path = "src/lib.rs"
