@@ -96,6 +96,18 @@ class FactorExpr:
     def __lt__(self, other: Any) -> "FactorExpr":
         return CompositeExpr("lt", self, _to_expr(other))
 
+    def __ge__(self, other: Any) -> "FactorExpr":
+        return CompositeExpr("ge", self, _to_expr(other))
+
+    def __le__(self, other: Any) -> "FactorExpr":
+        return CompositeExpr("le", self, _to_expr(other))
+
+    def __eq__(self, other: Any) -> "FactorExpr":
+        return CompositeExpr("eq", self, _to_expr(other))
+
+    def __ne__(self, other: Any) -> "FactorExpr":
+        return CompositeExpr("ne", self, _to_expr(other))
+
     def where(self, condition: Any, other: Any = np.nan) -> "FactorExpr":
         return WhereOp(_to_expr(condition), self, _to_expr(other))
 

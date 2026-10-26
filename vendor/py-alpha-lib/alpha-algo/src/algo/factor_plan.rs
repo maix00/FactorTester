@@ -23,6 +23,7 @@ pub enum ExprSpec {
     Product(Vec<f64>),
     Rolling { child: usize, window: usize, op: SessionOp, min_periods: usize, propagate_nan: bool },
     Ema { child: usize, span: usize, min_periods: usize, propagate_nan: bool },
+    MatchDistance { child: usize, predicate: crate::algo::MatchExpr, count: usize, nearest: bool, default: f64, include_current: bool },
     SessionRolling { child: usize, lookback_sessions: usize, sessions: Vec<(i64, i64, usize)>, op: SessionOp, min_periods: usize, propagate_nan: bool },
     Linreg { child: usize, window: usize, op: String, min_periods: usize, propagate_nan: bool },
     Neg { child: usize },
@@ -97,6 +98,7 @@ struct NodeState {
     rolling: Vec<Option<IntervalKernel>>,
     ema: Vec<Option<crate::algo::EmaState>>,
     linreg: Vec<Option<LinearState>>,
+    match_history: Vec<VecDeque<(u64, f64)>>,
     history: VecDeque<Vec<f64>>,
     since_first: Vec<Option<usize>>,
     since_last: Vec<Option<usize>>,
@@ -158,7 +160,9 @@ impl FactorPlanKernel {
                 _ => (0..products).map(|_| None).collect(),
             };
             nodes.push(NodeState {
-                spec, rolling, ema, linreg, history: VecDeque::new(),
+                spec, rolling, ema, linreg,
+                match_history: (0..products).map(|_| VecDeque::new()).collect(),
+                history: VecDeque::new(),
                 since_first: vec![None; products],
                 since_last: vec![None; products],
                 since_base: vec![0; products],
@@ -179,7 +183,7 @@ impl FactorPlanKernel {
             let children: &[usize] = match &node.spec {
                 ExprSpec::Column(_) | ExprSpec::Const(_) | ExprSpec::Product(_) => &[],
                 ExprSpec::Neg { child } | ExprSpec::Unary { child, .. } | ExprSpec::Rolling { child, .. }
-                | ExprSpec::SessionRolling { child, .. }
+                | ExprSpec::SessionRolling { child, .. } | ExprSpec::MatchDistance { child, .. }
                 | ExprSpec::Ema { child, .. } | ExprSpec::Linreg { child, .. }
                 | ExprSpec::Shift { child, .. } | ExprSpec::Cross { child, .. }
                 | ExprSpec::Scope { child, .. } | ExprSpec::Signal { child, .. } => std::slice::from_ref(child),
@@ -275,6 +279,20 @@ impl FactorPlanKernel {
                         let Some(state) = node.rolling[product].as_mut() else { out[product] = f64::NAN; continue };
                         state.set_semantics(min_periods, propagate_nan);
                         out[product] = state.update_explicit(start, current, input[product]);
+                    }
+                }
+                ExprSpec::MatchDistance { child, ref predicate, count, nearest, default, include_current } => {
+                    let input = &head[child];
+                    let node = &mut self.nodes[index];
+                    for product in 0..products {
+                        let current_value = input[product];
+                        let candidates: Vec<(u64, f64)> = node.match_history[product].iter().copied().collect();
+                        let mut value = crate::algo::match_distance(current, current_value, &candidates, predicate, count as u64, nearest, default);
+                        if include_current && predicate.eval(current_value, current_value) != 0.0 { value = 0.0; }
+                        out[product] = value;
+                        let history = &mut node.match_history[product];
+                        history.push_back((current, current_value));
+                        while history.len() > count { history.pop_front(); }
                     }
                 }
                 ExprSpec::SessionRolling { child, lookback_sessions, ref sessions, min_periods, propagate_nan, .. } => {
@@ -411,6 +429,45 @@ fn default_include_current() -> bool { true }
 fn default_partial() -> String { "drop".into() }
 
 #[derive(Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+enum RawMatch {
+    Current,
+    Candidate,
+    Const { value: f64 },
+    Add { a: Box<RawMatch>, b: Box<RawMatch> },
+    Sub { a: Box<RawMatch>, b: Box<RawMatch> },
+    Mul { a: Box<RawMatch>, b: Box<RawMatch> },
+    Div { a: Box<RawMatch>, b: Box<RawMatch> },
+    Abs { a: Box<RawMatch> },
+    Gt { a: Box<RawMatch>, b: Box<RawMatch> },
+    Lt { a: Box<RawMatch>, b: Box<RawMatch> },
+    Ge { a: Box<RawMatch>, b: Box<RawMatch> },
+    Le { a: Box<RawMatch>, b: Box<RawMatch> },
+    Eq { a: Box<RawMatch>, b: Box<RawMatch> },
+    Ne { a: Box<RawMatch>, b: Box<RawMatch> },
+}
+
+fn compile_match(raw: RawMatch) -> crate::algo::MatchExpr {
+    use crate::algo::MatchExpr as M;
+    match raw {
+        RawMatch::Current => M::Current,
+        RawMatch::Candidate => M::Candidate,
+        RawMatch::Const { value } => M::Const(value),
+        RawMatch::Add { a, b } => M::Add(Box::new(compile_match(*a)), Box::new(compile_match(*b))),
+        RawMatch::Sub { a, b } => M::Sub(Box::new(compile_match(*a)), Box::new(compile_match(*b))),
+        RawMatch::Mul { a, b } => M::Mul(Box::new(compile_match(*a)), Box::new(compile_match(*b))),
+        RawMatch::Div { a, b } => M::Div(Box::new(compile_match(*a)), Box::new(compile_match(*b))),
+        RawMatch::Abs { a } => M::Abs(Box::new(compile_match(*a))),
+        RawMatch::Gt { a, b } => M::Gt(Box::new(compile_match(*a)), Box::new(compile_match(*b))),
+        RawMatch::Lt { a, b } => M::Lt(Box::new(compile_match(*a)), Box::new(compile_match(*b))),
+        RawMatch::Ge { a, b } => M::Ge(Box::new(compile_match(*a)), Box::new(compile_match(*b))),
+        RawMatch::Le { a, b } => M::Le(Box::new(compile_match(*a)), Box::new(compile_match(*b))),
+        RawMatch::Eq { a, b } => M::Eq(Box::new(compile_match(*a)), Box::new(compile_match(*b))),
+        RawMatch::Ne { a, b } => M::Ne(Box::new(compile_match(*a)), Box::new(compile_match(*b))),
+    }
+}
+
+#[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum RawNode {
     Column { index: usize },
@@ -422,6 +479,8 @@ enum RawNode {
             #[serde(default)] sessions: Vec<[i64; 3]> },
     SessionRolling { child: usize, lookback_sessions: usize, sessions: Vec<[i64; 3]>, op: String,
                      min_periods: usize, propagate_nan: bool },
+    MatchDistance { child: usize, predicate: RawMatch, count: usize, nearest: bool,
+                    default: f64, #[serde(default = "default_include_current")] include_current: bool },
     Binary { op: String, left: usize, right: usize },
     Neg { child: usize },
     Unary { op: String, child: usize },
@@ -474,6 +533,8 @@ impl FactorPlanKernel {
                         ExprSpec::Rolling { child, window, op: session_op(&op, quantile)?, min_periods, propagate_nan }
                     }
                 }
+                RawNode::MatchDistance { child, predicate, count, nearest, default, include_current } =>
+                    ExprSpec::MatchDistance { child, predicate: compile_match(predicate), count, nearest, default, include_current },
                 RawNode::SessionRolling { child, lookback_sessions, sessions, op, min_periods, propagate_nan } =>
                     ExprSpec::SessionRolling { child, lookback_sessions,
                         sessions: sessions.into_iter().map(|item| (item[0], item[1], item[2] as usize)).collect(),
@@ -627,5 +688,22 @@ mod timeline_tests {
         // The helper lives on PanelPlan.
         let positions = crate::algo::PanelPlan::asof_indices(&source, &target).unwrap();
         assert_eq!(positions, vec![-1, 0, 0, 1, 1, 2]);
+    }
+}
+
+#[cfg(test)]
+mod match_plan_tests {
+    use super::*;
+
+    #[test]
+    fn match_distance_compiles_to_plan_json() {
+        let json = r#"{"columns":["C"],"nodes":[
+          {"kind":"column","index":0},
+          {"kind":"match_distance","child":0,"count":3,"nearest":true,"default":9.0,"include_current":true,
+           "predicate":{"op":"ge","a":{"op":"sub","a":{"op":"current"},"b":{"op":"candidate"}},"b":{"op":"const","value":1.5}}}
+        ],"outputs":[1]}"#;
+        let mut kernel = FactorPlanKernel::from_spec_json(json, 1).unwrap();
+        assert_eq!(kernel.update(&[10.0]).unwrap(), vec![9.0]);
+        assert_eq!(kernel.update(&[12.0]).unwrap(), vec![1.0]);
     }
 }

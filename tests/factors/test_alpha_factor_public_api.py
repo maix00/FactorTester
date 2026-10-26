@@ -470,15 +470,6 @@ def test_tools_incremental_rust_facade_supports_multiple_columns():
     assert executor.on_signal(pd.Timestamp('2026-01-05 09:30')) == {'A': 5.0}
 
 
-def test_alpha_factor_bar_distance_is_not_falsely_claimed_as_migrated():
-    from alpha.factor import bar_distance, scope_bars
-
-    condition = ColumnRef('CLOSE') > 0
-    expression = bar_distance(condition, scope=scope_bars(3), default=3.0)
-    spec = expression.to_plan_spec()
-    assert spec is None
-
-
 def test_alpha_factor_ema_executes_in_rust_kernel():
     import json
     from alpha import FactorPlanState
@@ -687,3 +678,21 @@ def test_lightweight_category_and_term_inputs_without_product_objects():
     assert np.isnan(spread['B'].iloc[0])
 
 
+
+
+def test_alpha_factor_current_candidate_bar_distance_plan():
+    import json
+    from alpha import FactorPlanState
+    from alpha.factor import CANDIDATE, CURRENT, bar_distance, scope_bars
+
+    expression = bar_distance(
+        ColumnRef('CLOSE'), (CURRENT - CANDIDATE) > 1.5, scope=scope_bars(3), default=9.0,
+    )
+    spec = expression.to_plan_spec()
+    assert spec is not None
+    node = spec['nodes'][-1]
+    assert node['kind'] == 'match_distance'
+    assert node['predicate']['op'] == 'gt'
+    state = FactorPlanState(json.dumps(spec), 1)
+    values = [float(state.update(np.array([value]))[0]) for value in (10.0, 12.0, 9.0)]
+    np.testing.assert_allclose(values, [9.0, 1.0, 9.0])

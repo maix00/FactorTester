@@ -11,6 +11,7 @@ from .core import ColumnRef, CompositeExpr, ConstExpr, RollingOp, ShiftOp, Where
 from .cross_sectional import CrossSectionalExpr
 from .scope import GroupByScopeOp
 from .bar_search import BarDistanceExpr, BarSinceExpr, BarSinceExpr as BarSince
+from .match import MatchBarDistanceExpr, _predicate
 from .signal import SignalAlign
 from .scopes import SessionScope, TradingDayScope
 from .category import CategoryBoolRef
@@ -137,6 +138,16 @@ def to_plan_spec(expressions: list[Any], *, products=None) -> dict[str, Any] | N
                 node["sessions"] = sessions
             elif expr.scope is not None:
                 return None
+        elif isinstance(expr, MatchBarDistanceExpr):
+            child = build(expr.value)
+            if child is None:
+                return None
+            node = {
+                "kind": "match_distance", "child": child,
+                "predicate": _predicate(expr.condition),
+                "count": expr.scope.count, "nearest": expr.select == "nearest",
+                "default": expr.default, "include_current": expr.include_current,
+            }
         elif isinstance(expr, BarDistanceExpr):
             # The original bar_distance compares CURRENT against historical
             # CANDIDATE values; a boolean condition is not the same operator.
