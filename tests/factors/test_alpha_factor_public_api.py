@@ -167,3 +167,13 @@ def test_signal_align_uses_last_completed_value_only():
     ctx = EvalContext(products=('A',), preloaded={'A': frame})
     aligned = ColumnRef('CLOSE').signal_align('2min').evaluate(ctx)
     np.testing.assert_allclose(aligned['A'].to_numpy(), [0.0, 2.0, 4.0])
+
+
+def test_nested_signal_align_uses_causal_inner_signal():
+    index = pd.date_range('2026-01-05 09:30', periods=8, freq='min')
+    frame = pd.DataFrame({'CLOSE': np.arange(8, dtype=float)}, index=index)
+    ctx = EvalContext(products=('A',), preloaded={'A': frame})
+    nested = (
+        ColumnRef('CLOSE').signal_align('2min').signal_align('4min')
+    ).evaluate(ctx)
+    np.testing.assert_allclose(nested['A'].to_numpy(), [2.0, 6.0])

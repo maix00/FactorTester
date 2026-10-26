@@ -25,16 +25,28 @@ class SignalAlign(FactorExpr):
 
     def evaluate(self, ctx) -> pd.DataFrame:
         source = self.child.evaluate(ctx)
-        if not isinstance(source.index, pd.DatetimeIndex):
+        if isinstance(source.index, pd.MultiIndex):
+            signal_levels = [
+                index for index, name in enumerate(source.index.names)
+                if str(name).startswith("_SIGNAL@")
+            ]
+            if not signal_levels:
+                raise TypeError("nested SignalAlign requires a _SIGNAL@ level")
+            times = pd.DatetimeIndex(
+                source.index.get_level_values(signal_levels[-1]),
+            )
+        elif isinstance(source.index, pd.DatetimeIndex):
+            times = source.index
+        else:
             raise TypeError("SignalAlign requires a DatetimeIndex source")
         target = pd.date_range(
-            source.index[0].ceil(self.signal_freq),
-            source.index[-1],
+            times[0].ceil(self.signal_freq),
+            times[-1],
             freq=self.signal_freq,
         )
         from alpha import BatchPlan
         positions = BatchPlan.asof_indices(
-            source.index.as_unit("ns").asi8,
+            times.as_unit("ns").asi8,
             target.as_unit("ns").asi8,
         )
         out = {}
