@@ -181,6 +181,7 @@ def run_small_catalog_replay(
     inputs: tuple[ReplayInput, ...], output_dir: Path, *,
     max_input_bars: int = 2_000, batch_minutes: int = 20,
     max_batch_bars: int = 250_000,
+    max_replay_days: int = 2,
     synthetic_order_probe: bool = False,
     frozen_factor_ref: str | None = None,
     position_cost_basis: str = "WEIGHTED_AVERAGE",
@@ -249,12 +250,14 @@ def run_small_catalog_replay(
         instrument_id: str(value).rsplit(".", 1)[-1]
         for instrument_id, value in raw_basis_overrides.items()
     }
+    if isinstance(max_replay_days, bool) or not isinstance(max_replay_days, int) or max_replay_days <= 0:
+        raise ValueError("max_replay_days must be a positive integer")
     preflight_catalogs(opened, max_input_bars=max_input_bars)
     first_ns = min(int(row[2]["first_event_ns"]) for row in opened)
     first_available_ns = min(int(row[2]["first_available_ns"]) for row in opened)
     last_ns = max(int(row[2]["last_event_ns"]) for row in opened)
-    if last_ns - first_ns > 2 * 86_400 * 1_000_000_000:
-        raise ValueError("isolated replay window may not span more than two days")
+    if last_ns - first_ns > max_replay_days * 86_400 * 1_000_000_000:
+        raise ValueError(f"isolated replay window exceeds {max_replay_days} days")
     venue = Venue("CFFEX")
     started = time.perf_counter()
     engine = BacktestEngine(config=BacktestEngineConfig(
