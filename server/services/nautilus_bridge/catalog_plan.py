@@ -5,6 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 
+_EXPANSION_CACHE: dict[tuple[tuple[str, ...], str, str], tuple[str, ...]] = {}
+_EXPANSION_CACHE_LIMIT = 64
+
+
 def _expand_product_paths(paths: list[str], *, start: str, end: str) -> list[str]:
     """Resolve product paths to the contracts listed in the run window.
 
@@ -13,6 +17,10 @@ def _expand_product_paths(paths: list[str], *, start: str, end: str) -> list[str
     contracts exist for the requested window; those contract UIDs are what
     Nautilus may stage and trade.
     """
+    cache_key = (tuple(sorted(set(paths))), start[:10], end[:10])
+    cached = _EXPANSION_CACHE.get(cache_key)
+    if cached is not None:
+        return list(cached)
     expanded: list[str] = []
     for path in paths:
         marker = "/_products/"
@@ -40,7 +48,11 @@ def _expand_product_paths(paths: list[str], *, start: str, end: str) -> list[str
             expanded.append(path)
             continue
         expanded.extend(uids)
-    return sorted(set(expanded))
+    result = tuple(sorted(set(expanded)))
+    if len(_EXPANSION_CACHE) >= _EXPANSION_CACHE_LIMIT:
+        _EXPANSION_CACHE.pop(next(iter(_EXPANSION_CACHE)))
+    _EXPANSION_CACHE[cache_key] = result
+    return list(result)
 
 
 def catalog_staging_requests(run_spec: dict[str, Any]) -> list[dict[str, Any]]:
