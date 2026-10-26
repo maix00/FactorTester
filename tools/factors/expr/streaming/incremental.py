@@ -1850,7 +1850,26 @@ def compile_streaming_factor(
             trunc_end = _resolve_truncation(expr.trunc_end)
             has_trunc = trunc_start is not None or trunc_end is not None
             rust_range = has_trunc
-            if op_name in RustPartitionNode._OPS:
+            event_scope = None
+            if not has_trunc and event_line is not None:
+                from tools.factors.events import EventId, EventRef
+                from tools.factors.expr.lookback_scope import (
+                    SessionScope, TradingDayScope,
+                )
+                if isinstance(expr.scope, TradingDayScope):
+                    event_scope = EventRef(EventId.TRADING_DAY_START)
+                elif isinstance(expr.scope, SessionScope):
+                    event_scope = EventRef(EventId.TRADING_SESSION_START)
+            if event_scope is not None and op_name in RustEventWindowNode._OPS:
+                try:
+                    node = RustEventWindowNode(
+                        op_name, data_operands[0], event_scope, event_line,
+                        len(products), quantile=quantile,
+                    )
+                    rust_partition = True
+                except ImportError:
+                    rust_partition = False
+            if not rust_partition and op_name in RustPartitionNode._OPS:
                 try:
                     node = RustPartitionNode(
                         op_name, data_operands[0], expr.scope, len(products),
