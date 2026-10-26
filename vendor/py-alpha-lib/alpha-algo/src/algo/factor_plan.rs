@@ -1013,4 +1013,39 @@ mod bar_count_tests {
         assert_eq!(kernel.update_at(3, &[1.0]).unwrap(), vec![3.0]);
         assert_eq!(kernel.update_at(4, &[1.0]).unwrap(), vec![3.0]);
     }
+
+    #[test]
+    fn interval_count_is_constant_state_and_rejects_repeated_bars() {
+        let mut kernel = FactorPlanKernel::new(1, vec![ExprSpec::BarCount {
+            start_ns: 0, end_ns: 100_000,
+        }], vec![0]).unwrap();
+        let mut output = Vec::new();
+        for timestamp in 0..100_000 {
+            kernel.update_into(timestamp, &[f64::NAN], &mut output).unwrap();
+        }
+        assert_eq!(output, vec![100_000.0]);
+        assert_eq!(kernel.nodes[0].interval_count, 100_000);
+        assert!(kernel.nodes[0].history.is_empty());
+        assert!(kernel.nodes[0].session_starts.is_empty());
+        assert!(kernel.update_at(99_999, &[1.0]).is_err());
+        assert!(kernel.update_at(1, &[1.0]).is_err());
+        assert_eq!(kernel.update_at(100_001, &[1.0]).unwrap(), vec![100_000.0]);
+    }
+
+    #[test]
+    fn session_windows_use_replayed_positions_not_declared_capacity() {
+        for (lookback, expected) in [(1, 5.0), (2, 3.0)] {
+            let json = format!(r#"{{"nodes":[
+              {{"kind":"column","index":0}},
+              {{"kind":"session_rolling","child":0,"lookback_sessions":{lookback},
+                "sessions":[[0,9,10],[10,19,10],[20,29,10]],"op":"mean",
+                "min_periods":1,"propagate_nan":false}}
+            ],"outputs":[1]}}"#);
+            let mut kernel = FactorPlanKernel::from_spec_json(&json, 1).unwrap();
+            assert_eq!(kernel.update_at(12, &[1.0]).unwrap(), vec![1.0]);
+            assert_eq!(kernel.update_at(15, &[3.0]).unwrap(), vec![2.0]);
+            assert_eq!(kernel.update_at(22, &[5.0]).unwrap(), vec![expected]);
+            assert!(kernel.update_at(30, &[7.0]).is_err());
+        }
+    }
 }
