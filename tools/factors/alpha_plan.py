@@ -16,7 +16,7 @@ from tools.factors.expr.conditional import WhereOp
 from tools.factors.expr.cross_sectional import CrossSectionalOp
 from tools.factors.expr.groupby_scope import GroupByScopeOp
 from tools.factors.expr.leaf import CategoryBoolRef, ColumnRef, ConstExpr
-from tools.factors.expr.lookback_scope import BarCountScope
+from tools.factors.expr.lookback_scope import BarCountScope, SessionScope, TradingDayScope
 from tools.factors.expr.rolling import IntervalBarsExpr, RollingOp, WindowBarsExpr, WindowBarsExpr, _resolve_windows
 from tools.factors.expr.shift import ShiftOp
 from tools.factors.expr.term_structure import TermStructureOp
@@ -160,18 +160,33 @@ def alpha_plan_spec(expression: Any, *, source_freq=None, products=(), session_c
             if op == "quantile":
                 node["quantile"] = float(expr.quantile)
         elif isinstance(expr, GroupByScopeOp):
-            if not isinstance(expr.scope, BarCountScope):
+            if isinstance(expr.scope, (SessionScope, TradingDayScope)) and session_calendar is not None:
+                sessions = [[int(item.start_ns), int(item.end_ns), int(item.bar_count)]
+                            for item in session_calendar.sessions]
+                if not sessions or any(item[2] <= 0 for item in sessions):
+                    return None
+                child = build(expr.operands[0])
+                if child is None or expr.op.startswith("quantile"):
+                    return None
+                node = {
+                    "kind": "session_rolling", "child": child, "lookback_sessions": 1,
+                    "sessions": sessions, "op": expr.op,
+                    "min_periods": expr.min_periods or 1,
+                    "propagate_nan": expr.nan_policy.value == "propagate",
+                }
+            elif not isinstance(expr.scope, BarCountScope):
                 return None
-            if expr.op.startswith("quantile"):
+            elif expr.op.startswith("quantile"):
                 return None
-            child = build(expr.operands[0])
-            if child is None:
-                return None
-            node = {
-                "kind": "scope", "child": child, "count": int(expr.scope.resolved_count()),
-                "op": expr.op, "min_periods": expr.min_periods or 1,
-                "propagate_nan": expr.nan_policy.value == "propagate",
-            }
+            else:
+                child = build(expr.operands[0])
+                if child is None:
+                    return None
+                node = {
+                    "kind": "scope", "child": child, "count": int(expr.scope.resolved_count()),
+                    "op": expr.op, "min_periods": expr.min_periods or 1,
+                    "propagate_nan": expr.nan_policy.value == "propagate",
+                }
         elif isinstance(expr, SignalAlign):
             if expr.daily_basepoint is not None or expr.end_session_skip:
                 return None

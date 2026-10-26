@@ -275,3 +275,20 @@ def test_interval_bars_compiles_to_bar_count_and_drives_truncation():
     kinds = [node['kind'] for node in spec['nodes']]
     assert 'bar_count' in kinds
     assert spec['nodes'][-1]['trunc_start_child'] is not None
+
+
+def test_calendar_groupby_scope_compiles_to_rust_session_rolling():
+    from types import SimpleNamespace
+    from tools.factors.alpha_plan import alpha_plan_spec
+    from tools.factors.expr.groupby_scope import GroupByScopeExpr
+    from tools.factors.expr.lookback_scope import scope_trading_day
+
+    calendar = SimpleNamespace(sessions=(
+        SimpleNamespace(start_ns=0, end_ns=10, bar_count=3),
+        SimpleNamespace(start_ns=11, end_ns=20, bar_count=4),
+    ))
+    expression = GroupByScopeExpr(scope_trading_day(), ColumnRef(DataColumn.CLOSE)).mean()
+    spec = alpha_plan_spec(expression, source_freq=DataFreq.MIN1, products=('A',), session_calendar=calendar)
+    node = spec['nodes'][-1]
+    assert node['kind'] == 'session_rolling'
+    assert node['lookback_sessions'] == 1
