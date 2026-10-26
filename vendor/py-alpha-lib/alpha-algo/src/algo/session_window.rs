@@ -80,6 +80,7 @@ pub enum SessionOp {
   Std,
   Min,
   Max,
+  Skew,
 }
 
 pub struct SessionWindowState {
@@ -88,6 +89,7 @@ pub struct SessionWindowState {
   ring: VecDeque<(u32, f64, u64)>,
   finite_sum: f64,
   finite_sumsq: f64,
+  finite_sum3: f64,
   finite_count: usize,
   next_index: u64,
   min_deque: VecDeque<(u64, f64)>,
@@ -109,6 +111,7 @@ impl SessionWindowState {
       ring: VecDeque::new(),
       finite_sum: 0.0,
       finite_sumsq: 0.0,
+      finite_sum3: 0.0,
       finite_count: 0,
       next_index: 0,
       min_deque: VecDeque::new(),
@@ -121,6 +124,7 @@ impl SessionWindowState {
     if old.is_finite() {
       self.finite_sum -= old;
       self.finite_sumsq -= old * old;
+      self.finite_sum3 -= old * old * old;
       self.finite_count -= 1;
     }
     while self.min_deque.front().is_some_and(|(i, _)| *i <= index) {
@@ -147,6 +151,7 @@ impl SessionWindowState {
     if value.is_finite() {
       self.finite_sum += value;
       self.finite_sumsq += value * value;
+      self.finite_sum3 += value * value * value;
       self.finite_count += 1;
       while self.min_deque.back().is_some_and(|(_, v)| *v >= value) {
         self.min_deque.pop_back();
@@ -176,6 +181,23 @@ impl SessionWindowState {
       }
       SessionOp::Min => self.min_deque.front().map(|(_, v)| *v).unwrap_or(f64::NAN),
       SessionOp::Max => self.max_deque.front().map(|(_, v)| *v).unwrap_or(f64::NAN),
+      SessionOp::Skew => {
+        if count < 3 {
+          f64::NAN
+        } else {
+          let n = count as f64;
+          let mean = self.finite_sum / n;
+          let m2 = (self.finite_sumsq - self.finite_sum * self.finite_sum / n).max(0.0);
+          let m3 = self.finite_sum3 - 3.0 * mean * self.finite_sumsq
+            + 2.0 * n * mean * mean * mean;
+          if m2 <= 0.0 {
+            f64::NAN
+          } else {
+            let population = (m3 / n) / (m2 / n).powf(1.5);
+            population * (n * (n - 1.0)).sqrt() / (n - 2.0)
+          }
+        }
+      }
     }
   }
 }
@@ -205,6 +227,12 @@ pub fn ta_session_rolling_std<NumT: Float>(
   values: &[f64], session_ids: &[u32], lookback_sessions: usize,
 ) -> Result<Vec<NumT>, Error> {
   session_rolling_state(values, session_ids, lookback_sessions, SessionOp::Std)
+}
+
+pub fn ta_session_rolling_skew<NumT: Float>(
+  values: &[f64], session_ids: &[u32], lookback_sessions: usize,
+) -> Result<Vec<NumT>, Error> {
+  session_rolling_state(values, session_ids, lookback_sessions, SessionOp::Skew)
 }
 
 pub fn ta_session_rolling_min<NumT: Float>(
@@ -346,6 +374,17 @@ mod tests {
     max.update(0, 5.0);
     max.update(0, 2.0);
     assert_eq!(max.update(1, 7.0), 7.0);
+  }
+
+  #[test]
+  fn streaming_skew_is_available() {
+    let mut state = SessionWindowState::new_op(1, SessionOp::Skew).unwrap();
+    for value in [1.0, 2.0, 3.0, 4.0] {
+      let result = state.update(0, value);
+      if value >= 3.0 {
+        assert!(result.is_finite());
+      }
+    }
   }
 
   #[test]

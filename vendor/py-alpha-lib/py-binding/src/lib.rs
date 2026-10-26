@@ -2571,9 +2571,22 @@ struct SessionRollingState {
 #[pymethods]
 impl SessionRollingState {
   #[new]
-  #[pyo3(signature = (lookback_sessions, mean=false))]
-  fn new(lookback_sessions: usize, mean: bool) -> PyResult<Self> {
-    let inner = alpha_algo::SessionWindowState::new(lookback_sessions, mean)
+  #[pyo3(signature = (lookback_sessions, mean=false, op=None))]
+  fn new(lookback_sessions: usize, mean: bool, op: Option<&str>) -> PyResult<Self> {
+    use alpha_algo::SessionOp;
+    let op = match op.unwrap_or(if mean { "mean" } else { "sum" }) {
+      "sum" => SessionOp::Sum,
+      "mean" => SessionOp::Mean,
+      "var" => SessionOp::Var,
+      "std" => SessionOp::Std,
+      "min" => SessionOp::Min,
+      "max" => SessionOp::Max,
+      "skew" => SessionOp::Skew,
+      other => return Err(pyo3::exceptions::PyValueError::new_err(
+        format!("unsupported session op: {other}")
+      )),
+    };
+    let inner = alpha_algo::SessionWindowState::new_op(lookback_sessions, op)
       .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
     Ok(Self { inner })
   }
