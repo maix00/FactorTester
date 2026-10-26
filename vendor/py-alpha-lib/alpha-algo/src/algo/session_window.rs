@@ -236,6 +236,20 @@ impl OrderStatisticTree {
     total
   }
 
+  fn rank_lt(&self, key: f64) -> usize {
+    let mut node = self.root;
+    let mut total = 0;
+    while let Some(index) = node {
+      if key <= self.nodes[index].key {
+        node = self.nodes[index].left;
+      } else {
+        total += Self::size(self.nodes[index].left, &self.nodes) + self.nodes[index].count;
+        node = self.nodes[index].right;
+      }
+    }
+    total
+  }
+
   fn total_sum(&self) -> f64 {
     self.root.map(|index| self.nodes[index].sum).unwrap_or(0.0)
   }
@@ -414,11 +428,25 @@ impl SessionWindowState {
           return f64::NAN;
         };
         let median = (low + high) / 2.0;
-        let below = tree.rank_le(median) as f64;
-        let below_sum = tree.sum_le(median);
-        let above = count as f64 - below;
-        let above_sum = tree.total_sum() - below_sum;
-        (median * below - below_sum + above_sum - median * above) / count as f64
+        let max_distance = {
+          let min = self.min_deque.front().map(|(_, v)| *v).unwrap_or(median);
+          let max = self.max_deque.front().map(|(_, v)| *v).unwrap_or(median);
+          (median - min).abs().max((max - median).abs())
+        };
+        let kth = |k: usize| -> f64 {
+          let (mut lo, mut hi) = (0.0f64, max_distance);
+          for _ in 0..64 {
+            let mid = (lo + hi) / 2.0;
+            let within = tree.rank_le(median + mid) - tree.rank_lt(median - mid);
+            if within > k { hi = mid; } else { lo = mid; }
+          }
+          hi
+        };
+        if count % 2 == 1 {
+          kth(count / 2)
+        } else {
+          (kth(count / 2 - 1) + kth(count / 2)) / 2.0
+        }
       }
       SessionOp::Rank => {
         let Some(tree) = self.order_stat.as_ref() else { return f64::NAN };
