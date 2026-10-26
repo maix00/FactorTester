@@ -2,20 +2,29 @@ from tools.factors.expr.streaming.calendar_window import (
     TradingCalendarWindow,
     TradingSession,
 )
+from tools.factors.expr.streaming.incremental import resolve_trading_day_window
 
 
-def test_250_sessions_have_variable_minute_bar_count():
-    sessions = tuple(
+def _calendar():
+    return TradingCalendarWindow(tuple(
         TradingSession(day, day * 10_000, day * 10_000 + 9_000,
                        200 if day % 2 else 300)
         for day in range(1, 261)
-    )
-    window = TradingCalendarWindow(sessions)
-    # 250 sessions ending at session 259: 125 even (300) + 125 odd (200)
+    ))
+
+
+def test_250_sessions_have_variable_minute_bar_count():
+    window = _calendar()
     assert window.window_size(259, 250) == 125 * 300 + 125 * 200
     assert window.window_size(10, 250) == sum(
-        item.bar_count for item in sessions[:11]
+        (300 if day % 2 == 0 else 200) for day in range(1, 12)
     )
+
+
+def test_250d_resolves_to_250_sessions_not_250_bars():
+    assert resolve_trading_day_window(
+        "250d", calendar_window=_calendar(), current_session=259,
+    ) == 125 * 300 + 125 * 200
 
 
 def test_night_session_is_labelled_by_next_trading_day():
