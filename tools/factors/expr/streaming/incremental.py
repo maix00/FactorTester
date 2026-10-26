@@ -353,6 +353,47 @@ class RustPartitionNode:
         return result
 
 
+class RustBarScopeNode:
+    """Bar-count scope expressed as a resetting start index, not a partition."""
+
+    _OPS = {
+        "mean": "mean", "sum": "sum", "var": "var", "std": "std",
+        "min": "min", "max": "max", "skew": "skew",
+        "argmin": "argmin", "argmax": "argmax",
+        "median": "quantile", "quantile": "quantile", "rank": "rank",
+        "mad": "mad",
+    }
+
+    def __init__(self, op, child, bar_count, width, quantile=None):
+        from alpha import StartIndexState
+        rust_op = self._OPS.get(op)
+        if rust_op is None:
+            raise UnsupportedStreamingFactor(f"bar scope does not support {op}")
+        self.op = op
+        self.child = child
+        self.bar_count = max(1, int(bar_count))
+        self._width = width
+        self._ordinal = 0
+        self._states = [StartIndexState(rust_op, quantile) for _ in range(width)]
+
+    def update(self, market, cache):
+        key = id(self)
+        if key in cache:
+            return cache[key]
+        start = (self._ordinal // self.bar_count) * self.bar_count
+        self._ordinal += 1
+        values = np.asarray(self.child.update(market, cache), dtype=float)
+        if values.shape != (self._width,):
+            raise ValueError("bar scope input width changed")
+        result = np.asarray(
+            [state.update(start, float(value))
+             for state, value in zip(self._states, values, strict=True)],
+            dtype=float,
+        )
+        cache[key] = result
+        return result
+
+
 class RustEventWindowNode:
     """Window whose start is the latest occurrence of a TradeResearch event."""
 
@@ -1851,16 +1892,31 @@ def compile_streaming_factor(
             has_trunc = trunc_start is not None or trunc_end is not None
             rust_range = has_trunc
             event_scope = None
-            if not has_trunc and event_line is not None:
-                from tools.factors.events import EventId, EventRef
+            bar_scope_count = None
+            if not has_trunc:
                 from tools.factors.expr.lookback_scope import (
-                    SessionScope, TradingDayScope,
+                    BarCountScope, SessionScope, TradingDayScope,
                 )
-                if isinstance(expr.scope, TradingDayScope):
-                    event_scope = EventRef(EventId.TRADING_DAY_START)
-                elif isinstance(expr.scope, SessionScope):
-                    event_scope = EventRef(EventId.TRADING_SESSION_START)
-            if event_scope is not None and op_name in RustEventWindowNode._OPS:
+                if isinstance(expr.scope, BarCountScope):
+                    bar_scope_count = int(expr.scope.resolved_count(
+                        source_freq=source_freq, products=products,
+                    ))
+                elif event_line is not None:
+                    from tools.factors.events import EventId, EventRef
+                    if isinstance(expr.scope, TradingDayScope):
+                        event_scope = EventRef(EventId.TRADING_DAY_START)
+                    elif isinstance(expr.scope, SessionScope):
+                        event_scope = EventRef(EventId.TRADING_SESSION_START)
+            if bar_scope_count is not None and op_name in RustBarScopeNode._OPS:
+                try:
+                    node = RustBarScopeNode(
+                        op_name, data_operands[0], bar_scope_count, len(products),
+                        quantile=quantile,
+                    )
+                    rust_partition = True
+                except ImportError:
+                    rust_partition = False
+            if not rust_partition and event_scope is not None and op_name in RustEventWindowNode._OPS:
                 try:
                     node = RustEventWindowNode(
                         op_name, data_operands[0], event_scope, event_line,
