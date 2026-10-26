@@ -142,3 +142,6 @@ def bar_since(values, count, include_current=True, nearest=True,
     dtype=float,
   )
 
+
+
+FactorPlanState = _algo.FactorPlanState

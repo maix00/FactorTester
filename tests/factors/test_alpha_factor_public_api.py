@@ -147,3 +147,15 @@ def test_alpha_factor_serializes_to_rust_plan_spec():
     kinds = [node['kind'] for node in spec['nodes']]
     assert kinds == ['column', 'rolling', 'const', 'binary']
     assert spec['nodes'][1]['op'] == 'mean'
+
+
+def test_alpha_factor_incremental_plan_uses_shared_rust_kernel():
+    from alpha.factor import IncrementalFactorPlan
+
+    close = ColumnRef('CLOSE')
+    plan = IncrementalFactorPlan(
+        {'mean': close.rolling(2).mean(), 'sum': close.rolling(2).sum()},
+        ('A',),
+    )
+    assert plan.update([1.0]) == {'mean': {'A': 1.0}, 'sum': {'A': 1.0}}
+    assert plan.update([3.0]) == {'mean': {'A': 2.0}, 'sum': {'A': 4.0}}

@@ -3023,6 +3023,30 @@ fn plan_linreg(values: &[f64], window: usize, metric: &str, min: usize, prop: bo
 }
 
 #[pyclass]
+struct FactorPlanState {
+  inner: alpha_algo::FactorPlanKernel,
+}
+
+#[pymethods]
+impl FactorPlanState {
+  #[new]
+  #[pyo3(signature = (json, products))]
+  fn new(json: &str, products: usize) -> PyResult<Self> {
+    Ok(Self {
+      inner: alpha_algo::FactorPlanKernel::from_spec_json(json, products)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?,
+    })
+  }
+
+  fn update(&mut self, py: Python<'_>, values: numpy::PyReadonlyArray1<f64>) -> PyResult<Py<numpy::PyArray1<f64>>> {
+    use numpy::IntoPyArray;
+    Ok(self.inner.update(values.as_slice()?)
+      .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
+      .into_pyarray(py).unbind())
+  }
+}
+
+#[pyclass]
 struct IntervalState {
   inner: alpha_algo::IntervalKernel,
 }
@@ -3104,6 +3128,7 @@ fn _algo(m: &Bound<'_, PyModule>) -> PyResult<()> {
   m.add_class::<ThresholdKernel>()?;
   m.add_class::<EmaState>()?;
   m.add_class::<IntervalState>()?;
+  m.add_class::<FactorPlanState>()?;
   m.add_class::<IntervalPairState>()?;
   m.add_class::<BatchPlan>()?;
   m.add_class::<GroupKernel>()?;
