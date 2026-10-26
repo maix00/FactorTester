@@ -325,3 +325,17 @@ mod tests {
         assert_eq!(engine.update(&[1.0, 3.0]).unwrap(), vec![0.0, 0.5]);
     }
 }
+
+#[cfg(test)]
+mod timeline_tests {
+    use super::*;
+
+    #[test]
+    fn asof_mapping_never_uses_future_values() {
+        let source = [10_i64, 20, 30];
+        let target = [5_i64, 10, 15, 20, 25, 30];
+        // The helper lives on PanelPlan.
+        let positions = crate::algo::PanelPlan::asof_indices(&source, &target).unwrap();
+        assert_eq!(positions, vec![-1, 0, 0, 1, 1, 2]);
+    }
+}
