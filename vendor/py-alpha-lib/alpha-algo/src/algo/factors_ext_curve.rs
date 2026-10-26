@@ -102,6 +102,44 @@ pub fn ta_ft_curve_pair<NumT: Float + Send + Sync>(
   Ok(())
 }
 
+/// Least-squares polynomial coefficient for `points`; `degree` 1/2 returns
+/// the linear/quadratic coefficient. Shared by batch and streaming curves.
+pub fn ft_fit_coefficient<NumT: Float>(points: &[(NumT, NumT)], degree: usize) -> Option<NumT> {
+    let n = points.len();
+    if n < degree + 1 { return None; }
+    let count = NumT::from(n).unwrap();
+    let mean_x = points.iter().fold(NumT::zero(), |a, (x, _)| a + *x) / count;
+    let size = degree + 1;
+    let mut a = vec![vec![NumT::zero(); size]; size];
+    let mut b = vec![NumT::zero(); size];
+    for &(x, y) in points {
+        let x = x - mean_x;
+        let mut powers = [NumT::one(); 3];
+        for p in 1..size { powers[p] = powers[p - 1] * x; }
+        for row in 0..size {
+            b[row] = b[row] + powers[row] * y;
+            for col in 0..size { a[row][col] = a[row][col] + powers[row] * powers[col]; }
+        }
+    }
+    for col in 0..size {
+        let mut pivot = col;
+        for row in col + 1..size { if a[row][col].abs() > a[pivot][col].abs() { pivot = row; } }
+        if !(a[pivot][col].abs() > NumT::from(1e-18).unwrap()) { return None; }
+        a.swap(col, pivot); b.swap(col, pivot);
+        let diag = a[col][col];
+        for k in col..size { a[col][k] = a[col][k] / diag; }
+        b[col] = b[col] / diag;
+        for row in 0..size {
+            if row == col { continue; }
+            let factor = a[row][col];
+            if factor == NumT::zero() { continue; }
+            for k in col..size { a[row][k] = a[row][k] - factor * a[col][k]; }
+            b[row] = b[row] - factor * b[col];
+        }
+    }
+    Some(b[degree])
+}
+
 /// Polynomial fit over the first `depth` valid (days, value) pairs:
 /// `op == 0` returns the linear coefficient, `op == 1` the quadratic one.
 pub fn ta_ft_curve_fit<NumT: Float + Send + Sync>(
@@ -139,64 +177,10 @@ pub fn ta_ft_curve_fit<NumT: Float + Send + Sync>(
         ys.push(y);
       }
     }
-    let n = xs.len();
     let degree = if op == 0 { 1 } else { 2 };
-    if n < degree + 1 {
-      continue;
-    }
-    // Center x for conditioning, then normal equations.
-    let count = NumT::from(n).unwrap();
-    let mean_x = xs.iter().fold(NumT::zero(), |a, v| a + *v) / count;
-    let size = degree + 1;
-    let mut a = vec![vec![NumT::zero(); size]; size];
-    let mut b = vec![NumT::zero(); size];
-    for i in 0..n {
-      let x = xs[i] - mean_x;
-      let y = ys[i];
-      let mut powers = [NumT::one(); 3];
-      for p in 1..size {
-        powers[p] = powers[p - 1] * x;
-      }
-      for row_a in 0..size {
-        b[row_a] = b[row_a] + powers[row_a] * y;
-        for col in 0..size {
-          a[row_a][col] = a[row_a][col] + powers[row_a] * powers[col];
-        }
-      }
-    }
-    // Gaussian elimination with partial pivoting.
-    for col in 0..size {
-      let mut pivot = col;
-      for row_i in col + 1..size {
-        if a[row_i][col].abs() > a[pivot][col].abs() {
-          pivot = row_i;
-        }
-      }
-      if !(a[pivot][col].abs() > NumT::from(1e-18).unwrap()) {
-        break;
-      }
-      a.swap(col, pivot);
-      b.swap(col, pivot);
-      let diag = a[col][col];
-      for k in col..size {
-        a[col][k] = a[col][k] / diag;
-      }
-      b[col] = b[col] / diag;
-      for row_i in 0..size {
-        if row_i == col {
-          continue;
-        }
-        let factor = a[row_i][col];
-        if factor == NumT::zero() {
-          continue;
-        }
-        for k in col..size {
-          a[row_i][k] = a[row_i][k] - factor * a[col][k];
-        }
-        b[row_i] = b[row_i] - factor * b[col];
-      }
-    }
-    write_row(r, slots, row, b[degree]);
+    let points: Vec<(NumT, NumT)> = xs.into_iter().zip(ys).collect();
+    let Some(value) = ft_fit_coefficient(&points, degree) else { continue; };
+    write_row(r, slots, row, value);
   }
   Ok(())
 }

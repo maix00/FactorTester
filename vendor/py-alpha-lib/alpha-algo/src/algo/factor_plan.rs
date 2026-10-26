@@ -674,45 +674,13 @@ fn term_metric(op: &str, curve: &[(f64, f64)], near_rank: usize, far_rank: usize
         "term_rank_value" => near.map(|(_, value)| value).unwrap_or(f64::NAN),
         "term_slope" | "term_curvature" => {
             let frame: Vec<(f64, f64)> = curve.iter().take(depth).copied().collect();
-            if frame.len() < if op == "term_slope" { 2 } else { 3 } { return f64::NAN; }
-            let n = frame.len() as f64;
-            let mean_x = frame.iter().map(|(x, _)| x).sum::<f64>() / n;
-            let mean_y = frame.iter().map(|(_, y)| y).sum::<f64>() / n;
-            let (mut sxx, mut sxy) = (0.0, 0.0);
-            for (x, y) in &frame { sxx += (x - mean_x).powi(2); sxy += (x - mean_x) * (y - mean_y); }
-            if sxx == 0.0 { f64::NAN }
-            else if op == "term_slope" { sxy / sxx }
-            else { quadratic_coefficient(&frame) }
+            let degree = if op == "term_slope" { 1 } else { 2 };
+            crate::algo::ft_fit_coefficient(&frame, degree).unwrap_or(f64::NAN)
         }
         _ => f64::NAN,
     }
 }
 
-fn quadratic_coefficient(points: &[(f64, f64)]) -> f64 {
-    // Normal equations for y = a + b*x + c*x^2, return c.
-    let mut matrix = [[0.0; 4]; 3];
-    for &(x, y) in points {
-        let powers = [1.0, x, x * x];
-        for row in 0..3 {
-            for column in 0..3 { matrix[row][column] += powers[row] * powers[column]; }
-            matrix[row][3] += powers[row] * y;
-        }
-    }
-    for pivot in 0..3 {
-        let mut best = pivot;
-        for row in pivot + 1..3 { if matrix[row][pivot].abs() > matrix[best][pivot].abs() { best = row; } }
-        if matrix[best][pivot].abs() < 1e-12 { return f64::NAN; }
-        matrix.swap(pivot, best);
-        let divisor = matrix[pivot][pivot];
-        for column in pivot..4 { matrix[pivot][column] /= divisor; }
-        for row in 0..3 {
-            if row == pivot { continue; }
-            let factor = matrix[row][pivot];
-            for column in pivot..4 { matrix[row][column] -= factor * matrix[pivot][column]; }
-        }
-    }
-    matrix[2][3]
-}
 
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
