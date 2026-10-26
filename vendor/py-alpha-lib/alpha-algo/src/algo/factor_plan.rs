@@ -5,8 +5,6 @@
 
 use std::collections::VecDeque;
 
-use rayon::prelude::*;
-
 use crate::algo::{IntervalKernel, SessionOp};
 use serde::Deserialize;
 
@@ -300,27 +298,6 @@ impl FactorPlanKernel {
                     let node = &mut self.nodes[index];
                     let base = current.saturating_sub(window as u64 - 1);
                     let truncated = trunc_start >= 0 || trunc_end >= 0 || trunc_start_child.is_some() || trunc_end_child.is_some();
-                    if products >= 8 && trunc_start_child.is_none() && trunc_end_child.is_none() {
-                        out.par_iter_mut()
-                            .zip(node.rolling.par_iter_mut())
-                            .zip(node.trunc_history.par_iter_mut())
-                            .zip(input.par_iter())
-                            .for_each(|(((value, state), history), &sample)| {
-                                if truncated {
-                                    history.push_back(sample);
-                                    while history.len() > window { history.pop_front(); }
-                                    let start = if trunc_start >= 0 { base.saturating_add(trunc_start as u64) } else { base };
-                                    let end = if trunc_end >= 0 { base.saturating_add(trunc_end as u64) } else { current };
-                                    *value = truncated_slice(op, history, start, end, current, min_periods, propagate_nan);
-                                } else if let Some(state) = state.as_mut() {
-                                    state.set_semantics(min_periods, propagate_nan);
-                                    *value = state.update_explicit(base, current, sample);
-                                } else {
-                                    *value = f64::NAN;
-                                }
-                            });
-                        continue;
-                    }
                     for product in 0..products {
                         if truncated {
                             let history = &mut node.trunc_history[product];
@@ -929,20 +906,6 @@ mod term_plan_tests {
         kernel.update(&[2.0]).unwrap();
         assert_eq!(kernel.update(&[3.0]).unwrap(), vec![2.0]);
         assert_eq!(kernel.update(&[4.0]).unwrap(), vec![3.0]);
-    }
-
-    #[test]
-    fn parallel_products_keep_rolling_state_isolated() {
-        let json = r#"{"columns":["C"],"nodes":[
-          {"kind":"column","index":0},
-          {"kind":"rolling","child":0,"window":2,"op":"mean","min_periods":1,"propagate_nan":false}
-        ],"outputs":[1]}"#;
-        let mut kernel = FactorPlanKernel::from_spec_json(json, 8).unwrap();
-        let first: Vec<f64> = (0..8).map(|value| value as f64).collect();
-        assert_eq!(kernel.update(&first).unwrap(), first);
-        let second: Vec<f64> = (0..8).map(|value| (value * 3) as f64).collect();
-        let expected: Vec<f64> = first.iter().zip(second.iter()).map(|(a, b)| (a + b) / 2.0).collect();
-        assert_eq!(kernel.update(&second).unwrap(), expected);
     }
 
     #[test]
