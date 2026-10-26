@@ -2643,6 +2643,57 @@ impl StartIndexState {
 }
 
 #[pyclass]
+struct IntervalPairState {
+  inner: alpha_algo::PairIntervalState,
+}
+
+#[pymethods]
+impl IntervalPairState {
+  #[new]
+  #[pyo3(signature = (correlation=false))]
+  fn new(correlation: bool) -> Self {
+    Self { inner: alpha_algo::PairIntervalState::new(correlation) }
+  }
+
+  fn update(&mut self, start_index: u64, end_index: u64, x: f64, y: f64) -> f64 {
+    self.inner.update(start_index, end_index, x, y)
+  }
+}
+
+#[pyclass]
+struct IntervalState {
+  inner: alpha_algo::IntervalKernel,
+}
+
+#[pymethods]
+impl IntervalState {
+  #[new]
+  #[pyo3(signature = (op="mean", quantile=None))]
+  fn new(op: &str, quantile: Option<f64>) -> PyResult<Self> {
+    use alpha_algo::SessionOp;
+    let op = match op {
+      "sum" => SessionOp::Sum, "mean" => SessionOp::Mean,
+      "var" => SessionOp::Var, "std" => SessionOp::Std,
+      "min" => SessionOp::Min, "max" => SessionOp::Max,
+      "skew" => SessionOp::Skew, "argmin" => SessionOp::Argmin,
+      "argmax" => SessionOp::Argmax, "rank" => SessionOp::Rank,
+      "mad" => SessionOp::Mad,
+      "median" | "quantile" => SessionOp::Quantile(quantile.unwrap_or(0.5)),
+      other => return Err(pyo3::exceptions::PyValueError::new_err(
+        format!("unsupported interval op: {other}")
+      )),
+    };
+    let inner = alpha_algo::SessionWindowState::new_explicit(op)
+      .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    Ok(Self { inner })
+  }
+
+  fn update(&mut self, start_index: u64, end_index: u64, value: f64) -> f64 {
+    self.inner.update_explicit(start_index, end_index, value)
+  }
+}
+
+#[pyclass]
 struct ExplicitRangeState {
   inner: alpha_algo::SessionWindowState,
 }
@@ -2844,6 +2895,9 @@ fn _algo(m: &Bound<'_, PyModule>) -> PyResult<()> {
   m.add_class::<WallPairState>()?;
   m.add_class::<EmaState>()?;
   m.add_class::<StartIndexState>()?;
+  m.add_class::<ExplicitRangeState>()?;
+  m.add_class::<IntervalState>()?;
+  m.add_class::<IntervalPairState>()?;
   m.add_class::<BarRollingState>()?;
   m.add_class::<WallRollingState>()?;
   m.add_class::<GroupKernel>()?;

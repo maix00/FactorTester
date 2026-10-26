@@ -284,6 +284,9 @@ pub enum WindowPolicy {
   WallClock(i64),
 }
 
+/// Single kernel entry point: all windows/scopes are explicit `[start,end]`.
+pub type IntervalKernel = SessionWindowState;
+
 pub struct SessionWindowState {
   policy: WindowPolicy,
   op: SessionOp,
@@ -882,6 +885,67 @@ fn time_rolling(
     .map(|(ts, value)| state.update_at(0, ts, value)).collect())
 }
 
+/// Explicit-interval pair kernel for cov/corr.
+pub struct PairIntervalState {
+  correlation: bool,
+  ring: VecDeque<(u64, f64, f64)>,
+  sx: f64,
+  sy: f64,
+  sxx: f64,
+  syy: f64,
+  sxy: f64,
+  count: usize,
+  next_index: u64,
+  last: f64,
+}
+
+impl PairIntervalState {
+  pub fn new(correlation: bool) -> Self {
+    Self {
+      correlation, ring: VecDeque::new(),
+      sx: 0.0, sy: 0.0, sxx: 0.0, syy: 0.0, sxy: 0.0,
+      count: 0, next_index: 0, last: f64::NAN,
+    }
+  }
+
+  fn evict(&mut self, start: u64) {
+    while self.ring.front().is_some_and(|(index, _, _)| *index < start) {
+      if let Some((_, x, y)) = self.ring.pop_front() {
+        if x.is_finite() && y.is_finite() {
+          self.sx -= x; self.sy -= y; self.sxx -= x * x;
+          self.syy -= y * y; self.sxy -= x * y; self.count -= 1;
+        }
+      }
+    }
+  }
+
+  pub fn update(&mut self, start: u64, end: u64, x: f64, y: f64) -> f64 {
+    let current = self.next_index;
+    self.next_index += 1;
+    if current < start { return self.last; }
+    if current > end { return self.last; }
+    self.evict(start);
+    self.ring.push_back((current, x, y));
+    if x.is_finite() && y.is_finite() {
+      self.sx += x; self.sy += y; self.sxx += x * x;
+      self.syy += y * y; self.sxy += x * y; self.count += 1;
+    }
+    if self.count < 2 { self.last = f64::NAN; return self.last; }
+    let n = self.count as f64;
+    let covariance = (self.sxy - self.sx * self.sy / n) / (n - 1.0);
+    let value = if !self.correlation {
+      covariance
+    } else {
+      let vx = (self.sxx - self.sx * self.sx / n).max(0.0);
+      let vy = (self.syy - self.sy * self.sy / n).max(0.0);
+      let denom = (vx * vy).sqrt();
+      if denom > 0.0 { (self.sxy - self.sx * self.sy / n) / denom } else { f64::NAN }
+    };
+    self.last = value;
+    value
+  }
+}
+
 pub struct SessionPairState {
   policy: WindowPolicy,
   correlation: bool,
@@ -1109,6 +1173,14 @@ mod tests {
     assert_eq!(state.update_from(0, 1.0), 1.0);
     assert_eq!(state.update_from(0, 2.0), 3.0);
     assert_eq!(state.update_from(1, 5.0), 7.0);
+  }
+
+  #[test]
+  fn pair_interval_tracks_explicit_range() {
+    let mut state = PairIntervalState::new(true);
+    state.update(0, 2, 1.0, 2.0);
+    assert!((state.update(0, 2, 2.0, 4.0) - 1.0).abs() < 1e-12);
+    assert!(state.update(2, 2, 3.0, 6.0).is_nan());
   }
 
   #[test]

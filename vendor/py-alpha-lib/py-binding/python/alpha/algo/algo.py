@@ -80,3 +80,9 @@ EmaState = _algo.EmaState
 
 
 StartIndexState = _algo.StartIndexState
+
+
+IntervalState = _algo.IntervalState
+
+
+IntervalPairState = _algo.IntervalPairState
