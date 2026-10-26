@@ -43,7 +43,9 @@ macOS `/usr/bin/time -l` 进程峰值 RSS 分别为 34,439,168 与 46,301,184 �
   跨不同策略构造器的运行级合并仍需核对，不能据单策略多 role 的测试声称全部完成。
 - Cython Nautilus 策略入口仍可能经 Python 逐 Bar 适配；Rust Actor 注册与回调测试
   不等于真实 RunSpec/Job 已全程无 Python 回调。
-- 仍存在旧 Python 状态机。必须先完成参数和时间语义的严格对照，再移除其生产入口。
+- `StreamingFactorPlan`、`compile_streaming_factor`、`RustIntervalNode` 及旧 bar-search
+  状态机已删除；测试改走真实 Rust 编译入口并覆盖跨交易日扩展与淘汰。
+  `streaming/incremental.py` 仅保留编译适配、单输出视图与窗口/事件元数据解析。
 - 完整日频 SignalAlign close、稀疏产品增量观测掩码等不得凭节点存在声称验收。
 
 没有执行全仓测试、公网负载、推送或部署。

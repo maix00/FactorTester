@@ -415,6 +415,7 @@ EXACT_PATH_TESTS = {
     ),
 }
 FACTOR_PLAN_TESTS = (
+    "tests/server/test_factor_session_rolling.py",
     "tests/factors/test_bar_counts.py",
     "tests/factors/test_runtime_boundaries.py",
     "tests/factors/test_rust_plan.py",
@@ -429,6 +430,8 @@ for _path in (
     "tools/factors/expr/rolling.py",
     "tools/factors/expr/streaming/rust_incremental.py",
     "tools/factors/expr/streaming/incremental.py",
+    "tools/factors/expr/streaming/__init__.py",
+    "tools/factors/expr/streaming/bar_search.py",
     "vendor/py-alpha-lib/alpha-algo/src/algo/factor_plan.rs",
     "vendor/py-alpha-lib/alpha-algo/src/algo/panel_plan.rs",
     "vendor/py-alpha-lib/alpha-algo/src/algo/session_window.rs",

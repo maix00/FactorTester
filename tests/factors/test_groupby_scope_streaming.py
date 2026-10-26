@@ -122,7 +122,7 @@ CASES = [
 
 
 def test_compiled_plan_routes_groupby_scope_to_the_scope_kernel():
-    """接线证据：走真正的 compile_streaming_factor 路径，必须落到作用域内核。
+    """接线证据：走真正的编译入口，必须落到共享 Rust Plan。
 
     直接 import 内核的单测不能证明分派接线正确（两条 elif 分支里只有第一条可达），
     所以这里断言编译产物本身，并喂几根 bar 看它真的按当日累计。
@@ -131,27 +131,17 @@ def test_compiled_plan_routes_groupby_scope_to_the_scope_kernel():
     from tools.factors.expr.groupby_scope import GroupByScopeExpr
     from tools.factors.expr.leaf import ColumnRef
     from tools.factors.expr.streaming.incremental import (
-        RustIntervalNode,
-        StreamingFactorPlan,
         compile_incremental_factor,
-        compile_streaming_factor,
     )
 
     column = DataColumn.CLOSE
     expression = GroupByScopeExpr(scope_trading_day(), ColumnRef(column)).mean()
     events = _DayEvents()
-    plan = compile_streaming_factor(
-        expression, ("A",), source_freq=DataFreq.MIN1, event_line=events,
-    )
-    assert isinstance(plan, StreamingFactorPlan)
-    assert isinstance(plan._root, RustIntervalNode), (
-        f"编译路径没有接到事件作用域内核，而是 {type(plan._root).__name__}"
-    )
-
     executor = compile_incremental_factor(
         "trading-day-mean", expression, ("A",), source_freq=DataFreq.MIN1,
         event_line=events,
     )
+    assert executor._multi.uses_rust
     index = pd.date_range("2026-01-05 09:31", periods=4, freq="min")
     observed = []
     for position, stamp in enumerate(index):
@@ -171,7 +161,6 @@ def test_compiled_plan_resets_at_the_day_boundary():
     from tools.data.types import DataColumn, DataFreq
     from tools.factors.expr.groupby_scope import GroupByScopeExpr
     from tools.factors.expr.leaf import ColumnRef
-    from tools.factors.expr.streaming.incremental import compile_streaming_factor
     from tools.factors.expr.streaming.incremental import compile_incremental_factor
 
     column = DataColumn.CLOSE
