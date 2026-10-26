@@ -335,6 +335,10 @@ impl SessionWindowState {
     Self::new(op)
   }
 
+  pub fn update_interval(&mut self, interval: crate::algo::IntervalSpec, value: f64) -> f64 {
+    self.update_explicit(interval.start, interval.end, value)
+  }
+
   pub fn update_explicit(&mut self, start_index: u64, end_index: u64, value: f64) -> f64 {
     self.start_index = start_index;
     self.range_end = end_index;
