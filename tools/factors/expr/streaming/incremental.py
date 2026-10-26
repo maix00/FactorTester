@@ -49,7 +49,6 @@ from .group_cross_sectional import GroupCrossSectionalNode
 from .rolling_covariance import RollingCovarianceState
 from .rolling_extrema import RollingArgExtremaState, RollingMinMaxState
 from .rolling_moments import RollingMomentsState
-from .rolling_statistics import ROLLING_STATISTICS, RollingStatisticsNode
 
 if TYPE_CHECKING:
     # MarketSlice lived in the now-deleted engines/native/runtime.py
@@ -395,55 +394,6 @@ class RustEmaNode:
         )
         cache[key] = result
         return result
-
-
-class ExpandingEwmNode:
-    def __init__(self, child: StreamingNode, span: int, width: int) -> None:
-        self.child = child
-        self.span = span
-        self._width = width
-        self._minimum = max(1, span // 2)
-        # pandas' default rolling EMA is adjust=True, ignore_na=False.  Keep
-        # the adjusted numerator/denominator recurrence instead of rebuilding
-        # an ever-growing DataFrame on every bar (the old implementation was
-        # O(T²) in the number of bars).
-        self._decay = 1.0 - (2.0 / (span + 1.0))
-        self._numerator = np.zeros(width, dtype=float)
-        self._denominator = np.zeros(width, dtype=float)
-        self._observations = np.zeros(width, dtype=np.int64)
-        self._last_result = np.full(width, np.nan, dtype=float)
-
-    def update(self, market: MarketSlice, cache: dict[int, np.ndarray]) -> np.ndarray:
-        key = id(self)
-        if key in cache:
-            return cache[key]
-        value = np.asarray(self.child.update(market, cache), dtype=float)
-        finite = np.isfinite(value)
-        self._numerator *= self._decay
-        self._denominator *= self._decay
-        self._numerator[finite] += value[finite]
-        self._denominator[finite] += 1.0
-        self._observations[finite] += 1
-        result = np.full(self._width, np.nan, dtype=float)
-        ready = (self._observations >= self._minimum) & (self._denominator > 0.0)
-        result[ready] = self._numerator[ready] / self._denominator[ready]
-        # A missing observation does not change the visible adjusted mean.
-        # Keep the previous quotient exactly (rather than dividing two
-        # repeatedly decayed floats and accumulating gap-length roundoff).
-        unchanged = (~finite) & (self._observations >= self._minimum)
-        result[unchanged] = self._last_result[unchanged]
-        # Very long missing runs can underflow both adjusted state terms.  In
-        # that case pandas keeps the last EWM value visible; retaining the
-        # output separately also avoids turning a legitimate long gap into a
-        # spurious NaN.  A later finite value naturally restarts the state.
-        fallback = (self._observations >= self._minimum) & ~ready & ~unchanged
-        result[fallback] = self._last_result[fallback]
-        observed = np.isfinite(result)
-        self._last_result[observed] = result[observed]
-        cache[key] = result
-        if len(cache[key]) != self._width:
-            raise ValueError("streaming ewm output width changed unexpectedly")
-        return cache[key]
 
 
 class ShiftNode:
@@ -885,18 +835,6 @@ def compile_streaming_factor(
                     expr.op, children[0], len(products),
                     _BarWindowResolver(window),
                     quantile=getattr(expr, "quantile", None),
-                )
-            elif expr.op in ROLLING_STATISTICS:
-                if len(children) != 1:
-                    raise UnsupportedStreamingFactor(
-                        f"{expr.op} expects one streaming operand"
-                    )
-                node = RollingStatisticsNode(
-                    expr.op,
-                    children[0],
-                    window,
-                    len(products),
-                    quantile=expr.quantile,
                 )
             elif expr.op == "rolling_ema":
                 if len(children) != 1:
