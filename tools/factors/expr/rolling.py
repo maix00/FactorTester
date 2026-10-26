@@ -27,6 +27,7 @@ from .operands import OperandExpr
 from .leaf import ConstExpr, _to_expr
 from .rolling_arg_extrema import rolling_argmaxmin as _rolling_argmaxmin
 from .rolling_statistics import ROLLING_STATISTICS, apply_rolling_statistic
+from .window_semantics import DEFAULT_MIN_PERIODS, DEFAULT_NAN_POLICY, NanPolicy
 
 class RollingExpr(FactorExpr):
     """
@@ -48,11 +49,15 @@ class RollingExpr(FactorExpr):
 
     def __init__(self, data: FactorExpr, window: FactorExpr,
                  trunc_start: Optional[FactorExpr] = None,
-                 trunc_end: Optional[FactorExpr] = None):
+                 trunc_end: Optional[FactorExpr] = None,
+                 min_periods: int | None = DEFAULT_MIN_PERIODS,
+                 nan_policy: NanPolicy = DEFAULT_NAN_POLICY):
         self._data = data
         self._window = window
         self._trunc_start = trunc_start
         self._trunc_end = trunc_end
+        self._min_periods = min_periods
+        self._nan_policy = nan_policy
 
     @property
     def _operands(self) -> Sequence[FactorExpr]:
@@ -76,12 +81,19 @@ class RollingExpr(FactorExpr):
         """将窗口长度解析为可参与截断边界运算的 bar 数表达式。"""
         return WindowBarsExpr(self._window)
 
+    def semantics(self, *, min_periods: int | None = DEFAULT_MIN_PERIODS,
+                  nan_policy: NanPolicy = DEFAULT_NAN_POLICY) -> 'RollingExpr':
+        """Return a rolling expression with explicit window semantics."""
+        return RollingExpr(self._data, self._window, self._trunc_start,
+                           self._trunc_end, min_periods, nan_policy)
+
     # ── 截断 ──
 
     def truncate(self, start: Any, end: Any) -> 'RollingExpr':
         """返回带截断的新 RollingExpr."""
         return RollingExpr(self._data, self._window,
-                           _to_expr(start), _to_expr(end))
+                           _to_expr(start), _to_expr(end),
+                           self._min_periods, self._nan_policy)
 
     # ── 聚合方法 → RollingOp ──
 
@@ -156,10 +168,14 @@ class RollingExpr(FactorExpr):
         if extra is not None:
             return RollingOp(op_key, self._window, self._data, _to_expr(extra),
                              trunc_start=self._trunc_start,
-                             trunc_end=self._trunc_end)
+                             trunc_end=self._trunc_end,
+                             min_periods=self._min_periods,
+                             nan_policy=self._nan_policy)
         return RollingOp(op_key, self._window, self._data,
                          trunc_start=self._trunc_start,
-                         trunc_end=self._trunc_end)
+                         trunc_end=self._trunc_end,
+                         min_periods=self._min_periods,
+                         nan_policy=self._nan_policy)
 
     # ── 结构等价 ──
 
@@ -169,14 +185,15 @@ class RollingExpr(FactorExpr):
             base += (self._trunc_start._structural_key(),)
         if self._trunc_end is not None:
             base += (self._trunc_end._structural_key(),)
-        return base
+        return base + (self._min_periods, self._nan_policy.value)
 
     def resolve(self, *args, **kwargs) -> 'FactorExpr':
         resolved_data = self._data.resolve(*args, **kwargs)
         resolved_window = self._window.resolve(*args, **kwargs)
         resolved_ts = self._trunc_start.resolve(*args, **kwargs) if self._trunc_start is not None else None
         resolved_te = self._trunc_end.resolve(*args, **kwargs) if self._trunc_end is not None else None
-        return RollingExpr(resolved_data, resolved_window, resolved_ts, resolved_te)
+        return RollingExpr(resolved_data, resolved_window, resolved_ts, resolved_te,
+                           self._min_periods, self._nan_policy)
 
     def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
         # RollingExpr 本身不求值——聚合由 RollingOp 完成
@@ -286,7 +303,9 @@ class RollingOp(OperandExpr):
 
     def __init__(self, op: str, window: FactorExpr, *data_and_trunc: FactorExpr,
                  trunc_start: Optional[FactorExpr] = None,
-                 trunc_end: Optional[FactorExpr] = None):
+                 trunc_end: Optional[FactorExpr] = None,
+                 min_periods: int | None = DEFAULT_MIN_PERIODS,
+                 nan_policy: NanPolicy = DEFAULT_NAN_POLICY):
         # 拼出 operands: (window, *data, [trunc_start], [trunc_end])
         operands: List[FactorExpr] = [window]
         extra_start = 1
@@ -302,6 +321,8 @@ class RollingOp(OperandExpr):
             operands.extend(data_and_trunc)
         self._trunc_start = trunc_start
         self._trunc_end = trunc_end
+        self.min_periods = min_periods
+        self.nan_policy = nan_policy
         super().__init__(op, *operands)
 
     @property
@@ -563,7 +584,14 @@ class RollingOp(OperandExpr):
             extra += (self._trunc_start._structural_key(),)
         if self._trunc_end is not None:
             extra += (self._trunc_end._structural_key(),)
-        return extra
+        return extra + (self.min_periods, self.nan_policy.value)
+
+    def resolve(self, *args, **kwargs) -> 'FactorExpr':
+        resolved = [opnd.resolve(*args, **kwargs) for opnd in self._operands]
+        return type(self)(
+            self.op, *resolved,
+            min_periods=self.min_periods, nan_policy=self.nan_policy,
+        )
 
     def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
 
