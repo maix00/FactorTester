@@ -400,6 +400,24 @@ class RollingOp(OperandExpr):
         'rolling_rank': 'rank', 'rolling_mad': 'mad',
     }
 
+    def _apply_window_semantics(self, result: pd.DataFrame, values: pd.DataFrame,
+                                window: int) -> pd.DataFrame:
+        """Mask the Rust aggregation according to explicit window semantics."""
+        min_periods = self.min_periods if self.min_periods is not None else window
+        propagate = self.nan_policy is NanPolicy.PROPAGATE
+        for column in result.columns:
+            raw = pd.to_numeric(values[column], errors="coerce").to_numpy(dtype=float)
+            finite = np.isfinite(raw)
+            counts = np.concatenate(([0], np.cumsum(finite)))
+            positions = np.arange(len(raw))
+            widths = np.minimum(positions + 1, window)
+            valid = counts[positions + 1] - counts[np.maximum(0, positions + 1 - window)]
+            mask = valid < min_periods
+            if propagate:
+                mask |= valid < widths
+            result.loc[mask, column] = np.nan
+        return result
+
     def _rust_rolling(self, window: int, df: pd.DataFrame,
                       quantile: float | None = None) -> pd.DataFrame | None:
         """Batch path uses the same Rust interval kernel as streaming."""
@@ -425,7 +443,7 @@ class RollingOp(OperandExpr):
             result[column] = interval_rolling(
                 values, starts, ordinals, op, quantile,
             )
-        return result
+        return self._apply_window_semantics(result, df, window)
 
     def _rust_rolling_pair(self, window: int, left: pd.DataFrame,
                            right: pd.DataFrame) -> pd.DataFrame | None:
@@ -445,7 +463,7 @@ class RollingOp(OperandExpr):
             result[column] = interval_rolling_pair(
                 x, y, starts, ordinals, op == 'corr',
             )
-        return result
+        return self._apply_window_semantics(result, left, window)
 
     def _apply_rolling(self, window: int, *dfs: pd.DataFrame,
                        freq: DataFreq,

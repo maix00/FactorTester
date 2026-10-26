@@ -170,6 +170,8 @@ def apply_grouped(
     quantile: float | None = None,
     trunc_start: int | None = None,
     trunc_end: int | None = None,
+    min_periods: int = 1,
+    propagate_nan: bool = True,
 ) -> pd.DataFrame:
     """Partition ``data`` by ``scope`` and aggregate inside each partition."""
     if op not in GROUPED_AGGREGATIONS:
@@ -194,7 +196,7 @@ def apply_grouped(
                        "min": "min", "max": "max", "median": "quantile",
                        "quantile": "quantile", "argmax": "argmax",
                        "argmin": "argmin"}[op]
-            state = IntervalState(rust_op, quantile)
+            state = IntervalState(rust_op, quantile, max(1, int(min_periods)), bool(propagate_nan))
             result = np.empty(len(group), dtype=float)
             for position, value in enumerate(group):
                 effective_end = position if end is None else min(end, position)

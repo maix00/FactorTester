@@ -312,7 +312,16 @@ class RustIntervalNode:
         self.child = child
         self.resolver = resolver
         self._width = width
+        self._rust_op = rust_op
+        self._quantile = quantile
         self._states = [IntervalState(rust_op, quantile) for _ in range(width)]
+
+    def configure(self, min_periods: int, propagate_nan: bool) -> None:
+        from alpha import IntervalState
+        self._states = [
+            IntervalState(self._rust_op, self._quantile, max(1, int(min_periods)), bool(propagate_nan))
+            for _ in range(self._width)
+        ]
 
     def update(self, market, cache):
         key = id(self)
@@ -980,6 +989,16 @@ def compile_streaming_factor(
             raise UnsupportedStreamingFactor(
                 f"unsupported FactorExpr node: {type(expr).__name__}"
             )
+        if isinstance(node, RustIntervalNode):
+            from tools.factors.expr.window_semantics import NanPolicy
+            if isinstance(expr, GroupByScopeOp):
+                min_periods = expr.min_periods if expr.min_periods is not None else 1
+            else:
+                min_periods = getattr(expr, "min_periods", None)
+                if min_periods is None:
+                    min_periods = locals().get("window", 1) if isinstance(locals().get("window"), int) else 1
+            policy = getattr(expr, "nan_policy", NanPolicy.PROPAGATE)
+            node.configure(int(min_periods), policy is NanPolicy.PROPAGATE)
         memo[key] = node
         return node
 

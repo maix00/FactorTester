@@ -270,4 +270,6 @@ class GroupByScopeOp(OperandExpr):
             quantile=quantile,
             trunc_start=_bound_value(self.trunc_start, ctx),
             trunc_end=_bound_value(self.trunc_end, ctx),
+            min_periods=self.min_periods if self.min_periods is not None else 1,
+            propagate_nan=self.nan_policy is NanPolicy.PROPAGATE,
         )

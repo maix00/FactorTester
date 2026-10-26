@@ -260,5 +260,7 @@ def test_rolling_slides_while_scope_resets_within_partition():
         rolling_values.append(rolling.on_signal(stamp)["A"])
         scoped_values.append(scoped.on_signal(stamp)["A"])
 
-    assert rolling_values == [10.0, 15.0, 20.0, 30.0, 40.0]
-    assert scoped_values == [10.0, 15.0, 20.0, 40.0, 45.0]
+    np.testing.assert_allclose(
+        rolling_values, [np.nan, np.nan, 20.0, 30.0, 40.0], equal_nan=True,
+    )
+    np.testing.assert_allclose(scoped_values, [10.0, 15.0, 20.0, 40.0, 45.0])

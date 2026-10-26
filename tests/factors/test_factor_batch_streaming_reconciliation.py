@@ -82,3 +82,30 @@ def test_scope_batch_and_streaming_agree():
     expected = _batch(batch_expression).iloc[:, 0].to_numpy(dtype=float)
     actual = _stream(expression, values)
     np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=1e-10)
+
+
+def test_default_semantics_propagate_nan_and_full_window():
+    values = [1.0, np.nan, 3.0, 4.0]
+    frame = _FrameExpr(pd.DataFrame({"A": values}))
+    batch = frame.rolling_mean(2)
+    expected = batch.evaluate(ctx=EvaluateContext(products=["A"], freq=DataFreq.MIN1, cache={}))
+    actual = _stream(ColumnRef(DataColumn.CLOSE).rolling_mean(2), values)
+    np.testing.assert_allclose(actual, expected.iloc[:, 0].to_numpy(dtype=float), equal_nan=True)
+
+
+def test_explicit_skip_semantics_matches_batch_and_streaming():
+    from tools.factors.expr.window_semantics import NanPolicy
+
+    values = [1.0, np.nan, 3.0, 4.0]
+    frame = _FrameExpr(pd.DataFrame({"A": values}))
+    expression = ColumnRef(DataColumn.CLOSE).rolling(2).semantics(
+        min_periods=1, nan_policy=NanPolicy.SKIP,
+    ).mean()
+    batch_expression = frame.rolling(2).semantics(
+        min_periods=1, nan_policy=NanPolicy.SKIP,
+    ).mean()
+    expected = batch_expression.evaluate(
+        ctx=EvaluateContext(products=["A"], freq=DataFreq.MIN1, cache={})
+    )
+    actual = _stream(expression, values)
+    np.testing.assert_allclose(actual, expected.iloc[:, 0].to_numpy(dtype=float), equal_nan=True)
