@@ -66,18 +66,23 @@ class EventLine(Protocol):
 
     def latest(self, event: EventId) -> int | None: ...
 
+    def previous(self, event: EventId) -> int | None: ...
+
+    def first(self, event: EventId) -> int | None: ...
+
 
 def resolve_event_ref(
     ref: EventRef, line: EventLine, current_index: int,
 ) -> int | None:
     """Resolve a factor boundary to an absolute bar ordinal."""
-    occurrence = line.latest(ref.event)
+    if ref.occurrence is Occurrence.FIRST:
+        occurrence = line.first(ref.event)
+    elif ref.occurrence is Occurrence.PREVIOUS:
+        occurrence = line.previous(ref.event)
+    else:
+        occurrence = line.latest(ref.event)
     if occurrence is None:
         return None
-    if ref.occurrence is Occurrence.FIRST:
-        occurrence = 0
-    elif ref.occurrence is Occurrence.PREVIOUS:
-        occurrence = max(0, occurrence - 1)
     if ref.offset < 0:
         occurrence = max(0, occurrence + ref.offset)
     else:

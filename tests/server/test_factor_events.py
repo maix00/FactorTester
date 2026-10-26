@@ -32,3 +32,11 @@ def test_event_boundary_resolves_from_runtime_event_line():
     assert resolve_event_ref(
         EventRef(EventId.TRADING_SESSION_START), line, 120,
     ) is None
+
+
+def test_event_window_syntax_supports_occurrence():
+    from tools.factors.expr.streaming.incremental import _event_ref_from_window
+
+    ref = _event_ref_from_window("event:previous:trading_day_start")
+    assert ref is not None
+    assert ref.occurrence is Occurrence.PREVIOUS

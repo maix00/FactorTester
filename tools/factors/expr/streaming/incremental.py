@@ -386,11 +386,11 @@ class RustEventWindowNode:
         key = id(self)
         if key in cache:
             return cache[key]
-        occurrence = self.event_line.latest(self.event_ref.event)
+        from tools.factors.events import resolve_event_ref
+        occurrence = resolve_event_ref(self.event_ref, self.event_line, 0)
         if occurrence is None:
             return np.full(self._width, np.nan, dtype=float)
-        start = int(occurrence) - 1 + int(self.event_ref.offset)
-        start = max(0, start)
+        start = max(0, int(occurrence) - 1)
         values = np.asarray(self.child.update(market, cache), dtype=float)
         if values.shape != (self._width,):
             raise ValueError("event window input width changed")
@@ -2076,9 +2076,12 @@ def _event_ref_from_window(value: object):
     """Parse explicit ``event:<id>`` window syntax into an EventRef."""
     if not isinstance(value, str) or not value.startswith("event:"):
         return None
-    from tools.factors.events import EventId, EventRef
+    from tools.factors.events import EventId, EventRef, Occurrence
 
-    return EventRef(EventId(value.split(":", 1)[1]))
+    parts = value.split(":")
+    if len(parts) == 3 and parts[1] in {item.value for item in Occurrence}:
+        return EventRef(EventId(parts[2]), Occurrence(parts[1]))
+    return EventRef(EventId(parts[1]))
 
 
 def _wall_duration_ns(value: object) -> int | None:

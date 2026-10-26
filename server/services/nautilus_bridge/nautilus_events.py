@@ -20,9 +20,25 @@ from tools.factors.events import EventId
 class NautilusEventTimeline:
     calendar: Any | None = None
     bar_ordinal: int = 0
-    latest: dict[str, int] = field(default_factory=dict)
+    _latest: dict[str, int] = field(default_factory=dict)
+    history: dict[str, list[int]] = field(default_factory=dict)
     _trading_day: Any | None = None
     _session: int | None = None
+
+    def _record(self, event: Any, occurrence: int) -> None:
+        self._latest[event] = occurrence
+        self.history.setdefault(event, []).append(occurrence)
+
+    def latest(self, event: EventId) -> int | None:
+        return self._latest.get(event)
+
+    def previous(self, event: EventId) -> int | None:
+        history = self.history.get(event) or []
+        return history[-2] if len(history) >= 2 else None
+
+    def first(self, event: EventId) -> int | None:
+        history = self.history.get(event) or []
+        return history[0] if history else None
 
     def on_bar(self, bar: Any, *, trading_day: Any | None = None) -> None:
         self.bar_ordinal += 1
@@ -35,26 +51,26 @@ class NautilusEventTimeline:
                 day = self.calendar.sessions[session].trading_day
         if day is not None and day != self._trading_day:
             self._trading_day = day
-            self.latest[EventId.TRADING_DAY_START] = self.bar_ordinal
+            self._record(EventId.TRADING_DAY_START, self.bar_ordinal)
         if session is not None and session != self._session:
             self._session = session
-            self.latest[EventId.TRADING_SESSION_START] = self.bar_ordinal
-        self.latest[EventId.BAR] = self.bar_ordinal
+            self._record(EventId.TRADING_SESSION_START, self.bar_ordinal)
+        self._record(EventId.BAR, self.bar_ordinal)
 
     def on_instrument_status(
         self, status: Any, *, instrument_id: Any | None = None,
     ) -> None:
         """Record a Nautilus instrument status change (halt/resume/close)."""
         name = str(getattr(status, "name", status))
-        self.latest[EventId.INSTRUMENT_STATUS] = self.bar_ordinal
-        self.latest[f"instrument_status:{name}"] = self.bar_ordinal
+        self._record(EventId.INSTRUMENT_STATUS, self.bar_ordinal)
+        self._latest[f"instrument_status:{name}"] = self.bar_ordinal
         if instrument_id is not None:
-            self.latest[f"instrument_status:{instrument_id}:{name}"] = self.bar_ordinal
+            self._latest[f"instrument_status:{instrument_id}:{name}"] = self.bar_ordinal
 
     def on_roll(self, trade_date: Any) -> None:
         """Record a contract-roll event supplied by the strategy/data layer."""
-        self.latest[EventId.CONTRACT_ROLL] = self.bar_ordinal
-        self.latest[f"contract_roll:{pd.Timestamp(trade_date).date()}"] = self.bar_ordinal
+        self._record(EventId.CONTRACT_ROLL, self.bar_ordinal)
+        self._latest[f"contract_roll:{pd.Timestamp(trade_date).date()}"] = self.bar_ordinal
 
     def latest_occurrence(self, event: str | EventId) -> int | None:
-        return self.latest.get(event)
+        return self._latest.get(event)
