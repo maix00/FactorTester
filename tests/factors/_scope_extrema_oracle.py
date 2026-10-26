@@ -1,32 +1,29 @@
-"""Retained scalar oracle for regression/benchmark comparison; never production."""
+"""Small exhaustive scalar oracle; deliberately independent of production kernels."""
 import numpy as np
 
-def _prefix_arg_extreme_loop(
-    values: np.ndarray, op: str, start: int, end: int,
-) -> np.ndarray:
-    """逐根实现：小分区下比 numpy 调用开销更低，同时作为向量化版的等价参照。"""
-    length = len(values)
-    output = np.full(length, np.nan, dtype=float)
-    best_index = start
-    stop = length - 1 if end is None else min(end, length - 1)
-    scanned_through = start
-    for position in range(start, length):
-        limit = position if end is None else min(position, stop)
-        for challenger in range(scanned_through + 1, limit + 1):
-            challenger_value = values[challenger]
-            if np.isnan(challenger_value):
-                continue
-            best_value = values[best_index] if best_index >= 0 else np.nan
-            # 只有严格更优才推进，保证与 rolling 的「最早出现的极值」一致。
-            if np.isnan(best_value) or (
-                (op == "argmax" and challenger_value > best_value)
-                or (op == "argmin" and challenger_value < best_value)
-            ):
-                best_index = challenger
-        scanned_through = max(scanned_through, limit)
-        if np.isnan(values[position]) or np.isnan(values[best_index]):
+
+def _prefix_arg_extreme_loop(values, op, start, end, *, min_periods=1, propagate_nan=False):
+    """Earliest tie; normalized age uses positions, not the count of nonmissing values.
+
+    Only the candidate interval is subject to missing-value policy. Values after
+    its endpoint cannot change the winner (including NaN at the current bar).
+    Infinities are ordered values. Empty/reversed intervals return NaN.
+    """
+    output = np.full(len(values), np.nan, dtype=float)
+    if start < 0 or (end is not None and start > end):
+        return output
+    for current in range(start, len(values)):
+        stop = current if end is None else min(end, current)
+        candidates = [(i, values[i]) for i in range(start, stop + 1)]
+        valid = [(i, v) for i, v in candidates if not np.isnan(v)]
+        if len(valid) < max(1, min_periods):
             continue
-        span = position - start
-        age = position - best_index
-        output[position] = 0.0 if span == 0 else age / span
+        if propagate_nan and len(valid) != len(candidates):
+            continue
+        best, value = valid[0]
+        for index, challenger in valid[1:]:
+            if (op == "argmax" and challenger > value) or (op == "argmin" and challenger < value):
+                best, value = index, challenger
+        span = current - start
+        output[current] = (current - best) / span if span else 0.0
     return output

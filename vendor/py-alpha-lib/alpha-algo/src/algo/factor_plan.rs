@@ -431,7 +431,7 @@ impl FactorPlanKernel {
                     let node = &mut self.nodes[index];
                     let base = current.saturating_sub(*window as u64 - 1);
                     let truncated = *trunc_start >= 0 || *trunc_end >= 0 || trunc_start_child.is_some() || trunc_end_child.is_some();
-                    let static_trunc = *trunc_start >= 0 && *trunc_end >= 0
+                    let static_trunc = *trunc_start >= 0 && *trunc_end >= *trunc_start
                         && trunc_start_child.is_none() && trunc_end_child.is_none()
                         && (*trunc_end as usize) < window.saturating_sub(1);
                     for product in 0..products {
@@ -1199,6 +1199,16 @@ mod variance_semantics_tests {
 #[cfg(test)]
 mod static_truncation_tests {
     use super::*;
+
+    #[test]
+    fn reversed_static_truncation_is_empty_without_unsigned_underflow() {
+        let json = r#"{"columns":["C"],"nodes":[
+          {"kind":"column","index":0},
+          {"kind":"rolling","child":0,"window":5,"op":"mean","min_periods":1,"propagate_nan":false,"trunc_start":3,"trunc_end":1}
+        ],"outputs":[1]}"#;
+        let mut kernel = FactorPlanKernel::from_spec_json(json, 1).unwrap();
+        for value in 0..20 { assert!(kernel.update(&[value as f64]).unwrap()[0].is_nan()); }
+    }
 
     #[test]
     fn static_truncation_matches_dynamic_endpoint_reference() {

@@ -428,10 +428,14 @@ impl SessionWindowState {
     self.start_index = start_index;
     self.range_end = end_index;
     let current = self.next_index;
+    if start_index > end_index {
+      self.next_index += 1;
+      return f64::NAN;
+    }
     if current < start_index || current > end_index {
       self.next_index += 1;
       if current > end_index && matches!(self.op, SessionOp::Argmin | SessionOp::Argmax | SessionOp::ArgminRaw | SessionOp::ArgmaxRaw) {
-        return if !value.is_finite() || self.finite_count < self.min_periods || (self.propagate_nan && self.nan_count > 0) {
+        return if self.finite_count < self.min_periods || (self.propagate_nan && self.nan_count > 0) {
           f64::NAN
         } else { self.arg_extreme_at(current) };
       }
@@ -461,12 +465,20 @@ impl SessionWindowState {
     else if span == 0 { 0.0 } else { age / span as f64 }
   }
 
+  // Extrema order infinities normally; arithmetic kernels retain their finite-input contract.
+  fn accepts_value(&self, value: f64) -> bool {
+    if matches!(self.op, SessionOp::Min | SessionOp::Max | SessionOp::Argmin
+      | SessionOp::Argmax | SessionOp::ArgminRaw | SessionOp::ArgmaxRaw) {
+      !value.is_nan()
+    } else { value.is_finite() }
+  }
+
   fn remove_oldest(&mut self) {
     let Some((_session, _timestamp, old, index)) = self.ring.pop_front() else { return };
-    if !old.is_finite() {
+    if !self.accepts_value(old) {
       self.nan_count = self.nan_count.saturating_sub(1);
     }
-    if old.is_finite() {
+    if self.accepts_value(old) {
       match self.op {
         SessionOp::Sum | SessionOp::Mean => self.finite_sum -= old,
         SessionOp::Var | SessionOp::Std => {
@@ -503,10 +515,10 @@ impl SessionWindowState {
     let index = self.next_index;
     self.next_index += 1;
     self.ring.push_back((0, 0, value, index));
-    if !value.is_finite() {
+    if !self.accepts_value(value) {
       self.nan_count += 1;
     }
-    if value.is_finite() {
+    if self.accepts_value(value) {
       match self.op {
         SessionOp::Sum | SessionOp::Mean => self.finite_sum += value,
         SessionOp::Var | SessionOp::Std => {
@@ -561,7 +573,7 @@ impl SessionWindowState {
       SessionOp::Min => self.min_deque.front().map(|(_, v)| *v).unwrap_or(f64::NAN),
       SessionOp::Max => self.max_deque.front().map(|(_, v)| *v).unwrap_or(f64::NAN),
       SessionOp::Argmin | SessionOp::Argmax | SessionOp::ArgminRaw | SessionOp::ArgmaxRaw => {
-        if !value.is_finite() { f64::NAN } else { self.arg_extreme_at(self.next_index.saturating_sub(1)) }
+        self.arg_extreme_at(self.next_index.saturating_sub(1))
       }
       SessionOp::Mad => {
         let Some(tree) = self.order_stat.as_ref() else { return f64::NAN };
@@ -1115,13 +1127,30 @@ mod tests {
   use super::*;
 
   #[test]
+  fn extrema_missing_policy_and_infinities_apply_to_candidates() {
+    let mut state = SessionWindowState::new_explicit(SessionOp::Argmax).unwrap().with_semantics(1, false);
+    assert_eq!(state.update_explicit(0, 10, 1.0), 0.0);
+    assert_eq!(state.update_explicit(0, 10, f64::NAN), 1.0);
+    assert_eq!(state.update_explicit(0, 10, f64::INFINITY), 0.0);
+    assert_eq!(state.update_explicit(0, 10, f64::INFINITY), 1.0 / 3.0);
+    assert_eq!(state.update_explicit(2, 10, 1.0), 1.0);
+    assert!(state.update_explicit(5, 4, 1.0).is_nan());
+    let mut strict = SessionWindowState::new_explicit(SessionOp::Argmax).unwrap().with_semantics(2, true);
+    assert!(strict.update_explicit(0, 2, 1.0).is_nan());
+    assert!(strict.update_explicit(0, 2, f64::NAN).is_nan());
+    assert!(strict.update_explicit(0, 2, 5.0).is_nan());
+    let mut empty = SessionWindowState::new_explicit(SessionOp::Argmax).unwrap();
+    for value in [f64::NAN, 1.0, 2.0] { assert!(empty.update_explicit(0, 0, value).is_nan()); }
+  }
+
+  #[test]
   fn truncated_extreme_keeps_first_tie_and_advances_age_after_endpoint() {
     let mut state = SessionWindowState::new_explicit(SessionOp::Argmax).unwrap().with_semantics(1, false);
     assert_eq!(state.update_explicit(0, 2, 1.0), 0.0);
     assert_eq!(state.update_explicit(0, 2, 5.0), 0.0);
     assert_eq!(state.update_explicit(0, 2, 5.0), 0.5);
     assert_eq!(state.update_explicit(0, 2, 100.0), 2.0 / 3.0);
-    assert!(state.update_explicit(0, 2, f64::NAN).is_nan());
+    assert_eq!(state.update_explicit(0, 2, f64::NAN), 3.0 / 4.0);
     assert_eq!(state.update_explicit(0, 2, 100.0), 4.0 / 5.0);
     let mut minimum = SessionWindowState::new_explicit(SessionOp::Min).unwrap();
     for index in 0..1000 { minimum.update_explicit(0, index, 1.0); }
