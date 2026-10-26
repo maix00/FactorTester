@@ -13,6 +13,8 @@ from typing import Any
 
 import pandas as pd
 
+from tools.factors.events import EventId
+
 
 @dataclass(slots=True)
 class NautilusEventTimeline:
@@ -33,25 +35,26 @@ class NautilusEventTimeline:
                 day = self.calendar.sessions[session].trading_day
         if day is not None and day != self._trading_day:
             self._trading_day = day
-            self.latest["trading_day_start"] = self.bar_ordinal
+            self.latest[EventId.TRADING_DAY_START] = self.bar_ordinal
         if session is not None and session != self._session:
             self._session = session
-            self.latest["session_start"] = self.bar_ordinal
-        self.latest["bar"] = self.bar_ordinal
+            self.latest[EventId.TRADING_SESSION_START] = self.bar_ordinal
+        self.latest[EventId.BAR] = self.bar_ordinal
 
     def on_instrument_status(
         self, status: Any, *, instrument_id: Any | None = None,
     ) -> None:
         """Record a Nautilus instrument status change (halt/resume/close)."""
         name = str(getattr(status, "name", status))
+        self.latest[EventId.INSTRUMENT_STATUS] = self.bar_ordinal
         self.latest[f"instrument_status:{name}"] = self.bar_ordinal
         if instrument_id is not None:
             self.latest[f"instrument_status:{instrument_id}:{name}"] = self.bar_ordinal
 
     def on_roll(self, trade_date: Any) -> None:
         """Record a contract-roll event supplied by the strategy/data layer."""
-        self.latest["contract_roll"] = self.bar_ordinal
+        self.latest[EventId.CONTRACT_ROLL] = self.bar_ordinal
         self.latest[f"contract_roll:{pd.Timestamp(trade_date).date()}"] = self.bar_ordinal
 
-    def latest_occurrence(self, event: str) -> int | None:
+    def latest_occurrence(self, event: str | EventId) -> int | None:
         return self.latest.get(event)

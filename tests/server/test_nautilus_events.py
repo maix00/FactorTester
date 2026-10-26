@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from server.services.nautilus_bridge.nautilus_events import NautilusEventTimeline
+from tools.factors.events import EventId
 
 
 def test_nautilus_bars_record_trading_day_and_session_events():
@@ -15,11 +16,11 @@ def test_nautilus_bars_record_trading_day_and_session_events():
     timeline = NautilusEventTimeline(calendar=calendar)
     timeline.on_bar(SimpleNamespace(ts_init=5))
     timeline.on_bar(SimpleNamespace(ts_init=6))
-    assert timeline.latest_occurrence("trading_day_start") == 1
-    assert timeline.latest_occurrence("session_start") == 1
+    assert timeline.latest_occurrence(EventId.TRADING_DAY_START) == 1
+    assert timeline.latest_occurrence(EventId.TRADING_SESSION_START) == 1
     timeline.on_bar(SimpleNamespace(ts_init=25))
-    assert timeline.latest_occurrence("trading_day_start") == 3
-    assert timeline.latest_occurrence("session_start") == 3
+    assert timeline.latest_occurrence(EventId.TRADING_DAY_START) == 3
+    assert timeline.latest_occurrence(EventId.TRADING_SESSION_START) == 3
 
 
 def test_instrument_status_and_roll_are_recurring_non_calendar_events():
