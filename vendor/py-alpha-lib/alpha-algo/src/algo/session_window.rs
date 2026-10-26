@@ -352,7 +352,8 @@ impl SessionWindowState {
     Ok(state)
   }
 
-  pub fn new_partition_range(start: usize, end: usize, op: SessionOp) -> Result<Self, Error> {
+  pub fn new_partition_range(start: usize, end: Option<usize>, op: SessionOp) -> Result<Self, Error> {
+    let end = end.unwrap_or(u32::MAX as usize);
     if end < start {
       return Err(Error::InvalidParameter("partition range end before start".to_string()));
     }
@@ -1101,7 +1102,7 @@ mod tests {
 
   #[test]
   fn partition_range_truncates_and_freezes() {
-    let mut state = SessionWindowState::new_partition_range(0, 0, SessionOp::Sum).unwrap();
+    let mut state = SessionWindowState::new_partition_range(0, Some(0), SessionOp::Sum).unwrap();
     assert_eq!(state.update(1, 2.0), 2.0);
     assert_eq!(state.update(1, 3.0), 2.0);
     assert_eq!(state.update(2, 7.0), 7.0);

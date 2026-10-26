@@ -2618,7 +2618,7 @@ struct PartitionRangeState {
 impl PartitionRangeState {
   #[new]
   #[pyo3(signature = (start, end, op="mean", quantile=None))]
-  fn new(start: usize, end: usize, op: &str, quantile: Option<f64>) -> PyResult<Self> {
+  fn new(start: usize, end: Option<usize>, op: &str, quantile: Option<f64>) -> PyResult<Self> {
     use alpha_algo::SessionOp;
     let op = match op {
       "sum" => SessionOp::Sum, "mean" => SessionOp::Mean,
