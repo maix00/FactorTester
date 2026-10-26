@@ -113,3 +113,14 @@ def test_alpha_factor_bar_since_executes_in_rust():
 
 
 
+
+
+def test_alpha_factor_trading_day_scope_is_cumulative():
+    from alpha.factor import scope_trading_day
+
+    index = pd.date_range('2026-01-05 09:30', periods=8, freq='min')
+    values = np.arange(8, dtype=float)
+    frame = pd.DataFrame({'CLOSE': values}, index=index)
+    ctx = EvalContext(products=('A',), preloaded={'A': frame})
+    result = ColumnRef('CLOSE').groupby_scope(scope_trading_day()).mean().evaluate(ctx)
+    np.testing.assert_allclose(result['A'].to_numpy(), np.cumsum(values) / np.arange(1, 9))
