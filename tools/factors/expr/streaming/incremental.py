@@ -1784,16 +1784,16 @@ def compile_streaming_factor(
             rust_partition = False
             trunc_start = _resolve_truncation(expr.trunc_start)
             trunc_end = _resolve_truncation(expr.trunc_end)
-            rust_range = (
-                isinstance(trunc_start, int) and isinstance(trunc_end, int)
-            )
+            has_trunc = trunc_start is not None or trunc_end is not None
+            rust_range = has_trunc
             if op_name in RustPartitionNode._OPS:
                 try:
                     node = RustPartitionNode(
                         op_name, data_operands[0], expr.scope, len(products),
                         quantile=quantile, source_freq=source_freq, products=products,
-                        range_start=trunc_start if rust_range else None,
-                        range_end=trunc_end if rust_range else None,
+                        range_start=(trunc_start if isinstance(trunc_start, int) else 0)
+                        if has_trunc else None,
+                        range_end=trunc_end if isinstance(trunc_end, int) else None,
                     )
                     rust_partition = True
                 except ImportError:
