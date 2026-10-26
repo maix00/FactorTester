@@ -2633,6 +2633,26 @@ impl WallRollingState {
 }
 
 #[pyclass]
+struct WallPairState {
+  inner: alpha_algo::SessionPairState,
+}
+
+#[pymethods]
+impl WallPairState {
+  #[new]
+  #[pyo3(signature = (duration_ns, correlation=false))]
+  fn new(duration_ns: i64, correlation: bool) -> PyResult<Self> {
+    let inner = alpha_algo::SessionPairState::new_wall(duration_ns, correlation)
+      .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    Ok(Self { inner })
+  }
+
+  fn update(&mut self, timestamp_ns: i64, x: f64, y: f64) -> f64 {
+    self.inner.update_at(0, timestamp_ns, x, y)
+  }
+}
+
+#[pyclass]
 struct SessionPairState {
   inner: alpha_algo::SessionPairState,
 }
@@ -2676,6 +2696,7 @@ fn _algo(m: &Bound<'_, PyModule>) -> PyResult<()> {
   m.add_class::<ThresholdKernel>()?;
   m.add_class::<SessionRollingState>()?;
   m.add_class::<SessionPairState>()?;
+  m.add_class::<WallPairState>()?;
   m.add_class::<WallRollingState>()?;
   m.add_class::<GroupKernel>()?;
   m.add_class::<TermCarryKernel>()?;

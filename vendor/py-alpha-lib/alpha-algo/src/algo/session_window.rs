@@ -502,6 +502,29 @@ pub fn ta_time_rolling_rank(timestamps: &[i64], values: &[f64], duration_ns: i64
   time_rolling_op(timestamps, values, duration_ns, SessionOp::Rank)
 }
 
+fn time_rolling_pair(
+  timestamps: &[i64], x: &[f64], y: &[f64], duration_ns: i64, correlation: bool,
+) -> Result<Vec<f64>, Error> {
+  if timestamps.len() != x.len() || x.len() != y.len() {
+    return Err(Error::LengthMismatch(timestamps.len(), x.len()));
+  }
+  let mut state = SessionPairState::new_wall(duration_ns, correlation)?;
+  Ok(timestamps.iter().copied().zip(x.iter().copied()).zip(y.iter().copied())
+    .map(|((ts, x), y)| state.update_at(0, ts, x, y)).collect())
+}
+
+pub fn ta_time_rolling_cov(
+  timestamps: &[i64], x: &[f64], y: &[f64], duration_ns: i64,
+) -> Result<Vec<f64>, Error> {
+  time_rolling_pair(timestamps, x, y, duration_ns, false)
+}
+
+pub fn ta_time_rolling_corr(
+  timestamps: &[i64], x: &[f64], y: &[f64], duration_ns: i64,
+) -> Result<Vec<f64>, Error> {
+  time_rolling_pair(timestamps, x, y, duration_ns, true)
+}
+
 pub fn ta_session_rolling_argmin<NumT: Float>(
   values: &[f64], session_ids: &[u32], lookback_sessions: usize,
 ) -> Result<Vec<NumT>, Error> {
@@ -665,9 +688,9 @@ fn time_rolling(
 }
 
 pub struct SessionPairState {
-  lookback_sessions: u32,
+  policy: WindowPolicy,
   correlation: bool,
-  ring: VecDeque<(u32, f64, f64)>,
+  ring: VecDeque<(u32, i64, f64, f64)>,
   sx: f64,
   sy: f64,
   sxx: f64,
@@ -682,15 +705,24 @@ impl SessionPairState {
       return Err(Error::InvalidParameter("lookback must be positive".to_string()));
     }
     Ok(Self {
-      lookback_sessions: lookback_sessions as u32,
+      policy: WindowPolicy::Sessions(lookback_sessions as u32),
       correlation,
       ring: VecDeque::new(),
       sx: 0.0, sy: 0.0, sxx: 0.0, syy: 0.0, sxy: 0.0, count: 0,
     })
   }
 
+  pub fn new_wall(duration_ns: i64, correlation: bool) -> Result<Self, Error> {
+    let mut state = Self::new(1, correlation)?;
+    if duration_ns <= 0 {
+      return Err(Error::InvalidParameter("duration must be positive".to_string()));
+    }
+    state.policy = WindowPolicy::WallClock(duration_ns);
+    Ok(state)
+  }
+
   fn remove_oldest(&mut self) {
-    let Some((_, ox, oy)) = self.ring.pop_front() else { return };
+    let Some((_, _, ox, oy)) = self.ring.pop_front() else { return };
     if ox.is_finite() && oy.is_finite() {
       self.sx -= ox; self.sy -= oy; self.sxx -= ox * ox;
       self.syy -= oy * oy; self.sxy -= ox * oy; self.count -= 1;
@@ -698,14 +730,31 @@ impl SessionPairState {
   }
 
   pub fn update(&mut self, session_id: u32, x: f64, y: f64) -> f64 {
-    if let Some((last, _, _)) = self.ring.back() {
-      if session_id < *last { return f64::NAN; }
+    self.update_at(session_id, 0, x, y)
+  }
+
+  pub fn update_at(&mut self, session_id: u32, timestamp_ns: i64, x: f64, y: f64) -> f64 {
+    if let Some((last_session, last_timestamp, _, _)) = self.ring.back() {
+      match self.policy {
+        WindowPolicy::Sessions(_) if session_id < *last_session => return f64::NAN,
+        WindowPolicy::WallClock(_) if timestamp_ns < *last_timestamp => return f64::NAN,
+        _ => {}
+      }
     }
-    let first_session = (session_id + 1).saturating_sub(self.lookback_sessions);
-    while self.ring.front().is_some_and(|(id, _, _)| *id < first_session) {
-      self.remove_oldest();
+    match self.policy {
+      WindowPolicy::Sessions(lookback) => {
+        let first_session = (session_id + 1).saturating_sub(lookback);
+        while self.ring.front().is_some_and(|(id, _, _, _)| *id < first_session) {
+          self.remove_oldest();
+        }
+      }
+      WindowPolicy::WallClock(duration) => {
+        while self.ring.front().is_some_and(|(_, ts, _, _)| timestamp_ns - *ts > duration) {
+          self.remove_oldest();
+        }
+      }
     }
-    self.ring.push_back((session_id, x, y));
+    self.ring.push_back((session_id, timestamp_ns, x, y));
     if x.is_finite() && y.is_finite() {
       self.sx += x; self.sy += y; self.sxx += x * x;
       self.syy += y * y; self.sxy += x * y; self.count += 1;
@@ -876,6 +925,17 @@ mod tests {
     assert_eq!(min[2], 2.0);
     let q = ta_time_rolling_quantile(&timestamps, &values, 2_000, 0.5).unwrap();
     assert_eq!(q[2], 2.0);
+  }
+
+  #[test]
+  fn wall_pair_cov_and_corr() {
+    let ts = [0i64, 1_000, 2_000];
+    let x = [1.0, 2.0, 3.0];
+    let y = [2.0, 4.0, 6.0];
+    let corr = ta_time_rolling_corr(&ts, &x, &y, 2_000).unwrap();
+    assert!((corr[2] - 1.0).abs() < 1e-12);
+    let cov = ta_time_rolling_cov(&ts, &x, &y, 1_000).unwrap();
+    assert!((cov[2] - 1.0).abs() < 1e-12);
   }
 
   #[test]

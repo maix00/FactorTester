@@ -63,3 +63,6 @@ SessionPairState = _algo.SessionPairState
 
 
 WallRollingState = _algo.WallRollingState
+
+
+WallPairState = _algo.WallPairState
