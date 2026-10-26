@@ -1202,7 +1202,7 @@ def get_research_report_chapter(publication_id: str, chapter_id: str):
 @sft_bp.get("/api/strategy-families")
 def get_public_strategy_families():
     require_user()
-    from server.services.nautilus_bridge.strategy_family_catalog import (
+    from server.services.strategy_family_catalog import (
         list_public_strategy_families,
     )
 
