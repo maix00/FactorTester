@@ -90,7 +90,8 @@ def interval_rolling(values, starts, ends, op="mean", quantile=None, window=None
   )
 
 
-def interval_rolling_pair(x, y, starts, ends, correlation=False, window=None):
+def interval_rolling_pair(x, y, starts, ends, correlation=False, window=None,
+                          min_periods=2, propagate_nan=False):
   """Batch interval cov/corr executed in Rust."""
   return np.asarray(
     _algo.interval_rolling_pair(
@@ -99,6 +100,7 @@ def interval_rolling_pair(x, y, starts, ends, correlation=False, window=None):
       np.asarray(starts, dtype=np.uint64),
       np.asarray(ends, dtype=np.uint64),
       bool(correlation), None if window is None else int(window),
+      int(min_periods), bool(propagate_nan),
     ),
     dtype=float,
   )

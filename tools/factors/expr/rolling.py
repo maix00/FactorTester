@@ -502,8 +502,10 @@ class RollingOp(OperandExpr):
             ).astype(np.uint64)
             result[column] = interval_rolling_pair(
                 x, y, starts, ordinals, op == 'corr', window,
+                max(2, self._min_periods_value(window)),
+                self.nan_policy is NanPolicy.PROPAGATE,
             )
-        return self._apply_window_semantics(result, left, window)
+        return result
 
     def _apply_rolling(self, window: int, *dfs: pd.DataFrame,
                        freq: DataFreq,

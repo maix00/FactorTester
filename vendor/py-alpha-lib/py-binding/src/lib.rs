@@ -268,11 +268,11 @@ mod algo_impl {
   }
 
   #[pyfunction]
-  #[pyo3(signature = (x, y, starts, ends, correlation=false, window=None))]
+  #[pyo3(signature = (x, y, starts, ends, correlation=false, window=None, min_periods=2, propagate_nan=false))]
   pub fn interval_rolling_pair(
     py: Python<'_>, x: PyReadonlyArray1<f64>, y: PyReadonlyArray1<f64>,
     starts: PyReadonlyArray1<u64>, ends: PyReadonlyArray1<u64>,
-    correlation: bool, window: Option<usize>,
+    correlation: bool, window: Option<usize>, min_periods: usize, propagate_nan: bool,
   ) -> PyResult<Py<PyArray1<f64>>> {
     let x = x.as_slice()?;
     let y = y.as_slice()?;
@@ -315,7 +315,10 @@ mod algo_impl {
                 syy -= y[k] * y[k]; sxy -= x[k] * y[k]; count -= 1;
               }
             }
-            if count < 2 { *slot = f64::NAN; continue; }
+            let width = (index + 1).min(window);
+            if count < 2 || count < min_periods || (propagate_nan && count < width) {
+              *slot = f64::NAN; continue;
+            }
             let m = count as f64;
             let covariance = (sxy - sx * sy / m) / (m - 1.0);
             *slot = if !correlation {
@@ -332,6 +335,7 @@ mod algo_impl {
       }
     }
     let mut state = alpha_algo::PairIntervalState::new(correlation);
+    let _ = (min_periods, propagate_nan);
     Ok(x.iter().copied().zip(y.iter().copied())
       .zip(starts.iter().copied()).zip(ends.iter().copied())
       .map(|(((x, y), start), end)| state.update(start, end, x, y))
