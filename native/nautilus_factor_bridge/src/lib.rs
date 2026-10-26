@@ -6,6 +6,9 @@
 
 use alpha_algo::{IntervalKernel, SessionOp};
 
+pub mod plan;
+pub use plan::{BinaryOp, CrossOp, ExprSpec, FactorPlanEngine};
+
 #[derive(Clone, Debug)]
 pub struct MarketBar {
     pub timestamp_ns: i64,
