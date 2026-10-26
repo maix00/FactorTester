@@ -278,9 +278,8 @@ pub enum SessionOp {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WindowPolicy {
   Bars(u32),
-  Partition,
-  PartitionRange { start: u32, end: u32 },
   StartIndex,
+  ExplicitRange,
   Sessions(u32),
   WallClock(i64),
 }
@@ -295,6 +294,7 @@ pub struct SessionWindowState {
   finite_count: usize,
   next_index: u64,
   start_index: u64,
+  range_end: u64,
   last_value: f64,
   min_deque: VecDeque<(u64, f64)>,
   max_deque: VecDeque<(u64, f64)>,
@@ -320,6 +320,7 @@ impl SessionWindowState {
       finite_count: 0,
       next_index: 0,
       start_index: 0,
+      range_end: u64::MAX,
       last_value: f64::NAN,
       min_deque: VecDeque::new(),
       max_deque: VecDeque::new(),
@@ -349,31 +350,38 @@ impl SessionWindowState {
     Ok(state)
   }
 
-  pub fn new_partition(op: SessionOp) -> Result<Self, Error> {
-    let mut state = Self::new_op(1, op)?;
-    state.policy = WindowPolicy::Partition;
-    Ok(state)
-  }
-
-  pub fn new_partition_range(start: usize, end: Option<usize>, op: SessionOp) -> Result<Self, Error> {
-    let end = end.unwrap_or(u32::MAX as usize);
-    if end < start {
-      return Err(Error::InvalidParameter("partition range end before start".to_string()));
-    }
-    let mut state = Self::new_op(1, op)?;
-    state.policy = WindowPolicy::PartitionRange { start: start as u32, end: end as u32 };
-    Ok(state)
-  }
-
   pub fn new_start_index(op: SessionOp) -> Result<Self, Error> {
     let mut state = Self::new_op(1, op)?;
     state.policy = WindowPolicy::StartIndex;
     Ok(state)
   }
 
+  pub fn new_explicit(op: SessionOp) -> Result<Self, Error> {
+    let mut state = Self::new_op(1, op)?;
+    state.policy = WindowPolicy::ExplicitRange;
+    Ok(state)
+  }
+
   pub fn update_from(&mut self, start_index: u64, value: f64) -> f64 {
     self.start_index = start_index;
     self.update_at(0, 0, value)
+  }
+
+  pub fn update_explicit(&mut self, start_index: u64, end_index: u64, value: f64) -> f64 {
+    self.start_index = start_index;
+    self.range_end = end_index;
+    let current = self.next_index;
+    if current > end_index {
+      self.next_index += 1;
+      return self.last_value;
+    }
+    if current < start_index {
+      self.next_index += 1;
+      return self.last_value;
+    }
+    let out = self.update_at_inner(0, 0, value);
+    self.last_value = out;
+    out
   }
 
   fn clear(&mut self) {
@@ -384,6 +392,7 @@ impl SessionWindowState {
     self.finite_count = 0;
     self.next_index = 0;
     self.start_index = 0;
+    self.range_end = u64::MAX;
     self.last_value = f64::NAN;
     self.min_deque.clear();
     self.max_deque.clear();
@@ -412,31 +421,10 @@ impl SessionWindowState {
   }
 
   pub fn update_at(&mut self, session_id: u32, timestamp_ns: i64, value: f64) -> f64 {
-    if let WindowPolicy::PartitionRange { start, end } = self.policy {
-      if let Some((last, _, _, _)) = self.ring.back() {
-        if *last != session_id { self.clear(); }
-      }
-      let ordinal = self.next_index as u32;
-      if ordinal < start {
-        self.next_index += 1;
-        return self.last_value;
-      }
-      if ordinal > end { return self.last_value; }
-      let out = self.update_at_inner(session_id, timestamp_ns, value);
-      self.last_value = out;
-      return out;
-    }
     self.update_at_inner(session_id, timestamp_ns, value)
   }
 
   fn update_at_inner(&mut self, session_id: u32, timestamp_ns: i64, value: f64) -> f64 {
-    if self.policy == WindowPolicy::Partition {
-      if let Some((last_session, _, _, _)) = self.ring.back() {
-        if *last_session != session_id {
-          self.clear();
-        }
-      }
-    }
     if let Some((last_session, last_timestamp, _, _)) = self.ring.back() {
       match self.policy {
         WindowPolicy::Sessions(_) if session_id < *last_session => return f64::NAN,
@@ -461,7 +449,11 @@ impl SessionWindowState {
           self.remove_oldest();
         }
       }
-      WindowPolicy::Partition | WindowPolicy::PartitionRange { .. } => {}
+      WindowPolicy::ExplicitRange => {
+        while self.ring.front().is_some_and(|(_, _, _, index)| *index < self.start_index) {
+          self.remove_oldest();
+        }
+      }
       WindowPolicy::StartIndex => {
         while self.ring.front().is_some_and(|(_, _, _, index)| *index < self.start_index) {
           self.remove_oldest();
@@ -970,17 +962,7 @@ impl SessionPairState {
           self.remove_oldest();
         }
       }
-      WindowPolicy::PartitionRange { .. } => {}
-      WindowPolicy::StartIndex => {}
-      WindowPolicy::Partition => {
-        if let Some((last, _, _, _)) = self.ring.back() {
-          if *last != session_id {
-            self.ring.clear();
-            self.sx = 0.0; self.sy = 0.0; self.sxx = 0.0;
-            self.syy = 0.0; self.sxy = 0.0; self.count = 0;
-          }
-        }
-      }
+      WindowPolicy::StartIndex | WindowPolicy::ExplicitRange => {}
     }
     self.ring.push_back((session_id, timestamp_ns, x, y));
     if x.is_finite() && y.is_finite() {
@@ -1130,21 +1112,14 @@ mod tests {
   }
 
   #[test]
-  fn partition_range_truncates_and_freezes() {
-    let mut state = SessionWindowState::new_partition_range(0, Some(0), SessionOp::Sum).unwrap();
-    assert_eq!(state.update(1, 2.0), 2.0);
-    assert_eq!(state.update(1, 3.0), 2.0);
-    assert_eq!(state.update(2, 7.0), 7.0);
+  fn explicit_range_freezes_and_evicts() {
+    let mut state = SessionWindowState::new_explicit(SessionOp::Sum).unwrap();
+    assert_eq!(state.update_explicit(0, 0, 2.0), 2.0);
+    assert_eq!(state.update_explicit(0, 0, 3.0), 2.0);
+    assert_eq!(state.update_explicit(2, 2, 7.0), 7.0);
   }
 
   #[test]
-  fn partition_policy_resets_at_boundary() {
-    let mut state = SessionWindowState::new_partition(SessionOp::Sum).unwrap();
-    assert_eq!(state.update(1, 2.0), 2.0);
-    assert_eq!(state.update(1, 3.0), 5.0);
-    assert_eq!(state.update(2, 7.0), 7.0);
-  }
-
   #[test]
   fn streaming_ema_matches_adjusted_recurrence() {
     let values = ta_ema_streaming(&[1.0, 2.0, 3.0], 3).unwrap();
