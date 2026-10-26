@@ -101,6 +101,12 @@ def interval_rolling_pair(x, y, starts, ends, correlation=False):
   )
 
 
-def interval_ema(values, span: int):
-  """Batch adjusted EMA executed in Rust."""
-  return np.asarray(_algo.interval_ema(np.asarray(values, dtype=float), int(span)), dtype=float)
+def interval_ema(values, span: int, min_periods: int = 1, propagate_nan: bool = True):
+  """Batch EMA executed in Rust."""
+  return np.asarray(
+    _algo.interval_ema(
+      np.asarray(values, dtype=float), int(span),
+      int(min_periods), bool(propagate_nan),
+    ),
+    dtype=float,
+  )
