@@ -1632,14 +1632,8 @@ def compile_streaming_factor(
                     _BarWindowResolver(window),
                 )
             else:
-                node = RollingWindowNode(
-                    expr.op,
-                    children,
-                    window,
-                    len(products),
-                    session_calendar=session_calendar,
-        event_line=event_line,
-                    lookback_sessions=lookback_sessions,
+                raise UnsupportedStreamingFactor(
+                    f"rolling op has no interval-kernel implementation: {expr.op}"
                 )
         elif isinstance(expr, GroupByScopeOp):
             op_name = expr.op
