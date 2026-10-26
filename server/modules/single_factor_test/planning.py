@@ -170,8 +170,9 @@ def _backtest_plan(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str,
         str(item.get("ref") or "")
         for item in factors if isinstance(item, dict) and item.get("ref")
     })
+    strategy = _strategy_execution_block(data, shared)
     resolved = {
-        "kind": "backtest",
+        "kind": "nautilus_strategy_family" if strategy else "backtest",
         "run_spec_version": NAUTILUS_RUN_SPEC_VERSION,
         "run_spec_sha256": hash_run_spec(run_spec),
         "execution": compiled.manifest(),
@@ -192,7 +193,56 @@ def _backtest_plan(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str,
         "catalog_staging": catalog_staging_requests(run_spec),
         "external_factor_artifacts": _artifact_plan_rows(data),
     }
+    if strategy:
+        resolved["strategy"] = strategy
     return resolved, []
+
+
+
+def _strategy_execution_block(data: dict[str, Any], shared: Any) -> dict[str, Any] | None:
+    """Freeze the TradeResearch strategy family choice into the execution plan."""
+    specs = data.get("strategy_specs") or data.get("strategy_plan")
+    if not isinstance(specs, list) or not specs or not isinstance(specs[0], dict):
+        return None
+    spec = specs[0]
+    kind = str(spec.get("strategy_kind") or spec.get("source_name") or "").strip()
+    parameters = spec.get("parameters") if isinstance(spec.get("parameters"), dict) else {}
+    if kind == "threshold":
+        family = {
+            "entry_threshold": parameters.get("entry_threshold", parameters.get("entry", 0)),
+            "exit_threshold": parameters.get("exit_threshold", parameters.get("exit", 0)),
+            "side_mode": parameters.get("side_mode", "long_short"),
+        }
+    elif kind in {"cross_sectional_group", "group_quantile"}:
+        family = {
+            "split_count": parameters.get("split_count", 0),
+            "group_index": parameters.get("group_index", 0),
+        }
+        kind = "cross_sectional_group"
+    else:
+        return None
+    roles = spec.get("factor_roles")
+    if not isinstance(roles, dict) or not roles:
+        role = str(spec.get("factor_role") or "factor")
+        alias = str((spec.get("data") or {}).get("factor") or "").strip()
+        factors = (shared or {}).get("factors") if isinstance(shared, dict) else None
+        binding = None
+        if isinstance(factors, list):
+            for item in factors:
+                if isinstance(item, dict) and (not alias or item.get("alias") == alias):
+                    binding = {"ref": item.get("ref"), "alias": item.get("alias")}
+                    break
+        if binding and binding.get("ref"):
+            roles = {role: binding}
+        else:
+            return None
+    return {
+        "kind": kind,
+        "family_id": kind,
+        "parameters": family,
+        "factor_roles": roles,
+        "products": list((spec.get("data") or {}).get("products") or ()),
+    }
 
 
 def _analysis_plan(kind: str, data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
