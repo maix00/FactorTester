@@ -180,6 +180,7 @@ def replay_catalog_batches(engine, opened, *, max_input_bars: int, batch_minutes
 def run_small_catalog_replay(
     inputs: tuple[ReplayInput, ...], output_dir: Path, *,
     max_input_bars: int = 2_000, batch_minutes: int = 20,
+    max_batch_bars: int = 250_000,
     synthetic_order_probe: bool = False,
     frozen_factor_ref: str | None = None,
     position_cost_basis: str = "WEIGHTED_AVERAGE",
