@@ -592,6 +592,25 @@ class StreamingFactorPlan:
         return dict(zip(self.products, values, strict=True))
 
 
+class MultiStreamingPlan:
+    """One incremental plan DAG shared by several factor outputs."""
+
+    def __init__(self, aliases, products, roots, plans):
+        self.aliases = tuple(aliases)
+        self.products = products
+        self._roots = tuple(roots)
+        self.plans = tuple(plans)
+
+    def update(self, timestamp, market):
+        cache: dict[int, np.ndarray] = {}
+        values = {}
+        market = _with_timestamp(market, timestamp)
+        for alias, root in zip(self.aliases, self._roots, strict=True):
+            array = root.update(market, cache)
+            values[alias] = dict(zip(self.products, array, strict=True))
+        return values
+
+
 @dataclass(frozen=True, slots=True)
 class _StreamingBarPrice:
     fields: Mapping[str, float]
@@ -657,6 +676,48 @@ class IncrementalFactorExecutor:
         return dict(self._latest)
 
 
+class MultiStreamingIncrementalExecutor:
+    """Run-scoped executor with one shared DAG for several factors."""
+
+    def __init__(self, plan: MultiStreamingPlan) -> None:
+        self._plan = plan
+        self._latest: dict[str, dict[Any, float]] = {}
+
+    def on_bar(
+        self,
+        timestamp: pd.Timestamp,
+        fields_by_product: Mapping[Any, Any],
+        term_curves_by_product: Mapping[Any, Any] | None = None,
+        trading_day: pd.Timestamp | None = None,
+    ) -> None:
+        term_curves_by_product = term_curves_by_product or {}
+        observed_products = set(fields_by_product) | set(term_curves_by_product)
+        missing = [product for product in self._plan.products if product not in observed_products]
+        if missing:
+            raise ValueError(f"market slice is missing streaming products: {missing!r}")
+        market = _StreamingMarketSlice(
+            pd.Timestamp(timestamp),
+            pd.Timestamp(trading_day).normalize() if trading_day is not None else None,
+            {
+                product: _StreamingBarPrice(_normalize_bar_fields(fields_by_product.get(product, {})))
+                for product in self._plan.products
+            },
+            {
+                product: _normalize_term_curve(curve)
+                for product, curve in term_curves_by_product.items()
+                if product in self._plan.products
+            },
+            tuple(product in observed_products for product in self._plan.products),
+        )
+        self._latest = {
+            alias: {product: float(value) for product, value in values.items()}
+            for alias, values in self._plan.update(pd.Timestamp(timestamp), market).items()
+        }
+
+    def on_signal(self, timestamp: pd.Timestamp) -> dict[str, dict[Any, float]]:
+        return {alias: dict(values) for alias, values in self._latest.items()}
+
+
 def compile_streaming_factor(
     expression: FactorExpr,
     products: tuple[Any, ...],
@@ -664,13 +725,15 @@ def compile_streaming_factor(
     source_freq: DataFreq | str | None = None,
     session_calendar: Any = None,
     event_line: Any = None,
+    memo: dict[tuple, StreamingNode] | None = None,
 ) -> StreamingFactorPlan:
     if not products or len(set(products)) != len(products):
         raise ValueError("streaming products must be non-empty and unique")
-    memo: dict[int, StreamingNode] = {}
+    if memo is None:
+        memo = {}
 
     def compile_node(expr: FactorExpr) -> StreamingNode:
-        key = id(expr)
+        key = expr._structural_key()
         if key in memo:
             return memo[key]
         if isinstance(expr, ConstExpr):
@@ -1047,6 +1110,34 @@ def compile_incremental_factor(
         session_calendar=session_calendar, event_line=event_line,
     )
     return IncrementalFactorExecutor(factor_alias, plan)
+
+
+def compile_incremental_factors(
+    expressions: dict[str, FactorExpr],
+    products: tuple[Any, ...],
+    *,
+    source_freq: DataFreq | str | None = None,
+    session_calendar: Any = None,
+    event_line: Any = None,
+) -> MultiStreamingIncrementalExecutor:
+    """Compile several factors into one shared incremental DAG."""
+    if not expressions:
+        raise ValueError("incremental factor set must be non-empty")
+    memo: dict[tuple, StreamingNode] = {}
+    plans = []
+    aliases = []
+    roots = []
+    for alias, expression in expressions.items():
+        plan = compile_streaming_factor(
+            expression, products, source_freq=source_freq,
+            session_calendar=session_calendar, event_line=event_line,
+            memo=memo,
+        )
+        aliases.append(alias)
+        plans.append(plan)
+        roots.append(plan._root)
+    multi = MultiStreamingPlan(aliases, products, roots, plans)
+    return MultiStreamingIncrementalExecutor(multi)
 
 
 def _normalize_bar_fields(fields: Any) -> dict[str, float]:
