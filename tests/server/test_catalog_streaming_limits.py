@@ -72,3 +72,13 @@ def test_native_failure_still_releases_loaded_batch():
     with pytest.raises(RuntimeError, match="failed"):
         replay_catalog_batches(engine, [opened(catalog)], max_input_bars=8)
     assert cleared == [True]
+
+
+def test_per_batch_bar_budget_densifies_the_time_step():
+    catalog = Catalog(count=16)
+    batches = list(iter_catalog_bar_batches(
+        [opened(catalog)], max_input_bars=16, max_batch_bars=2,
+    ))
+    assert sum(len(batch) for batch in batches) == 16
+    assert max(len(batch) for batch in batches) <= 2
+    assert len(batches) >= 8

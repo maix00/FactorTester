@@ -115,14 +115,24 @@ def preflight_catalogs(opened, *, max_input_bars: int) -> tuple[int, int, int]:
     return first, last, total
 
 
-def iter_catalog_bar_batches(opened, *, max_input_bars: int, batch_minutes: int = 20):
-    """One bounded catalog reader shared by probe and strategy replays."""
+def iter_catalog_bar_batches(opened, *, max_input_bars: int, batch_minutes: int = 20,
+                             max_batch_bars: int = 250_000):
+    """One bounded catalog reader shared by probe and strategy replays.
+
+    ``max_batch_bars`` derives a denser time step from the frozen receipt
+    density when one 20-minute slice would exceed the per-batch bar budget.
+    """
     if isinstance(batch_minutes, bool) or not isinstance(batch_minutes, int) or batch_minutes <= 0:
         raise ValueError("batch_minutes must be a positive integer")
+    if isinstance(max_batch_bars, bool) or not isinstance(max_batch_bars, int) or max_batch_bars <= 0:
+        raise ValueError("max_batch_bars must be a positive integer")
     rows = tuple(opened)
     first, last, expected = preflight_catalogs(rows, max_input_bars=max_input_bars)
     processed = 0
     step = batch_minutes * MINUTE_NS
+    span = max(1, last - first + 1)
+    density_step = max(MINUTE_NS, (span * max_batch_bars) // max(1, expected))
+    step = min(step, density_step)
     for begin in range(first, last + 1, step):
         end = min(begin + step - 1, last)
         bars = []
@@ -130,6 +140,8 @@ def iter_catalog_bar_batches(opened, *, max_input_bars: int, batch_minutes: int 
             if int(receipt["last_available_ns"]) < begin or int(receipt["first_available_ns"]) > end:
                 continue
             bars.extend(catalog.query_bars(identifiers=[receipt["bar_type"]], start=begin, end=end))
+        if len(bars) > max_batch_bars:
+            raise ValueError("catalog query exceeds the per-batch bar budget")
         processed += len(bars)
         if processed > expected:
             raise ValueError("catalog query exceeds its frozen receipt count")
@@ -140,13 +152,15 @@ def iter_catalog_bar_batches(opened, *, max_input_bars: int, batch_minutes: int 
         raise ValueError(f"catalog replay count {processed} != receipts {expected}")
 
 
-def replay_catalog_batches(engine, opened, *, max_input_bars: int, batch_minutes: int = 20):
+def replay_catalog_batches(engine, opened, *, max_input_bars: int, batch_minutes: int = 20,
+                           max_batch_bars: int = 250_000):
     """Feed bounded slices to Nautilus' native streaming replay path."""
     rows = tuple(opened)
     next_start, _, _ = preflight_catalogs(rows, max_input_bars=max_input_bars)
     total = batches = largest = 0
     previous_end = None
-    for bars in iter_catalog_bar_batches(rows, max_input_bars=max_input_bars, batch_minutes=batch_minutes):
+    for bars in iter_catalog_bar_batches(rows, max_input_bars=max_input_bars, batch_minutes=batch_minutes,
+                                         max_batch_bars=max_batch_bars):
         begin, end = int(bars[0].ts_init), int(bars[-1].ts_init)
         if previous_end is not None and begin <= previous_end:
             raise ValueError("streaming batch splits or reorders a replay timestamp")
@@ -311,7 +325,8 @@ def run_small_catalog_replay(
         probe_seen = 0
         probe_order_pending = False
         expected_probe_fill_prices: list[str] = []
-        for bars in iter_catalog_bar_batches(opened, max_input_bars=max_input_bars, batch_minutes=batch_minutes):
+        for bars in iter_catalog_bar_batches(opened, max_input_bars=max_input_bars, batch_minutes=batch_minutes,
+                                             max_batch_bars=max_batch_bars):
             processed += len(bars)
             if processed > max_input_bars:
                 raise ValueError("catalog query exceeds explicit replay bar cap")
