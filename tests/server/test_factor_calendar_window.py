@@ -37,3 +37,22 @@ def test_night_session_is_labelled_by_next_trading_day():
     assert window.window_for_timestamp(2_500, 2) == (1, 30)
     assert window.window_for_timestamp(4_500, 2) == (2, 50)
     assert window.eviction_session(2, 2) == 0
+
+
+def test_calendar_from_bars_merges_night_and_day_into_one_session():
+    from types import SimpleNamespace
+
+    day = "2025-02-04"
+    bars = [
+        SimpleNamespace(trading_day=day,
+                        clock=SimpleNamespace(interval_open_ns=0, interval_end_ns=10)),
+        SimpleNamespace(trading_day=day,
+                        clock=SimpleNamespace(interval_open_ns=20, interval_end_ns=30)),
+        SimpleNamespace(trading_day="2025-02-05",
+                        clock=SimpleNamespace(interval_open_ns=40, interval_end_ns=50)),
+    ]
+    window = TradingCalendarWindow.from_bars(bars)
+    assert window.sessions[0].trading_day == day
+    assert window.sessions[0].start_ns == 0
+    assert window.sessions[0].end_ns == 30
+    assert window.sessions[0].bar_count == 2
