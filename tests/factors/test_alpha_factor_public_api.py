@@ -792,3 +792,26 @@ def test_category_effective_time_compiles_to_rust_plan():
     )
     assert plan.update_at(0, [1.0]) == {'metal': {'A': 0.0}}
     assert plan.update_at(100, [1.0]) == {'metal': {'A': 1.0}}
+
+
+def test_signal_align_multi_product_batch_incremental_reconcile():
+    from alpha.factor import IncrementalFactorPlan, TradingSession, scope_session
+
+    index = pd.date_range('2026-01-05 09:30', periods=4, freq='min')
+    frames = {
+        'A': pd.DataFrame({'CLOSE': [0.0, 1.0, 2.0, 3.0]}, index=index),
+        'B': pd.DataFrame({'CLOSE': [10.0, 11.0, 12.0, 13.0]}, index=index),
+    }
+    session = TradingSession(index[0].value, index[-1].value)
+    expression = ColumnRef('CLOSE').signal_align('2min', scope=scope_session((session,)))
+    batch = expression.evaluate(EvalContext(products=('A', 'B'), preloaded=frames))
+    plan = IncrementalFactorPlan({'s': expression}, ('A', 'B'))
+    for timestamp, (_, row) in zip(index, frames['A'].iterrows(), strict=True):
+        incremental = plan.update_at(
+            timestamp.value, [frames['A'].loc[timestamp, 'CLOSE'], frames['B'].loc[timestamp, 'CLOSE']],
+        )['s']
+        if timestamp in batch.index:
+            np.testing.assert_allclose(
+                [incremental['A'], incremental['B']],
+                [batch.loc[timestamp, 'A'], batch.loc[timestamp, 'B']],
+            )
