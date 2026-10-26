@@ -177,7 +177,10 @@ class RustSessionRollingNode:
         self, op: str, child: StreamingNode, calendar: Any,
         lookback_sessions: int, width: int,
     ) -> None:
-        if op not in {"rolling_mean", "rolling_sum"}:
+        if op not in {
+            "rolling_mean", "rolling_sum", "rolling_var",
+            "rolling_std", "rolling_min", "rolling_max",
+        }:
             raise UnsupportedStreamingFactor(
                 f"Rust session state does not support {op}"
             )
@@ -189,8 +192,13 @@ class RustSessionRollingNode:
         self.lookback_sessions = int(lookback_sessions)
         self._width = width
         self._mean = op == "rolling_mean"
+        rust_op = {
+            "rolling_mean": "mean", "rolling_sum": "sum",
+            "rolling_var": "var", "rolling_std": "std",
+            "rolling_min": "min", "rolling_max": "max",
+        }[op]
         self._states = [
-            SessionRollingState(self.lookback_sessions, self._mean)
+            SessionRollingState(self.lookback_sessions, False, rust_op)
             for _ in range(width)
         ]
 
@@ -1331,9 +1339,12 @@ def compile_streaming_factor(
                             "session window must be an integer trading-day count"
                         )
                     lookback_sessions = int(round(ratio))
-                    if expr.op not in {"rolling_mean", "rolling_sum"}:
+                    if expr.op not in {
+                        "rolling_mean", "rolling_sum", "rolling_var",
+                        "rolling_std", "rolling_min", "rolling_max",
+                    }:
                         raise UnsupportedStreamingFactor(
-                            "session windows currently support only O(1) mean/sum"
+                            "session window has no verified Rust implementation"
                         )
                     window = 1
                 else:
@@ -1364,7 +1375,10 @@ def compile_streaming_factor(
                 if (
                     session_calendar is not None
                     and lookback_sessions is not None
-                    and expr.op in {"rolling_mean", "rolling_sum"}
+                    and expr.op in {
+                        "rolling_mean", "rolling_sum", "rolling_var",
+                        "rolling_std", "rolling_min", "rolling_max",
+                    }
                 ):
                     node = RustSessionRollingNode(
                         expr.op,
