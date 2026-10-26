@@ -60,3 +60,24 @@ def test_alpha_factor_cross_sectional_executes_in_rust():
     result = ColumnRef('CLOSE').cs_zscore().evaluate(ctx)
     np.testing.assert_allclose(result['A'].to_numpy(), [-1.0, 0.0, 1.0])
     np.testing.assert_allclose(result['B'].to_numpy(), [1.0, 0.0, -1.0])
+
+
+def test_alpha_factor_family_owns_versioned_identity():
+    from alpha.factor import FactorFamily
+
+    class Momentum(FactorFamily):
+        alias = 'momentum'
+
+        @staticmethod
+        def factor_expr():
+            return ColumnRef('CLOSE').rolling(3).mean()
+
+    definition = Momentum.get_factor(owner_ref='tester')
+    assert definition.ref.startswith('factor:v2:')
+    assert definition.identity.factor_ref == definition.ref
+    assert definition.identity.family_ref.startswith('factor-family:v2:')
+    first = definition
+    second = Momentum.get_factor(owner_ref='tester')
+    assert first.ref == second.ref
+    other = Momentum.get_factor(owner_ref='other')
+    assert other.ref != first.ref
