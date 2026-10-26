@@ -7,7 +7,10 @@ from tools.factors.expr.streaming.calendar_window import (
     TradingCalendarWindow,
     TradingSession,
 )
-from tools.factors.expr.streaming.incremental import RollingWindowNode
+from tools.factors.expr.streaming.incremental import (
+    RustIntervalNode,
+    _SessionWindowResolver,
+)
 
 
 class _SequenceNode:
@@ -31,11 +34,10 @@ def _market(ns):
 
 
 def test_session_sum_expands_and_evicts_in_o1_state():
-    node = RollingWindowNode(
-        "rolling_sum", (_SequenceNode(),), 1, 1,
-        session_calendar=_calendar(), lookback_sessions=2,
+    node = RustIntervalNode(
+        "rolling_sum", _SequenceNode(), 1,
+        _SessionWindowResolver(_calendar(), 2),
     )
-    assert node._fast is True
     # day 1: only one session exists, window = 2 bars
     assert node.update(_market(10), {})[0] == 1
     assert node.update(_market(20), {})[0] == 3
@@ -43,6 +45,3 @@ def test_session_sum_expands_and_evicts_in_o1_state():
     assert node.update(_market(1_010), {})[0] == 6
     assert node.update(_market(1_020), {})[0] == 10
     assert node.update(_market(1_030), {})[0] == 15
-    # no per-bar history scan; ring capacity is the largest session window
-    assert node._ring_capacity == 5
-    assert node._ring_length == 5
