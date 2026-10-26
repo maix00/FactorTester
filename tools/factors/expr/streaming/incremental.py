@@ -273,6 +273,51 @@ class RustSessionPairNode:
         return result
 
 
+class RustWallRollingNode:
+    """Explicit wall-clock window executed by Rust."""
+
+    def __init__(self, op, child, duration_ns, width, quantile=None):
+        from alpha import WallRollingState
+        rust_op = {
+            "rolling_mean": "mean", "rolling_sum": "sum",
+            "rolling_var": "var", "rolling_std": "std",
+            "rolling_min": "min", "rolling_max": "max",
+            "rolling_skew": "skew",
+            "rolling_argmin": "argmin", "rolling_argmax": "argmax",
+            "rolling_median": "quantile",
+            "rolling_quantile": "quantile", "rolling_rank": "rank",
+        }.get(op)
+        if rust_op is None:
+            raise UnsupportedStreamingFactor(f"wall window does not support {op}")
+        self.op = op
+        self.child = child
+        self.duration_ns = int(duration_ns)
+        self._width = width
+        q = 0.5 if op == "rolling_median" else quantile
+        self._states = [
+            WallRollingState(self.duration_ns, rust_op, q) for _ in range(width)
+        ]
+
+    def update(self, market, cache):
+        key = id(self)
+        if key in cache:
+            return cache[key]
+        timestamp = getattr(market, "timestamp", None)
+        if timestamp is None:
+            raise UnsupportedStreamingFactor("wall window needs bar timestamps")
+        values = np.asarray(self.child.update(market, cache), dtype=float)
+        if values.shape != (self._width,):
+            raise ValueError("wall window input width changed")
+        ts = int(pd.Timestamp(timestamp).value)
+        result = np.asarray(
+            [state.update(ts, float(value))
+             for state, value in zip(self._states, values, strict=True)],
+            dtype=float,
+        )
+        cache[key] = result
+        return result
+
+
 class RollingWindowNode:
     def __init__(
         self,
@@ -1374,7 +1419,10 @@ def compile_streaming_factor(
             if not isinstance(expr.window, ConstExpr):
                 raise UnsupportedStreamingFactor("streaming windows must resolve to fixed bars")
             lookback_sessions = None
-            if session_calendar is not None:
+            wall_duration_ns = _wall_duration_ns(expr.window.value)
+            if wall_duration_ns is not None:
+                window = 1
+            elif session_calendar is not None:
                 try:
                     duration = pd.Timedelta(expr.window.value)
                 except (TypeError, ValueError):
@@ -1405,7 +1453,16 @@ def compile_streaming_factor(
                 compile_node(item)
                 for item in expr.operands[expr._data_start:expr._data_start + expr._n_data]
             )
-            if (
+            if wall_duration_ns is not None:
+                if len(children) != 1:
+                    raise UnsupportedStreamingFactor(
+                        "wall window expects one streaming operand"
+                    )
+                node = RustWallRollingNode(
+                    expr.op, children[0], wall_duration_ns, len(products),
+                    quantile=getattr(expr, "quantile", None),
+                )
+            elif (
                 session_calendar is not None
                 and lookback_sessions is not None
                 and expr.op in {"rolling_cov", "rolling_corr"}
@@ -1681,6 +1738,16 @@ def resolve_trading_day_window(
     if not np.isfinite(ratio) or not np.isclose(ratio, round(ratio)):
         raise UnsupportedStreamingFactor("trading-day window must be an integer day count")
     return calendar_window.window_size(current_session, int(round(ratio)))
+
+
+def _wall_duration_ns(value: object) -> int | None:
+    """Return nanoseconds for the explicit ``wall:`` window syntax."""
+    if not isinstance(value, str) or not value.startswith("wall:"):
+        return None
+    duration = pd.Timedelta(value[5:])
+    if duration <= pd.Timedelta(0):
+        raise UnsupportedStreamingFactor("wall window must be positive")
+    return int(duration.value)
 
 
 def _resolve_window_bars(
