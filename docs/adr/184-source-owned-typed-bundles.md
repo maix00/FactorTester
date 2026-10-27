@@ -181,9 +181,10 @@ federated catalog's runtime availability/count projection.
 
 - 历史规则提供者不再由中央硬编码为 `FieldHistory:market_rules:exchange`。源成员声明
   `trading_field_provider_ref` 与 `trading_field_related_members`，执行侧只验证关系
-  并调用源提供的 loader；`TradingFieldProvider` 只要求 `resolve_at` 协议，不再以具体
-  `FieldHistoryProvider` 类作为准入条件。中央仍使用现有规则值/错误类型，完整规则协议
-  迁移尚未完成。
+  并调用源提供的 loader；`TradingFieldProvider` 只要求 `resolve_at` 协议，
+  `TradingFieldValue` 只要求字段，不再以具体 `FieldHistoryProvider`/
+  `HistoricalFieldValue` 类作为准入条件，也不再导入规则 fallback 枚举/异常类。
+  源 loader 仍返回现有 FieldHistory 实现，完整规则数据协议迁移尚未完成。
 - 多合约目录显式失败。`stage_catalogs` 在写任何 catalog 前检查同一品种的多个合约
   并拒绝；这是防止错误结果的 fail-closed，不是多合约已完成。
 - DAY1 不再静默复用 MIN1 `stage_contract_minute_catalog`。源 loader 使用
