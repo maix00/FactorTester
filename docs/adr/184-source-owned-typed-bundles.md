@@ -245,3 +245,11 @@ checks and historical-rule binding still need neutral/source-owned ports.
 Current RunSpec records do not yet freeze the Bundle manifest/package revision.
 The existing product-keyed catalog return contract is unchanged; this tranche
 does not establish full multi-contract roll/replay acceptance.
+
+### P3 元数据只读描述（2026-10-27）
+
+新增 `installed_bundle_descriptors()`：只读取 `installed_bundles()` 的 JSON 清单，
+返回 Bundle/member/频率/关系/更新策略/product_bindings，`availability` 显式为
+`unknown`、`product_count=None`。该函数不调用 `load_all_sources`、不实例化 Nautilus、
+不读行情。它尚未替换现有 `product_source_descriptors()`/目录路由/UI；运行时可用性与
+权限投影仍需后续切换。
