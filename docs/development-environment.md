@@ -25,6 +25,7 @@ conda activate GTHT
 | tqdm | 4.67.1 |
 | pyarrow | 22.0.0 |
 | maturin | 1.15.0 |
+| celery | 5.6.3 |
 
 ## NautilusTrader 本地扩展
 

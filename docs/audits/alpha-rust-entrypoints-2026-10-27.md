@@ -146,3 +146,95 @@ Rust alpha 217、原生 adapter 28、Catalog runtime 1 项通过。未跑全仓�
 
 仍需另行验收：Linux release wheel、Celery/RabbitMQ/公网实际 Job、异步/缺观测增量
 产品的原生截面合并，以及异精度 Catalog 的资源预算；本轮未用小测试替代这些结论。
+
+
+## 后续实施：Category / BarDistance / 真实 Celery Job
+
+固定实现：alpha e6d7b78、7f8bb56；TradeResearch ed0dc6ba4（父提交 b76e09a89，
+其中前端由另一执行者提交，本轮没有修改前端）。Nautilus 仍为 1c4c1b83c0，未改动。
+
+### 公开 batch 的统一计算
+
+CategoryBoolRef、CURRENT/CANDIDATE MatchBarDistanceExpr 与旧布尔 BarDistanceExpr
+均继承公共 Plan evaluate。PanelPlan.add_kernel 只负责按产品观测 lane 推进同一个
+FactorPlanKernel 并散布结果，不新增 Python 数学或第二套匹配算法。稀疏产品不把 union
+空行计作 Bar；每个 lane 复用输出和有界窗口。公共 API 的旧 Python Category 行循环、
+Match 谓词/窗口扫描及 bar-search 数学 fallback 已删除。
+
+CategoryMembership 定义为完整的生效快照，后一个空集合会移除标签；不能并集累计
+所有历史标签。无时间戳快照从最早时刻有效，未来快照不提前应用，同一时刻冲突快照
+拒绝。Rust 只维护当前 mask 与前进游标，每个变化消费一次，避免每 Bar 扫历史规则。
+时间戳倒退在更新前失败。公开测试覆盖负时间戳、移除、未来规则和所有输入前缀。
+
+CURRENT/CANDIDATE 的 nearest/farthest 是历史匹配；旧布尔 BarDistanceExpr 是事件年龄，
+不混成同一公开语义。匹配共用 Rust deque kernel；farthest 的历史匹配不会再被当前
+Bar 的零距离覆盖。nearest 当前即命中时直接返回，不额外扫描窗口。非有限谓词结果
+不当作真；显式 NaN 默认值用 JSON null 传输。负号谓词序列化为已有减法节点。
+
+这里的完成范围是 alpha 的公开 batch 与其 incremental/bridge 核心。TradeResearch
+兼容 DSL 中更宽的 bar_search_eval（外部序列/Where 等）仍有旧 Python fallback，不能
+把本节说成全平台所有旧数学路径都已删除。其滚动回看与分段 scope 合同还须分别冻结，
+再消除重复实现，不能直接删掉功能使测试通过。日频 SignalAlign 的交易日收盘权威
+日历等先前边界也不能由本次 30 分钟 Job 推定已接通。
+
+### SignalAlign 的性能回退
+
+剖析确认有可避免的开销：已排序 asof 仍分配全量(timestamp,index)临时向量；
+单产品也走 concat；相同索引再做 isin；Plan 重复遍历图；简单网格元数据构造
+dataclass。已分别改为无排序临时向量的原生线性指针、单列视图、同索引快速观测
+mask、一次图遍历和轻量 NamedTuple；直接构造 ns DatetimeIndex，不走日期解析器。
+所有目标采样/因果规则不变，不恢复旧 Python 采样数学，也不在图外另建缓存。
+
+同上一节机器、dev 扩展、20,000 行/200 曲线的公共入口，新进程各一次，共5次，
+不清系统缓存；SignalAlign 为 2.502/2.531/2.415/2.485/2.449 ms，中位 2.485 ms，
+峰值 RSS 112.0–113.8 MiB。相比上一轮 3.639 ms 中位约少32%；仍比最初 Python
+实现 1.811 ms 多约0.67 ms。样本跨实现批次，宿主非独占，不是严格CPU隔离的提速
+承诺；没有宣称完全消除回退或所有规模最优。回执 /tmp/tr-signal-final-after-*-20261027.json。
+
+新扩展下再跑双产品各1M根的共享原生回放：5.243 s、峰值477.3 MiB、一个Actor/
+3节点、最大批2048、两消费者各1M次、排序1M次，末尾窗口逐值对账。与前批范围
+基本一致；这是单次合成连续时钟容量复核，不是完整真实行情经济回测。
+回执 /tmp/tr-shared-remaining-long-final-20261027/measurements.json。
+
+### 真实 RabbitMQ → Celery → Nautilus → CouchDB
+
+新增可显式运行的 tests/benchmarks/verify_native_celery_job.py，限定 localhost
+和专属测试实例。使用真实 T2403/TL2406 各10,000分钟Bar、独立 Job SQLite、冻结
+RunSpec/执行计划、嵌入且校验身份的家族源码、真实 worker 和默认 NautilusJobExecutor。
+没有 eager、mock 策略或替代执行器。原生20分钟mean、内外30分钟SignalAlign共享
+4节点；基础执行策略明确为 basic、零手续费及合成合约探针规则，不是原研报收益结论。
+
+实际尝试暴露并修复：
+
+1. GTHT 未声明 Celery，补 environment.yml 的 celery==5.6.3 并在 GTHT 安装验证，
+   测试检查真实依赖存在，不再靠 importorskip 掩盖环境缺失。
+2. 冻结家族解析后的 RollingOp 会直接持有 ConstExpr('20m')，旧编译器只接受整数
+   或 WindowBarsExpr。现复用已有 _resolve_windows/交易日分支处理直接时长常量，
+   不改变单位、不增加另一套窗口计算。
+3. Group-1 与 Threshold-1 名称不同但 Nautilus 的 order_id_tag 均为1。alpha bridge
+   只对冲突尾号追加确定的、避开冻结尾号的 factor 序号，输出 logical→native 映射
+   供报告归属核查，不改 Nautilus 或撮合/账户规则。跨独立既有策略集仍遵循原生冲突
+   检查，不擅自改名。真实混合策略回归覆盖了此路径。
+
+独立 worker 的三次完整验收（耗时包括 worker 启动、执行、CouchDB及轮询，不含staging）：
+
+| Job | 模式 | Bar | 订单 | 终态 | 耗时 | 采样worker最大RSS |
+| --- | --- | ---: | ---: | --- | ---: | ---: |
+| acceptance-c4a4628ec7f9-native | 两分组+阈值，共3消费者 | 20,000 | 8 | succeeded | 1.736s | 391.9MiB |
+| acceptance-f005b07a3f87-native | 分组第1/2组 | 20,000 | 6 | succeeded | 1.552s | 383.1MiB |
+| acceptance-37b48ee779e2-native | 阈值 | 20,000 | 2 | succeeded | 1.558s | 381.9MiB |
+
+RSS 由父进程约每0.2秒读取 ps，是采样最大值而非精确峰值。每个 Job 均有独立task ID、
+不同于提交进程的 worker PID、持久终态、非空 report_ref，5份 CouchDB 附件逐份SHA256
+校验；阈值不需要排序，rank_passes=0，分组及混合各10,000而非按消费者重复排序。
+三个原始回执及导出的 Couch 文档保存在 /tmp/tr-real-celery-{mixed,group}-final-20261027/
+和 /tmp/tr-real-celery-threshold-final2-20261027/。本地Job DB/HTML/CSV保留供检查。
+
+运行方式见 runbook。专属测试 RabbitMQ/CouchDB 与 worker 结束后关闭；不触及其他
+服务器/队列。本次是实际冻结计划执行和报告存储验收，未验证 HTTP authoring/planning、
+生产调度、Linux release wheel、研报收益、实盘或所有参数组合，也没有公网部署。
+
+验证：Rust core219、原生adapter28+Catalog1通过；公开入口聚焦112通过；Job相关68通过；
+本次实现提交钩子343通过/1跳过。计数有交集。唯一跳过仍为已退役进程内sink测试。
+未执行全仓测试。回退可在授权任务分支 revert ed0dc6ba4 并重建此前 alpha gitlink/组合扩展；
+不能 reset 共享工作区或覆盖另一执行者的前端改动。
