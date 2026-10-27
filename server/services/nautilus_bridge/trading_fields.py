@@ -18,10 +18,6 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from tools.data.field_history import (
-    OPENCTP_LATEST_FIELD_PROVIDER,
-    OPENCTP_LATEST_FIELD_SOURCE_KEY,
-)
 from traderesearch_data.rules import TradingFieldProvider, TradingFieldValue
 
 MARKET_RULE_FIELDS = (
@@ -47,6 +43,8 @@ class TradingFieldSource:
     timezone: str
     adapter_id: str
     related_members: tuple[str, ...] = ()
+    latest_provider: str = ""
+    latest_source_prefix: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +75,14 @@ def bind_trading_field_source(resolved_source: Any) -> TradingFieldSource:
     return TradingFieldSource(
         capability.family_key, capability.member_key,
         capability.timezone, capability.adapter_id, related,
+        latest_provider=str(
+            getattr(getattr(resolved_source, "member", None),
+                    "trading_field_latest_provider", "") or ""
+        ),
+        latest_source_prefix=str(
+            getattr(getattr(resolved_source, "member", None),
+                    "trading_field_latest_source_prefix", "") or ""
+        ),
     )
 
 
@@ -279,10 +285,13 @@ def _rule_at(
     return max(candidates, key=lambda item: item[0])[1]
 
 
-def _field_evidence(field: str, record: TradingFieldValue) -> FieldEvidence:
+def _field_evidence(
+    field: str, record: TradingFieldValue, source: TradingFieldSource,
+) -> FieldEvidence:
     if (record.approximated or not record.provider or not record.source_key
-            or record.provider == OPENCTP_LATEST_FIELD_PROVIDER
-            or record.source_key.startswith(OPENCTP_LATEST_FIELD_SOURCE_KEY)):
+            or (source.latest_provider and record.provider == source.latest_provider)
+            or (source.latest_source_prefix
+                and record.source_key.startswith(source.latest_source_prefix))):
         raise TradingFieldContractError(f"{field}: latest/approximate snapshot is not historical evidence")
     try:
         value = Decimal(str(record.value))
@@ -329,7 +338,7 @@ def resolve_trading_fields_at(
             raise TradingFieldContractError(
                 f"{source.member_key}/{instrument}: missing {name} at {timestamp.isoformat()}: {exc}"
             ) from exc
-        fields.append(_field_evidence(name, resolved))
+        fields.append(_field_evidence(name, resolved, source))
     values = {field.name: field.value for field in fields}
     if values["MinLimitOrderVolume"] > values["MaxLimitOrderVolume"]:
         raise TradingFieldContractError("minimum order volume exceeds maximum")

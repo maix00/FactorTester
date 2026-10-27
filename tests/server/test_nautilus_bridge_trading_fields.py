@@ -25,6 +25,8 @@ from tools.data.field_history import FieldHistoryProvider
 SOURCE = TradingFieldSource(
     "Local", "LocalCNFuturesContractMIN1", "Asia/Shanghai",
     "local_cnfutures_contract_minute_parquet_v1",
+    latest_provider="OpenCTP:latest",
+    latest_source_prefix="openctp/latest_snapshot",
 )
 
 

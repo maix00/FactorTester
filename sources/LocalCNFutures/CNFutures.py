@@ -545,6 +545,8 @@ def _declare_source_semantics(
     source.raw_timestamp_unit = raw_timestamp_unit
     source.trading_field_provider_ref = 'FieldHistory:market_rules:exchange'
     source.trading_field_related_members = ('FieldHistory:market_rules:exchange',)
+    source.trading_field_latest_provider = 'OpenCTP:latest'
+    source.trading_field_latest_source_prefix = 'openctp/latest_snapshot'
     source.trading_field_effective_clock = 'effective_timestamp_or_trading_day'
     source.trading_field_provider_loader = _strict_exchange_field_history
     return source
