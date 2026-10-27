@@ -268,9 +268,9 @@ does not establish full multi-contract roll/replay acceptance.
 新增 `FrozenBundleInput`/`freeze_bundle_input`：固定 authority、owner、device、Bundle
 版本与 metadata fingerprint、mapping_version、成员和 related_members，并生成紧凑
 `source-input:<sha256>` 引用。CatalogLoadRequest 现携带 bundle_id/version/fingerprint/
-member_id，staged catalog receipt 也记录同一身份；这已进入实际 staging/receipt，
-但尚未写入 RunSpec/报告，也没有 mutable_history 数据 revision 或 live_stream
-录制语义。
+member_id，staged catalog receipt 和 replay receipt 的 `source_inputs` 都记录同一
+身份；这已进入实际 staging/replay receipt，但尚未写入 RunSpec，也没有
+mutable_history 数据 revision 或 live_stream 录制语义。
 
 ### P3 元数据只读描述（2026-10-27）
 
