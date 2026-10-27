@@ -46,7 +46,7 @@ def main():
                "python": sys.version.split()[0], "elapsed_s": elapsed,
                "process_peak_rss_bytes": peak * (1024 if sys.platform.startswith("linux") else 1),
                "cache": "unchanged Nautilus engine defaults", "result": result,
-               "scope": "local real family and reports, includes Python strategy/factor event adapter; excludes source conversion/Celery"}
+               "scope": "local real family and reports with Rust FactorActor/native strategies; excludes source conversion/Celery"}
     (args.output_dir / "measurements.json").write_text(json.dumps(summary, indent=2))
     print(json.dumps(summary, indent=2))
 

@@ -61,10 +61,10 @@ macOS `/usr/bin/time -l` 进程峰值 RSS 分别为 34,439,168 与 46,301,184 �
 ## 未完成边界
 
 - 实际策略构造器的所有 role 已合并到一个共享 Plan，使用 RunSpec 冻结 ref，
-  不再生成 role 名称伪 ref。订阅者引用同一发布，保留最近两个值并独立累计计数。
+  不再生成 role 名称伪 ref。Rust 策略借用同一发布，只保留目标缓冲及计数。
   跨不同策略构造器的运行级合并仍需核对，不能据单策略多 role 的测试声称全部完成。
-- Cython Nautilus 策略入口仍可能经 Python 逐 Bar 适配；Rust Actor 注册与回调测试
-  不等于真实 RunSpec/Job 已全程无 Python 回调。
+- 实际家族 runner 的逐 Bar 因子与策略消费已改为 Rust Actor，见末节；
+  Celery/公网及任意用户策略的端到端覆盖仍不能据此声称完成。
 - `StreamingFactorPlan`、`compile_streaming_factor`、`RustIntervalNode` 及旧 bar-search
   状态机已删除；测试改走真实 Rust 编译入口并覆盖跨交易日扩展与淘汰。
   `streaming/incremental.py` 仅保留编译适配、单输出视图与窗口/事件元数据解析。
@@ -271,10 +271,8 @@ start/end/count。TradingCalendarWindow 的两种来源入口和 staging 复用�
 mtime，避免相同版本号的旧扩展直接被判定为已构建；增量依赖判定仍交给 Cargo。
 没有修改 Nautilus core 来依赖因子库，也未增加常驻数据服务。
 
-仍未完成：当前实际策略消费因子仍经 Python on_bar 适配，再调用 Rust kernel。
-独立 Rust FactorActor 尚未替换该真实 Job 的因子消费端；Celery/RabbitMQ、原研报
-策略、公网及持久化端到端验收仍须继续。当前路径已移除 Python 行情合并，但不能
-称整条 Job 为零 Python per-Bar。
+该里程碑当时仍使用 Python on_bar 因子适配；此部分已由下一节的原生消费端替代。
+Celery/RabbitMQ、原研报策略、公网及持久化端到端验收仍须继续。
 
 本地测量（parent d22606240 / Nautilus 01a1e56793）：
 `tests/benchmarks/bench_strategy_catalog_runtime.py` 使用已冻结的真实 T/TL 各
@@ -289,3 +287,54 @@ GTHT Python 3.14、native dev opt-level=1，Cache 保持现有默认设置；没
 
 验证：原生 node 23 项、Python 聚焦 74 项、提交 hook 121 项通过，均非全仓测试。
 子模块与父仓库均本地提交，未推送或部署。
+
+## 实际策略消费端切换 Rust FactorActor（2026-10-27）
+
+实际 `run_strategy_family_run_spec` / 家族 runner 保留 Python 的冻结引用解析、
+输入收据预检、引擎配置与报告导出；行情回放期间，数据从 Nautilus Catalog 经
+DataEngine 到共享 FactorActor，再经原生消息总线交给 Rust 家族 Strategy。
+删除 `factor_stream.py`、Python Trader/FamilyTrader 回调、Python 家族成员与
+方向计算，以及无引用的 Python EventTimeline；不保留自动回退。
+
+`native/factortester_nautilus_runtime` 是组合根，生成同一个
+`nautilus_trader._libnautilus` 扩展，保留原来的 Python 功能 feature 与版本，
+避免第二个动态库产生独立的 Cache、Actor 注册表或撮合状态。Nautilus 仅增加
+可选 embedding 初始化入口，默认上游构建不变，不引入因子依赖。
+构建脚本使用成功构建的输入/二进制指纹收据；依赖重编译仍由 Cargo 决定。
+首次组合需构建完整扩展，不是秒级冷构建；热缓存验证 Cargo 0.58 秒完成，
+下一次脚本直接识别已构建。脚本启动扫描开销不在该 Cargo 时间中。
+
+同一冻结输入/时钟的多 role 在原有公共编译器做 CSE，不另写计划编译器。
+一个 Actor 维护一份 kernel、有限乱序切片及最近结果；消费者借用发布内容，
+只保留可复用目标缓冲。同一个输出的分组策略共用一次排序，NaN 不进入排名，
+同值按品种标识排序。持仓及待成交数量从 Nautilus Cache 读取，使用 Decimal，
+不复制整段行情或另维护模拟持仓。普通运行不保存因子输出历史；可选诊断 trace
+使用共享的 64 KiB JSONL 写出器。原生消息接收端是线程绑定的，不要求 sink 为 Send。
+
+冻结日历通过单调游标在完整切片上发出 bar/交易日/session 边界，不逐 Bar 建立
+Python datetime 或保存事件历史；缺少必需日历、未知边界、范围错误或消费者失败
+均中止回放并向 runner 返回失败。Nautilus 继续负责账户、撮合和订单；未补全的
+历史交易规则、DMTM 等不因本次接线而变为已支持。
+
+真实本机验证使用 T2403/TL2406 价格 Catalog，不 mock 引擎、Actor 或策略。
+双策略集成样本：16 根输入、8 个完整时间片、2 节点，两个消费者各收到 8 次，
+共享排名只执行 8 次；订单真实成交。独立逐点参考检查 SignalAlign/Where 的值、
+事件时刻及可用时刻；另测分段重置、缺日历/越界失败。Python profile 检查没有
+进入旧因子/策略 on_bar/on_signal。原生 28 项及 Catalog 集成 1 项通过，
+alpha-algo 214 项通过；父仓提交 hook 聚焦 232 项通过，未运行全仓测试。
+
+性能入口仍为 `tests/benchmarks/bench_strategy_catalog_runtime.py`。Mac16,12、
+24 GiB 内存、macOS arm64、GTHT Python 3.14、dev opt-level=1；同一冻结 T/TL
+各 2,000 根、100 批、最大 40 根，rolling20 分组策略，默认 Cache，输出报告，
+不输出逐点 trace。未清空文件缓存，3 次顺序独立进程：1.081196、0.662701、
+0.671587 秒，中位 0.671587 秒；整进程峰值分别为 343,703,552、334,626,816、
+336,527,360 字节。旧 Python 回调同入口中位 0.687269 秒，峰值最大
+331,759,616 字节；样本不足以声称显著提速或节省整进程内存。每次均只有一个
+Actor、2,000 次发布/排序和一笔 TL2406 BUY 1，下一 Bar 01:32 UTC 开盘价
+101.53 成交，与前次结果相同。耗时包含预检及报告，不含首次源转换或 Celery。
+
+剩余限制：实际 runner 目前只接受已有阈值/分组家族及一条冻结策略路由；底层
+多消费者共享已验证，但运行级跨家族自动合并仍需接线。稀疏/异步产品、期限曲线、
+自定义边界仍须权威事件输入，不能用空数据代替。收据校验仍可能读取文件字节，
+不能称整个流程只读磁盘一次。查询预算不等于整个进程内存硬上限。未验收
+Celery/RabbitMQ、公网、CouchDB 或原研报收益，也未推送或部署。

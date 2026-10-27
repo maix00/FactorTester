@@ -153,10 +153,13 @@ FactorExpr 是唯一作者接口，执行方式属于编译器后端：
 - **Incremental backend**：编译为有状态 kernel，随行情或完整横截面逐 bar 更新，
   直接在回测框架生命周期内产生同一种 `FactorSignal`。
 
-增量 kernel 属于 FactorExpr 执行后端，代码位于
-`tools/factors/expr/streaming/`；它只实现表达式算子及有界状态，不包含行情读取、
-订单撮合、持仓、费用或账本。Nautilus 的行情事件 Adapter 在完整 bar 可用后调用
-该 kernel，并把结果交给 Nautilus 策略与账户。正式回测不能另走 FactorTester
+增量数值状态的唯一实现是 `alpha-algo::FactorPlanKernel`；
+`tools/factors/expr/streaming/` 负责编译与字段适配。实际内置家族回测中，
+Nautilus Rust Catalog/DataEngine 将 Bar 分发给共享 FactorActor，原生策略借用
+发布结果，不经过 Python 因子回调。`native/factortester_nautilus_runtime/` 将独立
+bridge 与 Nautilus 组合为同一个扩展，不让 Nautilus core 依赖因子库。行情读取、
+撮合、持仓、费用及账本仍由 Nautilus 管理。状态及验收边界见
+[ADR-180](docs/adr/180-factor-boundary-input-and-shared-session-windows.md)。正式回测不能另走 FactorTester
 旧撮合器；旧 Job worker 的切换状态见 [ADR-162](docs/adr/162-nautilus-execution-and-results.md)。
 
 逐点、固定 Shift、有限 Rolling 和横截面算子可以拥有两种等价 Implementation；

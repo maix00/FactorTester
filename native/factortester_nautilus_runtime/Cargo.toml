@@ -50,4 +50,3 @@ incremental = true
 # small one-off compile cost pays off in faster test/run loops.
 [profile.dev.package."*"]
 opt-level = 1
-

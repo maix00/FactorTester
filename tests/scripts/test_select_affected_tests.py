@@ -51,6 +51,10 @@ def test_factor_plan_changes_select_concrete_consumers_without_full_suite():
 
 def test_docs_only_skips_and_deleted_test_falls_back_to_module():
     assert selector.select({"docs/adr/new.md"}) == ("SKIP", [])
+    assert selector.select({"CONTEXT.md", "docs/adr/new.md"}) == ("SKIP", [])
+    assert selector.select({"CONTEXT.md", "scripts/build_nautilus_extension.sh"}) == (
+        "SCOPED", ["tests/scripts/test_nautilus_extension_build.py"],
+    )
     assert selector.select({"tests/scripts/support.py"}) == ("SCOPED", ["tests/scripts"])
     assert selector.select({"tests/server/test_nonexistent_deleted.py"}) == (
         "SCOPED", ["tests/server"],

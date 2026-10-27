@@ -532,7 +532,7 @@ PREFIX_PATH_TESTS = {
     "server/services/versioning/": ("tests/server/test_versioning_revisions.py",),
 }
 FULL_PATHS = {
-    "AGENTS.md", "CONTEXT.md", "conftest.py", "environment.yml", "pytest.ini",
+    "AGENTS.md", "conftest.py", "environment.yml", "pytest.ini",
     "pyproject.toml", "setup.cfg", "requirements.txt", "scripts/test.sh",
     ".githooks/pre-commit", ".githooks/pre-push",
 }
