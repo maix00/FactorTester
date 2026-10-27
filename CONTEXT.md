@@ -156,8 +156,9 @@ FactorExpr 是唯一作者接口，执行方式属于编译器后端：
 增量数值状态的唯一实现是 `alpha-algo::FactorPlanKernel`；
 `tools/factors/expr/streaming/` 负责编译与字段适配。实际内置家族回测中，
 Nautilus Rust Catalog/DataEngine 将 Bar 分发给共享 FactorActor，原生策略借用
-发布结果，不经过 Python 因子回调。`native/factortester_nautilus_runtime/` 将独立
-bridge 与 Nautilus 组合为同一个扩展，不让 Nautilus core 依赖因子库。行情读取、
+发布结果，不经过 Python 因子回调。`native/traderesearch_nautilus_runtime/` 将
+alpha 的 `adapters/nautilus`（包含阈值/分组公共策略）与 Nautilus 组合为
+同一个扩展，不让 Nautilus core 依赖因子库。行情读取、
 撮合、持仓、费用及账本仍由 Nautilus 管理。状态及验收边界见
 [ADR-180](docs/adr/180-factor-boundary-input-and-shared-session-windows.md)。正式回测不能另走 FactorTester
 旧撮合器；旧 Job worker 的切换状态见 [ADR-162](docs/adr/162-nautilus-execution-and-results.md)。

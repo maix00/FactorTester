@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NAUTILUS_ROOT="${ROOT_DIR}/vendor/nautilus_trader"
 PYTHON_SOURCE="${NAUTILUS_ROOT}/python"
-COMPOSITION_ROOT="${ROOT_DIR}/native/factortester_nautilus_runtime"
+COMPOSITION_ROOT="${ROOT_DIR}/native/traderesearch_nautilus_runtime"
 ENV_NAME="${FT_ENV_NAME:-GTHT}"
 BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
 DEV_OPT_LEVEL="${CARGO_PROFILE_DEV_OPT_LEVEL:-1}"
@@ -69,7 +69,7 @@ build_inputs = [rust_root / name for name in ("Cargo.toml", "Cargo.lock", "rust-
 build_inputs.extend(path for path in (rust_root / "crates").rglob("*")
                     if path.suffix in {".rs", ".toml"})
 repo_root = rust_root.parent.parent
-for folder in (repo_root / "native", repo_root / "vendor/py-alpha-lib/alpha-algo"):
+for folder in (repo_root / "native", repo_root / "vendor/py-alpha-lib/alpha-algo", repo_root / "vendor/py-alpha-lib/adapters/nautilus"):
     for directory, children, files in os.walk(folder):
         children[:] = [name for name in children if name not in {"target", ".git", "__pycache__"}]
         build_inputs.extend(Path(directory) / name for name in files
@@ -82,7 +82,7 @@ for path in sorted(set(build_inputs)):
 stat = native_path.stat()
 current = {"source_signature": fingerprint.hexdigest(),
            "binary": [str(native_path), stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns]}
-receipt = rust_root / "target/factortester-runtime-receipt.json"
+receipt = rust_root / "target/traderesearch-runtime-receipt.json"
 if mode == "record":
     receipt.parent.mkdir(parents=True, exist_ok=True)
     temporary = receipt.with_suffix(".tmp")

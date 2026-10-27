@@ -111,10 +111,10 @@ def main():
     root = Path(__file__).resolve().parents[2]
     source_paths = ["vendor/py-alpha-lib/alpha-algo/src/algo/factor_plan.rs",
                     "vendor/py-alpha-lib/alpha-algo/src/algo/session_window.rs",
-                    "native/nautilus_factor_bridge/src/lib.rs",
-                    "native/nautilus_factor_bridge/src/replay.rs",
-                    "native/nautilus_factor_bridge/examples/catalog_replay.rs",
-                    "native/nautilus_factor_bridge/Cargo.lock"]
+                    "vendor/py-alpha-lib/adapters/nautilus/src/lib.rs",
+                    "vendor/py-alpha-lib/adapters/nautilus/src/replay.rs",
+                    "vendor/py-alpha-lib/adapters/nautilus/examples/catalog_replay.rs",
+                    "vendor/py-alpha-lib/adapters/nautilus/Cargo.lock"]
     summary = {"source_sha256":{path:hashlib.sha256((root/path).read_bytes()).hexdigest() for path in source_paths},
                "binary_sha256":hashlib.sha256(args.binary.read_bytes()).hexdigest(),
                "platform":platform.platform(),"python":sys.version.split()[0],"bars_per_product":args.bars,

@@ -28,7 +28,10 @@ conda activate GTHT
 
 ## NautilusTrader 本地扩展
 
-NautilusTrader 由 `vendor/nautilus_trader` 固定版本提供。第一次运行完整
+NautilusTrader 由 `vendor/nautilus_trader` 固定版本提供；因子核心和 bridge 由
+`vendor/py-alpha-lib` 固定提交的 submodule 提供。初始化源码时使用
+`git submodule update --init --recursive`。TradeResearch 的
+`native/traderesearch_nautilus_runtime` 只负责把两者组装到一个原生扩展。第一次运行完整
 测试或 Nautilus 集成测试前，统一测试入口会在 `GTHT` 中构建对应的 Python
 扩展；也可以手动执行：
 
@@ -40,6 +43,15 @@ NautilusTrader 由 `vendor/nautilus_trader` 固定版本提供。第一次运行
 （默认 `opt-level=1`，降低 macOS Python 扩展链接体积），复用
 `vendor/nautilus_trader/target`。测试会拒绝静默跳过扩展缺失、加载其他
 wheel 或版本不匹配的情况。
+
+alpha adapter 及两个公共因子策略的原生测试使用同一固定 Nautilus 源码：
+
+```bash
+conda run -n GTHT python scripts/test_alpha_nautilus_adapter.py
+```
+
+该脚本从组合 manifest 读取 source patches，不另维护依赖版本清单。alpha 核心
+不依赖 Nautilus；策略库管理与版本冻结仍属于 TradeResearch。
 
 ## SQLite 并发版本
 

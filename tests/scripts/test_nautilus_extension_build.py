@@ -33,11 +33,11 @@ def test_builder_uses_vendor_toolchain_and_reused_dev_target():
     assert "maturin develop --profile dev --locked" in builder
     assert 'getattr(native, "__file__", None)' in builder
     assert "_libnautilus" in builder
-    assert "factortester_nautilus_runtime" in builder
+    assert "traderesearch_nautilus_runtime" in builder
     assert "attach_factor_family" in builder
     assert 'getattr(BacktestEngine, "run_catalogs", None)' in builder
     assert "source_signature" in builder
-    assert "factortester-runtime-receipt.json" in builder
+    assert "traderesearch-runtime-receipt.json" in builder
 
 
 def test_test_entrypoint_builds_extension_for_runtime_tests():
@@ -78,10 +78,44 @@ def test_runtime_helper_rejects_a_native_module_without_a_binary_path(monkeypatc
 def test_composition_preserves_upstream_features_version_and_dev_profile():
     import tomllib
     native=tomllib.loads((ROOT/"vendor/nautilus_trader/python/pyproject.toml").read_text())
-    composition=tomllib.loads((ROOT/"native/factortester_nautilus_runtime/pyproject.toml").read_text())
+    composition=tomllib.loads((ROOT/"native/traderesearch_nautilus_runtime/pyproject.toml").read_text())
     assert composition["project"]["version"]==native["project"]["version"]
     assert composition["tool"]["maturin"]["features"]==native["tool"]["maturin"]["features"]
     upstream=tomllib.loads((ROOT/"vendor/nautilus_trader/Cargo.toml").read_text())
-    wrapper=tomllib.loads((ROOT/"native/factortester_nautilus_runtime/Cargo.toml").read_text())
+    wrapper=tomllib.loads((ROOT/"native/traderesearch_nautilus_runtime/Cargo.toml").read_text())
     assert wrapper["profile"]["dev"]==upstream["profile"]["dev"]
     assert "nautilus-factor-bridge" not in upstream.get("workspace",{}).get("dependencies",{})
+
+
+def test_alpha_owns_adapter_and_public_strategies_without_a_second_copy():
+    import tomllib
+    adapter = ROOT / "vendor/py-alpha-lib/adapters/nautilus"
+    assert not (ROOT / "native/nautilus_factor_bridge").exists()
+    assert not (ROOT / "native/factortester_nautilus_runtime").exists()
+    assert (adapter / "src/family.rs").is_file()
+    assert (adapter / "src/runtime.rs").is_file()
+    core = tomllib.loads((ROOT / "vendor/py-alpha-lib/alpha-algo/Cargo.toml").read_text())
+    assert not any(key.startswith("nautilus") for key in core["dependencies"])
+    bridge = tomllib.loads((adapter / "Cargo.toml").read_text())
+    assert bridge["dependencies"]["alpha-algo"]["path"] == "../../alpha-algo"
+    assert not any("path" in value for key, value in bridge["dependencies"].items()
+                   if key.startswith("nautilus"))
+    composition = ROOT / "native/traderesearch_nautilus_runtime/Cargo.toml"
+    wrapper = tomllib.loads(composition.read_text())
+    dependency = wrapper["dependencies"]["nautilus-factor-bridge"]
+    assert (composition.parent / dependency["path"]).resolve() == adapter.resolve()
+    assert wrapper["package"]["name"] == "traderesearch-nautilus-runtime"
+    assert 'url = https://github.com/maix00/py-alpha-lib.git' in (ROOT / '.gitmodules').read_text()
+
+
+def test_adapter_test_build_uses_composition_source_patches():
+    from scripts.test_alpha_nautilus_adapter import source_patch_args
+    import tomllib
+    composition = ROOT / "native/traderesearch_nautilus_runtime/Cargo.toml"
+    patches = tomllib.loads(composition.read_text())["patch"]["crates-io"]
+    args = source_patch_args()
+    assert len(args) == 2 * len(patches)
+    for name, patch in patches.items():
+        assert any(f'patch.crates-io.{name}.path=' in argument
+                   and str((composition.parent / patch['path']).resolve()) in argument
+                   for argument in args)

@@ -61,6 +61,15 @@ def test_docs_only_skips_and_deleted_test_falls_back_to_module():
     )
 
 
+def test_alpha_gitlink_and_adapter_extraction_stay_scoped():
+    mode, targets = selector.select({"vendor/py-alpha-lib", ".gitmodules",
+        "vendor/py-alpha-lib/py-binding/tests/usage.py",
+        "native/nautilus_factor_bridge/examples/bench.rs",
+        "native/traderesearch_nautilus_runtime/Cargo.toml"})
+    assert mode == "SCOPED"
+    assert set(targets) == set(selector.ALPHA_RUNTIME_TESTS)
+
+
 def test_rename_considers_both_paths():
     paths = selector.paths_from_name_status(
         b"R100\0tools/cli/old.py\0tools/parameters/new.py\0"

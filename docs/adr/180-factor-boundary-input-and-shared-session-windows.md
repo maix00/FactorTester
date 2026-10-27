@@ -338,3 +338,50 @@ Actor、2,000 次发布/排序和一笔 TL2406 BUY 1，下一 Bar 01:32 UTC 开�
 自定义边界仍须权威事件输入，不能用空数据代替。收据校验仍可能读取文件字节，
 不能称整个流程只读磁盘一次。查询预算不等于整个进程内存硬上限。未验收
 Celery/RabbitMQ、公网、CouchDB 或原研报收益，也未推送或部署。
+
+
+## alpha 独立仓库与 adapter 归属（2026-10-27）
+
+按用户确认，Nautilus bridge 及阈值/横截面分组两个公共因子策略归 alpha，
+策略库管理、用户策略注册、权限、冻结版本、RunSpec、Job 与 UI 归 TradeResearch。
+`vendor/py-alpha-lib` 从普通 vendored 源码转换为固定提交 submodule；先在 alpha
+提交现有公开因子 API/Rust Plan 快照，再提交 `adapters/nautilus`。主仓不再
+维护 `native/nautilus_factor_bridge` 副本。迁入的 11 个 Rust 源码/测试/示例
+逐文件与迁移前相同，不重写算法、缓存、撮合或策略决策。
+
+alpha 核心工作区排除 adapter，保持不依赖任何回测框架。adapter 是独立 Cargo
+工作区，通过可选 feature 依赖 Nautilus 包。当前接口要求 0.67.0 及本项目固定
+修订的配置引擎回放 API；不能仅凭同版本号就认定任意发布 wheel 兼容。
+`native/traderesearch_nautilus_runtime` 是宿主组合根，将 adapter 的 Nautilus
+依赖 patch 到同一 submodule 源码，与原有 Python 功能链接成唯一扩展。
+`test_alpha_nautilus_adapter.py` 从该 manifest 提取 source patches 后运行
+adapter 独立工作区测试，不复制依赖列表或 adapter 代码。
+
+新组合 crate/目录、缓存收据和文档使用 TradeResearch 命名。现有 Catalog
+收据字段、冻结 ID 与旧接口名不在这次迁移中重命名，避免把代码归属变更
+混入数据格式迁移。历史段落中的旧路径描述各自提交当时的状态。
+
+共享 Actor/Plan、输出借用、可复用目标缓冲、分组排序共享与有界查询继续沿用，
+不会按策略创建独立行情历史或第二个引擎。独立依赖图检查确认 alpha-algo、
+bridge、Nautilus core/model/common 各一份。迁移不增加逐 Bar 检查或读取。
+
+本轮 alpha 核心 214 项、adapter 原生 28 项与 Catalog 集成 1 项、GTHT
+真实策略/构建/限流聚焦 54 项通过。实际组合扩展已经重建，随后再次执行构建
+脚本直接识别已构建。首次 adapter 测试构建在固定 Rust 1.99.0 下包含
+DataFusion/Nautilus 的独立 feature/profile 依赖编译，耗时约 10 分钟；
+组合扩展输出的 4 分 6 秒包含等待该 target 锁，实际只重编译 bridge 和组合
+crate。不能把等待/首次依赖编译解释成回测耗时或承诺秒级冷构建。
+
+同一冻结 T2403/TL2406 各 2,000 根真实 Bar，共 4,000 根、100 批、最大40根；
+macOS arm64/Mac16,12、24 GiB、GTHT Python3.14、dev opt1，Cache 默认、
+未清空系统缓存、不启用 trace。3 次顺序独立进程耗时 0.917402、0.706484、
+0.679370 秒，中位 0.706484；峰值 RSS 分别337,231,872、338,755,584、
+333,283,328 字节。前次原生版本中位0.671587、峰值最大343,703,552字节；
+此规模与噪声不足以证明显著变化或最优性。本次没有同时运行本任务的构建/测试，
+但宿主机不是独占基准环境。各次均一个Actor、2节点、2,000次发布/排序，
+TL2406 BUY1在2024-01-02 01:32 UTC以101.53成交，经济结果与前次相同。
+报告/预检包含在耗时内，首次源转换、Celery、网络与部署不包含。
+
+alpha 源码及桥接分别提交，主仓固定新的 gitlink；这些本地提交尚未推送，
+其他设备在获取提交之前不能仅靠远端 submodule URL复现新版本。没有部署、
+公网负载、完整研报收益或长回测内存稳定性验收。

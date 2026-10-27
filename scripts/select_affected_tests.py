@@ -501,6 +501,13 @@ for _path in (
     "vendor/py-alpha-lib/alpha-algo/examples/bench_window_memory.rs",
 ):
     EXACT_PATH_TESTS[_path] = FACTOR_PLAN_TESTS
+# Alpha is now a gitlink. Legacy paths remain mapped only for removal diffs.
+ALPHA_RUNTIME_TESTS = (*FACTOR_PLAN_TESTS,
+    "tests/scripts/test_nautilus_extension_build.py",
+    "tests/server/test_nautilus_strategy_family_replay.py")
+EXACT_PATH_TESTS["vendor/py-alpha-lib"] = ALPHA_RUNTIME_TESTS
+EXACT_PATH_TESTS[".gitmodules"] = ("tests/scripts/test_nautilus_extension_build.py",)
+EXACT_PATH_TESTS["scripts/test_alpha_nautilus_adapter.py"] = ("tests/scripts/test_nautilus_extension_build.py",)
 EXACT_PATH_TESTS["tests/factors/test_bar_counts.py"] = ("tests/factors/test_bar_counts.py",)
 EXACT_PATH_TESTS["tests/factors/test_runtime_boundaries.py"] = ("tests/factors/test_runtime_boundaries.py",)
 EXACT_PATH_TESTS["tests/server/test_catalog_streaming_limits.py"] = ("tests/server/test_catalog_streaming_limits.py",)
@@ -509,6 +516,9 @@ EXACT_PATH_TESTS["tests/factors/rolling_benchmarks/extrema.py"] = ("tests/factor
 EXACT_PATH_TESTS["tests/factors/test_shared_timeline.py"] = ("tests/factors/test_shared_timeline.py",)
 
 PREFIX_PATH_TESTS = {
+    "vendor/py-alpha-lib/": ALPHA_RUNTIME_TESTS,
+    "native/traderesearch_nautilus_runtime/": ALPHA_RUNTIME_TESTS,
+    "native/nautilus_factor_bridge/": ALPHA_RUNTIME_TESTS,
     "web/app/": ("tests/release/test_configuration_editor_frontend.py",),
     "static/vendor/web-app/": ("tests/release/test_configuration_editor_frontend.py",),
     "tools/testers/backtest/engines/factors/": (
