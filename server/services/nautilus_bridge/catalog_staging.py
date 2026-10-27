@@ -70,6 +70,8 @@ def stage_run_spec_catalogs(
     start_ns, end_ns = _ns(start_utc), _ns(end_utc)
     if end_ns < start_ns:
         raise ValueError("catalog range ends before its start")
+    if not staging_requests:
+        raise ValueError("catalog staging request has no members")
     module_name, _, symbol_path = entrypoint.partition(":")
     loader = import_module(module_name)
     for name in symbol_path.split("."):

@@ -205,6 +205,23 @@ def test_market_member_must_declare_related_history_member(monkeypatch, tmp_path
         )
 
 
+def test_empty_catalog_request_fails_before_activation(monkeypatch, tmp_path):
+    import pytest
+    from server.services.nautilus_bridge import catalog_staging
+    from sources.registry import installed_bundles
+
+    bundle = installed_bundles()[0]
+    monkeypatch.setattr(catalog_staging, "installed_bundles", lambda: (bundle,))
+    monkeypatch.setattr(catalog_staging, "import_module",
+                        lambda name: pytest.fail("empty request activated source"))
+    with pytest.raises(ValueError, match="no members"):
+        catalog_staging.stage_run_spec_catalogs(
+            staging_requests=[], source_key="LocalCNFuturesContractMIN1",
+            frequency="MIN1", start_utc="2024-01-02T00:00:00Z",
+            end_utc="2024-01-03T00:00:00Z", target_root=tmp_path,
+        )
+
+
 def _bundle_with_loader():
     from dataclasses import replace
     from sources.registry import installed_bundles
