@@ -170,6 +170,13 @@ class CatalogRoutesMixin:
         category_id = category_ids[0] if len(category_ids) == 1 else ",".join(category_ids)
         try:
             if parsed.path == "/api/product-library/installed-bundles":
+                if visitor is not None:
+                    json_response(
+                        self,
+                        {"success": False, "error": "visitor cannot inspect installed bundles"},
+                        403,
+                    )
+                    return True
                 from server.services.product_catalog_projection import (
                     installed_bundle_descriptors,
                 )

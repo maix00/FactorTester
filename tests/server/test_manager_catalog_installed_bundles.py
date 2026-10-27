@@ -41,3 +41,30 @@ def test_installed_bundles_route_is_metadata_only(monkeypatch):
         "metadata_only": True,
         "sources": [descriptor],
     }, 200)]
+
+
+def test_installed_bundles_route_rejects_visitor(monkeypatch):
+    responses = []
+    monkeypatch.setattr(
+        catalog_routes, "json_response",
+        lambda _handler, value, status=200: responses.append((value, status)),
+    )
+
+    class Visitor:
+        principal = "guest"
+
+    class Handler(catalog_routes.CatalogRoutesMixin):
+        def _session(self):
+            return None
+
+        def _visitor_mode(self):
+            return Visitor()
+
+    handled = Handler()._serve_product_catalog(SimpleNamespace(
+        path="/api/product-library/installed-bundles", query="",
+    ))
+    assert handled is True
+    assert responses == [({
+        "success": False,
+        "error": "visitor cannot inspect installed bundles",
+    }, 403)]
