@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from tests.nautilus_runtime import require_nautilus
 from tests.server.test_nautilus_bridge_backtest_runner import _real_catalog
 from server.services.nautilus_bridge.strategy_backtest import run_strategy_family_replay
@@ -131,3 +133,17 @@ def test_real_cross_factor_uses_each_strategy_universe(tmp_path):
     import numpy as np
     np.testing.assert_equal(result['latest_outputs']['Cross-0']['signal'][2],[.5,np.nan])
     np.testing.assert_equal(result['latest_outputs']['Cross-1']['signal'][2],[np.nan,.5])
+
+
+@pytest.mark.parametrize("strategies, message", [
+    ([dict(strategy_id="Empty-000", products=[])], "must not be empty"),
+    ([dict(strategy_id="Alias"), dict(strategy_id="Alias-000")], "normalization"),
+])
+def test_invalid_consumer_scope_or_identity_fails_before_catalog_read(monkeypatch,tmp_path,strategies,message):
+    from server.services.nautilus_bridge import strategy_backtest as module
+    require_nautilus()
+    monkeypatch.setattr(module,"_load_input",lambda *a:pytest.fail("must validate before loading"))
+    values=[dict(factor_bindings={"signal":CLOSE},factor_refs={"signal":"factor:v2:"+"a"*43},
+                 family=ThresholdState(1,0),**strategy) for strategy in strategies]
+    with pytest.raises(ValueError,match=message):
+        module.run_strategy_families_replay(inputs={"T":None},strategies=values,output_dir=tmp_path)

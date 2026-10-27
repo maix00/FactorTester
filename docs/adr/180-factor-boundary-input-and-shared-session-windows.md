@@ -418,3 +418,18 @@ Actor、2节点、100批最大40根、2,000次发布/排序，成交与前次一
 
 本轮最终聚焦Python契约148项通过、1项已退役旧Celery sink测试跳过；原生
 adapter 28项与Catalog集成1项通过，非全量平台测试。alpha提交`7e99875`。
+
+
+## 2026-10-27 公开 batch 与多策略接线补充
+
+此节取代上文“跨策略仍待接通”和 Python heap/按时间批回放的过渡状态。
+公开 SignalAlign 的网格/采样和 TermStructure 的数学统一到 alpha Rust Plan；
+Python 仅提供冻结分区、曲线输入和输出视图。无 Python 数学 fallback。
+同输入/时钟的多个策略共享 Actor/CSE；产品局部祖先共享，横截面及其后代按
+策略产品集合区分。NETTING 的重叠独立目标必须拒绝，HEDGING 使用原生持仓归属。
+
+实际 Catalog 回放启用 Nautilus optimize_file_loading，避免同精度目录每文件各建
+预取查询。它不是新读取基础设施；数量/时间戳组/查询预算保护继续独立生效。
+不同精度文件的原生回退仍需单独容量验证。最新测量与公开 batch 的小输入
+SignalAlign 开销回归均记录在 [本轮审计](../audits/alpha-rust-entrypoints-2026-10-27.md)。
+不以此宣称所有算子、所有时钟、Linux/Celery/公网均已验收。

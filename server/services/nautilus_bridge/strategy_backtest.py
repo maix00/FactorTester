@@ -98,11 +98,14 @@ def run_strategy_families_replay(*,inputs,strategies,output_dir,max_bars=8,execu
     from nautilus_trader.execution import MakerTakerFeeModel
     from nautilus_trader.model import AccountType,Currency,Money,OmsType,TraderId,Venue
     if not strategies:raise ValueError('at least one native strategy is required')
-    products=tuple(inputs);seen=set();roots={};role_refs={};consumers=[];scopes={}
+    products=tuple(inputs);seen=set();native_ids=set();roots={};role_refs={};consumers=[];scopes={}
     for strategy in strategies:
         identity=str(strategy['strategy_id'])
         if not identity or identity in seen:raise ValueError('duplicate or empty strategy id')
         seen.add(identity)
+        native_id=identity if '-' in identity else identity+'-000'
+        if native_id in native_ids:raise ValueError('strategy ids collide after Nautilus normalization')
+        native_ids.add(native_id)
         bindings=strategy['factor_bindings'];refs=strategy['factor_refs']
         if set(bindings)!=set(refs) or 'signal' not in refs:raise ValueError('factor roles must exactly bind frozen refs and include signal')
         for role,expr in bindings.items():
@@ -112,10 +115,12 @@ def run_strategy_families_replay(*,inputs,strategies,output_dir,max_bars=8,execu
                 raise ValueError('one frozen factor ref resolved to conflicting expressions')
             roots[ref]=expr
         role_refs[identity]=refs
-        chosen=tuple(strategy.get('products') or products)
+        selected=strategy.get('products')
+        chosen=products if selected is None else tuple(selected)
+        if not chosen:raise ValueError('strategy product scope must not be empty')
         if len(set(chosen))!=len(chosen) or not set(chosen)<=set(products):raise ValueError('strategy product scope is outside frozen inputs')
         scopes[identity]=chosen
-        consumers.append(dict(strategy_id=identity if '-' in identity else identity+'-000',
+        consumers.append(dict(strategy_id=native_id,
             rule=_family_rule(strategy['family']),product_indices=[products.index(p) for p in chosen]))
     spec,slots=_compile_frozen_roots(roots,products,session_calendar)
     from alpha.factor.spec import scope_plan_outputs
