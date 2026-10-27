@@ -286,7 +286,8 @@ def iter_daily_bars(
                 raise ValueError(f"out-of-order or duplicate daily bar for {uid}")
             previous_by_uid[uid] = clock.interval_end_ns
             yield MarketBar(
-                contract_uid=uid, instrument_code=str(row["CONTRACT"] or ""),
+                contract_uid=uid,
+                instrument_code=str(row["CONTRACT"] or "").split(".", 1)[0],
                 trading_day=day, clock=clock,
                 open=_decimal(row["OPEN"], "OPEN"),
                 high=_decimal(row["HIGH"], "HIGH"),

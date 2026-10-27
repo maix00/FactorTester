@@ -10,7 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from server.services.nautilus_bridge.catalog import stage_contract_minute_catalog
+from server.services.nautilus_bridge.catalog import (
+    stage_contract_daily_catalog, stage_contract_minute_catalog,
+)
 from server.services.nautilus_bridge.market_data import (
     FuturesContractSpec,
     iter_minute_bars,
@@ -78,6 +80,52 @@ def test_real_three_bar_native_catalog_readback_and_receipt(
             start_ns=bars[0].clock.interval_end_ns,
             end_ns=bars[-1].clock.interval_end_ns,
         )
+
+
+def test_daily_catalog_uses_trading_day_labels_and_exchange_close(tmp_path):
+    require_nautilus()
+    pytest.importorskip("pyarrow")
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from datetime import date, datetime, time
+    from nautilus_trader.persistence import ParquetDataCatalog
+
+    source = tmp_path / "term.parquet"
+    pq.write_table(pa.Table.from_pylist([
+        {"TRADING_DAY": date(2024, 1, 2), "PRODUCT": "T",
+         "CONTRACT": "T2403.CFE", "CONTRACT_UID": "CFFEX|F|T|2403",
+         "OPEN": 102.9, "HIGH": 103.0, "LOW": 102.8, "CLOSE": 102.95,
+         "VOLUME": 1000.0, "OPEN_INTEREST": 180000.0,
+         "SETTLEMENT_PRICE": 102.94},
+        {"TRADING_DAY": date(2024, 1, 3), "PRODUCT": "T",
+         "CONTRACT": "T2403.CFE", "CONTRACT_UID": "CFFEX|F|T|2403",
+         "OPEN": 102.95, "HIGH": 103.1, "LOW": 102.9, "CLOSE": 103.05,
+         "VOLUME": 1100.0, "OPEN_INTEREST": 181000.0,
+         "SETTLEMENT_PRICE": 103.04},
+    ]), source)
+    spec = FuturesContractSpec(
+        "T2403", "CFFEX", "T", Decimal("0.005"), 3, Decimal("10000"),
+        "CNY", 1, 2_000_000_000_000_000_000, Decimal("0.02"),
+        Decimal("0.02"), "test-only fixture", resolved_contract_minute_source(),
+    )
+    target = tmp_path / "daily-catalog"
+    receipt = stage_contract_daily_catalog(
+        source, target, contract_uid="CFFEX|F|T|2403", instrument_spec=spec,
+        start_ns=0, end_ns=2_000_000_000_000_000_000,
+        product_codes={"T"},
+        session_for_day=lambda day: (
+            datetime.combine(day, time(9, 30)), datetime.combine(day, time(15, 0))
+        ),
+        batch_bars=1,
+    )
+    assert receipt.bar_type.endswith("1-DAY-LAST-EXTERNAL")
+    assert receipt.selected_count == 2
+    assert receipt.session_summaries[0]["trading_day"] == "2024-01-02"
+    catalog = ParquetDataCatalog(str(target))
+    readback = catalog.query_bars(identifiers=[receipt.bar_type])
+    assert [bar.ts_event for bar in readback] == [
+        receipt.first_event_ns, receipt.last_event_ns,
+    ]
 
 
 def test_budget_failure_does_not_publish_partial_catalog(tmp_path):
