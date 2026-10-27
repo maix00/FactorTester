@@ -209,8 +209,12 @@ federated catalog's runtime availability/count projection.
   不相等或缺一侧时报告“single-margin Instrument contract”不可表示。initial/maintenance
   仍相同，完整历史规则/执行路径尚未接入。
 
-仍未完成：显式多 catalog 消费者契约、真实 DAY1 小窗口与异常日历/结算验证、无损保证金、
-同一规则源单次加载、非 CN/非 Parquet 独立 Bundle、RunSpec 输入身份冻结。
+多合约的显式引用形状与消费者迁移条件见
+[ADR-186](186-multi-contract-catalog-references.md)；在消费者契约确认前保持
+fail-closed。
+
+仍未完成：显式多 catalog 消费者契约、真实 DAY1 异常日历/结算验证、无损保证金、
+非 CN/非 Parquet 独立 Bundle、RunSpec 输入身份冻结。
 
 ### Source-owned catalog staging entrypoint
 
