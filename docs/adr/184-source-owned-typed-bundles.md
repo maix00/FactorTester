@@ -202,7 +202,9 @@ federated catalog's runtime availability/count projection.
   频率、Bundle `related_members`、请求路径、窗口和输出根；中央只在调用时构造，
   源 loader 不再接收可变的 `staging_requests: list[dict]`。`NautilusCatalogLoader`
   只接受这个请求。LocalCNFutures 在 staging 前拒绝未声明历史规则成员的请求；
-  规则成员的实际加载/单次缓存仍未切换。
+  规则成员的实际加载/单次缓存仍未切换。LocalCNFutures 的 strict 规则 provider
+  现在按 `openctp` SQLite 的 mtime/size 缓存：同一 revision 只加载一次，revision
+  变化后重新加载；加载期间 revision 变化则不缓存。
 - 保证金不再取 `max(long, short)` 或把缺失补零。源 loader 要求多空两侧都存在且相等；
   不相等或缺一侧时报告“single-margin Instrument contract”不可表示。initial/maintenance
   仍相同，完整历史规则/执行路径尚未接入。
