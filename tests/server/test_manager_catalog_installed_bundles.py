@@ -68,3 +68,30 @@ def test_installed_bundles_route_rejects_visitor(monkeypatch):
         "success": False,
         "error": "visitor cannot inspect installed bundles",
     }, 403)]
+
+
+def test_installed_bundles_route_does_not_activate_sources(monkeypatch):
+    import pytest
+    from sources import registry
+
+    responses = []
+    monkeypatch.setattr(
+        registry, "load_all_sources",
+        lambda: pytest.fail("installed bundle metadata must not activate sources"),
+    )
+    monkeypatch.setattr(
+        catalog_routes, "json_response",
+        lambda _handler, value, status=200: responses.append((value, status)),
+    )
+
+    class Handler(catalog_routes.CatalogRoutesMixin):
+        def _session(self):
+            return {"username": "alice", "role": "user"}
+
+        def _visitor_mode(self):
+            return None
+
+    assert Handler()._serve_product_catalog(SimpleNamespace(
+        path="/api/product-library/installed-bundles", query="",
+    )) is True
+    assert responses[0][0]["metadata_only"] is True
