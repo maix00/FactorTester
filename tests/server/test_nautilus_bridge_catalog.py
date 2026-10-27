@@ -11,7 +11,8 @@ from pathlib import Path
 import pytest
 
 from server.services.nautilus_bridge.catalog import (
-    stage_contract_daily_catalog, stage_contract_minute_catalog,
+    load_catalog_settlement_records, stage_contract_daily_catalog,
+    stage_contract_minute_catalog,
 )
 from server.services.nautilus_bridge.market_data import (
     FuturesContractSpec,
@@ -121,12 +122,18 @@ def test_daily_catalog_uses_trading_day_labels_and_exchange_close(tmp_path):
     assert receipt.bar_type.endswith("1-DAY-LAST-EXTERNAL")
     assert receipt.selected_count == 2
     assert receipt.session_summaries[0]["trading_day"] == "2024-01-02"
-    assert receipt.settlement_records[0] == {
+    expected_settlement = {
         "contract_uid": "CFFEX|F|T|2403",
         "trading_day": "2024-01-02",
         "event_ns": receipt.first_event_ns,
         "settlement_price": "102.94",
     }
+    assert receipt.settlement_records[0] == expected_settlement
+    assert load_catalog_settlement_records(
+        target, contract_uid="CFFEX|F|T|2403",
+    )[0] == expected_settlement
+    with pytest.raises(ValueError, match="identity differs"):
+        load_catalog_settlement_records(target, contract_uid="CFFEX|F|T|2406")
     catalog = ParquetDataCatalog(str(target))
     readback = catalog.query_bars(identifiers=[receipt.bar_type])
     assert [bar.ts_event for bar in readback] == [

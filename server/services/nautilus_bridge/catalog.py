@@ -230,6 +230,23 @@ def _stage_contract_catalog(
         raise
 
 
+def load_catalog_settlement_records(
+    catalog_dir: str | Path, *, contract_uid: str,
+) -> tuple[dict[str, str | int], ...]:
+    """Read the persisted DAY1 settlement observations for one staged catalog."""
+    folder = Path(catalog_dir)
+    receipt = json.loads((folder / "factor_tester_catalog_receipt.json").read_text())
+    if receipt.get("contract_uid") != contract_uid:
+        raise ValueError("catalog settlement identity differs from requested contract")
+    records = receipt.get("settlement_records") or ()
+    for item in records:
+        if item.get("contract_uid") != contract_uid:
+            raise ValueError("settlement record belongs to another contract")
+        if not str(item.get("trading_day") or "") or not str(item.get("settlement_price") or ""):
+            raise ValueError("settlement record is incomplete")
+    return tuple(records)
+
+
 def stage_contract_minute_catalog(
     source_path: str | Path, target_dir: str | Path, *,
     contract_uid: str, instrument_spec: FuturesContractSpec,
