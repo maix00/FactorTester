@@ -123,10 +123,24 @@ class CatalogLoadRequest:
     target_root: Path
 
     def __post_init__(self) -> None:
-        if not self.source_key or not self.frequency:
-            raise ValueError("catalog source and frequency are required")
+        if not isinstance(self.source_key, str) or not self.source_key:
+            raise ValueError("catalog source is required")
+        if not isinstance(self.frequency, str) or not self.frequency:
+            raise ValueError("catalog frequency is required")
+        if not isinstance(self.related_members, tuple) or any(
+            not isinstance(value, str) or not value for value in self.related_members
+        ):
+            raise TypeError("catalog related_members must be a tuple of non-empty strings")
+        if not isinstance(self.staging_requests, tuple) or any(
+            not isinstance(value, CatalogStagingRequest) for value in self.staging_requests
+        ):
+            raise TypeError("catalog staging_requests must be a tuple of requests")
+        if type(self.start_ns) is not int or type(self.end_ns) is not int:
+            raise TypeError("catalog bounds must be integers")
         if self.start_ns > self.end_ns:
             raise ValueError("catalog range ends before its start")
+        if not isinstance(self.target_root, Path):
+            raise TypeError("catalog target_root must be a Path")
 
 
 # The loader is source-owned; no engine or platform domain objects cross this

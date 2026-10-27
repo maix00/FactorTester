@@ -282,3 +282,25 @@ def test_installed_bundle_descriptors_are_metadata_only(monkeypatch):
     member = next(item for item in local["members"] if item["id"] == "LocalCNFuturesContractMIN1")
     assert "FieldHistory:market_rules:exchange" in member["related_members"]
     assert member["update_policy"]["mode"] == "mutable_history"
+
+
+def test_catalog_load_request_rejects_mutable_or_invalid_fields(tmp_path):
+    import pytest
+    from traderesearch_data.nautilus import CatalogLoadRequest, CatalogStagingRequest
+
+    request = CatalogStagingRequest(("CFFEX|F|T|2403",))
+    with pytest.raises(TypeError, match="related_members"):
+        CatalogLoadRequest(
+            source_key="LocalCNFuturesContractMIN1", frequency="MIN1",
+            related_members=[], staging_requests=(request,),
+            start_utc="2024-01-02T00:00:00Z", end_utc="2024-01-03T00:00:00Z",
+            start_ns=0, end_ns=1, target_root=tmp_path,
+        )
+    with pytest.raises(TypeError, match="target_root"):
+        CatalogLoadRequest(
+            source_key="LocalCNFuturesContractMIN1", frequency="MIN1",
+            related_members=("FieldHistory:market_rules:exchange",),
+            staging_requests=(request,), start_utc="2024-01-02T00:00:00Z",
+            end_utc="2024-01-03T00:00:00Z", start_ns=0, end_ns=1,
+            target_root=str(tmp_path),
+        )
