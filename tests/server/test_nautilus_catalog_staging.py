@@ -1,4 +1,6 @@
 import pytest
+
+import pytest
 from server.services.nautilus_bridge.catalog_staging import _ns
 
 
@@ -38,16 +40,20 @@ def test_catalog_window_timestamp_is_utc():
     assert _ns("2024-01-02T00:00:00Z") == 1704153600000000000
 
 
-def test_stage_run_spec_catalogs_writes_each_frozen_contract(monkeypatch, tmp_path):
+@pytest.mark.parametrize("selected", ["CFFEX|F|T|2403", "Product/Futures/CNFutures/_products/T.CFE"])
+def test_stage_run_spec_catalogs_writes_each_frozen_contract(monkeypatch, tmp_path, selected):
     from types import SimpleNamespace
     from server.services.nautilus_bridge import catalog_staging
     from sources.LocalCNFutures import nautilus_catalog
 
-    product = SimpleNamespace(get_parent_product=lambda: SimpleNamespace(
+    parent = SimpleNamespace(
+        name="T.CFE", alias="T.CFE",
         get_contract_list=lambda start, end: [
             {"uid": "CFFEX|F|T|2403", "start_ts": 1700611200000, "end_ts": 1708387200000},
         ],
-    ))
+    )
+    product = SimpleNamespace(get_parent_product=lambda: parent)
+    monkeypatch.setattr("sources.LocalCNFutures.CNFutures.get_all_futures", lambda: [parent])
     monkeypatch.setattr(nautilus_catalog, "find_contract_product", lambda uid: product)
     monkeypatch.setattr(nautilus_catalog, "instrument_fields",
                         lambda product: {"multiplier": 10000, "price_increment": 0.005,
@@ -67,8 +73,7 @@ def test_stage_run_spec_catalogs_writes_each_frozen_contract(monkeypatch, tmp_pa
         captured.update(source=source, target=str(target), **kwargs)
     monkeypatch.setattr(nautilus_catalog, "stage_contract_minute_catalog", stage)
     result = catalog_staging.stage_run_spec_catalogs(
-        staging_requests=[{"paths": ["CFFEX|F|T|2403"]},
-                          {"paths": ["CFFEX|F|T|2403"]}],
+        staging_requests=[{"paths": [selected]}, {"paths": [selected]}],
         source_key="LocalCNFuturesContractMIN1", frequency="MIN1",
         start_utc="2024-01-02T00:00:00Z", end_utc="2024-01-03T00:00:00Z",
         target_root=tmp_path,
@@ -347,3 +352,32 @@ def test_bundle_native_margin_fields_reach_instrument_unchanged(monkeypatch):
     assert instrument.margin_maint == Decimal("0.02")
     assert str(instrument.min_quantity) == "2"
     assert str(instrument.max_quantity) == "20"
+
+
+def test_bundle_resolves_products_once_per_run_and_uses_actual_run_window(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from traderesearch_data.nautilus import CatalogLoadRequest, CatalogStagingRequest
+    from sources.LocalCNFutures import CNFutures as source
+    from sources.LocalCNFutures.nautilus_catalog import _contract_requests
+    calls = []
+    available = ["CFFEX|F|T|2403"]
+    def contracts(start, end):
+        calls.append((start, end))
+        return [{"uid": uid} for uid in available]
+    monkeypatch.setattr(source, "get_all_futures", lambda: [SimpleNamespace(
+        name="T.CFE", alias="T.CFE", get_contract_list=contracts)])
+    path = "Product/Futures/CNFutures/_products/T.CFE"
+    request = CatalogLoadRequest(
+        source_key="LocalCNFuturesContractMIN1", frequency="MIN1",
+        bundle_id="Local", bundle_version="1", bundle_fingerprint="sha256:" + "a" * 64,
+        member_id="LocalCNFuturesContractMIN1",
+        related_members=("FieldHistory:market_rules:exchange",),
+        staging_requests=(CatalogStagingRequest((path,)), CatalogStagingRequest((path,))),
+        start_utc="2024-01-02T00:00:00Z", end_utc="2024-02-03T00:00:00Z",
+        start_ns=1704153600000000000, end_ns=1706918400000000000, target_root=tmp_path)
+    selections = _contract_requests(request)
+    assert [item.paths for item in selections] == [("CFFEX|F|T|2403",)] * 2
+    assert calls == [("2024-01-02", "2024-02-03")]
+    available[:] = ["CFFEX|F|T|2406"]
+    assert _contract_requests(request)[0].paths == ("CFFEX|F|T|2406",)
+    assert len(calls) == 2  # no stale expansion shared between executions

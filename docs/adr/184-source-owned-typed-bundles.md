@@ -324,3 +324,15 @@ LocalCNFutures 的 `instrument_fields.py` 现在拥有唯一字段生产实现�
 执行入口。当前旧 Product 子类上的 get_instrument_fields 只用于迁移现有消费者；本批不
 扩充旧 Product 的计算职责。待目录、分类、因子产品维度及来源查找切到轻量引用后，删除
 对应旧 Product 执行/加载实现，不再增加一套平行的 Product→Instrument 字段转换。
+
+### 平台规划不再实例化 Product（2026-10-27）
+
+catalog_plan 仅收集 RunSpec 已选产品/合约引用，不导入 settings、平台 Product 或数据源。
+删除了平台的 _expand_product_paths 及未按数据修订失效的全局展开缓存。解析引用属于已选
+Bundle 的执行入口，使用实际 CatalogLoadRequest 起止区间；不再从旧 start_date 字段猜测
+区间或默认展开 1900–2100 的合约列表。重复产品引用只在同次调用内解析一次，不跨运行
+缓存可变来源的合约结果；直接物理合约入口保持可用。
+
+LocalCNFutures 内部仍暂用其原有产品元数据读取合约生命周期；这不代表厚 Product 已从
+整个仓库删除，也不代表多合约回放已接通。平台对该源的实例化依赖已从此规划入口移除，
+后续需将源内部读取器替换为本 Bundle 的轻量目录实现，并将实际输入身份记录到运行结果。

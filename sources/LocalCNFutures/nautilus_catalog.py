@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 from server.services.nautilus_bridge.catalog import (
     stage_contract_daily_catalog, stage_contract_minute_catalog,
 )
-from traderesearch_data.nautilus import CatalogLoadRequest
+from traderesearch_data.nautilus import CatalogLoadRequest, CatalogStagingRequest
 from server.services.nautilus_bridge.market_data import FuturesContractSpec
 from server.modules.shared.price_services import (
     contract_data_path_for, find_contract_product,
@@ -123,13 +123,49 @@ def _session_for_day(product: Any, previous_days: dict[Any, Any] | None = None):
     return session
 
 
+def _contract_requests(request: CatalogLoadRequest) -> tuple[CatalogStagingRequest, ...]:
+    """Resolve this Bundle's product references once per execution, not globally."""
+    expanded: dict[str, tuple[str, ...]] = {}
+    products = None
+    result = []
+    for selection in request.staging_requests:
+        paths = []
+        for path in selection.paths:
+            if path not in expanded:
+                if "/_products/" not in path:
+                    parts = path.split("|")
+                    if len(parts) != 4 or parts[1] != "F":
+                        raise ValueError(f"unsupported source contract reference: {path}")
+                    expanded[path] = (path,)
+                else:
+                    if products is None:
+                        from .CNFutures import get_all_futures
+                        products = tuple(get_all_futures())
+                    name = path.rsplit("/_products/", 1)[-1]
+                    matches = [product for product in products
+                               if name in {str(product.name), str(getattr(product, "alias", ""))}]
+                    if len(matches) != 1:
+                        raise ValueError(f"source product reference is missing or ambiguous: {path}")
+                    rows = matches[0].get_contract_list(request.start_utc[:10], request.end_utc[:10])
+                    contracts = tuple(sorted({str(row["uid"]) for row in rows
+                                              if row.get("uid")
+                                              and str(row["uid"]).split("|")[-1].isdigit()
+                                              and int(str(row["uid"]).split("|")[-1]) >= 1000}))
+                    if not contracts:
+                        raise ValueError(f"source product has no contracts in run window: {path}")
+                    expanded[path] = contracts
+            paths.extend(expanded[path])
+        result.append(CatalogStagingRequest(tuple(dict.fromkeys(paths))))
+    return tuple(result)
+
+
 def stage_catalogs(request: CatalogLoadRequest) -> dict[str, dict[str, str]]:
     frequency = request.frequency
     source_key = request.source_key
     start_utc, end_utc = request.start_utc, request.end_utc
     start_ns, end_ns = request.start_ns, request.end_ns
     target_root = request.target_root
-    staging_requests = request.staging_requests
+    staging_requests = _contract_requests(request)
     bundle_identity = dict(
         bundle_id=request.bundle_id, bundle_version=request.bundle_version,
         bundle_fingerprint=request.bundle_fingerprint, member_id=request.member_id,
