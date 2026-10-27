@@ -123,7 +123,8 @@ from traderesearch_data.shared_cache import batch_input_budget
 @batch_input_budget
 def replay_catalog_batches(engine, opened, *, max_input_bars: int, batch_minutes: int = 20,
                            max_batch_bars: int = 250_000,
-                           query_memory_limit_bytes: int = 128 * 1024 * 1024):
+                           query_memory_limit_bytes: int = 128 * 1024 * 1024,
+                           input_transport: str = "catalog"):
     """Use Nautilus' native Catalog merge/replay on the configured engine.
 
     Only frozen receipt validation/configuration crosses Python here. Market
@@ -131,6 +132,8 @@ def replay_catalog_batches(engine, opened, *, max_input_bars: int, batch_minutes
     """
     if isinstance(batch_minutes, bool) or not isinstance(batch_minutes, int) or batch_minutes <= 0:
         raise ValueError("batch_minutes must be a positive integer")
+    if input_transport not in {"catalog", "shared"}:
+        raise ValueError("unknown input transport")
     rows = tuple(opened)
     first, last, expected = preflight_catalogs(rows, max_input_bars=max_input_bars)
     if isinstance(max_batch_bars, bool) or not isinstance(max_batch_bars, int) or max_batch_bars < 1:
@@ -162,20 +165,25 @@ def replay_catalog_batches(engine, opened, *, max_input_bars: int, batch_minutes
             start_time=min(int(item["event_ns"]) for item in records),
             end_time=max(int(item["event_ns"]) for item in records),
         ))
-    total, batches, largest, source_counts = engine.run_catalogs(
-        data=data, chunk_size=min(batch_minutes * len(rows), max_batch_bars, 1_000_000),
-        max_chunk_events=max_batch_bars, start=first, end=last,
-        query_memory_limit_bytes=max(1, query_memory_limit_bytes // len(rows)),
-    )
+    chunk_size = min(batch_minutes * len(rows), max_batch_bars, 1_000_000)
+    if input_transport == "shared":
+        from .shared_inputs import replay_shared_catalogs
+        total, batches, largest, source_counts = replay_shared_catalogs(engine, rows,
+            chunk_size=chunk_size, max_chunk_events=max_batch_bars,
+            max_input_events=expected + settlement_count, start=first, end=last,
+            query_memory_limit_bytes=query_memory_limit_bytes)
+    else:
+        total, batches, largest, source_counts = engine.run_catalogs(
+            data=data, chunk_size=chunk_size,
+            max_chunk_events=max_batch_bars, start=first, end=last,
+            query_memory_limit_bytes=max(1, query_memory_limit_bytes // len(rows)),
+        )
     if total < settlement_count:
         raise ValueError("native replay total is smaller than settlement events")
     total -= settlement_count
-    expected_source_counts = []
-    for row in rows:
-        expected_source_counts.append(int(row[2]["selected_count"]))
-        settlement = len(tuple(row[2].get("settlement_records") or ()))
-        if settlement:
-            expected_source_counts.append(settlement)
+    expected_source_counts = [int(row[2]["selected_count"]) for row in rows]
+    expected_source_counts.extend(len(row[2]["settlement_records"])
+        for row in rows if row[2].get("settlement_records"))
     if list(source_counts) != expected_source_counts:
         raise ValueError("native per-source replay counts differ from frozen receipts")
     if total != expected or engine.get_result().iterations != expected + settlement_count:

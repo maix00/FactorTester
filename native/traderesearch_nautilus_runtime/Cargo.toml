@@ -29,6 +29,12 @@ nautilus-model = { path = "../../vendor/nautilus_trader/crates/model" }
 nautilus-factor-bridge = { path = "../../vendor/py-alpha-lib/adapters/nautilus", features = ["nautilus-backtest"] }
 pyo3 = { version = "0.30.1", features = ["macros", "extension-module"] }
 serde_json = "1"
+anyhow = "1"
+traderesearch-data-io = { path = "../../traderesearch_data/rust" }
+nautilus-core = { path = "../../vendor/nautilus_trader/crates/core" }
+nautilus-data = { path = "../../vendor/nautilus_trader/crates/data" }
+nautilus-serialization = { path = "../../vendor/nautilus_trader/crates/serialization", features = ["arrow"] }
+nautilus-persistence = { path = "../../vendor/nautilus_trader/crates/persistence" }
 
 [patch.crates-io]
 nautilus-trading = { path = "../../vendor/nautilus_trader/crates/trading" }

@@ -33,6 +33,18 @@ def test_mmap_cache_reuse_projection_and_batch_bound(tmp_path):
     assert first[0].schema.names == ['value']
 
 
+def test_projected_batches_preserve_source_schema_metadata(tmp_path):
+    source = tmp_path/'source.parquet'
+    schema = pa.schema([('value',pa.int64()),('other',pa.int64())],
+                       metadata={b'type_name':b'CustomEvent',b'unit':b'exact'})
+    pq.write_table(pa.Table.from_arrays([pa.array([1,2]),pa.array([3,4])],schema=schema),source)
+    cache = SharedColumnarCache(tmp_path/'cache',_scope())
+    for _ in range(2):
+        batches=list(cache.iter_parquet_batches(source,columns=['value']))
+        assert batches[0].schema.metadata == schema.metadata
+        assert batches[0].schema.names == ['value']
+
+
 def test_cache_scope_isolation_and_global_admission(tmp_path):
     source=tmp_path/'source.parquet'; _file(source)
     server=SharedColumnarCache(tmp_path/'cache', _scope(), consumers=1, timeout=0)

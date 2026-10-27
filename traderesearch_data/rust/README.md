@@ -17,6 +17,12 @@ through reference-counted ownership after the reader is dropped. Validation is
 enabled; compressed or misaligned input is rejected rather than silently
 allocating private value buffers. RecordBatch/schema metadata still allocates.
 
+The explicit `from_file_with_alignment_copy` entrypoint is for bounded native
+event conversion: IPC producers can align to 8 bytes while Decimal128 requires
+16. It permits Arrow to copy only misaligned arrays. Consumers must cap file and
+batch sizes and must not claim this mode is fully zero-copy. It does not alter
+the strict default or implement a second decoder.
+
 Native consumers should prefer `MappedIpc::from_file` using a duplicated or
 transferred handle from `SharedColumnarCache.borrow_chunk`. Opening the file
 under the cache key lock prevents eviction from removing its path before the

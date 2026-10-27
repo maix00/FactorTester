@@ -376,3 +376,43 @@ borrow_chunk，在key锁内打开已发布inode；Rust from_file接收已打开/
 POSIX隔离验证在删除路径后，将句柄显式继承给独立Rust进程，字典字符串、列表、空值
 仍可完整读取，原Python批次也保持有效。Windows须用操作系统句柄复制/转移机制，
 不能跨进程序列化裸fd整数；本批未验证Windows句柄转移。接口不取消配额/查询准入。
+
+### 原生共享批次回放适配（2026-10-28）
+
+组合运行时增加 replay_shared_inputs：Python只在每个IPC块交接打开的文件，Rust复制
+句柄、mmap、调用Nautilus原生Arrow解码器；不生成Python逐事件对象。共享缓存的
+iter_parquet_handles与网页批次读取复用同一生产器/缓存身份/锁/配额，命中时不在Python
+重建Arrow批次。新Catalog回执保留原生type_name，避免回放为分类反复读取所有文件footer。
+
+Nautilus只开放现有merge_streams、stream_chunks为公共集成边界并补输入上限校验；
+仍由同一DataIterator和时间戳对齐循环回放，不引入另一套合并/撮合算法，不依赖平台或
+traderesearch_data。适配器放组合运行时，不放Nautilus core。每个输入检查字节/行数、
+单调ts_init及全来源事件总预算。解码后的活动事件窗口、账户和因子状态仍由每次运行独立
+拥有；共享IPC不是整个回测零分配或零复制的证明。
+
+当前可选input_transport="shared"；默认仍为原Catalog读取，等待代表性性能/完整类型
+验收后再决定切换。此项是I/O实现选择，不改变RunSpec交易语义。已接入Bar、QuoteTick、
+TradeTick、InstrumentClose、InstrumentStatus；L2增量的帧组装必须复用Nautilus现有
+逻辑，暂不接入该适配器，不能将其当普通独立行回放。未支持类型在执行前明确拒绝。
+Windows原生句柄交接尚未实现。原Catalog路径及其其他类型能力保持可用。
+
+同时修复来源计数校验顺序：原配置为全部Bar来源后追加结算来源，校验应采用相同顺序，
+不能交错计算每个品种的Bar/结算计数。构建就绪检查纳入公共Rust I/O源码和新入口，
+防止新依赖修改后误用旧扩展。测试构建须从Nautilus目录执行，读取其固定工具链和
+平台链接配置；不要以根目录的裸Cargo命令代替既有构建入口。
+
+实际接线验证发现两个存储边界问题：Parquet投影批次会丢掉schema metadata，通用缓存
+现以原始schema metadata恢复头部（不复制值缓冲），并升级派生缓存格式至v3；网页转
+pandas时显式忽略其索引提示，避免时间列被pandas metadata隐式消费。另一个是存储列
+与事件列的物理类型可不同（如UInt64 volume对定点Decimal128），原生适配复用Nautilus
+现有cast_record_batch_to_schema，不在平台新增字段转换算法。此函数仅开放可见性，
+原算法不变。8字节IPC对齐也可能不满足Decimal128的16字节要求，严格读取默认不变，
+原生适配显式允许当前受限批次的对齐复制。这些都不能被描述为全链路一份内存。
+
+真实本机T2403/TL2406各8根Bar对照通过：同一个原生因子分组策略，普通Catalog、
+冷共享IPC、热共享IPC三条路径的回放统计、最终因子输出和成交方向/数量/价格一致。
+使用独立进程预加载target中的候选扩展，没有替换GTHT当前安装扩展。共享入口的无效
+范围/不支持类型在读取源前失败；测试合计5项通过，其中包含该真实引擎对照。
+其他聚焦检查69项通过（与5项有重叠），Rust I/O 3项通过。未跑全量、生产Job或性能
+压力验收，不因此默认切换共享方式。原生字段投影按照Nautilus schema顺序，只克隆
+数组引用；不能把缓存的列排序直接当作Nautilus解码字段顺序。

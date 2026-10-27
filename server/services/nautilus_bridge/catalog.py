@@ -220,10 +220,12 @@ def _stage_contract_catalog(
         ):
             raise RuntimeError("source changed while catalog was staged")
 
+        import pyarrow.parquet as pq
         files = tuple({
             "path": file.relative_to(staged).as_posix(),
             "bytes": file.stat().st_size,
             "sha256": _sha256_file(file),
+            "type_name": (pq.read_schema(file).metadata or {}).get(b"type_name", b"").decode(),
         } for file in sorted(staged.rglob("*.parquet")))
         receipt = CatalogReceipt(
             schema_version=1, engine=f"NautilusTrader {nt_version}",

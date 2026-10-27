@@ -59,7 +59,9 @@ if not package_path.is_relative_to(source) or not native_path.is_relative_to(sou
     print("needs-build")
     raise SystemExit(0)
 from nautilus_trader.backtest import BacktestEngine
-if not callable(getattr(BacktestEngine, "run_catalogs", None)) or not callable(getattr(native, "attach_factor_family", None)):
+if (not callable(getattr(BacktestEngine, "run_catalogs", None))
+        or not callable(getattr(native, "attach_factor_family", None))
+        or not callable(getattr(native, "replay_shared_inputs", None))):
     print("needs-build")
     raise SystemExit(0)
 # A matching package version does not imply the local Rust edits are built.
@@ -69,7 +71,7 @@ build_inputs = [rust_root / name for name in ("Cargo.toml", "Cargo.lock", "rust-
 build_inputs.extend(path for path in (rust_root / "crates").rglob("*")
                     if path.suffix in {".rs", ".toml"})
 repo_root = rust_root.parent.parent
-for folder in (repo_root / "native", repo_root / "vendor/py-alpha-lib/alpha-algo", repo_root / "vendor/py-alpha-lib/adapters/nautilus"):
+for folder in (repo_root / "native", repo_root / "traderesearch_data/rust", repo_root / "vendor/py-alpha-lib/alpha-algo", repo_root / "vendor/py-alpha-lib/adapters/nautilus"):
     for directory, children, files in os.walk(folder):
         children[:] = [name for name in children if name not in {"target", ".git", "__pycache__"}]
         build_inputs.extend(Path(directory) / name for name in files

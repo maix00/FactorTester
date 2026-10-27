@@ -39,7 +39,9 @@ def parquet_frame(path, *, columns, filters=(), max_bytes=128*1024**2,
     for batch in server_input_cache().iter_parquet_batches(path, columns=columns, filters=filters):
         if not batch.num_rows:
             continue
-        frame = batch.to_pandas(split_blocks=True)
+        # Preserve raw projected columns; pandas index hints are not a platform
+        # schema contract and must not consume a requested time column.
+        frame = batch.to_pandas(split_blocks=True, ignore_metadata=True)
         if transform is not None:
             frame = transform(frame)
         frames.append(frame)

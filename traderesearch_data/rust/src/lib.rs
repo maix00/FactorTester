@@ -49,6 +49,25 @@ impl MappedIpc {
     /// # Safety
     /// The same inode immutability guarantee as [`Self::open`] is required.
     pub unsafe fn from_file(file: File) -> Result<Self, ArrowError> {
+        // SAFETY: forwarded unchanged from this function's caller.
+        unsafe { Self::map_file(file, true) }
+    }
+
+    /// Map a published file, permitting bounded copies of misaligned arrays.
+    ///
+    /// Some IPC producers align buffers to 8 bytes while Decimal128 requires
+    /// 16. Already aligned arrays still borrow the mapping; only misaligned
+    /// arrays are copied by Arrow. Callers must bound the batch before decode
+    /// and must not describe this mode as fully zero-copy.
+    ///
+    /// # Safety
+    /// The same inode immutability guarantee as [`Self::open`] is required.
+    pub unsafe fn from_file_with_alignment_copy(file: File) -> Result<Self, ArrowError> {
+        // SAFETY: forwarded unchanged from this function's caller.
+        unsafe { Self::map_file(file, false) }
+    }
+
+    unsafe fn map_file(file: File, require_alignment: bool) -> Result<Self, ArrowError> {
         if file.metadata()?.len() < 10 {
             return Err(invalid("IPC file is too short"));
         }
@@ -76,8 +95,8 @@ impl MappedIpc {
                 .schema()
                 .ok_or_else(|| invalid("missing IPC schema"))?,
         ));
-        // Do not silently copy misaligned input arrays into private buffers.
-        let mut decoder = FileDecoder::new(schema, footer.version()).with_require_alignment(true);
+        let mut decoder =
+            FileDecoder::new(schema, footer.version()).with_require_alignment(require_alignment);
         if let Some(dictionaries) = footer.dictionaries() {
             for block in dictionaries {
                 decoder.read_dictionary(block, &block_buffer(&buffer, block, start)?)?;

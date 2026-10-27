@@ -489,3 +489,18 @@ def test_manager_product_fields_resolves_contracts_for_independent_detail_tabs(
     assert value["parent_product"] == "A.DCE"
     assert value["source_ids"] == ["PublicSource"]
     assert value["fields"]["contract_uid"]["value"] == "DCE|A|2501"
+
+
+def test_shared_projection_keeps_stored_pandas_index_as_raw_column(tmp_path, monkeypatch):
+    import pandas as pd
+    from traderesearch_data.shared_cache import SharedColumnarCache, CacheScope
+    from server.services.product_market_data import shared_read
+    path = tmp_path/'indexed.parquet'
+    pd.DataFrame({'close':[1.0,2.0]}, index=pd.DatetimeIndex(
+        ['2024-01-01','2024-01-02'],name='trade_time')).to_parquet(path)
+    cache = SharedColumnarCache(tmp_path/'cache',CacheScope('server','test','platform','local'))
+    monkeypatch.setattr(shared_read,'server_input_cache',lambda:cache)
+    frame = shared_read.parquet_frame(path,columns=['trade_time','close'])
+    assert list(frame.columns) == ['close','trade_time']
+    assert frame['close'].tolist() == [1.0,2.0]
+    assert len(frame['trade_time']) == 2

@@ -7,6 +7,7 @@ use nautilus_factor_bridge::{
 };
 use nautilus_model::data::BarType;
 use pyo3::{exceptions::PyRuntimeError, prelude::*};
+mod shared_input;
 
 #[pyclass(unsendable)]
 struct FactorRuntimeHandle {
@@ -88,6 +89,7 @@ fn attach_factor_family(
 fn _libnautilus(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     nautilus_pyo3::_libnautilus(py, module)?;
     module.add_function(wrap_pyfunction!(attach_factor_family, module)?)?;
+    module.add_function(wrap_pyfunction!(shared_input::replay_shared_inputs, module)?)?;
     module.add_class::<FactorRuntimeHandle>()?;
     Ok(())
 }

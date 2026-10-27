@@ -19,6 +19,9 @@ import time
 from typing import Iterator, Sequence
 
 
+CACHE_FORMAT_VERSION = 3  # v3 retains source schema metadata after projected reads
+
+
 class CacheBusy(RuntimeError):
     pass
 
@@ -210,6 +213,25 @@ class SharedColumnarCache:
     def iter_parquet_batches(self, path: str | Path, *, columns: Sequence[str],
                              row_groups: Sequence[int] | None = None, filters=(),
                              batch_size=4096, revision: str | None = None) -> Iterator:
+        yield from self._iter_parquet(path, columns=columns, row_groups=row_groups,
+            filters=filters, batch_size=batch_size, revision=revision)
+
+    def iter_parquet_handles(self, path: str | Path, *, columns: Sequence[str] | None = None,
+                             row_groups: Sequence[int] | None = None,
+                             revision: str | None = None) -> Iterator:
+        """Yield open immutable IPC files; duplicate before advancing iterator.
+
+        Uses the same producer, cache keys and limits as Python batch readers.
+        Cache hits do not decode Arrow batches in Python. The consumer owns row
+        filtering and native event conversion, preserving exact timestamp units.
+        """
+        yield from self._iter_parquet(path, columns=columns, row_groups=row_groups,
+                                     revision=revision, handles=True)
+
+    def _iter_parquet(self, path: str | Path, *, columns: Sequence[str] | None,
+                             row_groups: Sequence[int] | None = None, filters=(),
+                             batch_size=4096, revision: str | None = None,
+                             handles=False) -> Iterator:
         import pyarrow as pa
         import pyarrow.parquet as pq
         import pyarrow.compute as pc
@@ -218,7 +240,7 @@ class SharedColumnarCache:
         path = Path(path).resolve(strict=True)
         before = self._revision(path)
         reader = pq.ParquetFile(path)
-        columns = tuple(sorted(set(columns)))
+        columns = tuple(sorted(set(reader.schema_arrow.names if columns is None else columns)))
         groups = range(reader.metadata.num_row_groups) if row_groups is None else row_groups
         operators = {'>=': pc.greater_equal, '<=': pc.less_equal, '==': pc.equal}
         for column, operator, _ in filters:
@@ -245,7 +267,7 @@ class SharedColumnarCache:
                     skip = True; break
             if skip:
                 continue
-            group_key = sha256(json.dumps([before, revision, group, columns, 2]).encode()).hexdigest()
+            group_key = sha256(json.dumps([before, revision, group, columns, CACHE_FORMAT_VERSION]).encode()).hexdigest()
             producer = None
             scanner, scanned = None, -1
             try:
@@ -258,8 +280,11 @@ class SharedColumnarCache:
                     while True:
                         with _lock(self.root / f'key-{stripe}.lock', self.timeout):
                             if target.exists():
-                                mapped = pa.memory_map(str(target), 'r')
-                                ipc = pa.ipc.open_file(mapped)
+                                if handles:
+                                    mapped = target.open('rb')
+                                else:
+                                    mapped = pa.memory_map(str(target), 'r')
+                                    ipc = pa.ipc.open_file(mapped)
                                 os.utime(target, None)
                                 break
                         if producer is None:
@@ -277,6 +302,10 @@ class SharedColumnarCache:
                                                                   batch_size=4096, use_threads=False)
                                 while scanned < chunk:
                                     data = next(scanner)
+                                    # Parquet projection can drop schema metadata (including
+                                    # native event identities/precision). This changes only
+                                    # the schema header, never copies the value buffers.
+                                    data = data.replace_schema_metadata(reader.schema_arrow.metadata)
                                     scanned += 1
                                 if data.nbytes > self.max_entry_bytes:
                                     raise CacheLimit('decoded batch exceeds cache entry budget')
@@ -295,9 +324,12 @@ class SharedColumnarCache:
                                 with _lock(self.base / 'quota.lock', self.timeout):
                                     reservation.unlink(missing_ok=True)
                     try:
-                        batch = ipc.get_batch(0)
-                        for offset in range(0, batch.num_rows, batch_size):
-                            yield selected(batch.slice(offset, batch_size))
+                        if handles:
+                            yield mapped
+                        else:
+                            batch = ipc.get_batch(0)
+                            for offset in range(0, batch.num_rows, batch_size):
+                                yield selected(batch.slice(offset, batch_size))
                     finally:
                         mapped.close()
                     if self._revision(path) != before:
