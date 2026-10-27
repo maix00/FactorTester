@@ -216,6 +216,9 @@ federated catalog's runtime availability/count projection.
   （写事务 trigger 递增）；LocalCNFutures 在调用方 SQLite 连接上建立 savepoint，
   同一快照内只读一个 revision 值、读取 frame、构造 provider；缓存键为数据库路径 +
   revision。命中检查不执行 `COUNT(*)`/全表扫描，provider 装载在 single-flight 锁内。
+  本机 10 万行热缓存实验：revision 读取中位约 0.000666ms，旧 `COUNT(*)+MAX(rowid)`
+  约 2.1155ms；这是修订键步骤，不是整个任务耗时。并发首次装载测试确认只调用一次
+  loader。
 - 保证金不再取 `max(long, short)` 或把缺失补零。源 loader 要求多空两侧都存在且相等；
   不相等或缺一侧时报告“single-margin Instrument contract”不可表示。initial/maintenance
   改为分别读取 `initial_margin_ratio` / `maintenance_margin_ratio`；缺任一条即失败，

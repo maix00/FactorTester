@@ -285,3 +285,42 @@ def test_rule_revision_snapshot_distinguishes_old_and_new_connections(tmp_path):
     old.rollback()
     old.close()
     assert old_revision != new_revision
+
+
+def test_strict_provider_loading_is_single_flight(monkeypatch, tmp_path):
+    import threading
+    import time
+    from tools.data import field_history, hub
+    from sources.LocalCNFutures import CNFutures
+
+    class FakeConnection:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def execute(self, *args): return self
+        def rollback(self): return None
+
+    class FakeHub:
+        def get_store_path(self, key): return tmp_path / "rules.sqlite"
+        def connect_store(self, key): return FakeConnection()
+
+    monkeypatch.setattr(hub.DataHub, "get_instance", classmethod(lambda cls: FakeHub()))
+    monkeypatch.setattr(CNFutures, "_rule_revision_for", lambda conn, path: (1,))
+    monkeypatch.setattr(field_history, "ensure_historical_field_schema", lambda conn: None)
+    monkeypatch.setattr(field_history, "load_historical_field_frame", lambda **kwargs: object())
+    calls = []
+    sentinel = object()
+    def load(**kwargs):
+        calls.append(1)
+        time.sleep(0.05)
+        return sentinel
+    monkeypatch.setattr(field_history, "load_market_rule_field_provider", load)
+    CNFutures._clear_rule_provider_cache()
+    results = []
+    threads = [threading.Thread(target=lambda: results.append(CNFutures._strict_exchange_field_history())) for _ in range(2)]
+    try:
+        for thread in threads: thread.start()
+        for thread in threads: thread.join()
+        assert calls == [1]
+        assert results == [sentinel, sentinel]
+    finally:
+        CNFutures._clear_rule_provider_cache()
