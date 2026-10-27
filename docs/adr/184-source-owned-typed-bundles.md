@@ -199,8 +199,9 @@ federated catalog's runtime availability/count projection.
   `T2403`，写入 3 根 `T2403.CFFEX-1-MINUTE-LAST-EXTERNAL` 并 readback；确认大写
   合约身份与现有源一致。该检查同样不代替完整回放验收。
 - 源 loader 的输入改为不可变 `CatalogLoadRequest` / `CatalogStagingRequest`，包含成员、
-  频率、请求路径、窗口和输出根；中央只在调用时构造，源 loader 不再接收可变的
-  `staging_requests: list[dict]`。`NautilusCatalogLoader` 只接受这个请求。
+  频率、Bundle `related_members`、请求路径、窗口和输出根；中央只在调用时构造，
+  源 loader 不再接收可变的 `staging_requests: list[dict]`。`NautilusCatalogLoader`
+  只接受这个请求。规则成员的实际加载/单次缓存仍未切换。
 - 保证金不再取 `max(long, short)` 或把缺失补零。源 loader 要求多空两侧都存在且相等；
   不相等或缺一侧时报告“single-margin Instrument contract”不可表示。initial/maintenance
   仍相同，完整历史规则/执行路径尚未接入。
