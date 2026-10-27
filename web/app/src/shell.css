@@ -505,17 +505,34 @@ html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pin
 .dv-inactive-tab .tr-dock-arrange { visibility:hidden; }
 .dv-inactive-tab:hover .tr-dock-arrange,.dv-inactive-tab:focus-within .tr-dock-arrange { visibility:visible; }
 .tr-source-summary { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:24px; color:var(--muted); font-size:13px; }
-.tr-source-overview { max-width:960px; background:var(--panel); }
-.tr-source-overview .ant-descriptions-item-label { width:180px; }
-.tr-source-overview .ant-descriptions-item-content,.tr-source-properties .ant-descriptions-item-content { overflow-wrap:anywhere; }
-.tr-source-members { margin-top:28px; }
+/* Source details use the same compact definition rows on mobile and desktop. */
+.tr-source-overview { max-width:840px; }
+.tr-source-members { margin-top:32px; }
 .tr-source-members h2 { font-size:17px; margin:0 0 16px; }
-.tr-source-properties { display:grid; gap:16px; min-width:0; }
-.tr-source-properties > .ant-tag { width:fit-content; }
-.tr-source-properties .ant-descriptions-item-label { width:180px; }
-.tr-source-mapping { display:grid; gap:6px; margin:0; }
-.tr-source-mapping > div { display:grid; grid-template-columns:minmax(64px,1fr) minmax(0,1fr); gap:12px; }
-.tr-source-mapping dt { color:var(--muted); }
-.tr-source-mapping dd { margin:0; overflow-wrap:anywhere; }
-@media(max-width:760px) { .tr-source-properties .ant-descriptions-item-label,.tr-source-overview .ant-descriptions-item-label { width:110px; } }
-@container tr-panel (max-width:760px) { .tr-source-overview .ant-descriptions-item-label { width:110px; } }
+.tr-source-properties { min-width:0; padding:4px 0 8px; }
+.tr-source-property-meta { display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px; color:var(--muted); font-size:12px; margin:0 0 12px; }
+.tr-source-property-meta code { font-size:12px; letter-spacing:.01em; }
+.tr-source-adapter-status { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:13px; margin:0 0 28px; }
+.tr-source-adapter-status > span { width:6px; height:6px; flex:none; border-radius:50%; background:#98a2b3; }
+.tr-source-adapter-status.is-ready { color:#257956; }
+.tr-source-adapter-status.is-ready > span { background:#2b9b6f; }
+.tr-source-adapter-status.is-unavailable > span { background:#d19a45; }
+.tr-property-groups { display:grid; gap:28px; }
+.tr-property-group { min-width:0; }
+.tr-property-group h3 { margin:0 0 8px; font-size:14px; font-weight:600; color:var(--text); }
+.tr-property-list { margin:0; }
+.tr-property-list > div { display:grid; grid-template-columns:minmax(120px,42%) minmax(0,1fr); align-items:baseline; gap:16px; min-height:40px; padding:10px 0; box-sizing:border-box; border-bottom:1px solid var(--line); font-size:13px; line-height:20px; }
+.tr-property-list > div:last-child { border-bottom:0; }
+.tr-property-list dt { color:var(--muted); }
+.tr-property-list dd { margin:0; text-align:right; color:var(--text); overflow-wrap:anywhere; min-width:0; font-variant-numeric:tabular-nums; }
+.tr-property-list > .is-wide { grid-template-columns:1fr; gap:8px; }
+.tr-property-list > .is-wide dd { text-align:left; }
+.tr-property-missing { border-top:1px solid var(--line); padding-top:16px; font-size:12px; color:var(--muted); }
+.tr-property-missing summary { cursor:pointer; width:fit-content; padding:4px 0; }
+.tr-property-missing[open] > .tr-property-list { margin-top:12px; }
+.tr-source-mapping { display:grid; gap:8px; margin:0; padding:12px 14px; background:#f7f9fc; border-radius:6px; }
+.tr-source-mapping > div { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:24px; position:relative; }
+.tr-source-mapping > div::after { content:"→"; position:absolute; left:calc(50% - 6px); color:#98a2b3; }
+.tr-source-mapping dt,.tr-source-mapping dd { font-family:ui-monospace,SFMono-Regular,monospace; font-size:12px; }
+.tr-source-mapping dd { text-align:right; }
+@media(max-width:760px) { .tr-source-property-meta { font-size:11px; } .tr-property-list > div { grid-template-columns:minmax(110px,43%) minmax(0,1fr); gap:12px; } .tr-property-list > .is-wide { grid-template-columns:1fr; } }

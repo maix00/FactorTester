@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from "react";
 import { Button, Modal } from "antd";
 import { useTranslation } from "react-i18next";
 import { useCompactLayout } from "../configuration/layout.ts";
-export function DetailsPanel({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }): React.ReactElement {
+export function DetailsPanel({ title, onClose, children, width = 960 }: { title: string; onClose: () => void; children: React.ReactNode; width?: number }): React.ReactElement {
   const mobile = useCompactLayout(), { t } = useTranslation();
   const id = useRef(crypto.randomUUID()), close = useRef(onClose); close.current = onClose;
   useEffect(() => {
@@ -13,5 +13,5 @@ export function DetailsPanel({ title, onClose, children }: { title: string; onCl
   }, [mobile]);
   const dismiss = (): void => { if (mobile && history.state?.trDetail === id.current) history.back(); else onClose(); };
   if (mobile) return <section className="tr-mobile-detail-page"><header><Button type="text" onClick={dismiss}>‹ {t("back")}</Button><h2>{title}</h2></header><div>{children}</div></section>;
-  return <Modal open title={title} footer={null} width={960} onCancel={dismiss} styles={{ body: { maxHeight: "75vh", overflow: "auto" } }}>{children}</Modal>;
+  return <Modal open title={title} footer={null} width={width} onCancel={dismiss} styles={{ body: { maxHeight: "75vh", overflow: "auto" } }}>{children}</Modal>;
 }
