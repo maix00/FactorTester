@@ -190,7 +190,11 @@ federated catalog's runtime availability/count projection.
   `stage_contract_daily_catalog`，由 `iter_daily_bars` 读取 `TRADING_DAY`/结算列，
   由源声明的 `session_for_day` 把日期标签转换为交易所收盘时钟，并写入
   `1-DAY-LAST-EXTERNAL`。当前 session 来自产品日盘时段字段，尚未用真实异常交易日历
-  验证；不能据此声称 DAY1 已完成。
+  验证；不能据此声称 DAY1 已完成。一次本机只读检查使用真实
+  `term_structure-listed_contracts.parquet` 的 `A1001`，写入 10 根 DAY1 Bar，
+  Nautilus readback 数量/OHLC/事件时刻一致；首个事件为 2010-01-04 15:00
+  Asia/Shanghai。该检查是合成/真实小窗口的局部证据，不是完整验收，也没有
+  作为常驻慢测试加入聚焦套件。
 - 保证金不再取 `max(long, short)` 或把缺失补零。源 loader 要求多空两侧都存在且相等；
   不相等或缺一侧时报告“single-margin Instrument contract”不可表示。initial/maintenance
   仍相同，完整历史规则/执行路径尚未接入。
